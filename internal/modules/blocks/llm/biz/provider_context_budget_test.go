@@ -123,8 +123,8 @@ func TestEnforceProviderRequestBudgetFailsWhenCoverageWorkItemFocusMissing(t *te
 
 	got := enforceProviderRequestBudget(req)
 
-	if got.ContextBudget == nil || got.ContextBudget.ContextGateAction != providerContextGateFailFast {
-		t.Fatalf("contextBudget = %+v, want fail_fast", got.ContextBudget)
+	if got.ContextBudget == nil || got.ContextBudget.ContextGateAction != providerContextGateDegradeToAssessment {
+		t.Fatalf("contextBudget = %+v, want degrade_to_assessment", got.ContextBudget)
 	}
 	if got.ContextBudget.ContextGateReason != "coverage_work_item_unresolved_without_current_focus" {
 		t.Fatalf("contextGateReason = %q, want coverage focus warning", got.ContextBudget.ContextGateReason)
@@ -340,6 +340,48 @@ func TestProviderCoverageWorkItemWarningsAcceptCurrentFocusItems(t *testing.T) {
 
 	if warnings := providerCoverageWorkItemWarnings(input); len(warnings) != 0 {
 		t.Fatalf("warnings = %+v, want none for complete currentFocusItems projection", warnings)
+	}
+}
+
+func TestProviderContextGateDecisionClassifiesRecoveryActions(t *testing.T) {
+	tests := []struct {
+		name    string
+		warning string
+		action  string
+	}{
+		{
+			name:    "read required for missing protected snapshot",
+			warning: "protected_repair_action_target_snapshot_missing_after_context_budget",
+			action:  providerContextGateReadRequired,
+		},
+		{
+			name:    "degrade to assessment for missing coverage focus",
+			warning: "coverage_work_item_unresolved_without_current_focus",
+			action:  providerContextGateDegradeToAssessment,
+		},
+		{
+			name:    "blocker required for missing current failure",
+			warning: "runtime_repair_current_failure_missing",
+			action:  providerContextGateBlockerRequired,
+		},
+		{
+			name:    "replan required for missing coverage target set",
+			warning: "coverage_repair_required_without_coverage_target_set",
+			action:  providerContextGateReplanRequired,
+		},
+		{
+			name:    "fail fast for inadmissible repair target",
+			warning: "inadmissible_repair_target_set",
+			action:  providerContextGateFailFast,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			action, reason := providerContextGateDecision(false, false, false, []string{tt.warning})
+			if action != tt.action || reason != tt.warning {
+				t.Fatalf("providerContextGateDecision() = %q/%q, want %q/%q", action, reason, tt.action, tt.warning)
+			}
+		})
 	}
 }
 
@@ -1270,8 +1312,8 @@ func TestEnforceProviderRequestBudgetWarnsCoverageRepairWithoutTargets(t *testin
 			t.Fatalf("integrityWarnings = %+v, missing %s", got.ContextBudget.IntegrityWarnings, expected)
 		}
 	}
-	if got.ContextBudget.ContextGateAction != providerContextGateFailFast {
-		t.Fatalf("contextGateAction = %q, want fail_fast", got.ContextBudget.ContextGateAction)
+	if got.ContextBudget.ContextGateAction != providerContextGateReplanRequired {
+		t.Fatalf("contextGateAction = %q, want replan_required", got.ContextBudget.ContextGateAction)
 	}
 }
 
@@ -1298,8 +1340,8 @@ func TestEnforceProviderRequestBudgetFailsGateWhenRepairCurrentFailureMissing(t 
 	if !stringSliceContains(got.ContextBudget.IntegrityWarnings, "runtime_repair_current_failure_missing") {
 		t.Fatalf("integrityWarnings = %+v, want missing current failure warning", got.ContextBudget.IntegrityWarnings)
 	}
-	if got.ContextBudget.ContextGateAction != providerContextGateFailFast {
-		t.Fatalf("contextGateAction = %q, want fail_fast", got.ContextBudget.ContextGateAction)
+	if got.ContextBudget.ContextGateAction != providerContextGateBlockerRequired {
+		t.Fatalf("contextGateAction = %q, want blocker_required", got.ContextBudget.ContextGateAction)
 	}
 }
 
@@ -1427,8 +1469,8 @@ func TestEnforceProviderRequestBudgetFailsGateWhenRepairProcessEvidenceMissing(t
 	if !stringSliceContains(got.ContextBudget.IntegrityWarnings, "runtime_repair_process_evidence_missing") {
 		t.Fatalf("integrityWarnings = %+v, want missing process evidence warning", got.ContextBudget.IntegrityWarnings)
 	}
-	if got.ContextBudget.ContextGateAction != providerContextGateFailFast {
-		t.Fatalf("contextGateAction = %q, want fail_fast", got.ContextBudget.ContextGateAction)
+	if got.ContextBudget.ContextGateAction != providerContextGateBlockerRequired {
+		t.Fatalf("contextGateAction = %q, want blocker_required", got.ContextBudget.ContextGateAction)
 	}
 }
 

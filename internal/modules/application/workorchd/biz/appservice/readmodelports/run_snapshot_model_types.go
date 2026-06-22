@@ -20,6 +20,7 @@ type runSnapshotModels struct {
 	Results               []*resultmodel.Result
 	Artifacts             []*resultmodel.Artifact
 	ArtifactContinuations []*orchestratormodel.ArtifactContinuation
+	CoverageWorkItems     []*orchestratormodel.CoverageWorkItem
 	EventRecords          []*eventstreammodel.EventRecord
 	LLMUsageEventRecords  []*eventstreammodel.EventRecord
 	MemoryRecallTraces    []*memorymodel.MemoryRecallTrace

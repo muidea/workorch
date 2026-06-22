@@ -28,6 +28,9 @@ func MapDecision(item *decisionmodel.Ticket, resolution *decisionmodel.Resolutio
 		ret.ResolutionID = string(resolution.ID)
 		ret.ResolutionType = resolution.Type
 		ret.ResolutionPayload = governancecore.CloneDecisionPayload(resolution.Payload)
+		ret.ContinuationAction = resolution.ContinuationAction
+		ret.ResumeRunID = string(resolution.ResumeRunID)
+		ret.SuccessorRunID = string(resolution.SuccessorRunID)
 	}
 	return ret
 }

@@ -27,11 +27,11 @@ func (d *CLICommandDispatcher) handleGovernanceCommand(ctx context.Context, cmd 
 		return nil, clicore.ResourceMaps(items), err
 	case events.CommandApprovalApprove:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
-		item, err := ApproveApprovalWithSession(ctx, d.borrow(), cmd.SubjectID)
+		item, err := ResolveApprovalWithSession(ctx, d.borrow(), cmd.SubjectID, clicore.ResolveApprovalCommandFromPayload("approve", cmd.Payload))
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandApprovalReject:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
-		item, err := RejectApprovalWithSession(ctx, d.borrow(), cmd.SubjectID)
+		item, err := ResolveApprovalWithSession(ctx, d.borrow(), cmd.SubjectID, clicore.ResolveApprovalCommandFromPayload("reject", cmd.Payload))
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandApprovalList:
 		items, err := ListApprovalsWithSession(ctx, d.borrow(), string(cmd.WorkspaceID), "")

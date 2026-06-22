@@ -122,6 +122,12 @@ func schedulerDiagnosticsStatusText(item *backend.SchedulerDiagnosticsInfo) stri
 			b.WriteString(item.Watchdog.LatestError)
 		}
 		b.WriteString("\n")
+	} else if item.Watchdog.TimerRegistrations > 0 {
+		b.WriteString("- watchdog: registered")
+		if item.Watchdog.TimerRegistrations > 1 {
+			b.WriteString(fmt.Sprintf(" x%d", item.Watchdog.TimerRegistrations))
+		}
+		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

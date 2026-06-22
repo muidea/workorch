@@ -2,7 +2,7 @@ import React from 'react';
 import { Space, Empty, Descriptions } from 'antd';
 import { ProTable } from '../proCompat';
 import type { LLMContextBudgetTrace } from '../../types';
-import { numberText, compactJSON } from '../../utils';
+import { numberText, compactJSON, percentText } from '../../utils';
 import { MetricGrid, CompactTags } from '../common';
 
 interface LLMContextBudgetCardProps {
@@ -42,8 +42,10 @@ export const LLMContextBudgetCard = React.memo(function LLMContextBudgetCard({ t
   }
 
   const truncatedCount = items.filter((item) => item.truncated).length;
+  const overBudgetCount = items.filter((item) => item.overBudget).length;
   const p0OverflowCount = items.filter((item) => item.p0Overflow).length;
   const goalDoDCompressedCount = items.filter((item) => item.goalDoDCompressed).length;
+  const latest = items[items.length - 1];
 
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -51,8 +53,12 @@ export const LLMContextBudgetCard = React.memo(function LLMContextBudgetCard({ t
         items={[
           { key: 'traceCount', label: '预算轨迹', value: numberText(items.length), color: '#1668dc' },
           { key: 'truncatedCount', label: '触发压缩', value: numberText(truncatedCount), color: truncatedCount ? '#d48806' : undefined },
+          { key: 'overBudgetCount', label: '超预算', value: numberText(overBudgetCount), color: overBudgetCount ? '#cf1322' : undefined },
           { key: 'p0OverflowCount', label: 'P0 Overflow', value: numberText(p0OverflowCount), color: p0OverflowCount ? '#cf1322' : undefined },
-          { key: 'goalDoDCompressedCount', label: 'Goal/DoD 被压缩', value: numberText(goalDoDCompressedCount), color: goalDoDCompressedCount ? '#cf1322' : '#389e0d' }
+          { key: 'goalDoDCompressedCount', label: 'Goal/DoD 被压缩', value: numberText(goalDoDCompressedCount), color: goalDoDCompressedCount ? '#cf1322' : '#389e0d' },
+          { key: 'latestUtilization', label: '最新利用率', value: percentText(latest?.contextUtilizationRatio), color: latest?.contextUtilizationRatio && latest.contextUtilizationRatio > 0.85 ? '#d48806' : undefined },
+          { key: 'profileMode', label: 'Profile Mode', value: latest?.profileMode || '-' },
+          { key: 'capabilitySource', label: '能力来源', value: latest?.capabilitySource || '-' }
         ]}
       />
       <ProTable<LLMContextBudgetTrace>
@@ -67,7 +73,8 @@ export const LLMContextBudgetCard = React.memo(function LLMContextBudgetCard({ t
           { title: '字节预算', width: 150, render: (_, item) => `${numberText(item.actualBytes)} / ${numberText(item.maxBytes)}` },
           { title: 'Token 预算', width: 150, render: (_, item) => `${numberText(item.estimatedInputTokens)} / ${numberText(item.maxTokens)}` },
           { title: '压缩级别', dataIndex: 'shrinkLevel', width: 90, render: (_, item) => numberText(item.shrinkLevel) },
-          { title: '状态', width: 180, render: (_, item) => <CompactTags tags={[item.truncated ? 'truncated' : 'full', item.p0Overflow ? 'p0_overflow' : '', item.goalDoDCompressed ? 'goal_dod_compressed' : 'goal_dod_protected'].filter(Boolean)} maxVisible={4} /> }
+          { title: '利用率', width: 100, render: (_, item) => percentText(item.contextUtilizationRatio) },
+          { title: '状态', width: 220, render: (_, item) => <CompactTags tags={[item.truncated ? 'truncated' : 'full', item.overBudget ? 'over_budget' : '', item.p0Overflow ? 'p0_overflow' : '', item.goalDoDCompressed ? 'goal_dod_compressed' : 'goal_dod_protected'].filter(Boolean)} maxVisible={5} /> }
         ]}
         expandable={{
           expandedRowRender: (item) => (
@@ -80,6 +87,9 @@ export const LLMContextBudgetCard = React.memo(function LLMContextBudgetCard({ t
                 { key: 'refs', label: '来源引用', children: <CompactTags tags={item.sourceRefs ?? []} maxVisible={8} /> },
                 { key: 'cachePlan', label: 'Cache Plan', children: <CompactTags tags={cachePlanTags(item.cachePlan)} maxVisible={8} /> },
                 { key: 'cacheBreakers', label: 'Cache Breakers', children: <CompactTags tags={cacheBreakerTags(item.cachePlan)} maxVisible={8} /> },
+                { key: 'profileMode', label: 'Profile', children: `${item.profileMode || '-'} / source: ${item.capabilitySource || '-'}` },
+                { key: 'stageBudget', label: 'Stage Budget', children: `${percentText(item.stageBudgetRatio)} / source: ${item.stageBudgetSource || '-'}` },
+                { key: 'requestBytes', label: '请求字节上限', children: numberText(item.maxRequestBytes) },
                 { key: 'policy', label: 'trace 策略', children: `${item.tracePolicy || '-'} / estimator: ${item.estimator || '-'}` },
                 { key: 'profile', label: 'Profile', children: <pre className="json-panel">{compactJSON(item.profile)}</pre> }
               ]}

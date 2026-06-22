@@ -22,10 +22,15 @@ const (
 	contractViolationRuleDecisionBlockedWhenActionable = "decision_blocked_when_actionable"
 	contractViolationRuleUnsafeOutput                  = "unsafe_output"
 	contractViolationRuleUnparseableOutput             = "unparseable_output"
+	contractViolationRulePatchApplyContractFailed      = "patch_apply_contract_failed"
+	contractViolationRuleAvailableSnapshotIgnored      = "available_snapshot_ignored"
 	contractViolationRuleRuntimeContract               = "runtime_contract_violation"
 
 	stepOutputKeyContractViolation        = "contractViolation"
 	stepInputKeyContractViolationRecovery = "contractViolationRecovery"
+
+	contractViolationCorrectionModeTargeted     = "targeted"
+	contractViolationCorrectionModeForcedNarrow = "forced_narrow"
 )
 
 type runtimeContractViolationError struct {
@@ -74,6 +79,15 @@ func contractViolationRuleFromType(violationType string) string {
 		return contractViolationRuleDoDAssessmentEvidenceMissing
 	case contractViolationCoverageMapIncomplete:
 		return contractViolationRuleCoverageMapIncomplete
+	case contractViolationGraphDependsOnLLMBeforePatch,
+		contractViolationPatchTargetRefRequired,
+		contractViolationPatchContentRequired,
+		contractViolationPatchUnresolvedTemplate,
+		contractViolationPatchDispatchInvalid,
+		contractViolationFileEditConflict:
+		return contractViolationRulePatchApplyContractFailed
+	case contractViolationAvailableSnapshotIgnored:
+		return contractViolationRuleAvailableSnapshotIgnored
 	default:
 		return contractViolationRuleRuntimeContract
 	}
@@ -91,6 +105,7 @@ func contractViolationFromFailedStep(run *runModel.Run, step *runModel.Step, exe
 	}
 	rule := contractViolationRuleFromStep(step)
 	recoverability := contractViolationRecoverabilityForRule(rule)
+	correction := contractViolationCorrectionProfileForStep(step, rule, attempt, signatureRepeatCount)
 	violation := runtimemodel.ContractViolation{
 		ID:                   fmt.Sprintf("%s/%s/contract-violation", run.ID, step.ID),
 		WorkspaceID:          run.WorkspaceID,
@@ -110,6 +125,10 @@ func contractViolationFromFailedStep(run *runModel.Run, step *runModel.Step, exe
 		Recoverability:       recoverability,
 		RetryHint:            contractViolationRetryHint(rule),
 		ForbiddenRepeat:      contractViolationForbiddenRepeat(rule),
+		CorrectionProfileID:  stringFromMap(correction, "profileId"),
+		CorrectionMode:       stringFromMap(correction, "mode"),
+		CorrectionContract:   mapFromValue(correction["contract"]),
+		TargetScope:          stringFromMap(correction, "targetScope"),
 		SourceRefs:           contractViolationSourceRefs(step),
 		Attempt:              attempt,
 		MaxAttempts:          maxAttempts,
@@ -149,15 +168,24 @@ func applyContractViolationRecoveryProjection(input map[string]any, failedStep *
 	if len(violation) == 0 {
 		return
 	}
+	ensureAvailableTargetSnapshotsForStateChangingRepair(input)
 	violation["attempt"] = attempt
 	violation["maxAttempts"] = maxAttempts
 	violation["signatureRepeatCount"] = signatureRepeatCount
+	correction := contractViolationCorrectionProfileForStep(failedStep, stringFromMap(violation, "violatedRule"), attempt, signatureRepeatCount)
+	if len(correction) > 0 {
+		violation["correctionProfileId"] = stringFromMap(correction, "profileId")
+		violation["correctionMode"] = stringFromMap(correction, "mode")
+		violation["targetScope"] = stringFromMap(correction, "targetScope")
+		violation["correctionContract"] = mapFromValue(correction["contract"])
+	}
 	input[stepInputKeyContractViolationRecovery] = violation
 	input["contractViolationRetry"] = true
 	input[stepInputKeyRecoveryLineageType] = "contract_violation_retry"
 	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 		"The previous LLM output was rejected by the runtime contract before any side effects were executed.",
 		"Use contractViolationRecovery.expectedContract as the required output contract and do not repeat contractViolationRecovery.actualOutputSummary.",
+		"Use contractViolationRecovery.correctionContract as the current narrow retry contract; if correctionMode is forced_narrow, return only an allowed output shape from that contract or a real governance blocker.",
 		"Return one valid JSON decision that satisfies the same runtimeStage and repairObjective; do not weaken Goal, DoD, evidence, or approval requirements.",
 	)
 }
@@ -281,6 +309,9 @@ func contractViolationRuleFromStep(step *runModel.Step) string {
 	if step == nil {
 		return contractViolationRuleRuntimeContract
 	}
+	if contractViolationOutputClaimsMissingAvailableSnapshot(step) {
+		return contractViolationRuleAvailableSnapshotIgnored
+	}
 	output := step.Output
 	switch strings.TrimSpace(stringFromMap(output, outputKeyContractViolationType)) {
 	case contractViolationRepairNoStateChangingOutput,
@@ -304,7 +335,9 @@ func contractViolationRuleFromStep(step *runModel.Step) string {
 		contractViolationPatchUnresolvedTemplate,
 		contractViolationPatchDispatchInvalid,
 		contractViolationFileEditConflict:
-		return contractViolationRuleRuntimeContract
+		return contractViolationRulePatchApplyContractFailed
+	case contractViolationAvailableSnapshotIgnored:
+		return contractViolationRuleAvailableSnapshotIgnored
 	}
 	if strings.TrimSpace(stringFromMap(output, failureOutputKeyClass)) == failureClassDoDCoverageMissing {
 		return contractViolationRuleDoDAssessmentEvidenceMissing
@@ -338,6 +371,10 @@ func contractViolationRetryHint(rule string) string {
 		return "rewrite the assessment so every satisfied item has traceable evidenceRefs and current coverage"
 	case contractViolationRuleUnparseableOutput:
 		return "return one complete valid JSON decision object only"
+	case contractViolationRulePatchApplyContractFailed:
+		return "return a valid patch/apply output that satisfies targetRef, patchType, content/diff, baseHash/snapshot, and current requiredOutput"
+	case contractViolationRuleAvailableSnapshotIgnored:
+		return "use the available complete target snapshots already supplied in the current action instead of claiming they are missing or returning another read-only acquisition graph"
 	default:
 		return "return a valid output that satisfies expectedContract and does not repeat actualOutputSummary"
 	}
@@ -353,9 +390,277 @@ func contractViolationForbiddenRepeat(rule string) []string {
 		return []string{"satisfied assessment item without evidenceRefs"}
 	case contractViolationRuleUnparseableOutput:
 		return []string{"markdown wrapped JSON", "partial JSON", "multiple JSON objects"}
+	case contractViolationRulePatchApplyContractFailed:
+		return []string{"patch/apply without targetRef", "patch/apply without content or diff", "same-graph read-before-patch when current snapshot is supplied", "file_write without matching baseHash for existing target"}
+	case contractViolationRuleAvailableSnapshotIgnored:
+		return []string{"claiming current target snapshots are missing when complete safe snapshots are already available", "file/read or context rehydration for already supplied targets"}
 	default:
 		return []string{"same rejected output shape"}
 	}
+}
+
+func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string, attempt int, signatureRepeatCount int) map[string]any {
+	rule = strings.TrimSpace(rule)
+	if rule == "" {
+		rule = contractViolationRuleFromStep(step)
+	}
+	mode := contractViolationCorrectionModeTargeted
+	if attempt > 1 || signatureRepeatCount > 0 {
+		mode = contractViolationCorrectionModeForcedNarrow
+	}
+	targetScope := runtimeFailureTargetScopeFromStep(step)
+	contract := map[string]any{
+		"violatedRule":     rule,
+		"mode":             mode,
+		"preserveContract": true,
+		"mustNotWeaken":    []string{"runtimeStage", "repairObjective", "requiredOutput", "Goal", "DoD", "evidence", "approval"},
+	}
+	profileID := "contract_correction_generic"
+	switch rule {
+	case contractViolationRuleStateChangingRequiredMissing:
+		profileID = "state_changing_required_output"
+		contract["requiredOutputShape"] = "state_changing_output"
+		contract["allowedOutputs"] = []string{"executionGraph_with_state_changing_node", "patch/apply", "accepted_state_changing_tool_or_shell", "incremental_artifact_state_change", "blocked_on_decision", "blocked_on_approval"}
+		contract["forbiddenOutputs"] = []string{"read_only_executionGraph", "failed_dodAssessment_only", "same_actualOutputSummary"}
+		contract["mustSatisfy"] = []string{"stateChangingOutputRequired", "repairActionPackage.requiredOutput"}
+	case contractViolationRuleConcreteValidationMissing:
+		profileID = "concrete_validation_evidence"
+		contract["requiredOutputShape"] = "bounded_validation_evidence"
+		contract["allowedOutputs"] = []string{"executionGraph_with_declared_validationEvidence", "satisfied_dodAssessment_with_concrete_evidenceRefs", "blocked_on_decision", "blocked_on_approval"}
+		contract["requiredFields"] = []string{"validationEvidence.mode", "validationEvidence.observationType"}
+		contract["forbiddenOutputs"] = []string{"static_inspection_only", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}
+		if scratch := validationScratchDirFromStep(step); scratch != "" {
+			contract[validationScratchDirKey] = scratch
+		}
+	case contractViolationRulePatchApplyContractFailed:
+		profileID = "patch_apply_contract"
+		contract["requiredOutputShape"] = "valid_patch_apply"
+		contract["allowedPatchModes"] = []string{"unified_diff", "text_replace", "file_write_with_matching_baseHash_when_safe"}
+		contract["requiredFields"] = []string{"targetRef", "patchType", "content_or_diff"}
+		contract["forbiddenOutputs"] = []string{"missing_targetRef", "missing_content_or_diff", "read_before_patch_when_snapshot_available", "file_write_existing_target_without_matching_baseHash", "unresolved_template_markers"}
+		if targetScope != "" {
+			contract["targetScope"] = targetScope
+		}
+		if snapshots := contractViolationTargetSnapshotSummary(step); len(snapshots) > 0 {
+			contract["targetSnapshots"] = snapshots
+		}
+	case contractViolationRuleAvailableSnapshotIgnored:
+		profileID = "available_snapshot_direct_action"
+		contract["requiredOutputShape"] = "state_changing_output_from_available_snapshot"
+		contract["allowedOutputs"] = []string{"patch/apply_against_available_snapshot", "executionGraph_with_patch_apply_against_available_snapshot", "failed_dodAssessment_with_specific_non_snapshot_blocker", "blocked_on_decision", "blocked_on_approval"}
+		contract["forbiddenOutputs"] = []string{"missing_snapshot_claim", "file_read_for_available_target", "context_rehydration_graph", "same_actualOutputSummary"}
+		contract["mustSatisfy"] = []string{"availableTargetSnapshots", "repairActionPackage.requiredOutput"}
+		if targetScope != "" {
+			contract["targetScope"] = targetScope
+		}
+		if snapshots := contractViolationAvailableTargetSnapshotSummary(step); len(snapshots) > 0 {
+			contract["availableTargetSnapshots"] = snapshots
+		}
+	case contractViolationRuleCoverageMapIncomplete, contractViolationRuleDoDAssessmentEvidenceMissing:
+		profileID = "coverage_evidence_assessment"
+		contract["requiredOutputShape"] = "traceable_coverage_assessment"
+		contract["requiredFields"] = []string{"dodAssessment.items", "evidenceRefs"}
+		contract["forbiddenOutputs"] = []string{"satisfied_item_without_evidenceRefs", "coverage_map_missing_current_goal_or_dod", "untraceable_summary_only"}
+	case contractViolationRuleUnparseableOutput, contractViolationRuleWrongOutputShape:
+		profileID = "json_output_shape"
+		contract["requiredOutputShape"] = "single_valid_json_decision"
+		contract["forbiddenOutputs"] = []string{"markdown_wrapped_json", "partial_json", "multiple_json_objects", "side_effects"}
+	default:
+		contract["requiredOutputShape"] = "expected_contract_compliant_output"
+		contract["forbiddenOutputs"] = []string{"same_actualOutputSummary"}
+	}
+	if mode == contractViolationCorrectionModeForcedNarrow {
+		contract["forcedNarrow"] = true
+		contract["forcedNarrowRule"] = "same-rule or same-target violation repeated; return only an allowed output shape from this correctionContract or a real governance blocker"
+	}
+	return map[string]any{
+		"profileId":   profileID,
+		"mode":        mode,
+		"targetScope": targetScope,
+		"contract":    contract,
+	}
+}
+
+func contractViolationOutputClaimsMissingAvailableSnapshot(step *runModel.Step) bool {
+	if len(contractViolationAvailableTargetSnapshotSummary(step)) == 0 {
+		return false
+	}
+	text := strings.ToLower(strings.Join(contractViolationOutputTextFragments(step.Output, 0), "\n"))
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	return contractViolationTextMentionsSnapshotOrCurrentTarget(text) && contractViolationTextClaimsMissingSnapshot(text)
+}
+
+func contractViolationTextMentionsSnapshotOrCurrentTarget(text string) bool {
+	for _, marker := range []string{
+		"snapshot",
+		"current target",
+		"current content",
+		"target snapshot",
+		"target content",
+		"快照",
+		"当前目标",
+		"当前内容",
+		"目标文本",
+		"目标快照",
+		"当前诊断",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func contractViolationTextClaimsMissingSnapshot(text string) bool {
+	for _, marker := range []string{
+		"missing",
+		"not available",
+		"unavailable",
+		"not provided",
+		"not supplied",
+		"need to read",
+		"needs to read",
+		"must read",
+		"requires read",
+		"cannot proceed without",
+		"no current",
+		"缺少",
+		"缺失",
+		"未提供",
+		"没有",
+		"无法",
+		"不能",
+		"需要读取",
+		"需读取",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func contractViolationOutputTextFragments(value any, depth int) []string {
+	if depth > 4 || value == nil {
+		return nil
+	}
+	switch typed := value.(type) {
+	case string:
+		if trimmed := strings.TrimSpace(typed); trimmed != "" {
+			return []string{trimmed}
+		}
+	case map[string]any:
+		ret := []string{}
+		for _, item := range typed {
+			ret = append(ret, contractViolationOutputTextFragments(item, depth+1)...)
+			if len(ret) > 80 {
+				return ret[:80]
+			}
+		}
+		return ret
+	case []any:
+		ret := []string{}
+		for _, item := range typed {
+			ret = append(ret, contractViolationOutputTextFragments(item, depth+1)...)
+			if len(ret) > 80 {
+				return ret[:80]
+			}
+		}
+		return ret
+	case []map[string]any:
+		ret := []string{}
+		for _, item := range typed {
+			ret = append(ret, contractViolationOutputTextFragments(item, depth+1)...)
+			if len(ret) > 80 {
+				return ret[:80]
+			}
+		}
+		return ret
+	case []string:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				ret = append(ret, trimmed)
+			}
+		}
+		return ret
+	}
+	return nil
+}
+
+func contractViolationAvailableTargetSnapshotSummary(step *runModel.Step) []map[string]any {
+	snapshots := contractViolationTargetSnapshotSummary(step)
+	if len(snapshots) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		if !boolValue(snapshot["contentComplete"]) || !boolValue(snapshot["safeForFileWrite"]) {
+			continue
+		}
+		ret = append(ret, snapshot)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func contractViolationTargetSnapshotSummary(step *runModel.Step) []map[string]any {
+	if step == nil {
+		return nil
+	}
+	var ret []map[string]any
+	add := func(item map[string]any) {
+		if len(item) == 0 {
+			return
+		}
+		targetRef := strings.TrimSpace(stringFromMap(item, "targetRef"))
+		if targetRef == "" {
+			return
+		}
+		summary := map[string]any{
+			"targetRef":        targetRef,
+			"contentHash":      stringFromMap(item, "contentHash"),
+			"baseHash":         stringFromMap(item, "baseHash"),
+			"contentComplete":  boolValue(item["contentComplete"]),
+			"safeForFileWrite": boolValue(item["safeForFileWrite"]),
+		}
+		for key, value := range summary {
+			if contractViolationEmptyValue(value) {
+				delete(summary, key)
+			}
+		}
+		ret = append(ret, summary)
+	}
+	for _, source := range []map[string]any{
+		step.Input,
+		mapFromValue(step.Input["repairActionPackage"]),
+		mapFromValue(step.Input["patchRepairContext"]),
+		mapFromValue(step.Input["failureTargetRepairContext"]),
+	} {
+		for _, item := range mapSliceFromValue(source["targetSnapshots"]) {
+			add(item)
+		}
+		for _, item := range mapSliceFromValue(source["currentTargetSnapshots"]) {
+			add(item)
+		}
+		for _, item := range mapSliceFromValue(source["patchRepairContext"]) {
+			add(item)
+		}
+		for _, item := range mapSliceFromValue(source["failureTargetRepairContext"]) {
+			add(item)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	if len(ret) > 6 {
+		return ret[:6]
+	}
+	return ret
 }
 
 func contractViolationExpectedContract(step *runModel.Step) map[string]any {
@@ -473,6 +778,10 @@ func contractViolationMap(violation runtimemodel.ContractViolation) map[string]a
 		"recoverability":       violation.Recoverability,
 		"retryHint":            violation.RetryHint,
 		"forbiddenRepeat":      violation.ForbiddenRepeat,
+		"correctionProfileId":  violation.CorrectionProfileID,
+		"correctionMode":       violation.CorrectionMode,
+		"correctionContract":   violation.CorrectionContract,
+		"targetScope":          violation.TargetScope,
 		"sourceRefs":           violation.SourceRefs,
 		"attempt":              violation.Attempt,
 		"maxAttempts":          violation.MaxAttempts,

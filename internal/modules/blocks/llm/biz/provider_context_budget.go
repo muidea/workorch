@@ -23,9 +23,12 @@ const (
 )
 
 const (
-	providerContextGatePass         = "pass"
-	providerContextGateReadRequired = "read_required"
-	providerContextGateFailFast     = "fail_fast"
+	providerContextGatePass                = "pass"
+	providerContextGateReadRequired        = "read_required"
+	providerContextGateDegradeToAssessment = "degrade_to_assessment"
+	providerContextGateBlockerRequired     = "blocker_required"
+	providerContextGateFailFast            = "fail_fast"
+	providerContextGateReplanRequired      = "replan_required"
 )
 
 var providerP0InputKeys = []string{
@@ -931,28 +934,42 @@ func providerContextGateDecision(goalDoDCompressed, overBudget, p0Overflow bool,
 		return providerContextGateFailFast, "provider request remains over context budget after compaction"
 	}
 	for _, warning := range integrityWarnings {
-		switch strings.TrimSpace(warning) {
-		case "protected_goal_dod_changed_after_context_budget",
-			"request_still_over_budget_with_protected_goal_dod",
-			"coverage_repair_required_without_coverage_target_set",
-			"must_declare_coverage_targets_without_target_set",
-			"repair_action_package_required_output_missing",
-			"runtime_repair_current_failure_missing",
-			"runtime_repair_process_evidence_missing",
-			"selected_context_memories_without_selected_memory_ids",
-			"selected_context_memories_include_unselected_or_excluded_memory",
-			"coverage_work_item_unresolved_without_current_focus",
-			"coverage_work_item_current_focus_missing_minimum_fields",
-			"inadmissible_repair_target_set",
-			"inadmissible_repair_target_snapshot":
-			return providerContextGateFailFast, warning
-		case "protected_failure_target_snapshot_missing_after_context_budget",
-			"protected_patch_repair_snapshot_missing_after_context_budget",
-			"protected_repair_action_target_snapshot_missing_after_context_budget":
-			return providerContextGateReadRequired, warning
+		warning = strings.TrimSpace(warning)
+		if action := providerContextGateActionForWarning(warning); action != "" && action != providerContextGatePass {
+			return action, warning
 		}
 	}
 	return providerContextGatePass, ""
+}
+
+func providerContextGateActionForWarning(warning string) string {
+	switch strings.TrimSpace(warning) {
+	case "":
+		return providerContextGatePass
+	case "protected_failure_target_snapshot_missing_after_context_budget",
+		"protected_patch_repair_snapshot_missing_after_context_budget",
+		"protected_repair_action_target_snapshot_missing_after_context_budget",
+		"selected_context_memories_without_selected_memory_ids",
+		"selected_context_memories_include_unselected_or_excluded_memory":
+		return providerContextGateReadRequired
+	case "coverage_work_item_unresolved_without_current_focus",
+		"coverage_work_item_current_focus_missing_minimum_fields":
+		return providerContextGateDegradeToAssessment
+	case "runtime_repair_current_failure_missing",
+		"runtime_repair_process_evidence_missing":
+		return providerContextGateBlockerRequired
+	case "coverage_repair_required_without_coverage_target_set",
+		"must_declare_coverage_targets_without_target_set":
+		return providerContextGateReplanRequired
+	case "protected_goal_dod_changed_after_context_budget",
+		"request_still_over_budget_with_protected_goal_dod",
+		"repair_action_package_required_output_missing",
+		"inadmissible_repair_target_set",
+		"inadmissible_repair_target_snapshot":
+		return providerContextGateFailFast
+	default:
+		return providerContextGateFailFast
+	}
 }
 
 func providerInputRequiresProcessEvidence(input map[string]any) bool {

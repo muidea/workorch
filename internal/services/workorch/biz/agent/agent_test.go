@@ -291,13 +291,13 @@ func (fakeDecision) Get(context.Context, common.WorkspaceID, common.TicketID) (*
 
 type fakeApproval struct{}
 
-func (fakeApproval) Approve(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (fakeApproval) Approve(context.Context, common.WorkspaceID, common.ApprovalID, ...map[string]any) (*backend.ApprovalInfo, error) {
 	return &backend.ApprovalInfo{}, nil
 }
-func (fakeApproval) Reject(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (fakeApproval) Reject(context.Context, common.WorkspaceID, common.ApprovalID, ...map[string]any) (*backend.ApprovalInfo, error) {
 	return &backend.ApprovalInfo{}, nil
 }
-func (fakeApproval) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string) ([]backend.ApprovalInfo, error) {
+func (fakeApproval) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...map[string]any) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
 func (fakeApproval) List(context.Context, common.WorkspaceID) ([]backend.ApprovalInfo, error) {

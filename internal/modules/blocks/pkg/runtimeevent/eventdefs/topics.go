@@ -16,7 +16,7 @@ func RuntimeBlockExecuteTopic(kind string) string {
 }
 
 func Contracts() []eventcontract.Contract {
-	return eventcontract.Build("runtimeevent", eventcontract.CommandClassNotify, eventcontract.LanePolicyTopic,
+	return eventcontract.Build("runtimeevent", eventcontract.CommandClassNotify, eventcontract.LanePolicyState,
 		TopicRuntimeBlockExecuteAccepted,
 		TopicRuntimeBlockExecuteProgress,
 		TopicRuntimeBlockExecuteCompleted,

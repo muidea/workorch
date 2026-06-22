@@ -2,10 +2,9 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
-func stepRuntimeTimelineItem(step presenter.StepView, runState string, occurredAt string) readmodelcore.RuntimeTimelineItem {
+func stepRuntimeTimelineItem(step StepView, runState string, occurredAt string) readmodelcore.RuntimeTimelineItem {
 	return readmodelcore.RuntimeTimelineItem{
 		Source:     "step",
 		Type:       step.Kind,
@@ -15,7 +14,7 @@ func stepRuntimeTimelineItem(step presenter.StepView, runState string, occurredA
 		StepState:  step.State,
 		Summary:    TimelineStepSummary(step.Output),
 		OccurredAt: occurredAt,
-		Output:     cloneReadModelMap(step.Output),
+		Output:     boundedStreamStepOutput(step.Output),
 	}
 }
 

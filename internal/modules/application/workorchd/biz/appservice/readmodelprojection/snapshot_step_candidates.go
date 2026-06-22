@@ -1,11 +1,10 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func LatestNonTerminalSnapshotStep(steps []presenter.StepView) *presenter.StepView {
+func LatestNonTerminalSnapshotStep(steps []StepView) *StepView {
 	for idx := len(steps) - 1; idx >= 0; idx-- {
 		if steps[idx].State == string(common.StepStateDispatched) || steps[idx].State == string(common.StepStatePending) {
 			return &steps[idx]
@@ -14,7 +13,7 @@ func LatestNonTerminalSnapshotStep(steps []presenter.StepView) *presenter.StepVi
 	return nil
 }
 
-func TerminalSnapshotStep(steps []presenter.StepView) *presenter.StepView {
+func TerminalSnapshotStep(steps []StepView) *StepView {
 	terminals := terminalSnapshotStepCandidates(steps)
 	if len(terminals) == 0 {
 		return nil

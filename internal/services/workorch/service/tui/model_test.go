@@ -13,9 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -27,6 +25,47 @@ func asModel(m tea.Model) AppModel {
 		return *v
 	}
 	panic("not AppModel")
+}
+
+func TestSchedulerDiagnosticsStatusShowsWatchdogTimerRegistration(t *testing.T) {
+	text := schedulerDiagnosticsStatusText(&backend.SchedulerDiagnosticsInfo{
+		Watchdog: backend.WatchdogDiagnosticsInfo{TimerRegistrations: 2},
+	})
+	if !strings.Contains(text, "- watchdog: registered x2") {
+		t.Fatalf("status text = %q, want watchdog registration summary", text)
+	}
+}
+
+func TestLatestLLMContextBudgetPrefersProjectedBudgetTrace(t *testing.T) {
+	got := latestLLMContextBudget([]backend.LLMContextBudgetTraceInfo{
+		{
+			StepID:               common.StepID("step-budget"),
+			ProviderID:           "provider-budget",
+			Model:                "model-budget",
+			MaxTokens:            8192,
+			EstimatedInputTokens: 4096,
+			ShrinkLevel:          2,
+			IncludedSections:     []string{"p0", "p1"},
+			ProfileMode:          "auto",
+			CapabilitySource:     "provider",
+			PromptCaptured:       true,
+		},
+	}, []backend.LLMUsageTraceInfo{
+		{
+			ID: "usage-fallback",
+			ContextBudget: map[string]any{
+				"providerId": "provider-usage",
+				"maxTokens":  1024,
+			},
+		},
+	})
+	if got["providerId"] != "provider-budget" || got["model"] != "model-budget" || got["maxTokens"] != 8192 {
+		t.Fatalf("context budget = %+v, want projected budget trace", got)
+	}
+	included, ok := got["includedSections"].([]string)
+	if !ok || len(included) != 2 || included[0] != "p0" {
+		t.Fatalf("includedSections = %+v, want projected sections", got["includedSections"])
+	}
 }
 
 func projectWorkspace(m *AppModel, ws backend.WorkspaceInfo) {
@@ -1147,6 +1186,48 @@ func TestModelInspectCommandsRenderCurrentState(t *testing.T) {
 	}
 }
 
+func TestModelStatusRendersSchedulerDiagnosticsWithoutTriggeringCommands(t *testing.T) {
+	be := &decisionRecordingBE{fakeBE: newFake(t)}
+	m := NewAppModel(be, "ws-1", "")
+	m.activeWorkspaceID = "ws-1"
+	m.activeRunID = "run-1"
+	m.schedulerDiagnostics = &backend.SchedulerDiagnosticsInfo{
+		LatestContinuation: &backend.ContinuationDiagnosticInfo{
+			WorkspaceID:        "ws-1",
+			RunID:              "run-1",
+			Kind:               "replan_continuation",
+			State:              "failed",
+			Reason:             "owner_command_failed",
+			Detail:             "owner command failed after accepted scheduler event",
+			Recoverability:     "manual_retry_required",
+			RecommendedActions: []string{"run_resume", "workspace_restart"},
+		},
+		Watchdog: backend.WatchdogDiagnosticsInfo{TimerRegistrations: 1},
+	}
+
+	m.setInput("/status")
+	next, cmd := m.submitInput()
+	m = asModel(next)
+	if cmd != nil {
+		t.Fatal("/status returned command, want local projection render only")
+	}
+	for _, want := range []string{
+		"replan_continuation failed owner_command_failed",
+		"manual_retry_required run_resume,workspace_restart",
+		"watchdog: registered",
+	} {
+		if !strings.Contains(m.result, want) {
+			t.Fatalf("/status result = %q, missing %q", m.result, want)
+		}
+	}
+	if len(be.decisions) != 0 || be.approval.lastPayload != nil {
+		t.Fatalf("/status triggered governance command: decisions=%+v approvalPayload=%+v", be.decisions, be.approval.lastPayload)
+	}
+	if m.progressText != "Showing workspace status" {
+		t.Fatalf("progressText = %q, want status display text", m.progressText)
+	}
+}
+
 func TestModelStepProgressAutoScrollsToLatest(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.width = 120
@@ -1703,7 +1784,7 @@ func TestModelDecisionReplanSlashSubcommandUsesExplicitResolutionType(t *testing
 		t.Fatalf("resolved decisions = %d, want one", len(be.decisions))
 	}
 	req := be.decisions[0]
-	if req.TicketID != "ticket-1" || req.ResolutionType != decisioncommon.ResolutionTypeReplan {
+	if req.TicketID != "ticket-1" || req.ResolutionType != backend.DecisionResolutionTypeReplan {
 		t.Fatalf("decision request = %+v, want explicit replan for ticket-1", req)
 	}
 	if req.Payload["answer"] != "重新规划当前路径" {
@@ -1744,7 +1825,7 @@ func TestModelDecisionReplanAfterWorkspaceSwitchUsesOverviewBlocker(t *testing.T
 		t.Fatalf("resolved decisions = %d, want one", len(be.decisions))
 	}
 	req := be.decisions[0]
-	if req.WorkspaceID != "ws-b" || req.TicketID != "ticket-b" || req.ResolutionType != decisioncommon.ResolutionTypeReplan {
+	if req.WorkspaceID != "ws-b" || req.TicketID != "ticket-b" || req.ResolutionType != backend.DecisionResolutionTypeReplan {
 		t.Fatalf("decision request = %+v, want ws-b ticket-b replan", req)
 	}
 	if m.lastError != nil {
@@ -1815,7 +1896,7 @@ func TestModelDecisionReplanUsesCurrentOverviewTicketOverStaleLocalBlocker(t *te
 		t.Fatalf("resolved decisions = %d, want one", len(be.decisions))
 	}
 	req := be.decisions[0]
-	if req.WorkspaceID != "ws-1" || req.TicketID != "ticket-current" || req.ResolutionType != decisioncommon.ResolutionTypeReplan {
+	if req.WorkspaceID != "ws-1" || req.TicketID != "ticket-current" || req.ResolutionType != backend.DecisionResolutionTypeReplan {
 		t.Fatalf("decision request = %+v, want current server-projected replan ticket", req)
 	}
 }
@@ -1835,7 +1916,7 @@ func TestModelDecisionReplanUsesServerProjectionEvenAfterOptimisticResolvedMark(
 	m.selectedWorkspaceID = "ws-1"
 	m.activeRunID = "run-1"
 	m.markDecisionResolvedForWorkspace("ws-1", "ticket-1", "run-1")
-	m.markDecisionResolved("ticket-1")
+	m.markDecisionResolved("ticket-1", "ws-1", "run-1")
 	m.blockingDecision = nil
 	m.setInput("/decision replan")
 
@@ -1849,8 +1930,90 @@ func TestModelDecisionReplanUsesServerProjectionEvenAfterOptimisticResolvedMark(
 		t.Fatalf("resolved decisions = %d, want one", len(be.decisions))
 	}
 	req := be.decisions[0]
-	if req.WorkspaceID != "ws-1" || req.TicketID != "ticket-1" || req.ResolutionType != decisioncommon.ResolutionTypeReplan {
+	if req.WorkspaceID != "ws-1" || req.TicketID != "ticket-1" || req.ResolutionType != backend.DecisionResolutionTypeReplan {
 		t.Fatalf("decision request = %+v, want server-projected ticket despite optimistic resolved mark", req)
+	}
+}
+
+func TestModelResolvedMarkersAreScopedAcrossDuplicateIDs(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-b", "")
+	m.workspaces = []backend.WorkspaceInfo{
+		{ID: "ws-a", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-a", BlockingTicketID: "ticket-shared"},
+		{ID: "ws-b", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-shared"},
+	}
+	m.activeWorkspaceID = "ws-b"
+	m.activeRunID = "run-b"
+	m.decisions = []backend.DecisionInfo{
+		{ID: "ticket-shared", WorkspaceID: "ws-a", RunID: "run-a", State: "open"},
+		{ID: "ticket-shared", WorkspaceID: "ws-b", RunID: "run-b", State: "open"},
+	}
+	m.approvals = []backend.ApprovalInfo{
+		{ID: "approval-shared", WorkspaceID: "ws-a", RunID: "run-a", State: "pending"},
+		{ID: "approval-shared", WorkspaceID: "ws-b", RunID: "run-b", State: "pending"},
+	}
+
+	m.markDecisionResolved("ticket-shared", "ws-b", "run-b")
+	m.markApprovalResolved("approval-shared", "ws-b", "run-b")
+
+	if m.decisions[0].State != "open" || m.decisions[1].State != "resolved" {
+		t.Fatalf("decision states = %+v, want only ws-b resolved", m.decisions)
+	}
+	if m.approvals[0].State != "pending" || m.approvals[1].State != "resolved" {
+		t.Fatalf("approval states = %+v, want only ws-b resolved", m.approvals)
+	}
+}
+
+func TestModelDecisionReplanDoesNotUseLocalBlockerWhenServerProjectionIsLive(t *testing.T) {
+	be := &decisionRecordingBE{fakeBE: newFake(t)}
+	m := NewAppModel(be, "ws-1", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:          "ws-1",
+		Title:       "A",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: "run-1",
+	}}})
+	m = asModel(next)
+	m.activeWorkspaceID = "ws-1"
+	m.activeRunID = "run-1"
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-stale", WorkspaceID: "ws-1", RunID: "run-1", State: "open"}
+	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
+	m.setInput("/decision replan")
+
+	next, cmd := m.submitInput()
+	m = asModel(next)
+	if cmd != nil {
+		t.Fatal("stale local blocker produced a decision command")
+	}
+	if len(be.decisions) != 0 {
+		t.Fatalf("resolved decisions = %d, want none", len(be.decisions))
+	}
+	if m.lastError == nil || !strings.Contains(m.lastError.Error(), "no blocking decision") {
+		t.Fatalf("lastError = %v, want no blocking decision", m.lastError)
+	}
+}
+
+func TestModelApprovalApproveDoesNotUseLocalBlockerWhenServerProjectionIsLive(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:          "ws-1",
+		Title:       "A",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: "run-1",
+	}}})
+	m = asModel(next)
+	m.activeWorkspaceID = "ws-1"
+	m.activeRunID = "run-1"
+	m.blockingApproval = &backend.ApprovalInfo{ID: "approval-stale", WorkspaceID: "ws-1", RunID: "run-1", State: "pending"}
+	m.approvals = []backend.ApprovalInfo{*m.blockingApproval}
+	m.setInput("/approval approve")
+
+	next, cmd := m.submitInput()
+	m = asModel(next)
+	if cmd != nil {
+		t.Fatal("stale local blocker produced an approval command")
+	}
+	if m.lastError == nil || !strings.Contains(m.lastError.Error(), "no blocking approval") {
+		t.Fatalf("lastError = %v, want no blocking approval", m.lastError)
 	}
 }
 
@@ -2338,7 +2501,8 @@ func TestApprovalInputUsesSemanticIntent(t *testing.T) {
 }
 
 func TestModelApprovalSemanticApproveSubmitsApprove(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
+	be := newFake(t)
+	m := NewAppModel(be, "ws-1", "")
 	projectApprovalBlocker(&m, "ws-1", "run-1", "approval-1")
 	m.blockingApproval = &backend.ApprovalInfo{ID: "approval-1", WorkspaceID: "ws-1", RunID: "run-1", State: "pending"}
 	m.input = "同意继续调用外部接口"
@@ -2355,6 +2519,9 @@ func TestModelApprovalSemanticApproveSubmitsApprove(t *testing.T) {
 	}
 	if len(m.transcript) != 1 || m.transcript[0].Text != "同意继续调用外部接口" {
 		t.Fatalf("transcript = %+v, want original approval text", m.transcript)
+	}
+	if be.approval.lastPayload["rawInput"] != "同意继续调用外部接口" || be.approval.lastPayload["source"] != "tui" {
+		t.Fatalf("approval payload = %#v, want raw input from tui", be.approval.lastPayload)
 	}
 }
 
@@ -2984,6 +3151,36 @@ func TestModelWorkspaceContextDoesNotTreatOutcomeRunAsActive(t *testing.T) {
 	}
 }
 
+func TestModelWorkspaceContextDoesNotTreatAcceptedRunCommandAsRunning(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	m.activeRunID = "run-old"
+	m.running = true
+	m.progress = progressSubmitting
+	m.progressText = "Submitting run command"
+	next, _ := m.Update(WorkspaceContextMsg{
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
+			RunCommand: &backend.RunCommandStatusInfo{
+				WorkspaceID: "ws-a",
+				RunID:       "run-accepted",
+				Intent:      "replan",
+				RequestID:   "request-accepted",
+				Source:      "tui",
+				Revision:    3,
+			},
+		},
+	})
+	m = asModel(next)
+	if m.activeRunID != "" || m.running || m.progress == progressRunning {
+		t.Fatalf("run state = %q/%v/%s, want accepted command metadata without live run", m.activeRunID, m.running, m.progress)
+	}
+	if m.progress == progressSubmitting {
+		t.Fatalf("progress = %s/%q, accepted command projection must not leave stale submitting state", m.progress, m.progressText)
+	}
+}
+
 func TestModelWorkspaceContextDoesNotRestoreOldOutcomeForLiveRun(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-a"
@@ -3500,6 +3697,18 @@ func TestModelWorkspaceContextRendersBusinessSectionsFromSnapshot(t *testing.T) 
 					NodeRunning:   1,
 				},
 			},
+			TaskPlans: []backend.TaskPlanInfo{
+				{
+					ID:                "plan-1",
+					RunID:             "run-1",
+					State:             "blocked_on_decision",
+					SourceOutputState: "retrying",
+					Summary:           "按计划推进当前收敛项",
+					NodeTotal:         3,
+					NodeCompleted:     1,
+					NodeRunning:       1,
+				},
+			},
 			MemoryRecallTraces: []backend.MemoryRecallTraceInfo{
 				{
 					ID:                 "mr-1",
@@ -3543,8 +3752,8 @@ func TestModelWorkspaceContextRendersBusinessSectionsFromSnapshot(t *testing.T) 
 		"Goal: 完成服务配置修复",
 		"DoD",
 		"变更最小化",
-		"Task Decomposition",
-		"分解代码任务并执行验证",
+		"Task Plans",
+		"按计划推进当前收敛项",
 		"Memory Recall",
 		"vector/execution: selected",
 		"LLM Usage",
@@ -3933,6 +4142,60 @@ func TestModelWorkspaceListSynchronizesWaitingDecisionPrompt(t *testing.T) {
 	}
 }
 
+func TestFetchWorkspaceContextUsesProjectionSnapshotOnly(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateRunning)
+	be.snapshot = &backend.WorkspaceSnapshotInfo{
+		Workspace: backend.WorkspaceInfo{
+			ID:          "ws-projection-context",
+			State:       common.WorkspaceStateRunning,
+			ActiveRunID: "run-projection-context",
+			Projection:  backend.ProjectionInfo{State: "ready", WorkspaceRevision: 42},
+		},
+		Projection: backend.ProjectionInfo{State: "ready", WorkspaceRevision: 42},
+		Runs: []backend.RunInfo{{
+			ID:          "run-projection-context",
+			WorkspaceID: "ws-projection-context",
+			State:       common.RunStateRunning,
+		}},
+		TaskProgress: backend.TaskProgressInfo{
+			WorkspaceID: "ws-projection-context",
+			RunID:       "run-projection-context",
+			State:       string(common.RunStateRunning),
+			Summary:     "projection task progress",
+			Recovery: backend.RecoveryPlanInfo{
+				StepID: "step-projection-context",
+			},
+		},
+		RunHeartbeat: backend.RunHeartbeatInfo{
+			WorkspaceID:   "ws-projection-context",
+			RunID:         "run-projection-context",
+			State:         string(common.RunStateRunning),
+			ActivityState: "running",
+			Summary:       "projection heartbeat",
+		},
+	}
+
+	msg, ok := FetchWorkspaceContext(be, "ws-projection-context")().(WorkspaceContextMsg)
+	if !ok {
+		t.Fatalf("FetchWorkspaceContext returned %T, want WorkspaceContextMsg", msg)
+	}
+	if msg.Error != nil {
+		t.Fatalf("FetchWorkspaceContext error: %v", msg.Error)
+	}
+	if be.lastSnapshotWorkspace != "ws-projection-context" {
+		t.Fatalf("snapshot workspace = %q, want ws-projection-context", be.lastSnapshotWorkspace)
+	}
+	if be.lastStatusWorkspace != "" || be.lastListWorkspace != "" || be.lastGetWorkspace != "" {
+		t.Fatalf("unexpected extra run/workspace reads: status=%q list=%q get=%q", be.lastStatusWorkspace, be.lastListWorkspace, be.lastGetWorkspace)
+	}
+	if msg.Status == nil || msg.Status.CurrentStepID != "step-projection-context" || msg.Status.State != common.RunStateRunning {
+		t.Fatalf("status = %+v, want projection task progress status", msg.Status)
+	}
+	if msg.Projection.WorkspaceRevision != 42 {
+		t.Fatalf("projection = %+v, want snapshot projection revision", msg.Projection)
+	}
+}
+
 func TestModelActiveWorkspaceWithoutRunIgnoresHistoricalGovernance(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.width = 100
@@ -4129,6 +4392,16 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 			Workspace:    backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateRunning, ActiveRunID: "run-b"},
 			TaskProgress: backend.TaskProgressInfo{WorkspaceID: "ws-b", RunID: "run-b", State: "running", Summary: "B is making progress"},
 			RunHeartbeat: backend.RunHeartbeatInfo{WorkspaceID: "ws-b", RunID: "run-b", State: "running", ActivityState: "running", Summary: "B heartbeat"},
+			SchedulerDiagnostics: &backend.SchedulerDiagnosticsInfo{
+				LatestContinuation: &backend.ContinuationDiagnosticInfo{
+					WorkspaceID:    "ws-b",
+					RunID:          "run-b",
+					Kind:           "run_continuation",
+					State:          "completed",
+					Reason:         "active-diagnostic",
+					Recoverability: "no_action_needed",
+				},
+			},
 		},
 		WorkspaceHasLive: true,
 	})
@@ -4144,6 +4417,30 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 	}
 	if view := stripANSI(m.View()); !strings.Contains(view, "build workspace B") || strings.Contains(view, "task-a") {
 		t.Fatalf("main view not rebound to workspace B:\n%s", view)
+	}
+	if scheduler := schedulerDiagnosticsStatusText(m.schedulerDiagnostics); !strings.Contains(scheduler, "active-diagnostic") {
+		t.Fatalf("scheduler diagnostics = %q, want active workspace diagnostic", scheduler)
+	}
+
+	next, _ = m.Update(WorkspaceContextMsg{
+		WorkspaceID: "ws-a",
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateFailed, ActiveRunID: "run-a"},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateFailed, ActiveRunID: "run-a"},
+			SchedulerDiagnostics: &backend.SchedulerDiagnosticsInfo{
+				LatestContinuation: &backend.ContinuationDiagnosticInfo{
+					WorkspaceID: "ws-a",
+					RunID:       "run-a",
+					Kind:        "replan_continuation",
+					State:       "failed",
+					Reason:      "inactive-diagnostic",
+				},
+			},
+		},
+	})
+	m = asModel(next)
+	if scheduler := schedulerDiagnosticsStatusText(m.schedulerDiagnostics); strings.Contains(scheduler, "inactive-diagnostic") || !strings.Contains(scheduler, "active-diagnostic") {
+		t.Fatalf("inactive scheduler diagnostic polluted active view: %q", scheduler)
 	}
 
 	cmd = m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-a", Revision: 12})
@@ -4538,11 +4835,11 @@ func TestModelLLMStreamProgressUpdatesStatus(t *testing.T) {
 		RunID:       "run-a",
 		Revision:    1,
 		Payload: map[string]any{
-			events.PayloadKeyProviderID:    "local",
-			events.PayloadKeyModel:         "verify-model",
-			events.PayloadKeyStatus:        "streaming",
-			events.PayloadKeyChunkCount:    3,
-			events.PayloadKeyReceivedBytes: 128,
+			backend.PayloadKeyProviderID:    "local",
+			backend.PayloadKeyModel:         "verify-model",
+			backend.PayloadKeyStatus:        "streaming",
+			backend.PayloadKeyChunkCount:    3,
+			backend.PayloadKeyReceivedBytes: 128,
 		},
 	})
 	if cmd != nil {
@@ -4951,15 +5248,20 @@ func writeOptionalTUIViewSnapshot(t *testing.T, name string, model AppModel) {
 
 // ── fake backend ──
 
-type fakeBE struct{}
+type fakeBE struct {
+	approval *fakeA
+}
 
-func newFake(t *testing.T) *fakeBE                    { t.Helper(); return &fakeBE{} }
+func newFake(t *testing.T) *fakeBE {
+	t.Helper()
+	return &fakeBE{approval: &fakeA{}}
+}
 func (b *fakeBE) Workspace() backend.WorkspaceBackend { return &fakeWS{} }
 func (b *fakeBE) Goal() backend.GoalBackend           { return &fakeG{} }
 func (b *fakeBE) DoD() backend.DoDBackend             { return &fakeD{} }
 func (b *fakeBE) Run() backend.RunBackend             { return &fakeR{} }
 func (b *fakeBE) Decision() backend.DecisionBackend   { return &fakeDC{} }
-func (b *fakeBE) Approval() backend.ApprovalBackend   { return &fakeA{} }
+func (b *fakeBE) Approval() backend.ApprovalBackend   { return b.approval }
 func (b *fakeBE) Soul() backend.SoulBackend           { return &fakeS{} }
 func (b *fakeBE) Skill() backend.SkillBackend         { return &fakeSK{} }
 func (b *fakeBE) MCP() backend.MCPBackend             { return &fakeM{} }
@@ -5250,13 +5552,13 @@ func (f *conflictWorkspaceBackend) Delete(ctx context.Context, id common.Workspa
 
 type conflictApprovalBackend struct{}
 
-func (f *conflictApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (f *conflictApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*backend.ApprovalInfo, error) {
 	return nil, common.ErrConflict
 }
-func (f *conflictApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (f *conflictApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*backend.ApprovalInfo, error) {
 	return nil, common.ErrConflict
 }
-func (f *conflictApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string) ([]backend.ApprovalInfo, error) {
+func (f *conflictApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...map[string]any) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
 func (f *conflictApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.ApprovalInfo, error) {
@@ -5424,15 +5726,20 @@ func (f *fakeDC) Get(ctx context.Context, wsID common.WorkspaceID, id common.Tic
 	return &backend.DecisionInfo{ID: id, WorkspaceID: wsID, Question: "?", State: "open"}, nil
 }
 
-type fakeA struct{}
+type fakeA struct {
+	lastPayload map[string]any
+}
 
-func (f *fakeA) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (f *fakeA) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*backend.ApprovalInfo, error) {
+	f.lastPayload = firstFakeApprovalPayload(payload...)
 	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "approved"}, nil
 }
-func (f *fakeA) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (f *fakeA) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*backend.ApprovalInfo, error) {
+	f.lastPayload = firstFakeApprovalPayload(payload...)
 	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "rejected"}, nil
 }
-func (f *fakeA) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string) ([]backend.ApprovalInfo, error) {
+func (f *fakeA) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...map[string]any) ([]backend.ApprovalInfo, error) {
+	f.lastPayload = firstFakeApprovalPayload(payload...)
 	return nil, nil
 }
 func (f *fakeA) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.ApprovalInfo, error) {
@@ -5440,6 +5747,15 @@ func (f *fakeA) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.Ap
 }
 func (f *fakeA) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
 	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, Reason: "reason", State: "pending"}, nil
+}
+
+func firstFakeApprovalPayload(payload ...map[string]any) map[string]any {
+	for _, candidate := range payload {
+		if len(candidate) > 0 {
+			return candidate
+		}
+	}
+	return nil
 }
 
 type fakeS struct{}

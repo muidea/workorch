@@ -22,49 +22,50 @@ type WorkorchContractSpec struct {
 }
 
 var (
-	workorchEventContracts = map[string]WorkorchContractSpec{
-		workspaceevents.TopicWorkspaceCreated:                               newWorkorchEventContract(workspaceevents.TopicWorkspaceCreated),
-		workspaceevents.TopicWorkspaceStateChanged:                          newWorkorchEventContract(workspaceevents.TopicWorkspaceStateChanged),
-		workspaceevents.TopicWorkspaceDeleted:                               newWorkorchEventContract(workspaceevents.TopicWorkspaceDeleted),
-		workspaceevents.TopicGoalDefined:                                    newWorkorchEventContract(workspaceevents.TopicGoalDefined),
-		workspaceevents.TopicDoDDefined:                                     newWorkorchEventContract(workspaceevents.TopicDoDDefined),
-		runevents.TopicRunCreated:                                           newWorkorchEventContract(runevents.TopicRunCreated),
-		runevents.TopicRunStateChanged:                                      newWorkorchEventContract(runevents.TopicRunStateChanged),
-		runevents.TopicRunLLMStreamProgress:                                 newWorkorchEventContract(runevents.TopicRunLLMStreamProgress),
-		runevents.TopicRunLLMUsageRecorded:                                  newWorkorchEventContract(runevents.TopicRunLLMUsageRecorded),
-		runevents.TopicStepDispatched:                                       newWorkorchEventContract(runevents.TopicStepDispatched),
-		runevents.TopicStepStateChanged:                                     newWorkorchEventContract(runevents.TopicStepStateChanged),
-		decisionevents.TopicTicketCreated:                                   newWorkorchEventContract(decisionevents.TopicTicketCreated),
-		decisionevents.TopicTicketResolved:                                  newWorkorchEventContract(decisionevents.TopicTicketResolved),
-		decisionevents.TopicTicketUpdated:                                   newWorkorchEventContract(decisionevents.TopicTicketUpdated),
-		approvalevents.TopicApprovalCreated:                                 newWorkorchEventContract(approvalevents.TopicApprovalCreated),
-		approvalevents.TopicApprovalResolved:                                newWorkorchEventContract(approvalevents.TopicApprovalResolved),
-		resultevents.TopicResultAccepted:                                    newWorkorchEventContract(resultevents.TopicResultAccepted),
-		resultevents.TopicResultRejected:                                    newWorkorchEventContract(resultevents.TopicResultRejected),
-		resultevents.TopicResultSuperseded:                                  newWorkorchEventContract(resultevents.TopicResultSuperseded),
-		resultevents.TopicArtifactCreated:                                   newWorkorchEventContract(resultevents.TopicArtifactCreated),
-		orchestratorevents.TopicPatchPreviewed:                              newWorkorchEventContract(orchestratorevents.TopicPatchPreviewed),
-		orchestratorevents.TopicPatchApplied:                                newWorkorchEventContract(orchestratorevents.TopicPatchApplied),
-		orchestratorevents.TopicPatchFailed:                                 newWorkorchEventContract(orchestratorevents.TopicPatchFailed),
-		orchestratorevents.TopicPatchReverted:                               newWorkorchEventContract(orchestratorevents.TopicPatchReverted),
-		orchestratorevents.TopicOrchestratorContractViolationRecorded:       newWorkorchEventContract(orchestratorevents.TopicOrchestratorContractViolationRecorded),
-		orchestratorevents.TopicOrchestratorContractViolationRetryRequested: newWorkorchEventContract(orchestratorevents.TopicOrchestratorContractViolationRetryRequested),
-		orchestratorevents.TopicOrchestratorContractViolationEscalated:      newWorkorchEventContract(orchestratorevents.TopicOrchestratorContractViolationEscalated),
-		orchestratorevents.TopicArtifactContinuationCreated:                 newWorkorchEventContract(orchestratorevents.TopicArtifactContinuationCreated),
-		orchestratorevents.TopicArtifactContinuationChunkRecorded:           newWorkorchEventContract(orchestratorevents.TopicArtifactContinuationChunkRecorded),
-		orchestratorevents.TopicArtifactContinuationChunkRejected:           newWorkorchEventContract(orchestratorevents.TopicArtifactContinuationChunkRejected),
-		orchestratorevents.TopicArtifactContinuationAssembled:               newWorkorchEventContract(orchestratorevents.TopicArtifactContinuationAssembled),
-		orchestratorevents.TopicArtifactContinuationApplied:                 newWorkorchEventContract(orchestratorevents.TopicArtifactContinuationApplied),
-		orchestratorevents.TopicArtifactContinuationFailed:                  newWorkorchEventContract(orchestratorevents.TopicArtifactContinuationFailed),
-		memoryevents.TopicMemoryCreated:                                     newWorkorchEventContract(memoryevents.TopicMemoryCreated),
-		memoryevents.TopicMemoryUpdated:                                     newWorkorchEventContract(memoryevents.TopicMemoryUpdated),
-		memoryevents.TopicMemoryDeleted:                                     newWorkorchEventContract(memoryevents.TopicMemoryDeleted),
-		memoryevents.TopicMemoryRecallRecorded:                              newWorkorchEventContract(memoryevents.TopicMemoryRecallRecorded),
-		governanceevents.TopicGovernanceAutoEvaluated:                       newWorkorchEventContract(governanceevents.TopicGovernanceAutoEvaluated),
-		governanceevents.TopicGovernanceAutoResolved:                        newWorkorchEventContract(governanceevents.TopicGovernanceAutoResolved),
-		governanceevents.TopicGovernanceAutoEscalated:                       newWorkorchEventContract(governanceevents.TopicGovernanceAutoEscalated),
-		governanceevents.TopicGovernanceAutoBlocked:                         newWorkorchEventContract(governanceevents.TopicGovernanceAutoBlocked),
+	workorchEventTopics = []string{
+		workspaceevents.TopicWorkspaceCreated,
+		workspaceevents.TopicWorkspaceStateChanged,
+		workspaceevents.TopicWorkspaceDeleted,
+		workspaceevents.TopicGoalDefined,
+		workspaceevents.TopicDoDDefined,
+		runevents.TopicRunCreated,
+		runevents.TopicRunStateChanged,
+		runevents.TopicRunLLMStreamProgress,
+		runevents.TopicRunLLMUsageRecorded,
+		runevents.TopicStepDispatched,
+		runevents.TopicStepStateChanged,
+		decisionevents.TopicTicketCreated,
+		decisionevents.TopicTicketResolved,
+		decisionevents.TopicTicketUpdated,
+		approvalevents.TopicApprovalCreated,
+		approvalevents.TopicApprovalResolved,
+		resultevents.TopicResultAccepted,
+		resultevents.TopicResultRejected,
+		resultevents.TopicResultSuperseded,
+		resultevents.TopicArtifactCreated,
+		orchestratorevents.TopicPatchPreviewed,
+		orchestratorevents.TopicPatchApplied,
+		orchestratorevents.TopicPatchFailed,
+		orchestratorevents.TopicPatchReverted,
+		orchestratorevents.TopicOrchestratorContractViolationRecorded,
+		orchestratorevents.TopicOrchestratorContractViolationRetryRequested,
+		orchestratorevents.TopicOrchestratorContractViolationEscalated,
+		orchestratorevents.TopicArtifactContinuationCreated,
+		orchestratorevents.TopicArtifactContinuationChunkRecorded,
+		orchestratorevents.TopicArtifactContinuationChunkRejected,
+		orchestratorevents.TopicArtifactContinuationAssembled,
+		orchestratorevents.TopicArtifactContinuationApplied,
+		orchestratorevents.TopicArtifactContinuationFailed,
+		memoryevents.TopicMemoryCreated,
+		memoryevents.TopicMemoryUpdated,
+		memoryevents.TopicMemoryDeleted,
+		memoryevents.TopicMemoryRecallRecorded,
+		governanceevents.TopicGovernanceAutoEvaluated,
+		governanceevents.TopicGovernanceAutoResolved,
+		governanceevents.TopicGovernanceAutoEscalated,
+		governanceevents.TopicGovernanceAutoBlocked,
 	}
+	workorchEventContracts    = buildWorkorchEventContracts(workorchEventTopics)
 	workorchSnapshotContracts = map[string]WorkorchContractSpec{
 		"/workspace/snapshot":       newWorkorchSnapshotContract("/workspace/snapshot"),
 		"/run/snapshot":             newWorkorchSnapshotContract("/run/snapshot"),
@@ -73,6 +74,14 @@ var (
 		"/approval/snapshot":        newWorkorchSnapshotContract("/approval/snapshot"),
 	}
 )
+
+func buildWorkorchEventContracts(topics []string) map[string]WorkorchContractSpec {
+	ret := make(map[string]WorkorchContractSpec, len(topics))
+	for _, topic := range topics {
+		ret[topic] = newWorkorchEventContract(topic)
+	}
+	return ret
+}
 
 func WorkorchEventContract(topic string) (WorkorchContractSpec, bool) {
 	spec, ok := workorchEventContracts[topic]

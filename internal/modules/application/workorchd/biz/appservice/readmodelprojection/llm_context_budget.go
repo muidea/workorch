@@ -2,11 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 )
 
-func MapLLMContextBudgetTraces(steps []presenter.StepView) []readmodelcore.LLMContextBudgetTrace {
+func MapLLMContextBudgetTraces(steps []StepView) []readmodelcore.LLMContextBudgetTrace {
 	if len(steps) == 0 {
 		return nil
 	}

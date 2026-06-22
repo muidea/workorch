@@ -218,7 +218,8 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	if len(page.Decisions) != 1 || page.Decisions[0].ID != second.BlockingTicketID || page.Decisions[0].State != string(common.DecisionTicketStateOpen) {
 		t.Fatalf("page decisions = %+v, want open second ticket first", page.Decisions)
 	}
-	if !page.HasMore || page.NextCursorAfterID != second.BlockingTicketID {
+	wantCursor := second.WorkspaceID + "\x00" + second.BlockingTicketID
+	if !page.HasMore || page.NextCursorAfterID != wantCursor {
 		t.Fatalf("page cursor = %+v, want hasMore with second cursor", page)
 	}
 	if page.Decisions[0].Context != nil || page.Decisions[0].ResolutionPayload != nil {
@@ -242,6 +243,62 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	}
 	if detail.Context == nil || detail.ResolutionPayload == nil {
 		t.Fatalf("detail decision lost full payloads: %+v", detail)
+	}
+}
+
+func TestListDecisionPageWithBackendScopesResolvedDuplicateTicketIDs(t *testing.T) {
+	dataRoot := t.TempDir()
+	const runID = "run-decision-page-shared"
+	first := prepareDecisionRun(t, dataRoot, "ws-decision-page-shared-a", runID)
+	second := prepareDecisionRun(t, dataRoot, "ws-decision-page-shared-b", runID)
+	if first.BlockingTicketID != second.BlockingTicketID {
+		t.Fatalf("test setup ticket ids = %q/%q, want duplicate IDs", first.BlockingTicketID, second.BlockingTicketID)
+	}
+
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("runtime exports: %v", err)
+	}
+	for _, workspaceID := range []common.WorkspaceID{"ws-decision-page-shared-a", "ws-decision-page-shared-b"} {
+		scoped := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+		ticket, err := exports.Repositories.Tickets.Get(scoped, common.TicketID(first.BlockingTicketID))
+		if err != nil {
+			t.Fatalf("get ticket %s/%s: %v", workspaceID, first.BlockingTicketID, err)
+		}
+		ticket.State = common.DecisionTicketStateResolved
+		if err := exports.Repositories.Tickets.Update(scoped, ticket); err != nil {
+			t.Fatalf("update ticket %s/%s: %v", workspaceID, first.BlockingTicketID, err)
+		}
+		if err := exports.Repositories.Resolutions.Create(scoped, &decisionmodel.Resolution{
+			ID:       common.ResolutionID("resolution-" + string(workspaceID)),
+			TicketID: common.TicketID(first.BlockingTicketID),
+			Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+			Payload:  map[string]any{"workspaceId": string(workspaceID)},
+		}); err != nil {
+			t.Fatalf("create resolution %s/%s: %v", workspaceID, first.BlockingTicketID, err)
+		}
+	}
+
+	page, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, DecisionQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListDecisionPageWithBackend: %v", err)
+	}
+	if len(page.Decisions) != 2 {
+		t.Fatalf("page decisions = %+v, want two scoped duplicate-ticket decisions", page.Decisions)
+	}
+	got := map[string]Decision{}
+	for _, item := range page.Decisions {
+		got[item.WorkspaceID] = item
+	}
+	for _, workspaceID := range []string{"ws-decision-page-shared-a", "ws-decision-page-shared-b"} {
+		item, ok := got[workspaceID]
+		if !ok {
+			t.Fatalf("page decisions = %+v, missing workspace %s", page.Decisions, workspaceID)
+		}
+		if item.ID != first.BlockingTicketID || item.ResolutionPayload["workspaceId"] != workspaceID {
+			t.Fatalf("decision for %s = %+v, want scoped resolution payload", workspaceID, item)
+		}
 	}
 }
 
@@ -656,6 +713,44 @@ func TestResolveDecisionWithSessionInfersRepairExhaustionReplanFromContinueUnder
 	}
 	if item.ResolutionPayload["recoveryAction"] != "replan" {
 		t.Fatalf("resolutionPayload = %+v, want inferred replan", item.ResolutionPayload)
+	}
+}
+
+func TestResolveDecisionWithSessionKeepsExplicitRepairExhaustionTerminateUnderReplanPolicy(t *testing.T) {
+	session, tickets, _ := newCountingDecisionRuntimeSession(t)
+	ctx := context.Background()
+	ticketID := common.TicketID("ticket-repair-exhaustion-terminate-replan-policy")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: common.WorkspaceID("ws-repair-exhaustion-terminate-replan-policy"),
+		RunID:       common.RunID("run-repair-exhaustion-terminate-replan-policy"),
+		StepID:      common.StepID("run-repair-exhaustion-terminate-replan-policy/step-1"),
+		Reason:      "runtime repair attempts exhausted after 3 attempts",
+		Question:    "Provide missing implementation guidance, choose replan, or reject the current path.",
+		Context: map[string]any{
+			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyRepairPlan,
+			"allowedRecoveryActions":                        []any{"replan"},
+		},
+		State: common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+		ResolutionPayload: map[string]any{
+			"recoveryAction": "terminate",
+			"operator":       "e2e",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveDecisionWithSession: %v", err)
+	}
+	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeRejectCurrentPath {
+		t.Fatalf("decision = %+v, want resolved reject_current_path", item)
+	}
+	if item.ResolutionPayload["recoveryAction"] != "terminate" {
+		t.Fatalf("resolutionPayload = %+v, want explicit terminate preserved", item.ResolutionPayload)
 	}
 }
 

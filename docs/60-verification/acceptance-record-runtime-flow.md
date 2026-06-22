@@ -54,15 +54,15 @@ Last Updated: 2026-05-30
 | Area | Evidence | Result | Notes |
 | --- | --- | --- | --- |
 | activation / definition | activation service, run service, run/workspace models | pass | activation 基于 effective Goal / DoD 创建新 run，写入 definition revision，stale active run 会被 supersede，首个正式入口为 `llm/workspace_execution`。 |
-| activation coverage baseline | `runtime_coverage_work_items.go`, `runtime_step_input.go` | partial | initial/dispatch 前会 `ensureRunCoverageWorkItems` 并形成 `coverageWorkItemContext`；但底层仍是 `Run.ExecutionContext` ledger，独立对象化属于 domain 层 `doc-ahead`。 |
+| activation coverage baseline | `runtime_coverage_work_items.go`, `runtime_step_input.go`, `workorchruntimecontract.CoverageWorkItem` | pass | initial/dispatch 前会 `ensureRunCoverageWorkItems` 并形成 `coverageWorkItemContext`；`CoverageWorkItem` 正式 model/repository 已落地，orchestrator 写路径已同步到 owner repository，read-model 列表已通过 EventHub owner command 读取 owner repository；dispatch/provider context 前会从 owner repository 水合 `Run.ExecutionContext` coverage 投影并生成 gap baseline。 |
 | planning / execution | `runtime_graph.go`, `runtime_orchestrator.go`, `runtime_output_mode_selector.go` | pass | graph 调度由 orchestrator 持有；graph exhausted 后进入 follow-up、assessment-only 或 completion gate；`incrementalArtifact` 走正式 output-mode 主链。 |
 | context assembly | `execution_context_package.go`, `runtime_step_input.go`, `prompt_messages.go` | pass | 每次 provider request 前重新组装 context package，覆盖 contract、continuity、failure、progress、coverage、snapshots、capabilities、memory、budget。 |
-| context gate | `provider_context_budget.go`, `runtime_adapter.go`, tests | partial | provider 前置 gate 真实存在，稳定实现 `pass` / `read_required` / `fail_fast`；`degrade_to_assessment`、`blocker_required`、`replan_required` 尚未作为独立 gate action 落地。 |
+| context gate | `provider_context_budget.go`, `runtime_adapter.go`, `runtime_repair.go`, tests | pass | provider 前置 gate 真实存在，稳定实现 `pass` / `read_required` / `degrade_to_assessment` / `blocker_required` / `fail_fast` / `replan_required`；非 pass action 会阻断 provider 调用，并由 orchestrator 形成结构化 context decision ticket。 |
 | canonical failure hydration | `runtime_orchestrator.go`, `runtime_repair.go`, `runtime_llm_context.go` | pass | 可从 ticket context、failed input/output、repair package、progress digest、replan/rejected continuation 重建 current failure/progress，避免单字段缺失误判。 |
 | repair / replan / governance recovery | `runtime_repair.go`, `runtime_orchestrator.go`, tests | pass | wrapper failure inheritance 成立；context-gate failure 不进入普通 state-changing repair；decision/approval resolved 后创建新的 retry/continuation step。 |
 | verification / acceptance | `runtime_graph.go`, `runtime_evidence_quality.go`, `runtime_result_recording.go` | pass | completion gate 会 normalize/validate DoD assessment、校验证据质量、更新 coverage ledger，并在 coverage ready 后记录 accepted/rejected Result。 |
 | evidence / result / projection | `read_model_service.go`, event repository, result recording | pass | evidence 来源分层成立；accepted Result 在 outcome/taskProgress 中优先于旧失败 evidence；payload summary/ref 与 raw open 边界成立。 |
-| cross-flow consistency | coverage ledger + context package + read-model projection | partial | definition revision、coverage baseline、context package、accepted outcome 主链一致；剩余缺口是 coverage ledger 独立对象化与完整 gate action 枚举。 |
+| cross-flow consistency | coverage ledger + context package + read-model projection | pass | definition revision、coverage baseline、context package、context gate、accepted outcome 主链一致；coverage ledger 写路径已独立持久化，read-model 列表已从 owner repository 读取；dispatch/provider context 前会从 owner repository 水合 cache-stable coverage projection。 |
 
 ## Requirement Notes
 
@@ -89,12 +89,12 @@ Last Updated: 2026-05-30
 
 - provider request 前存在 context assembly，不复用旧 step input。
 - context package 包含合同、连续性、失败、进度、coverage、capability、memory、budget 等主要分区。
-- provider budget/gate 会输出 contextGateAction/contextGateReason 并可 fail-fast。
+- provider budget/gate 会输出 contextGateAction/contextGateReason，并覆盖 pass/read-required/degrade-to-assessment/blocker-required/fail-fast/replan-required。
 - coverage gap 已存在时可恢复 coverage target/focus 上下文。
 
 保留项：
 
-- flow 文档中的完整 gate action 枚举仍未全部落地为 provider budget action。
+- flow 文档中的完整 gate action 枚举已落地为 provider budget action；LLM adapter 只做 provider 前阻断，orchestrator 负责恢复 ticket / retry routing。
 - 后续落地时应保持 LLM adapter 只负责 gate decision/budget，orchestrator 负责恢复路径。
 
 ### 4. Repair / Replan / Governance
@@ -131,10 +131,9 @@ Last Updated: 2026-05-30
 - runtime-flow 主链已经完成代码对齐。
 - 当前未发现需要立即修复的 `impl-drift`。
 - 保留项集中在：
-  - `CoverageWorkItem` 独立对象化：由 domain/model 层继续跟踪
-  - context gate 完整 action 枚举：`degrade_to_assessment` / `blocker_required` / `replan_required`
+  - 当前无 `CoverageWorkItem` activation/read-model/provider dispatch 主路径缺口；`Run.ExecutionContext` coverage 字段保留为 provider-facing/cache-stable 投影。
 
-总体结果：`partial`
+总体结果：`pass`
 
 ## Verification Evidence
 
@@ -144,9 +143,15 @@ Last Updated: 2026-05-30
   - 证明 runtime flow 收口没有通过业务特化逻辑破坏核心中立性。
 - `go test ./internal/modules/kernel/orchestrator/biz -run 'Test(CoverageWorkItems|CoverageWorkItem|RuntimeOrchestrator_.*Coverage|ApplyOutputModeSelection|SelectOutputMode|HandleArtifactOutput|ValidateArtifact|BuildExecutionContextPackage|ProviderContext|RuntimeOrchestrator_Context|VerifyWorkorchRuntime)' -count=1`
   - 证明 activation coverage baseline、planning/execution、context package、context gate、artifact output mode、repair/recovery 与 verifier fixture 的核心路径仍通过。
+- `go test ./internal/modules/kernel/orchestrator ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/bootstrap ./internal/initiators/workorchruntime ./internal/pkg/repository ./internal/pkg/workorchrepo -count=1 -timeout=240s`
+  - 证明 CoverageWorkItem owner storage 接线、orchestrator 主路径同步、purge evidence、bootstrap/framework initiator 与 repository backend 回归通过。
+- `go test ./internal/modules/application/workorchd/biz/appservice/ownerreadports ./internal/modules/application/workorchd/biz/appservice/readmodelports ./internal/modules/application/workorchd/biz/appservice/readmodelprojection ./internal/modules/application/workorchd/biz/appservice ./internal/modules/kernel/orchestrator -count=1 -timeout=240s`
+  - 证明 CoverageWorkItem read-model 列表通过 EventHub owner command 读取 owner repository 后，runtime snapshot 投影仍保持兼容的展示字段。
+- `go test ./internal/modules/kernel/orchestrator/biz -run 'Test(CoverageWorkItemsSyncProjectionToRepository|EnsureGapBaselineHydratesCoverageContextFromOwnerRepository|CoverageWorkItemsGovernanceOwnerSyncRespectsRequiredCounts|NextDispatchSpecsPersistsGapBaselineBeforeInitialStep|InitialDispatchBuildsStateChangingContractFromGapBaseline)' -count=1 -timeout=120s`
+  - 证明 dispatch/provider context 前会从 owner repository 水合 coverage projection，并据此生成 gap baseline、accepted/rejected evidence refs 与当前 todo/focus。
 - `go test ./internal/pkg/repository ./internal/modules/application/workorchd/biz/appservice -run 'Test(ArtifactContinuation|MemoryRecallTrace|EventRecord|Decision|Approval|ReadRunSnapshotIncludesArtifactContinuation|ListDecision|ListApproval|ReadRunSnapshotWithBackendReturnsExecutionEvidence|ReadRunObservability|MapTaskProgress|MapResultQuality)' -count=1`
   - 证明 evidence/result/projection flow 与治理对象、event payload summary/ref、read-model 投影仍通过。
 - `git diff --check`
   - 证明本轮文档与当前改动没有 whitespace/formatted diff 问题。
 
-未新增 Go 代码修改；当前保留项仍是设计前置或结构化增强项，不需要在本轮扩大 runtime 状态机。
+当前无需扩大 runtime 状态机；coverage owner storage 与 provider-facing 投影边界已经收口。

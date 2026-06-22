@@ -7,16 +7,19 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func (o *RuntimeOrchestrator) ensureCoverageLedger(ctx context.Context, run *runModel.Run) bool {
+func (o *RuntimeOrchestrator) ensureCoverageLedger(ctx context.Context, run *runModel.Run) (bool, error) {
 	if o == nil || run == nil {
-		return false
+		return false, nil
 	}
-	changed := o.coverageLedger().ensure(run)
+	changed, err := o.coverageLedger().ensureFromRepository(ctx, run)
+	if err != nil {
+		return changed, err
+	}
 	decisionRefs, approvalRefs := o.governanceEvidenceRefs(ctx, run.ID)
-	if o.coverageLedger().updateFromGovernanceEvidence(run, decisionRefs, approvalRefs, "governance-owner-sync") {
+	if o.coverageLedger().updateFromGovernanceEvidence(run, decisionRefs, approvalRefs, "governance-owner-sync", ctx) {
 		changed = true
 	}
-	return changed
+	return changed, nil
 }
 
 func (o *RuntimeOrchestrator) governanceEvidenceRefs(ctx context.Context, runID common.RunID) ([]string, []string) {

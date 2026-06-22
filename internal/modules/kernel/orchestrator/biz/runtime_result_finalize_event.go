@@ -19,7 +19,7 @@ func (o *RuntimeOrchestrator) FinalizeRuntimeStepResult(
 	if o == nil || o.runs == nil || o.steps == nil || o.workspaces == nil || runID == "" || stepID == "" {
 		return common.ErrInvalidArgument
 	}
-	run, err := o.runs.Get(ctx, runID)
+	run, err := o.runtimeEventRun(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -39,6 +39,16 @@ func (o *RuntimeOrchestrator) FinalizeRuntimeStepResult(
 		return err
 	}
 	return o.finalizeRuntimeStepResultWithWorkspace(ctx, run, step, toolCall, workspace, result, execErr)
+}
+
+func (o *RuntimeOrchestrator) runtimeEventRun(ctx context.Context, runID common.RunID) (*runModel.Run, error) {
+	if o == nil || o.runs == nil || runID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	if workspaceID := common.RuntimeWorkspaceIDFromContext(ctx); workspaceID != "" {
+		return o.runs.GetByWorkspaceID(ctx, workspaceID, runID)
+	}
+	return o.runs.Get(ctx, runID)
 }
 
 func (o *RuntimeOrchestrator) runtimeToolCallForStep(ctx context.Context, stepID common.StepID) (*runModel.ToolCall, error) {

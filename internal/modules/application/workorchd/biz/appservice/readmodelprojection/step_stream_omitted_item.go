@@ -4,10 +4,9 @@ import (
 	"strconv"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
-func streamTimelineOmittedItem(step presenter.StepView, runState string, total int) readmodelcore.RuntimeTimelineItem {
+func streamTimelineOmittedItem(step StepView, runState string, total int) readmodelcore.RuntimeTimelineItem {
 	omitted := total - streamTimelineHeadItemKeep - streamTimelineTailItemKeep
 	return readmodelcore.RuntimeTimelineItem{
 		Source:    "step_stream",

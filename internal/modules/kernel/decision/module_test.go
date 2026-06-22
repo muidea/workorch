@@ -211,6 +211,170 @@ func TestDecisionMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 }
 
+func TestDecisionResolveCommandWithoutScopeResolvesUniqueOpenTicket(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	ticketID := common.TicketID("ticket-unscoped-unique")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: "ws-ticket-unscoped-unique",
+		RunID:       "run-ticket-unscoped-unique",
+		StepID:      "step-ticket-unscoped-unique",
+		State:       common.DecisionTicketStateOpen,
+		Reason:      "decision unscoped unique test",
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	module := New()
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(ctx); err != nil {
+			t.Fatalf("Teardown: %v", err)
+		}
+	})
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic: decisionevents.TopicDecisionCommandEnsureResolved,
+		Payload: map[string]any{
+			events.PayloadKeyBlockingTicketID: string(ticketID),
+			events.PayloadKeyResolutionID:     "resolution-unscoped-unique",
+			events.PayloadKeyType:             "provide_missing_info",
+			events.PayloadKeyPayload:          map[string]any{"answer": "ok"},
+		},
+	})
+	response, ok := events.ResponseEnvelope(err)
+	if !ok {
+		t.Fatalf("unscoped resolve err = %v, want response", err)
+	}
+	item, ok := response.Payload[events.PayloadKeyTicket].(*decisionmodel.Ticket)
+	if !ok || item == nil || item.ID != ticketID || item.WorkspaceID != "ws-ticket-unscoped-unique" || item.State != common.DecisionTicketStateResolved {
+		t.Fatalf("response ticket = %+v, want resolved unique ticket", response.Payload[events.PayloadKeyTicket])
+	}
+	resolution, err := resolutions.GetByTicketID(ctx, ticketID)
+	if err != nil {
+		t.Fatalf("get resolution: %v", err)
+	}
+	if resolution.ID != "resolution-unscoped-unique" || resolution.Type != "provide_missing_info" {
+		t.Fatalf("resolution = %+v, want unscoped unique resolution", resolution)
+	}
+}
+
+func TestDecisionResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	ticketID := common.TicketID("ticket-unscoped-duplicate")
+	for _, item := range []*decisionmodel.Ticket{
+		{
+			ID:          ticketID,
+			WorkspaceID: "ws-ticket-unscoped-duplicate-a",
+			RunID:       "run-ticket-unscoped-duplicate-a",
+			State:       common.DecisionTicketStateOpen,
+			Reason:      "decision unscoped duplicate test",
+		},
+		{
+			ID:          ticketID,
+			WorkspaceID: "ws-ticket-unscoped-duplicate-b",
+			RunID:       "run-ticket-unscoped-duplicate-b",
+			State:       common.DecisionTicketStateOpen,
+			Reason:      "decision unscoped duplicate test",
+		},
+	} {
+		if err := tickets.Create(ctx, item); err != nil {
+			t.Fatalf("create ticket %s/%s: %v", item.WorkspaceID, item.ID, err)
+		}
+	}
+
+	module := New()
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(ctx); err != nil {
+			t.Fatalf("Teardown: %v", err)
+		}
+	})
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic: decisionevents.TopicDecisionCommandEnsureResolved,
+		Payload: map[string]any{
+			events.PayloadKeyBlockingTicketID: string(ticketID),
+			events.PayloadKeyResolutionID:     "resolution-unscoped-duplicate",
+			events.PayloadKeyType:             "provide_missing_info",
+		},
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate resolve err = %v, want conflict", err)
+	}
+	if _, err := resolutions.GetByTicketID(ctx, ticketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("duplicate resolve resolution err = %v, want not found", err)
+	}
+	items, err := tickets.List(ctx)
+	if err != nil {
+		t.Fatalf("list tickets: %v", err)
+	}
+	for _, item := range items {
+		if item.ID == ticketID && item.State != common.DecisionTicketStateOpen {
+			t.Fatalf("ticket %s state = %s, want open after duplicate conflict", item.WorkspaceID, item.State)
+		}
+	}
+}
+
+func TestDecisionDeleteCommandWithoutScopeDeletesUniqueOpenTicket(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	ticketID := common.TicketID("ticket-unscoped-delete")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: "ws-ticket-unscoped-delete",
+		RunID:       "run-ticket-unscoped-delete",
+		State:       common.DecisionTicketStateOpen,
+		Reason:      "decision unscoped delete test",
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	module := New()
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(ctx); err != nil {
+			t.Fatalf("Teardown: %v", err)
+		}
+	})
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic: decisionevents.TopicDecisionCommandDeleteTicket,
+		Payload: map[string]any{
+			events.PayloadKeyBlockingTicketID: string(ticketID),
+		},
+	})
+	if _, ok := events.ResponseEnvelope(err); !ok {
+		t.Fatalf("unscoped delete err = %v, want response", err)
+	}
+	if _, err := tickets.Get(ctx, ticketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get deleted ticket err = %v, want not found", err)
+	}
+}
+
 func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
@@ -239,10 +403,13 @@ func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
 		SubjectID:   "resolution-contract",
 		Payload: map[string]any{
 			events.PayloadKeyCommand: decisioncontracts.CreateResolutionCommand{
-				ResolutionID: "resolution-contract",
-				TicketID:     ticketID,
-				Type:         "provide_missing_info",
-				Payload:      map[string]any{"answer": "ok"},
+				ResolutionID:       "resolution-contract",
+				TicketID:           ticketID,
+				Type:               "provide_missing_info",
+				Payload:            map[string]any{"answer": "ok"},
+				ContinuationAction: "resume",
+				ResumeRunID:        "run-current",
+				SuccessorRunID:     "run-next",
 			},
 		},
 	})
@@ -255,6 +422,197 @@ func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
 	}
 	if item.ID != "resolution-contract" || item.Type != "provide_missing_info" || item.Payload["answer"] != "ok" {
 		t.Fatalf("resolution = %+v, want command fields", item)
+	}
+	if item.ContinuationAction != "resume" || item.ResumeRunID != "run-current" || item.SuccessorRunID != "run-next" {
+		t.Fatalf("resolution refs = %+v, want command recovery refs", item)
+	}
+}
+
+func TestDecisionResolutionCommandGetHonorsTicketScope(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	ticketID := common.TicketID("ticket-resolution-scope")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: "ws-resolution-owner-a",
+		RunID:       "run-resolution-owner-a",
+		StepID:      "step-resolution-owner-a",
+		State:       common.DecisionTicketStateResolved,
+		Reason:      "decision resolution scope test",
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	if err := resolutions.Create(common.ContextWithRuntimeWorkspaceID(ctx, "ws-resolution-owner-a"), &decisionmodel.Resolution{
+		ID:       "resolution-owner-a",
+		TicketID: ticketID,
+		Type:     "provide_missing_info",
+		Payload:  map[string]any{"answer": "ok"},
+	}); err != nil {
+		t.Fatalf("create resolution: %v", err)
+	}
+
+	module := New()
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(ctx); err != nil {
+			t.Errorf("Stop: %v", err)
+		}
+	})
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic:       decisionevents.TopicDecisionCommandGetResolution,
+		WorkspaceID: "ws-resolution-owner-b",
+		RunID:       "run-resolution-owner-a",
+		StepID:      "step-resolution-owner-a",
+		Payload: map[string]any{
+			events.PayloadKeyBlockingTicketID: string(ticketID),
+			events.PayloadKeyWorkspaceID:      "ws-resolution-owner-b",
+			events.PayloadKeyRunID:            "run-resolution-owner-a",
+			events.PayloadKeyStepID:           "step-resolution-owner-a",
+		},
+	})
+	if !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("wrong workspace get resolution err = %v, want not found", err)
+	}
+
+	err = hub.Publish(ctx, events.Envelope{
+		Topic:       decisionevents.TopicDecisionCommandGetResolution,
+		WorkspaceID: "ws-resolution-owner-a",
+		RunID:       "run-resolution-owner-a",
+		StepID:      "step-resolution-owner-a",
+		Payload: map[string]any{
+			events.PayloadKeyBlockingTicketID: string(ticketID),
+			events.PayloadKeyWorkspaceID:      "ws-resolution-owner-a",
+			events.PayloadKeyRunID:            "run-resolution-owner-a",
+			events.PayloadKeyStepID:           "step-resolution-owner-a",
+		},
+	})
+	response, ok := events.ResponseEnvelope(err)
+	if !ok {
+		t.Fatalf("scoped get resolution err = %v, want response", err)
+	}
+	item, ok := response.Payload[events.PayloadKeyResolution].(*decisionmodel.Resolution)
+	if !ok || item == nil || item.ID != "resolution-owner-a" || item.TicketID != ticketID {
+		t.Fatalf("response resolution = %+v, want scoped resolution", response.Payload[events.PayloadKeyResolution])
+	}
+}
+
+func TestDecisionResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	ticketID := common.TicketID("ticket-resolution-duplicate")
+	for _, item := range []*decisionmodel.Ticket{
+		{
+			ID:          ticketID,
+			WorkspaceID: "ws-resolution-duplicate-a",
+			RunID:       "run-resolution-duplicate-a",
+			State:       common.DecisionTicketStateOpen,
+			Reason:      "decision resolution duplicate test",
+		},
+		{
+			ID:          ticketID,
+			WorkspaceID: "ws-resolution-duplicate-b",
+			RunID:       "run-resolution-duplicate-b",
+			State:       common.DecisionTicketStateOpen,
+			Reason:      "decision resolution duplicate test",
+		},
+	} {
+		if err := tickets.Create(ctx, item); err != nil {
+			t.Fatalf("create ticket %s/%s: %v", item.WorkspaceID, item.ID, err)
+		}
+	}
+
+	module := New()
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(ctx); err != nil {
+			t.Errorf("Stop: %v", err)
+		}
+	})
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic: decisionevents.TopicDecisionCommandGetResolution,
+		Payload: map[string]any{
+			events.PayloadKeyBlockingTicketID: string(ticketID),
+		},
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate get resolution err = %v, want conflict", err)
+	}
+
+	err = hub.Publish(ctx, events.Envelope{
+		Topic: decisionevents.TopicDecisionCommandDeleteResolution,
+		Payload: map[string]any{
+			events.PayloadKeyBlockingTicketID: string(ticketID),
+		},
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate delete resolution err = %v, want conflict", err)
+	}
+}
+
+func TestDecisionResolutionDeleteWithoutScopeDeletesUniqueTicketResolution(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	ticketID := common.TicketID("ticket-resolution-delete-unique")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: "ws-resolution-delete-unique",
+		RunID:       "run-resolution-delete-unique",
+		State:       common.DecisionTicketStateResolved,
+		Reason:      "decision resolution delete unique test",
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	if err := resolutions.Create(common.ContextWithRuntimeWorkspaceID(ctx, "ws-resolution-delete-unique"), &decisionmodel.Resolution{
+		ID:       "resolution-delete-unique",
+		TicketID: ticketID,
+		Type:     "provide_missing_info",
+		Payload:  map[string]any{"answer": "ok"},
+	}); err != nil {
+		t.Fatalf("create resolution: %v", err)
+	}
+
+	module := New()
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(ctx); err != nil {
+			t.Errorf("Stop: %v", err)
+		}
+	})
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic: decisionevents.TopicDecisionCommandDeleteResolution,
+		Payload: map[string]any{
+			events.PayloadKeyBlockingTicketID: string(ticketID),
+		},
+	})
+	if _, ok := events.ResponseEnvelope(err); !ok {
+		t.Fatalf("unscoped delete resolution err = %v, want response", err)
+	}
+	if _, err := resolutions.GetByTicketID(common.ContextWithRuntimeWorkspaceID(ctx, "ws-resolution-delete-unique"), ticketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get deleted resolution err = %v, want not found", err)
 	}
 }
 

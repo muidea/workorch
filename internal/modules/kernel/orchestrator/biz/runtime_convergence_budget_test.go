@@ -108,6 +108,55 @@ func TestUpdateConvergenceBudgetResetsNoDeltaAfterCoverageDelta(t *testing.T) {
 	}
 }
 
+func TestResetConvergenceBudgetForReplanSuccessorClearsRuntimeCounters(t *testing.T) {
+	executionContext := map[string]any{
+		convergenceBudgetKey: map[string]any{
+			"state":                     "escalated",
+			"decision":                  "escalate_decision",
+			"focusId":                   "focus-cwi-001",
+			"sliceId":                   "slice-primary-state-change",
+			"repairAttempts":            int64(4),
+			"llmRounds":                 int64(6),
+			"validationOnlyRetries":     int64(3),
+			"noCoverageDeltaRounds":     int64(3),
+			"repeatedFailureSignatures": int64(2),
+			"lastDecisionReason":        "max_repair_attempts_per_focus_exceeded",
+			"lastFailureSignature":      "class=shell_command_failed|kind=shell/command",
+			"lastNoDeltaReason":         "failed_without_coverage_delta:shell_command_failed",
+			"maxRepairAttemptsPerFocus": int64(7),
+		},
+	}
+
+	if !resetConvergenceBudgetForReplanSuccessor(executionContext) {
+		t.Fatal("resetConvergenceBudgetForReplanSuccessor changed = false, want reset")
+	}
+	budget := mapFromValue(executionContext[convergenceBudgetKey])
+	if budget["decision"] != "continue" || budget["state"] != "tracking" {
+		t.Fatalf("budget = %+v, want tracking/continue", budget)
+	}
+	if budget["focusId"] != "focus-cwi-001" || budget["sliceId"] != "slice-primary-state-change" {
+		t.Fatalf("budget = %+v, want focus/slice scope preserved", budget)
+	}
+	if int64FromValue(budget["maxRepairAttemptsPerFocus"]) != 7 ||
+		int64FromValue(budget["maxLLMRoundsPerSlice"]) != 0 {
+		t.Fatalf("budget = %+v, want explicit limits preserved without inventing defaults", budget)
+	}
+	for _, key := range []string{
+		"repairAttempts",
+		"llmRounds",
+		"validationOnlyRetries",
+		"noCoverageDeltaRounds",
+		"repeatedFailureSignatures",
+		"lastDecisionReason",
+		"lastFailureSignature",
+		"lastNoDeltaReason",
+	} {
+		if _, ok := budget[key]; ok {
+			t.Fatalf("budget retained runtime key %s: %+v", key, budget)
+		}
+	}
+}
+
 func TestConvergenceBudgetDoesNotCountConcreteEvidenceGraphNodeAsRepairAttempt(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-convergence-budget-evidence-node",
@@ -180,6 +229,62 @@ func TestConvergenceBudgetDoesNotCountConcreteEvidenceGraphNodeAsRepairAttempt(t
 	if int64FromValue(budget["repairAttempts"]) != 1 ||
 		int64FromValue(budget["noCoverageDeltaRounds"]) != 1 {
 		t.Fatalf("budget after llm repair = %+v, want one repair/no-delta round", budget)
+	}
+}
+
+func TestUpdateConvergenceBudgetDoesNotCountPatchBaseHashMismatchAsNoDelta(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-convergence-budget-patch-basehash",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			coverageFocusKey: map[string]any{
+				"id":      "focus-item-1",
+				"sliceId": "slice-1",
+				"state":   "active",
+			},
+			convergenceBudgetKey: map[string]any{
+				"state":                       "tracking",
+				"decision":                    "continue",
+				"focusId":                     "focus-item-1",
+				"sliceId":                     "slice-1",
+				"noCoverageDeltaRounds":       int64(2),
+				"maxNoCoverageDeltaRounds":    int64(3),
+				"maxRepeatedFailureSignature": int64(3),
+				"maxRepairAttemptsPerFocus":   int64(5),
+				"maxLLMRoundsPerSlice":        int64(5),
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-convergence-budget-patch-basehash/graph-001/patch-target",
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"targetRef": "target.txt",
+			"patchType": "text_replace",
+			"baseHash":  "stale-hash",
+		},
+		Output: map[string]any{
+			"stage":                   "patch_apply",
+			"error":                   "conflict: patch baseHash mismatch",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: "class=patch_apply_failed|kind=patch/apply|targetRef=target.txt|error=conflict: patch basehash mismatch",
+		},
+	}
+
+	if !updateConvergenceBudgetFromStep(run, step, false) {
+		t.Fatal("updateConvergenceBudgetFromStep changed = false, want failure signature update")
+	}
+	budget := mapFromValue(run.ExecutionContext[convergenceBudgetKey])
+	if int64FromValue(budget["noCoverageDeltaRounds"]) != 2 {
+		t.Fatalf("budget = %+v, want noCoverageDeltaRounds unchanged for stale baseHash", budget)
+	}
+	if budget["decision"] != "continue" || budget["state"] != "tracking" {
+		t.Fatalf("budget = %+v, want no convergence escalation for stale baseHash", budget)
+	}
+	if int64FromValue(budget["repeatedFailureSignatures"]) != 1 ||
+		budget["lastFailureSignature"] == nil {
+		t.Fatalf("budget = %+v, want failure signature still tracked", budget)
 	}
 }
 

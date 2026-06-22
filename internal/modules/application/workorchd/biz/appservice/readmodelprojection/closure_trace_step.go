@@ -4,11 +4,10 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 )
 
-func closureTraceFromStep(step presenter.StepView) (readmodelcore.ClosureTrace, bool) {
+func closureTraceFromStep(step StepView) (readmodelcore.ClosureTrace, bool) {
 	input := step.Input
 	output := step.Output
 	trace := readmodelcore.ClosureTrace{

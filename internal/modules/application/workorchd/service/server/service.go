@@ -33,6 +33,12 @@ func (s *Service) Startup(ctx context.Context, serviceName string, eventHub even
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if eventHub == nil {
+		return cd.NewError(cd.IllegalParam, "workorch event hub is not configured")
+	}
+	if backgroundRoutine == nil {
+		return cd.NewError(cd.IllegalParam, "workorch background routine is not configured")
+	}
 	s.eventHub = eventHub
 	s.backgroundRoutine = backgroundRoutine
 	s.http = NewHTTPServerWithEventHubAndBackground(s.config, workorchevents.NewMagicHubWithHubOwner(eventHub, "workorchd/http"), backgroundRoutine)

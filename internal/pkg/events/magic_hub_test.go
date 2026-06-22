@@ -295,6 +295,8 @@ func (blockingSubscribeHub) Terminate(_ context.Context) {}
 type recordingLaneHub struct {
 	events []magicevent.Event
 	lanes  []string
+	posts  int
+	sends  int
 }
 
 func (h *recordingLaneHub) Subscribe(string, magicevent.Observer) {}
@@ -302,17 +304,64 @@ func (h *recordingLaneHub) Subscribe(string, magicevent.Observer) {}
 func (h *recordingLaneHub) Unsubscribe(string, magicevent.Observer) {}
 
 func (h *recordingLaneHub) Post(event magicevent.Event) {
+	h.posts++
 	h.events = append(h.events, event)
 	h.lanes = append(h.lanes, event.LaneKey())
 }
 
 func (h *recordingLaneHub) Send(event magicevent.Event) magicevent.Result {
+	h.sends++
 	h.events = append(h.events, event)
 	h.lanes = append(h.lanes, event.LaneKey())
 	return nil
 }
 
 func (h *recordingLaneHub) Terminate(_ context.Context) {}
+
+type contractDeliveryHub struct {
+	syncPublishes  int
+	asyncPublishes int
+}
+
+func (h *contractDeliveryHub) Publish(context.Context, Envelope) error {
+	h.syncPublishes++
+	return nil
+}
+
+func (h *contractDeliveryHub) PublishAsync(context.Context, Envelope) error {
+	h.asyncPublishes++
+	return nil
+}
+
+func (h *contractDeliveryHub) Subscribe(string, Handler) func() {
+	return func() {}
+}
+
+type contractSyncOnlyHub struct {
+	syncPublishes int
+}
+
+func (h *contractSyncOnlyHub) Publish(context.Context, Envelope) error {
+	h.syncPublishes++
+	return nil
+}
+
+func (h *contractSyncOnlyHub) Subscribe(string, Handler) func() {
+	return func() {}
+}
+
+type contractResponseHub struct {
+	topic string
+}
+
+func (h *contractResponseHub) Publish(_ context.Context, envelope Envelope) error {
+	h.topic = envelope.Topic
+	return Response(Envelope{Topic: envelope.Topic + "/response"})
+}
+
+func (h *contractResponseHub) Subscribe(string, Handler) func() {
+	return func() {}
+}
 
 func TestMagicHubPublishWithoutSubscribersSucceeds(t *testing.T) {
 	hub := NewMagicHub()
@@ -327,7 +376,7 @@ func TestMagicHubPublishWithoutSubscribersSucceeds(t *testing.T) {
 	}
 }
 
-func TestMagicHubUsesTopicLanesForScopedNotificationEvents(t *testing.T) {
+func TestMagicHubUsesStateLanesForScopedNotificationEvents(t *testing.T) {
 	rawHub := &recordingLaneHub{}
 	hub := NewMagicHubWithHub(rawHub)
 
@@ -337,8 +386,157 @@ func TestMagicHubUsesTopicLanesForScopedNotificationEvents(t *testing.T) {
 	if err := hub.Publish(context.Background(), Envelope{Topic: runevents.TopicRunStateChanged, WorkspaceID: "ws-a", RunID: "run-001"}); err != nil {
 		t.Fatalf("publish run event: %v", err)
 	}
-	if len(rawHub.lanes) != 2 || rawHub.lanes[0] != "topic/"+workspaceevents.TopicWorkspaceStateChanged || rawHub.lanes[1] != "topic/"+runevents.TopicRunStateChanged {
-		t.Fatalf("lanes = %v, want topic lanes for scoped notifications", rawHub.lanes)
+	if len(rawHub.lanes) != 2 || rawHub.lanes[0] != "state/workspace/ws-a" || rawHub.lanes[1] != "state/run/ws-a/run-001" {
+		t.Fatalf("lanes = %v, want scoped state lanes for notifications", rawHub.lanes)
+	}
+}
+
+func TestEventHubLaneKeySeparatesNotificationLanesByWorkspaceScope(t *testing.T) {
+	workspaceA := EventHubLaneKey(Envelope{Topic: workspaceevents.TopicWorkspaceStateChanged, WorkspaceID: "ws-a"})
+	workspaceB := EventHubLaneKey(Envelope{Topic: workspaceevents.TopicWorkspaceStateChanged, WorkspaceID: "ws-b"})
+	if workspaceA == workspaceB {
+		t.Fatalf("workspace notification lanes both %q, want workspace-scoped lanes", workspaceA)
+	}
+	runA := EventHubLaneKey(Envelope{Topic: runevents.TopicStepStateChanged, WorkspaceID: "ws-a", RunID: "run-001", StepID: "step-001"})
+	runB := EventHubLaneKey(Envelope{Topic: runevents.TopicStepStateChanged, WorkspaceID: "ws-b", RunID: "run-001", StepID: "step-001"})
+	if runA == runB {
+		t.Fatalf("run notification lanes both %q, want workspace/run-scoped lanes", runA)
+	}
+}
+
+func TestMagicHubPublishAsyncUsesPostWithoutSendResponseWait(t *testing.T) {
+	rawHub := &recordingLaneHub{}
+	hub := NewMagicHubWithHub(rawHub)
+	envelope := Envelope{Topic: workorchdevents.TopicWorkspaceProjectionChanged, WorkspaceID: "ws-a"}
+
+	if err := hub.PublishAsync(context.Background(), envelope); err != nil {
+		t.Fatalf("publish async projection event: %v", err)
+	}
+	if rawHub.posts != 1 || rawHub.sends != 0 {
+		t.Fatalf("delivery counts = post:%d send:%d, want async post without send", rawHub.posts, rawHub.sends)
+	}
+	if want := EventHubLaneKey(envelope); len(rawHub.lanes) != 1 || rawHub.lanes[0] != want {
+		t.Fatalf("lanes = %v, want projection lane %q", rawHub.lanes, want)
+	}
+}
+
+func TestEventHubDeliveryModeForTopicClassifiesCommandsAndNotifications(t *testing.T) {
+	tests := []struct {
+		name  string
+		topic string
+		want  EventHubDeliveryMode
+	}{
+		{
+			name:  "read commands require synchronous response semantics",
+			topic: runevents.TopicRunCommandListStepsByRun,
+			want:  EventHubDeliveryModeSync,
+		},
+		{
+			name:  "write commands require synchronous response semantics",
+			topic: runevents.TopicRunCommandUpdate,
+			want:  EventHubDeliveryModeSync,
+		},
+		{
+			name:  "facade commands require synchronous accepted response semantics",
+			topic: workorchdevents.TopicCLICommand,
+			want:  EventHubDeliveryModeSync,
+		},
+		{
+			name:  "facade results keep synchronous response semantics",
+			topic: workorchdevents.TopicCLIResult,
+			want:  EventHubDeliveryModeSync,
+		},
+		{
+			name:  "runtime execute commands require synchronous accepted response semantics",
+			topic: runtimeeventdefs.RuntimeBlockExecuteTopic("mcp/tool_call"),
+			want:  EventHubDeliveryModeSync,
+		},
+		{
+			name:  "runtime terminal result notifications are async-preferred observer updates",
+			topic: runtimeeventdefs.TopicRuntimeBlockExecuteCompleted,
+			want:  EventHubDeliveryModeAsync,
+		},
+		{
+			name:  "workspace state notifications are async-preferred observer updates",
+			topic: workspaceevents.TopicWorkspaceStateChanged,
+			want:  EventHubDeliveryModeAsync,
+		},
+		{
+			name:  "run state notifications are async-preferred observer updates",
+			topic: runevents.TopicRunStateChanged,
+			want:  EventHubDeliveryModeAsync,
+		},
+		{
+			name:  "projection notifications are async-preferred observer updates",
+			topic: workorchdevents.TopicWorkspaceProjectionChanged,
+			want:  EventHubDeliveryModeAsync,
+		},
+		{
+			name:  "unknown topics keep conservative synchronous delivery",
+			topic: "/unknown/topic",
+			want:  EventHubDeliveryModeSync,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := EventHubDeliveryModeForTopic(tt.topic); got != tt.want {
+				t.Fatalf("delivery mode = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPublishByContractUsesAsyncForNotifyWhenAvailable(t *testing.T) {
+	hub := &contractDeliveryHub{}
+
+	if err := PublishByContract(context.Background(), hub, Envelope{Topic: runevents.TopicRunStateChanged}); err != nil {
+		t.Fatalf("publish by contract: %v", err)
+	}
+	if hub.asyncPublishes != 1 || hub.syncPublishes != 0 {
+		t.Fatalf("publish counts = sync:%d async:%d, want async delivery", hub.syncPublishes, hub.asyncPublishes)
+	}
+}
+
+func TestPublishByContractFallsBackToSyncWhenAsyncUnavailable(t *testing.T) {
+	hub := &contractSyncOnlyHub{}
+
+	if err := PublishByContract(context.Background(), hub, Envelope{Topic: runevents.TopicRunStateChanged}); err != nil {
+		t.Fatalf("publish by contract: %v", err)
+	}
+	if hub.syncPublishes != 1 {
+		t.Fatalf("sync publishes = %d, want fallback sync delivery", hub.syncPublishes)
+	}
+}
+
+func TestPublishByContractIgnoresNotifyResponseWhenFallingBackToSync(t *testing.T) {
+	hub := &contractResponseHub{}
+
+	if err := PublishByContract(context.Background(), hub, Envelope{Topic: runevents.TopicRunStateChanged}); err != nil {
+		t.Fatalf("publish by contract notify response fallback: %v", err)
+	}
+	if hub.topic != runevents.TopicRunStateChanged {
+		t.Fatalf("published topic = %q, want %q", hub.topic, runevents.TopicRunStateChanged)
+	}
+}
+
+func TestPublishByContractUsesSyncForCommandTopics(t *testing.T) {
+	hub := &contractDeliveryHub{}
+
+	if err := PublishByContract(context.Background(), hub, Envelope{Topic: runevents.TopicRunCommandUpdate}); err != nil {
+		t.Fatalf("publish by contract: %v", err)
+	}
+	if hub.syncPublishes != 1 || hub.asyncPublishes != 0 {
+		t.Fatalf("publish counts = sync:%d async:%d, want sync delivery", hub.syncPublishes, hub.asyncPublishes)
+	}
+}
+
+func TestPublishByContractPreservesCommandResponseWhenUsingSync(t *testing.T) {
+	hub := &contractResponseHub{}
+
+	err := PublishByContract(context.Background(), hub, Envelope{Topic: runevents.TopicRunCommandUpdate})
+	if _, ok := ResponseEnvelope(err); !ok {
+		t.Fatalf("publish by contract command response = %v, want response envelope", err)
 	}
 }
 

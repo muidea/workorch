@@ -279,7 +279,7 @@ func (m *GoalDoDManager) publishWorkspaceEvent(ctx context.Context, topic string
 	if m.eventHub == nil {
 		return nil
 	}
-	return m.eventHub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, m.eventHub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
 		SourceModule: modulecommon.ModuleID,
@@ -294,7 +294,7 @@ func (m *GoalDoDManager) publishGoalEvent(ctx context.Context, goal *workspaceMo
 	if m.eventHub == nil {
 		return nil
 	}
-	return m.eventHub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, m.eventHub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        workspaceevents.TopicGoalDefined,
 		SourceModule: modulecommon.ModuleID,
@@ -387,7 +387,7 @@ func (m *GoalDoDManager) publishDoDEvent(ctx context.Context, dod *workspaceMode
 	if m.eventHub == nil {
 		return nil
 	}
-	return m.eventHub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, m.eventHub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        workspaceevents.TopicDoDDefined,
 		SourceModule: modulecommon.ModuleID,

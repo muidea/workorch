@@ -4,7 +4,7 @@ import "github.com/muidea/workorch/internal/pkg/eventcontract"
 
 func Contracts() []eventcontract.Contract {
 	ret := []eventcontract.Contract{}
-	ret = append(ret, eventcontract.Build("governance", eventcontract.CommandClassNotify, eventcontract.LanePolicyTopic,
+	ret = append(ret, eventcontract.Build("governance", eventcontract.CommandClassNotify, eventcontract.LanePolicyState,
 		TopicGovernanceAutoEvaluated,
 		TopicGovernanceAutoResolved,
 		TopicGovernanceAutoEscalated,

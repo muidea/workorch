@@ -227,8 +227,8 @@ func TestRuntimeOrchestrator_DuplicateRuntimeFailureUsesDialogLanguage(t *testin
 		t.Fatalf("ticket context runtimeRepairLoopState = %#v, want duplicate_failure_escalated", ticket.Context["runtimeRepairLoopState"])
 	}
 	allowed, ok := ticket.Context["allowedRecoveryActions"].([]string)
-	if !ok || len(allowed) != 1 || allowed[0] != "replan" {
-		t.Fatalf("ticket context allowedRecoveryActions = %#v, want [replan]", ticket.Context["allowedRecoveryActions"])
+	if !ok || len(allowed) != 2 || allowed[0] != "replan" || allowed[1] != "terminate" {
+		t.Fatalf("ticket context allowedRecoveryActions = %#v, want [replan terminate]", ticket.Context["allowedRecoveryActions"])
 	}
 }
 

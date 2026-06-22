@@ -131,7 +131,7 @@ func TestRepairSubsystemRecoveryDispatchSpecPlansRuntimeRepairWithExactScope(t *
 	}
 }
 
-func TestRepairSubsystemBlockRecoveryActionDelegatesToExecutor(t *testing.T) {
+func TestRepairSubsystemBlockRecoveryActionPersistsBlockerBeforeErrBlocked(t *testing.T) {
 	executor := &repairBlockedRecoveryExecutorStub{}
 	err := newRepairSubsystem(nil, nil).blockRecoveryActionFromFailedStep(
 		context.Background(),
@@ -146,7 +146,7 @@ func TestRepairSubsystemBlockRecoveryActionDelegatesToExecutor(t *testing.T) {
 		t.Fatalf("blockRecoveryActionFromFailedStep error = %v, want ErrBlocked", err)
 	}
 	if executor.called != runtimeRecoveryActionDuplicateFailure {
-		t.Fatalf("executor called = %s, want duplicate failure", executor.called)
+		t.Fatalf("executor side effect = %s, want duplicate failure persisted before ErrBlocked", executor.called)
 	}
 }
 

@@ -8,8 +8,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
@@ -700,7 +698,7 @@ func ResolveDecisionWithType(be backend.Backend, workspaceID string, ticketID st
 		if wsID != "" {
 			ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
 		}
-		if !decisioncommon.IsSupportedResolutionType(resolutionType) {
+		if !backend.IsSupportedDecisionResolutionType(resolutionType) {
 			resolutionType = inferDecisionResolutionType(answer)
 		}
 		decision, err := be.Decision().Resolve(ctx, backend.ResolveDecisionRequest{
@@ -717,14 +715,14 @@ func ResolveDecisionWithType(be backend.Backend, workspaceID string, ticketID st
 }
 
 func inferDecisionResolutionType(answer string) string {
-	semantic := governancecommon.NormalizeDecisionResolution("auto", map[string]any{
+	semantic := backend.NormalizeDecisionResolution("auto", map[string]any{
 		"answer":   answer,
 		"operator": "tui",
 	})
 	return semantic.ResolutionType
 }
 
-func ResolveApproval(be backend.Backend, workspaceID string, approvalID string, approve bool) tea.Cmd {
+func ResolveApproval(be backend.Backend, workspaceID string, approvalID string, approve bool, payload ...map[string]any) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -735,9 +733,9 @@ func ResolveApproval(be backend.Backend, workspaceID string, approvalID string, 
 		var approval *backend.ApprovalInfo
 		var err error
 		if approve {
-			approval, err = be.Approval().Approve(ctx, wsID, common.ApprovalID(approvalID))
+			approval, err = be.Approval().Approve(ctx, wsID, common.ApprovalID(approvalID), payload...)
 		} else {
-			approval, err = be.Approval().Reject(ctx, wsID, common.ApprovalID(approvalID))
+			approval, err = be.Approval().Reject(ctx, wsID, common.ApprovalID(approvalID), payload...)
 		}
 		if err != nil && errors.Is(err, common.ErrConflict) && wsID != "" {
 			current, getErr := be.Approval().Get(ctx, wsID, common.ApprovalID(approvalID))
@@ -755,4 +753,12 @@ func ResolveApproval(be backend.Backend, workspaceID string, approvalID string, 
 		}
 		return ApprovalResolvedMsg{WorkspaceID: wsID, Approval: approval, Error: err}
 	}
+}
+
+func approvalResolutionPayload(rawInput string) map[string]any {
+	rawInput = strings.TrimSpace(rawInput)
+	if rawInput == "" {
+		return map[string]any{"source": "tui"}
+	}
+	return map[string]any{"rawInput": rawInput, "source": "tui"}
 }

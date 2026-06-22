@@ -2,6 +2,7 @@ package governanceports
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
@@ -86,8 +87,8 @@ func TestDecisionPageProjectsResolutionAndAutoGovernance(t *testing.T) {
 	if item.AutoGovernance == nil || item.AutoGovernance.TraceID != "trace-001" {
 		t.Fatalf("auto governance = %+v, want trace-001", item.AutoGovernance)
 	}
-	if page.Limit != 10 || page.NextCursorAfterID != "ticket-001" {
-		t.Fatalf("page = %+v, want limit 10 and next cursor ticket-001", page)
+	if page.Limit != 10 || page.NextCursorAfterID != string(workspaceID)+"\x00ticket-001" {
+		t.Fatalf("page = %+v, want limit 10 and scoped next cursor", page)
 	}
 }
 
@@ -430,6 +431,156 @@ func TestResolveApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
 	}
 	if item.ID != "approval-scope-001" || item.WorkspaceID != string(workspaceID) || item.State != string(common.ApprovalStateApproved) {
 		t.Fatalf("item = %+v, want scoped approved approval", item)
+	}
+}
+
+func TestResolveApprovalViewWithCommandPublishesGovernanceSemanticContext(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-approval-semantic")
+	hub.Subscribe(approvalevents.TopicApprovalCommandGet, func(_ context.Context, envelope events.Envelope) error {
+		approvalID := common.ApprovalID(envelope.Payload[events.PayloadKeyApprovalID].(string))
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyApproval: &approvalmodel.Approval{
+					ID:          approvalID,
+					WorkspaceID: workspaceID,
+					RunID:       "run-approval-semantic",
+					State:       common.ApprovalStatePending,
+				},
+			},
+		})
+	})
+	hub.Subscribe(approvalevents.TopicApprovalCommandEnsureApproved, func(_ context.Context, envelope events.Envelope) error {
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want ResolveApprovalCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		semantic, ok := cmd.Context["governanceSemantic"].(map[string]any)
+		if !ok {
+			t.Fatalf("governanceSemantic = %#v, want map", cmd.Context["governanceSemantic"])
+		}
+		if semantic["intent"] != "approve_execution" || semantic["rawInput"] != "同意继续" || semantic["source"] != "tui" {
+			t.Fatalf("governanceSemantic = %#v, want approve rawInput/source", semantic)
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyApproval: &approvalmodel.Approval{
+					ID:          cmd.ApprovalID,
+					WorkspaceID: cmd.WorkspaceID,
+					RunID:       cmd.RunID,
+					State:       common.ApprovalStateApproved,
+					Context:     cmd.Context,
+				},
+			},
+		})
+	})
+
+	item, err := ResolveApprovalViewWithCommand(ctx, hub, nil, "approval-semantic-001", appmodelcore.ResolveApprovalCommand{
+		Action: "approve",
+		Payload: map[string]any{
+			"rawInput": "同意继续",
+			"source":   "tui",
+		},
+	}, workspaceID)
+	if err != nil {
+		t.Fatalf("ResolveApprovalViewWithCommand err = %v", err)
+	}
+	semantic, ok := item.Context["governanceSemantic"].(map[string]any)
+	if !ok || semantic["intent"] != "approve_execution" {
+		t.Fatalf("item semantic = %#v, want approve", item.Context["governanceSemantic"])
+	}
+}
+
+func TestResolveApprovalViewWithoutScopeResolvesUniquePendingApproval(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-approval-unique")
+	hub.Subscribe(approvalevents.TopicApprovalCommandList, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != "" {
+			t.Fatalf("list approval envelope workspace = %q, want empty no-scope list", envelope.WorkspaceID)
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyItems: []*approvalmodel.Approval{
+					{
+						ID:          "approval-unique",
+						WorkspaceID: workspaceID,
+						RunID:       "run-approval-unique",
+						State:       common.ApprovalStatePending,
+					},
+				},
+			},
+		})
+	})
+	hub.Subscribe(approvalevents.TopicApprovalCommandEnsureApproved, func(_ context.Context, envelope events.Envelope) error {
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want ResolveApprovalCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		if envelope.WorkspaceID != string(workspaceID) || envelope.RunID != "run-approval-unique" {
+			t.Fatalf("approval envelope scope = workspace:%q run:%q, want %s/run-approval-unique", envelope.WorkspaceID, envelope.RunID, workspaceID)
+		}
+		if cmd.WorkspaceID != workspaceID || cmd.RunID != "run-approval-unique" {
+			t.Fatalf("approval command scope = workspace:%q run:%q, want %s/run-approval-unique", cmd.WorkspaceID, cmd.RunID, workspaceID)
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyApproval: &approvalmodel.Approval{
+					ID:          cmd.ApprovalID,
+					WorkspaceID: cmd.WorkspaceID,
+					RunID:       cmd.RunID,
+					State:       common.ApprovalStateApproved,
+				},
+			},
+		})
+	})
+
+	item, err := ResolveApprovalView(ctx, hub, nil, "approval-unique", "approve", "")
+	if err != nil {
+		t.Fatalf("ResolveApprovalView err = %v", err)
+	}
+	if item.ID != "approval-unique" || item.WorkspaceID != string(workspaceID) || item.State != string(common.ApprovalStateApproved) {
+		t.Fatalf("item = %+v, want unique scoped approval", item)
+	}
+}
+
+func TestResolveApprovalViewWithoutScopeConflictsOnDuplicatePendingApprovals(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	hub.Subscribe(approvalevents.TopicApprovalCommandList, func(_ context.Context, envelope events.Envelope) error {
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyItems: []*approvalmodel.Approval{
+					{
+						ID:          "approval-duplicate",
+						WorkspaceID: "ws-approval-duplicate-a",
+						RunID:       "run-001",
+						State:       common.ApprovalStatePending,
+					},
+					{
+						ID:          "approval-duplicate",
+						WorkspaceID: "ws-approval-duplicate-b",
+						RunID:       "run-001",
+						State:       common.ApprovalStatePending,
+					},
+				},
+			},
+		})
+	})
+	hub.Subscribe(approvalevents.TopicApprovalCommandEnsureApproved, func(context.Context, events.Envelope) error {
+		t.Fatal("approval mutation should not be published for duplicate no-scope approval")
+		return nil
+	})
+
+	_, err := ResolveApprovalView(ctx, hub, nil, "approval-duplicate", "approve", "")
+	if err == nil || !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("ResolveApprovalView err = %v, want conflict", err)
 	}
 }
 

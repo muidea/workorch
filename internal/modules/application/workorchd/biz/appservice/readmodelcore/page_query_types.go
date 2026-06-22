@@ -1,7 +1,5 @@
 package readmodelcore
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
-
 type StepQuery struct {
 	WorkspaceID   string
 	RunID         string
@@ -10,12 +8,12 @@ type StepQuery struct {
 }
 
 type StepPage struct {
-	RunID             string               `json:"runId"`
-	Steps             []presenter.StepView `json:"steps,omitempty"`
-	Limit             int                  `json:"limit"`
-	CursorAfterID     string               `json:"cursorAfterId,omitempty"`
-	NextCursorAfterID string               `json:"nextCursorAfterId,omitempty"`
-	HasMore           bool                 `json:"hasMore"`
+	RunID             string     `json:"runId"`
+	Steps             []StepView `json:"steps,omitempty"`
+	Limit             int        `json:"limit"`
+	CursorAfterID     string     `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID string     `json:"nextCursorAfterId,omitempty"`
+	HasMore           bool       `json:"hasMore"`
 }
 
 type ToolCallQuery struct {

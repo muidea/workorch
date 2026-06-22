@@ -38,6 +38,39 @@ func TestDecodeSnapshotInfoPreservesRunExecutionContext(t *testing.T) {
 func TestDecodeSnapshotInfoPreservesLLMContextBudget(t *testing.T) {
 	snapshot, err := decodeSnapshotInfo(map[string]any{
 		"workspace": map[string]any{"id": "ws-budget", "state": "running"},
+		"llmContextBudgets": []any{
+			map[string]any{
+				"stepId":                  "step-budget",
+				"providerId":              "provider-a",
+				"model":                   "model-a",
+				"maxTokens":               4096,
+				"estimatedInputTokens":    1800,
+				"includedSections":        []any{"p0", "turn-01"},
+				"profileMode":             "auto",
+				"capabilitySource":        "provider",
+				"contextUtilizationRatio": 0.44,
+				"stageBudgetRatio":        0.8,
+				"stageBudgetSource":       "runtime_stage",
+				"goalDoDCompressed":       false,
+				"promptCaptured":          true,
+				"overBudget":              false,
+				"profile":                 map[string]any{"contextWindowTokens": 8192},
+				"cachePlan":               map[string]any{"stablePrefixHash": "sha256:abcdef"},
+			},
+		},
+		"llmContextBudgetSummary": map[string]any{
+			"traceTotal":                       1,
+			"maxShrinkLevel":                   2,
+			"maxContextUtilizationRatio":       0.44,
+			"avgContextUtilizationRatio":       0.44,
+			"maxInputTokens":                   1800,
+			"maxRequestBytes":                  8192,
+			"recentWindowSize":                 1,
+			"recentTraceTotal":                 1,
+			"recentAvgContextUtilizationRatio": 0.44,
+			"recentMaxInputTokens":             1800,
+			"contextUtilizationTrend":          "stable",
+		},
 		"llmUsageTraces": []any{
 			map[string]any{
 				"id": "trace-1",
@@ -53,8 +86,37 @@ func TestDecodeSnapshotInfoPreservesLLMContextBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeSnapshotInfo: %v", err)
 	}
-	if snapshot == nil || len(snapshot.LLMUsageTraces) != 1 {
-		t.Fatalf("snapshot = %+v, want one llm usage trace", snapshot)
+	if snapshot == nil || len(snapshot.LLMContextBudgets) != 1 || len(snapshot.LLMUsageTraces) != 1 {
+		t.Fatalf("snapshot = %+v, want context budget and usage trace", snapshot)
+	}
+	projected := snapshot.LLMContextBudgets[0]
+	if projected.StepID != "step-budget" ||
+		projected.ProviderID != "provider-a" ||
+		projected.Model != "model-a" ||
+		projected.MaxTokens != 4096 ||
+		projected.EstimatedInputTokens != 1800 ||
+		projected.ProfileMode != "auto" ||
+		projected.CapabilitySource != "provider" ||
+		projected.StageBudgetSource != "runtime_stage" ||
+		!projected.PromptCaptured {
+		t.Fatalf("llmContextBudgets[0] = %+v, want decoded budget metadata", projected)
+	}
+	if len(projected.IncludedSections) != 2 || projected.IncludedSections[0] != "p0" {
+		t.Fatalf("includedSections = %+v, want decoded sections", projected.IncludedSections)
+	}
+	if projected.Profile == nil || projected.CachePlan == nil {
+		t.Fatalf("profile/cachePlan = %+v/%+v, want decoded maps", projected.Profile, projected.CachePlan)
+	}
+	if snapshot.LLMContextBudgetSummary.TraceTotal != 1 ||
+		snapshot.LLMContextBudgetSummary.MaxShrinkLevel != 2 ||
+		snapshot.LLMContextBudgetSummary.MaxInputTokens != 1800 ||
+		snapshot.LLMContextBudgetSummary.MaxRequestBytes != 8192 ||
+		snapshot.LLMContextBudgetSummary.RecentWindowSize != 1 ||
+		snapshot.LLMContextBudgetSummary.RecentTraceTotal != 1 ||
+		snapshot.LLMContextBudgetSummary.RecentAvgUtilization != 0.44 ||
+		snapshot.LLMContextBudgetSummary.RecentMaxInputTokens != 1800 ||
+		snapshot.LLMContextBudgetSummary.UtilizationTrend != "stable" {
+		t.Fatalf("llmContextBudgetSummary = %+v, want decoded summary", snapshot.LLMContextBudgetSummary)
 	}
 	budget := snapshot.LLMUsageTraces[0].ContextBudget
 	if budget == nil {
@@ -87,6 +149,87 @@ func TestDecodeSnapshotInfoPreservesGapBaselineEvidenceRefs(t *testing.T) {
 	}
 	if len(snapshot.GapBaseline.RejectedEvidenceRefs) != 1 || snapshot.GapBaseline.RejectedEvidenceRefs[0] != "evidence-rejected" {
 		t.Fatalf("rejectedEvidenceRefs = %+v, want decoded rejected refs", snapshot.GapBaseline.RejectedEvidenceRefs)
+	}
+}
+
+func TestDecodeSnapshotInfoPreservesRunCommandStatus(t *testing.T) {
+	snapshot, err := decodeSnapshotInfo(map[string]any{
+		"workspace": map[string]any{"id": "ws-run-command", "state": "active"},
+		"runCommand": map[string]any{
+			"workspaceId":        "ws-run-command",
+			"runId":              "run-accepted",
+			"intent":             "replan",
+			"reason":             "decision resolved",
+			"requestId":          "request-accepted",
+			"source":             "tui",
+			"definitionRevision": "revision-1",
+			"decisionId":         "ticket-accepted",
+			"acceptedAt":         "2026-06-21T00:00:00Z",
+			"revision":           float64(7),
+		},
+	})
+	if err != nil {
+		t.Fatalf("decodeSnapshotInfo: %v", err)
+	}
+	if snapshot == nil || snapshot.RunCommand == nil {
+		t.Fatalf("snapshot = %+v, want run command status", snapshot)
+	}
+	if snapshot.RunCommand.WorkspaceID != "ws-run-command" ||
+		snapshot.RunCommand.RunID != "run-accepted" ||
+		snapshot.RunCommand.Intent != "replan" ||
+		snapshot.RunCommand.RequestID != "request-accepted" ||
+		snapshot.RunCommand.DecisionID != "ticket-accepted" ||
+		snapshot.RunCommand.Revision != 7 {
+		t.Fatalf("run command = %+v, want decoded accepted command metadata", snapshot.RunCommand)
+	}
+}
+
+func TestDecodeSnapshotInfoPreservesTaskPlans(t *testing.T) {
+	snapshot, err := decodeSnapshotInfo(map[string]any{
+		"workspace": map[string]any{"id": "ws-task-plan", "state": "running"},
+		"taskPlans": []any{
+			map[string]any{
+				"id":                "plan-1",
+				"workspaceId":       "ws-task-plan",
+				"runId":             "run-task-plan",
+				"anchorStepId":      "step-root",
+				"revisionStepId":    "step-retry",
+				"revision":          float64(2),
+				"state":             "blocked_on_decision",
+				"sourceOutputState": "retrying",
+				"retryOf":           "step-root",
+				"retryAttempt":      float64(2),
+				"violatedRule":      "available_snapshot_ignored",
+				"blockingTicketId":  "ticket-task-plan",
+				"nodes": []any{
+					map[string]any{
+						"id":              "node-1",
+						"state":           "blocked_on_decision",
+						"violatedRule":    "available_snapshot_ignored",
+						"coverageTargets": []any{"coverage-a"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("decodeSnapshotInfo: %v", err)
+	}
+	if snapshot == nil || len(snapshot.TaskPlans) != 1 {
+		t.Fatalf("snapshot = %+v, want one task plan", snapshot)
+	}
+	plan := snapshot.TaskPlans[0]
+	if plan.ID != "plan-1" ||
+		plan.RunID != "run-task-plan" ||
+		plan.Revision != 2 ||
+		plan.State != "blocked_on_decision" ||
+		plan.SourceOutputState != "retrying" ||
+		plan.BlockingTicketID != "ticket-task-plan" ||
+		plan.ViolatedRule != "available_snapshot_ignored" {
+		t.Fatalf("task plan = %+v, want decoded lifecycle metadata", plan)
+	}
+	if len(plan.Nodes) != 1 || plan.Nodes[0].State != "blocked_on_decision" || len(plan.Nodes[0].CoverageTargets) != 1 {
+		t.Fatalf("task plan nodes = %+v, want decoded node metadata", plan.Nodes)
 	}
 }
 

@@ -38,6 +38,7 @@ const (
 	workspaceScopedPatchFile               = "patch.json"
 	workspaceScopedValidationResultFile    = "validation_result.json"
 	workspaceScopedRuntimeCheckpointFile   = "runtime_checkpoint.json"
+	workspaceScopedCoverageWorkItemDir     = "coverage-work-items"
 	workspaceScopedArtifactContinuationDir = "artifact-continuations"
 	workspaceScopedResultFile              = "result.json"
 	workspaceScopedArtifactFile            = "artifact.json"
@@ -65,6 +66,7 @@ type workspaceScopedFileStore struct {
 	patches               map[string]*fileRepo.PatchRepository
 	validationResults     map[string]*fileRepo.ValidationResultRepository
 	runtimeCheckpoints    map[string]*fileRepo.RuntimeCheckpointRepository
+	coverageWorkItems     map[string]*fileRepo.CoverageWorkItemRepository
 	artifactContinuations map[string]*fileRepo.ArtifactContinuationRepository
 	results               map[string]*fileRepo.ResultRepository
 	artifacts             map[string]*fileRepo.ArtifactRepository
@@ -89,6 +91,7 @@ type WorkspaceScopedFileRepositorySet struct {
 	Patches               repository.PatchRepository
 	ValidationResults     repository.ValidationResultRepository
 	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
+	CoverageWorkItems     repository.CoverageWorkItemRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository
 	Tickets               repository.DecisionTicketRepository
 	Resolutions           repository.DecisionResolutionRepository
@@ -134,6 +137,7 @@ func NewWorkspaceScopedFileRepositorySet(dataRoot string) WorkspaceScopedFileRep
 		Patches:               newWorkspaceScopedPatchRepository(store),
 		ValidationResults:     newWorkspaceScopedValidationResultRepository(store),
 		RuntimeCheckpoints:    newWorkspaceScopedRuntimeCheckpointRepository(store),
+		CoverageWorkItems:     newWorkspaceScopedCoverageWorkItemRepository(store),
 		ArtifactContinuations: newWorkspaceScopedArtifactContinuationRepository(store),
 		Tickets:               tickets,
 		Resolutions:           newWorkspaceScopedDecisionResolutionRepository(store, tickets),
@@ -155,6 +159,7 @@ func newWorkspaceScopedFileStore(dataRoot string) *workspaceScopedFileStore {
 		patches:               map[string]*fileRepo.PatchRepository{},
 		validationResults:     map[string]*fileRepo.ValidationResultRepository{},
 		runtimeCheckpoints:    map[string]*fileRepo.RuntimeCheckpointRepository{},
+		coverageWorkItems:     map[string]*fileRepo.CoverageWorkItemRepository{},
 		artifactContinuations: map[string]*fileRepo.ArtifactContinuationRepository{},
 		results:               map[string]*fileRepo.ResultRepository{},
 		artifacts:             map[string]*fileRepo.ArtifactRepository{},
@@ -413,6 +418,17 @@ func (s *workspaceScopedFileStore) runtimeCheckpointRepo(path string) *fileRepo.
 	if !ok {
 		repo = fileRepo.NewRuntimeCheckpointRepository(path)
 		s.runtimeCheckpoints[path] = repo
+	}
+	return repo
+}
+
+func (s *workspaceScopedFileStore) coverageWorkItemRepo(path string) *fileRepo.CoverageWorkItemRepository {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	repo, ok := s.coverageWorkItems[path]
+	if !ok {
+		repo = fileRepo.NewCoverageWorkItemRepository(path)
+		s.coverageWorkItems[path] = repo
 	}
 	return repo
 }
@@ -1089,6 +1105,13 @@ func (r *workspaceScopedRunRepository) Get(ctx context.Context, id common.RunID)
 	return nil, common.ErrNotFound
 }
 
+func (r *workspaceScopedRunRepository) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	if workspaceID == "" || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	return r.store.runRepo(r.store.runPath(r.store.runRoot(workspaceID, id), workspaceScopedRunFile)).GetByWorkspaceID(ctx, workspaceID, id)
+}
+
 func (r *workspaceScopedRunRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
 	ret := []*runmodel.Run{}
 	for _, root := range r.store.allRunRoots() {
@@ -1624,6 +1647,98 @@ func (r *workspaceScopedRuntimeCheckpointRepository) Delete(ctx context.Context,
 	return r.store.runtimeCheckpointRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedRuntimeCheckpointFile)).Delete(ctx, id)
 }
 
+type workspaceScopedCoverageWorkItemRepository struct {
+	store *workspaceScopedFileStore
+}
+
+func newWorkspaceScopedCoverageWorkItemRepository(store *workspaceScopedFileStore) *workspaceScopedCoverageWorkItemRepository {
+	return &workspaceScopedCoverageWorkItemRepository{store: store}
+}
+
+func (r *workspaceScopedCoverageWorkItemRepository) Create(ctx context.Context, item *orchestratormodel.CoverageWorkItem) error {
+	if item == nil || item.WorkspaceID == "" || item.RunID == "" || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	return r.repoForRun(item.WorkspaceID, item.RunID).Create(ctx, item)
+}
+
+func (r *workspaceScopedCoverageWorkItemRepository) Get(ctx context.Context, id common.CoverageWorkItemID) (*orchestratormodel.CoverageWorkItem, error) {
+	if id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*orchestratormodel.CoverageWorkItem, error) {
+		return r.store.coverageWorkItemRepo(r.store.runPath(root, workspaceScopedCoverageWorkItemDir)).Get(ctx, id)
+	})
+}
+
+func (r *workspaceScopedCoverageWorkItemRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*orchestratormodel.CoverageWorkItem, error) {
+	ret := []*orchestratormodel.CoverageWorkItem{}
+	roots, err := r.store.runRootsByRunID(ctx, runID)
+	if err != nil {
+		if err == common.ErrNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	for _, root := range roots {
+		items, err := r.store.coverageWorkItemRepo(r.store.runPath(root, workspaceScopedCoverageWorkItemDir)).ListByRun(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, items...)
+	}
+	sortCoverageWorkItems(ret)
+	return nilIfEmpty(ret), nil
+}
+
+func (r *workspaceScopedCoverageWorkItemRepository) ListActiveByRun(ctx context.Context, runID common.RunID) ([]*orchestratormodel.CoverageWorkItem, error) {
+	items, err := r.ListByRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	ret := items[:0]
+	for _, item := range items {
+		if item.IsActive() {
+			ret = append(ret, item)
+		}
+	}
+	return nilIfEmpty(ret), nil
+}
+
+func (r *workspaceScopedCoverageWorkItemRepository) Update(ctx context.Context, item *orchestratormodel.CoverageWorkItem) error {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if item.WorkspaceID != "" && item.RunID != "" {
+		err := r.repoForRun(item.WorkspaceID, item.RunID).Update(ctx, item)
+		if err == nil || err != common.ErrNotFound {
+			return err
+		}
+	}
+	current, err := r.Get(ctx, item.ID)
+	if err != nil {
+		return err
+	}
+	item.WorkspaceID = current.WorkspaceID
+	item.RunID = current.RunID
+	return r.repoForRun(item.WorkspaceID, item.RunID).Update(ctx, item)
+}
+
+func (r *workspaceScopedCoverageWorkItemRepository) Delete(ctx context.Context, id common.CoverageWorkItemID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.repoForRun(current.WorkspaceID, current.RunID).Delete(ctx, id)
+}
+
+func (r *workspaceScopedCoverageWorkItemRepository) repoForRun(workspaceID common.WorkspaceID, runID common.RunID) *fileRepo.CoverageWorkItemRepository {
+	return r.store.coverageWorkItemRepo(r.store.runPath(r.store.runRoot(workspaceID, runID), workspaceScopedCoverageWorkItemDir))
+}
+
 type workspaceScopedArtifactContinuationRepository struct {
 	store *workspaceScopedFileStore
 }
@@ -2007,9 +2122,14 @@ func (r *workspaceScopedEventRecordRepository) Get(ctx context.Context, id commo
 
 func (r *workspaceScopedEventRecordRepository) List(ctx context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	listQuery := query
-	if query.RunID == "" || query.WorkspaceID == "" {
+	if query.WorkspaceID == "" {
 		listQuery.CursorAfterID = ""
 		listQuery.Limit = 0
+	} else if query.RunID == "" {
+		listQuery.CursorAfterID = ""
+		if query.CursorAfterID != "" {
+			listQuery.Limit = 0
+		}
 	}
 	ret := []*eventstreammodel.EventRecord{}
 	if query.RunID == "" {
@@ -2394,6 +2514,21 @@ func sortValidationResults(items []*runmodel.ValidationResult) {
 
 func sortRuntimeCheckpoints(items []*runmodel.RuntimeCheckpoint) {
 	sort.Slice(items, func(i, j int) bool { return string(items[i].ID) < string(items[j].ID) })
+}
+
+func sortCoverageWorkItems(items []*orchestratormodel.CoverageWorkItem) {
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].RunID != items[j].RunID {
+			return string(items[i].RunID) < string(items[j].RunID)
+		}
+		if items[i].DefinitionRevision != items[j].DefinitionRevision {
+			return items[i].DefinitionRevision < items[j].DefinitionRevision
+		}
+		if items[i].NormalizedSourceKey != items[j].NormalizedSourceKey {
+			return items[i].NormalizedSourceKey < items[j].NormalizedSourceKey
+		}
+		return string(items[i].ID) < string(items[j].ID)
+	})
 }
 
 func sortArtifactContinuations(items []*orchestratormodel.ArtifactContinuation) {

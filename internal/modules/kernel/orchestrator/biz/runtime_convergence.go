@@ -447,7 +447,7 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 			contract.RuntimeStage = runtimeStageVerification
 			contract.RuntimeStageMode = "strict_convergence"
 			contract.RepairObjective = repairObjectiveConcreteValidationEvidence
-			required := concreteValidationEvidenceRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+			required := concreteValidationEvidenceRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
 			required["mustReferenceCoverageWorkItem"] = true
 			contract.RepairActionPackage["requiredOutput"] = required
 			return true
@@ -483,7 +483,7 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 			contract.RuntimeStage = runtimeStageVerification
 			contract.RuntimeStageMode = "strict_convergence"
 			contract.RepairObjective = repairObjectiveConcreteValidationEvidence
-			required := concreteValidationEvidenceRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+			required := concreteValidationEvidenceRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
 			required["mustReferenceCoverageWorkItem"] = true
 			contract.RepairActionPackage["requiredOutput"] = required
 			return true
@@ -504,7 +504,7 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		contract.RuntimeStage = runtimeStageVerification
 		contract.RuntimeStageMode = "strict_convergence"
 		contract.RepairObjective = repairObjectiveConcreteValidationEvidence
-		required := concreteValidationEvidenceRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+		required := concreteValidationEvidenceRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
 		required["mustReferenceCoverageWorkItem"] = true
 		contract.RepairActionPackage["requiredOutput"] = required
 		return true
@@ -518,7 +518,7 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		contract.RuntimeStage = runtimeStageVerification
 		contract.RuntimeStageMode = "strict_convergence"
 		contract.RepairObjective = repairObjectiveConcreteValidationEvidence
-		required := concreteValidationEvidenceRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+		required := concreteValidationEvidenceRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
 		required["mustReferenceCoverageWorkItem"] = true
 		if targets := coverageTargetSetFromRepairInput(input); len(targets) > 0 {
 			contract.RepairActionPackage["coverageRepairRequired"] = true
@@ -534,7 +534,7 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		contract.RuntimeStage = runtimeStageVerification
 		contract.RuntimeStageMode = "strict_convergence"
 		contract.RepairObjective = repairObjectiveConcreteValidationEvidence
-		required := concreteValidationEvidenceRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+		required := concreteValidationEvidenceRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
 		required["mustReferenceCoverageWorkItem"] = true
 		contract.RepairActionPackage["requiredOutput"] = required
 		return true
@@ -910,7 +910,7 @@ func populateConcreteValidationConvergenceContract(input map[string]any, contrac
 		contract.RepairActionPackage["coverageRepairRequired"] = true
 		contract.RepairActionPackage["coverageTargetSet"] = targets
 	}
-	required := concreteValidationEvidenceRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+	required := concreteValidationEvidenceRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
 	if len(mapSliceFromValue(contract.RepairActionPackage["coverageTargetSet"])) > 0 {
 		required["mustDeclareCoverageTargets"] = true
 		required["coverageTargetMatchRule"] = "validation evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
@@ -1464,7 +1464,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		if len(pkg) == 0 {
 			pkg = map[string]any{}
 		}
-		required := concreteValidationEvidenceRequiredOutput(mapFromValue(pkg["requiredOutput"]))
+		required := concreteValidationEvidenceRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
 		if targets := coverageTargetSetFromRepairInput(input); len(targets) > 0 {
 			input["coverageRepairRequired"] = true
 			input["coverageTargetSet"] = targets
@@ -2184,11 +2184,15 @@ func coverageTargetProfileStateChangeEvidenceSatisfied(target map[string]any) bo
 	if len(target) == 0 {
 		return false
 	}
+	if coverageTargetExplicitlyDoesNotMissStateChange(target) {
+		return true
+	}
+	missingKinds := stringSet(coverageMissingEvidenceKinds(target))
 	accepted := mapStringSliceValue(target["acceptedEvidenceByKind"])
 	if coverageEvidenceCountForKind("state_change", accepted["state_change"]) == 0 {
 		return false
 	}
-	return !stringSet(coverageMissingEvidenceKinds(target))["state_change"]
+	return !missingKinds["state_change"]
 }
 
 func profileEvidenceRuntimeCapabilityGap(requirements []profileEvidenceKindRequirement) map[string]any {
@@ -2354,11 +2358,30 @@ func coverageTargetClosedForPrimaryStateChange(target map[string]any) bool {
 	if len(target) == 0 {
 		return true
 	}
+	if coverageTargetExplicitlyDoesNotMissStateChange(target) {
+		return true
+	}
+	missingKinds := stringSet(coverageMissingEvidenceKinds(target))
 	state := strings.TrimSpace(stringFromMap(target, "state"))
 	if state != "satisfied" && state != "evidence_ready" {
 		return false
 	}
-	return !stringSet(coverageMissingEvidenceKinds(target))["state_change"]
+	return !missingKinds["state_change"]
+}
+
+func coverageTargetExplicitlyDoesNotMissStateChange(target map[string]any) bool {
+	if len(target) == 0 {
+		return false
+	}
+	required := stringSet(stringSliceFromValue(target["requiredEvidenceKinds"]))
+	if !required["state_change"] {
+		return false
+	}
+	if _, ok := target["missingEvidenceKinds"]; !ok {
+		return false
+	}
+	missing := stringSet(stringSliceFromValue(target["missingEvidenceKinds"]))
+	return !missing["state_change"]
 }
 
 func coverageTargetEvidenceKindRequirements(run *runModel.Run, targets []map[string]any) []profileEvidenceKindRequirement {

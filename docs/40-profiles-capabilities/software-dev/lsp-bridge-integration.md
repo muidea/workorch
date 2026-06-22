@@ -28,6 +28,9 @@ Last Updated: 2026-05-30
 - `lsp_hover`
 - `lsp_references`
 - `lsp_diagnostics`
+- `lsp_status`
+- `lsp_shutdown`
+- `lsp_repair`
 
 不推荐做法：
 
@@ -46,7 +49,7 @@ Last Updated: 2026-05-30
 
 ### Planning
 
-- 可用 `lsp_initialize`、`lsp_definition`、`lsp_references`、`lsp_hover` 辅助定位入口、接口与影响面。
+- 可用 `lsp_initialize`、`lsp_definition`、`lsp_references`、`lsp_hover` 辅助定位入口、接口与影响面；可用 `lsp_status` 判断语义会话与依赖是否可用。
 - 多语言项目可按语言分别初始化。
 - LSP 不可用时应回退到 file/read、rg、build/test 输出，不得阻塞整个 run。
 
@@ -55,6 +58,7 @@ Last Updated: 2026-05-30
 - 生成 patch 前可用 definition/references 辅助定位目标。
 - 文件修改后，如需基于未落盘内容继续查询，应使用 `lsp_sync` 同步完整文件内容。
 - `lsp_diagnostics` 可用于快速发现语法、类型、未定义符号等问题。
+- `lsp_status` 可用于确认语义会话状态；`lsp_shutdown` / `lsp_repair` 只能用于 workspace-local 实例级恢复，不能修改交付文件。
 - LSP 不负责状态变更；文件修改仍必须通过 patch/apply 或其他明确 state-changing tool 完成。
 
 ### Repair
@@ -101,6 +105,9 @@ LSP 类故障应保持为辅助能力降级，而不是默认 blocker：
 | `lsp_hover` | 读取符号说明 | 辅助上下文 |
 | `lsp_references` | 分析影响面 | 辅助证据 |
 | `lsp_diagnostics` | 发现语法/类型/符号错误 | 辅助质量信号 |
+| `lsp_status` | 查看语义会话、依赖、活跃/空闲和重启状态 | 辅助运行状态证据 |
+| `lsp_shutdown` | 关闭 workspace-local 语义实例 | 辅助恢复动作 |
+| `lsp_repair` | 诊断或安全恢复 workspace-local 语义实例 | 辅助恢复动作 |
 
 约束：
 

@@ -324,7 +324,7 @@ func (e *Executor) startWorkerHeartbeat(ctx context.Context, request runtimemode
 	if e == nil || e.background == nil || runtimeWorkerHeartbeatInterval <= 0 {
 		return
 	}
-	_ = e.background.Timer(ctx, runtimeWorkerHeartbeatTask{fn: func() {
+	if err := e.background.Timer(ctx, runtimeWorkerHeartbeatTask{fn: func() {
 		if err := e.publishWorkerLifecycle(context.Background(), request, requestID, "runtime_worker_heartbeat", "worker_heartbeat", "runtime worker heartbeat", map[string]any{
 			"queueKey":     queueKey,
 			"workerId":     workerID,
@@ -333,7 +333,10 @@ func (e *Executor) startWorkerHeartbeat(ctx context.Context, request runtimemode
 		}); err != nil {
 			slog.Warn("runtime worker heartbeat event publish failed", "module", e.moduleID, "requestID", requestID, "queueKey", queueKey, "err", err)
 		}
-	}}, runtimeWorkerHeartbeatInterval, 0)
+	}}, runtimeWorkerHeartbeatInterval, 0); err != nil {
+		recordRuntimeHeartbeatTimerStartFailure()
+		slog.Warn("runtime worker heartbeat timer start failed", "module", e.moduleID, "requestID", requestID, "queueKey", queueKey, "err", err)
+	}
 }
 
 type runtimeWorkerHeartbeatTask struct {
@@ -520,14 +523,31 @@ func publishRuntimeNotification(hub events.Hub, ctx context.Context, envelope ev
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	if asyncHub, ok := hub.(events.AsyncHub); ok {
-		return asyncHub.PublishAsync(ctx, envelope)
+	if err := events.PublishByContract(ctx, hub, envelope); err != nil {
+		recordRuntimeNotificationPublishFailure(envelope)
+		return err
 	}
-	err := hub.Publish(ctx, envelope)
-	if _, ok := events.ResponseEnvelope(err); ok {
-		return nil
+	return nil
+}
+
+func recordRuntimeNotificationPublishFailure(envelope events.Envelope) {
+	switch envelope.Topic {
+	case TopicRuntimeBlockExecuteAccepted:
+		runtimeEventAcceptedPublishFailuresTotal.Add(1)
+	case TopicRuntimeBlockExecuteCompleted, TopicRuntimeBlockExecuteFailed:
+		runtimeEventTerminalPublishFailuresTotal.Add(1)
+	case TopicRuntimeBlockExecuteProgress:
+		runtimeEventProgressPublishFailuresTotal.Add(1)
+		if progress, ok := envelope.Payload[events.PayloadKeyRuntimeProgress].(runtimemodel.RuntimeStepExecutionProgressed); ok {
+			switch progress.Event {
+			case "runtime_worker_started", "runtime_worker_stopped", "runtime_worker_heartbeat", "runtime_worker_lost":
+				runtimeEventWorkerLifecycleFailuresTotal.Add(1)
+				if progress.Event == "runtime_worker_lost" {
+					runtimeEventWorkerLostPublishFailuresTotal.Add(1)
+				}
+			}
+		}
 	}
-	return err
 }
 
 func runtimeRequestID(envelope events.Envelope, request runtimemodel.StepExecutionRequest) string {

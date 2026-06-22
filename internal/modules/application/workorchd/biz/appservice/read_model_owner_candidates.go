@@ -12,6 +12,7 @@ func ownerReaderCandidatesFromReadModelDependencies(deps readModelDependencies) 
 		Results:               deps.results,
 		Artifacts:             deps.artifacts,
 		ArtifactContinuations: deps.artifactContinuations,
+		CoverageWorkItems:     deps.coverageWorkItems,
 		EventRecords:          deps.eventRecords,
 		MemoryRecalls:         deps.memoryRecalls,
 		ToolCalls:             deps.toolCalls,

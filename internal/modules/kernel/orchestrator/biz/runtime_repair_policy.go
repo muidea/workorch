@@ -116,7 +116,7 @@ func runtimeContextIntegrityGateFailure(step *runModel.Step) bool {
 	}
 	budget := mapFromValue(step.Output["contextBudget"])
 	action := strings.TrimSpace(stringFromMap(budget, "contextGateAction"))
-	if action == "read_required" || action == "fail_fast" {
+	if contextGateActionBlocksProvider(action) {
 		return true
 	}
 	text := strings.ToLower(strings.Join([]string{
@@ -124,6 +124,19 @@ func runtimeContextIntegrityGateFailure(step *runModel.Step) bool {
 		stringFromMap(step.Output, "reason"),
 	}, " "))
 	return strings.Contains(text, "llm context gate")
+}
+
+func contextGateActionBlocksProvider(action string) bool {
+	switch strings.TrimSpace(action) {
+	case "read_required",
+		"degrade_to_assessment",
+		"blocker_required",
+		"fail_fast",
+		"replan_required":
+		return true
+	default:
+		return false
+	}
 }
 
 func runtimeContextIntegrityGateCanRecoverWithCoverageTargets(step *runModel.Step) bool {

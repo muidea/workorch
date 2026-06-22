@@ -10,7 +10,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -727,7 +726,7 @@ func applyRuntimeProgressToSnapshot(snapshot *readmodelcore.WorkspaceSnapshot, u
 		return false
 	}
 	if update.StepID != "" && (snapshot.Step == nil || snapshot.Step.ID != update.StepID) {
-		snapshot.Step = &presenter.StepView{ID: update.StepID}
+		snapshot.Step = &readmodelcore.StepView{ID: update.StepID}
 	}
 	if snapshot.Step != nil {
 		if update.StepID != "" {

@@ -12,16 +12,7 @@ func GetRunFromReader(ctx context.Context, runs RunReader, runID common.RunID) (
 		return nil, common.ErrInvalidArgument
 	}
 	if workspaceID := common.RuntimeWorkspaceIDFromContext(ctx); workspaceID != "" {
-		items, err := runs.ListByWorkspaceID(ctx, workspaceID)
-		if err != nil {
-			return nil, err
-		}
-		for _, item := range items {
-			if item != nil && item.ID == runID {
-				return item, nil
-			}
-		}
-		return nil, common.ErrNotFound
+		return runs.GetByWorkspaceID(ctx, workspaceID, runID)
 	}
 	return runs.Get(ctx, runID)
 }

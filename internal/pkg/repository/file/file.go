@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -718,13 +717,24 @@ func (r *ResultRepository) ListByWorkspace(_ context.Context, workspaceID common
 	})
 }
 
-func (r *ResultRepository) ListByRun(_ context.Context, runID common.RunID) ([]*resultmodel.Result, error) {
+func (r *ResultRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*resultmodel.Result, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return r.list(func(item resultmodel.Result) bool {
-		return item.RunID == runID
+	items, err := r.list(func(item resultmodel.Result) bool {
+		return item.RunID == runID && itemMatchesRuntimeWorkspace(ctx, item.WorkspaceID)
 	})
+	if err != nil {
+		return nil, err
+	}
+	if common.RuntimeWorkspaceIDFromContext(ctx) == "" {
+		if conflict := listHasMultipleRunWorkspaces(items, func(item *resultmodel.Result) common.WorkspaceID {
+			return item.WorkspaceID
+		}); conflict {
+			return nil, common.ErrConflict
+		}
+	}
+	return items, nil
 }
 
 func (r *ResultRepository) Update(_ context.Context, item *resultmodel.Result) error {
@@ -827,13 +837,24 @@ func (r *ArtifactRepository) ListByWorkspace(_ context.Context, workspaceID comm
 	})
 }
 
-func (r *ArtifactRepository) ListByRun(_ context.Context, runID common.RunID) ([]*resultmodel.Artifact, error) {
+func (r *ArtifactRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*resultmodel.Artifact, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return r.list(func(item resultmodel.Artifact) bool {
-		return item.RunID == runID
+	items, err := r.list(func(item resultmodel.Artifact) bool {
+		return item.RunID == runID && itemMatchesRuntimeWorkspace(ctx, item.WorkspaceID)
 	})
+	if err != nil {
+		return nil, err
+	}
+	if common.RuntimeWorkspaceIDFromContext(ctx) == "" {
+		if conflict := listHasMultipleRunWorkspaces(items, func(item *resultmodel.Artifact) common.WorkspaceID {
+			return item.WorkspaceID
+		}); conflict {
+			return nil, common.ErrConflict
+		}
+	}
+	return items, nil
 }
 
 func (r *ArtifactRepository) ListByResult(_ context.Context, resultID common.ResultID) ([]*resultmodel.Artifact, error) {
@@ -1269,6 +1290,10 @@ func (r *EventRecordRepository) scanEventRecordSegment(path string, fn func(*eve
 		return err
 	}
 	defer file.Close()
+	recordsScanned := 0
+	defer func() {
+		repository.RecordEventRecordMetadataScan(recordsScanned)
+	}()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
@@ -1280,6 +1305,7 @@ func (r *EventRecordRepository) scanEventRecordSegment(path string, fn func(*eve
 		if err := json.Unmarshal([]byte(line), &recordLine); err != nil {
 			return err
 		}
+		recordsScanned++
 		item := cloneEventRecord(&recordLine.Record)
 		if recordLine.PayloadRef != "" {
 			item.PayloadRef = recordLine.PayloadRef
@@ -1303,6 +1329,10 @@ func (r *EventRecordRepository) scanEventRecordSegmentReverse(path string, fn fu
 		}
 		return false, err
 	}
+	recordsScanned := 0
+	defer func() {
+		repository.RecordEventRecordMetadataScan(recordsScanned)
+	}()
 	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := bytes.TrimSpace(lines[i])
@@ -1313,6 +1343,7 @@ func (r *EventRecordRepository) scanEventRecordSegmentReverse(path string, fn fu
 		if err := json.Unmarshal(line, &recordLine); err != nil {
 			return false, err
 		}
+		recordsScanned++
 		item := cloneEventRecord(&recordLine.Record)
 		if recordLine.PayloadRef != "" {
 			item.PayloadRef = recordLine.PayloadRef
@@ -1387,6 +1418,7 @@ func (r *EventRecordRepository) readEventPayload(ref string) (map[string]any, er
 	if err != nil {
 		return nil, err
 	}
+	repository.RecordEventRecordPayloadHydrate(len(data))
 	payload := map[string]any{}
 	if len(data) == 0 {
 		return payload, nil
@@ -1410,28 +1442,11 @@ func readableRepositoryItemName(value string) string {
 }
 
 func safeRepositoryItemPath(value string) string {
-	segments := runtimepath.SafeSegments(value)
+	segments := runtimepath.SafeSegmentsWithMax(value, runtimepath.DefaultMaxSegmentLen)
 	if len(segments) == 0 {
 		return "empty"
 	}
-	for idx, segment := range segments {
-		segments[idx] = truncateRepositoryItemSegment(segment)
-	}
 	return filepath.Join(segments...)
-}
-
-func truncateRepositoryItemSegment(segment string) string {
-	const maxSegmentLen = 160
-	if len(segment) <= maxSegmentLen {
-		return segment
-	}
-	sum := sha256.Sum256([]byte(segment))
-	hash := fmt.Sprintf("%x", sum[:])[:16]
-	prefixLen := maxSegmentLen - len(hash) - 1
-	if prefixLen < 16 {
-		prefixLen = 16
-	}
-	return strings.TrimRight(segment[:prefixLen], ".-") + "-" + hash
 }
 
 func repositoryItemRoot(path string, legacyFileName string, directoryName string) string {
@@ -1453,6 +1468,32 @@ func repositoryItemPaths(root string) ([]string, error) {
 	return repositoryFiles(root, "json")
 }
 
+func itemMatchesRuntimeWorkspace(ctx context.Context, workspaceID common.WorkspaceID) bool {
+	scopedWorkspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	return scopedWorkspaceID == "" || workspaceID == scopedWorkspaceID
+}
+
+func listHasMultipleRunWorkspaces[T any](items []*T, workspaceID func(*T) common.WorkspaceID) bool {
+	if len(items) <= 1 {
+		return false
+	}
+	var found common.WorkspaceID
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		current := workspaceID(item)
+		if found == "" {
+			found = current
+			continue
+		}
+		if current != found {
+			return true
+		}
+	}
+	return false
+}
+
 func repositoryMetadataDirs(root string) ([]string, error) {
 	paths, err := repositoryFiles(root, "metadata.json")
 	if err != nil {
@@ -1470,7 +1511,7 @@ func repositorySequenceScopedDir(root string, scopeID string, itemID string) str
 }
 
 func repositorySequenceScopeRoot(root string, scopeID string) string {
-	scopeSafe := runtimepath.SafeSegment(scopeID)
+	scopeSafe := runtimepath.TruncateSafeSegment(runtimepath.SafeSegment(scopeID), runtimepath.DefaultMaxSegmentLen)
 	if scopeSafe == "" {
 		scopeSafe = "scope"
 	}
@@ -1927,6 +1968,24 @@ func (r *RunRepository) Get(_ context.Context, id common.RunID) (*run.Run, error
 	}
 	item, ok := items[id]
 	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneRun(&item), nil
+}
+
+func (r *RunRepository) GetByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID, id common.RunID) (*run.Run, error) {
+	if workspaceID == "" || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadMap[common.RunID, run.Run](r.path)
+	if err != nil {
+		return nil, err
+	}
+	item, ok := items[id]
+	if !ok || item.WorkspaceID != workspaceID {
 		return nil, common.ErrNotFound
 	}
 	return cloneRun(&item), nil

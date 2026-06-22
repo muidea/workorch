@@ -20,6 +20,7 @@ func WorkspaceSnapshotFromModels(input WorkspaceSnapshotModelInput) readmodelcor
 		Approvals:             input.Approvals,
 	}
 	ret.LLMUsageTraces = MapLLMUsageTracesFromEventRecords(MapEventRecords(input.LLMUsageEventRecords), "")
+	ret.LLMContextBudgetSummary = SummarizeLLMContextBudgets(ret.LLMContextBudgets)
 	ret.LLMUsageSummary = SummarizeLLMUsage(ret.LLMUsageTraces)
 	ret.Acceptance = MapWorkspaceAcceptanceProjection(ret)
 	ret.TaskProgress = MapLocalizedWorkspaceTaskProgress(ret)

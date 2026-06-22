@@ -2,7 +2,6 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
@@ -19,7 +18,7 @@ func persistedEventTimelineItem(item readmodelcore.EventRecord) readmodelcore.Ru
 	}
 }
 
-func observedEventTimelineItem(item presenter.ObservedView) readmodelcore.RuntimeTimelineItem {
+func observedEventTimelineItem(item ObservedView) readmodelcore.RuntimeTimelineItem {
 	return readmodelcore.RuntimeTimelineItem{
 		Source:     "event",
 		Type:       item.SubjectType,

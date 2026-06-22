@@ -210,6 +210,68 @@ func TestGoalDoDManager_CreateWorkspace_PublishesWorkspaceCreatedEvent(t *testin
 	}
 }
 
+func TestGoalDoDManager_PublishesWorkspaceNotificationsThroughAsyncHub(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewWorkspaceRepository()
+	hub := &recordingWorkspaceAsyncHub{}
+	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), hub)
+
+	if err := manager.CreateWorkspace(ctx, workspaceservice.CreateWorkspaceCommand{
+		WorkspaceID:          common.WorkspaceID("ws-async"),
+		Title:                "async workspace",
+		DeliverableDirectory: "/tmp/workorch/ws-async",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	if hub.syncPublishes != 0 || hub.asyncPublishes != 1 {
+		t.Fatalf("publish counts = sync:%d async:%d, want async workspace notification", hub.syncPublishes, hub.asyncPublishes)
+	}
+	if len(hub.published) != 1 || hub.published[0].Topic != workspaceevents.TopicWorkspaceCreated {
+		t.Fatalf("published = %+v, want workspace created notification", hub.published)
+	}
+}
+
+func TestGoalDoDManager_PublishesDefinitionNotificationsThroughAsyncHub(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewWorkspaceRepository()
+	hub := &recordingWorkspaceAsyncHub{}
+	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), hub)
+
+	workspaceID := common.WorkspaceID("ws-definition-async")
+	if err := repo.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "definition workspace",
+		DeliverableDirectory: "/tmp/workorch/ws-definition-async",
+		State:                common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := manager.DefineGoal(ctx, workspaceservice.DefineGoalCommand{
+		GoalID:      common.GoalID("goal-async"),
+		WorkspaceID: workspaceID,
+		Text:        "goal",
+	}); err != nil {
+		t.Fatalf("define goal: %v", err)
+	}
+	if err := manager.DefineDoD(ctx, workspaceservice.DefineDoDCommand{
+		DoDID:       common.DoDID("dod-async"),
+		WorkspaceID: workspaceID,
+		Items:       []string{"dod"},
+	}); err != nil {
+		t.Fatalf("define dod: %v", err)
+	}
+
+	if hub.syncPublishes != 0 || hub.asyncPublishes != 2 {
+		t.Fatalf("publish counts = sync:%d async:%d, want async definition notifications", hub.syncPublishes, hub.asyncPublishes)
+	}
+	if len(hub.published) != 2 ||
+		hub.published[0].Topic != workspaceevents.TopicGoalDefined ||
+		hub.published[1].Topic != workspaceevents.TopicDoDDefined {
+		t.Fatalf("published = %+v, want goal and DoD notifications", hub.published)
+	}
+}
+
 func TestGoalDoDManager_EnsureWorkspaceCreatesMissingWorkspace(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewWorkspaceRepository()
@@ -430,4 +492,26 @@ func TestGoalDoDManager_DefinitionChangeReopensTerminalWorkspace(t *testing.T) {
 			}
 		})
 	}
+}
+
+type recordingWorkspaceAsyncHub struct {
+	syncPublishes  int
+	asyncPublishes int
+	published      []events.Envelope
+}
+
+func (h *recordingWorkspaceAsyncHub) Publish(_ context.Context, envelope events.Envelope) error {
+	h.syncPublishes++
+	h.published = append(h.published, envelope)
+	return nil
+}
+
+func (h *recordingWorkspaceAsyncHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
+	h.asyncPublishes++
+	h.published = append(h.published, envelope)
+	return nil
+}
+
+func (h *recordingWorkspaceAsyncHub) Subscribe(string, events.Handler) func() {
+	return func() {}
 }

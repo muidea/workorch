@@ -91,6 +91,11 @@ internal/modules/application/workorchd/service/server/http_workspace.go
 - `serverState.registerReplanContinuationWatcher` 已存在但当前为空逻辑。
 - `runContinuationScheduler` 管理 periodic stale dispatched runtime gap recovery、manual governance/replan/resume/restart continuation；服务启动只注册 periodic watchdog timer，不自动恢复历史 running run。resolved governance 必须由 decision/approval resolve 主路径发布 continuation command，不能依赖 watchdog 扫描兜底。
 - Workspace activation/restart、run start/resume、governance continuation 和 replan continuation 已统一通过 workorchd scheduler command handler 入队。同步 command 只有在 scheduler owner 返回明确 accepted response 且后台 work item 已成功提交后，REST/TUI 才能报告 accepted。
+- Embedded EventHub backend 的 `Run().Command` 已同步收口到同一 accepted
+  语义：只有收到 `workorchd/scheduler` 返回的 `<topic>/accepted` 且
+  `accepted=true` 的 response 才算提交成功；缺少 subscriber、缺少
+  response、错误 response topic、非 accepted 或非 scheduler owner response
+  都返回业务错误，避免 TUI local 模式把“publish 成功”误当成后端已入队。
 
 剩余长期方向是把当前 server-local scheduler pending 进一步持久化或 owner 化；短期不得绕过现有 scheduler command ack 规则，也不得让 watchdog 代替正常 command 主路径。
 
@@ -114,6 +119,58 @@ Web/TUI 可以等待同步 command response，也可以收到 accepted response 
 
 对于会启动长耗时工作的 scheduler command，accepted response 必须表示 owner 已完成快速校验并成功提交 BackgroundRoutine work item。缺少 subscriber、缺少 `events.Response`、response 类型错误或后台提交失败，都必须返回非 accepted 业务错误；handler 不能在 EventHub lane 内执行 activation/resume/replan/restart 本体。
 
+Closure evidence:
+
+- Code: `internal/services/workorch/biz/backends/eventhub.go`.
+- Test: `internal/services/workorch/biz/backends/eventhub_test.go`.
+- Verification: `go test ./internal/services/workorch/biz/backends -count=1`.
+- Covered cases: missing scheduler response, wrong response topic, `accepted=false`,
+  wrong response owner, and valid accepted response.
+
+Additional scope closure:
+
+- Embedded EventHub backend Goal/DoD `Get` and `Update` commands now forward
+  the caller workspace scope into the CLI command envelope and payload. This
+  keeps workspace-local definition objects on the same scoped command path as
+  define/list operations.
+- Embedded EventHub backend workspace object commands now forward workspace
+  scope for `Workspace.Get`, `Workspace.Snapshot`, and `Workspace.Delete`.
+  The workorchd CLI dispatcher also rejects workspace object commands whose
+  `WorkspaceID` is empty or does not match the command subject id, so bad
+  clients cannot bypass the scoped command contract.
+- workorchd CLI run command dispatcher now rejects `run/activate`, `run/list`,
+  `run/resume`, `run/get`, and `run/status` commands that do not carry
+  workspace scope. Run-scoped read/mutation commands also require a run subject
+  id and reject envelope `RunID` / subject mismatch before any appservice or
+  owner command path is entered.
+- Appservice approval resolution now mirrors decision resolution for no-scope
+  commands: it first resolves the approval id to a unique pending approval, or
+  to a unique historical approval when there is no pending match, and returns
+  conflict for duplicate cross-workspace matches. The subsequent approve/reject
+  owner command is always published with the resolved workspace/run scope.
+- Kernel approval owner mutation commands now also guard no-scope
+  approve/reject/delete requests. When no workspace/run/step scope is supplied,
+  the owner resolves the approval id against its repository, accepts a unique
+  pending or unique historical match, and returns conflict for duplicate
+  cross-workspace matches before any state transition is attempted.
+- Kernel decision owner resolve/delete commands now apply the same no-scope
+  rule. No-scope `ensure-resolved` resolves a unique open ticket or unique
+  historical ticket, stamps the resolved workspace/run/step scope into the
+  command, and rejects duplicate cross-workspace matches before writing a
+  resolution. No-scope delete resolves a unique ticket and deletes it through
+  the resolved workspace scope.
+- Kernel decision resolution read/delete commands now inherit scope from the
+  owning ticket before reading or deleting a resolution. Scoped requests must
+  match the ticket workspace/run/step refs; no-scope requests resolve a unique
+  open or unique historical ticket first and return conflict for duplicate
+  cross-workspace ticket ids.
+- Verification:
+  `go test ./internal/services/workorch/biz/backends ./internal/services/workorch/service/tui -count=1`;
+  `go test ./internal/services/workorch/biz/backends ./internal/modules/application/workorchd/biz/appservice -run 'TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope|TestEventHubRunReadCommandsCarryWorkspaceScope|TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand|TestCLIWorkspaceObjectCommandsRequireMatchingWorkspaceScope|TestCLIRunCommandsRequireWorkspaceScope|TestCLIWorkspaceSnapshotCommandProjectsDetailView' -count=1`;
+  `go test ./internal/modules/application/workorchd/biz/appservice/governanceports -run 'TestResolveApprovalView(ReadsApprovalWithExplicitScope|WithoutScopeResolvesUniquePendingApproval|WithoutScopeConflictsOnDuplicatePendingApprovals)|TestBatchResolveApprovalViewsApprovesPendingItems' -count=1`;
+  `go test ./internal/modules/kernel/approval -run 'TestApproval(MutationCommandsHonorWorkspaceScope|MutationCommandWithoutScopeResolvesUniquePendingApproval|MutationCommandWithoutScopeConflictsOnDuplicatePendingApprovals|CommandGetHonorsScope|CommandListByRunHonorsWorkspaceScope)' -count=1`;
+  `go test ./internal/modules/kernel/decision -run 'TestDecision(TicketCommandGetHonorsScope|TicketCommandListByRunHonorsWorkspaceScope|MutationCommandsHonorWorkspaceScope|ResolveCommandWithoutScopeResolvesUniqueOpenTicket|ResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets|DeleteCommandWithoutScopeDeletesUniqueOpenTicket|ResolutionCommandGetHonorsTicketScope|ResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets|ResolutionDeleteWithoutScopeDeletesUniqueTicketResolution)' -count=1`.
+
 ### Event Ownership Rule
 
 事件 topic 按被操作业务模型 owner 归属：
@@ -132,6 +189,7 @@ Web/TUI 可以等待同步 command response，也可以收到 accepted response 
 EventHub observer 必须轻量：
 
 - 可以校验 payload、scope、幂等 key。
+- envelope 与 payload 同时携带 workspace/run scope 时必须一致；不一致必须返回 conflict，且不得写入 pending queue。
 - 可以把 work item 放入 workorchd 内部 pending queue。
 - 可以发布 projection changed / accepted notification。
 - 对需要同步确认的 command，必须设置明确 `events.Response`；不能用无响应或 publish success 代替 accepted。
@@ -144,11 +202,22 @@ workorchd 内部 pending queue 必须满足：
 
 - key 显式包含 workspace scope。
 - replan/governance continuation key 至少包含 `workspaceId + runId + ticketId/resolutionId`。
+- 缺少 `workspaceId` 或 `runId` 的 governance continuation ref 必须作为无效
+  ref 丢弃，不能生成 `intent//runId` 这类无 scope pending key，也不能提交
+  BackgroundRoutine work item。
 - restart key 至少包含 `workspaceId + requestId`；如果要幂等合并，可加入 activeRunId 和 command fingerprint。
 - start/resume key 至少包含 `workspaceId + runId + action + requestId`。
-- BackgroundRoutine 投递失败时 pending 不丢失。
-- 执行失败时，只有 owner 状态已经不再需要该 work item，才能清除 pending。
-- startup/watchdog 必须能从 owner state 重建 pending，而不是依赖 HTTP handler 曾经投递过。
+- BackgroundRoutine 投递失败时必须同步返回未接受或记录 scheduler diagnostic；
+  不能假装 command accepted。
+- 执行失败时必须记录 bounded continuation diagnostic；只有 owner 状态已经不再需要
+  该 work item，才能清除当前进程内 pending。
+- 服务重启后不自动 replay 旧进程的 scheduler pending。旧 pending 是
+  process-local 状态；重启后只能投影为 `not_scheduled` / manual retry
+  diagnostic，由用户通过 `/run resume`、`/run restart` 或对应 REST command
+  重新激活。
+- watchdog 不能补偿 EventHub command/result 丢失或自动创建 replan
+  continuation；它只允许处理幂等、外部调用可能超时的 stale dispatched
+  runtime gap，并必须输出可观测诊断。
 
 ### Lane Rule
 
@@ -160,6 +229,8 @@ workorchd 内部 pending queue 必须满足：
 | workorchd command accepted / pending mutation | `state/workorchd/workspace/<workspaceId>` |
 | orchestrator start/resume/fail/complete | `state/orchestrator/workspace/<workspaceId>/run/<runId>` |
 | run owner update | `state/run/workspace/<workspaceId>/run/<runId>` |
+| runtime dispatch request | carries `workspaceId + runId + stepId`; orchestrator validates the target run through workspace-scoped lookup before dispatching |
+| runtime progress / terminal result event | carries `workspaceId + runId + stepId`; orchestrator validates the run through workspace-scoped lookup before checkpointing or finalizing |
 | projection notification | `topic/<projection-changed-topic>` 等 notify topic lane |
 | TUI/CLI facade result/progress | topic lane |
 
@@ -197,7 +268,9 @@ Web/TUI
 
 - HTTP handler 不直接调用 `scheduleGovernanceRunResumeRefs`。
 - auto-governance 和 manual decision 走同一条 continuation event。
-- resolution 已存在但 continuation 丢失时，startup/watchdog 从 Decision/Run owner state 重建 pending。
+- resolution 已存在但 continuation 未入队时，必须把首次 command/result 丢失视为主路径缺陷：
+  REST/TUI command 应返回未接受或投影 scheduler diagnostic；startup/watchdog
+  不得从历史 Decision/Run owner state 自动创建 replan pending。
 
 ### Workspace Restart
 
@@ -306,7 +379,8 @@ Web/TUI
   - 保留 BackgroundRoutine worker 和并发 slot 管理。
   - pending queue 改成 work item model，支持 continuation/replan/restart/start/resume 多类型。
   - 由 EventHub subscriber 入队，不由 HTTP handler 直接调用。
-  - startup/watchdog 从 owner state 重建 pending。
+  - 服务重启后不恢复旧进程 pending；watchdog 只处理幂等 stale dispatched
+    runtime gap，并记录 diagnostic。
 - `http_types.go`
   - `registerReplanContinuationWatcher` 补齐或替换为统一 scheduler command subscriber。
   - `registerAutoGovernanceResumeWatcher` 不直接调用 scheduler 函数，改投递统一 command event 或调用同一个 enqueue event handler。
@@ -337,8 +411,10 @@ Web/TUI
 需要核对：
 
 - run owner command 和 read command 是否都携带 workspace scope。
-- activeRunId、superseded predecessor、replacement/successor lineage 是否可以支持 restart/replan 查询。
+- activeRunId、superseded predecessor、replacement/successor lineage 是否可以支持 restart/replan 查询；activeRunId 已知 workspace owner 时必须通过 workspace-scoped run lookup 读取。
 - 无 workspace 的 run command 必须失败并提示 workspace 缺失。
+- appservice run lifecycle facade 必须在进入 run owner read/start/resume 前已经绑定 workspace scope，不能先用裸 `runID` 全局解析后再补 scope。
+- run repository contract 已提供 `GetByWorkspaceID(workspaceID, runID)`；带 workspace scope 的 `/run/command/get`、run owner service 状态转换读取、orchestrator lifecycle/completion/close/resume/dispatch request run lookup、runtime progress/terminal event run lookup、governance auto-ticket/approval run read、appservice run repository helper 和 readmodelcore run reader helper 必须直接使用 scoped getter，避免同名 run 跨 workspace 后置过滤或为单个 run 读取扫描 workspace run list。
 
 ### `internal/modules/kernel/decision` / `approval`
 
@@ -389,7 +465,9 @@ Web/TUI
 - TUI `/decision replan` 提交后，后端必须出现 governance continuation requested event 和 pending/started worker evidence。
 - TUI `/run restart` 不再调用 activation-only path；必须创建 restart command event。
 - 多 workspace 同时处于 waiting_decision 时，分别 replan 后都能形成独立 pending key 并被执行。
-- 服务重启后，resolved decision 但无 successor/resume 的 workspace 能从 owner state 重建 pending。
+- 服务重启后，resolved decision 但无 successor/resume 的 workspace 不自动重建
+  replan pending；projection / scheduler diagnostics 必须提示需要 manual retry，
+  用户重新提交 `/run resume`、`/run restart` 或 decision/replan command 后才入队。
 - 并发 slot 被占满时，command 不丢失，后续 slot 释放后继续执行。
 - Web/TUI 只消费 projection refreshed 后的状态，不依赖请求同步返回推断最终状态。
 
@@ -409,12 +487,23 @@ Web/TUI
 - observer 只做 payload decode、scope 校验、幂等 key 生成和入队。
 - 增加单测覆盖 topic/lane、payload scope、缺 response/缺 scope 错误。
 
+Closure evidence:
+
+- Code: `internal/modules/application/workorchd/service/server/workorchd_scheduler_commands.go`.
+- Code: `internal/modules/application/workorchd/service/server/http_run_cache.go`.
+- Code: `internal/modules/application/workorchd/biz/appservice/runports/lifecycle_start_resume.go`.
+- Test: `internal/modules/application/workorchd/service/server/http_test.go`.
+- Test: `internal/modules/application/workorchd/biz/appservice/run_service_test.go`; `internal/modules/application/workorchd/biz/appservice/read_model_service_test.go`.
+- Covered cases: scheduler command rejects workspace scope mismatch and run scope mismatch between envelope and payload before queueing; mismatch does not create restart/run pending entries. Governance continuation refs without workspace scope now generate no pending key, create no pending entry, and submit no background work item. Appservice `StartRunView` / `ResumeRunView` rejects missing workspace scope before scoped owner read/start/resume.
+- Verification: `go test ./internal/modules/application/workorchd/service/server -run 'TestWorkorchDScheduler(CommandRejects.*ScopeMismatch|CommandReturnsErrorWhenRunContinuationQueueFails|CommandRequiresAcceptedResponse)|TestWorkorchDWorkspaceRunCommandRestartEnqueuesWorkspaceRestart|TestWorkorchDSchedulerWorkspaceRunCommandEnqueuesWorkspaceRestartByWorkspaceScope|TestServerStateGovernanceRunResumeRejectsMissingWorkspaceScope' -count=1`; `go test ./internal/modules/application/workorchd/biz/appservice -run 'Test(Start|Resume)RunWith(Session|Backend)|TestReadTerminalRunModelsWithBackendRemainStableAcrossReloads|TestWorkspaceScopedRunLookupDisambiguatesDuplicateRunIDs|TestRecoverStuckRunningRunsWithDuplicateRunIDsUsesWorkspaceScope' -count=1 -timeout=300s`.
+
 ### Phase 3: Scheduler Work Item Model
 
 - 将当前 governance/replan continuation pending map 收口为统一 work item entry。
 - 支持 governance continuation、run continuation、workspace restart、workspace activation、run start/resume。
 - pending clear 必须基于 owner state still-needs-work 判定。
-- startup/watchdog 从 owner state 重建 pending。
+- 服务重启后不恢复旧进程 pending；watchdog 只处理幂等 stale dispatched
+  runtime gap，不自动创建 replan/governance continuation。
 
 ### Phase 4: REST/TUI/Web Command Path Migration
 
@@ -437,7 +526,10 @@ Web/TUI
 - HTTP handler 不再直接调用 `scheduleGovernanceRunResumeRefs`、`scheduleReplanContinuationIfNeeded`、长耗时 `startRun/resumeRun/activateWorkspace` 路径。
 - workorchd scheduler observer 只轻量入队，实际执行在 BackgroundRoutine 中完成。
 - pending work item 按 workspace scoped key 管理，不同 workspace 的同名 run/ticket 不串扰。
-- 服务重启后，resolved governance blocker、superseded replan predecessor、stale running/dispatched run 都能由 recovery 重建 pending。
+- 服务重启后，resolved governance blocker 与 superseded replan predecessor 不自动由
+  recovery 重建 pending；它们必须投影为 explicit diagnostic / manual retry。
+  stale dispatched runtime gap 可由 watchdog 进行幂等恢复；stale running 但无
+  外部 runtime gap 证据时不得被 watchdog 当作自动 replan/restart 入口。
 - `/run restart` 语义明确为 restart/replacement intent，不再等价于普通 activation 返回现有 active run。
 - Web/TUI prompt、主视图、workspace list 的最终状态只来自 workorchd projection。
 - 核心框架保持业务中立，不把软件开发、LSP、Go、具体验证命令等 profile 策略写入 scheduler/orchestrator core。
@@ -451,7 +543,12 @@ Web/TUI
    - 推荐：restart command 使用中立 policy：running/dispatched 先 request supersede/cancel；waiting_decision/waiting_approval/blocked 直接创建 replacement lineage；具体可由 owner state transition 返回是否允许。
 
 3. pending queue 是否需要持久化实体？
-   - 推荐：短期以内存 pending + owner-state recovery 闭环；长期如需要强审计，可引入 scheduler work item owner 或 eventstream checkpoint。前提是任何 pending 都能从正式 owner state 重建。
+   - 当前推荐：短期以内存 pending + scheduler diagnostic + manual retry 闭环。
+     不从 owner state 自动重建 replan/governance pending，避免重启后重复执行或补偿
+     EventHub 主路径缺陷。
+   - 长期如需要强审计，可引入 scheduler work item owner 或 eventstream checkpoint；
+     只有被正式持久化为 scheduler work item 的 pending 才允许重启恢复，并且必须
+     具备幂等 key、scope guard、accepted ack 和 owner still-needs-work 判定。
 
 4. auto-governance resolved notification 是否直接触发 continuation，还是只发布 owner notification？
    - 推荐：所有 manual/auto governance resolution 都通过同一个 resolved notification 或 workorchd command subscriber 进入 continuation queue。
@@ -472,5 +569,5 @@ Web/TUI
 - 确认新增 topic 在 owner `pkg/events` 中定义，并登记 contract。
 - 确认所有 command envelope 携带 workspace scope。
 - 确认 observer 不执行长耗时动作。
-- 确认 BackgroundRoutine 缺失时作为装配错误，不创建裸 goroutine fallback。
+- 已确认 BackgroundRoutine 缺失时作为装配错误，不创建裸 goroutine fallback：`Service.Startup` 要求 framework `EventHub` 与 `BackgroundRoutine` 均已注入；`serverState.scheduleBackground` 缺少 routine 或提交失败时返回未入队并释放 wait group。
 - 确认 ViewModel/projection 只更新显示态，不驱动正式状态机。

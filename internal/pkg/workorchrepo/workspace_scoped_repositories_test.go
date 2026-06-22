@@ -3,6 +3,9 @@ package workorchrepo
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
@@ -249,5 +252,80 @@ func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T
 	}
 	if len(workspaceLatest) != 2 || workspaceLatest[0].ID != "evt-run-a-002" || workspaceLatest[1].ID != "evt-run-b-001" {
 		t.Fatalf("workspace latest = %+v, want newest two in chronological order", workspaceLatest)
+	}
+}
+
+func TestWorkspaceScopedEventRecordWorkspaceLatestUsesBoundedPerRunLists(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	repos := NewWorkspaceScopedFileRepositorySet(root)
+	workspaceID := common.WorkspaceID("ws-event-bounded")
+	scoped := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	for _, runID := range []common.RunID{"run-a", "run-b"} {
+		if err := repos.Runs.Create(scoped, &runmodel.Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       common.RunStateRunning,
+		}); err != nil {
+			t.Fatalf("create run %s: %v", runID, err)
+		}
+	}
+	for _, record := range []*eventstreammodel.EventRecord{
+		{
+			ID:          "evt-run-a-001",
+			Topic:       "/step/state/changed",
+			OccurredAt:  "2026-06-16T00:01:00Z",
+			WorkspaceID: workspaceID,
+			RunID:       "run-a",
+			Payload:     map[string]any{"state": "old"},
+		},
+		{
+			ID:          "evt-run-a-002",
+			Topic:       "/step/state/changed",
+			OccurredAt:  "2026-06-16T00:02:00Z",
+			WorkspaceID: workspaceID,
+			RunID:       "run-a",
+			Payload:     map[string]any{"state": "latest-a"},
+		},
+		{
+			ID:          "evt-run-b-001",
+			Topic:       "/run/state/changed",
+			OccurredAt:  "2026-06-16T00:03:00Z",
+			WorkspaceID: workspaceID,
+			RunID:       "run-b",
+			Payload:     map[string]any{"state": "latest-b"},
+		},
+	} {
+		if err := repos.EventRecords.Append(scoped, record); err != nil {
+			t.Fatalf("append event %s: %v", record.ID, err)
+		}
+	}
+	corruptFirstJSONLLine(t, filepath.Join(root, "internal", "workspaces", string(workspaceID), "runs", "run-a", "events", "events-000001.jsonl"))
+
+	workspaceLatest, err := repos.EventRecords.List(scoped, repository.EventRecordQuery{
+		WorkspaceID: workspaceID,
+		Limit:       1,
+	})
+	if err != nil {
+		t.Fatalf("list workspace latest with bounded per-run reads: %v", err)
+	}
+	if len(workspaceLatest) != 1 || workspaceLatest[0].ID != "evt-run-b-001" {
+		t.Fatalf("workspace latest = %+v, want newest run-b event without scanning corrupt old run-a event", workspaceLatest)
+	}
+}
+
+func corruptFirstJSONLLine(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read event jsonl %s: %v", path, err)
+	}
+	lines := strings.Split(string(data), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
+		t.Fatalf("event jsonl %s has no first line to corrupt", path)
+	}
+	lines[0] = "{not-json"
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatalf("write corrupt event jsonl %s: %v", path, err)
 	}
 }

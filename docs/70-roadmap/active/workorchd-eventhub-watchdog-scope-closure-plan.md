@@ -23,8 +23,26 @@ The first boundary adjustment has already been made locally:
 
 - Startup automatic recovery was removed.
 - Startup now only registers the watchdog timer.
+- `workorchd` service startup now treats missing framework `EventHub` or
+  `BackgroundRoutine` as assembly errors. Background scheduling does not create
+  unmanaged goroutine fallback when the routine is absent or rejects a task.
 - Periodic watchdog currently calls stale dispatched runtime-gap recovery only.
 - Historical running-run recovery, resolved-governance recovery, and replan continuation recovery are no longer part of periodic startup recovery and should remain explicit/manual paths unless a later design explicitly changes that.
+- Periodic stale runtime-gap recovery now enumerates only compact running-run
+  candidates through run owner read command payload
+  `states=[running], compact=true`; candidate runs omit `ExecutionContext`.
+- Watchdog runtime-gap classification uses scoped step summaries and scoped
+  runtime checkpoints. It does not read workspace snapshot, run snapshot,
+  global event list, or raw event payload on the periodic path.
+- Automatic recovery remains gated by neutral recovery safety metadata:
+  `request_not_accepted` is diagnostic-only, terminal gaps require terminal
+  result evidence, and in-progress/worker-lost gaps require explicit watchdog
+  retry safety.
+- Runtime event terminal/lifecycle publication failures are now observable.
+  `runtimeevent` records accepted, terminal, progress, worker lifecycle,
+  worker-lost, and heartbeat timer start failure counters, and `/metrics`
+  exposes them as `workorch_runtime_event_publish_failures_total` plus
+  `workorch_runtime_heartbeat_timer_start_failures_total`.
 
 Remaining work is the scope below.
 
@@ -149,13 +167,43 @@ Required closure:
 - Accepted, completed, failed, and worker-lost publication failures must be observable and must not be silently swallowed.
 - Heartbeat/progress publication failures may remain non-fatal, but must be rate-limited/logged or otherwise observable.
 - Runtime terminal state should not be recorded as completed in local executor state before the terminal event is durably published, unless replay semantics are made explicit and tested.
-- Runtime event lane policy should be reviewed. Terminal result events may need state-lane ordering by workspace/run/step instead of topic-lane ordering.
+- Runtime event lane policy has been reviewed for the audited path. Runtime accepted/result events use scoped state lanes, and owner notifications now use owner/workspace/run scoped state lanes; future topic-lane notifications require an explicit global-ordering reason.
 
 Tests:
 
 - Terminal publish failure is surfaced by runtime executor.
 - Worker-lost publish failure is logged or returned through a test-observable hook.
 - Runtime event ordering for accepted/progress/completed/failed remains deterministic per workspace/run/step.
+
+Closure record:
+
+- Code: `internal/modules/blocks/pkg/runtimeevent/metrics.go`,
+  `internal/modules/blocks/pkg/runtimeevent/runtime_event.go`,
+  `internal/modules/application/workorchd/service/server/http_response_helpers.go`,
+  `scripts/observe-workorch-runtime-closure.sh`, `Makefile`.
+- Behavior: runtime event publish failure is counted at the shared
+  `publishRuntimeNotification` boundary. Terminal completed/failed publish
+  failures increment the terminal counter and still avoid recording terminal
+  replay state before durable publication succeeds. Accepted publish failures
+  increment the accepted counter and still prevent worker start. Worker
+  lifecycle progress publish failures increment progress and lifecycle
+  counters, with `runtime_worker_lost` also incrementing the worker-lost
+  counter. Heartbeat timer start failure is counted and logged.
+- Metrics: `/metrics` exposes
+  `workorch_runtime_event_publish_failures_total{category="accepted"}`,
+  `terminal`, `progress`, `worker_lifecycle`, `worker_lost`, and
+  `workorch_runtime_heartbeat_timer_start_failures_total`.
+- Runtime observation: `observe-workorch-runtime-closure.sh` requires the new
+  metrics and reports `runtimeEventPublishFailures` deltas. The optional
+  `WORKORCH_OBSERVE_MAX_RUNTIME_EVENT_PUBLISH_FAILURES_DELTA` gate is set to
+  zero by `make verify-runtime-idle-baseline`.
+- Verification:
+  `go test ./internal/modules/blocks/pkg/runtimeevent ./internal/modules/application/workorchd/service/server -run 'TestExecutor(TerminalPublishFailureDoesNotRecordCompletedTerminal|WorkerLostPublishFailureIsReturned|AcceptedPublishFailureDoesNotStartWorker)|TestMetricsEndpointReportsCounters' -count=1`.
+  `WORKORCH_OBSERVE_DURATION_SECONDS=5 WORKORCH_MANAGED_VERIFY_KEEP_ARTIFACTS=1 make verify-runtime-idle-baseline`
+  passed with artifacts in `/tmp/tmp.E6cSX08MH6/observe-runtime-closure`;
+  `runtimeEventPublishFailures.totalPublishFailureDelta=0`,
+  `projectionPendingRebuilds=0`, event payload hydrate delta `0`, and process
+  read/write byte deltas `0`.
 
 ## P1 Closure Scope
 

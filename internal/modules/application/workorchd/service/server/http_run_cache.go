@@ -668,13 +668,16 @@ func governanceRunResumeKey(item governanceRunResumeRef) string {
 	if intent == "" {
 		intent = "resume"
 	}
-	if item.WorkspaceID == "" {
-		return intent + "//" + item.RunID
+	workspaceID := strings.TrimSpace(item.WorkspaceID)
+	runID := strings.TrimSpace(item.RunID)
+	if workspaceID == "" || runID == "" {
+		return ""
 	}
-	if item.DecisionID != "" {
-		return intent + "/" + item.WorkspaceID + "/" + item.RunID + "/" + item.DecisionID
+	decisionID := strings.TrimSpace(item.DecisionID)
+	if decisionID != "" {
+		return intent + "/" + workspaceID + "/" + runID + "/" + decisionID
 	}
-	return intent + "/" + item.WorkspaceID + "/" + item.RunID
+	return intent + "/" + workspaceID + "/" + runID
 }
 
 func uniqueNonEmptyStrings(items []string) []string {

@@ -116,7 +116,7 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	if summary == "" {
 		summary = "workspace patch apply"
 	}
-	if containsNonSubstantivePatchIntent(summary) || containsNonSubstantivePatchIntent(content) || containsNonSubstantivePatchIntent(diff) || containsNonSubstantivePatchIntent(newText) {
+	if patchDeclaresNonSubstantiveChange(item) {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch describes a non-substantive state-change placeholder", common.ErrInvalidArgument)
 	}
 	return runtimePatchRequest{
@@ -264,8 +264,22 @@ func containsRuntimeRedactionMarker(value string) bool {
 	return runtimeRedactionMarkerPattern.MatchString(value)
 }
 
-func containsNonSubstantivePatchIntent(value string) bool {
-	return nonSubstantivePatchIntentPattern.MatchString(value)
+func patchDeclaresNonSubstantiveChange(item map[string]any) bool {
+	if item == nil {
+		return false
+	}
+	for _, key := range []string{"nonSubstantive", "zeroWork"} {
+		if boolFromValue(item[key]) {
+			return true
+		}
+	}
+	for _, key := range []string{"substantive", "meaningfulChange"} {
+		value, ok := item[key].(bool)
+		if ok && !value {
+			return true
+		}
+	}
+	return false
 }
 
 var unresolvedRuntimeSymbolPattern = regexp.MustCompile(`__[A-Z][A-Z0-9_]{8,}__`)
@@ -274,4 +288,3 @@ var unresolvedUnifiedDiffHunkPattern = regexp.MustCompile(`(?m)^@@\s*\.\.\.\s*@@
 var unresolvedAnglePlaceholderPattern = regexp.MustCompile(`<<\s*[A-Za-z0-9_-]*(FROM|PATCH|DIFF|CONTENT|IMPLEMENTATION|PLACEHOLDER|TODO)[A-Za-z0-9_\s.-]*\s*>>`)
 var unresolvedPseudoImplementationPattern = regexp.MustCompile(`(?i)(TODO:\s*(implement|fill|replace)|\.\.\.\s*(省略|omitted|placeholder)|省略(实现|代码|内容)|伪代码|占位(实现|代码|内容))`)
 var runtimeRedactionMarkerPattern = regexp.MustCompile(`(?i)\[(?:REDACTED|SECRET|MASKED)\]`)
-var nonSubstantivePatchIntentPattern = regexp.MustCompile(`(?i)(ensure|satisfy|force|only|just).{0,48}(patch|state[-_ ]?change|contract|node|anchor)|(?:patch|state[-_ ]?change|contract|node|anchor).{0,48}(ensure|satisfy|force|only|just)|确保.{0,24}补丁.{0,24}(节点|存在)|为了.{0,24}(补丁|状态变更|patch)|(?:满足|确保).{0,24}(状态变更|契约|contract)|runtime[-_ ]?repair.{0,48}(contract|convergence|marker)|仅.{0,12}(添加|增加).{0,12}(注释|comment).{0,24}(满足|确保|避免)|占位.{0,12}(补丁|patch|变更)|严格收敛.{0,32}(锚点|注释|marker|占位|最小状态变更|有界验证)|验证锚点|收敛修复.{0,32}(锚点|注释|marker|占位|最小状态变更)|仅为.{0,24}验证|state[-_ ]?change.{0,24}anchor|verification.{0,24}anchor`)

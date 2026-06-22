@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -18,7 +17,7 @@ const (
 	runtimeExecutionGapWorkerLost                 = "worker_lost"
 )
 
-func MapRuntimeExecutionState(steps []presenter.StepView, checkpoints []readmodelcore.RuntimeCheckpoint, currentStep *presenter.StepView) *readmodelcore.RuntimeExecutionState {
+func MapRuntimeExecutionState(steps []StepView, checkpoints []readmodelcore.RuntimeCheckpoint, currentStep *StepView) *readmodelcore.RuntimeExecutionState {
 	if len(steps) == 0 && currentStep == nil {
 		return nil
 	}
@@ -159,7 +158,7 @@ func applyRuntimeExecutionProgress(state *readmodelcore.RuntimeExecutionState, c
 	}
 }
 
-func runtimeExecutionContractViolationFromStep(step *presenter.StepView) *runtimemodel.ContractViolation {
+func runtimeExecutionContractViolationFromStep(step *StepView) *runtimemodel.ContractViolation {
 	if step == nil {
 		return nil
 	}

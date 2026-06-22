@@ -14,6 +14,7 @@ func (c OwnerReaderCandidates) WorkspaceSnapshotReaders(owner OwnerReaders, publ
 		Results:               c.Results,
 		Artifacts:             c.Artifacts,
 		ArtifactContinuations: c.ArtifactContinuations,
+		CoverageWorkItems:     c.CoverageWorkItems,
 		EventRecords:          c.EventRecords,
 		Patches:               c.Patches,
 		Tickets:               c.Tickets,

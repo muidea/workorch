@@ -4,10 +4,9 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
-func applyRepairGroundingInputDetails(ret *readmodelcore.RepairLoop, repairStep *presenter.StepView, actionPackage map[string]any) {
+func applyRepairGroundingInputDetails(ret *readmodelcore.RepairLoop, repairStep *StepView, actionPackage map[string]any) {
 	if ret == nil || repairStep == nil {
 		return
 	}

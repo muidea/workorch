@@ -2,11 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 )
 
-func MapGitOperationTraces(steps []presenter.StepView) []readmodelcore.GitOperationTrace {
+func MapGitOperationTraces(steps []StepView) []readmodelcore.GitOperationTrace {
 	if len(steps) == 0 {
 		return nil
 	}

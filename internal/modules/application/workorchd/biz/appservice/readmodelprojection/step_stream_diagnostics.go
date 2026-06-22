@@ -4,10 +4,9 @@ import (
 	"strconv"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
-func streamDiagnosticsTimelineItems(step presenter.StepView, runState string, stepOccurredAt string) []readmodelcore.RuntimeTimelineItem {
+func streamDiagnosticsTimelineItems(step StepView, runState string, stepOccurredAt string) []readmodelcore.RuntimeTimelineItem {
 	diagnostics := readModelMapValue(step.Output["streamDiagnostics"])
 	if len(diagnostics) == 0 {
 		return nil

@@ -20,8 +20,10 @@ import {
   nextProviderDraft,
   nextWebSearchProviderDraft,
   providerDraftFromTemplate,
+  splitHeaderLines,
   SoulDefinitionManager,
   splitLines,
+  validateHeaderLines,
   webSearchConfigurationFormValues,
   webSearchProviderDraftFromTemplate,
   webSearchProviderFormValues,
@@ -163,6 +165,7 @@ export function ConfigurationPage() {
           provider: item.provider?.trim(),
           searchEndpoint: item.searchEndpoint?.trim(),
           fetchEndpoint: item.fetchEndpoint?.trim(),
+          headers: item.headers ?? {},
           apiKey: item.apiKey?.trim(),
           timeout: item.timeout?.trim(),
           maxResults: item.maxResults,
@@ -331,6 +334,7 @@ export function ConfigurationPage() {
           ...values,
           allowDomains: splitLines(values.allowDomains),
           denyDomains: splitLines(values.denyDomains),
+          headers: splitHeaderLines(values.headers),
           apiKey: values.apiKey
         });
         webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(templated));
@@ -349,7 +353,8 @@ export function ConfigurationPage() {
         ...nextItems[selectedWebSearchProviderIndex],
         ...values,
         allowDomains: splitLines(values.allowDomains),
-        denyDomains: splitLines(values.denyDomains)
+        denyDomains: splitLines(values.denyDomains),
+        headers: splitHeaderLines(values.headers)
       };
       const nextID = values.id?.trim();
       if (defaultWebSearchProviderId === previousID && nextID && nextID !== previousID) {
@@ -530,6 +535,19 @@ export function ConfigurationPage() {
                 </Form.Item>
                 <Form.Item name="fetchEndpoint" label="Fetch Endpoint">
                   <Input placeholder="https://search-gateway.example/api/fetch" />
+                </Form.Item>
+                <Form.Item
+                  name="headers"
+                  label="请求头"
+                  rules={[
+                    {
+                      validator: async (_, value?: string) => {
+                        validateHeaderLines(value);
+                      }
+                    }
+                  ]}
+                >
+                  <Input.TextArea rows={3} placeholder="Authorization: Bearer token&#10;X-Request-Source: workorch" />
                 </Form.Item>
                 <Form.Item name="timeout" label="超时">
                   <Input placeholder="20s" />

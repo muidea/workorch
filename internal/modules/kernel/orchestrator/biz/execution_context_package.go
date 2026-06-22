@@ -349,13 +349,11 @@ func runExecutionContextPackage(ctx context.Context, deps executionContextPackag
 			}
 		}
 	}
-	selected := map[string]any{}
-	if len(stableContext.selectedContext) > 0 {
-		selected = cloneStepPayload(stableContext.selectedContext)
-	} else if base := selectedContextPackage(executionContext); len(base) > 0 {
-		selected = base
-	}
+	selected := mergeSelectedContextRuntimeCapabilities(stableContext.selectedContext, selectedContextPackage(executionContext))
 	if len(memoryRetrieval) > 0 {
+		if selected == nil {
+			selected = map[string]any{}
+		}
 		if len(refreshedMemories) > 0 {
 			selected["memories"] = refreshedMemories
 		} else {
@@ -767,6 +765,39 @@ func compactSelectedContextForCurrentDefinition(selected map[string]any, current
 			"definitionRevision": strings.TrimSpace(currentRevision),
 			"omittedCount":       omitted,
 		}
+	}
+	return ret
+}
+
+func mergeSelectedContextRuntimeCapabilities(stable map[string]any, current map[string]any) map[string]any {
+	ret := map[string]any{}
+	if len(stable) > 0 {
+		ret = cloneStepPayload(stable)
+	}
+	if len(current) == 0 {
+		if len(ret) == 0 {
+			return nil
+		}
+		return ret
+	}
+	if len(ret) == 0 {
+		return cloneStepPayload(current)
+	}
+	for _, key := range []string{"skills", "mcpServers", "mcpCapabilities", "capabilityIds"} {
+		if value, ok := current[key]; ok && value != nil {
+			ret[key] = cloneLLMContextValue(value)
+		}
+	}
+	for _, key := range []string{"memories", "memoryRetrieval"} {
+		if _, ok := ret[key]; ok {
+			continue
+		}
+		if value, ok := current[key]; ok && value != nil {
+			ret[key] = cloneLLMContextValue(value)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
 	}
 	return ret
 }
@@ -1946,6 +1977,9 @@ func selectedContextPackage(executionContext map[string]any) map[string]any {
 	if capabilities := compactMCPCapabilityContexts(mapSliceFromValue(executionContext["mcpCapabilities"])); len(capabilities) > 0 {
 		ret["mcpCapabilities"] = capabilities
 	}
+	if capabilityIDs := compactUniqueStrings(stringSliceFromValue(executionContext["capabilityIds"])); len(capabilityIDs) > 0 {
+		ret["capabilityIds"] = capabilityIDs
+	}
 	if memories := compactMemoryContexts(mapSliceFromValue(executionContext["memories"])); len(memories) > 0 {
 		ret["memories"] = memories
 	}
@@ -2017,7 +2051,7 @@ func (o *RuntimeOrchestrator) recordLLMStepInputMemoryRecallTrace(ctx context.Co
 	if o.eventHub == nil {
 		return nil
 	}
-	return o.eventHub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, o.eventHub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        memoryevents.TopicMemoryRecallRecorded,
 		OccurredAt:   trace.OccurredAt,

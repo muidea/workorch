@@ -95,7 +95,8 @@ func TestListApprovalPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	if len(page.Approvals) != 1 || page.Approvals[0].ID != second.BlockingApprovalID {
 		t.Fatalf("page approvals = %+v, want newest second approval", page.Approvals)
 	}
-	if !page.HasMore || page.NextCursorAfterID != second.BlockingApprovalID {
+	wantCursor := second.WorkspaceID + "\x00" + second.BlockingApprovalID
+	if !page.HasMore || page.NextCursorAfterID != wantCursor {
 		t.Fatalf("page cursor = %+v, want hasMore with second cursor", page)
 	}
 	if page.Approvals[0].Context != nil {
@@ -227,6 +228,29 @@ func TestApproveApprovalWithBackendReturnsApprovedApproval(t *testing.T) {
 	}
 	if item.State != "approved" {
 		t.Fatalf("approval = %+v, want approved", item)
+	}
+}
+
+func TestResolveApprovalWithBackendPersistsGovernanceSemanticPayload(t *testing.T) {
+	dataRoot := t.TempDir()
+	started := prepareApprovalRun(t, dataRoot, "ws-approval-semantic", "run-approval-semantic")
+
+	item, err := ResolveApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID, ResolveApprovalCommand{
+		Action: "approve",
+		Payload: map[string]any{
+			"rawInput": "同意继续",
+			"source":   "tui",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveApprovalWithBackend: %v", err)
+	}
+	if item.State != "approved" {
+		t.Fatalf("approval = %+v, want approved", item)
+	}
+	semantic, ok := item.Context["governanceSemantic"].(map[string]any)
+	if !ok || semantic["intent"] != "approve_execution" || semantic["source"] != "tui" {
+		t.Fatalf("governanceSemantic = %#v, want approve from tui", item.Context["governanceSemantic"])
 	}
 }
 

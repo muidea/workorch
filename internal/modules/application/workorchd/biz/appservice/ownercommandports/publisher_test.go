@@ -69,3 +69,49 @@ func TestPublishMemoryRecallTraceUpsertPublishesCommandPayload(t *testing.T) {
 		t.Fatalf("payload contains legacy traceId field")
 	}
 }
+
+func TestRecordMemoryRecallTracePublishesRecordedNotificationThroughAsyncHub(t *testing.T) {
+	ctx := context.Background()
+	hub := &recordingMemoryRecallAsyncHub{}
+	trace := &memorymodel.MemoryRecallTrace{
+		ID:                 "trace-recorded-async",
+		WorkspaceID:        "ws-trace-recorded-async",
+		RunID:              "run-trace-recorded-async",
+		Stage:              "activation",
+		Status:             "selected",
+		RetrievedMemoryIDs: []common.MemoryID{"mem-selected"},
+		OccurredAt:         "2026-06-21T00:00:00Z",
+	}
+
+	if err := RecordMemoryRecallTrace(ctx, hub, trace); err != nil {
+		t.Fatalf("RecordMemoryRecallTrace: %v", err)
+	}
+	if len(hub.sync) != 1 || hub.sync[0].Topic != memoryevents.TopicMemoryRecallTraceCommandUpsert {
+		t.Fatalf("sync publishes = %+v, want one trace upsert command", hub.sync)
+	}
+	if len(hub.async) != 1 || hub.async[0].Topic != memoryevents.TopicMemoryRecallRecorded {
+		t.Fatalf("async publishes = %+v, want one memory recall recorded notification", hub.async)
+	}
+	if hub.async[0].WorkspaceID != string(trace.WorkspaceID) || hub.async[0].RunID != string(trace.RunID) {
+		t.Fatalf("async scope = workspace:%q run:%q", hub.async[0].WorkspaceID, hub.async[0].RunID)
+	}
+}
+
+type recordingMemoryRecallAsyncHub struct {
+	sync  []events.Envelope
+	async []events.Envelope
+}
+
+func (h *recordingMemoryRecallAsyncHub) Publish(_ context.Context, envelope events.Envelope) error {
+	h.sync = append(h.sync, envelope)
+	return events.Response(envelope)
+}
+
+func (h *recordingMemoryRecallAsyncHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
+	h.async = append(h.async, envelope)
+	return nil
+}
+
+func (h *recordingMemoryRecallAsyncHub) Subscribe(string, events.Handler) func() {
+	return func() {}
+}

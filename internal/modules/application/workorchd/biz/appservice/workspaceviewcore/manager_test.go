@@ -427,6 +427,22 @@ func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 	}
 }
 
+func TestManagerPublishesProjectionChangedThroughAsyncHub(t *testing.T) {
+	ctx := context.Background()
+	hub := &recordingAsyncProjectionHub{}
+	manager := NewManager(ManagerOptions{Hub: hub})
+	manager.store.UpsertWorkspace(appmodelcore.Workspace{ID: "ws-a", State: "active"})
+
+	manager.publishProjectionChanged(ctx, "ws-a", "detail")
+
+	if hub.asyncCalls != 1 || hub.syncCalls != 0 {
+		t.Fatalf("publish calls = async:%d sync:%d, want projection notification through async hub", hub.asyncCalls, hub.syncCalls)
+	}
+	if hub.last.Topic != workorchdevents.TopicWorkspaceProjectionChanged || hub.last.WorkspaceID != "ws-a" || hub.last.Payload["changeKind"] != "detail" {
+		t.Fatalf("projection event = %+v, want workspace projection changed detail", hub.last)
+	}
+}
+
 func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuild(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
@@ -803,6 +819,63 @@ func TestManagerReschedulesWorkspaceRebuildWhenEventArrivesInFlight(t *testing.T
 	}
 }
 
+func TestManagerSchedulesIndependentWorkspaceRebuildsWithPerWorkspaceDebounce(t *testing.T) {
+	ctx := context.Background()
+	loader := &workspaceCountingProjectionLoader{}
+	var scheduled []func(context.Context)
+	manager := NewManager(ManagerOptions{
+		Loader: loader,
+		Schedule: func(name string, fn func(context.Context)) bool {
+			if name != "workspace_projection_rebuild" {
+				t.Fatalf("scheduled task = %q, want workspace_projection_rebuild", name)
+			}
+			scheduled = append(scheduled, fn)
+			return true
+		},
+	})
+
+	manager.ScheduleRebuildWorkspace("ws-a")
+	manager.ScheduleRebuildWorkspace("ws-b")
+	manager.ScheduleRebuildWorkspace("ws-a")
+	if len(scheduled) != 2 {
+		t.Fatalf("scheduled rebuilds = %d, want one task per distinct workspace before pending rerun", len(scheduled))
+	}
+	if metrics := manager.Metrics(); metrics.WorkspaceRebuildDebouncedTotal != 1 || metrics.PendingWorkspaceRebuilds != 1 {
+		t.Fatalf("debounce metrics = %+v, want only ws-a pending rerun", metrics)
+	}
+
+	scheduled[1](ctx)
+	if got := loader.callsFor("ws-b"); got != 1 {
+		t.Fatalf("ws-b rebuild calls = %d, want independent rebuild while ws-a is pending", got)
+	}
+	if len(scheduled) != 2 {
+		t.Fatalf("scheduled rebuilds after ws-b run = %d, want no cross-workspace rerun", len(scheduled))
+	}
+
+	scheduled[0](ctx)
+	if len(scheduled) != 3 {
+		t.Fatalf("scheduled rebuilds after first ws-a run = %d, want pending ws-a rerun", len(scheduled))
+	}
+	scheduled[2](ctx)
+	if got := loader.callsFor("ws-a"); got != 2 {
+		t.Fatalf("ws-a rebuild calls = %d, want pending rerun", got)
+	}
+	if metrics := manager.Metrics(); metrics.PendingWorkspaceRebuilds != 0 {
+		t.Fatalf("pending workspace rebuilds = %d, want drained", metrics.PendingWorkspaceRebuilds)
+	}
+	snapshotA, _, err := manager.ReadWorkspaceSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("read ws-a snapshot: %v", err)
+	}
+	snapshotB, _, err := manager.ReadWorkspaceSnapshot("ws-b")
+	if err != nil {
+		t.Fatalf("read ws-b snapshot: %v", err)
+	}
+	if snapshotA.Workspace.Title != "ws-a-snapshot-2" || snapshotB.Workspace.Title != "ws-b-snapshot-1" {
+		t.Fatalf("snapshots = %q/%q, want per-workspace rebuild results", snapshotA.Workspace.Title, snapshotB.Workspace.Title)
+	}
+}
+
 func TestManagerSchedulesWorkspaceRebuildAfterWorkspaceEventDuringFullRebuild(t *testing.T) {
 	ctx := context.Background()
 	loader := &blockingProjectionLoader{
@@ -992,6 +1065,28 @@ type scheduledProjectionTask struct {
 	fn   func(context.Context)
 }
 
+type recordingAsyncProjectionHub struct {
+	syncCalls  int
+	asyncCalls int
+	last       events.Envelope
+}
+
+func (h *recordingAsyncProjectionHub) Publish(_ context.Context, envelope events.Envelope) error {
+	h.syncCalls++
+	h.last = envelope
+	return nil
+}
+
+func (h *recordingAsyncProjectionHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
+	h.asyncCalls++
+	h.last = envelope
+	return nil
+}
+
+func (h *recordingAsyncProjectionHub) Subscribe(string, events.Handler) func() {
+	return func() {}
+}
+
 type fakeProjectionLoader struct {
 	workspaces []appmodelcore.Workspace
 	snapshots  map[string]readmodelcore.WorkspaceSnapshot
@@ -1034,6 +1129,41 @@ func (f *countingProjectionLoader) ReadWorkspaceSnapshot(context.Context, string
 	return readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: "ws-a", Title: fmt.Sprintf("snapshot-%d", f.calls)},
 	}, nil
+}
+
+type workspaceCountingProjectionLoader struct {
+	mu    sync.Mutex
+	calls map[string]int
+}
+
+func (f *workspaceCountingProjectionLoader) ListWorkspaces(context.Context) ([]appmodelcore.Workspace, error) {
+	return []appmodelcore.Workspace{
+		{ID: "ws-a", Title: "workspace-a"},
+		{ID: "ws-b", Title: "workspace-b"},
+	}, nil
+}
+
+func (f *workspaceCountingProjectionLoader) ReadWorkspace(_ context.Context, workspaceID string) (appmodelcore.Workspace, error) {
+	return appmodelcore.Workspace{ID: workspaceID, Title: workspaceID + "-workspace"}, nil
+}
+
+func (f *workspaceCountingProjectionLoader) ReadWorkspaceSnapshot(_ context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+	f.mu.Lock()
+	if f.calls == nil {
+		f.calls = map[string]int{}
+	}
+	f.calls[workspaceID]++
+	call := f.calls[workspaceID]
+	f.mu.Unlock()
+	return readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: workspaceID, Title: fmt.Sprintf("%s-snapshot-%d", workspaceID, call)},
+	}, nil
+}
+
+func (f *workspaceCountingProjectionLoader) callsFor(workspaceID string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[workspaceID]
 }
 
 type blockingProjectionLoader struct {

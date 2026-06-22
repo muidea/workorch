@@ -3,6 +3,7 @@ package runtimepath
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,6 +35,49 @@ func TestSequenceScopedPathUsesScopeSequenceAndStableExistingPath(t *testing.T) 
 	}
 	if got := SequenceScopedPath(root, "run-001", "run-001/repair-001-of-graph-004-004-verify"); got != "run-001/003-repair-001-of-graph-004-004-verify" {
 		t.Fatalf("repair path = %q, want third sequence", got)
+	}
+}
+
+func TestSafePathWithMaxTruncatesLongSegmentsWithStableHash(t *testing.T) {
+	long := "prefix-" + strings.Repeat("segment-", 40)
+	got := SafePathWithMax("run-001/"+long, DefaultMaxSegmentLen)
+	parts := strings.Split(filepath.ToSlash(got), "/")
+	if len(parts) != 2 {
+		t.Fatalf("parts = %+v, want two segments", parts)
+	}
+	if len(parts[1]) > DefaultMaxSegmentLen {
+		t.Fatalf("segment len = %d, want <= %d", len(parts[1]), DefaultMaxSegmentLen)
+	}
+	if !strings.HasPrefix(parts[1], "prefix-segment-") || !strings.Contains(parts[1], "-") {
+		t.Fatalf("segment = %q, want readable hash fallback", parts[1])
+	}
+	if got2 := SafePathWithMax("run-001/"+long, DefaultMaxSegmentLen); got2 != got {
+		t.Fatalf("SafePathWithMax not stable: %q vs %q", got2, got)
+	}
+}
+
+func TestSequenceScopedPathBoundsScopeAndDirectorySegments(t *testing.T) {
+	root := t.TempDir()
+	scope := "run-" + strings.Repeat("scope-", 50)
+	item := scope + "/repair-" + strings.Repeat("very-long-", 50)
+	got := SequenceScopedPath(root, scope, item)
+	parts := strings.Split(filepath.ToSlash(got), "/")
+	if len(parts) != 2 {
+		t.Fatalf("parts = %+v, want scope and item dir", parts)
+	}
+	for _, part := range parts {
+		if len(part) > DefaultMaxSegmentLen {
+			t.Fatalf("part len = %d, want <= %d for %q", len(part), DefaultMaxSegmentLen, part)
+		}
+	}
+	if !strings.HasPrefix(parts[1], "001-repair-") {
+		t.Fatalf("item dir = %q, want readable sequence prefix", parts[1])
+	}
+	if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(got)), 0o755); err != nil {
+		t.Fatalf("mkdir bounded sequence dir: %v", err)
+	}
+	if got2 := SequenceScopedPath(root, scope, item); got2 != got {
+		t.Fatalf("existing bounded sequence path = %q, want %q", got2, got)
 	}
 }
 

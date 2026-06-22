@@ -50,7 +50,7 @@ func (s *Service) CreateTicket(ctx context.Context, cmd decisioncontracts.Create
 	if s.eventHub == nil {
 		return nil
 	}
-	return s.eventHub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, s.eventHub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        decisionevents.TopicTicketCreated,
 		SourceModule: modulecommon.ModuleID,
@@ -121,10 +121,13 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 
 	ticket.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	resolution := &decisionModel.Resolution{
-		ID:       cmd.ResolutionID,
-		TicketID: cmd.TicketID,
-		Type:     cmd.Type,
-		Payload:  common.RedactSensitiveMap(clonePayload(cmd.Payload)),
+		ID:                 cmd.ResolutionID,
+		TicketID:           cmd.TicketID,
+		Type:               cmd.Type,
+		Payload:            common.RedactSensitiveMap(clonePayload(cmd.Payload)),
+		ContinuationAction: nonEmptyString(cmd.ContinuationAction, stringPayloadValue(cmd.Payload, "continuationAction")),
+		ResumeRunID:        nonEmptyRunID(cmd.ResumeRunID, common.RunID(stringPayloadValue(cmd.Payload, "resumeRunId"))),
+		SuccessorRunID:     nonEmptyRunID(cmd.SuccessorRunID, common.RunID(stringPayloadValue(cmd.Payload, "successorRunId"))),
 	}
 	if err := s.resolutions.Create(ctx, resolution); err != nil {
 		return nil, err
@@ -218,7 +221,7 @@ func (s *Service) publishResolvedTicketEvent(ctx context.Context, ticket *decisi
 	if s == nil || s.eventHub == nil || ticket == nil || resolution == nil {
 		return nil
 	}
-	return s.eventHub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, s.eventHub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        decisionevents.TopicTicketResolved,
 		SourceModule: modulecommon.ModuleID,
@@ -233,6 +236,11 @@ func (s *Service) publishResolvedTicketEvent(ctx context.Context, ticket *decisi
 			resolution.ID,
 			resolution.Type,
 			resolution.Payload,
+			events.DecisionResolutionPayloadData{
+				ContinuationAction: resolution.ContinuationAction,
+				ResumeRunID:        resolution.ResumeRunID,
+				SuccessorRunID:     resolution.SuccessorRunID,
+			},
 		),
 	})
 }
@@ -276,4 +284,27 @@ func clonePayload(input map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func nonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func nonEmptyRunID(values ...common.RunID) common.RunID {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func stringPayloadValue(payload map[string]any, key string) string {
+	value, _ := payload[key].(string)
+	return value
 }

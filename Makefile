@@ -18,7 +18,7 @@ CONSOLE_DEPS_STAMP := $(CONSOLE_NODE_MODULES)/.workorch-deps-stamp
 NPM_CI_FLAGS ?=
 NPM_INSTALL_FLAGS ?=
 
-.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-incremental-artifact-e2e verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch verify-run-resume-gap-confirmation-e2e observe-runtime-closure verify-web-console-projection-visual verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full verify-managed-full loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-workspace-switch-visual verify-tui-terminal-render verify-tui-long-output release release-check install-latest ci
+.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-incremental-artifact-e2e verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch verify-run-resume-gap-confirmation-e2e observe-runtime-closure verify-runtime-idle-baseline verify-web-console-projection-visual verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full verify-managed-full loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-workspace-switch-visual verify-tui-terminal-render verify-tui-long-output release release-check install-latest ci
 
 help:
 	@echo "Targets:"
@@ -58,6 +58,7 @@ help:
 	@echo "  verify-workspace-projection-switch - verify deployed workspace projection scope and switch refresh contract"
 	@echo "  verify-run-resume-gap-confirmation-e2e - verify deployed /run resume projection and gap baseline contract"
 	@echo "  observe-runtime-closure - collect deployed runtime projection, SSE, heartbeat, and optional LLM cache observations"
+	@echo "  verify-runtime-idle-baseline - verify managed latest service idle CPU/IO and event IO pressure baseline"
 	@echo "  verify-web-console-projection-visual - verify Web Console projection and heartbeat display contract"
 	@echo "  verify-incremental-artifact-e2e - verify deployed neutral incremental artifact plan/chunk/apply lifecycle"
 	@echo "  verify-e2e-template-contract - verify all e2e workspace creation requests declare templateId"
@@ -232,6 +233,26 @@ verify-run-resume-gap-confirmation-e2e:
 
 observe-runtime-closure:
 	./scripts/observe-workorch-runtime-closure.sh
+
+verify-runtime-idle-baseline:
+	WORKORCH_MANAGED_VERIFY_TARGET=observe-runtime-closure \
+	WORKORCH_MANAGED_PRECREATE_WORKSPACE_COUNT=$${WORKORCH_MANAGED_PRECREATE_WORKSPACE_COUNT:-2} \
+	WORKORCH_MANAGED_GO_TEST_PACKAGES="$${WORKORCH_MANAGED_GO_TEST_PACKAGES:-./internal/pkg/repository ./internal/pkg/repository/file ./internal/pkg/workorchrepo ./internal/modules/blocks/pkg/runtimeevent ./internal/modules/application/workorchd/service/server}" \
+	WORKORCH_OBSERVE_DURATION_SECONDS=$${WORKORCH_OBSERVE_DURATION_SECONDS:-20} \
+	WORKORCH_OBSERVE_AUTO_SNAPSHOT_LIMIT=0 \
+	WORKORCH_OBSERVE_ENABLE_PPROF_CHECK=0 \
+	WORKORCH_OBSERVE_ENABLE_CPU_PROFILE_CHECK=0 \
+	WORKORCH_OBSERVE_REQUIRE_PROCESS_RESOURCE=1 \
+	WORKORCH_OBSERVE_MAX_PENDING_REBUILDS=0 \
+	WORKORCH_OBSERVE_MAX_PROJECTION_SCHEDULE_DROPPED_DELTA=0 \
+	WORKORCH_OBSERVE_MAX_EVENT_METADATA_RECORDS_SCANNED_DELTA=$${WORKORCH_OBSERVE_MAX_EVENT_METADATA_RECORDS_SCANNED_DELTA:-0} \
+	WORKORCH_OBSERVE_MAX_EVENT_PAYLOAD_HYDRATES_DELTA=$${WORKORCH_OBSERVE_MAX_EVENT_PAYLOAD_HYDRATES_DELTA:-0} \
+	WORKORCH_OBSERVE_MAX_EVENT_PAYLOAD_HYDRATE_BYTES_DELTA=$${WORKORCH_OBSERVE_MAX_EVENT_PAYLOAD_HYDRATE_BYTES_DELTA:-0} \
+	WORKORCH_OBSERVE_MAX_RUNTIME_EVENT_PUBLISH_FAILURES_DELTA=$${WORKORCH_OBSERVE_MAX_RUNTIME_EVENT_PUBLISH_FAILURES_DELTA:-0} \
+	WORKORCH_OBSERVE_MAX_PROCESS_CPU_PERCENT=$${WORKORCH_OBSERVE_MAX_PROCESS_CPU_PERCENT:-20} \
+	WORKORCH_OBSERVE_MAX_PROCESS_READ_BYTES_DELTA=$${WORKORCH_OBSERVE_MAX_PROCESS_READ_BYTES_DELTA:-0} \
+	WORKORCH_OBSERVE_MAX_PROCESS_WRITE_BYTES_DELTA=$${WORKORCH_OBSERVE_MAX_PROCESS_WRITE_BYTES_DELTA:-0} \
+	./scripts/verify-workorch-managed-full.sh
 
 verify-web-console-projection-visual: console-build
 	./scripts/verify-web-console-projection-visual.sh

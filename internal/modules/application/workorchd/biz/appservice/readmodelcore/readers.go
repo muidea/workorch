@@ -26,6 +26,7 @@ type DoDReader interface {
 
 type RunReader interface {
 	Get(context.Context, common.RunID) (*runmodel.Run, error)
+	GetByWorkspaceID(context.Context, common.WorkspaceID, common.RunID) (*runmodel.Run, error)
 	List(context.Context) ([]*runmodel.Run, error)
 	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*runmodel.Run, error)
 }
@@ -51,6 +52,10 @@ type ArtifactReader interface {
 
 type ArtifactContinuationReader interface {
 	ListByRun(context.Context, common.RunID) ([]*orchestratormodel.ArtifactContinuation, error)
+}
+
+type CoverageWorkItemReader interface {
+	ListByRun(context.Context, common.RunID) ([]*orchestratormodel.CoverageWorkItem, error)
 }
 
 type ToolCallReader interface {

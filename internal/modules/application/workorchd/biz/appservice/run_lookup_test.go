@@ -16,14 +16,5 @@ func getRunFromRepository(ctx context.Context, runs repository.RunRepository, ru
 	if workspaceID == "" {
 		return runs.Get(ctx, runID)
 	}
-	items, err := runs.ListByWorkspaceID(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	for _, item := range items {
-		if item != nil && item.ID == runID {
-			return item, nil
-		}
-	}
-	return nil, common.ErrNotFound
+	return runs.GetByWorkspaceID(ctx, workspaceID, runID)
 }

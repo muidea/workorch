@@ -59,6 +59,20 @@ func TestRuntimeOrchestrator_RunningResumeReplansFromResolvedDecisionOnFailedNon
 			"goal": map[string]any{
 				"text": "- complete the current requested outcome after replan",
 			},
+			convergenceBudgetKey: map[string]any{
+				"state":                     "escalated",
+				"decision":                  "escalate_decision",
+				"focusId":                   "focus-cwi-001",
+				"sliceId":                   "slice-primary-state-change",
+				"repairAttempts":            int64(4),
+				"llmRounds":                 int64(4),
+				"validationOnlyRetries":     int64(3),
+				"noCoverageDeltaRounds":     int64(3),
+				"repeatedFailureSignatures": int64(2),
+				"lastDecisionReason":        "max_repair_attempts_per_focus_exceeded",
+				"lastFailureSignature":      "class=shell_command_failed|kind=shell/command",
+				"maxRepairAttemptsPerFocus": int64(7),
+			},
 		},
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -133,6 +147,16 @@ func TestRuntimeOrchestrator_RunningResumeReplansFromResolvedDecisionOnFailedNon
 	if successor.ExecutionContext == nil || successor.ExecutionContext["replanContinuation"] == nil {
 		t.Fatalf("successor execution context = %#v, want replan continuation", successor.ExecutionContext)
 	}
+	successorBudget := mapFromValue(successor.ExecutionContext[convergenceBudgetKey])
+	if stringFromMap(successorBudget, "decision") != "continue" || stringFromMap(successorBudget, "state") != "tracking" {
+		t.Fatalf("successor convergenceBudget = %+v, want reset tracking budget", successorBudget)
+	}
+	if reason := stringFromMap(successorBudget, "lastDecisionReason"); reason == "max_repair_attempts_per_focus_exceeded" {
+		t.Fatalf("successor convergenceBudget retained predecessor decision reason: %+v", successorBudget)
+	}
+	if got := int64FromValue(successorBudget["maxRepairAttemptsPerFocus"]); got != 7 {
+		t.Fatalf("successor maxRepairAttemptsPerFocus = %d, want inherited limit 7", got)
+	}
 	if baseline := mapFromValue(successor.ExecutionContext[gapBaselineKey]); len(baseline) == 0 {
 		t.Fatalf("successor execution context = %#v, want gapBaseline after replan start", successor.ExecutionContext)
 	}
@@ -141,6 +165,10 @@ func TestRuntimeOrchestrator_RunningResumeReplansFromResolvedDecisionOnFailedNon
 	}
 	if baseline := mapFromValue(runtime.requests[len(runtime.requests)-1].Input[gapBaselineKey]); len(baseline) == 0 {
 		t.Fatalf("successor runtime input = %#v, want gapBaseline", runtime.requests[len(runtime.requests)-1].Input)
+	}
+	requestBudget := mapFromValue(mapFromValue(runtime.requests[len(runtime.requests)-1].Input["acceptance"])["budget"])
+	if stringFromMap(requestBudget, "decision") != "continue" || stringFromMap(requestBudget, "state") != "tracking" {
+		t.Fatalf("successor runtime input acceptance budget = %+v, want reset tracking budget", requestBudget)
 	}
 }
 

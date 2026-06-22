@@ -10,12 +10,14 @@ import (
 )
 
 type fakeRunReader struct {
-	byID      map[common.RunID]*runmodel.Run
-	byWS      map[common.WorkspaceID][]*runmodel.Run
-	getCalls  int
-	listCalls int
-	getErr    error
-	listWSErr error
+	byID           map[common.RunID]*runmodel.Run
+	byWS           map[common.WorkspaceID]map[common.RunID]*runmodel.Run
+	getCalls       int
+	scopedGetCalls int
+	listCalls      int
+	getErr         error
+	scopedGetErr   error
+	listWSErr      error
 }
 
 func (r *fakeRunReader) Get(_ context.Context, id common.RunID) (*runmodel.Run, error) {
@@ -24,6 +26,19 @@ func (r *fakeRunReader) Get(_ context.Context, id common.RunID) (*runmodel.Run, 
 		return nil, r.getErr
 	}
 	item, ok := r.byID[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return item, nil
+}
+
+func (r *fakeRunReader) GetByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	r.scopedGetCalls++
+	if r.scopedGetErr != nil {
+		return nil, r.scopedGetErr
+	}
+	items := r.byWS[workspaceID]
+	item, ok := items[id]
 	if !ok {
 		return nil, common.ErrNotFound
 	}
@@ -39,7 +54,12 @@ func (r *fakeRunReader) ListByWorkspaceID(_ context.Context, workspaceID common.
 	if r.listWSErr != nil {
 		return nil, r.listWSErr
 	}
-	return r.byWS[workspaceID], nil
+	items := r.byWS[workspaceID]
+	ret := make([]*runmodel.Run, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, item)
+	}
+	return ret, nil
 }
 
 func TestGetRunFromReaderUsesDirectGetWithoutRuntimeWorkspace(t *testing.T) {
@@ -64,8 +84,8 @@ func TestGetRunFromReaderUsesRuntimeWorkspaceScope(t *testing.T) {
 		byID: map[common.RunID]*runmodel.Run{
 			run.ID: {ID: run.ID, WorkspaceID: "ws-other"},
 		},
-		byWS: map[common.WorkspaceID][]*runmodel.Run{
-			"ws-001": {run},
+		byWS: map[common.WorkspaceID]map[common.RunID]*runmodel.Run{
+			"ws-001": {run.ID: run},
 		},
 	}
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-001")
@@ -77,15 +97,15 @@ func TestGetRunFromReaderUsesRuntimeWorkspaceScope(t *testing.T) {
 	if got != run {
 		t.Fatalf("run mismatch")
 	}
-	if reader.getCalls != 0 || reader.listCalls != 1 {
-		t.Fatalf("calls mismatch: get=%d list=%d", reader.getCalls, reader.listCalls)
+	if reader.getCalls != 0 || reader.scopedGetCalls != 1 || reader.listCalls != 0 {
+		t.Fatalf("calls mismatch: get=%d scopedGet=%d list=%d", reader.getCalls, reader.scopedGetCalls, reader.listCalls)
 	}
 }
 
 func TestGetRunFromReaderReturnsNotFoundWhenScopedRunMissing(t *testing.T) {
 	reader := &fakeRunReader{
-		byWS: map[common.WorkspaceID][]*runmodel.Run{
-			"ws-001": {{ID: "run-other", WorkspaceID: "ws-001"}},
+		byWS: map[common.WorkspaceID]map[common.RunID]*runmodel.Run{
+			"ws-001": {"run-other": {ID: "run-other", WorkspaceID: "ws-001"}},
 		},
 	}
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-001")

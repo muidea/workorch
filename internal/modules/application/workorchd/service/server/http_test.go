@@ -386,6 +386,7 @@ func TestReadyzNativeRouteInjectsEventHub(t *testing.T) {
 
 func TestReadyzIncludesSchedulerDiagnostics(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), events.NewMemoryHub())
+	state.schedulerDiagnostics.recordWatchdogTimerRegistration()
 	state.schedulerDiagnostics.recordContinuation(schedulerDiagnosticInput{
 		WorkspaceID:    "ws-readyz-diagnostics",
 		RunID:          "run-readyz-diagnostics",
@@ -415,6 +416,9 @@ func TestReadyzIncludesSchedulerDiagnostics(t *testing.T) {
 	}
 	if body.Diagnostics == nil || body.Diagnostics.LatestContinuation == nil {
 		t.Fatalf("readyz diagnostics = %+v, want latest scheduler continuation", body.Diagnostics)
+	}
+	if body.Diagnostics.Watchdog.TimerRegistrations != 1 {
+		t.Fatalf("readyz watchdog timer registrations = %d, want 1", body.Diagnostics.Watchdog.TimerRegistrations)
 	}
 	latest := body.Diagnostics.LatestContinuation
 	if latest.WorkspaceID != "ws-readyz-diagnostics" ||
@@ -2169,21 +2173,27 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return []appservice.Decision{{ID: "ticket-native-read", WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "resolved", ResolutionType: cmd.ResolutionType}}, nil
 	}
-	state.approveApproval = func(ctx context.Context, _, _, approvalID string) (appservice.Approval, error) {
+	state.approveApproval = func(ctx context.Context, _, _, approvalID string, cmd appservice.ResolveApprovalCommand) (appservice.Approval, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("approval approve event hub = %#v, want injected hub", got)
 		}
 		if approvalID != "approval-native-read" {
 			t.Fatalf("approvalID = %q, want approval-native-read", approvalID)
 		}
+		if cmd.Action != "approve" {
+			t.Fatalf("approval approve action = %q, want approve", cmd.Action)
+		}
 		return appservice.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "approved"}, nil
 	}
-	state.rejectApproval = func(ctx context.Context, _, _, approvalID string) (appservice.Approval, error) {
+	state.rejectApproval = func(ctx context.Context, _, _, approvalID string, cmd appservice.ResolveApprovalCommand) (appservice.Approval, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("approval reject event hub = %#v, want injected hub", got)
 		}
 		if approvalID != "approval-native-read" {
 			t.Fatalf("approvalID = %q, want approval-native-read", approvalID)
+		}
+		if cmd.Action != "reject" {
+			t.Fatalf("approval reject action = %q, want reject", cmd.Action)
 		}
 		return appservice.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "rejected"}, nil
 	}
@@ -4931,6 +4941,32 @@ func TestServerStateGovernanceRunResumeUsesWorkspaceContext(t *testing.T) {
 	}
 }
 
+func TestServerStateGovernanceRunResumeRejectsMissingWorkspaceScope(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	state := newServerStateWithBackground(normalizeConfig(Config{
+		Backend:           "memory",
+		MaxConcurrentRuns: 1,
+	}), nil, routine)
+
+	if key := governanceRunResumeKey(governanceRunResumeRef{RunID: "run-missing-scope"}); key != "" {
+		t.Fatalf("governance resume key = %q, want empty for missing workspace scope", key)
+	}
+	if !state.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{
+		RunID: "run-missing-scope",
+	}}, 0) {
+		t.Fatal("scheduleGovernanceRunResumeRefs returned false for invalid no-op ref")
+	}
+	state.runContinuations.governanceMu.Lock()
+	pendingCount := len(state.runContinuations.governancePending)
+	state.runContinuations.governanceMu.Unlock()
+	if pendingCount != 0 {
+		t.Fatalf("governance pending count = %d, want no pending entry without workspace scope", pendingCount)
+	}
+	if routine.asyncFunctionCalls != 0 {
+		t.Fatalf("background submissions = %d, want no work without workspace scope", routine.asyncFunctionCalls)
+	}
+}
+
 func TestServerStateRecoversResolvedDecisionBlockedRun(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
@@ -5605,6 +5641,59 @@ func TestWorkorchDWorkspaceRunCommandRestartEnqueuesWorkspaceRestart(t *testing.
 	}
 }
 
+func TestWorkorchDSchedulerCommandRejectsWorkspaceScopeMismatch(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	hub := events.NewMemoryHub()
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+
+	err := publishHTTPTestCommand(context.Background(), hub, events.Envelope{
+		Topic:       workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
+		WorkspaceID: "ws-scheduler-envelope",
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID: "ws-scheduler-payload",
+			events.PayloadKeyIntent:      "restart",
+		},
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("workspace scope mismatch err = %v, want conflict", err)
+	}
+
+	state.runContinuations.restartMu.Lock()
+	pendingCount := len(state.runContinuations.restartPending)
+	state.runContinuations.restartMu.Unlock()
+	if pendingCount != 0 {
+		t.Fatalf("restart pending count = %d, want no queued command after scope mismatch", pendingCount)
+	}
+}
+
+func TestWorkorchDSchedulerCommandRejectsRunScopeMismatch(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	hub := events.NewMemoryHub()
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+
+	err := publishHTTPTestCommand(context.Background(), hub, events.Envelope{
+		Topic:       workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
+		WorkspaceID: "ws-scheduler-run-scope",
+		RunID:       "run-scheduler-envelope",
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID: "ws-scheduler-run-scope",
+			events.PayloadKeyRunID:       "run-scheduler-payload",
+			events.PayloadKeyIntent:      "resume",
+			events.PayloadKeyAction:      "resume",
+		},
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("run scope mismatch err = %v, want conflict", err)
+	}
+
+	state.runContinuations.runMu.Lock()
+	pendingCount := len(state.runContinuations.runPending)
+	state.runContinuations.runMu.Unlock()
+	if pendingCount != 0 {
+		t.Fatalf("run pending count = %d, want no queued command after scope mismatch", pendingCount)
+	}
+}
+
 func TestWorkorchDSchedulerCommandReturnsErrorWhenRunContinuationQueueFails(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
 	hub := events.NewMemoryHub()
@@ -5627,6 +5716,19 @@ func TestWorkorchDSchedulerCommandReturnsErrorWhenRunContinuationQueueFails(t *t
 	state.runContinuations.runMu.Unlock()
 	if !pending {
 		t.Fatalf("run continuation pending entry was dropped after queue failure")
+	}
+	diagnostics := state.schedulerDiagnostics.snapshot(workspaceID, runID)
+	if diagnostics == nil || diagnostics.LatestContinuation == nil {
+		t.Fatalf("scheduler diagnostics = %+v, want enqueue failure diagnostic", diagnostics)
+	}
+	latest := diagnostics.LatestContinuation
+	if latest.WorkspaceID != workspaceID ||
+		latest.RunID != runID ||
+		latest.Kind != schedulerKindRunContinuation ||
+		latest.State != schedulerDiagnosticStateFailed ||
+		latest.Reason != schedulerReasonEnqueueFailed ||
+		latest.Recoverability != schedulerRecoverabilityManualRetry {
+		t.Fatalf("latest continuation = %+v, want run continuation enqueue failure", latest)
 	}
 }
 
@@ -5689,7 +5791,7 @@ func TestWorkorchDGovernanceResolutionReturnsConflictWhenSchedulerQueueFails(t *
 	state.resolveDecision = func(context.Context, string, string, string, appservice.ResolveDecisionCommand) (appservice.Decision, error) {
 		return appservice.Decision{ID: "ticket-scheduler-fail", WorkspaceID: workspaceID, RunID: runID, State: string(common.DecisionTicketStateResolved)}, nil
 	}
-	state.approveApproval = func(context.Context, string, string, string) (appservice.Approval, error) {
+	state.approveApproval = func(context.Context, string, string, string, appservice.ResolveApprovalCommand) (appservice.Approval, error) {
 		return appservice.Approval{ID: "approval-scheduler-fail", WorkspaceID: workspaceID, RunID: runID, State: string(common.ApprovalStateApproved)}, nil
 	}
 	handler := newMuxWithState(state)
@@ -5822,6 +5924,49 @@ func TestServerStateRecoverReplanContinuationsSchedulesWaitingDecisionActiveSupe
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("waiting decision replan continuation recovery did not schedule activation")
+	}
+}
+
+func TestServerStateWatchdogDoesNotRecoverReplanContinuations(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := state.close(ctx); err != nil {
+			t.Fatalf("close server state: %v", err)
+		}
+	})
+
+	var workspaceScan atomic.Bool
+	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
+		workspaceScan.Store(true)
+		return []appservice.Workspace{
+			{ID: "ws-replan-watchdog", State: string(common.WorkspaceStateWaitingDecision), ActiveRunID: "run-replan-watchdog"},
+		}, nil
+	}
+	var activationCount atomic.Int32
+	state.resumeWorkspaceExecution = func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		activationCount.Add(1)
+		return appservice.WorkspaceExecutionActivation{
+			Run: appservice.Run{ID: "run-replan-watchdog-replan-001", WorkspaceID: "ws-replan-watchdog", State: string(common.RunStateRunning)},
+		}, nil
+	}
+
+	state.scheduleWatchdog()
+	if routine.timerTask == nil {
+		t.Fatal("watchdog timer was not registered")
+	}
+	routine.timerTask.Run()
+
+	if workspaceScan.Load() {
+		t.Fatal("watchdog scanned workspaces for replan continuation recovery")
+	}
+	if got := activationCount.Load(); got != 0 {
+		t.Fatalf("watchdog activated %d replan continuations, want none", got)
+	}
+	if got := state.schedulerDiagnostics.snapshot("", "").Watchdog.LatestTickAt; got == "" {
+		t.Fatal("watchdog latest tick was not recorded")
 	}
 }
 
@@ -6046,7 +6191,7 @@ func TestApprovalApproveEndpointApprovesApprovalAndAllowsRunResume(t *testing.T)
 
 	_, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "approval approve http workspace", runID)
 
-	approveReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/approvals/"+started.BlockingApprovalID+"/approve", nil)
+	approveReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/approvals/"+started.BlockingApprovalID+"/approve", strings.NewReader(`{"payload":{"rawInput":"同意继续","source":"web"}}`))
 	approveRec := httptest.NewRecorder()
 	handler.ServeHTTP(approveRec, approveReq)
 	if approveRec.Code != http.StatusOK {
@@ -6058,6 +6203,10 @@ func TestApprovalApproveEndpointApprovesApprovalAndAllowsRunResume(t *testing.T)
 	}
 	if approved.Approval.State != "approved" {
 		t.Fatalf("approval = %+v, want approved", approved.Approval)
+	}
+	semantic, ok := approved.Approval.Context["governanceSemantic"].(map[string]any)
+	if !ok || semantic["intent"] != "approve_execution" || semantic["source"] != "web" {
+		t.Fatalf("approval governance semantic = %#v, want approve from web", approved.Approval.Context["governanceSemantic"])
 	}
 
 	resumed := waitRunStateForHTTP(t, dataRoot, runID, string(common.RunStateFailed))
@@ -6209,6 +6358,16 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 		`workorch_run_outcomes_total{status="failed"} 1`,
 		`workorch_run_outcomes_total{status="canceled"} 0`,
 		`workorch_server_max_concurrent_runs 1`,
+		`workorch_event_record_metadata_scans_total`,
+		`workorch_event_record_metadata_records_scanned_total`,
+		`workorch_event_record_payload_hydrates_total`,
+		`workorch_event_record_payload_hydrate_bytes_total`,
+		`workorch_runtime_event_publish_failures_total{category="accepted"}`,
+		`workorch_runtime_event_publish_failures_total{category="terminal"}`,
+		`workorch_runtime_event_publish_failures_total{category="progress"}`,
+		`workorch_runtime_event_publish_failures_total{category="worker_lifecycle"}`,
+		`workorch_runtime_event_publish_failures_total{category="worker_lost"}`,
+		`workorch_runtime_heartbeat_timer_start_failures_total`,
 		`workorch_workspace_projection_rebuild_total{scope="full"}`,
 		`workorch_workspace_projection_pending_rebuilds`,
 		`workorch_workspace_projection_debounced_rebuild_total`,
@@ -6248,6 +6407,7 @@ func TestMetricsEndpointReportsSchedulerDiagnostics(t *testing.T) {
 		Reason:      schedulerReasonReplanSuccessorExists,
 		Detail:      "successor already exists",
 	})
+	state.schedulerDiagnostics.recordWatchdogTimerRegistration()
 	state.schedulerDiagnostics.recordWatchdogTick(time.Now().UTC(), 25*time.Millisecond, errors.New("watchdog failed"))
 	state.schedulerDiagnostics.recordStaleRuntimeGapRecovery("stale_dispatched", "runtime_recovery_policy", 2)
 
@@ -6264,6 +6424,7 @@ func TestMetricsEndpointReportsSchedulerDiagnostics(t *testing.T) {
 		`workorch_scheduler_command_enqueue_failures_total{kind="run_continuation",reason="scheduler_enqueue_failed"} 1`,
 		`workorch_scheduler_continuation_failures_total{kind="replan_continuation",reason="owner_command_failed"} 1`,
 		`workorch_scheduler_continuation_no_action_total{kind="replan_continuation",reason="replan_successor_exists"} 1`,
+		`workorch_watchdog_timer_registrations_total 1`,
 		`workorch_watchdog_interval_seconds 30`,
 		`workorch_watchdog_ticks_total 1`,
 		`workorch_watchdog_last_error_timestamp_seconds`,
@@ -6344,6 +6505,9 @@ func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing
 	second.state.scheduleWatchdog()
 	if routine.timerTask == nil {
 		t.Fatal("startup scheduling did not register periodic watchdog timer")
+	}
+	if got := second.state.schedulerDiagnostics.snapshot("", "").Watchdog.TimerRegistrations; got != 1 {
+		t.Fatalf("watchdog timer registrations = %d, want 1", got)
 	}
 	routine.timerTask.Run()
 

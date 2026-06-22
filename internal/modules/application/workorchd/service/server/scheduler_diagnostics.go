@@ -30,14 +30,15 @@ const (
 	schedulerDiagnosticStateCompleted      = "completed"
 	schedulerDiagnosticStateNoActionNeeded = "no_action_needed"
 
-	schedulerReasonEnqueueFailed         = "scheduler_enqueue_failed"
-	schedulerReasonBackgroundFailed      = "background_execution_failed"
-	schedulerReasonOwnerCommandFailed    = "owner_command_failed"
-	schedulerReasonRunSlotUnavailable    = "run_slot_unavailable"
-	schedulerReasonServiceShuttingDown   = "service_shutting_down"
-	schedulerReasonWorkspaceNotEligible  = "workspace_not_eligible"
-	schedulerReasonRunNotEligible        = "run_not_eligible"
-	schedulerReasonReplanSuccessorExists = "replan_successor_exists"
+	schedulerReasonEnqueueFailed                           = "scheduler_enqueue_failed"
+	schedulerReasonBackgroundFailed                        = "background_execution_failed"
+	schedulerReasonOwnerCommandFailed                      = "owner_command_failed"
+	schedulerReasonRunSlotUnavailable                      = "run_slot_unavailable"
+	schedulerReasonServiceShuttingDown                     = "service_shutting_down"
+	schedulerReasonWorkspaceNotEligible                    = "workspace_not_eligible"
+	schedulerReasonRunNotEligible                          = "run_not_eligible"
+	schedulerReasonReplanSuccessorExists                   = "replan_successor_exists"
+	schedulerReasonServiceRestartedPendingWorkNotRecovered = "service_restarted_pending_scheduler_work_not_recovered"
 
 	schedulerRecoverabilityManualRetry = "manual_retry_required"
 	schedulerRecoverabilityNoAction    = "no_action_needed"
@@ -68,13 +69,14 @@ type schedulerDiagnosticsStore struct {
 	continuationNoActions  map[labelPair]uint64
 	continuationCompleted  map[labelPair]uint64
 
-	watchdogTicks             uint64
-	watchdogLatestTickAt      time.Time
-	watchdogLatestDuration    time.Duration
-	watchdogLatestError       string
-	watchdogLastErrorAt       time.Time
-	watchdogStaleRecoveries   map[labelPair]uint64
-	watchdogStaleRecoveryRuns uint64
+	watchdogTimerRegistrations uint64
+	watchdogTicks              uint64
+	watchdogLatestTickAt       time.Time
+	watchdogLatestDuration     time.Duration
+	watchdogLatestError        string
+	watchdogLastErrorAt        time.Time
+	watchdogStaleRecoveries    map[labelPair]uint64
+	watchdogStaleRecoveryRuns  uint64
 }
 
 type labelPair struct {
@@ -166,6 +168,15 @@ func (s *schedulerDiagnosticsStore) recordContinuation(input schedulerDiagnostic
 	return item
 }
 
+func (s *schedulerDiagnosticsStore) recordWatchdogTimerRegistration() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.watchdogTimerRegistrations++
+}
+
 func (s *schedulerDiagnosticsStore) recordWatchdogTick(start time.Time, duration time.Duration, err error) {
 	if s == nil {
 		return
@@ -217,10 +228,11 @@ func (s *schedulerDiagnosticsStore) snapshot(workspaceID, runID string) *appserv
 	}
 	ret := &appservice.SchedulerDiagnostics{
 		Watchdog: appservice.WatchdogDiagnostics{
-			LatestTickAt:      formatSchedulerTime(s.watchdogLatestTickAt),
-			LatestDurationMs:  int64(s.watchdogLatestDuration / time.Millisecond),
-			LatestError:       s.watchdogLatestError,
-			StaleRecoveryRuns: s.watchdogStaleRecoveryRuns,
+			TimerRegistrations: s.watchdogTimerRegistrations,
+			LatestTickAt:       formatSchedulerTime(s.watchdogLatestTickAt),
+			LatestDurationMs:   int64(s.watchdogLatestDuration / time.Millisecond),
+			LatestError:        s.watchdogLatestError,
+			StaleRecoveryRuns:  s.watchdogStaleRecoveryRuns,
 		},
 		RecentContinuations: recent,
 	}
@@ -252,6 +264,8 @@ func (s *schedulerDiagnosticsStore) renderMetrics() string {
 	writeLabelPairMetrics(&b, "workorch_scheduler_continuation_failures_total", "kind", "reason", s.continuationFailures)
 	b.WriteString("# TYPE workorch_scheduler_continuation_no_action_total counter\n")
 	writeLabelPairMetrics(&b, "workorch_scheduler_continuation_no_action_total", "kind", "reason", s.continuationNoActions)
+	b.WriteString("# TYPE workorch_watchdog_timer_registrations_total counter\n")
+	b.WriteString(fmt.Sprintf("workorch_watchdog_timer_registrations_total %d\n", s.watchdogTimerRegistrations))
 	b.WriteString("# TYPE workorch_watchdog_interval_seconds gauge\n")
 	b.WriteString(fmt.Sprintf("workorch_watchdog_interval_seconds %.0f\n", runWatchdogInterval.Seconds()))
 	b.WriteString("# TYPE workorch_watchdog_ticks_total counter\n")

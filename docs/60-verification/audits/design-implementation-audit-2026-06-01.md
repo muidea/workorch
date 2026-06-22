@@ -200,11 +200,109 @@ graph follow-up 扩展上限为 `maxGraphFollowUpExpansionAttempts=2`
 | 旧偏差 # | 描述 | 当前状态 | 处置 |
 |----------|------|----------|------|
 | 1 | `dispatchStep` 缺少 rejected result 前置拦截 | 已修复 | 本次 P1-02 已收口 |
-| 2 | `created` 状态未拦截直接 result 写入 | 未修复 | 维持极低风险，不处理 |
+| 2 | `created` 状态未拦截直接 result 写入 | 已修复 | formal result closeout 主路径已补 created-run gate；Result owner 仍只维护 outcome 对象，不反向耦合 Run owner |
 | 3 | Planning repair 依赖字符串匹配 | 已修复 | 本次 P1-01 已收口；字符串匹配仅保留为旧数据 fallback |
-| 4 | `dod_coverage_missing` 在 assessment-only step 中仍可进入 repair | 未修复 | 维持低风险，后续迭代 |
-| 5 | `cancelled` 终态文档遗漏 | 未修复 | 文档补充，后续迭代 |
-| 6 | `blockRecoveryActionFromFailedStep` 可读性 | 未修复 | 无功能影响，不处理 |
+| 4 | `dod_coverage_missing` 在 assessment-only step 中仍可进入 repair | 已修复 | assessment-only coverage correction 失败且仍存在 actionable coverage gap 时，下一轮 repair 会清除 assessment-only，转入 concrete validation evidence / state-changing evidence 路径；新增主入口回归测试覆盖 |
+| 5 | `cancelled` 终态文档遗漏 | 已修复 | `runtime-stage-contract.md` 状态桥接图和阶段转换表已补 `cancelled` 终态 |
+| 6 | `blockRecoveryActionFromFailedStep` 可读性 | 已修复 | 已补函数注释和回归测试，明确 executor 先持久化 blocker，再返回 `ErrBlocked` 作为派发停止信号 |
+
+---
+
+### 2026-06-22 补充收口：旧偏差 #6
+
+旧偏差指出 `blockRecoveryActionFromFailedStep` 会先变更 run/blocker 状态，
+再返回 error 给 dispatch loop，功能正确但控制流不直观。本次保持行为不变，
+只把该控制流固化为代码注释和测试合同：
+
+- `blockRecoveryActionFromFailedStep` 注释明确：executor 先持久化选定
+  blocker 状态，随后返回 `ErrBlocked` 作为 dispatch-loop stop signal。
+- `TestRepairSubsystemBlockRecoveryActionPersistsBlockerBeforeErrBlocked`
+  明确断言 executor side effect 发生后才以 `ErrBlocked` 收口。
+
+验证：
+
+```bash
+go test ./internal/modules/kernel/orchestrator/biz -run TestRepairSubsystemBlockRecoveryActionPersistsBlockerBeforeErrBlocked -count=1 -timeout=180s
+```
+
+---
+
+### 2026-06-22 补充收口：旧偏差 #5
+
+旧偏差指出 `cancelled` 终态在文档状态机表中未独立列出。代码侧已经
+通过 `RunStateCancelled`、`CancelRun`、`isTerminalRunState` 和 read model
+terminal projection 支持 `cancelled` 终态，本次只补齐权威核心合同：
+
+- `runtime-stage-contract.md` 的 RunState 桥接图已列出
+  `cancelled` / `superseded`。
+- 阶段流图已把 `cancelled` 列为终态。
+- 转换表已明确任意非终态 Run 可通过显式 cancel command 进入
+  `cancelled`，且终态不可逆。
+
+验证依据：
+
+```bash
+go test ./internal/modules/kernel/run/biz -run TestService_RunStateMachineTransitionsWithoutOrchestrator -count=1 -timeout=180s
+```
+
+---
+
+### 2026-06-22 补充收口：旧偏差 #2
+
+旧建议要求在 result 写入 API 增加 run state 校验。按当前
+framework/EventHub owner 边界，`kernel/result` 是正式 outcome owner，
+不拥有 Run 状态，也不应为了校验直接注入 Run repository 或 Run owner
+service。实际收口落点放在 orchestrator 正式 result closeout 主路径：
+
+- `recordRunResultFromDoDAssessment`
+- `recordRunResultFromValidatedDoDAssessment`
+- `recordRejectedCompletionDoDAssessment`
+- `recordAcceptedSliceResultsFromRun`
+- `recordCompletionEvidenceFromValidatedDoDAssessment`
+
+这些入口在写入正式 Result/Artifact/Memory evidence 前统一执行
+created-run gate。若 run 仍处于 `created`，直接返回 `conflict`，并阻止
+completion evidence 并行路径产生 result、artifact 或 memory 副作用。
+
+验证：
+
+```bash
+go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_DoesNotRecordCompletionEvidenceForCreatedRun|TestRuntimeOrchestrator_ReusesValidatedDoDAssessmentForCompletionEvidence|TestRuntimeOrchestrator_RecordsRejectedResultForUnsatisfiedDoDAssessment|TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment' -count=1 -timeout=180s
+```
+
+边界说明：
+
+- Result owner 仍只做 Result/Artifact model 校验与 owner repository 操作。
+- Run 状态约束留在 orchestrator closeout 主路径，避免 kernel/result
+  跨 owner 读取 Run 状态。
+- 该收口不引入模板、语言、provider 或 workspace 特判。
+
+---
+
+### 2026-06-22 补充收口：旧偏差 #4
+
+旧建议要求在 `shouldAttemptRuntimeRepair` 中直接排除
+`assessment-only + dod_coverage_missing`。当前实现采用了更细的中立收敛语义：
+
+- 首次 DoD/Goal/deliverable coverage 合同缺失时，允许一次
+  assessment-only coverage correction，只补齐结构化 `dodAssessment`。
+- 如果该 assessment-only correction 后仍返回 `dod_coverage_missing`
+  且存在 actionable coverage gap，则下一轮 repair 输入会清除
+  `assessmentOnly` / `assessmentOnlyReason`，不再继续 assessment-only graph。
+- 后续 repair 转入 `repairObjective=produce_concrete_validation_evidence`
+  或必要的 state-changing evidence 路径，并通过 `repairActionPackage`
+  约束 bounded concrete evidence。
+
+验证：
+
+```bash
+go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_RuntimeRepairInput(StopsAssessmentOnlyAfterCoverageCorrectionStillMissing|RequiresValidationEvidenceForMissingDoDWithoutTarget)' -count=1 -timeout=180s
+```
+
+对应回归测试：
+
+- `TestRuntimeOrchestrator_RuntimeRepairInputStopsAssessmentOnlyAfterCoverageCorrectionStillMissing`
+- `TestRuntimeOrchestrator_RuntimeRepairInputRequiresValidationEvidenceForMissingDoDWithoutTarget`
 
 ---
 

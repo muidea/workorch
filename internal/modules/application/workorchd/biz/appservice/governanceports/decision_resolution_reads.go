@@ -18,7 +18,8 @@ func ResolutionForTicket(ctx context.Context, hub events.Hub, item *decisionmode
 	if item == nil || hub == nil || item.State != common.DecisionTicketStateResolved {
 		return nil, nil
 	}
-	resolution, err := ReadDecisionResolutionByTicket(ctx, hub, item.ID)
+	resolutionCtx := contextWithGovernanceScope(ctx, item.WorkspaceID)
+	resolution, err := ReadDecisionResolutionByTicket(resolutionCtx, hub, item.ID)
 	if errors.Is(err, common.ErrNotFound) {
 		return nil, nil
 	}
@@ -28,8 +29,8 @@ func ResolutionForTicket(ctx context.Context, hub events.Hub, item *decisionmode
 	return resolution, nil
 }
 
-func ResolutionsForTickets(ctx context.Context, hub events.Hub, items []*decisionmodel.Ticket) (map[common.TicketID]*decisionmodel.Resolution, error) {
-	ret := make(map[common.TicketID]*decisionmodel.Resolution, len(items))
+func ResolutionsForTickets(ctx context.Context, hub events.Hub, items []*decisionmodel.Ticket) (map[string]*decisionmodel.Resolution, error) {
+	ret := make(map[string]*decisionmodel.Resolution, len(items))
 	for _, item := range items {
 		if item == nil || item.State != common.DecisionTicketStateResolved {
 			continue
@@ -39,8 +40,15 @@ func ResolutionsForTickets(ctx context.Context, hub events.Hub, items []*decisio
 			return nil, err
 		}
 		if resolution != nil {
-			ret[item.ID] = resolution
+			ret[decisionResolutionMapKey(item)] = resolution
 		}
 	}
 	return ret, nil
+}
+
+func decisionResolutionMapKey(item *decisionmodel.Ticket) string {
+	if item == nil {
+		return ""
+	}
+	return string(item.WorkspaceID) + "\x00" + string(item.ID)
 }

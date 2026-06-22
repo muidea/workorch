@@ -50,7 +50,11 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
     void loadBoard(false);
   }, {
     debounceMs: 250,
-    onReconnect: () => void loadBoard(false)
+    onReconnect: () => void loadBoard(false),
+    onExhausted: () => {
+      message.warning('事件流连接已断开，请检查服务状态或手动刷新。');
+      void loadBoard(false);
+    }
   });
 
   const trackWorkspaceResumeInBackground = (workspaceId: string, request: WorkspaceExecutionActivationRequest) => {

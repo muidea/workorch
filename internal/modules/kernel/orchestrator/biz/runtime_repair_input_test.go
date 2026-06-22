@@ -471,6 +471,88 @@ func TestApplyRuntimeRepairPatchContextProjectionRequiresStateChangingRepair(t *
 	}
 }
 
+func TestApplyRuntimeRepairPatchFailureRecoveryContractNarrowsPatchRetry(t *testing.T) {
+	failed := &runmodel.Step{
+		ID:    "run-patch-failure/graph-001/001-patch",
+		RunID: "run-patch-failure",
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"targetRef": "src/app.go",
+			"patchType": "text_replace",
+			"oldText":   "stale old text",
+			"newText":   "fresh new text",
+			"baseHash":  "stale-hash",
+		},
+		Output: map[string]any{
+			"stage":                        "patch_apply",
+			"error":                        "conflict: patch text_replace oldText not found",
+			failureOutputKeyClass:          failureClassPatchApply,
+			failureOutputKeySignature:      "class=patch_apply_failed|kind=patch/apply|failureTargets=src/app.go|error=conflict",
+			outputKeyContractViolationType: "",
+		},
+	}
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"patchRepairContext": []map[string]any{{
+			"targetRef":        "src/app.go",
+			"contentHash":      "hash-current",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+			"exists":           true,
+		}},
+		"patchRepairSuggestions": []map[string]any{{
+			"targetRef":      "src/app.go",
+			"patchType":      "text_replace",
+			"oldText":        "current old text",
+			"newText":        "fresh new text",
+			"contentHash":    "hash-current",
+			"safeForMinimal": true,
+		}},
+	}
+	pkg := map[string]any{
+		"requiredOutput": stateChangingRepairRequiredOutput(),
+		"patchRepairContext": []map[string]any{{
+			"targetRef":        "src/app.go",
+			"contentHash":      "hash-current",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+		}},
+	}
+
+	applyRuntimeRepairPatchFailureRecoveryContract(input, pkg, failed)
+
+	required := mapFromValue(pkg["requiredOutput"])
+	if required["mustRepairFailedPatchApplication"] != true ||
+		required["mustUsePatchRepairContext"] != true ||
+		required["mustNotRetryFailedPatchLiteral"] != true {
+		t.Fatalf("requiredOutput = %+v, want patch failure recovery contract", required)
+	}
+	if !stringSliceContains(stringSliceFromValue(required["forbiddenOutputs"]), "retry_same_failed_patch_literal") ||
+		!stringSliceContains(stringSliceFromValue(required["forbiddenOutputs"]), "oldText_not_present_in_current_snapshot") {
+		t.Fatalf("forbiddenOutputs = %+v, want stale patch forbidden outputs", required["forbiddenOutputs"])
+	}
+	failedRequests := mapSliceFromValue(required["failedPatchRequests"])
+	if len(failedRequests) != 1 ||
+		stringFromMap(failedRequests[0], "targetRef") != "src/app.go" ||
+		stringFromMap(failedRequests[0], "patchType") != "text_replace" ||
+		stringFromMap(failedRequests[0], "baseHash") != "stale-hash" {
+		t.Fatalf("failedPatchRequests = %+v, want failed text_replace request summary", failedRequests)
+	}
+	contract := mapFromValue(pkg["patchFailureRecoveryContract"])
+	refs := mapSliceFromValue(contract["patchRepairContextRefs"])
+	if len(refs) != 1 || stringFromMap(refs[0], "contentHash") != "hash-current" {
+		t.Fatalf("patchFailureRecoveryContract = %+v, want current snapshot refs", contract)
+	}
+	if suggestions := mapSliceFromValue(required["preferredPatchRepairSuggestions"]); len(suggestions) != 1 {
+		t.Fatalf("preferredPatchRepairSuggestions = %+v, want compact current suggestion", suggestions)
+	}
+	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
+	if !strings.Contains(guidance, "failedPatchRequests") || !strings.Contains(guidance, "current contentHash") {
+		t.Fatalf("repairGuidance = %s, want failed patch recovery guidance", guidance)
+	}
+}
+
 func TestApplyRuntimeRepairPatchContextProjectionKeepsSatisfiedPatchAsValidation(t *testing.T) {
 	input := map[string]any{}
 	patchContext := []map[string]any{{
@@ -627,6 +709,51 @@ func TestApplyRuntimeRepairStateChangingActionPackageProjectionRequiresStateChan
 	guidance := stringSliceFromValue(input["repairGuidance"])
 	if len(guidance) < 2 {
 		t.Fatalf("repairGuidance = %+v, want action package guidance", guidance)
+	}
+}
+
+func TestApplyRuntimeRepairStateChangingActionPackageProjectionMaterializesAvailableTargetSnapshots(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"failureTargetRepairContext": []map[string]any{{
+			"targetRef":        "target.txt",
+			"content":          "current target content\n",
+			"contentHash":      "sha256-current-target",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+			"exists":           true,
+		}},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-repair-action-package/step-with-target-context",
+		RunID: "run-repair-action-package",
+		Kind:  "llm",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stderr": "target file mismatch",
+		},
+	}
+
+	applyRuntimeRepairStateChangingActionPackageProjection(input, failed, errors.New("exit status 1"))
+
+	available := mapSliceFromValue(input["availableTargetSnapshots"])
+	if len(available) != 1 || stringFromMap(available[0], "targetRef") != "target.txt" ||
+		stringFromMap(available[0], "contentHash") != "sha256-current-target" {
+		t.Fatalf("availableTargetSnapshots = %+v, want compact current target snapshot", available)
+	}
+	if stringFromMap(available[0], "content") != "" {
+		t.Fatalf("availableTargetSnapshots must not carry full content: %+v", available[0])
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	targets := mapSliceFromValue(pkg["targetSnapshots"])
+	if len(targets) != 1 || stringFromMap(targets[0], "targetRef") != "target.txt" ||
+		strings.TrimSpace(stringFromMap(targets[0], "content")) == "" {
+		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want full current target snapshot", targets)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustUseCurrentTargetSnapshot"]) || !boolValue(required["mustPatchDirectlyFromProvidedSnapshot"]) {
+		t.Fatalf("requiredOutput = %+v, want current snapshot direct patch contract", required)
 	}
 }
 

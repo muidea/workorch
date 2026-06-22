@@ -53,6 +53,10 @@ func (c OwnerReaderCandidates) matchesRuntimeReaders(owner OwnerReaders) bool {
 	if !ok || continuations != owner.ArtifactContinuations {
 		return false
 	}
+	coverageWorkItems, ok := c.CoverageWorkItems.(CoverageWorkItemReader)
+	if !ok || coverageWorkItems != owner.CoverageWorkItems {
+		return false
+	}
 	eventRecords, ok := c.EventRecords.(EventRecordReader)
 	if !ok || eventRecords != owner.EventRecords {
 		return false

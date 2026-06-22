@@ -68,6 +68,35 @@ func updateConvergenceBudgetFromStep(run *runModel.Run, step *runModel.Step, cov
 	return before != stableCoverageJSON(budget)
 }
 
+func resetConvergenceBudgetForReplanSuccessor(executionContext map[string]any) bool {
+	if len(executionContext) == 0 {
+		return false
+	}
+	existing := mapFromValue(executionContext[convergenceBudgetKey])
+	if len(existing) == 0 {
+		return false
+	}
+	reset := map[string]any{}
+	for key := range defaultConvergenceBudgetLimits() {
+		if value := positiveIntFromValue(existing[key], 0); value > 0 {
+			reset[key] = value
+		}
+	}
+	if focusID := strings.TrimSpace(stringFromMap(existing, "focusId")); focusID != "" {
+		reset["focusId"] = focusID
+	}
+	if sliceID := strings.TrimSpace(stringFromMap(existing, "sliceId")); sliceID != "" {
+		reset["sliceId"] = sliceID
+	}
+	reset["state"] = "tracking"
+	reset["decision"] = "continue"
+	if stableCoverageJSON(existing) == stableCoverageJSON(reset) {
+		return false
+	}
+	executionContext[convergenceBudgetKey] = reset
+	return true
+}
+
 func ensureConvergenceBudgetFocusScope(budget map[string]any, focus map[string]any) {
 	if len(budget) == 0 || len(focus) == 0 {
 		return
@@ -129,7 +158,37 @@ func convergenceBudgetCountsNoDelta(step *runModel.Step) bool {
 	if stepIsConcreteFailureEvidenceAcquisitionGraphNode(step) {
 		return false
 	}
+	if convergenceBudgetSkipsNoDeltaForMechanicalPatchConflict(step) {
+		return false
+	}
 	return step.State == common.StepStateCompleted || step.State == common.StepStateFailed
+}
+
+func convergenceBudgetSkipsNoDeltaForMechanicalPatchConflict(step *runModel.Step) bool {
+	if step == nil || step.State != common.StepStateFailed {
+		return false
+	}
+	if strings.TrimSpace(step.Kind) != "patch/apply" &&
+		strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)) != failureClassPatchApply {
+		return false
+	}
+	return runtimePatchBaseHashMismatchFailure(step)
+}
+
+func runtimePatchBaseHashMismatchFailure(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	textValues := repairForbiddenReuseTextValues(step.Input, step.Output)
+	if diagnostics := mapFromValue(step.Output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		textValues = append(textValues,
+			stringFromMap(diagnostics, "errorDetail"),
+			stringFromMap(diagnostics, "guidance"),
+		)
+	}
+	text := strings.ToLower(strings.Join(textValues, "\n"))
+	return strings.Contains(text, "basehash mismatch") ||
+		(strings.Contains(text, "basehash") && strings.Contains(text, "mismatch"))
 }
 
 func stepIsConcreteFailureEvidenceAcquisitionGraphNode(step *runModel.Step) bool {

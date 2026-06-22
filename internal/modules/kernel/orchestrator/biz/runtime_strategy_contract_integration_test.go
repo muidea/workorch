@@ -117,6 +117,78 @@ func TestValidateLLMExecutionOutputContractAllowsStrategyReassessmentDecisionFie
 	}
 }
 
+func TestValidateLLMExecutionOutputContractRejectsDisallowedStrategyRepairMode(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-disallowed-mode",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-disallowed-mode/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureTargetScope":              "failureTargets=validation-target.txt",
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"failedSurface":        "failureTargets=validation-target.txt",
+				"targetRepairAttempts": int64(3),
+				"allowedRepairModes":   []string{strategyRepairModeShiftRootCauseTarget},
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"repairMode",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"repairTargetSet": []string{"validation-target.txt", "implementation-target.txt"},
+				"targetSnapshots": []map[string]any{{
+					"targetRef": "validation-target.txt",
+					"content":   "old",
+				}},
+				"rootCauseCandidateContext": []map[string]any{{
+					"targetRef": "implementation-target.txt",
+					"content":   "implementation target content",
+				}},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-validation-target",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "validation-target.txt",
+						"patchType":            "text_replace",
+						"oldText":              "old",
+						"newText":              "new",
+						"failedSurface":        "failureTargets=validation-target.txt",
+						"rootCauseTarget":      "validation-target.txt",
+						"repairTargetDecision": "continue patching the failed validation surface",
+						"repairMode":           strategyRepairModeContinueSameTarget,
+						"forbiddenRepair":      "do not patch unrelated resources",
+						"verificationPlan":     "run bounded verification for validation-target.txt",
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "repairMode=continue_same_target_repair is not allowed") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want disallowed repair mode rejection", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsStrategySurfaceByTargetRef(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-strategy-reassessment-target-ref-surface",

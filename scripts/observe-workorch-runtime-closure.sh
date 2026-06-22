@@ -35,6 +35,16 @@ MAX_PROJECTION_SCHEDULE_DROPPED_DELTA="${WORKORCH_OBSERVE_MAX_PROJECTION_SCHEDUL
 MAX_SUSPICIOUS_CPU_FLAT_PERCENT="${WORKORCH_OBSERVE_MAX_SUSPICIOUS_CPU_FLAT_PERCENT:-50}"
 MAX_SUSPICIOUS_CPU_CUM_PERCENT="${WORKORCH_OBSERVE_MAX_SUSPICIOUS_CPU_CUM_PERCENT:-90}"
 REQUIRE_GOVERNANCE_CONTINUATION="${WORKORCH_OBSERVE_REQUIRE_GOVERNANCE_CONTINUATION:-0}"
+GOVERNANCE_RESOLVE_WORKSPACE_ID="${WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_WORKSPACE_ID:-}"
+GOVERNANCE_RESOLVE_TICKET_ID="${WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_TICKET_ID:-}"
+GOVERNANCE_RESOLVE_PAYLOAD="${WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_PAYLOAD:-}"
+PROCESS_PID="${WORKORCH_OBSERVE_PROCESS_PID:-}"
+REQUIRE_PROCESS_RESOURCE="${WORKORCH_OBSERVE_REQUIRE_PROCESS_RESOURCE:-0}"
+REQUIRE_GOAL_CONVERGENCE="${WORKORCH_OBSERVE_REQUIRE_GOAL_CONVERGENCE:-0}"
+GOAL_CONVERGENCE_RUN_STATES="${WORKORCH_OBSERVE_GOAL_CONVERGENCE_RUN_STATES:-completed}"
+MIN_GOAL_ACCEPTED_RESULTS="${WORKORCH_OBSERVE_MIN_GOAL_ACCEPTED_RESULTS:-1}"
+MIN_GOAL_ARTIFACTS="${WORKORCH_OBSERVE_MIN_GOAL_ARTIFACTS:-0}"
+REQUIRE_GOAL_COVERAGE_CLOSED="${WORKORCH_OBSERVE_REQUIRE_GOAL_COVERAGE_CLOSED:-1}"
 
 mkdir -p "$TMP_DIR"
 
@@ -67,9 +77,119 @@ cleanup() {
 
 trap cleanup EXIT
 
+infer_process_pid() {
+  if [[ -n "$PROCESS_PID" ]]; then
+    echo "$PROCESS_PID"
+    return 0
+  fi
+  if ! command -v python3 >/dev/null 2>&1 || ! command -v ss >/dev/null 2>&1; then
+    return 0
+  fi
+  local endpoint host port
+  endpoint="$(python3 - "$BASE_URL" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+url = urlparse(sys.argv[1])
+host = url.hostname or ""
+port = url.port
+if port is None:
+    port = 443 if url.scheme == "https" else 80
+print(f"{host} {port}")
+PY
+)"
+  host="${endpoint% *}"
+  port="${endpoint##* }"
+  case "$host" in
+    ""|"localhost"|"127.0.0.1"|"::1")
+      ss -ltnp "sport = :$port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1
+      ;;
+  esac
+}
+
+capture_process_resource_snapshot() {
+  local pid="$1"
+  local output="$2"
+  [[ -n "$pid" ]] || return 0
+  python3 - "$pid" "$output" <<'PY'
+import json
+import os
+import sys
+import time
+
+pid, output_path = sys.argv[1], sys.argv[2]
+
+def read_status_value(path, key):
+    try:
+        for raw in open(path, encoding="utf-8", errors="replace"):
+            if not raw.startswith(key + ":"):
+                continue
+            parts = raw.split()
+            if len(parts) >= 2:
+                return int(parts[1])
+    except FileNotFoundError:
+        return None
+    return None
+
+def read_io(path):
+    ret = {}
+    try:
+        for raw in open(path, encoding="utf-8", errors="replace"):
+            if ":" not in raw:
+                continue
+            key, value = raw.split(":", 1)
+            value = value.strip()
+            if value.isdigit():
+                ret[key.strip()] = int(value)
+    except FileNotFoundError:
+        pass
+    return ret
+
+proc = f"/proc/{pid}"
+snapshot = {
+    "pid": int(pid) if str(pid).isdigit() else pid,
+    "capturedAtEpoch": time.time(),
+    "available": False,
+}
+try:
+    stat = open(os.path.join(proc, "stat"), encoding="utf-8", errors="replace").read()
+    fields = stat[stat.rfind(")") + 2:].split()
+    ticks = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+    utime_ticks = int(fields[11])
+    stime_ticks = int(fields[12])
+    snapshot.update({
+        "available": True,
+        "clockTicksPerSecond": ticks,
+        "utimeTicks": utime_ticks,
+        "stimeTicks": stime_ticks,
+        "cpuTimeSeconds": (utime_ticks + stime_ticks) / float(ticks),
+        "rssBytes": (read_status_value(os.path.join(proc, "status"), "VmRSS") or 0) * 1024,
+    })
+    io = read_io(os.path.join(proc, "io"))
+    snapshot.update({
+        "readBytes": int(io.get("read_bytes") or 0),
+        "writeBytes": int(io.get("write_bytes") or 0),
+        "cancelledWriteBytes": int(io.get("cancelled_write_bytes") or 0),
+    })
+except Exception as exc:
+    snapshot["error"] = str(exc)
+
+with open(output_path, "w", encoding="utf-8") as handle:
+    json.dump(snapshot, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+PY
+}
+
 curl -fsS "$BASE_URL/readyz" >"$TMP_DIR/readyz.json"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces" >"$TMP_DIR/workspaces.json"
 curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics-before.txt"
+OBSERVED_PROCESS_PID="$(infer_process_pid || true)"
+if [[ -n "$OBSERVED_PROCESS_PID" ]]; then
+  echo "$OBSERVED_PROCESS_PID" >"$TMP_DIR/process-pid.txt"
+  capture_process_resource_snapshot "$OBSERVED_PROCESS_PID" "$TMP_DIR/process-resource-before.json"
+else
+  echo "workorch process pid not detected; set WORKORCH_OBSERVE_PROCESS_PID to enable process CPU/RSS/IO sampling" >"$TMP_DIR/process-resource-warning.txt"
+fi
 
 python3 - "$BASE_URL/api/v1/workorch/events/stream" "$TMP_DIR/sse-events.jsonl" "$DURATION_SECONDS" >"$TMP_DIR/sse-listener.log" 2>&1 <<'PY' &
 import json
@@ -138,10 +258,39 @@ PY
   done
 fi
 
+if [[ -n "$GOVERNANCE_RESOLVE_TICKET_ID" || -n "$GOVERNANCE_RESOLVE_WORKSPACE_ID" ]]; then
+  if [[ -z "$GOVERNANCE_RESOLVE_TICKET_ID" || -z "$GOVERNANCE_RESOLVE_WORKSPACE_ID" ]]; then
+    echo "WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_TICKET_ID and WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_WORKSPACE_ID must be set together" >&2
+    exit 1
+  fi
+  if [[ -z "$GOVERNANCE_RESOLVE_PAYLOAD" ]]; then
+    GOVERNANCE_RESOLVE_PAYLOAD='{"resolutionType":"provide_missing_info","resolutionPayload":{"source":"observe-runtime-closure"}}'
+  fi
+  printf '%s\n' "$GOVERNANCE_RESOLVE_PAYLOAD" >"$TMP_DIR/governance-resolution-request.json"
+  governance_resolve_path="$(python3 - "$GOVERNANCE_RESOLVE_TICKET_ID" "$GOVERNANCE_RESOLVE_WORKSPACE_ID" <<'PY'
+import sys
+from urllib.parse import quote
+
+ticket_id, workspace_id = sys.argv[1], sys.argv[2]
+print(
+    "/api/v1/workorch/decisions/"
+    + quote(ticket_id, safe="")
+    + "/resolve?workspaceId="
+    + quote(workspace_id, safe="")
+)
+PY
+)"
+  curl -fsS -X POST "$BASE_URL$governance_resolve_path" -H 'Content-Type: application/json' \
+    -d @"$TMP_DIR/governance-resolution-request.json" >"$TMP_DIR/governance-resolution-response.json"
+fi
+
 wait "$sse_pid" || true
 
 curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics-after.txt"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces" >"$TMP_DIR/workspaces.json"
+if [[ -n "${OBSERVED_PROCESS_PID:-}" ]]; then
+  capture_process_resource_snapshot "$OBSERVED_PROCESS_PID" "$TMP_DIR/process-resource-after.json"
+fi
 if [[ "$ENABLE_PPROF_CHECK" == "1" || "$ENABLE_PPROF_CHECK" == "true" || "$ENABLE_PPROF_CHECK" == "yes" ]]; then
   if ! curl -fsS "$BASE_URL$PPROF_GOROUTINE_PATH" >"$TMP_DIR/pprof-goroutine.txt"; then
     echo "pprof goroutine unavailable at $BASE_URL$PPROF_GOROUTINE_PATH" >"$TMP_DIR/pprof-goroutine-error.txt"
@@ -237,6 +386,17 @@ max_projection_schedule_dropped_delta = int(sys.argv[23].strip() or "0")
 max_suspicious_cpu_flat_percent = float(sys.argv[24].strip() or "50")
 max_suspicious_cpu_cum_percent = float(sys.argv[25].strip() or "90")
 require_governance_continuation = sys.argv[26].strip() in {"1", "true", "yes"}
+governance_resolve_workspace_id = os.environ.get("WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_WORKSPACE_ID", "").strip()
+governance_resolve_ticket_id = os.environ.get("WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_TICKET_ID", "").strip()
+max_event_metadata_records_scanned_delta = os.environ.get("WORKORCH_OBSERVE_MAX_EVENT_METADATA_RECORDS_SCANNED_DELTA", "").strip()
+max_event_payload_hydrates_delta = os.environ.get("WORKORCH_OBSERVE_MAX_EVENT_PAYLOAD_HYDRATES_DELTA", "").strip()
+max_event_payload_hydrate_bytes_delta = os.environ.get("WORKORCH_OBSERVE_MAX_EVENT_PAYLOAD_HYDRATE_BYTES_DELTA", "").strip()
+max_runtime_event_publish_failures_delta = os.environ.get("WORKORCH_OBSERVE_MAX_RUNTIME_EVENT_PUBLISH_FAILURES_DELTA", "").strip()
+require_process_resource = os.environ.get("WORKORCH_OBSERVE_REQUIRE_PROCESS_RESOURCE", "").strip() in {"1", "true", "yes"}
+max_process_cpu_percent = os.environ.get("WORKORCH_OBSERVE_MAX_PROCESS_CPU_PERCENT", "").strip()
+max_process_rss_bytes = os.environ.get("WORKORCH_OBSERVE_MAX_PROCESS_RSS_BYTES", "").strip()
+max_process_read_bytes_delta = os.environ.get("WORKORCH_OBSERVE_MAX_PROCESS_READ_BYTES_DELTA", "").strip()
+max_process_write_bytes_delta = os.environ.get("WORKORCH_OBSERVE_MAX_PROCESS_WRITE_BYTES_DELTA", "").strip()
 
 def read_json(path):
     with open(path, "r", encoding="utf-8") as handle:
@@ -443,6 +603,272 @@ def validate_heartbeat_display_contract(heartbeat, scope):
         "issues": issues,
     }
 
+def list_value(value):
+    return value if isinstance(value, list) else []
+
+def state_counts(items):
+    counts = {}
+    for item in list_value(items):
+        if not isinstance(item, dict):
+            continue
+        state = str(item.get("state") or "unknown")
+        counts[state] = counts.get(state, 0) + 1
+    return counts
+
+def compact_item_refs(items, limit=5):
+    ret = []
+    for item in list_value(items)[:limit]:
+        if not isinstance(item, dict):
+            continue
+        ret.append({
+            "id": item.get("id"),
+            "state": item.get("state"),
+            "kind": item.get("kind") or item.get("decisionKind") or item.get("category") or item.get("sourceType"),
+            "runId": item.get("runId"),
+            "stepId": item.get("stepId"),
+        })
+    return ret
+
+def latest_by_time(items, *keys):
+    latest = None
+    latest_value = ""
+    for item in list_value(items):
+        if not isinstance(item, dict):
+            continue
+        value = ""
+        for key in keys:
+            value = str(item.get(key) or "")
+            if value:
+                break
+        if latest is None or value >= latest_value:
+            latest = item
+            latest_value = value
+    return latest or {}
+
+def bounded_text(value, limit=512):
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...<truncated>"
+
+def workspace_live_summary(workspace_id, snapshot_body):
+    snapshot = snapshot_body.get("snapshot") or {}
+    projection = snapshot_body.get("projection") or {}
+    workspace = snapshot.get("workspace") or {}
+    run = snapshot.get("run") or {}
+    heartbeat = snapshot.get("runHeartbeat") or {}
+    coverage_summary = snapshot.get("coverageSummary") or {}
+    current_focus = coverage_summary.get("currentFocus") or {}
+    decisions = list_value(snapshot.get("decisions"))
+    approvals = list_value(snapshot.get("approvals"))
+    results = list_value(snapshot.get("results"))
+    artifacts = list_value(snapshot.get("artifacts"))
+    task_decompositions = list_value(snapshot.get("taskDecompositions"))
+    execution_sections = list_value(snapshot.get("executionSections"))
+    patches = list_value(snapshot.get("patches"))
+    llm_usage_traces = list_value(snapshot.get("llmUsageTraces"))
+    open_decisions = [
+        item for item in decisions
+        if isinstance(item, dict) and str(item.get("state") or "") not in {"resolved", "closed", "canceled", "cancelled"}
+    ]
+    pending_approvals = [
+        item for item in approvals
+        if isinstance(item, dict) and str(item.get("state") or "") not in {"approved", "rejected", "closed", "canceled", "cancelled"}
+    ]
+    latest_result = latest_by_time(results, "updatedAt", "acceptedAt", "createdAt")
+    latest_task_decomposition = latest_by_time(task_decompositions, "updatedAt", "createdAt")
+    return {
+        "workspaceId": workspace_id,
+        "workspace": {
+            "id": workspace.get("id"),
+            "title": workspace.get("title"),
+            "state": workspace.get("state"),
+            "activeRunId": workspace.get("activeRunId"),
+            "blockingTicketId": workspace.get("blockingTicketId"),
+            "blockingApprovalId": workspace.get("blockingApprovalId"),
+        },
+        "run": {
+            "id": run.get("id"),
+            "state": run.get("state"),
+            "blockingTicketId": run.get("blockingTicketId"),
+            "blockingApprovalId": run.get("blockingApprovalId"),
+            "failureClass": run.get("failureClass"),
+            "failureReason": run.get("failureReason"),
+        },
+        "heartbeat": {
+            "present": bool(heartbeat),
+            "activityState": heartbeat.get("activityState"),
+            "summary": heartbeat.get("summary"),
+            "latestStepId": heartbeat.get("latestStepId"),
+            "latestStepKind": heartbeat.get("latestStepKind"),
+            "latestStepState": heartbeat.get("latestStepState"),
+            "latestEventTopic": heartbeat.get("latestEventTopic"),
+            "latestEventRevision": heartbeat.get("latestEventRevision"),
+            "latestEventAt": heartbeat.get("latestEventAt"),
+            "latestLLMUsageAt": heartbeat.get("latestLLMUsageAt"),
+            "latestResultAt": heartbeat.get("latestResultAt"),
+            "latestPatchAt": heartbeat.get("latestPatchAt"),
+            "latestEffectiveProgressAt": heartbeat.get("latestEffectiveProgressAt"),
+            "stalled": bool(heartbeat.get("stalled")),
+            "ineffectiveRetry": bool(heartbeat.get("ineffectiveRetry")),
+        },
+        "projection": {
+            "state": projection.get("state"),
+            "workspaceRevision": projection.get("workspaceRevision"),
+            "sourceEventRevision": projection.get("sourceEventRevision"),
+            "projectedSourceRevision": projection.get("projectedSourceRevision"),
+            "updatedAt": projection.get("updatedAt"),
+            "rebuiltAt": projection.get("rebuiltAt"),
+        },
+        "counts": {
+            "decisions": len(decisions),
+            "openDecisions": len(open_decisions),
+            "approvals": len(approvals),
+            "pendingApprovals": len(pending_approvals),
+            "results": len(results),
+            "acceptedResults": sum(1 for item in results if isinstance(item, dict) and item.get("state") == "accepted"),
+            "rejectedResults": sum(1 for item in results if isinstance(item, dict) and item.get("state") == "rejected"),
+            "artifacts": len(artifacts),
+            "taskDecompositions": len(task_decompositions),
+            "executionSections": len(execution_sections),
+            "patches": len(patches),
+            "llmUsageTraces": len(llm_usage_traces),
+        },
+        "stateCounts": {
+            "decisions": state_counts(decisions),
+            "approvals": state_counts(approvals),
+            "results": state_counts(results),
+            "taskDecompositions": state_counts(task_decompositions),
+            "executionSections": state_counts(execution_sections),
+            "patches": state_counts(patches),
+        },
+        "blockers": {
+            "openDecisions": compact_item_refs(open_decisions),
+            "pendingApprovals": compact_item_refs(pending_approvals),
+        },
+        "latestResult": {
+            "id": latest_result.get("id"),
+            "state": latest_result.get("state"),
+            "sourceType": latest_result.get("sourceType"),
+            "sourceRef": latest_result.get("sourceRef"),
+            "summary": bounded_text(latest_result.get("summary")),
+            "reason": bounded_text(latest_result.get("reason")),
+            "updatedAt": latest_result.get("updatedAt"),
+        },
+        "latestTaskDecomposition": {
+            "id": latest_task_decomposition.get("id"),
+            "state": latest_task_decomposition.get("state"),
+            "summary": latest_task_decomposition.get("summary"),
+            "nodeTotal": latest_task_decomposition.get("nodeTotal"),
+            "nodeCompleted": latest_task_decomposition.get("nodeCompleted"),
+            "nodeFailed": latest_task_decomposition.get("nodeFailed"),
+            "nodeRunning": latest_task_decomposition.get("nodeRunning"),
+        },
+        "coverage": {
+            "currentFocusId": current_focus.get("id"),
+            "definitionRevision": current_focus.get("definitionRevision"),
+            "currentGap": current_focus.get("currentGap"),
+            "missingEvidenceKinds": current_focus.get("missingEvidenceKinds") or [],
+            "nextAllowedConvergenceStates": current_focus.get("nextAllowedConvergenceStates") or [],
+        },
+    }
+
+def bool_env(name, default=False):
+    value = os.environ.get(name, "")
+    if value == "":
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+def int_env(name, default=0):
+    value = os.environ.get(name, "")
+    if value == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        raise ValueError(f"{name} must be an integer, got {value!r}")
+
+def csv_env(name, default):
+    value = os.environ.get(name, "").strip()
+    if not value:
+        value = default
+    return {item.strip() for item in value.split(",") if item.strip()}
+
+require_goal_convergence = bool_env("WORKORCH_OBSERVE_REQUIRE_GOAL_CONVERGENCE")
+goal_convergence_run_states = csv_env("WORKORCH_OBSERVE_GOAL_CONVERGENCE_RUN_STATES", "completed")
+min_goal_accepted_results = int_env("WORKORCH_OBSERVE_MIN_GOAL_ACCEPTED_RESULTS", 1)
+min_goal_artifacts = int_env("WORKORCH_OBSERVE_MIN_GOAL_ARTIFACTS", 0)
+require_goal_coverage_closed = bool_env("WORKORCH_OBSERVE_REQUIRE_GOAL_COVERAGE_CLOSED", True)
+
+def evaluate_goal_convergence(summary):
+    issues = []
+    workspace = summary.get("workspace") or {}
+    run = summary.get("run") or {}
+    heartbeat = summary.get("heartbeat") or {}
+    counts = summary.get("counts") or {}
+    coverage = summary.get("coverage") or {}
+    latest_result = summary.get("latestResult") or {}
+    workspace_id = summary.get("workspaceId") or workspace.get("id") or ""
+
+    run_id = str(run.get("id") or workspace.get("activeRunId") or "").strip()
+    run_state = str(run.get("state") or "").strip()
+    if not run_id:
+        issues.append("active run id is missing")
+    if run_state not in goal_convergence_run_states:
+        issues.append(
+            "run state is not an accepted convergence terminal state: "
+            f"state={run_state!r} allowed={sorted(goal_convergence_run_states)}"
+        )
+    if int(counts.get("openDecisions") or 0) > 0:
+        issues.append(f"open decisions remain: {counts.get('openDecisions')}")
+    if int(counts.get("pendingApprovals") or 0) > 0:
+        issues.append(f"pending approvals remain: {counts.get('pendingApprovals')}")
+    if bool(heartbeat.get("stalled")):
+        issues.append("run heartbeat is marked stalled")
+    if bool(heartbeat.get("ineffectiveRetry")):
+        issues.append("run heartbeat is marked ineffectiveRetry")
+
+    accepted_results = int(counts.get("acceptedResults") or 0)
+    if accepted_results < min_goal_accepted_results:
+        issues.append(
+            "accepted result count below convergence threshold: "
+            f"acceptedResults={accepted_results} min={min_goal_accepted_results}"
+        )
+    if latest_result.get("id") and latest_result.get("state") != "accepted":
+        issues.append(
+            "latest result is not accepted: "
+            f"id={latest_result.get('id')} state={latest_result.get('state')}"
+        )
+
+    artifact_count = int(counts.get("artifacts") or 0)
+    if artifact_count < min_goal_artifacts:
+        issues.append(
+            "artifact count below convergence threshold: "
+            f"artifacts={artifact_count} min={min_goal_artifacts}"
+        )
+
+    current_gap = str(coverage.get("currentGap") or "").strip()
+    missing_evidence = coverage.get("missingEvidenceKinds") or []
+    if require_goal_coverage_closed and (current_gap or missing_evidence):
+        issues.append(
+            "coverage still has an open gap: "
+            f"currentGap={current_gap!r} missingEvidenceKinds={missing_evidence}"
+        )
+
+    return {
+        "workspaceId": workspace_id,
+        "runId": run_id,
+        "runState": run_state,
+        "pass": not issues,
+        "issues": issues,
+        "thresholds": {
+            "allowedRunStates": sorted(goal_convergence_run_states),
+            "minAcceptedResults": min_goal_accepted_results,
+            "minArtifacts": min_goal_artifacts,
+            "requireCoverageClosed": require_goal_coverage_closed,
+        },
+    }
+
 errors = []
 warnings = []
 readyz = read_json(artifact_dir / "readyz.json")
@@ -457,6 +883,8 @@ workspaces = read_json(artifact_dir / "workspaces.json")
 workspace_items = workspaces.get("workspaces") or []
 workspace_set = {item.get("id") for item in workspace_items}
 workspace_list_projection = workspaces.get("projection") or {}
+workspace_summaries = []
+goal_convergence = []
 display_contract = {
     "listProjection": validate_projection_display_contract(workspace_list_projection, "workspace-list", False),
     "workspaceListItems": [
@@ -496,6 +924,9 @@ for workspace_id in workspace_ids:
         snapshot_body = read_json(snapshot_path)
         snapshot_projection = snapshot_body.get("projection") or {}
         snapshot = snapshot_body.get("snapshot") or {}
+        live_summary = workspace_live_summary(workspace_id, snapshot_body)
+        workspace_summaries.append(live_summary)
+        goal_convergence.append(evaluate_goal_convergence(live_summary))
         scheduler_diagnostics_observed.extend(
             scheduler_diagnostics_from_payload(snapshot.get("schedulerDiagnostics") or {}, f"workspace-snapshot[{workspace_id}]")
         )
@@ -564,6 +995,54 @@ required_metric_markers = [
 for marker in required_metric_markers:
     if marker not in metrics_text:
         errors.append(f"metrics missing {marker}")
+
+optional_metric_groups = [
+    {
+        "name": "eventRecordIOPressure",
+        "markers": [
+            "workorch_event_record_metadata_scans_total",
+            "workorch_event_record_metadata_records_scanned_total",
+            "workorch_event_record_payload_hydrates_total",
+            "workorch_event_record_payload_hydrate_bytes_total",
+        ],
+        "required": any(
+            str(value or "").strip()
+            for value in (
+                max_event_metadata_records_scanned_delta,
+                max_event_payload_hydrates_delta,
+                max_event_payload_hydrate_bytes_delta,
+            )
+        ),
+    },
+    {
+        "name": "runtimeEventPublishFailures",
+        "markers": [
+            "workorch_runtime_event_publish_failures_total",
+            "workorch_runtime_heartbeat_timer_start_failures_total",
+        ],
+        "required": bool(str(max_runtime_event_publish_failures_delta or "").strip()),
+    },
+    {
+        "name": "watchdogRegistration",
+        "markers": ["workorch_watchdog_timer_registrations_total"],
+        "required": bool_env("WORKORCH_OBSERVE_REQUIRE_WATCHDOG_REGISTRATION_METRIC", False),
+    },
+]
+optional_metric_availability = {}
+for group in optional_metric_groups:
+    missing = [marker for marker in group["markers"] if marker not in metrics_text]
+    optional_metric_availability[group["name"]] = {
+        "available": not missing,
+        "required": bool(group["required"]),
+        "missing": missing,
+    }
+    if not missing:
+        continue
+    message = f"metrics missing optional {group['name']} markers: {missing}"
+    if group["required"]:
+        errors.append(message)
+    else:
+        warnings.append(message)
 stale_dispatched_step_min_age_seconds = metrics.get("workorch_stale_dispatched_step_min_age_seconds")
 if expected_stale_dispatched_step_min_age_seconds:
     expected = float(expected_stale_dispatched_step_min_age_seconds)
@@ -581,8 +1060,20 @@ def metric_delta(name):
 def labeled_metric_delta(name, labels=None):
     return metric_sample_sum(metric_samples, name, labels) - metric_sample_sum(metric_samples_before, name, labels)
 
+def optional_float(value):
+    value = str(value or "").strip()
+    if not value:
+        return None
+    return float(value)
+
 pending_rebuilds = int(metrics.get("workorch_workspace_projection_pending_rebuilds") or 0)
 schedule_dropped_delta = int(metric_delta("workorch_workspace_projection_schedule_dropped_total"))
+event_metadata_scan_delta = metric_delta("workorch_event_record_metadata_scans_total")
+event_metadata_records_scanned_delta = metric_delta("workorch_event_record_metadata_records_scanned_total")
+event_payload_hydrates_delta = metric_delta("workorch_event_record_payload_hydrates_total")
+event_payload_hydrate_bytes_delta = metric_delta("workorch_event_record_payload_hydrate_bytes_total")
+runtime_event_publish_failure_delta = labeled_metric_delta("workorch_runtime_event_publish_failures_total")
+runtime_heartbeat_timer_start_failure_delta = metric_delta("workorch_runtime_heartbeat_timer_start_failures_total")
 if pending_rebuilds > max_pending_rebuilds:
     errors.append(
         "workspace projection pending rebuilds above threshold: "
@@ -593,6 +1084,32 @@ if schedule_dropped_delta > max_projection_schedule_dropped_delta:
         "workspace projection schedule dropped delta above threshold: "
         f"delta={schedule_dropped_delta} threshold={max_projection_schedule_dropped_delta}"
     )
+max_metadata_records = optional_float(max_event_metadata_records_scanned_delta)
+if max_metadata_records is not None and event_metadata_records_scanned_delta > max_metadata_records:
+    errors.append(
+        "event metadata records scanned delta above threshold: "
+        f"delta={event_metadata_records_scanned_delta} threshold={max_metadata_records}"
+    )
+max_payload_hydrates = optional_float(max_event_payload_hydrates_delta)
+if max_payload_hydrates is not None and event_payload_hydrates_delta > max_payload_hydrates:
+    errors.append(
+        "event payload hydrate delta above threshold: "
+        f"delta={event_payload_hydrates_delta} threshold={max_payload_hydrates}"
+    )
+max_payload_hydrate_bytes = optional_float(max_event_payload_hydrate_bytes_delta)
+if max_payload_hydrate_bytes is not None and event_payload_hydrate_bytes_delta > max_payload_hydrate_bytes:
+    errors.append(
+        "event payload hydrate bytes delta above threshold: "
+        f"delta={event_payload_hydrate_bytes_delta} threshold={max_payload_hydrate_bytes}"
+    )
+max_runtime_publish_failures = optional_float(max_runtime_event_publish_failures_delta)
+if max_runtime_publish_failures is not None:
+    runtime_publish_failure_total_delta = runtime_event_publish_failure_delta + runtime_heartbeat_timer_start_failure_delta
+    if runtime_publish_failure_total_delta > max_runtime_publish_failures:
+        errors.append(
+            "runtime event publish failure delta above threshold: "
+            f"delta={runtime_publish_failure_total_delta} threshold={max_runtime_publish_failures}"
+        )
 
 governance_resolution_delta = (
     metric_delta('workorch_http_requests_total{endpoint="decision_resolve"}')
@@ -659,6 +1176,9 @@ governance_scheduler_evidence_delta = (
 )
 governance_continuation_main_path = {
     "required": require_governance_continuation,
+    "triggeredResolution": bool(governance_resolve_workspace_id and governance_resolve_ticket_id),
+    "triggeredWorkspaceID": governance_resolve_workspace_id,
+    "triggeredTicketID": governance_resolve_ticket_id,
     "governanceResolutionDelta": governance_resolution_delta,
     "governanceCommandAcceptedDelta": governance_command_accepted_delta,
     "replanCommandAcceptedDelta": replan_command_accepted_delta,
@@ -688,6 +1208,11 @@ if governance_resolution_delta > 0 and watchdog_stale_recovery_delta > 0 and not
     errors.append(
         "governance continuation appears to rely on watchdog stale-runtime recovery without scheduler evidence"
     )
+if governance_continuation_main_path["triggeredResolution"]:
+    governance_continuation_main_path["requestArtifact"] = "governance-resolution-request.json"
+    governance_continuation_main_path["responseArtifact"] = "governance-resolution-response.json"
+    if not (artifact_dir / "governance-resolution-response.json").exists():
+        errors.append("governance resolution trigger was requested but response artifact is missing")
 
 events_path = artifact_dir / "sse-events.jsonl"
 topic_counts = {}
@@ -986,11 +1511,112 @@ if enable_cpu_profile_check:
         else:
             warnings.append(message)
 
+process_resource_summary = {
+    "enabled": True,
+    "pid": None,
+    "available": False,
+    "beforeArtifact": None,
+    "afterArtifact": None,
+    "cpuPercent": None,
+    "cpuTimeDeltaSeconds": None,
+    "elapsedSeconds": None,
+    "rssBytes": None,
+    "readBytesDelta": None,
+    "writeBytesDelta": None,
+    "thresholds": {
+        "maxCpuPercent": optional_float(max_process_cpu_percent),
+        "maxRSSBytes": optional_float(max_process_rss_bytes),
+        "maxReadBytesDelta": optional_float(max_process_read_bytes_delta),
+        "maxWriteBytesDelta": optional_float(max_process_write_bytes_delta),
+    },
+    "issues": [],
+}
+before_resource_path = artifact_dir / "process-resource-before.json"
+after_resource_path = artifact_dir / "process-resource-after.json"
+if before_resource_path.exists() and after_resource_path.exists():
+    before_resource = read_json(before_resource_path)
+    after_resource = read_json(after_resource_path)
+    process_resource_summary["beforeArtifact"] = before_resource_path.name
+    process_resource_summary["afterArtifact"] = after_resource_path.name
+    process_resource_summary["pid"] = after_resource.get("pid") or before_resource.get("pid")
+    if before_resource.get("available") and after_resource.get("available"):
+        elapsed = max(0.0, float(after_resource.get("capturedAtEpoch") or 0) - float(before_resource.get("capturedAtEpoch") or 0))
+        cpu_delta = max(0.0, float(after_resource.get("cpuTimeSeconds") or 0) - float(before_resource.get("cpuTimeSeconds") or 0))
+        read_delta = max(0.0, float(after_resource.get("readBytes") or 0) - float(before_resource.get("readBytes") or 0))
+        write_delta = max(0.0, float(after_resource.get("writeBytes") or 0) - float(before_resource.get("writeBytes") or 0))
+        cpu_percent = (cpu_delta / elapsed * 100.0) if elapsed > 0 else None
+        process_resource_summary.update({
+            "available": True,
+            "cpuPercent": cpu_percent,
+            "cpuTimeDeltaSeconds": cpu_delta,
+            "elapsedSeconds": elapsed,
+            "rssBytes": int(after_resource.get("rssBytes") or 0),
+            "readBytesDelta": read_delta,
+            "writeBytesDelta": write_delta,
+        })
+        thresholds = process_resource_summary["thresholds"]
+        if thresholds["maxCpuPercent"] is not None and cpu_percent is not None and cpu_percent > thresholds["maxCpuPercent"]:
+            process_resource_summary["issues"].append(
+                f"process CPU percent above threshold: cpu={cpu_percent:.2f}% threshold={thresholds['maxCpuPercent']}"
+            )
+        if thresholds["maxRSSBytes"] is not None and process_resource_summary["rssBytes"] > thresholds["maxRSSBytes"]:
+            process_resource_summary["issues"].append(
+                f"process RSS above threshold: rssBytes={process_resource_summary['rssBytes']} threshold={thresholds['maxRSSBytes']}"
+            )
+        if thresholds["maxReadBytesDelta"] is not None and read_delta > thresholds["maxReadBytesDelta"]:
+            process_resource_summary["issues"].append(
+                f"process read bytes delta above threshold: delta={read_delta} threshold={thresholds['maxReadBytesDelta']}"
+            )
+        if thresholds["maxWriteBytesDelta"] is not None and write_delta > thresholds["maxWriteBytesDelta"]:
+            process_resource_summary["issues"].append(
+                f"process write bytes delta above threshold: delta={write_delta} threshold={thresholds['maxWriteBytesDelta']}"
+            )
+    else:
+        process_resource_summary["issues"].append(
+            f"process resource snapshot unavailable: before={before_resource.get('error')} after={after_resource.get('error')}"
+        )
+else:
+    process_resource_summary["issues"].append(
+        "process resource snapshots unavailable; set WORKORCH_OBSERVE_PROCESS_PID or observe a local listening workorchd"
+    )
+if process_resource_summary["issues"]:
+    if require_process_resource:
+        errors.extend(process_resource_summary["issues"])
+    else:
+        warnings.extend(process_resource_summary["issues"])
+
+goal_convergence_summary = {
+    "required": require_goal_convergence,
+    "pass": bool(goal_convergence) and all(item.get("pass") for item in goal_convergence),
+    "workspaceCount": len(goal_convergence),
+    "thresholds": {
+        "allowedRunStates": sorted(goal_convergence_run_states),
+        "minAcceptedResults": min_goal_accepted_results,
+        "minArtifacts": min_goal_artifacts,
+        "requireCoverageClosed": require_goal_coverage_closed,
+    },
+    "workspaces": goal_convergence,
+}
+if require_goal_convergence:
+    if not goal_convergence:
+        errors.append(
+            "goal convergence verification requested but no workspace snapshots were observed; "
+            "set WORKORCH_OBSERVE_WORKSPACE_IDS or allow WORKORCH_OBSERVE_AUTO_SNAPSHOT_LIMIT > 0"
+        )
+    for item in goal_convergence:
+        if not item.get("pass"):
+            errors.append(
+                f"{item.get('workspaceId')}: goal convergence check failed: "
+                + "; ".join(item.get("issues") or [])
+            )
+
 summary = {
     "serviceReady": readyz.get("status") == "ready",
     "projectionState": projection.get("state"),
     "workspaceTotal": len(workspace_items),
     "observedWorkspaceIds": workspace_ids,
+    "workspaceSummaries": workspace_summaries,
+    "goalConvergence": goal_convergence_summary,
     "syntheticWorkspaceIds": synthetic_workspace_ids,
     "sseTopicCounts": topic_counts,
     "sseWorkspaceEventCounts": workspace_event_counts,
@@ -1004,12 +1630,41 @@ summary = {
         "serverMaxConcurrentRuns": metrics.get("workorch_server_max_concurrent_runs", 0),
         "runRequestsInFlight": metrics.get("workorch_run_requests_in_flight", 0),
         "runQueueWaiting": metrics.get("workorch_run_queue_waiting", 0),
+        "watchdogTimerRegistrations": metrics.get("workorch_watchdog_timer_registrations_total", 0),
         "watchdogIntervalSeconds": metrics.get("workorch_watchdog_interval_seconds", 0),
         "projectionPendingRebuilds": pending_rebuilds,
         "projectionScheduleDroppedDelta": schedule_dropped_delta,
         "projectionRebuildDelta": {
             "full": metric_delta("workorch_workspace_projection_rebuild_total{scope=\"full\"}"),
             "debounced": metric_delta("workorch_workspace_projection_debounced_rebuild_total"),
+        },
+        "optionalMetricAvailability": optional_metric_availability,
+        "eventRecordIOPressure": {
+            "metadataScansTotal": metrics.get("workorch_event_record_metadata_scans_total", 0),
+            "metadataRecordsScannedTotal": metrics.get("workorch_event_record_metadata_records_scanned_total", 0),
+            "payloadHydratesTotal": metrics.get("workorch_event_record_payload_hydrates_total", 0),
+            "payloadHydrateBytesTotal": metrics.get("workorch_event_record_payload_hydrate_bytes_total", 0),
+            "metadataScanDelta": event_metadata_scan_delta,
+            "metadataRecordsScannedDelta": event_metadata_records_scanned_delta,
+            "payloadHydratesDelta": event_payload_hydrates_delta,
+            "payloadHydrateBytesDelta": event_payload_hydrate_bytes_delta,
+            "thresholds": {
+                "maxMetadataRecordsScannedDelta": max_metadata_records,
+                "maxPayloadHydratesDelta": max_payload_hydrates,
+                "maxPayloadHydrateBytesDelta": max_payload_hydrate_bytes,
+            },
+        },
+        "runtimeEventPublishFailures": {
+            "acceptedDelta": labeled_metric_delta("workorch_runtime_event_publish_failures_total", {"category": "accepted"}),
+            "terminalDelta": labeled_metric_delta("workorch_runtime_event_publish_failures_total", {"category": "terminal"}),
+            "progressDelta": labeled_metric_delta("workorch_runtime_event_publish_failures_total", {"category": "progress"}),
+            "workerLifecycleDelta": labeled_metric_delta("workorch_runtime_event_publish_failures_total", {"category": "worker_lifecycle"}),
+            "workerLostDelta": labeled_metric_delta("workorch_runtime_event_publish_failures_total", {"category": "worker_lost"}),
+            "heartbeatTimerStartFailureDelta": runtime_heartbeat_timer_start_failure_delta,
+            "totalPublishFailureDelta": runtime_event_publish_failure_delta + runtime_heartbeat_timer_start_failure_delta,
+            "thresholds": {
+                "maxTotalDelta": max_runtime_publish_failures,
+            },
         },
         "scheduler": {
             "governanceResolutionDelta": governance_resolution_delta,
@@ -1055,6 +1710,7 @@ summary = {
     },
     "pprof": pprof_summary,
     "cpuProfile": cpu_profile_summary,
+    "processResource": process_resource_summary,
     "warnings": warnings,
     "errors": errors,
 }

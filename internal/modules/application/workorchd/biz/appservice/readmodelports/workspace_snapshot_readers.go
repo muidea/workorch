@@ -10,6 +10,7 @@ type WorkspaceSnapshotReaders struct {
 	Results               readmodelcore.ResultReader
 	Artifacts             readmodelcore.ArtifactReader
 	ArtifactContinuations readmodelcore.ArtifactContinuationReader
+	CoverageWorkItems     readmodelcore.CoverageWorkItemReader
 	EventRecords          readmodelcore.EventRecordReader
 	Patches               readmodelcore.PatchReader
 	Tickets               readmodelcore.DecisionTicketReader

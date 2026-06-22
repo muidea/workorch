@@ -893,8 +893,69 @@ func TestRuntimeRepairActionPackageUsesEvidenceAcquisitionWithoutConcreteTarget(
 	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
 		t.Fatalf("acceptedKinds = %#v, want no patch/apply without concrete target evidence", required["acceptedKinds"])
 	}
+	if required["deliverableWriteForbidden"] != true || required["scratchOnlyForGeneratedFixtures"] != true {
+		t.Fatalf("requiredOutput = %#v, want evidence acquisition to forbid deliverable writes and require scratch fixtures", required)
+	}
+	if scratch := stringFromMap(required, validationScratchDirKey); scratch == "" ||
+		stringFromMap(actionPackage, validationScratchDirKey) != scratch ||
+		stringFromMap(input, validationScratchDirKey) != scratch {
+		t.Fatalf("scratch contract not mirrored input=%q pkg=%q required=%q", stringFromMap(input, validationScratchDirKey), stringFromMap(actionPackage, validationScratchDirKey), scratch)
+	}
+	if !strings.Contains(stringFromAny(required["deliverableWriteRule"]), "must not create, modify, delete, or initialize workspace deliverable files") {
+		t.Fatalf("deliverableWriteRule = %q, want explicit deliverable write prohibition", required["deliverableWriteRule"])
+	}
+	if !strings.Contains(stringFromAny(required["scratchFixtureRule"]), validationScratchDirKey) {
+		t.Fatalf("scratchFixtureRule = %q, want validation scratch fixture rule", required["scratchFixtureRule"])
+	}
 	if required["mustReturnValidJSON"] != true {
 		t.Fatalf("requiredOutput = %#v, want schema recovery JSON contract preserved", required)
+	}
+}
+
+func TestCoverageTargetSetPrioritizesCurrentCoverageFocus(t *testing.T) {
+	input := map[string]any{
+		coverageFocusKey: map[string]any{
+			"id":                  "focus-cwi-005",
+			"coverageWorkItemIds": []string{"cwi-005"},
+			"targetRefs":          []string{"goal-req-005"},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                  "cwi-001",
+				"sourceRequirementId": "goal-req-001",
+				"sourceScope":         "goal_leaf",
+				"targetText":          "first goal target",
+				"missingEvidenceKinds": []string{
+					"validation",
+				},
+			},
+			"ledgerSummary": []map[string]any{{
+				"id":                  "cwi-001",
+				"sourceRequirementId": "goal-req-001",
+				"sourceScope":         "goal_leaf",
+				"targetText":          "first goal target",
+				"missingEvidenceKinds": []string{
+					"validation",
+				},
+			}, {
+				"id":                  "cwi-005",
+				"sourceRequirementId": "goal-req-005",
+				"sourceScope":         "goal_leaf",
+				"targetText":          "focused goal target",
+				"missingEvidenceKinds": []string{
+					"validation",
+				},
+			}},
+		},
+	}
+
+	targets := coverageTargetSetFromRepairInput(input)
+	if len(targets) == 0 {
+		t.Fatal("coverageTargetSetFromRepairInput returned no targets")
+	}
+	if targets[0]["sourceRequirementId"] != "goal-req-005" ||
+		targets[0]["targetText"] != "focused goal target" {
+		t.Fatalf("first target = %+v, want current coverage focus cwi-005", targets[0])
 	}
 }
 
@@ -1364,6 +1425,56 @@ func TestRuntimeRepairActionPackageMarksRepeatedTargetRepairMode(t *testing.T) {
 	}
 }
 
+func TestRuntimeRepairActionPackageRequiresShiftWhenGroundedRootCauseCandidateExists(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"targetRepairAttempts":        3,
+		"failureTargetScope":          "failureTargets=validation-target.txt",
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"failureTargetRepairContext": []map[string]any{{
+			"targetRef":        "validation-target.txt",
+			"exists":           true,
+			"contentHash":      "hash-validation",
+			"content":          "validation target content",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+		}},
+		"rootCauseCandidateContext": []map[string]any{{
+			"targetRef":        "implementation-target.txt",
+			"exists":           true,
+			"contentHash":      "hash-implementation",
+			"content":          "implementation target content",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+		}},
+		"structuredFailureSignals": map[string]any{
+			"targetRefs": []string{"validation-target.txt"},
+			"messages":   []string{"validation target still fails after repeated repair"},
+		},
+	}
+
+	actionPackage := repairActionPackageFromRepairInput(input, map[string]any{
+		"error":                   "validation target still fails",
+		failureOutputKeySignature: "class=shell_command_failed|failureTargets=validation-target.txt",
+	})
+
+	reassessment := mapFromValue(actionPackage["strategyReassessment"])
+	if got := stringSliceFromValue(reassessment["allowedRepairModes"]); len(got) != 1 || !stringSliceContains(got, strategyRepairModeShiftRootCauseTarget) {
+		t.Fatalf("allowedRepairModes = %#v, want only shift_root_cause_target", got)
+	}
+	if reassessment["requiredRepairMode"] != strategyRepairModeShiftRootCauseTarget ||
+		reassessment["modePolicy"] != "grounded_root_cause_candidate_required" {
+		t.Fatalf("strategyReassessment = %#v, want grounded root-cause shift policy", reassessment)
+	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if got := stringSliceFromValue(required["strategyReassessmentRepairModes"]); len(got) != 1 || !stringSliceContains(got, strategyRepairModeShiftRootCauseTarget) {
+		t.Fatalf("required repair modes = %#v, want only shift_root_cause_target", got)
+	}
+	if required["mustShiftRootCauseTarget"] != true {
+		t.Fatalf("requiredOutput = %#v, want mustShiftRootCauseTarget", required)
+	}
+}
+
 func TestRuntimeRepairActionPackageRequiresShapeEvidenceForRepeatedShapeFailure(t *testing.T) {
 	input := map[string]any{
 		"stateChangingOutputRequired": true,
@@ -1404,6 +1515,9 @@ func TestRuntimeRepairActionPackageRequiresShapeEvidenceForRepeatedShapeFailure(
 		required["patchForbiddenUntilConcreteTargetEvidence"] != true ||
 		required["mustIncludeStateChangingNode"] != false {
 		t.Fatalf("requiredOutput = %#v, want bounded evidence acquisition contract", required)
+	}
+	if required["deliverableWriteForbidden"] != true || required["scratchOnlyForGeneratedFixtures"] != true {
+		t.Fatalf("requiredOutput = %#v, want evidence acquisition to forbid deliverable writes and require scratch fixtures", required)
 	}
 	if !stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") {
 		t.Fatalf("requiredOutput.forbiddenKinds = %#v, want patch/apply forbidden", required["forbiddenKinds"])
@@ -1654,5 +1768,50 @@ func TestRuntimeRepairActionPackageGroundsCurrentPatchFailure(t *testing.T) {
 	budget := mapFromValue(actionPackage["repairBudget"])
 	if budget["budgetKind"] != "patch_apply_repair" || budget["attempt"] != int64(3) {
 		t.Fatalf("repairBudget = %#v, want patch apply budget state", budget)
+	}
+}
+
+func TestRuntimeRepairActionPackageTreatsBaseHashMismatchAsStalePatch(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"runtimeRepairAttempt":        1,
+		"maxRuntimeRepairAttempts":    10,
+		"failedStepId":                "run/graph-001/patch",
+		"failedStepKind":              "patch/apply",
+		"failureClass":                failureClassPatchApply,
+		"failureSignature":            "class=patch_apply_failed|kind=patch/apply|targetRef=target.txt|error=conflict: patch basehash mismatch",
+		"failureTargetScope":          "targetRef=target.txt",
+		"patchRepairContext": []map[string]any{{
+			"targetRef":        "target.txt",
+			"exists":           true,
+			"contentHash":      "sha256-current",
+			"content":          "current content\n",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+		}},
+	}
+	actionPackage := repairActionPackageFromRepairInput(input, map[string]any{
+		"stage":                   "patch_apply",
+		"targetRef":               "target.txt",
+		"patchType":               "text_replace",
+		"error":                   "conflict: patch baseHash mismatch",
+		failureOutputKeyClass:     failureClassPatchApply,
+		failureOutputKeySignature: "class=patch_apply_failed|kind=patch/apply|targetRef=target.txt|error=conflict: patch basehash mismatch",
+	})
+
+	digest := mapFromValue(actionPackage["failedPatchDigest"])
+	if digest["targetRef"] != "target.txt" || digest["stalePatchRejected"] != true {
+		t.Fatalf("failedPatchDigest = %#v, want baseHash mismatch marked as stale patch", digest)
+	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustUseCurrentTargetSnapshot"] != true ||
+		required["mustRebuildFromCurrentEvidence"] != true {
+		t.Fatalf("requiredOutput = %#v, want current snapshot rebuild contract", required)
+	}
+	if actionPackage["requiredRepairMode"] != "patch_current_snapshot_only" {
+		t.Fatalf("requiredRepairMode = %#v, want patch_current_snapshot_only", actionPackage["requiredRepairMode"])
+	}
+	if !stringSliceContains(stringSliceFromValue(actionPackage["forbiddenActions"]), "reuse_stale_patch_hunk") {
+		t.Fatalf("forbiddenActions = %#v, want stale patch reuse forbidden", actionPackage["forbiddenActions"])
 	}
 }

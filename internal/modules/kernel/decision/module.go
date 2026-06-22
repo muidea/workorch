@@ -126,6 +126,15 @@ func (m *Module) handleEnsureResolvedCommand(ctx context.Context, envelope event
 	if cmd.StepID == "" {
 		cmd.StepID = scopedStepID(envelope)
 	}
+	if cmd.WorkspaceID == "" && cmd.RunID == "" && cmd.StepID == "" {
+		ticket, err := m.resolveUniqueTicketForUnscopedCommand(ctx, cmd.TicketID)
+		if err != nil {
+			return err
+		}
+		cmd.WorkspaceID = ticket.WorkspaceID
+		cmd.RunID = ticket.RunID
+		cmd.StepID = ticket.StepID
+	}
 	ticket, resolution, err := m.servicePtr.EnsureResolvedTicketAndReturn(ctx, cmd)
 	if err != nil {
 		return err
@@ -236,6 +245,13 @@ func (m *Module) handleTicketCommand(ctx context.Context, envelope events.Envelo
 		return decisionCommandResponse(envelope, nil)
 	case decisionevents.TopicDecisionCommandDeleteTicket:
 		ticketID := deleteTicketIDFromPayload(envelope.Payload)
+		if !envelopeHasScope(envelope) {
+			ticket, err := m.resolveUniqueTicketForUnscopedCommand(ctx, ticketID)
+			if err != nil {
+				return err
+			}
+			ctx = common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID)
+		}
 		if err := m.ensureTicketScope(ctx, ticketID, envelope); err != nil {
 			return err
 		}
@@ -329,13 +345,23 @@ func (m *Module) handleResolutionCommand(ctx context.Context, envelope events.En
 		}
 		return decisionCommandResponse(envelope, nil)
 	case decisionevents.TopicDecisionCommandGetResolution:
-		item, err := m.resolutions.GetByTicketID(ctx, common.TicketID(stringPayload(envelope.Payload, events.PayloadKeyBlockingTicketID)))
+		ticketID := common.TicketID(stringPayload(envelope.Payload, events.PayloadKeyBlockingTicketID))
+		resolutionCtx, err := m.resolveResolutionTicketContext(ctx, ticketID, envelope)
+		if err != nil {
+			return err
+		}
+		item, err := m.resolutions.GetByTicketID(resolutionCtx, ticketID)
 		if err != nil {
 			return err
 		}
 		return decisionCommandResponse(envelope, map[string]any{events.PayloadKeyResolution: item})
 	case decisionevents.TopicDecisionCommandDeleteResolution:
-		if err := m.resolutions.DeleteByTicketID(ctx, deleteResolutionTicketIDFromPayload(envelope.Payload)); err != nil {
+		ticketID := deleteResolutionTicketIDFromPayload(envelope.Payload)
+		resolutionCtx, err := m.resolveResolutionTicketContext(ctx, ticketID, envelope)
+		if err != nil {
+			return err
+		}
+		if err := m.resolutions.DeleteByTicketID(resolutionCtx, ticketID); err != nil {
 			return err
 		}
 		return decisionCommandResponse(envelope, nil)
@@ -344,15 +370,46 @@ func (m *Module) handleResolutionCommand(ctx context.Context, envelope events.En
 	}
 }
 
+func (m *Module) resolveResolutionTicketContext(ctx context.Context, ticketID common.TicketID, envelope events.Envelope) (context.Context, error) {
+	if ticketID == "" {
+		return ctx, common.ErrInvalidArgument
+	}
+	if m == nil || m.tickets == nil {
+		return ctx, common.ErrInvalidArgument
+	}
+	if !envelopeHasScope(envelope) {
+		ticket, err := m.resolveUniqueTicketForUnscopedCommand(ctx, ticketID)
+		if err != nil {
+			return ctx, err
+		}
+		if ticket.WorkspaceID != "" {
+			ctx = common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID)
+		}
+		return ctx, nil
+	}
+	item, err := m.tickets.Get(ctx, ticketID)
+	if err != nil {
+		return ctx, err
+	}
+	if !ticketMatchesScope(item, envelope) {
+		return ctx, common.ErrNotFound
+	}
+	if item.WorkspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
+	}
+	return ctx, nil
+}
+
 func (m *Module) ensureTicketScope(ctx context.Context, ticketID common.TicketID, envelope events.Envelope) error {
 	if ticketID == "" {
 		return common.ErrInvalidArgument
 	}
-	if !envelopeHasScope(envelope) {
-		return nil
-	}
 	if m == nil || m.tickets == nil {
 		return common.ErrInvalidArgument
+	}
+	if !envelopeHasScope(envelope) {
+		_, err := m.resolveUniqueTicketForUnscopedCommand(ctx, ticketID)
+		return err
 	}
 	item, err := m.tickets.Get(ctx, ticketID)
 	if err != nil {
@@ -362,6 +419,42 @@ func (m *Module) ensureTicketScope(ctx context.Context, ticketID common.TicketID
 		return common.ErrNotFound
 	}
 	return nil
+}
+
+func (m *Module) resolveUniqueTicketForUnscopedCommand(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Ticket, error) {
+	if ticketID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	if m == nil || m.tickets == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	items, err := m.tickets.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var matches []*decisionmodel.Ticket
+	var openMatches []*decisionmodel.Ticket
+	for _, item := range items {
+		if item == nil || item.ID != ticketID {
+			continue
+		}
+		matches = append(matches, item)
+		if item.State == common.DecisionTicketStateOpen {
+			openMatches = append(openMatches, item)
+		}
+	}
+	switch {
+	case len(openMatches) == 1:
+		return openMatches[0], nil
+	case len(openMatches) > 1:
+		return nil, common.ErrConflict
+	case len(matches) == 1:
+		return matches[0], nil
+	case len(matches) > 1:
+		return nil, common.ErrConflict
+	default:
+		return nil, common.ErrNotFound
+	}
 }
 
 func envelopeHasScope(envelope events.Envelope) bool {
@@ -451,10 +544,13 @@ func resolutionFromPayload(payload map[string]any) (*decisionmodel.Resolution, e
 			return nil, common.ErrInvalidArgument
 		}
 		return &decisionmodel.Resolution{
-			ID:       cmd.ResolutionID,
-			TicketID: cmd.TicketID,
-			Type:     cmd.Type,
-			Payload:  cloneMap(cmd.Payload),
+			ID:                 cmd.ResolutionID,
+			TicketID:           cmd.TicketID,
+			Type:               cmd.Type,
+			Payload:            cloneMap(cmd.Payload),
+			ContinuationAction: nonEmptyString(cmd.ContinuationAction, stringPayloadValue(cmd.Payload, "continuationAction")),
+			ResumeRunID:        nonEmptyRunID(cmd.ResumeRunID, common.RunID(stringPayloadValue(cmd.Payload, "resumeRunId"))),
+			SuccessorRunID:     nonEmptyRunID(cmd.SuccessorRunID, common.RunID(stringPayloadValue(cmd.Payload, "successorRunId"))),
 		}, nil
 	}
 	item, ok := payload[events.PayloadKeyResolution].(*decisionmodel.Resolution)
@@ -467,6 +563,29 @@ func resolutionFromPayload(payload map[string]any) (*decisionmodel.Resolution, e
 func stringPayload(payload map[string]any, key string) string {
 	value, _ := payload[key].(string)
 	return value
+}
+
+func stringPayloadValue(payload map[string]any, key string) string {
+	value, _ := payload[key].(string)
+	return value
+}
+
+func nonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func nonEmptyRunID(values ...common.RunID) common.RunID {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func mapPayload(payload map[string]any, key string) map[string]any {

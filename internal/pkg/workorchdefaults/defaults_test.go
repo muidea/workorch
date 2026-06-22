@@ -68,6 +68,9 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	}
 	assertStringListContains(t, semanticNavigation["defaultMCPServerIds"].([]any), "mcp-lsp-bridge")
 	assertStringListContains(t, semanticNavigation["defaultCapabilityIds"].([]any), "mcp-lsp-bridge:tool:lsp_diagnostics")
+	assertStringListContains(t, semanticNavigation["defaultCapabilityIds"].([]any), "mcp-lsp-bridge:tool:lsp_status")
+	assertStringListContains(t, semanticNavigation["defaultCapabilityIds"].([]any), "mcp-lsp-bridge:tool:lsp_shutdown")
+	assertStringListContains(t, semanticNavigation["defaultCapabilityIds"].([]any), "mcp-lsp-bridge:tool:lsp_repair")
 	assertSoftwareDevAcceptanceSlicePolicy(t, item.ContextHints)
 	assertSoftwareDevAcceptanceDimensions(t, item.ContextHints)
 	assertSoftwareDevCapabilityUsagePolicies(t, item.ContextHints)
@@ -375,12 +378,23 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	if server.Env["LSP_BRIDGE_CONFIG"] != "{workspaceManagedConfig:lsp-bridge/mcp-config.json}" {
 		t.Fatalf("mcp-lsp-bridge env = %+v, want managed config placeholder", server.Env)
 	}
+	assertStringSliceContains(t, server.AllowedTools, "lsp_diagnostics")
+	assertStringSliceContains(t, server.AllowedTools, "lsp_status")
+	assertStringSliceContains(t, server.AllowedTools, "lsp_shutdown")
+	assertStringSliceContains(t, server.AllowedTools, "lsp_repair")
 	capability, err := mcpCapabilityRepo.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_diagnostics"))
 	if err != nil {
 		t.Fatalf("get lsp diagnostics capability: %v", err)
 	}
 	if capability.Category != "code_semantics" || capability.RiskLevel != "read_only" {
 		t.Fatalf("lsp diagnostics capability = %+v, want code semantics read-only", capability)
+	}
+	statusCapability, err := mcpCapabilityRepo.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_status"))
+	if err != nil {
+		t.Fatalf("get lsp status capability: %v", err)
+	}
+	if statusCapability.Category != "code_semantics" || statusCapability.RiskLevel != "read_only" {
+		t.Fatalf("lsp status capability = %+v, want code semantics read-only", statusCapability)
 	}
 }
 
@@ -812,6 +826,9 @@ func assertSoftwareDevCapabilityUsagePolicies(t *testing.T, hints map[string]any
 			}
 			assertStringListContains(t, preferred, "lsp_sync")
 			assertStringListContains(t, preferred, "lsp_diagnostics")
+			assertStringListContains(t, preferred, "lsp_status")
+			assertStringListContains(t, preferred, "lsp_shutdown")
+			assertStringListContains(t, preferred, "lsp_repair")
 		}
 	}
 	if !found {

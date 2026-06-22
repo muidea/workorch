@@ -58,7 +58,7 @@ func (e *eventSubsystem) publishRunCreated(ctx context.Context, run *runModel.Ru
 	if e == nil || e.hub == nil || run == nil {
 		return nil
 	}
-	return e.hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, e.hub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        runevents.TopicRunCreated,
 		SourceModule: modulecommon.ModuleID,
@@ -84,7 +84,7 @@ func (e *eventSubsystem) publishRunStateChangedAtStep(ctx context.Context, run *
 	if e == nil || e.hub == nil || run == nil {
 		return nil
 	}
-	return e.hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, e.hub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        runevents.TopicRunStateChanged,
 		SourceModule: modulecommon.ModuleID,
@@ -103,7 +103,7 @@ func (e *eventSubsystem) publishRunStateChangedAtStep(ctx context.Context, run *
 	})
 }
 
-func (e *eventSubsystem) publishResultAccepted(ctx context.Context, item *resultmodel.Result) error {
+func (e *eventSubsystem) publishResultEvent(ctx context.Context, item *resultmodel.Result) error {
 	if e == nil || item == nil || e.hub == nil {
 		return nil
 	}
@@ -113,7 +113,7 @@ func (e *eventSubsystem) publishResultAccepted(ctx context.Context, item *result
 			artifactRefs = append(artifactRefs, string(ref))
 		}
 	}
-	return e.hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, e.hub, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/%s", item.ID, resultEventStateSuffix(item.State)),
 		Version:      events.WorkorchEventVersion,
 		Topic:        resultEventTopic(item.State),
@@ -168,7 +168,7 @@ func (e *eventSubsystem) publishArtifactCreated(ctx context.Context, item *resul
 	if item == nil || e.hub == nil {
 		return nil
 	}
-	return e.hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, e.hub, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/created", item.ID),
 		Version:      events.WorkorchEventVersion,
 		Topic:        resultevents.TopicArtifactCreated,
@@ -222,7 +222,7 @@ func (e *eventSubsystem) publishPatchChanged(ctx context.Context, run *runModel.
 	if failure != nil {
 		errText = failure.Error()
 	}
-	return e.hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, e.hub, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/%s", patch.ID, patchEventName(topic)),
 		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
@@ -287,7 +287,7 @@ func (e *eventSubsystem) publishArtifactContinuationChanged(ctx context.Context,
 	if step != nil {
 		stepID = step.ID
 	}
-	return e.hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, e.hub, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/%s", item.ID, artifactContinuationEventName(topic)),
 		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
@@ -331,7 +331,7 @@ func (e *eventSubsystem) publishPatchPreview(ctx context.Context, run *runModel.
 	targetRef := stringFromAny(preview["targetRef"])
 	patchType := stringFromAny(preview["patchType"])
 	subjectID := fmt.Sprintf("%s/patch-preview", step.ID)
-	return e.hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, e.hub, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/patch-previewed", subjectID),
 		Version:      events.WorkorchEventVersion,
 		Topic:        orchestratorevents.TopicPatchPreviewed,
@@ -432,7 +432,7 @@ func (e *eventSubsystem) publishMemoryChanged(ctx context.Context, topic string,
 	if item == nil || e.hub == nil {
 		return nil
 	}
-	return e.hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, e.hub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
 		SourceModule: modulecommon.ModuleID,
@@ -448,7 +448,7 @@ func (e *eventSubsystem) publishWorkspaceStateChanged(ctx context.Context, works
 	if e.hub == nil || workspace == nil {
 		return nil
 	}
-	return e.hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, e.hub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        workspaceevents.TopicWorkspaceStateChanged,
 		SourceModule: modulecommon.ModuleID,
@@ -464,7 +464,7 @@ func (e *eventSubsystem) publishStepState(ctx context.Context, run *runModel.Run
 	if e.hub == nil || run == nil || step == nil {
 		return nil
 	}
-	if err := e.hub.Publish(ctx, events.Envelope{
+	if err := events.PublishByContract(ctx, e.hub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
 		SourceModule: modulecommon.ModuleID,
@@ -543,7 +543,7 @@ func (e *eventSubsystem) publishContractViolationChanged(
 	if len(context) > 0 {
 		payload["context"] = cloneStepPayload(context)
 	}
-	return e.hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, e.hub, events.Envelope{
 		ID:           contractViolationEventID(topic, run, sourceStep, retryStepID, ticketID, violation),
 		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
@@ -620,7 +620,7 @@ func (e *eventSubsystem) publishRuntimeStepProgress(ctx context.Context, run *ru
 		status = "running"
 	}
 	summary := strings.TrimSpace(firstNonEmptyString(stringFromMap(data, "summary"), event))
-	return e.hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, e.hub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        runevents.TopicRunLLMStreamProgress,
 		SourceModule: modulecommon.ModuleID,
@@ -717,7 +717,7 @@ func (e *eventSubsystem) publishLLMStreamProgressFromStep(ctx context.Context, r
 	if status == "" {
 		status = "completed"
 	}
-	return e.hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, e.hub, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/llm-stream-progress", step.ID),
 		Version:      events.WorkorchEventVersion,
 		Topic:        runevents.TopicRunLLMStreamProgress,
@@ -821,7 +821,7 @@ func (e *eventSubsystem) publishLLMUsageFromStep(ctx context.Context, run *runMo
 	if !ok {
 		return nil
 	}
-	return e.hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, e.hub, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/llm-usage-recorded", step.ID),
 		Version:      events.WorkorchEventVersion,
 		Topic:        runevents.TopicRunLLMUsageRecorded,

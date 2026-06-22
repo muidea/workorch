@@ -40,6 +40,26 @@ type AsyncHub interface {
 	PublishAsync(context.Context, Envelope) error
 }
 
+func PublishByContract(ctx context.Context, hub Hub, envelope Envelope) error {
+	if hub == nil {
+		return nil
+	}
+	if EventHubDeliveryModeForTopic(envelope.Topic) == EventHubDeliveryModeAsync {
+		if asyncHub, ok := hub.(AsyncHub); ok {
+			return ignoreNotifyResponse(asyncHub.PublishAsync(ctx, envelope))
+		}
+		return ignoreNotifyResponse(hub.Publish(ctx, envelope))
+	}
+	return hub.Publish(ctx, envelope)
+}
+
+func ignoreNotifyResponse(err error) error {
+	if _, ok := ResponseEnvelope(err); ok {
+		return nil
+	}
+	return err
+}
+
 type MemoryHub struct {
 	mu          sync.RWMutex
 	subscribers map[string]map[int]Handler

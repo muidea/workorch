@@ -47,20 +47,20 @@ func withGovernanceSession[T any](ctx context.Context, session *RuntimeSession, 
 	return read(ctx, deps)
 }
 
-func withBackendSession[T any](ctx context.Context, backend string, dataRoot string, read func(context.Context, *RuntimeSession) (T, error)) (T, error) {
+func withBackendSession[T any](ctx context.Context, backend string, dataRoot string, read func(context.Context, *RuntimeSession) (T, error)) (ret T, err error) {
 	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
-		var ret T
 		return ret, err
 	}
+	defer session.CloseOnReturn(ctx, &err)
 	return read(ctx, session)
 }
 
-func withEnvSession[T any](ctx context.Context, read func(context.Context, *RuntimeSession) (T, error)) (T, error) {
+func withEnvSession[T any](ctx context.Context, read func(context.Context, *RuntimeSession) (T, error)) (ret T, err error) {
 	session, err := NewRuntimeSessionFromEnv()
 	if err != nil {
-		var ret T
 		return ret, err
 	}
+	defer session.CloseOnReturn(ctx, &err)
 	return read(ctx, session)
 }

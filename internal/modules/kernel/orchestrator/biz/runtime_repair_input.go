@@ -531,6 +531,172 @@ func applyRuntimeRepairPatchContextProjection(
 	}
 }
 
+func applyRuntimeRepairPatchFailureRecoveryContract(input map[string]any, pkg map[string]any, failedStep *runModel.Step) {
+	if input == nil || len(pkg) == 0 || failedStep == nil {
+		return
+	}
+	if !shouldIncludePatchRepairContext(failedStep) {
+		return
+	}
+	patchContext := mapSliceFromValue(input["patchRepairContext"])
+	if len(patchContext) == 0 {
+		patchContext = mapSliceFromValue(pkg["patchRepairContext"])
+	}
+	if len(patchContext) == 0 {
+		return
+	}
+	failedRequests := patchFailureRecoveryRequests(failedStep)
+	if len(failedRequests) == 0 {
+		return
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if len(required) == 0 {
+		required = stateChangingRepairRequiredOutput()
+	}
+	applyCurrentSnapshotDirectPatchContract(required)
+	required["mustRepairFailedPatchApplication"] = true
+	required["mustUsePatchRepairContext"] = true
+	required["mustNotRetryFailedPatchLiteral"] = true
+	required["patchFailureRecoveryRule"] = "previous patch application failed after dispatch; rebuild a fresh patch from patchRepairContext/current target snapshots, use the current snapshot contentHash as baseHash, and do not retry stale oldText/diff/content from failedPatchRequests"
+	required["patchFailureFallbackRule"] = "if current patchRepairContext is insufficient for a safe state change, return a real governance blocker or concrete evidence acquisition request; do not output another stale patch"
+	required["acceptedPatchRecoveryModes"] = []string{
+		"text_replace_with_exact_current_oldText_and_baseHash",
+		"unified_diff_with_current_visible_context_and_line_ranges",
+		"file_write_with_matching_current_baseHash_when_safeForFileWrite",
+	}
+	required["forbiddenOutputs"] = compactUniqueStrings(append(stringSliceFromValue(required["forbiddenOutputs"]),
+		"retry_same_failed_patch_literal",
+		"oldText_not_present_in_current_snapshot",
+		"diff_context_not_derived_from_current_snapshot",
+		"symbolic_or_stale_baseHash",
+	))
+	required["failedPatchRequests"] = failedRequests
+	if suggestions := mapSliceFromValue(input["patchRepairSuggestions"]); len(suggestions) > 0 {
+		required["preferredPatchRepairSuggestions"] = limitedMapSliceForRepairContract(suggestions, 5)
+	}
+	pkg["requiredOutput"] = required
+	pkg["patchFailureRecoveryContract"] = map[string]any{
+		"failedPatchRequests":          failedRequests,
+		"patchRepairContextRefs":       patchRepairContextRefs(patchContext),
+		"requiresCurrentSnapshotPatch": true,
+		"businessJudgment":             false,
+	}
+	input["patchFailureRecoveryContract"] = pkg["patchFailureRecoveryContract"]
+	input["repairActionPackage"] = pkg
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"The previous patch reached runtime patch application and failed against the current workspace content.",
+		"Treat failedPatchRequests as rejected stale material. Do not retry the same oldText, diff, content, or symbolic baseHash.",
+		"Build the next patch from patchRepairContext/current target snapshots and copy the current contentHash as baseHash when baseHash is used.",
+	)
+}
+
+func patchFailureRecoveryRequests(failedStep *runModel.Step) []map[string]any {
+	if failedStep == nil {
+		return nil
+	}
+	requests := patchRepairRequestsFromStep(failedStep)
+	if len(requests) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, min(len(requests), 5))
+	for _, request := range requests {
+		targetRef := normalizeRepairPatchTargetRef(request.TargetRef)
+		if targetRef == "" {
+			continue
+		}
+		item := map[string]any{
+			"targetRef": targetRef,
+			"patchType": request.PatchType,
+		}
+		if request.BaseHash != "" {
+			item["baseHash"] = request.BaseHash
+		}
+		if request.OldText != "" {
+			item["oldTextHash"] = sha256HexBytes([]byte(request.OldText))
+			item["oldTextPreview"] = truncateLLMContextString(request.OldText)
+		}
+		if request.NewText != "" {
+			item["newTextHash"] = sha256HexBytes([]byte(request.NewText))
+			item["newTextPreview"] = truncateLLMContextString(request.NewText)
+		}
+		if request.Diff != "" {
+			item["diffHash"] = sha256HexBytes([]byte(request.Diff))
+			item["diffPreview"] = truncateLLMContextString(request.Diff)
+		}
+		if request.Content != "" {
+			item["contentHash"] = sha256HexBytes([]byte(request.Content))
+			item["contentPreview"] = truncateLLMContextString(request.Content)
+		}
+		if reason := firstNonEmptyString(
+			stringFromMap(failedStep.Output, "error"),
+			stringFromMap(failedStep.Output, "reason"),
+			errorStringFromOutput(failedStep.Output),
+		); reason != "" {
+			item["failureReason"] = truncateLLMContextString(reason)
+		}
+		ret = append(ret, item)
+		if len(ret) >= 5 {
+			break
+		}
+	}
+	return ret
+}
+
+func patchRepairContextRefs(items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, min(len(items), 5))
+	for _, item := range items {
+		targetRef := normalizeRepairPatchTargetRef(stringFromMap(item, "targetRef"))
+		if targetRef == "" {
+			continue
+		}
+		ref := map[string]any{
+			"targetRef": targetRef,
+		}
+		for _, key := range []string{"contentHash", "baseHash"} {
+			if value := strings.TrimSpace(stringFromMap(item, key)); value != "" {
+				ref[key] = value
+			}
+		}
+		for _, key := range []string{"contentComplete", "safeForFileWrite", "redacted", "truncated", "exists"} {
+			if value, ok := item[key]; ok {
+				ref[key] = value
+			}
+		}
+		ret = append(ret, ref)
+		if len(ret) >= 5 {
+			break
+		}
+	}
+	return ret
+}
+
+func limitedMapSliceForRepairContract(items []map[string]any, limit int) []map[string]any {
+	if limit <= 0 || len(items) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, min(len(items), limit))
+	for _, item := range items {
+		if len(item) == 0 {
+			continue
+		}
+		ret = append(ret, compactLLMContextMap(item, 1))
+		if len(ret) >= limit {
+			break
+		}
+	}
+	return ret
+}
+
+func errorStringFromOutput(output map[string]any) string {
+	if len(output) == 0 {
+		return ""
+	}
+	return firstNonEmptyString(stringFromMap(output, "error"), stringFromMap(output, "reason"))
+}
+
 func applyRuntimeRepairFailureTargetContextProjection(input map[string]any, targetContext []map[string]any) {
 	if input == nil || len(targetContext) == 0 {
 		return
@@ -609,7 +775,9 @@ func applyRuntimeRepairStateChangingActionPackageProjection(
 			input["evidenceAcquisitionReason"] = stringFromMap(pkg, "evidenceAcquisitionReason")
 			input["repairGuidance"] = concreteFailureEvidenceAcquisitionGuidance()
 		}
+		applyRuntimeRepairPatchFailureRecoveryContract(input, pkg, failedStep)
 		input["repairActionPackage"] = pkg
+		ensureAvailableTargetSnapshotsForStateChangingRepair(input)
 		compactStateChangingRepairInputAroundActionPackage(input)
 	}
 	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
@@ -987,6 +1155,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	applyLLMOutputModeSelection(ctx, policy.LLMOutput, o.evidence.ArtifactContinuations, run, input, failedStep, attempt)
 	contract := o.convergenceManager().build(run, nil, failedStep, map[string]any{"input": input}, nil)
 	input = o.convergenceManager().apply(input, contract)
+	ensureAvailableTargetSnapshotsForStateChangingRepair(input)
 	applyLLMOutputModeSelection(ctx, policy.LLMOutput, o.evidence.ArtifactContinuations, run, input, failedStep, attempt)
 	refreshRuntimeRepairOutputDecisionContract(input, failedStep)
 	return input
@@ -996,6 +1165,7 @@ func refreshRuntimeRepairOutputDecisionContract(input map[string]any, failedStep
 	if input == nil {
 		return
 	}
+	ensureAvailableTargetSnapshotsForStateChangingRepair(input)
 	pkg := mapFromValue(input["repairActionPackage"])
 	if len(pkg) == 0 {
 		return

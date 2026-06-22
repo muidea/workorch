@@ -277,6 +277,18 @@ func TestArtifactContinuationRepositoryContract_File(t *testing.T) {
 	})
 }
 
+func TestCoverageWorkItemRepositoryContract_Memory(t *testing.T) {
+	testCoverageWorkItemRepositoryContract(t, func() repository.CoverageWorkItemRepository {
+		return memory.NewCoverageWorkItemRepository()
+	})
+}
+
+func TestCoverageWorkItemRepositoryContract_File(t *testing.T) {
+	testCoverageWorkItemRepositoryContract(t, func() repository.CoverageWorkItemRepository {
+		return file.NewCoverageWorkItemRepository(filepath.Join(t.TempDir(), "coverage-work-items"))
+	})
+}
+
 func TestDecisionTicketRepositoryContract_Memory(t *testing.T) {
 	testDecisionTicketRepositoryContract(t, func() repository.DecisionTicketRepository {
 		return memory.NewDecisionTicketRepository()
@@ -334,6 +346,7 @@ func TestRepositoryBundleContract_Memory(t *testing.T) {
 		patches:               memory.NewPatchRepository(),
 		validationResults:     memory.NewValidationResultRepository(),
 		runtimeCheckpoints:    memory.NewRuntimeCheckpointRepository(),
+		coverageWorkItems:     memory.NewCoverageWorkItemRepository(),
 		artifactContinuations: memory.NewArtifactContinuationRepository(),
 		tickets:               memory.NewDecisionTicketRepository(),
 		resolutions:           memory.NewDecisionResolutionRepository(),
@@ -365,6 +378,7 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 			patches:               file.NewPatchRepository(filepath.Join(dir, "patch.json")),
 			validationResults:     file.NewValidationResultRepository(filepath.Join(dir, "validation_result.json")),
 			runtimeCheckpoints:    file.NewRuntimeCheckpointRepository(filepath.Join(dir, "runtime_checkpoint.json")),
+			coverageWorkItems:     file.NewCoverageWorkItemRepository(filepath.Join(dir, "coverage-work-items")),
 			artifactContinuations: file.NewArtifactContinuationRepository(filepath.Join(dir, "artifact-continuations")),
 			tickets:               file.NewDecisionTicketRepository(filepath.Join(dir, "ticket.json")),
 			resolutions:           file.NewDecisionResolutionRepository(filepath.Join(dir, "resolution.json")),
@@ -394,6 +408,7 @@ type repositoryBundle struct {
 	patches               repository.PatchRepository
 	validationResults     repository.ValidationResultRepository
 	runtimeCheckpoints    repository.RuntimeCheckpointRepository
+	coverageWorkItems     repository.CoverageWorkItemRepository
 	artifactContinuations repository.ArtifactContinuationRepository
 	tickets               repository.DecisionTicketRepository
 	resolutions           repository.DecisionResolutionRepository
@@ -651,6 +666,39 @@ func testResultRepositoryContract(t *testing.T, factory func() repository.Result
 	if len(empty) != 0 {
 		t.Fatalf("missing run results = %+v, want empty", empty)
 	}
+	sharedRunID := common.RunID("run-shared-result")
+	first := &resultmodel.Result{
+		ID:          common.ResultID("result-shared-a"),
+		WorkspaceID: common.WorkspaceID("ws-result-a"),
+		RunID:       sharedRunID,
+		SourceType:  "manual",
+		Summary:     "first shared run result",
+		State:       common.ResultStateAccepted,
+	}
+	second := &resultmodel.Result{
+		ID:          common.ResultID("result-shared-b"),
+		WorkspaceID: common.WorkspaceID("ws-result-b"),
+		RunID:       sharedRunID,
+		SourceType:  "manual",
+		Summary:     "second shared run result",
+		State:       common.ResultStateAccepted,
+	}
+	if err := repo.Create(ctx, first); err != nil {
+		t.Fatalf("create first shared result: %v", err)
+	}
+	if err := repo.Create(ctx, second); err != nil {
+		t.Fatalf("create second shared result: %v", err)
+	}
+	if _, err := repo.ListByRun(ctx, sharedRunID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate run result list err = %v, want conflict", err)
+	}
+	scopedResults, err := repo.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, first.WorkspaceID), sharedRunID)
+	if err != nil {
+		t.Fatalf("scoped duplicate run result list: %v", err)
+	}
+	if len(scopedResults) != 1 || scopedResults[0].ID != first.ID {
+		t.Fatalf("scoped duplicate run results = %+v, want %s", scopedResults, first.ID)
+	}
 	if _, err := repo.Get(ctx, common.ResultID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("get missing result err = %v, want not found", err)
 	}
@@ -721,6 +769,39 @@ func testArtifactRepositoryContract(t *testing.T, factory func() repository.Arti
 	}
 	if len(byRun) != 1 || byRun[0].ID != item.ID {
 		t.Fatalf("run artifacts = %+v, want %s", byRun, item.ID)
+	}
+	sharedRunID := common.RunID("run-shared-artifact")
+	first := &resultmodel.Artifact{
+		ID:           common.ArtifactID("artifact-shared-a"),
+		WorkspaceID:  common.WorkspaceID("ws-artifact-a"),
+		RunID:        sharedRunID,
+		ArtifactType: "report",
+		Name:         "first shared run artifact",
+		State:        common.ArtifactStateAvailable,
+	}
+	second := &resultmodel.Artifact{
+		ID:           common.ArtifactID("artifact-shared-b"),
+		WorkspaceID:  common.WorkspaceID("ws-artifact-b"),
+		RunID:        sharedRunID,
+		ArtifactType: "report",
+		Name:         "second shared run artifact",
+		State:        common.ArtifactStateAvailable,
+	}
+	if err := repo.Create(ctx, first); err != nil {
+		t.Fatalf("create first shared artifact: %v", err)
+	}
+	if err := repo.Create(ctx, second); err != nil {
+		t.Fatalf("create second shared artifact: %v", err)
+	}
+	if _, err := repo.ListByRun(ctx, sharedRunID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate run artifact list err = %v, want conflict", err)
+	}
+	scopedArtifacts, err := repo.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, first.WorkspaceID), sharedRunID)
+	if err != nil {
+		t.Fatalf("scoped duplicate run artifact list: %v", err)
+	}
+	if len(scopedArtifacts) != 1 || scopedArtifacts[0].ID != first.ID {
+		t.Fatalf("scoped duplicate run artifacts = %+v, want %s", scopedArtifacts, first.ID)
 	}
 	byResult, err := repo.ListByResult(ctx, item.ResultID)
 	if err != nil {
@@ -1577,6 +1658,19 @@ func testRunRepositoryContract(t *testing.T, factory func() repository.RunReposi
 	if refreshed.FailureReason != "manual fail" {
 		t.Fatalf("failure reason = %q, want manual fail", refreshed.FailureReason)
 	}
+	scoped, err := repo.GetByWorkspaceID(ctx, item.WorkspaceID, item.ID)
+	if err != nil {
+		t.Fatalf("get run by workspace: %v", err)
+	}
+	if scoped.ID != item.ID || scoped.WorkspaceID != item.WorkspaceID {
+		t.Fatalf("scoped run = %+v, want %q/%q", scoped, item.WorkspaceID, item.ID)
+	}
+	if _, err := repo.GetByWorkspaceID(ctx, common.WorkspaceID("ws-missing"), item.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("wrong workspace get err = %v, want not found", err)
+	}
+	if _, err := repo.GetByWorkspaceID(ctx, item.WorkspaceID, common.RunID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing scoped get err = %v, want not found", err)
+	}
 
 	second := &runmodel.Run{
 		ID:          common.RunID("run-contract-2"),
@@ -2270,6 +2364,131 @@ func testArtifactContinuationRepositoryContract(t *testing.T, factory func() rep
 	}
 }
 
+func testCoverageWorkItemRepositoryContract(t *testing.T, factory func() repository.CoverageWorkItemRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &orchestratormodel.CoverageWorkItem{
+		ID:                    common.CoverageWorkItemID("cwi-contract-001"),
+		WorkspaceID:           common.WorkspaceID("ws-contract"),
+		RunID:                 common.RunID("run-contract"),
+		DefinitionRevision:    "rev-001",
+		NormalizedSourceKey:   "dod:001",
+		SourceScope:           "dod",
+		SourceRequirementID:   "dod-001",
+		SourceDoDID:           common.DoDID("dod-contract"),
+		TargetText:            "Requirement text",
+		RequiredEvidenceKinds: []string{"state_change", "validation"},
+		Status:                "open",
+		AcceptedEvidenceRefs:  []string{"ev:accepted"},
+		RejectedEvidenceRefs:  []string{"ev:rejected"},
+		CurrentGap:            "validation missing",
+		UpdatedByStepID:       common.StepID("run-contract/step-1"),
+		Metadata:              map[string]any{"scope": "contract"},
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create coverage work item: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate coverage work item create err = %v, want conflict", err)
+	}
+	if err := repo.Create(ctx, &orchestratormodel.CoverageWorkItem{
+		ID:                  common.CoverageWorkItemID("cwi-contract-duplicate-active"),
+		WorkspaceID:         item.WorkspaceID,
+		RunID:               item.RunID,
+		DefinitionRevision:  item.DefinitionRevision,
+		NormalizedSourceKey: item.NormalizedSourceKey,
+		Status:              "open",
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate active coverage source create err = %v, want conflict", err)
+	}
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get coverage work item: %v", err)
+	}
+	got.Metadata["scope"] = "mutated"
+	got.RequiredEvidenceKinds[0] = "mutated"
+	got.AcceptedEvidenceRefs[0] = "mutated"
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get fresh coverage work item: %v", err)
+	}
+	if fresh.Metadata["scope"] != "contract" ||
+		fresh.RequiredEvidenceKinds[0] != "state_change" ||
+		fresh.AcceptedEvidenceRefs[0] != "ev:accepted" ||
+		fresh.UpdatedByStepID != item.UpdatedByStepID {
+		t.Fatalf("coverage work item clone isolation failed: %+v", fresh)
+	}
+
+	closedSameSource := &orchestratormodel.CoverageWorkItem{
+		ID:                  common.CoverageWorkItemID("cwi-contract-closed-source"),
+		WorkspaceID:         item.WorkspaceID,
+		RunID:               item.RunID,
+		DefinitionRevision:  item.DefinitionRevision,
+		NormalizedSourceKey: item.NormalizedSourceKey,
+		Status:              "satisfied",
+	}
+	if err := repo.Create(ctx, closedSameSource); err != nil {
+		t.Fatalf("create closed coverage work item with same source: %v", err)
+	}
+	otherRun := &orchestratormodel.CoverageWorkItem{
+		ID:                  common.CoverageWorkItemID("cwi-contract-other-run"),
+		WorkspaceID:         item.WorkspaceID,
+		RunID:               common.RunID("run-other"),
+		DefinitionRevision:  item.DefinitionRevision,
+		NormalizedSourceKey: item.NormalizedSourceKey,
+		Status:              "open",
+	}
+	if err := repo.Create(ctx, otherRun); err != nil {
+		t.Fatalf("create other run coverage work item: %v", err)
+	}
+
+	list, err := repo.ListByRun(ctx, item.RunID)
+	if err != nil {
+		t.Fatalf("list coverage work items by run: %v", err)
+	}
+	if len(list) != 2 || list[0].ID != item.ID || list[1].ID != closedSameSource.ID {
+		t.Fatalf("coverage work items by run = %+v, want active then closed same source", list)
+	}
+	active, err := repo.ListActiveByRun(ctx, item.RunID)
+	if err != nil {
+		t.Fatalf("list active coverage work items by run: %v", err)
+	}
+	if len(active) != 1 || active[0].ID != item.ID {
+		t.Fatalf("active coverage work items = %+v, want only active item", active)
+	}
+
+	fresh.Status = "satisfied"
+	fresh.CurrentGap = ""
+	if err := repo.Update(ctx, fresh); err != nil {
+		t.Fatalf("update coverage work item: %v", err)
+	}
+	replacement := &orchestratormodel.CoverageWorkItem{
+		ID:                  common.CoverageWorkItemID("cwi-contract-replacement"),
+		WorkspaceID:         item.WorkspaceID,
+		RunID:               item.RunID,
+		DefinitionRevision:  item.DefinitionRevision,
+		NormalizedSourceKey: item.NormalizedSourceKey,
+		Status:              "open",
+	}
+	if err := repo.Create(ctx, replacement); err != nil {
+		t.Fatalf("create replacement active coverage work item: %v", err)
+	}
+	if err := repo.Delete(ctx, replacement.ID); err != nil {
+		t.Fatalf("delete replacement coverage work item: %v", err)
+	}
+	if _, err := repo.Get(ctx, replacement.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get deleted coverage work item err = %v, want not found", err)
+	}
+	if _, err := repo.Get(ctx, common.CoverageWorkItemID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing get err = %v, want not found", err)
+	}
+	if err := repo.Update(ctx, &orchestratormodel.CoverageWorkItem{ID: common.CoverageWorkItemID("missing")}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("invalid missing update err = %v, want invalid argument", err)
+	}
+}
+
 func testDecisionTicketRepositoryContract(t *testing.T, factory func() repository.DecisionTicketRepository) {
 	t.Helper()
 	ctx := context.Background()
@@ -2358,10 +2577,13 @@ func testDecisionResolutionRepositoryContract(t *testing.T, factory func() repos
 	repo := factory()
 
 	item := &decisionmodel.Resolution{
-		ID:       common.ResolutionID("resolution-contract"),
-		TicketID: common.TicketID("ticket-contract"),
-		Type:     "provide_missing_info",
-		Payload:  map[string]any{"operator": "contract-test"},
+		ID:                 common.ResolutionID("resolution-contract"),
+		TicketID:           common.TicketID("ticket-contract"),
+		Type:               "provide_missing_info",
+		Payload:            map[string]any{"operator": "contract-test"},
+		ContinuationAction: "resume",
+		ResumeRunID:        "run-current",
+		SuccessorRunID:     "run-successor",
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create resolution: %v", err)
@@ -2385,6 +2607,9 @@ func testDecisionResolutionRepositoryContract(t *testing.T, factory func() repos
 	}
 	if fresh.Payload["operator"] != "contract-test" {
 		t.Fatalf("payload operator = %v, want contract-test", fresh.Payload["operator"])
+	}
+	if fresh.ContinuationAction != "resume" || fresh.ResumeRunID != "run-current" || fresh.SuccessorRunID != "run-successor" {
+		t.Fatalf("resolution refs = %+v, want persisted recovery refs", fresh)
 	}
 
 	if _, err := repo.GetByTicketID(ctx, common.TicketID("missing")); !errors.Is(err, common.ErrNotFound) {
@@ -2498,6 +2723,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	patchID := common.PatchID("patch-bundle-contract")
 	validationResultID := common.ValidationResultID("validation-bundle-contract")
 	checkpointID := common.CheckpointID("checkpoint-bundle-contract")
+	coverageWorkItemID := common.CoverageWorkItemID("cwi-bundle-contract")
 	artifactContinuationID := common.ArtifactContinuationID("artifact-continuation-bundle-contract-001")
 	resultID := common.ResultID("result-bundle-contract")
 	artifactID := common.ArtifactID("artifact-bundle-contract")
@@ -2781,6 +3007,29 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 	if err := bundle.runtimeCheckpoints.Create(ctx, checkpoint); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("duplicate runtime checkpoint create err = %v, want conflict", err)
+	}
+
+	coverageWorkItem := &orchestratormodel.CoverageWorkItem{
+		ID:                    coverageWorkItemID,
+		WorkspaceID:           workspaceID,
+		RunID:                 runID,
+		DefinitionRevision:    "rev-bundle",
+		NormalizedSourceKey:   "dod:bundle",
+		SourceScope:           "dod",
+		SourceRequirementID:   "dod-bundle",
+		SourceDoDID:           dodID,
+		TargetText:            "bundle done",
+		RequiredEvidenceKinds: []string{"validation"},
+		Status:                "open",
+		CurrentGap:            "validation missing",
+		UpdatedByStepID:       stepID,
+		Metadata:              map[string]any{"scope": "bundle"},
+	}
+	if err := bundle.coverageWorkItems.Create(ctx, coverageWorkItem); err != nil {
+		t.Fatalf("create coverage work item: %v", err)
+	}
+	if err := bundle.coverageWorkItems.Create(ctx, coverageWorkItem); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate coverage work item create err = %v, want conflict", err)
 	}
 
 	artifactContinuation := &orchestratormodel.ArtifactContinuation{
@@ -3125,6 +3374,17 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 	if len(reloadedCheckpoints) != 1 || reloadedCheckpoints[0].ID != checkpointID || reloadedCheckpoints[0].Data["thread"] != "main" {
 		t.Fatalf("reloaded runtime checkpoints = %+v, want %q", reloadedCheckpoints, checkpointID)
+	}
+
+	reloadedCoverageWorkItems, err := reloaded.coverageWorkItems.ListActiveByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("reload active coverage work items by run: %v", err)
+	}
+	if len(reloadedCoverageWorkItems) != 1 ||
+		reloadedCoverageWorkItems[0].ID != coverageWorkItemID ||
+		reloadedCoverageWorkItems[0].RequiredEvidenceKinds[0] != "validation" ||
+		reloadedCoverageWorkItems[0].Metadata["scope"] != "bundle" {
+		t.Fatalf("reloaded coverage work items = %+v, want %q", reloadedCoverageWorkItems, coverageWorkItemID)
 	}
 
 	reloadedArtifactContinuations, err := reloaded.artifactContinuations.ListByRun(ctx, runID)

@@ -2,6 +2,9 @@ package orchestrator
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -70,5 +73,69 @@ func TestRepairActionPackageCarriesValidationFailureDiagnostic(t *testing.T) {
 	if required["mustAddressValidationDiagnostic"] != true ||
 		required["recommendedEvidenceTargetType"] != runtimemodel.ValidationEvidenceTargetToolchainContract {
 		t.Fatalf("requiredOutput = %+v, want validation diagnostic target contract", required)
+	}
+}
+
+func TestRepairActionPackageAddsValidationScratchDirForConcreteValidationEvidence(t *testing.T) {
+	input := map[string]any{
+		"workspaceId":  "ws-scratch-contract",
+		"runId":        "run-scratch-contract",
+		"failedStepId": "run-scratch-contract/001-verify",
+		"currentTargetAlreadySatisfiesFailedPatch": []map[string]any{{
+			"targetRef": "neutral-target",
+			"reason":    "state change already present; validation evidence remains required",
+		}},
+	}
+
+	pkg := repairActionPackageFromRepairInput(input)
+	required := mapFromValue(pkg["requiredOutput"])
+	scratch := stringFromMap(required, validationScratchDirKey)
+	if scratch == "" {
+		t.Fatalf("requiredOutput = %+v, want validationScratchDir", required)
+	}
+	if stringFromMap(input, validationScratchDirKey) != scratch || stringFromMap(pkg, validationScratchDirKey) != scratch {
+		t.Fatalf("scratch contract not mirrored input=%q pkg=%q required=%q", stringFromMap(input, validationScratchDirKey), stringFromMap(pkg, validationScratchDirKey), scratch)
+	}
+	if !strings.Contains(stringFromMap(required, "controlledSubstituteScratchRule"), validationScratchDirKey) {
+		t.Fatalf("requiredOutput = %+v, want scratch rule", required)
+	}
+}
+
+func TestEnsureRuntimeValidationScratchDirCreatesOnlyControlledRoot(t *testing.T) {
+	scratch := filepath.Join(os.TempDir(), "workorch-validation-scratch", "ws-scratch-runtime", "run", "step")
+	t.Cleanup(func() {
+		_ = os.RemoveAll(filepath.Join(os.TempDir(), "workorch-validation-scratch", "ws-scratch-runtime"))
+	})
+	input := map[string]any{
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				validationScratchDirKey: scratch,
+			},
+		},
+	}
+	got, err := ensureRuntimeValidationScratchDir(input)
+	if err != nil {
+		t.Fatalf("ensure runtime validation scratch: %v", err)
+	}
+	if got != scratch || stringFromMap(input, validationScratchDirKey) != scratch {
+		t.Fatalf("scratch = %q input=%q, want %q", got, stringFromMap(input, validationScratchDirKey), scratch)
+	}
+	if info, err := os.Stat(scratch); err != nil || !info.IsDir() {
+		t.Fatalf("scratch dir stat = %v info=%+v, want directory", err, info)
+	}
+
+	outside := filepath.Join(os.TempDir(), "workorch-validation-scratch-sibling", "ws", "run", "step")
+	_, err = ensureRuntimeValidationScratchDir(map[string]any{
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				validationScratchDirKey: outside,
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("ensure runtime validation scratch outside controlled root succeeded, want error")
+	}
+	if _, statErr := os.Stat(outside); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("outside scratch stat = %v, want not created", statErr)
 	}
 }

@@ -121,6 +121,7 @@ func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T
 	if _, err := os.Stat(filepath.Join(strings.TrimSuffix(root, ".json"), "payloads", filepath.FromSlash(safeEventRecordFileName("event-jsonl-1"))+".json")); err != nil {
 		t.Fatalf("large event payload ref stat: %v", err)
 	}
+	beforeDefaultList := repository.EventRecordIOMetricsSnapshot()
 	items, err := repo.List(ctx, repository.EventRecordQuery{RunID: common.RunID("run-jsonl")})
 	if err != nil {
 		t.Fatalf("list events: %v", err)
@@ -131,12 +132,26 @@ func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T
 	if items[0].PayloadRef == "" || len(items[0].PayloadSummary) == 0 {
 		t.Fatalf("event payload projection = ref:%q summary:%+v, want ref and summary", items[0].PayloadRef, items[0].PayloadSummary)
 	}
+	afterDefaultList := repository.EventRecordIOMetricsSnapshot()
+	if afterDefaultList.MetadataScansTotal <= beforeDefaultList.MetadataScansTotal ||
+		afterDefaultList.MetadataRecordsScannedTotal <= beforeDefaultList.MetadataRecordsScannedTotal {
+		t.Fatalf("event metadata metrics before/after = %+v/%+v, want metadata scan pressure incremented", beforeDefaultList, afterDefaultList)
+	}
+	if afterDefaultList.PayloadHydratesTotal != beforeDefaultList.PayloadHydratesTotal ||
+		afterDefaultList.PayloadHydrateBytesTotal != beforeDefaultList.PayloadHydrateBytesTotal {
+		t.Fatalf("event payload hydrate metrics before/after default list = %+v/%+v, want unchanged", beforeDefaultList, afterDefaultList)
+	}
 	withPayload, err := repo.List(ctx, repository.EventRecordQuery{RunID: common.RunID("run-jsonl"), IncludePayload: true})
 	if err != nil {
 		t.Fatalf("list events with payload: %v", err)
 	}
 	if len(withPayload) != 1 || withPayload[0].Payload["large"] != payload {
 		t.Fatalf("events = %+v, want rehydrated large payload", withPayload)
+	}
+	afterPayloadList := repository.EventRecordIOMetricsSnapshot()
+	if afterPayloadList.PayloadHydratesTotal <= afterDefaultList.PayloadHydratesTotal ||
+		afterPayloadList.PayloadHydrateBytesTotal <= afterDefaultList.PayloadHydrateBytesTotal {
+		t.Fatalf("event payload hydrate metrics default/with-payload = %+v/%+v, want hydrate incremented", afterDefaultList, afterPayloadList)
 	}
 }
 
@@ -790,6 +805,56 @@ func TestDecisionResolutionRepositoryStoresLongReadableIDsWithSafeFileName(t *te
 	}
 	if !strings.Contains(name, "-") {
 		t.Fatalf("resolution filename = %s, want readable prefix plus hash suffix", name)
+	}
+}
+
+func TestStepRepositoryStoresLongReadableIDsWithBoundedSequenceDirectories(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	repo := NewStepRepository(filepath.Join(root, "step.json"))
+	runID := common.RunID("run-" + strings.Repeat("very-long-scope-", 30))
+	stepID := common.StepID(string(runID) + "/repair-" + strings.Repeat("very-long-step-", 40))
+
+	if err := repo.Create(ctx, &runmodel.Step{
+		ID:     stepID,
+		RunID:  runID,
+		Kind:   "llm/workspace_execution",
+		State:  common.StepStateCompleted,
+		Input:  map[string]any{"input": "ok"},
+		Output: map[string]any{"output": "ok"},
+	}); err != nil {
+		t.Fatalf("create long step: %v", err)
+	}
+	got, err := repo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get long step: %v", err)
+	}
+	if got.ID != stepID || got.RunID != runID || got.Output["output"] != "ok" {
+		t.Fatalf("step = %+v, want long id round trip with payload", got)
+	}
+	listed, err := repo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list long run steps: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != stepID {
+		t.Fatalf("listed = %+v, want long step by run", listed)
+	}
+
+	dirs, err := repositoryMetadataDirs(filepath.Join(root, "steps"))
+	if err != nil {
+		t.Fatalf("metadata dirs: %v", err)
+	}
+	if len(dirs) != 1 {
+		t.Fatalf("metadata dirs = %+v, want one", dirs)
+	}
+	rel, err := filepath.Rel(filepath.Join(root, "steps"), dirs[0])
+	if err != nil {
+		t.Fatalf("relative metadata dir: %v", err)
+	}
+	for _, segment := range strings.Split(filepath.ToSlash(rel), "/") {
+		if len(segment) > 160 {
+			t.Fatalf("metadata segment len = %d, want <= 160, segment=%q rel=%s", len(segment), segment, rel)
+		}
 	}
 }
 

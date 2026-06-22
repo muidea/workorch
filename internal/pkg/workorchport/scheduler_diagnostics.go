@@ -22,10 +22,11 @@ type ContinuationDiagnosticCountInfo struct {
 }
 
 type WatchdogDiagnosticsInfo struct {
-	LatestTickAt      string
-	LatestDurationMs  int64
-	LatestError       string
-	StaleRecoveryRuns uint64
+	TimerRegistrations uint64
+	LatestTickAt       string
+	LatestDurationMs   int64
+	LatestError        string
+	StaleRecoveryRuns  uint64
 }
 
 type SchedulerDiagnosticsInfo struct {

@@ -58,6 +58,7 @@ type WebSourceTrace = readmodelcore.WebSourceTrace
 type GitOperationTrace = readmodelcore.GitOperationTrace
 type GitChangedFile = readmodelcore.GitChangedFile
 type LLMContextBudgetTrace = readmodelcore.LLMContextBudgetTrace
+type LLMContextBudgetSummary = readmodelcore.LLMContextBudgetSummary
 type LLMUsageTrace = readmodelcore.LLMUsageTrace
 type LLMUsageSummary = readmodelcore.LLMUsageSummary
 type LLMUsageProviderModelBreakdown = readmodelcore.LLMUsageProviderModelBreakdown

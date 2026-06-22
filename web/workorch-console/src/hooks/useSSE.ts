@@ -15,13 +15,17 @@ export interface UseSSEOptions {
   enabled?: boolean;
   debounceMs?: number;
   onReconnect?: () => void;
+  onExhausted?: (detail: { retryCount: number }) => void;
   maxRetries?: number;
+  workspaceId?: string;
+  runId?: string;
 }
 
 export function useSSE(onEvent: (event: SSEEvent) => void, options: UseSSEOptions = {}) {
-  const { enabled = true, debounceMs = 150, onReconnect, maxRetries = 20 } = options;
+  const { enabled = true, debounceMs = 150, onReconnect, onExhausted, maxRetries = 20, workspaceId, runId } = options;
   const onEventRef = useRef(onEvent);
   const onReconnectRef = useRef(onReconnect);
+  const onExhaustedRef = useRef(onExhausted);
   const debounceTimerRef = useRef<number | undefined>(undefined);
   const retryCountRef = useRef(0);
   const retryTimerRef = useRef<number | undefined>(undefined);
@@ -29,6 +33,11 @@ export function useSSE(onEvent: (event: SSEEvent) => void, options: UseSSEOption
 
   useEffect(() => { onEventRef.current = onEvent; }, [onEvent]);
   useEffect(() => { onReconnectRef.current = onReconnect; }, [onReconnect]);
+  useEffect(() => { onExhaustedRef.current = onExhausted; }, [onExhausted]);
+  useEffect(() => {
+    lastEventIdRef.current = '';
+    retryCountRef.current = 0;
+  }, [workspaceId, runId]);
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -38,7 +47,7 @@ export function useSSE(onEvent: (event: SSEEvent) => void, options: UseSSEOption
 
     function connect() {
       if (disposed) return;
-      stream = createWorkorchEventStream({ lastEventId: lastEventIdRef.current });
+      stream = createWorkorchEventStream({ workspaceId, runId, lastEventId: lastEventIdRef.current });
 
       stream.addEventListener('workorch', (event: MessageEvent<string>) => {
         retryCountRef.current = 0;
@@ -79,7 +88,10 @@ export function useSSE(onEvent: (event: SSEEvent) => void, options: UseSSEOption
         stream = null;
         if (disposed) return;
         onReconnectRef.current?.();
-        if (retryCountRef.current >= maxRetries) return;
+        if (retryCountRef.current >= maxRetries) {
+          onExhaustedRef.current?.({ retryCount: retryCountRef.current });
+          return;
+        }
         const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 30000);
         retryCountRef.current += 1;
         retryTimerRef.current = window.setTimeout(connect, delay);
@@ -98,5 +110,5 @@ export function useSSE(onEvent: (event: SSEEvent) => void, options: UseSSEOption
         window.clearTimeout(retryTimerRef.current);
       }
     };
-  }, [enabled, debounceMs, maxRetries]);
+  }, [enabled, debounceMs, maxRetries, workspaceId, runId]);
 }

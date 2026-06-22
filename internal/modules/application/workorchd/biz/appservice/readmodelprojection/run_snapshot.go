@@ -3,11 +3,10 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
 func RunSnapshotFromModels(input RunSnapshotModelInput) readmodelcore.RunSnapshot {
-	stepViews := presenter.MapSteps(input.Steps)
+	stepViews := MapSteps(input.Steps)
 	currentStep := CurrentRunSnapshotStep(
 		stepViews,
 		DecisionStepID(input.SelectedTicket),

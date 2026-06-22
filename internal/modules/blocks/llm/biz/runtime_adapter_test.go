@@ -328,8 +328,8 @@ func TestRuntimeAdapterBlocksProviderCallWhenContextGateFails(t *testing.T) {
 		t.Fatalf("output = %+v, want context integrity stage", result.Output)
 	}
 	budget := recordFromAny(result.Output["contextBudget"])
-	if budget["contextGateAction"] != providerContextGateFailFast {
-		t.Fatalf("contextBudget = %+v, want fail_fast context gate", budget)
+	if budget["contextGateAction"] != providerContextGateBlockerRequired {
+		t.Fatalf("contextBudget = %+v, want blocker_required context gate", budget)
 	}
 }
 
@@ -2124,6 +2124,151 @@ func TestRuntimeAdapterFailoverOnRetryableProviderFailure(t *testing.T) {
 		failover["toProviderId"] != nil ||
 		failover["resolvedBy"] != nil {
 		t.Fatalf("llmFailover = %+v, want successful failover metadata", result.Output["llmFailover"])
+	}
+}
+
+func TestRuntimeAdapterAttemptsConfiguredFailoverProvidersUntilSuccess(t *testing.T) {
+	primary := &failoverProvider{err: errors.New("http status 429: rate limit reached")}
+	backupA := &failoverProvider{err: context.DeadlineExceeded}
+	backupB := &failoverProvider{payload: []byte(`{
+		"completionState":"continue",
+		"shellCommands":[{"command":"echo","args":["second-backup"]}]
+	}`)}
+	adapter := NewRuntimeAdapterWithProviders("primary", map[string]ProviderRuntime{
+		"primary": {
+			Config: llmmodels.ProviderConfig{
+				ID:                "primary",
+				Provider:          llmcommon.ProviderCompatible,
+				APIKey:            "primary-secret",
+				Model:             "primary-model",
+				FailoverEnabled:   true,
+				FailoverProviders: []string{"backup-a", "backup-b"},
+			},
+			Provider: primary,
+		},
+		"backup-a": {
+			Config: llmmodels.ProviderConfig{
+				ID:       "backup-a",
+				Provider: llmcommon.ProviderCompatible,
+				APIKey:   "backup-a-secret",
+				Model:    "backup-a-model",
+			},
+			Provider: backupA,
+		},
+		"backup-b": {
+			Config: llmmodels.ProviderConfig{
+				ID:       "backup-b",
+				Provider: llmcommon.ProviderCompatible,
+				APIKey:   "backup-b-secret",
+				Model:    "backup-b-model",
+			},
+			Provider: backupB,
+		},
+	})
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	if len(primary.requests) != 1 || len(backupA.requests) != 1 || len(backupB.requests) != 1 {
+		t.Fatalf("provider calls primary=%d backup-a=%d backup-b=%d, want one call each", len(primary.requests), len(backupA.requests), len(backupB.requests))
+	}
+	if result.Output["stage"] != "llm_shell_plan" {
+		t.Fatalf("output stage = %v, want llm_shell_plan from second backup", result.Output["stage"])
+	}
+	failover, ok := result.Output["llmFailover"].(map[string]any)
+	if !ok || failover["success"] != true || failover["attemptCount"] != 2 || failover["successAttempt"] != 2 {
+		t.Fatalf("llmFailover = %+v, want second failover attempt success", result.Output["llmFailover"])
+	}
+	attempts, ok := failover["attempts"].([]map[string]any)
+	if !ok || len(attempts) != 2 {
+		t.Fatalf("failover attempts = %#v, want two attempt records", failover["attempts"])
+	}
+	if attempts[0]["success"] != false || attempts[0]["failureClass"] != providerFailureClassTimeout || attempts[0]["stage"] == "" {
+		t.Fatalf("first failover attempt = %+v, want timeout failure metadata", attempts[0])
+	}
+	if attempts[1]["success"] != true || attempts[1]["failureClass"] != nil || attempts[1]["error"] != nil {
+		t.Fatalf("second failover attempt = %+v, want success without failure metadata", attempts[1])
+	}
+	if failover["fromProviderId"] != nil || failover["toProviderId"] != nil || failover["resolvedBy"] != nil {
+		t.Fatalf("llmFailover = %+v, provider identity must stay out of runtime output", failover)
+	}
+}
+
+func TestRuntimeAdapterSkipsCircuitOpenFailoverProvider(t *testing.T) {
+	primary := &failoverProvider{err: errors.New("http status 429: rate limit reached")}
+	backupA := &failoverProvider{err: context.DeadlineExceeded}
+	backupB := &failoverProvider{payload: []byte(`{
+		"completionState":"continue",
+		"shellCommands":[{"command":"echo","args":["healthy-backup"]}]
+	}`)}
+	adapter := NewRuntimeAdapterWithProviders("primary", map[string]ProviderRuntime{
+		"primary": {
+			Config: llmmodels.ProviderConfig{
+				ID:                "primary",
+				Provider:          llmcommon.ProviderCompatible,
+				APIKey:            "primary-secret",
+				Model:             "primary-model",
+				FailoverEnabled:   true,
+				FailoverProviders: []string{"backup-a", "backup-b"},
+			},
+			Provider: primary,
+		},
+		"backup-a": {
+			Config: llmmodels.ProviderConfig{
+				ID:       "backup-a",
+				Provider: llmcommon.ProviderCompatible,
+				APIKey:   "backup-a-secret",
+				Model:    "backup-a-model",
+			},
+			Provider: backupA,
+		},
+		"backup-b": {
+			Config: llmmodels.ProviderConfig{
+				ID:       "backup-b",
+				Provider: llmcommon.ProviderCompatible,
+				APIKey:   "backup-b-secret",
+				Model:    "backup-b-model",
+			},
+			Provider: backupB,
+		},
+	})
+
+	for i := 0; i < providerCircuitFailureThreshold; i++ {
+		if _, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest()); err != nil {
+			t.Fatalf("warm up failover %d: %v", i+1, err)
+		}
+	}
+	if len(backupA.requests) != providerCircuitFailureThreshold {
+		t.Fatalf("backup-a requests after warmup = %d, want %d", len(backupA.requests), providerCircuitFailureThreshold)
+	}
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute runtime step after circuit opens: %v", err)
+	}
+	if len(primary.requests) != providerCircuitFailureThreshold+1 {
+		t.Fatalf("primary requests = %d, want %d", len(primary.requests), providerCircuitFailureThreshold+1)
+	}
+	if len(backupA.requests) != providerCircuitFailureThreshold {
+		t.Fatalf("backup-a requests = %d, want circuit-open provider to be skipped", len(backupA.requests))
+	}
+	if len(backupB.requests) != providerCircuitFailureThreshold+1 {
+		t.Fatalf("backup-b requests = %d, want healthy backup used every time", len(backupB.requests))
+	}
+	failover, ok := result.Output["llmFailover"].(map[string]any)
+	if !ok {
+		t.Fatalf("llmFailover missing from output: %+v", result.Output)
+	}
+	if failover["success"] != true ||
+		failover["attemptCount"] != 1 ||
+		failover["successAttempt"] != 1 ||
+		failover["skippedUnhealthyCount"] != 1 ||
+		failover["skippedReason"] != "provider circuit open" {
+		t.Fatalf("llmFailover = %+v, want circuit-open skip with single healthy attempt", failover)
+	}
+	if failover["fromProviderId"] != nil || failover["toProviderId"] != nil || failover["resolvedBy"] != nil {
+		t.Fatalf("llmFailover = %+v, provider identity must stay out of runtime output", failover)
 	}
 }
 

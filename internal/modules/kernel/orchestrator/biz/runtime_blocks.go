@@ -616,7 +616,7 @@ func (o *RuntimeOrchestrator) createApproval(
 	if o.eventHub == nil {
 		return nil
 	}
-	return o.eventHub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, o.eventHub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        approvalevents.TopicApprovalCreated,
 		SourceModule: modulecommon.ModuleID,

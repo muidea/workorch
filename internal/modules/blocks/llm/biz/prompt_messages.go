@@ -2134,6 +2134,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 				"Return bounded executable validation evidence, failed dodAssessment, or a real requiredDecision/requiredApproval blocker",
 				"Do not ask the user to choose planning, execution, repair, or validation stage when runtime capabilities can continue",
 				"Do not return patch/apply or other state-changing work unless a separate state-changing repair contract explicitly requires it",
+				"Evidence acquisition shell/command or mcp/tool_call nodes must not create, modify, delete, or initialize workspace deliverable files; write generated fixtures or controlled substitutes only outside the deliverable tree, such as a runtime validation scratch directory or equivalent temporary path",
 				"Validation evidence must cite concrete runtime observations, controlled substitutes, executable contracts, or dynamic execution observations when requiredOutput declares validationEvidence rules",
 				"If an external credential, permission, unavailable provider, or runtime configuration is truly required, declare it through requiredDecision/requiredApproval with structured context",
 			},
@@ -2159,6 +2160,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			"file_write content must be non-empty and cannot represent deletion; when no supported state-changing output can satisfy the request, return failed dodAssessment or a real blocker",
 			"When failed evidence includes current target snapshots, update those targets directly with auditable state-change artifacts before rerunning verification",
 			"Do not use shell commands to modify workspace files when a patch artifact can represent the change; shell commands should prepare or verify after the accepted state-changing artifact",
+			"Do not use evidence acquisition or supplemental validation shell/tool nodes to create, initialize, or mutate workspace deliverable files; generated fixtures and probes that are only for evidence must stay in runtime scratch or temporary paths outside the deliverable tree",
 			"Do not return no-op patch/apply content; text_replace oldText and newText must be different substantive literal strings",
 			"If an earlier stream was incomplete, continue by producing a complete fresh JSON object rather than inspecting the run again",
 		}
@@ -2169,9 +2171,10 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			)
 		}
 		section := map[string]any{
-			"type":           "produce_state_changing_repair_or_failed_assessment",
-			"requiredOutput": required,
-			"requirements":   requirements,
+			"type":              "produce_state_changing_repair_or_failed_assessment",
+			"primaryNextAction": "produce an accepted state-changing output using the current available target snapshots, or return a traceable failed assessment or real governance blocker",
+			"requiredOutput":    required,
+			"requirements":      requirements,
 		}
 		if len(outputContract) > 0 {
 			section["outputDecisionContract"] = outputContract
@@ -2203,6 +2206,9 @@ func marshalCurrentActionPromptSection(section map[string]any, input map[string]
 	if section == nil {
 		section = map[string]any{}
 	}
+	if snapshots := availableTargetSnapshotsPromptSummary(input, defaultPromptSnapshotBudget()); len(snapshots) > 0 {
+		section["availableTargetSnapshots"] = snapshots
+	}
 	if recovery := contractViolationRecoveryPromptPayload(input); len(recovery) > 0 {
 		section["contractViolationRecovery"] = recovery
 		requirements := stringSliceFromAny(section["requirements"])
@@ -2213,6 +2219,105 @@ func marshalCurrentActionPromptSection(section map[string]any, input map[string]
 		section["requirements"] = requirements
 	}
 	return marshalPromptSection("Current Requested Action", section)
+}
+
+func availableTargetSnapshotsPromptSummary(input map[string]any, snapshotBudget promptSnapshotBudget) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	limit := snapshotBudget.ItemLimit
+	if limit <= 0 {
+		limit = repairSnapshotPromptItemLimit
+	}
+	contentLimit := snapshotBudget.RepairContentLimit
+	if contentLimit <= 0 {
+		contentLimit = repairSnapshotPromptContentLimit
+	}
+	seen := map[string]bool{}
+	ret := make([]map[string]any, 0, limit)
+	add := func(raw map[string]any, source string) {
+		if len(raw) == 0 || len(ret) >= limit {
+			return
+		}
+		targetRef := strings.TrimSpace(stringValue(raw["targetRef"]))
+		if targetRef == "" {
+			return
+		}
+		contentHash := strings.TrimSpace(stringValue(firstNonNilValue(raw["contentHash"], raw["baseHash"])))
+		key := targetRef + "|" + contentHash
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		content, _ := raw["content"].(string)
+		promptContentComplete := boolValue(raw["contentComplete"])
+		promptSafeForFileWrite := boolValue(raw["safeForFileWrite"])
+		promptExtractionRequired := false
+		if contentLimit > 0 && len(content) > contentLimit {
+			promptContentComplete = false
+			promptSafeForFileWrite = false
+			promptExtractionRequired = true
+		}
+		if boolValue(raw["redacted"]) || boolValue(raw["truncated"]) || boolValue(raw["isBinary"]) {
+			promptContentComplete = false
+			promptSafeForFileWrite = false
+			promptExtractionRequired = true
+		}
+		item := map[string]any{
+			"targetRef":                targetRef,
+			"contentHash":              contentHash,
+			"baseHash":                 strings.TrimSpace(stringValue(firstNonNilValue(raw["baseHash"], raw["contentHash"]))),
+			"contentComplete":          boolValue(raw["contentComplete"]),
+			"safeForFileWrite":         boolValue(raw["safeForFileWrite"]),
+			"promptContentComplete":    promptContentComplete,
+			"promptSafeForFileWrite":   promptSafeForFileWrite,
+			"promptExtractionRequired": promptExtractionRequired,
+			"allowedPatchModes":        []string{"unified_diff", "text_replace", "file_write_with_matching_baseHash_when_promptSafeForFileWrite"},
+			"source":                   source,
+		}
+		if sourcePath := strings.TrimSpace(stringValue(firstNonNilValue(raw["sourcePath"], raw["path"], raw["resourcePath"]))); sourcePath != "" {
+			item["sourcePath"] = sourcePath
+		}
+		if promptExtractionRequired {
+			item["promptSafetyNote"] = "prompt snapshot is not safe for complete file_write; use exact targeted replacement, unified_diff with visible context, or acquire exact current content first"
+		}
+		for key, value := range item {
+			if promptSnapshotSummaryEmptyValue(value) {
+				delete(item, key)
+			}
+		}
+		ret = append(ret, item)
+	}
+	addItems := func(value any, source string) {
+		for _, raw := range providerRepairSnapshotItemsFromValue(value) {
+			add(raw, source)
+			if len(ret) >= limit {
+				return
+			}
+		}
+	}
+	addItems(input["failureTargetRepairContext"], "failureTargetRepairContext")
+	addItems(input["patchRepairContext"], "patchRepairContext")
+	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
+		addItems(pkg["targetSnapshots"], "repairActionPackage.targetSnapshots")
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func promptSnapshotSummaryEmptyValue(value any) bool {
+	switch typed := value.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(typed) == ""
+	case []string:
+		return len(typed) == 0
+	default:
+		return false
+	}
 }
 
 func contractViolationRecoveryPromptPayload(input map[string]any) map[string]any {

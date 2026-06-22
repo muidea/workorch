@@ -329,6 +329,9 @@ func acceptedSchedulerCommandIntent(envelope events.Envelope) string {
 }
 
 func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, envelope events.Envelope) error {
+	if err := validateSchedulerEnvelopePayloadScope(envelope); err != nil {
+		return err
+	}
 	switch envelope.Topic {
 	case workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested:
 		req := workspaceRunRequestFromEnvelope(envelope)
@@ -407,6 +410,31 @@ func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, envel
 	default:
 		return common.ErrInvalidArgument
 	}
+}
+
+func validateSchedulerEnvelopePayloadScope(envelope events.Envelope) error {
+	if envelope.Payload == nil {
+		return nil
+	}
+	if err := validateSchedulerScopeValue(envelope.WorkspaceID, schedulerStringValue(envelope.Payload, events.PayloadKeyWorkspaceID)); err != nil {
+		return err
+	}
+	if err := validateSchedulerScopeValue(envelope.RunID, schedulerStringValue(envelope.Payload, events.PayloadKeyRunID)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateSchedulerScopeValue(envelopeValue string, payloadValue string) error {
+	envelopeValue = strings.TrimSpace(envelopeValue)
+	payloadValue = strings.TrimSpace(payloadValue)
+	if envelopeValue == "" || payloadValue == "" {
+		return nil
+	}
+	if envelopeValue != payloadValue {
+		return common.ErrConflict
+	}
+	return nil
 }
 
 func schedulerCommandQueueError(topic string) error {

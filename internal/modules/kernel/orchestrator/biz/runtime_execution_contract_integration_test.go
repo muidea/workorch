@@ -440,6 +440,98 @@ func TestValidateLLMExecutionOutputContractRejectsStateChangingRepairSatisfiedAs
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsStructuredStateChangingBlockers(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-structured-blocker",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-structured-blocker/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+		},
+	}
+	cases := []struct {
+		name   string
+		output map[string]any
+	}{
+		{
+			name: "decision",
+			output: map[string]any{
+				"status":                           "blocked",
+				stepOutputKeyBlockDecisionReason:   "external input is required",
+				stepOutputKeyBlockDecisionQuestion: "Which valid target should be changed?",
+			},
+		},
+		{
+			name: "approval",
+			output: map[string]any{
+				"status":                         "blocked",
+				stepOutputKeyBlockApprovalReason: "manual approval is required",
+				stepOutputKeyBlockApprovalAction: "apply high-impact workspace change",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateLLMExecutionOutputContract(run, step, tc.output); err != nil {
+				t.Fatalf("validateLLMExecutionOutputContract err = %v, want structured blocker allowed", err)
+			}
+		})
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsIncompleteStateChangingBlockers(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-incomplete-blocker",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-incomplete-blocker/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+		},
+	}
+	cases := []struct {
+		name    string
+		output  map[string]any
+		wantErr string
+	}{
+		{
+			name: "decision reason only",
+			output: map[string]any{
+				"status":                         "blocked",
+				stepOutputKeyBlockDecisionReason: "external input is required",
+			},
+			wantErr: "incomplete decision blocker",
+		},
+		{
+			name: "approval reason only",
+			output: map[string]any{
+				"status":                         "blocked",
+				stepOutputKeyBlockApprovalReason: "manual approval is required",
+			},
+			wantErr: "incomplete approval blocker",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateLLMExecutionOutputContract(run, step, tc.output)
+			if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("validateLLMExecutionOutputContract err = %v, want %s", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsDeclaredStateChangingShellGraph(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-repair-shell-graph",
@@ -532,6 +624,75 @@ func TestValidateLLMExecutionOutputContractRejectsUndeclaredStateChangingShellGr
 	err := validateLLMExecutionOutputContract(run, step, output)
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "auditable state-changing operation") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want undeclared shell graph rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsAcceptedGitWriteStateChangingGraph(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-git-write-graph",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-git-write-graph/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{gitcommon.StepKindWrite},
+					"acceptedOperations":           []string{gitcommon.OperationCommit},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "check-status",
+					"kind": gitcommon.StepKindRead,
+					"input": map[string]any{
+						"operation": gitcommon.OperationStatus,
+					},
+				},
+				{
+					"id":        "stage-changes",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"check-status"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationAdd,
+						"pathspecs": []string{"artifact.txt"},
+					},
+				},
+				{
+					"id":        "commit-snapshot",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"stage-changes"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationCommit,
+						"message":   "Record workspace snapshot",
+					},
+				},
+				{
+					"id":        "verify-snapshot",
+					"kind":      gitcommon.StepKindRead,
+					"dependsOn": []string{"commit-snapshot"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationLog,
+						"limit":     1,
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want accepted git/write graph allowed", err)
 	}
 }
 
@@ -2170,6 +2331,7 @@ func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithDet
 }
 
 func TestValidateLLMExecutionOutputContractRejectsFileMutatingConcreteValidationShell(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/file-mutating-validation"
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-file-mutating-validation",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
@@ -2182,12 +2344,14 @@ func TestValidateLLMExecutionOutputContractRejectsFileMutatingConcreteValidation
 			"repairObjective":           repairObjectiveConcreteValidationEvidence,
 			"boundedValidationRequired": true,
 			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
 			"repairActionPackage": map[string]any{
 				"requiredOutput": map[string]any{
 					"mustProduceConcreteValidationEvidence":    true,
 					"mustDeclareValidationEvidenceMode":        true,
 					"mustDeclareValidationEvidenceObservation": true,
-					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+					validationScratchDirKey:                    scratch,
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
 				},
 			},
 		},
@@ -2213,12 +2377,13 @@ func TestValidateLLMExecutionOutputContractRejectsFileMutatingConcreteValidation
 
 	err := validateLLMExecutionOutputContract(run, step, output)
 	if !errors.Is(err, common.ErrInvalidArgument) ||
-		!strings.Contains(err.Error(), "must not mutate workspace files") {
+		!strings.Contains(err.Error(), "write outside validationScratchDir") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want file-mutating validation shell rejection", err)
 	}
 }
 
 func TestValidateLLMExecutionOutputContractRejectsConcreteValidationShellFileRedirection(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/file-redirection-validation"
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-file-redirection-validation",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
@@ -2231,12 +2396,14 @@ func TestValidateLLMExecutionOutputContractRejectsConcreteValidationShellFileRed
 			"repairObjective":           repairObjectiveConcreteValidationEvidence,
 			"boundedValidationRequired": true,
 			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
 			"repairActionPackage": map[string]any{
 				"requiredOutput": map[string]any{
 					"mustProduceConcreteValidationEvidence":    true,
 					"mustDeclareValidationEvidenceMode":        true,
 					"mustDeclareValidationEvidenceObservation": true,
-					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+					validationScratchDirKey:                    scratch,
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
 				},
 			},
 		},
@@ -2262,7 +2429,7 @@ func TestValidateLLMExecutionOutputContractRejectsConcreteValidationShellFileRed
 
 	err := validateLLMExecutionOutputContract(run, step, output)
 	if !errors.Is(err, common.ErrInvalidArgument) ||
-		!strings.Contains(err.Error(), "must not mutate workspace files") {
+		!strings.Contains(err.Error(), "write outside validationScratchDir") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want file-redirection validation shell rejection", err)
 	}
 }
@@ -2314,13 +2481,74 @@ func TestValidateLLMExecutionOutputContractAllowsConcreteValidationShellDevNullR
 	}
 }
 
-func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteMktempFileRedirection(t *testing.T) {
+func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteScratchFileRedirection(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/controlled-substitute-file"
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-controlled-substitute-mktemp-file",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}
 	step := &runmodel.Step{
 		ID:   "run-evidence-repair-controlled-substitute-mktemp-file/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					validationScratchDirKey:                    scratch,
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args": []string{"-c", strings.Join([]string{
+						`scratch="/tmp/workorch-validation-test/controlled-substitute-file"`,
+						`mkdir -p "$scratch"`,
+						`LOG="$scratch/validation.log"`,
+						`if ! verify-command >"$LOG" 2>&1; then`,
+						`  cat "$LOG"`,
+						`  exit 1`,
+						`fi`,
+						`cat "$LOG"`,
+					}, "\n")},
+					"validationEvidence": map[string]any{
+						"mode":            "controlled_substitute",
+						"observationType": "controlled_substitute_observation",
+						"substituteFor":   "validation command output capture",
+						"substitute":      "temporary log file created under validationScratchDir",
+					},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want scratch log redirection allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsControlledSubstituteWriteWithoutScratchContract(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-controlled-substitute-missing-scratch",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-controlled-substitute-missing-scratch/repair-001-of-verify",
 		Kind: llmWorkspaceExecutionStepKind,
 		Input: map[string]any{
 			stepInputKeyRuntimeStage:    runtimeStageVerification,
@@ -2346,32 +2574,131 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteMktempFileR
 				"kind": shellcommon.StepKindCommand,
 				"input": map[string]any{
 					"command": "sh",
-					"args": []string{"-c", strings.Join([]string{
-						`LOG="$(mktemp)"`,
-						`trap 'rm -f "$LOG"' EXIT`,
-						`if ! verify-command >"$LOG" 2>&1; then`,
-						`  cat "$LOG"`,
-						`  exit 1`,
-						`fi`,
-						`cat "$LOG"`,
-					}, "\n")},
+					"args":    []string{"-c", `printf ok > /tmp/workorch-validation-test/missing-scratch/validation.log`},
 					"validationEvidence": map[string]any{
 						"mode":            "controlled_substitute",
 						"observationType": "controlled_substitute_observation",
 						"substituteFor":   "validation command output capture",
-						"substitute":      "temporary log file created with mktemp",
 					},
 				},
 			}},
 		},
 	}
 
-	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
-		t.Fatalf("validateLLMExecutionOutputContract err = %v, want mktemp log redirection allowed", err)
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "requires runtime validationScratchDir") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want missing validationScratchDir rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsRelativeControlledSubstituteScratchContract(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-controlled-substitute-relative-scratch",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-controlled-substitute-relative-scratch/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     "relative-validation-scratch",
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					validationScratchDirKey:                    "relative-validation-scratch",
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", `mkdir -p relative-validation-scratch; printf ok > relative-validation-scratch/validation.log`},
+					"validationEvidence": map[string]any{
+						"mode":            "controlled_substitute",
+						"observationType": "controlled_substitute_observation",
+						"substituteFor":   "validation command output capture",
+					},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "requires runtime validationScratchDir") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want relative validationScratchDir rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsControlledSubstituteScratchPrefixCollision(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/prefix"
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-controlled-substitute-prefix-collision",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-controlled-substitute-prefix-collision/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					validationScratchDirKey:                    scratch,
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", `mkdir -p /tmp/workorch-validation-test/prefix-other; printf ok > /tmp/workorch-validation-test/prefix-other/validation.log`},
+					"validationEvidence": map[string]any{
+						"mode":            "controlled_substitute",
+						"observationType": "controlled_substitute_observation",
+						"substituteFor":   "validation command output capture",
+					},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "write outside validationScratchDir") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want scratch prefix collision rejection", err)
 	}
 }
 
 func TestValidateLLMExecutionOutputContractAllowsDynamicExecutionTempCacheWrites(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/dynamic-temp-cache"
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-dynamic-temp-cache",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
@@ -2384,12 +2711,14 @@ func TestValidateLLMExecutionOutputContractAllowsDynamicExecutionTempCacheWrites
 			"repairObjective":           repairObjectiveConcreteValidationEvidence,
 			"boundedValidationRequired": true,
 			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
 			"repairActionPackage": map[string]any{
 				"requiredOutput": map[string]any{
 					"mustProduceConcreteValidationEvidence":    true,
 					"mustDeclareValidationEvidenceMode":        true,
 					"mustDeclareValidationEvidenceObservation": true,
-					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+					validationScratchDirKey:                    scratch,
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
 				},
 			},
 		},
@@ -2405,12 +2734,12 @@ func TestValidateLLMExecutionOutputContractAllowsDynamicExecutionTempCacheWrites
 					"command": "sh",
 					"args": []string{"-c", strings.Join([]string{
 						`set -eu`,
-						`tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/verify-dynamic.XXXXXX")"`,
+						`tmpdir="/tmp/workorch-validation-test/dynamic-temp-cache"`,
 						`cleanup() {`,
 						`  chmod -R u+w "$tmpdir" 2>/dev/null || true`,
-						`  rm -rf "$tmpdir" 2>/dev/null || true`,
 						`}`,
 						`trap cleanup EXIT INT TERM`,
+						`mkdir -p "$tmpdir"`,
 						`export GOCACHE="$tmpdir/gocache"`,
 						`export GOMODCACHE="$tmpdir/gomodcache"`,
 						`mkdir -p "$GOCACHE" "$GOMODCACHE"`,
@@ -2420,7 +2749,7 @@ func TestValidateLLMExecutionOutputContractAllowsDynamicExecutionTempCacheWrites
 					"validationEvidence": map[string]any{
 						"mode":            "dynamic_execution",
 						"observationType": "dynamic_execution_observation",
-						"substitute":      "tool caches and captured output are isolated under mktemp",
+						"substitute":      "tool caches and captured output are isolated under validationScratchDir",
 					},
 				},
 			}},
@@ -2433,6 +2762,7 @@ func TestValidateLLMExecutionOutputContractAllowsDynamicExecutionTempCacheWrites
 }
 
 func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteTempWorkspaceWrites(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/controlled-substitute-temp-writes"
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-controlled-substitute-temp-writes",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
@@ -2445,12 +2775,14 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteTempWorkspa
 			"repairObjective":           repairObjectiveConcreteValidationEvidence,
 			"boundedValidationRequired": true,
 			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
 			"repairActionPackage": map[string]any{
 				"requiredOutput": map[string]any{
 					"mustProduceConcreteValidationEvidence":    true,
 					"mustDeclareValidationEvidenceMode":        true,
 					"mustDeclareValidationEvidenceObservation": true,
-					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+					validationScratchDirKey:                    scratch,
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
 				},
 			},
 		},
@@ -2465,8 +2797,8 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteTempWorkspa
 				"input": map[string]any{
 					"command": "sh",
 					"args": []string{"-c", strings.Join([]string{
-						`TMPDIR_ROOT="$(mktemp -d)"`,
-						`trap 'rm -rf "$TMPDIR_ROOT"' EXIT`,
+						`TMPDIR_ROOT="/tmp/workorch-validation-test/controlled-substitute-temp-writes"`,
+						`mkdir -p "$TMPDIR_ROOT"`,
 						`TMP_REPO="$TMPDIR_ROOT/repo"`,
 						`XDG_CACHE_HOME="$TMPDIR_ROOT/home/.cache"`,
 						`mkdir -p "$TMP_REPO"`,
@@ -2493,6 +2825,7 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteTempWorkspa
 }
 
 func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteCopiedWorkspaceHarness(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/controlled-substitute-copied-workspace"
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-controlled-substitute-copied-workspace",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
@@ -2505,20 +2838,22 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteCopiedWorks
 			"repairObjective":           repairObjectiveConcreteValidationEvidence,
 			"boundedValidationRequired": true,
 			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
 			"repairActionPackage": map[string]any{
 				"requiredOutput": map[string]any{
 					"mustProduceConcreteValidationEvidence":    true,
 					"mustDeclareValidationEvidenceMode":        true,
 					"mustDeclareValidationEvidenceObservation": true,
-					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+					validationScratchDirKey:                    scratch,
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
 				},
 			},
 		},
 	}
 	command := strings.Join([]string{
 		`set -eu`,
-		`tmp="$(mktemp -d)"`,
-		`trap 'rm -rf "$tmp"' EXIT INT TERM`,
+		`tmp="/tmp/workorch-validation-test/controlled-substitute-copied-workspace"`,
+		`mkdir -p "$tmp"`,
 		`mkdir -p "$tmp/home" "$tmp/gocache" "$tmp/gopath" "$tmp/copy"`,
 		`XDG_CACHE_HOME="$tmp/home/.cache"`,
 		`mkdir -p "$XDG_CACHE_HOME"`,
@@ -2577,6 +2912,7 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteCopiedWorks
 }
 
 func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteTarCopiedWorkspaceWrite(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/controlled-substitute-tar-copy-write"
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-controlled-substitute-tar-copy-write",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
@@ -2589,22 +2925,23 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteTarCopiedWo
 			"repairObjective":           repairObjectiveConcreteValidationEvidence,
 			"boundedValidationRequired": true,
 			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
 			"repairActionPackage": map[string]any{
 				"requiredOutput": map[string]any{
 					"mustProduceConcreteValidationEvidence":    true,
 					"mustDeclareValidationEvidenceMode":        true,
 					"mustDeclareValidationEvidenceObservation": true,
-					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+					validationScratchDirKey:                    scratch,
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
 				},
 			},
 		},
 	}
 	command := strings.Join([]string{
 		`set -eu`,
-		`TMPDIR_ROOT="$(mktemp -d)"`,
+		`TMPDIR_ROOT="/tmp/workorch-validation-test/controlled-substitute-tar-copy-write"`,
 		`cleanup() {`,
 		`  chmod -R u+w "$TMPDIR_ROOT" 2>/dev/null || true`,
-		`  rm -rf "$TMPDIR_ROOT"`,
 		`}`,
 		`trap cleanup EXIT HUP INT TERM`,
 		`mkdir -p "$TMPDIR_ROOT/src" "$TMPDIR_ROOT/gomodcache" "$TMPDIR_ROOT/gocache"`,
@@ -2639,6 +2976,7 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteTarCopiedWo
 }
 
 func TestValidateLLMExecutionOutputContractRejectsControlledSubstituteWorkspaceWrite(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/controlled-substitute-workspace-write"
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-controlled-substitute-workspace-write",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
@@ -2651,12 +2989,14 @@ func TestValidateLLMExecutionOutputContractRejectsControlledSubstituteWorkspaceW
 			"repairObjective":           repairObjectiveConcreteValidationEvidence,
 			"boundedValidationRequired": true,
 			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
 			"repairActionPackage": map[string]any{
 				"requiredOutput": map[string]any{
 					"mustProduceConcreteValidationEvidence":    true,
 					"mustDeclareValidationEvidenceMode":        true,
 					"mustDeclareValidationEvidenceObservation": true,
-					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+					validationScratchDirKey:                    scratch,
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
 				},
 			},
 		},
@@ -2670,7 +3010,7 @@ func TestValidateLLMExecutionOutputContractRejectsControlledSubstituteWorkspaceW
 				"kind": shellcommon.StepKindCommand,
 				"input": map[string]any{
 					"command": "sh",
-					"args":    []string{"-c", `TMPDIR_ROOT="$(mktemp -d)"; printf ok > validation.log; rm -rf "$TMPDIR_ROOT"`},
+					"args":    []string{"-c", `scratch="/tmp/workorch-validation-test/controlled-substitute-workspace-write"; mkdir -p "$scratch"; printf ok > validation.log`},
 					"validationEvidence": map[string]any{
 						"mode":            "controlled_substitute",
 						"observationType": "controlled_substitute_observation",
@@ -2683,8 +3023,8 @@ func TestValidateLLMExecutionOutputContractRejectsControlledSubstituteWorkspaceW
 
 	err := validateLLMExecutionOutputContract(run, step, output)
 	if !errors.Is(err, common.ErrInvalidArgument) ||
-		!strings.Contains(err.Error(), "must not mutate workspace files") {
-		t.Fatalf("validateLLMExecutionOutputContract err = %v, want workspace write rejection", err)
+		!strings.Contains(err.Error(), "write outside validationScratchDir") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want scratch boundary write rejection", err)
 	}
 }
 
@@ -2915,5 +3255,137 @@ func TestValidateLLMExecutionOutputContractRejectsRepairFileWriteForExistingCont
 	err := validateLLMExecutionOutputContract(run, step, output)
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "file_write cannot replace existing target") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want existing target file_write rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsUnsafeRepairFileWriteForExistingContextTarget(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-repair-file-write-unsafe-existing-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	cases := []struct {
+		name string
+		item map[string]any
+		hash string
+	}{
+		{
+			name: "base hash mismatch",
+			item: map[string]any{"targetRef": "main.go", "exists": true, "contentHash": "hash-main", "contentComplete": true, "safeForFileWrite": true},
+			hash: "hash-stale",
+		},
+		{
+			name: "incomplete snapshot",
+			item: map[string]any{"targetRef": "main.go", "exists": true, "contentHash": "hash-main", "contentComplete": false, "safeForFileWrite": true},
+			hash: "hash-main",
+		},
+		{
+			name: "unsafe snapshot",
+			item: map[string]any{"targetRef": "main.go", "exists": true, "contentHash": "hash-main", "contentComplete": true, "safeForFileWrite": false},
+			hash: "hash-main",
+		},
+		{
+			name: "redacted snapshot",
+			item: map[string]any{"targetRef": "main.go", "exists": true, "contentHash": "hash-main", "contentComplete": true, "safeForFileWrite": true, "redacted": true},
+			hash: "hash-main",
+		},
+		{
+			name: "truncated snapshot",
+			item: map[string]any{"targetRef": "main.go", "exists": true, "contentHash": "hash-main", "contentComplete": true, "safeForFileWrite": true, "truncated": true},
+			hash: "hash-main",
+		},
+		{
+			name: "binary snapshot",
+			item: map[string]any{"targetRef": "main.go", "exists": true, "contentHash": "hash-main", "contentComplete": true, "safeForFileWrite": true, "isBinary": true},
+			hash: "hash-main",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			step := &runmodel.Step{
+				ID:   "run-repair-file-write-unsafe-existing-target/repair-001-of-graph-001-003-patch",
+				Kind: llmWorkspaceExecutionStepKind,
+				Input: map[string]any{
+					stepInputKeyRuntimeRepairFollowUp: true,
+					stepInputKeyRuntimeStage:          runtimeStageRepair,
+					"repairObjective":                 repairObjectiveStateChangingOutput,
+					"stateChangingOutputRequired":     true,
+					"failedStepKind":                  "patch/apply",
+					"patchRepairContext":              []map[string]any{tc.item},
+				},
+			}
+			output := map[string]any{
+				"status": "completed",
+				"stage":  "llm_execution_graph_plan",
+				stepOutputKeyExecutionGraph: map[string]any{
+					"nodes": []map[string]any{
+						{
+							"id":   "rewrite-main",
+							"kind": "patch/apply",
+							"input": map[string]any{
+								"targetRef": "main.go",
+								"patchType": "file_write",
+								"baseHash":  tc.hash,
+								"content":   "package main\n",
+							},
+						},
+					},
+				},
+			}
+
+			err := validateLLMExecutionOutputContract(run, step, output)
+			if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "file_write cannot replace existing target") {
+				t.Fatalf("validateLLMExecutionOutputContract err = %v, want unsafe existing target file_write rejection", err)
+			}
+		})
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsNonSubstantiveRepairUnifiedDiff(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-repair-non-substantive-unified-diff",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-repair-non-substantive-unified-diff/repair-001-of-graph-001-003-patch",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failedStepKind":                  "patch/apply",
+			"patchRepairContext": []map[string]any{{
+				"targetRef":        "main.go",
+				"exists":           true,
+				"contentHash":      "hash-main",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "annotate-main",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":      "main.go",
+						"patchType":      "unified_diff",
+						"summary":        "add a neutral marker only to satisfy repair state change",
+						"diff":           "--- a/main.go\n+++ b/main.go\n@@ -1,2 +1,3 @@\n package main\n+\n+// state-change anchor for verification\n",
+						"nonSubstantive": true,
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "non-substantive state-change placeholder") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want non-substantive unified diff rejection", err)
 	}
 }

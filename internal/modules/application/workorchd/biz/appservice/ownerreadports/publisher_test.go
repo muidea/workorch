@@ -136,6 +136,18 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInEnvelopeAndPayload(t *testing.T) 
 			},
 		},
 		{
+			name:      "coverage work items by run",
+			topic:     orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun,
+			wantRunID: string(runID),
+			responsePayload: map[string]any{
+				events.PayloadKeyItems: []*runtimecontract.CoverageWorkItem{},
+			},
+			invoke: func(ctx context.Context, hub events.Hub) error {
+				_, err := ListCoverageWorkItemsByRunOwnerCommand(ctx, hub, runID)
+				return err
+			},
+		},
+		{
 			name:      "results by run",
 			topic:     resultevents.TopicResultCommandListByRun,
 			wantRunID: string(runID),

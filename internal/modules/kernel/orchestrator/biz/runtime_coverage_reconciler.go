@@ -23,7 +23,7 @@ func (o *RuntimeOrchestrator) reconcileCoverageValidationEvidence(ctx context.Co
 	if err != nil {
 		return false, 0
 	}
-	return o.coverageLedger().reconcileValidationEvidence(run, validations, steps)
+	return o.coverageLedger().reconcileValidationEvidence(run, validations, steps, ctx)
 }
 
 func logCoverageReconcilerBinding(runID common.RunID, bound int) {
@@ -40,11 +40,12 @@ func (c *coverageSubsystem) reconcileValidationEvidence(
 	run *runModel.Run,
 	validations []*runModel.ValidationResult,
 	steps []*runModel.Step,
+	contexts ...context.Context,
 ) (bool, int) {
 	if run == nil || len(run.ExecutionContext) == 0 {
 		return false, 0
 	}
-	if c.ensure(run) {
+	if c.ensure(run, contexts...) {
 		// ensure may have added the items list — keep going
 	}
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
@@ -125,6 +126,7 @@ func (c *coverageSubsystem) reconcileValidationEvidence(
 		coverageExcludedSourcesFromContext(run.ExecutionContext),
 		coverageHistoricalItemsFromContext(run.ExecutionContext),
 	)
+	c.syncRepositoryProjection(coverageRepositoryContext(run, contexts...), run, items)
 	return true, bound
 }
 

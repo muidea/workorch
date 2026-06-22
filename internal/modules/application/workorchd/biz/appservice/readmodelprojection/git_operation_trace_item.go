@@ -2,10 +2,9 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
-func projectGitOperationTrace(step presenter.StepView) readmodelcore.GitOperationTrace {
+func projectGitOperationTrace(step StepView) readmodelcore.GitOperationTrace {
 	commit := readModelMapValue(step.Output["commit"])
 	return readmodelcore.GitOperationTrace{
 		StepID:           step.ID,

@@ -20,13 +20,16 @@ func ResolveDecision(ctx context.Context, hub events.Hub, ticket *decisionmodel.
 	resolutionID := "resolution-" + string(ticket.WorkspaceID) + "-" + ticketID + "-" + resolutionType
 	response, err := ownercommandports.PublishWithResponse(ctx, hub, decisionevents.TopicDecisionCommandEnsureResolved, "decision_ticket", ticketID, ticket.WorkspaceID, ticket.RunID, map[string]any{
 		events.PayloadKeyCommand: decisioncontracts.ResolveTicketCommand{
-			ResolutionID: common.ResolutionID(resolutionID),
-			TicketID:     ticket.ID,
-			WorkspaceID:  ticket.WorkspaceID,
-			RunID:        ticket.RunID,
-			StepID:       ticket.StepID,
-			Type:         resolutionType,
-			Payload:      cloneMap(payload),
+			ResolutionID:       common.ResolutionID(resolutionID),
+			TicketID:           ticket.ID,
+			WorkspaceID:        ticket.WorkspaceID,
+			RunID:              ticket.RunID,
+			StepID:             ticket.StepID,
+			Type:               resolutionType,
+			Payload:            cloneMap(payload),
+			ContinuationAction: stringPayloadValue(payload, "continuationAction"),
+			ResumeRunID:        common.RunID(stringPayloadValue(payload, "resumeRunId")),
+			SuccessorRunID:     common.RunID(stringPayloadValue(payload, "successorRunId")),
 		},
 	})
 	if err != nil {
@@ -52,4 +55,9 @@ func cloneMap(input map[string]any) map[string]any {
 		ret[key] = value
 	}
 	return ret
+}
+
+func stringPayloadValue(payload map[string]any, key string) string {
+	value, _ := payload[key].(string)
+	return value
 }

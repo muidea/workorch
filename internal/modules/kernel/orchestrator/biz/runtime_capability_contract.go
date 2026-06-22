@@ -14,6 +14,9 @@ func validateLLMSoulGraphCapabilityContract(run *runModel.Run, step *runModel.St
 	if !ok || len(graph.Nodes) == 0 {
 		return nil
 	}
+	if err := validateGraphDeclaredMCPServers(run, step, graph); err != nil {
+		return err
+	}
 	soul := runtimeSoulForStep(run, step)
 	if len(soul) == 0 {
 		return nil
@@ -357,20 +360,113 @@ func validateGraphAllowedMCPServers(graph runtimemodel.BlockExecutionGraph, allo
 	}
 	allowedSet := stringSet(allowed)
 	for _, node := range graph.Nodes {
-		kind := strings.TrimSpace(node.Kind)
-		if kind != "mcp/tool_call" && kind != "mcp/resource_read" {
+		if !graphNodeRequiresMCPServerDeclaration(node) {
 			continue
 		}
-		serverID := strings.TrimSpace(stringFromMap(node.Input, "serverId"))
-		if serverID == "" {
-			serverID = strings.TrimSpace(stringFromMap(mapFromValue(node.Input["input"]), "serverId"))
-		}
+		serverID := graphNodeMCPServerID(node)
 		if serverID == "" || allowedSet[serverID] {
 			continue
 		}
 		return fmt.Errorf("%w: executionGraph node %q MCP server %q is not allowed by current soul allowedMCPServerRefs", common.ErrInvalidArgument, strings.TrimSpace(node.ID), serverID)
 	}
 	return nil
+}
+
+func validateGraphDeclaredMCPServers(run *runModel.Run, step *runModel.Step, graph runtimemodel.BlockExecutionGraph) error {
+	declared, present := declaredRuntimeMCPServerIDs(run, step)
+	if !present {
+		return nil
+	}
+	for _, node := range graph.Nodes {
+		if !graphNodeRequiresMCPServerDeclaration(node) {
+			continue
+		}
+		serverID := graphNodeMCPServerID(node)
+		if serverID == "" || declared[serverID] {
+			continue
+		}
+		return fmt.Errorf("%w: executionGraph node %q MCP server %q is not declared by current runtime MCP capabilities", common.ErrInvalidArgument, strings.TrimSpace(node.ID), serverID)
+	}
+	return nil
+}
+
+func declaredRuntimeMCPServerIDs(run *runModel.Run, step *runModel.Step) (map[string]bool, bool) {
+	ret := map[string]bool{}
+	present := false
+	addServer := func(server map[string]any) {
+		if len(server) == 0 {
+			return
+		}
+		present = true
+		if id := strings.TrimSpace(firstNonEmptyString(stringFromMap(server, "id"), stringFromMap(server, "serverId"))); id != "" {
+			ret[id] = true
+		}
+	}
+	addCapability := func(capability map[string]any) {
+		if len(capability) == 0 {
+			return
+		}
+		present = true
+		if id := strings.TrimSpace(stringFromMap(capability, "serverId")); id != "" {
+			ret[id] = true
+		}
+	}
+	addCapabilityID := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		present = true
+		if idx := strings.Index(value, ":"); idx > 0 {
+			ret[strings.TrimSpace(value[:idx])] = true
+		}
+	}
+	var visit func(map[string]any)
+	visit = func(source map[string]any) {
+		if len(source) == 0 {
+			return
+		}
+		for _, server := range mapSliceFromValue(source["mcpServers"]) {
+			addServer(server)
+		}
+		for _, capability := range mapSliceFromValue(source["mcpCapabilities"]) {
+			addCapability(capability)
+		}
+		for _, id := range stringSliceFromValue(source["capabilityIds"]) {
+			addCapabilityID(id)
+		}
+		if selected := mapFromValue(source["selectedContext"]); len(selected) > 0 {
+			visit(selected)
+		}
+		if runtimeCapabilities := mapFromValue(source["runtimeCapabilities"]); len(runtimeCapabilities) > 0 {
+			visit(runtimeCapabilities)
+		}
+	}
+	if run != nil {
+		visit(run.ExecutionContext)
+	}
+	if step != nil && step.Input != nil {
+		visit(step.Input)
+		visit(mapFromValue(step.Input["executionContext"]))
+		visit(mapFromValue(step.Input[stepInputKeyExecutionContextPackage]))
+	}
+	return ret, present
+}
+
+func graphNodeRequiresMCPServerDeclaration(node runtimemodel.BlockExecutionNode) bool {
+	switch strings.TrimSpace(node.Kind) {
+	case "mcp/tool_call", "mcp/resource_read", "mcp/prompt_get":
+		return true
+	default:
+		return false
+	}
+}
+
+func graphNodeMCPServerID(node runtimemodel.BlockExecutionNode) string {
+	if serverID := strings.TrimSpace(stringFromMap(node.Input, "serverId")); serverID != "" {
+		return serverID
+	}
+	return strings.TrimSpace(stringFromMap(mapFromValue(node.Input["input"]), "serverId"))
 }
 
 func stringSet(values []string) map[string]bool {

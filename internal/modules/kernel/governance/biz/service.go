@@ -56,6 +56,7 @@ type ApprovalReader interface {
 
 type RunReader interface {
 	Get(context.Context, common.RunID) (*runmodel.Run, error)
+	GetByWorkspaceID(context.Context, common.WorkspaceID, common.RunID) (*runmodel.Run, error)
 	List(context.Context) ([]*runmodel.Run, error)
 }
 
@@ -321,11 +322,12 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 	if err != nil || ticket == nil || ticket.State != common.DecisionTicketStateOpen {
 		return
 	}
-	run, err := s.runs.Get(ctx, ticket.RunID)
+	run, err := s.runs.GetByWorkspaceID(ctx, ticket.WorkspaceID, ticket.RunID)
 	if err != nil || run == nil {
 		return
 	}
-	goal, dod := s.loadGoalAndDoD(ctx, run.GoalID, run.DoDID)
+	definitionCtx := common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID)
+	goal, dod := s.loadGoalAndDoD(definitionCtx, run.GoalID, run.DoDID)
 	memoryItems := s.loadMemoryItems(ctx, ticket.WorkspaceID)
 	eval := s.evaluateTicket(ctx, ticket, run, goal, dod, memoryItems)
 	trace := &governancemodel.AutoGovernanceTrace{
@@ -432,11 +434,12 @@ func (s *Service) processPendingApproval(ctx context.Context, approvalID common.
 	if err != nil || approval == nil || approval.State != common.ApprovalStatePending {
 		return
 	}
-	run, err := s.runs.Get(ctx, approval.RunID)
+	run, err := s.runs.GetByWorkspaceID(ctx, approval.WorkspaceID, approval.RunID)
 	if err != nil || run == nil {
 		return
 	}
-	goal, dod := s.loadGoalAndDoD(ctx, run.GoalID, run.DoDID)
+	definitionCtx := common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID)
+	goal, dod := s.loadGoalAndDoD(definitionCtx, run.GoalID, run.DoDID)
 	eval := s.evaluateApproval(ctx, approval, goal, dod, cfg.Governance)
 	trace := &governancemodel.AutoGovernanceTrace{
 		ID:                 common.AutoGovernanceTraceID(fmt.Sprintf("%s/auto-governance", approval.ID)),
@@ -1966,7 +1969,7 @@ func (s *Service) publishGovernanceEvent(ctx context.Context, topic string, trac
 	if s == nil || s.eventHub == nil || trace == nil {
 		return nil
 	}
-	return s.eventHub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, s.eventHub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
 		SourceModule: "kernel/governance",

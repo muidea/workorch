@@ -55,7 +55,13 @@ export function DecisionQueuePage() {
     if (isGovernanceRefreshEvent(event)) {
       void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
     }
-  }, { debounceMs: 300 });
+  }, {
+    debounceMs: 300,
+    onExhausted: () => {
+      message.warning('治理事件流已断开，请检查服务状态或手动刷新。');
+      void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
+    }
+  });
 
   const resolve = async (item: Decision, resolutionType: string, payload?: Record<string, unknown>) => {
     try {

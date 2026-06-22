@@ -28,20 +28,26 @@ type UpdateTicketCommand struct {
 }
 
 type ResolveTicketCommand struct {
-	ResolutionID common.ResolutionID
-	TicketID     common.TicketID
-	WorkspaceID  common.WorkspaceID
-	RunID        common.RunID
-	StepID       common.StepID
-	Type         string
-	Payload      map[string]any
+	ResolutionID       common.ResolutionID
+	TicketID           common.TicketID
+	WorkspaceID        common.WorkspaceID
+	RunID              common.RunID
+	StepID             common.StepID
+	Type               string
+	Payload            map[string]any
+	ContinuationAction string
+	ResumeRunID        common.RunID
+	SuccessorRunID     common.RunID
 }
 
 type CreateResolutionCommand struct {
-	ResolutionID common.ResolutionID
-	TicketID     common.TicketID
-	Type         string
-	Payload      map[string]any
+	ResolutionID       common.ResolutionID
+	TicketID           common.TicketID
+	Type               string
+	Payload            map[string]any
+	ContinuationAction string
+	ResumeRunID        common.RunID
+	SuccessorRunID     common.RunID
 }
 
 type DeleteTicketCommand struct {

@@ -1205,6 +1205,19 @@ func (r *RunRepository) Get(ctx context.Context, id common.RunID) (*run.Run, err
 	return cloneRun(ret), nil
 }
 
+func (r *RunRepository) GetByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID, id common.RunID) (*run.Run, error) {
+	if workspaceID == "" || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[workspaceScopedKey(workspaceID, string(id))]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return cloneRun(item), nil
+}
+
 func (r *RunRepository) List(_ context.Context) ([]*run.Run, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

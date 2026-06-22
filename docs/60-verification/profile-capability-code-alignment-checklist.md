@@ -44,7 +44,7 @@ Last Updated: 2026-05-30
 
 建议优先核对以下代码目录：
 
-- `internal/modules/application/workorchd/biz/bootstrap/defaults`
+- `internal/pkg/workorchdefaults/defaults`
 - `internal/modules/application/workorchd/biz/appservice`
 - `internal/modules/kernel`
 - `internal/modules/blocks`
@@ -208,17 +208,18 @@ Last Updated: 2026-05-30
 
 | Area | Code Path | Result | Notes |
 | --- | --- | --- | --- |
-| built-in templates / defaults | `internal/modules/application/workorchd/biz/bootstrap/defaults/templates.json`, `defaults/souls.json`, `defaults/souls/*/*.md`, `defaults.go` | pass | 内置模板、Soul Markdown 拆分资源、MCP server/capability 默认资源均有应用层 bootstrap 落点；本轮补齐所有内置模板 `defaultSoulId`，统一指向各模板 execution Soul，阶段绑定仍按 `soulBindings` 生效。 |
+| built-in templates / defaults | `internal/pkg/workorchdefaults/defaults/{templates.json,souls.json,souls/*/*.md,mcp_servers.json,mcp_capabilities.json}`, `internal/pkg/workorchdefaults/defaults.go`, `internal/pkg/workorchdefaults/defaults_test.go` | pass | 内置模板、Soul Markdown 拆分资源、MCP server/capability 默认资源均由 `workorchdefaults` 嵌入包提供，bootstrap 只消费该默认资源包；所有内置模板 `defaultSoulId` 已由测试覆盖并统一指向各模板 execution Soul，阶段绑定仍按 `soulBindings` 生效。 |
 | workspace soul routing / setup-draft | `activationports/soul_routing.go`, `workspace_execution_activation_service.go`, `workspace_setup_draft_service.go` | pass | routing 优先级按 run stage、workspace stage、run default、workspace default、system default 解析，并写入 `executionContext.soulRouting`；setup-draft 只形成创建前草案，不创建 Run。 |
-| software-dev profile | `defaults/templates.json`, `defaults/souls/software-dev/*.md`, `defaults_test.go`, `verify-workorch-runtime-profile-software-dev.sh` | pass | software-dev 规则保留在 template/Soul/default resource/profile verifier 层；core prompt 与 reusable runtime 已有边界脚本防止软件开发语义下沉。 |
+| software-dev profile | `internal/pkg/workorchdefaults/defaults/templates.json`, `internal/pkg/workorchdefaults/defaults/souls/software-dev/*.md`, `internal/pkg/workorchdefaults/defaults_test.go`, `scripts/verify-workorch-runtime-profile-software-dev.sh` | pass | software-dev 规则保留在 template/Soul/default resource/profile verifier 层；core prompt 与 reusable runtime 已有边界脚本防止软件开发语义下沉。 |
 | MCP capability | `internal/modules/kernel/mcp`, `defaults/mcp_servers.json`, `defaults/mcp_capabilities.json`, `workspace_execution_activation_service.go` | pass | `MCPServer` / `MCPCapability` 已是正式对象；capability 具备 display/category/stage/risk/approval/enabled 字段；activation 通过 capability refs 选择并投影。 |
 | runtime capabilities | `internal/modules/blocks/{file,git,web,shell,mcp}`, `runtime_patch_adapter.go`, `runtime_patch_approval.go` | pass | file/patch/git/web/shell/mcp 均作为 runtime capability 执行外部动作，不拥有 accepted closeout；shell 与 patch/file 路径围绕 workspace deliverable boundary 执行。 |
 | cross-layer boundary | `verify-boundary-contract.sh`, `workspaceExecutionContract`, `read_model_service.go`, Web/TUI projection | pass | profile 规则通过 template/contextHints/evidencePolicies/profileContracts 注入 execution contract；activation 不回写 workspace 绑定；Web/TUI 消费投影字段，不重新实现 profile 状态机。 |
 
 ### Closed In This Pass
 
-- 内置模板缺少 `defaultSoulId` 属于默认资源 `impl-drift`；已在 `defaults/templates.json`
-  补齐，并新增 bootstrap defaults 测试覆盖。
+- 内置模板缺少 `defaultSoulId` 属于默认资源 `impl-drift`；已在
+  `internal/pkg/workorchdefaults/defaults/templates.json` 补齐，并由
+  `internal/pkg/workorchdefaults/defaults_test.go` 覆盖。
 
 ### Remaining Follow-Up
 

@@ -2,8 +2,6 @@ package readmodelprojection
 
 import (
 	"testing"
-
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
 func TestReadModelFallbackFailureTargetRefsUsesProgressFailureTargetScope(t *testing.T) {
@@ -23,7 +21,7 @@ func TestReadModelFallbackFailureTargetRefsUsesProgressFailureTargetScope(t *tes
 }
 
 func TestReadModelFailureTargetScopeUsesStructuredScope(t *testing.T) {
-	step := &presenter.StepView{
+	step := &StepView{
 		Output: map[string]any{
 			"failureTargetScope": "failureTargets=target.txt",
 		},

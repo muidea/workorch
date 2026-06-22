@@ -98,9 +98,15 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 			return newRuntimeContractViolationError(contractViolationRepairNoStateChangingOutput, "state-changing llm repair step returned dodAssessment without executable state-changing output")
 		}
 		if spec := decisionBlockSpec(output); spec.Reason != "" {
+			if !runtimeDecisionBlockSpecIsStructurallyValid(spec) {
+				return newRuntimeContractViolationError(contractViolationRepairNoStateChangingOutput, "state-changing llm repair step returned incomplete decision blocker without executable state-changing output")
+			}
 			return nil
 		}
 		if spec := approvalBlockSpec(output); spec.Reason != "" {
+			if !runtimeApprovalBlockSpecIsStructurallyValid(spec) {
+				return newRuntimeContractViolationError(contractViolationRepairNoStateChangingOutput, "state-changing llm repair step returned incomplete approval blocker without executable state-changing output")
+			}
 			return nil
 		}
 		return newRuntimeContractViolationError(contractViolationRepairNoStateChangingOutput, "state-changing llm repair step returned no state-changing output")
@@ -127,6 +133,14 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 		return nil
 	}
 	return newRuntimeContractViolationError(contractViolationExecutionNoStateChangingOutput, "state-changing execution-stage llm graph node returned no state-changing output")
+}
+
+func runtimeDecisionBlockSpecIsStructurallyValid(spec runtimeDecisionBlockSpec) bool {
+	return strings.TrimSpace(spec.Reason) != "" && strings.TrimSpace(spec.Question) != ""
+}
+
+func runtimeApprovalBlockSpecIsStructurallyValid(spec runtimeApprovalBlockSpec) bool {
+	return strings.TrimSpace(spec.Reason) != "" && strings.TrimSpace(spec.Action) != ""
 }
 
 func validateAssessmentOnlyOutputContract(step *runModel.Step, output map[string]any) error {
@@ -261,12 +275,13 @@ func validateConcreteValidationBehaviorEvidenceGraph(step *runModel.Step, graph 
 		return nil
 	}
 	if graphHasDeclaredConcreteValidationEvidenceNode(graph) {
-		return validateConcreteValidationGraphShellSafety(graph)
+		return validateConcreteValidationGraphShellSafety(step, graph)
 	}
 	return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair returned executionGraph without a declared non-static validationEvidence contract; shell/command or mcp/tool_call nodes must declare validationEvidence.mode and validationEvidence.observationType, and controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute")
 }
 
-func validateConcreteValidationGraphShellSafety(graph runtimemodel.BlockExecutionGraph) error {
+func validateConcreteValidationGraphShellSafety(step *runModel.Step, graph runtimemodel.BlockExecutionGraph) error {
+	validationScratchDir := validationScratchDirFromStep(step)
 	for _, node := range graph.Nodes {
 		if canonicalRuntimeGraphNodeKind(node.Kind) != "shell/command" {
 			continue
@@ -281,15 +296,18 @@ func validateConcreteValidationGraphShellSafety(graph runtimemodel.BlockExecutio
 		if shellCommandLineStartsDetachedProcess(commandLine) {
 			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence graph must not start detached or background processes; use a bounded foreground command, timeout-controlled harness, or controlled substitute")
 		}
-		allowIsolatedWrites := validationEvidenceModeAllowsIsolatedTempWrites(nodeValidationEvidenceMode(node))
-		if shellCommandLineContainsWorkspaceFileMutation(commandLine, allowIsolatedWrites) {
-			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence graph must not mutate workspace files through shell/command; use patch/apply for file state changes and keep validation shell commands read-only or externally bounded")
+		allowScratchWrites := validationEvidenceModeAllowsScratchWrites(nodeValidationEvidenceMode(node))
+		if shellCommandLineContainsWorkspaceFileMutation(commandLine, allowScratchWrites, validationScratchDir) {
+			if allowScratchWrites && validationScratchDir == "" {
+				return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence graph with controlled substitute writes requires runtime validationScratchDir")
+			}
+			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence graph must not mutate workspace files or write outside validationScratchDir through shell/command; use patch/apply for file state changes and keep validation shell commands read-only or scratch-bounded")
 		}
 	}
 	return nil
 }
 
-func validationEvidenceModeAllowsIsolatedTempWrites(mode string) bool {
+func validationEvidenceModeAllowsScratchWrites(mode string) bool {
 	switch strings.TrimSpace(mode) {
 	case "controlled_substitute", "dynamic_execution", "executable_contract", "runtime_behavior":
 		return true
@@ -359,13 +377,13 @@ func shellCommandLineStartsDetachedProcess(commandLine string) bool {
 	return shellCommandLineContainsStandaloneAmpersand(lower)
 }
 
-func shellCommandLineContainsWorkspaceFileMutation(commandLine string, allowIsolatedControlledSubstitute bool) bool {
+func shellCommandLineContainsWorkspaceFileMutation(commandLine string, allowScratchWrites bool, validationScratchDir string) bool {
 	lower := strings.ToLower(strings.TrimSpace(commandLine))
 	if lower == "" {
 		return false
 	}
-	if allowIsolatedControlledSubstitute && shellCommandLineUsesTemporaryTarget(lower) {
-		return shellCommandLineContainsWorkspaceFileMutationOutsideIsolatedTemp(lower)
+	if allowScratchWrites && strings.TrimSpace(validationScratchDir) != "" && shellCommandLineReferencesValidationScratch(lower, validationScratchDir) {
+		return shellCommandLineContainsWorkspaceFileMutationOutsideValidationScratch(lower, validationScratchDir)
 	}
 	padded := " " + lower + " "
 	for _, marker := range []string{
@@ -394,20 +412,12 @@ func shellCommandLineContainsWorkspaceFileMutation(commandLine string, allowIsol
 			return true
 		}
 	}
-	return shellCommandLineContainsWriteRedirection(lower, false)
+	return shellCommandLineContainsWriteRedirection(lower, false, "")
 }
 
-func shellCommandLineUsesIsolatedTemporaryWorkspace(commandLine string) bool {
-	return strings.Contains(commandLine, "mktemp -d") && shellCommandLineSegmentReferencesTemp(commandLine)
-}
-
-func shellCommandLineUsesTemporaryTarget(commandLine string) bool {
-	return strings.Contains(commandLine, "mktemp") && shellCommandLineSegmentReferencesTemp(commandLine)
-}
-
-func shellCommandLineContainsWorkspaceFileMutationOutsideIsolatedTemp(commandLine string) bool {
-	tempAliases := shellCommandLineTempAliases(commandLine)
-	inTempCWD := false
+func shellCommandLineContainsWorkspaceFileMutationOutsideValidationScratch(commandLine string, validationScratchDir string) bool {
+	scratchAliases := shellCommandLineValidationScratchAliases(commandLine, validationScratchDir)
+	inScratchCWD := false
 	for _, segment := range strings.FieldsFunc(commandLine, func(r rune) bool {
 		return r == '\n' || r == ';'
 	}) {
@@ -415,7 +425,7 @@ func shellCommandLineContainsWorkspaceFileMutationOutsideIsolatedTemp(commandLin
 		if segment == "" {
 			continue
 		}
-		segmentTempScoped := inTempCWD || shellCommandLineSegmentRunsInTemp(segment, tempAliases...)
+		segmentScratchScoped := inScratchCWD || shellCommandLineSegmentRunsInValidationScratch(segment, validationScratchDir, scratchAliases...)
 		padded := " " + segment + " "
 		for _, marker := range []string{
 			" sed -i",
@@ -435,30 +445,34 @@ func shellCommandLineContainsWorkspaceFileMutationOutsideIsolatedTemp(commandLin
 			" git restore",
 		} {
 			if strings.Contains(padded, marker) {
-				if !segmentTempScoped && !shellCommandLineSegmentReferencesTemp(segment, tempAliases...) {
+				if !segmentScratchScoped && !shellCommandLineSegmentReferencesValidationScratch(segment, validationScratchDir, scratchAliases...) {
 					return true
 				}
 				break
 			}
 		}
 		for _, marker := range []string{" rm ", " rm -", " mkdir ", " rmdir ", " cp "} {
-			if strings.Contains(padded, marker) && !segmentTempScoped && !shellCommandLineSegmentReferencesTemp(segment, tempAliases...) {
+			if strings.Contains(padded, marker) && !segmentScratchScoped && !shellCommandLineSegmentReferencesValidationScratch(segment, validationScratchDir, scratchAliases...) {
 				return true
 			}
 		}
-		if !segmentTempScoped && shellCommandLineContainsWriteRedirection(segment, true, tempAliases...) {
+		if !segmentScratchScoped && shellCommandLineContainsWriteRedirection(segment, true, validationScratchDir, scratchAliases...) {
 			return true
 		}
 		if shellCommandLineSegmentChangesDirectory(segment) {
-			inTempCWD = shellCommandLineSegmentChangesDirectoryToTemp(segment, tempAliases...)
+			inScratchCWD = shellCommandLineSegmentChangesDirectoryToValidationScratch(segment, validationScratchDir, scratchAliases...)
 		}
 	}
 	return false
 }
 
-func shellCommandLineSegmentRunsInTemp(segment string, tempAliases ...string) bool {
+func shellCommandLineReferencesValidationScratch(commandLine string, validationScratchDir string) bool {
+	return shellCommandLineSegmentReferencesValidationScratch(commandLine, validationScratchDir, shellCommandLineValidationScratchAliases(commandLine, validationScratchDir)...)
+}
+
+func shellCommandLineSegmentRunsInValidationScratch(segment string, validationScratchDir string, scratchAliases ...string) bool {
 	segment = strings.ToLower(strings.TrimSpace(segment))
-	if segment == "" || !shellCommandLineSegmentReferencesTemp(segment, tempAliases...) {
+	if segment == "" || !shellCommandLineSegmentReferencesValidationScratch(segment, validationScratchDir, scratchAliases...) {
 		return false
 	}
 	padded := " " + segment + " "
@@ -473,15 +487,16 @@ func shellCommandLineSegmentChangesDirectory(segment string) bool {
 	return strings.HasPrefix(segment, "cd ") || strings.HasPrefix(segment, "cd\t")
 }
 
-func shellCommandLineSegmentChangesDirectoryToTemp(segment string, tempAliases ...string) bool {
+func shellCommandLineSegmentChangesDirectoryToValidationScratch(segment string, validationScratchDir string, scratchAliases ...string) bool {
 	if !shellCommandLineSegmentChangesDirectory(segment) {
 		return false
 	}
-	return shellCommandLineSegmentReferencesTemp(segment, tempAliases...)
+	return shellCommandLineSegmentReferencesValidationScratch(segment, validationScratchDir, scratchAliases...)
 }
 
-func shellCommandLineTempAliases(commandLine string) []string {
+func shellCommandLineValidationScratchAliases(commandLine string, validationScratchDir string) []string {
 	commandLine = strings.ToLower(commandLine)
+	validationScratchDir = strings.ToLower(strings.TrimSpace(normalizeValidationScratchDir(validationScratchDir)))
 	aliases := map[string]struct{}{}
 	for changed := true; changed; {
 		changed = false
@@ -497,7 +512,7 @@ func shellCommandLineTempAliases(commandLine string) []string {
 			if _, exists := aliases[name]; exists {
 				continue
 			}
-			if shellCommandLineSegmentReferencesTemp(value, stringStructKeys(aliases)...) {
+			if shellCommandLineSegmentReferencesValidationScratch(value, validationScratchDir, stringStructKeys(aliases)...) {
 				aliases[name] = struct{}{}
 				changed = true
 			}
@@ -517,15 +532,13 @@ func stringStructKeys(values map[string]struct{}) []string {
 	return keys
 }
 
-func shellCommandLineSegmentReferencesTemp(segment string, tempAliases ...string) bool {
+func shellCommandLineSegmentReferencesValidationScratch(segment string, validationScratchDir string, scratchAliases ...string) bool {
 	segment = strings.ToLower(segment)
-	if strings.Contains(segment, "$tmp") ||
-		strings.Contains(segment, "${tmp") ||
-		strings.Contains(segment, "/tmp/") ||
-		strings.Contains(segment, "$(mktemp") {
+	validationScratchDir = strings.ToLower(strings.TrimSpace(normalizeValidationScratchDir(validationScratchDir)))
+	if validationScratchDir != "" && shellCommandLineMentionsPath(segment, validationScratchDir) {
 		return true
 	}
-	for _, alias := range tempAliases {
+	for _, alias := range scratchAliases {
 		alias = strings.ToLower(strings.TrimSpace(alias))
 		if alias == "" {
 			continue
@@ -537,7 +550,48 @@ func shellCommandLineSegmentReferencesTemp(segment string, tempAliases ...string
 	return false
 }
 
-func shellCommandLineContainsWriteRedirection(commandLine string, allowTempTarget bool, tempAliases ...string) bool {
+func shellCommandLineMentionsPath(segment string, path string) bool {
+	segment = strings.ToLower(segment)
+	path = strings.ToLower(strings.TrimSpace(normalizeValidationScratchDir(path)))
+	if segment == "" || path == "" {
+		return false
+	}
+	start := 0
+	for {
+		idx := strings.Index(segment[start:], path)
+		if idx < 0 {
+			return false
+		}
+		idx += start
+		beforeOK := idx == 0 || shellCommandLinePathBoundaryBefore(segment[idx-1])
+		afterIdx := idx + len(path)
+		afterOK := afterIdx >= len(segment) || segment[afterIdx] == '/' || shellCommandLinePathBoundaryAfter(segment[afterIdx])
+		if beforeOK && afterOK {
+			return true
+		}
+		start = idx + len(path)
+	}
+}
+
+func shellCommandLinePathBoundaryBefore(ch byte) bool {
+	switch ch {
+	case ' ', '\t', '\n', '\r', '\'', '"', '`', '=', ':', '(', '{', '[', '<', '>':
+		return true
+	default:
+		return false
+	}
+}
+
+func shellCommandLinePathBoundaryAfter(ch byte) bool {
+	switch ch {
+	case ' ', '\t', '\n', '\r', '\'', '"', '`', ';', '&', '|', ')', '}', ']', '<', '>':
+		return true
+	default:
+		return false
+	}
+}
+
+func shellCommandLineContainsWriteRedirection(commandLine string, allowScratchTarget bool, validationScratchDir string, scratchAliases ...string) bool {
 	for idx := 0; idx < len(commandLine); idx++ {
 		if commandLine[idx] != '>' {
 			continue
@@ -562,7 +616,7 @@ func shellCommandLineContainsWriteRedirection(commandLine string, allowTempTarge
 		}
 		if targetEnd > targetStart {
 			target := strings.Trim(commandLine[targetStart:targetEnd], `"'`)
-			if target == "/dev/null" || (allowTempTarget && shellCommandLineSegmentReferencesTemp(target, tempAliases...)) {
+			if target == "/dev/null" || (allowScratchTarget && shellCommandLineSegmentReferencesValidationScratch(target, validationScratchDir, scratchAliases...)) {
 				continue
 			}
 		}

@@ -26,6 +26,13 @@ func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
+	if err := runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: "ws-run-owner-b",
+		State:       common.RunStateRunning,
+	}); err != nil {
+		t.Fatalf("create duplicate scoped run: %v", err)
+	}
 
 	module := New()
 	if err := module.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
@@ -42,6 +49,19 @@ func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 
 	err := hub.Publish(ctx, events.Envelope{
 		Topic:       runevents.TopicRunCommandGet,
+		WorkspaceID: "ws-run-owner-c",
+		RunID:       string(runID),
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID: "ws-run-owner-c",
+			events.PayloadKeyRunID:       string(runID),
+		},
+	})
+	if !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("wrong workspace get err = %v, want not found", err)
+	}
+
+	err = hub.Publish(ctx, events.Envelope{
+		Topic:       runevents.TopicRunCommandGet,
 		WorkspaceID: "ws-run-owner-b",
 		RunID:       string(runID),
 		Payload: map[string]any{
@@ -49,8 +69,13 @@ func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 			events.PayloadKeyRunID:       string(runID),
 		},
 	})
-	if !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("wrong workspace get err = %v, want not found", err)
+	response, ok := events.ResponseEnvelope(err)
+	if !ok {
+		t.Fatalf("duplicate scoped get err = %v, want response", err)
+	}
+	item, ok := response.Payload[events.PayloadKeyRun].(*runmodel.Run)
+	if !ok || item == nil || item.WorkspaceID != "ws-run-owner-b" || item.State != common.RunStateRunning {
+		t.Fatalf("duplicate scoped response run = %+v, want workspace b running run", response.Payload[events.PayloadKeyRun])
 	}
 
 	err = hub.Publish(ctx, events.Envelope{
@@ -62,13 +87,71 @@ func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 			events.PayloadKeyRunID:       string(runID),
 		},
 	})
-	response, ok := events.ResponseEnvelope(err)
+	response, ok = events.ResponseEnvelope(err)
 	if !ok {
 		t.Fatalf("scoped get err = %v, want response", err)
 	}
-	item, ok := response.Payload[events.PayloadKeyRun].(*runmodel.Run)
+	item, ok = response.Payload[events.PayloadKeyRun].(*runmodel.Run)
 	if !ok || item == nil || item.WorkspaceID != "ws-run-owner-a" || item.ID != runID {
 		t.Fatalf("response run = %+v, want scoped run", response.Payload[events.PayloadKeyRun])
+	}
+}
+
+func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	runs := memory.NewRunRepository()
+	if err := runs.Create(ctx, &runmodel.Run{
+		ID:               "run-compact-running",
+		WorkspaceID:      "ws-run-compact",
+		State:            common.RunStateRunning,
+		ExecutionContext: map[string]any{"large": "context"},
+		Priority:         3,
+	}); err != nil {
+		t.Fatalf("create running run: %v", err)
+	}
+	if err := runs.Create(ctx, &runmodel.Run{
+		ID:               "run-compact-completed",
+		WorkspaceID:      "ws-run-compact",
+		State:            common.RunStateCompleted,
+		ExecutionContext: map[string]any{"large": "context"},
+	}); err != nil {
+		t.Fatalf("create completed run: %v", err)
+	}
+
+	module := New()
+	if err := module.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(ctx); err != nil {
+			t.Fatalf("Teardown: %v", err)
+		}
+	})
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic: runevents.TopicRunCommandList,
+		Payload: map[string]any{
+			events.PayloadKeyStates:  []string{string(common.RunStateRunning)},
+			events.PayloadKeyCompact: true,
+		},
+	})
+	response, ok := events.ResponseEnvelope(err)
+	if !ok {
+		t.Fatalf("list err = %v, want response", err)
+	}
+	items, ok := response.Payload[events.PayloadKeyRuns].([]*runmodel.Run)
+	if !ok {
+		t.Fatalf("runs payload = %T, want run slice", response.Payload[events.PayloadKeyRuns])
+	}
+	if len(items) != 1 || items[0].ID != "run-compact-running" {
+		t.Fatalf("items = %+v, want only running run", items)
+	}
+	if items[0].ExecutionContext != nil || items[0].Priority != 3 || items[0].WorkspaceID != "ws-run-compact" {
+		t.Fatalf("compact item = %+v, want metadata without execution context", items[0])
 	}
 }
 

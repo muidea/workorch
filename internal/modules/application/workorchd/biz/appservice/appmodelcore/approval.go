@@ -33,7 +33,13 @@ type ApprovalPage struct {
 	HasMore           bool       `json:"hasMore"`
 }
 
+type ResolveApprovalCommand struct {
+	Action  string         `json:"action"`
+	Payload map[string]any `json:"payload,omitempty"`
+}
+
 type BatchResolveApprovalCommand struct {
-	ApprovalIDs []string `json:"approvalIds"`
-	Action      string   `json:"action"`
+	ApprovalIDs []string       `json:"approvalIds"`
+	Action      string         `json:"action"`
+	Payload     map[string]any `json:"payload,omitempty"`
 }

@@ -197,6 +197,15 @@ func (f fakeRunStatusRunReader) Get(_ context.Context, id common.RunID) (*runmod
 	return nil, common.ErrNotFound
 }
 
+func (f fakeRunStatusRunReader) GetByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	for _, item := range f.items {
+		if item != nil && item.WorkspaceID == workspaceID && item.ID == id {
+			return item, nil
+		}
+	}
+	return nil, common.ErrNotFound
+}
+
 func (f fakeRunStatusRunReader) List(context.Context) ([]*runmodel.Run, error) {
 	return append([]*runmodel.Run(nil), f.items...), nil
 }

@@ -94,6 +94,36 @@ def parse_metrics(path):
             continue
     return values, text
 
+def labeled_metric_value(metrics_text, metric_name, labels=None):
+    labels = labels or {}
+    total = 0.0
+    found = False
+    for raw in metrics_text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        name = parts[0]
+        if name == metric_name:
+            parsed_labels = {}
+        elif name.startswith(metric_name + "{") and name.endswith("}"):
+            parsed_labels = {}
+            label_blob = name[len(metric_name) + 1:-1]
+            for label in re.findall(r'([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"', label_blob):
+                parsed_labels[label[0]] = label[1]
+        else:
+            continue
+        if any(parsed_labels.get(key) != value for key, value in labels.items()):
+            continue
+        try:
+            total += float(parts[1])
+            found = True
+        except ValueError:
+            continue
+    return total if found else 0.0
+
 errors = []
 readyz = json.loads((artifact_dir / "readyz.json").read_text(encoding="utf-8"))
 if readyz.get("status") != "ready":
@@ -111,6 +141,7 @@ required_metric_markers = [
     "workorch_scheduler_command_enqueue_failures_total",
     "workorch_scheduler_continuation_failures_total",
     "workorch_scheduler_continuation_no_action_total",
+    "workorch_watchdog_timer_registrations_total",
     "workorch_watchdog_interval_seconds",
     "workorch_watchdog_ticks_total",
     "workorch_watchdog_last_error_timestamp_seconds",
@@ -136,6 +167,36 @@ summary = {
     "maxConcurrentRuns": metrics.get("workorch_server_max_concurrent_runs"),
     "runRequestsInFlight": metrics.get("workorch_run_requests_in_flight"),
     "runQueueWaiting": metrics.get("workorch_run_queue_waiting"),
+    "runSlots": {
+        "maxConcurrentRuns": metrics.get("workorch_server_max_concurrent_runs"),
+        "inFlight": metrics.get("workorch_run_requests_in_flight"),
+        "queueWaiting": metrics.get("workorch_run_queue_waiting"),
+    },
+    "governanceContinuationMainPathMetrics": {
+        "governanceCommandAccepted": labeled_metric_value(
+            metrics_text, "workorch_scheduler_commands_total", {"kind": "governance_continuation", "result": "accepted"}
+        ),
+        "replanCommandAccepted": labeled_metric_value(
+            metrics_text, "workorch_scheduler_commands_total", {"kind": "replan_continuation", "result": "accepted"}
+        ),
+        "governanceCommandEnqueueFailures": labeled_metric_value(
+            metrics_text,
+            "workorch_scheduler_command_enqueue_failures_total",
+            {"kind": "governance_continuation", "reason": "scheduler_enqueue_failed"},
+        ),
+        "replanCommandEnqueueFailures": labeled_metric_value(
+            metrics_text,
+            "workorch_scheduler_command_enqueue_failures_total",
+            {"kind": "replan_continuation", "reason": "scheduler_enqueue_failed"},
+        ),
+        "governanceContinuationFailures": labeled_metric_value(
+            metrics_text, "workorch_scheduler_continuation_failures_total", {"kind": "governance_continuation"}
+        ),
+        "replanContinuationFailures": labeled_metric_value(
+            metrics_text, "workorch_scheduler_continuation_failures_total", {"kind": "replan_continuation"}
+        ),
+    },
+    "watchdogTimerRegistrations": metrics.get("workorch_watchdog_timer_registrations_total"),
     "watchdogIntervalSeconds": metrics.get("workorch_watchdog_interval_seconds"),
     "watchdogTicks": metrics.get("workorch_watchdog_ticks_total"),
     "watchdogLastErrorTimestampSeconds": metrics.get("workorch_watchdog_last_error_timestamp_seconds"),

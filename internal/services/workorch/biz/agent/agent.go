@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -170,7 +169,7 @@ func (a *Agent) handleBackendEvent(ctx context.Context, evt backend.Event, runDo
 	case backend.EventStepDispatched, backend.EventStepCompleted:
 		a.Send(Event{Type: EventProgress, Payload: evt.Payload})
 	case backend.EventDecisionCreated:
-		ticketID := firstString(evt.Payload, "ticketId", "ID", "id", events.PayloadKeyBlockingTicketID)
+		ticketID := firstString(evt.Payload, "ticketId", "ID", "id", backend.PayloadKeyBlockingTicketID)
 		if ticketID == "" {
 			ticketID = string(evt.RunID)
 		}
@@ -184,12 +183,12 @@ func (a *Agent) handleBackendEvent(ctx context.Context, evt backend.Event, runDo
 		a.Send(Event{Type: EventDecision, Payload: DecisionInfo{
 			TicketID:    ticketID,
 			Question:    firstString(evt.Payload, "question", "Question"),
-			Reason:      firstString(evt.Payload, "reason", "Reason", events.PayloadKeyReason),
+			Reason:      firstString(evt.Payload, "reason", "Reason", backend.PayloadKeyReason),
 			WorkspaceID: string(evt.WorkspaceID),
 			RunID:       string(evt.RunID),
 		}})
 	case backend.EventApprovalCreated:
-		approvalID := firstString(evt.Payload, "approvalId", "ID", "id", events.PayloadKeyBlockingApprovalID)
+		approvalID := firstString(evt.Payload, "approvalId", "ID", "id", backend.PayloadKeyBlockingApprovalID)
 		if approvalID == "" {
 			approvalID = string(evt.RunID)
 		}
@@ -202,9 +201,9 @@ func (a *Agent) handleBackendEvent(ctx context.Context, evt backend.Event, runDo
 		a.mu.Unlock()
 		a.Send(Event{Type: EventApproval, Payload: ApprovalInfo{
 			ApprovalID:  approvalID,
-			Reason:      firstString(evt.Payload, "reason", "Reason", events.PayloadKeyReason),
-			Action:      firstString(evt.Payload, "action", "Action", events.PayloadKeyAction),
-			Context:     mapFromPayload(evt.Payload, "context", "Context", events.PayloadKeyContext),
+			Reason:      firstString(evt.Payload, "reason", "Reason", backend.PayloadKeyReason),
+			Action:      firstString(evt.Payload, "action", "Action", backend.PayloadKeyAction),
+			Context:     mapFromPayload(evt.Payload, "context", "Context", backend.PayloadKeyContext),
 			WorkspaceID: string(evt.WorkspaceID),
 			RunID:       string(evt.RunID),
 		}})
@@ -212,12 +211,12 @@ func (a *Agent) handleBackendEvent(ctx context.Context, evt backend.Event, runDo
 		a.mu.Lock()
 		a.lastResult = RunCompletedInfo{
 			RunID:   string(evt.RunID),
-			Summary: firstString(evt.Payload, "summary", "Summary", events.PayloadKeySummary),
+			Summary: firstString(evt.Payload, "summary", "Summary", backend.PayloadKeySummary),
 			Sources: a.webSourceLabels(ctx, evt.WorkspaceID, evt.RunID),
 		}
 		a.mu.Unlock()
 	case backend.EventRunStateChanged:
-		state := firstString(evt.Payload, "state", "State", events.PayloadKeyState)
+		state := firstString(evt.Payload, "state", "State", backend.PayloadKeyState)
 		switch common.RunState(state) {
 		case common.RunStateCompleted:
 			info := a.completedInfo(evt.RunID)
@@ -227,7 +226,7 @@ func (a *Agent) handleBackendEvent(ctx context.Context, evt backend.Event, runDo
 			default:
 			}
 		case common.RunStateFailed:
-			err := fmt.Errorf("%s", firstString(evt.Payload, "failureReason", "FailureReason", events.PayloadKeyFailureReason))
+			err := fmt.Errorf("%s", firstString(evt.Payload, "failureReason", "FailureReason", backend.PayloadKeyFailureReason))
 			a.Send(Event{Type: EventRunFailed, Error: err})
 			select {
 			case runDone <- err:

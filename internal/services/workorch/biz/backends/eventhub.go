@@ -237,6 +237,10 @@ func convertEnvelope(envelope events.Envelope) (ret Event) {
 		return Event{Type: EventPatchFailed, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
 	case orchestratorevents.TopicPatchReverted:
 		return Event{Type: EventPatchReverted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
+	case orchestratorevents.TopicOrchestratorContractViolationRecorded,
+		orchestratorevents.TopicOrchestratorContractViolationRetryRequested,
+		orchestratorevents.TopicOrchestratorContractViolationEscalated:
+		return Event{Type: EventWorkspaceProjectionChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
 	case orchestratorevents.TopicArtifactContinuationCreated,
 		orchestratorevents.TopicArtifactContinuationChunkRecorded,
 		orchestratorevents.TopicArtifactContinuationChunkRejected,
@@ -286,7 +290,7 @@ func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req CreateWorkspa
 	return decodeResultResource[WorkspaceInfo](result, err)
 }
 func (b *eventHubWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*WorkspaceInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandWorkspaceGet, "", "", "workspace", string(id), nil)
+	result, err := b.parent.sendCommand(ctx, events.CommandWorkspaceGet, id, "", "workspace", string(id), nil)
 	return decodeResultResource[WorkspaceInfo](result, err)
 }
 func (b *eventHubWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, error) {
@@ -298,7 +302,7 @@ func (b *eventHubWorkspaceBackend) Snapshot(ctx context.Context, id common.Works
 	return decodeResultResource[WorkspaceSnapshotInfo](result, err)
 }
 func (b *eventHubWorkspaceBackend) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
-	_, err := b.parent.sendCommand(ctx, events.CommandWorkspaceDelete, "", "", "workspace", string(id), map[string]any{"purge": purge})
+	_, err := b.parent.sendCommand(ctx, events.CommandWorkspaceDelete, id, "", "workspace", string(id), map[string]any{"purge": purge})
 	return err
 }
 
@@ -313,11 +317,11 @@ func (b *eventHubGoalBackend) List(ctx context.Context, wsID common.WorkspaceID)
 	return decodeResultResources[GoalInfo](result, err)
 }
 func (b *eventHubGoalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.GoalID) (*GoalInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandGoalGet, "", "", "goal", string(id), nil)
+	result, err := b.parent.sendCommand(ctx, events.CommandGoalGet, wsID, "", "goal", string(id), nil)
 	return decodeResultResource[GoalInfo](result, err)
 }
 func (b *eventHubGoalBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*GoalInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandGoalUpdate, "", "", "goal", string(id), map[string]any{"text": text})
+	result, err := b.parent.sendCommand(ctx, events.CommandGoalUpdate, wsID, "", "goal", string(id), map[string]any{"text": text})
 	return decodeResultResource[GoalInfo](result, err)
 }
 
@@ -332,11 +336,11 @@ func (b *eventHubDoDBackend) List(ctx context.Context, wsID common.WorkspaceID) 
 	return decodeResultResources[DoDInfo](result, err)
 }
 func (b *eventHubDoDBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.DoDID) (*DoDInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandDoDGet, "", "", "dod", string(id), nil)
+	result, err := b.parent.sendCommand(ctx, events.CommandDoDGet, wsID, "", "dod", string(id), nil)
 	return decodeResultResource[DoDInfo](result, err)
 }
 func (b *eventHubDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*DoDInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandDoDUpdate, "", "", "dod", string(id), map[string]any{"items": items})
+	result, err := b.parent.sendCommand(ctx, events.CommandDoDUpdate, wsID, "", "dod", string(id), map[string]any{"items": items})
 	return decodeResultResource[DoDInfo](result, err)
 }
 
@@ -384,12 +388,25 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 		Payload:      payload,
 	}
 	if err := b.parent.eventHub.Publish(ctx, envelope); err != nil {
-		if _, ok := events.ResponseEnvelope(err); ok {
-			return nil, nil
+		if response, ok := events.ResponseEnvelope(err); ok {
+			return nil, validateEventHubRunCommandAcceptedResponse(envelope.Topic, response)
 		}
 		return nil, err
 	}
-	return nil, nil
+	return nil, fmt.Errorf("%w: run command %s returned no accepted response", common.ErrConflict, envelope.Topic)
+}
+
+func validateEventHubRunCommandAcceptedResponse(topic string, response events.Envelope) error {
+	if strings.TrimSpace(response.Topic) != strings.TrimSpace(topic)+"/accepted" {
+		return fmt.Errorf("%w: run command %s returned unexpected response topic %s", common.ErrConflict, topic, response.Topic)
+	}
+	if accepted, _ := response.Payload["accepted"].(bool); !accepted {
+		return fmt.Errorf("%w: run command %s was not accepted", common.ErrConflict, topic)
+	}
+	if strings.TrimSpace(response.SourceModule) != "workorchd/scheduler" {
+		return fmt.Errorf("%w: run command %s returned response from %s", common.ErrConflict, topic, response.SourceModule)
+	}
+	return nil
 }
 
 func normalizedRunCommandSource(source string) string {
@@ -444,16 +461,16 @@ func (b *eventHubDecisionBackend) Get(ctx context.Context, wsID common.Workspace
 
 type eventHubApprovalBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandApprovalApprove, wsID, "", "approval", string(id), nil)
+func (b *eventHubApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*ApprovalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandApprovalApprove, wsID, "", "approval", string(id), approvalCommandPayload("approve", nil, payload...))
 	return decodeResultResource[ApprovalInfo](result, err)
 }
-func (b *eventHubApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandApprovalReject, wsID, "", "approval", string(id), nil)
+func (b *eventHubApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*ApprovalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandApprovalReject, wsID, "", "approval", string(id), approvalCommandPayload("reject", nil, payload...))
 	return decodeResultResource[ApprovalInfo](result, err)
 }
-func (b *eventHubApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string) ([]ApprovalInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandApprovalBatch, wsID, "", "approval", "", map[string]any{"approvalIds": approvalIDStrings(ids), "action": action})
+func (b *eventHubApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...map[string]any) ([]ApprovalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandApprovalBatch, wsID, "", "approval", "", approvalCommandPayload(action, approvalIDStrings(ids), payload...))
 	return decodeResultResources[ApprovalInfo](result, err)
 }
 func (b *eventHubApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]ApprovalInfo, error) {
@@ -463,6 +480,20 @@ func (b *eventHubApprovalBackend) List(ctx context.Context, wsID common.Workspac
 func (b *eventHubApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error) {
 	result, err := b.parent.sendCommand(ctx, events.CommandApprovalGet, wsID, "", "approval", string(id), nil)
 	return decodeResultResource[ApprovalInfo](result, err)
+}
+
+func approvalCommandPayload(action string, ids []string, payload ...map[string]any) map[string]any {
+	ret := map[string]any{"action": action}
+	if len(ids) > 0 {
+		ret["approvalIds"] = ids
+	}
+	for _, candidate := range payload {
+		if len(candidate) > 0 {
+			ret["payload"] = candidate
+			break
+		}
+	}
+	return ret
 }
 
 type eventHubSoulBackend struct{ parent *eventHubBackend }
@@ -652,31 +683,34 @@ func workspaceSnapshotResourceMap(snapshot WorkspaceSnapshotInfo) map[string]any
 		})
 	}
 	return map[string]any{
-		"Workspace":             snapshot.Workspace,
-		"Projection":            snapshot.Projection,
-		"Outcome":               snapshot.Outcome,
-		"TaskProgress":          snapshot.TaskProgress,
-		"RunHeartbeat":          snapshot.RunHeartbeat,
-		"RuntimeExecution":      snapshot.RuntimeExecution,
-		"RunCommand":            snapshot.RunCommand,
-		"CoverageSummary":       cloneCLIResultValue(snapshot.CoverageSummary, 0),
-		"GapBaseline":           cloneCLIResultValue(snapshot.GapBaseline, 0),
-		"Acceptance":            snapshot.Acceptance,
-		"TaskDecompositions":    snapshot.TaskDecompositions,
-		"Goals":                 snapshot.Goals,
-		"DoDs":                  snapshot.DoDs,
-		"Runs":                  runs,
-		"Results":               snapshot.Results,
-		"Artifacts":             snapshot.Artifacts,
-		"ArtifactContinuations": snapshot.ArtifactContinuations,
-		"Patches":               snapshot.Patches,
-		"MemoryRecallTraces":    snapshot.MemoryRecallTraces,
-		"WebSources":            snapshot.WebSources,
-		"LLMUsageTraces":        snapshot.LLMUsageTraces,
-		"LLMUsageSummary":       snapshot.LLMUsageSummary,
-		"EventRecords":          eventRecords,
-		"Decisions":             snapshot.Decisions,
-		"Approvals":             snapshot.Approvals,
+		"Workspace":               snapshot.Workspace,
+		"Projection":              snapshot.Projection,
+		"Outcome":                 snapshot.Outcome,
+		"TaskProgress":            snapshot.TaskProgress,
+		"RunHeartbeat":            snapshot.RunHeartbeat,
+		"RuntimeExecution":        snapshot.RuntimeExecution,
+		"RunCommand":              snapshot.RunCommand,
+		"CoverageSummary":         cloneCLIResultValue(snapshot.CoverageSummary, 0),
+		"GapBaseline":             cloneCLIResultValue(snapshot.GapBaseline, 0),
+		"Acceptance":              snapshot.Acceptance,
+		"TaskDecompositions":      snapshot.TaskDecompositions,
+		"TaskPlans":               snapshot.TaskPlans,
+		"Goals":                   snapshot.Goals,
+		"DoDs":                    snapshot.DoDs,
+		"Runs":                    runs,
+		"Results":                 snapshot.Results,
+		"Artifacts":               snapshot.Artifacts,
+		"ArtifactContinuations":   snapshot.ArtifactContinuations,
+		"Patches":                 snapshot.Patches,
+		"MemoryRecallTraces":      snapshot.MemoryRecallTraces,
+		"WebSources":              snapshot.WebSources,
+		"LLMContextBudgets":       snapshot.LLMContextBudgets,
+		"LLMContextBudgetSummary": snapshot.LLMContextBudgetSummary,
+		"LLMUsageTraces":          snapshot.LLMUsageTraces,
+		"LLMUsageSummary":         snapshot.LLMUsageSummary,
+		"EventRecords":            eventRecords,
+		"Decisions":               snapshot.Decisions,
+		"Approvals":               snapshot.Approvals,
 	}
 }
 

@@ -2,6 +2,8 @@ package readmodelprojection
 
 var eventPayloadContractViolationAllowedKeys = map[string]struct{}{
 	"attempt":              {},
+	"correctionMode":       {},
+	"correctionProfileId":  {},
 	"failureSignature":     {},
 	"maxAttempts":          {},
 	"recoverability":       {},
@@ -10,6 +12,7 @@ var eventPayloadContractViolationAllowedKeys = map[string]struct{}{
 	"retryStepId":          {},
 	"signatureRepeatCount": {},
 	"sourceStepId":         {},
+	"targetScope":          {},
 	"ticketId":             {},
 	"violatedRule":         {},
 }

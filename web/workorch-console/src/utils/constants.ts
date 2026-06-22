@@ -27,6 +27,7 @@ export const stateLabels: Record<string, string> = {
   blocked_on_approval: '等待审批',
   waiting_decision: '等待决策',
   waiting_approval: '等待审批',
+  stalled: '停滞',
   open: '待处理',
   resolved: '已解决',
   pending: '待审批',

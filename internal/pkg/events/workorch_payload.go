@@ -37,6 +37,9 @@ const (
 	PayloadKeySource                 = "source"
 	PayloadKeyContext                = "context"
 	PayloadKeyResolutionID           = "resolutionId"
+	PayloadKeyContinuationAction     = "continuationAction"
+	PayloadKeyResumeRunID            = "resumeRunId"
+	PayloadKeySuccessorRunID         = "successorRunId"
 	PayloadKeyDecisionID             = "decisionId"
 	PayloadKeyType                   = "type"
 	PayloadKeyPayload                = "payload"
@@ -63,6 +66,8 @@ const (
 	PayloadKeyStatus                 = "status"
 	PayloadKeyEnabled                = "enabled"
 	PayloadKeyQuery                  = "query"
+	PayloadKeyStates                 = "states"
+	PayloadKeyCompact                = "compact"
 	PayloadKeyTopic                  = "topic"
 	PayloadKeySubjectType            = "subjectType"
 	PayloadKeySubjectID              = "subjectId"
@@ -277,9 +282,12 @@ type DecisionTicketPayloadData struct {
 
 type DecisionResolutionPayloadData struct {
 	DecisionTicketPayloadData
-	ResolutionID common.ResolutionID
-	Type         string
-	Payload      map[string]any
+	ResolutionID       common.ResolutionID
+	Type               string
+	Payload            map[string]any
+	ContinuationAction string
+	ResumeRunID        common.RunID
+	SuccessorRunID     common.RunID
 }
 
 type ApprovalPayloadData struct {
@@ -489,11 +497,24 @@ func DecisionResolutionPayload(
 	resolutionID common.ResolutionID,
 	resolutionType string,
 	payload map[string]any,
+	refs ...DecisionResolutionPayloadData,
 ) map[string]any {
 	ret := DecisionTicketPayload(reason, state)
 	ret[PayloadKeyResolutionID] = string(resolutionID)
 	ret[PayloadKeyType] = resolutionType
 	ret[PayloadKeyPayload] = clonePayloadMap(payload)
+	if len(refs) > 0 {
+		ref := refs[0]
+		if ref.ContinuationAction != "" {
+			ret[PayloadKeyContinuationAction] = ref.ContinuationAction
+		}
+		if ref.ResumeRunID != "" {
+			ret[PayloadKeyResumeRunID] = string(ref.ResumeRunID)
+		}
+		if ref.SuccessorRunID != "" {
+			ret[PayloadKeySuccessorRunID] = string(ref.SuccessorRunID)
+		}
+	}
 	return ret
 }
 
@@ -922,11 +943,17 @@ func DecodeDecisionResolutionPayload(payload map[string]any) (DecisionResolution
 	if !ok {
 		return DecisionResolutionPayloadData{}, false
 	}
+	continuationAction, _ := stringField(payload, PayloadKeyContinuationAction)
+	resumeRunID, _ := stringField(payload, PayloadKeyResumeRunID)
+	successorRunID, _ := stringField(payload, PayloadKeySuccessorRunID)
 	return DecisionResolutionPayloadData{
 		DecisionTicketPayloadData: base,
 		ResolutionID:              common.ResolutionID(resolutionID),
 		Type:                      resolutionType,
 		Payload:                   resolutionPayload,
+		ContinuationAction:        continuationAction,
+		ResumeRunID:               common.RunID(resumeRunID),
+		SuccessorRunID:            common.RunID(successorRunID),
 	}, true
 }
 

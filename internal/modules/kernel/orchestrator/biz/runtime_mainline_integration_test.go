@@ -372,6 +372,68 @@ func TestRuntimeOrchestrator_DispatchStepRequestsRuntimeExecutionWithoutWaitingF
 	}
 }
 
+func TestRuntimeOrchestrator_DispatchPreparesValidationScratchBeforeRuntimeRequest(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	checkpointRepo := memory.NewRuntimeCheckpointRepository()
+	toolCallRepo := memory.NewToolCallRepository()
+	runtime := &requestOnlyRuntimeAdapter{}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{
+			ToolCalls:          toolCallRepo,
+			RuntimeCheckpoints: checkpointRepo,
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-runtime-scratch")
+	runID := common.RunID("run-runtime-scratch")
+	stepID := common.StepID("run-runtime-scratch/validate")
+	scratch := filepath.Join(os.TempDir(), "workorch-validation-scratch", string(workspaceID), string(runID), "validate")
+	t.Cleanup(func() {
+		_ = os.RemoveAll(filepath.Join(os.TempDir(), "workorch-validation-scratch", string(workspaceID)))
+	})
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	input := map[string]any{
+		"command": "sh",
+		"args":    []any{"-c", "true"},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				validationScratchDirKey: scratch,
+			},
+		},
+	}
+
+	if err := orch.dispatchStepWithWorkspace(ctx, run, stepID, "shell/command", input, workspace); err != nil {
+		t.Fatalf("dispatch step: %v", err)
+	}
+	if len(runtime.requests) != 1 {
+		t.Fatalf("runtime requests = %d, want 1", len(runtime.requests))
+	}
+	if got := stringFromMap(runtime.requests[0].Input, validationScratchDirKey); got != scratch {
+		t.Fatalf("runtime request scratch = %q, want %q", got, scratch)
+	}
+	if info, err := os.Stat(scratch); err != nil || !info.IsDir() {
+		t.Fatalf("scratch stat = %v info=%+v, want prepared directory", err, info)
+	}
+}
+
 func TestRuntimeOrchestrator_FinalizeRuntimeStepResultClosesLateResultAfterRunBlocks(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

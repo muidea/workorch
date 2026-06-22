@@ -91,6 +91,62 @@ type LLMUsageTraceInfo struct {
 	EvidenceRef   string
 }
 
+type LLMContextBudgetTraceInfo struct {
+	StepID                common.StepID
+	ProviderID            string
+	Model                 string
+	MaxBytes              int
+	ActualBytes           int
+	MaxTokens             int
+	EstimatedInputTokens  int
+	EstimatedOutputTokens int
+	ActualTokens          int
+	ShrinkLevel           int
+	Truncated             bool
+	Rules                 []string
+	SourceRefs            []string
+	IncludedSections      []string
+	NormalizedSections    []string
+	CompressedSections    []string
+	OmittedSections       []string
+	GoalDoDCompressed     bool
+	OverBudget            bool
+	P0Overflow            bool
+	ProfileMode           string
+	CapabilitySource      string
+	ContextUtilization    float64
+	MaxRequestBytes       int
+	StageBudgetRatio      float64
+	StageBudgetSource     string
+	TracePolicy           string
+	PromptCaptured        bool
+	Estimator             string
+	Profile               map[string]any
+	CachePlan             map[string]any
+}
+
+type LLMContextBudgetSummaryInfo struct {
+	TraceTotal             int
+	TruncatedCount         int
+	OverBudgetCount        int
+	P0OverflowCount        int
+	GoalDoDCompressedCount int
+	PromptCapturedCount    int
+	MaxShrinkLevel         int
+	MaxContextUtilization  float64
+	AvgContextUtilization  float64
+	MaxInputTokens         int
+	MaxRequestBytes        int
+	RecentWindowSize       int     `json:"recentWindowSize,omitempty"`
+	RecentTraceTotal       int     `json:"recentTraceTotal,omitempty"`
+	RecentTruncatedCount   int     `json:"recentTruncatedCount,omitempty"`
+	RecentOverBudgetCount  int     `json:"recentOverBudgetCount,omitempty"`
+	RecentMaxUtilization   float64 `json:"recentMaxContextUtilizationRatio,omitempty"`
+	RecentAvgUtilization   float64 `json:"recentAvgContextUtilizationRatio,omitempty"`
+	RecentMaxInputTokens   int     `json:"recentMaxInputTokens,omitempty"`
+	UtilizationTrend       string  `json:"contextUtilizationTrend,omitempty"`
+}
+
 type LLMUsageSummaryInfo struct {
 	EntryTotal              int
 	InputTokens             int
@@ -190,16 +246,25 @@ type RunObservabilityInfo struct {
 }
 
 type TaskDecompositionNodeInfo struct {
-	ID           string
-	Kind         string
-	Title        string
-	State        string
-	DependsOn    []string
-	Branch       string
-	StepID       common.StepID
-	StepState    string
-	EvidenceRefs []string
-	Input        map[string]any
+	ID               string
+	Kind             string
+	Title            string
+	State            string
+	DependsOn        []string
+	Branch           string
+	StepID           common.StepID
+	StepState        string
+	RetryOf          string
+	RetryAttempt     int
+	ViolationType    string
+	ViolatedRule     string
+	FailureClass     string
+	FailureSignature string
+	TargetScope      string
+	BlockingTicketID common.TicketID
+	EvidenceRefs     []string
+	CoverageTargets  []string
+	Input            map[string]any
 }
 
 type TaskDecompositionInfo struct {
@@ -216,4 +281,34 @@ type TaskDecompositionInfo struct {
 	NodeRunning   int
 	Nodes         []TaskDecompositionNodeInfo
 	EvidenceRefs  []string
+}
+
+type TaskPlanInfo struct {
+	ID                string
+	WorkspaceID       common.WorkspaceID
+	RunID             common.RunID
+	AnchorStepID      common.StepID
+	RevisionStepID    common.StepID
+	Revision          int
+	State             string
+	Stage             string
+	SourceOutputState string
+	Summary           string
+	GraphBranch       string
+	NodeTotal         int
+	NodeCompleted     int
+	NodeFailed        int
+	NodeRunning       int
+	Nodes             []TaskDecompositionNodeInfo
+	RetryOf           string
+	RetryAttempt      int
+	ViolationType     string
+	ViolatedRule      string
+	FailureClass      string
+	FailureSignature  string
+	TargetScope       string
+	BlockingTicketID  common.TicketID
+	EvidenceRefs      []string
+	OccurredAt        string
+	SourceProjection  string
 }

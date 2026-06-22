@@ -22,6 +22,34 @@ func TestValidateWorkorchEventVersionUsesTopicMatrix(t *testing.T) {
 	}
 }
 
+func TestWorkorchTopicsAreVersionedByTopicMatrix(t *testing.T) {
+	topics := WorkorchTopics()
+	if len(topics) == 0 {
+		t.Fatal("WorkorchTopics returned no topics")
+	}
+	seen := map[string]bool{}
+	for _, topic := range topics {
+		if topic == "" {
+			t.Fatal("WorkorchTopics returned an empty topic")
+		}
+		if seen[topic] {
+			t.Fatalf("WorkorchTopics returned duplicate topic %q", topic)
+		}
+		seen[topic] = true
+		if !ValidateWorkorchEventVersion(topic, WorkorchEventVersion) {
+			t.Fatalf("WorkorchTopics topic %q is missing from version matrix", topic)
+		}
+	}
+	if len(seen) != len(workorchEventContracts) {
+		t.Fatalf("version matrix topic count = %d, WorkorchTopics count = %d", len(workorchEventContracts), len(seen))
+	}
+	for topic := range workorchEventContracts {
+		if !seen[topic] {
+			t.Fatalf("version matrix topic %q is missing from WorkorchTopics", topic)
+		}
+	}
+}
+
 func TestValidateWorkorchEventVersionRejectsUnknownTopic(t *testing.T) {
 	if ValidateWorkorchEventVersion("/unknown/topic", WorkorchEventVersion) {
 		t.Fatalf("ValidateWorkorchEventVersion should reject unknown topic")

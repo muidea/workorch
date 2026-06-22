@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
-import { modelLabels } from './utils/constants';
+import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
+import { stateLabel as canonicalStateLabel } from './utils/format';
+import { stateTag as canonicalStateTag } from './utils/ui';
+
+export { progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels, stateLabels } from './utils/constants';
 
 export type ViewKey = 'board' | 'workspaceDetail' | 'governance' | 'runtimeControl' | 'configuration' | 'service';
 
@@ -33,90 +37,10 @@ export function mergeById<T extends { id: string }>(current: T[], items: T[], ap
   ];
 }
 
-export const stateLabels: Record<string, string> = {
-  unknown: '未知',
-  active: '活跃',
-  created: '已创建',
-  running: '运行中',
-  validating: '验收中',
-  completed: '已完成',
-  accepted: '已接受',
-  failed: '失败',
-  cancelled: '已取消',
-  superseded: '已替代',
-  blocked_on_decision: '等待决策',
-  blocked_on_approval: '等待审批',
-  waiting_decision: '等待决策',
-  waiting_approval: '等待审批',
-  stalled: '停滞',
-  open: '待处理',
-  resolved: '已解决',
-  pending: '待审批',
-  approved: '已批准',
-  rejected: '已拒绝',
-  ready: '就绪',
-  satisfied: '已满足'
-};
-
-export const progressKindLabels: Record<string, string> = {
-  step: '步骤',
-  tool_call: '工具调用',
-  patch: '补丁（Patch）',
-  validation_result: '校验结果',
-  result: '结果（Result）',
-  artifact: '交付物（Artifact）',
-  decision: '决策工单',
-  approval: '审批工单'
-};
-
-export const recoveryModeLabels: Record<string, string> = {
-  idle: '待启动',
-  resume: '可恢复',
-  wait_decision: '等待决策',
-  wait_approval: '等待审批',
-  inspect_failure: '排查失败',
-  restart: '可重新启动',
-  none: '无需恢复'
-};
-
-export const recoveryActionLabels: Record<string, string> = {
-  start_workspace_execution: '提交工作空间执行',
-  inspect_active_run: '查看活跃运行',
-  resume_run: '恢复运行',
-  resume_validation: '恢复验收',
-  resolve_decision_ticket: '补充或处理决策工单',
-  resolve_approval: '处理审批工单',
-  inspect_result: '查看结果（Result）/交付物（Artifact）',
-  inspect_failure_reason_and_evidence: '查看失败原因和运行证据',
-  start_new_run: '启动新的运行'
-};
-
-export const repairLoopStateLabels: Record<string, string> = {
-  inactive: '未进入修复',
-  repairing: '自动修复中',
-  awaiting_decision: '等待决策',
-  awaiting_approval: '等待审批',
-  completed_after_repair: '修复后完成',
-  escalated_decision: '已升级决策',
-  terminated: '修复终止'
-};
-
 export const defaultSoulBindingStages = ['planning', 'execution', 'decision', 'approval', 'validation', 'artifact'];
 
-export const soulBindingStageLabels: Record<string, string> = {
-  planning: '规划',
-  execution: '执行',
-  decision: '决策',
-  approval: '审批',
-  validation: '验收',
-  artifact: '交付物'
-};
-
 export function stateLabel(state?: string) {
-  if (!state) {
-    return '未知';
-  }
-  return stateLabels[state] ? `${stateLabels[state]} (${state})` : state;
+  return canonicalStateLabel(state);
 }
 
 export function soulBindingStageLabel(stage: string) {
@@ -152,9 +76,7 @@ export function repairLoopStateLabel(state?: string) {
 }
 
 export function stateTag(state?: string) {
-  const value = state || 'unknown';
-  const color = value.includes('failed') || value.includes('reject') || value.includes('stalled') ? 'red' : value.includes('block') || value.includes('pending') ? 'gold' : 'green';
-  return <Tag color={color}>{stateLabel(value)}</Tag>;
+  return canonicalStateTag(state);
 }
 
 export function shortId(value?: string, keep = 10) {
@@ -274,6 +196,23 @@ export function runtimeExecutionDescriptions(runtime?: RuntimeExecution) {
     { key: 'acceptedAt', label: '接收时间', children: runtime.acceptedAt || '-' },
     { key: 'lastProgress', label: '最近进展', children: [runtime.lastProgressSummary, runtime.lastProgressEvent, runtime.lastProgressStage, runtime.lastProgressAt].filter(Boolean).join(' / ') || '-' },
     { key: 'terminal', label: '终态事件', children: [runtime.doneAt ? `done ${runtime.doneAt}` : '', runtime.failedAt ? `failed ${runtime.failedAt}` : '', runtime.finalizedAt ? `finalized ${runtime.finalizedAt}` : '', runtime.finalizeEvent].filter(Boolean).join(' / ') || '-' }
+  ];
+}
+
+export function runCommandDescriptions(snapshot?: WorkspaceSnapshot) {
+  const command = snapshot?.runCommand;
+  if (!command || (!command.intent && !command.requestId && !command.acceptedAt)) {
+    return [{ key: 'runCommand', label: '调度 ACK', children: '-' }];
+  }
+  return [
+    { key: 'intent', label: '调度 ACK', children: <Space wrap><Tag color="gold">accepted</Tag>{command.intent ? <Tag>{command.intent}</Tag> : null}{command.source ? <Tag>{command.source}</Tag> : null}</Space> },
+    { key: 'requestId', label: '请求 ID', children: command.requestId || '-' },
+    { key: 'runId', label: '目标运行', children: command.runId || '-' },
+    { key: 'reason', label: '原因', children: command.reason || '-' },
+    { key: 'decisionId', label: '关联决策', children: command.decisionId || '-' },
+    { key: 'definitionRevision', label: '定义 Revision', children: command.definitionRevision || '-' },
+    { key: 'acceptedAt', label: '接收时间', children: command.acceptedAt || '-' },
+    { key: 'revision', label: '投影 Revision', children: command.revision ?? '-' }
   ];
 }
 
@@ -655,6 +594,107 @@ export function taskDecompositionCard(items?: TaskDecomposition[]) {
                       items={[
                         { key: 'stepState', label: '步骤状态', children: node.stepState ? stateLabel(node.stepState) : '-' },
                         { key: 'branch', label: '分支', children: node.branch || '-' },
+                        { key: 'evidence', label: '证据', children: compactTags(node.evidenceRefs ?? [], 6) },
+                        { key: 'input', label: '输入', children: <pre className="json-panel">{compactJSON(node.input)}</pre> }
+                      ]}
+                    />
+                  )
+                }}
+                dataSource={item.nodes ?? []}
+              />
+            </Space>
+          )
+        }))}
+      />
+    </Space>
+  );
+}
+
+export function taskPlanCard(plans?: TaskPlan[], decompositions?: TaskDecomposition[]) {
+  const taskPlans = plans ?? [];
+  if (taskPlans.length === 0) {
+    return taskDecompositionCard(decompositions);
+  }
+  const latest = taskPlans.at(-1);
+  const total = taskPlans.reduce((sum, item) => sum + item.nodeTotal, 0);
+  const completed = taskPlans.reduce((sum, item) => sum + item.nodeCompleted, 0);
+  const failed = taskPlans.reduce((sum, item) => sum + item.nodeFailed, 0);
+  const running = taskPlans.reduce((sum, item) => sum + item.nodeRunning, 0);
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Descriptions
+        column={{ xs: 1, md: 4 }}
+        size="small"
+        items={[
+          { key: 'plans', label: '计划修订', children: taskPlans.length },
+          { key: 'node', label: '节点', children: `${completed}/${total} 已完成` },
+          { key: 'running', label: '执行中', children: running },
+          { key: 'failed', label: '失败', children: failed },
+          { key: 'latest', label: '最新计划', children: latest ? boundedParagraph(latest.id, { rows: 1, copyText: latest.id }) : '-' },
+          { key: 'state', label: '最新状态', children: latest ? stateTag(latest.state) : '-' },
+          { key: 'source', label: '输出状态', children: latest?.sourceOutputState ? stateTag(latest.sourceOutputState) : '-' },
+          { key: 'summary', label: '摘要', children: boundedParagraph(latest?.summary, { rows: 2 }) }
+        ]}
+      />
+      <Tabs
+        items={taskPlans.map((item, index) => ({
+          key: item.id || `${item.anchorStepId}-${item.revision}-${index}`,
+          label: `计划 ${index + 1} / ${stateLabel(item.state)}`,
+          children: (
+            <Space direction="vertical" size="small" style={{ width: '100%' }}>
+              {metricGrid([
+                { key: 'nodes', label: '节点总数', value: item.nodeTotal },
+                { key: 'completed', label: '已完成', value: item.nodeCompleted, color: '#389e0d' },
+                { key: 'running', label: '执行中', value: item.nodeRunning, color: '#0958d9' },
+                { key: 'failed', label: '失败', value: item.nodeFailed, color: '#cf1322' }
+              ])}
+              <Descriptions
+                column={{ xs: 1, md: 2 }}
+                size="small"
+                items={[
+                  { key: 'anchor', label: '锚定步骤', children: item.anchorStepId ? boundedParagraph(item.anchorStepId, { rows: 1, copyText: item.anchorStepId }) : '-' },
+                  { key: 'revisionStep', label: '修订步骤', children: item.revisionStepId ? boundedParagraph(item.revisionStepId, { rows: 1, copyText: item.revisionStepId }) : '-' },
+                  { key: 'revision', label: '修订号', children: item.revision || '-' },
+                  { key: 'stage', label: '阶段', children: item.stage || '-' },
+                  { key: 'sourceProjection', label: '投影来源', children: item.sourceProjection || '-' },
+                  { key: 'branch', label: '分支', children: item.graphBranch || '-' },
+                  { key: 'retryOf', label: '重试来源', children: item.retryOf ? boundedParagraph(item.retryOf, { rows: 1, copyText: item.retryOf }) : '-' },
+                  { key: 'retryAttempt', label: '重试轮次', children: item.retryAttempt || '-' },
+                  { key: 'violation', label: '违例', children: [item.violationType, item.violatedRule].filter(Boolean).join(' / ') || '-' },
+                  { key: 'failure', label: '失败分类', children: [item.failureClass, item.failureSignature].filter(Boolean).join(' / ') || '-' },
+                  { key: 'targetScope', label: '目标范围', children: item.targetScope || '-' },
+                  { key: 'blocking', label: '阻塞决策', children: item.blockingTicketId || '-' },
+                  { key: 'evidence', label: '证据', children: compactTags(item.evidenceRefs ?? [], 6) }
+                ]}
+              />
+              <ProTable<TaskDecompositionNode>
+                rowKey={(node, nodeIndex) => `${item.id}-${node.id}-${nodeIndex}`}
+                search={false}
+                options={false}
+                pagination={{ pageSize: 8 }}
+                size="small"
+                columns={[
+                  { title: '节点', dataIndex: 'id', copyable: true, ellipsis: true },
+                  { title: '类型', dataIndex: 'kind', width: 150 },
+                  { title: '标题', dataIndex: 'title', ellipsis: true, render: (_, node) => boundedParagraph(node.title, { rows: 2 }) },
+                  { title: '状态', dataIndex: 'state', width: 130, render: (_, node) => stateTag(node.state) },
+                  { title: '重试', dataIndex: 'retryAttempt', width: 90, render: (_, node) => node.retryAttempt || '-' },
+                  { title: '违例', width: 190, ellipsis: true, render: (_, node) => [node.violationType, node.violatedRule].filter(Boolean).join(' / ') || '-' },
+                  { title: '执行步骤', dataIndex: 'stepId', copyable: true, ellipsis: true }
+                ]}
+                expandable={{
+                  expandedRowRender: (node) => (
+                    <Descriptions
+                      column={1}
+                      size="small"
+                      items={[
+                        { key: 'stepState', label: '步骤状态', children: node.stepState ? stateLabel(node.stepState) : '-' },
+                        { key: 'branch', label: '分支', children: node.branch || '-' },
+                        { key: 'retryOf', label: '重试来源', children: node.retryOf ? boundedParagraph(node.retryOf, { rows: 1, copyText: node.retryOf }) : '-' },
+                        { key: 'failure', label: '失败分类', children: [node.failureClass, node.failureSignature].filter(Boolean).join(' / ') || '-' },
+                        { key: 'targetScope', label: '目标范围', children: node.targetScope || '-' },
+                        { key: 'blocking', label: '阻塞决策', children: node.blockingTicketId || '-' },
+                        { key: 'coverageTargets', label: '覆盖目标', children: compactTags(node.coverageTargets ?? [], 6) },
                         { key: 'evidence', label: '证据', children: compactTags(node.evidenceRefs ?? [], 6) },
                         { key: 'input', label: '输入', children: <pre className="json-panel">{compactJSON(node.input)}</pre> }
                       ]}
@@ -1071,22 +1111,33 @@ export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]
   );
 }
 
-export function llmContextBudgetCard(traces?: LLMContextBudgetTrace[]) {
-  const items = traces ?? [];
-  if (items.length === 0) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前运行未记录 LLM Context Budget" />;
-  }
-  const truncatedCount = items.filter((item) => item.truncated).length;
-  const p0OverflowCount = items.filter((item) => item.p0Overflow).length;
-  const goalDoDCompressedCount = items.filter((item) => item.goalDoDCompressed).length;
-  return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      {metricGrid([
-        { key: 'traceCount', label: '预算轨迹', value: numberText(items.length), color: '#1668dc' },
-        { key: 'truncatedCount', label: '触发压缩', value: numberText(truncatedCount), color: truncatedCount ? '#d48806' : undefined },
-        { key: 'p0OverflowCount', label: 'P0 Overflow', value: numberText(p0OverflowCount), color: p0OverflowCount ? '#cf1322' : undefined },
-        { key: 'goalDoDCompressedCount', label: 'Goal/DoD 被压缩', value: numberText(goalDoDCompressedCount), color: goalDoDCompressedCount ? '#cf1322' : '#389e0d' }
-      ])}
+export function llmContextBudgetCard(traces?: LLMContextBudgetTrace[], summary?: LLMContextBudgetSummary) {
+	const items = traces ?? [];
+	if (items.length === 0) {
+		return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前运行未记录 LLM Context Budget" />;
+	}
+	const truncatedCount = summary?.truncatedCount ?? items.filter((item) => item.truncated).length;
+	const overBudgetCount = summary?.overBudgetCount ?? items.filter((item) => item.overBudget).length;
+	const p0OverflowCount = summary?.p0OverflowCount ?? items.filter((item) => item.p0Overflow).length;
+	const goalDoDCompressedCount = summary?.goalDoDCompressedCount ?? items.filter((item) => item.goalDoDCompressed).length;
+	const traceTotal = summary?.traceTotal || items.length;
+	return (
+		<Space direction="vertical" size="middle" style={{ width: '100%' }}>
+			{metricGrid([
+				{ key: 'traceCount', label: '预算轨迹', value: numberText(traceTotal), color: '#1668dc' },
+				{ key: 'truncatedCount', label: '触发压缩', value: numberText(truncatedCount), color: truncatedCount ? '#d48806' : undefined },
+				{ key: 'overBudgetCount', label: '超预算', value: numberText(overBudgetCount), color: overBudgetCount ? '#cf1322' : undefined },
+				{ key: 'p0OverflowCount', label: 'P0 Overflow', value: numberText(p0OverflowCount), color: p0OverflowCount ? '#cf1322' : undefined },
+				{ key: 'goalDoDCompressedCount', label: 'Goal/DoD 被压缩', value: numberText(goalDoDCompressedCount), color: goalDoDCompressedCount ? '#cf1322' : '#389e0d' },
+				{ key: 'maxShrinkLevel', label: '最大压缩级别', value: numberText(summary?.maxShrinkLevel) },
+				{ key: 'maxContextUtilization', label: '最大利用率', value: percentText(summary?.maxContextUtilizationRatio), color: summary?.maxContextUtilizationRatio && summary.maxContextUtilizationRatio > 0.85 ? '#d48806' : undefined },
+				{ key: 'avgContextUtilization', label: '平均利用率', value: percentText(summary?.avgContextUtilizationRatio) },
+				{ key: 'maxInputTokens', label: '最大输入 Token', value: numberText(summary?.maxInputTokens) },
+				{ key: 'recentWindow', label: '最近窗口', value: `${numberText(summary?.recentTraceTotal)} / ${numberText(summary?.recentWindowSize)}` },
+				{ key: 'recentUtilization', label: '最近平均利用率', value: percentText(summary?.recentAvgContextUtilizationRatio), color: summary?.recentAvgContextUtilizationRatio && summary.recentAvgContextUtilizationRatio > 0.85 ? '#d48806' : undefined },
+				{ key: 'recentMaxInputTokens', label: '最近最大输入', value: numberText(summary?.recentMaxInputTokens) },
+				{ key: 'contextUtilizationTrend', label: '利用率趋势', value: summary?.contextUtilizationTrend || '-' }
+			])}
       <ProTable<LLMContextBudgetTrace>
         rowKey={(item, index) => `${item.stepId}-${index}`}
         search={false}
@@ -1098,8 +1149,9 @@ export function llmContextBudgetCard(traces?: LLMContextBudgetTrace[]) {
           { title: 'Provider/Model', render: (_, item) => `${item.providerId || '-'} / ${item.model || '-'}`, ellipsis: true },
           { title: '字节预算', width: 150, render: (_, item) => `${numberText(item.actualBytes)} / ${numberText(item.maxBytes)}` },
           { title: 'Token 预算', width: 150, render: (_, item) => `${numberText(item.estimatedInputTokens)} / ${numberText(item.maxTokens)}` },
-          { title: '压缩级别', dataIndex: 'shrinkLevel', width: 90, render: (_, item) => numberText(item.shrinkLevel) },
-          { title: '状态', width: 180, render: (_, item) => compactTags([item.truncated ? 'truncated' : 'full', item.p0Overflow ? 'p0_overflow' : '', item.goalDoDCompressed ? 'goal_dod_compressed' : 'goal_dod_protected'].filter(Boolean), 4) }
+				{ title: '压缩级别', dataIndex: 'shrinkLevel', width: 90, render: (_, item) => numberText(item.shrinkLevel) },
+				{ title: '利用率', width: 100, render: (_, item) => percentText(item.contextUtilizationRatio) },
+				{ title: '状态', width: 220, render: (_, item) => compactTags([item.truncated ? 'truncated' : 'full', item.overBudget ? 'over_budget' : '', item.p0Overflow ? 'p0_overflow' : '', item.goalDoDCompressed ? 'goal_dod_compressed' : 'goal_dod_protected'].filter(Boolean), 5) }
         ]}
         expandable={{
           expandedRowRender: (item) => (
@@ -1110,7 +1162,10 @@ export function llmContextBudgetCard(traces?: LLMContextBudgetTrace[]) {
                 { key: 'rules', label: '预算规则', children: compactTags(item.rules ?? [], 8) },
                 { key: 'sections', label: '分区处理', children: compactTags([`included:${(item.includedSections ?? []).join('|') || '-'}`, `normalized:${(item.normalizedSections ?? []).join('|') || '-'}`, `compressed:${(item.compressedSections ?? []).join('|') || '-'}`, `omitted:${(item.omittedSections ?? []).join('|') || '-'}`], 8) },
                 { key: 'refs', label: '来源引用', children: compactTags(item.sourceRefs ?? [], 8) },
-                { key: 'policy', label: 'trace 策略', children: `${item.tracePolicy || '-'} / estimator: ${item.estimator || '-'}` },
+				{ key: 'profileMode', label: 'Profile', children: `${item.profileMode || '-'} / source: ${item.capabilitySource || '-'}` },
+				{ key: 'stageBudget', label: 'Stage Budget', children: `${percentText(item.stageBudgetRatio)} / source: ${item.stageBudgetSource || '-'}` },
+				{ key: 'requestBytes', label: '请求字节上限', children: numberText(item.maxRequestBytes) },
+				{ key: 'policy', label: 'trace 策略', children: `${item.tracePolicy || '-'} / estimator: ${item.estimator || '-'}` },
                 { key: 'profile', label: 'Profile', children: <pre className="json-panel">{compactJSON(item.profile)}</pre> }
               ]}
             />
@@ -1330,17 +1385,37 @@ export function secondaryCellText(value: string) {
 
 export function timelineStreamContent(item: RuntimeTimelineItem) {
   if (item.source === 'step_stream') {
+    if (item.type === 'omitted') {
+      const omitted = numberValue(item.data?.omitted);
+      const total = numberValue(item.data?.total);
+      return <Space size={4} wrap><Tag color="orange">omitted {numberText(omitted)}</Tag><Typography.Text type="secondary">total {numberText(total)}</Typography.Text></Space>;
+    }
     const delta = outputText(item.data, 'delta');
+    const truncated = item.data?.deltaTruncated === true;
     if (delta !== '-') {
-      return delta;
+      return <Space size={4} wrap><Typography.Text>{delta}</Typography.Text>{truncated ? <Tag color="orange">truncated</Tag> : null}</Space>;
     }
     return item.type ? `事件类型：${item.type}` : '已记录流式片段';
+  }
+  if (item.source === 'step_stream_summary') {
+    const bytes = numberValue(item.data?.receivedBytes);
+    const chunks = numberValue(item.data?.receivedEventCount ?? item.data?.receivedDeltaCount);
+    const incomplete = item.data?.streamIncomplete === true;
+    return <Space size={4} wrap><Tag color={incomplete ? 'red' : 'cyan'}>{incomplete ? 'stream incomplete' : 'stream summary'}</Tag>{chunks ? <Typography.Text>{numberText(chunks)} chunks</Typography.Text> : null}{bytes ? <Typography.Text>{numberText(bytes)} bytes</Typography.Text> : null}</Space>;
   }
   const raw = (item.output ?? item.data)?.streamEvents;
   if (Array.isArray(raw) && raw.length > 0) {
     return <Tag color="cyan">已记录 {raw.length} 条</Tag>;
   }
+  const streamEventCount = numberValue((item.output ?? item.data)?.streamEventCount);
+  if ((item.output ?? item.data)?.streamEventsOmitted === true || streamEventCount > 0) {
+    return <Space size={4} wrap><Tag color="cyan">stream events omitted</Tag>{streamEventCount ? <Typography.Text>{numberText(streamEventCount)} chunks</Typography.Text> : null}</Space>;
+  }
   return secondaryCellText('不适用');
+}
+
+function numberValue(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 export function timelineOccurredAtContent(item: RuntimeTimelineItem) {
@@ -1811,6 +1886,36 @@ export function joinLines(values?: string[]) {
   return (values ?? []).join('\n');
 }
 
+export function splitHeaderLines(value?: string) {
+  const headers: Record<string, string> = {};
+  for (const line of splitLines(value)) {
+    const separatorIndex = line.includes(':') ? line.indexOf(':') : line.indexOf('=');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+    const key = line.slice(0, separatorIndex).trim();
+    const headerValue = line.slice(separatorIndex + 1).trim();
+    if (key) {
+      headers[key] = headerValue;
+    }
+  }
+  return headers;
+}
+
+export function validateHeaderLines(value?: string) {
+  for (const line of splitLines(value)) {
+    const separatorIndex = line.includes(':') ? line.indexOf(':') : line.indexOf('=');
+    const key = separatorIndex >= 0 ? line.slice(0, separatorIndex).trim() : '';
+    if (separatorIndex <= 0 || !key) {
+      throw new Error(`Invalid header line: ${line}`);
+    }
+  }
+}
+
+export function joinHeaderLines(headers?: Record<string, string>) {
+  return Object.entries(headers ?? {}).map(([key, value]) => `${key}: ${value}`).join('\n');
+}
+
 export function splitDefinitionList(value?: string) {
   return (value || '').split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
 }
@@ -2276,9 +2381,10 @@ function hasDefinedValue(input: Record<string, unknown>) {
   return Object.values(input).some((value) => value !== undefined && value !== '');
 }
 
-export type WebSearchProviderFormValues = Omit<Partial<UpdateWebSearchProviderConfiguration>, 'allowDomains' | 'denyDomains'> & {
+export type WebSearchProviderFormValues = Omit<Partial<UpdateWebSearchProviderConfiguration>, 'allowDomains' | 'denyDomains' | 'headers'> & {
   allowDomains?: string;
   denyDomains?: string;
+  headers?: string;
 };
 
 export function webSearchConfigurationFormValues(configuration: ServiceConfiguration): UpdateWebSearchConfigurationRequest {
@@ -2289,6 +2395,7 @@ export function webSearchConfigurationFormValues(configuration: ServiceConfigura
       provider: item.provider,
       searchEndpoint: item.searchEndpoint,
       fetchEndpoint: item.fetchEndpoint,
+      headers: item.headers ?? {},
       apiKey: '',
       timeout: item.timeout,
       maxResults: item.maxResults,
@@ -2305,7 +2412,8 @@ export function webSearchProviderFormValues(provider?: UpdateWebSearchProviderCo
   return {
     ...provider,
     allowDomains: joinLines(provider?.allowDomains),
-    denyDomains: joinLines(provider?.denyDomains)
+    denyDomains: joinLines(provider?.denyDomains),
+    headers: joinHeaderLines(provider?.headers)
   };
 }
 

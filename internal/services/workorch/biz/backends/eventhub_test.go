@@ -191,6 +191,8 @@ func TestEventHubSnapshotResourceMapCompactsRunExecutionContext(t *testing.T) {
 func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 	ctx := context.Background()
 	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
+	unsubscribe := subscribeWorkspaceRunAccepted(t, eventHub)
+	defer unsubscribe()
 
 	if _, err := be.Run().Command(ctx, WorkspaceRunCommand{
 		WorkspaceID:        "ws-restart-unified",
@@ -250,6 +252,89 @@ func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 	}
 }
 
+func TestEventHubRunCommandRequiresSchedulerAcceptedResponse(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name      string
+		subscribe func(events.Hub) func()
+		wantError string
+	}{
+		{
+			name:      "missing scheduler response",
+			wantError: "returned no accepted response",
+		},
+		{
+			name: "wrong response topic",
+			subscribe: func(hub events.Hub) func() {
+				return hub.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(_ context.Context, envelope events.Envelope) error {
+					return events.Response(events.Envelope{
+						Topic:        envelope.Topic + "/done",
+						SourceModule: "workorchd/scheduler",
+						Payload:      map[string]any{"accepted": true},
+					})
+				})
+			},
+			wantError: "unexpected response topic",
+		},
+		{
+			name: "not accepted",
+			subscribe: func(hub events.Hub) func() {
+				return hub.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(_ context.Context, envelope events.Envelope) error {
+					return events.Response(events.Envelope{
+						Topic:        envelope.Topic + "/accepted",
+						SourceModule: "workorchd/scheduler",
+						Payload:      map[string]any{"accepted": false},
+					})
+				})
+			},
+			wantError: "was not accepted",
+		},
+		{
+			name: "wrong response owner",
+			subscribe: func(hub events.Hub) func() {
+				return hub.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(_ context.Context, envelope events.Envelope) error {
+					return events.Response(events.Envelope{
+						Topic:        envelope.Topic + "/accepted",
+						SourceModule: "other-owner",
+						Payload:      map[string]any{"accepted": true},
+					})
+				})
+			},
+			wantError: "returned response from other-owner",
+		},
+		{
+			name: "accepted",
+			subscribe: func(hub events.Hub) func() {
+				return subscribeWorkspaceRunAccepted(t, hub)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := events.NewMemoryHub()
+			if tc.subscribe != nil {
+				unsubscribe := tc.subscribe(hub)
+				defer unsubscribe()
+			}
+			be := NewEventHub(hub)
+			_, err := be.Run().Command(ctx, WorkspaceRunCommand{
+				WorkspaceID: "ws-run-command-ack",
+				Intent:      RunCommandIntentResume,
+				RequestID:   "request-run-command-ack",
+				Source:      "test",
+			})
+			if tc.wantError == "" {
+				if err != nil {
+					t.Fatalf("run command: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("run command err = %v, want containing %q", err, tc.wantError)
+			}
+		})
+	}
+}
+
 func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 	ctx := context.Background()
 	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
@@ -285,6 +370,35 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 		}
 	}
 	t.Fatal("workspace snapshot did not publish CLI command")
+}
+
+func TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope(t *testing.T) {
+	ctx := context.Background()
+	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
+
+	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "workspace object scope"})
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := be.Workspace().Get(ctx, ws.ID); err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	snapshotBackend, ok := be.Workspace().(interface {
+		Snapshot(context.Context, common.WorkspaceID) (*WorkspaceSnapshotInfo, error)
+	})
+	if !ok {
+		t.Fatal("workspace backend does not expose snapshot reader")
+	}
+	if _, err := snapshotBackend.Snapshot(ctx, ws.ID); err != nil {
+		t.Fatalf("snapshot workspace: %v", err)
+	}
+	if err := be.Workspace().Delete(ctx, ws.ID, false); err != nil {
+		t.Fatalf("delete workspace: %v", err)
+	}
+
+	assertCLICommandWorkspaceScope(t, eventHub, events.CommandWorkspaceGet, ws.ID, string(ws.ID))
+	assertCLICommandWorkspaceScope(t, eventHub, events.CommandWorkspaceSnapshot, ws.ID, string(ws.ID))
+	assertCLICommandWorkspaceScope(t, eventHub, events.CommandWorkspaceDelete, ws.ID, string(ws.ID))
 }
 
 func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
@@ -364,6 +478,93 @@ func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 	}
 	if !sawUpdatedGoal || !sawUpdatedDoD {
 		t.Fatalf("published updated goal=%v dod=%v, want both definition update events", sawUpdatedGoal, sawUpdatedDoD)
+	}
+}
+
+func TestEventHubGoalAndDoDGetUpdateCommandsCarryWorkspaceScope(t *testing.T) {
+	ctx := context.Background()
+	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
+
+	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "definition scope workspace"})
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	goal, err := be.Goal().Define(ctx, ws.ID, "scoped goal")
+	if err != nil {
+		t.Fatalf("define goal: %v", err)
+	}
+	if _, err := be.Goal().Get(ctx, ws.ID, goal.ID); err != nil {
+		t.Fatalf("get goal: %v", err)
+	}
+	if _, err := be.Goal().Update(ctx, ws.ID, goal.ID, "updated scoped goal"); err != nil {
+		t.Fatalf("update goal: %v", err)
+	}
+	dod, err := be.DoD().Define(ctx, ws.ID, []string{"scoped dod"})
+	if err != nil {
+		t.Fatalf("define dod: %v", err)
+	}
+	if _, err := be.DoD().Get(ctx, ws.ID, dod.ID); err != nil {
+		t.Fatalf("get dod: %v", err)
+	}
+	if _, err := be.DoD().Update(ctx, ws.ID, dod.ID, []string{"updated scoped dod"}); err != nil {
+		t.Fatalf("update dod: %v", err)
+	}
+
+	assertCLICommandWorkspaceScope(t, eventHub, events.CommandGoalGet, ws.ID, string(goal.ID))
+	assertCLICommandWorkspaceScope(t, eventHub, events.CommandGoalUpdate, ws.ID, string(goal.ID))
+	assertCLICommandWorkspaceScope(t, eventHub, events.CommandDoDGet, ws.ID, string(dod.ID))
+	assertCLICommandWorkspaceScope(t, eventHub, events.CommandDoDUpdate, ws.ID, string(dod.ID))
+}
+
+func TestEventHubRunReadCommandsCarryWorkspaceScope(t *testing.T) {
+	ctx := context.Background()
+	eventHub := events.NewMemoryHub()
+	unsubscribe := subscribeRunReadCLIResponses(t, eventHub, "ws-run-read-scope", "run-read-scope")
+	defer unsubscribe()
+	be := NewEventHub(eventHub)
+
+	if _, err := be.Run().Get(ctx, "ws-run-read-scope", "run-read-scope"); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if _, err := be.Run().List(ctx, "ws-run-read-scope"); err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if _, err := be.Run().Status(ctx, "ws-run-read-scope", "run-read-scope"); err != nil {
+		t.Fatalf("run status: %v", err)
+	}
+
+	assertCLICommandWorkspaceScope(t, eventHub, events.CommandRunGet, "ws-run-read-scope", "run-read-scope")
+	assertCLICommandWorkspaceScope(t, eventHub, events.CommandRunList, "ws-run-read-scope", "")
+	assertCLICommandWorkspaceScope(t, eventHub, events.CommandRunStatus, "ws-run-read-scope", "run-read-scope")
+}
+
+func TestEventHubBackendWorkspaceListUsesProjectionViewReader(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(32)
+	eventHub := events.NewMagicHubWithHubOwner(rawHub, "workorchd/test")
+	reader := &projectionOnlyWorkspaceViewReader{
+		workspaces: []appservice.Workspace{{
+			ID:    "ws-projected-list",
+			Title: "projected list",
+			State: string(common.WorkspaceStateActive),
+		}},
+	}
+	dispatcher := appservice.NewCLICommandDispatcher(&appservice.RuntimeSession{}, eventHub, reader)
+	if err := dispatcher.Run(); err != nil {
+		t.Fatalf("run dispatcher: %v", err)
+	}
+	t.Cleanup(dispatcher.Close)
+	be := NewEventHub(eventHub)
+
+	items, err := be.Workspace().List(ctx)
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
+	}
+	if reader.listCalls != 1 {
+		t.Fatalf("view reader list calls = %d, want 1", reader.listCalls)
+	}
+	if len(items) != 1 || items[0].ID != "ws-projected-list" {
+		t.Fatalf("items = %+v, want projection workspace list", items)
 	}
 }
 
@@ -473,6 +674,81 @@ func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backen
 	return NewEventHub(exports.Infrastructure.EventHub), exports.Infrastructure.EventHub
 }
 
+func subscribeWorkspaceRunAccepted(t *testing.T, hub events.Hub) func() {
+	t.Helper()
+	return hub.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(_ context.Context, envelope events.Envelope) error {
+		return events.Response(events.Envelope{
+			Topic:        envelope.Topic + "/accepted",
+			SourceModule: "workorchd/scheduler",
+			SubjectType:  envelope.SubjectType,
+			SubjectID:    envelope.SubjectID,
+			WorkspaceID:  envelope.WorkspaceID,
+			RunID:        envelope.RunID,
+			Payload:      map[string]any{"accepted": true},
+		})
+	})
+}
+
+func subscribeRunReadCLIResponses(t *testing.T, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID) func() {
+	t.Helper()
+	return hub.Subscribe(workorchdevents.TopicCLICommand, func(_ context.Context, envelope events.Envelope) error {
+		cmd, ok := events.DecodeCLICommandPayload(envelope.Payload)
+		if !ok {
+			t.Fatalf("decode CLI command payload failed: %+v", envelope.Payload)
+		}
+		payload := events.CLIResultPayload{
+			CorrelationID: cmd.CorrelationID,
+			CommandID:     cmd.CommandID,
+			OK:            true,
+			WorkspaceID:   cmd.WorkspaceID,
+			RunID:         cmd.RunID,
+			OccurredAt:    time.Now().UTC(),
+		}
+		run := RunInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+		switch cmd.Command {
+		case events.CommandRunGet:
+			payload.Resource = resourceMap(run)
+		case events.CommandRunList:
+			payload.Resources = []map[string]any{resourceMap(run)}
+		case events.CommandRunStatus:
+			payload.Resource = resourceMap(RunStatusInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning})
+		default:
+			return nil
+		}
+		return events.Response(events.Envelope{
+			Topic:        workorchdevents.TopicCLIResult,
+			SourceModule: "workorchd/cli",
+			SubjectType:  envelope.SubjectType,
+			SubjectID:    envelope.SubjectID,
+			WorkspaceID:  envelope.WorkspaceID,
+			RunID:        envelope.RunID,
+			Payload:      events.CLIResultPayloadMap(payload),
+		})
+	})
+}
+
+func assertCLICommandWorkspaceScope(t *testing.T, hub events.Hub, command string, workspaceID common.WorkspaceID, subjectID string) {
+	t.Helper()
+	publishedHub, ok := hub.(interface{ Published() []events.Envelope })
+	if !ok {
+		t.Fatal("event hub does not expose published envelopes")
+	}
+	for _, envelope := range publishedHub.Published() {
+		if envelope.Topic != workorchdevents.TopicCLICommand {
+			continue
+		}
+		cmd, ok := events.DecodeCLICommandPayload(envelope.Payload)
+		if !ok || cmd.Command != command || cmd.SubjectID != subjectID {
+			continue
+		}
+		if envelope.WorkspaceID != string(workspaceID) || cmd.WorkspaceID != workspaceID {
+			t.Fatalf("%s command scope envelope=%q payload=%q, want %q", command, envelope.WorkspaceID, cmd.WorkspaceID, workspaceID)
+		}
+		return
+	}
+	t.Fatalf("published CLI command %s subject=%s not found", command, subjectID)
+}
+
 type testWorkspaceViewReader struct {
 	session *appservice.RuntimeSession
 }
@@ -483,6 +759,20 @@ func (r testWorkspaceViewReader) ListWorkspaceView(ctx context.Context) ([]appse
 
 func (r testWorkspaceViewReader) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (appservice.WorkspaceSnapshot, error) {
 	return appservice.ReadWorkspaceSnapshotWithSession(ctx, r.session.Borrow(), workspaceID)
+}
+
+type projectionOnlyWorkspaceViewReader struct {
+	workspaces []appservice.Workspace
+	listCalls  int
+}
+
+func (r *projectionOnlyWorkspaceViewReader) ListWorkspaceView(context.Context) ([]appservice.Workspace, error) {
+	r.listCalls++
+	return r.workspaces, nil
+}
+
+func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceViewSnapshot(context.Context, string) (appservice.WorkspaceSnapshot, error) {
+	return appservice.WorkspaceSnapshot{}, common.ErrInvalidArgument
 }
 
 func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
@@ -554,5 +844,34 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 	})
 	if artifact.Type != EventArtifactContinuationChanged || artifact.Payload["artifactContinuationId"] != "artifact-continuation-1" {
 		t.Fatalf("artifact continuation event = %+v, want artifact continuation id from subject", artifact)
+	}
+}
+
+func TestConvertEnvelopeTreatsContractViolationAsProjectionChange(t *testing.T) {
+	for _, topic := range []string{
+		orchestratorevents.TopicOrchestratorContractViolationRecorded,
+		orchestratorevents.TopicOrchestratorContractViolationRetryRequested,
+		orchestratorevents.TopicOrchestratorContractViolationEscalated,
+	} {
+		t.Run(topic, func(t *testing.T) {
+			evt := convertEnvelope(events.Envelope{
+				Topic:       topic,
+				WorkspaceID: "ws-violation",
+				RunID:       "run-violation",
+				StepID:      "run-violation/step-1",
+				Payload: map[string]any{
+					"violatedRule":   "state_changing_required_missing",
+					"recoverability": "retry_same_contract",
+				},
+			})
+			if evt.Type != EventWorkspaceProjectionChanged ||
+				evt.WorkspaceID != "ws-violation" ||
+				evt.RunID != "run-violation" {
+				t.Fatalf("event = %+v, want workspace projection changed for contract violation", evt)
+			}
+			if evt.Payload["violatedRule"] != "state_changing_required_missing" {
+				t.Fatalf("payload = %+v, want violation summary preserved", evt.Payload)
+			}
+		})
 	}
 }

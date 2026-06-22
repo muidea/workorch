@@ -130,7 +130,7 @@ func preserveConcreteValidationSchemaInvalidRepairContract(input map[string]any,
 			"make every executionGraph node a complete JSON object",
 		},
 	}
-	required := concreteValidationEvidenceRequiredOutput(mapFromValue(pkg["requiredOutput"]))
+	required := concreteValidationEvidenceRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
 	required["mustReturnValidJSON"] = true
 	required["mustNotReuseRejectedJSON"] = true
 	required["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(required["forbiddenKinds"]),

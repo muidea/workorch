@@ -23,7 +23,7 @@ Last Updated: 2026-05-30
 推荐目录结构：
 
 ```text
-internal/modules/application/workorchd/biz/bootstrap/defaults/
+internal/pkg/workorchdefaults/defaults/
   souls.json
   souls/
     <template>/

@@ -16,6 +16,7 @@ VERIFY_TARGET="${WORKORCH_MANAGED_VERIFY_TARGET:-verify-e2e-full}"
 MAX_CONCURRENT_RUNS="${WORKORCH_MANAGED_MAX_CONCURRENT_RUNS:-1}"
 STALE_DISPATCHED_STEP_MIN_AGE="${WORKORCH_MANAGED_STALE_DISPATCHED_STEP_MIN_AGE:-10m}"
 LLM_CONFIG_JSON="${WORKORCH_MANAGED_LLM_CONFIG_JSON:-}"
+PRECREATE_WORKSPACE_COUNT="${WORKORCH_MANAGED_PRECREATE_WORKSPACE_COUNT:-0}"
 
 select_addr() {
   if [[ -n "${WORKORCH_MANAGED_ADDR:-}" ]]; then
@@ -165,6 +166,88 @@ apply_managed_llm_config() {
   fi
 }
 
+wait_projection_drained() {
+  local deadline=$((SECONDS + 60))
+  while (( SECONDS <= deadline )); do
+    curl -fsS "$BASE_URL/readyz" >"$TMP_DIR/readyz-projection-wait.json"
+    curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics-projection-wait.txt"
+    if python3 - "$TMP_DIR/readyz-projection-wait.json" "$TMP_DIR/metrics-projection-wait.txt" <<'PY'
+import json
+import sys
+
+readyz = json.load(open(sys.argv[1], encoding="utf-8"))
+metrics_text = open(sys.argv[2], encoding="utf-8").read()
+projection = readyz.get("projection") or {}
+state = projection.get("state")
+pending = None
+for raw in metrics_text.splitlines():
+    if raw.startswith("workorch_workspace_projection_pending_rebuilds "):
+        try:
+            pending = float(raw.split()[1])
+        except Exception:
+            pending = None
+        break
+if state in {"ready", "stale", "degraded"} and (pending is None or pending <= 0):
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+    then
+      return
+    fi
+    sleep 0.2
+  done
+  echo "timed out waiting for workspace projection to drain" >&2
+  return 1
+}
+
+precreate_observation_workspaces() {
+  if ! [[ "$PRECREATE_WORKSPACE_COUNT" =~ ^[0-9]+$ ]] || (( PRECREATE_WORKSPACE_COUNT <= 0 )); then
+    return
+  fi
+  local ids_file="$TMP_DIR/precreated-workspace-ids.txt"
+  : >"$ids_file"
+  for ((idx = 1; idx <= PRECREATE_WORKSPACE_COUNT; idx++)); do
+    local workspace_dir="$TMP_DIR/precreated-workspace-$idx"
+    local payload_file="$TMP_DIR/precreated-workspace-$idx-payload.json"
+    local response_file="$TMP_DIR/precreated-workspace-$idx.json"
+    mkdir -p "$workspace_dir"
+    python3 - "$idx" "$workspace_dir" >"$payload_file" <<'PY'
+import json
+import sys
+
+idx, workspace_dir = sys.argv[1], sys.argv[2]
+print(json.dumps({
+    "title": f"runtime idle baseline workspace {idx}",
+    "description": "workspace precreated before idle baseline observation",
+    "deliverableDirectory": workspace_dir,
+    "templateId": "generic-governed",
+}, ensure_ascii=False))
+PY
+    curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" \
+      -H 'Content-Type: application/json' \
+      -d @"$payload_file" >"$response_file"
+    python3 - "$response_file" >>"$ids_file" <<'PY'
+import json
+import sys
+
+body = json.load(open(sys.argv[1], encoding="utf-8"))
+workspace_id = ((body.get("workspace") or {}).get("id") or "").strip()
+if workspace_id:
+    print(workspace_id)
+PY
+  done
+  wait_projection_drained
+  local created_csv
+  created_csv="$(paste -sd, "$ids_file")"
+  if [[ -n "$created_csv" ]]; then
+    if [[ -n "${WORKORCH_OBSERVE_WORKSPACE_IDS:-}" ]]; then
+      export WORKORCH_OBSERVE_WORKSPACE_IDS="${WORKORCH_OBSERVE_WORKSPACE_IDS},$created_csv"
+    else
+      export WORKORCH_OBSERVE_WORKSPACE_IDS="$created_csv"
+    fi
+  fi
+}
+
 trap report_failure ERR
 trap cleanup EXIT
 
@@ -180,6 +263,7 @@ run_step go build -o "$BINARY" ./application/workorch
 
 start_server
 apply_managed_llm_config
+precreate_observation_workspaces
 
 export WORKORCH_BASE_URL="$BASE_URL"
 export WORKORCH_VERIFY_BASE_URL="${WORKORCH_VERIFY_BASE_URL:-$BASE_URL}"

@@ -497,3 +497,95 @@ func TestService_CreateAndResolveApproval_PublishesEvents(t *testing.T) {
 		t.Fatalf("resolved state payload = %v, want approved", published[1].Payload[events.PayloadKeyState])
 	}
 }
+
+func TestService_ResolveApprovalMergesResolutionContext(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewApprovalRepository()
+	service := NewService(repo, nil)
+
+	approvalID := common.ApprovalID("approval-context")
+	if err := service.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
+		ApprovalID:  approvalID,
+		WorkspaceID: "ws-context",
+		RunID:       "run-context",
+		Reason:      "need human approval",
+		Context:     map[string]any{"existing": "kept"},
+	}); err != nil {
+		t.Fatalf("create approval: %v", err)
+	}
+	if err := service.Approve(ctx, approvalservice.ResolveApprovalCommand{
+		ApprovalID: approvalID,
+		Context: map[string]any{
+			"governanceSemantic": map[string]any{
+				"intent": "approve",
+				"source": "tui",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("approve approval: %v", err)
+	}
+
+	item, err := repo.Get(ctx, approvalID)
+	if err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+	if item.Context["existing"] != "kept" {
+		t.Fatalf("existing context = %v, want kept", item.Context["existing"])
+	}
+	semantic, ok := item.Context["governanceSemantic"].(map[string]any)
+	if !ok || semantic["intent"] != "approve" || semantic["source"] != "tui" {
+		t.Fatalf("governance semantic = %#v, want approve from tui", item.Context["governanceSemantic"])
+	}
+}
+
+func TestService_PublishesApprovalNotificationsThroughAsyncHub(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewApprovalRepository()
+	hub := &recordingApprovalAsyncHub{}
+	service := NewService(repo, hub)
+
+	cmd := approvalservice.CreateApprovalCommand{
+		ApprovalID:  common.ApprovalID("approval-async"),
+		WorkspaceID: common.WorkspaceID("ws-async"),
+		RunID:       common.RunID("run-async"),
+		StepID:      common.StepID("run-async/manual-approval"),
+		Reason:      "need human approval",
+	}
+	if err := service.CreateApproval(ctx, cmd); err != nil {
+		t.Fatalf("create approval: %v", err)
+	}
+	if err := service.Approve(ctx, approvalservice.ResolveApprovalCommand{ApprovalID: cmd.ApprovalID}); err != nil {
+		t.Fatalf("approve approval: %v", err)
+	}
+
+	if hub.syncPublishes != 0 || hub.asyncPublishes != 2 {
+		t.Fatalf("publish counts = sync:%d async:%d, want async approval notifications", hub.syncPublishes, hub.asyncPublishes)
+	}
+	if len(hub.published) != 2 ||
+		hub.published[0].Topic != approvalevents.TopicApprovalCreated ||
+		hub.published[1].Topic != approvalevents.TopicApprovalResolved {
+		t.Fatalf("published = %+v, want approval created and resolved notifications", hub.published)
+	}
+}
+
+type recordingApprovalAsyncHub struct {
+	syncPublishes  int
+	asyncPublishes int
+	published      []events.Envelope
+}
+
+func (h *recordingApprovalAsyncHub) Publish(_ context.Context, envelope events.Envelope) error {
+	h.syncPublishes++
+	h.published = append(h.published, envelope)
+	return nil
+}
+
+func (h *recordingApprovalAsyncHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
+	h.asyncPublishes++
+	h.published = append(h.published, envelope)
+	return nil
+}
+
+func (h *recordingApprovalAsyncHub) Subscribe(string, events.Handler) func() {
+	return func() {}
+}

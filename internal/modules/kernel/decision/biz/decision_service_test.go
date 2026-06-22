@@ -541,10 +541,12 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionSamePayloadIsIdem
 	// Persist a resolution directly without going through resolveTicketItem,
 	// so the ticket stays in "open" state. This is the orphan shape.
 	orphan := &decisionModel.Resolution{
-		ID:       common.ResolutionID("resolution-orphan-recover"),
-		TicketID: createCmd.TicketID,
-		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:  map[string]any{"actor": "operator", "intent": "retry_same_step"},
+		ID:                 common.ResolutionID("resolution-orphan-recover"),
+		TicketID:           createCmd.TicketID,
+		Type:               decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:            map[string]any{"actor": "operator", "intent": "retry_same_step"},
+		ContinuationAction: "resume",
+		ResumeRunID:        "run-1",
 	}
 	if err := resolutionRepo.inner.Create(ctx, orphan); err != nil {
 		t.Fatalf("seed orphan resolution: %v", err)
@@ -565,6 +567,9 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionSamePayloadIsIdem
 	}
 	if resolution == nil || resolution.ID != orphan.ID {
 		t.Fatalf("resolution = %+v, want persisted orphan %q", resolution, orphan.ID)
+	}
+	if resolution.ContinuationAction != "resume" || resolution.ResumeRunID != "run-1" {
+		t.Fatalf("resolution recovery refs = %+v, want resume/run-1", resolution)
 	}
 
 	// Ticket state should have been synced to resolved.
@@ -624,8 +629,55 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionPublishesResolved
 	if published[1].Payload[events.PayloadKeyResolutionID] != string(orphan.ID) {
 		t.Fatalf("resolution id payload = %v, want %s", published[1].Payload[events.PayloadKeyResolutionID], orphan.ID)
 	}
+	if _, ok := published[1].Payload[events.PayloadKeyContinuationAction]; ok {
+		t.Fatalf("continuationAction payload = %v, want absent for orphan without refs", published[1].Payload[events.PayloadKeyContinuationAction])
+	}
 	if published[1].Payload[events.PayloadKeyState] != string(common.DecisionTicketStateResolved) {
 		t.Fatalf("resolved state payload = %v, want resolved", published[1].Payload[events.PayloadKeyState])
+	}
+}
+
+func TestService_EnsureResolvedTicketAndReturn_PromotesRecoveryRefsFromPayload(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	hub := events.NewMemoryHub()
+	service := NewService(ticketRepo, resolutionRepo, hub)
+
+	cmd := decisionservice.CreateTicketCommand{
+		TicketID:    "ticket-resolution-refs",
+		WorkspaceID: "ws-refs",
+		RunID:       "run-source",
+		Reason:      "continue selected path",
+	}
+	if err := service.CreateTicket(ctx, cmd); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	_, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, decisionservice.ResolveTicketCommand{
+		ResolutionID: "resolution-refs",
+		TicketID:     cmd.TicketID,
+		WorkspaceID:  cmd.WorkspaceID,
+		RunID:        cmd.RunID,
+		Type:         decisioncommon.ResolutionTypeReplan,
+		Payload: map[string]any{
+			"continuationAction": "replan",
+			"resumeRunId":        "run-source",
+			"successorRunId":     "run-successor",
+		},
+	})
+	if err != nil {
+		t.Fatalf("resolve ticket: %v", err)
+	}
+	if resolution.ContinuationAction != "replan" || resolution.ResumeRunID != "run-source" || resolution.SuccessorRunID != "run-successor" {
+		t.Fatalf("resolution refs = %+v, want promoted payload refs", resolution)
+	}
+	published := hub.Published()
+	last := published[len(published)-1]
+	if last.Payload[events.PayloadKeyContinuationAction] != "replan" ||
+		last.Payload[events.PayloadKeyResumeRunID] != "run-source" ||
+		last.Payload[events.PayloadKeySuccessorRunID] != "run-successor" {
+		t.Fatalf("resolved event payload = %+v, want recovery refs", last.Payload)
 	}
 }
 
@@ -793,4 +845,61 @@ func TestService_CreateAndResolveTicket_PublishesEvents(t *testing.T) {
 	if published[1].Payload[events.PayloadKeyState] != string(common.DecisionTicketStateResolved) {
 		t.Fatalf("resolved state payload = %v, want resolved", published[1].Payload[events.PayloadKeyState])
 	}
+}
+
+func TestService_PublishesDecisionNotificationsThroughAsyncHub(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	hub := &recordingDecisionAsyncHub{}
+	service := NewService(ticketRepo, resolutionRepo, hub)
+
+	createCmd := decisionservice.CreateTicketCommand{
+		TicketID:    common.TicketID("ticket-async"),
+		WorkspaceID: common.WorkspaceID("ws-async"),
+		RunID:       common.RunID("run-async"),
+		StepID:      common.StepID("run-async/manual-gate"),
+		Reason:      "need operator decision",
+	}
+	if err := service.CreateTicket(ctx, createCmd); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	if err := service.ResolveTicket(ctx, decisionservice.ResolveTicketCommand{
+		ResolutionID: common.ResolutionID("resolution-async"),
+		TicketID:     createCmd.TicketID,
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+	}); err != nil {
+		t.Fatalf("resolve ticket: %v", err)
+	}
+
+	if hub.syncPublishes != 0 || hub.asyncPublishes != 2 {
+		t.Fatalf("publish counts = sync:%d async:%d, want async decision notifications", hub.syncPublishes, hub.asyncPublishes)
+	}
+	if len(hub.published) != 2 ||
+		hub.published[0].Topic != decisionevents.TopicTicketCreated ||
+		hub.published[1].Topic != decisionevents.TopicTicketResolved {
+		t.Fatalf("published = %+v, want ticket created and resolved notifications", hub.published)
+	}
+}
+
+type recordingDecisionAsyncHub struct {
+	syncPublishes  int
+	asyncPublishes int
+	published      []events.Envelope
+}
+
+func (h *recordingDecisionAsyncHub) Publish(_ context.Context, envelope events.Envelope) error {
+	h.syncPublishes++
+	h.published = append(h.published, envelope)
+	return nil
+}
+
+func (h *recordingDecisionAsyncHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
+	h.asyncPublishes++
+	h.published = append(h.published, envelope)
+	return nil
+}
+
+func (h *recordingDecisionAsyncHub) Subscribe(string, events.Handler) func() {
+	return func() {}
 }

@@ -21,7 +21,7 @@ func RecoverStuckRunningRunViews(ctx context.Context, hub events.Hub, resume Res
 		return nil, err
 	}
 
-	runs, err := ListRuns(ctx, hub)
+	runs, err := ListRecoverableRuntimeGapRunCandidates(ctx, hub)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func RecoverStaleRuntimeGapRunViews(ctx context.Context, hub events.Hub, recover
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	runs, err := ListRuns(ctx, hub)
+	runs, err := ListRecoverableRuntimeGapRunCandidates(ctx, hub)
 	if err != nil {
 		return nil, err
 	}

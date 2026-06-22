@@ -684,8 +684,8 @@ Memory 收口规则：
 
 | Path | Adjustment |
 | --- | --- |
-| `internal/modules/application/workorchd/biz/bootstrap/defaults/templates.json` | 如需更细的 `requiredOutput` / `acceptedKinds`，由 template 数据声明，不写入 core。 |
-| `internal/modules/application/workorchd/biz/bootstrap/defaults/souls.json` | 可补充业务提示词：遵循 core 合同、收到违例诊断后只修正输出形态，不改变目标。 |
+| `internal/pkg/workorchdefaults/defaults/templates.json` | 如需更细的 `requiredOutput` / `acceptedKinds`，由 template 数据声明，不写入 core。 |
+| `internal/pkg/workorchdefaults/defaults/souls.json` | 可补充业务提示词：遵循 core 合同、收到违例诊断后只修正输出形态，不改变目标。 |
 | `/home/rangh/aispace/.agents/skills/workorch-core-template-boundary` | 后续代码落地后更新 skill，固化“违例可记录但不可执行”的规则。 |
 
 模板侧只能做以下调整：
@@ -801,18 +801,36 @@ Memory 收口规则：
 
 本轮最终修正的主路径缺口是 `SubscribeWorkorch` 未解码 `/orchestrator/contract_violation/*` 事件，导致 eventstream 无法持久化 violation recorded / retry_requested / escalated。已新增中立 `OrchestratorContractViolationEvent` wrapper，只做版本校验和 payload 透传，不引入 template、语言、文件、命令或 provider 业务判断。
 
+2026-06-22 追加核对发现 embedded EventHub backend 虽然订阅了
+`WorkorchTopics()`，但 `convertEnvelope` 未把
+`/orchestrator/contract_violation/*` 转换成端侧事件，导致本地 TUI 在
+violation recorded / retry requested / escalated 后无法自动刷新服务端
+projection。已按“workorchd 是 projection owner，TUI 只消费 projection”的
+边界收口：三类 contract violation 事件统一转换为
+`workspace/projection/changed`，端侧只触发重新读取服务端快照，不复制
+contract violation 状态机，也不自动发起 retry/replan/restart。
+
 ## Review Checklist
 
 代码收口前后必须逐项核对：
 
-- [ ] 本次修改是否只实现中立合同/状态机能力。
-- [ ] 是否没有执行任何 rejected output。
-- [ ] 是否没有把具体业务策略写入 kernel/orchestrator。
-- [ ] 是否所有 command/event 都携带 workspace/run/step scope。
-- [ ] 是否 retry 通过 EventHub dispatch requested 主路径推进。
-- [ ] 是否 projection 是唯一 UI 状态来源。
-- [ ] 是否新增 tests 能证明旧失败样本进入 recovery loop。
-- [ ] 是否 boundary search 无新增场景特判。
+- [x] 本次修改是否只实现中立合同/状态机能力。
+- [x] 是否没有执行任何 rejected output。
+- [x] 是否没有把具体业务策略写入 kernel/orchestrator。
+- [x] 是否所有 command/event 都携带 workspace/run/step scope。
+- [x] 是否 retry 通过 EventHub dispatch requested 主路径推进。
+- [x] 是否 projection 是唯一 UI 状态来源。
+- [x] 是否新增 tests 能证明旧失败样本进入 recovery loop。
+- [x] 是否 boundary search 无新增场景特判。
+
+2026-06-22 追加验证命令：
+
+```bash
+go test ./internal/services/workorch/biz/backends ./internal/pkg/events ./internal/modules/kernel/orchestrator/pkg/events -count=1 -timeout=180s
+go test ./internal/services/workorch/service/tui -count=1 -timeout=180s
+git diff --check -- internal/services/workorch/biz/backends/eventhub.go internal/services/workorch/biz/backends/eventhub_test.go docs/30-module-architecture/contract-violation-recovery-loop-design.md
+git diff -U0 -- internal/services/workorch/biz/backends/eventhub.go internal/services/workorch/biz/backends/eventhub_test.go docs/30-module-architecture/contract-violation-recovery-loop-design.md | rg '^\+' | rg -v '^\+\+\+' | rg -n "software-dev|weather-query|code-review|go test|npm test|no tests to run|city|ssh|mcp-lsp|lsp|server" || true
+```
 
 建议验证命令：
 

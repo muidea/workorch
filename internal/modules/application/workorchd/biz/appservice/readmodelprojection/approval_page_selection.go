@@ -11,7 +11,7 @@ func selectApprovalPageWindow(items []*approvalmodel.Approval, limit int, cursor
 			continue
 		}
 		if !started {
-			if string(item.ID) == cursorAfterID {
+			if governanceCursorMatches(cursorAfterID, string(item.WorkspaceID), string(item.ID)) {
 				started = true
 			}
 			continue
@@ -24,7 +24,8 @@ func selectApprovalPageWindow(items []*approvalmodel.Approval, limit int, cursor
 	}
 	nextCursor := ""
 	if len(selected) > 0 {
-		nextCursor = string(selected[len(selected)-1].ID)
+		last := selected[len(selected)-1]
+		nextCursor = governanceScopedCursor(string(last.WorkspaceID), string(last.ID))
 	}
 	return selected, nextCursor, hasMore
 }

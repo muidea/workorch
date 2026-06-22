@@ -214,12 +214,18 @@ func defaultReadApproval(ctx context.Context, backend string, dataRoot string, a
 	return appservice.ReadApprovalWithBackend(ctx, backend, dataRoot, approvalID)
 }
 
-func defaultApproveApproval(ctx context.Context, backend string, dataRoot string, approvalID string) (appservice.Approval, error) {
-	return appservice.ApproveApprovalWithBackend(ctx, backend, dataRoot, approvalID)
+func defaultApproveApproval(ctx context.Context, backend string, dataRoot string, approvalID string, cmd appservice.ResolveApprovalCommand) (appservice.Approval, error) {
+	if cmd.Action == "" {
+		cmd.Action = "approve"
+	}
+	return appservice.ResolveApprovalWithBackend(ctx, backend, dataRoot, approvalID, cmd)
 }
 
-func defaultRejectApproval(ctx context.Context, backend string, dataRoot string, approvalID string) (appservice.Approval, error) {
-	return appservice.RejectApprovalWithBackend(ctx, backend, dataRoot, approvalID)
+func defaultRejectApproval(ctx context.Context, backend string, dataRoot string, approvalID string, cmd appservice.ResolveApprovalCommand) (appservice.Approval, error) {
+	if cmd.Action == "" {
+		cmd.Action = "reject"
+	}
+	return appservice.ResolveApprovalWithBackend(ctx, backend, dataRoot, approvalID, cmd)
 }
 
 func defaultBatchResolveApprovals(ctx context.Context, backend string, dataRoot string, cmd appservice.BatchResolveApprovalCommand) ([]appservice.Approval, error) {

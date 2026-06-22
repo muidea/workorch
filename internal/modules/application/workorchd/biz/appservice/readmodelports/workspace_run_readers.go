@@ -46,6 +46,10 @@ func (r RunReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run, err
 	return ownerreadports.ReadRunByOwnerCommand(ctx, r.Hub, id)
 }
 
+func (r RunReader) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	return ownerreadports.ReadRunByWorkspaceOwnerCommand(ctx, r.Hub, workspaceID, id)
+}
+
 func (r RunReader) List(ctx context.Context) ([]*runmodel.Run, error) {
 	return ownerreadports.ListRunsByOwnerCommand(ctx, r.Hub)
 }

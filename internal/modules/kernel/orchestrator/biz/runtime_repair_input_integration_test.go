@@ -2484,6 +2484,73 @@ func TestRuntimeOrchestrator_RuntimeRepairInputRequiresValidationEvidenceForMiss
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputStopsAssessmentOnlyAfterCoverageCorrectionStillMissing(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-assessment-only-coverage-still-missing")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/assessment-correction"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyAssessmentOnly:   true,
+			"assessmentOnlyReason":       "dod_coverage_contract_correction",
+			"repairObjective":            "complete_dod_goal_coverage_assessment",
+			"assessmentOnlyCorrectionOf": "previous-dod-coverage-missing",
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   "DoD coverage is still missing.",
+				"items": []map[string]any{
+					{"item": "deliver concrete verification evidence", "state": "failed"},
+				},
+			},
+			"missingDoDItems": []map[string]any{
+				{"item": "deliver concrete verification evidence", "state": "failed"},
+			},
+		},
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: "ws-repair-assessment-only-coverage-still-missing",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, common.ErrInvalidArgument)
+
+	for _, key := range []string{stepInputKeyAssessmentOnly, "assessmentOnlyReason"} {
+		if _, ok := input[key]; ok {
+			t.Fatalf("%s = %+v, want assessment-only correction cleared after repeated coverage miss", key, input[key])
+		}
+	}
+	if input["completionFollowUp"] != false {
+		t.Fatalf("completionFollowUp = %v, want false after repeated coverage miss", input["completionFollowUp"])
+	}
+	if input["repairObjective"] != repairObjectiveConcreteValidationEvidence || input["evidenceRepairRequired"] != true {
+		t.Fatalf("repair input = %+v, want concrete validation evidence repair", input)
+	}
+	if stringFromMap(input, "evidenceRepairSource") != "failed_assessment_only_coverage_gap" {
+		t.Fatalf("evidenceRepairSource = %q, want failed assessment-only coverage gap", stringFromMap(input, "evidenceRepairSource"))
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustProduceConcreteValidationEvidence"] != true ||
+		required["mustIncludeStateChangingNode"] != false ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want bounded concrete validation evidence without patch/apply", required)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputDoesNotForceStateChangeForValidationFollowUpReadOnlyGraph(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{

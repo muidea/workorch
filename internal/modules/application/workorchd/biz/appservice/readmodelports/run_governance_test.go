@@ -24,9 +24,12 @@ func TestDecisionsForRunSelectsBlockingTicketAndProjectsResolution(t *testing.T)
 		{ID: "ticket-wrong-run", WorkspaceID: run.WorkspaceID, RunID: "run-other", State: common.DecisionTicketStateResolved},
 	}
 	resolution := &decisionmodel.Resolution{
-		ID:       "resolution-blocking",
-		TicketID: "ticket-blocking",
-		Type:     "provide_missing_info",
+		ID:                 "resolution-blocking",
+		TicketID:           "ticket-blocking",
+		Type:               "provide_missing_info",
+		ContinuationAction: "replan",
+		ResumeRunID:        "run-governance",
+		SuccessorRunID:     "run-governance-next",
 	}
 
 	got, err := DecisionsForRun(
@@ -50,6 +53,9 @@ func TestDecisionsForRunSelectsBlockingTicketAndProjectsResolution(t *testing.T)
 	}
 	if got.Items[1].ResolutionID != "resolution-blocking" || got.Items[1].ResolutionType != "provide_missing_info" {
 		t.Fatalf("blocking decision projection = %+v, want resolution fields", got.Items[1])
+	}
+	if got.Items[1].ContinuationAction != "replan" || got.Items[1].ResumeRunID != "run-governance" || got.Items[1].SuccessorRunID != "run-governance-next" {
+		t.Fatalf("blocking decision projection = %+v, want resolution recovery refs", got.Items[1])
 	}
 }
 

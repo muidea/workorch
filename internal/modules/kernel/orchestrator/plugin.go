@@ -7,12 +7,6 @@ import (
 	"github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
 	"github.com/muidea/magicCommon/task"
-	filecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
-	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
-	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	mcpcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
-	sshcommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
-	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	"github.com/muidea/workorch/internal/pkg/workorchdeps"
 )
@@ -38,42 +32,7 @@ func (m *Module) Setup(_ context.Context, _ event.Hub, backgroundRoutine task.Ba
 	}
 	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry()
 	eventAdapter := NewEventRuntimeAdapter(eventHub)
-	for _, stepKind := range []string{filecommon.StepKindList, filecommon.StepKindRead, filecommon.StepKindEdit} {
-		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
-			return cd.NewError(cd.Unexpected, err.Error())
-		}
-	}
-	if err := runtimeRegistry.Register("shell/command", eventAdapter); err != nil {
-		return cd.NewError(cd.Unexpected, err.Error())
-	}
-	for _, stepKind := range []string{gitcommon.StepKindRead, gitcommon.StepKindWrite} {
-		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
-			return cd.NewError(cd.Unexpected, err.Error())
-		}
-	}
-	if err := runtimeRegistry.Register(sshcommon.StepKindCommand, eventAdapter); err != nil {
-		return cd.NewError(cd.Unexpected, err.Error())
-	}
-	for _, stepKind := range []string{webcommon.StepKindSearch, webcommon.StepKindFetch} {
-		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
-			return cd.NewError(cd.Unexpected, err.Error())
-		}
-	}
-	for _, stepKind := range []string{mcpcommon.StepKindToolCall, mcpcommon.StepKindResourceRead, mcpcommon.StepKindPromptGet} {
-		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
-			return cd.NewError(cd.Unexpected, err.Error())
-		}
-	}
-	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchApply, eventAdapter); err != nil {
-		return cd.NewError(cd.Unexpected, err.Error())
-	}
-	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchPreview, eventAdapter); err != nil {
-		return cd.NewError(cd.Unexpected, err.Error())
-	}
-	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchRevert, eventAdapter); err != nil {
-		return cd.NewError(cd.Unexpected, err.Error())
-	}
-	if err := runtimeRegistry.Register(llmcommon.StepKindWorkspaceExecution, eventAdapter); err != nil {
+	if err := registerRuntimeStepKinds(runtimeRegistry, eventAdapter); err != nil {
 		return cd.NewError(cd.Unexpected, err.Error())
 	}
 	if setupErr := m.Configure(Dependencies{
@@ -83,6 +42,7 @@ func (m *Module) Setup(_ context.Context, _ event.Hub, backgroundRoutine task.Ba
 		Patches:               repos.Patches,
 		ValidationResults:     repos.ValidationResults,
 		RuntimeCheckpoints:    repos.RuntimeCheckpoints,
+		CoverageWorkItems:     repos.CoverageWorkItems,
 		ArtifactContinuations: repos.ArtifactContinuations,
 		RuntimePolicy:         runtimePolicy,
 		EventHub:              eventHub,

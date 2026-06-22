@@ -108,52 +108,8 @@ type OrchestratorContractViolationEvent struct {
 	Data     map[string]any
 }
 
-var workorchTopics = []string{
-	workspaceevents.TopicWorkspaceCreated,
-	workspaceevents.TopicWorkspaceStateChanged,
-	workspaceevents.TopicWorkspaceDeleted,
-	workspaceevents.TopicGoalDefined,
-	workspaceevents.TopicDoDDefined,
-	runevents.TopicRunCreated,
-	runevents.TopicRunStateChanged,
-	runevents.TopicRunLLMStreamProgress,
-	runevents.TopicRunLLMUsageRecorded,
-	runevents.TopicStepDispatched,
-	runevents.TopicStepStateChanged,
-	decisionevents.TopicTicketCreated,
-	decisionevents.TopicTicketResolved,
-	decisionevents.TopicTicketUpdated,
-	approvalevents.TopicApprovalCreated,
-	approvalevents.TopicApprovalResolved,
-	resultevents.TopicResultAccepted,
-	resultevents.TopicResultRejected,
-	resultevents.TopicResultSuperseded,
-	resultevents.TopicArtifactCreated,
-	orchestratorevents.TopicPatchPreviewed,
-	orchestratorevents.TopicPatchApplied,
-	orchestratorevents.TopicPatchFailed,
-	orchestratorevents.TopicPatchReverted,
-	orchestratorevents.TopicOrchestratorContractViolationRecorded,
-	orchestratorevents.TopicOrchestratorContractViolationRetryRequested,
-	orchestratorevents.TopicOrchestratorContractViolationEscalated,
-	orchestratorevents.TopicArtifactContinuationCreated,
-	orchestratorevents.TopicArtifactContinuationChunkRecorded,
-	orchestratorevents.TopicArtifactContinuationChunkRejected,
-	orchestratorevents.TopicArtifactContinuationAssembled,
-	orchestratorevents.TopicArtifactContinuationApplied,
-	orchestratorevents.TopicArtifactContinuationFailed,
-	memoryevents.TopicMemoryCreated,
-	memoryevents.TopicMemoryUpdated,
-	memoryevents.TopicMemoryDeleted,
-	memoryevents.TopicMemoryRecallRecorded,
-	governanceevents.TopicGovernanceAutoEvaluated,
-	governanceevents.TopicGovernanceAutoResolved,
-	governanceevents.TopicGovernanceAutoEscalated,
-	governanceevents.TopicGovernanceAutoBlocked,
-}
-
 func WorkorchTopics() []string {
-	return append([]string(nil), workorchTopics...)
+	return append([]string(nil), workorchEventTopics...)
 }
 
 func SubscribeWorkorch(hub Hub, handler func(context.Context, WorkorchEvent) error) []func() {
@@ -161,8 +117,9 @@ func SubscribeWorkorch(hub Hub, handler func(context.Context, WorkorchEvent) err
 		return nil
 	}
 
-	unsubscribers := make([]func(), 0, len(workorchTopics))
-	for _, topic := range workorchTopics {
+	topics := WorkorchTopics()
+	unsubscribers := make([]func(), 0, len(topics))
+	for _, topic := range topics {
 		unsubscribe := hub.Subscribe(topic, func(ctx context.Context, envelope Envelope) error {
 			event, ok := DecodeWorkorchEvent(envelope)
 			if !ok {

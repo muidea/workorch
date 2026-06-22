@@ -3,21 +3,24 @@ package appmodelcore
 import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 
 type Decision struct {
-	ID                string                                `json:"id"`
-	WorkspaceID       string                                `json:"workspaceId"`
-	RunID             string                                `json:"runId"`
-	StepID            string                                `json:"stepId,omitempty"`
-	Reason            string                                `json:"reason"`
-	DecisionKind      string                                `json:"decisionKind,omitempty"`
-	Question          string                                `json:"question,omitempty"`
-	Context           map[string]any                        `json:"context,omitempty"`
-	State             string                                `json:"state"`
-	ResolutionID      string                                `json:"resolutionId,omitempty"`
-	ResolutionType    string                                `json:"resolutionType,omitempty"`
-	ResolutionPayload map[string]any                        `json:"resolutionPayload,omitempty"`
-	AutoGovernance    *governancecore.AutoGovernanceSummary `json:"autoGovernance,omitempty"`
-	CreatedAt         string                                `json:"createdAt,omitempty"`
-	UpdatedAt         string                                `json:"updatedAt,omitempty"`
+	ID                 string                                `json:"id"`
+	WorkspaceID        string                                `json:"workspaceId"`
+	RunID              string                                `json:"runId"`
+	StepID             string                                `json:"stepId,omitempty"`
+	Reason             string                                `json:"reason"`
+	DecisionKind       string                                `json:"decisionKind,omitempty"`
+	Question           string                                `json:"question,omitempty"`
+	Context            map[string]any                        `json:"context,omitempty"`
+	State              string                                `json:"state"`
+	ResolutionID       string                                `json:"resolutionId,omitempty"`
+	ResolutionType     string                                `json:"resolutionType,omitempty"`
+	ResolutionPayload  map[string]any                        `json:"resolutionPayload,omitempty"`
+	ContinuationAction string                                `json:"continuationAction,omitempty"`
+	ResumeRunID        string                                `json:"resumeRunId,omitempty"`
+	SuccessorRunID     string                                `json:"successorRunId,omitempty"`
+	AutoGovernance     *governancecore.AutoGovernanceSummary `json:"autoGovernance,omitempty"`
+	CreatedAt          string                                `json:"createdAt,omitempty"`
+	UpdatedAt          string                                `json:"updatedAt,omitempty"`
 }
 
 type DecisionQuery struct {

@@ -39,13 +39,13 @@ func (c *Client) GetApproval(ctx context.Context, workspaceID string, approvalID
 }
 
 // Approve approves an approval gate.
-func (c *Client) Approve(ctx context.Context, workspaceID string, approvalID string) (*Approval, error) {
+func (c *Client) Approve(ctx context.Context, workspaceID string, approvalID string, payload ...map[string]any) (*Approval, error) {
 	path := fmt.Sprintf("/api/v1/workorch/approvals/%s/approve", escapePath(approvalID))
 	values := url.Values{}
 	if workspaceID != "" {
 		values.Set("workspaceId", workspaceID)
 	}
-	resp, err := c.do(ctx, "POST", joinQuery(path, values), nil)
+	resp, err := c.do(ctx, "POST", joinQuery(path, values), approvalResolveRequestPayload(payload...))
 	if err != nil {
 		return nil, err
 	}
@@ -53,13 +53,13 @@ func (c *Client) Approve(ctx context.Context, workspaceID string, approvalID str
 }
 
 // Reject rejects an approval gate.
-func (c *Client) Reject(ctx context.Context, workspaceID string, approvalID string) (*Approval, error) {
+func (c *Client) Reject(ctx context.Context, workspaceID string, approvalID string, payload ...map[string]any) (*Approval, error) {
 	path := fmt.Sprintf("/api/v1/workorch/approvals/%s/reject", escapePath(approvalID))
 	values := url.Values{}
 	if workspaceID != "" {
 		values.Set("workspaceId", workspaceID)
 	}
-	resp, err := c.do(ctx, "POST", joinQuery(path, values), nil)
+	resp, err := c.do(ctx, "POST", joinQuery(path, values), approvalResolveRequestPayload(payload...))
 	if err != nil {
 		return nil, err
 	}
@@ -67,11 +67,12 @@ func (c *Client) Reject(ctx context.Context, workspaceID string, approvalID stri
 }
 
 // BatchResolveApprovals resolves multiple approvals at once.
-func (c *Client) BatchResolveApprovals(ctx context.Context, workspaceID string, approvalIDs []string, action string) ([]Approval, error) {
+func (c *Client) BatchResolveApprovals(ctx context.Context, workspaceID string, approvalIDs []string, action string, payload ...map[string]any) ([]Approval, error) {
 	req := struct {
-		ApprovalIDs []string `json:"approvalIds"`
-		Action      string   `json:"action"`
-	}{ApprovalIDs: approvalIDs, Action: action}
+		ApprovalIDs []string       `json:"approvalIds"`
+		Action      string         `json:"action"`
+		Payload     map[string]any `json:"payload,omitempty"`
+	}{ApprovalIDs: approvalIDs, Action: action, Payload: firstApprovalPayload(payload...)}
 	values := url.Values{}
 	if workspaceID != "" {
 		values.Set("workspaceId", workspaceID)
@@ -81,4 +82,23 @@ func (c *Client) BatchResolveApprovals(ctx context.Context, workspaceID string, 
 		return nil, err
 	}
 	return decodeEnvelopeSlice[Approval](resp, "approvals")
+}
+
+func approvalResolveRequestPayload(payload ...map[string]any) any {
+	selected := firstApprovalPayload(payload...)
+	if selected == nil {
+		return nil
+	}
+	return struct {
+		Payload map[string]any `json:"payload,omitempty"`
+	}{Payload: selected}
+}
+
+func firstApprovalPayload(payload ...map[string]any) map[string]any {
+	for _, candidate := range payload {
+		if len(candidate) > 0 {
+			return candidate
+		}
+	}
+	return nil
 }

@@ -76,6 +76,197 @@ func TestEnsureRunCoverageWorkItemsBuildsNeutralBaseline(t *testing.T) {
 	}
 }
 
+func TestCoverageWorkItemsSyncProjectionToRepository(t *testing.T) {
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "workspace-cwi-repo-sync")
+	repo := memory.NewCoverageWorkItemRepository()
+	run := &runmodel.Run{
+		ID:          "run-cwi-repo-sync",
+		WorkspaceID: "workspace-cwi-repo-sync",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"id":   "goal-cwi-repo-sync",
+				"text": "- sync repository-backed coverage work item",
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"acceptanceDimensions": []map[string]any{{
+							"id":       "dimension-required",
+							"required": true,
+						}},
+					},
+				},
+			},
+		},
+	}
+	coverage := newCoverageSubsystem(repo)
+	if !coverage.ensure(run, ctx) {
+		t.Fatalf("coverage.ensure changed = false, want true")
+	}
+	stored, err := repo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("ListByRun: %v", err)
+	}
+	if len(stored) != 2 {
+		t.Fatalf("stored coverage work items = %d, want 2: %+v", len(stored), stored)
+	}
+	var targetID common.CoverageWorkItemID
+	targetContextID := ""
+	for _, item := range stored {
+		if stringSet(item.RequiredEvidenceKinds)["validation"] {
+			targetID = item.ID
+			targetContextID = strings.TrimSpace(stringFromMap(item.Metadata, "contextCoverageWorkItemId"))
+			break
+		}
+	}
+	if targetID == "" || targetContextID == "" {
+		t.Fatalf("stored coverage work items = %+v, want one validation-backed context item", stored)
+	}
+	if !strings.HasPrefix(string(targetID), string(run.ID)+"-") {
+		t.Fatalf("stored id = %q, want run scoped repository id", targetID)
+	}
+
+	step := &runmodel.Step{
+		ID:    "step-cwi-repo-sync",
+		RunID: run.ID,
+		Kind:  "mcp/tool_call",
+		Input: map[string]any{
+			"coverageWorkItemId": targetContextID,
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+			},
+		},
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"evidenceRef": "evidence-cwi-repo-sync",
+		},
+	}
+	if !coverage.updateFromCompletedStep(run, step, ctx) {
+		t.Fatalf("updateFromCompletedStep changed = false, want accepted evidence update")
+	}
+	stored, err = repo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("ListByRun after update: %v", err)
+	}
+	if len(stored) != 2 {
+		t.Fatalf("stored coverage work items after update = %d, want 2: %+v", len(stored), stored)
+	}
+	storedByID := map[common.CoverageWorkItemID]int{}
+	for idx, item := range stored {
+		storedByID[item.ID] = idx
+	}
+	firstStored, ok := storedByID[targetID]
+	if !ok {
+		t.Fatalf("stored coverage work item IDs after update = %+v, want %s", storedByID, targetID)
+	}
+	refs := stringSet(stored[firstStored].AcceptedEvidenceRefs)
+	if !refs["step-cwi-repo-sync"] || !refs["evidence-cwi-repo-sync"] {
+		t.Fatalf("accepted evidence refs = %+v, want step and explicit evidence refs", stored[firstStored].AcceptedEvidenceRefs)
+	}
+}
+
+func TestEnsureGapBaselineHydratesCoverageContextFromOwnerRepository(t *testing.T) {
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "workspace-cwi-repo-hydrate")
+	repo := memory.NewCoverageWorkItemRepository()
+	run := &runmodel.Run{
+		ID:          "run-cwi-repo-hydrate",
+		WorkspaceID: "workspace-cwi-repo-hydrate",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"id":   "goal-cwi-repo-hydrate",
+				"text": "- hydrate coverage context from owner storage",
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"acceptanceDimensions": []map[string]any{{
+							"id":       "dimension-required",
+							"required": true,
+						}},
+					},
+				},
+			},
+		},
+	}
+	coverage := newCoverageSubsystem(repo)
+	if !coverage.ensure(run, ctx) {
+		t.Fatalf("coverage.ensure changed = false, want initial owner sync")
+	}
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) == 0 {
+		t.Fatalf("coverageWorkItems = %+v, want initial projection", run.ExecutionContext[coverageWorkItemsKey])
+	}
+	targetContextID := strings.TrimSpace(stringFromMap(items[0], "id"))
+	if targetContextID == "" {
+		t.Fatalf("coverage item = %+v, want context id", items[0])
+	}
+	step := &runmodel.Step{
+		ID:    "step-cwi-repo-hydrate",
+		RunID: run.ID,
+		Kind:  "mcp/tool_call",
+		Input: map[string]any{
+			"coverageWorkItemId": targetContextID,
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+			},
+		},
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"evidenceRef": "evidence-cwi-repo-hydrate",
+		},
+	}
+	if !coverage.updateFromCompletedStep(run, step, ctx) {
+		t.Fatalf("updateFromCompletedStep changed = false, want accepted evidence")
+	}
+	delete(run.ExecutionContext, coverageWorkItemsKey)
+	delete(run.ExecutionContext, coverageWorkItemContextKey)
+	delete(run.ExecutionContext, gapBaselineKey)
+
+	runRepo := memory.NewRunRepository()
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		runs: runRepo,
+		evidence: RuntimeEvidenceRepositories{
+			CoverageWorkItems: repo,
+		},
+		coverage: newCoverageSubsystem(repo),
+	}
+	if err := orch.ensureGapBaselineBeforeDispatch(ctx, run); err != nil {
+		t.Fatalf("ensureGapBaselineBeforeDispatch: %v", err)
+	}
+	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
+	foundOwnerBackedItem := false
+	for _, item := range mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey]) {
+		if stringFromMap(item, "id") != targetContextID {
+			continue
+		}
+		refs := stringSet(stringSliceFromValue(item["acceptedEvidenceRefs"]))
+		foundOwnerBackedItem = refs["evidence-cwi-repo-hydrate"]
+	}
+	if !foundOwnerBackedItem {
+		t.Fatalf("coverageWorkItems = %+v, want owner-backed accepted evidence for %s", run.ExecutionContext[coverageWorkItemsKey], targetContextID)
+	}
+	if ledger := mapSliceFromValue(context["ledgerSummary"]); len(ledger) == 0 {
+		t.Fatalf("coverageWorkItemContext = %+v, want owner-backed ledger summary", context)
+	}
+	baseline := mapFromValue(run.ExecutionContext[gapBaselineKey])
+	if refs := stringSliceFromValue(baseline["acceptedEvidenceRefs"]); !stringSet(refs)["evidence-cwi-repo-hydrate"] {
+		t.Fatalf("gapBaseline.acceptedEvidenceRefs = %+v, want owner repository evidence ref", refs)
+	}
+	persisted, err := runRepo.Get(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get persisted run: %v", err)
+	}
+	if baseline := mapFromValue(persisted.ExecutionContext[gapBaselineKey]); len(baseline) == 0 {
+		t.Fatalf("persisted executionContext = %+v, want owner-backed gapBaseline", persisted.ExecutionContext)
+	}
+}
+
 func TestNextDispatchSpecsPersistsGapBaselineBeforeInitialStep(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-gap-baseline-initial")
@@ -858,6 +1049,125 @@ func TestCoverageWorkItemContextPrioritizesStateChangingCoverageItem(t *testing.
 	ledger := mapSliceFromValue(context["ledgerSummary"])
 	if len(ledger) != 2 || stringFromMap(ledger[0], "id") != "cwi-001" || stringFromMap(ledger[1], "id") != "cwi-002" {
 		t.Fatalf("ledgerSummary = %+v, want original ledger order preserved", ledger)
+	}
+}
+
+func TestCoverageWorkItemContextAlignsCurrentFocusToActiveCoverageFocus(t *testing.T) {
+	revision := "rev-current"
+	items := []map[string]any{
+		{
+			"id":                    "cwi-012",
+			"definitionRevision":    revision,
+			"source":                "goal",
+			"sourceScope":           "goal_leaf",
+			"sourceRequirementId":   "goal-req-012",
+			"sourcePath":            "goal.leaves[11]",
+			"targetText":            "later validation target",
+			"normalizedSourceKey":   "goal:goal_leaf:goal-req-012",
+			"requiredEvidenceKinds": []string{"validation"},
+			"missingEvidenceKinds":  []string{"validation"},
+			"status":                "open",
+		},
+		{
+			"id":                    "cwi-085",
+			"definitionRevision":    revision,
+			"source":                "deliverable",
+			"sourceScope":           "deliverable",
+			"sourceRequirementId":   "source_change",
+			"sourcePath":            "executionContract.profileContracts.neutral.deliverableExpectations[0]",
+			"targetText":            "primary source change",
+			"normalizedSourceKey":   "deliverable:deliverable:source_change",
+			"requiredEvidenceKinds": []string{"state_change", "validation"},
+			"acceptedEvidenceByKind": map[string]any{
+				"state_change": []string{"run/graph/001-patch"},
+				"validation":   []string{"run/graph/002-verify"},
+			},
+			"acceptedEvidenceRefs": []string{"run/graph/001-patch"},
+			"status":               "evidence_ready",
+		},
+	}
+	context := coverageWorkItemContextFromItems(revision, items, nil, nil)
+	if got := stringFromMap(mapFromValue(context["currentFocus"]), "id"); got != "cwi-012" {
+		t.Fatalf("test setup currentFocus = %q, want cwi-012 before active focus alignment", got)
+	}
+	focus := map[string]any{
+		"id":                  "focus-cwi-085",
+		"coverageWorkItemIds": []string{"cwi-085"},
+		"targetRefs":          []string{"source_change", "deliverable:deliverable:source_change"},
+		"requiredEvidenceKinds": []string{
+			"state_change",
+			"validation",
+		},
+	}
+
+	aligned := coverageWorkItemContextAlignedToFocus(context, focus)
+
+	current := mapFromValue(aligned["currentFocus"])
+	if stringFromMap(current, "id") != "cwi-085" ||
+		stringFromMap(current, "activeCoverageFocusId") != "focus-cwi-085" ||
+		!boolValue(current["focusScoped"]) {
+		t.Fatalf("aligned currentFocus = %+v, want active cwi-085 focus", current)
+	}
+	if refs := stringSliceFromValue(current["targetRefs"]); !stringSliceContains(refs, "source_change") {
+		t.Fatalf("aligned currentFocus.targetRefs = %+v, want active focus refs", refs)
+	}
+	focusItems := mapSliceFromValue(aligned["currentFocusItems"])
+	if len(focusItems) == 0 || stringFromMap(focusItems[0], "id") != "cwi-085" {
+		t.Fatalf("aligned currentFocusItems = %+v, want cwi-085 first", focusItems)
+	}
+	for _, item := range mapSliceFromValue(aligned["ledgerSummary"]) {
+		if stringFromMap(item, "id") == "cwi-085" && boolValue(item["omittedFromCurrentFocus"]) {
+			t.Fatalf("aligned ledger cwi-085 = %+v, want in-focus ledger item", item)
+		}
+	}
+	if got := stringFromMap(mapFromValue(context["currentFocus"]), "id"); got != "cwi-012" {
+		t.Fatalf("original context currentFocus mutated to %q", got)
+	}
+}
+
+func TestSlimExecutionContextAlignsCoverageContextWithCoverageFocus(t *testing.T) {
+	revision := "rev-current"
+	context := coverageWorkItemContextFromItems(revision, []map[string]any{
+		{
+			"id":                    "cwi-012",
+			"definitionRevision":    revision,
+			"source":                "goal",
+			"sourceScope":           "goal_leaf",
+			"sourceRequirementId":   "goal-req-012",
+			"targetText":            "later validation target",
+			"requiredEvidenceKinds": []string{"validation"},
+			"missingEvidenceKinds":  []string{"validation"},
+			"status":                "open",
+		},
+		{
+			"id":                    "cwi-085",
+			"definitionRevision":    revision,
+			"source":                "deliverable",
+			"sourceScope":           "deliverable",
+			"sourceRequirementId":   "source_change",
+			"targetText":            "primary source change",
+			"requiredEvidenceKinds": []string{"state_change", "validation"},
+			"acceptedEvidenceByKind": map[string]any{
+				"state_change": []string{"run/graph/001-patch"},
+				"validation":   []string{"run/graph/002-verify"},
+			},
+			"status": "evidence_ready",
+		},
+	}, nil, nil)
+	executionContext := map[string]any{
+		coverageWorkItemContextKey: context,
+		coverageFocusKey: map[string]any{
+			"id":                  "focus-cwi-085",
+			"coverageWorkItemIds": []string{"cwi-085"},
+			"targetRefs":          []string{"source_change"},
+		},
+	}
+
+	slim := slimExecutionContextForStepInput(executionContext)
+
+	nestedContext := mapFromValue(slim[coverageWorkItemContextKey])
+	if got := stringFromMap(mapFromValue(nestedContext["currentFocus"]), "id"); got != "cwi-085" {
+		t.Fatalf("slim executionContext coverageWorkItemContext.currentFocus = %q, want cwi-085", got)
 	}
 }
 
@@ -1739,7 +2049,11 @@ func TestCoverageWorkItemsGovernanceOwnerSyncRespectsRequiredCounts(t *testing.T
 	}
 	orch := NewRuntimeOrchestratorWithResolutions(nil, memory.NewRunRepository(), memory.NewStepRepository(), memory.NewWorkspaceRepository(), ticketRepo, resolutionRepo, approvalRepo, nil)
 
-	if !orch.ensureCoverageLedger(ctx, run) {
+	changed, err := orch.ensureCoverageLedger(ctx, run)
+	if err != nil {
+		t.Fatalf("ensureCoverageLedger: %v", err)
+	}
+	if !changed {
 		t.Fatalf("ensureCoverageLedger changed=false, want owner evidence sync")
 	}
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])

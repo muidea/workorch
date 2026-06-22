@@ -28,6 +28,7 @@ func TestPurgeRunEvidenceDeletesOnlyRequestedRunEvidence(t *testing.T) {
 	patches := memoryrepo.NewPatchRepository()
 	validations := memoryrepo.NewValidationResultRepository()
 	checkpoints := memoryrepo.NewRuntimeCheckpointRepository()
+	coverageWorkItems := memoryrepo.NewCoverageWorkItemRepository()
 	continuations := memoryrepo.NewArtifactContinuationRepository()
 	traces := memoryrepo.NewMemoryRecallTraceRepository()
 	must := func(err error) {
@@ -46,6 +47,8 @@ func TestPurgeRunEvidenceDeletesOnlyRequestedRunEvidence(t *testing.T) {
 	must(validations.Create(ctx, &runmodel.ValidationResult{ID: "validation-keep", RunID: otherRunID}))
 	must(checkpoints.Create(ctx, &runmodel.RuntimeCheckpoint{ID: "checkpoint-purge", RunID: runID}))
 	must(checkpoints.Create(ctx, &runmodel.RuntimeCheckpoint{ID: "checkpoint-keep", RunID: otherRunID}))
+	must(coverageWorkItems.Create(ctx, &orchestratormodel.CoverageWorkItem{ID: "cwi-purge", WorkspaceID: workspaceID, RunID: runID, DefinitionRevision: "rev-purge", NormalizedSourceKey: "source-purge", Status: "open"}))
+	must(coverageWorkItems.Create(ctx, &orchestratormodel.CoverageWorkItem{ID: "cwi-keep", WorkspaceID: workspaceID, RunID: otherRunID, DefinitionRevision: "rev-keep", NormalizedSourceKey: "source-keep", Status: "open"}))
 	must(continuations.Create(ctx, &orchestratormodel.ArtifactContinuation{ID: "continuation-purge", WorkspaceID: workspaceID, RunID: runID}))
 	must(continuations.Create(ctx, &orchestratormodel.ArtifactContinuation{ID: "continuation-keep", WorkspaceID: workspaceID, RunID: otherRunID}))
 	must(traces.Create(ctx, &memorymodel.MemoryRecallTrace{ID: "trace-purge", WorkspaceID: workspaceID, RunID: runID}))
@@ -56,14 +59,15 @@ func TestPurgeRunEvidenceDeletesOnlyRequestedRunEvidence(t *testing.T) {
 		Patches:               patches,
 		ValidationResults:     validations,
 		RuntimeCheckpoints:    checkpoints,
+		CoverageWorkItems:     coverageWorkItems,
 		ArtifactContinuations: continuations,
 		MemoryRecallTraces:    traces,
 	}, runID)
 	if err != nil {
 		t.Fatalf("purge run evidence: %v", err)
 	}
-	if deleted != 7 {
-		t.Fatalf("deleted = %d, want 7", deleted)
+	if deleted != 8 {
+		t.Fatalf("deleted = %d, want 8", deleted)
 	}
 	assertRunEvidenceCount(t, ctx, steps, runID, 0)
 	assertRunEvidenceCount(t, ctx, steps, otherRunID, 1)
@@ -75,6 +79,8 @@ func TestPurgeRunEvidenceDeletesOnlyRequestedRunEvidence(t *testing.T) {
 	assertRunEvidenceCount(t, ctx, validations, otherRunID, 1)
 	assertRunEvidenceCount(t, ctx, checkpoints, runID, 0)
 	assertRunEvidenceCount(t, ctx, checkpoints, otherRunID, 1)
+	assertRunEvidenceCount(t, ctx, coverageWorkItems, runID, 0)
+	assertRunEvidenceCount(t, ctx, coverageWorkItems, otherRunID, 1)
 	assertRunEvidenceCount(t, ctx, continuations, runID, 0)
 	assertRunEvidenceCount(t, ctx, continuations, otherRunID, 1)
 	traceItems, err := traces.List(ctx, repository.MemoryRecallTraceQuery{RunID: runID})
@@ -141,6 +147,7 @@ func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 		Patches:               memoryrepo.NewPatchRepository(),
 		ValidationResults:     memoryrepo.NewValidationResultRepository(),
 		RuntimeCheckpoints:    memoryrepo.NewRuntimeCheckpointRepository(),
+		CoverageWorkItems:     memoryrepo.NewCoverageWorkItemRepository(),
 		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),
 		EventHub:              hub,
 	}); err != nil {

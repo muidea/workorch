@@ -10,15 +10,16 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func ResolutionsForTickets(ctx context.Context, reader readmodelcore.DecisionResolutionReader, items []*decisionmodel.Ticket) (map[common.TicketID]*decisionmodel.Resolution, error) {
-	ret := make(map[common.TicketID]*decisionmodel.Resolution)
+func ResolutionsForTickets(ctx context.Context, reader readmodelcore.DecisionResolutionReader, items []*decisionmodel.Ticket) (map[string]*decisionmodel.Resolution, error) {
+	ret := make(map[string]*decisionmodel.Resolution)
 	if reader == nil || len(items) == 0 {
 		return ret, nil
 	}
 	var mu sync.Mutex
 	err := readmodelcore.RunTasks(resolvedTicketTasks(items, func(item *decisionmodel.Ticket) func() error {
 		return func() error {
-			resolution, err := reader.GetByTicketID(ctx, item.ID)
+			resolutionCtx := common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
+			resolution, err := reader.GetByTicketID(resolutionCtx, item.ID)
 			if errors.Is(err, common.ErrNotFound) {
 				return nil
 			}
@@ -26,7 +27,7 @@ func ResolutionsForTickets(ctx context.Context, reader readmodelcore.DecisionRes
 				return err
 			}
 			mu.Lock()
-			ret[item.ID] = resolution
+			ret[decisionResolutionMapKey(item)] = resolution
 			mu.Unlock()
 			return nil
 		}
@@ -35,6 +36,13 @@ func ResolutionsForTickets(ctx context.Context, reader readmodelcore.DecisionRes
 		return nil, err
 	}
 	return ret, nil
+}
+
+func decisionResolutionMapKey(item *decisionmodel.Ticket) string {
+	if item == nil {
+		return ""
+	}
+	return string(item.WorkspaceID) + "\x00" + string(item.ID)
 }
 
 func resolvedTicketTasks(items []*decisionmodel.Ticket, build func(*decisionmodel.Ticket) func() error) []func() error {

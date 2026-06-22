@@ -2,11 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 )
 
-func MapWebSourceTraces(steps []presenter.StepView) []readmodelcore.WebSourceTrace {
+func MapWebSourceTraces(steps []StepView) []readmodelcore.WebSourceTrace {
 	if len(steps) == 0 {
 		return nil
 	}

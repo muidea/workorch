@@ -22,10 +22,11 @@ type ContinuationDiagnosticCount struct {
 }
 
 type WatchdogDiagnostics struct {
-	LatestTickAt      string `json:"latestTickAt,omitempty"`
-	LatestDurationMs  int64  `json:"latestDurationMs,omitempty"`
-	LatestError       string `json:"latestError,omitempty"`
-	StaleRecoveryRuns uint64 `json:"staleRecoveryRuns,omitempty"`
+	TimerRegistrations uint64 `json:"timerRegistrations,omitempty"`
+	LatestTickAt       string `json:"latestTickAt,omitempty"`
+	LatestDurationMs   int64  `json:"latestDurationMs,omitempty"`
+	LatestError        string `json:"latestError,omitempty"`
+	StaleRecoveryRuns  uint64 `json:"staleRecoveryRuns,omitempty"`
 }
 
 type SchedulerDiagnostics struct {

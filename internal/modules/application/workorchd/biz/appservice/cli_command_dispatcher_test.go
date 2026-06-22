@@ -2,9 +2,11 @@ package appservice
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
@@ -34,7 +36,7 @@ func TestCLICommandDispatcherRunIsIdempotent(t *testing.T) {
 
 func TestCLIWorkspaceSnapshotCommandProjectsDetailView(t *testing.T) {
 	dispatcher := &CLICommandDispatcher{
-		viewReader: staticCLIWorkspaceViewReader{
+		viewReader: &staticCLIWorkspaceViewReader{
 			snapshot: WorkspaceSnapshot{
 				Workspace: Workspace{
 					ID:               "ws-cli-detail",
@@ -60,8 +62,9 @@ func TestCLIWorkspaceSnapshotCommandProjectsDetailView(t *testing.T) {
 	}
 
 	resource, _, err := dispatcher.handleWorkspaceCommand(context.Background(), events.CLICommandPayload{
-		Command:   events.CommandWorkspaceSnapshot,
-		SubjectID: "ws-cli-detail",
+		Command:     events.CommandWorkspaceSnapshot,
+		WorkspaceID: "ws-cli-detail",
+		SubjectID:   "ws-cli-detail",
 	})
 	if err != nil {
 		t.Fatalf("handle workspace snapshot: %v", err)
@@ -81,19 +84,150 @@ func TestCLIWorkspaceSnapshotCommandProjectsDetailView(t *testing.T) {
 	}
 }
 
+func TestCLIWorkspaceObjectCommandsRequireMatchingWorkspaceScope(t *testing.T) {
+	dispatcher := &CLICommandDispatcher{viewReader: &staticCLIWorkspaceViewReader{}}
+	for _, tc := range []struct {
+		name        string
+		command     string
+		workspaceID string
+		subjectID   string
+		wantErr     error
+	}{
+		{
+			name:      "snapshot missing workspace scope",
+			command:   events.CommandWorkspaceSnapshot,
+			subjectID: "ws-scope",
+			wantErr:   common.ErrInvalidArgument,
+		},
+		{
+			name:        "snapshot mismatched workspace scope",
+			command:     events.CommandWorkspaceSnapshot,
+			workspaceID: "ws-a",
+			subjectID:   "ws-b",
+			wantErr:     common.ErrConflict,
+		},
+		{
+			name:        "get missing subject",
+			command:     events.CommandWorkspaceGet,
+			workspaceID: "ws-scope",
+			wantErr:     common.ErrInvalidArgument,
+		},
+		{
+			name:        "delete mismatched workspace scope",
+			command:     events.CommandWorkspaceDelete,
+			workspaceID: "ws-a",
+			subjectID:   "ws-b",
+			wantErr:     common.ErrConflict,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := dispatcher.handleWorkspaceCommand(context.Background(), events.CLICommandPayload{
+				Command:     tc.command,
+				WorkspaceID: common.WorkspaceID(tc.workspaceID),
+				SubjectID:   tc.subjectID,
+			})
+			if err == nil || !errors.Is(err, tc.wantErr) {
+				t.Fatalf("handle workspace command err = %v, want %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestCLIRunCommandsRequireWorkspaceScope(t *testing.T) {
+	dispatcher := &CLICommandDispatcher{}
+	for _, tc := range []struct {
+		name        string
+		command     string
+		workspaceID string
+		runID       string
+		subjectID   string
+		wantErr     error
+	}{
+		{
+			name:    "activate missing workspace",
+			command: events.CommandRunActivate,
+			wantErr: common.ErrInvalidArgument,
+		},
+		{
+			name:    "list missing workspace",
+			command: events.CommandRunList,
+			wantErr: common.ErrInvalidArgument,
+		},
+		{
+			name:      "resume missing workspace",
+			command:   events.CommandRunResume,
+			subjectID: "run-a",
+			wantErr:   common.ErrInvalidArgument,
+		},
+		{
+			name:        "get missing run subject",
+			command:     events.CommandRunGet,
+			workspaceID: "ws-a",
+			wantErr:     common.ErrInvalidArgument,
+		},
+		{
+			name:        "status mismatched run subject",
+			command:     events.CommandRunStatus,
+			workspaceID: "ws-a",
+			runID:       "run-a",
+			subjectID:   "run-b",
+			wantErr:     common.ErrConflict,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := dispatcher.handleRunCommand(context.Background(), events.CLICommandPayload{
+				Command:     tc.command,
+				WorkspaceID: common.WorkspaceID(tc.workspaceID),
+				RunID:       common.RunID(tc.runID),
+				SubjectID:   tc.subjectID,
+			})
+			if err == nil || !errors.Is(err, tc.wantErr) {
+				t.Fatalf("handle run command err = %v, want %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestCLIWorkspaceListCommandUsesWorkspaceViewReader(t *testing.T) {
+	reader := &staticCLIWorkspaceViewReader{
+		workspaces: []Workspace{{
+			ID:    "ws-projection-list",
+			Title: "projection list",
+			State: "active",
+		}},
+	}
+	dispatcher := &CLICommandDispatcher{viewReader: reader}
+
+	_, resources, err := dispatcher.handleWorkspaceCommand(context.Background(), events.CLICommandPayload{
+		Command: events.CommandWorkspaceList,
+	})
+	if err != nil {
+		t.Fatalf("handle workspace list: %v", err)
+	}
+	if reader.listCalls != 1 {
+		t.Fatalf("list calls = %d, want 1", reader.listCalls)
+	}
+	if len(resources) != 1 || resources[0]["id"] != "ws-projection-list" {
+		t.Fatalf("resources = %+v, want projection workspace list", resources)
+	}
+}
+
 func workspaceSnapshotTraceProjectionStringLimitForTest() int {
 	return 1024 + len("...[truncated]")
 }
 
 type staticCLIWorkspaceViewReader struct {
-	snapshot WorkspaceSnapshot
+	workspaces []Workspace
+	snapshot   WorkspaceSnapshot
+	listCalls  int
 }
 
-func (r staticCLIWorkspaceViewReader) ListWorkspaceView(context.Context) ([]Workspace, error) {
-	return nil, nil
+func (r *staticCLIWorkspaceViewReader) ListWorkspaceView(context.Context) ([]Workspace, error) {
+	r.listCalls++
+	return r.workspaces, nil
 }
 
-func (r staticCLIWorkspaceViewReader) ReadWorkspaceViewSnapshot(context.Context, string) (WorkspaceSnapshot, error) {
+func (r *staticCLIWorkspaceViewReader) ReadWorkspaceViewSnapshot(context.Context, string) (WorkspaceSnapshot, error) {
 	return r.snapshot, nil
 }
 

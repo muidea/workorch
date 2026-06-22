@@ -30,6 +30,7 @@ type RepairLoopInfo = port.RepairLoopInfo
 type TaskProgressInfo = port.TaskProgressInfo
 type TaskDecompositionNodeInfo = port.TaskDecompositionNodeInfo
 type TaskDecompositionInfo = port.TaskDecompositionInfo
+type TaskPlanInfo = port.TaskPlanInfo
 type WorkspaceBackend = port.WorkspaceBackend
 type GoalInfo = port.GoalInfo
 type GoalBackend = port.GoalBackend

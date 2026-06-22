@@ -301,6 +301,43 @@ func TestMergeGovernanceContinuationContextSuppressesContinuationAfterDefinition
 	}
 }
 
+func TestDefinitionChangeImpactUsesCurrentModelRevisionWhenEventProjectionLags(t *testing.T) {
+	goal := &workspacemodel.Goal{
+		ID:                     "goal-current",
+		WorkspaceID:            "ws-definition-lag",
+		Text:                   "updated goal",
+		DefinitionRevision:     "goal:updated",
+		PreviousDefinitionHash: "goal:previous",
+	}
+	dod := &workspacemodel.DoD{
+		ID:          "dod-current",
+		WorkspaceID: "ws-definition-lag",
+		Items:       []string{"current dod"},
+		State:       common.DoDStateReady,
+	}
+
+	impact := DefinitionChangeImpactFromDefinitions(
+		goal,
+		[]map[string]any{GoalContext(goal)},
+		nil,
+		dod,
+		[]map[string]any{DoDContext(dod)},
+		nil,
+	)
+
+	if !DefinitionChangeImpactChanged(impact) {
+		t.Fatalf("definitionChangeImpact = %+v, want changed from current model previous hash", impact)
+	}
+	goalChange := impact["goalChange"].(map[string]any)
+	revisions := goalChange["definitionRevisions"].([]map[string]any)
+	if len(revisions) != 1 ||
+		revisions[0]["id"] != "goal-current" ||
+		revisions[0]["source"] != "current_definition_model" ||
+		revisions[0]["previousDefinitionHash"] != "goal:previous" {
+		t.Fatalf("goal definitionRevisions = %+v, want current model revision marker", revisions)
+	}
+}
+
 func TestCreatedWorkspaceRunExecutionContextInjectsCompressedContext(t *testing.T) {
 	input := map[string]any{
 		"dialogLanguage": "zh-CN",

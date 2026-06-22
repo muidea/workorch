@@ -488,6 +488,36 @@ func TestRuntimeAdapter_ExecuteRuntimeStepNormalizesShPipefailScriptToBash(t *te
 	}
 }
 
+func TestRuntimeAdapter_ExecuteRuntimeStepNormalizesShPipeStatusScriptToBash(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command": "sh",
+			"args":    []any{"-c", `false | true; printf 'first_status=%s\n' "${PIPESTATUS[0]}"`},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v output=%+v", err, result.Output)
+	}
+	if result.Output["status"] != "completed" {
+		t.Fatalf("status = %v, want completed", result.Output["status"])
+	}
+	if result.Output["command"] != "sh" || result.Output["actualCommand"] != "bash" {
+		t.Fatalf("command fields = %+v, want requested sh executed by bash", result.Output)
+	}
+	if result.Output["commandNormalization"] != "sh_script_requires_bash_pipestatus" {
+		t.Fatalf("commandNormalization = %v, want pipestatus normalization", result.Output["commandNormalization"])
+	}
+	stdout, _ := result.Output["stdout"].(string)
+	if strings.TrimSpace(stdout) != "first_status=1" {
+		t.Fatalf("stdout = %q, want first_status=1", stdout)
+	}
+}
+
 func TestRuntimeAdapter_ExecuteRuntimeStepWrapsCompoundCommandWithShell(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()

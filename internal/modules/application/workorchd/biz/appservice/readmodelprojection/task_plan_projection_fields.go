@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
 type taskPlanFields struct {
@@ -14,7 +13,7 @@ type taskPlanFields struct {
 	occurredAt   string
 }
 
-func taskPlanProjectionFields(decomposition readmodelcore.TaskDecomposition, step presenter.StepView, hasStep bool, occurrences map[string]string) taskPlanFields {
+func taskPlanProjectionFields(decomposition readmodelcore.TaskDecomposition, step StepView, hasStep bool, occurrences map[string]string) taskPlanFields {
 	ret := taskPlanFields{
 		anchorStepID: strings.TrimSpace(decomposition.RootStepID),
 		state:        taskPlanStateFromDecomposition(decomposition.State),

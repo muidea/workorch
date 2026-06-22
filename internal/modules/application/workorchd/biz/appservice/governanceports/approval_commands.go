@@ -3,6 +3,7 @@ package governanceports
 import (
 	"context"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
@@ -21,14 +22,21 @@ func RejectApproval(ctx context.Context, hub events.Hub, approvalID common.Appro
 }
 
 func ApproveApprovalItem(ctx context.Context, hub events.Hub, item *approvalmodel.Approval) (*approvalmodel.Approval, error) {
-	return resolveApprovalItem(ctx, hub, approvalevents.TopicApprovalCommandEnsureApproved, item)
+	return resolveApprovalItem(ctx, hub, approvalevents.TopicApprovalCommandEnsureApproved, item, nil)
 }
 
 func RejectApprovalItem(ctx context.Context, hub events.Hub, item *approvalmodel.Approval) (*approvalmodel.Approval, error) {
-	return resolveApprovalItem(ctx, hub, approvalevents.TopicApprovalCommandEnsureRejected, item)
+	return resolveApprovalItem(ctx, hub, approvalevents.TopicApprovalCommandEnsureRejected, item, nil)
 }
 
-func resolveApprovalItem(ctx context.Context, hub events.Hub, topic string, item *approvalmodel.Approval) (*approvalmodel.Approval, error) {
+func ResolveApprovalItemWithContext(ctx context.Context, hub events.Hub, item *approvalmodel.Approval, action string, resolutionContext map[string]any) (*approvalmodel.Approval, error) {
+	if action == "approve" {
+		return resolveApprovalItem(ctx, hub, approvalevents.TopicApprovalCommandEnsureApproved, item, resolutionContext)
+	}
+	return resolveApprovalItem(ctx, hub, approvalevents.TopicApprovalCommandEnsureRejected, item, resolutionContext)
+}
+
+func resolveApprovalItem(ctx context.Context, hub events.Hub, topic string, item *approvalmodel.Approval, resolutionContext map[string]any) (*approvalmodel.Approval, error) {
 	if item == nil || item.ID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -36,6 +44,7 @@ func resolveApprovalItem(ctx context.Context, hub events.Hub, topic string, item
 		ApprovalID:  item.ID,
 		WorkspaceID: item.WorkspaceID,
 		RunID:       item.RunID,
+		Context:     governancecore.CloneApprovalMap(resolutionContext),
 	})
 }
 

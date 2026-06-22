@@ -28,7 +28,7 @@ func PublishMemoryEvent(ctx context.Context, hub events.Hub, topic string, item 
 	if hub == nil || item == nil {
 		return nil
 	}
-	return hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, hub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
 		SourceModule: memoryEventSourceModule,

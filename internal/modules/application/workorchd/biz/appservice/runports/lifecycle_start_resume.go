@@ -14,6 +14,9 @@ func StartRunView(ctx context.Context, hub events.Hub, deps CompressedContextDep
 		return appmodelcore.Run{}, common.ErrInvalidArgument
 	}
 	id := common.RunID(strings.TrimSpace(runID))
+	if id == "" || common.RuntimeWorkspaceIDFromContext(ctx) == "" {
+		return appmodelcore.Run{}, common.ErrInvalidArgument
+	}
 	loadedRun, err := ReadRun(ctx, hub, id)
 	if err != nil {
 		return appmodelcore.Run{}, err
@@ -38,6 +41,9 @@ func ResumeRunView(ctx context.Context, hub events.Hub, deps CompressedContextDe
 		return appmodelcore.Run{}, common.ErrInvalidArgument
 	}
 	id := common.RunID(strings.TrimSpace(runID))
+	if id == "" || common.RuntimeWorkspaceIDFromContext(ctx) == "" {
+		return appmodelcore.Run{}, common.ErrInvalidArgument
+	}
 	patch, loadedRun, err := CompressedContextPatchForRun(ctx, deps, id)
 	if err != nil {
 		return appmodelcore.Run{}, err

@@ -16,6 +16,7 @@ const (
 	TopicOrchestratorCommandListToolCallsByRun             = "/orchestrator/command/list-tool-calls-by-run"
 	TopicOrchestratorCommandListPatchesByRun               = "/orchestrator/command/list-patches-by-run"
 	TopicOrchestratorCommandListValidationResultsByRun     = "/orchestrator/command/list-validation-results-by-run"
+	TopicOrchestratorCommandListCoverageWorkItemsByRun     = "/orchestrator/command/list-coverage-work-items-by-run"
 	TopicOrchestratorCommandListArtifactContinuationsByRun = "/orchestrator/command/list-artifact-continuations-by-run"
 
 	TopicOrchestratorDispatchStepRequested           = "/orchestrator/dispatch-step/requested"

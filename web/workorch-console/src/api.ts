@@ -1,4 +1,4 @@
-import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, Decision, DecisionPage, DoD, EventRecord, Goal, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryItemWriteRequest, MemoryRecallTrace, PatchPage, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -111,17 +111,31 @@ type RunCommandAcceptedResponse = {
   run?: Run;
 };
 
+type WorkspaceSetupDraftGenerationRequest = {
+  templateId?: string;
+  title?: string;
+  description?: string;
+  deliverableDirectory?: string;
+  draft?: WorkspaceSetupDraft;
+  dialogLanguage?: string;
+};
+
+type WorkspaceSetupDraftMessageRequest = WorkspaceSetupDraftGenerationRequest & {
+  content: string;
+};
+
 function runCommandRequestId(intent: string, workspaceId: string, runId: string) {
   const suffix = Math.random().toString(36).slice(2, 10);
   return `web-${intent}-${workspaceId || 'workspace'}-${runId || 'run'}-${Date.now()}-${suffix}`;
 }
 
-function runCommandBody(intent: string, workspaceId: string, runId: string) {
+function runCommandBody(intent: string, workspaceId: string, runId: string, executionContextPatch?: Record<string, unknown>) {
   return JSON.stringify({
     intent,
     requestId: runCommandRequestId(intent, workspaceId, runId),
     reason: 'user_requested',
-    source: 'web'
+    source: 'web',
+    executionContextPatch
   });
 }
 
@@ -197,14 +211,14 @@ export const workorchApi = {
     });
     return body.draftSession;
   },
-  appendWorkspaceSetupDraftMessage: async (sessionId: string, requestBody: { templateId?: string; title?: string; description?: string; deliverableDirectory?: string; content: string; draft?: WorkspaceSetupDraft; dialogLanguage?: string }) => {
+  appendWorkspaceSetupDraftMessage: async (sessionId: string, requestBody: WorkspaceSetupDraftMessageRequest) => {
     const body = await request<{ draftSession: WorkspaceSetupDraftSession }>(`${apiBase}/workspace-setup-draft-sessions/${encodeURIComponent(sessionId)}/messages`, {
       method: 'POST',
       body: JSON.stringify(requestBody)
     });
     return body.draftSession;
   },
-  regenerateWorkspaceSetupDraft: async (sessionId: string, requestBody: { templateId?: string; title?: string; description?: string; deliverableDirectory?: string; content?: string; draft?: WorkspaceSetupDraft; dialogLanguage?: string }) => {
+  regenerateWorkspaceSetupDraft: async (sessionId: string, requestBody: WorkspaceSetupDraftGenerationRequest) => {
     const body = await request<{ draftSession: WorkspaceSetupDraftSession }>(`${apiBase}/workspace-setup-draft-sessions/${encodeURIComponent(sessionId)}/regenerate`, {
       method: 'POST',
       body: JSON.stringify(requestBody)
@@ -212,6 +226,7 @@ export const workorchApi = {
     return body.draftSession;
   },
   deleteWorkspace: async (workspaceId: string, purge?: boolean) => {
+    // Workspace delete uses the documented query contract; the backend body path is reserved for non-browser clients.
     const suffix = purge ? `?${new URLSearchParams({ purge: 'true' }).toString()}` : '';
     await request<Record<string, never>>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}${suffix}`, {
       method: 'DELETE'
@@ -253,8 +268,15 @@ export const workorchApi = {
     });
     return body.dod;
   },
-  listRuns: async () => {
-    const body = await request<{ runs: Run[] }>(`${apiBase}/runs`);
+  checkGoalDoDQuality: async (workspaceId: string, requestBody: GoalDoDQualityCheckRequest) => {
+    const body = await request<{ qualityCheck: GoalDoDQualityCheck }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/goal-dod-quality-check`, {
+      method: 'POST',
+      body: JSON.stringify(requestBody)
+    });
+    return body.qualityCheck;
+  },
+  listRuns: async (workspaceId?: string) => {
+    const body = await request<{ runs: Run[] }>(`${apiBase}/runs${querySuffix({ workspaceId })}`);
     return body.runs ?? [];
   },
   readRunSnapshot: async (runId: string, workspaceId: string) => {
@@ -354,7 +376,7 @@ export const workorchApi = {
     const body = await request<{ eventRecords: EventRecord[] }>(`${apiBase}/events${suffix}`);
     return body.eventRecords ?? [];
   },
-  createRun: async (workspaceId: string, runId: string, goalId?: string, doDId?: string) => {
+  createRun: async (workspaceId: string, runId: string, goalId: string, doDId: string) => {
     const body = await request<{ run: Run }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/runs`, {
       method: 'POST',
       body: JSON.stringify({ runId, goalId, doDId })
@@ -364,13 +386,13 @@ export const workorchApi = {
   startRun: async (runId: string, priority: number | undefined, workspaceId: string) => {
     return request<RunCommandAcceptedResponse>(`${runPath(workspaceId, runId, 'start')}${querySuffix({ priority })}`, {
       method: 'POST',
-      body: runCommandBody('resume', workspaceId, runId)
+      body: runCommandBody('start', workspaceId, runId)
     });
   },
-  resumeRun: async (runId: string, priority: number | undefined, workspaceId: string) => {
+  resumeRun: async (runId: string, priority: number | undefined, workspaceId: string, executionContextPatch?: Record<string, unknown>) => {
     return request<RunCommandAcceptedResponse>(`${runPath(workspaceId, runId, 'resume')}${querySuffix({ priority })}`, {
       method: 'POST',
-      body: runCommandBody('resume', workspaceId, runId)
+      body: runCommandBody('resume', workspaceId, runId, executionContextPatch)
     });
   },
   resumeWorkspaceExecution: async (workspaceId: string, goalIdOrRequest?: string | WorkspaceExecutionActivationRequest, doDId?: string) => {
@@ -506,10 +528,29 @@ export const workorchApi = {
   listMemory: async (workspaceId: string, query?: string) => {
     const search = new URLSearchParams({ workspaceId });
     if (query) {
-      search.set('query', query);
+      search.set('q', query);
     }
     const body = await request<{ memory: MemoryItem[] }>(`${apiBase}/memory?${search.toString()}`);
     return body.memory ?? [];
+  },
+  createMemory: async (workspaceId: string, requestBody: MemoryItemWriteRequest) => {
+    const body = await request<{ memory: MemoryItem }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/memory`, {
+      method: 'POST',
+      body: JSON.stringify(requestBody)
+    });
+    return body.memory;
+  },
+  updateMemory: async (workspaceId: string, memoryId: string, requestBody: MemoryItemWriteRequest) => {
+    const body = await request<{ memory: MemoryItem }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/memory/${encodeURIComponent(memoryId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(requestBody)
+    });
+    return body.memory;
+  },
+  deleteMemory: async (workspaceId: string, memoryId: string) => {
+    await request<Record<string, never>>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/memory/${encodeURIComponent(memoryId)}`, {
+      method: 'DELETE'
+    });
   },
   listDecisionPage: async (query?: { workspaceId?: string; runId?: string; cursorAfterId?: string; limit?: number }) => {
     const search = new URLSearchParams();

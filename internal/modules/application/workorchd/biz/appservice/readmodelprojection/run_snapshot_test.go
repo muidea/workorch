@@ -359,6 +359,147 @@ func TestRunSnapshotFromModelsProjectsContractViolationWithoutRuntimeProgress(t 
 	}
 }
 
+func TestRunSnapshotProjectsRejectedExecutionGraphAsTaskPlan(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-rejected-graph-task-plan")
+	runID := common.RunID("run-rejected-graph-task-plan")
+	rootStepID := common.StepID("step-rejected-graph")
+	got := RunSnapshotFromModels(RunSnapshotModelInput{
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "task plan projection", State: common.WorkspaceStateRunning},
+		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		Steps: []*runmodel.Step{{
+			ID:    rootStepID,
+			RunID: runID,
+			Kind:  "llm/workspace_execution",
+			State: common.StepStateFailed,
+			Output: map[string]any{
+				"stage":                 "runtime_contract_failed",
+				"contractViolationType": "validation_evidence_required",
+				"contractViolation": map[string]any{
+					"id":               "violation-rejected-graph",
+					"sourceStepId":     string(rootStepID),
+					"violatedRule":     "concrete_validation_contract_missing",
+					"failureClass":     "runtime_failed",
+					"failureSignature": "class=runtime_failed|rule=concrete_validation_contract_missing",
+					"targetScope":      "targetRef=artifact",
+					"sourceRefs":       []any{string(rootStepID), "validation-node"},
+				},
+				"executionGraph": map[string]any{
+					"nodes": []map[string]any{{
+						"id":   "validation-node",
+						"kind": "shell/command",
+						"input": map[string]any{
+							"coverageTargets": []any{"coverage-001"},
+						},
+					}},
+				},
+			},
+		}},
+	})
+
+	if len(got.TaskPlans) != 1 {
+		t.Fatalf("TaskPlans = %+v, want rejected plan", got.TaskPlans)
+	}
+	plan := got.TaskPlans[0]
+	if plan.State != "rejected" || plan.SourceOutputState != "rejected" || plan.ViolatedRule != "concrete_validation_contract_missing" {
+		t.Fatalf("TaskPlan = %+v, want rejected contract violation plan", plan)
+	}
+	if len(plan.Nodes) != 1 || plan.Nodes[0].State != "rejected" || plan.Nodes[0].ViolatedRule != "concrete_validation_contract_missing" {
+		t.Fatalf("TaskPlan.Nodes = %+v, want rejected node with violation metadata", plan.Nodes)
+	}
+	if len(plan.Nodes[0].CoverageTargets) != 1 || plan.Nodes[0].CoverageTargets[0] != "coverage-001" {
+		t.Fatalf("TaskPlan node coverage = %+v, want projected coverage target", plan.Nodes[0].CoverageTargets)
+	}
+	if len(got.TaskProgress.Items) == 0 {
+		t.Fatalf("TaskProgress.Items empty, want raw activity retained separately")
+	}
+}
+
+func TestRunSnapshotProjectsContractRetryWithoutNewGraphAsPlanRevision(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-retry-plan-revision")
+	runID := common.RunID("run-retry-plan-revision")
+	rootStepID := common.StepID("step-original-plan")
+	retryStepID := common.StepID("step-contract-retry")
+	ticketID := common.TicketID("ticket-retry-exhausted")
+	got := RunSnapshotFromModels(RunSnapshotModelInput{
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "task retry projection", State: common.WorkspaceStateRunning},
+		Run: &runmodel.Run{
+			ID:               runID,
+			WorkspaceID:      workspaceID,
+			State:            common.RunStateBlockedOnDecision,
+			BlockingTicketID: ticketID,
+		},
+		Steps: []*runmodel.Step{
+			{
+				ID:    rootStepID,
+				RunID: runID,
+				Kind:  "llm/workspace_execution",
+				State: common.StepStateCompleted,
+				Output: map[string]any{
+					"executionGraph": map[string]any{
+						"nodes": []map[string]any{{
+							"id":   "patch-node",
+							"kind": "patch/apply",
+							"input": map[string]any{
+								"coverageWorkItemIds": []any{"cwi-001"},
+							},
+						}},
+					},
+				},
+			},
+			{
+				ID:    retryStepID,
+				RunID: runID,
+				Kind:  "llm/workspace_execution",
+				State: common.StepStateFailed,
+				Input: map[string]any{
+					"contractViolationRecovery": map[string]any{
+						"sourceStepId":     string(rootStepID),
+						"attempt":          float64(2),
+						"violatedRule":     "available_snapshot_ignored",
+						"failureClass":     "runtime_failed",
+						"failureSignature": "class=runtime_failed|rule=available_snapshot_ignored",
+						"targetScope":      "targetRef=artifact",
+					},
+				},
+				Output: map[string]any{
+					"stage":            "runtime_contract_failed",
+					"blockingTicketId": string(ticketID),
+				},
+			},
+		},
+		Decisions: []readmodelcore.Decision{{
+			ID:          string(ticketID),
+			WorkspaceID: string(workspaceID),
+			RunID:       string(runID),
+			StepID:      string(retryStepID),
+			State:       string(common.DecisionTicketStateOpen),
+		}},
+	})
+
+	if len(got.TaskPlans) != 2 {
+		t.Fatalf("TaskPlans = %+v, want original plan and retry revision", got.TaskPlans)
+	}
+	var retry readmodelcore.TaskPlan
+	for _, item := range got.TaskPlans {
+		if item.SourceProjection == "contract_violation_retry" {
+			retry = item
+			break
+		}
+	}
+	if retry.SourceProjection != "contract_violation_retry" ||
+		retry.State != "blocked_on_decision" ||
+		retry.RetryOf != string(rootStepID) ||
+		retry.RetryAttempt != 2 ||
+		retry.ViolatedRule != "available_snapshot_ignored" ||
+		retry.BlockingTicketID != string(ticketID) {
+		t.Fatalf("retry TaskPlan = %+v, want blocked retry revision with lineage", retry)
+	}
+}
+
 func TestRunSnapshotFromModelsProjectsRuntimeExecutionWorkerLostGap(t *testing.T) {
 	t.Parallel()
 

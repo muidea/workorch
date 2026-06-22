@@ -1,6 +1,8 @@
 package bootstrap
 
 import (
+	"context"
+
 	magictask "github.com/muidea/magicCommon/task"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	gitmodule "github.com/muidea/workorch/internal/modules/blocks/git"
@@ -21,6 +23,7 @@ import (
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	skillmodule "github.com/muidea/workorch/internal/modules/kernel/skill"
 	soulmodule "github.com/muidea/workorch/internal/modules/kernel/soul"
+	systemmodule "github.com/muidea/workorch/internal/modules/kernel/system"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -104,6 +107,13 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 		Capabilities: repos.mcpCapability,
 		EventHub:     eventHub,
 	}))
+	systemModule := systemmodule.New()
+	mustSetup("system", systemModule.Configure(systemmodule.Dependencies{
+		Souls:           repos.soul,
+		Templates:       repos.workspaceTemplate,
+		MCPServers:      repos.mcpServer,
+		MCPCapabilities: repos.mcpCapability,
+	}))
 	mcpBlockModule := mcpblockmodule.New()
 	mustSetup("mcp-block", mcpBlockModule.Configure(mcpblockmodule.Dependencies{
 		EventHub:   eventHub,
@@ -157,6 +167,7 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 		Patches:               repos.patch,
 		ValidationResults:     repos.validationResult,
 		RuntimeCheckpoints:    repos.runtimeCheckpoint,
+		CoverageWorkItems:     repos.coverageWorkItem,
 		ArtifactContinuations: repos.artifactContinuation,
 		RuntimePolicy:         runtimePolicy,
 		EventHub:              eventHub,
@@ -188,6 +199,11 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 		memoryModule,
 		skillModule,
 		mcpModule,
+		contextStartLifecycle{
+			id:    systemModule.ID(),
+			start: systemModule.Start,
+			stop:  systemModule.Stop,
+		},
 		mcpBlockModule,
 		eventStreamModule,
 		workspaceModule,
@@ -225,6 +241,7 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 				Patches:               repos.patch,
 				ValidationResults:     repos.validationResult,
 				RuntimeCheckpoints:    repos.runtimeCheckpoint,
+				CoverageWorkItems:     repos.coverageWorkItem,
 				ArtifactContinuations: repos.artifactContinuation,
 				Tickets:               repos.ticket,
 				Resolutions:           repos.resolution,
@@ -246,6 +263,28 @@ func mustSetup(name string, err error) {
 	if err != nil {
 		panic("setup module " + name + ": " + err.Error())
 	}
+}
+
+type contextStartLifecycle struct {
+	id    string
+	start func(context.Context) error
+	stop  func(context.Context) error
+}
+
+func (l contextStartLifecycle) ID() string { return l.id }
+
+func (l contextStartLifecycle) Start() error {
+	if l.start == nil {
+		return nil
+	}
+	return l.start(context.Background())
+}
+
+func (l contextStartLifecycle) Stop(ctx context.Context) error {
+	if l.stop == nil {
+		return nil
+	}
+	return l.stop(ctx)
 }
 
 func buildRuntimeAdapterRegistry(eventHub events.Hub) (*orchestratormodule.RuntimeAdapterRegistry, error) {

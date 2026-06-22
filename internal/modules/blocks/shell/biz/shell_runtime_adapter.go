@@ -485,14 +485,15 @@ func normalizeShellExecutionCommand(command string, args []string) (string, []st
 	if shellCommandRequiresInlineShell(command, args) {
 		return "sh", []string{"-c", shellCommandInlineScript(command, args)}, "compound_command_wrapped_with_sh_c"
 	}
-	if !shellCommandRequiresBash(command, args) {
+	bashReason := shellCommandBashNormalizationReason(command, args)
+	if bashReason == "" {
 		return command, args, ""
 	}
 	bashPath, err := exec.LookPath("bash")
 	if err != nil {
 		return command, args, ""
 	}
-	return bashPath, args, "sh_script_requires_bash_pipefail"
+	return bashPath, args, bashReason
 }
 
 func shellCommandRequiresInlineShell(command string, args []string) bool {
@@ -555,15 +556,22 @@ func shellQuoteCommandToken(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
-func shellCommandRequiresBash(command string, args []string) bool {
+func shellCommandBashNormalizationReason(command string, args []string) string {
 	if filepath.Base(strings.TrimSpace(command)) != "sh" {
-		return false
+		return ""
 	}
 	script, ok := inlineShellScript(args)
 	if !ok {
-		return false
+		return ""
 	}
-	return strings.Contains(strings.ToLower(script), "pipefail")
+	normalized := strings.ToLower(script)
+	if strings.Contains(normalized, "pipefail") {
+		return "sh_script_requires_bash_pipefail"
+	}
+	if strings.Contains(script, "${PIPESTATUS") || strings.Contains(script, "${PIPESTATUS[") {
+		return "sh_script_requires_bash_pipestatus"
+	}
+	return ""
 }
 
 func inlineShellScript(args []string) (string, bool) {

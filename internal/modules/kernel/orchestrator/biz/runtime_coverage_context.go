@@ -236,6 +236,129 @@ func coverageWorkItemContextFromInput(input map[string]any) map[string]any {
 	return nil
 }
 
+func coverageWorkItemContextAlignedToFocus(context map[string]any, focus map[string]any) map[string]any {
+	if len(context) == 0 || len(focus) == 0 {
+		return context
+	}
+	matches := coverageWorkItemContextFocusMatches(context, focus)
+	if len(matches) == 0 {
+		return context
+	}
+	ret := cloneStepPayload(context)
+	ret["currentFocus"] = coverageWorkItemFocusWithActiveFocus(matches[0], focus)
+	ret["currentFocusItems"] = coverageWorkItemContextAlignedFocusItems(context, focus, matches)
+	ret["ledgerSummary"] = coverageWorkItemContextAlignedLedger(mapSliceFromValue(context["ledgerSummary"]), focus)
+	ret["focusAlignmentPolicy"] = "coverageWorkItemContext currentFocus is aligned to active coverageFocus before runtime dispatch"
+	ret["focusAligned"] = true
+	return ret
+}
+
+func coverageWorkItemContextFocusMatches(context map[string]any, focus map[string]any) []map[string]any {
+	if len(context) == 0 || len(focus) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0)
+	seen := map[string]bool{}
+	add := func(item map[string]any) {
+		if len(item) == 0 || !coverageWorkItemMatchesFocus(item, focus) {
+			return
+		}
+		key := firstNonEmptyString(
+			stringFromMap(item, "id"),
+			stringFromMap(item, "coverageWorkItemId"),
+			stringFromMap(item, "sourceRequirementId"),
+			stringFromMap(item, "normalizedSourceKey"),
+			stringFromMap(item, "targetText"),
+		)
+		if key == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		ret = append(ret, item)
+	}
+	for _, item := range coverageWorkItemContextItems(context) {
+		add(item)
+	}
+	return ret
+}
+
+func coverageWorkItemFocusWithActiveFocus(item map[string]any, focus map[string]any) map[string]any {
+	ret := coverageWorkItemFocus(item)
+	if len(ret) == 0 {
+		ret = cloneStepPayload(item)
+	}
+	if len(ret) == 0 {
+		ret = cloneStepPayload(focus)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	for _, key := range []string{"coverageWorkItemIds", "targetRefs", "requiredEvidenceKinds", "acceptedEvidenceRefs", "rejectedEvidenceRefs"} {
+		if value, ok := focus[key]; ok && value != nil {
+			ret[key] = cloneStepInputValue(value)
+		}
+	}
+	if id := strings.TrimSpace(stringFromMap(focus, "id")); id != "" {
+		ret["activeCoverageFocusId"] = id
+	}
+	ret["focusScoped"] = true
+	return ret
+}
+
+func coverageWorkItemContextAlignedFocusItems(context map[string]any, focus map[string]any, matches []map[string]any) []map[string]any {
+	ret := make([]map[string]any, 0, 3)
+	seen := map[string]bool{}
+	add := func(item map[string]any, current bool) {
+		if len(item) == 0 || len(ret) >= 3 {
+			return
+		}
+		key := firstNonEmptyString(
+			stringFromMap(item, "id"),
+			stringFromMap(item, "coverageWorkItemId"),
+			stringFromMap(item, "sourceRequirementId"),
+			stringFromMap(item, "normalizedSourceKey"),
+			stringFromMap(item, "targetText"),
+		)
+		if key != "" && seen[key] {
+			return
+		}
+		if key != "" {
+			seen[key] = true
+		}
+		if current {
+			ret = append(ret, coverageWorkItemFocusWithActiveFocus(item, focus))
+			return
+		}
+		ret = append(ret, cloneStepPayload(item))
+	}
+	for _, item := range matches {
+		add(item, true)
+	}
+	for _, item := range mapSliceFromValue(context["currentFocusItems"]) {
+		add(item, false)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func coverageWorkItemContextAlignedLedger(items []map[string]any, focus map[string]any) []map[string]any {
+	if len(items) == 0 || len(focus) == 0 {
+		return items
+	}
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		next := cloneStepPayload(item)
+		if coverageWorkItemMatchesFocus(next, focus) {
+			next["omittedFromCurrentFocus"] = false
+			delete(next, "omittedReason")
+		}
+		ret = append(ret, next)
+	}
+	return ret
+}
+
 func coverageWorkItemPrimaryFocus(context map[string]any) map[string]any {
 	if focus := mapFromValue(context["currentFocus"]); len(focus) > 0 {
 		return focus

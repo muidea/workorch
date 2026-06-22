@@ -1,14 +1,20 @@
 # WorkOrch Full-Chain Assessment Closure Audit
 
-Status: active
+Status: superseded-by-runtime-contract-retry-audit
 
 Type: audit
 
-Last Updated: 2026-05-29
+Last Updated: 2026-06-22
 
 ## Purpose
 
 本文承接 WorkOrch 全链路评估中的审计性内容，聚焦跨层缺口、收口方向和已确认风险，不再把它作为主计划文档使用。
+
+Current tracking note: this historical audit is retained as a source record.
+Active runtime-contract convergence closure is tracked in
+`../../70-roadmap/active/runtime-contract-retry-full-chain-audit-plan.md` and
+`../../70-roadmap/active/runtime-contract-retry-convergence-closure-plan.md`.
+Do not use this document alone as an active code-closure backlog.
 
 ## Cross-Layer Audit Scope
 

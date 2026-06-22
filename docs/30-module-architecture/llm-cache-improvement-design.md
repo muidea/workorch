@@ -17,19 +17,21 @@ Related:
 本文是 workorch LLM 缓存能力的改进设计文档。目标不是在 core runtime 中写入 provider 私有字段，而是在保持
 `runtime-request-cache-note.md` provider-neutral 约束的前提下，补齐 provider-facing request 的缓存能力映射、观测与验证。
 
-当前代码已经具备以下基础：
+当前代码已经具备以下能力：
 
 - runtime 生成 `ProviderCachePlan`、`ProviderAdapterCacheHint`、`stablePrefixHash`、`workspaceDefinitionHash`、`cacheKey` 等 provider-neutral 审计字段。
 - `buildProviderFacingPrompt` 已经把连续的 `C0` / `C1` / `C2` 渲染为第一段 provider-facing stable prefix。
 - LLM usage 已经可以记录 provider 原生 cache token 字段；provider 未返回时按 cache plan 估算。
+- provider config 已显式承载 `apiSurface`、`cacheMode`、`promptCacheKey`、`messageCacheControl`、`cacheUsageFields`，并映射为 `ProviderCacheCapability`。
+- `HTTPProvider` 已按 OpenAI-compatible HTTP 与 Anthropic-compatible HTTP 两套 wire contract 构造 request；未知 HTTP surface 在提交前失败。
+- provider-facing cache marker 已按 capability gate 下传；未声明能力的 compatible endpoint 默认不收到未知私有 cache 字段。
+- `runtime_adapter` 已输出 `cacheMarkersSent`、`RenderedStablePrefixHash`、provider-native / estimated `cacheUsage`，read model 已消费这些字段生成 LLM usage projection。
 
-仍需补齐的是：
+2026-06-22 收口后，原 P0/P1/P2/P3 主路径已完成代码落地和定向测试。后续仍可继续完善的是：
 
-- 不同调用面和 cache capability 没有统一描述和验证。
-- HTTP compatible 路径没有明确区分 OpenAI-compatible / Anthropic-compatible wire contract，也没有明确的 cache marker 下传策略。
-- Anthropic SDK 路径已有 `cache_control`，但缺少统一可观测字段和策略化开关。
-- OpenAI SDK 路径尚未明确如何使用 `prompt_cache_key`。
-- 请求渲染后的 stable prefix 与 cache plan 缺少一致性校验。
+- OpenAI SDK Chat Completions path 是否有稳定、受 SDK 支持的 `prompt_cache_key` wire 承载方式；当前实现只记录 `promptCacheKeyUnsupported=true`，不伪造字段。
+- 新增 provider surface 或代理透传能力时，为该 surface 补 focused wire-level test。
+- 根据真实运行数据决定是否需要 P4 的 adapter 拆分、cache 预热或跨 run cache key；这些都不是当前默认行为。
 
 ## Current State Analysis
 

@@ -130,7 +130,11 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
-	if workspaceID := workspaceScopedWorkspaceID(envelope); workspaceID != "" {
+	workspaceID, err := workspaceCommandWorkspaceScope(envelope)
+	if err != nil {
+		return err
+	}
+	if workspaceID != "" {
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	}
 	switch envelope.Topic {
@@ -580,12 +584,42 @@ func stringPayload(payload map[string]any, key string) string {
 	return value
 }
 
-func workspaceScopedWorkspaceID(envelope events.Envelope) common.WorkspaceID {
+func workspaceCommandWorkspaceScope(envelope events.Envelope) (common.WorkspaceID, error) {
 	workspaceID := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
-	if workspaceID == "" {
-		workspaceID = common.WorkspaceID(envelope.WorkspaceID)
+	commandWorkspaceID := workspaceIDFromCommandPayload(envelope.Payload[events.PayloadKeyCommand])
+	if workspaceID != "" && commandWorkspaceID != "" && workspaceID != commandWorkspaceID {
+		return "", common.ErrConflict
 	}
-	return workspaceID
+	if workspaceID == "" {
+		workspaceID = commandWorkspaceID
+	}
+	envelopeWorkspaceID := common.WorkspaceID(envelope.WorkspaceID)
+	if workspaceID != "" && envelopeWorkspaceID != "" && workspaceID != envelopeWorkspaceID {
+		return "", common.ErrConflict
+	}
+	if workspaceID == "" {
+		workspaceID = envelopeWorkspaceID
+	}
+	return workspaceID, nil
+}
+
+func workspaceIDFromCommandPayload(command any) common.WorkspaceID {
+	switch cmd := command.(type) {
+	case workspacecontracts.CreateWorkspaceCommand:
+		return cmd.WorkspaceID
+	case workspacecontracts.EnsureWorkspaceCommand:
+		return cmd.WorkspaceID
+	case workspacecontracts.UpdateWorkspaceCommand:
+		return cmd.WorkspaceID
+	case workspacecontracts.DeleteWorkspaceCommand:
+		return cmd.WorkspaceID
+	case workspacecontracts.DefineGoalCommand:
+		return cmd.WorkspaceID
+	case workspacecontracts.DefineDoDCommand:
+		return cmd.WorkspaceID
+	default:
+		return ""
+	}
 }
 
 func stringSlicePayload(payload map[string]any, key string) []string {

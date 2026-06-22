@@ -24,6 +24,9 @@ func (r *resultSubsystem) recordRunResultFromDoDAssessment(
 	if r == nil || run == nil || step == nil || r.evidence.Results == nil || !requiresDoDAssessmentCompletionGate(run) {
 		return nil
 	}
+	if err := ensureRunCanRecordFormalResult(run); err != nil {
+		return err
+	}
 	assessment := doDAssessmentFromOutput(output)
 	if assessment == nil {
 		return nil
@@ -37,6 +40,9 @@ func (r *resultSubsystem) recordRunResultFromDoDAssessment(
 }
 
 func (r *resultSubsystem) recordRejectedCompletionDoDAssessment(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any) error {
+	if err := ensureRunCanRecordFormalResult(run); err != nil {
+		return err
+	}
 	assessment := doDAssessmentFromOutput(output)
 	if assessment == nil {
 		assessment = syntheticRejectedDoDAssessment(run, step, output)
@@ -129,6 +135,9 @@ func (r *resultSubsystem) recordRunResultFromValidatedDoDAssessment(
 ) error {
 	if r == nil || run == nil || step == nil || r.evidence.Results == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
 		return nil
+	}
+	if err := ensureRunCanRecordFormalResult(run); err != nil {
+		return err
 	}
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
@@ -268,9 +277,9 @@ func (r *resultSubsystem) recordRunResultFromValidatedDoDAssessment(
 		if err := r.evidence.Results.Update(ctx, existing); err != nil {
 			return err
 		}
-		return r.publishResultAccepted(ctx, existing)
+		return r.publishResultEvent(ctx, existing)
 	}
-	return r.publishResultAccepted(ctx, item)
+	return r.publishResultEvent(ctx, item)
 }
 
 func (o *RuntimeOrchestrator) recordCoverageProgressFromCompletionAssessment(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any) error {
@@ -295,8 +304,8 @@ func (o *RuntimeOrchestrator) recordCoverageProgressFromCompletionAssessment(ctx
 	if err := validateDoDAssessmentEvidenceQuality(ctx, o.steps, o.evidence, run, assessment); err != nil {
 		return err
 	}
-	if o.coverageLedger().updateFromAssessment(run, step, assessment) && o.runs != nil {
-		if err := o.runs.Update(ctx, run); err != nil {
+	if o.coverageLedger().updateFromAssessment(run, step, assessment, ctx) && o.runs != nil {
+		if err := o.persistRunProgressUpdate(ctx, run); err != nil {
 			return err
 		}
 	}
@@ -306,6 +315,9 @@ func (o *RuntimeOrchestrator) recordCoverageProgressFromCompletionAssessment(ctx
 func (r *resultSubsystem) recordAcceptedSliceResultsFromRun(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
 	if r == nil || run == nil || step == nil || r.evidence.Results == nil {
 		return nil
+	}
+	if err := ensureRunCanRecordFormalResult(run); err != nil {
+		return err
 	}
 	slices := mapSliceFromValue(run.ExecutionContext[acceptanceSlicesKey])
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
@@ -439,9 +451,9 @@ func (r *resultSubsystem) recordAcceptedSliceResult(
 		if err := r.evidence.Results.Update(ctx, existing); err != nil {
 			return err
 		}
-		return r.publishResultAccepted(ctx, existing)
+		return r.publishResultEvent(ctx, existing)
 	}
-	return r.publishResultAccepted(ctx, item)
+	return r.publishResultEvent(ctx, item)
 }
 
 func acceptanceSliceResultIDPart(sliceID string) string {
@@ -462,6 +474,9 @@ func (r *resultSubsystem) recordRunResultFromRejectedDoDAssessment(
 ) error {
 	if r == nil || run == nil || step == nil || r.evidence.Results == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
 		return nil
+	}
+	if err := ensureRunCanRecordFormalResult(run); err != nil {
+		return err
 	}
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
@@ -509,9 +524,9 @@ func (r *resultSubsystem) recordRunResultFromRejectedDoDAssessment(
 		if err := r.evidence.Results.Update(ctx, existing); err != nil {
 			return err
 		}
-		return r.publishResultAccepted(ctx, existing)
+		return r.publishResultEvent(ctx, existing)
 	}
-	return r.publishResultAccepted(ctx, item)
+	return r.publishResultEvent(ctx, item)
 }
 
 func rejectedResultSourceAndEvidenceRefs(step *runModel.Step, evidenceRefs []string) (string, []string) {
@@ -684,6 +699,9 @@ func (r *resultSubsystem) recordCompletionEvidenceFromValidatedDoDAssessment(
 	summary string,
 	workspace *workspaceModel.Workspace,
 ) error {
+	if err := ensureRunCanRecordFormalResult(run); err != nil {
+		return err
+	}
 	return runParallel(
 		func() error {
 			return r.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace)
@@ -698,4 +716,14 @@ func (r *resultSubsystem) recordCompletionEvidenceFromValidatedDoDAssessment(
 			return r.recordValidationCommandMemoriesFromValidatedDoDAssessment(ctx, run, step, assessment)
 		},
 	)
+}
+
+func ensureRunCanRecordFormalResult(run *runModel.Run) error {
+	if run == nil {
+		return nil
+	}
+	if run.State == common.RunStateCreated {
+		return common.ErrConflict
+	}
+	return nil
 }

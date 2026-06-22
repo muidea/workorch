@@ -2,11 +2,9 @@ package readmodelprojection
 
 import (
 	"strings"
-
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
-func stepByID(steps []presenter.StepView, stepID string) *presenter.StepView {
+func stepByID(steps []StepView, stepID string) *StepView {
 	stepID = strings.TrimSpace(stepID)
 	if stepID == "" {
 		return nil

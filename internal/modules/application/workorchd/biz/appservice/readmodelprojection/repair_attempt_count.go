@@ -1,8 +1,6 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
-
-func repairAttemptProjection(steps []presenter.StepView) (count int, lastAttempt int, lastStepID string) {
+func repairAttemptProjection(steps []StepView) (count int, lastAttempt int, lastStepID string) {
 	for _, step := range steps {
 		if !readModelBoolValue(step.Input["runtimeRepairFollowUp"]) {
 			continue

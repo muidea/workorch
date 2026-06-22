@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
 func repairFailureProjectionFromCheckpoint(checkpoint readmodelcore.RuntimeCheckpoint) *repairFailureProjection {
@@ -23,7 +22,7 @@ func repairFailureProjectionFromCheckpoint(checkpoint readmodelcore.RuntimeCheck
 	}
 }
 
-func repairFailureProjectionFromStep(step presenter.StepView) *repairFailureProjection {
+func repairFailureProjectionFromStep(step StepView) *repairFailureProjection {
 	class := strings.TrimSpace(readModelStringValue(step.Output["failureClass"]))
 	signature := strings.TrimSpace(readModelStringValue(step.Output["failureSignature"]))
 	if class == "" && signature == "" {

@@ -67,7 +67,7 @@ func (o *RuntimeOrchestrator) failRunningResume(ctx context.Context, runID commo
 	if cause == nil {
 		return nil
 	}
-	current, getErr := o.runs.Get(ctx, runID)
+	current, getErr := o.runtimeEventRun(ctx, runID)
 	if getErr != nil {
 		return errors.Join(cause, getErr)
 	}

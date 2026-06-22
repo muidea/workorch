@@ -842,46 +842,31 @@ func TestRuntimePatchRequestRejectsEmptyFileWriteContent(t *testing.T) {
 	}
 }
 
-func TestRuntimePatchRequestRejectsNonSubstantivePatchPlaceholder(t *testing.T) {
-	_, err := runtimePatchRequestFromMap(map[string]any{
-		"patchType": "file_write",
-		"targetRef": "logger.go",
-		"summary":   "添加注释以确保补丁节点存在",
-		"content": `package main
-
-import "fmt"
-
-// LogMessage prints a message to stdout
-func LogMessage(msg string) {
-	fmt.Println(msg)
-}
-`,
-	})
-	if err == nil || !strings.Contains(err.Error(), "non-substantive state-change placeholder") {
-		t.Fatalf("runtimePatchRequestFromMap error = %v, want non-substantive patch error", err)
+func TestRuntimePatchRequestRejectsDeclaredNonSubstantivePatch(t *testing.T) {
+	cases := []struct {
+		name  string
+		extra map[string]any
+	}{
+		{name: "explicit non-substantive", extra: map[string]any{"nonSubstantive": true}},
+		{name: "zero work", extra: map[string]any{"zeroWork": true}},
+		{name: "substantive false", extra: map[string]any{"substantive": false}},
+		{name: "meaningful change false", extra: map[string]any{"meaningfulChange": false}},
 	}
-}
-
-func TestRuntimePatchRequestRejectsContractConvergenceMarkerPatch(t *testing.T) {
-	_, err := runtimePatchRequestFromMap(map[string]any{
-		"patchType": "unified_diff",
-		"targetRef": "config.yaml",
-		"summary":   "为满足修复收敛契约执行最小状态变更，新增注释且不改变运行语义",
-		"diff":      "--- a/config.yaml\n+++ b/config.yaml\n@@ -1,2 +1,3 @@\n+# runtime-repair: bounded state change for strategy reassessment convergence\n listen_addr: \":8080\"\n",
-	})
-	if err == nil || !strings.Contains(err.Error(), "non-substantive state-change placeholder") {
-		t.Fatalf("runtimePatchRequestFromMap error = %v, want contract marker patch rejection", err)
-	}
-}
-
-func TestRuntimePatchRequestRejectsVerificationAnchorPatch(t *testing.T) {
-	_, err := runtimePatchRequestFromMap(map[string]any{
-		"patchType": "unified_diff",
-		"targetRef": "main.go",
-		"summary":   "在失败目标 main.go 上做最小状态变更，并为严格收敛修复提供有界验证锚点",
-		"diff":      "--- a/main.go\n+++ b/main.go\n@@ -1,2 +1,3 @@\n package main\n+\n+// state-change anchor for verification\n",
-	})
-	if err == nil || !strings.Contains(err.Error(), "non-substantive state-change placeholder") {
-		t.Fatalf("runtimePatchRequestFromMap error = %v, want verification anchor patch rejection", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := map[string]any{
+				"patchType": "file_write",
+				"targetRef": "target.txt",
+				"summary":   "declared patch quality metadata",
+				"content":   "concrete content\n",
+			}
+			for key, value := range tc.extra {
+				input[key] = value
+			}
+			_, err := runtimePatchRequestFromMap(input)
+			if err == nil || !strings.Contains(err.Error(), "non-substantive state-change placeholder") {
+				t.Fatalf("runtimePatchRequestFromMap error = %v, want declared non-substantive patch rejection", err)
+			}
+		})
 	}
 }

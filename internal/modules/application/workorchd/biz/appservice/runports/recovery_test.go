@@ -558,6 +558,13 @@ func TestRecoverStaleRuntimeGapRunViewsNoEligibleGapUsesBoundedReads(t *testing.
 
 	hub.Subscribe(runevents.TopicRunCommandList, func(_ context.Context, envelope events.Envelope) error {
 		listRunsCalls++
+		if compact, _ := envelope.Payload[events.PayloadKeyCompact].(bool); !compact {
+			t.Fatalf("run list compact = %v, want true for watchdog candidate scan", envelope.Payload[events.PayloadKeyCompact])
+		}
+		states, _ := envelope.Payload[events.PayloadKeyStates].([]string)
+		if len(states) != 1 || states[0] != string(common.RunStateRunning) {
+			t.Fatalf("run list states = %+v, want running-only watchdog candidate scan", envelope.Payload[events.PayloadKeyStates])
+		}
 		return events.Response(events.Envelope{
 			Topic: envelope.Topic + "/response",
 			Payload: map[string]any{

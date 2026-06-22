@@ -138,6 +138,13 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	}
 	injectRuntimeEvidencePolicies(runtimeInput, run.ExecutionContext)
 	recoveryPolicy := runtimemodel.RuntimeRecoveryPolicyFromInput(runtimeInput)
+	if _, err := ensureRuntimeValidationScratchDir(runtimeInput); err != nil {
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, map[string]any{
+			"status": "failed",
+			"stage":  "runtime_validation_scratch_prepare_failed",
+			"error":  err.Error(),
+		}, "runtime validation scratch prepare failed", err)
+	}
 	request := runtimemodel.StepExecutionRequest{
 		WorkspaceID:                   run.WorkspaceID,
 		WorkspaceDeliverableDirectory: workspace.DeliverableDirectory,
@@ -279,8 +286,8 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 	if err := o.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}
-	if o.coverageLedger().updateFromCompletedStep(run, step) && o.runs != nil {
-		if err := o.runs.Update(ctx, run); err != nil {
+	if o.coverageLedger().updateFromCompletedStep(run, step, ctx) && o.runs != nil {
+		if err := o.persistRunProgressUpdate(ctx, run); err != nil {
 			return err
 		}
 	}
@@ -422,8 +429,8 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 	if err := validateDoDAssessmentEvidenceQuality(ctx, o.steps, o.evidence, run, assessment); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
-	if o.coverageLedger().updateFromAssessment(run, step, assessment) && o.runs != nil {
-		if err := o.runs.Update(ctx, run); err != nil {
+	if o.coverageLedger().updateFromAssessment(run, step, assessment, ctx) && o.runs != nil {
+		if err := o.persistRunProgressUpdate(ctx, run); err != nil {
 			return err
 		}
 	}
@@ -431,12 +438,12 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 		return err
 	}
 	if changed, bound := o.reconcileCoverageValidationEvidence(ctx, run); changed && o.runs != nil {
-		if err := o.runs.Update(ctx, run); err != nil {
+		if err := o.persistRunProgressUpdate(ctx, run); err != nil {
 			return err
 		}
 		logCoverageReconcilerBinding(run.ID, bound)
 	}
-	if err := o.coverageLedger().validateReadyForAcceptance(run); err != nil {
+	if err := o.coverageLedger().validateReadyForAcceptance(run, ctx); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
 	if err := o.resultManager().recordCompletionEvidenceFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace); err != nil {
@@ -568,7 +575,7 @@ func (o *RuntimeOrchestrator) currentRunForRuntimeStepResult(ctx context.Context
 	if o == nil || o.runs == nil || run == nil || step == nil || run.ID == "" || step.ID == "" {
 		return nil, false, common.ErrInvalidArgument
 	}
-	current, err := o.runs.Get(ctx, run.ID)
+	current, err := o.runs.GetByWorkspaceID(ctx, run.WorkspaceID, run.ID)
 	if err != nil {
 		return nil, false, err
 	}

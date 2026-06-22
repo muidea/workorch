@@ -41,6 +41,7 @@ type Dependencies struct {
 	Patches               repository.PatchRepository
 	ValidationResults     repository.ValidationResultRepository
 	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
+	CoverageWorkItems     repository.CoverageWorkItemRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository
 	RuntimePolicy         orchestratorbiz.RuntimePolicy
 	EventHub              events.Hub
@@ -68,6 +69,7 @@ func (m *Module) Configure(deps Dependencies) error {
 		deps.Patches == nil ||
 		deps.ValidationResults == nil ||
 		deps.RuntimeCheckpoints == nil ||
+		deps.CoverageWorkItems == nil ||
 		deps.ArtifactContinuations == nil ||
 		deps.EventHub == nil {
 		return common.ErrInvalidArgument
@@ -87,6 +89,7 @@ func (m *Module) Configure(deps Dependencies) error {
 			Patches:               deps.Patches,
 			ValidationResults:     deps.ValidationResults,
 			RuntimeCheckpoints:    deps.RuntimeCheckpoints,
+			CoverageWorkItems:     deps.CoverageWorkItems,
 			ArtifactContinuations: deps.ArtifactContinuations,
 			MemoryItems:           memoryEventRepository{hub: deps.EventHub},
 			MemoryRecallTraces:    memoryRecallTraceEventRepository{hub: deps.EventHub},
@@ -148,6 +151,7 @@ func (m *Module) Start() error {
 		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListToolCallsByRun, m.handleEvidenceReadCommand),
 		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListPatchesByRun, m.handleEvidenceReadCommand),
 		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun, m.handleEvidenceReadCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun, m.handleEvidenceReadCommand),
 		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun, m.handleEvidenceReadCommand),
 		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorDispatchStepRequested, m.handleDispatchStepRequested),
 		m.eventHub.Subscribe(runtimeevent.TopicRuntimeBlockExecuteProgress, m.handleRuntimeProgressEvent),
@@ -644,6 +648,11 @@ func (m *Module) handleEvidenceReadCommand(ctx context.Context, envelope events.
 			return common.ErrInvalidArgument
 		}
 		items, err = evidence.ValidationResults.ListByRun(ctx, runID)
+	case orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun:
+		if evidence.CoverageWorkItems == nil {
+			return common.ErrInvalidArgument
+		}
+		items, err = evidence.CoverageWorkItems.ListByRun(ctx, runID)
 	case orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun:
 		if evidence.ArtifactContinuations == nil {
 			return common.ErrInvalidArgument

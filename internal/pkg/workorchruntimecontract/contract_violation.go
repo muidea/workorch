@@ -29,6 +29,10 @@ type ContractViolation struct {
 	Recoverability       string             `json:"recoverability,omitempty"`
 	RetryHint            string             `json:"retryHint,omitempty"`
 	ForbiddenRepeat      []string           `json:"forbiddenRepeat,omitempty"`
+	CorrectionProfileID  string             `json:"correctionProfileId,omitempty"`
+	CorrectionMode       string             `json:"correctionMode,omitempty"`
+	CorrectionContract   map[string]any     `json:"correctionContract,omitempty"`
+	TargetScope          string             `json:"targetScope,omitempty"`
 	SourceRefs           []string           `json:"sourceRefs,omitempty"`
 	Attempt              int                `json:"attempt,omitempty"`
 	MaxAttempts          int                `json:"maxAttempts,omitempty"`

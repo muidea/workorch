@@ -26,7 +26,7 @@ func DecisionPage(ctx context.Context, hub events.Hub, traces governancecore.Aut
 		if err != nil {
 			return appmodelcore.DecisionPage{}, err
 		}
-		decisions = append(decisions, readmodelprojection.ProjectDecisionView(readmodelprojection.MapDecision(item, resolutionMap[item.ID], summary)))
+		decisions = append(decisions, readmodelprojection.ProjectDecisionView(readmodelprojection.MapDecision(item, resolutionMap[decisionResolutionMapKey(item)], summary)))
 	}
 	return appmodelcore.DecisionPage{
 		WorkspaceID:       strings.TrimSpace(query.WorkspaceID),

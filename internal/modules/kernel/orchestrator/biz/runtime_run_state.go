@@ -49,6 +49,7 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 		successorContext["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(history, 6)
 	}
 	delete(successorContext, "replanContinuation")
+	resetConvergenceBudgetForReplanSuccessor(successorContext)
 	replanContext := map[string]any{
 		"predecessorRunId": string(run.ID),
 		"reason":           "decision_replan",
@@ -89,7 +90,7 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 	if successor.InitialStepKind == "" {
 		successor.InitialStepKind = initialStepKind(run)
 	}
-	o.coverageLedger().prepareReplanSuccessor(successor)
+	o.coverageLedger().prepareReplanSuccessor(successor, ctx)
 	if contract := o.convergenceManager().build(successor, nil, nil, map[string]any{"input": successor.ExecutionContext}, nil); contract.State != "" {
 		successor.ExecutionContext["convergenceContract"] = o.convergenceManager().compact(contract)
 	}
@@ -189,7 +190,7 @@ func localizedRuntimeRetentionPolicy(language string) string {
 }
 
 func (o *RuntimeOrchestrator) closeRun(ctx context.Context, runID common.RunID, state common.RunState, reason string) error {
-	r, err := o.runs.Get(ctx, runID)
+	r, err := o.runtimeEventRun(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -292,6 +293,45 @@ func isTerminalRunState(state common.RunState) bool {
 	default:
 		return false
 	}
+}
+
+func isActiveRunProgressState(state common.RunState) bool {
+	switch state {
+	case common.RunStateCreated, common.RunStateRunning, common.RunStateValidating:
+		return true
+	default:
+		return false
+	}
+}
+
+func (o *RuntimeOrchestrator) persistRunProgressUpdate(ctx context.Context, run *runModel.Run) error {
+	if o == nil || o.runs == nil || run == nil {
+		return common.ErrInvalidArgument
+	}
+	readCtx := ctx
+	if run.WorkspaceID != "" {
+		readCtx = common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID)
+	}
+	current, err := o.runtimeEventRun(readCtx, run.ID)
+	if err == nil && current != nil {
+		preserveRunLifecycleForProgressUpdate(run, current)
+	} else if err != nil && !errors.Is(err, common.ErrNotFound) {
+		return err
+	}
+	return o.runs.Update(ctx, run)
+}
+
+func preserveRunLifecycleForProgressUpdate(next *runModel.Run, current *runModel.Run) {
+	if next == nil || current == nil {
+		return
+	}
+	if current.BlockingTicketID == "" && current.BlockingApprovalID == "" && isActiveRunProgressState(current.State) {
+		return
+	}
+	next.State = current.State
+	next.BlockingTicketID = current.BlockingTicketID
+	next.BlockingApprovalID = current.BlockingApprovalID
+	next.FailureReason = current.FailureReason
 }
 
 func runParallel(tasks ...func() error) error {

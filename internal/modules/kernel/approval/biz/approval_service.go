@@ -48,7 +48,7 @@ func (s *Service) CreateApproval(ctx context.Context, cmd approvalcontracts.Crea
 	if s.eventHub == nil {
 		return nil
 	}
-	return s.eventHub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, s.eventHub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        approvalevents.TopicApprovalCreated,
 		SourceModule: modulecommon.ModuleID,
@@ -85,7 +85,7 @@ func (s *Service) EnsureApproval(ctx context.Context, cmd approvalcontracts.Crea
 }
 
 func (s *Service) Approve(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
-	return s.resolve(ctx, cmd.ApprovalID, common.ApprovalStateApproved)
+	return s.resolve(ctx, cmd.ApprovalID, common.ApprovalStateApproved, cmd.Context)
 }
 
 func (s *Service) EnsureApproved(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
@@ -108,14 +108,14 @@ func (s *Service) EnsureApprovedAndReturn(ctx context.Context, cmd approvalcontr
 	if item.State == common.ApprovalStateRejected {
 		return nil, common.ErrConflict
 	}
-	if err := s.resolveItem(ctx, item, common.ApprovalStateApproved); err != nil {
+	if err := s.resolveItem(ctx, item, common.ApprovalStateApproved, cmd.Context); err != nil {
 		return nil, err
 	}
 	return item, nil
 }
 
 func (s *Service) Reject(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
-	return s.resolve(ctx, cmd.ApprovalID, common.ApprovalStateRejected)
+	return s.resolve(ctx, cmd.ApprovalID, common.ApprovalStateRejected, cmd.Context)
 }
 
 func (s *Service) EnsureRejected(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
@@ -138,13 +138,13 @@ func (s *Service) EnsureRejectedAndReturn(ctx context.Context, cmd approvalcontr
 	if item.State == common.ApprovalStateApproved {
 		return nil, common.ErrConflict
 	}
-	if err := s.resolveItem(ctx, item, common.ApprovalStateRejected); err != nil {
+	if err := s.resolveItem(ctx, item, common.ApprovalStateRejected, cmd.Context); err != nil {
 		return nil, err
 	}
 	return item, nil
 }
 
-func (s *Service) resolve(ctx context.Context, approvalID common.ApprovalID, target common.ApprovalState) error {
+func (s *Service) resolve(ctx context.Context, approvalID common.ApprovalID, target common.ApprovalState, context map[string]any) error {
 	if approvalID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -157,10 +157,10 @@ func (s *Service) resolve(ctx context.Context, approvalID common.ApprovalID, tar
 		return common.ErrConflict
 	}
 
-	return s.resolveItem(ctx, item, target)
+	return s.resolveItem(ctx, item, target, context)
 }
 
-func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval, target common.ApprovalState) error {
+func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval, target common.ApprovalState, resolutionContext map[string]any) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -168,6 +168,7 @@ func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval,
 		return common.ErrConflict
 	}
 	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	item.Context = mergeApprovalContext(item.Context, resolutionContext)
 	item.State = target
 	if err := s.approvals.Update(ctx, item); err != nil {
 		return err
@@ -175,7 +176,7 @@ func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval,
 	if s.eventHub == nil {
 		return nil
 	}
-	return s.eventHub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, s.eventHub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        approvalevents.TopicApprovalResolved,
 		SourceModule: modulecommon.ModuleID,
@@ -194,6 +195,20 @@ func cloneApprovalContext(input map[string]any) map[string]any {
 	}
 	ret := make(map[string]any, len(input))
 	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
+}
+
+func mergeApprovalContext(existing map[string]any, overlay map[string]any) map[string]any {
+	ret := cloneApprovalContext(existing)
+	if len(overlay) == 0 {
+		return ret
+	}
+	if ret == nil {
+		ret = map[string]any{}
+	}
+	for key, value := range overlay {
 		ret[key] = value
 	}
 	return ret

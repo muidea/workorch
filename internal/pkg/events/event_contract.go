@@ -41,6 +41,13 @@ const (
 	EventLanePolicyGlobal  = eventcontract.LanePolicyGlobal
 )
 
+type EventHubDeliveryMode string
+
+const (
+	EventHubDeliveryModeSync  EventHubDeliveryMode = "sync"
+	EventHubDeliveryModeAsync EventHubDeliveryMode = "async"
+)
+
 type EventHubContract struct {
 	Topic        string
 	Owner        string
@@ -62,6 +69,21 @@ func ResolveEventHubContract(topic string) (EventHubContract, bool) {
 	}
 	contract, ok := eventHubContracts[topic]
 	return contract, ok
+}
+
+func EventHubDeliveryModeForTopic(topic string) EventHubDeliveryMode {
+	contract, ok := ResolveEventHubContract(topic)
+	if !ok {
+		return EventHubDeliveryModeSync
+	}
+	switch contract.CommandClass {
+	case EventCommandClassNotify:
+		return EventHubDeliveryModeAsync
+	case EventCommandClassRead, EventCommandClassWrite, EventCommandClassExecute, EventCommandClassFacade:
+		return EventHubDeliveryModeSync
+	default:
+		return EventHubDeliveryModeSync
+	}
 }
 
 func EventHubLaneKey(envelope Envelope) string {

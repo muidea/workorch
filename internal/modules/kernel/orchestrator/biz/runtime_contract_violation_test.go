@@ -85,6 +85,15 @@ func TestRuntimeRepairInputIncludesContractViolationRecovery(t *testing.T) {
 	if recovery["attempt"] != 1 || recovery["maxAttempts"] != NormalizeRuntimePolicy(RuntimePolicy{}).MaxContractViolationRetriesPerStep {
 		t.Fatalf("contractViolationRecovery budget = %+v, want attempt/max", recovery)
 	}
+	if stringFromMap(recovery, "correctionProfileId") != "state_changing_required_output" ||
+		stringFromMap(recovery, "correctionMode") != contractViolationCorrectionModeTargeted {
+		t.Fatalf("contractViolationRecovery correction = %+v, want targeted state-changing profile", recovery)
+	}
+	correction := mapFromValue(recovery["correctionContract"])
+	if stringFromMap(correction, "requiredOutputShape") != "state_changing_output" ||
+		!stringSliceContains(stringSliceFromValue(correction["forbiddenOutputs"]), "failed_dodAssessment_only") {
+		t.Fatalf("correctionContract = %+v, want state-changing output contract", correction)
+	}
 	expected := mapFromValue(recovery["expectedContract"])
 	if expected["stateChangingOutputRequired"] != true {
 		t.Fatalf("expectedContract = %+v, want stateChangingOutputRequired", expected)
@@ -94,6 +103,253 @@ func TestRuntimeRepairInputIncludesContractViolationRecovery(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"), "contractViolationRecovery.expectedContract") {
 		t.Fatalf("repairGuidance = %+v, want contract violation guidance", input["repairGuidance"])
+	}
+	if !strings.Contains(strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"), "contractViolationRecovery.correctionContract") {
+		t.Fatalf("repairGuidance = %+v, want correction contract guidance", input["repairGuidance"])
+	}
+}
+
+func TestContractViolationCorrectionProfilesCoverPrimaryRules(t *testing.T) {
+	tests := []struct {
+		name           string
+		violationType  string
+		errText        string
+		wantRule       string
+		wantProfile    string
+		wantShape      string
+		wantForbidden  string
+		wantTargetRule bool
+	}{
+		{
+			name:          "state changing",
+			violationType: contractViolationRepairNoStateChangingOutput,
+			errText:       "state-changing llm repair step returned no state-changing output",
+			wantRule:      contractViolationRuleStateChangingRequiredMissing,
+			wantProfile:   "state_changing_required_output",
+			wantShape:     "state_changing_output",
+			wantForbidden: "failed_dodAssessment_only",
+		},
+		{
+			name:          "concrete validation",
+			violationType: contractViolationValidationEvidenceRequired,
+			errText:       "concrete validation evidence repair must return bounded shell/command",
+			wantRule:      contractViolationRuleConcreteValidationMissing,
+			wantProfile:   "concrete_validation_evidence",
+			wantShape:     "bounded_validation_evidence",
+			wantForbidden: "write_outside_validationScratchDir",
+		},
+		{
+			name:           "patch apply",
+			violationType:  contractViolationPatchContentRequired,
+			errText:        "patch content is required",
+			wantRule:       contractViolationRulePatchApplyContractFailed,
+			wantProfile:    "patch_apply_contract",
+			wantShape:      "valid_patch_apply",
+			wantForbidden:  "missing_content_or_diff",
+			wantTargetRule: true,
+		},
+		{
+			name:          "coverage evidence",
+			violationType: contractViolationDoDAssessmentEvidenceMissing,
+			errText:       "satisfied dodAssessment item requires evidenceRefs",
+			wantRule:      contractViolationRuleDoDAssessmentEvidenceMissing,
+			wantProfile:   "coverage_evidence_assessment",
+			wantShape:     "traceable_coverage_assessment",
+			wantForbidden: "satisfied_item_without_evidenceRefs",
+		},
+		{
+			name:          "unparseable",
+			violationType: "",
+			errText:       "invalid llm decision json",
+			wantRule:      contractViolationRuleUnparseableOutput,
+			wantProfile:   "json_output_shape",
+			wantShape:     "single_valid_json_decision",
+			wantForbidden: "partial_json",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runID := common.RunID("run-contract-correction-profile-" + strings.ReplaceAll(tt.name, " ", "-"))
+			run := &runmodel.Run{ID: runID, WorkspaceID: common.WorkspaceID("ws-" + strings.ReplaceAll(tt.name, " ", "-")), InitialStepKind: llmWorkspaceExecutionStepKind}
+			failed := contractViolationFailedStep(runID, "failed-profile")
+			failed.Output["error"] = tt.errText
+			failed.Output[failureOutputKeySignature] = "class=runtime_failed|stage=runtime_contract_failed|failureTargets=target.txt"
+			if tt.violationType != "" {
+				failed.Output[outputKeyContractViolationType] = tt.violationType
+			} else {
+				delete(failed.Output, outputKeyContractViolationType)
+				failed.Output["stage"] = "llm_schema_invalid"
+			}
+			if tt.wantRule == contractViolationRuleConcreteValidationMissing {
+				failed.Input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+				pkg := mapFromValue(failed.Input["repairActionPackage"])
+				required := mapFromValue(pkg["requiredOutput"])
+				required["mustProduceConcreteValidationEvidence"] = true
+				pkg["requiredOutput"] = required
+				ensureConcreteValidationScratchContract(failed.Input, pkg, required)
+				failed.Input["repairActionPackage"] = pkg
+			}
+			if tt.wantTargetRule {
+				pkg := mapFromValue(failed.Input["repairActionPackage"])
+				pkg["targetSnapshots"] = []map[string]any{{
+					"targetRef":        "target.txt",
+					"contentHash":      "hash-target",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}}
+				failed.Input["repairActionPackage"] = pkg
+			}
+			attachContractViolationDiagnostics(run, failed, common.ErrInvalidArgument)
+
+			recovery := contractViolationFromFailedOutput(failed)
+			if got := stringFromMap(recovery, "violatedRule"); got != tt.wantRule {
+				t.Fatalf("violatedRule = %q, want %s; recovery=%+v", got, tt.wantRule, recovery)
+			}
+			if got := stringFromMap(recovery, "correctionProfileId"); got != tt.wantProfile {
+				t.Fatalf("correctionProfileId = %q, want %s; recovery=%+v", got, tt.wantProfile, recovery)
+			}
+			contract := mapFromValue(recovery["correctionContract"])
+			if got := stringFromMap(contract, "requiredOutputShape"); got != tt.wantShape {
+				t.Fatalf("requiredOutputShape = %q, want %s; contract=%+v", got, tt.wantShape, contract)
+			}
+			if !stringSliceContains(stringSliceFromValue(contract["forbiddenOutputs"]), tt.wantForbidden) {
+				t.Fatalf("forbiddenOutputs = %+v, want %s", contract["forbiddenOutputs"], tt.wantForbidden)
+			}
+			if tt.wantTargetRule {
+				if stringFromMap(contract, "targetScope") != "failureTargets=target.txt" {
+					t.Fatalf("correctionContract targetScope = %+v, want failureTargets=target.txt", contract)
+				}
+				if snapshots := mapSliceFromValue(contract["targetSnapshots"]); len(snapshots) != 1 || stringFromMap(snapshots[0], "targetRef") != "target.txt" {
+					t.Fatalf("targetSnapshots = %+v, want compact target snapshot", contract["targetSnapshots"])
+				}
+			}
+		})
+	}
+}
+
+func TestContractViolationClassifiesAvailableSnapshotIgnored(t *testing.T) {
+	runID := common.RunID("run-contract-available-snapshot-ignored")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-available-snapshot-ignored", InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := contractViolationFailedStep(runID, "failed-available-snapshot")
+	pkg := mapFromValue(failed.Input["repairActionPackage"])
+	pkg["targetSnapshots"] = []map[string]any{{
+		"targetRef":        "target.txt",
+		"content":          "current target content\n",
+		"contentHash":      "sha256-current-target",
+		"contentComplete":  true,
+		"safeForFileWrite": true,
+	}}
+	failed.Input["repairActionPackage"] = pkg
+	failed.Output["error"] = "failed assessment claimed current target snapshot is missing and must read the file before patching"
+	failed.Output["dodAssessment"] = map[string]any{
+		"satisfied": false,
+		"summary":   "cannot proceed because the target snapshot is not provided",
+	}
+
+	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
+
+	recovery := contractViolationFromFailedOutput(failed)
+	if got := stringFromMap(recovery, "violatedRule"); got != contractViolationRuleAvailableSnapshotIgnored {
+		t.Fatalf("violatedRule = %q, want %s; recovery=%+v", got, contractViolationRuleAvailableSnapshotIgnored, recovery)
+	}
+	if got := stringFromMap(recovery, "correctionProfileId"); got != "available_snapshot_direct_action" {
+		t.Fatalf("correctionProfileId = %q, want available_snapshot_direct_action; recovery=%+v", got, recovery)
+	}
+	contract := mapFromValue(recovery["correctionContract"])
+	if got := stringFromMap(contract, "requiredOutputShape"); got != "state_changing_output_from_available_snapshot" {
+		t.Fatalf("requiredOutputShape = %q, want state_changing_output_from_available_snapshot; contract=%+v", got, contract)
+	}
+	if !stringSliceContains(stringSliceFromValue(contract["forbiddenOutputs"]), "missing_snapshot_claim") {
+		t.Fatalf("forbiddenOutputs = %+v, want missing_snapshot_claim", contract["forbiddenOutputs"])
+	}
+	snapshots := mapSliceFromValue(contract["availableTargetSnapshots"])
+	if len(snapshots) != 1 || stringFromMap(snapshots[0], "targetRef") != "target.txt" ||
+		stringFromMap(snapshots[0], "contentHash") != "sha256-current-target" {
+		t.Fatalf("availableTargetSnapshots = %+v, want current target snapshot summary", snapshots)
+	}
+}
+
+func TestContractViolationClassifiesAvailableSnapshotIgnoredFromNestedChineseOutput(t *testing.T) {
+	runID := common.RunID("run-contract-available-snapshot-ignored-cn")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-available-snapshot-ignored-cn", InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := contractViolationFailedStep(runID, "failed-available-snapshot-cn")
+	delete(mapFromValue(failed.Input["repairActionPackage"]), "targetSnapshots")
+	failed.Input["failureTargetRepairContext"] = []map[string]any{{
+		"targetRef":        "target.txt",
+		"content":          "current target content\n",
+		"contentHash":      "sha256-current-target",
+		"contentComplete":  true,
+		"safeForFileWrite": true,
+		"exists":           true,
+	}}
+	failed.Output["summary"] = "缺少可安全生成最小补丁所需的当前目标快照文本，无法继续生成 state-changing 输出"
+
+	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
+
+	recovery := contractViolationFromFailedOutput(failed)
+	if got := stringFromMap(recovery, "violatedRule"); got != contractViolationRuleAvailableSnapshotIgnored {
+		t.Fatalf("violatedRule = %q, want %s; recovery=%+v", got, contractViolationRuleAvailableSnapshotIgnored, recovery)
+	}
+	contract := mapFromValue(recovery["correctionContract"])
+	snapshots := mapSliceFromValue(contract["availableTargetSnapshots"])
+	if len(snapshots) != 1 || stringFromMap(snapshots[0], "targetRef") != "target.txt" ||
+		stringFromMap(snapshots[0], "contentHash") != "sha256-current-target" {
+		t.Fatalf("availableTargetSnapshots = %+v, want nested current target snapshot summary", snapshots)
+	}
+}
+
+func TestContractViolationDoesNotClassifyMissingSnapshotWithoutAvailableSnapshot(t *testing.T) {
+	runID := common.RunID("run-contract-missing-snapshot-no-context")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-missing-snapshot-no-context", InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := contractViolationFailedStep(runID, "failed-no-available-snapshot")
+	failed.Output["error"] = "failed assessment claimed current target snapshot is missing and must read the file before patching"
+
+	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
+
+	recovery := contractViolationFromFailedOutput(failed)
+	if got := stringFromMap(recovery, "violatedRule"); got == contractViolationRuleAvailableSnapshotIgnored {
+		t.Fatalf("violatedRule = %q, want no available snapshot classification without supplied snapshot; recovery=%+v", got, recovery)
+	}
+}
+
+func TestContractViolationRetryUsesForcedNarrowAfterRepeatedRule(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-violation-forced-narrow")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-violation-forced-narrow", InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := contractViolationFailedStep(runID, "failed-forced-narrow")
+	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
+	repo := memory.NewStepRepository()
+	previous := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/previous-contract-violation"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: stringFromMap(failed.Output, failureOutputKeySignature),
+			stepOutputKeyContractViolation: map[string]any{
+				"violatedRule": contractViolationRuleStateChangingRequiredMissing,
+			},
+		},
+	}
+	if err := repo.Create(ctx, previous); err != nil {
+		t.Fatalf("seed previous violation: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		steps:  repo,
+		policy: NormalizeRuntimePolicy(RuntimePolicy{}),
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failed, 2, common.ErrInvalidArgument)
+
+	recovery := mapFromValue(input[stepInputKeyContractViolationRecovery])
+	if got := stringFromMap(recovery, "correctionMode"); got != contractViolationCorrectionModeForcedNarrow {
+		t.Fatalf("correctionMode = %q, want forced_narrow; recovery=%+v", got, recovery)
+	}
+	contract := mapFromValue(recovery["correctionContract"])
+	if contract["forcedNarrow"] != true ||
+		!strings.Contains(stringFromMap(contract, "forcedNarrowRule"), "same-rule or same-target") {
+		t.Fatalf("correctionContract = %+v, want forced narrow rule", contract)
 	}
 }
 
@@ -332,6 +588,12 @@ func TestContractViolationRecoveryPublishesRecordedRetryAndDispatchEvents(t *tes
 	if got := intFromAny(retry.Payload["attempt"]); got != 1 {
 		t.Fatalf("retry attempt = %d, want 1", got)
 	}
+	if got := stringFromMap(retry.Payload, "correctionProfileId"); got != "state_changing_required_output" {
+		t.Fatalf("retry correctionProfileId = %q, want state_changing_required_output; payload=%+v", got, retry.Payload)
+	}
+	if got := stringFromMap(retry.Payload, "correctionMode"); got != contractViolationCorrectionModeTargeted {
+		t.Fatalf("retry correctionMode = %q, want targeted; payload=%+v", got, retry.Payload)
+	}
 
 	dispatch := publishedTopic(hub.Published(), orchestratorevents.TopicOrchestratorDispatchStepRequested)
 	if dispatch == nil {
@@ -368,6 +630,65 @@ func TestContractViolationEscalatedEventPayloadIsScoped(t *testing.T) {
 	}
 	if got := intFromAny(mapFromValue(escalated.Payload["context"])["attempts"]); got != 2 {
 		t.Fatalf("escalated context = %+v, want attempts", escalated.Payload["context"])
+	}
+}
+
+func TestEventSubsystemPublishesNotificationsThroughAsyncHub(t *testing.T) {
+	ctx := context.Background()
+	hub := &recordingOrchestratorAsyncHub{}
+	publisher := newEventSubsystem(hub, nil, nil)
+	run := &runmodel.Run{
+		ID:          "run-event-subsystem-async",
+		WorkspaceID: "ws-event-subsystem-async",
+		State:       common.RunStateRunning,
+	}
+	failed := contractViolationFailedStep(run.ID, "failed-event-subsystem-async")
+	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
+
+	if err := publisher.publishRunCreated(ctx, run); err != nil {
+		t.Fatalf("publish run created: %v", err)
+	}
+	if err := publisher.publishContractViolationRecorded(ctx, run, failed); err != nil {
+		t.Fatalf("publish contract violation recorded: %v", err)
+	}
+
+	if hub.syncPublishes != 0 || hub.asyncPublishes != 2 {
+		t.Fatalf("publish counts = sync:%d async:%d, want async event subsystem notifications", hub.syncPublishes, hub.asyncPublishes)
+	}
+	if len(hub.published) != 2 ||
+		hub.published[0].Topic == "" ||
+		hub.published[1].Topic != orchestratorevents.TopicOrchestratorContractViolationRecorded {
+		t.Fatalf("published = %+v, want run created and contract violation notifications", hub.published)
+	}
+}
+
+func TestContractViolationEscalationCorrectionContextUsesLastRetryRecovery(t *testing.T) {
+	runID := common.RunID("run-contract-violation-escalation-correction")
+	failed := contractViolationFailedStep(runID, "failed-escalation-correction")
+	failed.Input[stepInputKeyContractViolationRecovery] = map[string]any{
+		"correctionProfileId": "state_changing_required_output",
+		"correctionMode":      contractViolationCorrectionModeForcedNarrow,
+		"targetScope":         "failureTargets=target.txt",
+		"correctionContract": map[string]any{
+			"requiredOutputShape": "state_changing_output",
+			"forcedNarrow":        true,
+		},
+	}
+	violation := map[string]any{
+		"correctionProfileId": "older_profile",
+		"correctionMode":      contractViolationCorrectionModeTargeted,
+	}
+
+	context := contractViolationEscalationCorrectionContext(failed, violation)
+
+	if stringFromMap(context, "correctionProfileId") != "state_changing_required_output" ||
+		stringFromMap(context, "correctionMode") != contractViolationCorrectionModeForcedNarrow ||
+		stringFromMap(context, "targetScope") != "failureTargets=target.txt" {
+		t.Fatalf("correction context = %+v, want last retry recovery correction fields", context)
+	}
+	contract := mapFromValue(context["correctionContract"])
+	if stringFromMap(contract, "requiredOutputShape") != "state_changing_output" || contract["forcedNarrow"] != true {
+		t.Fatalf("correctionContract = %+v, want forced-narrow state-changing contract", contract)
 	}
 }
 
@@ -425,4 +746,26 @@ func contractViolationFailedStep(runID common.RunID, label string) *runmodel.Ste
 		},
 	}
 	return step
+}
+
+type recordingOrchestratorAsyncHub struct {
+	syncPublishes  int
+	asyncPublishes int
+	published      []events.Envelope
+}
+
+func (h *recordingOrchestratorAsyncHub) Publish(_ context.Context, envelope events.Envelope) error {
+	h.syncPublishes++
+	h.published = append(h.published, envelope)
+	return nil
+}
+
+func (h *recordingOrchestratorAsyncHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
+	h.asyncPublishes++
+	h.published = append(h.published, envelope)
+	return nil
+}
+
+func (h *recordingOrchestratorAsyncHub) Subscribe(string, events.Handler) func() {
+	return func() {}
 }

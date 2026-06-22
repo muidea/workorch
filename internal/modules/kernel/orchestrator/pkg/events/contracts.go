@@ -8,6 +8,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorCommandListToolCallsByRun,
 		TopicOrchestratorCommandListPatchesByRun,
 		TopicOrchestratorCommandListValidationResultsByRun,
+		TopicOrchestratorCommandListCoverageWorkItemsByRun,
 		TopicOrchestratorCommandListArtifactContinuationsByRun,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
@@ -30,7 +31,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorContractViolationRetryRequested,
 		TopicOrchestratorContractViolationEscalated,
 	)...)
-	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassNotify, eventcontract.LanePolicyTopic,
+	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassNotify, eventcontract.LanePolicyState,
 		TopicPatchPreviewed,
 		TopicPatchApplied,
 		TopicPatchFailed,

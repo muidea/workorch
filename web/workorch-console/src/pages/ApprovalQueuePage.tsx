@@ -55,7 +55,13 @@ export function ApprovalQueuePage() {
     if (isGovernanceRefreshEvent(event)) {
       void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)));
     }
-  }, { debounceMs: 300 });
+  }, {
+    debounceMs: 300,
+    onExhausted: () => {
+      message.warning('治理事件流已断开，请检查服务状态或手动刷新。');
+      void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)));
+    }
+  });
 
   const openApprovalResolution = async (item: Approval, action: 'approve' | 'reject') => {
     approvalForm.resetFields();

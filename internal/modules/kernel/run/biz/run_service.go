@@ -67,6 +67,9 @@ func (s *Service) CreateRun(ctx context.Context, cmd runcontracts.CreateRunComma
 	if cmd.WorkspaceID == "" || cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
+	if _, err := runWorkspaceScope(ctx, cmd.WorkspaceID); err != nil {
+		return err
+	}
 	if _, err := s.workspaces.Get(ctx, cmd.WorkspaceID); err != nil {
 		return err
 	}
@@ -95,7 +98,7 @@ func (s *Service) EnsureRun(ctx context.Context, cmd runcontracts.CreateRunComma
 		return common.ErrInvalidArgument
 	}
 
-	run, err := s.runs.Get(ctx, cmd.RunID)
+	run, err := s.loadRun(ctx, cmd.RunID, cmd.WorkspaceID)
 	if err == nil {
 		definitionRevision := firstNonEmptyString(cmd.DefinitionRevision, runDefinitionRevisionFromExecutionContext(cmd.ExecutionContext))
 		if run.WorkspaceID != cmd.WorkspaceID ||
@@ -174,7 +177,7 @@ func (s *Service) EnsureStarted(ctx context.Context, cmd runcontracts.StartRunCo
 		return common.ErrInvalidArgument
 	}
 
-	r, err := s.runs.Get(ctx, cmd.RunID)
+	r, err := s.loadRun(ctx, cmd.RunID, "")
 	if err != nil {
 		return err
 	}
@@ -205,12 +208,9 @@ func (s *Service) ResumeRun(ctx context.Context, cmd runcontracts.ResumeRunComma
 			return patcher.ResumeLoadedRunWithExecutionContextPatch(ctx, cmd.LoadedRun, cloneExecutionContext(cmd.ExecutionContextPatch))
 		}
 	} else if s.runs != nil {
-		loaded, err := s.runs.Get(ctx, cmd.RunID)
+		loaded, err := s.loadRun(ctx, cmd.RunID, cmd.WorkspaceID)
 		if err != nil {
 			return err
-		}
-		if cmd.WorkspaceID != "" && loaded.WorkspaceID != cmd.WorkspaceID {
-			return common.ErrNotFound
 		}
 		if loaded.State == common.RunStateRunning {
 			return common.ErrConflict
@@ -235,12 +235,9 @@ func (s *Service) EnsureResumed(ctx context.Context, cmd runcontracts.ResumeRunC
 		return common.ErrInvalidArgument
 	}
 
-	r, err := s.runs.Get(ctx, cmd.RunID)
+	r, err := s.loadRun(ctx, cmd.RunID, cmd.WorkspaceID)
 	if err != nil {
 		return err
-	}
-	if cmd.WorkspaceID != "" && r.WorkspaceID != cmd.WorkspaceID {
-		return common.ErrNotFound
 	}
 	if isTerminalRunState(r.State) {
 		return nil
@@ -270,7 +267,7 @@ func (s *Service) EnsureBlockedOnDecision(ctx context.Context, cmd runcontracts.
 		return common.ErrInvalidArgument
 	}
 
-	r, err := s.runs.Get(ctx, cmd.RunID)
+	r, err := s.loadRun(ctx, cmd.RunID, "")
 	if err != nil {
 		return err
 	}
@@ -307,7 +304,7 @@ func (s *Service) EnsureBlockedOnApproval(ctx context.Context, cmd runcontracts.
 		return common.ErrInvalidArgument
 	}
 
-	r, err := s.runs.Get(ctx, cmd.RunID)
+	r, err := s.loadRun(ctx, cmd.RunID, "")
 	if err != nil {
 		return err
 	}
@@ -334,7 +331,7 @@ func (s *Service) ValidateRun(ctx context.Context, cmd runcontracts.ValidateRunC
 		return s.orchestrator.ValidateRun(ctx, cmd.RunID)
 	}
 
-	r, err := s.runs.Get(ctx, cmd.RunID)
+	r, err := s.loadRun(ctx, cmd.RunID, "")
 	if err != nil {
 		return err
 	}
@@ -357,7 +354,7 @@ func (s *Service) CompleteRun(ctx context.Context, cmd runcontracts.CompleteRunC
 		return s.orchestrator.CompleteRun(ctx, cmd.RunID)
 	}
 
-	r, err := s.runs.Get(ctx, cmd.RunID)
+	r, err := s.loadRun(ctx, cmd.RunID, "")
 	if err != nil {
 		return err
 	}
@@ -382,7 +379,7 @@ func (s *Service) CancelRun(ctx context.Context, cmd runcontracts.CancelRunComma
 		return s.orchestrator.CancelRun(ctx, cmd.RunID)
 	}
 
-	r, err := s.runs.Get(ctx, cmd.RunID)
+	r, err := s.loadRun(ctx, cmd.RunID, "")
 	if err != nil {
 		return err
 	}
@@ -407,7 +404,7 @@ func (s *Service) SupersedeRun(ctx context.Context, cmd runcontracts.SupersedeRu
 		return s.orchestrator.SupersedeRun(ctx, cmd.RunID)
 	}
 
-	r, err := s.runs.Get(ctx, cmd.RunID)
+	r, err := s.loadRun(ctx, cmd.RunID, "")
 	if err != nil {
 		return err
 	}
@@ -432,7 +429,7 @@ func (s *Service) FailRun(ctx context.Context, cmd runcontracts.FailRunCommand) 
 		return s.orchestrator.FailRun(ctx, cmd.RunID, cmd.Reason)
 	}
 
-	r, err := s.runs.Get(ctx, cmd.RunID)
+	r, err := s.loadRun(ctx, cmd.RunID, "")
 	if err != nil {
 		return err
 	}
@@ -483,11 +480,36 @@ func canFailRun(state common.RunState) bool {
 	}
 }
 
+func (s *Service) loadRun(ctx context.Context, runID common.RunID, explicitWorkspaceID common.WorkspaceID) (*runModel.Run, error) {
+	if s == nil || s.runs == nil || runID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	workspaceID, err := runWorkspaceScope(ctx, explicitWorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if workspaceID != "" {
+		return s.runs.GetByWorkspaceID(ctx, workspaceID, runID)
+	}
+	return s.runs.Get(ctx, runID)
+}
+
+func runWorkspaceScope(ctx context.Context, explicitWorkspaceID common.WorkspaceID) (common.WorkspaceID, error) {
+	contextWorkspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	if explicitWorkspaceID != "" && contextWorkspaceID != "" && explicitWorkspaceID != contextWorkspaceID {
+		return "", common.ErrConflict
+	}
+	if explicitWorkspaceID != "" {
+		return explicitWorkspaceID, nil
+	}
+	return contextWorkspaceID, nil
+}
+
 func (s *Service) publishRunEvent(ctx context.Context, topic string, run *runModel.Run) error {
 	if s.eventHub == nil || run == nil {
 		return nil
 	}
-	return s.eventHub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, s.eventHub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
 		SourceModule: modulecommon.ModuleID,

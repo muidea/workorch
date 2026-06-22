@@ -179,8 +179,9 @@ func (r *blockingCompletedStepRepository) Delete(ctx context.Context, id common.
 }
 
 type countingRunRepository struct {
-	inner    *memory.RunRepository
-	getCount atomic.Int64
+	inner                 *memory.RunRepository
+	getCount              atomic.Int64
+	getByWorkspaceIDCount atomic.Int64
 }
 
 func newCountingRunRepository() *countingRunRepository {
@@ -194,6 +195,11 @@ func (r *countingRunRepository) Create(ctx context.Context, item *runmodel.Run) 
 func (r *countingRunRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
 	r.getCount.Add(1)
 	return r.inner.Get(ctx, id)
+}
+
+func (r *countingRunRepository) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	r.getByWorkspaceIDCount.Add(1)
+	return r.inner.GetByWorkspaceID(ctx, workspaceID, id)
 }
 
 func (r *countingRunRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
@@ -224,6 +230,10 @@ func (r *blockingCompletedRunRepository) Create(ctx context.Context, item *runmo
 
 func (r *blockingCompletedRunRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
 	return r.inner.Get(ctx, id)
+}
+
+func (r *blockingCompletedRunRepository) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	return r.inner.GetByWorkspaceID(ctx, workspaceID, id)
 }
 
 func (r *blockingCompletedRunRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
@@ -268,6 +278,10 @@ func (r *blockingValidatingRunRepository) Get(ctx context.Context, id common.Run
 	return r.inner.Get(ctx, id)
 }
 
+func (r *blockingValidatingRunRepository) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	return r.inner.GetByWorkspaceID(ctx, workspaceID, id)
+}
+
 func (r *blockingValidatingRunRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
 	return r.inner.List(ctx)
 }
@@ -310,6 +324,10 @@ func (r *blockingRunningRunRepository) Get(ctx context.Context, id common.RunID)
 	return r.inner.Get(ctx, id)
 }
 
+func (r *blockingRunningRunRepository) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	return r.inner.GetByWorkspaceID(ctx, workspaceID, id)
+}
+
 func (r *blockingRunningRunRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
 	return r.inner.List(ctx)
 }
@@ -350,6 +368,10 @@ func (r *blockingBlockedRunRepository) Create(ctx context.Context, item *runmode
 
 func (r *blockingBlockedRunRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
 	return r.inner.Get(ctx, id)
+}
+
+func (r *blockingBlockedRunRepository) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	return r.inner.GetByWorkspaceID(ctx, workspaceID, id)
 }
 
 func (r *blockingBlockedRunRepository) List(ctx context.Context) ([]*runmodel.Run, error) {

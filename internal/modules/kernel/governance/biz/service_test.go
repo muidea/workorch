@@ -21,6 +21,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -40,6 +41,50 @@ func (r testWorkspaceDefinitions) GetGoal(ctx context.Context, id common.GoalID)
 
 func (r testWorkspaceDefinitions) GetDoD(ctx context.Context, id common.DoDID) (*workspacemodel.DoD, error) {
 	return r.dods.Get(ctx, id)
+}
+
+type recordingWorkspaceDefinitions struct {
+	inner         testWorkspaceDefinitions
+	goalScope     common.WorkspaceID
+	dodScope      common.WorkspaceID
+	goalReadCount atomic.Int32
+	dodReadCount  atomic.Int32
+}
+
+func (r *recordingWorkspaceDefinitions) GetGoal(ctx context.Context, id common.GoalID) (*workspacemodel.Goal, error) {
+	r.goalReadCount.Add(1)
+	r.goalScope = common.RuntimeWorkspaceIDFromContext(ctx)
+	return r.inner.GetGoal(ctx, id)
+}
+
+func (r *recordingWorkspaceDefinitions) GetDoD(ctx context.Context, id common.DoDID) (*workspacemodel.DoD, error) {
+	r.dodReadCount.Add(1)
+	r.dodScope = common.RuntimeWorkspaceIDFromContext(ctx)
+	return r.inner.GetDoD(ctx, id)
+}
+
+type countingGovernanceRunReader struct {
+	inner                   repository.RunRepository
+	getCount                atomic.Int32
+	getByWorkspaceIDCount   atomic.Int32
+	lastGetByWorkspaceIDRun common.RunID
+	lastGetByWorkspaceID    common.WorkspaceID
+}
+
+func (r *countingGovernanceRunReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
+	r.getCount.Add(1)
+	return r.inner.Get(ctx, id)
+}
+
+func (r *countingGovernanceRunReader) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	r.getByWorkspaceIDCount.Add(1)
+	r.lastGetByWorkspaceID = workspaceID
+	r.lastGetByWorkspaceIDRun = id
+	return r.inner.GetByWorkspaceID(ctx, workspaceID, id)
+}
+
+func (r *countingGovernanceRunReader) List(ctx context.Context) ([]*runmodel.Run, error) {
+	return r.inner.List(ctx)
 }
 
 type recordingBackgroundRoutine struct {
@@ -131,6 +176,134 @@ func TestServiceUsesBackgroundRoutineForWorkerAndReconciliation(t *testing.T) {
 	}
 }
 
+func TestProcessPendingTicketUsesWorkspaceScopedRunLookup(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-governance-scoped-run")
+	runID := common.RunID("run-governance-scoped-run")
+	goalID := common.GoalID("goal-governance-scoped-run")
+	dodID := common.DoDID("dod-governance-scoped-run")
+	ticketID := common.TicketID("ticket-governance-scoped-run")
+	ticketRepo := memory.NewDecisionTicketRepository()
+	runRepo := memory.NewRunRepository()
+	countingRuns := &countingGovernanceRunReader{inner: runRepo}
+	goalRepo := memory.NewGoalRepository()
+	dodRepo := memory.NewDoDRepository()
+	definitions := &recordingWorkspaceDefinitions{inner: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo}}
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		GoalID:      goalID,
+		DoDID:       dodID,
+		State:       common.RunStateBlockedOnDecision,
+	}))
+	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "complete the requested outcome"}))
+	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"final result satisfies the request"}, State: common.DoDStateReady}))
+	mustNoErr(t, ticketRepo.Create(ctx, ticket(&ticketFixture{
+		id:          ticketID,
+		workspaceID: workspaceID,
+		runID:       runID,
+		kind:        "provide_missing_info",
+		question:    "provide missing input",
+		reason:      "missing input",
+		state:       common.DecisionTicketStateOpen,
+	})))
+	svc := NewService(Dependencies{
+		Tickets:              ticketRepo,
+		Runs:                 countingRuns,
+		WorkspaceDefinitions: definitions,
+		MemoryItems:          memory.NewMemoryItemRepository(),
+		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
+		EventHub:             events.NewMemoryHub(),
+		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
+		ResolveApproval:      func(context.Context, common.ApprovalID) error { return nil },
+		ResumeRun:            func(context.Context, common.RunID) error { return nil },
+		LoadConfig:           testGovernanceConfig(true, 0.82, 3),
+	})
+
+	svc.processPendingTicket(ctx, ticketID)
+
+	if got := countingRuns.getCount.Load(); got != 0 {
+		t.Fatalf("run Get count = %d, want 0 for ticket-scoped governance lookup", got)
+	}
+	if got := countingRuns.getByWorkspaceIDCount.Load(); got == 0 {
+		t.Fatalf("run GetByWorkspaceID count = %d, want scoped ticket governance lookup", got)
+	}
+	if countingRuns.lastGetByWorkspaceID != workspaceID || countingRuns.lastGetByWorkspaceIDRun != runID {
+		t.Fatalf("scoped lookup = (%s, %s), want (%s, %s)", countingRuns.lastGetByWorkspaceID, countingRuns.lastGetByWorkspaceIDRun, workspaceID, runID)
+	}
+	if definitions.goalReadCount.Load() == 0 || definitions.dodReadCount.Load() == 0 {
+		t.Fatalf("definition reads goal=%d dod=%d, want both", definitions.goalReadCount.Load(), definitions.dodReadCount.Load())
+	}
+	if definitions.goalScope != workspaceID || definitions.dodScope != workspaceID {
+		t.Fatalf("definition scopes goal=%s dod=%s, want %s", definitions.goalScope, definitions.dodScope, workspaceID)
+	}
+}
+
+func TestProcessPendingApprovalUsesWorkspaceScopedRunLookup(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-governance-approval-scoped-run")
+	runID := common.RunID("run-governance-approval-scoped-run")
+	goalID := common.GoalID("goal-governance-approval-scoped-run")
+	dodID := common.DoDID("dod-governance-approval-scoped-run")
+	approvalID := common.ApprovalID("approval-governance-scoped-run")
+	approvalRepo := memory.NewApprovalRepository()
+	runRepo := memory.NewRunRepository()
+	countingRuns := &countingGovernanceRunReader{inner: runRepo}
+	goalRepo := memory.NewGoalRepository()
+	dodRepo := memory.NewDoDRepository()
+	definitions := &recordingWorkspaceDefinitions{inner: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo}}
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		GoalID:      goalID,
+		DoDID:       dodID,
+		State:       common.RunStateBlockedOnApproval,
+	}))
+	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "complete the requested outcome"}))
+	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"final result satisfies the request"}, State: common.DoDStateReady}))
+	mustNoErr(t, approvalRepo.Create(ctx, &approvalmodel.Approval{
+		ID:          approvalID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      common.StepID(string(runID) + "/step-1"),
+		Reason:      "approval required",
+		Action:      "continue requested operation",
+		Context:     map[string]any{"risk": "read_only"},
+		State:       common.ApprovalStatePending,
+	}))
+	svc := NewService(Dependencies{
+		Tickets:              memory.NewDecisionTicketRepository(),
+		Approvals:            approvalRepo,
+		Runs:                 countingRuns,
+		WorkspaceDefinitions: definitions,
+		MemoryItems:          memory.NewMemoryItemRepository(),
+		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
+		EventHub:             events.NewMemoryHub(),
+		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
+		ResolveApproval:      func(context.Context, common.ApprovalID) error { return nil },
+		ResumeRun:            func(context.Context, common.RunID) error { return nil },
+		LoadConfig:           testGovernanceConfig(true, 0.82, 3),
+	})
+
+	svc.processPendingApproval(ctx, approvalID)
+
+	if got := countingRuns.getCount.Load(); got != 0 {
+		t.Fatalf("run Get count = %d, want 0 for approval-scoped governance lookup", got)
+	}
+	if got := countingRuns.getByWorkspaceIDCount.Load(); got == 0 {
+		t.Fatalf("run GetByWorkspaceID count = %d, want scoped approval governance lookup", got)
+	}
+	if countingRuns.lastGetByWorkspaceID != workspaceID || countingRuns.lastGetByWorkspaceIDRun != runID {
+		t.Fatalf("scoped lookup = (%s, %s), want (%s, %s)", countingRuns.lastGetByWorkspaceID, countingRuns.lastGetByWorkspaceIDRun, workspaceID, runID)
+	}
+	if definitions.goalReadCount.Load() == 0 || definitions.dodReadCount.Load() == 0 {
+		t.Fatalf("definition reads goal=%d dod=%d, want both", definitions.goalReadCount.Load(), definitions.dodReadCount.Load())
+	}
+	if definitions.goalScope != workspaceID || definitions.dodScope != workspaceID {
+		t.Fatalf("definition scopes goal=%s dod=%s, want %s", definitions.goalScope, definitions.dodScope, workspaceID)
+	}
+}
+
 func TestPublishGovernanceEventCarriesTraceScope(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
@@ -184,6 +357,32 @@ func TestPublishGovernanceEventCarriesTraceScope(t *testing.T) {
 		if _, ok := events.DecodeAutoGovernanceEvent(envelope); !ok {
 			t.Fatalf("governance envelope did not decode: %+v", envelope)
 		}
+	}
+}
+
+func TestPublishGovernanceEventUsesAsyncHubForNotifications(t *testing.T) {
+	ctx := context.Background()
+	hub := &recordingGovernanceAsyncHub{}
+	svc := NewService(Dependencies{EventHub: hub})
+	trace := &governancemodel.AutoGovernanceTrace{
+		ID:          "trace-async",
+		WorkspaceID: "ws-governance-async",
+		RunID:       "run-governance-async",
+		StepID:      "run-governance-async/step-1",
+		ItemType:    "ticket",
+		ItemID:      "ticket-governance-async",
+		Status:      "evaluated",
+	}
+
+	if err := svc.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEvaluated, trace, ""); err != nil {
+		t.Fatalf("publish governance event: %v", err)
+	}
+
+	if hub.syncPublishes != 0 || hub.asyncPublishes != 1 {
+		t.Fatalf("publish counts = sync:%d async:%d, want async governance notification", hub.syncPublishes, hub.asyncPublishes)
+	}
+	if len(hub.published) != 1 || hub.published[0].Topic != governanceevents.TopicGovernanceAutoEvaluated {
+		t.Fatalf("published = %+v, want governance auto evaluated notification", hub.published)
 	}
 }
 
@@ -1819,4 +2018,26 @@ func mustNoErr(t *testing.T, err error) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+type recordingGovernanceAsyncHub struct {
+	syncPublishes  int
+	asyncPublishes int
+	published      []events.Envelope
+}
+
+func (h *recordingGovernanceAsyncHub) Publish(_ context.Context, envelope events.Envelope) error {
+	h.syncPublishes++
+	h.published = append(h.published, envelope)
+	return nil
+}
+
+func (h *recordingGovernanceAsyncHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
+	h.asyncPublishes++
+	h.published = append(h.published, envelope)
+	return nil
+}
+
+func (h *recordingGovernanceAsyncHub) Subscribe(string, events.Handler) func() {
+	return func() {}
 }

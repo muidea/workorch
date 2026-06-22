@@ -1,6 +1,6 @@
 // Package workorchport defines the shared interface consumed by CLI commands,
-// TUI, and agent session logic. Local EventHub and remote HTTP implementations
-// satisfy the same interface so callers never branch on transport.
+// TUI, and agent session logic. Multiple transport implementations satisfy the
+// same interface so callers never branch on transport.
 package workorchport
 
 // Backend is the shared CLI backend consumed by Cobra commands, the TUI model,

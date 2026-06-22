@@ -9,7 +9,7 @@
 - 从 PRD/需求文档和用户 Goal 中提取功能目标、约束、非功能要求、验收点和外部依赖
 - 识别可用 build/test/lint 命令与入口，缺失时制定可解释的跳过策略
 - 标注与 Goal 相关的目标模块、受影响文件、风险文件、入口路径、错误路径和回归范围
-- 需要理解符号关系、接口实现或跨文件影响面时，可以按需使用已选 LSP MCP 能力；使用前先 lsp_initialize，line/col 使用 0-based，空结果只能视为不确定
+- 需要理解符号关系、接口实现或跨文件影响面时，可以按需使用已选 LSP MCP 能力；使用前先 lsp_initialize，line/col 使用 0-based，空结果只能视为不确定；lsp_status 只能作为辅助健康/依赖状态证据，不能替代 Goal/DoD gap analysis
 - 参考 Memory 中的项目约定、验证命令、历史失败修复经验
 - 参考 processEvidenceTimeline 和 currentProgressDigest，明确已有输出、最近动作、最近失败、当前缺口和下一步要求；不要丢弃已验证满足的证据
 - 输出结构化实现步骤（executionGraph 或 nextStep），覆盖代码修改、构建、测试、失败修复、DoD 验收和交付物

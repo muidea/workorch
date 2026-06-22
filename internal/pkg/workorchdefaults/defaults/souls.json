@@ -190,7 +190,8 @@
       "mcp-lsp-bridge:tool:lsp_definition",
       "mcp-lsp-bridge:tool:lsp_hover",
       "mcp-lsp-bridge:tool:lsp_references",
-      "mcp-lsp-bridge:tool:lsp_diagnostics"
+      "mcp-lsp-bridge:tool:lsp_diagnostics",
+      "mcp-lsp-bridge:tool:lsp_status"
     ],
     "allowedToolKinds": [
       "file/list",

@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -164,7 +163,9 @@ func (m AppModel) renderMain(width, height int) string {
 	if section := renderAcceptanceCompact(m.acceptance, width-2); section != "" {
 		b.WriteString(section)
 	}
-	if section := renderTaskDecompositionSummary(m.taskDecomp, width-2, 3); section != "" {
+	if section := renderTaskPlanSummary(m.taskPlans, width-2, 3); section != "" {
+		b.WriteString(section)
+	} else if section := renderTaskDecompositionSummary(m.taskDecomp, width-2, 3); section != "" {
 		b.WriteString(section)
 	}
 	if section := renderMemoryRecallCompact(m.memoryRecalls, width-2, 3); section != "" {
@@ -173,7 +174,7 @@ func (m AppModel) renderMain(width, height int) string {
 	if section := renderLLMUsageCompact(m.llmUsage, width-2); section != "" {
 		b.WriteString(section)
 	}
-	if section := renderLLMContextCompact(m.llmContext, width-2); section != "" {
+	if section := renderLLMContextCompact(m.llmContext, m.llmContextSummary, width-2); section != "" {
 		b.WriteString(section)
 	}
 	if section := renderRuntimeExecutionCompact(m.runtimeExecution, width-2); section != "" {
@@ -413,6 +414,38 @@ func renderTaskDecompositionSummary(items []backend.TaskDecompositionInfo, width
 	return b.String()
 }
 
+func renderTaskPlanSummary(items []backend.TaskPlanInfo, width int, limit int) string {
+	if len(items) == 0 || width <= 0 || limit <= 0 {
+		return ""
+	}
+	if limit > len(items) {
+		limit = len(items)
+	}
+	var b strings.Builder
+	b.WriteString(Heading.Render("Task Plans"))
+	b.WriteString("\n")
+	for i := 0; i < limit; i++ {
+		item := items[i]
+		title := nonEmpty(item.Summary, item.ID)
+		nodes := ""
+		if item.NodeTotal > 0 {
+			nodes = fmt.Sprintf(" [%d/%d/%d/%d]", item.NodeCompleted, item.NodeRunning, item.NodeFailed, item.NodeTotal)
+		}
+		line := strings.TrimSpace(strings.Join(compactStrings([]string{
+			item.State,
+			item.SourceOutputState,
+			title + nodes,
+		}), " "))
+		b.WriteString(truncateDisplay("- "+line, width))
+		b.WriteString("\n")
+	}
+	if len(items) > limit {
+		b.WriteString(truncateDisplay(fmt.Sprintf("+%d more task plans", len(items)-limit), width))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func renderMemoryRecallCompact(items []backend.MemoryRecallTraceInfo, width int, limit int) string {
 	if len(items) == 0 || width <= 0 || limit <= 0 {
 		return ""
@@ -461,7 +494,7 @@ func renderLLMUsageCompact(summary backend.LLMUsageSummaryInfo, width int) strin
 	return b.String()
 }
 
-func renderLLMContextCompact(budget map[string]any, width int) string {
+func renderLLMContextCompact(budget map[string]any, summary backend.LLMContextBudgetSummaryInfo, width int) string {
 	if len(budget) == 0 || width <= 0 {
 		return ""
 	}
@@ -493,6 +526,33 @@ func renderLLMContextCompact(budget map[string]any, width int) string {
 	}
 	if len(parts) > 0 {
 		b.WriteString(truncateDisplay("- "+strings.Join(parts, " | "), width))
+		b.WriteString("\n")
+	}
+	if summary.TraceTotal > 0 {
+		summaryParts := []string{
+			fmt.Sprintf("traces %d", summary.TraceTotal),
+			fmt.Sprintf("max shrink %d", summary.MaxShrinkLevel),
+		}
+		if summary.MaxContextUtilization > 0 {
+			summaryParts = append(summaryParts, fmt.Sprintf("max util %.0f%%", summary.MaxContextUtilization*100))
+		}
+		if summary.AvgContextUtilization > 0 {
+			summaryParts = append(summaryParts, fmt.Sprintf("avg util %.0f%%", summary.AvgContextUtilization*100))
+		}
+		if summary.OverBudgetCount > 0 {
+			summaryParts = append(summaryParts, fmt.Sprintf("over budget %d", summary.OverBudgetCount))
+		}
+		if summary.RecentTraceTotal > 0 {
+			recent := fmt.Sprintf("recent %d/%d", summary.RecentTraceTotal, summary.RecentWindowSize)
+			if summary.RecentAvgUtilization > 0 {
+				recent += fmt.Sprintf(" avg %.0f%%", summary.RecentAvgUtilization*100)
+			}
+			if summary.UtilizationTrend != "" {
+				recent += " " + summary.UtilizationTrend
+			}
+			summaryParts = append(summaryParts, recent)
+		}
+		b.WriteString(truncateDisplay("- "+strings.Join(summaryParts, " | "), width))
 		b.WriteString("\n")
 	}
 	included := payloadStringSliceValue(budget, "includedSections", "IncludedSections")
@@ -659,10 +719,10 @@ func runtimeExecutionProgressText(item *backend.RuntimeExecutionInfo) string {
 }
 
 func llmUsageProgressText(payload map[string]any) string {
-	provider := firstPayloadString(payload, events.PayloadKeyProviderID, "providerId", "ProviderID")
-	model := firstPayloadString(payload, events.PayloadKeyModel, "model", "Model")
-	total := payloadIntValue(payload, events.PayloadKeyTotalTokens, "totalTokens", "TotalTokens")
-	status := firstPayloadString(payload, events.PayloadKeyStatus, "status", "Status")
+	provider := firstPayloadString(payload, backend.PayloadKeyProviderID, "providerId", "ProviderID")
+	model := firstPayloadString(payload, backend.PayloadKeyModel, "model", "Model")
+	total := payloadIntValue(payload, backend.PayloadKeyTotalTokens, "totalTokens", "TotalTokens")
+	status := firstPayloadString(payload, backend.PayloadKeyStatus, "status", "Status")
 	label := strings.TrimSpace(strings.Join([]string{nonEmpty(provider, "llm"), model}, "/"))
 	if total > 0 {
 		return fmt.Sprintf("LLM usage recorded: %s %d tokens", label, total)
@@ -671,15 +731,15 @@ func llmUsageProgressText(payload map[string]any) string {
 }
 
 func llmStreamProgressText(payload map[string]any) string {
-	summary := firstPayloadString(payload, events.PayloadKeySummary, "summary", "Summary")
+	summary := firstPayloadString(payload, backend.PayloadKeySummary, "summary", "Summary")
 	if strings.TrimSpace(summary) != "" {
 		return "LLM streaming: " + strings.TrimSpace(summary)
 	}
-	provider := firstPayloadString(payload, events.PayloadKeyProviderID, "providerId", "ProviderID")
-	model := firstPayloadString(payload, events.PayloadKeyModel, "model", "Model")
-	status := firstPayloadString(payload, events.PayloadKeyStatus, "status", "Status")
-	chunks := payloadIntValue(payload, events.PayloadKeyChunkCount, "chunkCount", "ChunkCount")
-	bytes := payloadIntValue(payload, events.PayloadKeyReceivedBytes, "receivedBytes", "ReceivedBytes")
+	provider := firstPayloadString(payload, backend.PayloadKeyProviderID, "providerId", "ProviderID")
+	model := firstPayloadString(payload, backend.PayloadKeyModel, "model", "Model")
+	status := firstPayloadString(payload, backend.PayloadKeyStatus, "status", "Status")
+	chunks := payloadIntValue(payload, backend.PayloadKeyChunkCount, "chunkCount", "ChunkCount")
+	bytes := payloadIntValue(payload, backend.PayloadKeyReceivedBytes, "receivedBytes", "ReceivedBytes")
 	label := strings.TrimSpace(strings.Join([]string{nonEmpty(provider, "llm"), model}, "/"))
 	parts := []string{"LLM streaming:", label}
 	if status != "" {
@@ -695,8 +755,8 @@ func llmStreamProgressText(payload map[string]any) string {
 }
 
 func artifactContinuationProgressText(payload map[string]any) string {
-	state := firstPayloadString(payload, "state", "State", events.PayloadKeyState)
-	targetRef := firstPayloadString(payload, "targetRef", "TargetRef", events.PayloadKeyTargetRef)
+	state := firstPayloadString(payload, "state", "State", backend.PayloadKeyState)
+	targetRef := firstPayloadString(payload, "targetRef", "TargetRef", backend.PayloadKeyTargetRef)
 	artifactID := firstPayloadString(payload, "artifactId", "ArtifactID")
 	expected := payloadIntValue(payload, "expectedSequence", "ExpectedSequence")
 	received := len(payloadStringSliceValue(payload, "receivedSequences", "ReceivedSequences"))

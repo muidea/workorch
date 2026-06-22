@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -100,4 +101,57 @@ func TestRuntimeOrchestratorBlocksOperatorMCPToolCallBeforeRuntimeExecution(t *t
 	if step.State != common.StepStateCompleted {
 		t.Fatalf("step state = %s, want completed", step.State)
 	}
+}
+
+func TestRuntimeOrchestratorCreateApprovalPublishesNotificationThroughAsyncHub(t *testing.T) {
+	ctx := context.Background()
+	approvalRepo := memory.NewApprovalRepository()
+	hub := &recordingApprovalNotificationAsyncHub{}
+	orch := &RuntimeOrchestrator{
+		approvals: approvalRepo,
+		eventHub:  hub,
+	}
+	run := &runmodel.Run{
+		ID:          "run-create-approval-async",
+		WorkspaceID: "ws-create-approval-async",
+	}
+	step := &runmodel.Step{
+		ID:    "run-create-approval-async/step-001",
+		RunID: run.ID,
+	}
+
+	if err := orch.createApproval(ctx, run, step, "approval-create-async", "requires approval", "apply patch", map[string]any{"operation": "test"}); err != nil {
+		t.Fatalf("createApproval: %v", err)
+	}
+	if _, err := approvalRepo.Get(ctx, "approval-create-async"); err != nil {
+		t.Fatalf("get created approval: %v", err)
+	}
+	if len(hub.sync) != 0 {
+		t.Fatalf("sync publishes = %+v, want none for approval notification", hub.sync)
+	}
+	if len(hub.async) != 1 || hub.async[0].Topic != approvalevents.TopicApprovalCreated {
+		t.Fatalf("async publishes = %+v, want one approval created notification", hub.async)
+	}
+	if hub.async[0].WorkspaceID != string(run.WorkspaceID) || hub.async[0].RunID != string(run.ID) || hub.async[0].StepID != string(step.ID) {
+		t.Fatalf("async scope = workspace:%q run:%q step:%q", hub.async[0].WorkspaceID, hub.async[0].RunID, hub.async[0].StepID)
+	}
+}
+
+type recordingApprovalNotificationAsyncHub struct {
+	sync  []events.Envelope
+	async []events.Envelope
+}
+
+func (h *recordingApprovalNotificationAsyncHub) Publish(_ context.Context, envelope events.Envelope) error {
+	h.sync = append(h.sync, envelope)
+	return nil
+}
+
+func (h *recordingApprovalNotificationAsyncHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
+	h.async = append(h.async, envelope)
+	return nil
+}
+
+func (h *recordingApprovalNotificationAsyncHub) Subscribe(string, events.Handler) func() {
+	return func() {}
 }

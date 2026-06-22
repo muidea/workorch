@@ -2,16 +2,20 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
-func taskDecompositionFromStep(snapshot readmodelcore.RunSnapshot, step presenter.StepView, executedByNode map[string]presenter.StepView) (readmodelcore.TaskDecomposition, bool) {
+func taskDecompositionFromStep(snapshot readmodelcore.RunSnapshot, step StepView, executedByNode map[string]StepView) (readmodelcore.TaskDecomposition, bool) {
 	graph := taskGraphFromValue(step.Output["executionGraph"])
 	nodes := readModelMapSliceValue(graph["nodes"])
 	if len(nodes) == 0 {
 		return readmodelcore.TaskDecomposition{}, false
 	}
 	rootStepID := step.ID
+	blockingTickets := taskBlockingTicketByStep(snapshot)
+	rootMeta := taskLifecycleMetadataFromStep(step)
+	if ticketID := blockingTickets[rootStepID]; ticketID != "" {
+		rootMeta.blockingTicketID = ticketID
+	}
 	item := readmodelcore.TaskDecomposition{
 		ID:          rootStepID + "/task-decomposition",
 		WorkspaceID: snapshot.Run.WorkspaceID,
@@ -26,7 +30,7 @@ func taskDecompositionFromStep(snapshot readmodelcore.RunSnapshot, step presente
 		}),
 	}
 	for _, node := range nodes {
-		addTaskDecompositionNode(&item, node, executedByNode)
+		addTaskDecompositionNode(&item, node, executedByNode, rootMeta, blockingTickets)
 	}
 	item.State = taskDecompositionState(item)
 	item.EvidenceRefs = compactUniqueStrings(item.EvidenceRefs)

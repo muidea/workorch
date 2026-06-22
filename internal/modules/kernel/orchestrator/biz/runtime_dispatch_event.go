@@ -23,7 +23,7 @@ func (o *RuntimeOrchestrator) requestDispatchStep(ctx context.Context, runID com
 		return common.ErrInvalidArgument
 	}
 	if !o.eventDrivenDispatch {
-		run, err := o.runs.Get(ctx, runID)
+		run, err := o.runtimeEventRun(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), runID)
 		if err != nil {
 			return err
 		}
@@ -91,7 +91,7 @@ func (o *RuntimeOrchestrator) DispatchRequestedStep(ctx context.Context, cmd orc
 	if o == nil || cmd.RunID == "" || cmd.StepID == "" || cmd.Kind == "" {
 		return common.ErrInvalidArgument
 	}
-	run, err := o.runs.Get(ctx, cmd.RunID)
+	run, err := o.runtimeEventRun(common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID), cmd.RunID)
 	if err != nil {
 		return err
 	}
@@ -117,8 +117,11 @@ func (o *RuntimeOrchestrator) DispatchRequestedStep(ctx context.Context, cmd orc
 		if cmd.Input == nil {
 			cmd.Input = map[string]any{}
 		}
-		if _, ok := cmd.Input[coverageWorkItemContextKey]; !ok {
-			cmd.Input[coverageWorkItemContextKey] = context
+		focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
+		if existing := mapFromValue(cmd.Input[coverageWorkItemContextKey]); len(existing) > 0 {
+			cmd.Input[coverageWorkItemContextKey] = coverageWorkItemContextAlignedToFocus(existing, focus)
+		} else {
+			cmd.Input[coverageWorkItemContextKey] = coverageWorkItemContextAlignedToFocus(context, focus)
 		}
 	}
 	if baseline := mapFromValue(run.ExecutionContext[gapBaselineKey]); len(baseline) > 0 {

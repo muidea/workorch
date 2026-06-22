@@ -189,6 +189,10 @@ func (r *blockingRunListRepository) Get(ctx context.Context, id common.RunID) (*
 	return r.base.Get(ctx, id)
 }
 
+func (r *blockingRunListRepository) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	return r.base.GetByWorkspaceID(ctx, workspaceID, id)
+}
+
 func (r *blockingRunListRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
 	return r.base.List(ctx)
 }
@@ -215,6 +219,38 @@ func (r *blockingRunListRepository) Delete(ctx context.Context, id common.RunID)
 }
 
 var _ repository.RunRepository = (*blockingRunListRepository)(nil)
+
+func TestGetRunFromRepositoryUsesScopedGetterWithoutWorkspaceList(t *testing.T) {
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-run-helper-scoped")
+	baseRuns := memory.NewRunRepository()
+	runID := common.RunID("run-helper-scoped")
+	if err := baseRuns.Create(context.Background(), &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: "ws-run-helper-scoped",
+		State:       common.RunStateCreated,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	started := make(chan string, 1)
+	repo := &blockingRunListRepository{
+		base:    baseRuns,
+		started: started,
+		release: make(chan struct{}),
+	}
+
+	got, err := getRunFromRepository(ctx, repo, runID)
+	if err != nil {
+		t.Fatalf("getRunFromRepository: %v", err)
+	}
+	if got.ID != runID || got.WorkspaceID != "ws-run-helper-scoped" {
+		t.Fatalf("run = %+v, want scoped run", got)
+	}
+	select {
+	case workspaceID := <-started:
+		t.Fatalf("ListByWorkspaceID was called for %s; want scoped getter only", workspaceID)
+	default:
+	}
+}
 
 type countingMCPCapabilityRepository struct {
 	base      repository.MCPCapabilityRepository
@@ -4334,6 +4370,66 @@ func TestReadRunSnapshotIncludesArtifactContinuationMetadata(t *testing.T) {
 	}
 }
 
+func TestReadRunSnapshotReadsCoverageWorkItemsFromOwnerRepository(t *testing.T) {
+	session, ctx := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+	workspaceID := common.WorkspaceID("ws-coverage-work-item-read-model")
+	runID := common.RunID("run-coverage-work-item-read-model")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:    workspaceID,
+		Title: "coverage work item read model",
+		State: common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			"coverageWorkItemContext": map[string]any{"summary": "context projection retained"},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.CoverageWorkItems.Create(ctx, &orchestratormodel.CoverageWorkItem{
+		ID:                    "run-coverage-work-item-read-model-cwi-001",
+		WorkspaceID:           workspaceID,
+		RunID:                 runID,
+		DefinitionRevision:    "rev-coverage-read-model",
+		NormalizedSourceKey:   "source:coverage-read-model",
+		TargetText:            "owner-backed coverage item",
+		RequiredEvidenceKinds: []string{"validation"},
+		Status:                "open",
+		CurrentGap:            "missing accepted evidence binding for required evidence kind: validation",
+		Metadata: map[string]any{
+			"id":                     "cwi-001",
+			"source":                 "goal",
+			"acceptedEvidenceByKind": map[string]any{"validation": []string{"evidence-ref-001"}},
+		},
+	}); err != nil {
+		t.Fatalf("Create coverage work item: %v", err)
+	}
+
+	snapshot, err := ReadRunSnapshotWithSession(ctx, session, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithSession: %v", err)
+	}
+	if len(snapshot.CoverageWorkItems) != 1 {
+		t.Fatalf("coverage work items = %+v, want one owner item", snapshot.CoverageWorkItems)
+	}
+	item := snapshot.CoverageWorkItems[0]
+	if item["id"] != "cwi-001" || item["repositoryId"] != "run-coverage-work-item-read-model-cwi-001" {
+		t.Fatalf("coverage item ids = %+v, want context id plus repository id", item)
+	}
+	if item["targetText"] != "owner-backed coverage item" || item["status"] != "open" {
+		t.Fatalf("coverage item = %+v, want owner-backed fields", item)
+	}
+	if snapshot.CoverageWorkItemContext["summary"] != "context projection retained" {
+		t.Fatalf("coverage context = %+v, want existing context projection retained", snapshot.CoverageWorkItemContext)
+	}
+}
+
 func TestReadWorkspaceSnapshotIncludesWorkspaceGoalsAndDoDs(t *testing.T) {
 	ctx := context.Background()
 	workspaceID := common.WorkspaceID("ws-snapshot-goal-dod")
@@ -4829,7 +4925,8 @@ func TestReadTerminalRunModelsWithBackendRemainStableAcrossReloads(t *testing.T)
 	if _, err := RejectApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID); err != nil {
 		t.Fatalf("RejectApprovalWithBackend: %v", err)
 	}
-	if _, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID); err != nil {
+	runCtx := common.ContextWithRuntimeWorkspaceID(context.Background(), common.WorkspaceID(workspaceID))
+	if _, err := ResumeRunWithBackend(runCtx, "file", dataRoot, runID); err != nil {
 		t.Fatalf("ResumeRunWithBackend: %v", err)
 	}
 	_ = waitRunSnapshotWithBackend(t, "file", dataRoot, runID, 5*time.Second, func(snapshot RunSnapshot) bool {

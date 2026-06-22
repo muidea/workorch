@@ -86,6 +86,10 @@ func (s *runContinuationScheduler) schedulePeriodicStaleDispatchedRecovery() {
 	if err != nil {
 		s.clearPeriodicRecoveryTimerStarted()
 		slog.Warn("workorch stale dispatched run recovery timer failed", "err", err)
+		return
+	}
+	if state.schedulerDiagnostics != nil {
+		state.schedulerDiagnostics.recordWatchdogTimerRegistration()
 	}
 }
 
@@ -130,6 +134,21 @@ func (s *runContinuationScheduler) recoverStartupInactiveRunningWorkspaces(ctx c
 		runIDs := make([]string, 0, len(recovered))
 		for _, item := range recovered {
 			runIDs = append(runIDs, item.ID)
+			if state.schedulerDiagnostics != nil {
+				state.schedulerDiagnostics.recordContinuation(schedulerDiagnosticInput{
+					WorkspaceID:    item.WorkspaceID,
+					RunID:          item.ID,
+					Kind:           schedulerKindRunContinuation,
+					State:          schedulerDiagnosticStateNotScheduled,
+					Reason:         schedulerReasonServiceRestartedPendingWorkNotRecovered,
+					Detail:         "previous process-local execution is not recoverable after service restart; submit an explicit command to continue",
+					Recoverability: schedulerRecoverabilityManualRetry,
+					RecommendedActions: []string{
+						"run_resume",
+						"workspace_restart",
+					},
+				})
+			}
 		}
 		slog.Warn("workorch recovered startup inactive running workspaces", "runIDs", runIDs)
 	}

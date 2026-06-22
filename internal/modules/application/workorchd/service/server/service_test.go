@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -57,6 +58,18 @@ func (r *recordingBackgroundRoutine) Timer(ctx context.Context, task magictask.T
 
 func (r *recordingBackgroundRoutine) Shutdown(ctx context.Context) bool {
 	return true
+}
+
+func TestServiceStartupRequiresFrameworkRuntime(t *testing.T) {
+	svc := NewService(Config{Addr: "127.0.0.1:0", Backend: "memory"})
+	routine := &recordingBackgroundRoutine{}
+
+	if err := svc.Startup(context.Background(), "workorch", nil, routine); err == nil {
+		t.Fatal("Startup returned nil error without event hub")
+	}
+	if err := svc.Startup(context.Background(), "workorch", event.NewHub(8), nil); err == nil {
+		t.Fatal("Startup returned nil error without background routine")
+	}
 }
 
 func TestServiceRunUsesBackgroundRoutine(t *testing.T) {
@@ -161,6 +174,19 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 	}
 	if snapshot.TaskProgress.Recovery.Mode != "idle" || snapshot.TaskProgress.Recovery.NextAction != "start_workspace_execution" {
 		t.Fatalf("projected recovery = %+v, want idle start action", snapshot.TaskProgress.Recovery)
+	}
+	diagnostics := svc.http.state.schedulerDiagnostics.snapshot(workspaceID, runID)
+	if diagnostics == nil || diagnostics.LatestContinuation == nil {
+		t.Fatalf("scheduler diagnostics = %+v, want restart not scheduled diagnostic", diagnostics)
+	}
+	latest := diagnostics.LatestContinuation
+	if latest.State != schedulerDiagnosticStateNotScheduled ||
+		latest.Reason != schedulerReasonServiceRestartedPendingWorkNotRecovered ||
+		latest.Recoverability != schedulerRecoverabilityManualRetry {
+		t.Fatalf("latest diagnostic = %+v, want service restart manual retry diagnostic", latest)
+	}
+	if len(latest.RecommendedActions) != 2 || latest.RecommendedActions[0] != "run_resume" || latest.RecommendedActions[1] != "workspace_restart" {
+		t.Fatalf("recommended actions = %+v, want run_resume/workspace_restart", latest.RecommendedActions)
 	}
 }
 

@@ -241,6 +241,29 @@ Last Updated: 2026-05-30
 7. 服务恢复后重新让 LLM 生成已确认 chunk。
 8. raw tail 正文被塞回 prompt / memory / event payload。
 
+## 2026-06-22 Code Alignment Result
+
+| 项目 | 代码位置 | 结果 | 备注 |
+| --- | --- | --- | --- |
+| core contract | `internal/modules/kernel/orchestrator/biz/runtime_output_mode_selector.go`, `runtime_artifact_output_contract.go`, `runtime_artifact_output_contract_test.go`, `runtime_output_mode_selector_test.go` | pass | `incrementalArtifact` 作为 output mode / request-side contract 存在，不是新的 run/step state；selector 使用 LLM output budget、open continuation、requested mode 和 structured retry 信号，不依赖模板名、业务语言或文件名；顶层 `outputMode`、graph/artifact 互斥、plan/chunk/repair 互斥和 chunk hash/sequence/tail 检查均有合同测试。 |
+| flow routing | `runtime_artifact_assemble.go`, `runtime_artifact_assemble_test.go`, `runtime_resume_contract_integration_test.go` | pass | 主链按 plan -> chunk -> assemble -> apply -> validation/acceptance 推进；open continuation 恢复优先继续当前 continuation，terminal continuation 回落到 `executionGraph` 并清理 incremental-only 字段；chunk rejected 不推进 cursor。 |
+| provider assembly | `internal/modules/blocks/llm/biz/prompt_messages.go`, `prompt_messages_test.go`, `runtime_adapter.go`, `runtime_adapter_test.go`, `docs/30-module-architecture/llm-provider-assembly.md` | pass | LLM-facing stage contract 投影 `outputMode`、`requestedOutputMode`、selector、artifact contract 和 metadata-only continuation context；LLM adapter 输出 artifact chunk / chunk repair structured stage；completion follow-up 不继承已完成 artifact 的 chunk/plan contract。 |
+| persistence | `internal/pkg/workorchruntimecontract/artifact_continuation.go`, `internal/pkg/repository/artifact_continuation_repository.go`, `internal/pkg/repository/{file,memory}/artifact_continuation_repository.go`, `internal/pkg/repository/repository_contract_test.go`, `internal/pkg/repository/file/file_test.go` | pass | continuation 是 run-scoped internal state；file/memory repository 支持 metadata、plan、chunk content、assembled content、open listing 和 reload contract；file repository 测试证明 chunk/assembled 正文存储在 metadata 外。 |
+| read-model | `readmodelcore/artifact_continuation_types.go`, `readmodelprojection/artifact_continuation*.go`, `readmodelprojection/run_snapshot_base.go`, `readmodelprojection/workspace_snapshot.go`, `workspace_snapshot_test.go`, `read_model_service_test.go` | pass | RunSnapshot / WorkspaceSnapshot 投影 `artifactContinuations` metadata/progress；默认 read model 不内嵌 plan/chunk/assembled 正文，continuation 投影不替代正式 Result / Artifact / Validation 视图。 |
+| API | `service/server/http_run.go`, `http_test.go`, `artifact_content_service.go`, `runtime_raw_content_service.go`, corresponding service tests | pass | snapshot 默认暴露 metadata；正文通过 `/api/v1/workorch/artifacts/content?uri=...` 与 `/api/v1/workorch/runtime/payloads?ref=...` 显式 raw/detail 入口读取；service tests 覆盖 unsafe URI/ref 拒绝。 |
+| Web/TUI | `web/workorch-console/src/pages/WorkspaceDetailPage.tsx`, `web/workorch-console/src/api.ts`, `internal/services/workorch/service/tui/{model.go,view.go,inspect_commands.go,workspace_state.go}` | pass | Web detail 以 table/summary 展示 continuation metadata，并使用显式 content URL 打开正式 artifact；TUI 主视图只展示 target/state/progress/failure summary，不默认展开 chunk/assembled 正文。 |
+| tests | `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz ./internal/pkg/repository ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/services/workorch/service/tui -count=1` | pass locally on 2026-06-22 | 覆盖 selector、contract enforcement、continuation lifecycle、repository metadata/content split、read-model/API raw/detail、TUI continuation display。 |
+
+### Closed In This Pass
+
+- 该审计文档此前只有核对模板，没有实际代码核对结果表；本轮将当前实现证据固化到具体代码和测试路径。
+- 未发现需要立即修复的 `incrementalArtifact` core / provider / persistence / projection / API / TUI-Web 代码偏差。
+
+### Remaining Follow-Up
+
+- 后续如新增 continuation raw/detail UI，仍必须保持 metadata-first 主视图和显式 raw/detail 打开边界。
+- 后续如新增新的 output mode selector 信号，必须继续保持业务中立，不能按 template、语言、文件名或具体工具输出文本分支。
+
 ## Suggested Code Landing Paths
 
 核对时可优先检查以下代码目录：

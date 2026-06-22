@@ -441,9 +441,14 @@ type batchResolveDecisionsRequest struct {
 	ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
 }
 
+type resolveApprovalRequest struct {
+	Payload map[string]any `json:"payload,omitempty"`
+}
+
 type batchResolveApprovalsRequest struct {
-	ApprovalIDs []string `json:"approvalIds"`
-	Action      string   `json:"action"`
+	ApprovalIDs []string       `json:"approvalIds"`
+	Action      string         `json:"action"`
+	Payload     map[string]any `json:"payload,omitempty"`
 }
 
 type defineGoalRequest struct {
@@ -532,8 +537,8 @@ type batchResolveDecisionsFunc func(context.Context, string, string, appservice.
 type listApprovalsFunc func(context.Context, string, string, string, string) ([]appservice.Approval, error)
 type listApprovalPageFunc func(context.Context, string, string, appservice.ApprovalQuery) (appservice.ApprovalPage, error)
 type readApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
-type approveApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
-type rejectApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
+type approveApprovalFunc func(context.Context, string, string, string, appservice.ResolveApprovalCommand) (appservice.Approval, error)
+type rejectApprovalFunc func(context.Context, string, string, string, appservice.ResolveApprovalCommand) (appservice.Approval, error)
 type batchResolveApprovalsFunc func(context.Context, string, string, appservice.BatchResolveApprovalCommand) ([]appservice.Approval, error)
 type createSoulFunc func(context.Context, string, string, appservice.CreateSoulCommand) (appservice.Soul, error)
 type updateSoulFunc func(context.Context, string, string, string, appservice.UpdateSoulCommand) (appservice.Soul, error)
@@ -1596,20 +1601,26 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		})
 		return ret, err
 	}
-	s.approveApproval = func(ctx context.Context, _, _, approvalID string) (appservice.Approval, error) {
+	s.approveApproval = func(ctx context.Context, _, _, approvalID string, cmd appservice.ResolveApprovalCommand) (appservice.Approval, error) {
 		var ret appservice.Approval
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
-			ret, err = appservice.ApproveApprovalWithSession(ctx, session, approvalID)
+			if cmd.Action == "" {
+				cmd.Action = "approve"
+			}
+			ret, err = appservice.ResolveApprovalWithSession(ctx, session, approvalID, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.rejectApproval = func(ctx context.Context, _, _, approvalID string) (appservice.Approval, error) {
+	s.rejectApproval = func(ctx context.Context, _, _, approvalID string, cmd appservice.ResolveApprovalCommand) (appservice.Approval, error) {
 		var ret appservice.Approval
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
-			ret, err = appservice.RejectApprovalWithSession(ctx, session, approvalID)
+			if cmd.Action == "" {
+				cmd.Action = "reject"
+			}
+			ret, err = appservice.ResolveApprovalWithSession(ctx, session, approvalID, cmd)
 			return err
 		})
 		return ret, err

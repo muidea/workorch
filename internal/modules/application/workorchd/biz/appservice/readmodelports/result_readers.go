@@ -45,3 +45,11 @@ type ArtifactContinuationReader struct {
 func (r ArtifactContinuationReader) ListByRun(ctx context.Context, runID common.RunID) ([]*orchestratormodel.ArtifactContinuation, error) {
 	return ownerreadports.ListArtifactContinuationsByRunOwnerCommand(ctx, r.Hub, runID)
 }
+
+type CoverageWorkItemReader struct {
+	Hub events.Hub
+}
+
+func (r CoverageWorkItemReader) ListByRun(ctx context.Context, runID common.RunID) ([]*orchestratormodel.CoverageWorkItem, error) {
+	return ownerreadports.ListCoverageWorkItemsByRunOwnerCommand(ctx, r.Hub, runID)
+}

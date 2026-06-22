@@ -1143,6 +1143,69 @@ func TestCompactSelectedContextForCurrentDefinitionDropsStaleAndOldRevisionMemor
 	}
 }
 
+func TestRunExecutionContextPackageMergesCurrentRuntimeCapabilityContextIntoStableSelectedContext(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-selected-context-capability-merge",
+		WorkspaceID: "ws-selected-context-capability-merge",
+		ExecutionContext: map[string]any{
+			"capabilityIds": []string{"runtime-mcp:tool:inspect"},
+			"mcpServers": []map[string]any{{
+				"id":        "runtime-mcp",
+				"name":      "Runtime MCP",
+				"transport": "stdio",
+				"enabled":   true,
+			}},
+			"mcpCapabilities": []map[string]any{{
+				"id":       "runtime-mcp:tool:inspect",
+				"serverId": "runtime-mcp",
+				"kind":     "tool",
+				"name":     "inspect",
+				"status":   "active",
+			}},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-selected-context-capability-merge/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyExecutionContextPackage: map[string]any{
+				"selectedContext": map[string]any{
+					"memories": []map[string]any{{
+						"id":         "memory-current",
+						"summary":    "current reference",
+						"importance": 0.8,
+						"confidence": 0.8,
+					}},
+					"mcpServers": []map[string]any{{
+						"id": "stale-mcp",
+					}},
+				},
+			},
+		},
+	}
+
+	pkg := runExecutionContextPackage(context.Background(), executionContextPackageDeps{}, run, step, nil)
+	selected := mapFromValue(pkg["selectedContext"])
+	if len(selected) == 0 {
+		t.Fatalf("selectedContext missing from package: %+v", pkg)
+	}
+	servers := mapSliceFromValue(selected["mcpServers"])
+	if len(servers) != 1 || servers[0]["id"] != "runtime-mcp" {
+		t.Fatalf("mcpServers = %+v, want current runtime capability context", servers)
+	}
+	capabilities := mapSliceFromValue(selected["mcpCapabilities"])
+	if len(capabilities) != 1 || capabilities[0]["serverId"] != "runtime-mcp" {
+		t.Fatalf("mcpCapabilities = %+v, want current runtime capability context", capabilities)
+	}
+	if ids := stringSliceFromValue(selected["capabilityIds"]); len(ids) != 1 || ids[0] != "runtime-mcp:tool:inspect" {
+		t.Fatalf("capabilityIds = %+v, want current runtime capability IDs", ids)
+	}
+	if memories := mapSliceFromValue(selected["memories"]); len(memories) != 1 || memories[0]["id"] != "memory-current" {
+		t.Fatalf("memories = %+v, want stable memory context preserved", memories)
+	}
+}
+
 func TestCompactStepOutputForLLMContextSummarizesExecutionGraph(t *testing.T) {
 	output := map[string]any{
 		"summary": "historical graph output",

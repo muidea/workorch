@@ -46,6 +46,14 @@ func BatchResolveApprovalCommandFromPayload(payload map[string]any) appmodelcore
 	return appmodelcore.BatchResolveApprovalCommand{
 		ApprovalIDs: StringSliceValue(payload, "approvalIds"),
 		Action:      StringValue(payload, "action"),
+		Payload:     FirstMapValue(payload, "payload", "resolutionPayload"),
+	}
+}
+
+func ResolveApprovalCommandFromPayload(action string, payload map[string]any) appmodelcore.ResolveApprovalCommand {
+	return appmodelcore.ResolveApprovalCommand{
+		Action:  action,
+		Payload: FirstMapValue(payload, "payload", "resolutionPayload"),
 	}
 }
 

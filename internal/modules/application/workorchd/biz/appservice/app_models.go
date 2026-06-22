@@ -20,6 +20,7 @@ type BatchResolveDecisionCommand = appmodelcore.BatchResolveDecisionCommand
 type Approval = appmodelcore.Approval
 type ApprovalQuery = appmodelcore.ApprovalQuery
 type ApprovalPage = appmodelcore.ApprovalPage
+type ResolveApprovalCommand = appmodelcore.ResolveApprovalCommand
 type BatchResolveApprovalCommand = appmodelcore.BatchResolveApprovalCommand
 
 const (

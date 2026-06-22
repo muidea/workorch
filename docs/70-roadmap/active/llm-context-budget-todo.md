@@ -72,9 +72,15 @@ projection follow-up。
 - `CTX-07/CTX-10 Observability + Read Model Projection` 已收口基础版：
   - `llm/workspace_execution` step 输出包含结构化 `contextBudget`
   - `RunSnapshot/RunObservability` 增加 `llmContextBudgets` 投影，web/tui 共用同一读模型
+  - `workorchclient` / `workorchport` / remote backend 已贯穿 `llmContextBudgets`，TUI 优先使用正式 context budget trace，而不是从 usage trace 的内嵌字段派生最新上下文。
+  - Web `LLMContextBudgetCard` 已展示 over-budget、context utilization、profile mode、capability source、stage budget 等细粒度元数据。
+  - `RunSnapshot` / `WorkspaceSnapshot` / `RunObservability` 已新增 `llmContextBudgetSummary`，由 workorchd read-model 统一聚合 trace total、压缩/超预算/P0 overflow/Goal-DoD 压缩、最大压缩级别、最大/平均利用率和最大输入规模；client/port/Web/TUI 共用该投影。
+  - `llmContextBudgetSummary` 已补充最近窗口聚合与利用率趋势字段（recent trace/window、recent avg/max utilization、recent max input tokens、trend），由 workorchd read-model 统一计算并供 Web/TUI 展示。
 - `CTX-08 Provider Failure Policy and Failover` 已收口基础版：
   - provider 失败细分类已扩展：`provider_timeout`、`context_too_large`、`rate_limited`、`auth_or_config_error`、`provider_unavailable`
-  - `RuntimeAdapter` 支持一次性 failover（按 provider 配置启用并记录 from/to provider 与失败原因）
+  - `RuntimeAdapter` 支持按 provider 配置启用 failover，并按 `failoverProviders` / default provider / 其他可用 provider 顺序执行多级候选切换
+  - failover 候选会跳过不可用 provider、缺失 provider runtime、以及不支持当前 operation 的 provider，并记录中立 attempts / failureClass / stage / budget 元数据
+  - failover 候选已接入运行期内存健康窗口；连续 transient provider failure 会临时打开候选熔断窗口，后续 failover 在窗口内跳过该候选，并仅输出中立 skipped count/reason，不把 provider/model 动态绑定写入业务恢复状态
   - retryable provider failure 已扩展到 `provider_timeout` / `context_too_large` / `rate_limited`
 - `CTX-09 Multi-Client Governance Semantic Normalization` 已收口基础版：
   - 新增治理语义归一能力（`kernel/governance/pkg/common`），统一推断 decision/approval 语义意图
@@ -82,11 +88,14 @@ projection follow-up。
   - 归一结果写入 `resolutionPayload.governanceSemantic`（`resolutionType/intent/confidence/rawInput/source/inferred`）
   - TUI 本地 decision/approval 文本判断改为复用同一治理语义归一逻辑
   - batch approval 支持语义 action 文本归一到 `approve/reject`
+  - 单条 approve/reject endpoint、`workorchclient`、`workorchport`、remote/eventhub backend 与 TUI approval 输入已支持可选语义 payload 追溯；归一结果写入 approval owner state 的 `context.governanceSemantic`
 - `CTX-12 Streaming LLM Progress Event Projection` 已收口基础版：
   - 新增统一事件主题 `TopicRunLLMStreamProgress`（`/run/llm_stream/progress`）
   - orchestrator 在 LLM step 完成/失败后从 `streamEvents` 聚合 `chunkCount/receivedBytes/elapsedMs/status` 并发布 EventHub 事件
   - eventstream 持久化链路自动覆盖该主题，read-model timeline 新增 `llm_stream_progress_event` 投影
   - 保持 streaming 仅用于进度观测，不改变最终 `LLMExecutionDecision` 业务决策边界
+  - read-model timeline 对历史/兼容 `streamEvents` 执行头尾窗口保留、omitted summary 和单 delta preview 截断；通用 step timeline 不再向端侧输出完整 raw streamEvents
+  - Web 时间线已展示 stream summary、omitted/truncated 标记、chunk/bytes 诊断和 raw stream omitted 摘要
 - `CTX-13 Workspace LLM Usage Ledger` 已收口基础版：
   - 新增统一事件主题 `TopicRunLLMUsageRecorded`（`/run/llm_usage/recorded`）
   - LLM runtime 输出新增结构化 `llmUsage`（workspace/run/step/provider/model/operation/token/bytes/streaming/duration/status/failureClass/contextBudget）
@@ -114,16 +123,17 @@ projection follow-up。
 
 ### 当前仍未完全收口
 
-- 当前仍未接入真实 tokenizer 或 provider 原生 token usage。
-- context budget 元数据已完成基础投影；细粒度展示和聚合统计仍待补齐。
-- provider failover 当前为基础一跳策略（单次切换），尚未支持多级策略、权重或健康度感知。
-- approval 语义归一当前已覆盖 TUI 与 batch approval；单条 approve/reject endpoint 仍为显式动作接口，尚未扩展语义 payload 追溯字段。
-- 当前 LLM streaming 已完成 eventhub/run progress 基础投影；stream 记录上限策略与 UI 细粒度展示仍待补齐。
+- provider 原生 token usage 已接入非流式/流式主链；剩余缺口是未接入可插拔真实 tokenizer，高精度估算仍依赖 provider 返回 usage 或保守 bytes-ratio fallback。
+- context budget 元数据已完成基础投影、端侧细粒度展示、run/workspace 基础聚合统计和最近窗口趋势统计；跨 run 长期趋势视图和真实 tokenizer 精度仍待补齐。
+- provider failover 已支持多级有序候选、基础可用性/operation eligibility 筛选和运行期内存健康/熔断窗口；权重策略与更细粒度健康评分仍待补齐。
+- 当前 LLM streaming 已完成 eventhub/run progress 基础投影、read-model 记录上限策略和 Web 时间线基础诊断展示；独立 stream 详情页、筛选和跨 run 趋势视图仍待补齐。
 - 当前已具备 workspace 维度 LLM usage ledger、usageSource 语义区分、cache usage 统计、以及非流式/流式 provider 原生 usage 优先链路；剩余项聚焦 provider 侧覆盖率与精度提升。
 
 ## 待办项
 
 ### CTX-01 Provider/Model Context Profile
+
+状态：基础收口已完成。provider 配置、model capability table、REST/Web 配置读写和 runtime budget 计算已支持 `contextWindowTokens`、`maxInputTokens`、`reservedOutputTokens`、`safetyRatio`、`contextUtilizationRatio`、`bytesHardLimit`、`maxRequestBytes` 和 `estimatedTokensPerByte`。后续只保留更细粒度 model capability registry 和 tokenizer 绑定策略增强。
 
 - 为 LLM provider/model 增加 context profile 配置。
 - 普通配置入口：
@@ -137,6 +147,8 @@ projection follow-up。
 - 未配置时使用保守默认值。
 
 ### CTX-02 Token Budget Estimation
+
+状态：基础收口已完成。runtime 当前使用 provider/model context profile 的 `estimatedTokensPerByte` 做保守输入 token 估算，provider 返回 usage 时优先使用 provider-native token usage；尚未接入可插拔 tokenizer，因此高精度估算仍是后续增强项。
 
 - 引入 token 预算计算。
 - 优先使用 provider/model tokenizer。
@@ -200,7 +212,7 @@ projection follow-up。
 
 ### CTX-08 Provider Failure Policy and Failover
 
-状态：基础收口已完成（失败分类 + 单次 failover + 可追溯元数据），高级策略待补齐。
+状态：基础收口已完成（失败分类 + 多级有序 failover + 基础可用性/operation eligibility 筛选 + 运行期内存健康/熔断窗口 + 可追溯中立元数据），高级权重和更细粒度健康评分策略待补齐。
 
 - 区分不同 provider 失败类型：
   - `provider_timeout`
@@ -211,11 +223,13 @@ projection follow-up。
 - 对 retryable 失败执行有限重试和 context shrink。
 - 对不可自动恢复失败进入 governance decision，而不是直接终态失败。
 - 支持按配置启用 provider/model failover。
-- failover 后必须记录原 provider/model、目标 provider/model、失败原因和上下文预算变化。
+- failover 后必须记录失败原因、上下文预算变化和尝试序号；provider/model 动态绑定只允许通过受控 request audit / raw ref 追溯，不进入 workspace/run 业务恢复状态。
+- 多级 failover 必须保持 provider/model 动态绑定不进入业务恢复状态；运行期输出只暴露中立 attempt、failureClass、stage、error、budget 和成功序号。
+- 运行期健康/熔断只作为 LLM block 内存态选择策略；服务重启或 provider 配置 revision 变化会重置健康窗口，不作为 workspace/run 恢复状态持久化。
 
 ### CTX-09 Multi-Client Governance Semantic Normalization
 
-状态：基础收口已完成（统一归一能力 + appservice/tui 接入 + payload 追溯字段），入口覆盖与治理记录细化待补齐。
+状态：基础收口已完成（统一归一能力 + appservice/tui 接入 + approval owner payload 追溯字段），入口覆盖与治理记录细化待补齐。
 
 - TUI、HTTP、console、自动治理入口必须复用同一套 decision/approval 语义归一逻辑。
 - 用户输入的治理意图应根据语义识别为：
@@ -245,6 +259,7 @@ projection follow-up。
   - 当前 shrink level
   - 是否需要用户决策
 - 保证 web/TUI 展示来自同一 read model，避免功能分叉。
+- workorchd read-model 负责最近窗口与趋势聚合；Web/TUI 只展示 `llmContextBudgetSummary`，不得自行维护另一套统计状态。
 
 ### CTX-11 Context Split and Continuation
 
@@ -255,7 +270,7 @@ projection follow-up。
 
 ### CTX-12 Streaming LLM Progress Event Projection
 
-状态：基础收口已完成（EventHub 事件主题 + orchestrator 聚合发布 + eventstream 持久化 + read-model timeline 投影），高级展示与记录策略待补齐。
+状态：基础收口已完成（EventHub 事件主题 + orchestrator 聚合发布 + eventstream 持久化 + read-model timeline 投影 + read-model bounded stream record + Web 时间线基础诊断展示），高级展示待补齐。
 
 - 支持按 provider/model capability 启用 LLM streaming。
 - streaming 只用于进度展示、运行期观测和故障排查，不直接驱动业务状态流转。
@@ -272,9 +287,9 @@ projection follow-up。
   - `elapsedMs`
   - `status`
 - TUI 默认只显示简化进度，例如 `LLM responding... received N chunks`。
-- web 可以提供更完整的 stream progress 和错误诊断视图。
+- Web 已在运行时间线中展示 stream progress、omitted/truncated 和错误诊断摘要；更完整的独立详情页、筛选和跨 run 趋势视图仍待补齐。
 - 需要避免将完整 delta 默认显示到 TUI 主结果区，防止干扰最终结果展示。
-- stream 记录需要有上限和摘要策略，避免自身造成新的上下文膨胀。
+- stream 记录已具备 read-model 上限和摘要策略，避免历史/兼容 `streamEvents` 自身造成新的端侧 payload 膨胀；后续如新增独立 stream 详情页，需要继续复用该 bounded projection。
 - e2e 覆盖：
   - provider streaming 开启后能收到 progress event。
   - streaming 完成后仍按完整 JSON 决策执行。

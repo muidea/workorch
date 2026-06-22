@@ -6,7 +6,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -21,8 +20,10 @@ type workspaceDisplayState struct {
 	Patches               []backend.PatchInfo
 	ArtifactContinuations []backend.ArtifactContinuationInfo
 	TaskDecompositions    []backend.TaskDecompositionInfo
+	TaskPlans             []backend.TaskPlanInfo
 	MemoryRecalls         []backend.MemoryRecallTraceInfo
 	LLMUsage              backend.LLMUsageSummaryInfo
+	LLMContextSummary     backend.LLMContextBudgetSummaryInfo
 	LLMContext            map[string]any
 	Acceptance            backend.AcceptanceProjectionInfo
 	RunHeartbeat          backend.RunHeartbeatInfo
@@ -179,13 +180,13 @@ func workspaceIndex(workspaces []backend.WorkspaceInfo, id string) int {
 }
 
 func (m *AppModel) upsertWorkspaceFromEvent(evt backend.Event) {
-	state := common.WorkspaceState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState))
-	activeRunID := common.RunID(firstPayloadString(evt.Payload, "activeRunId", "ActiveRunID", events.PayloadKeyActiveRunID))
-	blockingTicketID := common.TicketID(firstPayloadString(evt.Payload, "blockingTicketId", "BlockingTicketID", events.PayloadKeyBlockingTicketID))
-	blockingApprovalID := common.ApprovalID(firstPayloadString(evt.Payload, "blockingApprovalId", "BlockingApprovalID", events.PayloadKeyBlockingApprovalID))
-	title := firstPayloadString(evt.Payload, "title", "Title", events.PayloadKeyTitle)
-	description := firstPayloadString(evt.Payload, "description", "Description", events.PayloadKeyDescription)
-	deliverableDirectory := firstPayloadString(evt.Payload, "deliverableDirectory", "DeliverableDirectory", events.PayloadKeyDeliverableDirectory)
+	state := common.WorkspaceState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState))
+	activeRunID := common.RunID(firstPayloadString(evt.Payload, "activeRunId", "ActiveRunID", backend.PayloadKeyActiveRunID))
+	blockingTicketID := common.TicketID(firstPayloadString(evt.Payload, "blockingTicketId", "BlockingTicketID", backend.PayloadKeyBlockingTicketID))
+	blockingApprovalID := common.ApprovalID(firstPayloadString(evt.Payload, "blockingApprovalId", "BlockingApprovalID", backend.PayloadKeyBlockingApprovalID))
+	title := firstPayloadString(evt.Payload, "title", "Title", backend.PayloadKeyTitle)
+	description := firstPayloadString(evt.Payload, "description", "Description", backend.PayloadKeyDescription)
+	deliverableDirectory := firstPayloadString(evt.Payload, "deliverableDirectory", "DeliverableDirectory", backend.PayloadKeyDeliverableDirectory)
 	for i := range m.workspaces {
 		if m.workspaces[i].ID == evt.WorkspaceID {
 			if title != "" {
@@ -200,13 +201,13 @@ func (m *AppModel) upsertWorkspaceFromEvent(evt backend.Event) {
 			if state != "" {
 				m.workspaces[i].State = state
 			}
-			if activeRunID != "" || hasPayloadKey(evt.Payload, events.PayloadKeyActiveRunID, "ActiveRunID", "activeRunId") {
+			if activeRunID != "" || hasPayloadKey(evt.Payload, backend.PayloadKeyActiveRunID, "ActiveRunID", "activeRunId") {
 				m.workspaces[i].ActiveRunID = activeRunID
 			}
-			if blockingTicketID != "" || hasPayloadKey(evt.Payload, events.PayloadKeyBlockingTicketID, "BlockingTicketID", "blockingTicketId") {
+			if blockingTicketID != "" || hasPayloadKey(evt.Payload, backend.PayloadKeyBlockingTicketID, "BlockingTicketID", "blockingTicketId") {
 				m.workspaces[i].BlockingTicketID = blockingTicketID
 			}
-			if blockingApprovalID != "" || hasPayloadKey(evt.Payload, events.PayloadKeyBlockingApprovalID, "BlockingApprovalID", "blockingApprovalId") {
+			if blockingApprovalID != "" || hasPayloadKey(evt.Payload, backend.PayloadKeyBlockingApprovalID, "BlockingApprovalID", "blockingApprovalId") {
 				m.workspaces[i].BlockingApprovalID = blockingApprovalID
 			}
 			if evt.Revision > 0 {
@@ -441,9 +442,6 @@ func (m *AppModel) ensureActiveBlockingDecisionFromOverview() bool {
 		m.progressText = nonEmpty(blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
 		return true
 	}
-	if m.blockingDecision != nil && m.blockingDecision.ID != "" && m.decisionMatchesActiveScope(*m.blockingDecision) {
-		return true
-	}
 	return false
 }
 
@@ -467,9 +465,6 @@ func (m *AppModel) ensureActiveBlockingApprovalFromOverview() bool {
 		m.running = false
 		m.progress = progressWaitingApproval
 		m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
-		return true
-	}
-	if m.blockingApproval != nil && m.blockingApproval.ID != "" && m.approvalMatchesActiveScope(*m.blockingApproval) {
 		return true
 	}
 	return false
@@ -633,9 +628,11 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.patches = snapshotPatches(msg.Snapshot, run.ID)
 		m.artifactContinuations = snapshotArtifactContinuations(msg.Snapshot, run.ID)
 		m.taskDecomp = snapshotTaskDecompositions(msg.Snapshot, run.ID)
+		m.taskPlans = snapshotTaskPlans(msg.Snapshot, run.ID)
 		m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), msg.Snapshot.MemoryRecallTraces...)
 		m.llmUsage = msg.Snapshot.LLMUsageSummary
-		m.llmContext = latestLLMContextBudget(msg.Snapshot.LLMUsageTraces)
+		m.llmContextSummary = msg.Snapshot.LLMContextBudgetSummary
+		m.llmContext = latestLLMContextBudget(msg.Snapshot.LLMContextBudgets, msg.Snapshot.LLMUsageTraces)
 		m.acceptance = msg.Snapshot.Acceptance
 		m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
 		m.applyRuntimeExecution(msg.Snapshot.RuntimeExecution)
@@ -645,18 +642,18 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 
 	state := run.State
 	payload := map[string]any{
-		events.PayloadKeyFailureReason:      run.FailureReason,
-		events.PayloadKeyBlockingTicketID:   string(run.BlockingTicketID),
-		events.PayloadKeyBlockingApprovalID: string(run.BlockingApprovalID),
+		backend.PayloadKeyFailureReason:      run.FailureReason,
+		backend.PayloadKeyBlockingTicketID:   string(run.BlockingTicketID),
+		backend.PayloadKeyBlockingApprovalID: string(run.BlockingApprovalID),
 	}
 	if msg.Status != nil {
 		state = msg.Status.State
-		payload[events.PayloadKeyFailureReason] = msg.Status.FailureReason
-		payload[events.PayloadKeyBlockingTicketID] = string(msg.Status.BlockingTicketID)
-		payload[events.PayloadKeyBlockingApprovalID] = string(msg.Status.BlockingApprovalID)
+		payload[backend.PayloadKeyFailureReason] = msg.Status.FailureReason
+		payload[backend.PayloadKeyBlockingTicketID] = string(msg.Status.BlockingTicketID)
+		payload[backend.PayloadKeyBlockingApprovalID] = string(msg.Status.BlockingApprovalID)
 	}
-	if msg.Snapshot != nil && payload[events.PayloadKeyFailureReason] == "" {
-		payload[events.PayloadKeyFailureReason] = msg.Snapshot.Outcome.Reason
+	if msg.Snapshot != nil && payload[backend.PayloadKeyFailureReason] == "" {
+		payload[backend.PayloadKeyFailureReason] = msg.Snapshot.Outcome.Reason
 	}
 	if workspaceHasLive {
 		m.applyRunState(state, payload)
@@ -668,7 +665,9 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	}
 	if msg.Status != nil {
 		m.applyRuntimeExecution(msg.Status.RuntimeExecution)
-		m.applySchedulerDiagnostics(msg.Status.SchedulerDiagnostics)
+		if msg.Status.SchedulerDiagnostics != nil {
+			m.applySchedulerDiagnostics(msg.Status.SchedulerDiagnostics)
+		}
 	}
 	if msg.Snapshot != nil && strings.TrimSpace(msg.Snapshot.TaskProgress.Summary) != "" && m.progress == progressRunning {
 		m.progressText = strings.TrimSpace(msg.Snapshot.TaskProgress.Summary)
@@ -687,8 +686,10 @@ func (m *AppModel) clearRunProjectionState() {
 	m.patches = nil
 	m.artifactContinuations = nil
 	m.taskDecomp = nil
+	m.taskPlans = nil
 	m.memoryRecalls = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
+	m.llmContextSummary = backend.LLMContextBudgetSummaryInfo{}
 	m.llmContext = nil
 	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runHeartbeat = backend.RunHeartbeatInfo{}
@@ -814,6 +815,7 @@ func (m *AppModel) resetWorkspaceView() {
 	m.patches = nil
 	m.artifactContinuations = nil
 	m.taskDecomp = nil
+	m.taskPlans = nil
 	m.memoryRecalls = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
 	m.llmContext = nil
@@ -855,8 +857,10 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 		Patches:               append([]backend.PatchInfo(nil), m.patches...),
 		ArtifactContinuations: append([]backend.ArtifactContinuationInfo(nil), m.artifactContinuations...),
 		TaskDecompositions:    append([]backend.TaskDecompositionInfo(nil), m.taskDecomp...),
+		TaskPlans:             append([]backend.TaskPlanInfo(nil), m.taskPlans...),
 		MemoryRecalls:         append([]backend.MemoryRecallTraceInfo(nil), m.memoryRecalls...),
 		LLMUsage:              m.llmUsage,
+		LLMContextSummary:     m.llmContextSummary,
 		LLMContext:            clonePayloadMap(m.llmContext),
 		Acceptance:            m.acceptance,
 		RunHeartbeat:          m.runHeartbeat,
@@ -882,8 +886,10 @@ func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
 	m.patches = append([]backend.PatchInfo(nil), cached.Patches...)
 	m.artifactContinuations = append([]backend.ArtifactContinuationInfo(nil), cached.ArtifactContinuations...)
 	m.taskDecomp = append([]backend.TaskDecompositionInfo(nil), cached.TaskDecompositions...)
+	m.taskPlans = append([]backend.TaskPlanInfo(nil), cached.TaskPlans...)
 	m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), cached.MemoryRecalls...)
 	m.llmUsage = cached.LLMUsage
+	m.llmContextSummary = cached.LLMContextSummary
 	m.llmContext = clonePayloadMap(cached.LLMContext)
 	m.acceptance = cached.Acceptance
 	m.runHeartbeat = cached.RunHeartbeat
@@ -989,7 +995,12 @@ func (m *AppModel) applySchedulerDiagnostics(item *backend.SchedulerDiagnosticsI
 	m.schedulerDiagnostics = cloneSchedulerDiagnosticsInfoPtr(item)
 }
 
-func latestLLMContextBudget(traces []backend.LLMUsageTraceInfo) map[string]any {
+func latestLLMContextBudget(budgets []backend.LLMContextBudgetTraceInfo, traces []backend.LLMUsageTraceInfo) map[string]any {
+	for idx := len(budgets) - 1; idx >= 0; idx-- {
+		if budget := llmContextBudgetTraceMap(budgets[idx]); len(budget) > 0 {
+			return budget
+		}
+	}
 	for idx := len(traces) - 1; idx >= 0; idx-- {
 		budget := traces[idx].ContextBudget
 		if len(budget) == 0 {
@@ -998,6 +1009,58 @@ func latestLLMContextBudget(traces []backend.LLMUsageTraceInfo) map[string]any {
 		return clonePayloadMap(budget)
 	}
 	return nil
+}
+
+func llmContextBudgetTraceMap(item backend.LLMContextBudgetTraceInfo) map[string]any {
+	if item.StepID == "" &&
+		item.ProviderID == "" &&
+		item.Model == "" &&
+		item.MaxBytes == 0 &&
+		item.ActualBytes == 0 &&
+		item.MaxTokens == 0 &&
+		item.EstimatedInputTokens == 0 &&
+		item.EstimatedOutputTokens == 0 &&
+		item.ActualTokens == 0 &&
+		len(item.IncludedSections) == 0 &&
+		len(item.NormalizedSections) == 0 &&
+		len(item.CompressedSections) == 0 &&
+		len(item.OmittedSections) == 0 {
+		return nil
+	}
+	ret := map[string]any{
+		"stepId":                string(item.StepID),
+		"providerId":            item.ProviderID,
+		"model":                 item.Model,
+		"maxBytes":              item.MaxBytes,
+		"actualBytes":           item.ActualBytes,
+		"maxTokens":             item.MaxTokens,
+		"estimatedInputTokens":  item.EstimatedInputTokens,
+		"estimatedOutputTokens": item.EstimatedOutputTokens,
+		"actualTokens":          item.ActualTokens,
+		"shrinkLevel":           item.ShrinkLevel,
+		"truncated":             item.Truncated,
+		"rules":                 append([]string(nil), item.Rules...),
+		"sourceRefs":            append([]string(nil), item.SourceRefs...),
+		"includedSections":      append([]string(nil), item.IncludedSections...),
+		"normalizedSections":    append([]string(nil), item.NormalizedSections...),
+		"compressedSections":    append([]string(nil), item.CompressedSections...),
+		"omittedSections":       append([]string(nil), item.OmittedSections...),
+		"goalDoDCompressed":     item.GoalDoDCompressed,
+		"overBudget":            item.OverBudget,
+		"p0Overflow":            item.P0Overflow,
+		"profileMode":           item.ProfileMode,
+		"capabilitySource":      item.CapabilitySource,
+		"contextUtilization":    item.ContextUtilization,
+		"maxRequestBytes":       item.MaxRequestBytes,
+		"stageBudgetRatio":      item.StageBudgetRatio,
+		"stageBudgetSource":     item.StageBudgetSource,
+		"tracePolicy":           item.TracePolicy,
+		"promptCaptured":        item.PromptCaptured,
+		"estimator":             item.Estimator,
+		"profile":               clonePayloadMap(item.Profile),
+		"cachePlan":             clonePayloadMap(item.CachePlan),
+	}
+	return ret
 }
 
 func (m *AppModel) upsertWorkspace(ws backend.WorkspaceInfo) {

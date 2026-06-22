@@ -121,6 +121,15 @@ Last Updated: 2026-05-30
 - 自动治理 trace、read-model 投影和 Web/TUI 说明仍需补强
 - e2e / verifier 对自动治理场景的专门覆盖仍可继续补齐
 
+已完成的边界收口：
+
+- Auto Governance 读取 run 时已继承 ticket/approval 的 `workspaceId`，
+  并通过 workspace-scoped run lookup 访问 run owner。
+- Auto Governance 读取 Goal/DoD definition 时已继承 run 的 `workspaceId`；
+  EventHub-backed workspace definition reader 会把 scope 写入
+  `/workspace/command/get-goal` / `/workspace/command/get-dod` envelope 和
+  payload，由 workspace owner command guard 校验。
+
 ## 剩余迁移关注点
 
 ### Auto Governance Agent

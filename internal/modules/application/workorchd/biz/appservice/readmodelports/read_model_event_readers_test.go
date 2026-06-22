@@ -32,6 +32,7 @@ func TestNewOwnerReadersBindsEveryReaderToHub(t *testing.T) {
 		readers.Results.Hub != hub ||
 		readers.Artifacts.Hub != hub ||
 		readers.ArtifactContinuations.Hub != hub ||
+		readers.CoverageWorkItems.Hub != hub ||
 		readers.EventRecords.Hub != hub ||
 		readers.MemoryRecalls.Hub != hub ||
 		readers.ToolCalls.Hub != hub ||
@@ -81,6 +82,7 @@ func TestOwnerReadersBuildsSnapshotAndStatusReaderBundles(t *testing.T) {
 		runReaders.Results != readers.Results ||
 		runReaders.Artifacts != readers.Artifacts ||
 		runReaders.ArtifactContinuations != readers.ArtifactContinuations ||
+		runReaders.CoverageWorkItems != readers.CoverageWorkItems ||
 		runReaders.EventRecords != readers.EventRecords ||
 		runReaders.MemoryRecalls != readers.MemoryRecalls ||
 		runReaders.Tickets != readers.Tickets ||
@@ -101,6 +103,7 @@ func TestOwnerReadersBuildsSnapshotAndStatusReaderBundles(t *testing.T) {
 		workspaceReaders.Results != readers.Results ||
 		workspaceReaders.Artifacts != readers.Artifacts ||
 		workspaceReaders.ArtifactContinuations != readers.ArtifactContinuations ||
+		workspaceReaders.CoverageWorkItems != readers.CoverageWorkItems ||
 		workspaceReaders.EventRecords != readers.EventRecords ||
 		workspaceReaders.Patches != readers.Patches ||
 		workspaceReaders.Tickets != readers.Tickets ||
@@ -137,6 +140,7 @@ func TestOwnerReaderCandidatesReuseOwnerBundlesWhenAllReadersMatch(t *testing.T)
 		Results:               readers.Results,
 		Artifacts:             readers.Artifacts,
 		ArtifactContinuations: readers.ArtifactContinuations,
+		CoverageWorkItems:     readers.CoverageWorkItems,
 		EventRecords:          readers.EventRecords,
 		MemoryRecalls:         readers.MemoryRecalls,
 		ToolCalls:             readers.ToolCalls,
@@ -177,6 +181,7 @@ func TestOwnerReaderCandidatesUseFallbackBundlesWhenReadersDiffer(t *testing.T) 
 		Results:               readers.Results,
 		Artifacts:             readers.Artifacts,
 		ArtifactContinuations: readers.ArtifactContinuations,
+		CoverageWorkItems:     readers.CoverageWorkItems,
 		EventRecords:          readers.EventRecords,
 		MemoryRecalls:         readers.MemoryRecalls,
 		ToolCalls:             readers.ToolCalls,

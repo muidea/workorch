@@ -25,7 +25,7 @@ Last Updated: 2026-05-30
 
 本轮主要检查以下实现与测试证据：
 
-- `internal/modules/application/workorchd/biz/bootstrap/defaults/*`
+- `internal/pkg/workorchdefaults/defaults/*`
 - `internal/modules/application/workorchd/biz/appservice/workspace_execution_activation_service.go`
 - `internal/modules/application/workorchd/biz/appservice/workspace_setup_draft_service.go`
 - `internal/modules/application/workorchd/biz/appservice/{contextregistrycore,contextregistryports}`
@@ -42,7 +42,7 @@ Last Updated: 2026-05-30
 
 | Area | Evidence | Result | Notes |
 | --- | --- | --- | --- |
-| built-in templates / defaults | defaults embed、`templates.json`、`souls.json`、`mcp_capabilities.json`、`defaults_test.go` | pass | 内置模板、Soul 资源、MCP capability 默认资源均有正式 bootstrap 落点；`defaultSoulId` 已覆盖内置模板 |
+| built-in templates / defaults | `internal/pkg/workorchdefaults` defaults embed、`templates.json`、`souls.json`、`mcp_capabilities.json`、`defaults_test.go` | pass | 内置模板、Soul 资源、MCP capability 默认资源均有正式默认资源包落点，bootstrap 消费该包完成初始化；`defaultSoulId` 已覆盖内置模板 |
 | workspace soul routing / setup-draft | `activationports/soul_routing.go`, activation service, setup-draft service, tests | pass | routing 优先级、`executionContext.soulRouting` 投影、setup-draft 不创建 Run、activation 只消费正式定义均有直接证据 |
 | software-dev profile | defaults + software-dev souls + verifier/e2e scripts | pass | software-dev 规则保留在 template/Soul/profile/verifier 层，没有看到错误下沉到 core/module |
 | MCP capability | context registry ports/core, defaults, activation service, read-model projection | pass | `MCPServer` / `MCPCapability` 是正式对象；selected/used capability 投影成立；risk/approval/stage/display 字段有正式来源 |
@@ -55,11 +55,11 @@ Last Updated: 2026-05-30
 
 证据：
 
-- `defaults.go` 的 embed 列表
-- `defaults/templates.json`
-- `defaults/souls.json`
-- `defaults/souls/*/*.md`
-- `defaults_test.go`
+- `internal/pkg/workorchdefaults/defaults.go` 的 embed 列表
+- `internal/pkg/workorchdefaults/defaults/templates.json`
+- `internal/pkg/workorchdefaults/defaults/souls.json`
+- `internal/pkg/workorchdefaults/defaults/souls/*/*.md`
+- `internal/pkg/workorchdefaults/defaults_test.go`
 
 结论：
 
@@ -69,7 +69,7 @@ Last Updated: 2026-05-30
   - `soulBindings`
   - `contextHints`
   - `evidencePolicies`
-- 已证明 bootstrap 默认资源校验存在
+- 已证明 `workorchdefaults` 默认资源校验存在，bootstrap 只消费该默认资源包
 
 ### 2. Soul routing / setup-draft
 
@@ -90,10 +90,10 @@ Last Updated: 2026-05-30
 
 证据：
 
-- `defaults/templates.json`
-- `defaults/souls/software-dev/*.md`
-- `verify-workorch-runtime-profile-software-dev.sh`
-- `verify-software-dev-goal-dod-e2e.sh`
+- `internal/pkg/workorchdefaults/defaults/templates.json`
+- `internal/pkg/workorchdefaults/defaults/souls/software-dev/*.md`
+- `scripts/verify-workorch-runtime-profile-software-dev.sh`
+- `scripts/verify-software-dev-goal-dod-e2e.sh`
 
 结论：
 

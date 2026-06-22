@@ -2,11 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 )
 
-func taskDecompositionNode(raw map[string]any, executedByNode map[string]presenter.StepView) readmodelcore.TaskDecompositionNode {
+func taskDecompositionNode(raw map[string]any, executedByNode map[string]StepView) readmodelcore.TaskDecompositionNode {
 	nodeID := readModelStringValue(raw["id"])
 	input, _ := raw["input"].(map[string]any)
 	ret := readmodelcore.TaskDecompositionNode{
@@ -18,6 +17,7 @@ func taskDecompositionNode(raw map[string]any, executedByNode map[string]present
 		Branch:    readModelStringValue(raw["branch"]),
 		Input:     cloneReadModelMap(input),
 	}
+	ret.CoverageTargets = taskCoverageTargetsFromInput(ret.Input)
 	if executedByNode != nil {
 		if step, ok := executedByNode[nodeID]; ok {
 			ret.StepID = step.ID

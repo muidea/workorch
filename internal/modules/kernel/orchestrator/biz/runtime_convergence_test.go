@@ -150,6 +150,112 @@ func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCove
 	}
 }
 
+func TestBuildConvergenceContractDoesNotReopenPrimaryStateChangeWhenOnlyValidationMissing(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-profile-evidence-mixed-targets",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{
+							{
+								"id":                "primary-output",
+								"scope":             "deliverable",
+								"evidenceRole":      "primary_state_change",
+								"acceptedStepKinds": []string{"patch/apply"},
+							},
+							{
+								"id":                 "snapshot-output",
+								"scope":              "deliverable",
+								"evidenceRole":       "supplemental_evidence",
+								"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+								"acceptedOperations": []string{gitcommon.OperationCommit},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID: "run-convergence-profile-evidence-mixed-targets/repair-001",
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageRepair,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			"repairObjective":            repairObjectiveStateChangingOutput,
+			"coverageTargetSet": []map[string]any{
+				{
+					"kind":                  "deliverable",
+					"source":                "deliverable",
+					"sourceScope":           "deliverable",
+					"sourceRequirementId":   "primary-output",
+					"sourcePath":            "executionContract.profileContracts.neutral-profile.deliverableExpectations[0]",
+					"targetText":            "primary-output",
+					"state":                 "failed",
+					"evidenceRole":          "primary_state_change",
+					"requiredEvidenceKinds": []string{"validation", "state_change"},
+					"missingEvidenceKinds":  []string{"validation"},
+					"acceptedEvidenceRefs":  []string{"run/graph/001-primary-output"},
+				},
+				{
+					"kind":                  "deliverable",
+					"source":                "deliverable",
+					"sourceScope":           "deliverable",
+					"sourceRequirementId":   "snapshot-output",
+					"sourcePath":            "executionContract.profileContracts.neutral-profile.deliverableExpectations[1]",
+					"targetText":            "snapshot-output",
+					"state":                 "open",
+					"evidenceRole":          "supplemental_evidence",
+					"requiredEvidenceKinds": []string{"validation", "state_change"},
+					"missingEvidenceKinds":  []string{"validation", "state_change"},
+				},
+			},
+			"coverageWorkItemContext": map[string]any{
+				"currentFocus": map[string]any{
+					"id":                    "cwi-snapshot",
+					"source":                "deliverable",
+					"sourceScope":           "deliverable",
+					"sourceRequirementId":   "snapshot-output",
+					"targetText":            "snapshot-output",
+					"status":                "open",
+					"evidenceRole":          "supplemental_evidence",
+					"requiredEvidenceKinds": []string{"validation", "state_change"},
+					"missingEvidenceKinds":  []string{"validation", "state_change"},
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"coverageFocus": map[string]any{
+					"id":                    "stale-primary-focus",
+					"sourceRequirementId":   "primary-output",
+					"targetText":            "primary-output",
+					"state":                 "failed",
+					"evidenceRole":          "primary_state_change",
+					"requiredEvidenceKinds": []string{"validation", "state_change"},
+					"missingEvidenceKinds":  []string{"validation"},
+					"acceptedEvidenceRefs":  []string{"run/graph/001-primary-output"},
+				},
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(run, step, step, map[string]any{"input": step.Input}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q", contract.State, convergenceStateNeedStateChange)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if required["mustIncludePrimaryStateChangingNode"] == true {
+		t.Fatalf("requiredOutput = %+v, should not reopen primary state-change when the primary target only misses validation", required)
+	}
+	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("acceptedKinds = %+v, should not include unrelated primary patch kind", required["acceptedKinds"])
+	}
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedOperations"]), gitcommon.OperationCommit) {
+		t.Fatalf("requiredOutput = %+v, want supplemental git/write commit contract", required)
+	}
+}
+
 func TestBuildConvergenceContractPreservesStrategyReassessmentForProfileStateChange(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-profile-strategy-reassessment",
@@ -2227,6 +2333,11 @@ func TestBuildConvergenceContractAssessmentOnlyFailedGapSwitchesToValidation(t *
 	if !boolValue(required["mustProduceConcreteValidationEvidence"]) {
 		t.Fatalf("requiredOutput = %+v, want concrete validation evidence contract", required)
 	}
+	if stringFromMap(required, validationScratchDirKey) == "" ||
+		stringFromMap(mapFromValue(applied["repairActionPackage"]), validationScratchDirKey) != stringFromMap(required, validationScratchDirKey) ||
+		stringFromMap(applied, validationScratchDirKey) != stringFromMap(required, validationScratchDirKey) {
+		t.Fatalf("scratch contract not mirrored applied=%q pkg=%q required=%q", stringFromMap(applied, validationScratchDirKey), stringFromMap(mapFromValue(applied["repairActionPackage"]), validationScratchDirKey), stringFromMap(required, validationScratchDirKey))
+	}
 }
 
 func TestBuildConvergenceContractCoverageFocusWithAcceptedEvidenceNeedsAssessment(t *testing.T) {
@@ -3420,6 +3531,54 @@ func TestBuildConvergenceContractNeedValidationWhenPatchAlreadySatisfied(t *test
 
 	if contract.State != convergenceStateNeedValidation {
 		t.Fatalf("contract state = %q, want %q", contract.State, convergenceStateNeedValidation)
+	}
+}
+
+func TestBuildConvergenceContractNeedValidationCarriesScratchContract(t *testing.T) {
+	input := map[string]any{
+		"workspaceId":                 "ws-convergence-scratch",
+		"runId":                       "run-convergence-scratch",
+		"failedStepId":                "run-convergence-scratch/repair-001",
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+			"currentTargetAlreadySatisfiesFailedPatch": []map[string]any{{
+				"targetRef": "target.txt",
+				"state":     "satisfied",
+			}},
+			"targetSnapshots": []map[string]any{{
+				"targetRef":   "target.txt",
+				"exists":      true,
+				"contentHash": "hash-target",
+			}},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+	if contract.State != convergenceStateNeedValidation {
+		t.Fatalf("contract state = %q, want %q", contract.State, convergenceStateNeedValidation)
+	}
+	contractRequired := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	contractScratch := stringFromMap(contractRequired, validationScratchDirKey)
+	if contractScratch == "" {
+		t.Fatalf("contract requiredOutput = %+v, want validationScratchDir", contractRequired)
+	}
+
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	pkg := mapFromValue(applied["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	if stringFromMap(applied, validationScratchDirKey) != contractScratch ||
+		stringFromMap(pkg, validationScratchDirKey) != contractScratch ||
+		stringFromMap(required, validationScratchDirKey) != contractScratch {
+		t.Fatalf("scratch contract not mirrored applied=%q pkg=%q required=%q want %q", stringFromMap(applied, validationScratchDirKey), stringFromMap(pkg, validationScratchDirKey), stringFromMap(required, validationScratchDirKey), contractScratch)
+	}
+	if !strings.Contains(stringFromMap(required, "controlledSubstituteScratchRule"), validationScratchDirKey) {
+		t.Fatalf("requiredOutput = %+v, want scratch rule", required)
+	}
+	if applied["stateChangingOutputRequired"] != nil || applied["repairObjective"] != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("applied input = %+v, want validation repair contract", applied)
 	}
 }
 

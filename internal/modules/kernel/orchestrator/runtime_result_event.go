@@ -16,6 +16,11 @@ func (m *Module) finalizeRuntimeResult(ctx context.Context, envelope events.Enve
 	if m == nil || m.bizPtr == nil {
 		return common.ErrInvalidArgument
 	}
+	workspaceID, err := runtimeResultWorkspaceIDFromEnvelope(envelope)
+	if err != nil {
+		return err
+	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	runID, stepID, result, execErr, err := runtimeResultFromEnvelope(envelope)
 	if err != nil {
 		return err
@@ -24,6 +29,30 @@ func (m *Module) finalizeRuntimeResult(ctx context.Context, envelope events.Enve
 		return err
 	}
 	return m.bizPtr.FinalizeRuntimeStepResult(ctx, runID, stepID, result, execErr)
+}
+
+func runtimeResultWorkspaceIDFromEnvelope(envelope events.Envelope) (common.WorkspaceID, error) {
+	workspaceID := common.WorkspaceID(envelope.WorkspaceID)
+	var payloadWorkspaceID common.WorkspaceID
+	switch envelope.Topic {
+	case runtimeevent.TopicRuntimeBlockExecuteCompleted:
+		completed, _ := envelope.Payload[events.PayloadKeyRuntimeCompleted].(runtimemodel.RuntimeStepExecutionCompleted)
+		payloadWorkspaceID = completed.WorkspaceID
+	case runtimeevent.TopicRuntimeBlockExecuteFailed:
+		failed, _ := envelope.Payload[events.PayloadKeyRuntimeFailed].(runtimemodel.RuntimeStepExecutionFailed)
+		payloadWorkspaceID = failed.WorkspaceID
+	default:
+		return "", common.ErrInvalidArgument
+	}
+	if workspaceID == "" {
+		workspaceID = payloadWorkspaceID
+	} else if payloadWorkspaceID != "" && payloadWorkspaceID != workspaceID {
+		return "", common.ErrConflict
+	}
+	if workspaceID == "" {
+		return "", common.ErrInvalidArgument
+	}
+	return workspaceID, nil
 }
 
 func (m *Module) recordRuntimeProgress(ctx context.Context, envelope events.Envelope) error {

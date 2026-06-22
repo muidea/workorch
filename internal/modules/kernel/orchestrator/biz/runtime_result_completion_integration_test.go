@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -466,6 +467,66 @@ func TestRuntimeOrchestrator_ReusesValidatedDoDAssessmentForCompletionEvidence(t
 	}
 	if !hasCompletionRunSummaryMemory(memories, runID, step.ID, "validated DoD summary") {
 		t.Fatalf("memories = %+v, want completion run summary memory from same validated assessment", memories)
+	}
+}
+
+func TestRuntimeOrchestrator_DoesNotRecordCompletionEvidenceForCreatedRun(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-created-result-gate")
+	runID := common.RunID("run-created-result-gate")
+	step := &runmodel.Step{ID: common.StepID(string(runID) + "/step-1"), RunID: runID}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		GoalID:          "goal-created-result-gate",
+		DoDID:           "dod-created-result-gate",
+		State:           common.RunStateCreated,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	assessment := map[string]any{
+		"satisfied": true,
+		"summary":   "DoD satisfied before run activation",
+		"items": []map[string]any{{
+			"item":         "activation gated result",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(step.ID)},
+		}},
+	}
+	resultRepo := memory.NewResultRepository()
+	artifactRepo := memory.NewArtifactRepository()
+	memoryRepo := memory.NewMemoryItemRepository()
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{
+			Results:     resultRepo,
+			Artifacts:   artifactRepo,
+			MemoryItems: memoryRepo,
+		},
+	}
+
+	err := orch.resultManager().recordCompletionEvidenceFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied before run activation", nil)
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("record completion evidence err = %v, want conflict", err)
+	}
+	results, err := resultRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list results: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("results = %+v, want no formal result for created run", results)
+	}
+	artifacts, err := artifactRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	}
+	if len(artifacts) != 0 {
+		t.Fatalf("artifacts = %+v, want no artifacts for created run", artifacts)
+	}
+	memories, err := memoryRepo.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("list memories: %v", err)
+	}
+	if len(memories) != 0 {
+		t.Fatalf("memories = %+v, want no memory side effects for created run", memories)
 	}
 }
 

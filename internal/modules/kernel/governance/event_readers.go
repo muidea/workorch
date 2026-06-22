@@ -91,6 +91,21 @@ func (r eventRunReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run
 	return item, nil
 }
 
+func (r eventRunReader) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	response, err := publishGovernanceReadCommand(ctx, r.hub, runevents.TopicRunCommandGet, "run", string(id), workspaceID, id, map[string]any{
+		events.PayloadKeyWorkspaceID: string(workspaceID),
+		events.PayloadKeyRunID:       string(id),
+	})
+	if err != nil {
+		return nil, err
+	}
+	item, ok := response.Payload[events.PayloadKeyRun].(*runmodel.Run)
+	if !ok || item == nil {
+		return nil, common.ErrNotFound
+	}
+	return item, nil
+}
+
 func (r eventRunReader) List(ctx context.Context) ([]*runmodel.Run, error) {
 	response, err := publishGovernanceReadCommand(ctx, r.hub, runevents.TopicRunCommandList, "run", "all", "", "", nil)
 	if err != nil {
@@ -108,8 +123,10 @@ type eventWorkspaceReader struct {
 }
 
 func (r eventWorkspaceReader) GetGoal(ctx context.Context, id common.GoalID) (*workspacemodel.Goal, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandGetGoal, "goal", string(id), "", "", map[string]any{
-		events.PayloadKeyGoalID: string(id),
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	response, err := publishGovernanceReadCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandGetGoal, "goal", string(id), workspaceID, "", map[string]any{
+		events.PayloadKeyWorkspaceID: string(workspaceID),
+		events.PayloadKeyGoalID:      string(id),
 	})
 	if err != nil {
 		return nil, err
@@ -122,8 +139,10 @@ func (r eventWorkspaceReader) GetGoal(ctx context.Context, id common.GoalID) (*w
 }
 
 func (r eventWorkspaceReader) GetDoD(ctx context.Context, id common.DoDID) (*workspacemodel.DoD, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(id), "", "", map[string]any{
-		events.PayloadKeyDoDID: string(id),
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	response, err := publishGovernanceReadCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(id), workspaceID, "", map[string]any{
+		events.PayloadKeyWorkspaceID: string(workspaceID),
+		events.PayloadKeyDoDID:       string(id),
 	})
 	if err != nil {
 		return nil, err

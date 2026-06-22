@@ -204,3 +204,106 @@ func TestApprovalMutationCommandsHonorWorkspaceScope(t *testing.T) {
 		t.Fatalf("approval should remain after wrong-scope delete: %v", err)
 	}
 }
+
+func TestApprovalMutationCommandWithoutScopeResolvesUniquePendingApproval(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	approvals := memory.NewApprovalRepository()
+	approvalID := common.ApprovalID("approval-unscoped-unique")
+	if err := approvals.Create(ctx, &approvalmodel.Approval{
+		ID:          approvalID,
+		WorkspaceID: "ws-approval-unscoped-unique",
+		RunID:       "run-approval-unscoped-unique",
+		State:       common.ApprovalStatePending,
+		Reason:      "approval unscoped unique test",
+	}); err != nil {
+		t.Fatalf("create approval: %v", err)
+	}
+
+	module := New()
+	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: hub}); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(ctx); err != nil {
+			t.Fatalf("Teardown: %v", err)
+		}
+	})
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic: approvalevents.TopicApprovalCommandEnsureApproved,
+		Payload: map[string]any{
+			events.PayloadKeyApprovalID: string(approvalID),
+		},
+	})
+	response, ok := events.ResponseEnvelope(err)
+	if !ok {
+		t.Fatalf("unscoped approve err = %v, want response", err)
+	}
+	item, ok := response.Payload[events.PayloadKeyApproval].(*approvalmodel.Approval)
+	if !ok || item == nil || item.ID != approvalID || item.State != common.ApprovalStateApproved {
+		t.Fatalf("response approval = %+v, want approved unique approval", response.Payload[events.PayloadKeyApproval])
+	}
+}
+
+func TestApprovalMutationCommandWithoutScopeConflictsOnDuplicatePendingApprovals(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	approvals := memory.NewApprovalRepository()
+	approvalID := common.ApprovalID("approval-unscoped-duplicate")
+	for _, item := range []*approvalmodel.Approval{
+		{
+			ID:          approvalID,
+			WorkspaceID: "ws-approval-unscoped-duplicate-a",
+			RunID:       "run-approval-unscoped-duplicate-a",
+			State:       common.ApprovalStatePending,
+			Reason:      "approval unscoped duplicate test",
+		},
+		{
+			ID:          approvalID,
+			WorkspaceID: "ws-approval-unscoped-duplicate-b",
+			RunID:       "run-approval-unscoped-duplicate-b",
+			State:       common.ApprovalStatePending,
+			Reason:      "approval unscoped duplicate test",
+		},
+	} {
+		if err := approvals.Create(ctx, item); err != nil {
+			t.Fatalf("create approval %s/%s: %v", item.WorkspaceID, item.ID, err)
+		}
+	}
+
+	module := New()
+	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: hub}); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(ctx); err != nil {
+			t.Fatalf("Teardown: %v", err)
+		}
+	})
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic: approvalevents.TopicApprovalCommandEnsureApproved,
+		Payload: map[string]any{
+			events.PayloadKeyApprovalID: string(approvalID),
+		},
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate approve err = %v, want conflict", err)
+	}
+	items, err := approvals.List(ctx)
+	if err != nil {
+		t.Fatalf("list approvals: %v", err)
+	}
+	for _, item := range items {
+		if item.ID == approvalID && item.State != common.ApprovalStatePending {
+			t.Fatalf("approval %s state = %s, want pending after duplicate conflict", item.WorkspaceID, item.State)
+		}
+	}
+}

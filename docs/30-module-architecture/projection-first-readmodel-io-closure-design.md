@@ -485,15 +485,259 @@ rg "ListProjectedWorkspaces|Snapshot|ListEvents" internal/modules/application in
 
 - [x] Event list default is metadata-only.
 - [x] Payload hydration is opt-in and scope-bound.
-- [ ] Workspace list reads projection, not global event history.
+- [x] Workspace list reads projection, not global event history.
 - [x] Workspace detail projection is compact by default, including run history, LLM usage, LLM context budget, memory recall, execution sections and context bundle.
-- [ ] TUI prompt/status/main view are projection-driven.
-- [ ] Web board/detail are projection-driven.
-- [ ] Watchdog uses compact state only.
-- [ ] Projection manager has per-workspace dedupe/backpressure.
-- [ ] File backend supports bounded metadata queries.
-- [ ] Metrics expose payload hydrate and metadata scan pressure.
-- [ ] Long-running multi-workspace idle CPU/IO returns to stable baseline.
+- [x] TUI prompt/status/main view are projection-driven.
+- [x] Web board/detail are projection-driven.
+- [x] Watchdog uses compact state only.
+- [x] Projection manager has per-workspace dedupe/backpressure.
+- [x] File backend supports bounded metadata queries.
+- [x] Metrics expose payload hydrate and metadata scan pressure.
+- [x] Long-running multi-workspace idle CPU/IO returns to stable baseline.
+
+### Closure Notes
+
+2026-06-21 workspace list projection path closure:
+
+- HTTP `/api/v1/workorch/workspaces` reads `serverState.listProjectedWorkspaces()`,
+  which delegates to `workspaceviewcore.Manager.ListWorkspaces()` rather than
+  assembling list output from global event history.
+- `HTTPServer.ListWorkspaceView` exposes the same projection-backed list to the
+  appservice CLI command dispatcher.
+- `CommandWorkspaceList` delegates to `WorkspaceViewReader.ListWorkspaceView`
+  and no longer needs owner repository/session list assembly for the list
+  command path.
+- remote TUI/CLI backend uses `workorchclient.ListWorkspaceProjection()` against
+  `/api/v1/workorch/workspaces`.
+- embedded TUI/CLI backend sends `CommandWorkspaceList` through EventHub and
+  receives the projection view reader result.
+
+Verification:
+
+```bash
+go test ./internal/modules/application/workorchd/biz/appservice ./internal/services/workorch/biz/backends -count=1
+```
+
+Regression tests:
+
+- `TestCLIWorkspaceListCommandUsesWorkspaceViewReader`
+- `TestEventHubBackendWorkspaceListUsesProjectionViewReader`
+
+2026-06-21 TUI projection-driven view closure:
+
+- `FetchAll` reads `Workspace().List()`, which is projection-backed for both
+  remote and embedded backends.
+- `FetchWorkspaceContext` reads `Workspace().Snapshot()` and builds the TUI
+  context from the server projection snapshot envelope. It does not issue
+  additional run status/list/get reads for prompt/status/main view refresh.
+- `renderInput` derives prompt suffixes from `activeWorkspaceOverview()`, whose
+  source is workspace projection overview state.
+- `renderRuntimeStatusBar` and main view state are refreshed from
+  `WorkspaceContextMsg` / projection snapshot, while live EventHub notifications
+  only trigger scoped projection refresh or transient UI progress updates.
+
+Verification:
+
+```bash
+go test ./internal/services/workorch/service/tui -count=1
+```
+
+Regression tests:
+
+- `TestFetchWorkspaceContextUsesProjectionSnapshotOnly`
+- `TestModelWorkspaceListSynchronizesWaitingDecisionPrompt`
+- `TestTUIE2EWorkspaceSwitchProjectionRefreshVisualSnapshot`
+- `TestModelDecisionResolvedDoesNotHideServerOpenProjection`
+
+2026-06-21 Web projection-driven board/detail closure:
+
+- workspace board uses `workorchApi.listWorkspaceProjection()` and refreshes
+  from projection-changed SSE only.
+- workspace detail uses `workorchApi.listWorkspaceProjection()` for workspace
+  selector data and `workorchApi.readWorkspaceSnapshotProjection()` for the
+  detail ViewModel.
+- workspace detail no longer auto-loads run snapshot / observability / event
+  pages after every workspace projection refresh. Run process evidence remains
+  available as an explicit drill-down action through the run table.
+- run process drill-down calls are workspace scoped and paginated where page
+  endpoints exist; they are no longer part of the default board/detail refresh
+  path.
+
+Verification:
+
+```bash
+cd web/workorch-console && npm run build
+```
+
+2026-06-21 watchdog compact-state closure:
+
+- periodic watchdog still only invokes stale dispatched runtime-gap recovery.
+- runtime-gap candidate enumeration now uses run owner read command with
+  `states=[running]` and `compact=true`.
+- compact run list items omit `ExecutionContext` and retain only generic run
+  metadata needed for recovery classification.
+- step lookup uses scoped step summaries; runtime evidence lookup uses scoped
+  runtime checkpoints by run. The watchdog path does not read workspace
+  snapshot, run snapshot, global event list, or raw event payload.
+- automatic recovery remains gated by neutral runtime recovery policy:
+  `request_not_accepted` is diagnostic-only, terminal gaps require terminal
+  result evidence, and in-progress/worker-lost gaps require explicit watchdog
+  retry safety metadata.
+
+Verification:
+
+```bash
+go test ./internal/modules/kernel/run ./internal/modules/application/workorchd/biz/appservice/runports -count=1
+go test ./internal/modules/application/workorchd/service/server -count=1
+```
+
+Regression tests:
+
+- `TestRunCommandListSupportsCompactStateFilter`
+- `TestRecoverStaleRuntimeGapRunViewsNoEligibleGapUsesBoundedReads`
+
+2026-06-21 projection manager per-workspace dedupe/backpressure closure:
+
+- `workspaceviewcore.Manager` maintains a per-workspace rebuild state entry with
+  `inFlight`, `pending`, and `pendingAfterFull` flags.
+- repeated rebuild requests for the same workspace are debounced into one
+  pending rerun while the in-flight rebuild completes.
+- rebuild requests for different workspaces are scheduled independently and do
+  not share the same pending gate.
+- workspace events observed while a full rebuild is in flight are retained as
+  per-workspace `pendingAfterFull` entries and scheduled after the full rebuild.
+- metrics expose pending workspace rebuild count, debounced rebuild count,
+  dropped schedule count, and per-workspace rebuild duration/failure counters.
+
+Verification:
+
+```bash
+go test ./internal/modules/application/workorchd/biz/appservice/workspaceviewcore -count=1
+```
+
+Regression tests:
+
+- `TestManagerReschedulesWorkspaceRebuildWhenEventArrivesInFlight`
+- `TestManagerSchedulesIndependentWorkspaceRebuildsWithPerWorkspaceDebounce`
+- `TestManagerSchedulesWorkspaceRebuildAfterWorkspaceEventDuringFullRebuild`
+- `TestManagerMetricsTracksPendingWorkspaceRebuilds`
+
+2026-06-21 file backend bounded metadata query closure:
+
+- file `EventRecordRepository.List` keeps default list results metadata-only and
+  only hydrates payload on explicit `IncludePayload=true`.
+- `Limit > 0` with no cursor uses reverse segment scan and stops after matching
+  the bounded latest set, while preserving chronological return order.
+- workspace-scoped event repository keeps run-scoped cursor/limit queries
+  unchanged.
+- workspace-scoped latest queries now push `Limit` down to each run event
+  repository before global merge, avoiding full per-run event history reads for
+  latest workspace metadata.
+- workspace-scoped cursor pagination remains a scoped global merge path because
+  cursor semantics are global to the merged workspace event list.
+
+Verification:
+
+```bash
+go test ./internal/pkg/workorchrepo -count=1
+go test ./internal/pkg/repository -count=1
+go test ./internal/pkg/repository/file -count=1
+```
+
+Regression tests:
+
+- `TestEventRecordRepositoryContract_File`
+- `TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite`
+- `TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit`
+- `TestWorkspaceScopedEventRecordWorkspaceLatestUsesBoundedPerRunLists`
+
+2026-06-21 event record IO pressure metrics closure:
+
+- repository-level `EventRecordIOMetricsSnapshot()` exposes neutral cumulative
+  counters for event metadata scans, metadata records scanned, payload hydrate
+  calls, and payload hydrate bytes.
+- file event repository records metadata scan pressure while scanning JSONL
+  event metadata segments in both forward and reverse paths.
+- file event repository records payload hydrate pressure only when payload refs
+  are explicitly opened.
+- HTTP `/metrics` exposes the counters as:
+  `workorch_event_record_metadata_scans_total`,
+  `workorch_event_record_metadata_records_scanned_total`,
+  `workorch_event_record_payload_hydrates_total`, and
+  `workorch_event_record_payload_hydrate_bytes_total`.
+- default event list remains metadata-only; explicit `IncludePayload=true` is
+  the path that increases payload hydrate counters.
+
+Verification:
+
+```bash
+go test ./internal/pkg/repository/file ./internal/modules/application/workorchd/service/server -count=1
+```
+
+Regression tests:
+
+- `TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite`
+- `TestMetricsEndpointReportsCounters`
+
+2026-06-21 runtime idle baseline observation gate update:
+
+- `scripts/observe-workorch-runtime-closure.sh` now requires the event record IO
+  pressure metrics to exist in `/metrics`.
+- the observation summary includes before/after deltas for metadata scans,
+  metadata records scanned, payload hydrate calls, and payload hydrate bytes.
+- deployed-instance idle gates can bound event IO pressure with:
+  `WORKORCH_OBSERVE_MAX_EVENT_METADATA_RECORDS_SCANNED_DELTA`,
+  `WORKORCH_OBSERVE_MAX_EVENT_PAYLOAD_HYDRATES_DELTA`, and
+  `WORKORCH_OBSERVE_MAX_EVENT_PAYLOAD_HYDRATE_BYTES_DELTA`.
+- the same observation script now records process-level CPU/RSS/IO when it can
+  infer a local listening PID, or when `WORKORCH_OBSERVE_PROCESS_PID` is set.
+- deployed-instance idle gates can require process resource evidence with
+  `WORKORCH_OBSERVE_REQUIRE_PROCESS_RESOURCE=1` and can bound CPU/RSS/IO with:
+  `WORKORCH_OBSERVE_MAX_PROCESS_CPU_PERCENT`,
+  `WORKORCH_OBSERVE_MAX_PROCESS_RSS_BYTES`,
+  `WORKORCH_OBSERVE_MAX_PROCESS_READ_BYTES_DELTA`, and
+  `WORKORCH_OBSERVE_MAX_PROCESS_WRITE_BYTES_DELTA`.
+- this prepares the remaining long-running CPU/IO baseline item to be verified
+  with real deployed-instance observation rather than inferred from unit tests.
+
+Verification:
+
+```bash
+bash -n scripts/observe-workorch-runtime-closure.sh
+git diff --check
+```
+
+2026-06-21 managed multi-workspace idle baseline closure:
+
+- added `make verify-runtime-idle-baseline`, which automatically manages a
+  latest local `./bin/workorch` instance through
+  `scripts/verify-workorch-managed-full.sh`.
+- managed verification precreates idle workspaces before the observation
+  baseline, waits for projection to drain, and then runs
+  `observe-runtime-closure`.
+- the default gate observes 2 idle workspaces, requires process resource
+  snapshots, requires pending projection rebuilds to stay at 0, requires
+  projection schedule drops to stay at 0, requires event metadata scan delta and
+  payload hydrate delta to stay at 0, and bounds process CPU at 20%.
+- 2026-06-21 latest-code managed run passed with artifacts at
+  `/tmp/tmp.NxI6aSS9dM/observe-runtime-closure`:
+  - `workspaceTotal=2`
+  - both workspaces `state=active`, `activityState=idle`, no active run
+  - `projectionPendingRebuilds=0`
+  - `projectionScheduleDroppedDelta=0`
+  - `metadataScanDelta=0`
+  - `metadataRecordsScannedDelta=0`
+  - `payloadHydratesDelta=0`
+  - `payloadHydrateBytesDelta=0`
+  - `processResource.cpuPercent=0.03322078528846294`
+  - `processResource.readBytesDelta=0`
+  - `processResource.writeBytesDelta=0`
+
+Verification:
+
+```bash
+WORKORCH_MANAGED_VERIFY_KEEP_ARTIFACTS=1 make verify-runtime-idle-baseline
+```
 
 ## Source Documents
 

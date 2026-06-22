@@ -167,13 +167,13 @@ func (agentCommandDecisionBackend) Get(context.Context, common.WorkspaceID, comm
 
 type agentCommandApprovalBackend struct{}
 
-func (agentCommandApprovalBackend) Approve(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) Approve(context.Context, common.WorkspaceID, common.ApprovalID, ...map[string]any) (*backend.ApprovalInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandApprovalBackend) Reject(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) Reject(context.Context, common.WorkspaceID, common.ApprovalID, ...map[string]any) (*backend.ApprovalInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string) ([]backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...map[string]any) ([]backend.ApprovalInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
 func (agentCommandApprovalBackend) List(context.Context, common.WorkspaceID) ([]backend.ApprovalInfo, error) {

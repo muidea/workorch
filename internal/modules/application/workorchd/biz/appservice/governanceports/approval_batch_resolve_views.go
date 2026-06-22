@@ -12,7 +12,8 @@ import (
 )
 
 func BatchResolveApprovalViews(ctx context.Context, hub events.Hub, traces governancecore.AutoGovernanceTraceReader, cmd appmodelcore.BatchResolveApprovalCommand, scope common.WorkspaceID) ([]readmodelcore.Approval, error) {
-	action, err := governancecore.NormalizeApprovalBatchAction(cmd.Action)
+	semantic := approvalSemanticFromCommand(appmodelcore.ResolveApprovalCommand{Action: cmd.Action, Payload: cmd.Payload}, "")
+	action, err := governancecore.NormalizeApprovalBatchAction(semantic.Action)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +43,8 @@ func BatchResolveApprovalViews(ctx context.Context, hub events.Hub, traces gover
 
 	ret := make([]readmodelcore.Approval, 0, len(cmd.ApprovalIDs))
 	for _, r := range reads {
-		item, err := resolveApprovalItemByAction(ctx, hub, r.item, action)
+		resolutionContext := governancecore.WithApprovalSemanticPayload(cmd.Payload, semantic, approvalSemanticSource(cmd.Payload))
+		item, err := ResolveApprovalItemWithContext(ctx, hub, r.item, action, resolutionContext)
 		if err != nil {
 			return nil, err
 		}

@@ -33,3 +33,25 @@ type LLMContextBudgetTrace struct {
 	Profile               map[string]any `json:"profile,omitempty"`
 	CachePlan             map[string]any `json:"cachePlan,omitempty"`
 }
+
+type LLMContextBudgetSummary struct {
+	TraceTotal             int     `json:"traceTotal"`
+	TruncatedCount         int     `json:"truncatedCount,omitempty"`
+	OverBudgetCount        int     `json:"overBudgetCount,omitempty"`
+	P0OverflowCount        int     `json:"p0OverflowCount,omitempty"`
+	GoalDoDCompressedCount int     `json:"goalDoDCompressedCount,omitempty"`
+	PromptCapturedCount    int     `json:"promptCapturedCount,omitempty"`
+	MaxShrinkLevel         int     `json:"maxShrinkLevel,omitempty"`
+	MaxContextUtilization  float64 `json:"maxContextUtilizationRatio,omitempty"`
+	AvgContextUtilization  float64 `json:"avgContextUtilizationRatio,omitempty"`
+	MaxInputTokens         int     `json:"maxInputTokens,omitempty"`
+	MaxRequestBytes        int     `json:"maxRequestBytes,omitempty"`
+	RecentWindowSize       int     `json:"recentWindowSize,omitempty"`
+	RecentTraceTotal       int     `json:"recentTraceTotal,omitempty"`
+	RecentTruncatedCount   int     `json:"recentTruncatedCount,omitempty"`
+	RecentOverBudgetCount  int     `json:"recentOverBudgetCount,omitempty"`
+	RecentMaxUtilization   float64 `json:"recentMaxContextUtilizationRatio,omitempty"`
+	RecentAvgUtilization   float64 `json:"recentAvgContextUtilizationRatio,omitempty"`
+	RecentMaxInputTokens   int     `json:"recentMaxInputTokens,omitempty"`
+	UtilizationTrend       string  `json:"contextUtilizationTrend,omitempty"`
+}

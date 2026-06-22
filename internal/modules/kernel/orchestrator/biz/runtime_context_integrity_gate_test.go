@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
@@ -135,9 +136,9 @@ func TestRuntimeContextIntegrityGateCoverageTargetFailureCanRecover(t *testing.T
 		},
 		Output: map[string]any{
 			"stage": "llm_context_integrity_failed",
-			"error": "invalid argument: llm context gate fail_fast: coverage_repair_required_without_coverage_target_set",
+			"error": "invalid argument: llm context gate replan_required: coverage_repair_required_without_coverage_target_set",
 			"contextBudget": map[string]any{
-				"contextGateAction": "fail_fast",
+				"contextGateAction": "replan_required",
 				"contextGateReason": "coverage_repair_required_without_coverage_target_set",
 			},
 		},
@@ -168,5 +169,78 @@ func TestRuntimeContextIntegrityGateCoverageTargetFailureCanRecover(t *testing.T
 	input := orch.runtimeRepairFollowUpStepInput(t.Context(), run, step, 1, common.ErrInvalidArgument)
 	if targets := mapSliceFromValue(input["coverageTargetSet"]); len(targets) != 1 || targets[0]["goalRequirementId"] != "goal-req-runtime-context" {
 		t.Fatalf("coverageTargetSet = %+v, want inherited Goal target", input["coverageTargetSet"])
+	}
+}
+
+func TestBlockOnContextIntegrityGateRecordsRecommendedRecoveryAction(t *testing.T) {
+	ctx := t.Context()
+	workspaceID := common.WorkspaceID("ws-context-gate")
+	runID := common.RunID("run-context-gate")
+	stepID := common.StepID("run-context-gate/repair-001")
+	runRepo := memory.NewRunRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{
+		ID:          workspaceID,
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	run := &runModel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	failed := &runModel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"repairActionPackage": map[string]any{
+				"coverageTargetSet": []map[string]any{{"targetText": "target"}},
+			},
+		},
+		Output: map[string]any{
+			"stage": "llm_context_integrity_failed",
+			"contextBudget": map[string]any{
+				"contextGateAction": "replan_required",
+				"contextGateReason": "coverage_repair_required_without_coverage_target_set",
+			},
+		},
+	}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{},
+		nil,
+	)
+
+	if err := orch.blockOnContextIntegrityGate(ctx, run, failed, common.ErrInvalidArgument); err != nil {
+		t.Fatalf("block on context integrity gate: %v", err)
+	}
+	updated, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get updated run: %v", err)
+	}
+	ticket, err := ticketRepo.Get(ctx, updated.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("get ticket: %v", err)
+	}
+	if ticket.Context["recommendedRecoveryAction"] != "replan_required" {
+		t.Fatalf("ticket context recommendedRecoveryAction = %#v, want replan_required", ticket.Context["recommendedRecoveryAction"])
+	}
+	allowed, ok := ticket.Context["allowedRecoveryActions"].([]string)
+	if !ok || len(allowed) != 3 || allowed[0] != "replan" || allowed[1] != "provide_information" || allowed[2] != "terminate" {
+		t.Fatalf("ticket context allowedRecoveryActions = %#v, want [replan provide_information terminate]", ticket.Context["allowedRecoveryActions"])
 	}
 }

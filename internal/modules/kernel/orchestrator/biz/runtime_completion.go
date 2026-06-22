@@ -12,7 +12,7 @@ func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunI
 	if runID == "" {
 		return common.ErrInvalidArgument
 	}
-	r, err := o.runs.Get(ctx, runID)
+	r, err := o.runtimeEventRun(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -43,7 +43,7 @@ func (o *RuntimeOrchestrator) ValidateRun(ctx context.Context, runID common.RunI
 	if runID == "" {
 		return common.ErrInvalidArgument
 	}
-	r, err := o.runs.Get(ctx, runID)
+	r, err := o.runtimeEventRun(ctx, runID)
 	if err != nil {
 		return err
 	}

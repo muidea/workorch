@@ -29,6 +29,7 @@ type ResolveApprovalCommand struct {
 	ApprovalID  common.ApprovalID
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
+	Context     map[string]any
 }
 
 type DeleteApprovalCommand struct {

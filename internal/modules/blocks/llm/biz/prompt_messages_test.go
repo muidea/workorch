@@ -560,6 +560,155 @@ func TestContractViolationRecoveryRendersInCurrentActionOnly(t *testing.T) {
 	}
 }
 
+func TestCurrentActionIncludesAvailableTargetSnapshots(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-available-snapshot",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             "produce_state_changing_output",
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                []string{"patch/apply"},
+					"mustIncludeStateChangingNode": true,
+				},
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "target.txt",
+					"sourcePath":       ".workorch-workspaces/ws/target.txt",
+					"content":          "current target content\n",
+					"contentHash":      "sha256-current-target",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	current, ok := promptContextSectionByID(context, "C4.current-action")
+	if !ok {
+		t.Fatalf("missing C4.current-action; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{
+		"availableTargetSnapshots",
+		"primaryNextAction",
+		"target.txt",
+		"sha256-current-target",
+		".workorch-workspaces/ws/target.txt",
+		"allowedPatchModes",
+		"promptSafeForFileWrite",
+	} {
+		if !strings.Contains(current.Content, want) {
+			t.Fatalf("C4.current-action missing %q: %s", want, current.Content)
+		}
+	}
+	prompt := buildProviderFacingPrompt(req)
+	if strings.Contains(prompt.StablePrefix, "availableTargetSnapshots") ||
+		strings.Contains(prompt.StablePrefix, "sha256-current-target") {
+		t.Fatalf("stable prefix leaked available snapshot summary: %s", prompt.StablePrefix)
+	}
+}
+
+func TestCurrentActionMarksTruncatedAvailableSnapshotUnsafe(t *testing.T) {
+	content := strings.Repeat("x", repairSnapshotPromptContentLimit+128)
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-truncated-snapshot",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             "produce_state_changing_output",
+			"repairActionPackage": map[string]any{
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "large-target.txt",
+					"content":          content,
+					"contentHash":      "sha256-large-target",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	current, ok := promptContextSectionByID(context, "C4.current-action")
+	if !ok {
+		t.Fatalf("missing C4.current-action; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{
+		"large-target.txt",
+		"promptSafeForFileWrite\":false",
+		"promptExtractionRequired\":true",
+	} {
+		if !strings.Contains(current.Content, want) {
+			t.Fatalf("C4.current-action missing %q: %s", want, current.Content)
+		}
+	}
+}
+
+func TestProviderCachePlanKeepsStablePrefixForAvailableTargetSnapshots(t *testing.T) {
+	base := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-cache-available-snapshot",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             "produce_state_changing_output",
+			"repairActionPackage": map[string]any{
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "target.txt",
+					"content":          "old content\n",
+					"contentHash":      "sha256-old",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+			},
+		},
+	}
+	changed := base
+	changed.Input = map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             "produce_state_changing_output",
+		"repairActionPackage": map[string]any{
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "target.txt",
+				"content":          "new content\n",
+				"contentHash":      "sha256-new",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+		},
+	}
+	base.PromptContext = buildPromptContextFromRequest(base)
+	changed.PromptContext = buildPromptContextFromRequest(changed)
+	attachProviderCachePlan(&base)
+	attachProviderCachePlan(&changed)
+
+	if base.ContextBudget == nil || base.ContextBudget.CachePlan == nil ||
+		changed.ContextBudget == nil || changed.ContextBudget.CachePlan == nil {
+		t.Fatalf("cachePlan missing: base=%+v changed=%+v", base.ContextBudget, changed.ContextBudget)
+	}
+	if base.ContextBudget.CachePlan.StablePrefixHash != changed.ContextBudget.CachePlan.StablePrefixHash {
+		t.Fatalf("stablePrefixHash base=%q changed=%q, want unchanged C0", base.ContextBudget.CachePlan.StablePrefixHash, changed.ContextBudget.CachePlan.StablePrefixHash)
+	}
+	if base.ContextBudget.CachePlan.VolatileTailHash == changed.ContextBudget.CachePlan.VolatileTailHash {
+		t.Fatalf("volatileTailHash base=%q changed=%q, want C4 available snapshot change", base.ContextBudget.CachePlan.VolatileTailHash, changed.ContextBudget.CachePlan.VolatileTailHash)
+	}
+}
+
 func TestProviderPromptDoesNotIncludeProjectionOnlyInputState(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-projection-guard",
@@ -1272,6 +1421,8 @@ func TestBuildProviderPromptMessagesUsesStateChangingRepairAction(t *testing.T) 
 		"do not satisfy this state-changing contract with file/read-only nodes",
 		"hunk/context/base mismatch",
 		"Do not use shell commands to modify workspace files",
+		"Do not use evidence acquisition or supplemental validation shell/tool nodes to create, initialize, or mutate workspace deliverable files",
+		"runtime scratch or temporary paths outside the deliverable tree",
 		"complete fresh JSON object",
 		"outputDecisionContract",
 		"state_changing_patch_apply",
@@ -1616,6 +1767,8 @@ func TestBuildProviderPromptMessagesUsesConcreteValidationRepairAction(t *testin
 		"shell/command",
 		"mcp/tool_call",
 		"Do not ask the user to choose planning, execution, repair, or validation stage",
+		"Evidence acquisition shell/command or mcp/tool_call nodes must not create, modify, delete, or initialize workspace deliverable files",
+		"runtime validation scratch directory or equivalent temporary path",
 		"runtime observations",
 	} {
 		if !strings.Contains(joined, want) {

@@ -675,15 +675,18 @@ watchdog 不是正常调度链路，也不是 event 丢失的兜底替代。TUI/
 
 后续特性跟踪项：
 
-- [ ] `/metrics` 增加 watchdog 维度指标：startup watchdog timer registration count、periodic tick count、stale dispatched recovery count、last watchdog error。
-- [ ] `/readyz` 或 runtime diagnostics 增加最近一次 watchdog 执行时间、执行耗时和恢复摘要，便于区分 provider 卡住、projection stale 和 continuation 未调度。
-- [ ] `observe-runtime-closure` 增加 resolved-governance-blocked 场景观测：模拟 ticket 已 resolved 后确认 resolve handler / scheduler command / EventHub 主路径提交 scoped resume；若 run 仍 blocked，应暴露为主链路缺陷。
-- [ ] `verify-real-runtime-closure` 的 preflight 除 stale dispatched 阈值外，补充 watchdog interval、run slot 上限和 governance continuation 主路径指标采样。
-- [ ] TUI `/status` 可展示服务端 projection 中的 latest watchdog summary，但不得在 TUI 端主动重放 resume。
+- [x] `/metrics` 增加 watchdog 维度指标：startup watchdog timer registration count、periodic tick count、stale dispatched recovery count、last watchdog error。
+- [x] `/readyz` 或 runtime diagnostics 增加最近一次 watchdog 执行时间、执行耗时和恢复摘要，便于区分 provider 卡住、projection stale 和 continuation 未调度。
+- [x] `observe-runtime-closure` 增加 resolved-governance-blocked 场景观测：模拟 ticket 已 resolved 后确认 resolve handler / scheduler command / EventHub 主路径提交 scoped resume；若 run 仍 blocked，应暴露为主链路缺陷。
+- [x] `verify-real-runtime-closure` 的 preflight 除 stale dispatched 阈值外，补充 watchdog interval、run slot 上限和 governance continuation 主路径指标采样。
+- [x] TUI `/status` 可展示服务端 projection 中的 latest watchdog summary，但不得在 TUI 端主动重放 resume。
 - [ ] 根据真实 provider 长跑结果评估是否把 replan continuation recovery 纳入 periodic watchdog，前提是仍保持 workspace-scoped、幂等和 run-slot 受控。
 
 当前进展：
 
+- Watchdog timer 成功注册会记录 `timerRegistrations`，并通过 `/metrics` 的 `workorch_watchdog_timer_registrations_total`、`/readyz` diagnostics、Run/Workspace `schedulerDiagnostics` 和 TUI `/status` compact 文本透出；注册失败不会被误计为成功注册。
+- `observe-runtime-closure` 可通过 `WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_WORKSPACE_ID` 与 `WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_TICKET_ID` 在 SSE 监听窗口内主动提交 decision resolve，并在 `runtime-observation-summary.json` 的 `governanceContinuationMainPath` 中记录触发 workspace/ticket、请求/响应 artifact、scheduler command accepted/error、enqueue failure、continuation failure/no-action 与 watchdog stale recovery delta；若 resolve 后没有 scheduler 主路径 evidence，脚本直接失败并暴露为主链路缺陷。
+- `verify-real-runtime-closure` preflight summary 已输出 run slot 状态、watchdog timer registration / interval / tick / last error，以及 governance/replan continuation 主路径 metrics，避免真实 provider 验证只检查 stale dispatched 阈值。
 - `/metrics` 已输出 active run heartbeat 总数、最大 heartbeat age、stalled run 数和 ineffective retry run 数，并纳入 `verify-workspace-projection-switch` deployed-instance gate。
 - TUI `/status` 已输出当前 workspace stream revision gap count；模型测试覆盖 active/inactive workspace gap 计数和 active gap refresh 行为。
 - `observe-runtime-closure` 会采集 `/readyz` projection 状态、workspace list、metrics 前后快照、SSE topic/workspace 事件计数、指定或自动抽样 workspace snapshot、projection DTO display contract，以及可选 ai-proxy cache hit rate；managed 验证可通过 `WORKORCH_MANAGED_VERIFY_TARGET=observe-runtime-closure` 自动启动临时服务执行。未显式传入 `WORKORCH_OBSERVE_WORKSPACE_IDS` 且未创建 synthetic workspace 时，默认 `WORKORCH_OBSERVE_AUTO_SNAPSHOT_LIMIT=20`，从 workspace list 自动选择最多 20 个 workspace snapshot 做 display contract 验证；设置为 `0` 可关闭。启用 `WORKORCH_OBSERVE_SYNTHETIC_WORKSPACE_COUNT=2` 时，会在 SSE 监听窗口内创建 2 个临时 workspace，并强校验 `/workspace/created` 与 scoped projection changed 事件、workspace projection list metadata、snapshot projection revision/timing metadata、workspaceTotal、Web/TUI 展示所需 projection/workspace/runHeartbeat DTO 字段对齐。启用 `WORKORCH_OBSERVE_AI_PROXY_INTERACTIONS_DIR` 与 `WORKORCH_OBSERVE_REQUIRE_CACHE_SAMPLES=1` 时，会从真实 ai-proxy interactions metadata 中读取 provider/model/token/cache hit rate 样本并写入 `runtime-observation-summary.json`；可进一步用 `WORKORCH_OBSERVE_CACHE_PROVIDER`、`WORKORCH_OBSERVE_CACHE_MODEL`、`WORKORCH_OBSERVE_CACHE_SINCE`、`WORKORCH_OBSERVE_CACHE_UNTIL` 限定 real-provider 场景窗口，并通过 `WORKORCH_OBSERVE_CACHE_BASELINE_FILE` 与 delta 阈值做改善对比 gate。

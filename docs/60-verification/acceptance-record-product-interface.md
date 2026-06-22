@@ -155,6 +155,16 @@ Last Updated: 2026-05-30
   - provider/runtime compatibility
   - run/decision/approval 状态机
 
+### 2026-06-22 Web State Display Helper Closure
+
+本轮复核发现 Web Console 仍保留 `helpers.tsx` 与 `utils` 两套状态展示 label / tag 规则。已将 `helpers.tsx` 改为复用 `utils/constants`、`utils/format`、`utils/ui` 的 canonical 实现，并通过 re-export 保留旧 helper 导入兼容。页面现有 helper 引用不需要迁移，但 active run / blocker / terminal state 等状态显示规则只保留一份，避免后续 Web 页面重新形成第二套前端投影语义。
+
+验证：
+
+- `npm run build` in `web/workorch-console`
+- `rg -n "export const stateLabels|export function stateTag|export function stateLabel|blocked_on_decision: '等待决策'|stalled: '停滞'" web/workorch-console/src/helpers.tsx web/workorch-console/src/utils -g '*.ts' -g '*.tsx'`
+- `git diff --check -- web/workorch-console/src/helpers.tsx web/workorch-console/src/utils/constants.ts web/workorch-console/src/utils/format.ts web/workorch-console/src/utils/ui.tsx docs/60-verification/product-interface-code-alignment-checklist.md`
+
 ## Summary
 
 本轮结论：

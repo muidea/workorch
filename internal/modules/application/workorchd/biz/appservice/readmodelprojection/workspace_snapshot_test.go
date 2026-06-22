@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -66,6 +65,14 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 	runID := common.RunID("run-workspace-run-merge")
 	base := readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateRunning)},
+		Results: []readmodelcore.Result{
+			{ID: "result-run", WorkspaceID: string(workspaceID), RunID: string(runID), State: string(common.ResultStateRejected)},
+			{ID: "result-workspace-only", WorkspaceID: string(workspaceID), RunID: "run-previous", State: string(common.ResultStateAccepted)},
+		},
+		Artifacts: []readmodelcore.Artifact{
+			{ID: "artifact-result", WorkspaceID: string(workspaceID), RunID: string(runID), ResultID: "result-run", State: string(common.ArtifactStateCreated)},
+			{ID: "artifact-workspace-only", WorkspaceID: string(workspaceID), RunID: "run-previous", State: string(common.ArtifactStateAvailable)},
+		},
 		Patches: []readmodelcore.Patch{
 			{ID: "patch-shared", State: string(common.PatchStateApplied)},
 			{ID: "patch-workspace-only", State: string(common.PatchStateApplied)},
@@ -79,7 +86,7 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 	}
 	runSnapshot := &readmodelcore.RunSnapshot{
 		Run: readmodelcore.Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateCompleted)},
-		Step: &presenter.StepView{
+		Step: &StepView{
 			ID:    "step-current",
 			State: string(common.StepStateCompleted),
 		},
@@ -98,6 +105,7 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 			},
 		},
 		TaskDecompositions: []readmodelcore.TaskDecomposition{{ID: "decomposition-run"}},
+		TaskPlans:          []readmodelcore.TaskPlan{{ID: "plan-run", AnchorStepID: "step-current", Revision: 1, State: "accepted"}},
 		ExecutionSections:  []readmodelcore.ExecutionSection{{ID: "section-run"}},
 		MemoryRecallTraces: []readmodelcore.MemoryRecallTrace{{ID: "memory-run", RunID: string(runID)}},
 		Patches: []readmodelcore.Patch{
@@ -108,14 +116,41 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 			{ID: "continuation-shared", RunID: string(runID), State: string(common.ArtifactContinuationStateApplied), FinalReceived: true},
 			{ID: "continuation-run-only", RunID: string(runID), State: string(common.ArtifactContinuationStateChunking)},
 		},
-		WebSources:        []readmodelcore.WebSourceTrace{{Query: "web-run"}},
-		LLMContextBudgets: []readmodelcore.LLMContextBudgetTrace{{StepID: "budget-run"}},
-		LLMUsageTraces:    []readmodelcore.LLMUsageTrace{{ID: "usage-run", StepID: "step-run", OccurredAt: "2026-06-05T00:01:00Z"}},
+		WebSources: []readmodelcore.WebSourceTrace{{Query: "web-run"}},
+		LLMContextBudgets: []readmodelcore.LLMContextBudgetTrace{{
+			StepID:               "budget-run",
+			EstimatedInputTokens: 2048,
+			Truncated:            true,
+			ContextUtilization:   0.75,
+		}},
+		LLMContextBudgetSummary: readmodelcore.LLMContextBudgetSummary{
+			TraceTotal:            1,
+			TruncatedCount:        1,
+			MaxInputTokens:        2048,
+			MaxContextUtilization: 0.75,
+		},
+		LLMUsageTraces: []readmodelcore.LLMUsageTrace{{ID: "usage-run", StepID: "step-run", OccurredAt: "2026-06-05T00:01:00Z"}},
 		Results: []readmodelcore.Result{{
 			ID:          "result-run",
 			WorkspaceID: string(workspaceID),
 			RunID:       string(runID),
 			State:       string(common.ResultStateAccepted),
+			ArtifactRefs: []string{
+				"artifact-result",
+			},
+			EvidenceRefs: []string{
+				"step-current",
+				"validation-current",
+			},
+		}},
+		Artifacts: []readmodelcore.Artifact{{
+			ID:           "artifact-result",
+			WorkspaceID:  string(workspaceID),
+			RunID:        string(runID),
+			ResultID:     "result-run",
+			State:        string(common.ArtifactStateAvailable),
+			Category:     "runtime_evidence",
+			EvidenceRefs: []string{"validation-current"},
 		}},
 		Decisions: []readmodelcore.Decision{
 			{ID: "decision-shared", State: "resolved", RunID: string(runID)},
@@ -137,6 +172,16 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 	if got.Result == nil || got.Result.ID != "result-run" {
 		t.Fatalf("Result = %+v, want primary run result", got.Result)
 	}
+	if len(got.Results) != 2 || got.Results[0].ID != "result-run" || got.Results[0].State != string(common.ResultStateAccepted) || len(got.Results[0].ArtifactRefs) != 1 {
+		t.Fatalf("Results = %+v, want run result projection overriding workspace base", got.Results)
+	}
+	if len(got.Artifacts) != 2 ||
+		got.Artifacts[0].ID != "artifact-result" ||
+		got.Artifacts[0].State != string(common.ArtifactStateAvailable) ||
+		got.Artifacts[0].ResultID != "result-run" ||
+		len(got.Artifacts[0].EvidenceRefs) != 1 {
+		t.Fatalf("Artifacts = %+v, want accepted result-linked artifact projection", got.Artifacts)
+	}
 	if got.Acceptance.ActiveSliceID != "slice-run" || got.Acceptance.Summary.ActiveSlices != 1 {
 		t.Fatalf("Acceptance = %+v, want merged run acceptance", got.Acceptance)
 	}
@@ -152,8 +197,16 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 	if len(got.LLMUsageTraces) != 2 || got.LLMUsageSummary.EntryTotal != 2 {
 		t.Fatalf("LLM usage = %+v summary=%+v, want merged traces and summary", got.LLMUsageTraces, got.LLMUsageSummary)
 	}
+	if got.LLMContextBudgetSummary.TraceTotal != 1 ||
+		got.LLMContextBudgetSummary.TruncatedCount != 1 ||
+		got.LLMContextBudgetSummary.MaxInputTokens != 2048 {
+		t.Fatalf("LLM context summary = %+v, want merged run context summary", got.LLMContextBudgetSummary)
+	}
 	if len(got.TaskDecompositions) != 1 || got.TaskDecompositions[0].ID != "decomposition-run" {
 		t.Fatalf("TaskDecompositions = %+v, want run decompositions", got.TaskDecompositions)
+	}
+	if len(got.TaskPlans) != 1 || got.TaskPlans[0].ID != "plan-run" || got.TaskPlans[0].State != "accepted" {
+		t.Fatalf("TaskPlans = %+v, want run task plans", got.TaskPlans)
 	}
 	if got.TaskProgress.CurrentStepID != "step-current" {
 		t.Fatalf("TaskProgress = %+v, want run task progress", got.TaskProgress)

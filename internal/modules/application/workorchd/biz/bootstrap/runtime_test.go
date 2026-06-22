@@ -202,6 +202,45 @@ func TestNewWithBackendMemoryBuildsRuntime(t *testing.T) {
 	}
 }
 
+func TestNewWithBackendMemoryStartsSystemDefaultsModule(t *testing.T) {
+	ctx := context.Background()
+	rt := NewWithBackend("memory", "")
+	if rt == nil {
+		t.Fatal("expected runtime")
+	}
+	exports := rt.Exports()
+
+	server, err := exports.Repositories.MCPServers.Get(ctx, common.MCPServerID("mcp-lsp-bridge"))
+	if err != nil {
+		t.Fatalf("get mcp-lsp-bridge server: %v", err)
+	}
+	for _, tool := range []string{"lsp_status", "lsp_shutdown", "lsp_repair"} {
+		assertBootstrapStringSliceContains(t, server.AllowedTools, tool)
+	}
+
+	capability, err := exports.Repositories.MCPCapabilities.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_status"))
+	if err != nil {
+		t.Fatalf("get lsp_status capability: %v", err)
+	}
+	if capability.Category != "code_semantics" || capability.RiskLevel != "read_only" {
+		t.Fatalf("lsp_status capability = %+v, want code_semantics read_only", capability)
+	}
+
+	template, err := exports.Repositories.WorkspaceTemplates.Get(ctx, "software-dev")
+	if err != nil {
+		t.Fatalf("get software-dev template: %v", err)
+	}
+	semanticNavigation, ok := template.ContextHints["semanticCodeNavigation"].(map[string]any)
+	if !ok {
+		t.Fatalf("software-dev semanticCodeNavigation = %#v, want object", template.ContextHints["semanticCodeNavigation"])
+	}
+	defaultCapabilityIDs, ok := semanticNavigation["defaultCapabilityIds"].([]any)
+	if !ok {
+		t.Fatalf("semanticCodeNavigation.defaultCapabilityIds = %#v, want list", semanticNavigation["defaultCapabilityIds"])
+	}
+	assertBootstrapAnySliceContainsString(t, defaultCapabilityIDs, "mcp-lsp-bridge:tool:lsp_status")
+}
+
 func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T) {
 	hub := events.NewMemoryHub()
 	background := magictask.NewBackgroundRoutine(32)
@@ -322,6 +361,13 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 
 func TestNewWithBackendRegistersOrchestratorCommandHandlers(t *testing.T) {
 	rt := NewWithBackend("file", t.TempDir())
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := rt.Shutdown(ctx); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	}()
 	exports := rt.Exports()
 	if err := createTestWorkspace(context.Background(), exports, "ws-command", "command", ""); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
@@ -1146,4 +1192,24 @@ func TestRuntimeShutdownDrainsBackgroundBeforeModuleTeardown(t *testing.T) {
 	if !stopped {
 		t.Fatal("runtime shutdown did not teardown module after background drain")
 	}
+}
+
+func assertBootstrapStringSliceContains(t *testing.T, values []string, want string) {
+	t.Helper()
+	for _, value := range values {
+		if value == want {
+			return
+		}
+	}
+	t.Fatalf("values = %+v, want %q", values, want)
+}
+
+func assertBootstrapAnySliceContainsString(t *testing.T, values []any, want string) {
+	t.Helper()
+	for _, value := range values {
+		if got, ok := value.(string); ok && got == want {
+			return
+		}
+	}
+	t.Fatalf("values = %+v, want %q", values, want)
 }

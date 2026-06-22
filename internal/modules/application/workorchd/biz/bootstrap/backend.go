@@ -30,6 +30,7 @@ type repositorySet struct {
 	patch                repository.PatchRepository
 	validationResult     repository.ValidationResultRepository
 	runtimeCheckpoint    repository.RuntimeCheckpointRepository
+	coverageWorkItem     repository.CoverageWorkItemRepository
 	artifactContinuation repository.ArtifactContinuationRepository
 	ticket               repository.DecisionTicketRepository
 	resolution           repository.DecisionResolutionRepository
@@ -61,6 +62,7 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 			patch:                memory.NewPatchRepository(),
 			validationResult:     memory.NewValidationResultRepository(),
 			runtimeCheckpoint:    memory.NewRuntimeCheckpointRepository(),
+			coverageWorkItem:     memory.NewCoverageWorkItemRepository(),
 			artifactContinuation: memory.NewArtifactContinuationRepository(),
 			ticket:               memory.NewDecisionTicketRepository(),
 			resolution:           memory.NewDecisionResolutionRepository(),
@@ -90,6 +92,7 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 			patch:                workspaceScopedRepos.Patches,
 			validationResult:     workspaceScopedRepos.ValidationResults,
 			runtimeCheckpoint:    workspaceScopedRepos.RuntimeCheckpoints,
+			coverageWorkItem:     workspaceScopedRepos.CoverageWorkItems,
 			artifactContinuation: workspaceScopedRepos.ArtifactContinuations,
 			ticket:               workspaceScopedRepos.Tickets,
 			resolution:           workspaceScopedRepos.Resolutions,

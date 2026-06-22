@@ -41,7 +41,7 @@ func (o *RuntimeOrchestrator) RecordRuntimeStepTerminalResult(
 	if o.evidence.RuntimeCheckpoints == nil {
 		return nil
 	}
-	run, err := o.runs.Get(ctx, runID)
+	run, err := o.runtimeEventRun(ctx, runID)
 	if err != nil {
 		return err
 	}

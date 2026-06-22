@@ -232,9 +232,9 @@ Last Updated: 2026-05-30
 
 当前内置模板 / Soul 默认资源的主要代码证据包括：
 
-- `internal/modules/application/workorchd/biz/bootstrap/defaults/souls.json`
-- `internal/modules/application/workorchd/biz/bootstrap/defaults/souls/<template>/<stage>.md`
-- `internal/modules/application/workorchd/biz/bootstrap/defaults_test.go`
+- `internal/pkg/workorchdefaults/defaults/souls.json`
+- `internal/pkg/workorchdefaults/defaults/souls/<template>/<stage>.md`
+- `internal/pkg/workorchdefaults/defaults_test.go`
 
 这些测试当前已直接覆盖：
 

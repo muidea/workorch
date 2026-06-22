@@ -3,10 +3,9 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
-func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []presenter.StepView, currentStep *presenter.StepView) readmodelcore.RunSnapshot {
+func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []StepView, currentStep *StepView) readmodelcore.RunSnapshot {
 	ret := readmodelcore.RunSnapshot{
 		Workspace:             MapWorkspaceWithRunProjection(input.Workspace, input.Run),
 		Run:                   runtimecore.MapRun(input.Run),
@@ -27,6 +26,7 @@ func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []presente
 		Approvals:             input.Approvals,
 	}
 	ret.RuntimeExecution = MapRuntimeExecutionState(ret.Steps, ret.RuntimeCheckpoints, ret.Step)
+	ret.LLMContextBudgetSummary = SummarizeLLMContextBudgets(ret.LLMContextBudgets)
 	ret.LLMUsageSummary = SummarizeLLMUsage(ret.LLMUsageTraces)
 	ret.Acceptance = MapAcceptanceProjection(ret.Run)
 	ret.Outcome = MapRunOutcome(ret)

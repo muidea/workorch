@@ -45,7 +45,7 @@ function mcpServerPayload(values: MCPServerFormValues): MCPServer {
     endpoint: values.endpoint?.trim(),
     command: values.command?.trim(),
     args: splitLines(values.args),
-    enabled: values.enabled !== false,
+    enabled: values.enabled === true,
     allowedTools: splitLines(values.allowedTools),
     allowedResources: splitLines(values.allowedResources),
     allowedPrompts: splitLines(values.allowedPrompts),
@@ -58,6 +58,7 @@ function mcpServerPayload(values: MCPServerFormValues): MCPServer {
   } else if (values.envMode === 'set') {
     payload.env = parseEnvLines(values.env) ?? {};
   }
+  // envMode=keep intentionally omits env so the backend preserves the current server-side value.
   return payload;
 }
 
@@ -90,6 +91,10 @@ interface MCPCapabilityFilterValues {
 }
 
 interface MCPCapabilityFormValues {
+  id: string;
+  serverId: string;
+  kind: 'tool' | 'resource' | 'prompt' | string;
+  name: string;
   displayName: string;
   description?: string;
   category?: string;
@@ -101,7 +106,25 @@ interface MCPCapabilityFormValues {
   riskLevel?: string;
   approvalPolicy?: string;
   status?: string;
+  schema?: string;
+  uri?: string;
   enabled: boolean;
+}
+
+function parseCapabilitySchema(value?: string) {
+  const text = value?.trim();
+  if (!text) {
+    return undefined;
+  }
+  const parsed = JSON.parse(text) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('schema must be a JSON object');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function capabilitySchemaText(schema?: Record<string, unknown>) {
+  return schema ? JSON.stringify(schema, null, 2) : '';
 }
 
 export function RuntimeControlPage() {
@@ -216,6 +239,10 @@ export function RuntimeControlPage() {
 
   const resetServerDraft = () => {
     const nextIndex = servers.length + 1;
+    setSelectedServerId(undefined);
+    setTools([]);
+    setResources([]);
+    setPrompts([]);
     serverForm.setFieldsValue({
       id: `mcp-runtime-${nextIndex}`,
       name: `Runtime MCP ${nextIndex}`,
@@ -259,30 +286,69 @@ export function RuntimeControlPage() {
       ...item,
       tags: item.tags ?? [],
       stageHints: item.stageHints ?? [],
+      schema: capabilitySchemaText(item.schema),
       enabled: item.enabled !== false
     });
     setCapabilityModalOpen(true);
   };
 
+  const createCapability = () => {
+    setEditingCapability(undefined);
+    capabilityForm.setFieldsValue({
+      id: '',
+      serverId: selectedServerId || '',
+      kind: 'tool',
+      name: '',
+      displayName: '',
+      description: '',
+      category: '',
+      tags: [],
+      stageHints: [],
+      usageHint: '',
+      inputSummary: '',
+      outputSummary: '',
+      riskLevel: undefined,
+      approvalPolicy: '',
+      status: 'draft',
+      schema: '',
+      uri: '',
+      enabled: true
+    });
+    setCapabilityModalOpen(true);
+  };
+
+  const capabilityPayload = (values: MCPCapabilityFormValues): MCPCapability => ({
+    id: (editingCapability?.id || values.id || '').trim(),
+    serverId: (editingCapability?.serverId || values.serverId || '').trim(),
+    kind: (editingCapability?.kind || values.kind || '').trim(),
+    name: (editingCapability?.name || values.name || '').trim(),
+    displayName: values.displayName?.trim(),
+    description: values.description?.trim(),
+    category: values.category?.trim(),
+    tags: values.tags ?? [],
+    stageHints: values.stageHints ?? [],
+    usageHint: values.usageHint?.trim(),
+    inputSummary: values.inputSummary?.trim(),
+    outputSummary: values.outputSummary?.trim(),
+    riskLevel: values.riskLevel?.trim(),
+    approvalPolicy: values.approvalPolicy?.trim(),
+    status: values.status?.trim(),
+    schema: parseCapabilitySchema(values.schema),
+    uri: values.uri?.trim(),
+    enabled: values.enabled !== false
+  });
+
   const saveCapability = async () => {
-    if (!editingCapability) {
-      return;
-    }
     setSaving(true);
     try {
       const values = await capabilityForm.validateFields();
-      await workorchApi.updateMCPCapability(editingCapability.id, {
-        ...editingCapability,
-        ...values,
-        id: editingCapability.id,
-        serverId: editingCapability.serverId,
-        kind: editingCapability.kind,
-        name: editingCapability.name,
-        tags: values.tags ?? [],
-        stageHints: values.stageHints ?? [],
-        enabled: values.enabled !== false
-      });
-      message.success('MCP 能力已更新');
+      const payload = capabilityPayload(values);
+      if (editingCapability) {
+        await workorchApi.updateMCPCapability(editingCapability.id, payload);
+      } else {
+        await workorchApi.createMCPCapability(payload);
+      }
+      message.success(`MCP 能力已${editingCapability ? '更新' : '创建'}`);
       setCapabilityModalOpen(false);
       setEditingCapability(undefined);
       await loadCapabilityDirectory();
@@ -440,6 +506,7 @@ export function RuntimeControlPage() {
             <Space>
               <Button type="primary" htmlType="submit">筛选</Button>
               <Button onClick={() => { capabilityFilterForm.resetFields(); void loadCapabilityDirectory({}); }}>重置</Button>
+              <Button onClick={createCapability}>新建能力</Button>
             </Space>
           </Form.Item>
         </Form>
@@ -563,7 +630,7 @@ export function RuntimeControlPage() {
             onFinish={(values) => void saveServer(values)}
           >
             <Form.Item name="id" label="服务 ID" rules={[{ required: true }]}>
-              <Input placeholder="mcp-filesystem" />
+              <Input disabled={Boolean(selectedServerId)} placeholder="mcp-filesystem" />
             </Form.Item>
             <Form.Item name="name" label="名称" rules={[{ required: true }]}>
               <Input placeholder="Filesystem MCP" />
@@ -594,7 +661,7 @@ export function RuntimeControlPage() {
                 { value: 'clear', label: '清空环境变量' }
               ]} />
             </Form.Item>
-            <Form.Item name="enabled" label="是否启用">
+            <Form.Item name="enabled" label="是否启用" rules={[{ required: true }]}>
               <Select options={[
                 { value: true, label: '是' },
                 { value: false, label: '否' }
@@ -626,7 +693,7 @@ export function RuntimeControlPage() {
         </ProCard>
       </CardGrid>
       <Modal
-        title="编辑 MCP 能力"
+        title={editingCapability ? '编辑 MCP 能力' : '新建 MCP 能力'}
         open={capabilityModalOpen}
         onCancel={() => {
           setCapabilityModalOpen(false);
@@ -638,14 +705,29 @@ export function RuntimeControlPage() {
         destroyOnHidden
       >
         <Form form={capabilityForm} layout="vertical">
-          <Descriptions
-            size="small"
-            column={1}
-            items={[
-              { key: 'id', label: '能力 ID', children: editingCapability?.id || '-' },
-              { key: 'technical', label: '技术标识', children: `${editingCapability?.kind || '-'} / ${editingCapability?.serverId || '-'} / ${editingCapability?.name || '-'}` }
-            ]}
-          />
+          <Form.Item name="id" label="能力 ID" rules={[{ required: true }]}>
+            <Input disabled={Boolean(editingCapability)} placeholder="server-tool-name" />
+          </Form.Item>
+          <Form.Item name="serverId" label="所属服务" rules={[{ required: true }]}>
+            <Select
+              disabled={Boolean(editingCapability)}
+              placeholder="选择 MCP 服务"
+              options={servers.map((item) => ({ value: item.id, label: `${item.name} / ${item.id}` }))}
+            />
+          </Form.Item>
+          <Form.Item name="kind" label="能力类型" rules={[{ required: true }]}>
+            <Select
+              disabled={Boolean(editingCapability)}
+              options={[
+                { value: 'tool', label: modelLabels.mcpTool },
+                { value: 'resource', label: modelLabels.mcpResource },
+                { value: 'prompt', label: modelLabels.mcpPrompt }
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="name" label="技术标识" rules={[{ required: true }]}>
+            <Input disabled={Boolean(editingCapability)} placeholder="tool/resource/prompt name" />
+          </Form.Item>
           <Form.Item name="displayName" label="业务名称" rules={[{ required: true }]}>
             <Input placeholder="便于用户识别的能力名称" />
           </Form.Item>
@@ -669,6 +751,22 @@ export function RuntimeControlPage() {
           </Form.Item>
           <Form.Item name="outputSummary" label="输出摘要">
             <Input.TextArea rows={2} placeholder="说明会产生哪些输出" />
+          </Form.Item>
+          <Form.Item name="uri" label="资源 URI">
+            <Input placeholder="仅资源能力需要填写" />
+          </Form.Item>
+          <Form.Item
+            name="schema"
+            label="输入 Schema"
+            rules={[
+              {
+                validator: async (_, value?: string) => {
+                  parseCapabilitySchema(value);
+                }
+              }
+            ]}
+          >
+            <Input.TextArea rows={5} placeholder={'{\n  "type": "object"\n}'} />
           </Form.Item>
           <Form.Item name="riskLevel" label="风险等级">
             <Select

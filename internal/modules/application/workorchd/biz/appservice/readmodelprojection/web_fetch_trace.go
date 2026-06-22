@@ -2,10 +2,9 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
-func webFetchTrace(step presenter.StepView) readmodelcore.WebSourceTrace {
+func webFetchTrace(step StepView) readmodelcore.WebSourceTrace {
 	output := step.Output
 	evidenceRef := step.ID
 	fetched := readmodelcore.FetchedWebSource{

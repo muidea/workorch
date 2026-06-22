@@ -1,9 +1,7 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
-
-func taskExecutionStepsByRoot(steps []presenter.StepView) map[string]map[string]presenter.StepView {
-	ret := map[string]map[string]presenter.StepView{}
+func taskExecutionStepsByRoot(steps []StepView) map[string]map[string]StepView {
+	ret := map[string]map[string]StepView{}
 	for _, step := range steps {
 		nodeID := readModelStringValue(step.Input["graphNodeId"])
 		if nodeID == "" {
@@ -17,7 +15,7 @@ func taskExecutionStepsByRoot(steps []presenter.StepView) map[string]map[string]
 			continue
 		}
 		if ret[rootStepID] == nil {
-			ret[rootStepID] = map[string]presenter.StepView{}
+			ret[rootStepID] = map[string]StepView{}
 		}
 		ret[rootStepID][nodeID] = step
 	}

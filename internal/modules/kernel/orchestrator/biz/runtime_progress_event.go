@@ -9,10 +9,10 @@ import (
 )
 
 func (o *RuntimeOrchestrator) RecordRuntimeStepProgress(ctx context.Context, progress runtimemodel.RuntimeStepExecutionProgressed) error {
-	if o == nil || o.runs == nil || o.steps == nil || progress.RunID == "" || progress.StepID == "" {
+	if o == nil || o.runs == nil || o.steps == nil || progress.WorkspaceID == "" || progress.RunID == "" || progress.StepID == "" {
 		return common.ErrInvalidArgument
 	}
-	run, err := o.runs.Get(ctx, progress.RunID)
+	run, err := o.runs.GetByWorkspaceID(ctx, progress.WorkspaceID, progress.RunID)
 	if err != nil {
 		return err
 	}

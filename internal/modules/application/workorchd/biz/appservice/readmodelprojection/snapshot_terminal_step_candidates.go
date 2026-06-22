@@ -1,12 +1,10 @@
 package readmodelprojection
 
-import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
-)
+import ()
 
-func terminalSnapshotStepCandidates(steps []presenter.StepView) []*presenter.StepView {
+func terminalSnapshotStepCandidates(steps []StepView) []*StepView {
 	referenced := referencedSnapshotStepIDs(steps)
-	var terminals []*presenter.StepView
+	var terminals []*StepView
 	for idx := range steps {
 		if steps[idx].ID == "" || referenced[steps[idx].ID] {
 			continue

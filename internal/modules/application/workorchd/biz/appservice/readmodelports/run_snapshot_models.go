@@ -56,6 +56,13 @@ func loadRunSnapshotModels(ctx context.Context, readers RunSnapshotReaders, item
 			return err
 		},
 	}
+	if readers.CoverageWorkItems != nil {
+		tasks = append(tasks, func() error {
+			var err error
+			models.CoverageWorkItems, err = readers.CoverageWorkItems.ListByRun(ctx, item.ID)
+			return err
+		})
+	}
 	tasks = appendRunSnapshotObservabilityTasks(ctx, tasks, readers, item, &models)
 	tasks = appendRunSnapshotGovernanceTasks(ctx, tasks, readers, item, &models)
 	tasks = appendRunSnapshotCapabilityTasks(ctx, tasks, readers, recovery, &models)

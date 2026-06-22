@@ -105,7 +105,7 @@ func (s *runStateSubsystem) canTerminalRunReleaseWorkspace(ctx context.Context, 
 	if s == nil || s.runs == nil {
 		return false, common.ErrInvalidArgument
 	}
-	activeRun, err := s.runs.Get(ctx, workspace.ActiveRunID)
+	activeRun, err := s.runs.GetByWorkspaceID(ctx, workspace.ID, workspace.ActiveRunID)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
 			return true, nil
@@ -237,7 +237,7 @@ func (s *runStateSubsystem) workspaceForCreatedRunStart(ctx context.Context, run
 	if ws.ActiveRunID == "" || ws.ActiveRunID == run.ID {
 		return ws, nil
 	}
-	activeRun, err := s.runs.Get(ctx, ws.ActiveRunID)
+	activeRun, err := s.runs.GetByWorkspaceID(ctx, ws.ID, ws.ActiveRunID)
 	if errors.Is(err, common.ErrNotFound) {
 		return nil, common.ErrConflict
 	}
@@ -265,7 +265,7 @@ func (s *runStateSubsystem) reconcileWorkspaceActiveRun(
 		return ws, "", false, nil
 	}
 	activeRunID := ws.ActiveRunID
-	activeRun, err := s.runs.Get(ctx, activeRunID)
+	activeRun, err := s.runs.GetByWorkspaceID(ctx, ws.ID, activeRunID)
 	if err != nil {
 		if !errors.Is(err, common.ErrNotFound) {
 			return nil, "", false, err
@@ -307,7 +307,7 @@ func (s *runStateSubsystem) workspaceForActiveRunState(ctx context.Context, run 
 	if ws.ActiveRunID == "" || ws.ActiveRunID == run.ID {
 		return ws, nil
 	}
-	activeRun, err := s.runs.Get(ctx, ws.ActiveRunID)
+	activeRun, err := s.runs.GetByWorkspaceID(ctx, ws.ID, ws.ActiveRunID)
 	if err != nil && !errors.Is(err, common.ErrNotFound) {
 		return nil, err
 	}

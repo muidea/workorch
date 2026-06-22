@@ -4,10 +4,10 @@ import (
 	"strconv"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
-func streamTimelineEventItem(step presenter.StepView, runState string, stepOccurredAt string, idx int, event map[string]any) readmodelcore.RuntimeTimelineItem {
+func streamTimelineEventItem(step StepView, runState string, stepOccurredAt string, idx int, event map[string]any) readmodelcore.RuntimeTimelineItem {
+	bounded := boundedStreamTimelineEvent(event)
 	eventType, _ := event["type"].(string)
 	if eventType == "" {
 		eventType = "delta"
@@ -23,8 +23,8 @@ func streamTimelineEventItem(step presenter.StepView, runState string, stepOccur
 		RunState:   runState,
 		StepID:     step.ID,
 		StepState:  step.State,
-		Summary:    readModelStringValue(event["delta"]),
+		Summary:    readModelStringValue(bounded["delta"]),
 		OccurredAt: occurredAt,
-		Data:       cloneReadModelMap(event),
+		Data:       bounded,
 	}
 }

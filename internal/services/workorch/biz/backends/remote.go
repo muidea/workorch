@@ -491,10 +491,11 @@ func schedulerDiagnosticsInfoFromClient(input *client.SchedulerDiagnostics) *Sch
 	}
 	ret := &SchedulerDiagnosticsInfo{
 		Watchdog: WatchdogDiagnosticsInfo{
-			LatestTickAt:      input.Watchdog.LatestTickAt,
-			LatestDurationMs:  input.Watchdog.LatestDurationMs,
-			LatestError:       input.Watchdog.LatestError,
-			StaleRecoveryRuns: input.Watchdog.StaleRecoveryRuns,
+			TimerRegistrations: input.Watchdog.TimerRegistrations,
+			LatestTickAt:       input.Watchdog.LatestTickAt,
+			LatestDurationMs:   input.Watchdog.LatestDurationMs,
+			LatestError:        input.Watchdog.LatestError,
+			StaleRecoveryRuns:  input.Watchdog.StaleRecoveryRuns,
 		},
 		RecentContinuations:         continuationDiagnosticsFromClient(input.RecentContinuations),
 		ContinuationFailureCounts:   continuationDiagnosticCountsFromClient(input.ContinuationFailureCounts),
@@ -607,15 +608,18 @@ func mapRemoteDecisionInfoPtr(d *client.Decision) DecisionInfo {
 
 func mapRemoteDecisionInfo(d client.Decision) DecisionInfo {
 	return DecisionInfo{
-		ID:             common.TicketID(d.ID),
-		WorkspaceID:    common.WorkspaceID(d.WorkspaceID),
-		RunID:          common.RunID(d.RunID),
-		Reason:         d.Reason,
-		Question:       d.Question,
-		Context:        clonePayloadMap(d.Context),
-		State:          d.State,
-		ResolutionType: d.ResolutionType,
-		AutoGovernance: mapRemoteAutoGovernanceSummary(d.AutoGovernance),
+		ID:                 common.TicketID(d.ID),
+		WorkspaceID:        common.WorkspaceID(d.WorkspaceID),
+		RunID:              common.RunID(d.RunID),
+		Reason:             d.Reason,
+		Question:           d.Question,
+		Context:            clonePayloadMap(d.Context),
+		State:              d.State,
+		ResolutionType:     d.ResolutionType,
+		ContinuationAction: d.ContinuationAction,
+		ResumeRunID:        common.RunID(d.ResumeRunID),
+		SuccessorRunID:     common.RunID(d.SuccessorRunID),
+		AutoGovernance:     mapRemoteAutoGovernanceSummary(d.AutoGovernance),
 	}
 }
 
@@ -634,26 +638,26 @@ func clonePayloadMap(input map[string]any) map[string]any {
 
 type remoteApprovalBackend struct{ cl *client.Client }
 
-func (b *remoteApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error) {
-	a, err := b.cl.Approve(ctx, string(wsID), string(id))
+func (b *remoteApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*ApprovalInfo, error) {
+	a, err := b.cl.Approve(ctx, string(wsID), string(id), payload...)
 	if err != nil {
 		return nil, err
 	}
 	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
 }
-func (b *remoteApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error) {
-	a, err := b.cl.Reject(ctx, string(wsID), string(id))
+func (b *remoteApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*ApprovalInfo, error) {
+	a, err := b.cl.Reject(ctx, string(wsID), string(id), payload...)
 	if err != nil {
 		return nil, err
 	}
 	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
 }
-func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string) ([]ApprovalInfo, error) {
+func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...map[string]any) ([]ApprovalInfo, error) {
 	_idStrings := make([]string, len(ids))
 	for i, id := range ids {
 		_idStrings[i] = string(id)
 	}
-	list, err := b.cl.BatchResolveApprovals(ctx, string(wsID), _idStrings, action)
+	list, err := b.cl.BatchResolveApprovals(ctx, string(wsID), _idStrings, action, payload...)
 	if err != nil {
 		return nil, err
 	}

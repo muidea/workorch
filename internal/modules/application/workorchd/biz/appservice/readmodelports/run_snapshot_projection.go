@@ -17,6 +17,7 @@ func (models runSnapshotModels) projectionInput(item *runmodel.Run) readmodelpro
 		Results:               models.Results,
 		Artifacts:             models.Artifacts,
 		ArtifactContinuations: models.ArtifactContinuations,
+		CoverageWorkItems:     models.CoverageWorkItems,
 		EventRecords:          models.EventRecords,
 		LLMUsageEventRecords:  models.LLMUsageEventRecords,
 		MemoryRecallTraces:    models.MemoryRecallTraces,

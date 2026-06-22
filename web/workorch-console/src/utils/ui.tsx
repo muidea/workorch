@@ -4,7 +4,7 @@ import { stateLabel } from './format';
 
 export function stateTag(state?: string) {
   const value = state || 'unknown';
-  const color = value.includes('failed') || value.includes('reject') ? 'red' : value.includes('block') || value.includes('pending') ? 'gold' : 'green';
+  const color = value.includes('failed') || value.includes('reject') || value.includes('stalled') ? 'red' : value.includes('block') || value.includes('pending') ? 'gold' : 'green';
   return <Tag color={color}>{stateLabel(value)}</Tag>;
 }
 

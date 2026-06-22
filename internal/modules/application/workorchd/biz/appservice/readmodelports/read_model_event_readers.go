@@ -13,6 +13,7 @@ type OwnerReaders struct {
 	Results               ResultReader
 	Artifacts             ArtifactReader
 	ArtifactContinuations ArtifactContinuationReader
+	CoverageWorkItems     CoverageWorkItemReader
 	EventRecords          EventRecordReader
 	MemoryRecalls         MemoryRecallTraceReader
 	ToolCalls             ToolCallReader
@@ -38,6 +39,7 @@ func (r OwnerReaders) RunSnapshotReaders(published []events.WorkorchEvent) RunSn
 		Results:               r.Results,
 		Artifacts:             r.Artifacts,
 		ArtifactContinuations: r.ArtifactContinuations,
+		CoverageWorkItems:     r.CoverageWorkItems,
 		EventRecords:          r.EventRecords,
 		MemoryRecalls:         r.MemoryRecalls,
 		Tickets:               r.Tickets,
@@ -58,6 +60,7 @@ func (r OwnerReaders) WorkspaceSnapshotReaders(published []events.WorkorchEvent)
 		Results:               r.Results,
 		Artifacts:             r.Artifacts,
 		ArtifactContinuations: r.ArtifactContinuations,
+		CoverageWorkItems:     r.CoverageWorkItems,
 		EventRecords:          r.EventRecords,
 		Patches:               r.Patches,
 		Tickets:               r.Tickets,

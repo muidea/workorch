@@ -19,7 +19,10 @@
       "lsp_definition",
       "lsp_hover",
       "lsp_references",
-      "lsp_diagnostics"
+      "lsp_diagnostics",
+      "lsp_status",
+      "lsp_shutdown",
+      "lsp_repair"
     ]
   }
 ]

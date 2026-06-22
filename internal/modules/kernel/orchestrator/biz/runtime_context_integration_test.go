@@ -18,6 +18,7 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
@@ -1632,8 +1633,11 @@ func TestRuntimeOrchestrator_StartRunDispatchReusesLoadedRun(t *testing.T) {
 	if err := orch.StartRun(ctx, runID); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	if got := runRepo.getCount.Load(); got != 2 {
-		t.Fatalf("run Get count = %d, want initial StartRun read and finalize state guard read", got)
+	if got := runRepo.getCount.Load(); got != 1 {
+		t.Fatalf("run Get count = %d, want only initial StartRun read", got)
+	}
+	if got := runRepo.getByWorkspaceIDCount.Load(); got != 1 {
+		t.Fatalf("run GetByWorkspaceID count = %d, want finalize state guard scoped read", got)
 	}
 }
 
@@ -2145,7 +2149,9 @@ func TestRuntimeOrchestrator_StepInputMemoryTraceRecordsExcludedProviderRetryMem
 	ctx := context.Background()
 	memoryRepo := memory.NewMemoryItemRepository()
 	traceRepo := memory.NewMemoryRecallTraceRepository()
+	hub := &recordingMemoryRecallNotificationHub{}
 	orch := &RuntimeOrchestrator{
+		eventHub: hub,
 		evidence: RuntimeEvidenceRepositories{
 			MemoryItems:        memoryRepo,
 			MemoryRecallTraces: traceRepo,
@@ -2206,6 +2212,34 @@ func TestRuntimeOrchestrator_StepInputMemoryTraceRecordsExcludedProviderRetryMem
 	if !strings.Contains(trace.SelectionScores[0].Reason, "excluded_low_value_process_memory") {
 		t.Fatalf("selection score reason = %q, want low-value process exclusion", trace.SelectionScores[0].Reason)
 	}
+	if len(hub.sync) != 0 {
+		t.Fatalf("sync publishes = %+v, want none for memory recall notification", hub.sync)
+	}
+	if len(hub.async) != 1 || hub.async[0].Topic != memoryevents.TopicMemoryRecallRecorded {
+		t.Fatalf("async publishes = %+v, want one memory recall recorded notification", hub.async)
+	}
+	if hub.async[0].WorkspaceID != string(workspaceID) || hub.async[0].RunID != string(runID) || hub.async[0].StepID != string(step.ID) {
+		t.Fatalf("async scope = workspace:%q run:%q step:%q", hub.async[0].WorkspaceID, hub.async[0].RunID, hub.async[0].StepID)
+	}
+}
+
+type recordingMemoryRecallNotificationHub struct {
+	sync  []events.Envelope
+	async []events.Envelope
+}
+
+func (h *recordingMemoryRecallNotificationHub) Publish(_ context.Context, envelope events.Envelope) error {
+	h.sync = append(h.sync, envelope)
+	return nil
+}
+
+func (h *recordingMemoryRecallNotificationHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
+	h.async = append(h.async, envelope)
+	return nil
+}
+
+func (h *recordingMemoryRecallNotificationHub) Subscribe(string, events.Handler) func() {
+	return func() {}
 }
 
 func TestRuntimeOrchestrator_StepInputMemoryTraceExcludesTransientDoDFeedback(t *testing.T) {

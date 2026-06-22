@@ -18,7 +18,7 @@ import (
 
 type resultEventPublisher interface {
 	publishArtifactCreated(ctx context.Context, item *resultmodel.Artifact) error
-	publishResultAccepted(ctx context.Context, item *resultmodel.Result) error
+	publishResultEvent(ctx context.Context, item *resultmodel.Result) error
 	publishMemoryChanged(ctx context.Context, topic string, item *memorymodel.MemoryItem) error
 }
 
@@ -43,11 +43,11 @@ func (r *resultSubsystem) publishArtifactCreated(ctx context.Context, item *resu
 	return r.events.publishArtifactCreated(ctx, item)
 }
 
-func (r *resultSubsystem) publishResultAccepted(ctx context.Context, item *resultmodel.Result) error {
+func (r *resultSubsystem) publishResultEvent(ctx context.Context, item *resultmodel.Result) error {
 	if r == nil || r.events == nil {
 		return nil
 	}
-	return r.events.publishResultAccepted(ctx, item)
+	return r.events.publishResultEvent(ctx, item)
 }
 
 func (r *resultSubsystem) publishMemoryChanged(ctx context.Context, topic string, item *memorymodel.MemoryItem) error {

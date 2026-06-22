@@ -168,7 +168,9 @@ TopicOrchestratorCommandStartRun
 
 - 引入 event contract / lane policy registry。
 - 将 lane 计算从隐式 `RunID` / `WorkspaceID` fallback 迁移到显式 contract。
-- 保留迁移期 fallback，但增加测试和 TODO，确保新增 topic 必须声明契约。
+- 保留迁移期 fallback；`verify-boundary-contract.sh` 已增加 owner
+  `pkg/events/topics.go` -> `Contracts()` 覆盖检查，确保新增 topic 必须声明
+  command class 和 lane policy。
 - 移除长期存在的 `strings.Contains(topic, "/command/get|list|search")` read 推断。
 
 ### `internal/pkg/events/topics_*`
@@ -386,6 +388,10 @@ make verify-managed-full
 - owner write/state command 进入 state lane。
 - scoped notification 进入 topic lane。
 - `docs/60-verification/framework-eventhub-module-boundary-checklist.md` 已替换旧的 run/workspace 自动 lane 规则。
+- 2026-06-22 补充 `verify-boundary-contract.sh` topic contract 覆盖门禁：
+  遍历 `internal/modules` / `internal/initiators` 下 owner `pkg/events/topics.go`
+  与 runtime block eventdefs topics，除动态 runtime block execute prefix 外，所有
+  `Topic*` 常量都必须出现在对应 `Contracts()` 元数据中。
 
 直接验证：
 
@@ -485,3 +491,44 @@ rg -n "Topic[A-Za-z0-9]+\\s*=\\s*\\\"/" internal/pkg/events -g '*.go'
 - owner `pkg/events` contract 聚合完成。
 - `internal/pkg/events` 不再定义或 alias 业务 topic。
 - `go-application-event-runtime` 与 `go-multi-module-dev` 已补充 owner-owned event definition、基础 events 包不得承载业务 topic、runtime block execute topic 归属等规则。
+
+### 2026-06-22 WorkOrch Event Version Matrix Guard
+
+已完成：
+
+- `internal/pkg/events` 中公开 WorkOrch event topic 清单收敛为单一来源：
+  - `workorchEventTopics` 是 `WorkorchTopics()` 与 `WorkorchEventContract()` 的共同来源。
+  - `workorchEventContracts` 由该清单构建，避免 parser subscription 清单与版本矩阵分叉。
+- 新增 `TestWorkorchTopicsAreVersionedByTopicMatrix`，确保：
+  - `WorkorchTopics()` 不返回空 topic。
+  - topic 清单不存在重复项。
+  - 每个公开 WorkOrch event topic 都能通过 `ValidateWorkorchEventVersion(topic, WorkorchEventVersion)`。
+  - 版本矩阵不存在未被 `WorkorchTopics()` 暴露的孤儿 topic。
+
+直接核对：
+
+```bash
+go test ./internal/pkg/events -count=1 -timeout=120s
+```
+
+结果：
+
+- 公开 WorkOrch event parser/subscription 清单与 event version matrix 已消除重复维护点。
+- 该收口只约束 WorkOrch 公开事件版本合同，不改变 owner topic 归属、EventHub lane policy 或业务状态流转。
+
+### 2026-06-22 ReadModel DTO / Presenter Boundary Guard
+
+已完成：
+
+- `readmodelcore` / `readmodelprojection` 不再 import `pkg/presenter`。
+- `StepView` / `ObservedView` 作为共享 read-model DTO 位于 `readmodelcore`。
+- step/observed projection mapper 位于 `readmodelprojection`。
+- `pkg/presenter` 只保留 outward mapper 与类型 alias，不再作为 read-model core/projection owner。
+- `verify-boundary-contract.sh` 增加 `readmodelcore` / `readmodelprojection` -> `pkg/presenter` import 防回归检查。
+
+直接核对：
+
+```bash
+go test ./internal/modules/application/workorchd/biz/appservice/readmodelcore ./internal/modules/application/workorchd/pkg/presenter ./internal/modules/application/workorchd/biz/appservice/readmodelprojection ./internal/modules/application/workorchd/biz/appservice/readmodelports -count=1 -timeout=240s
+make verify-boundary-contract
+```

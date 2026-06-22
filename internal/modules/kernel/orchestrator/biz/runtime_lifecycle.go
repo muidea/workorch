@@ -32,7 +32,7 @@ func (o *RuntimeOrchestrator) acceptRunStart(ctx context.Context, runID common.R
 		return nil, nil, common.ErrInvalidArgument
 	}
 
-	r, err := o.runs.Get(ctx, runID)
+	r, err := o.runtimeEventRun(ctx, runID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -81,7 +81,7 @@ func (o *RuntimeOrchestrator) DispatchNextStep(ctx context.Context, runID common
 		return common.ErrInvalidArgument
 	}
 
-	r, err := o.runs.Get(ctx, runID)
+	r, err := o.runtimeEventRun(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.
 	if runID == "" || ticketID == "" {
 		return common.ErrInvalidArgument
 	}
-	r, err := o.runs.Get(ctx, runID)
+	r, err := o.runtimeEventRun(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.
 	if runID == "" || approvalID == "" {
 		return common.ErrInvalidArgument
 	}
-	r, err := o.runs.Get(ctx, runID)
+	r, err := o.runtimeEventRun(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -164,7 +164,7 @@ func (o *RuntimeOrchestrator) CanResumeRun(ctx context.Context, runID common.Run
 	if runID == "" {
 		return common.ErrInvalidArgument
 	}
-	r, err := o.runs.Get(ctx, runID)
+	r, err := o.runtimeEventRun(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func (o *RuntimeOrchestrator) ResumeRunWithExecutionContextPatch(ctx context.Con
 	if runID == "" {
 		return common.ErrInvalidArgument
 	}
-	r, err := o.runs.Get(ctx, runID)
+	r, err := o.runtimeEventRun(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -514,7 +514,7 @@ func (o *RuntimeOrchestrator) failResolvedDecisionResume(ctx context.Context, ru
 	if errors.Is(cause, common.ErrBlocked) {
 		return cause
 	}
-	current, err := o.runs.Get(ctx, run.ID)
+	current, err := o.runtimeEventRun(common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID), run.ID)
 	if err != nil {
 		return errors.Join(cause, err)
 	}

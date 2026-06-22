@@ -17,6 +17,7 @@ type readModelDependencies struct {
 	results               readmodelcore.ResultReader
 	artifacts             readmodelcore.ArtifactReader
 	artifactContinuations readmodelcore.ArtifactContinuationReader
+	coverageWorkItems     readmodelcore.CoverageWorkItemReader
 	eventRecords          readmodelcore.EventRecordReader
 	memoryRecalls         readmodelcore.MemoryRecallTraceReader
 	toolCalls             readmodelcore.ToolCallReader
@@ -58,6 +59,7 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 		results:               readers.Results,
 		artifacts:             readers.Artifacts,
 		artifactContinuations: readers.ArtifactContinuations,
+		coverageWorkItems:     readers.CoverageWorkItems,
 		eventRecords:          readers.EventRecords,
 		memoryRecalls:         readers.MemoryRecalls,
 		toolCalls:             readers.ToolCalls,

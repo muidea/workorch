@@ -424,6 +424,72 @@ Required tests:
   message, not the workspace active at handler time.
 - No code path calls `/api/v1/workorch/workspaces/{workspaceId}/decisions`.
 
+## Implementation Notes
+
+### 2026-06-22 Closure Pass
+
+Closed or re-verified items:
+
+- TUI prompt authority now uses the active workspace server projection for
+  command eligibility as well as rendering. `ensureActiveBlockingDecisionFromOverview`
+  and `ensureActiveBlockingApprovalFromOverview` no longer fall back to local
+  `blockingDecision` / `blockingApproval` when the active workspace projection
+  is live, terminal, missing, or otherwise not reporting the matching blocker.
+- Added TUI regressions proving stale local decision/approval blockers cannot
+  submit `/decision replan` or `/approval approve` when the current server
+  projection reports the workspace as running.
+- Startup inactive running run recovery now records a bounded
+  `not_scheduled` continuation diagnostic with reason
+  `service_restarted_pending_scheduler_work_not_recovered` and manual
+  `run_resume` / `workspace_restart` actions. This exposes restart semantics
+  without replaying process-local scheduler pending work.
+- Scheduler queue submission failure now has regression coverage proving that
+  the command returns a non-accepted error and records a workspace/run scoped
+  `scheduler_enqueue_failed` continuation diagnostic with manual retry
+  recoverability.
+- TUI decision/approval resolved markers now update only the matching
+  workspace/run scoped local item. Duplicate ticket or approval ids in another
+  workspace remain untouched, so local submission feedback cannot move or clear
+  another workspace's authoritative blocker display.
+- TUI `/status` now has regression coverage proving scheduler continuation
+  diagnostics and watchdog registration are rendered from the current
+  ViewModel without triggering resume, replan, approval, restart, or any other
+  backend command.
+- TUI workspace context application now treats workspace snapshot diagnostics
+  as the authoritative full projection and treats run status diagnostics as a
+  partial override only when present. A run status payload that omits
+  scheduler diagnostics no longer clears the active workspace snapshot
+  diagnostics, and inactive workspace diagnostics cannot pollute the active
+  workspace status view.
+- Added a direct server regression proving that executing the registered
+  periodic watchdog timer does not scan workspace governance state and does
+  not activate replan continuations. Replan continuation recovery remains an
+  explicit/manual recovery path, while the watchdog timer is scoped to stale
+  dispatched runtime gap recovery.
+- Re-verified that the periodic watchdog timer calls only stale dispatched run
+  recovery. It does not call replan continuation recovery.
+- Re-verified that source code does not call the deprecated
+  `/api/v1/workorch/workspaces/{workspaceId}/decisions` endpoint; remaining
+  matches are this document's requirement text.
+- `verify-boundary-contract` now enforces the deprecated workspace-scoped
+  decision endpoint ban across `internal`, `web`, and `scripts`, excluding
+  tests, built console assets, node modules, and docs. This turns the previous
+  manual `rg` evidence into a reusable regression gate.
+
+Validation evidence:
+
+```bash
+go test ./internal/services/workorch/service/tui -count=1 -timeout=180s
+go test ./internal/services/workorch/service/tui -run 'TestModel(ResolvedMarkersAreScopedAcrossDuplicateIDs|DecisionReplanUsesServerProjectionEvenAfterOptimisticResolvedMark|DecisionResolvedDoesNotHideServerOpenProjection|GovernanceResolvedEventRefreshesWorkspaceState|LiveRunStateEventClearsStaleDecisionPrompt|LiveStateEventClearsStaleDecisionPrompt)' -count=1 -timeout=180s
+go test ./internal/services/workorch/service/tui -run 'TestModel(StatusRendersSchedulerDiagnosticsWithoutTriggeringCommands|InspectCommandsRenderCurrentState)|TestSchedulerDiagnosticsStatusShowsWatchdogTimerRegistration' -count=1 -timeout=180s
+go test ./internal/services/workorch/service/tui -run 'TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar|TestModelStatusRendersSchedulerDiagnosticsWithoutTriggeringCommands' -count=1 -timeout=180s
+go test ./internal/modules/application/workorchd/service/server -count=1 -timeout=180s
+go test ./internal/modules/application/workorchd/service/server -run 'TestWorkorchDSchedulerCommandReturnsErrorWhenRunContinuationQueueFails|TestWorkorchDRESTCommandsReturnConflictWhenSchedulerQueueFails|TestSchedulerRecommendedActionsUseResumeTerminology' -count=1 -timeout=180s
+go test ./internal/modules/application/workorchd/service/server -run 'TestServerStateWatchdogDoesNotRecoverReplanContinuations|TestServerStateRecoverReplanContinuationsSchedulesWaitingDecisionActiveSupersededRun|TestHTTPServerStartupOnlySchedulesWatchdogTimer' -count=1 -timeout=180s
+make verify-boundary-contract
+rg -n "/api/v1/workorch/workspaces/\\{workspaceId\\}/decisions|workspaces/.*/decisions|/workorch/workspaces/.*/decisions" internal web scripts docs -g '!internal/modules/application/workorchd/service/server/consoleassets/dist/**'
+```
+
 Suggested commands:
 
 ```bash

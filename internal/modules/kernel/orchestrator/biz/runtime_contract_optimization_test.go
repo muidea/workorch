@@ -228,3 +228,51 @@ func TestValidateLLMExecutionOutputContractRejectsGraphMCPServerOutsideCurrentSo
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want current soul MCP server rejection", err)
 	}
 }
+
+func TestValidateLLMExecutionOutputContractRejectsGraphMCPServerOutsideDeclaredRuntimeCapabilities(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-runtime-mcp-server-contract",
+		WorkspaceID:     "ws-runtime-mcp-server-contract",
+		DoDID:           "dod-runtime-mcp-server-contract",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"mcpServers": []map[string]any{{
+				"id":      "declared-mcp",
+				"enabled": true,
+			}},
+			"mcpCapabilities": []map[string]any{{
+				"id":       "declared-mcp:tool:inspect",
+				"serverId": "declared-mcp",
+				"kind":     "tool",
+				"name":     "inspect",
+				"status":   "active",
+			}},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-runtime-mcp-server-contract/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageRepair,
+			stepInputKeySoulStage:    soulStageExecution,
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{{
+			ID:   "undeclared-mcp-call",
+			Kind: "mcp/tool_call",
+			Input: map[string]any{
+				"serverId": "undeclared-mcp",
+				"tool":     "inspect",
+			},
+		}}},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "not declared by current runtime MCP capabilities") ||
+		!strings.Contains(err.Error(), "undeclared-mcp") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want declared runtime MCP server rejection", err)
+	}
+}

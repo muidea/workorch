@@ -10,12 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/doditems"
-	"github.com/muidea/workorch/internal/pkg/events"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -84,8 +80,10 @@ type AppModel struct {
 	patches                []backend.PatchInfo
 	artifactContinuations  []backend.ArtifactContinuationInfo
 	taskDecomp             []backend.TaskDecompositionInfo
+	taskPlans              []backend.TaskPlanInfo
 	memoryRecalls          []backend.MemoryRecallTraceInfo
 	llmUsage               backend.LLMUsageSummaryInfo
+	llmContextSummary      backend.LLMContextBudgetSummaryInfo
 	llmContext             map[string]any
 	acceptance             backend.AcceptanceProjectionInfo
 	runHeartbeat           backend.RunHeartbeatInfo
@@ -489,7 +487,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeRunID = string(msg.Decision.RunID)
 			}
 			m.markDecisionResolvedForWorkspace(common.WorkspaceID(refreshWorkspaceID), msg.Decision.ID, msg.Decision.RunID)
-			m.markDecisionResolved(msg.Decision.ID)
+			m.markDecisionResolved(msg.Decision.ID, common.WorkspaceID(refreshWorkspaceID), msg.Decision.RunID)
 		}
 		if string(refreshWorkspaceID) == m.activeWorkspaceID {
 			m.blockingDecision = nil
@@ -516,7 +514,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeRunID = string(msg.Approval.RunID)
 			}
 			m.markApprovalResolvedForWorkspace(refreshWorkspaceID, msg.Approval.ID, msg.Approval.RunID)
-			m.markApprovalResolved(msg.Approval.ID)
+			m.markApprovalResolved(msg.Approval.ID, refreshWorkspaceID, msg.Approval.RunID)
 		}
 		if string(refreshWorkspaceID) == m.activeWorkspaceID {
 			m.blockingApproval = nil
@@ -703,7 +701,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 		m.clearInput()
 		m.lastError = nil
 		m.appendTranscript("Approval", text)
-		return m, ResolveApproval(m.be, m.activeWorkspaceID, approvalID, approve)
+		return m, ResolveApproval(m.be, m.activeWorkspaceID, approvalID, approve, approvalResolutionPayload(text))
 	}
 	if m.activeWorkspaceID == "" {
 		m.lastError = fmt.Errorf("no active workspace")
@@ -771,6 +769,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.artifacts = nil
 		m.patches = nil
 		m.llmUsage = backend.LLMUsageSummaryInfo{}
+		m.llmContextSummary = backend.LLMContextBudgetSummaryInfo{}
 		m.llmContext = nil
 		m.acceptance = backend.AcceptanceProjectionInfo{}
 		m.runtimeEvents = nil
@@ -883,7 +882,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Decision", answer)
-			return m, ResolveDecisionWithType(m.be, m.activeWorkspaceID, ticketID, decisioncommon.ResolutionTypeReplan, answer), true
+			return m, ResolveDecisionWithType(m.be, m.activeWorkspaceID, ticketID, backend.DecisionResolutionTypeReplan, answer), true
 		case "terminate", "reject":
 			if !m.ensureActiveBlockingDecisionFromOverview() {
 				m.lastError = fmt.Errorf("no blocking decision")
@@ -894,7 +893,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Decision", answer)
-			return m, ResolveDecisionWithType(m.be, m.activeWorkspaceID, ticketID, decisioncommon.ResolutionTypeRejectCurrentPath, answer), true
+			return m, ResolveDecisionWithType(m.be, m.activeWorkspaceID, ticketID, backend.DecisionResolutionTypeRejectCurrentPath, answer), true
 		default:
 			m.lastError = fmt.Errorf("unknown decision subcommand: %s", subcommand)
 			return m, nil, true
@@ -927,7 +926,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Approval", "approve")
-			return m, ResolveApproval(m.be, m.activeWorkspaceID, approvalID, true), true
+			return m, ResolveApproval(m.be, m.activeWorkspaceID, approvalID, true, approvalResolutionPayload("approve")), true
 		case "reject", "no":
 			if !m.ensureActiveBlockingApprovalFromOverview() {
 				m.lastError = fmt.Errorf("no blocking approval")
@@ -937,7 +936,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Approval", "reject")
-			return m, ResolveApproval(m.be, m.activeWorkspaceID, approvalID, false), true
+			return m, ResolveApproval(m.be, m.activeWorkspaceID, approvalID, false, approvalResolutionPayload("reject")), true
 		default:
 			m.lastError = fmt.Errorf("unknown approval subcommand: %s", subcommand)
 			return m, nil, true
@@ -1311,18 +1310,18 @@ func memoryRecallHitSummary(items []backend.MemoryRecallHitInfo, memoryID common
 
 func patchInfoFromEvent(evt backend.Event) backend.PatchInfo {
 	return backend.PatchInfo{
-		ID:           common.PatchID(firstPayloadString(evt.Payload, "patchId", "ID", "id", events.PayloadKeyPatchID)),
+		ID:           common.PatchID(firstPayloadString(evt.Payload, "patchId", "ID", "id", backend.PayloadKeyPatchID)),
 		WorkspaceID:  evt.WorkspaceID,
 		RunID:        evt.RunID,
-		StepID:       common.StepID(firstPayloadString(evt.Payload, "stepId", "StepID", events.PayloadKeyStepID)),
-		ToolCallID:   common.ToolCallID(firstPayloadString(evt.Payload, "toolCallId", "ToolCallID", events.PayloadKeyToolCallID)),
-		ApprovalID:   common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ApprovalID", events.PayloadKeyApprovalID)),
-		PatchType:    firstPayloadString(evt.Payload, "patchType", "PatchType", events.PayloadKeyPatchType),
-		TargetRef:    firstPayloadString(evt.Payload, "targetRef", "TargetRef", events.PayloadKeyTargetRef),
-		Summary:      firstPayloadString(evt.Payload, "summary", "Summary", events.PayloadKeySummary),
-		State:        common.PatchState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)),
-		AddedLines:   payloadIntValue(evt.Payload, "addedLines", "AddedLines", events.PayloadKeyAddedLines),
-		DeletedLines: payloadIntValue(evt.Payload, "deletedLines", "DeletedLines", events.PayloadKeyDeletedLines),
+		StepID:       common.StepID(firstPayloadString(evt.Payload, "stepId", "StepID", backend.PayloadKeyStepID)),
+		ToolCallID:   common.ToolCallID(firstPayloadString(evt.Payload, "toolCallId", "ToolCallID", backend.PayloadKeyToolCallID)),
+		ApprovalID:   common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ApprovalID", backend.PayloadKeyApprovalID)),
+		PatchType:    firstPayloadString(evt.Payload, "patchType", "PatchType", backend.PayloadKeyPatchType),
+		TargetRef:    firstPayloadString(evt.Payload, "targetRef", "TargetRef", backend.PayloadKeyTargetRef),
+		Summary:      firstPayloadString(evt.Payload, "summary", "Summary", backend.PayloadKeySummary),
+		State:        common.PatchState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)),
+		AddedLines:   payloadIntValue(evt.Payload, "addedLines", "AddedLines", backend.PayloadKeyAddedLines),
+		DeletedLines: payloadIntValue(evt.Payload, "deletedLines", "DeletedLines", backend.PayloadKeyDeletedLines),
 	}
 }
 
@@ -1383,14 +1382,14 @@ func artifactContinuationInfoFromEvent(evt backend.Event) backend.ArtifactContin
 		RunID:             evt.RunID,
 		RootStepID:        common.StepID(firstPayloadString(evt.Payload, "rootStepId", "RootStepID")),
 		ArtifactID:        firstPayloadString(evt.Payload, "artifactId", "ArtifactID"),
-		TargetRef:         firstPayloadString(evt.Payload, "targetRef", "TargetRef", events.PayloadKeyTargetRef),
-		Operation:         firstPayloadString(evt.Payload, "operation", "Operation", events.PayloadKeyOperation),
-		State:             common.ArtifactContinuationState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)),
+		TargetRef:         firstPayloadString(evt.Payload, "targetRef", "TargetRef", backend.PayloadKeyTargetRef),
+		Operation:         firstPayloadString(evt.Payload, "operation", "Operation", backend.PayloadKeyOperation),
+		State:             common.ArtifactContinuationState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)),
 		ExpectedSequence:  payloadIntValue(evt.Payload, "expectedSequence", "ExpectedSequence"),
 		ReceivedSequences: payloadIntSliceValue(evt.Payload, "receivedSequences", "ReceivedSequences"),
 		FinalReceived:     payloadBoolValue(evt.Payload, "finalReceived", "FinalReceived"),
-		BytesWritten:      int64(payloadIntValue(evt.Payload, "bytesWritten", "BytesWritten", events.PayloadKeyReceivedBytes)),
-		FailureReason:     firstPayloadString(evt.Payload, "failureReason", "FailureReason", "error", "Error", events.PayloadKeyError),
+		BytesWritten:      int64(payloadIntValue(evt.Payload, "bytesWritten", "BytesWritten", backend.PayloadKeyReceivedBytes)),
+		FailureReason:     firstPayloadString(evt.Payload, "failureReason", "FailureReason", "error", "Error", backend.PayloadKeyError),
 		Progress:          payloadMapValue(evt.Payload, "progress", "Progress"),
 	}
 }
@@ -1453,18 +1452,18 @@ func mergeArtifactContinuationInfo(existing backend.ArtifactContinuationInfo, ne
 
 func memoryRecallInfoFromEvent(evt backend.Event) backend.MemoryRecallTraceInfo {
 	return backend.MemoryRecallTraceInfo{
-		ID:                 common.MemoryRecallTraceID(firstPayloadString(evt.Payload, "traceId", "ID", "id", events.PayloadKeyTraceID)),
+		ID:                 common.MemoryRecallTraceID(firstPayloadString(evt.Payload, "traceId", "ID", "id", backend.PayloadKeyTraceID)),
 		WorkspaceID:        evt.WorkspaceID,
 		RunID:              evt.RunID,
-		StepID:             common.StepID(firstPayloadString(evt.Payload, "stepId", "StepID", events.PayloadKeyStepID)),
-		Stage:              firstPayloadString(evt.Payload, "stage", "Stage", events.PayloadKeyStage),
-		Source:             firstPayloadString(evt.Payload, "source", "Source", "sourceType", "SourceType", events.PayloadKeySourceType),
-		Policy:             firstPayloadString(evt.Payload, "policy", "Policy", events.PayloadKeyPolicy),
-		Status:             firstPayloadString(evt.Payload, "status", "Status", events.PayloadKeyStatus),
-		ProviderID:         firstPayloadString(evt.Payload, "providerId", "ProviderID", events.PayloadKeyProviderID),
-		Operation:          firstPayloadString(evt.Payload, "operation", "Operation", events.PayloadKeyOperation),
-		RetrievedMemoryIDs: memoryIDsFromStrings(payloadStringSliceValue(evt.Payload, "retrievedMemoryIds", "RetrievedMemoryIDs", events.PayloadKeyRetrievedMemoryIDs)),
-		Reason:             firstPayloadString(evt.Payload, "reason", "Reason", events.PayloadKeyReason),
+		StepID:             common.StepID(firstPayloadString(evt.Payload, "stepId", "StepID", backend.PayloadKeyStepID)),
+		Stage:              firstPayloadString(evt.Payload, "stage", "Stage", backend.PayloadKeyStage),
+		Source:             firstPayloadString(evt.Payload, "source", "Source", "sourceType", "SourceType", backend.PayloadKeySourceType),
+		Policy:             firstPayloadString(evt.Payload, "policy", "Policy", backend.PayloadKeyPolicy),
+		Status:             firstPayloadString(evt.Payload, "status", "Status", backend.PayloadKeyStatus),
+		ProviderID:         firstPayloadString(evt.Payload, "providerId", "ProviderID", backend.PayloadKeyProviderID),
+		Operation:          firstPayloadString(evt.Payload, "operation", "Operation", backend.PayloadKeyOperation),
+		RetrievedMemoryIDs: memoryIDsFromStrings(payloadStringSliceValue(evt.Payload, "retrievedMemoryIds", "RetrievedMemoryIDs", backend.PayloadKeyRetrievedMemoryIDs)),
+		Reason:             firstPayloadString(evt.Payload, "reason", "Reason", backend.PayloadKeyReason),
 	}
 }
 
@@ -1493,22 +1492,22 @@ func (m *AppModel) upsertMemoryRecall(next backend.MemoryRecallTraceInfo) {
 
 func (m *AppModel) applyLLMUsageEvent(payload map[string]any) {
 	m.llmUsage.EntryTotal++
-	inputTokens := payloadIntValue(payload, events.PayloadKeyInputTokens, "inputTokens", "InputTokens")
-	outputTokens := payloadIntValue(payload, events.PayloadKeyOutputTokens, "outputTokens", "OutputTokens")
-	totalTokens := payloadIntValue(payload, events.PayloadKeyTotalTokens, "totalTokens", "TotalTokens")
+	inputTokens := payloadIntValue(payload, backend.PayloadKeyInputTokens, "inputTokens", "InputTokens")
+	outputTokens := payloadIntValue(payload, backend.PayloadKeyOutputTokens, "outputTokens", "OutputTokens")
+	totalTokens := payloadIntValue(payload, backend.PayloadKeyTotalTokens, "totalTokens", "TotalTokens")
 	if totalTokens == 0 {
 		totalTokens = inputTokens + outputTokens
 	}
 	m.llmUsage.InputTokens += inputTokens
 	m.llmUsage.OutputTokens += outputTokens
 	m.llmUsage.TotalTokens += totalTokens
-	if payloadBoolValue(payload, events.PayloadKeyEstimated, "estimated", "Estimated") {
+	if payloadBoolValue(payload, backend.PayloadKeyEstimated, "estimated", "Estimated") {
 		m.llmUsage.EstimatedEntries++
 	} else {
 		m.llmUsage.ProviderNativeEntries++
 	}
-	if strings.TrimSpace(firstPayloadString(payload, events.PayloadKeyFailureClass, "failureClass", "FailureClass")) != "" ||
-		strings.EqualFold(firstPayloadString(payload, events.PayloadKeyStatus, "status", "Status"), "failed") {
+	if strings.TrimSpace(firstPayloadString(payload, backend.PayloadKeyFailureClass, "failureClass", "FailureClass")) != "" ||
+		strings.EqualFold(firstPayloadString(payload, backend.PayloadKeyStatus, "status", "Status"), "failed") {
 		m.llmUsage.FailedEntries++
 	}
 }
@@ -1613,7 +1612,7 @@ func stringInSlice(value string, items []string) bool {
 }
 
 func parseApprovalInput(value string) (bool, bool) {
-	semantic := governancecommon.NormalizeApprovalAction("", value, "")
+	semantic := backend.NormalizeApprovalAction("", value, "")
 	switch semantic.Action {
 	case "approve":
 		return true, true
@@ -1625,7 +1624,7 @@ func parseApprovalInput(value string) (bool, bool) {
 }
 
 func parseApprovalInputWithContext(value string, reason string) (bool, bool) {
-	semantic := governancecommon.NormalizeApprovalAction("", value, reason)
+	semantic := backend.NormalizeApprovalAction("", value, reason)
 	switch semantic.Action {
 	case "approve":
 		return true, true
@@ -1946,28 +1945,48 @@ func (m AppModel) activeScopeApprovals() []backend.ApprovalInfo {
 	return out
 }
 
-func (m *AppModel) markDecisionResolved(id common.TicketID) {
+func (m *AppModel) markDecisionResolved(id common.TicketID, workspaceID common.WorkspaceID, runID common.RunID) {
 	if id == "" {
 		return
 	}
 	for i := range m.decisions {
-		if m.decisions[i].ID == id {
+		if m.decisions[i].ID == id && decisionScopeMatches(m.decisions[i], workspaceID, runID) {
 			m.decisions[i].State = "resolved"
 			return
 		}
 	}
 }
 
-func (m *AppModel) markApprovalResolved(id common.ApprovalID) {
+func (m *AppModel) markApprovalResolved(id common.ApprovalID, workspaceID common.WorkspaceID, runID common.RunID) {
 	if id == "" {
 		return
 	}
 	for i := range m.approvals {
-		if m.approvals[i].ID == id {
+		if m.approvals[i].ID == id && approvalScopeMatches(m.approvals[i], workspaceID, runID) {
 			m.approvals[i].State = "resolved"
 			return
 		}
 	}
+}
+
+func decisionScopeMatches(item backend.DecisionInfo, workspaceID common.WorkspaceID, runID common.RunID) bool {
+	if workspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != workspaceID {
+		return false
+	}
+	if runID != "" && item.RunID != "" && item.RunID != runID {
+		return false
+	}
+	return true
+}
+
+func approvalScopeMatches(item backend.ApprovalInfo, workspaceID common.WorkspaceID, runID common.RunID) bool {
+	if workspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != workspaceID {
+		return false
+	}
+	if runID != "" && item.RunID != "" && item.RunID != runID {
+		return false
+	}
+	return true
 }
 
 func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
@@ -2012,8 +2031,8 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 	}
 	switch evt.Type {
 	case backend.EventWorkspaceStateChanged:
-		state := common.WorkspaceState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState))
-		activeRunID := firstPayloadString(evt.Payload, "activeRunId", "ActiveRunID", events.PayloadKeyActiveRunID)
+		state := common.WorkspaceState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState))
+		activeRunID := firstPayloadString(evt.Payload, "activeRunId", "ActiveRunID", backend.PayloadKeyActiveRunID)
 		if activeRunID != "" {
 			if activeRunID != m.activeRunID && workspaceStateIsLive(state) {
 				m.clearRunDisplayState()
@@ -2034,7 +2053,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.progressText = "Workspace definitions changed; refreshing context"
 		return m.requestWorkspaceContextRefresh(false)
 	case backend.EventRunStateChanged:
-		state := firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)
+		state := firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)
 		if evt.RunID != "" {
 			m.activeRunID = string(evt.RunID)
 		}
@@ -2046,7 +2065,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.appendRuntimeEvent(m.progressText)
 		m.followMainViewportTailUnlessUserScrolled()
 	case backend.EventStepCompleted:
-		if state := common.StepState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)); state == common.StepStateFailed {
+		if state := common.StepState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)); state == common.StepStateFailed {
 			m.rememberFailureHint(failureMessageFromPayload(evt.Payload))
 		}
 		if m.progress == progressRunning {
@@ -2057,10 +2076,10 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		return m.requestWorkspaceContextRefresh(false)
 	case backend.EventDecisionCreated:
 		decision := backend.DecisionInfo{
-			ID:          common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", events.PayloadKeyBlockingTicketID)),
+			ID:          common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", backend.PayloadKeyBlockingTicketID)),
 			WorkspaceID: evt.WorkspaceID,
 			RunID:       evt.RunID,
-			Reason:      firstPayloadString(evt.Payload, "reason", "Reason", events.PayloadKeyReason),
+			Reason:      firstPayloadString(evt.Payload, "reason", "Reason", backend.PayloadKeyReason),
 			Question:    firstPayloadString(evt.Payload, "question", "Question"),
 			State:       "open",
 		}
@@ -2072,12 +2091,12 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		return m.fetchActiveBlockerDetails()
 	case backend.EventApprovalCreated:
 		approval := backend.ApprovalInfo{
-			ID:          common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ID", "id", events.PayloadKeyBlockingApprovalID)),
+			ID:          common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ID", "id", backend.PayloadKeyBlockingApprovalID)),
 			WorkspaceID: evt.WorkspaceID,
 			RunID:       evt.RunID,
-			Reason:      firstPayloadString(evt.Payload, "reason", "Reason", events.PayloadKeyReason),
-			Action:      firstPayloadString(evt.Payload, "action", "Action", events.PayloadKeyAction),
-			Context:     payloadMapValue(evt.Payload, "context", "Context", events.PayloadKeyContext),
+			Reason:      firstPayloadString(evt.Payload, "reason", "Reason", backend.PayloadKeyReason),
+			Action:      firstPayloadString(evt.Payload, "action", "Action", backend.PayloadKeyAction),
+			Context:     payloadMapValue(evt.Payload, "context", "Context", backend.PayloadKeyContext),
 			State:       "pending",
 		}
 		m.blockingApproval = &approval
@@ -2087,9 +2106,9 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), string(m.blockingApproval.ID))
 		return m.fetchActiveBlockerDetails()
 	case backend.EventDecisionResolved:
-		ticketID := common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", events.PayloadKeyBlockingTicketID))
+		ticketID := common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", backend.PayloadKeyBlockingTicketID))
 		m.markDecisionResolvedForWorkspace(evt.WorkspaceID, ticketID, evt.RunID)
-		m.markDecisionResolved(ticketID)
+		m.markDecisionResolved(ticketID, evt.WorkspaceID, evt.RunID)
 		if string(evt.WorkspaceID) == m.activeWorkspaceID {
 			m.blockingDecision = nil
 			m.progress = progressSubmitting
@@ -2097,9 +2116,9 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		}
 		return m.refreshActiveWorkspaceState()
 	case backend.EventApprovalResolved:
-		approvalID := common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ID", "id", events.PayloadKeyBlockingApprovalID))
+		approvalID := common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ID", "id", backend.PayloadKeyBlockingApprovalID))
 		m.markApprovalResolvedForWorkspace(evt.WorkspaceID, approvalID, evt.RunID)
-		m.markApprovalResolved(approvalID)
+		m.markApprovalResolved(approvalID, evt.WorkspaceID, evt.RunID)
 		if string(evt.WorkspaceID) == m.activeWorkspaceID {
 			m.blockingApproval = nil
 			m.progress = progressSubmitting
@@ -2117,15 +2136,15 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 	case backend.EventGovernanceEvaluated:
 		m.progressText = governanceProgressText("evaluated", evt.Payload)
 	case backend.EventResultAccepted:
-		m.result = firstPayloadString(evt.Payload, "summary", "Summary", events.PayloadKeySummary)
+		m.result = firstPayloadString(evt.Payload, "summary", "Summary", backend.PayloadKeySummary)
 		m.artifacts = artifactPayloadStrings(evt.Payload)
 		m.sources = nil
 		m.followMainViewportTail()
 		return m.requestWorkspaceContextRefresh(false)
 	case backend.EventPatchPreviewed, backend.EventPatchApplied, backend.EventPatchFailed, backend.EventPatchReverted:
 		m.upsertPatch(patchInfoFromEvent(evt))
-		targetRef := firstPayloadString(evt.Payload, "targetRef", "TargetRef", events.PayloadKeyTargetRef)
-		state := firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)
+		targetRef := firstPayloadString(evt.Payload, "targetRef", "TargetRef", backend.PayloadKeyTargetRef)
+		state := firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)
 		if targetRef != "" || state != "" {
 			m.progressText = strings.TrimSpace("Patch " + nonEmpty(state, string(evt.Type)) + " " + targetRef)
 		} else {
@@ -2142,8 +2161,8 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		return nil
 	case backend.EventMemoryRecallRecorded:
 		m.upsertMemoryRecall(memoryRecallInfoFromEvent(evt))
-		status := firstPayloadString(evt.Payload, "status", "Status", events.PayloadKeyStatus)
-		ids := payloadStringSliceValue(evt.Payload, "retrievedMemoryIds", "RetrievedMemoryIDs", events.PayloadKeyRetrievedMemoryIDs)
+		status := firstPayloadString(evt.Payload, "status", "Status", backend.PayloadKeyStatus)
+		ids := payloadStringSliceValue(evt.Payload, "retrievedMemoryIds", "RetrievedMemoryIDs", backend.PayloadKeyRetrievedMemoryIDs)
 		if status == "degraded" {
 			m.progressText = "Memory recall: degraded"
 		} else {
@@ -2161,7 +2180,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 	case backend.EventLLMUsageRecorded:
 		m.applyLLMUsageEvent(evt.Payload)
 		m.progressText = llmUsageProgressText(evt.Payload)
-		m.llmContext = payloadMapValue(evt.Payload, "contextBudget", "ContextBudget", events.PayloadKeyContextBudget)
+		m.llmContext = payloadMapValue(evt.Payload, "contextBudget", "ContextBudget", backend.PayloadKeyContextBudget)
 		m.appendRuntimeEvent(m.progressText)
 		m.followMainViewportTailUnlessUserScrolled()
 		return m.requestWorkspaceContextRefresh(false)
@@ -2324,14 +2343,14 @@ func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) 
 	case common.RunStateBlockedOnDecision:
 		m.running = false
 		m.progress = progressWaitingDecision
-		if ticketID := common.TicketID(firstPayloadString(payload, "ticketId", "ID", "id", events.PayloadKeyBlockingTicketID)); ticketID != "" {
+		if ticketID := common.TicketID(firstPayloadString(payload, "ticketId", "ID", "id", backend.PayloadKeyBlockingTicketID)); ticketID != "" {
 			m.setBlockingDecision(ticketID, common.WorkspaceID(m.activeWorkspaceID), common.RunID(m.activeRunID), "", "")
 		}
 		m.progressText = nonEmpty(blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
 	case common.RunStateBlockedOnApproval:
 		m.running = false
 		m.progress = progressWaitingApproval
-		if approvalID := common.ApprovalID(firstPayloadString(payload, "approvalId", "ID", "id", events.PayloadKeyBlockingApprovalID)); approvalID != "" {
+		if approvalID := common.ApprovalID(firstPayloadString(payload, "approvalId", "ID", "id", backend.PayloadKeyBlockingApprovalID)); approvalID != "" {
 			m.setBlockingApproval(approvalID, common.WorkspaceID(m.activeWorkspaceID), common.RunID(m.activeRunID), "", "", nil)
 		}
 		m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
@@ -2415,9 +2434,9 @@ func (m *AppModel) applyRunStarted(run *backend.RunInfo) {
 	switch run.State {
 	case common.RunStateCompleted, common.RunStateFailed, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
 		m.applyRunState(run.State, map[string]any{
-			events.PayloadKeyFailureReason:      string(run.FailureReason),
-			events.PayloadKeyBlockingTicketID:   string(run.BlockingTicketID),
-			events.PayloadKeyBlockingApprovalID: string(run.BlockingApprovalID),
+			backend.PayloadKeyFailureReason:      string(run.FailureReason),
+			backend.PayloadKeyBlockingTicketID:   string(run.BlockingTicketID),
+			backend.PayloadKeyBlockingApprovalID: string(run.BlockingApprovalID),
 		})
 	case "":
 		if m.progress == progressIdle || m.progress == progressSubmitting {
@@ -2439,8 +2458,10 @@ func (m *AppModel) clearRunDisplayState() {
 	m.patches = nil
 	m.artifactContinuations = nil
 	m.taskDecomp = nil
+	m.taskPlans = nil
 	m.memoryRecalls = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
+	m.llmContextSummary = backend.LLMContextBudgetSummaryInfo{}
 	m.llmContext = nil
 	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runtimeEvents = nil
@@ -2501,10 +2522,10 @@ func workspaceLabel(ws backend.WorkspaceInfo) string {
 }
 
 func governanceProgressText(fallbackStatus string, payload map[string]any) string {
-	itemType := strings.TrimSpace(firstPayloadString(payload, events.PayloadKeyItemType, "itemType", "ItemType"))
-	action := strings.TrimSpace(firstPayloadString(payload, events.PayloadKeyAction, "action", "Action"))
-	status := strings.TrimSpace(firstPayloadString(payload, events.PayloadKeyStatus, "status", "Status"))
-	risk := strings.TrimSpace(firstPayloadString(payload, events.PayloadKeyRisk, "risk", "Risk"))
+	itemType := strings.TrimSpace(firstPayloadString(payload, backend.PayloadKeyItemType, "itemType", "ItemType"))
+	action := strings.TrimSpace(firstPayloadString(payload, backend.PayloadKeyAction, "action", "Action"))
+	status := strings.TrimSpace(firstPayloadString(payload, backend.PayloadKeyStatus, "status", "Status"))
+	risk := strings.TrimSpace(firstPayloadString(payload, backend.PayloadKeyRisk, "risk", "Risk"))
 	if status == "" {
 		status = fallbackStatus
 	}
@@ -2770,12 +2791,12 @@ func failureMessageFromPayload(payload map[string]any) string {
 	if payload == nil {
 		return ""
 	}
-	if output := payloadMap(payload, "output", "Output", events.PayloadKeyOutput); output != nil {
+	if output := payloadMap(payload, "output", "Output", backend.PayloadKeyOutput); output != nil {
 		if value := failureMessageFromPayload(output); value != "" {
 			return value
 		}
 	}
-	reason := firstPayloadString(payload, "reason", "Reason", "error", "Error", "failureReason", "FailureReason", events.PayloadKeyReason, events.PayloadKeyFailureReason)
+	reason := firstPayloadString(payload, "reason", "Reason", "error", "Error", "failureReason", "FailureReason", backend.PayloadKeyReason, backend.PayloadKeyFailureReason)
 	if sshMissingCredentialFailure(reason) {
 		return "SSH 命令缺少 password 或 privateKey/privateKeyPath，请补充凭证后重试。"
 	}
@@ -3237,6 +3258,23 @@ func snapshotTaskDecompositions(snapshot *backend.WorkspaceSnapshotInfo, runID c
 	return out
 }
 
+func snapshotTaskPlans(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.TaskPlanInfo {
+	if snapshot == nil || len(snapshot.TaskPlans) == 0 {
+		return nil
+	}
+	out := make([]backend.TaskPlanInfo, 0, len(snapshot.TaskPlans))
+	for _, item := range snapshot.TaskPlans {
+		if runID != "" && item.RunID != "" && item.RunID != runID {
+			continue
+		}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func artifactContinuationDisplayLabel(item backend.ArtifactContinuationInfo) string {
 	parts := make([]string, 0, 5)
 	if item.State != "" {
@@ -3325,7 +3363,7 @@ func stepProgressText(prefix string, kind string, fallback string) string {
 }
 
 func stepProgressTextFromPayload(prefix string, payload map[string]any, fallback string) string {
-	kind := llmcommon.CanonicalRuntimeBlockKind(firstPayloadString(payload, "kind", "Kind", events.PayloadKeyKind))
+	kind := backend.CanonicalRuntimeBlockKind(firstPayloadString(payload, "kind", "Kind", backend.PayloadKeyKind))
 	if strings.TrimSpace(kind) == "" {
 		return fallback
 	}
@@ -3345,7 +3383,7 @@ func stepProgressDetailFromPayload(payload map[string]any) string {
 	}
 	input := payloadMap(payload, "input", "Input")
 	summary := payloadMap(input, "summary", "Summary")
-	kind := firstPayloadString(payload, "kind", "Kind", events.PayloadKeyKind)
+	kind := firstPayloadString(payload, "kind", "Kind", backend.PayloadKeyKind)
 
 	if strings.Contains(kind, "mcp/") {
 		server := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "serverId", "ServerID", "mcpServerId", "MCPServerID")
@@ -3357,7 +3395,7 @@ func stepProgressDetailFromPayload(payload map[string]any) string {
 	if detail := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "path", "Path"); detail != "" {
 		return detail
 	}
-	if detail := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "targetRef", "TargetRef", events.PayloadKeyTargetRef); detail != "" {
+	if detail := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "targetRef", "TargetRef", backend.PayloadKeyTargetRef); detail != "" {
 		return detail
 	}
 	if command := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "command", "Command"); command != "" {
@@ -3373,7 +3411,7 @@ func stepProgressDetailFromPayload(payload map[string]any) string {
 	if node := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "graphNodeId", "GraphNodeID"); node != "" {
 		return node
 	}
-	if callID := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "toolCallId", "ToolCallID", events.PayloadKeyToolCallID); callID != "" {
+	if callID := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "toolCallId", "ToolCallID", backend.PayloadKeyToolCallID); callID != "" {
 		return callID
 	}
 	return ""
@@ -3475,6 +3513,15 @@ func mergeDecisionInfo(existing backend.DecisionInfo, next backend.DecisionInfo)
 	}
 	if next.ResolutionType != "" {
 		existing.ResolutionType = next.ResolutionType
+	}
+	if next.ContinuationAction != "" {
+		existing.ContinuationAction = next.ContinuationAction
+	}
+	if next.ResumeRunID != "" {
+		existing.ResumeRunID = next.ResumeRunID
+	}
+	if next.SuccessorRunID != "" {
+		existing.SuccessorRunID = next.SuccessorRunID
 	}
 	if next.AutoGovernance != nil {
 		existing.AutoGovernance = next.AutoGovernance

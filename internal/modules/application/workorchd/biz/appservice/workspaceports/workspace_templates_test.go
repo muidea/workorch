@@ -40,7 +40,7 @@ func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListWorkspaceTemplates: %v", err)
 	}
-	if len(items) != 1 || items[0].ID != "template-port" {
+	if !workspaceTemplateListContains(items, "template-port") {
 		t.Fatalf("templates = %#v, want template-port", items)
 	}
 
@@ -70,9 +70,18 @@ func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListWorkspaceTemplates after delete: %v", err)
 	}
-	if len(items) != 0 {
-		t.Fatalf("templates after delete = %#v, want empty", items)
+	if workspaceTemplateListContains(items, "template-port") {
+		t.Fatalf("templates after delete = %#v, want template-port removed", items)
 	}
+}
+
+func workspaceTemplateListContains(items []workspacecore.WorkspaceTemplate, id string) bool {
+	for _, item := range items {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDeleteWorkspaceTemplateRejectsBlankID(t *testing.T) {

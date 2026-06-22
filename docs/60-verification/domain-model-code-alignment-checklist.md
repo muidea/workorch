@@ -276,17 +276,38 @@ Last Updated: 2026-05-30
 | Workspace / Goal / DoD | `internal/modules/kernel/workspace/pkg/models/{goal,dod}.go` | pass | 已补齐 `definitionRevision`、`previousDefinitionHash`、previous definition id、`lineageState`，并由 `GoalDoDManager` 在定义/更新时写入。 |
 | Run | `internal/modules/kernel/run/pkg/models/run.go` | pass | `Run.definitionRevision` 已成为正式字段；创建 run 时从 activation effective definition 派生稳定 revision id。 |
 | Result / Artifact | `internal/modules/kernel/result/pkg/models` | pass | Result 与 Artifact 已有正式对象；Artifact 支持 run/step/result 等归属。 |
-| CoverageWorkItem | `internal/modules/kernel/orchestrator/biz/runtime_coverage_work_items.go` | doc-ahead | 当前仍是 run-scoped ledger，但落点为 `Run.ExecutionContext` map 与 read-model 投影；尚未拆成独立 model/repository。该项影响 orchestrator 恢复、acceptance gate、read-model 和 provider context，需作为单独迁移项处理。 |
-| ArtifactContinuation | `internal/modules/kernel/orchestrator/pkg/models/artifact_continuation.go` | pass | 已补齐 `currentStepId` 与 `outputMode`；repository contract 覆盖 metadata/chunk/assembled 分离与新字段持久化。 |
-| Governance | `internal/modules/kernel/decision/pkg/models` | partial | Ticket/Resolution 已有正式对象；Resolution 的 `continuationAction`、`resumeRunId`、`successorRunId` 仍主要由 `payload` 表达，后续可提升为顶层字段。 |
+| CoverageWorkItem | `internal/modules/kernel/orchestrator/biz/runtime_coverage_work_items.go`, `internal/pkg/workorchruntimecontract/coverage_work_item.go`, `internal/pkg/repository/coverage_work_item_repository.go` | pass | 已新增正式 runtime contract model、repository interface、memory/file/workspace-scoped backend 和 repository contract；orchestrator coverage ledger 主路径已把 `Run.ExecutionContext.coverageWorkItems` 投影同步写入 `CoverageWorkItemRepository`，framework initiator/module/bootstrap 均已接线，purge run evidence 已覆盖该 owner storage。read-model `CoverageWorkItems` 列表已通过 EventHub owner command 读取 owner repository。生产 dispatch/provider context 前会从 owner repository 水合 `Run.ExecutionContext` coverage 投影，并据此生成 `coverageWorkItemContext` / gap baseline；`Run.ExecutionContext` 仅作为 provider-facing/cache-stable 投影载体。 |
+| ArtifactContinuation | `internal/pkg/workorchruntimecontract/artifact_continuation.go`, `internal/pkg/repository/artifact_continuation_repository.go` | pass | 已补齐 `currentStepId` 与 `outputMode`；repository contract 覆盖 metadata/chunk/assembled 分离与新字段持久化。 |
+| Governance | `internal/modules/kernel/decision/pkg/models` | pass | Ticket/Resolution 已有正式对象；Resolution 的 `continuationAction`、`resumeRunId`、`successorRunId` 已提升为顶层字段，owner command、repository、resolved event payload、read-model projection、remote/TUI DTO 均保留这些通用恢复引用。 |
 | Memory / Recall | `internal/modules/kernel/memory/pkg/models/memory_recall_trace.go` | pass | `selectedMemoryIds`、`candidateMemoryIds`、`excludedMemoryIds`、`retrievedMemoryHits` 等已是正式 trace 字段。 |
 | Event / Observability | `internal/modules/kernel/eventstream/pkg/models/event_record.go` | pass | `payload` / `payloadSummary` / `payloadRef` 已进入正式 EventRecord；file repository 对大 payload 使用 summary + ref，并通过 raw hydrate 支持明细读取。 |
 | API / read-model naming | `internal/modules/application/workorchd/biz/appservice/read_model_types.go` | pass | `payloadSummary` / `payloadRef` 已进入 read-model event projection；coverage/artifact continuation 命名保持现有对象层命名。 |
 
 ### Remaining Follow-Up
 
-- `CoverageWorkItem` 独立对象化仍是主要 `doc-ahead` 项。落地时应新增正式 model/repository，并保持同一 `definitionRevision + normalizedSourceKey` 只有唯一 active item；迁移前不得破坏现有 `Run.ExecutionContext.coverageWorkItems` 的 LLM context 投影顺序和 cache 稳定性。
-- `DecisionResolution` 顶层恢复引用字段仍是 `partial`。后续可补 `continuationAction`、`resumeRunId`、`successorRunId` 顶层字段，并保持 `payload` 作为扩展数据。
+- `CoverageWorkItem` 已完成正式 model/repository 对象化，并由 repository contract 约束同一 `runId + definitionRevision + normalizedSourceKey` 只有唯一 active item。orchestrator 主路径当前以仓储为正式 owner storage 同步写入；read-model `CoverageWorkItems` 列表已通过 EventHub owner command 读取 owner repository；dispatch/provider context 前会从 owner repository 水合 `Run.ExecutionContext` coverage 投影。后续修改投影结构前不得破坏现有 LLM context 投影顺序和 cache 稳定性。
+- `DecisionResolution` 顶层恢复引用字段已收口：`continuationAction`、`resumeRunId`、`successorRunId` 进入 kernel decision model / owner command contract / repository clone / resolved event payload / read-model projection；`payload` 继续作为扩展数据保留。
+
+### 2026-06-22 Governance Resolution Recovery Refs Closure
+
+- Closed item: `DecisionResolution` 顶层恢复引用字段。
+- Implementation refs:
+  - `internal/modules/kernel/decision/pkg/models/resolution.go`
+  - `internal/modules/kernel/decision/pkg/contracts/commands.go`
+  - `internal/modules/kernel/decision/biz/decision_service.go`
+  - `internal/modules/kernel/decision/module.go`
+  - `internal/modules/application/workorchd/biz/appservice/governanceports/decision_resolution_commands.go`
+  - `internal/modules/application/workorchd/biz/appservice/readmodelprojection/decision_projection.go`
+  - `internal/pkg/events/workorch_payload.go`
+  - `internal/pkg/workorchclient/types.go`
+  - `internal/pkg/workorchport/governance.go`
+  - `internal/services/workorch/biz/backends/remote.go`
+  - `internal/services/workorch/service/tui/model.go`
+- Boundary result:
+  - 新字段仅表达治理恢复引用，不承载具体模板、语言、provider、workspace ID 或业务策略。
+  - owner command 仍通过 decision module 持久化正式状态；appservice/TUI/Web 只消费投影 DTO，不复制治理状态机。
+- Tests run:
+  - `go test ./internal/modules/kernel/decision/... ./internal/pkg/events ./internal/pkg/repository ./internal/modules/application/workorchd/biz/appservice/readmodelports ./internal/services/workorch/biz/backends ./internal/services/workorch/service/tui -count=1 -timeout=180s`
 
 ## Suggested Output Template
 

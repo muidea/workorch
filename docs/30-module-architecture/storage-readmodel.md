@@ -298,6 +298,11 @@ path-safe readable naming 方向：
 
 - readable naming 只服务可追踪与产品可读性，不改变正式对象 identity
 - 内部磁盘目录可继续保持 itemized persistence 结构，但对外必须经由受控 naming / ref 映射
+- file backend 的内部 item path 必须复用同一 path-safe segment 规则：
+  - `internal/pkg/runtimepath` 负责 readable safe segment / path 归一化
+  - 每个 filesystem segment 默认限制为 160 字节
+  - 超长 segment 保留可读前缀并追加稳定 hash suffix
+  - 普通 item JSON 路径和 run-scoped sequence metadata 目录必须使用同一 bounded segment 规则
 
 ### Raw Payload Ref Shape
 
@@ -324,10 +329,14 @@ workorch://workspaces/<workspace-id>/runs/<run-id>/steps/<run-id>/graph-002/007-
 
 ### Segment Overflow Fallback
 
-当单段 payload、事件段、artifact blob 或列表页数据过大时，本层需要有稳定 fallback。
+当单段 filesystem path、payload、事件段、artifact blob 或列表页数据过大时，本层需要有稳定 fallback。
 
 当前至少应支持：
 
+- path segment overflow fallback：
+  - `runtimepath.SafePathWithMax` / `SafeSegmentsWithMax`
+  - `runtimepath.SequenceScopedPath`
+  - file repository `safeRepositoryItemPath`
 - append-only event / payload segment 轮转
 - 大对象降级为 ref-only / detail-only
 - page query 通过 `limit` / `cursorAfterId` 分段读取
@@ -335,9 +344,10 @@ workorch://workspaces/<workspace-id>/runs/<run-id>/steps/<run-id>/graph-002/007-
 
 约束：
 
-- segment overflow 只影响读取方式，不应改变对象本体身份
+- segment overflow 只影响磁盘落点或读取方式，不应改变对象本体 identity
 - fallback 后仍必须保留可追溯 ref / cursor / count / omitted reason
 - 不能因为 overflow 就把 raw body 静默塞回 summary projection
+- 超长 path segment 的 hash suffix 只能作为 persistence path fallback；repository 读写仍必须通过正式 ID / scope / metadata 做身份校验
 
 ## Consistency Repair Boundary
 

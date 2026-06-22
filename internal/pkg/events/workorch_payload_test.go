@@ -65,6 +65,11 @@ func TestDecisionResolutionPayloadIncludesResolutionFields(t *testing.T) {
 		common.ResolutionID("resolution-1"),
 		"approve-plan",
 		map[string]any{"operator": "workorch"},
+		DecisionResolutionPayloadData{
+			ContinuationAction: "resume",
+			ResumeRunID:        "run-current",
+			SuccessorRunID:     "run-successor",
+		},
 	)
 
 	if payload[PayloadKeyReason] != "manual gate" {
@@ -85,6 +90,13 @@ func TestDecisionResolutionPayloadIncludesResolutionFields(t *testing.T) {
 	}
 	if resolutionPayload["operator"] != "workorch" {
 		t.Fatalf("resolution payload operator = %v, want workorch", resolutionPayload["operator"])
+	}
+	decoded, ok := DecodeDecisionResolutionPayload(payload)
+	if !ok {
+		t.Fatalf("DecodeDecisionResolutionPayload failed")
+	}
+	if decoded.ContinuationAction != "resume" || decoded.ResumeRunID != "run-current" || decoded.SuccessorRunID != "run-successor" {
+		t.Fatalf("decoded refs = %+v, want recovery refs", decoded)
 	}
 }
 

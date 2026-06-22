@@ -153,6 +153,7 @@ type RuntimeEvidenceRepositories struct {
 	Patches               repository.PatchRepository
 	ValidationResults     repository.ValidationResultRepository
 	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
+	CoverageWorkItems     repository.CoverageWorkItemRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository
 	MemoryItems           repository.MemoryItemRepository
 	MemoryRecallTraces    repository.MemoryRecallTraceRepository
@@ -241,7 +242,7 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		repair:      newRepairSubsystem(stepRepo, workspaceRepo),
 		graph:       newGraphSubsystem(stepRepo, evidence),
 		convergence: newConvergenceSubsystem(),
-		coverage:    newCoverageSubsystem(),
+		coverage:    newCoverageSubsystem(evidence.CoverageWorkItems),
 		runState:    newRunStateSubsystem(runRepo, workspaceRepo),
 		decision:    newDecisionResumeSubsystem(ticketRepo, resolutionRepo),
 	}
@@ -308,8 +309,9 @@ func (o *RuntimeOrchestrator) convergenceManager() *convergenceSubsystem {
 
 func (o *RuntimeOrchestrator) coverageLedger() *coverageSubsystem {
 	if o == nil || o.coverage == nil {
-		return newCoverageSubsystem()
+		return newCoverageSubsystem(nil)
 	}
+	o.coverage.items = o.evidence.CoverageWorkItems
 	return o.coverage
 }
 

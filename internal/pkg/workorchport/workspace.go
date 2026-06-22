@@ -147,33 +147,36 @@ type WorkspaceOutcomeInfo struct {
 }
 
 type WorkspaceSnapshotInfo struct {
-	Workspace             WorkspaceInfo
-	Projection            ProjectionInfo
-	Outcome               WorkspaceOutcomeInfo
-	TaskProgress          TaskProgressInfo
-	RunHeartbeat          RunHeartbeatInfo
-	RuntimeExecution      *RuntimeExecutionInfo
-	RunCommand            *RunCommandStatusInfo
-	SchedulerDiagnostics  *SchedulerDiagnosticsInfo
-	ContextBundle         map[string]any
-	CoverageSummary       map[string]any
-	GapBaseline           *GapBaselineInfo
-	Acceptance            AcceptanceProjectionInfo
-	TaskDecompositions    []TaskDecompositionInfo
-	Goals                 []GoalInfo
-	DoDs                  []DoDInfo
-	Runs                  []RunInfo
-	Results               []ResultInfo
-	Artifacts             []ArtifactInfo
-	ArtifactContinuations []ArtifactContinuationInfo
-	Patches               []PatchInfo
-	MemoryRecallTraces    []MemoryRecallTraceInfo
-	WebSources            []WebSourceTraceInfo
-	LLMUsageTraces        []LLMUsageTraceInfo
-	LLMUsageSummary       LLMUsageSummaryInfo
-	EventRecords          []EventRecordInfo
-	Decisions             []DecisionInfo
-	Approvals             []ApprovalInfo
+	Workspace               WorkspaceInfo
+	Projection              ProjectionInfo
+	Outcome                 WorkspaceOutcomeInfo
+	TaskProgress            TaskProgressInfo
+	RunHeartbeat            RunHeartbeatInfo
+	RuntimeExecution        *RuntimeExecutionInfo
+	RunCommand              *RunCommandStatusInfo
+	SchedulerDiagnostics    *SchedulerDiagnosticsInfo
+	ContextBundle           map[string]any
+	CoverageSummary         map[string]any
+	GapBaseline             *GapBaselineInfo
+	Acceptance              AcceptanceProjectionInfo
+	TaskDecompositions      []TaskDecompositionInfo
+	TaskPlans               []TaskPlanInfo
+	Goals                   []GoalInfo
+	DoDs                    []DoDInfo
+	Runs                    []RunInfo
+	Results                 []ResultInfo
+	Artifacts               []ArtifactInfo
+	ArtifactContinuations   []ArtifactContinuationInfo
+	Patches                 []PatchInfo
+	MemoryRecallTraces      []MemoryRecallTraceInfo
+	WebSources              []WebSourceTraceInfo
+	LLMContextBudgets       []LLMContextBudgetTraceInfo
+	LLMContextBudgetSummary LLMContextBudgetSummaryInfo
+	LLMUsageTraces          []LLMUsageTraceInfo
+	LLMUsageSummary         LLMUsageSummaryInfo
+	EventRecords            []EventRecordInfo
+	Decisions               []DecisionInfo
+	Approvals               []ApprovalInfo
 }
 
 type RunCommandStatusInfo struct {

@@ -1,15 +1,19 @@
 package orchestrator
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (
@@ -43,13 +47,31 @@ type coverageWorkItemUpdate struct {
 	Reason         string
 }
 
-type coverageSubsystem struct{}
-
-func newCoverageSubsystem() *coverageSubsystem {
-	return &coverageSubsystem{}
+type coverageSubsystem struct {
+	items repository.CoverageWorkItemRepository
 }
 
-func (c *coverageSubsystem) ensure(run *runModel.Run) bool {
+func newCoverageSubsystem(items ...repository.CoverageWorkItemRepository) *coverageSubsystem {
+	subsystem := &coverageSubsystem{}
+	if len(items) > 0 {
+		subsystem.items = items[0]
+	}
+	return subsystem
+}
+
+func (c *coverageSubsystem) ensureFromRepository(ctx context.Context, run *runModel.Run) (bool, error) {
+	if c == nil || c.items == nil || run == nil || run.ID == "" {
+		return c.ensure(run, ctx), nil
+	}
+	hydrated, err := c.hydrateProjectionFromRepository(coverageRepositoryContext(run, ctx), run)
+	if err != nil {
+		return hydrated, err
+	}
+	ensured := c.ensure(run, ctx)
+	return hydrated || ensured, nil
+}
+
+func (c *coverageSubsystem) ensure(run *runModel.Run, contexts ...context.Context) bool {
 	if run == nil {
 		return false
 	}
@@ -64,12 +86,15 @@ func (c *coverageSubsystem) ensure(run *runModel.Run) bool {
 		if _, ok := run.ExecutionContext[coverageWorkItemsKey]; ok {
 			delete(run.ExecutionContext, coverageWorkItemsKey)
 			delete(run.ExecutionContext, coverageWorkItemContextKey)
+			c.syncRepositoryProjection(coverageRepositoryContext(run, contexts...), run, nil)
 			return true
 		}
 		if _, ok := run.ExecutionContext[coverageWorkItemContextKey]; ok {
 			delete(run.ExecutionContext, coverageWorkItemContextKey)
+			c.syncRepositoryProjection(coverageRepositoryContext(run, contexts...), run, nil)
 			return true
 		}
+		c.syncRepositoryProjection(coverageRepositoryContext(run, contexts...), run, nil)
 		return acceptanceChanged
 	}
 	acceptanceContext := cloneStepPayload(run.ExecutionContext)
@@ -80,29 +105,57 @@ func (c *coverageSubsystem) ensure(run *runModel.Run) bool {
 	if stableCoverageJSON(currentItems) == stableCoverageJSON(items) &&
 		stableCoverageJSON(currentContext) == stableCoverageJSON(context) &&
 		!acceptanceChanged {
+		c.syncRepositoryProjection(coverageRepositoryContext(run, contexts...), run, items)
 		return false
 	}
 	run.ExecutionContext[coverageWorkItemsKey] = items
 	run.ExecutionContext[coverageWorkItemContextKey] = context
 	synchronizeAcceptanceProjection(run.ExecutionContext, items, context)
+	c.syncRepositoryProjection(coverageRepositoryContext(run, contexts...), run, items)
 	return true
 }
 
-func (c *coverageSubsystem) prepareReplanSuccessor(run *runModel.Run) bool {
+func (c *coverageSubsystem) hydrateProjectionFromRepository(ctx context.Context, run *runModel.Run) (bool, error) {
+	if c == nil || c.items == nil || run == nil || run.ID == "" {
+		return false, nil
+	}
+	items, err := c.items.ListByRun(ctx, run.ID)
+	if err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	projection := coverageWorkItemProjectionFromModels(items)
+	if len(projection) == 0 {
+		return false, nil
+	}
+	if run.ExecutionContext == nil {
+		run.ExecutionContext = map[string]any{}
+	}
+	current := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if stableCoverageJSON(current) == stableCoverageJSON(projection) {
+		return false, nil
+	}
+	run.ExecutionContext[coverageWorkItemsKey] = projection
+	return true, nil
+}
+
+func (c *coverageSubsystem) prepareReplanSuccessor(run *runModel.Run, contexts ...context.Context) bool {
 	if run == nil {
 		return false
 	}
 	if run.ExecutionContext == nil {
 		run.ExecutionContext = map[string]any{}
 	}
-	return c.ensure(run)
+	return c.ensure(run, contexts...)
 }
 
-func (c *coverageSubsystem) updateFromCompletedStep(run *runModel.Run, step *runModel.Step) bool {
+func (c *coverageSubsystem) updateFromCompletedStep(run *runModel.Run, step *runModel.Step, contexts ...context.Context) bool {
 	if run == nil || step == nil || step.State != common.StepStateCompleted {
 		return false
 	}
-	c.ensure(run)
+	c.ensure(run, contexts...)
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) == 0 {
 		return false
@@ -129,14 +182,15 @@ func (c *coverageSubsystem) updateFromCompletedStep(run *runModel.Run, step *run
 		run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
 	}
 	synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
+	c.syncRepositoryProjection(coverageRepositoryContext(run, contexts...), run, items)
 	return changed || budgetChanged
 }
 
-func (c *coverageSubsystem) updateFromFailedStep(run *runModel.Run, step *runModel.Step, reason string) bool {
+func (c *coverageSubsystem) updateFromFailedStep(run *runModel.Run, step *runModel.Step, reason string, contexts ...context.Context) bool {
 	if run == nil || step == nil || step.State != common.StepStateFailed {
 		return false
 	}
-	c.ensure(run)
+	c.ensure(run, contexts...)
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) == 0 {
 		return false
@@ -165,14 +219,15 @@ func (c *coverageSubsystem) updateFromFailedStep(run *runModel.Run, step *runMod
 		run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
 	}
 	synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
+	c.syncRepositoryProjection(coverageRepositoryContext(run, contexts...), run, items)
 	return changed || budgetChanged
 }
 
-func (c *coverageSubsystem) updateFromAssessment(run *runModel.Run, step *runModel.Step, assessment map[string]any) bool {
+func (c *coverageSubsystem) updateFromAssessment(run *runModel.Run, step *runModel.Step, assessment map[string]any, contexts ...context.Context) bool {
 	if run == nil || step == nil || len(assessment) == 0 {
 		return false
 	}
-	c.ensure(run)
+	c.ensure(run, contexts...)
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) == 0 {
 		return false
@@ -214,14 +269,15 @@ func (c *coverageSubsystem) updateFromAssessment(run *runModel.Run, step *runMod
 		run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
 	}
 	synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
+	c.syncRepositoryProjection(coverageRepositoryContext(run, contexts...), run, items)
 	return changed || budgetChanged
 }
 
-func (c *coverageSubsystem) updateFromGovernanceEvidence(run *runModel.Run, decisionRefs []string, approvalRefs []string, updatedBy string) bool {
+func (c *coverageSubsystem) updateFromGovernanceEvidence(run *runModel.Run, decisionRefs []string, approvalRefs []string, updatedBy string, contexts ...context.Context) bool {
 	if run == nil {
 		return false
 	}
-	c.ensure(run)
+	c.ensure(run, contexts...)
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) == 0 {
 		return false
@@ -246,6 +302,7 @@ func (c *coverageSubsystem) updateFromGovernanceEvidence(run *runModel.Run, deci
 		run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
 		synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
 	}
+	c.syncRepositoryProjection(coverageRepositoryContext(run, contexts...), run, items)
 	return changed
 }
 
@@ -275,11 +332,11 @@ func coverageApplyUnlinkedAssessmentRejectedEvidence(items []map[string]any, upd
 	return coverageApplyWorkItemEvidence(focus, []string{"validation"}, refs, false, false, string(step.ID), reason)
 }
 
-func (c *coverageSubsystem) validateReadyForAcceptance(run *runModel.Run) error {
+func (c *coverageSubsystem) validateReadyForAcceptance(run *runModel.Run, contexts ...context.Context) error {
 	if run == nil || len(run.ExecutionContext) == 0 {
 		return nil
 	}
-	c.ensure(run)
+	c.ensure(run, contexts...)
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) == 0 {
 		return nil
@@ -319,6 +376,240 @@ func (c *coverageSubsystem) validateReadyForAcceptance(run *runModel.Run) error 
 		return fmt.Errorf("%w: coverageWorkItems satisfied without accepted evidence refs: %s", common.ErrInvalidArgument, strings.Join(limitedStrings(unlinked, 8), ", "))
 	}
 	return nil
+}
+
+func (c *coverageSubsystem) syncRepositoryProjection(ctx context.Context, run *runModel.Run, items []map[string]any) bool {
+	if c == nil || c.items == nil || run == nil || run.ID == "" {
+		return false
+	}
+	existing, err := c.items.ListByRun(ctx, run.ID)
+	if err != nil && !errors.Is(err, common.ErrNotFound) {
+		return false
+	}
+	existingByID := map[common.CoverageWorkItemID]*runtimecontract.CoverageWorkItem{}
+	for _, item := range existing {
+		if item == nil || item.ID == "" {
+			continue
+		}
+		existingByID[item.ID] = item
+	}
+	seen := map[common.CoverageWorkItemID]bool{}
+	changed := false
+	for _, item := range items {
+		model := coverageWorkItemModelFromProjection(run, item)
+		if model == nil {
+			continue
+		}
+		seen[model.ID] = true
+		existingItem := existingByID[model.ID]
+		if existingItem == nil {
+			if err := c.items.Create(ctx, model); err == nil {
+				changed = true
+			} else if errors.Is(err, common.ErrConflict) {
+				if updateErr := c.items.Update(ctx, model); updateErr == nil {
+					changed = true
+				}
+			}
+			continue
+		}
+		if stableCoverageJSON(existingItem) == stableCoverageJSON(model) {
+			continue
+		}
+		if err := c.items.Update(ctx, model); err == nil {
+			changed = true
+		}
+	}
+	for _, existingItem := range existing {
+		if existingItem == nil || existingItem.ID == "" || seen[existingItem.ID] || !existingItem.IsActive() {
+			continue
+		}
+		superseded := *existingItem
+		superseded.Status = "superseded"
+		superseded.CurrentGap = ""
+		if superseded.Metadata == nil {
+			superseded.Metadata = map[string]any{}
+		}
+		superseded.Metadata["supersededByCoverageProjectionSync"] = true
+		if err := c.items.Update(ctx, &superseded); err == nil {
+			changed = true
+		}
+	}
+	return changed
+}
+
+func coverageRepositoryContext(run *runModel.Run, contexts ...context.Context) context.Context {
+	var ctx context.Context
+	for _, candidate := range contexts {
+		if candidate != nil {
+			ctx = candidate
+			break
+		}
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if run == nil || run.WorkspaceID == "" {
+		return ctx
+	}
+	return common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID)
+}
+
+func coverageWorkItemModelFromProjection(run *runModel.Run, item map[string]any) *runtimecontract.CoverageWorkItem {
+	if run == nil || run.ID == "" || len(item) == 0 {
+		return nil
+	}
+	contextID := strings.TrimSpace(stringFromMap(item, "id"))
+	if contextID == "" {
+		return nil
+	}
+	metadata := cloneStepPayload(item)
+	metadata["contextCoverageWorkItemId"] = contextID
+	model := &runtimecontract.CoverageWorkItem{
+		ID:                    coverageWorkItemRepositoryID(run.ID, contextID),
+		WorkspaceID:           run.WorkspaceID,
+		RunID:                 run.ID,
+		DefinitionRevision:    strings.TrimSpace(stringFromMap(item, "definitionRevision")),
+		NormalizedSourceKey:   strings.TrimSpace(stringFromMap(item, "normalizedSourceKey")),
+		SourceScope:           strings.TrimSpace(stringFromMap(item, "sourceScope")),
+		SourceRequirementID:   strings.TrimSpace(stringFromMap(item, "sourceRequirementId")),
+		SourceGoalID:          common.GoalID(strings.TrimSpace(stringFromMap(item, "sourceGoalId"))),
+		SourceDoDID:           common.DoDID(strings.TrimSpace(stringFromMap(item, "sourceDoDId"))),
+		SourcePath:            strings.TrimSpace(stringFromMap(item, "sourcePath")),
+		TargetText:            strings.TrimSpace(stringFromMap(item, "targetText")),
+		RequiredEvidenceKinds: compactUniqueStrings(stringSliceFromValue(item["requiredEvidenceKinds"])),
+		Status:                firstNonEmptyString(strings.TrimSpace(stringFromMap(item, "status")), "open"),
+		AcceptedEvidenceRefs:  compactUniqueStrings(stringSliceFromValue(item["acceptedEvidenceRefs"])),
+		RejectedEvidenceRefs:  compactUniqueStrings(stringSliceFromValue(item["rejectedEvidenceRefs"])),
+		CurrentGap:            strings.TrimSpace(stringFromMap(item, "currentGap")),
+		UpdatedByStepID:       common.StepID(strings.TrimSpace(stringFromMap(item, "updatedByStepId"))),
+		Metadata:              metadata,
+	}
+	if model.DefinitionRevision == "" || model.NormalizedSourceKey == "" {
+		return nil
+	}
+	return model
+}
+
+func coverageWorkItemRepositoryID(runID common.RunID, contextID string) common.CoverageWorkItemID {
+	contextID = strings.TrimSpace(contextID)
+	if runID == "" || contextID == "" {
+		return ""
+	}
+	return common.CoverageWorkItemID(string(runID) + "-" + contextID)
+}
+
+func coverageWorkItemProjectionFromModels(items []*runtimecontract.CoverageWorkItem) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	sorted := append([]*runtimecontract.CoverageWorkItem(nil), items...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		left := sorted[i]
+		right := sorted[j]
+		if left == nil || right == nil {
+			return right != nil
+		}
+		leftContextID := coverageWorkItemContextIDFromModel(left)
+		rightContextID := coverageWorkItemContextIDFromModel(right)
+		if leftContextID != rightContextID {
+			return leftContextID < rightContextID
+		}
+		if left.DefinitionRevision != right.DefinitionRevision {
+			return left.DefinitionRevision < right.DefinitionRevision
+		}
+		if left.NormalizedSourceKey != right.NormalizedSourceKey {
+			return left.NormalizedSourceKey < right.NormalizedSourceKey
+		}
+		return left.ID < right.ID
+	})
+	ret := make([]map[string]any, 0, len(sorted))
+	for _, item := range sorted {
+		mapped := coverageWorkItemProjectionFromModel(item)
+		if len(mapped) > 0 {
+			ret = append(ret, mapped)
+		}
+	}
+	return ret
+}
+
+func coverageWorkItemProjectionFromModel(item *runtimecontract.CoverageWorkItem) map[string]any {
+	if item == nil || item.ID == "" {
+		return nil
+	}
+	ret := cloneStepPayload(item.Metadata)
+	if ret == nil {
+		ret = map[string]any{}
+	}
+	contextID := coverageWorkItemContextIDFromModel(item)
+	if contextID != "" {
+		ret["id"] = contextID
+	} else if strings.TrimSpace(stringFromMap(ret, "id")) == "" {
+		ret["id"] = string(item.ID)
+	}
+	ret["repositoryId"] = string(item.ID)
+	ret["schemaVersion"] = firstNonEmptyString(stringFromMap(ret, "schemaVersion"), coverageWorkItemSchema)
+	if item.WorkspaceID != "" {
+		ret["workspaceId"] = string(item.WorkspaceID)
+	}
+	if item.RunID != "" {
+		ret["runId"] = string(item.RunID)
+	}
+	if item.DefinitionRevision != "" {
+		ret["definitionRevision"] = item.DefinitionRevision
+	}
+	if item.NormalizedSourceKey != "" {
+		ret["normalizedSourceKey"] = item.NormalizedSourceKey
+	}
+	if item.SourceScope != "" {
+		ret["sourceScope"] = item.SourceScope
+	}
+	if item.SourceRequirementID != "" {
+		ret["sourceRequirementId"] = item.SourceRequirementID
+	}
+	if item.SourceGoalID != "" {
+		ret["sourceGoalId"] = string(item.SourceGoalID)
+	}
+	if item.SourceDoDID != "" {
+		ret["sourceDoDId"] = string(item.SourceDoDID)
+	}
+	if item.SourcePath != "" {
+		ret["sourcePath"] = item.SourcePath
+	}
+	if item.TargetText != "" {
+		ret["targetText"] = item.TargetText
+	}
+	if len(item.RequiredEvidenceKinds) > 0 {
+		ret["requiredEvidenceKinds"] = append([]string(nil), item.RequiredEvidenceKinds...)
+	}
+	if item.Status != "" {
+		ret["status"] = item.Status
+	}
+	if len(item.AcceptedEvidenceRefs) > 0 {
+		ret["acceptedEvidenceRefs"] = append([]string(nil), item.AcceptedEvidenceRefs...)
+	}
+	if len(item.RejectedEvidenceRefs) > 0 {
+		ret["rejectedEvidenceRefs"] = append([]string(nil), item.RejectedEvidenceRefs...)
+	}
+	if item.CurrentGap != "" {
+		ret["currentGap"] = item.CurrentGap
+	}
+	if item.UpdatedByStepID != "" {
+		ret["updatedByStepId"] = string(item.UpdatedByStepID)
+	}
+	return ret
+}
+
+func coverageWorkItemContextIDFromModel(item *runtimecontract.CoverageWorkItem) string {
+	if item == nil {
+		return ""
+	}
+	if id := strings.TrimSpace(stringFromMap(item.Metadata, "contextCoverageWorkItemId")); id != "" {
+		return id
+	}
+	if id := strings.TrimSpace(stringFromMap(item.Metadata, "id")); id != "" {
+		return id
+	}
+	return ""
 }
 
 func buildCoverageWorkItemsForRun(run *runModel.Run) ([]map[string]any, map[string]any) {

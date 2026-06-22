@@ -581,6 +581,7 @@ func TestExecutorTerminalPublishFailureDoesNotRecordCompletedTerminal(t *testing
 	publishErr := errors.New("completed publish failed")
 	hub := &failingRuntimePublishHub{failTopic: TopicRuntimeBlockExecuteCompleted, err: publishErr}
 	executor := NewExecutor("test-block", hub, nil, nil, "llm/workspace_execution")
+	before := RuntimeEventPublishMetricsSnapshot()
 	request := runtimemodel.StepExecutionRequest{
 		WorkspaceID: "ws-terminal-publish-fail",
 		RunID:       "run-terminal-publish-fail",
@@ -604,12 +605,18 @@ func TestExecutorTerminalPublishFailureDoesNotRecordCompletedTerminal(t *testing
 	if state.Terminal || state.TerminalEvent.Topic != "" {
 		t.Fatalf("terminal state = %+v, want no terminal replay recorded after publish failure", state)
 	}
+
+	after := RuntimeEventPublishMetricsSnapshot()
+	if after.TerminalPublishFailuresTotal != before.TerminalPublishFailuresTotal+1 {
+		t.Fatalf("terminal publish failure metric = %d, want %d", after.TerminalPublishFailuresTotal, before.TerminalPublishFailuresTotal+1)
+	}
 }
 
 func TestExecutorWorkerLostPublishFailureIsReturned(t *testing.T) {
 	publishErr := errors.New("progress publish failed")
 	hub := &failingRuntimePublishHub{failTopic: TopicRuntimeBlockExecuteProgress, err: publishErr}
 	executor := NewExecutor("test-block", hub, nil, nil, "llm/workspace_execution")
+	before := RuntimeEventPublishMetricsSnapshot()
 	request := runtimemodel.StepExecutionRequest{
 		WorkspaceID: "ws-worker-lost-publish-fail",
 		RunID:       "run-worker-lost-publish-fail",
@@ -624,6 +631,17 @@ func TestExecutorWorkerLostPublishFailureIsReturned(t *testing.T) {
 	if !errors.Is(err, publishErr) {
 		t.Fatalf("publishWorkerLifecycle err = %v, want %v", err, publishErr)
 	}
+
+	after := RuntimeEventPublishMetricsSnapshot()
+	if after.ProgressPublishFailuresTotal != before.ProgressPublishFailuresTotal+1 {
+		t.Fatalf("progress publish failure metric = %d, want %d", after.ProgressPublishFailuresTotal, before.ProgressPublishFailuresTotal+1)
+	}
+	if after.WorkerLifecycleFailuresTotal != before.WorkerLifecycleFailuresTotal+1 {
+		t.Fatalf("worker lifecycle publish failure metric = %d, want %d", after.WorkerLifecycleFailuresTotal, before.WorkerLifecycleFailuresTotal+1)
+	}
+	if after.WorkerLostPublishFailuresTotal != before.WorkerLostPublishFailuresTotal+1 {
+		t.Fatalf("worker lost publish failure metric = %d, want %d", after.WorkerLostPublishFailuresTotal, before.WorkerLostPublishFailuresTotal+1)
+	}
 }
 
 func TestExecutorAcceptedPublishFailureDoesNotStartWorker(t *testing.T) {
@@ -631,6 +649,7 @@ func TestExecutorAcceptedPublishFailureDoesNotStartWorker(t *testing.T) {
 	hub := &failingRuntimePublishHub{failTopic: TopicRuntimeBlockExecuteAccepted, err: publishErr}
 	background := magictask.NewBackgroundRoutine(4)
 	defer background.Shutdown(context.Background())
+	before := RuntimeEventPublishMetricsSnapshot()
 
 	var calls atomic.Int64
 	started := make(chan struct{})
@@ -660,6 +679,11 @@ func TestExecutorAcceptedPublishFailureDoesNotStartWorker(t *testing.T) {
 	executor.mu.Unlock()
 	if exists {
 		t.Fatalf("queue key %q retained after accepted publish failure", queueKey)
+	}
+
+	after := RuntimeEventPublishMetricsSnapshot()
+	if after.AcceptedPublishFailuresTotal != before.AcceptedPublishFailuresTotal+1 {
+		t.Fatalf("accepted publish failure metric = %d, want %d", after.AcceptedPublishFailuresTotal, before.AcceptedPublishFailuresTotal+1)
 	}
 }
 

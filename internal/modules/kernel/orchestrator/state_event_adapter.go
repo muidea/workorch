@@ -34,6 +34,27 @@ func (r runEventRepository) Create(ctx context.Context, item *runmodel.Run) erro
 
 func (r runEventRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	if workspaceID != "" {
+		return r.GetByWorkspaceID(ctx, workspaceID, id)
+	}
+	response, err := publishStateEventCommand(ctx, r.hub, runevents.TopicRunCommandGet, "run", string(id), workspaceID, id, map[string]any{
+		events.PayloadKeyRunID:       string(id),
+		events.PayloadKeyWorkspaceID: string(workspaceID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	item, ok := response.Payload[events.PayloadKeyRun].(*runmodel.Run)
+	if !ok || item == nil {
+		return nil, common.ErrNotFound
+	}
+	return item, nil
+}
+
+func (r runEventRepository) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	if workspaceID == "" || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
 	response, err := publishStateEventCommand(ctx, r.hub, runevents.TopicRunCommandGet, "run", string(id), workspaceID, id, map[string]any{
 		events.PayloadKeyRunID:       string(id),
 		events.PayloadKeyWorkspaceID: string(workspaceID),

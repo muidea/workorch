@@ -157,8 +157,16 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			http.NotFound(w, r)
 			return
 		}
+		var req resolveApprovalRequest
+		if err := decodeOptionalJSON(r, &req); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
 		state.metrics.approvalApproveRequests.Add(1)
-		item, err := state.approveApproval(r.Context(), state.config.Backend, state.config.DataRoot, approvalID)
+		item, err := state.approveApproval(r.Context(), state.config.Backend, state.config.DataRoot, approvalID, appservice.ResolveApprovalCommand{
+			Action:  "approve",
+			Payload: req.Payload,
+		})
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -182,8 +190,16 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			http.NotFound(w, r)
 			return
 		}
+		var req resolveApprovalRequest
+		if err := decodeOptionalJSON(r, &req); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
 		state.metrics.approvalRejectRequests.Add(1)
-		item, err := state.rejectApproval(r.Context(), state.config.Backend, state.config.DataRoot, approvalID)
+		item, err := state.rejectApproval(r.Context(), state.config.Backend, state.config.DataRoot, approvalID, appservice.ResolveApprovalCommand{
+			Action:  "reject",
+			Payload: req.Payload,
+		})
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -215,6 +231,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 		items, err := state.batchResolveApprovals(r.Context(), state.config.Backend, state.config.DataRoot, appservice.BatchResolveApprovalCommand{
 			ApprovalIDs: req.ApprovalIDs,
 			Action:      req.Action,
+			Payload:     req.Payload,
 		})
 		if err != nil {
 			writeBusinessError(w, err)

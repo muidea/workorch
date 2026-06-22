@@ -27,7 +27,7 @@ func RecordMemoryRecallTrace(ctx context.Context, hub events.Hub, trace *memorym
 	if err := PublishMemoryRecallTraceUpsert(ctx, hub, trace); err != nil {
 		return err
 	}
-	return hub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, hub, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        memoryevents.TopicMemoryRecallRecorded,
 		OccurredAt:   trace.OccurredAt,

@@ -216,6 +216,51 @@ func TestRuntimeOrchestrator_DispatchRequestedStepHydratesGapBaseline(t *testing
 	}
 }
 
+func TestRuntimeOrchestratorDispatchRequestedStepUsesScopedRunLookup(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-dispatch-scoped-lookup")
+	workspaceID := common.WorkspaceID("ws-dispatch-scoped-lookup")
+	stepID := common.StepID(runID + "/step-1")
+	runRepo := newCountingRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{output: map[string]any{"completionState": "completed"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+
+	if err := orch.DispatchRequestedStep(ctx, orchestratorcontracts.DispatchStepCommand{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		Kind:        llmcommon.StepKindWorkspaceExecution,
+		Input:       map[string]any{"operator": "requested"},
+	}); err != nil {
+		t.Fatalf("DispatchRequestedStep: %v", err)
+	}
+	if got := runRepo.getCount.Load(); got != 0 {
+		t.Fatalf("run Get count = %d, want 0 for workspace-scoped dispatch command", got)
+	}
+	if got := runRepo.getByWorkspaceIDCount.Load(); got == 0 {
+		t.Fatalf("run GetByWorkspaceID count = %d, want scoped dispatch reads", got)
+	}
+}
+
 func TestRuntimeOrchestrator_NextDispatchSpecsHonorsGapBaselineWaitAction(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-gap-baseline-wait-decision")

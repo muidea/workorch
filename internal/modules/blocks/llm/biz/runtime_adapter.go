@@ -102,6 +102,16 @@ type RuntimeAdapter struct {
 	providerFactory   ProviderFactory
 	cacheMu           sync.RWMutex
 	cache             providerRuntimeCache
+	providerHealthMu  sync.Mutex
+	providerHealth    map[string]providerHealthState
+	now               func() time.Time
+}
+
+type providerHealthState struct {
+	ConsecutiveFailures int
+	CircuitOpenUntil    time.Time
+	LastFailureClass    string
+	LastFailureAt       time.Time
 }
 
 func NewRuntimeAdapter(config llmmodels.ProviderConfig, provider Provider) *RuntimeAdapter {
@@ -400,6 +410,11 @@ const (
 	providerFailureClassResponseSchema   = "provider_response_schema_invalid"
 )
 
+const (
+	providerCircuitFailureThreshold = 2
+	providerCircuitOpenDuration     = 30 * time.Second
+)
+
 type providerCallResult struct {
 	runtime      ProviderRuntime
 	request      llmmodels.ProviderRequest
@@ -409,6 +424,11 @@ type providerCallResult struct {
 	failover     map[string]any
 	failureStage string
 	err          error
+}
+
+type failoverCandidateSelection struct {
+	runtimes              []ProviderRuntime
+	skippedUnhealthyCount int
 }
 
 func (a *RuntimeAdapter) executeProviderWithFailover(
@@ -430,10 +450,12 @@ func (a *RuntimeAdapter) executeProviderWithFailover(
 		streamEvents: streamEvents,
 	}
 	if callErr == nil {
+		a.recordProviderSuccess(primaryProviderID)
 		return result
 	}
 
 	failureClass := classifyProviderInvocationFailure(callErr)
+	a.recordProviderFailure(primaryProviderID, failureClass)
 	result.failureStage = providerFailureStage(failureClass, len(streamEvents) > 0)
 	result.err = callErr
 	if !shouldAttemptProviderFailover(primaryRuntime.Config, failureClass) {
@@ -449,44 +471,91 @@ func (a *RuntimeAdapter) executeProviderWithFailover(
 		"primaryBudget":   providerContextBudgetOutput(providerReq.ContextBudget, primaryRuntime.Config.ID, primaryRuntime.Config.Model),
 		"retryWithBackup": true,
 	}
-	backupRuntime, _, ok := a.selectFailoverRuntime(primaryProviderID, primaryRuntime.Config, operation)
-	if !ok {
-		failover["reason"] = "no failover provider is available"
+	selection := a.failoverCandidateSelection(primaryProviderID, primaryRuntime.Config, operation)
+	if selection.skippedUnhealthyCount > 0 {
+		failover["skippedUnhealthyCount"] = selection.skippedUnhealthyCount
+		failover["skippedReason"] = "provider circuit open"
+	}
+	candidates := selection.runtimes
+	if len(candidates) == 0 {
+		if selection.skippedUnhealthyCount > 0 {
+			failover["reason"] = "no healthy failover provider is available"
+		} else {
+			failover["reason"] = "no failover provider is available"
+		}
 		result.failover = failover
 		return result
 	}
 
-	backupReq := providerRequest(request, backupRuntime.Config)
-	stopBackupHeartbeat := startProviderProgressHeartbeat(ctx, request.Progress, backupRuntime.Config.Capabilities.Streaming)
-	backupPayload, backupUsage, backupEvents, backupErr := completeProvider(ctx, backupRuntime, backupReq, request.Progress)
-	stopBackupHeartbeat()
-	failover["toBudget"] = providerContextBudgetOutput(backupReq.ContextBudget, backupRuntime.Config.ID, backupRuntime.Config.Model)
-	if backupErr != nil {
-		failover["backupError"] = backupErr.Error()
-		failover["backupFailureClass"] = classifyProviderInvocationFailure(backupErr)
-		failover["backupStage"] = providerFailureStage(classifyProviderInvocationFailure(backupErr), len(backupEvents) > 0)
-		combinedEvents := append([]llmmodels.ProviderStreamEvent{}, streamEvents...)
-		combinedEvents = append(combinedEvents, backupEvents...)
-		result.runtime = backupRuntime
-		result.request = backupReq
-		result.streamEvents = combinedEvents
-		result.payload = backupPayload
-		result.usage = backupUsage
-		result.failureStage = providerFailureStage(classifyProviderInvocationFailure(backupErr), len(combinedEvents) > 0)
-		result.err = backupErr
-		result.failover = failover
-		return result
+	attempts := make([]map[string]any, 0, len(candidates))
+	failover["attemptCount"] = 0
+	var lastRuntime ProviderRuntime
+	var lastReq llmmodels.ProviderRequest
+	var lastPayload []byte
+	var lastUsage *llmmodels.ProviderUsage
+	var lastEvents []llmmodels.ProviderStreamEvent
+	var lastErr error
+	var lastFailureClass string
+	var lastFailureStage string
+	for idx, candidateRuntime := range candidates {
+		candidateReq := providerRequest(request, candidateRuntime.Config)
+		stopCandidateHeartbeat := startProviderProgressHeartbeat(ctx, request.Progress, candidateRuntime.Config.Capabilities.Streaming)
+		candidatePayload, candidateUsage, candidateEvents, candidateErr := completeProvider(ctx, candidateRuntime, candidateReq, request.Progress)
+		stopCandidateHeartbeat()
+		attempt := map[string]any{
+			"attempt": idx + 1,
+			"budget":  providerContextBudgetOutput(candidateReq.ContextBudget, candidateRuntime.Config.ID, candidateRuntime.Config.Model),
+		}
+		lastRuntime = candidateRuntime
+		lastReq = candidateReq
+		lastPayload = candidatePayload
+		lastUsage = candidateUsage
+		lastEvents = candidateEvents
+		lastErr = candidateErr
+		if candidateErr == nil {
+			a.recordProviderSuccess(candidateRuntime.Config.ID)
+			attempt["success"] = true
+			attempts = append(attempts, attempt)
+			failover["success"] = true
+			failover["attemptCount"] = len(attempts)
+			failover["successAttempt"] = idx + 1
+			failover["toBudget"] = providerContextBudgetOutput(candidateReq.ContextBudget, candidateRuntime.Config.ID, candidateRuntime.Config.Model)
+			failover["attempts"] = attempts
+			result.runtime = candidateRuntime
+			result.request = candidateReq
+			result.payload = candidatePayload
+			result.usage = candidateUsage
+			result.streamEvents = candidateEvents
+			result.failover = failover
+			result.err = nil
+			result.failureStage = ""
+			return result
+		}
+		lastFailureClass = classifyProviderInvocationFailure(candidateErr)
+		a.recordProviderFailure(candidateRuntime.Config.ID, lastFailureClass)
+		lastFailureStage = providerFailureStage(lastFailureClass, len(candidateEvents) > 0)
+		attempt["success"] = false
+		attempt["error"] = candidateErr.Error()
+		attempt["failureClass"] = lastFailureClass
+		attempt["stage"] = lastFailureStage
+		attempts = append(attempts, attempt)
 	}
 
-	failover["success"] = true
-	result.runtime = backupRuntime
-	result.request = backupReq
-	result.payload = backupPayload
-	result.usage = backupUsage
-	result.streamEvents = backupEvents
+	failover["attemptCount"] = len(attempts)
+	failover["attempts"] = attempts
+	failover["backupError"] = lastErr.Error()
+	failover["backupFailureClass"] = lastFailureClass
+	failover["backupStage"] = lastFailureStage
+	combinedEvents := append([]llmmodels.ProviderStreamEvent{}, streamEvents...)
+	combinedEvents = append(combinedEvents, lastEvents...)
+	result.runtime = lastRuntime
+	result.request = lastReq
+	result.streamEvents = combinedEvents
+	result.payload = lastPayload
+	result.usage = lastUsage
+	result.failureStage = providerFailureStage(lastFailureClass, len(combinedEvents) > 0)
+	result.err = lastErr
 	result.failover = failover
-	result.err = nil
-	result.failureStage = ""
 	return result
 }
 
@@ -503,9 +572,22 @@ func shouldAttemptProviderFailover(config llmmodels.ProviderConfig, failureClass
 }
 
 func (a *RuntimeAdapter) selectFailoverRuntime(primaryProviderID string, primaryConfig llmmodels.ProviderConfig, operation string) (ProviderRuntime, string, bool) {
+	candidates := a.failoverCandidateRuntimes(primaryProviderID, primaryConfig, operation)
+	if len(candidates) == 0 {
+		return ProviderRuntime{}, "", false
+	}
+	runtime := candidates[0]
+	return runtime, runtime.Config.ID, true
+}
+
+func (a *RuntimeAdapter) failoverCandidateRuntimes(primaryProviderID string, primaryConfig llmmodels.ProviderConfig, operation string) []ProviderRuntime {
+	return a.failoverCandidateSelection(primaryProviderID, primaryConfig, operation).runtimes
+}
+
+func (a *RuntimeAdapter) failoverCandidateSelection(primaryProviderID string, primaryConfig llmmodels.ProviderConfig, operation string) failoverCandidateSelection {
 	defaultProviderID, providers, err := a.providerRuntimes()
 	if err != nil || len(providers) == 0 {
-		return ProviderRuntime{}, "", false
+		return failoverCandidateSelection{}
 	}
 	primaryProviderID = strings.TrimSpace(primaryProviderID)
 	if primaryProviderID == "" {
@@ -535,6 +617,8 @@ func (a *RuntimeAdapter) selectFailoverRuntime(primaryProviderID string, primary
 			candidates = append(candidates, id)
 		}
 	}
+	ret := make([]ProviderRuntime, 0, len(candidates))
+	skippedUnhealthyCount := 0
 	for _, candidate := range candidates {
 		if strings.TrimSpace(candidate) == "" || candidate == primaryProviderID {
 			continue
@@ -546,9 +630,91 @@ func (a *RuntimeAdapter) selectFailoverRuntime(primaryProviderID string, primary
 		if validateProviderOperation(operation, runtime.Config.Capabilities) != nil {
 			continue
 		}
-		return runtime, candidate, true
+		if a.providerCircuitOpen(candidate) {
+			skippedUnhealthyCount++
+			continue
+		}
+		ret = append(ret, runtime)
 	}
-	return ProviderRuntime{}, "", false
+	return failoverCandidateSelection{runtimes: ret, skippedUnhealthyCount: skippedUnhealthyCount}
+}
+
+func (a *RuntimeAdapter) recordProviderSuccess(providerID string) {
+	providerID = strings.TrimSpace(providerID)
+	if a == nil || providerID == "" {
+		return
+	}
+	a.providerHealthMu.Lock()
+	defer a.providerHealthMu.Unlock()
+	if len(a.providerHealth) == 0 {
+		return
+	}
+	delete(a.providerHealth, providerID)
+}
+
+func (a *RuntimeAdapter) recordProviderFailure(providerID string, failureClass string) {
+	providerID = strings.TrimSpace(providerID)
+	if a == nil || providerID == "" || !providerFailureContributesToCircuit(failureClass) {
+		return
+	}
+	now := a.currentTime()
+	a.providerHealthMu.Lock()
+	defer a.providerHealthMu.Unlock()
+	if a.providerHealth == nil {
+		a.providerHealth = map[string]providerHealthState{}
+	}
+	state := a.providerHealth[providerID]
+	state.ConsecutiveFailures++
+	state.LastFailureClass = strings.TrimSpace(failureClass)
+	state.LastFailureAt = now
+	if state.ConsecutiveFailures >= providerCircuitFailureThreshold {
+		state.CircuitOpenUntil = now.Add(providerCircuitOpenDuration)
+	}
+	a.providerHealth[providerID] = state
+}
+
+func (a *RuntimeAdapter) providerCircuitOpen(providerID string) bool {
+	providerID = strings.TrimSpace(providerID)
+	if a == nil || providerID == "" {
+		return false
+	}
+	now := a.currentTime()
+	a.providerHealthMu.Lock()
+	defer a.providerHealthMu.Unlock()
+	state, ok := a.providerHealth[providerID]
+	if !ok || state.CircuitOpenUntil.IsZero() {
+		return false
+	}
+	if now.Before(state.CircuitOpenUntil) {
+		return true
+	}
+	delete(a.providerHealth, providerID)
+	return false
+}
+
+func (a *RuntimeAdapter) resetProviderHealth() {
+	if a == nil {
+		return
+	}
+	a.providerHealthMu.Lock()
+	defer a.providerHealthMu.Unlock()
+	a.providerHealth = nil
+}
+
+func (a *RuntimeAdapter) currentTime() time.Time {
+	if a != nil && a.now != nil {
+		return a.now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func providerFailureContributesToCircuit(failureClass string) bool {
+	switch strings.TrimSpace(failureClass) {
+	case providerFailureClassTimeout, providerFailureClassRateLimited, providerFailureClassStreamIncomplete, providerFailureClassUnavailable:
+		return true
+	default:
+		return false
+	}
 }
 
 func classifyProviderInvocationFailure(err error) string {
@@ -1621,6 +1787,7 @@ func (a *RuntimeAdapter) providerRuntimes() (string, map[string]ProviderRuntime,
 			defaultProviderID: loadedDefaultProviderID,
 			providers:         loadedProviders,
 		}
+		a.resetProviderHealth()
 		return loadedDefaultProviderID, loadedProviders, nil
 	}
 	loadedDefaultProviderID, configs, err := a.configLoader()

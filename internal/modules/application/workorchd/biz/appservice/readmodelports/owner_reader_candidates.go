@@ -14,6 +14,7 @@ type OwnerReaderCandidates struct {
 	Results               readmodelcore.ResultReader
 	Artifacts             readmodelcore.ArtifactReader
 	ArtifactContinuations readmodelcore.ArtifactContinuationReader
+	CoverageWorkItems     readmodelcore.CoverageWorkItemReader
 	EventRecords          readmodelcore.EventRecordReader
 	MemoryRecalls         readmodelcore.MemoryRecallTraceReader
 	ToolCalls             readmodelcore.ToolCallReader
@@ -42,6 +43,7 @@ func (c OwnerReaderCandidates) RunSnapshotReaders(owner OwnerReaders, published 
 		Results:               c.Results,
 		Artifacts:             c.Artifacts,
 		ArtifactContinuations: c.ArtifactContinuations,
+		CoverageWorkItems:     c.CoverageWorkItems,
 		EventRecords:          c.EventRecords,
 		MemoryRecalls:         c.MemoryRecalls,
 		Tickets:               c.Tickets,

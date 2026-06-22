@@ -197,12 +197,15 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 			runID = common.RunID(envelope.RunID)
 		}
 		workspaceID := runScopedWorkspaceID(envelope)
-		item, err := m.runs.Get(ctx, runID)
+		var item *runmodel.Run
+		var err error
+		if workspaceID != "" {
+			item, err = m.runs.GetByWorkspaceID(ctx, workspaceID, runID)
+		} else {
+			item, err = m.runs.Get(ctx, runID)
+		}
 		if err != nil {
 			return err
-		}
-		if workspaceID != "" && item.WorkspaceID != workspaceID {
-			return common.ErrNotFound
 		}
 		return runCommandResponse(envelope, map[string]any{events.PayloadKeyRun: item})
 	case runevents.TopicRunCommandList:
@@ -210,12 +213,14 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 		if err != nil {
 			return err
 		}
+		items = projectRunCommandListItems(items, runStateFilterFromPayload(envelope.Payload), boolPayload(envelope.Payload, events.PayloadKeyCompact))
 		return runCommandResponse(envelope, map[string]any{events.PayloadKeyRuns: items})
 	case runevents.TopicRunCommandListByWorkspace:
 		items, err := m.runs.ListByWorkspaceID(ctx, common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID)))
 		if err != nil {
 			return err
 		}
+		items = projectRunCommandListItems(items, runStateFilterFromPayload(envelope.Payload), boolPayload(envelope.Payload, events.PayloadKeyCompact))
 		return runCommandResponse(envelope, map[string]any{events.PayloadKeyRuns: items})
 	case runevents.TopicRunCommandGetStep:
 		if m.steps == nil {
@@ -343,12 +348,8 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 		if workspaceID == "" || runID == "" {
 			return common.ErrInvalidArgument
 		}
-		item, err := m.runs.Get(ctx, runID)
-		if err != nil {
+		if _, err := m.runs.GetByWorkspaceID(ctx, workspaceID, runID); err != nil {
 			return err
-		}
-		if item.WorkspaceID != workspaceID {
-			return common.ErrNotFound
 		}
 		if err := m.runs.Delete(ctx, runID); err != nil {
 			return err
@@ -394,14 +395,8 @@ func (m *Module) validateRunReadScope(ctx context.Context, runID common.RunID, w
 	if runID == "" || workspaceID == "" {
 		return nil
 	}
-	item, err := m.runs.Get(ctx, runID)
-	if err != nil {
-		return err
-	}
-	if item.WorkspaceID != workspaceID {
-		return common.ErrNotFound
-	}
-	return nil
+	_, err := m.runs.GetByWorkspaceID(ctx, workspaceID, runID)
+	return err
 }
 
 func runFromPayload(payload map[string]any) (*runmodel.Run, error) {
@@ -474,6 +469,89 @@ func createRunCommandFromPayload(payload map[string]any) (runcontracts.CreateRun
 func stringPayload(payload map[string]any, key string) string {
 	value, _ := payload[key].(string)
 	return value
+}
+
+func boolPayload(payload map[string]any, key string) bool {
+	value, _ := payload[key].(bool)
+	return value
+}
+
+func runStateFilterFromPayload(payload map[string]any) map[common.RunState]struct{} {
+	raw, ok := payload[events.PayloadKeyStates]
+	if !ok {
+		return nil
+	}
+	values := make([]string, 0)
+	switch typed := raw.(type) {
+	case []string:
+		values = append(values, typed...)
+	case []common.RunState:
+		for _, item := range typed {
+			values = append(values, string(item))
+		}
+	case []any:
+		for _, item := range typed {
+			if text, ok := item.(string); ok {
+				values = append(values, text)
+			}
+		}
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	ret := map[common.RunState]struct{}{}
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		ret[common.RunState(value)] = struct{}{}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func projectRunCommandListItems(items []*runmodel.Run, states map[common.RunState]struct{}, compact bool) []*runmodel.Run {
+	if len(items) == 0 {
+		return items
+	}
+	ret := make([]*runmodel.Run, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if len(states) > 0 {
+			if _, ok := states[item.State]; !ok {
+				continue
+			}
+		}
+		if compact {
+			ret = append(ret, compactRunListItem(item))
+			continue
+		}
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func compactRunListItem(item *runmodel.Run) *runmodel.Run {
+	if item == nil {
+		return nil
+	}
+	return &runmodel.Run{
+		ID:                 item.ID,
+		WorkspaceID:        item.WorkspaceID,
+		GoalID:             item.GoalID,
+		DoDID:              item.DoDID,
+		DefinitionRevision: item.DefinitionRevision,
+		InitialStepKind:    item.InitialStepKind,
+		State:              item.State,
+		Priority:           item.Priority,
+		BlockingTicketID:   item.BlockingTicketID,
+		BlockingApprovalID: item.BlockingApprovalID,
+		FailureReason:      item.FailureReason,
+	}
 }
 
 func runScopedWorkspaceID(envelope events.Envelope) common.WorkspaceID {

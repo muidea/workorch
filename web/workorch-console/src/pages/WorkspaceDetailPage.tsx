@@ -3,7 +3,7 @@ import { App as AntApp, Button, Checkbox, Descriptions, Dropdown, Empty, FloatBu
 import { CardGrid, PageContainer, ProCard, ProTable } from '../components/proCompat';
 import type { ProColumns } from '../components/proCompat';
 import { DownOutlined } from '@ant-design/icons';
-import type { Approval, Artifact, ArtifactContinuation, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPServer, MemoryItem, Patch, PatchPage, ProjectionStatus, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from '../types';
+import type { Approval, Artifact, ArtifactContinuation, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, GoalDoDQualityCheck, MCPCapability, MCPServer, MemoryItem, MemoryItemWriteRequest, Patch, PatchPage, ProjectionStatus, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from '../types';
 import { workorchApi } from '../api';
 import { useSSE } from '../hooks';
 import { modelLabels } from '../utils/constants';
@@ -30,11 +30,11 @@ const {
   runtimeCapabilityTable, runtimeCheckpointPageLimit, runtimeDetailActions,
   runtimeEventPageLimit, runtimePatchPageLimit, runtimeRawRefActions, runtimeResultPageLimit,
   runtimeStepPageLimit, runtimeTarget, runtimeToolCallPageLimit, runtimeValidationPageLimit,
-  setupDoDItems, skillDisplayLabel, soulBindingStageLabel, splitLines, stageBindings,
+  runCommandDescriptions, setupDoDItems, skillDisplayLabel, soulBindingStageLabel, splitLines, stageBindings,
   projectionStatusDescriptions, projectionStatusSummary, runHeartbeatDescriptions, runtimeExecutionDescriptions,
-  stateLabel, stateTag, taskDecompositionCard, taskProgressCard, timelineLabel,
+  stateLabel, stateTag, taskPlanCard, taskProgressCard, timelineLabel,
   timelineOccurredAtContent, timelineStreamContent, webSourceCard, webSourceRows,
-  workspaceProcessItems, workspaceProjectionRun, workspaceProjectionRunLabel,
+  workspaceProcessItems, workspaceProjectionRunLabel,
   workspaceSetupDraftConfidenceLabel, workspaceSetupDraftDoDList, workspaceSetupDraftFromForms,
   workspaceSetupDraftInfoList, workspaceSetupDraftMessageLabel, workspaceSetupDraftReadyForApply,
   workspaceSetupDraftStateColor, workspaceSetupDraftStateLabel, workspaceSetupDraftTextBlock,
@@ -109,6 +109,12 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [soulBindingSaving, setSoulBindingSaving] = useState(false);
   const [editingGoal, setEditingGoal] = useState<Goal | undefined>(undefined);
   const [editingDoD, setEditingDoD] = useState<DoD | undefined>(undefined);
+  const [editingMemory, setEditingMemory] = useState<MemoryItem | undefined>(undefined);
+  const [memoryEditorOpen, setMemoryEditorOpen] = useState(false);
+  const [deletingMemoryId, setDeletingMemoryId] = useState<string | undefined>(undefined);
+  const [qualityCheck, setQualityCheck] = useState<GoalDoDQualityCheck | undefined>(undefined);
+  const [qualityCheckOpen, setQualityCheckOpen] = useState(false);
+  const [qualityCheckLoading, setQualityCheckLoading] = useState(false);
   const [activationTracking, setActivationTracking] = useState(false);
   const [workspaceListReady, setWorkspaceListReady] = useState(false);
   const [setupStep, setSetupStep] = useState(0);
@@ -127,6 +133,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [workspaceDeleteForm] = Form.useForm<WorkspaceDeleteFormValues>();
   const [goalForm] = Form.useForm();
   const [dodForm] = Form.useForm();
+  const [memoryForm] = Form.useForm<MemoryItemWriteRequest>();
   const workspaceSetupTitle = Form.useWatch('title', workspaceForm);
 
   useEffect(() => {
@@ -189,9 +196,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     }
     scheduleWorkspaceEventRefresh(true, eventWorkspaceId || selected);
   }, {
-    enabled: workspaceListReady,
+    enabled: workspaceListReady && Boolean(workspaceId),
+    workspaceId,
     debounceMs: 0,
-    onReconnect: () => scheduleWorkspaceEventRefresh(true, currentWorkspaceIdRef.current)
+    onReconnect: () => scheduleWorkspaceEventRefresh(true, currentWorkspaceIdRef.current),
+    onExhausted: () => {
+      message.warning('当前工作空间事件流已断开，请检查服务状态或手动刷新。');
+      scheduleWorkspaceEventRefresh(true, currentWorkspaceIdRef.current);
+    }
   });
 
   const readyDoDs = dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
@@ -738,14 +750,11 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setMCPCapabilities(nextMCPCapabilities);
     setMemoryItems(nextMemoryItems);
     setConfiguration(nextConfiguration);
-    const projectedRun = workspaceProjectionRun(nextSnapshot);
-    clearRunProcessView(nextSnapshot.contextBundle);
-    if (projectedRun) {
-      void loadRunProcess(projectedRun.id, false, targetWorkspaceId, requestSeq).catch((error: unknown) => {
-        if (requestSeq === workspaceContextRequestSeq.current && targetWorkspaceId === currentWorkspaceIdRef.current) {
-          message.error(errorMessage(error));
-        }
-      });
+    const keepRunProcessView = runSnapshot
+      && runSnapshot.workspace.id === targetWorkspaceId
+      && (nextSnapshot.runs ?? []).some((item) => item.id === runSnapshot.run.id);
+    if (!keepRunProcessView) {
+      clearRunProcessView(nextSnapshot.contextBundle);
     }
   }
 
@@ -1142,6 +1151,123 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setDoDDefinitionOpen(true);
   };
 
+  const openGoalDoDQualityCheck = async (goal?: Goal, dod?: DoD) => {
+    if (!workspaceId) {
+      message.error('请先选择工作空间');
+      return;
+    }
+    const targetGoal = goal ?? goals[0];
+    const targetDoD = dod ?? readyDoDs[0] ?? dods[0];
+    if (!targetGoal || !targetDoD) {
+      message.warning('请先定义目标和验收标准');
+      return;
+    }
+    setQualityCheckLoading(true);
+    try {
+      const next = await workorchApi.checkGoalDoDQuality(workspaceId, {
+        goalId: targetGoal.id,
+        doDId: targetDoD.id,
+        goalText: targetGoal.text,
+        doDItems: targetDoD.items
+      });
+      setQualityCheck(next);
+      setQualityCheckOpen(true);
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setQualityCheckLoading(false);
+    }
+  };
+
+  const openMemoryEditor = (item?: MemoryItem) => {
+    setEditingMemory(item);
+    memoryForm.setFieldsValue({
+      memoryId: item?.id,
+      runId: item?.runId,
+      sourceType: item?.sourceType || 'manual',
+      sourceRef: item?.sourceRef,
+      memoryType: item?.memoryType || 'note',
+      content: item?.content,
+      summary: item?.summary,
+      tags: item?.tags ?? [],
+      importance: item?.importance,
+      confidence: item?.confidence,
+      visibility: item?.visibility || 'workspace',
+      embeddingProviderId: item?.embeddingProviderId,
+      embeddingModel: item?.embeddingModel,
+      embeddingText: item?.embeddingText
+    });
+    setMemoryEditorOpen(true);
+  };
+
+  const memoryWriteRequest = (values: MemoryItemWriteRequest): MemoryItemWriteRequest => ({
+    memoryId: values.memoryId?.trim() || undefined,
+    runId: values.runId?.trim() || undefined,
+    sourceType: values.sourceType?.trim() || 'manual',
+    sourceRef: values.sourceRef?.trim() || undefined,
+    memoryType: values.memoryType?.trim() || 'note',
+    content: values.content?.trim() || undefined,
+    summary: values.summary?.trim() || '',
+    tags: values.tags?.map((item) => item.trim()).filter(Boolean),
+    importance: values.importance,
+    confidence: values.confidence,
+    visibility: values.visibility?.trim() || undefined,
+    embeddingProviderId: values.embeddingProviderId?.trim() || undefined,
+    embeddingModel: values.embeddingModel?.trim() || undefined,
+    embeddingText: values.embeddingText?.trim() || undefined
+  });
+
+  const submitMemoryEditor = async (values: MemoryItemWriteRequest) => {
+    if (!workspaceId) {
+      message.error('请先选择工作空间');
+      return;
+    }
+    setBusinessSubmitting(true);
+    try {
+      const payload = memoryWriteRequest(values);
+      if (editingMemory) {
+        await workorchApi.updateMemory(workspaceId, editingMemory.id, payload);
+      } else {
+        await workorchApi.createMemory(workspaceId, payload);
+      }
+      await loadWorkspaceContext(workspaceId);
+      setMemoryEditorOpen(false);
+      setEditingMemory(undefined);
+      memoryForm.resetFields();
+      message.success(editingMemory ? '记忆已更新' : '记忆已创建');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setBusinessSubmitting(false);
+    }
+  };
+
+  const deleteMemoryItem = (item: MemoryItem) => {
+    if (!workspaceId) {
+      message.error('请先选择工作空间');
+      return;
+    }
+    Modal.confirm({
+      title: '删除记忆',
+      content: `确认删除记忆 ${item.id}？`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        setDeletingMemoryId(item.id);
+        try {
+          await workorchApi.deleteMemory(workspaceId, item.id);
+          await loadWorkspaceContext(workspaceId);
+          message.success('记忆已删除');
+        } catch (error) {
+          message.error(errorMessage(error));
+        } finally {
+          setDeletingMemoryId(undefined);
+        }
+      }
+    });
+  };
+
   const runColumns: ProColumns<Run>[] = [
     { title: '运行 ID（Run ID）', dataIndex: 'id', copyable: true },
     { title: '目标', dataIndex: 'goalId', copyable: true },
@@ -1193,6 +1319,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const runWebSources = runObservability?.webSources ?? runSnapshot?.webSources ?? snapshot?.webSources;
   const webSourceCount = webSourceRows(runWebSources).length;
   const runLLMContextBudgets = runObservability?.llmContextBudgets ?? runSnapshot?.llmContextBudgets ?? snapshot?.llmContextBudgets;
+  const runLLMContextBudgetSummary = runObservability?.llmContextBudgetSummary ?? runSnapshot?.llmContextBudgetSummary ?? snapshot?.llmContextBudgetSummary;
   const workspaceLLMUsageSummary = snapshot?.llmUsageSummary;
   const runLLMUsageSummary = runObservability?.llmUsageSummary ?? runSnapshot?.llmUsageSummary ?? snapshot?.llmUsageSummary;
   const runLLMUsageTraces = runObservability?.llmUsageTraces ?? runSnapshot?.llmUsageTraces ?? snapshot?.llmUsageTraces;
@@ -1345,6 +1472,11 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               <Descriptions
                 column={{ xs: 1, md: 2 }}
                 size="small"
+                items={runCommandDescriptions(snapshot)}
+              />
+              <Descriptions
+                column={{ xs: 1, md: 2 }}
+                size="small"
                 items={runHeartbeatDescriptions(currentRunHeartbeat)}
               />
               <Descriptions
@@ -1361,16 +1493,22 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                   className="workorch-definition-list"
                   pagination={goals.length > 4 ? { pageSize: 4, size: 'small' } : false}
                   dataSource={goals}
-                  renderItem={(item) => (
-                    <List.Item
-                      actions={[<Button key="edit" type="link" size="small" onClick={() => openGoalDefinition(item)}>修改</Button>]}
-                    >
-                      <List.Item.Meta
-                        title={<Space><Typography.Text copyable>{item.id}</Typography.Text></Space>}
-                        description={boundedParagraph(item.text, { rows: 3 })}
-                      />
-                    </List.Item>
-                  )}
+                  renderItem={(item) => {
+                    const targetDoD = readyDoDs[0] ?? dods[0];
+                    return (
+                      <List.Item
+                        actions={[
+                          <Button key="edit" type="link" size="small" onClick={() => openGoalDefinition(item)}>修改</Button>,
+                          <Button key="quality" type="link" size="small" loading={qualityCheckLoading} disabled={!targetDoD} onClick={() => void openGoalDoDQualityCheck(item, targetDoD)}>质量评分</Button>
+                        ]}
+                      >
+                        <List.Item.Meta
+                          title={<Space><Typography.Text copyable>{item.id}</Typography.Text></Space>}
+                          description={boundedParagraph(item.text, { rows: 3 })}
+                        />
+                      </List.Item>
+                    );
+                  }}
                 />
               ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无目标" />}
             </ProCard>
@@ -1382,9 +1520,13 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                   dataSource={dodDefinitionRows}
                   renderItem={(item) => {
                     const dod = dods.find((candidate) => candidate.id === item.id);
+                    const targetGoal = goals[0];
                     return (
                       <List.Item
-                        actions={[<Button key="edit" type="link" size="small" disabled={!dod} onClick={() => dod && openDoDDefinition(dod)}>修改</Button>]}
+                        actions={[
+                          <Button key="edit" type="link" size="small" disabled={!dod} onClick={() => dod && openDoDDefinition(dod)}>修改</Button>,
+                          <Button key="quality" type="link" size="small" loading={qualityCheckLoading} disabled={!dod || !targetGoal} onClick={() => dod && void openGoalDoDQualityCheck(targetGoal, dod)}>质量评分</Button>
+                        ]}
                       >
                         <List.Item.Meta
                           title={<Space><Tag>{item.index}</Tag>{stateTag(item.state)}<Typography.Text copyable>{item.id}</Typography.Text></Space>}
@@ -1411,6 +1553,28 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                   ]}
                 />
               </Space>
+            </ProCard>
+            <ProCard title="工作空间记忆（Memory）" colSpan={{ xs: 24, lg: 12 }} extra={<Button size="small" onClick={() => openMemoryEditor()}>新增</Button>}>
+              {memoryItems.length ? (
+                <List
+                  className="workorch-definition-list"
+                  pagination={memoryItems.length > 5 ? { pageSize: 5, size: 'small' } : false}
+                  dataSource={memoryItems}
+                  renderItem={(item) => (
+                    <List.Item
+                      actions={[
+                        <Button key="edit" type="link" size="small" onClick={() => openMemoryEditor(item)}>编辑</Button>,
+                        <Button key="delete" type="link" danger size="small" loading={deletingMemoryId === item.id} onClick={() => deleteMemoryItem(item)}>删除</Button>
+                      ]}
+                    >
+                      <List.Item.Meta
+                        title={<Space><Tag>{item.memoryType}</Tag><Typography.Text copyable>{item.id}</Typography.Text></Space>}
+                        description={<Space direction="vertical" size={2}>{boundedParagraph(item.summary, { rows: 2 })}<Typography.Text type="secondary">{item.sourceType}{item.sourceRef ? ` / ${item.sourceRef}` : ''}</Typography.Text>{item.tags?.length ? compactTags(item.tags, 5) : null}</Space>}
+                      />
+                    </List.Item>
+                  )}
+                />
+              ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无工作空间记忆" />}
             </ProCard>
           </CardGrid>
           <ProCard
@@ -1560,7 +1724,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                     {webSourceCard(runWebSources)}
                   </ProCard>
                   <ProCard title="LLM Context Budget" colSpan={{ xs: 24, lg: 12 }}>
-                    {llmContextBudgetCard(runLLMContextBudgets)}
+                    {llmContextBudgetCard(runLLMContextBudgets, runLLMContextBudgetSummary)}
                   </ProCard>
                   <ProCard title={modelLabels.llmUsage} colSpan={{ xs: 24, lg: 12 }}>
                     {llmUsageCard(runLLMUsageSummary, runLLMUsageTraces)}
@@ -1568,7 +1732,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 </CardGrid>
               </Space>
             ) : (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先启动或选择一个运行（Run）查看目标成果" />
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请在运行记录中点击“查看成果与过程”加载运行明细" />
             )}
           </ProCard>
           <ProCard title="运行记录（Run）" className="workorch-section">
@@ -1599,11 +1763,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             {gapBaselineCard(runSnapshot?.gapBaseline ?? snapshot.gapBaseline)}
           </ProCard>
           <ProCard
-            title="任务拆分图"
+            title="任务计划"
             className="workorch-section"
-            extra={<Tag>{(runObservability?.taskDecompositions ?? runSnapshot?.taskDecompositions ?? snapshot.taskDecompositions ?? []).length} 个图</Tag>}
+            extra={<Tag>{(runObservability?.taskPlans ?? runSnapshot?.taskPlans ?? snapshot.taskPlans ?? []).length || (runObservability?.taskDecompositions ?? runSnapshot?.taskDecompositions ?? snapshot.taskDecompositions ?? []).length} 个投影</Tag>}
           >
-            {taskDecompositionCard(runObservability?.taskDecompositions ?? runSnapshot?.taskDecompositions ?? snapshot.taskDecompositions)}
+            {taskPlanCard(
+              runObservability?.taskPlans ?? runSnapshot?.taskPlans ?? snapshot.taskPlans,
+              runObservability?.taskDecompositions ?? runSnapshot?.taskDecompositions ?? snapshot.taskDecompositions
+            )}
           </ProCard>
           <ProCard
             title="执行分区"
@@ -1837,7 +2004,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                     {
                       key: 'llmContextBudgets',
                       label: `LLM Context ${runLLMContextBudgets?.length ?? 0}`,
-                      children: llmContextBudgetCard(runLLMContextBudgets)
+                      children: llmContextBudgetCard(runLLMContextBudgets, runLLMContextBudgetSummary)
                     },
                     {
                       key: 'llmUsage',
@@ -2424,7 +2591,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           <Form.Item label="工作空间">
             <Input value={workspaceForm.getFieldValue('title') || '待创建，最终确认提交后生成'} disabled />
           </Form.Item>
-          <Form.Item name="text" label="目标" rules={[{ required: true }]}>
+          <Form.Item name="text" label="目标" rules={[{ required: true, whitespace: true, min: 1 }]}>
             <Input.TextArea rows={5} placeholder="支持 Markdown 或普通文本；多条目标可换行或用分号分隔，提交后会规范化为独立目标项" />
           </Form.Item>
         </Form>
@@ -2575,7 +2742,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             }
           }}
         >
-          <Form.Item name="text" label="目标" rules={[{ required: true }]}>
+          <Form.Item name="text" label="目标" rules={[{ required: true, whitespace: true, min: 1 }]}>
             <Input.TextArea rows={4} placeholder="描述该工作空间要达成的业务结果" />
           </Form.Item>
         </Form>
@@ -2622,6 +2789,132 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           <Form.Item name="items" label="验收项" rules={[{ required: true }]}>
             <Input.TextArea rows={5} placeholder={'每行一个验收标准\n示例：服务已完成本地部署并可访问'} />
           </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title="Goal / DoD 质量评分"
+        open={qualityCheckOpen}
+        onCancel={() => setQualityCheckOpen(false)}
+        footer={<Button onClick={() => setQualityCheckOpen(false)}>关闭</Button>}
+        width={760}
+      >
+        {qualityCheck ? (
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Descriptions
+              bordered
+              size="small"
+              column={{ xs: 1, md: 2 }}
+              items={[
+                { key: 'status', label: '状态', children: stateTag(qualityCheck.status) },
+                { key: 'executionScore', label: '执行评分', children: numberText(qualityCheck.executionScore) },
+                { key: 'verificationScore', label: '验证评分', children: numberText(qualityCheck.verificationScore) },
+                { key: 'executable', label: '可执行', children: qualityCheck.executable ? <Tag color="green">是</Tag> : <Tag color="red">否</Tag> },
+                { key: 'verifiable', label: '可验证', children: qualityCheck.verifiable ? <Tag color="green">是</Tag> : <Tag color="red">否</Tag> },
+                { key: 'goal', label: 'Goal', children: qualityCheck.goalId || '-' },
+                { key: 'dod', label: 'DoD', children: qualityCheck.doDId || '-' }
+              ]}
+            />
+            {qualityCheck.missingConstraints?.length ? (
+              <div>
+                <Typography.Text strong>缺失约束</Typography.Text>
+                <div>{compactTags(qualityCheck.missingConstraints, 8)}</div>
+              </div>
+            ) : null}
+            {qualityCheck.suggestions?.length ? (
+              <div>
+                <Typography.Text strong>改进建议</Typography.Text>
+                <List
+                  size="small"
+                  dataSource={qualityCheck.suggestions}
+                  renderItem={(item) => <List.Item>{item}</List.Item>}
+                />
+              </div>
+            ) : null}
+            {qualityCheck.issues?.length ? (
+              <div>
+                <Typography.Text strong>问题明细</Typography.Text>
+                <List
+                  size="small"
+                  dataSource={qualityCheck.issues}
+                  renderItem={(item) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        title={<Space><Tag>{item.severity}</Tag><Typography.Text>{item.code}</Typography.Text><Typography.Text type="secondary">{item.target}</Typography.Text></Space>}
+                        description={item.suggestion ? `${item.message} ${item.suggestion}` : item.message}
+                      />
+                    </List.Item>
+                  )}
+                />
+              </div>
+            ) : null}
+          </Space>
+        ) : (
+          <Empty description="暂无质量评分结果" />
+        )}
+      </Modal>
+      <Modal
+        title={editingMemory ? '编辑记忆' : '新增记忆'}
+        open={memoryEditorOpen}
+        confirmLoading={businessSubmitting}
+        onCancel={() => {
+          setMemoryEditorOpen(false);
+          setEditingMemory(undefined);
+          memoryForm.resetFields();
+        }}
+        onOk={() => memoryForm.submit()}
+        width={720}
+      >
+        <Form
+          form={memoryForm}
+          layout="vertical"
+          onFinish={(values) => void submitMemoryEditor(values)}
+        >
+          <Form.Item name="memoryId" label="记忆 ID">
+            <Input disabled={Boolean(editingMemory)} placeholder="留空时由服务端生成" />
+          </Form.Item>
+          <Form.Item name="summary" label="摘要" rules={[{ required: true, whitespace: true, min: 1 }]}>
+            <Input.TextArea rows={3} placeholder="简明描述这条记忆对后续执行的参考价值" />
+          </Form.Item>
+          <Form.Item name="content" label="内容">
+            <Input.TextArea rows={5} placeholder="可选。保存完整上下文、约束或参考材料" />
+          </Form.Item>
+          <div className="soul-binding-grid soul-binding-grid-compact">
+            <Form.Item name="memoryType" label="记忆类型" rules={[{ required: true, whitespace: true }]}>
+              <Input placeholder="note / preference / constraint" />
+            </Form.Item>
+            <Form.Item name="sourceType" label="来源类型" rules={[{ required: true, whitespace: true }]}>
+              <Input placeholder="manual / runtime / artifact" />
+            </Form.Item>
+            <Form.Item name="sourceRef" label="来源引用">
+              <Input placeholder="可选 sourceRef" />
+            </Form.Item>
+            <Form.Item name="runId" label="关联运行">
+              <Input placeholder="可选 runId" />
+            </Form.Item>
+            <Form.Item name="importance" label="重要性">
+              <InputNumber style={{ width: '100%' }} min={0} max={100} />
+            </Form.Item>
+            <Form.Item name="confidence" label="置信度">
+              <InputNumber style={{ width: '100%' }} min={0} max={100} />
+            </Form.Item>
+          </div>
+          <Form.Item name="visibility" label="可见性">
+            <Input placeholder="workspace / run" />
+          </Form.Item>
+          <Form.Item name="tags" label="标签">
+            <Select mode="tags" placeholder="输入后回车生成标签" options={[]} />
+          </Form.Item>
+          <Form.Item name="embeddingText" label="向量化文本">
+            <Input.TextArea rows={3} placeholder="可选。用于向量召回的文本" />
+          </Form.Item>
+          <div className="soul-binding-grid soul-binding-grid-compact">
+            <Form.Item name="embeddingProviderId" label="Embedding Provider">
+              <Input placeholder="可选" />
+            </Form.Item>
+            <Form.Item name="embeddingModel" label="Embedding Model">
+              <Input placeholder="可选" />
+            </Form.Item>
+          </div>
         </Form>
       </Modal>
       <Modal
@@ -2709,7 +3002,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             />
           </Form.Item>
           <Form.Item name="priority" label="运行队列优先级">
-            <InputNumber style={{ width: '100%' }} placeholder="0" />
+            <InputNumber style={{ width: '100%' }} placeholder="0 = 队列默认优先级" />
           </Form.Item>
         </Form>
       </Modal>

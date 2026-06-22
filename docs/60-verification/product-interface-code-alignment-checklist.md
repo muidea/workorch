@@ -227,7 +227,8 @@ Last Updated: 2026-05-30
 | raw/detail boundary | `internal/modules/application/workorchd/biz/appservice/artifact_content_service.go` / `runtime_raw_content_service.go` / `web/workorch-console/src/api.ts` | pass | `artifacts/content` 与 `runtime/payloads` 仍是显式打开路径；snapshot/observability 默认不嵌入 runtime raw payload 或 artifact continuation 正文。 |
 | form / interaction boundary | `web/workorch-console/src/pages` | pass | Web form 只做字段组织、最小校验和 API 调用；未发现前端重演 DoD 质量、approval fallback、provider compatibility 或 runtime 状态机。 |
 | cross-product consistency | `web/workorch-console/src/utils/index.ts` / `web/workorch-console/src/helpers.tsx` | impl-drift fixed | 删除未使用但经 barrel 导出的 `utils/state.ts`，避免 Web 后续误用第二套 active/latest run、terminal state、DoD ready 投影规则；页面继续使用 `helpers.tsx` 的正式展示 helper。 |
+| Web state display helper | `web/workorch-console/src/helpers.tsx` / `web/workorch-console/src/utils/{constants,format,ui}.ts*` | impl-drift fixed | `helpers.tsx` 不再维护第二套 state/progress/recovery label map 和 state tag color 规则；旧 helper 导出保留为 `utils/constants` 的 re-export，页面现有引用继续可用但状态展示规则只有一份。 |
 
 ### Follow-Up
 
-- `helpers.tsx` 仍是 Web 当前主要展示 helper，后续如继续拆分，应把状态投影 helper 迁入单一稳定模块，并同步替换页面引用，禁止重新出现多套 active run / blocker / terminal state 规则。
+- `helpers.tsx` 仍是 Web 当前主要展示 helper，但状态/进度/恢复 label map 与 state tag color 已收束到 `utils/constants`、`utils/format`、`utils/ui`；后续如继续拆分，应保持单一稳定模块，并同步替换页面引用，禁止重新出现多套 active run / blocker / terminal state 规则。

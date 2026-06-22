@@ -187,7 +187,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		}
 	}
 
-	currentRun, err := o.runs.Get(ctx, run.ID)
+	currentRun, err := o.runtimeEventRun(common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID), run.ID)
 	if err != nil {
 		return err
 	}
@@ -255,15 +255,15 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	if err := validateDoDAssessmentEvidenceQuality(ctx, o.steps, o.evidence, currentRun, assessment); err != nil {
 		return o.handleGraphBatchCompletionGateFailure(ctx, currentRun, last, last.Output, "runtime completion gate failed", err)
 	}
-	if o.coverageLedger().updateFromAssessment(currentRun, last, assessment) && o.runs != nil {
-		if err := o.runs.Update(ctx, currentRun); err != nil {
+	if o.coverageLedger().updateFromAssessment(currentRun, last, assessment, ctx) && o.runs != nil {
+		if err := o.persistRunProgressUpdate(ctx, currentRun); err != nil {
 			return err
 		}
 	}
 	if err := o.resultManager().recordAcceptedSliceResultsFromRun(ctx, currentRun, last); err != nil {
 		return err
 	}
-	if err := o.coverageLedger().validateReadyForAcceptance(currentRun); err != nil {
+	if err := o.coverageLedger().validateReadyForAcceptance(currentRun, ctx); err != nil {
 		return o.handleGraphBatchCompletionGateFailure(ctx, currentRun, last, last.Output, "runtime completion gate failed", err)
 	}
 	if err := o.resultManager().recordCompletionEvidenceFromValidatedDoDAssessment(ctx, currentRun, last, assessment, summary, workspace); err != nil {
@@ -310,8 +310,8 @@ func (o *RuntimeOrchestrator) handleGraphBatchCompletionGateFailure(
 	attachRuntimeFailureDiagnostics(step, classification, execErr)
 	attachContractViolationDiagnostics(run, step, execErr)
 	errText := errorString(execErr)
-	if o.coverageLedger().updateFromFailedStep(run, step, errText) && o.runs != nil {
-		_ = o.runs.Update(ctx, run)
+	if o.coverageLedger().updateFromFailedStep(run, step, errText, ctx) && o.runs != nil {
+		_ = o.persistRunProgressUpdate(ctx, run)
 	}
 	attachCoverageWorkItemFailureDiagnostics(run, step)
 	_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, summary, "", errText)
@@ -1352,7 +1352,7 @@ func inheritConcreteValidationRepairContract(input map[string]any, previousStep 
 	delete(input, "concreteFailureEvidenceRequired")
 	if pkg := mapFromValue(previousStep.Input["repairActionPackage"]); len(pkg) > 0 {
 		next := cloneStepPayload(pkg)
-		required := concreteValidationEvidenceRequiredOutput(mapFromValue(next["requiredOutput"]))
+		required := concreteValidationEvidenceRequiredOutputWithScratch(input, next, mapFromValue(next["requiredOutput"]))
 		next["requiredOutput"] = required
 		next["evidenceRepairRequired"] = true
 		input["repairActionPackage"] = next

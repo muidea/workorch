@@ -870,7 +870,7 @@ func (o *RuntimeOrchestrator) blockOnDuplicateRuntimeFailure(
 	decisionContext := map[string]any{
 		decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
 		decisionContextKeyResultPolicy:   decisionContextResultPolicyRejected,
-		"allowedRecoveryActions":         []string{"replan"},
+		"allowedRecoveryActions":         []string{"replan", "terminate"},
 		"runtimeRepairLoopState":         "duplicate_failure_escalated",
 		"failureClass":                   class,
 		"failureSignature":               signature,

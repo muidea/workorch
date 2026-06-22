@@ -733,6 +733,7 @@ func runExecutionInput(run *runModel.Run, previousStepID common.StepID) map[stri
 		return nil
 	}
 	newCoverageSubsystem().ensure(run)
+	coverageFocus := mapFromValue(run.ExecutionContext[coverageFocusKey])
 	input := map[string]any{
 		"workspaceId":    string(run.WorkspaceID),
 		"previousStepId": string(previousStepID),
@@ -748,15 +749,15 @@ func runExecutionInput(run *runModel.Run, previousStepID common.StepID) map[stri
 	}
 	inheritRuntimeContractSignalsFromExecutionContext(input, run.ExecutionContext)
 	if context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]); len(context) > 0 {
-		input[coverageWorkItemContextKey] = context
+		input[coverageWorkItemContextKey] = coverageWorkItemContextAlignedToFocus(context, coverageFocus)
 	}
 	if baseline := mapFromValue(run.ExecutionContext[gapBaselineKey]); len(baseline) > 0 {
 		input[gapBaselineKey] = baseline
 	}
 	if acceptance := runtimeAcceptanceSignalFromExecutionContext(run.ExecutionContext); len(acceptance) > 0 {
 		input["acceptance"] = acceptance
-		if focus := mapFromValue(run.ExecutionContext[coverageFocusKey]); len(focus) > 0 {
-			input[coverageFocusKey] = focus
+		if len(coverageFocus) > 0 {
+			input[coverageFocusKey] = coverageFocus
 		}
 	}
 	return input
@@ -826,7 +827,7 @@ func slimExecutionContextForStepInput(executionContext map[string]any) map[strin
 		ret["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(value, 6)
 	}
 	if value := mapFromValue(executionContext[coverageWorkItemContextKey]); len(value) > 0 {
-		ret[coverageWorkItemContextKey] = value
+		ret[coverageWorkItemContextKey] = coverageWorkItemContextAlignedToFocus(value, mapFromValue(executionContext[coverageFocusKey]))
 	}
 	if value := mapFromValue(executionContext[gapBaselineKey]); len(value) > 0 {
 		ret[gapBaselineKey] = value

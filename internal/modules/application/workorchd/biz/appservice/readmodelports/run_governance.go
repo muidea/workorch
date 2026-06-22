@@ -35,7 +35,7 @@ func DecisionsForRun(ctx context.Context, tickets readmodelcore.DecisionTicketRe
 		if item == nil || item.RunID != run.ID {
 			continue
 		}
-		resolution := resolved[item.ID]
+		resolution := resolved[decisionResolutionMapKey(item)]
 		summary, err := governancecore.LatestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "ticket", string(item.ID))
 		if err != nil {
 			return RunDecisions{}, err
@@ -68,7 +68,7 @@ func DecisionsForWorkspaceItems(ctx context.Context, resolutions readmodelcore.D
 		if err != nil {
 			return nil, err
 		}
-		ret = append(ret, readmodelprojection.MapDecision(item, resolved[item.ID], summary))
+		ret = append(ret, readmodelprojection.MapDecision(item, resolved[decisionResolutionMapKey(item)], summary))
 	}
 	return ret, nil
 }

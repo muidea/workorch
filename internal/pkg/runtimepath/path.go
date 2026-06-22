@@ -1,12 +1,15 @@
 package runtimepath
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 )
+
+const DefaultMaxSegmentLen = 160
 
 // SafePath returns a readable, filesystem-safe relative path while preserving
 // the structure expressed by "/" or "\" in the source identifier.
@@ -18,13 +21,33 @@ func SafePath(value string) string {
 	return filepath.Join(parts...)
 }
 
+func SafePathWithMax(value string, maxSegmentLen int) string {
+	parts := SafeSegmentsWithMax(value, maxSegmentLen)
+	if len(parts) == 0 {
+		return "empty"
+	}
+	return filepath.Join(parts...)
+}
+
 func SafeSegments(value string) []string {
+	return safeSegments(value, 0)
+}
+
+func SafeSegmentsWithMax(value string, maxSegmentLen int) []string {
+	return safeSegments(value, maxSegmentLen)
+}
+
+func safeSegments(value string, maxSegmentLen int) []string {
 	parts := strings.FieldsFunc(strings.TrimSpace(value), func(r rune) bool {
 		return r == '/' || r == '\\'
 	})
 	cleaned := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if name := SafeSegment(part); name != "" {
+		name := SafeSegment(part)
+		if maxSegmentLen > 0 {
+			name = TruncateSafeSegment(name, maxSegmentLen)
+		}
+		if name != "" {
 			cleaned = append(cleaned, name)
 		}
 	}
@@ -60,6 +83,32 @@ func SafeSegment(value string) string {
 	return ret
 }
 
+func TruncateSafeSegment(segment string, maxLen int) string {
+	if maxLen <= 0 || len(segment) <= maxLen {
+		return segment
+	}
+	sum := sha256.Sum256([]byte(segment))
+	hash := fmt.Sprintf("%x", sum[:])[:16]
+	if maxLen <= len(hash)+1 {
+		return hash[:maxLen]
+	}
+	prefixLen := maxLen - len(hash) - 1
+	if prefixLen < 16 {
+		prefixLen = 16
+	}
+	if prefixLen+len(hash)+1 > maxLen {
+		prefixLen = maxLen - len(hash) - 1
+	}
+	if prefixLen >= len(segment) {
+		return segment
+	}
+	prefix := strings.TrimRight(segment[:prefixLen], ".-")
+	if prefix == "" {
+		prefix = segment[:prefixLen]
+	}
+	return prefix + "-" + hash
+}
+
 // SequenceScopedPath returns "<scope>/<NNN-label>" under scopeRoot.
 //
 // The returned path is relative to scopeRoot and uses an existing matching
@@ -67,7 +116,7 @@ func SafeSegment(value string) string {
 // The sequence is derived by scanning scopeRoot/scopeID, allowing service
 // restarts to continue from the current max sequence.
 func SequenceScopedPath(scopeRoot string, scopeID string, itemID string) string {
-	scopeSafe := SafeSegment(scopeID)
+	scopeSafe := TruncateSafeSegment(SafeSegment(scopeID), DefaultMaxSegmentLen)
 	if scopeSafe == "" {
 		scopeSafe = "scope"
 	}
@@ -84,18 +133,18 @@ func SequenceScopedRoot(scopeRoot string, relativePath string) string {
 }
 
 func sequenceLabel(scopeSafe string, itemID string) string {
-	parts := SafeSegments(itemID)
+	parts := SafeSegmentsWithMax(itemID, DefaultMaxSegmentLen)
 	if len(parts) > 0 && parts[0] == scopeSafe {
 		parts = parts[1:]
 	}
 	if len(parts) == 0 {
 		return "empty"
 	}
-	return SafeSegment(strings.Join(parts, "-"))
+	return TruncateSafeSegment(SafeSegment(strings.Join(parts, "-")), DefaultMaxSegmentLen-len("000-"))
 }
 
 func sequencePrefixedDir(scopeDir string, label string) string {
-	label = SafeSegment(label)
+	label = TruncateSafeSegment(SafeSegment(label), DefaultMaxSegmentLen-len("000-"))
 	if label == "" {
 		label = "empty"
 	}

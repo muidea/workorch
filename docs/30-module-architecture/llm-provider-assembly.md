@@ -49,7 +49,7 @@ Last Updated: 2026-06-08
 - normalized provider context profile
 - request messages / prompt sections
 - contextBudget / request audit metadata
-- output mode selector result / stage-contract projection
+- provider-facing output mode / stage-contract projection
 
 ## Request Rendering Direction
 
@@ -65,26 +65,35 @@ provider-specific 差异应尽量限制在 adapter 内，不扩散到上层 flow
 
 ## Output Mode Selector Landing
 
-当 runtime 进入 `need_state_change` 且存在大输出风险时，本层必须承接
-`selectOutputMode` 的 provider-facing 组装责任。
+当 runtime 进入 `need_state_change` 且存在大输出风险时，output mode 采用
+orchestrator 选择 + LLM block provider-facing 渲染的双落点合同。
 
-本层至少负责：
+orchestrator 至少负责：
 
-- 根据中立阈值和当前上下文决定 `executionGraph` 或 `incrementalArtifact`
-- 在 request-side stage contract 中投影：
+- 基于 runtime policy、continuation state、上下文预算和中立阈值选择
+  `executionGraph` 或 `incrementalArtifact`
+- 将选择结果写入 step input / stage contract：
   - `outputMode`
   - `requestedOutputMode`
   - `outputModeSelector.reason`
   - `outputModeSelector.priority`
   - `artifactOutputContract`
   - `artifactContinuationContext`
-- 当 active continuation 存在时，恢复 continuation 相关 request-side metadata
+- 当 active continuation 存在时，恢复 continuation 相关 stage metadata
+
+LLM provider assembly 至少负责：
+
+- 读取 orchestrator 已投影的 output mode / stage contract
+- 按 mode 生成互斥的 provider-facing prompt sections 和 response schema
+- 将 mode、selector、artifact phase、continuation metadata 写入 request audit
+- 对 mode-specific protected fields 执行 context budget / cache 分层校验
 
 约束：
 
 - selector 只能选择输出承载模式，不能改写 `ConvergenceContract.State`
 - selector 只能使用中立信号，不能依赖业务类型、语言、框架、文件名或 deliverable 文本
 - selector 结果必须进入 LLM-facing stage contract，不能只保留在 runtime internal executionContext
+- LLM block 不得重新选择 output mode；发现 stage contract 缺失或互斥字段冲突时，应记录 request assembly defect / contract violation
 
 ## Mode-Specific Request Assembly
 

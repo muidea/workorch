@@ -123,6 +123,14 @@ func (r staticRunRepository) Get(_ context.Context, runID common.RunID) (*runmod
 	return item, nil
 }
 
+func (r staticRunRepository) GetByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID, runID common.RunID) (*runmodel.Run, error) {
+	item, ok := r[runID]
+	if !ok || item.WorkspaceID != workspaceID {
+		return nil, common.ErrNotFound
+	}
+	return item, nil
+}
+
 func (r staticRunRepository) List(context.Context) ([]*runmodel.Run, error) {
 	return nil, nil
 }
@@ -265,6 +273,10 @@ func (r *countingRunRepository) Create(ctx context.Context, item *runmodel.Run) 
 func (r *countingRunRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
 	r.getCalls++
 	return r.base.Get(ctx, id)
+}
+
+func (r *countingRunRepository) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	return r.base.GetByWorkspaceID(ctx, workspaceID, id)
 }
 
 func (r *countingRunRepository) List(ctx context.Context) ([]*runmodel.Run, error) {

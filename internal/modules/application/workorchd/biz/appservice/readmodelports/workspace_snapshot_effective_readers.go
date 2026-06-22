@@ -20,6 +20,9 @@ func effectiveWorkspaceRunSnapshotReaders(readers WorkspaceSnapshotReaders) RunS
 	if ret.ArtifactContinuations == nil {
 		ret.ArtifactContinuations = readers.ArtifactContinuations
 	}
+	if ret.CoverageWorkItems == nil {
+		ret.CoverageWorkItems = readers.CoverageWorkItems
+	}
 	if ret.EventRecords == nil {
 		ret.EventRecords = readers.EventRecords
 	}

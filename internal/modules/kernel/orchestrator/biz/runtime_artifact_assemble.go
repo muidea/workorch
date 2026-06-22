@@ -863,8 +863,8 @@ func (o *RuntimeOrchestrator) completeInternalArtifactContinuationStep(
 	if err := o.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}
-	if o.coverageLedger().updateFromCompletedStep(run, step) && o.runs != nil {
-		if err := o.runs.Update(ctx, run); err != nil {
+	if o.coverageLedger().updateFromCompletedStep(run, step, ctx) && o.runs != nil {
+		if err := o.persistRunProgressUpdate(ctx, run); err != nil {
 			return err
 		}
 	}

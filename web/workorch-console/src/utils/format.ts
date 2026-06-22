@@ -72,7 +72,8 @@ export function getStateColor(state?: string): string {
     blocked_on_decision: 'warning',
     blocked_on_approval: 'warning',
     waiting_decision: 'warning',
-    waiting_approval: 'warning'
+    waiting_approval: 'warning',
+    stalled: 'red'
   };
   return colorMap[state || ''] || 'default';
 }

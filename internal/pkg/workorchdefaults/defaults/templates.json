@@ -163,7 +163,10 @@
           "mcp-lsp-bridge:tool:lsp_definition",
           "mcp-lsp-bridge:tool:lsp_hover",
           "mcp-lsp-bridge:tool:lsp_references",
-          "mcp-lsp-bridge:tool:lsp_diagnostics"
+          "mcp-lsp-bridge:tool:lsp_diagnostics",
+          "mcp-lsp-bridge:tool:lsp_status",
+          "mcp-lsp-bridge:tool:lsp_shutdown",
+          "mcp-lsp-bridge:tool:lsp_repair"
         ],
         "notes": [
           "semantic navigation is optional and must not replace build/test/lint or direct DoD evidence",
@@ -193,7 +196,10 @@
             "lsp_definition",
             "lsp_hover",
             "lsp_references",
-            "lsp_diagnostics"
+            "lsp_diagnostics",
+            "lsp_status",
+            "lsp_shutdown",
+            "lsp_repair"
           ],
           "requiredAfterKinds": ["patch/apply"],
           "fallbackPolicy": "fallback_to_file_read_and_build_output_without_blocking",

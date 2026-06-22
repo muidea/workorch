@@ -21,7 +21,10 @@ func (o *RuntimeOrchestrator) ensureGapBaselineBeforeDispatch(ctx context.Contex
 	if run.ExecutionContext == nil {
 		run.ExecutionContext = map[string]any{}
 	}
-	changed := o.ensureCoverageLedger(ctx, run)
+	changed, err := o.ensureCoverageLedger(ctx, run)
+	if err != nil {
+		return err
+	}
 	baseline := gapBaselineFromRun(run)
 	current := mapFromValue(run.ExecutionContext[gapBaselineKey])
 	switch {
@@ -35,7 +38,7 @@ func (o *RuntimeOrchestrator) ensureGapBaselineBeforeDispatch(ctx context.Contex
 		changed = true
 	}
 	if changed && o.runs != nil {
-		return o.runs.Update(ctx, run)
+		return o.persistRunProgressUpdate(ctx, run)
 	}
 	return nil
 }

@@ -2,10 +2,9 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
-func llmContextBudgetTraceFromStep(step presenter.StepView, budget map[string]any, usage map[string]any) readmodelcore.LLMContextBudgetTrace {
+func llmContextBudgetTraceFromStep(step StepView, budget map[string]any, usage map[string]any) readmodelcore.LLMContextBudgetTrace {
 	return readmodelcore.LLMContextBudgetTrace{
 		StepID:                step.ID,
 		ProviderID:            llmContextBudgetProviderID(budget, usage),

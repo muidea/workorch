@@ -220,7 +220,7 @@ RunState(running)
   -> selectOutputMode(...) = executionGraph | incrementalArtifact
   -> LLM output / graph / artifact continuation
   -> Validate / governance / next Dispatch
-  -> RunState(completed | blocked_on_decision | blocked_on_approval | failed)
+  -> RunState(completed | failed | cancelled | superseded | blocked_on_decision | blocked_on_approval)
 ```
 
 禁止反向污染：
@@ -391,7 +391,7 @@ created
   -> execution
   -> verification
   -> acceptance
-  -> completed | failed | blocked_on_decision
+  -> completed | failed | cancelled | superseded | blocked_on_decision
 ```
 
 ### 恢复路径
@@ -416,6 +416,8 @@ repair exhausted | plan invalid | repeated failure
 | `verification` | `acceptance` | 已有可引用 evidence，且覆盖目标可判定 |
 | `acceptance` | `completed` | accepted result，Goal / DoD coverage 完整 |
 | `acceptance` | `failed` | rejected result，缺口不可自动修复或预算耗尽 |
+| 任意非终态 Run | `cancelled` | 显式 cancel command 收口；终态不可逆 |
+| 任意非终态 Run | `superseded` | replan successor 或显式 supersede 收口；旧 run 进入历史 lineage |
 | 任意阶段 | `blocked_on_decision` | 需要人工信息、审批、provider/config 修复或外部依赖 |
 | `repair` | 原阶段 | 修复输出满足原阶段 contract |
 | `repair` | `replan` | 同一 failure scope 重复失败或 repair budget exhausted |

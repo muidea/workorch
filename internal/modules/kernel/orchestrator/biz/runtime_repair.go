@@ -63,6 +63,7 @@ const (
 	contractViolationDoDAssessmentEvidenceMissing   = "dod_assessment_missing_evidence_refs"
 	contractViolationCoverageMapIncomplete          = "coverage_map_incomplete"
 	contractViolationAssessmentOnlyExecutableOutput = "assessment_only_executable_output"
+	contractViolationAvailableSnapshotIgnored       = "available_snapshot_ignored"
 )
 
 func runtimeFailureOutput(output map[string]any, execErr error) map[string]any {
@@ -151,11 +152,11 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 	_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, summary, evidenceRef, errText)
 	_ = o.checkpointManager().recordStepCheckpoint(ctx, run, step, "step_failed")
 	_ = o.eventPublisher().publishContractViolationRecorded(ctx, run, step)
-	if o.coverageLedger().updateFromFailedStep(run, step, errText) && o.runs != nil {
-		_ = o.runs.Update(ctx, run)
+	if o.coverageLedger().updateFromFailedStep(run, step, errText, ctx) && o.runs != nil {
+		_ = o.persistRunProgressUpdate(ctx, run)
 	}
 	if changed, bound := o.reconcileCoverageValidationEvidence(ctx, run); changed && o.runs != nil {
-		_ = o.runs.Update(ctx, run)
+		_ = o.persistRunProgressUpdate(ctx, run)
 		logCoverageReconcilerBinding(run.ID, bound)
 	}
 	_ = o.steps.Update(ctx, step)
@@ -598,6 +599,8 @@ func runtimeRecoveryActionForFailedStep(ctx context.Context, repair *repairSubsy
 	return repair.recoveryActionForFailedStep(ctx, run, failedStep, policy, runtimeAvailable, canCreateDecisionTicket)
 }
 
+// blockRecoveryActionFromFailedStep first lets the executor persist the selected
+// blocker state, then returns ErrBlocked as the dispatch-loop stop signal.
 func (r *repairSubsystem) blockRecoveryActionFromFailedStep(
 	ctx context.Context,
 	run *runModel.Run,
@@ -734,10 +737,12 @@ func (o *RuntimeOrchestrator) blockOnContractViolationRecoveryExhaustion(
 	runAttempts := contractViolationRunRetryCount(ctx, o.repairManager(), run.ID)
 	signatureRepeats := contractViolationSignatureRepeatCount(ctx, o.repairManager(), run.ID, failedStep)
 	violation := contractViolationFromFailedOutput(failedStep)
+	correction := contractViolationEscalationCorrectionContext(failedStep, violation)
+	violation = contractViolationWithEscalationCorrection(violation, correction)
 	context := map[string]any{
 		decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
 		decisionContextKeyResultPolicy:   decisionContextResultPolicyRejected,
-		"allowedRecoveryActions":         []string{"replan"},
+		"allowedRecoveryActions":         []string{"replan", "terminate"},
 		"runtimeRepairLoopState":         "contract_violation_recovery_exhausted",
 		"failedStepId":                   string(failedStep.ID),
 		"failedStepKind":                 failedStep.Kind,
@@ -750,6 +755,10 @@ func (o *RuntimeOrchestrator) blockOnContractViolationRecoveryExhaustion(
 		"maxRetriesPerRun":               policy.MaxContractViolationRetriesPerRun,
 		"maxRepeatedViolationSignature":  policy.MaxRepeatedContractViolationSignature,
 		"contractViolation":              violation,
+		"correctionProfileId":            stringFromMap(correction, "correctionProfileId"),
+		"correctionMode":                 stringFromMap(correction, "correctionMode"),
+		"correctionTargetScope":          stringFromMap(correction, "targetScope"),
+		"correctionContract":             mapFromValue(correction["correctionContract"]),
 		"failedStepInput":                o.llmContextManager().compactStepInput(failedStep.Input),
 		"failedStepOutput":               o.llmContextManager().compactStepOutput(failedStep.Output),
 	}
@@ -773,6 +782,45 @@ func (o *RuntimeOrchestrator) blockOnContractViolationRecoveryExhaustion(
 		return err
 	}
 	return o.eventPublisher().publishContractViolationEscalated(ctx, run, failedStep, spec.TicketID, violation, context)
+}
+
+func contractViolationEscalationCorrectionContext(failedStep *runModel.Step, violation map[string]any) map[string]any {
+	if failedStep == nil {
+		return nil
+	}
+	recovery := mapFromValue(failedStep.Input[stepInputKeyContractViolationRecovery])
+	if len(recovery) == 0 {
+		recovery = violation
+	}
+	if len(recovery) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{"correctionProfileId", "correctionMode", "targetScope"} {
+		if value := strings.TrimSpace(stringFromMap(recovery, key)); value != "" {
+			ret[key] = value
+		}
+	}
+	if contract := mapFromValue(recovery["correctionContract"]); len(contract) > 0 {
+		ret["correctionContract"] = contract
+	}
+	return ret
+}
+
+func contractViolationWithEscalationCorrection(violation map[string]any, correction map[string]any) map[string]any {
+	if len(violation) == 0 || len(correction) == 0 {
+		return violation
+	}
+	ret := cloneStepPayload(violation)
+	for _, key := range []string{"correctionProfileId", "correctionMode", "targetScope"} {
+		if value := strings.TrimSpace(stringFromMap(correction, key)); value != "" {
+			ret[key] = value
+		}
+	}
+	if contract := mapFromValue(correction["correctionContract"]); len(contract) > 0 {
+		ret["correctionContract"] = contract
+	}
+	return ret
 }
 
 func localizedContractViolationRecoveryExhaustedReason(language string, violation map[string]any) string {
@@ -1153,7 +1201,8 @@ func (o *RuntimeOrchestrator) blockOnContextIntegrityGate(
 			decisionContextKeyDependency:     decisionContextDependencyContextGate,
 			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyContext,
 			decisionContextKeyResultPolicy:   decisionContextResultPolicyNone,
-			"allowedRecoveryActions":         []string{"provide_information", "replan", "terminate"},
+			"allowedRecoveryActions":         contextGateAllowedRecoveryActions(gateAction),
+			"recommendedRecoveryAction":      contextGateRecommendedRecoveryAction(gateAction),
 			"contextGateAction":              gateAction,
 			"contextGateReason":              gateReason,
 			"failureClass":                   stringFromMap(failedStep.Output, failureOutputKeyClass),
@@ -1170,6 +1219,36 @@ func (o *RuntimeOrchestrator) blockOnContextIntegrityGate(
 		return err
 	}
 	return o.blockOnDecisionAtStep(ctx, run, nil, ticketID, failedStep.ID)
+}
+
+func contextGateAllowedRecoveryActions(action string) []string {
+	switch strings.TrimSpace(action) {
+	case "read_required":
+		return []string{"provide_information", "retry_context", "terminate"}
+	case "degrade_to_assessment":
+		return []string{"degrade_to_assessment", "replan", "terminate"}
+	case "blocker_required":
+		return []string{"provide_information", "replan", "terminate"}
+	case "replan_required":
+		return []string{"replan", "provide_information", "terminate"}
+	case "fail_fast":
+		return []string{"terminate", "replan"}
+	default:
+		return []string{"provide_information", "replan", "terminate"}
+	}
+}
+
+func contextGateRecommendedRecoveryAction(action string) string {
+	switch strings.TrimSpace(action) {
+	case "read_required",
+		"degrade_to_assessment",
+		"blocker_required",
+		"replan_required",
+		"fail_fast":
+		return strings.TrimSpace(action)
+	default:
+		return "provide_information"
+	}
 }
 
 func (o *RuntimeOrchestrator) createOrReuseRuntimeBlockerTicket(

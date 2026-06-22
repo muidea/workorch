@@ -48,12 +48,20 @@
 
 | # | 偏差描述 | 风险 | 建议 |
 |---|---------|------|------|
-| 1 | `dispatchStep` 缺少 rejected result 前置拦截 — `nextDispatchSpecs` 和 `dispatchRuntimeRepairFollowUp` 都检查了，但 `dispatchStep` 本身没有防御性检查 | 低（内部路径已覆盖） | 在 `dispatchStep` 入口增加 rejected result 短路检查 |
-| 2 | `created` 状态未显式拦截直接 result 写入 — 实际不会发生（result 由 step completion 触发） | 极低 | 可选：在 result 写入 API 增加 run state 校验 |
-| 3 | Planning repair 依赖 error message 字符串匹配 — `stateChangingRepairRequired` 通过匹配 "implementation planning llm step returned read-only executiongraph" 触发 | 中（脆弱） | 改用结构化标记（如 output 中增加 `contractViolationType` 字段） |
-| 4 | `dod_coverage_missing` 在 assessment-only step 中仍可进入 repair — 文档要求"不得继续 assessment-only graph"，但代码未显式编码 | 低 | 在 `shouldAttemptRuntimeRepair` 中增加 assessment-only + dod_coverage_missing 的排除条件 |
-| 5 | `cancelled` 终态在文档状态机表中未独立列出 — 代码正确实现了 `CancelRun` | 无（文档遗漏） | 补充文档 |
+| 1 | `dispatchStep` 缺少 rejected result 前置拦截 — `nextDispatchSpecs` 和 `dispatchRuntimeRepairFollowUp` 都检查了，但 `dispatchStep` 本身没有防御性检查 | 已闭环 | `dispatchStepWithWorkspace` 已在入口拦截 active rejected result 并阻止继续派发 |
+| 2 | `created` 状态未显式拦截直接 result 写入 — 实际不会发生（result 由 step completion 触发） | 已闭环 | 正式 Result 记录由 orchestrator 统一持有 run-state gate；result owner 保持状态无关的 Result 持久化职责 |
+| 3 | Planning repair 依赖 error message 字符串匹配 — `stateChangingRepairRequired` 通过匹配 "implementation planning llm step returned read-only executiongraph" 触发 | 已闭环 | 当前实现优先消费结构化 `contractViolationType`；字符串匹配仅保留为旧错误形态兜底 |
+| 4 | `dod_coverage_missing` 在 assessment-only step 中仍可进入 repair — 文档要求"不得继续 assessment-only graph"，但代码未显式编码 | 已闭环 | 重复 assessment-only coverage miss 会清理 assessment-only 标记并转入 concrete validation evidence repair |
+| 5 | `cancelled` 终态在文档状态机表中未独立列出 — 代码正确实现了 `CancelRun` | 已闭环 | `runtime-stage-contract.md` 已列出 `cancelled` 终态、active-run 清理与 workspace 终态映射规则 |
 | 6 | `DispatchNextStep` 的 block 行为路径不够直观 — `blockRecoveryActionFromFailedStep` 在返回 error 前已变更 run 状态，功能正确但可读性差 | 无 | 可选：增加注释说明副作用 |
+
+### 2.2.1 2026-06-22 闭环复核
+
+- 偏差 #1 已由 `dispatchStepWithWorkspace` 的 rejected-result 前置门禁覆盖；`TestRuntimeOrchestrator_DispatchStepRejectsActiveRejectedResult` 证明存在 active rejected result 时不会派发新 step。
+- 偏差 #2 不应通过 result module 直接依赖 run repository 收口。按当前 EventHub owner 边界，正式 Result 只能由 orchestrator 的 result subsystem 记录，且 `ensureRunCanRecordFormalResult` 在所有正式 accepted/rejected Result 记录路径前拦截 `created` run。`TestRuntimeOrchestrator_DoesNotRecordCompletionEvidenceForCreatedRun` 覆盖 created-run result gate，`TestRuntimeOrchestrator_CompleteRunRejectsNonRunningState` 覆盖非 running complete gate。生产搜索确认 `TopicResultCommandCreate` 只由 orchestrator result event adapter 发布；直接 repository 写入只存在测试 fixture。
+- 偏差 #3 已由 `attachContractViolationType` / `contractViolationTypeFromFailure` / `contractViolationRequiresStateChangingRepair` 形成结构化合同违例路径。`stateChangingRepairRequired` 仍保留错误文本兜底，以兼容旧 checkpoint / 旧 step output 的诊断恢复，但主路径不再依赖单一 error message。
+- 偏差 #4 已由 coverage repair input 收口。`TestRuntimeOrchestrator_RuntimeRepairInputStopsAssessmentOnlyAfterCoverageCorrectionStillMissing` 证明 repeated `dod_coverage_missing` 不会继续 assessment-only，而是转为 bounded concrete validation evidence repair。
+- 偏差 #5 已由 `runtime-stage-contract.md` 收口。权威合同已列出 `completed` / `failed` / `cancelled` / `superseded` 为终态，并要求 workspace `ActiveRunID` 只能指向同 workspace 下的非终态 run。
 
 ### 2.3 实现中存在但文档未覆盖的行为（10 条）
 

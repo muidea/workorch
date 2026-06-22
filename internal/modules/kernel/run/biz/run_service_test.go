@@ -21,8 +21,9 @@ import (
 )
 
 type countingRunRepository struct {
-	base     *memory.RunRepository
-	getCalls atomic.Int32
+	base                  *memory.RunRepository
+	getCalls              atomic.Int32
+	getByWorkspaceIDCalls atomic.Int32
 }
 
 func newCountingRunRepository() *countingRunRepository {
@@ -36,6 +37,11 @@ func (r *countingRunRepository) Create(ctx context.Context, item *runmodel.Run) 
 func (r *countingRunRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
 	r.getCalls.Add(1)
 	return r.base.Get(ctx, id)
+}
+
+func (r *countingRunRepository) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	r.getByWorkspaceIDCalls.Add(1)
+	return r.base.GetByWorkspaceID(ctx, workspaceID, id)
 }
 
 func (r *countingRunRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
@@ -238,8 +244,15 @@ func TestService_EnsureRun_IsIdempotentAndRejectsSemanticMismatch(t *testing.T) 
 	if err := service.EnsureRun(ctx, runservice.CreateRunCommand{
 		RunID:       cmd.RunID,
 		WorkspaceID: otherWorkspaceID,
-	}); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("workspace mismatch err = %v, want conflict", err)
+	}); err != nil {
+		t.Fatalf("same run id in other workspace should create scoped run: %v", err)
+	}
+	otherRun, err := runRepo.GetByWorkspaceID(ctx, otherWorkspaceID, cmd.RunID)
+	if err != nil {
+		t.Fatalf("get same run id in other workspace: %v", err)
+	}
+	if otherRun.WorkspaceID != otherWorkspaceID {
+		t.Fatalf("other workspace run = %+v, want workspace %s", otherRun, otherWorkspaceID)
 	}
 	if err := service.EnsureRun(ctx, runservice.CreateRunCommand{
 		RunID:       cmd.RunID,
@@ -821,6 +834,57 @@ func TestService_CompleteRun_WithoutOrchestrator(t *testing.T) {
 	}
 }
 
+func TestService_RunStateMutationUsesScopedGetterWhenWorkspaceContextExists(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-scoped-run-mutation")
+	runID := common.RunID("run-scoped-run-mutation")
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := newCountingRunRepository()
+	service := NewService(runRepo, workspaceRepo, nil, nil)
+
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	if err := service.CompleteRun(scopedCtx, runservice.CompleteRunCommand{RunID: runID}); err != nil {
+		t.Fatalf("complete scoped run: %v", err)
+	}
+	if runRepo.getCalls.Load() != 0 {
+		t.Fatalf("global Get calls = %d, want 0 for workspace-scoped mutation", runRepo.getCalls.Load())
+	}
+	if runRepo.getByWorkspaceIDCalls.Load() != 1 {
+		t.Fatalf("GetByWorkspaceID calls = %d, want 1", runRepo.getByWorkspaceIDCalls.Load())
+	}
+}
+
+func TestService_PublishesRunNotificationsThroughAsyncHub(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	hub := &recordingRunAsyncHub{}
+	service := NewService(runRepo, workspaceRepo, nil, hub)
+
+	workspaceID := common.WorkspaceID("ws-async-run")
+	runID := common.RunID("run-async")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := service.CreateRun(ctx, runservice.CreateRunCommand{RunID: runID, WorkspaceID: workspaceID}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if hub.syncPublishes != 0 || hub.asyncPublishes != 1 {
+		t.Fatalf("publish counts = sync:%d async:%d, want async run notification", hub.syncPublishes, hub.asyncPublishes)
+	}
+	if len(hub.published) != 1 || hub.published[0].Topic != runevents.TopicRunCreated {
+		t.Fatalf("published = %+v, want run created notification", hub.published)
+	}
+}
+
 func TestService_CompleteRunAndFailRun_ValidateArguments(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(memory.NewRunRepository(), memory.NewWorkspaceRepository(), nil, nil)
@@ -1000,4 +1064,26 @@ func (s *serviceRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, _ runtimem
 		return runtimemodel.StepExecutionResult{}, s.err
 	}
 	return runtimemodel.StepExecutionResult{Output: s.output}, nil
+}
+
+type recordingRunAsyncHub struct {
+	syncPublishes  int
+	asyncPublishes int
+	published      []events.Envelope
+}
+
+func (h *recordingRunAsyncHub) Publish(_ context.Context, envelope events.Envelope) error {
+	h.syncPublishes++
+	h.published = append(h.published, envelope)
+	return nil
+}
+
+func (h *recordingRunAsyncHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
+	h.asyncPublishes++
+	h.published = append(h.published, envelope)
+	return nil
+}
+
+func (h *recordingRunAsyncHub) Subscribe(string, events.Handler) func() {
+	return func() {}
 }

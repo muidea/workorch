@@ -1,10 +1,8 @@
 package readmodelprojection
 
-import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
-)
+import ()
 
-func referencedSnapshotStepIDs(steps []presenter.StepView) map[string]bool {
+func referencedSnapshotStepIDs(steps []StepView) map[string]bool {
 	ret := map[string]bool{}
 	for _, step := range steps {
 		if previous := PreviousStepIDSnapshot(step); previous != "" {

@@ -88,6 +88,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if candidates := mapSliceFromValue(input["rootCauseCandidateContext"]); len(candidates) > 0 {
 		pkg["rootCauseCandidateContext"] = compactLLMContextValue(candidates, 1)
 		requiredOutput["rootCauseCandidateRule"] = "a grounded rootCauseCandidateContext target may be patched when the patch declares relatedFailureTargets for the failed surface or the candidate is included in repairTargetSet"
+		applyGroundedRootCauseCandidateRepairMode(input, pkg, requiredOutput, candidates)
 		if len(mapSliceFromValue(pkg["targetSnapshots"])) == 0 {
 			if promoted := repairActionPromotableRootCauseCandidateTargetSnapshots(candidates); len(promoted) > 0 {
 				pkg["targetSnapshots"] = promoted
@@ -115,6 +116,8 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		requiredOutput["coverageTargetMatchRule"] = "patch/apply coverageTargets must match one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
 	}
 	if context := coverageWorkItemContextFromInput(input); len(context) > 0 {
+		context = coverageWorkItemContextAlignedToFocus(context, repairCoverageFocusFromInput(input))
+		input[coverageWorkItemContextKey] = context
 		pkg[coverageWorkItemContextKey] = context
 	}
 	applyRepairCoverageFocusContract(input, pkg, requiredOutput)
@@ -215,7 +218,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		pkg["shapeContractEvidenceRequired"] = shapeContract
 		pkg["evidenceAcquisitionRequired"] = true
 		pkg["evidenceAcquisitionReason"] = "repeated_shape_or_contract_diagnostic_without_independent_shape_evidence"
-		next := evidenceAcquisitionRequiredOutput(requiredOutput)
+		next := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, requiredOutput)
 		next["mustAcquireShapeContractEvidence"] = true
 		next["mustNotGuessContractShape"] = true
 		next["shapeContractEvidenceRule"] = "before any next patch, acquire bounded evidence for the current resource or dependency contract shape using acceptedKinds; do not invent fields, methods, schemas, constructors, or callable signatures from diagnostics alone"
@@ -232,6 +235,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		}
 	}
 	applyConcreteRepairEvidenceOutputContract(input, pkg, requiredOutput)
+	ensureConcreteValidationScratchContract(input, pkg, requiredOutput)
 	addStrategyReassessmentRequiredOutputContract(pkg, requiredOutput)
 	if contract := repairActionOutputDecisionContract(input, pkg, requiredOutput, rawFailedOutput...); len(contract) > 0 {
 		pkg["outputDecisionContract"] = contract
@@ -240,6 +244,107 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		return nil
 	}
 	return pkg
+}
+
+func applyGroundedRootCauseCandidateRepairMode(input map[string]any, pkg map[string]any, requiredOutput map[string]any, candidates []map[string]any) {
+	if len(input) == 0 || len(pkg) == 0 || len(requiredOutput) == 0 || len(candidates) == 0 {
+		return
+	}
+	reassessment := mapFromValue(input["strategyReassessment"])
+	if len(reassessment) == 0 {
+		reassessment = repairStrategyReassessmentFromInput(input)
+	}
+	if !strategyReassessmentRequiresRootCauseTargetShift(reassessment) {
+		return
+	}
+	if !boolValue(input["stateChangingOutputRequired"]) && strings.TrimSpace(stringFromMap(input, "repairObjective")) != repairObjectiveStateChangingOutput {
+		return
+	}
+	failedSurfaceRefs := strategySurfaceTargetRefs(firstNonEmptyString(
+		strings.TrimSpace(stringFromMap(reassessment, "failedSurface")),
+		strings.TrimSpace(stringFromMap(input, "failureTargetScope")),
+	))
+	if !rootCauseCandidatesContainDistinctTarget(candidates, failedSurfaceRefs) {
+		return
+	}
+	next := cloneStepPayload(reassessment)
+	if len(next) == 0 {
+		return
+	}
+	next["allowedRepairModes"] = []string{strategyRepairModeShiftRootCauseTarget}
+	next["requiredRepairMode"] = strategyRepairModeShiftRootCauseTarget
+	next["forbiddenRepairModes"] = []string{strategyRepairModeContinueSameTarget}
+	next["modePolicy"] = "grounded_root_cause_candidate_required"
+	next["modePolicyReason"] = "repeated failed-surface repair has grounded distinct root-cause candidates; continuing the same surface would risk non-convergent auxiliary repair"
+	input["strategyReassessment"] = next
+	pkg["strategyReassessment"] = next
+	requiredOutput["strategyReassessmentRepairModes"] = []string{strategyRepairModeShiftRootCauseTarget}
+	requiredOutput["mustShiftRootCauseTarget"] = true
+	requiredOutput["sameTargetContinuationRule"] = "repairMode=continue_same_target_repair is forbidden when strategyReassessment.allowedRepairModes only permits shift_root_cause_target"
+	requiredOutput["rootCauseTargetShiftRule"] = "repairMode=shift_root_cause_target must patch a distinct grounded root-cause candidate target or return a real governance blocker"
+}
+
+func rootCauseCandidatesContainDistinctTarget(candidates []map[string]any, failedSurfaceRefs []string) bool {
+	for _, candidate := range candidates {
+		targetRef := normalizeRepairPatchTargetRef(strings.TrimSpace(stringFromMap(candidate, "targetRef")))
+		if targetRef == "" {
+			continue
+		}
+		if len(failedSurfaceRefs) == 0 || !repairPatchTargetRefMatches(targetRef, failedSurfaceRefs) {
+			return true
+		}
+	}
+	return false
+}
+
+func ensureAvailableTargetSnapshotsForStateChangingRepair(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	if !inputNeedsAvailableTargetSnapshotContract(input, required) {
+		return
+	}
+	targets := repairActionTargetSnapshots(input)
+	if len(targets) == 0 {
+		targets = mapSliceFromValue(pkg["targetSnapshots"])
+	}
+	if len(targets) == 0 {
+		return
+	}
+	metadata := repairActionTargetSnapshotMetadata(targets)
+	if len(metadata) > 0 {
+		input["availableTargetSnapshots"] = metadata
+	}
+	if len(pkg) == 0 {
+		return
+	}
+	merged := mergeRepairTargetSnapshots(mapSliceFromValue(pkg["targetSnapshots"]), targets)
+	if len(merged) == 0 {
+		return
+	}
+	pkg["targetSnapshots"] = merged
+	pkg["currentTargetSnapshots"] = repairActionTargetSnapshotMetadata(merged)
+	if len(required) == 0 {
+		required = stateChangingRepairRequiredOutput()
+	}
+	required["mustTargetFailureScope"] = true
+	required["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
+	applyCurrentSnapshotDirectPatchContract(required)
+	pkg["requiredOutput"] = required
+	input["repairActionPackage"] = pkg
+}
+
+func inputNeedsAvailableTargetSnapshotContract(input map[string]any, required map[string]any) bool {
+	if boolValue(input["stateChangingOutputRequired"]) ||
+		stringFromMap(input, "repairObjective") == repairObjectiveStateChangingOutput ||
+		boolValue(required["mustIncludeStateChangingNode"]) ||
+		boolValue(required["mustReturnPatchApplyNode"]) ||
+		boolValue(required["mustUseCurrentTargetSnapshot"]) {
+		return true
+	}
+	return false
 }
 
 func anchorRepairInputToPrimaryActionableFailure(input map[string]any, rawFailedOutput ...map[string]any) {
@@ -595,6 +700,8 @@ func evidenceAcquisitionRequiredOutput(existing map[string]any) map[string]any {
 	out["stateChangingForbidden"] = true
 	out["nestedLLMForbidden"] = true
 	out["patchForbiddenUntilConcreteTargetEvidence"] = true
+	out["deliverableWriteForbidden"] = true
+	out["scratchOnlyForGeneratedFixtures"] = true
 	out["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(existing["forbiddenKinds"]),
 		"patch/apply",
 		"patch/preview",
@@ -605,7 +712,17 @@ func evidenceAcquisitionRequiredOutput(existing map[string]any) map[string]any {
 		"observability_only_graph",
 	))
 	out["evidenceAcquisitionRule"] = "bounded evidence acquisition is required because no concrete state-changing repair target evidence is available; every executionGraph node kind must be in acceptedKinds and must not include patch/apply, patch/preview, or llm/workspace_execution"
+	out["deliverableWriteRule"] = "evidence acquisition shell/command or mcp/tool_call nodes must not create, modify, delete, or initialize workspace deliverable files; any workspace deliverable state change requires a state-changing repair contract and patch/apply or another explicitly accepted state-changing kind"
+	out["scratchFixtureRule"] = "generated fixtures, temporary configs, probes, or controlled substitutes used only to acquire evidence must be written under validationScratchDir; workspace deliverable tree writes remain forbidden"
 	return out
+}
+
+func evidenceAcquisitionRequiredOutputWithScratch(input map[string]any, pkg map[string]any, existing map[string]any) map[string]any {
+	required := evidenceAcquisitionRequiredOutput(existing)
+	if boolValue(required["mustProduceConcreteFailureEvidence"]) {
+		ensureValidationScratchContract(input, pkg, required)
+	}
+	return required
 }
 
 func evidenceAcquisitionAcceptedKinds() []string {
@@ -639,10 +756,10 @@ func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[strin
 		"file_mutating_shell_validation",
 	))
 	out["validationEvidenceRule"] = "bounded validation evidence is required for unresolved Goal/DoD/deliverable coverage; patch/apply is only valid after separate concrete implementation target evidence appears"
-	out["controlledSubstituteRule"] = "when a dependency or environment prerequisite is unavailable, first try a neutral local fixture, mock/stub, temporary config, isolated working directory, or alternate available port through accepted validation tools; static inspection alone does not close runtime-behavior coverage"
+	out["controlledSubstituteRule"] = "when a dependency or environment prerequisite is unavailable, first try a neutral local fixture, mock/stub, temporary config, isolated working directory, or alternate available port through accepted validation tools; all controlled-substitute writes must stay under validationScratchDir; static inspection alone does not close runtime-behavior coverage"
 	out["validationEvidenceModeRule"] = "each shell/command or mcp/tool_call node intended to close runtime-behavior coverage must declare input.validationEvidence.mode as runtime_behavior, controlled_substitute, executable_contract, or dynamic_execution; static_inspection/source_inspection metadata cannot close runtime-behavior coverage"
 	out["validationEvidenceObservationRule"] = "each concrete validation node must also declare input.validationEvidence.observationType as runtime_observation, controlled_substitute_observation, executable_contract_observation, or dynamic_execution_observation; controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute"
-	out["nonDestructiveBoundedShellRule"] = "shell/command validation nodes must not mutate workspace files, use nohup, setsid, background '&' service launches, kill/pkill/killall/fuser -k, or approval requests for process termination; use read-only bounded foreground commands, timeout-controlled harnesses, or controlled substitutes whose writes are confined to an isolated temporary directory"
+	out["nonDestructiveBoundedShellRule"] = "shell/command validation nodes must not mutate workspace files, write outside validationScratchDir, use nohup, setsid, background '&' service launches, kill/pkill/killall/fuser -k, or approval requests for process termination; use read-only bounded foreground commands, timeout-controlled harnesses, or controlled substitutes whose writes are confined to validationScratchDir"
 	out["validationEvidenceNodeExample"] = map[string]any{
 		"id":   "verify_behavior",
 		"kind": "shell/command",
@@ -682,7 +799,7 @@ func applyConcreteRepairEvidenceOutputContract(input map[string]any, pkg map[str
 		requiredOutput["acceptedKinds"] = acceptedKinds
 		return
 	}
-	next := evidenceAcquisitionRequiredOutput(requiredOutput)
+	next := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, requiredOutput)
 	for key := range requiredOutput {
 		delete(requiredOutput, key)
 	}
@@ -1007,7 +1124,11 @@ func addStrategyReassessmentRequiredOutputContract(pkg map[string]any, requiredO
 	}
 	requiredOutput["mustDeclareStrategyReassessmentFields"] = true
 	requiredOutput["strategyReassessmentRequiredFields"] = requiredFields
-	requiredOutput["strategyReassessmentRepairModes"] = []string{"continue_same_target_repair", "shift_root_cause_target"}
+	repairModes := strategyReassessmentAllowedRepairModes(reassessment)
+	if len(repairModes) == 0 {
+		repairModes = []string{strategyRepairModeContinueSameTarget, strategyRepairModeShiftRootCauseTarget}
+	}
+	requiredOutput["strategyReassessmentRepairModes"] = repairModes
 	requiredOutput["strategyReassessmentMatchRule"] = "each state-changing patch/apply node must declare these fields inside the patch/apply input object, not as top-level decision fields or node sibling fields; failedSurface must align with strategyReassessment.failedSurface, repairMode must be explicit, and rootCauseTarget must identify the resource or scope being changed"
 	if strategyReassessmentRequiresRootCauseTargetShift(reassessment) {
 		requiredOutput["mustReassessRepeatedFailedSurface"] = true
@@ -1287,11 +1408,11 @@ func coverageTargetSetFromRepairInput(input map[string]any) []map[string]any {
 		if targetText == "" {
 			return
 		}
-		token := normalizeCoverageGapRepairToken(firstNonEmptyString(stringFromMap(item, "goalRequirementId"), targetText))
-		if token == "" || seen[kind+":"+token] {
+		token := coverageTargetSetDedupToken(item, targetText)
+		if token == "" || seen[token] {
 			return
 		}
-		seen[kind+":"+token] = true
+		seen[token] = true
 		next := map[string]any{
 			"kind":       kind,
 			"targetText": targetText,
@@ -1330,6 +1451,14 @@ func coverageTargetSetFromRepairInput(input map[string]any) []map[string]any {
 		}
 		ret = append(ret, next)
 	}
+	for _, item := range coverageFocusCandidateItemsFromInput(input, workItemContext) {
+		add(firstNonEmptyString(stringFromMap(item, "kind"), stringFromMap(item, "sourceScope"), "coverage"), item, firstNonEmptyString(
+			stringFromMap(item, "targetText"),
+			stringFromMap(item, "coverageTargetToken"),
+			stringFromMap(item, "sourceRequirementId"),
+			stringFromMap(item, "id"),
+		))
+	}
 	for _, item := range mapSliceFromValue(input["missingDoDItems"]) {
 		add("dod", item, stringFromMap(item, "item"))
 	}
@@ -1364,6 +1493,97 @@ func coverageTargetSetFromRepairInput(input map[string]any) []map[string]any {
 		ret = ret[:maxLLMContextSliceItems]
 	}
 	return ret
+}
+
+func coverageTargetSetDedupToken(item map[string]any, targetText string) string {
+	return normalizeCoverageGapRepairToken(firstNonEmptyString(
+		stringFromMap(item, "goalRequirementId"),
+		stringFromMap(item, "sourceRequirementId"),
+		stringFromMap(item, "normalizedSourceKey"),
+		targetText,
+		stringFromMap(item, "coverageWorkItemId"),
+		stringFromMap(item, "id"),
+	))
+}
+
+func coverageFocusCandidateItemsFromInput(input map[string]any, context map[string]any) []map[string]any {
+	focus := mapFromValue(input[coverageFocusKey])
+	if len(focus) == 0 || len(context) == 0 {
+		return nil
+	}
+	wanted := coverageFocusMatchTokens(focus)
+	if len(wanted) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0)
+	seen := map[string]bool{}
+	for _, item := range coverageWorkItemContextItems(context) {
+		if !coverageWorkItemMatchesFocusTokens(item, wanted) {
+			continue
+		}
+		key := firstNonEmptyString(
+			stringFromMap(item, "id"),
+			stringFromMap(item, "sourceRequirementId"),
+			stringFromMap(item, "normalizedSourceKey"),
+			stringFromMap(item, "targetText"),
+		)
+		key = normalizeCoverageGapRepairToken(key)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func coverageFocusMatchTokens(focus map[string]any) map[string]bool {
+	ret := map[string]bool{}
+	add := func(value string) {
+		if token := normalizeCoverageGapRepairToken(value); token != "" {
+			ret[token] = true
+		}
+	}
+	for _, key := range []string{"id", "sliceId", "sourceRequirementId", "normalizedSourceKey"} {
+		add(stringFromMap(focus, key))
+	}
+	for _, key := range []string{"coverageWorkItemIds", "targetRefs", "sourceRequirementAliases"} {
+		for _, value := range stringSliceFromValue(focus[key]) {
+			add(value)
+		}
+	}
+	return ret
+}
+
+func coverageWorkItemMatchesFocusTokens(item map[string]any, wanted map[string]bool) bool {
+	if len(item) == 0 || len(wanted) == 0 {
+		return false
+	}
+	candidates := []string{
+		stringFromMap(item, "id"),
+		stringFromMap(item, "sourceRequirementId"),
+		stringFromMap(item, "normalizedSourceKey"),
+		stringFromMap(item, "sourcePath"),
+		stringFromMap(item, "targetText"),
+	}
+	for _, value := range stringSliceFromValue(item["sourceRequirementAliases"]) {
+		candidates = append(candidates, value)
+	}
+	for _, candidate := range candidates {
+		token := normalizeCoverageGapRepairToken(candidate)
+		if token == "" {
+			continue
+		}
+		if wanted[token] {
+			return true
+		}
+		for want := range wanted {
+			if coverageRepairTokenMatches(token, want) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func missingGoalCoverageItemMatchesWorkItemContext(item map[string]any, context map[string]any) bool {
@@ -1543,6 +1763,7 @@ func repairActionFailureIndicatesStalePatch(input map[string]any, output map[str
 	text := strings.ToLower(strings.Join(repairForbiddenReuseTextValues(input, output), "\n"))
 	return strings.Contains(text, "context mismatch") ||
 		strings.Contains(text, "patch does not apply") ||
+		strings.Contains(text, "basehash mismatch") ||
 		strings.Contains(text, "stale") ||
 		strings.Contains(text, "oldtext not found") ||
 		strings.Contains(text, "old text not found") ||

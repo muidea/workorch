@@ -48,6 +48,9 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 		if repairMode == "" {
 			continue
 		}
+		if !strategyReassessmentRepairModeAllowed(reassessment, repairMode) {
+			return fmt.Errorf("%w: strategyReassessment.required=true repairMode=%s is not allowed by current strategyReassessment.allowedRepairModes", common.ErrInvalidArgument, repairMode)
+		}
 		surfaceCorrection := strategyCandidateHasSurfaceContractCorrection(candidate, expectedSurface)
 		switch repairMode {
 		case strategyRepairModeContinueSameTarget:
@@ -620,6 +623,33 @@ func strategyReassessmentRequiresRootCauseTargetShift(reassessment map[string]an
 	}
 	reason := strings.ToLower(strings.TrimSpace(stringFromAny(reassessment["reason"])))
 	return strings.Contains(reason, "same_target")
+}
+
+func strategyReassessmentRepairModeAllowed(reassessment map[string]any, mode string) bool {
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		return false
+	}
+	allowed := strategyReassessmentAllowedRepairModes(reassessment)
+	if len(allowed) == 0 {
+		return true
+	}
+	return stringSliceContains(allowed, mode)
+}
+
+func strategyReassessmentAllowedRepairModes(reassessment map[string]any) []string {
+	if len(reassessment) == 0 {
+		return nil
+	}
+	var ret []string
+	for _, mode := range append(stringSliceFromValue(reassessment["allowedRepairModes"]), stringSliceFromValue(reassessment["requiredRepairModes"])...) {
+		mode = strategyRepairModeFromCandidate(map[string]any{"repairMode": mode})
+		if mode == "" {
+			continue
+		}
+		ret = append(ret, mode)
+	}
+	return compactUniqueStrings(ret)
 }
 
 func strategyCandidatePatchesFailedSurface(candidate map[string]any, expectedSurface string) bool {

@@ -293,6 +293,7 @@ func resolveApprovalCommandFromPayload(payload map[string]any) approvalcontracts
 		ApprovalID:  common.ApprovalID(stringPayload(payload, events.PayloadKeyApprovalID)),
 		WorkspaceID: common.WorkspaceID(stringPayload(payload, events.PayloadKeyWorkspaceID)),
 		RunID:       common.RunID(stringPayload(payload, events.PayloadKeyRunID)),
+		Context:     mapPayload(payload, events.PayloadKeyContext),
 	}
 }
 
@@ -307,11 +308,12 @@ func (m *Module) ensureApprovalScope(ctx context.Context, approvalID common.Appr
 	if approvalID == "" {
 		return common.ErrInvalidArgument
 	}
-	if !envelopeHasScope(envelope) {
-		return nil
-	}
 	if m == nil || m.approvals == nil {
 		return common.ErrInvalidArgument
+	}
+	if !envelopeHasScope(envelope) {
+		_, err := m.resolveUniqueApprovalForUnscopedCommand(ctx, approvalID)
+		return err
 	}
 	item, err := m.approvals.Get(ctx, approvalID)
 	if err != nil {
@@ -321,6 +323,42 @@ func (m *Module) ensureApprovalScope(ctx context.Context, approvalID common.Appr
 		return common.ErrNotFound
 	}
 	return nil
+}
+
+func (m *Module) resolveUniqueApprovalForUnscopedCommand(ctx context.Context, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {
+	if approvalID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	if m == nil || m.approvals == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	items, err := m.approvals.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var matches []*approvalmodel.Approval
+	var pendingMatches []*approvalmodel.Approval
+	for _, item := range items {
+		if item == nil || item.ID != approvalID {
+			continue
+		}
+		matches = append(matches, item)
+		if item.State == common.ApprovalStatePending {
+			pendingMatches = append(pendingMatches, item)
+		}
+	}
+	switch {
+	case len(pendingMatches) == 1:
+		return pendingMatches[0], nil
+	case len(pendingMatches) > 1:
+		return nil, common.ErrConflict
+	case len(matches) == 1:
+		return matches[0], nil
+	case len(matches) > 1:
+		return nil, common.ErrConflict
+	default:
+		return nil, common.ErrNotFound
+	}
 }
 
 func envelopeHasScope(envelope events.Envelope) bool {

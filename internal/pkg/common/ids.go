@@ -15,6 +15,7 @@ type ValidationResultID string
 type ResultID string
 type ArtifactID string
 type ArtifactContinuationID string
+type CoverageWorkItemID string
 type EventRecordID string
 type SoulID string
 type MemoryID string

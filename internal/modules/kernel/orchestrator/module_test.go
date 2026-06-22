@@ -507,6 +507,73 @@ func TestModuleRuntimeFailedEventSchedulesFinalize(t *testing.T) {
 	}
 }
 
+func TestModuleRuntimeResultEventRequiresWorkspaceScope(t *testing.T) {
+	ctx := context.Background()
+	module := &Module{
+		bizPtr: orchestratorbiz.NewRuntimeOrchestratorWithResolutionsAndEvidence(
+			moduleNoopRuntimeAdapter{},
+			memoryrepo.NewRunRepository(),
+			memoryrepo.NewStepRepository(),
+			memoryrepo.NewWorkspaceRepository(),
+			memoryrepo.NewDecisionTicketRepository(),
+			nil,
+			memoryrepo.NewApprovalRepository(),
+			orchestratorbiz.RuntimeEvidenceRepositories{RuntimeCheckpoints: memoryrepo.NewRuntimeCheckpointRepository()},
+			events.NewMemoryHub(),
+		),
+	}
+
+	err := module.handleRuntimeResultEvent(ctx, events.Envelope{
+		Topic:  runtimeevent.TopicRuntimeBlockExecuteCompleted,
+		RunID:  "run-terminal-missing-workspace",
+		StepID: "run-terminal-missing-workspace/step-1",
+		Payload: map[string]any{
+			events.PayloadKeyRuntimeCompleted: runtimemodel.RuntimeStepExecutionCompleted{
+				RunID:  "run-terminal-missing-workspace",
+				StepID: "run-terminal-missing-workspace/step-1",
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("terminal result without workspace err = %v, want invalid argument", err)
+	}
+}
+
+func TestModuleRuntimeResultEventRejectsWorkspaceScopeMismatch(t *testing.T) {
+	ctx := context.Background()
+	module := &Module{
+		bizPtr: orchestratorbiz.NewRuntimeOrchestratorWithResolutionsAndEvidence(
+			moduleNoopRuntimeAdapter{},
+			memoryrepo.NewRunRepository(),
+			memoryrepo.NewStepRepository(),
+			memoryrepo.NewWorkspaceRepository(),
+			memoryrepo.NewDecisionTicketRepository(),
+			nil,
+			memoryrepo.NewApprovalRepository(),
+			orchestratorbiz.RuntimeEvidenceRepositories{RuntimeCheckpoints: memoryrepo.NewRuntimeCheckpointRepository()},
+			events.NewMemoryHub(),
+		),
+	}
+
+	err := module.handleRuntimeResultEvent(ctx, events.Envelope{
+		Topic:       runtimeevent.TopicRuntimeBlockExecuteFailed,
+		WorkspaceID: "ws-envelope",
+		RunID:       "run-terminal-scope-mismatch",
+		StepID:      "run-terminal-scope-mismatch/step-1",
+		Payload: map[string]any{
+			events.PayloadKeyRuntimeFailed: runtimemodel.RuntimeStepExecutionFailed{
+				WorkspaceID: "ws-payload",
+				RunID:       "run-terminal-scope-mismatch",
+				StepID:      "run-terminal-scope-mismatch/step-1",
+				Error:       "runtime failed",
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("terminal result workspace mismatch err = %v, want conflict", err)
+	}
+}
+
 func hasModuleRuntimeTerminalResultCheckpoint(items []*runmodel.RuntimeCheckpoint, requestID string, terminalTopic string, outputStatus string, errorText string) bool {
 	for _, item := range items {
 		if item == nil || item.Data == nil {

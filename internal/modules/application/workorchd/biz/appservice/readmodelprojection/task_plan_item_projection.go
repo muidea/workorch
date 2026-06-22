@@ -2,12 +2,11 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 )
 
-func projectTaskPlan(snapshot readmodelcore.RunSnapshot, decomposition readmodelcore.TaskDecomposition, step presenter.StepView, hasStep bool, occurrences map[string]string) readmodelcore.TaskPlan {
+func projectTaskPlan(snapshot readmodelcore.RunSnapshot, decomposition readmodelcore.TaskDecomposition, step StepView, hasStep bool, occurrences map[string]string) readmodelcore.TaskPlan {
 	fields := taskPlanProjectionFields(decomposition, step, hasStep, occurrences)
-	return readmodelcore.TaskPlan{
+	plan := readmodelcore.TaskPlan{
 		WorkspaceID:      snapshot.Run.WorkspaceID,
 		RunID:            snapshot.Run.ID,
 		AnchorStepID:     fields.anchorStepID,
@@ -20,8 +19,17 @@ func projectTaskPlan(snapshot readmodelcore.RunSnapshot, decomposition readmodel
 		NodeCompleted:    decomposition.NodeCompleted,
 		NodeFailed:       decomposition.NodeFailed,
 		NodeRunning:      decomposition.NodeRunning,
+		Nodes:            cloneTaskDecompositionNodes(decomposition.Nodes),
 		EvidenceRefs:     compactUniqueStrings(append([]string{decomposition.RootStepID}, decomposition.EvidenceRefs...)),
 		OccurredAt:       fields.occurredAt,
 		SourceProjection: "task_decomposition",
 	}
+	if hasStep {
+		meta := taskLifecycleMetadataFromStep(step)
+		if ticketID := taskBlockingTicketByStep(snapshot)[step.ID]; ticketID != "" {
+			meta.blockingTicketID = ticketID
+		}
+		applyTaskLifecycleToPlan(&plan, meta)
+	}
+	return plan
 }

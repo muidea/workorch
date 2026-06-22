@@ -1,13 +1,10 @@
 package readmodelprojection
 
-import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-)
+import runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 
-func selectRunStepPageItems(items []*runmodel.Step, limit int, cursorAfterID string) ([]presenter.StepView, bool) {
+func selectRunStepPageItems(items []*runmodel.Step, limit int, cursorAfterID string) ([]StepView, bool) {
 	started := cursorAfterID == ""
-	selected := make([]presenter.StepView, 0, min(limit, len(items)))
+	selected := make([]StepView, 0, min(limit, len(items)))
 	for _, item := range items {
 		if item == nil {
 			continue
@@ -21,7 +18,7 @@ func selectRunStepPageItems(items []*runmodel.Step, limit int, cursorAfterID str
 		if len(selected) >= limit {
 			return selected, true
 		}
-		mapped := presenter.MapStep(item)
+		mapped := MapStep(item)
 		if mapped == nil {
 			continue
 		}

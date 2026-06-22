@@ -224,19 +224,19 @@ func (f *fakeDec) Get(ctx context.Context, wsID common.WorkspaceID, id common.Ti
 
 type fakeAppr struct{ b *fakeBackend }
 
-func (f *fakeAppr) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (f *fakeAppr) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*backend.ApprovalInfo, error) {
 	f.b.mu.Lock()
 	f.b.ApproveCalls = append(f.b.ApproveCalls, string(id))
 	f.b.mu.Unlock()
 	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "approved"}, nil
 }
-func (f *fakeAppr) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (f *fakeAppr) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*backend.ApprovalInfo, error) {
 	f.b.mu.Lock()
 	f.b.RejectCalls = append(f.b.RejectCalls, string(id))
 	f.b.mu.Unlock()
 	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "rejected"}, nil
 }
-func (f *fakeAppr) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string) ([]backend.ApprovalInfo, error) {
+func (f *fakeAppr) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...map[string]any) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
 func (f *fakeAppr) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.ApprovalInfo, error) {

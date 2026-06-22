@@ -301,6 +301,37 @@ export type DoD = {
   state: string;
 };
 
+export type GoalDoDQualityIssue = {
+  code: string;
+  severity: string;
+  target: string;
+  message: string;
+  suggestion?: string;
+};
+
+export type GoalDoDQualityCheck = {
+  workspaceId: string;
+  goalId?: string;
+  doDId?: string;
+  goalText?: string;
+  doDItems?: string[];
+  executable: boolean;
+  verifiable: boolean;
+  executionScore: number;
+  verificationScore: number;
+  status: string;
+  missingConstraints?: string[];
+  suggestions?: string[];
+  issues?: GoalDoDQualityIssue[];
+};
+
+export type GoalDoDQualityCheckRequest = {
+  goalId?: string;
+  doDId?: string;
+  goalText?: string;
+  doDItems?: string[];
+};
+
 export type Run = {
   id: string;
   workspaceId: string;
@@ -359,6 +390,19 @@ export type RuntimeExecution = {
   finalizeEvent?: string;
   pending?: boolean;
   gap?: string;
+};
+
+export type RunCommandStatus = {
+  workspaceId?: string;
+  runId?: string;
+  intent?: string;
+  reason?: string;
+  requestId?: string;
+  source?: string;
+  definitionRevision?: string;
+  decisionId?: string;
+  acceptedAt?: string;
+  revision?: number;
 };
 
 export type RunOutcome = {
@@ -564,14 +608,35 @@ export type MemoryItem = {
   sourceType: string;
   sourceRef?: string;
   memoryType: string;
+  content?: string;
   summary: string;
   tags?: string[];
+  importance?: number;
+  confidence?: number;
+  visibility?: string;
   embeddingProviderId?: string;
   embeddingModel?: string;
   embeddingText?: string;
   vectorReady?: boolean;
   vectorDimension?: number;
   vectorScore?: number;
+};
+
+export type MemoryItemWriteRequest = {
+  memoryId?: string;
+  runId?: string;
+  sourceType: string;
+  sourceRef?: string;
+  memoryType: string;
+  content?: string;
+  summary: string;
+  tags?: string[];
+  importance?: number;
+  confidence?: number;
+  visibility?: string;
+  embeddingProviderId?: string;
+  embeddingModel?: string;
+  embeddingText?: string;
 };
 
 export type MemoryRecallHit = {
@@ -876,12 +941,41 @@ export type LLMContextBudgetTrace = {
   compressedSections?: string[];
   omittedSections?: string[];
   goalDoDCompressed: boolean;
+  overBudget: boolean;
   p0Overflow: boolean;
+  profileMode?: string;
+  capabilitySource?: string;
+  contextUtilizationRatio?: number;
+  maxRequestBytes?: number;
+  stageBudgetRatio?: number;
+  stageBudgetSource?: string;
   tracePolicy?: string;
   promptCaptured: boolean;
   estimator?: string;
   profile?: Record<string, unknown>;
   cachePlan?: Record<string, unknown>;
+};
+
+export type LLMContextBudgetSummary = {
+  traceTotal: number;
+  truncatedCount?: number;
+  overBudgetCount?: number;
+  p0OverflowCount?: number;
+  goalDoDCompressedCount?: number;
+  promptCapturedCount?: number;
+  maxShrinkLevel?: number;
+  maxContextUtilizationRatio?: number;
+  avgContextUtilizationRatio?: number;
+  maxInputTokens?: number;
+  maxRequestBytes?: number;
+  recentWindowSize?: number;
+  recentTraceTotal?: number;
+  recentTruncatedCount?: number;
+  recentOverBudgetCount?: number;
+  recentMaxContextUtilizationRatio?: number;
+  recentAvgContextUtilizationRatio?: number;
+  recentMaxInputTokens?: number;
+  contextUtilizationTrend?: string;
 };
 
 export type LLMUsageTrace = {
@@ -1140,8 +1234,47 @@ export type TaskDecompositionNode = {
   branch?: string;
   stepId?: string;
   stepState?: string;
+  retryOf?: string;
+  retryAttempt?: number;
+  violationType?: string;
+  violatedRule?: string;
+  failureClass?: string;
+  failureSignature?: string;
+  targetScope?: string;
+  blockingTicketId?: string;
   evidenceRefs?: string[];
+  coverageTargets?: string[];
   input?: Record<string, unknown>;
+};
+
+export type TaskPlan = {
+  id: string;
+  workspaceId: string;
+  runId: string;
+  anchorStepId: string;
+  revisionStepId?: string;
+  revision: number;
+  state: string;
+  stage?: string;
+  sourceOutputState?: string;
+  summary?: string;
+  graphBranch?: string;
+  nodeTotal: number;
+  nodeCompleted: number;
+  nodeFailed: number;
+  nodeRunning: number;
+  nodes?: TaskDecompositionNode[];
+  retryOf?: string;
+  retryAttempt?: number;
+  violationType?: string;
+  violatedRule?: string;
+  failureClass?: string;
+  failureSignature?: string;
+  targetScope?: string;
+  blockingTicketId?: string;
+  evidenceRefs?: string[];
+  occurredAt?: string;
+  sourceProjection?: string;
 };
 
 export type ExecutionSection = {
@@ -1322,10 +1455,12 @@ export type RunObservability = {
   repairLoop: RepairLoop;
   acceptance: AcceptanceProjection;
   taskDecompositions?: TaskDecomposition[];
+  taskPlans?: TaskPlan[];
   executionSections?: ExecutionSection[];
   memoryRecallTraces?: MemoryRecallTrace[];
   webSources?: WebSourceTrace[];
   llmContextBudgets?: LLMContextBudgetTrace[];
+  llmContextBudgetSummary: LLMContextBudgetSummary;
   llmUsageTraces?: LLMUsageTrace[];
   llmUsageSummary: LLMUsageSummary;
   evidence: RuntimeEvidenceSummary;
@@ -1346,10 +1481,12 @@ export type RunSnapshot = {
   gapBaseline?: GapBaseline;
   runtimeExecution?: RuntimeExecution;
   taskDecompositions?: TaskDecomposition[];
+  taskPlans?: TaskPlan[];
   executionSections?: ExecutionSection[];
   memoryRecallTraces?: MemoryRecallTrace[];
   webSources?: WebSourceTrace[];
   llmContextBudgets?: LLMContextBudgetTrace[];
+  llmContextBudgetSummary: LLMContextBudgetSummary;
   llmUsageTraces?: LLMUsageTrace[];
   llmUsageSummary: LLMUsageSummary;
   steps?: StepView[];
@@ -1373,11 +1510,13 @@ export type WorkspaceSnapshot = {
   taskProgress: TaskProgress;
   runHeartbeat?: RunHeartbeat;
   runtimeExecution?: RuntimeExecution;
+  runCommand?: RunCommandStatus;
   contextBundle?: ContextBundle;
   coverageSummary?: Record<string, unknown>;
   gapBaseline?: GapBaseline;
   acceptance: AcceptanceProjection;
   taskDecompositions?: TaskDecomposition[];
+  taskPlans?: TaskPlan[];
   executionSections?: ExecutionSection[];
   goals?: Goal[];
   dods?: DoD[];
@@ -1388,6 +1527,7 @@ export type WorkspaceSnapshot = {
   patches?: Patch[];
   webSources?: WebSourceTrace[];
   llmContextBudgets?: LLMContextBudgetTrace[];
+  llmContextBudgetSummary: LLMContextBudgetSummary;
   llmUsageTraces?: LLMUsageTrace[];
   llmUsageSummary: LLMUsageSummary;
   eventRecords?: EventRecord[];
@@ -1419,6 +1559,9 @@ export type Decision = {
   resolutionId?: string;
   resolutionType?: string;
   resolutionPayload?: Record<string, unknown>;
+  continuationAction?: string;
+  resumeRunId?: string;
+  successorRunId?: string;
   autoGovernance?: AutoGovernanceSummary;
 };
 

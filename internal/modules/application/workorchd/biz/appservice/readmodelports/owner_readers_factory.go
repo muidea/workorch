@@ -18,6 +18,7 @@ func NewOwnerReaders(hub events.Hub) (OwnerReaders, error) {
 		Results:               ResultReader{Hub: hub},
 		Artifacts:             ArtifactReader{Hub: hub},
 		ArtifactContinuations: ArtifactContinuationReader{Hub: hub},
+		CoverageWorkItems:     CoverageWorkItemReader{Hub: hub},
 		EventRecords:          EventRecordReader{Hub: hub},
 		MemoryRecalls:         MemoryRecallTraceReader{Hub: hub},
 		ToolCalls:             ToolCallReader{Hub: hub},
