@@ -144,6 +144,32 @@ func TestCompactLLMContextDropsHeavyTransportFields(t *testing.T) {
 	}
 }
 
+func TestGenericLLMContextCompactionMarksTruncatedTargetSnapshotUnsafe(t *testing.T) {
+	fullContent := "package main\n" + strings.Repeat("func currentShape() {}\n", 300)
+	compacted := compactLLMContextValue(map[string]any{
+		"targetRef":        "main.go",
+		"contentHash":      "hash-main",
+		"contentComplete":  true,
+		"safeForFileWrite": true,
+		"truncated":        false,
+		"content":          fullContent,
+	}, 1)
+
+	snapshot := mapFromValue(compacted)
+	if snapshot["content"] != nil {
+		t.Fatalf("content = %#v, want omitted exact content after generic compaction", snapshot["content"])
+	}
+	if strings.TrimSpace(stringFromMap(snapshot, "contentPreview")) == "" {
+		t.Fatalf("contentPreview missing: %#v", snapshot)
+	}
+	if snapshot["contentComplete"] != false || snapshot["safeForFileWrite"] != false || snapshot["truncated"] != true {
+		t.Fatalf("snapshot metadata = %#v, want incomplete unsafe truncated target snapshot", snapshot)
+	}
+	if snapshot["contentOmitted"] != true || int64FromValue(snapshot["contentBytes"]) <= int64FromValue(snapshot["visibleContentBytes"]) {
+		t.Fatalf("snapshot omitted metadata = %#v, want original/visible byte counts", snapshot)
+	}
+}
+
 func TestCompactLLMContextOmitsArtifactChunkContent(t *testing.T) {
 	chunkContent := "line 1\nline 2\nline 3\n"
 	input := compactStepInputForLLMContext(map[string]any{

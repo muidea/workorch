@@ -1360,6 +1360,36 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 | closureBatch | 7 |
 | loadByDefault | false |
 
+### ev:code/patch-application-failure-narrow-retry/20260622-023
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-PATCH-APPLICATION-FAILURE-NARROW-RETRY-20260622-023` |
+| workspaceId | `ws-7ced70e98ea50c43` |
+| runId | `run-002-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-001` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | deployed `http://127.0.0.1:8080` plus local worktree |
+| extractCommand | `curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-7ced70e98ea50c43/snapshot; jq . .workorch-data/internal/workspaces/ws-7ced70e98ea50c43/runs/<run>/patches/<step>/patch/1.json; go test ./internal/modules/kernel/orchestrator/biz -run 'TestApplyRuntimeRepairPatchFailureRecoveryContractNarrowsPatchRetry|TestApplyRuntimeRepairPatchContextProjectionRequiresStateChangingRepair' -count=1; go test ./internal/modules/kernel/orchestrator/biz -count=1; ./scripts/verify-boundary-contract.sh; git diff --check` |
+| extractedSummary | After the root-cause shift contract forced repair away from the repeated failed surface, live `ws-7...` advanced to a real `patch/apply` against the root-cause target, but then blocked on `patch_apply_failed` with `conflict: patch text_replace oldText not found`. The runtime already provided current target snapshots, but the subsequent repair contract did not narrowly identify the failed patch literal as stale rejected material. Local core closure adds a neutral patch application failure recovery contract into `repairActionPackage.requiredOutput`: it records compact `failedPatchRequests`, current `patchRepairContext` refs, requires rebuilding from current snapshots/contentHash, forbids retrying stale `oldText`/diff/content/baseHash, and preserves existing state-changing Goal/DoD coverage requirements. The regression test proves a failed `patch/apply` oldText conflict now projects `mustRepairFailedPatchApplication`, `mustUsePatchRepairContext`, `mustNotRetryFailedPatchLiteral`, failed patch summaries, and preferred current repair suggestions. Focused and full orchestrator/biz tests, boundary verification, and whitespace diff check passed. Live redeploy plus explicit replan/resume remains required to prove positive convergence. |
+| owner | core |
+| closureBatch | 7 |
+| loadByDefault | false |
+
+### ev:code/llm-target-snapshot-compaction-safety/20260622-024
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-LLM-TARGET-SNAPSHOT-COMPACTION-SAFETY-20260622-024` |
+| workspaceId | `ws-7ced70e98ea50c43` |
+| runId | `run-002-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-002` |
+| evidenceKind | live-input-audit-and-code-test-output |
+| sourcePath | deployed `http://127.0.0.1:8080` plus local worktree |
+| extractCommand | `curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-7ced70e98ea50c43/snapshot; jq '.repairActionPackage.targetSnapshots | map({targetRef,contentHash,contentLen:(.content|length),contentComplete,safeForFileWrite,truncated})' .workorch-data/internal/workspaces/ws-7ced70e98ea50c43/runs/<run>/steps/<run>/<state-changing-follow-up>/input.json; go test ./internal/modules/kernel/orchestrator/biz -run 'TestGenericLLMContextCompactionMarksTruncatedTargetSnapshotUnsafe|TestCompactStepOutputForLLMContextOmitsRedactedRejectedPatchFragments|TestCompactLLMContextDropsHeavyTransportFields' -count=1; go test ./internal/modules/kernel/orchestrator/biz -count=1; ./scripts/verify-boundary-contract.sh; git diff --check` |
+| extractedSummary | Post-replan live audit showed the repair follow-up did receive `repairActionPackage.targetSnapshots`, but a target snapshot whose original file-read output was about 9.9 KiB reached the LLM-visible input with only a 4 KiB `content` string while still declaring `contentComplete=true`, `safeForFileWrite=true`, and `truncated=false`. The model then generated a `text_replace` oldText that was not present in the current target and the run blocked again on `patch_apply_failed`. Local core closure normalizes generic LLM context compaction for structured target snapshots: if exact snapshot content is compacted or redacted, it is downgraded to `contentPreview`, marks `contentComplete=false`, `safeForFileWrite=false`, `truncated=true`, and records omitted byte metadata. Patch request compaction remains separate and is not treated as a target snapshot. Focused tests, full orchestrator/biz tests, boundary verification, and whitespace diff check passed. Live redeploy plus explicit replan/resume remains required to verify positive convergence. |
+| owner | core |
+| closureBatch | 7 |
+| loadByDefault | false |
+
 ## Default Load Set For Next Code Closure
 
 Load only:

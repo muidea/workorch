@@ -1097,7 +1097,66 @@ func compactLLMContextMap(input map[string]any, depth int) map[string]any {
 		}
 		ret[key] = compactLLMContextValue(input[key], depth+1)
 	}
+	normalizeCompactedTargetSnapshotForLLMContext(ret, input)
 	return ret
+}
+
+func normalizeCompactedTargetSnapshotForLLMContext(ret map[string]any, original map[string]any) {
+	if len(ret) == 0 || len(original) == 0 || !looksLikeRuntimeTargetSnapshot(original) {
+		return
+	}
+	originalContent := strings.TrimSpace(stringFromMap(original, "content"))
+	if originalContent == "" {
+		return
+	}
+	visibleContent, hasVisibleContent := ret["content"].(string)
+	if hasVisibleContent && visibleContent == originalContent && !containsRuntimeRedactionMarker(visibleContent) {
+		return
+	}
+	if hasVisibleContent && strings.TrimSpace(visibleContent) != "" {
+		ret["contentPreview"] = visibleContent
+	}
+	delete(ret, "content")
+	ret["contentOmitted"] = true
+	ret["contentComplete"] = false
+	ret["safeForFileWrite"] = false
+	ret["truncated"] = true
+	ret["contentBytes"] = len([]byte(originalContent))
+	if hasVisibleContent {
+		ret["visibleContentBytes"] = len([]byte(visibleContent))
+	}
+	if containsRuntimeRedactionMarker(originalContent) {
+		ret["redacted"] = true
+		ret["contentOmittedReason"] = "target snapshot content contains runtime redaction markers and is not reusable as exact patch or file_write content"
+	} else {
+		ret["contentOmittedReason"] = "target snapshot content was compacted for LLM context and is not a complete exact patch or file_write baseline"
+	}
+}
+
+func looksLikeRuntimeTargetSnapshot(value map[string]any) bool {
+	if len(value) == 0 || strings.TrimSpace(stringFromMap(value, "targetRef")) == "" {
+		return false
+	}
+	for _, key := range []string{"patchType", "oldText", "newText", "diff"} {
+		if _, ok := value[key]; ok {
+			return false
+		}
+	}
+	for _, key := range []string{
+		"content",
+		"contentHash",
+		"contentComplete",
+		"safeForFileWrite",
+		"truncated",
+		"redacted",
+		"isBinary",
+		"exists",
+	} {
+		if _, ok := value[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func compactLLMContextValue(value any, depth int) any {
