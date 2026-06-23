@@ -1765,6 +1765,66 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 | closureBatch | 7 |
 | loadByDefault | false |
 
+### ev:verify/managed-ci-safe/20260623-047
+
+| Field | Value |
+| --- | --- |
+| claimId | `B7-G2-CI-SAFE-MANAGED-DEPLOYED-VERIFY-20260623-047` |
+| workspaceId | `ws-482ee53ac3b65f90`, `ws-406dcd30f824929a` |
+| runId | `run-001` |
+| evidenceKind | managed-ci-safe-verification-output |
+| sourcePath | `scripts/verify-workorch-managed-full.sh`, `Makefile`, managed artifact dir `/tmp/tmp.VPO4e5jtUM` |
+| extractCommand | `WORKORCH_MANAGED_VERIFY_TARGET=verify-ci-mvp-file WORKORCH_MANAGED_VERIFY_KEEP_ARTIFACTS=1 ./scripts/verify-workorch-managed-full.sh` |
+| extractedSummary | Current post-`046` closure packet passed CI-safe managed deployed verification. The managed verifier ran `make fmt-check`, `make console-build`, `make vet`, `go test -count=1 ./...`, built `./bin/workorch`, started a managed file-backed service at `http://127.0.0.1:34958`, and ran `make verify-ci-mvp-file`. Deployed checks passed for HTTP health/readiness, workspace template and Soul e2e, mock LLM workspace execution, and MCP stdio execution. MCP stdio completed `workspaceId=ws-406dcd30f824929a`, `runId=run-001`, `runState=completed`, `steps=3`, `toolCalls=3`, `validations=3`, and `runtimeCheckpoints=26`. Artifacts were retained at `/tmp/tmp.VPO4e5jtUM`. This strengthens the CI-safe managed deployed gate for the latest local closure packet, but it does not prove positive live real-provider goal convergence or full real-provider resource behavior. |
+| owner | verification / CI-safe managed deployed runtime |
+| closureBatch | 7 |
+| loadByDefault | false |
+
+### ev:verify/managed-mock-loadtest/20260623-048
+
+| Field | Value |
+| --- | --- |
+| claimId | `B7-G2-MANAGED-MOCK-LOADTEST-CONCURRENCY-VERIFY-20260623-048` |
+| workspaceId | `ws-0dbb35820d7e9931`, `ws-00b1c32f14a52548` |
+| runId | `run-001` |
+| evidenceKind | managed-mock-loadtest-output |
+| sourcePath | `scripts/verify-workorch-managed-full.sh`, `scripts/loadtest-workorch-governed.sh`, load artifact dir `/tmp/workorch-loadtest-load-20260623085423-cv9jh15t`, managed artifact dir `/tmp/tmp.PjsCzU4zXO` |
+| extractCommand | `WORKORCH_MANAGED_VERIFY_TARGET=loadtest-governed WORKORCH_MANAGED_VERIFY_KEEP_ARTIFACTS=1 WORKORCH_MANAGED_MAX_CONCURRENT_RUNS=2 WORKORCH_LOAD_TOTAL=2 WORKORCH_LOAD_CONCURRENCY=2 WORKORCH_LOAD_EXPECT_ACTIVE_OVERLAP=1 WORKORCH_MANAGED_GO_TEST_PACKAGES='./internal/modules/application/workorchd/biz/appservice ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz ./internal/services/workorch' ./scripts/verify-workorch-managed-full.sh` |
+| extractedSummary | Current post-`046` closure packet passed managed mock load/resource verification against a managed file-backed service at `http://127.0.0.1:36270`. Batch `load-20260623085423` ran `total=2`, `concurrency=2`, and `serverMaxConcurrentRuns=2`. Both workspaces completed successfully with `workspaceSuccessTotal=2`, `workspaceFailedTotal=0`, `successRate=1.0`, and `pass=true`. The verifier observed `maxObservedActiveStageOverlap=2`, `maxObservedRunRequestsInFlight=2`, and `activeRunOverlapPass=true`; HTTP 4xx/5xx, curl failures, LLM protocol failures, and timeline missing run-state counters were all zero. This verifies the managed mock concurrency/resource path for the latest local closure packet, but it still does not prove live real-provider goal convergence or full real-provider resource behavior. |
+| owner | verification / managed mock resource and concurrency runtime |
+| closureBatch | 7 |
+| loadByDefault | false |
+
+### ev:verify/live-observation/20260623-049
+
+| Field | Value |
+| --- | --- |
+| claimId | `B7-G3-POST-REDEPLOY-LIVE-OBSERVATION-BLOCKED-GOVERNANCE-20260623-049` |
+| workspaceId | `ws-4e83810542ac4d65`, `ws-7ced70e98ea50c43` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-011`, `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-replan-001` |
+| evidenceKind | live-observation-output |
+| sourcePath | deployed service `http://127.0.0.1:8080`, observation artifact dir `/tmp/tmp.eDbs6pmPAv` |
+| extractCommand | `WORKORCH_BASE_URL=http://127.0.0.1:8080 WORKORCH_OBSERVE_DURATION_SECONDS=20 WORKORCH_OBSERVE_KEEP_ARTIFACTS=1 WORKORCH_OBSERVE_REQUIRE_PROCESS_RESOURCE=1 WORKORCH_OBSERVE_MAX_PENDING_REBUILDS=10 WORKORCH_OBSERVE_MAX_PROJECTION_SCHEDULE_DROPPED_DELTA=0 ./scripts/observe-workorch-runtime-closure.sh` |
+| extractedSummary | Post-redeploy live observation found the deployed service ready and projection ready with two workspaces loaded. `ws-4e83810542ac4d65` was `waiting_decision` / `blocked_on_decision` on an open contract-violation decision, with coverage in `need_assessment` and no missing evidence kinds. Follow-up read-only REST inspection of the open decision showed `reason=LLM 输出连续违反运行期合同，自动修正预算已耗尽: dod_assessment_missing_evidence_refs`, `allowedRecoveryActions=[replan, terminate]`, and `autoGovernance.policyBlocked=replan_lineage_budget_exhausted`. `ws-7ced70e98ea50c43` was `blocked` / `blocked_on_approval` on one pending patch approval, with coverage in `need_validation` and missing accepted `validation` evidence. Follow-up read-only REST inspection of the pending approval showed `riskLevel=L3`, `policyBlocked=risk_level_requires_manual`, and evidence refs including `patch_apply`, `workspace_write`, and `large_change`. The observer found no projection backlog (`projectionPendingRebuilds=0`, `projectionScheduleDroppedDelta=0`), no runtime EventHub publish failure delta, no scheduler command error/enqueue/continuation failure delta, pprof without synchronous runtime send or recursive dispatch stacks, and process resource usage within a quiet envelope (`cpuPercent=1.46`, `readBytesDelta=0`, `writeBytesDelta=0`). No SSE events were captured during the 20 second window. This proves the current redeployed service is not showing a scheduler/projection/resource defect in this window, but it does not prove goal convergence because both live workspaces are blocked on explicit governance objects. |
+| owner | verification / live deployed runtime observation |
+| closureBatch | 7 |
+| loadByDefault | false |
+
+### ev:verify/live-goal-convergence-gate/20260623-050
+
+| Field | Value |
+| --- | --- |
+| claimId | `B7-G3-STRICT-LIVE-GOAL-CONVERGENCE-GATE-BLOCKED-GOVERNANCE-20260623-050` |
+| workspaceId | `ws-4e83810542ac4d65`, `ws-7ced70e98ea50c43` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-011`, `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-replan-001` |
+| evidenceKind | strict-live-goal-convergence-gate-output |
+| sourcePath | deployed service `http://127.0.0.1:8080`, observation artifact dir `/tmp/tmp.UXjIRWsOJH` |
+| extractCommand | `WORKORCH_BASE_URL=http://127.0.0.1:8080 WORKORCH_OBSERVE_DURATION_SECONDS=8 WORKORCH_OBSERVE_KEEP_ARTIFACTS=1 WORKORCH_OBSERVE_REQUIRE_PROCESS_RESOURCE=1 WORKORCH_OBSERVE_REQUIRE_GOAL_CONVERGENCE=1 WORKORCH_OBSERVE_MAX_PENDING_REBUILDS=10 WORKORCH_OBSERVE_MAX_PROJECTION_SCHEDULE_DROPPED_DELTA=0 ./scripts/observe-workorch-runtime-closure.sh` |
+| extractedSummary | Strict post-redeploy live goal-convergence gate failed with `observer_exit_status=1` as expected for the current live governance state. The deployed service and projection were ready, display contract passed, projection backlog remained zero, runtime EventHub publish failure delta remained zero, scheduler command/enqueue/continuation failure deltas remained zero, pprof did not show synchronous runtime send or recursive dispatch stacks, and process resource usage stayed bounded (`cpuPercent=3.95`, `readBytesDelta=0`, `writeBytesDelta=0`). The structured convergence failures were governance-bound: `ws-4e83810542ac4d65` remained `blocked_on_decision` with one open decision, `ineffectiveRetry=true`, latest result rejected, and coverage requiring assessment; `ws-7ced70e98ea50c43` remained `blocked_on_approval` with one pending approval, latest result rejected, and coverage missing accepted `validation` evidence. This is a negative convergence gate, not a new core defect, and it confirms positive live goal convergence still requires resolving the explicit governance objects and observing successor runs. |
+| owner | verification / strict live goal-convergence gate |
+| closureBatch | 7 |
+| loadByDefault | false |
+
 ## Default Load Set For Next Code Closure
 
 Load only:

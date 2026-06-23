@@ -1545,6 +1545,32 @@ The audited result is:
 - Boundary verification is present and should remain mandatory for core runtime/template boundary changes.
 - Unit regression inventory is broad, and the current code closure packet has explicit bounded unit outputs.
 - CI-safe managed deployed verification passed for HTTP, workspace template/Soul, mock LLM, and MCP stdio paths; targeted mock LLM verification also passed for the contract retry exhaustion decision path.
+- Latest post-`046` CI-safe managed deployed verification passed in
+  `ev:verify/managed-ci-safe/20260623-047`, including fmt-check,
+  console-build, vet, `go test ./...`, managed service startup, HTTP,
+  workspace template/Soul, mock LLM, and MCP stdio checks.
+- Latest post-`046` managed mock load/resource verification passed in
+  `ev:verify/managed-mock-loadtest/20260623-048`: two concurrent workspaces
+  completed successfully with active stage overlap observed, request in-flight
+  overlap observed, and zero HTTP, curl, LLM protocol, or timeline run-state
+  failures.
+- Latest post-redeploy live observation in
+  `ev:verify/live-observation/20260623-049` found the deployed service and
+  projection ready with quiet CPU/IO, no projection backlog, no runtime EventHub
+  publish failure delta, and no scheduler command/enqueue/continuation failure
+  delta. It did not prove goal convergence because the two observed workspaces
+  were explicitly blocked on governance: one open decision and one pending
+  approval. Follow-up read-only REST inspection confirmed the decision is gated
+  by `replan_lineage_budget_exhausted`, and the approval is an L3
+  `risk_level_requires_manual` patch/write/large-change gate; neither should be
+  bypassed by core runtime.
+- Strict post-redeploy live goal-convergence gate in
+  `ev:verify/live-goal-convergence-gate/20260623-050` failed with the same
+  governance-bound state. The gate output still showed ready service/projection,
+  no projection backlog, no runtime EventHub publish failure delta, no scheduler
+  command/enqueue/continuation failure delta, no synchronous runtime send stacks,
+  and bounded CPU/IO. This records a negative convergence gate, not a new core
+  runtime defect.
 - The current local closure packet reran CI-safe managed verification in
   `ev:verify/managed-ci-safe/20260622-006`, including shell, LLM, orchestrator
   targeted package tests before managed service startup.
