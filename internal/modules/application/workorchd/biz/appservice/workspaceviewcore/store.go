@@ -432,13 +432,72 @@ func (s *Store) ApplyRunCommandAccepted(update RunCommandAcceptedUpdate) bool {
 	snapshot.RunCommand = &readmodelcore.RunCommandStatus{
 		WorkspaceID:        strings.TrimSpace(update.WorkspaceID),
 		RunID:              strings.TrimSpace(update.RunID),
+		State:              "accepted",
 		Intent:             strings.TrimSpace(update.Intent),
 		Reason:             strings.TrimSpace(update.Reason),
 		RequestID:          strings.TrimSpace(update.RequestID),
+		IdempotencyKey:     strings.TrimSpace(update.IdempotencyKey),
 		Source:             strings.TrimSpace(update.Source),
 		DefinitionRevision: strings.TrimSpace(update.DefinitionRevision),
 		DecisionID:         strings.TrimSpace(update.DecisionID),
 		AcceptedAt:         acceptedAt,
+		Revision:           update.Revision,
+	}
+	entry.Snapshot = snapshot
+	entry.Workspace = cloneWorkspace(snapshot.Workspace)
+	entry.HasWorkspace = true
+	entry.HasSnapshot = true
+	entry.Revision++
+	s.globalRevision++
+	if update.Revision > entry.SourceRevision {
+		entry.SourceRevision = update.Revision
+	}
+	entry.ProjectedSourceRevision = entry.SourceRevision
+	entry.RebuiltAt = now
+	entry.Stale = false
+	entry.StaleReason = ""
+	entry.Error = ""
+	s.refreshProjectedSourceRevisionLocked()
+	s.globalStale = false
+	s.globalStaleReason = ""
+	s.state = StateReady
+	s.errText = ""
+	s.updatedAt = now
+	return true
+}
+
+func (s *Store) ApplyRunCommandRejected(update RunCommandRejectedUpdate) bool {
+	if s == nil || strings.TrimSpace(update.WorkspaceID) == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.workspaces[update.WorkspaceID]
+	if entry == nil || !entry.HasWorkspace {
+		return false
+	}
+	now := time.Now().UTC()
+	snapshot := entry.Snapshot
+	if !entry.HasSnapshot || strings.TrimSpace(snapshot.Workspace.ID) == "" {
+		snapshot.Workspace = cloneWorkspace(entry.Workspace)
+	}
+	rejectedAt := strings.TrimSpace(update.RejectedAt)
+	if rejectedAt == "" {
+		rejectedAt = formatProjectionTime(now)
+	}
+	snapshot.RunCommand = &readmodelcore.RunCommandStatus{
+		WorkspaceID:        strings.TrimSpace(update.WorkspaceID),
+		RunID:              strings.TrimSpace(update.RunID),
+		State:              "rejected",
+		Intent:             strings.TrimSpace(update.Intent),
+		Reason:             strings.TrimSpace(update.Reason),
+		RequestID:          strings.TrimSpace(update.RequestID),
+		IdempotencyKey:     strings.TrimSpace(update.IdempotencyKey),
+		Source:             strings.TrimSpace(update.Source),
+		DefinitionRevision: strings.TrimSpace(update.DefinitionRevision),
+		DecisionID:         strings.TrimSpace(update.DecisionID),
+		RejectedAt:         rejectedAt,
+		Error:              strings.TrimSpace(update.Error),
 		Revision:           update.Revision,
 	}
 	entry.Snapshot = snapshot

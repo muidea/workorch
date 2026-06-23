@@ -182,13 +182,17 @@ type WorkspaceSnapshotInfo struct {
 type RunCommandStatusInfo struct {
 	WorkspaceID        common.WorkspaceID
 	RunID              common.RunID
+	State              string
 	Intent             string
 	Reason             string
 	RequestID          string
+	IdempotencyKey     string
 	Source             string
 	DefinitionRevision string
 	DecisionID         common.TicketID
 	AcceptedAt         string
+	RejectedAt         string
+	Error              string
 	Revision           int64
 }
 

@@ -19,6 +19,8 @@ Related:
 - [LLM Cache Improvement Design](../../30-module-architecture/llm-cache-improvement-design.md)
 - [S0.1 Command Chain Audit](./goal-dod-nextaction-s0-1-command-chain-audit.md)
 - [S1.1-S1.2 Run Command Contract](./goal-dod-nextaction-s1-1-s1-2-run-command-contract.md)
+- [S1.3 Run Command Projection](./goal-dod-nextaction-s1-3-run-command-projection.md)
+- [S1.4 Replan Idempotency](./goal-dod-nextaction-s1-4-replan-idempotency.md)
 
 ## Purpose
 

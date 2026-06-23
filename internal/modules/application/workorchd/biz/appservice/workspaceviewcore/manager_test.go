@@ -624,6 +624,7 @@ func TestStoreRunCommandAcceptedProjectsCommandRevision(t *testing.T) {
 		Intent:             "resume",
 		Reason:             "user_requested",
 		RequestID:          "request-a",
+		IdempotencyKey:     "resume/ws-a/run-a",
 		Source:             "tui",
 		DefinitionRevision: "rev-a",
 		DecisionID:         "ticket-a",
@@ -639,8 +640,10 @@ func TestStoreRunCommandAcceptedProjectsCommandRevision(t *testing.T) {
 	if snapshot.RunCommand == nil ||
 		snapshot.RunCommand.WorkspaceID != "ws-a" ||
 		snapshot.RunCommand.RunID != "run-a" ||
+		snapshot.RunCommand.State != "accepted" ||
 		snapshot.RunCommand.Intent != "resume" ||
 		snapshot.RunCommand.RequestID != "request-a" ||
+		snapshot.RunCommand.IdempotencyKey != "resume/ws-a/run-a" ||
 		snapshot.RunCommand.DefinitionRevision != "rev-a" ||
 		snapshot.RunCommand.DecisionID != "ticket-a" ||
 		snapshot.RunCommand.Revision != 42 {
@@ -674,6 +677,7 @@ func TestStoreRunCommandAcceptedCreatesDetailPlaceholderForKnownWorkspace(t *tes
 	if snapshot.RunCommand == nil ||
 		snapshot.RunCommand.WorkspaceID != "ws-a" ||
 		snapshot.RunCommand.RunID != "run-a" ||
+		snapshot.RunCommand.State != "accepted" ||
 		snapshot.RunCommand.Intent != "replan" ||
 		snapshot.RunCommand.RequestID != "request-a" ||
 		snapshot.RunCommand.Revision != 42 {
@@ -724,6 +728,73 @@ func TestStoreRunCommandAcceptedRejectsUnknownWorkspace(t *testing.T) {
 	}, nil)
 	if store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{WorkspaceID: "ws-b", Intent: "resume", Revision: 2}) {
 		t.Fatal("ApplyRunCommandAccepted returned true for unknown workspace")
+	}
+	snapshot, status, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get snapshot: %v", err)
+	}
+	if snapshot.RunCommand != nil {
+		t.Fatalf("RunCommand = %+v, want no cross-workspace command projection", snapshot.RunCommand)
+	}
+	if status.SourceEventRevision != 0 || status.ProjectedSourceRevision != 0 {
+		t.Fatalf("status after rejected command = %+v, want unchanged revisions", status)
+	}
+}
+
+func TestStoreRunCommandRejectedProjectsCommandRevision(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {
+			Workspace: readmodelcore.Workspace{ID: "ws-a", State: "active"},
+		},
+	}, nil)
+
+	if !store.ApplyRunCommandRejected(RunCommandRejectedUpdate{
+		WorkspaceID:        "ws-a",
+		RunID:              "run-a",
+		Intent:             "resume",
+		Reason:             "user_requested",
+		RequestID:          "request-a",
+		IdempotencyKey:     "resume/ws-a/run-a",
+		Source:             "tui",
+		DefinitionRevision: "rev-a",
+		DecisionID:         "ticket-a",
+		Revision:           43,
+		RejectedAt:         "2026-06-21T00:01:00Z",
+		Error:              "scheduler command was not queued",
+	}) {
+		t.Fatalf("ApplyRunCommandRejected returned false")
+	}
+	snapshot, status, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.WorkspaceID != "ws-a" ||
+		snapshot.RunCommand.RunID != "run-a" ||
+		snapshot.RunCommand.State != "rejected" ||
+		snapshot.RunCommand.Intent != "resume" ||
+		snapshot.RunCommand.RequestID != "request-a" ||
+		snapshot.RunCommand.IdempotencyKey != "resume/ws-a/run-a" ||
+		snapshot.RunCommand.DefinitionRevision != "rev-a" ||
+		snapshot.RunCommand.DecisionID != "ticket-a" ||
+		snapshot.RunCommand.RejectedAt != "2026-06-21T00:01:00Z" ||
+		snapshot.RunCommand.Error != "scheduler command was not queued" ||
+		snapshot.RunCommand.Revision != 43 {
+		t.Fatalf("RunCommand = %+v, want rejected command projection", snapshot.RunCommand)
+	}
+	if status.SourceEventRevision != 43 || status.ProjectedSourceRevision != 43 {
+		t.Fatalf("status revisions = %+v, want rejected command revision", status)
+	}
+}
+
+func TestStoreRunCommandRejectedRejectsUnknownWorkspace(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {Workspace: readmodelcore.Workspace{ID: "ws-a", State: "active"}},
+	}, nil)
+	if store.ApplyRunCommandRejected(RunCommandRejectedUpdate{WorkspaceID: "ws-b", Intent: "resume", Revision: 2}) {
+		t.Fatal("ApplyRunCommandRejected returned true for unknown workspace")
 	}
 	snapshot, status, err := store.GetSnapshot("ws-a")
 	if err != nil {

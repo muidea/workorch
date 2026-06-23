@@ -158,9 +158,11 @@ func TestDecodeSnapshotInfoPreservesRunCommandStatus(t *testing.T) {
 		"runCommand": map[string]any{
 			"workspaceId":        "ws-run-command",
 			"runId":              "run-accepted",
+			"state":              "accepted",
 			"intent":             "replan",
 			"reason":             "decision resolved",
 			"requestId":          "request-accepted",
+			"idempotencyKey":     "replan/ws-run-command/run-accepted/ticket-accepted",
 			"source":             "tui",
 			"definitionRevision": "revision-1",
 			"decisionId":         "ticket-accepted",
@@ -176,11 +178,48 @@ func TestDecodeSnapshotInfoPreservesRunCommandStatus(t *testing.T) {
 	}
 	if snapshot.RunCommand.WorkspaceID != "ws-run-command" ||
 		snapshot.RunCommand.RunID != "run-accepted" ||
+		snapshot.RunCommand.State != "accepted" ||
 		snapshot.RunCommand.Intent != "replan" ||
 		snapshot.RunCommand.RequestID != "request-accepted" ||
+		snapshot.RunCommand.IdempotencyKey != "replan/ws-run-command/run-accepted/ticket-accepted" ||
 		snapshot.RunCommand.DecisionID != "ticket-accepted" ||
 		snapshot.RunCommand.Revision != 7 {
 		t.Fatalf("run command = %+v, want decoded accepted command metadata", snapshot.RunCommand)
+	}
+}
+
+func TestDecodeSnapshotInfoPreservesRejectedRunCommandStatus(t *testing.T) {
+	snapshot, err := decodeSnapshotInfo(map[string]any{
+		"workspace": map[string]any{"id": "ws-run-command", "state": "active"},
+		"runCommand": map[string]any{
+			"workspaceId":    "ws-run-command",
+			"runId":          "run-rejected",
+			"state":          "rejected",
+			"intent":         "resume",
+			"requestId":      "request-rejected",
+			"idempotencyKey": "resume/ws-run-command/run-rejected",
+			"source":         "tui",
+			"rejectedAt":     "2026-06-21T00:01:00Z",
+			"error":          "scheduler command was not queued",
+			"revision":       float64(8),
+		},
+	})
+	if err != nil {
+		t.Fatalf("decodeSnapshotInfo: %v", err)
+	}
+	if snapshot == nil || snapshot.RunCommand == nil {
+		t.Fatalf("snapshot = %+v, want run command status", snapshot)
+	}
+	if snapshot.RunCommand.WorkspaceID != "ws-run-command" ||
+		snapshot.RunCommand.RunID != "run-rejected" ||
+		snapshot.RunCommand.State != "rejected" ||
+		snapshot.RunCommand.Intent != "resume" ||
+		snapshot.RunCommand.RequestID != "request-rejected" ||
+		snapshot.RunCommand.IdempotencyKey != "resume/ws-run-command/run-rejected" ||
+		snapshot.RunCommand.RejectedAt != "2026-06-21T00:01:00Z" ||
+		snapshot.RunCommand.Error != "scheduler command was not queued" ||
+		snapshot.RunCommand.Revision != 8 {
+		t.Fatalf("run command = %+v, want decoded rejected command metadata", snapshot.RunCommand)
 	}
 }
 

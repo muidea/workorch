@@ -273,6 +273,7 @@ func (s *serverState) registerWorkorchDSchedulerCommandWatcher() {
 		topic := topic
 		unsubscribe := s.schedulerHub.Subscribe(topic, func(ctx context.Context, envelope events.Envelope) error {
 			if err := s.handleWorkorchDSchedulerCommand(ctx, envelope); err != nil {
+				s.projectRejectedSchedulerCommand(envelope, err)
 				return err
 			}
 			s.projectAcceptedSchedulerCommand(envelope)
@@ -296,7 +297,7 @@ func (s *serverState) projectAcceptedSchedulerCommand(envelope events.Envelope) 
 	if s == nil || s.workspaceProjection == nil {
 		return
 	}
-	workspaceID := schedulerString(envelope, events.PayloadKeyWorkspaceID, envelope.WorkspaceID)
+	workspaceID := firstNonEmptySchedulerString(envelope.WorkspaceID, schedulerStringValue(envelope.Payload, events.PayloadKeyWorkspaceID))
 	if strings.TrimSpace(workspaceID) == "" {
 		return
 	}
@@ -306,11 +307,43 @@ func (s *serverState) projectAcceptedSchedulerCommand(envelope events.Envelope) 
 		Intent:             acceptedSchedulerCommandIntent(envelope),
 		Reason:             schedulerStringValue(envelope.Payload, events.PayloadKeyReason),
 		RequestID:          schedulerStringValue(envelope.Payload, events.PayloadKeyRequestID),
+		IdempotencyKey:     schedulerCommandIdempotencyKey(envelope),
 		Source:             acceptedSchedulerCommandSource(envelope),
 		DefinitionRevision: schedulerStringValue(envelope.Payload, events.PayloadKeyDefinitionRevision),
 		DecisionID:         schedulerStringValue(envelope.Payload, events.PayloadKeyDecisionID),
 		Revision:           envelope.Revision,
 		AcceptedAt:         time.Now().UTC().Format(time.RFC3339Nano),
+	})
+}
+
+func (s *serverState) projectRejectedSchedulerCommand(envelope events.Envelope, cause error) {
+	if s == nil || s.workspaceProjection == nil {
+		return
+	}
+	if err := validateSchedulerEnvelopePayloadScope(envelope); err != nil {
+		return
+	}
+	workspaceID := firstNonEmptySchedulerString(envelope.WorkspaceID, schedulerStringValue(envelope.Payload, events.PayloadKeyWorkspaceID))
+	if strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	errText := ""
+	if cause != nil {
+		errText = cause.Error()
+	}
+	s.workspaceProjection.ApplyRunCommandRejected(workspaceviewcore.RunCommandRejectedUpdate{
+		WorkspaceID:        workspaceID,
+		RunID:              firstNonEmptySchedulerString(envelope.RunID, schedulerStringValue(envelope.Payload, events.PayloadKeyRunID)),
+		Intent:             acceptedSchedulerCommandIntent(envelope),
+		Reason:             schedulerStringValue(envelope.Payload, events.PayloadKeyReason),
+		RequestID:          schedulerStringValue(envelope.Payload, events.PayloadKeyRequestID),
+		IdempotencyKey:     schedulerCommandIdempotencyKey(envelope),
+		Source:             acceptedSchedulerCommandSource(envelope),
+		DefinitionRevision: schedulerStringValue(envelope.Payload, events.PayloadKeyDefinitionRevision),
+		DecisionID:         schedulerStringValue(envelope.Payload, events.PayloadKeyDecisionID),
+		Revision:           envelope.Revision,
+		RejectedAt:         time.Now().UTC().Format(time.RFC3339Nano),
+		Error:              errText,
 	})
 }
 
@@ -326,6 +359,35 @@ func acceptedSchedulerCommandIntent(envelope events.Envelope) string {
 		return intent
 	}
 	return ""
+}
+
+func schedulerCommandIdempotencyKey(envelope events.Envelope) string {
+	req := workspaceRunRequestFromEnvelope(envelope)
+	switch strings.TrimSpace(req.Intent) {
+	case "replan":
+		return governanceRunResumeKey(governanceRunResumeRef{
+			WorkspaceID: req.WorkspaceID,
+			RunID:       req.RunID,
+			Intent:      "replan",
+			DecisionID:  req.DecisionID,
+		})
+	case "resume", "recover":
+		return governanceRunResumeKey(governanceRunResumeRef{
+			WorkspaceID: req.WorkspaceID,
+			RunID:       req.RunID,
+			Intent:      req.Intent,
+		})
+	case "restart":
+		if strings.TrimSpace(req.WorkspaceID) == "" {
+			return ""
+		}
+		return "restart/" + strings.TrimSpace(req.WorkspaceID)
+	default:
+		if strings.TrimSpace(req.WorkspaceID) == "" {
+			return ""
+		}
+		return strings.TrimSpace(req.Intent) + "/" + strings.TrimSpace(req.WorkspaceID)
+	}
 }
 
 func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, envelope events.Envelope) error {

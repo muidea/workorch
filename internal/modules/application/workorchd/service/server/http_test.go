@@ -5534,11 +5534,72 @@ func TestWorkorchDRunResumeHTTPProjectsReplanIntent(t *testing.T) {
 		snapshot.RunCommand.Intent != "replan" ||
 		snapshot.RunCommand.RunID != "run-http-replan" ||
 		snapshot.RunCommand.RequestID != "request-http-replan" ||
+		snapshot.RunCommand.IdempotencyKey != "replan/"+workspace.ID+"/run-http-replan/ticket-http-replan" ||
 		snapshot.RunCommand.Reason != "decision_replan_resolved" ||
 		snapshot.RunCommand.Source != "web" ||
 		snapshot.RunCommand.DefinitionRevision != "rev-http-replan" ||
 		snapshot.RunCommand.DecisionID != "ticket-http-replan" {
 		t.Fatalf("projected run command = %+v, want HTTP replan command metadata", snapshot.RunCommand)
+	}
+}
+
+func TestWorkorchDWorkspaceRunCommandReplanUsesScopedIdempotencyKey(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	hub := events.NewMemoryHub()
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	const workspaceID = "ws-scheduler-replan-idempotency"
+	const runID = "run-scheduler-replan-idempotency"
+	const decisionID = "ticket-scheduler-replan-idempotency"
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"},
+	})
+
+	envelope := events.Envelope{
+		Topic:       workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		Revision:    21,
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID: workspaceID,
+			events.PayloadKeyRunID:       runID,
+			events.PayloadKeyIntent:      "replan",
+			events.PayloadKeyDecisionID:  decisionID,
+			events.PayloadKeyRequestID:   "request-replan-1",
+			events.PayloadKeySource:      "tui",
+		},
+	}
+	if err := publishHTTPTestCommand(context.Background(), hub, envelope); err != nil {
+		t.Fatalf("publish first replan command: %v", err)
+	}
+	envelope.Revision = 22
+	envelope.Payload[events.PayloadKeyRequestID] = "request-replan-2"
+	if err := publishHTTPTestCommand(context.Background(), hub, envelope); err != nil {
+		t.Fatalf("publish duplicate replan command: %v", err)
+	}
+
+	expectedKey := "replan/" + workspaceID + "/" + runID + "/" + decisionID
+	state.runContinuations.governanceMu.Lock()
+	pendingCount := len(state.runContinuations.governancePending)
+	startedCount := len(state.runContinuations.governanceStarted)
+	_, pending := state.runContinuations.governancePending[expectedKey]
+	_, started := state.runContinuations.governanceStarted[expectedKey]
+	state.runContinuations.governanceMu.Unlock()
+	if pendingCount != 1 || startedCount != 1 || !pending || !started {
+		t.Fatalf("governance queue pending=%d started=%d key pending/started=%v/%v, want one scoped replan key %s", pendingCount, startedCount, pending, started, expectedKey)
+	}
+	if routine.asyncFunctionCalls != 1 {
+		t.Fatalf("background submissions = %d, want duplicate replan coalesced", routine.asyncFunctionCalls)
+	}
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspaceID)
+	if err != nil {
+		t.Fatalf("read projected workspace snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.State != "accepted" ||
+		snapshot.RunCommand.Intent != "replan" ||
+		snapshot.RunCommand.IdempotencyKey != expectedKey ||
+		snapshot.RunCommand.RequestID != "request-replan-2" {
+		t.Fatalf("projected run command = %+v, want scoped replan idempotency key", snapshot.RunCommand)
 	}
 }
 
@@ -5708,6 +5769,12 @@ func TestWorkorchDSchedulerCommandRejectsWorkspaceScopeMismatch(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMemoryHub()
 	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-scheduler-envelope", State: "active"},
+	})
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-scheduler-payload", State: "active"},
+	})
 
 	err := publishHTTPTestCommand(context.Background(), hub, events.Envelope{
 		Topic:       workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
@@ -5726,6 +5793,20 @@ func TestWorkorchDSchedulerCommandRejectsWorkspaceScopeMismatch(t *testing.T) {
 	state.runContinuations.restartMu.Unlock()
 	if pendingCount != 0 {
 		t.Fatalf("restart pending count = %d, want no queued command after scope mismatch", pendingCount)
+	}
+	envelopeSnapshot, _, err := state.readProjectedWorkspaceSnapshot("ws-scheduler-envelope")
+	if err != nil {
+		t.Fatalf("read envelope workspace projection: %v", err)
+	}
+	if envelopeSnapshot.RunCommand != nil {
+		t.Fatalf("envelope workspace run command = %+v, want no projection for malformed scope", envelopeSnapshot.RunCommand)
+	}
+	payloadSnapshot, _, err := state.readProjectedWorkspaceSnapshot("ws-scheduler-payload")
+	if err != nil {
+		t.Fatalf("read payload workspace projection: %v", err)
+	}
+	if payloadSnapshot.RunCommand != nil {
+		t.Fatalf("payload workspace run command = %+v, want no cross-workspace projection", payloadSnapshot.RunCommand)
 	}
 }
 
@@ -5763,6 +5844,9 @@ func TestWorkorchDSchedulerCommandReturnsErrorWhenRunContinuationQueueFails(t *t
 	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	const workspaceID = "ws-scheduler-run-command-fail"
 	const runID = "run-scheduler-command-fail"
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"},
+	})
 
 	err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workspaceID, runID, map[string]any{
 		events.PayloadKeyWorkspaceID: workspaceID,
@@ -5792,6 +5876,17 @@ func TestWorkorchDSchedulerCommandReturnsErrorWhenRunContinuationQueueFails(t *t
 		latest.Reason != schedulerReasonEnqueueFailed ||
 		latest.Recoverability != schedulerRecoverabilityManualRetry {
 		t.Fatalf("latest continuation = %+v, want run continuation enqueue failure", latest)
+	}
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspaceID)
+	if err != nil {
+		t.Fatalf("read projected workspace snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.State != "rejected" ||
+		snapshot.RunCommand.Intent != "resume" ||
+		snapshot.RunCommand.RunID != runID ||
+		snapshot.RunCommand.Error == "" {
+		t.Fatalf("projected run command = %+v, want rejected scheduler command", snapshot.RunCommand)
 	}
 }
 

@@ -222,6 +222,17 @@ func (m *Manager) ApplyRunCommandAccepted(update RunCommandAcceptedUpdate) bool 
 	return true
 }
 
+func (m *Manager) ApplyRunCommandRejected(update RunCommandRejectedUpdate) bool {
+	if m == nil || m.store == nil {
+		return false
+	}
+	if !m.store.ApplyRunCommandRejected(update) {
+		return false
+	}
+	m.publishProjectionChanged(context.Background(), update.WorkspaceID, "run_command_rejected")
+	return true
+}
+
 func (m *Manager) DeleteWorkspace(workspaceID string) {
 	if m == nil || m.store == nil {
 		return

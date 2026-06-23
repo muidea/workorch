@@ -81,11 +81,27 @@ type RunCommandAcceptedUpdate struct {
 	Intent             string
 	Reason             string
 	RequestID          string
+	IdempotencyKey     string
 	Source             string
 	DefinitionRevision string
 	DecisionID         string
 	Revision           int64
 	AcceptedAt         string
+}
+
+type RunCommandRejectedUpdate struct {
+	WorkspaceID        string
+	RunID              string
+	Intent             string
+	Reason             string
+	RequestID          string
+	IdempotencyKey     string
+	Source             string
+	DefinitionRevision string
+	DecisionID         string
+	Revision           int64
+	RejectedAt         string
+	Error              string
 }
 
 type Loader interface {

@@ -39,13 +39,17 @@ type WorkspaceSnapshot struct {
 type RunCommandStatus struct {
 	WorkspaceID        string `json:"workspaceId,omitempty"`
 	RunID              string `json:"runId,omitempty"`
+	State              string `json:"state,omitempty"`
 	Intent             string `json:"intent,omitempty"`
 	Reason             string `json:"reason,omitempty"`
 	RequestID          string `json:"requestId,omitempty"`
+	IdempotencyKey     string `json:"idempotencyKey,omitempty"`
 	Source             string `json:"source,omitempty"`
 	DefinitionRevision string `json:"definitionRevision,omitempty"`
 	DecisionID         string `json:"decisionId,omitempty"`
 	AcceptedAt         string `json:"acceptedAt,omitempty"`
+	RejectedAt         string `json:"rejectedAt,omitempty"`
+	Error              string `json:"error,omitempty"`
 	Revision           int64  `json:"revision,omitempty"`
 }
 
