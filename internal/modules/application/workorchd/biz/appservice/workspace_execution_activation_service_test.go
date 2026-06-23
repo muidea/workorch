@@ -3916,11 +3916,44 @@ func TestActivateWorkspaceExecutionWithBackendRestartReplacesCreatedActiveRun(t 
 	if err != nil {
 		t.Fatalf("CreateRunWithBackend: %v", err)
 	}
+	updatedGoal, err := UpdateGoalWithBackend(context.Background(), "file", dataRoot, goal.ID, "restart created active goal revised")
+	if err != nil {
+		t.Fatalf("UpdateGoalWithBackend: %v", err)
+	}
+	updatedDoD, err := UpdateDoDWithBackend(context.Background(), "file", dataRoot, dod.ID, []string{"restart created active dod revised"})
+	if err != nil {
+		t.Fatalf("UpdateDoDWithBackend: %v", err)
+	}
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
 	exports := session.Bootstrap.Exports()
 	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
+	}
+	createdRun, err := exports.Repositories.Runs.Get(ctx, common.RunID(created.ID))
+	if err != nil {
+		t.Fatalf("get created run: %v", err)
+	}
+	createdRun.ExecutionContext = map[string]any{
+		"definitionRevision": "stale-restart-definition",
+		"coverageWorkItems": []map[string]any{{
+			"id":                 "cwi-stale-restart",
+			"definitionRevision": "stale-restart-definition",
+			"acceptedEvidenceRefs": []string{
+				"run-activation-restart-created-active/stale-evidence",
+			},
+			"targetText": "stale restart target",
+		}},
+		"gapBaseline": map[string]any{
+			"definitionRevision": "stale-restart-definition",
+			"baselineRevision":   "stale-restart-baseline",
+			"acceptedEvidenceRefs": []string{
+				"run-activation-restart-created-active/stale-evidence",
+			},
+		},
+	}
+	if err := exports.Repositories.Runs.Update(ctx, createdRun); err != nil {
+		t.Fatalf("update created run stale context: %v", err)
 	}
 	workspaceItem.ActiveRunID = common.RunID(created.ID)
 	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
@@ -3933,6 +3966,31 @@ func TestActivateWorkspaceExecutionWithBackendRestartReplacesCreatedActiveRun(t 
 	}
 	if item.Run.ID == created.ID {
 		t.Fatalf("activation run id = %q, want replacement run", item.Run.ID)
+	}
+	if item.Run.GoalID != updatedGoal.ID || item.Run.DoDID != updatedDoD.ID {
+		t.Fatalf("replacement run = %+v, want latest updated goal/dod", item.Run)
+	}
+	if item.Run.DefinitionRevision != "goal:"+updatedGoal.ID+"|dod:"+updatedDoD.ID {
+		t.Fatalf("replacement definitionRevision = %q, want latest revision", item.Run.DefinitionRevision)
+	}
+	if contextStringSliceContains(item.Run.ExecutionContext["acceptedEvidenceRefs"], "run-activation-restart-created-active/stale-evidence") {
+		t.Fatalf("replacement executionContext acceptedEvidenceRefs reused stale evidence: %+v", item.Run.ExecutionContext)
+	}
+	if items := contextMapSliceFromValue(t, item.Run.ExecutionContext["coverageWorkItems"]); len(items) > 0 {
+		for _, coverageItem := range items {
+			if coverageItem["id"] == "cwi-stale-restart" ||
+				coverageItem["definitionRevision"] == "stale-restart-definition" ||
+				contextStringSliceContains(coverageItem["acceptedEvidenceRefs"], "run-activation-restart-created-active/stale-evidence") {
+				t.Fatalf("replacement coverageWorkItems reused stale old run item: %+v", items)
+			}
+		}
+	}
+	if baseline := contextMapFromValue(t, item.Run.ExecutionContext["gapBaseline"]); len(baseline) > 0 {
+		if baseline["definitionRevision"] == "stale-restart-definition" ||
+			baseline["baselineRevision"] == "stale-restart-baseline" ||
+			contextStringSliceContains(baseline["acceptedEvidenceRefs"], "run-activation-restart-created-active/stale-evidence") {
+			t.Fatalf("replacement gapBaseline reused stale old run baseline: %+v", baseline)
+		}
 	}
 	if item.Run.State == "created" {
 		t.Fatalf("replacement run = %+v, want started observable run", item.Run)
