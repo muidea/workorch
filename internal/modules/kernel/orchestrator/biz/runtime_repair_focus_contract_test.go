@@ -275,6 +275,88 @@ func TestValidateLLMRepairCoverageFocusNormalizesEvidenceGraphBinding(t *testing
 	}
 }
 
+func TestValidateLLMRepairCoverageFocusNormalizesStateChangingWriteGraphBinding(t *testing.T) {
+	step := repairFocusEvidenceContractStep()
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{
+			Nodes: []runtimemodel.BlockExecutionNode{
+				{
+					ID:   "record-state-change",
+					Kind: "git/write",
+					Input: map[string]any{
+						"operation": "commit",
+						"message":   "record neutral state change",
+					},
+				},
+				{
+					ID:        "validate-state-change",
+					Kind:      "shell/command",
+					DependsOn: []string{"record-state-change"},
+					Input: map[string]any{
+						"command": "validate-state-change",
+						"validationEvidence": map[string]any{
+							"mode":            "executable_contract",
+							"observationType": "executable_contract_observation",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMRepairCoverageFocusBindingContract(step, output); err != nil {
+		t.Fatalf("validateLLMRepairCoverageFocusBindingContract err = %v, want normalized write graph allowed", err)
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok {
+		t.Fatalf("normalized executionGraph missing from output")
+	}
+	for idx, node := range graph.Nodes {
+		if got := stringFromMap(node.Input, "coverageFocusId"); got != "focus-cwi-primary" {
+			t.Fatalf("node[%d] coverageFocusId = %q, want focus-cwi-primary", idx, got)
+		}
+		if got := stringSliceFromValue(node.Input["coverageWorkItemIds"]); len(got) != 1 || got[0] != "cwi-primary" {
+			t.Fatalf("node[%d] coverageWorkItemIds = %+v, want cwi-primary", idx, got)
+		}
+	}
+}
+
+func TestValidateLLMRepairCoverageFocusRejectsUnboundStateChangingWriteGraph(t *testing.T) {
+	step := repairFocusContractStep()
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{
+			Nodes: []runtimemodel.BlockExecutionNode{
+				{
+					ID:   "change-primary",
+					Kind: "patch/apply",
+					Input: map[string]any{
+						"targetRef":           "primary-resource",
+						"patchType":           "file_write",
+						"content":             "primary update",
+						"baseHash":            "hash-primary",
+						"coverageFocusId":     "focus-cwi-primary",
+						"coverageWorkItemIds": []string{"cwi-primary"},
+					},
+				},
+				{
+					ID:        "record-state-change",
+					Kind:      "git/write",
+					DependsOn: []string{"change-primary"},
+					Input: map[string]any{
+						"operation": "commit",
+						"message":   "record neutral state change",
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMRepairCoverageFocusBindingContract(step, output)
+	if err == nil || !strings.Contains(err.Error(), "repair_focus_mismatch") {
+		t.Fatalf("validateLLMRepairCoverageFocusBindingContract err = %v, want repair_focus_mismatch", err)
+	}
+}
+
 func TestValidateLLMRepairCoverageFocusAllowsStructuredBlocker(t *testing.T) {
 	run := repairFocusContractRun()
 	step := repairFocusContractStep()

@@ -140,31 +140,30 @@ func normalizeRepairCoverageFocusGraphBinding(step *runModel.Step, graph runtime
 	changed := false
 	nodes := append([]runtimemodel.BlockExecutionNode(nil), graph.Nodes...)
 	for idx, node := range nodes {
-		kind := canonicalRuntimeGraphNodeKind(node.Kind)
-		switch kind {
-		case "shell/command", "mcp/tool_call":
-			if repairPayloadBindsCoverageFocus(node.Input, contract) {
-				continue
-			}
-			nextInput := cloneStepPayload(node.Input)
-			if nextInput == nil {
-				nextInput = map[string]any{}
-			}
-			if contract.FocusID != "" {
-				nextInput["coverageFocusId"] = contract.FocusID
-			}
-			if len(contract.WorkItemIDs) > 0 {
-				nextInput["coverageWorkItemIds"] = append([]string(nil), contract.WorkItemIDs...)
-				if len(contract.WorkItemIDs) == 1 {
-					nextInput["coverageWorkItemId"] = contract.WorkItemIDs[0]
-				}
-			}
-			if len(contract.TargetRefs) > 0 && len(stringSliceFromValue(nextInput["targetRefs"])) == 0 {
-				nextInput["targetRefs"] = append([]string(nil), contract.TargetRefs...)
-			}
-			nodes[idx].Input = nextInput
-			changed = true
+		if !repairGraphNodeShouldBindCoverageFocus(node) {
+			continue
 		}
+		if repairPayloadBindsCoverageFocus(node.Input, contract) {
+			continue
+		}
+		nextInput := cloneStepPayload(node.Input)
+		if nextInput == nil {
+			nextInput = map[string]any{}
+		}
+		if contract.FocusID != "" {
+			nextInput["coverageFocusId"] = contract.FocusID
+		}
+		if len(contract.WorkItemIDs) > 0 {
+			nextInput["coverageWorkItemIds"] = append([]string(nil), contract.WorkItemIDs...)
+			if len(contract.WorkItemIDs) == 1 {
+				nextInput["coverageWorkItemId"] = contract.WorkItemIDs[0]
+			}
+		}
+		if len(contract.TargetRefs) > 0 && len(stringSliceFromValue(nextInput["targetRefs"])) == 0 {
+			nextInput["targetRefs"] = append([]string(nil), contract.TargetRefs...)
+		}
+		nodes[idx].Input = nextInput
+		changed = true
 	}
 	if !changed {
 		return graph, false
@@ -297,22 +296,32 @@ func validateRepairCoverageFocusGraphBinding(graph runtimemodel.BlockExecutionGr
 	boundActionableNodes := 0
 	for _, node := range graph.Nodes {
 		kind := canonicalRuntimeGraphNodeKind(node.Kind)
-		switch kind {
-		case "patch/apply", "shell/command", "mcp/tool_call":
-			actionableNodes++
-			if repairPayloadBindsCoverageFocus(node.Input, contract) {
-				boundActionableNodes++
-				continue
-			}
-			if kind == "patch/apply" {
-				return repairCoverageFocusMismatchError(contract)
-			}
+		if !repairGraphNodeShouldBindCoverageFocus(node) {
+			continue
+		}
+		actionableNodes++
+		if repairPayloadBindsCoverageFocus(node.Input, contract) {
+			boundActionableNodes++
+			continue
+		}
+		if stepKindCanProduceStateChangingEvidence(kind) {
+			return repairCoverageFocusMismatchError(contract)
 		}
 	}
 	if actionableNodes > 0 && boundActionableNodes == 0 {
 		return repairCoverageFocusMismatchError(contract)
 	}
 	return nil
+}
+
+func repairGraphNodeShouldBindCoverageFocus(node runtimemodel.BlockExecutionNode) bool {
+	kind := canonicalRuntimeGraphNodeKind(node.Kind)
+	switch kind {
+	case "shell/command", "mcp/tool_call":
+		return true
+	default:
+		return stepKindCanProduceStateChangingEvidence(kind)
+	}
 }
 
 func repairPayloadBindsCoverageFocus(payload map[string]any, contract repairCoverageFocusBindingContract) bool {

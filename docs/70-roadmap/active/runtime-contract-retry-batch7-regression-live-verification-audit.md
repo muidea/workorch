@@ -1755,6 +1755,21 @@ The audited result is:
   command text. The closure is core-neutral: it changes only generic command
   parsing and does not add any template, language, workspace, or target-file
   rule.
+- After redeploying `038`, live `ws-4e...` verified that the previous scratch
+  validation scanner blocker did not recur: multiple scratch setup and
+  path-conversion validation nodes completed. The successor run then exposed a
+  separate coverage-ledger binding gap. A focus-bound graph completed
+  state-changing `git/write` add/commit nodes, but those nodes did not carry
+  `coverageFocusId` / `coverageWorkItemIds`, so the coverage work item lacked
+  the completed state-change evidence refs and the next assessment escalated
+  to `dod_assessment_missing_evidence_refs`. The local closure in
+  `ev:code/focus-bound-state-change-write-evidence/20260623-039` makes
+  coverage focus normalization and validation use the generic
+  `stepKindCanProduceStateChangingEvidence` rule, so any state-changing
+  evidence-producing node such as `*/write` must bind to the current focus or
+  be normalized when the step is eligible. The closure is core-neutral: it does
+  not add workspace IDs, template IDs, language rules, file names, provider
+  names, or target-project behavior.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked
