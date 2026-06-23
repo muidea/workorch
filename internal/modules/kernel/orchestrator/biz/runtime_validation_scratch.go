@@ -43,6 +43,7 @@ func ensureConcreteValidationScratchContract(input map[string]any, pkg map[strin
 func concreteValidationEvidenceRequiredOutputWithScratch(input map[string]any, pkg map[string]any, existing map[string]any) map[string]any {
 	required := concreteValidationEvidenceRequiredOutput(existing)
 	ensureConcreteValidationScratchContract(input, pkg, required)
+	applyRepairCoverageFocusContract(input, pkg, required)
 	return required
 }
 

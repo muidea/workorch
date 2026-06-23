@@ -21,6 +21,21 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 | closureBatch | 7 |
 | loadByDefault | false |
 
+### ev:code/focus-contract-required-output-preservation/20260623-032
+
+| Field | Value |
+| --- | --- |
+| claimId | `B7-G3` |
+| workspaceId | `ws-4e83810542ac4d65`, `ws-7ced70e98ea50c43` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_repair_focus_contract.go`, `internal/modules/kernel/orchestrator/biz/runtime_repair_action_package.go`, `internal/modules/kernel/orchestrator/biz/runtime_convergence.go`, `internal/modules/kernel/orchestrator/biz/runtime_repair_contracts.go`, `internal/modules/kernel/orchestrator/biz/runtime_validation_scratch.go`, `internal/modules/kernel/orchestrator/biz/runtime_repair_focus_contract_test.go` |
+| extractCommand | `curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces; curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-4e83810542ac4d65/snapshot; jq '{repairActionPackage:{requiredOutput:.repairActionPackage.requiredOutput,coverageFocus:.repairActionPackage.coverageFocus,coverageFocusBindingRequired:.repairActionPackage.coverageFocusBindingRequired},coverageFocus,stateChangingOutputRequired,repairObjective}' .workorch-data/internal/workspaces/ws-4e83810542ac4d65/runs/run-003-replan-001-replan-001-replan-001-replan-001-replan-001/steps/run-003-replan-001-replan-001-replan-001-replan-001-replan-001/003-*/input.json; go test ./internal/modules/kernel/orchestrator/biz -run 'TestStateChangingConvergencePreservesCoverageFocusRequiredOutput|TestRepairCoverageFocusContractSurvivesEvidenceRequiredOutputRebuild|TestValidateLLMRepairCoverageFocusAcceptsStateChangingReasonBinding|TestRepairActionPackageDeclaresCoverageFocusBinding|TestValidateLLMRepairCoverageFocusNormalizesEvidenceGraphBinding' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh; git diff --check` |
+| extractedSummary | After redeploy and scoped `replan`, both workspaces correctly created fresh successor runs. `ws-4e...` then blocked on `repair_focus_mismatch`: the step input carried `repairActionPackage.coverageFocusBindingRequired=true` and a concrete `coverageFocus`, but the rebuilt `repairActionPackage.requiredOutput` omitted the mechanical `mustBindCoverageFocus`, `coverageFocusId`, `coverageWorkItemIds`, and binding rule fields. The runtime validator still enforced the focus contract, so provider output that only mentioned the focus in `stateChangingReason` was rejected and consumed convergence budget. Local core closure reapplies the coverage focus contract after requiredOutput rebuilds and inside evidence/validation required-output helpers, accepts focus tokens in neutral tool-contract fields such as `stateChangingReason`, `boundedReason`, and `verificationScope`, and additionally covers the state-changing convergence existing-package path where `mustIncludeStateChangingNode=true` previously returned before focus fields were restored. Patch/apply focus binding remains strict. Focused and full orchestrator/biz tests plus boundary verification passed. `ws-7c...` separately remains blocked by destructive/background service validation shape, which is not closed by this evidence item. |
+| owner | core runtime repair contract consistency |
+| closureBatch | 7 |
+| loadByDefault | false |
+
 ### ev:code/software-dev-lsp-tool-surface/20260622-019
 
 | Field | Value |
@@ -1492,6 +1507,21 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 | extractCommand | `curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-7ced70e98ea50c43/snapshot; go test ./internal/modules/kernel/orchestrator/biz -run 'TestContractViolation(ConcreteValidationForbidsContinuableDecisionBlocker|CorrectionProfilesCoverPrimaryRules|CoverageAssessmentPreservesCurrentRequiredOutputShape|RecoveryActionRetriesWithinBudget|RuntimeRepairInputIncludesContractViolationRecovery)' -count=1 -timeout=300s` |
 | extractedSummary | Live verification-stage retry showed `decision requests a continuable candidate choice`: runtime correctly converted a continuable decision blocker into a contract failure, but the correction contract still listed bare `blocked_on_decision` as an allowed output. That made the retry prompt internally contradictory: it asked for bounded validation evidence while allowing another unqualified decision blocker. Local core closure changes correction contracts to allow only `blocked_on_decision_with_required_external_dependency` and `blocked_on_approval_with_required_governance_dependency`, while explicitly forbidding continuable candidate decision requests. The rule is based on generic governance/dependency shape, not workspace title, template, provider, endpoint, command, or language. |
 | owner | core runtime contract retry |
+| closureBatch | 7 |
+| loadByDefault | false |
+
+### ev:code/graph-node-primary-diagnostic-dependency-evidence/20260623-033
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-GRAPH-NODE-PRIMARY-DIAGNOSTIC-DEPENDENCY-EVIDENCE-20260623-033` |
+| workspaceId | `ws-4e83810542ac4d65` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-replan-001` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | deployed `http://127.0.0.1:8080` plus `internal/modules/kernel/orchestrator/biz/runtime_patch_contract.go`, `internal/modules/kernel/orchestrator/biz/runtime_primary_diagnostic_repair_test.go` |
+| extractCommand | `curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-4e83810542ac4d65/snapshot; jq '{graphNodeId,graphCompletedNodes,previousStepOutput,graphEvidence,primaryDiagnosticRepair}' .workorch-data/internal/workspaces/ws-4e83810542ac4d65/runs/<run>/steps/<run>/008-graph-002-002-add-output-limits-struct/input.json; go test ./internal/modules/kernel/orchestrator/biz -run 'TestValidateLLMExecutionOutputContract(AllowsGraphNodeAfterDependencyAddressesPrimaryDiagnostic|RejectsPatchThatMissesPrimaryDiagnostics|AllowsPatchOverPrimaryDiagnosticLines|AllowsRelatedPatchWithPrimaryDiagnosticDeclaration|AllowsInferredRelatedShapePatch|AllowsTextReplacePrimaryDiagnosticPatch|AllowsTextReplaceDeletingPrimaryDiagnosticLine|AllowsImportPatchForLinePayloadShortIdentifier|RejectsInferredRelatedCommentOnlyPatch)|TestStructuredFailureSignalsExtractShortLinePayloadIdentifier' -count=1 -timeout=240s` |
+| extractedSummary | Post-redeploy live `ws-4e...` moved past the previous focus requiredOutput blocker and produced a state-changing repair graph. The first graph node patched the primary diagnostic target and completed; the second graph node targeted the same diagnostic resource but was rejected with `primary diagnostic repair requires patch/apply to address line-referenced resource shape blockers before secondary changes` because the child step inherited the original primary diagnostic contract and the gate evaluated every graph node in isolation. Local core closure keeps the direct primary diagnostic gate strict, but also recognizes completed dependency graph evidence: when `previousStepOutput` or `graphEvidence` already contains a patch that directly satisfies the current primary diagnostic contract, later same-scope graph-node patches are no longer rejected by the stale primary diagnostic gate. This is business-neutral and consumes only structured graph evidence, target refs, line refs, and identifiers; it does not hardcode workspace IDs, templates, languages, commands, file names, or provider behavior. Focused regression tests prove the old blocker path is accepted only when dependency evidence has already addressed the primary diagnostic, while existing rejection tests remain active. |
+| owner | core runtime graph/patch contract |
 | closureBatch | 7 |
 | loadByDefault | false |
 

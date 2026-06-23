@@ -1674,6 +1674,30 @@ The audited result is:
   `ev:code/convergence-budget-intermediate-graph-nodes/20260623-031` skips
   no-delta accounting for completed non-validation graph nodes while preserving
   accounting for validation evidence nodes and failed steps.
+- The next redeploy plus scoped `replan` proved the governance continuation
+  path still creates fresh successor runs for both live workspaces. `ws-4e...`
+  then exposed a contract consistency defect rather than a scheduler defect:
+  the runtime validator enforced `coverageFocusBindingRequired`, but rebuilt
+  `repairActionPackage.requiredOutput` no longer exposed the matching
+  `mustBindCoverageFocus`, `coverageFocusId`, `coverageWorkItemIds`, or binding
+  rule. The local closure in
+  `ev:code/focus-contract-required-output-preservation/20260623-032` reapplies
+  focus binding after requiredOutput rebuilds and recognizes focus tokens in
+  neutral tool-contract fields. `ws-7c...` remains blocked on a distinct
+  concrete-validation safety issue where provider output uses background
+  service launch plus process termination; that requires separate bounded
+  service validation harness design or template guidance and is not closed by
+  `032`.
+- The subsequent redeploy/replan proved the focus requiredOutput preservation
+  is active: `ws-4e...` produced real patch activity instead of another
+  focus-mismatch failure. The new blocker is a separate graph-node contract
+  propagation defect: the first repair graph node satisfied the original
+  primary diagnostic, but the second same-scope graph node was still evaluated
+  against the stale primary diagnostic in isolation and escalated to decision.
+  The local closure in
+  `ev:code/graph-node-primary-diagnostic-dependency-evidence/20260623-033`
+  allows later same-scope graph-node patches only when completed dependency
+  graph evidence already directly satisfies the primary diagnostic contract.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked

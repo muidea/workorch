@@ -37,7 +37,7 @@ func preserveStateChangingSchemaInvalidRepairContract(input map[string]any, fail
 			"make every executionGraph node a complete JSON object",
 		},
 	}
-	required := enforceStateChangingRequiredOutputForConvergence(pkg)
+	required := enforceStateChangingRequiredOutputForConvergence(pkg, input)
 	required["mustReturnValidJSON"] = true
 	required["mustNotReuseRejectedJSON"] = true
 	required["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(required["forbiddenKinds"]),

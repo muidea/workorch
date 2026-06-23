@@ -39,6 +39,18 @@ func applyRepairCoverageFocusContract(input map[string]any, pkg map[string]any, 
 	requiredOutput["coverageFocusBindingRule"] = "state-changing and validation repair outputs must declare coverageFocusId, focusId, coverageWorkItemIds, coverageWorkItemId, or coverageTargets matching repairActionPackage.coverageFocus"
 }
 
+func reapplyRepairCoverageFocusContract(input map[string]any, pkg map[string]any) {
+	if len(input) == 0 || len(pkg) == 0 {
+		return
+	}
+	requiredOutput := mapFromValue(pkg["requiredOutput"])
+	if len(requiredOutput) == 0 {
+		return
+	}
+	applyRepairCoverageFocusContract(input, pkg, requiredOutput)
+	pkg["requiredOutput"] = requiredOutput
+}
+
 func repairCoverageFocusFromInput(input map[string]any) map[string]any {
 	if len(input) == 0 {
 		return nil
@@ -348,6 +360,9 @@ func repairCoverageFocusBindingTokensFromPayload(payload map[string]any) []strin
 			"raw",
 			"requirement",
 			"id",
+			"stateChangingReason",
+			"boundedReason",
+			"verificationScope",
 		} {
 			add(stringFromMap(item, key))
 		}

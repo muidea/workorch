@@ -454,6 +454,12 @@ go test ./... -count=1
    - patch application failure narrow retry contract for stale `oldText`/diff/content after dispatch (`ev:code/patch-application-failure-narrow-retry/20260622-023`)
    - LLM-visible target snapshot compaction safety, so compacted snapshots cannot claim complete safe file-write or exact patch baseline (`ev:code/llm-target-snapshot-compaction-safety/20260622-024`)
    - scoped root-cause strategy reassessment, so repeated failed-surface repair may accept a substantive patch to a declared sub-scope inside the failed resource without weakening broad same-surface rejection (`ev:code/scoped-root-cause-strategy-reassessment/20260622-025`)
+   - focus-bound evidence graph normalization for non-`patch/apply` evidence acquisition nodes (`ev:code/focus-bound-evidence-graph-normalization/20260623-028`)
+   - convergence-budget protection for pending graph plans and stale patch conflicts (`ev:code/convergence-budget-graph-pending-and-stale-patch/20260623-029`)
+   - correction-contract governance blocker shape narrowing (`ev:code/contract-correction-governance-blocker-shape/20260623-030`)
+   - convergence-budget protection for successful intermediate graph nodes without validation evidence (`ev:code/convergence-budget-intermediate-graph-nodes/20260623-031`)
+   - requiredOutput focus contract preservation after evidence/validation contract rebuilds (`ev:code/focus-contract-required-output-preservation/20260623-032`)
+   - graph-node primary diagnostic dependency evidence reuse after a completed dependency already addressed the diagnostic (`ev:code/graph-node-primary-diagnostic-dependency-evidence/20260623-033`)
 6. Continue Batch 7 regression and live verification.
 7. Re-run live workspace verification against fresh or resumed workspaces after the preceding gates are closed.
 

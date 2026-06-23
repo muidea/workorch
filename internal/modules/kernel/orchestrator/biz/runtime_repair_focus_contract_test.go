@@ -119,6 +119,88 @@ func TestValidateLLMRepairCoverageFocusAllowsBoundPatchGraph(t *testing.T) {
 	}
 }
 
+func TestRepairCoverageFocusContractSurvivesEvidenceRequiredOutputRebuild(t *testing.T) {
+	input := repairFocusContractInput()
+	pkg := map[string]any{"requiredOutput": stateChangingRepairRequiredOutput()}
+
+	required := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
+	if !boolValue(required["mustBindCoverageFocus"]) {
+		t.Fatalf("requiredOutput = %+v, want mustBindCoverageFocus preserved", required)
+	}
+	if got := stringFromMap(required, "coverageFocusId"); got != "focus-cwi-primary" {
+		t.Fatalf("coverageFocusId = %q, want focus-cwi-primary", got)
+	}
+	if got := stringSliceFromValue(required["coverageWorkItemIds"]); len(got) != 1 || got[0] != "cwi-primary" {
+		t.Fatalf("coverageWorkItemIds = %+v, want cwi-primary", got)
+	}
+
+	validationRequired := concreteValidationEvidenceRequiredOutputWithScratch(input, pkg, required)
+	if !boolValue(validationRequired["mustBindCoverageFocus"]) {
+		t.Fatalf("validation requiredOutput = %+v, want mustBindCoverageFocus preserved", validationRequired)
+	}
+	if got := stringFromMap(validationRequired, "coverageFocusId"); got != "focus-cwi-primary" {
+		t.Fatalf("validation coverageFocusId = %q, want focus-cwi-primary", got)
+	}
+}
+
+func TestStateChangingConvergencePreservesCoverageFocusRequiredOutput(t *testing.T) {
+	input := repairFocusContractInput()
+	input["repairActionPackage"] = map[string]any{
+		"coverageFocusBindingRequired": true,
+		coverageFocusKey:               cloneStepPayload(mapFromValue(input[coverageFocusKey])),
+		"requiredOutput": map[string]any{
+			"mustIncludeStateChangingNode": true,
+			"acceptedKinds":                []string{"patch/apply", "shell/command", "mcp/tool_call"},
+		},
+	}
+
+	pkg := stateChangingRepairActionPackageForConvergence(input, nil)
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustBindCoverageFocus"]) {
+		t.Fatalf("requiredOutput = %+v, want mustBindCoverageFocus after state-changing convergence", required)
+	}
+	if got := stringFromMap(required, "coverageFocusId"); got != "focus-cwi-primary" {
+		t.Fatalf("coverageFocusId = %q, want focus-cwi-primary", got)
+	}
+	if got := stringSliceFromValue(required["coverageWorkItemIds"]); len(got) != 1 || got[0] != "cwi-primary" {
+		t.Fatalf("coverageWorkItemIds = %+v, want cwi-primary", got)
+	}
+}
+
+func TestValidateLLMRepairCoverageFocusAcceptsStateChangingReasonBinding(t *testing.T) {
+	run := repairFocusContractRun()
+	step := repairFocusContractStep()
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{
+			Nodes: []runtimemodel.BlockExecutionNode{
+				{
+					ID:   "change-primary",
+					Kind: "shell/command",
+					Input: map[string]any{
+						"command":             "change-primary",
+						"stateChanging":       true,
+						"targetRef":           "primary-resource",
+						"stateChangingReason": "collect validation evidence for focus-cwi-primary",
+					},
+				},
+				{
+					ID:        "verify-primary",
+					Kind:      "shell/command",
+					DependsOn: []string{"change-primary"},
+					Input: map[string]any{
+						"command":           "verify-primary",
+						"verificationScope": "focus-cwi-primary",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want stateChangingReason focus binding allowed", err)
+	}
+}
+
 func TestValidateLLMRepairCoverageFocusNormalizesEvidenceGraphBinding(t *testing.T) {
 	run := repairFocusContractRun()
 	step := repairFocusEvidenceContractStep()

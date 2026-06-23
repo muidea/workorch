@@ -380,6 +380,57 @@ func TestValidateLLMExecutionOutputContractAllowsImportPatchForLinePayloadShortI
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsGraphNodeAfterDependencyAddressesPrimaryDiagnostic(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-primary-diagnostic-dependency-addressed",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := primaryDiagnosticRepairStep("run-primary-diagnostic-dependency-addressed/graph-001/002-secondary-shape")
+	step.Input[stepInputKeyGraphNodeID] = "secondary-shape"
+	step.Input[stepInputKeyGraphCompletedNodes] = []string{"fix-primary-shape"}
+	step.Input[stepInputKeyGraphEvidence] = []map[string]any{{
+		"nodeId": "fix-primary-shape",
+		"stepId": "run-primary-diagnostic-dependency-addressed/graph-001/001-fix-primary-shape",
+		"kind":   "patch/apply",
+		"output": map[string]any{
+			"status": "completed",
+			"stage":  "patch_apply",
+			"patches": []map[string]any{{
+				"patchType": "text_replace",
+				"targetRef": "main_test.go",
+				"oldText":   "\t_ = Vendor{ModelRouting: nil}",
+				"newText":   "\t_ = Vendor{ModelRouting: map[string]string{}}",
+				"summary":   "repair ModelRouting shape reported by the primary diagnostic",
+			}},
+		},
+	}}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "secondary-shape",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "text_replace",
+					"targetRef": "main_test.go",
+					"oldText":   "want old",
+					"newText": strings.Join([]string{
+						"type SupplementalShape struct{}",
+						"",
+						"want old",
+					}, "\n"),
+					"summary": "apply secondary shape prerequisite in the same diagnostic target after dependency repair",
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want dependency-addressed graph node patch allowed", err)
+	}
+}
+
 func TestStructuredFailureSignalsExtractShortLinePayloadIdentifier(t *testing.T) {
 	output := map[string]any{
 		"stderr": strings.Join([]string{

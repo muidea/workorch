@@ -185,7 +185,7 @@ func BuildConvergenceContract(
 		if len(pkg) == 0 {
 			pkg = convergenceStateChangingRepairActionPackage(input, failedStep)
 		} else if !boolValue(mapFromValue(pkg["requiredOutput"])["mustIncludeStateChangingNode"]) {
-			required := enforceStateChangingRequiredOutputForConvergence(pkg)
+			required := enforceStateChangingRequiredOutputForConvergence(pkg, input)
 			addStrategyReassessmentRequiredOutputContract(pkg, required)
 		}
 		contract.RepairActionPackage = pkg
@@ -295,7 +295,7 @@ func contractViolationRecoveryStateChangingContract(input map[string]any, failed
 	}
 	required := mapFromValue(pkg["requiredOutput"])
 	if !boolValue(required["mustIncludeStateChangingNode"]) {
-		required = enforceStateChangingRequiredOutputForConvergence(pkg)
+		required = enforceStateChangingRequiredOutputForConvergence(pkg, input)
 		addStrategyReassessmentRequiredOutputContract(pkg, required)
 	}
 	pkg["requiredOutput"] = required
@@ -318,7 +318,7 @@ func convergenceStateChangingRepairActionPackage(input map[string]any, failedSte
 	}
 	required := mapFromValue(pkg["requiredOutput"])
 	if !boolValue(required["mustIncludeStateChangingNode"]) {
-		required = enforceStateChangingRequiredOutputForConvergence(pkg)
+		required = enforceStateChangingRequiredOutputForConvergence(pkg, input)
 		addStrategyReassessmentRequiredOutputContract(pkg, required)
 	}
 	return pkg
@@ -460,7 +460,7 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 			contract.RuntimeStageMode = "strict_convergence"
 			contract.RepairObjective = repairObjectiveStateChangingOutput
 			contract.StateChangingOutputRequired = true
-			required := enforceStateChangingRequiredOutputForConvergence(contract.RepairActionPackage)
+			required := enforceStateChangingRequiredOutputForConvergence(contract.RepairActionPackage, input)
 			required["mustReferenceCoverageWorkItem"] = true
 			contract.RepairActionPackage["requiredOutput"] = required
 			contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
@@ -494,7 +494,7 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 			contract.RuntimeStageMode = "strict_convergence"
 			contract.RepairObjective = repairObjectiveStateChangingOutput
 			contract.StateChangingOutputRequired = true
-			required := enforceStateChangingRequiredOutputForConvergence(contract.RepairActionPackage)
+			required := enforceStateChangingRequiredOutputForConvergence(contract.RepairActionPackage, input)
 			required["mustReferenceCoverageWorkItem"] = true
 			contract.RepairActionPackage["requiredOutput"] = required
 			contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
@@ -958,7 +958,7 @@ func repeatedValidationRepairEscalationPackage(run *runModel.Run, input map[stri
 		pkg["evidenceAcquisitionReason"] = "missing current target evidence for repeated validation repair escalation"
 		return pkg
 	}
-	required := enforceStateChangingRequiredOutputForConvergence(pkg)
+	required := enforceStateChangingRequiredOutputForConvergence(pkg, input)
 	addStrategyReassessmentRequiredOutputContract(pkg, required)
 	return pkg
 }
@@ -1248,6 +1248,7 @@ func stateChangingRepairActionPackageForConvergence(input map[string]any, failed
 			applyConcreteRepairEvidenceOutputContract(input, existing, required)
 			addStrategyReassessmentRequiredOutputContract(existing, required)
 			existing["requiredOutput"] = required
+			reapplyRepairCoverageFocusContract(input, existing)
 			return existing
 		}
 	}
@@ -1262,8 +1263,9 @@ func stateChangingRepairActionPackageForConvergence(input map[string]any, failed
 	if len(pkg) == 0 {
 		pkg = map[string]any{}
 	}
-	required := enforceStateChangingRequiredOutputForConvergence(pkg)
+	required := enforceStateChangingRequiredOutputForConvergence(pkg, input)
 	addStrategyReassessmentRequiredOutputContract(pkg, required)
+	reapplyRepairCoverageFocusContract(input, pkg)
 	return pkg
 }
 
@@ -1291,7 +1293,7 @@ func syncRepairActionPackageTargetSnapshots(input map[string]any, pkg map[string
 	pkg["requiredOutput"] = required
 }
 
-func enforceStateChangingRequiredOutputForConvergence(pkg map[string]any) map[string]any {
+func enforceStateChangingRequiredOutputForConvergence(pkg map[string]any, inputs ...map[string]any) map[string]any {
 	required := stateChangingRepairRequiredOutput()
 	preserveStateChangingRequiredOutputSignals(required, mapFromValue(pkg["requiredOutput"]))
 	if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 || len(mapSliceFromValue(pkg["currentTargetSnapshots"])) > 0 {
@@ -1307,6 +1309,10 @@ func enforceStateChangingRequiredOutputForConvergence(pkg map[string]any) map[st
 		required["coverageTargetMatchRule"] = "patch/apply coverageTargets must match one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
 	}
 	pkg["requiredOutput"] = required
+	if len(inputs) > 0 {
+		reapplyRepairCoverageFocusContract(inputs[0], pkg)
+		required = mapFromValue(pkg["requiredOutput"])
+	}
 	return required
 }
 
@@ -1444,7 +1450,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		}
 		required := mapFromValue(pkg["requiredOutput"])
 		if !boolValue(required["mustIncludeStateChangingNode"]) {
-			required = enforceStateChangingRequiredOutputForConvergence(pkg)
+			required = enforceStateChangingRequiredOutputForConvergence(pkg, input)
 			addStrategyReassessmentRequiredOutputContract(pkg, required)
 		}
 		input["repairActionPackage"] = pkg

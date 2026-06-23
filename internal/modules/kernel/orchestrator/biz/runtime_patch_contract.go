@@ -252,6 +252,15 @@ func primaryDiagnosticRepairContractForStep(step *runModel.Step) map[string]any 
 }
 
 func primaryDiagnosticPatchRequestAddressesContract(step *runModel.Step, request runtimePatchRequest, contract map[string]any) bool {
+	if primaryDiagnosticPatchRequestDirectlyAddressesContract(step, request, contract) {
+		return true
+	}
+	targetRefs := primaryDiagnosticTargetRefsFromContract(contract)
+	return primaryDiagnosticGraphEvidenceAlreadyAddressesContract(step, contract) &&
+		primaryDiagnosticRequestTargetsDiagnosticScope(request, targetRefs)
+}
+
+func primaryDiagnosticPatchRequestDirectlyAddressesContract(step *runModel.Step, request runtimePatchRequest, contract map[string]any) bool {
 	if len(contract) == 0 {
 		return true
 	}
@@ -277,6 +286,42 @@ func primaryDiagnosticPatchRequestAddressesContract(step *runModel.Step, request
 		return true
 	}
 	return false
+}
+
+func primaryDiagnosticGraphEvidenceAlreadyAddressesContract(step *runModel.Step, contract map[string]any) bool {
+	if step == nil || step.Input == nil || len(contract) == 0 {
+		return false
+	}
+	for _, output := range primaryDiagnosticPriorGraphEvidenceOutputs(step.Input) {
+		requests, err := runtimePatchRequests(output)
+		if err != nil {
+			continue
+		}
+		for _, request := range requests {
+			if primaryDiagnosticPatchRequestDirectlyAddressesContract(step, request, contract) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func primaryDiagnosticPriorGraphEvidenceOutputs(input map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	var ret []map[string]any
+	if output := mapFromValue(input["previousStepOutput"]); len(output) > 0 {
+		ret = append(ret, output)
+	}
+	for _, item := range mapSliceFromValue(input[stepInputKeyGraphEvidence]) {
+		output := mapFromValue(item["output"])
+		if len(output) == 0 {
+			continue
+		}
+		ret = append(ret, output)
+	}
+	return ret
 }
 
 func primaryDiagnosticTargetRefsFromContract(contract map[string]any) []string {

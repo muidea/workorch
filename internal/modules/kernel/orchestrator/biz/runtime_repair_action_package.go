@@ -237,6 +237,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	applyConcreteRepairEvidenceOutputContract(input, pkg, requiredOutput)
 	ensureConcreteValidationScratchContract(input, pkg, requiredOutput)
 	addStrategyReassessmentRequiredOutputContract(pkg, requiredOutput)
+	reapplyRepairCoverageFocusContract(input, pkg)
 	if contract := repairActionOutputDecisionContract(input, pkg, requiredOutput, rawFailedOutput...); len(contract) > 0 {
 		pkg["outputDecisionContract"] = contract
 	}
@@ -722,6 +723,7 @@ func evidenceAcquisitionRequiredOutputWithScratch(input map[string]any, pkg map[
 	if boolValue(required["mustProduceConcreteFailureEvidence"]) {
 		ensureValidationScratchContract(input, pkg, required)
 	}
+	applyRepairCoverageFocusContract(input, pkg, required)
 	return required
 }
 
