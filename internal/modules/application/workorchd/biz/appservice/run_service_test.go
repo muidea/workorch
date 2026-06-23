@@ -740,6 +740,10 @@ func TestResumeRunWithBackendResolvedReplanCreatesObservableSuccessor(t *testing
 	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), common.WorkspaceID(workspaceID))
+	if _, err := ResumeRunWithBackend(ctx, "file", dataRoot, runID); err != nil {
+		t.Fatalf("ResumeRunWithBackend: %v", err)
+	}
 
 	item := waitRunWithBackend(t, "file", dataRoot, runID, 5*time.Second, func(item Run) bool {
 		return item.State != "blocked_on_decision" && item.BlockingTicketID == ""

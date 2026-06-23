@@ -54,7 +54,6 @@ func BatchResolveDecisionViews(ctx context.Context, hub events.Hub, traces gover
 		if err != nil {
 			return nil, err
 		}
-		publishDecisionResolutionRunResume(ctx, hub, item)
 		autoGovernance, autoErr := governancecore.LatestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "ticket", string(item.ID))
 		if autoErr != nil {
 			return nil, autoErr

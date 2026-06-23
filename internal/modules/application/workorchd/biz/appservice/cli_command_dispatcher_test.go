@@ -6,6 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -81,6 +85,75 @@ func TestCLIWorkspaceSnapshotCommandProjectsDetailView(t *testing.T) {
 	signature := traces[0].ContextBudget["failureSignature"].(string)
 	if len(signature) > workspaceSnapshotTraceProjectionStringLimitForTest() {
 		t.Fatalf("failureSignature length = %d, want detail projection bounded", len(signature))
+	}
+}
+
+func TestCLIDecisionResolvePublishesSchedulerContinuation(t *testing.T) {
+	session, tickets, _ := newCountingDecisionRuntimeSession(t)
+	hub, err := session.RequiredEventHub()
+	if err != nil {
+		t.Fatalf("session event hub: %v", err)
+	}
+	const workspaceID = common.WorkspaceID("ws-cli-governance-scheduler")
+	const runID = common.RunID("run-cli-governance-scheduler")
+	const ticketID = common.TicketID("ticket-cli-governance-scheduler")
+	if err := tickets.Create(context.Background(), &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		State:       common.DecisionTicketStateOpen,
+		Reason:      "need replan",
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	directResumePublished := false
+	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(context.Context, events.Envelope) error {
+		directResumePublished = true
+		return events.Response(events.Envelope{Topic: orchestratorevents.TopicOrchestratorCommandResumeRun + "/response"})
+	})
+	var schedulerEnvelope events.Envelope
+	hub.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(_ context.Context, envelope events.Envelope) error {
+		schedulerEnvelope = envelope
+		return events.Response(events.Envelope{
+			Topic:        envelope.Topic + "/accepted",
+			SourceModule: "workorchd/scheduler",
+			Payload:      map[string]any{"accepted": true},
+		})
+	})
+
+	dispatcher := NewCLICommandDispatcher(session, hub, nil)
+	resource, _, err := dispatcher.handleGovernanceCommand(context.Background(), events.CLICommandPayload{
+		CommandID:   "cmd-cli-replan",
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		SubjectID:   string(ticketID),
+		Command:     events.CommandDecisionResolve,
+		Payload: map[string]any{
+			"resolutionType": decisioncommon.ResolutionTypeReplan,
+			"payload":        map[string]any{"operator": "tester"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("handle governance command: %v", err)
+	}
+	if resource["id"] != string(ticketID) {
+		t.Fatalf("resource id = %v, want %s", resource["id"], ticketID)
+	}
+	if directResumePublished {
+		t.Fatal("CLI decision resolve published direct orchestrator resume; want scheduler command only")
+	}
+	if schedulerEnvelope.Topic != workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested {
+		t.Fatalf("scheduler envelope topic = %q, want workspace run command", schedulerEnvelope.Topic)
+	}
+	if schedulerEnvelope.WorkspaceID != string(workspaceID) || schedulerEnvelope.RunID != string(runID) {
+		t.Fatalf("scheduler envelope scope = workspace:%q run:%q, want %s/%s", schedulerEnvelope.WorkspaceID, schedulerEnvelope.RunID, workspaceID, runID)
+	}
+	if schedulerEnvelope.Payload[events.PayloadKeyIntent] != "replan" ||
+		schedulerEnvelope.Payload[events.PayloadKeyReason] != "decision_replan_resolved" ||
+		schedulerEnvelope.Payload[events.PayloadKeyDecisionID] != string(ticketID) ||
+		schedulerEnvelope.Payload[events.PayloadKeySource] != "cli" {
+		t.Fatalf("scheduler payload = %#v, want cli replan continuation", schedulerEnvelope.Payload)
 	}
 }
 

@@ -15,7 +15,6 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -143,16 +142,6 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 	resumePublished := false
 	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ context.Context, envelope events.Envelope) error {
 		resumePublished = true
-		if envelope.WorkspaceID != string(workspaceID) || envelope.RunID != "run-001" {
-			t.Fatalf("resume envelope scope = workspace:%q run:%q, want %s/run-001", envelope.WorkspaceID, envelope.RunID, workspaceID)
-		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.ResumeRunCommand)
-		if !ok {
-			t.Fatalf("resume command payload type = %T, want ResumeRunCommand", envelope.Payload[events.PayloadKeyCommand])
-		}
-		if cmd.WorkspaceID != workspaceID || cmd.RunID != "run-001" {
-			t.Fatalf("resume command = %+v, want scoped run-001", cmd)
-		}
 		return events.Response(events.Envelope{Topic: envelope.Topic + "/response"})
 	})
 
@@ -166,8 +155,8 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 	if item.ID != "ticket-001" || item.State != string(common.DecisionTicketStateResolved) || item.ResolutionID != "resolution-001" {
 		t.Fatalf("item = %+v, want resolved ticket with resolution", item)
 	}
-	if !resumePublished {
-		t.Fatal("resume command was not published after decision resolution")
+	if resumePublished {
+		t.Fatal("governance port published direct orchestrator resume; continuation must be owned by workorchd scheduler")
 	}
 }
 
@@ -301,13 +290,6 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 	})
 	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ context.Context, envelope events.Envelope) error {
 		resumeCount++
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.ResumeRunCommand)
-		if !ok {
-			t.Fatalf("resume command payload type = %T, want ResumeRunCommand", envelope.Payload[events.PayloadKeyCommand])
-		}
-		if envelope.WorkspaceID != string(workspaceID) || cmd.WorkspaceID != workspaceID || cmd.RunID != "run-001" {
-			t.Fatalf("resume scope envelope=%+v cmd=%+v, want %s/run-001", envelope, cmd, workspaceID)
-		}
 		return events.Response(events.Envelope{Topic: envelope.Topic + "/response"})
 	})
 
@@ -325,8 +307,8 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 	if resolvedCount != 2 {
 		t.Fatalf("resolved count = %d, want 2", resolvedCount)
 	}
-	if resumeCount != 2 {
-		t.Fatalf("resume count = %d, want 2", resumeCount)
+	if resumeCount != 0 {
+		t.Fatalf("direct orchestrator resume count = %d, want 0; continuation must be owned by workorchd scheduler", resumeCount)
 	}
 	for idx, item := range items {
 		if item.ID != ticketIDs[idx] || item.WorkspaceID != string(workspaceID) || item.State != string(common.DecisionTicketStateResolved) {

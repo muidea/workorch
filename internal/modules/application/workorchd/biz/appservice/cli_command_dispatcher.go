@@ -12,6 +12,7 @@ import (
 // backend publishes command envelopes only; owner state is read or changed here.
 type CLICommandDispatcher struct {
 	session    *RuntimeSession
+	eventHub   events.Hub
 	viewReader WorkspaceViewReader
 	core       *clicore.Dispatcher
 }
@@ -22,7 +23,7 @@ type WorkspaceViewReader interface {
 }
 
 func NewCLICommandDispatcher(session *RuntimeSession, eventHub events.Hub, viewReader WorkspaceViewReader) *CLICommandDispatcher {
-	ret := &CLICommandDispatcher{session: session, viewReader: viewReader}
+	ret := &CLICommandDispatcher{session: session, eventHub: eventHub, viewReader: viewReader}
 	ret.core = clicore.NewDispatcher(eventHub, func(ctx context.Context, cmd events.CLICommandPayload) (map[string]any, []map[string]any, error) {
 		return ret.handleCommand(ContextWithEventHub(ctx, eventHub), cmd)
 	})

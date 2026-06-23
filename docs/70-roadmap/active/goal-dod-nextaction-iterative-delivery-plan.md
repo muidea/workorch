@@ -17,6 +17,7 @@ Related:
 - [EventHub Driven Workorchd State Loop Design](../../30-module-architecture/eventhub-driven-workorchd-state-loop-design.md)
 - [MVVP Workspace ViewModel Architecture](../../30-module-architecture/mvvp-workspace-viewmodel-architecture.md)
 - [LLM Cache Improvement Design](../../30-module-architecture/llm-cache-improvement-design.md)
+- [S0.1 Command Chain Audit](./goal-dod-nextaction-s0-1-command-chain-audit.md)
 
 ## Purpose
 

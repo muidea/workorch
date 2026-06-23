@@ -10,8 +10,6 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -31,7 +29,6 @@ func ResolveDecisionView(ctx context.Context, hub events.Hub, traces governancec
 	if err != nil {
 		return readmodelcore.Decision{}, err
 	}
-	publishDecisionResolutionRunResume(ctx, hub, item)
 	autoGovernance, err := governancecore.LatestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "ticket", string(item.ID))
 	if err != nil {
 		return readmodelcore.Decision{}, err
@@ -81,28 +78,6 @@ func resolveDecisionTicket(ctx context.Context, hub events.Hub, ticket *decision
 		return nil, nil, err
 	}
 	return ResolveDecision(ctx, hub, ticket, normalizedType, common.RedactSensitiveMap(normalizedPayload))
-}
-
-func publishDecisionResolutionRunResume(ctx context.Context, hub events.Hub, ticket *decisionmodel.Ticket) {
-	if hub == nil || ticket == nil || ticket.WorkspaceID == "" || ticket.RunID == "" {
-		return
-	}
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       orchestratorevents.TopicOrchestratorCommandResumeRun,
-		SubjectType: "run",
-		SubjectID:   string(ticket.RunID),
-		WorkspaceID: string(ticket.WorkspaceID),
-		RunID:       string(ticket.RunID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand: runcontracts.ResumeRunCommand{
-				WorkspaceID: ticket.WorkspaceID,
-				RunID:       ticket.RunID,
-			},
-		},
-	})
-	if _, ok := events.ResponseEnvelope(err); ok {
-		return
-	}
 }
 
 func prepareDecisionResolution(ticket *decisionmodel.Ticket, resolutionType string, payload map[string]any, scope common.WorkspaceID) (map[string]any, string, error) {

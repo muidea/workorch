@@ -13,6 +13,9 @@ func (d *CLICommandDispatcher) handleGovernanceCommand(ctx context.Context, cmd 
 	case events.CommandDecisionResolve:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 		item, err := ResolveDecisionWithSession(ctx, d.borrow(), cmd.SubjectID, clicore.ResolveDecisionCommandFromPayload(cmd.Payload))
+		if err == nil {
+			err = d.publishDecisionContinuation(ctx, cmd, item)
+		}
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandDecisionList:
 		items, err := ListDecisionsWithSession(ctx, d.borrow(), string(cmd.WorkspaceID), "")
@@ -24,14 +27,23 @@ func (d *CLICommandDispatcher) handleGovernanceCommand(ctx context.Context, cmd 
 	case events.CommandDecisionBatch:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 		items, err := BatchResolveDecisionsWithSession(ctx, d.borrow(), clicore.BatchResolveDecisionCommandFromPayload(cmd.Payload))
+		if err == nil {
+			err = d.publishDecisionContinuations(ctx, cmd, items)
+		}
 		return nil, clicore.ResourceMaps(items), err
 	case events.CommandApprovalApprove:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 		item, err := ResolveApprovalWithSession(ctx, d.borrow(), cmd.SubjectID, clicore.ResolveApprovalCommandFromPayload("approve", cmd.Payload))
+		if err == nil {
+			err = d.publishApprovalContinuation(ctx, cmd, item)
+		}
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandApprovalReject:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 		item, err := ResolveApprovalWithSession(ctx, d.borrow(), cmd.SubjectID, clicore.ResolveApprovalCommandFromPayload("reject", cmd.Payload))
+		if err == nil {
+			err = d.publishApprovalContinuation(ctx, cmd, item)
+		}
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandApprovalList:
 		items, err := ListApprovalsWithSession(ctx, d.borrow(), string(cmd.WorkspaceID), "")
@@ -43,6 +55,9 @@ func (d *CLICommandDispatcher) handleGovernanceCommand(ctx context.Context, cmd 
 	case events.CommandApprovalBatch:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 		items, err := BatchResolveApprovalsWithSession(ctx, d.borrow(), clicore.BatchResolveApprovalCommandFromPayload(cmd.Payload))
+		if err == nil {
+			err = d.publishApprovalContinuations(ctx, cmd, items)
+		}
 		return nil, clicore.ResourceMaps(items), err
 	default:
 		return unsupportedCLICommand(cmd)
