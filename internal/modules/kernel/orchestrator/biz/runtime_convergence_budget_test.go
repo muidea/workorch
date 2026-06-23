@@ -5,6 +5,7 @@ import (
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestUpdateConvergenceBudgetEscalatesNoDeltaRepeatedFailure(t *testing.T) {
@@ -232,6 +233,66 @@ func TestConvergenceBudgetDoesNotCountConcreteEvidenceGraphNodeAsRepairAttempt(t
 	}
 }
 
+func TestUpdateConvergenceBudgetDoesNotCountPendingExecutionGraphAsNoDelta(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-convergence-budget-pending-graph",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			coverageFocusKey: map[string]any{
+				"id":      "focus-item-1",
+				"sliceId": "slice-1",
+				"state":   "active",
+			},
+			convergenceBudgetKey: map[string]any{
+				"state":                       "tracking",
+				"decision":                    "continue",
+				"maxNoCoverageDeltaRounds":    int64(1),
+				"maxRepairAttemptsPerFocus":   int64(5),
+				"maxLLMRoundsPerSlice":        int64(5),
+				"maxRepeatedFailureSignature": int64(5),
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-convergence-budget-pending-graph/repair-001",
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairActionPackage":         map[string]any{"requiredOutput": map[string]any{"mustIncludeStateChangingNode": true}},
+			"stateChangingOutputRequired": true,
+		},
+		Output: map[string]any{
+			stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{
+				Nodes: []runtimemodel.BlockExecutionNode{{
+					ID:   "patch-target",
+					Kind: "patch/apply",
+					Input: map[string]any{
+						"targetRef": "target.txt",
+						"patchType": "text_replace",
+						"oldText":   "old",
+						"newText":   "new",
+						"baseHash":  "hash",
+					},
+				}},
+			},
+		},
+	}
+
+	if !updateConvergenceBudgetFromStep(run, step, false) {
+		t.Fatal("updateConvergenceBudgetFromStep changed = false, want llm round update")
+	}
+	budget := mapFromValue(run.ExecutionContext[convergenceBudgetKey])
+	if int64FromValue(budget["llmRounds"]) != 1 {
+		t.Fatalf("budget = %+v, want llmRounds counted", budget)
+	}
+	if int64FromValue(budget["noCoverageDeltaRounds"]) != 0 ||
+		budget["decision"] != "continue" ||
+		budget["state"] != "tracking" {
+		t.Fatalf("budget = %+v, want pending executionGraph not counted as no-delta", budget)
+	}
+}
+
 func TestUpdateConvergenceBudgetDoesNotCountPatchBaseHashMismatchAsNoDelta(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-convergence-budget-patch-basehash",
@@ -281,6 +342,64 @@ func TestUpdateConvergenceBudgetDoesNotCountPatchBaseHashMismatchAsNoDelta(t *te
 	}
 	if budget["decision"] != "continue" || budget["state"] != "tracking" {
 		t.Fatalf("budget = %+v, want no convergence escalation for stale baseHash", budget)
+	}
+	if int64FromValue(budget["repeatedFailureSignatures"]) != 1 ||
+		budget["lastFailureSignature"] == nil {
+		t.Fatalf("budget = %+v, want failure signature still tracked", budget)
+	}
+}
+
+func TestUpdateConvergenceBudgetDoesNotCountPatchOldTextNotFoundAsNoDelta(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-convergence-budget-patch-oldtext",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			coverageFocusKey: map[string]any{
+				"id":      "focus-item-1",
+				"sliceId": "slice-1",
+				"state":   "active",
+			},
+			convergenceBudgetKey: map[string]any{
+				"state":                       "tracking",
+				"decision":                    "continue",
+				"focusId":                     "focus-item-1",
+				"sliceId":                     "slice-1",
+				"noCoverageDeltaRounds":       int64(2),
+				"maxNoCoverageDeltaRounds":    int64(3),
+				"maxRepeatedFailureSignature": int64(3),
+				"maxRepairAttemptsPerFocus":   int64(5),
+				"maxLLMRoundsPerSlice":        int64(5),
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-convergence-budget-patch-oldtext/graph-001/patch-target",
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"targetRef": "target.txt",
+			"patchType": "text_replace",
+			"oldText":   "stale",
+			"newText":   "fresh",
+			"baseHash":  "hash",
+		},
+		Output: map[string]any{
+			"stage":                   "patch_apply",
+			"error":                   "conflict: patch text_replace oldText not found",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: "class=patch_apply_failed|kind=patch/apply|targetRef=target.txt|error=conflict: patch text_replace oldtext not found",
+		},
+	}
+
+	if !updateConvergenceBudgetFromStep(run, step, false) {
+		t.Fatal("updateConvergenceBudgetFromStep changed = false, want failure signature update")
+	}
+	budget := mapFromValue(run.ExecutionContext[convergenceBudgetKey])
+	if int64FromValue(budget["noCoverageDeltaRounds"]) != 2 {
+		t.Fatalf("budget = %+v, want noCoverageDeltaRounds unchanged for stale oldText", budget)
+	}
+	if budget["decision"] != "continue" || budget["state"] != "tracking" {
+		t.Fatalf("budget = %+v, want no convergence escalation for stale oldText", budget)
 	}
 	if int64FromValue(budget["repeatedFailureSignatures"]) != 1 ||
 		budget["lastFailureSignature"] == nil {

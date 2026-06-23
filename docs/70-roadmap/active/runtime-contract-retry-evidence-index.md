@@ -1450,6 +1450,21 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 | closureBatch | 7 |
 | loadByDefault | false |
 
+### ev:code/convergence-budget-graph-pending-and-stale-patch/20260623-029
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-CONVERGENCE-BUDGET-GRAPH-PENDING-STALE-PATCH-20260623-029` |
+| workspaceId | `ws-4e83810542ac4d65` |
+| runId | `run-003-replan-001-replan-001` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | deployed `http://127.0.0.1:8080` plus `internal/modules/kernel/orchestrator/biz/runtime_convergence_budget.go`, `internal/modules/kernel/orchestrator/biz/runtime_convergence_budget_test.go` |
+| extractCommand | `curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-4e83810542ac4d65/snapshot; jq '{graphNodeId:.graphNodeId,repairObjective:.repairObjective,budget:.acceptance.budget}' .workorch-data/internal/workspaces/ws-4e83810542ac4d65/runs/run-003-replan-001-replan-001/steps/run-003-replan-001-replan-001/*/input.json; go test ./internal/modules/kernel/orchestrator/biz -run 'TestUpdateConvergenceBudget|TestConvergenceBudget' -count=1 -timeout=300s` |
+| extractedSummary | Live successor run started with a clean tracking budget, then a completed LLM step that only returned an executionGraph and a later completed repair-planning step consumed `noCoverageDeltaRounds` before their graph nodes could finish. The next `patch/apply` stale `oldText not found` conflict was then escalated to decision as `noCoverageDeltaRounds 5/3` instead of entering the existing patch-rebuild recovery path. Local core closure keeps LLM rounds counted, but no longer counts completed LLM steps that only return a pending executionGraph as no-coverage-delta. It also treats neutral stale `patch/apply` `oldText not found` conflicts like baseHash mismatch for no-delta accounting: failure signatures are still tracked, but the no-delta budget is not consumed by a mechanical stale patch conflict. |
+| owner | core runtime convergence budget |
+| closureBatch | 7 |
+| loadByDefault | false |
+
 ## Default Load Set For Next Code Closure
 
 Load only:

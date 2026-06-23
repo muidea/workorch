@@ -1645,6 +1645,17 @@ The audited result is:
   state-changing output is not required. `patch/apply` remains strict and must
   declare focus binding itself. Redeploy plus explicit replan/resume is still
   required to verify live convergence past this blocker.
+- The next redeploy/replan verified that the focus-bound evidence normalization
+  moved both workspaces past the previous blocker. It then exposed a separate
+  convergence-budget accounting defect: completed LLM steps that only returned
+  a pending `executionGraph` consumed `noCoverageDeltaRounds` before their
+  graph nodes could complete, and a mechanical stale `patch/apply` `oldText not
+  found` conflict consumed the same budget instead of staying on the patch
+  rebuild path. The local closure in
+  `ev:code/convergence-budget-graph-pending-and-stale-patch/20260623-029`
+  keeps LLM rounds and failure signatures visible while preventing pending
+  graph plans and stale patch conflicts from prematurely exhausting no-delta
+  budget.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked

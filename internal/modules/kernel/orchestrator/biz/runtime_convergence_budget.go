@@ -155,6 +155,9 @@ func convergenceBudgetCountsNoDelta(step *runModel.Step) bool {
 	if step == nil {
 		return false
 	}
+	if convergenceBudgetSkipsNoDeltaForPendingExecutionGraph(step) {
+		return false
+	}
 	if stepIsConcreteFailureEvidenceAcquisitionGraphNode(step) {
 		return false
 	}
@@ -162,6 +165,17 @@ func convergenceBudgetCountsNoDelta(step *runModel.Step) bool {
 		return false
 	}
 	return step.State == common.StepStateCompleted || step.State == common.StepStateFailed
+}
+
+func convergenceBudgetSkipsNoDeltaForPendingExecutionGraph(step *runModel.Step) bool {
+	if step == nil || step.State != common.StepStateCompleted {
+		return false
+	}
+	if canonicalLLMWorkspaceStepKind(strings.TrimSpace(step.Kind)) != llmWorkspaceExecutionStepKind {
+		return false
+	}
+	graph, ok := runtimeGraphSpecFromValue(step.Output[stepOutputKeyExecutionGraph])
+	return ok && len(graph.Nodes) > 0
 }
 
 func convergenceBudgetSkipsNoDeltaForMechanicalPatchConflict(step *runModel.Step) bool {
@@ -172,10 +186,10 @@ func convergenceBudgetSkipsNoDeltaForMechanicalPatchConflict(step *runModel.Step
 		strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)) != failureClassPatchApply {
 		return false
 	}
-	return runtimePatchBaseHashMismatchFailure(step)
+	return runtimeMechanicalPatchConflictFailure(step)
 }
 
-func runtimePatchBaseHashMismatchFailure(step *runModel.Step) bool {
+func runtimeMechanicalPatchConflictFailure(step *runModel.Step) bool {
 	if step == nil {
 		return false
 	}
@@ -188,7 +202,9 @@ func runtimePatchBaseHashMismatchFailure(step *runModel.Step) bool {
 	}
 	text := strings.ToLower(strings.Join(textValues, "\n"))
 	return strings.Contains(text, "basehash mismatch") ||
-		(strings.Contains(text, "basehash") && strings.Contains(text, "mismatch"))
+		(strings.Contains(text, "basehash") && strings.Contains(text, "mismatch")) ||
+		strings.Contains(text, "oldtext not found") ||
+		(strings.Contains(text, "oldtext") && strings.Contains(text, "not found"))
 }
 
 func stepIsConcreteFailureEvidenceAcquisitionGraphNode(step *runModel.Step) bool {
