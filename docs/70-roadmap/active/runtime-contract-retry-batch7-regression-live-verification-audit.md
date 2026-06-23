@@ -1798,6 +1798,25 @@ The audited result is:
   the budget still blocks non-progressing retry loops while allowing a
   genuinely progressing focus to continue repairing the next concrete
   validation failure.
+- After redeploying `041`, the scoped successor run proved positive coverage
+  progress now resets the local repair window: it advanced through additional
+  patch and validation nodes instead of immediately reusing the stale exhausted
+  budget. The next decision exposed a projection consistency defect rather
+  than a target-project rule. The active `coverageFocus` pointed at an
+  `evidence_ready` coverage work item, but the compact
+  `coverageWorkItemContext` match came from `ledgerSummary`, where by-kind
+  evidence ledgers are intentionally omitted to control LLM context size.
+  Recomputing `missingEvidenceKinds` from that compact item reopened the item
+  as missing `validation` and `state_change`, which forced more
+  state-changing repair and consumed `llmRounds` instead of moving toward
+  assessment. The local closure in
+  `ev:code/evidence-ready-compact-ledger-does-not-reopen-missing-evidence/20260623-042`
+  keeps complete by-kind ledgers authoritative when present, but treats
+  compact `evidence_ready` / `satisfied` work-item summaries with no by-kind
+  ledger as already evidence-complete. This is core-neutral: it preserves
+  strict missing-evidence calculation for `open`, `in_progress`, and `failed`
+  items and does not add workspace IDs, template IDs, language rules, provider
+  names, commands, or target-file rules.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked

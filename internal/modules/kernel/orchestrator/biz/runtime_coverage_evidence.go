@@ -181,7 +181,14 @@ func coverageMissingEvidenceKinds(item map[string]any) []string {
 	if len(required) == 0 {
 		required = []string{"validation"}
 	}
-	return coverageMissingEvidenceKindsFromDetails(required, mapStringSliceValue(item["acceptedEvidenceByKind"]), mapIntValue(item["requiredEvidenceCounts"]))
+	acceptedByKind := mapStringSliceValue(item["acceptedEvidenceByKind"])
+	if len(acceptedByKind) == 0 {
+		switch strings.TrimSpace(stringFromMap(item, "status")) {
+		case "evidence_ready", "satisfied":
+			return nil
+		}
+	}
+	return coverageMissingEvidenceKindsFromDetails(required, acceptedByKind, mapIntValue(item["requiredEvidenceCounts"]))
 }
 
 func coverageMissingEvidenceKindsFromDetails(requiredKinds []string, acceptedByKind map[string][]string, requiredCounts map[string]int) []string {

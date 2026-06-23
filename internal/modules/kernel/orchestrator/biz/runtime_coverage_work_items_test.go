@@ -1125,6 +1125,54 @@ func TestCoverageWorkItemContextAlignsCurrentFocusToActiveCoverageFocus(t *testi
 	}
 }
 
+func TestCoverageWorkItemContextAlignedEvidenceReadyLedgerItemDoesNotReopenMissingEvidence(t *testing.T) {
+	context := map[string]any{
+		"ledgerSummary": []map[string]any{{
+			"id":                      "cwi-ready",
+			"source":                  "deliverable",
+			"sourceScope":             "deliverable",
+			"sourceRequirementId":     "deliverable-ready",
+			"targetText":              "deliverable-ready",
+			"normalizedSourceKey":     "deliverable:deliverable:deliverable-ready",
+			"requiredEvidenceKinds":   []string{"validation", "state_change"},
+			"acceptedEvidenceRefs":    []string{"run/graph/001-patch", "run/graph/002-verify"},
+			"rejectedEvidenceRefs":    []string{"run/graph/003-rejected-verify"},
+			"status":                  "evidence_ready",
+			"currentGap":              "required evidence kinds present; coverage assessment required",
+			"omittedFromCurrentFocus": true,
+			"omittedReason":           "context_budget_top_k",
+		}},
+	}
+	focus := map[string]any{
+		"id":                    "focus-cwi-ready",
+		"coverageWorkItemIds":   []string{"cwi-ready"},
+		"targetRefs":            []string{"deliverable-ready"},
+		"requiredEvidenceKinds": []string{"validation", "state_change"},
+		"acceptedEvidenceRefs":  []string{"run/graph/001-patch", "run/graph/002-verify"},
+		"rejectedEvidenceRefs":  []string{"run/graph/003-rejected-verify"},
+	}
+
+	aligned := coverageWorkItemContextAlignedToFocus(context, focus)
+
+	current := mapFromValue(aligned["currentFocus"])
+	if got := stringFromMap(current, "id"); got != "cwi-ready" {
+		t.Fatalf("aligned currentFocus id = %q, want cwi-ready; current=%+v", got, current)
+	}
+	if got := stringFromMap(current, "status"); got != "evidence_ready" {
+		t.Fatalf("aligned currentFocus status = %q, want evidence_ready", got)
+	}
+	if missing := stringSliceFromValue(current["missingEvidenceKinds"]); len(missing) != 0 {
+		t.Fatalf("aligned currentFocus missingEvidenceKinds = %+v, want empty for evidence_ready ledger item", missing)
+	}
+	nextStates := stringSliceFromValue(current["nextAllowedConvergenceStates"])
+	if len(nextStates) != 1 || nextStates[0] != convergenceStateNeedAssessment {
+		t.Fatalf("aligned currentFocus nextAllowedConvergenceStates = %+v, want [%s]", nextStates, convergenceStateNeedAssessment)
+	}
+	if got := stringFromMap(current, "activeCoverageFocusId"); got != "focus-cwi-ready" {
+		t.Fatalf("activeCoverageFocusId = %q, want focus-cwi-ready", got)
+	}
+}
+
 func TestSlimExecutionContextAlignsCoverageContextWithCoverageFocus(t *testing.T) {
 	revision := "rev-current"
 	context := coverageWorkItemContextFromItems(revision, []map[string]any{
