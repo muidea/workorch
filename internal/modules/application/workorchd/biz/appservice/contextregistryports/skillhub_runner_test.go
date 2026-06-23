@@ -3,6 +3,8 @@ package contextregistryports
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -55,6 +57,38 @@ func TestListSkillHubWorkspaceSkillsSkipsEmptyDeliverableDirectory(t *testing.T)
 	}
 	if len(items) != 0 {
 		t.Fatalf("len(items) = %d, want 0", len(items))
+	}
+}
+
+func TestListSkillHubWorkspaceSkillsSkipsMissingWorkspaceSkillDirectory(t *testing.T) {
+	deliverableDirectory := t.TempDir()
+	items, err := ListSkillHubWorkspaceSkills(context.Background(), fakeSkillHubRunner{}, "ws-001", deliverableDirectory)
+	if err != nil {
+		t.Fatalf("ListSkillHubWorkspaceSkills: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("len(items) = %d, want 0", len(items))
+	}
+}
+
+func TestListSkillHubWorkspaceSkillsRequiresWorkspaceSkillDirectoryBeforeStatus(t *testing.T) {
+	deliverableDirectory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(deliverableDirectory, ".agents", "skills"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	runner := fakeSkillHubRunner{
+		responses: map[string][]byte{
+			deliverableDirectory + "|status --json": []byte(`{
+				"items":[{"skill_id":"workspace-skill","status":"Synced","local_version":"1.0.0"}]
+			}`),
+		},
+	}
+	items, err := ListSkillHubWorkspaceSkills(context.Background(), runner, "ws-001", deliverableDirectory)
+	if err != nil {
+		t.Fatalf("ListSkillHubWorkspaceSkills: %v", err)
+	}
+	if got := skillHubRunnerSkillIDs(items); !reflect.DeepEqual(got, []string{"skillhub:workspace:ws-001:workspace-skill"}) {
+		t.Fatalf("ids = %+v, want workspace skill", got)
 	}
 }
 

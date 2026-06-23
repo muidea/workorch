@@ -214,6 +214,38 @@ func TestOutputModeSelectorUsesIncrementalArtifactForRequestedModeWithInheritedB
 	}
 }
 
+func TestOutputModeSelectorHonorsExplicitRequestedIncrementalArtifactWithinGraphBudget(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"requestedOutputMode":         outputModeIncrementalArtifact,
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode":       true,
+				"estimatedPatchContentBytes":         20000,
+				"expectedStateChangingArtifactCount": 1,
+			},
+		},
+	}
+	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
+
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, &runmodel.Run{ID: "run-output-mode-requested-small", WorkspaceID: "ws-output-mode-requested-small"}, input, nil, 0)
+
+	if outputModeFromInput(input) != outputModeIncrementalArtifact {
+		t.Fatalf("outputMode = %v, want incrementalArtifact", input["outputMode"])
+	}
+	selector := mapFromValue(input["outputModeSelector"])
+	if selector["priority"] != "P5" || selector["reason"] != "requested_incremental_artifact_with_budget_signal" {
+		t.Fatalf("outputModeSelector = %+v, want P5 explicit requested mode", selector)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["outputMode"] != outputModeIncrementalArtifact ||
+		required["mustReturnArtifactPlan"] != true ||
+		required["mustIncludeStateChangingNode"] != nil {
+		t.Fatalf("requiredOutput = %+v, want explicit requested incremental artifact plan contract", required)
+	}
+}
+
 func TestOutputModeSelectorInheritsStateChangingSignalFromRunExecutionContext(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-output-mode-state-changing-context",

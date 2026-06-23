@@ -416,6 +416,10 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	if err != nil {
 		return o.failResolvedDecisionResume(ctx, r, originalResumeState, executionContextPatch, err)
 	}
+	resumeRun.State = common.RunStateRunning
+	resumeRun.FailureReason = ""
+	resumeRun.BlockingTicketID = ""
+	resumeRun.BlockingApprovalID = ""
 	mergeResumeInput(specs, resumeInput)
 	r.State = resumeRun.State
 	r.FailureReason = resumeRun.FailureReason

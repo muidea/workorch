@@ -120,6 +120,7 @@ func configureIsolatedTestSession(t *testing.T, state *serverState, config Confi
 	state.eventUnsubscribes = nil
 	state.configureSessionBackedOperations(session)
 	state.registerEventReplayRecorder()
+	state.registerRunStatusCacheInvalidationWatcher()
 	state.registerGovernanceResolvedResumeWatcher()
 	state.registerWorkorchDSchedulerCommandWatcher()
 }
@@ -3346,6 +3347,68 @@ func TestRunStatusEndpointCanWaitForTargetState(t *testing.T) {
 	}
 	if calls.Load() < 2 {
 		t.Fatalf("readRunStatus calls = %d, want repeated wait polling", calls.Load())
+	}
+}
+
+func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnOwnerRunStateEvent(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	var statusReads atomic.Int32
+	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
+		statusReads.Add(1)
+		return appservice.RunStatus{
+			ID:          runID,
+			WorkspaceID: "ws-status-owner-event",
+			State:       string(common.RunStateRunning),
+		}, nil
+	}
+	state.cacheRunSnapshot(appservice.RunSnapshot{
+		Workspace: appservice.Workspace{ID: "ws-status-owner-event", State: string(common.WorkspaceStateCompleted)},
+		Run: appservice.Run{
+			ID:          "run-status-owner-event",
+			WorkspaceID: "ws-status-owner-event",
+			State:       string(common.RunStateCompleted),
+		},
+	})
+	handler := newMuxWithState(state)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-status-owner-event/runs/run-status-owner-event/status", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cached status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var cachedBody runStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &cachedBody); err != nil {
+		t.Fatalf("unmarshal cached run status: %v", err)
+	}
+	if cachedBody.Status.State != string(common.RunStateCompleted) || statusReads.Load() != 0 {
+		t.Fatalf("cached status = %+v reads=%d, want cached completed state before owner event", cachedBody.Status, statusReads.Load())
+	}
+
+	if err := state.eventHub.Publish(context.Background(), events.Envelope{
+		Topic:       runevents.TopicRunStateChanged,
+		WorkspaceID: "ws-status-owner-event",
+		RunID:       "run-status-owner-event",
+		SubjectID:   "run-status-owner-event",
+		Payload:     events.RunPayload("", "", common.RunStateRunning, "", "", ""),
+	}); err != nil {
+		t.Fatalf("publish run state changed: %v", err)
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status after owner event = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var body runStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal run status: %v", err)
+	}
+	if body.Status.State != string(common.RunStateRunning) {
+		t.Fatalf("status after owner event = %+v, want fresh running status", body.Status)
+	}
+	if statusReads.Load() == 0 {
+		t.Fatal("status endpoint reused stale cached snapshot after owner run state event")
 	}
 }
 

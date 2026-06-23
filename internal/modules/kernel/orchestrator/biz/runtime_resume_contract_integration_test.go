@@ -170,6 +170,133 @@ func TestMergeResumeInputDoesNotOverrideExistingStageWithResolutionStage(t *test
 	}
 }
 
+func TestRuntimeOrchestrator_ResumeRunClearsResolvedDecisionBeforeGapBaselineRefresh(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+
+	workspaceID := common.WorkspaceID("ws-resume-gap-baseline")
+	runID := common.RunID("run-resume-gap-baseline")
+	stepID := common.StepID("run-resume-gap-baseline/step-1")
+	nextStepID := common.StepID("run-resume-gap-baseline/llm-after-decision")
+	ticketID := common.TicketID("ticket-resume-gap-baseline")
+	var runtimeObservedState common.RunState
+	var runtimeObservedTicket common.TicketID
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		if request.StepID != nextStepID {
+			return map[string]any{"status": "unexpected step"}, nil
+		}
+		current, err := runRepo.Get(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		runtimeObservedState = current.State
+		runtimeObservedTicket = current.BlockingTicketID
+		return map[string]any{"status": "ok"}, nil
+	}}
+	orch := NewRuntimeOrchestratorWithResolutions(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		resolutionRepo,
+		approvalRepo,
+		events.NewMemoryHub(),
+	)
+
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateBlocked, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	coverageItem := map[string]any{
+		"id":                    "cwi-resume-1",
+		"source":                "goal",
+		"sourcePath":            "goal.leaves[0]",
+		"sourceScope":           "goal_leaf",
+		"sourceRequirementId":   "goal-resume-1",
+		"targetText":            "resolved decision continuation",
+		"status":                "open",
+		"requiredEvidenceKinds": []string{"validation"},
+		"missingEvidenceKinds":  []string{"validation"},
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+		InitialStepKind:  llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			coverageWorkItemsKey: []map[string]any{coverageItem},
+			coverageWorkItemContextKey: map[string]any{
+				"definitionRevision":    "rev-resume-gap-baseline",
+				"coverageBaselineHash":  "sha256:resume-gap-baseline",
+				"unresolvedItems":       []map[string]any{coverageItem},
+				"currentFocusItems":     []map[string]any{coverageItem},
+				"currentFocus":          coverageItem,
+				"coverageWorkItemCount": 1,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"status":   "completed",
+			"nextStep": string(nextStepID),
+			"nextKind": llmWorkspaceExecutionStepKind,
+		},
+	}); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		State:       common.DecisionTicketStateResolved,
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       common.ResolutionID("resolution-resume-gap-baseline"),
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  map[string]any{"operator": "tester"},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("ResumeRun: %v", err)
+	}
+
+	if runtimeObservedState != common.RunStateRunning || runtimeObservedTicket != "" {
+		t.Fatalf("runtime observed run state=%s ticket=%q, want running with no blocker", runtimeObservedState, runtimeObservedTicket)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted || runItem.BlockingTicketID != "" {
+		t.Fatalf("run = %+v, want completed with cleared decision blocker", runItem)
+	}
+	nextStep, err := stepRepo.Get(ctx, nextStepID)
+	if err != nil {
+		t.Fatalf("get next step: %v", err)
+	}
+	if nextStep.State != common.StepStateCompleted || nextStep.Output["status"] == "ignored" {
+		t.Fatalf("next step = %+v, want accepted completed output", nextStep)
+	}
+}
+
 func TestRuntimeOrchestrator_ResumeContextGateResolutionRegeneratesRepairContext(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

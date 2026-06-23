@@ -3755,6 +3755,69 @@ func TestInitialStepOutputModeSelectionRestoresBudgetSignalsWithProfileStateChan
 	}
 }
 
+func TestConvergencePreservesRequestedIncrementalArtifactStateChangeWhenCoverageNeedsValidation(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-convergence-incremental-artifact",
+		WorkspaceID: "ws-convergence-incremental-artifact",
+		ExecutionContext: map[string]any{
+			"requestedOutputMode":         outputModeIncrementalArtifact,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode":       true,
+					"estimatedPatchContentBytes":         defaultMaxPatchContentBytes + 1,
+					"expectedStateChangingArtifactCount": 1,
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageRepair,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"requestedOutputMode":        outputModeIncrementalArtifact,
+		"coverageWorkItemContext": map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-incremental-artifact",
+				"status":                "open",
+				"source":                "goal",
+				"sourceScope":           "goal_leaf",
+				"sourceRequirementId":   "goal-req-incremental-artifact",
+				"targetText":            "produce a neutral incremental artifact deliverable",
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{"validation"},
+			},
+		},
+	}
+	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, run, input, nil, 0)
+
+	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	}
+	input = ApplyConvergenceContract(input, contract)
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, run, input, nil, 0)
+
+	if outputModeFromInput(input) != outputModeIncrementalArtifact {
+		t.Fatalf("outputMode = %v, want incrementalArtifact; input=%+v", input["outputMode"], input)
+	}
+	if input["stateChangingOutputRequired"] != true ||
+		stringFromMap(input, "repairObjective") != repairObjectiveStateChangingOutput {
+		t.Fatalf("state-changing contract = %+v, want preserved artifact state-change contract", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["outputMode"] != outputModeIncrementalArtifact ||
+		required["mustReturnArtifactPlan"] != true ||
+		intFromAny(required["estimatedPatchContentBytes"]) <= defaultMaxPatchContentBytes ||
+		intFromAny(required["expectedStateChangingArtifactCount"]) != 1 {
+		t.Fatalf("requiredOutput = %+v, want preserved incremental artifact output contract", required)
+	}
+	if contract := mapFromValue(input["artifactOutputContract"]); contract["phase"] != artifactOutputPhasePlan {
+		t.Fatalf("artifactOutputContract = %+v, want artifact_plan", contract)
+	}
+}
+
 func TestBuildConvergenceContractNeedValidationWhenPatchAlreadySatisfied(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:      runtimeStageRepair,

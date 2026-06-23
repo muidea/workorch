@@ -195,7 +195,8 @@ func TestSelectedSkillsCanResolveSkillHubReferences(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	deliverableDirectory := t.TempDir()
-	writeSkillHubInstruction(t, deliverableDirectory, "Workspace Runtime Skill")
+	skillDir := filepath.Join(deliverableDirectory, ".agents", "skills", "runtime-workspace-skill")
+	writeSkillHubInstruction(t, skillDir, "Workspace Runtime Skill")
 	withFakeSkillHubRunner(t, fakeSkillHubCommandRunner{
 		responses: map[string][]byte{
 			skillHubCommandKey(deliverableDirectory, "status", "--json"): []byte(fmt.Sprintf(`{
@@ -206,7 +207,7 @@ func TestSelectedSkillsCanResolveSkillHubReferences(t *testing.T) {
 					"local_version":"3.0.0",
 					"local_path":%q
 				}]
-			}`, deliverableDirectory, filepath.Join(deliverableDirectory, "SKILL.md"))),
+			}`, deliverableDirectory, filepath.Join(skillDir, "SKILL.md"))),
 		},
 	})
 	workspace, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "Runtime Workspace", "runtime workspace skill", deliverableDirectory)

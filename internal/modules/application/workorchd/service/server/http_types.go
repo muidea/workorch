@@ -1133,6 +1133,7 @@ func newServerStateWithBackground(config Config, eventHub events.Hub, background
 	state.workspaceProjection = newWorkspaceProjectionManager(state)
 	state.configureRuntimeSession()
 	state.registerEventReplayRecorder()
+	state.registerRunStatusCacheInvalidationWatcher()
 	state.registerGovernanceResolvedResumeWatcher()
 	state.registerWorkorchDSchedulerCommandWatcher()
 	return state
@@ -1903,6 +1904,29 @@ func (s *serverState) registerEventReplayRecorder() {
 		return nil
 	})
 	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribers...)
+}
+
+func (s *serverState) registerRunStatusCacheInvalidationWatcher() {
+	if s == nil || s.eventHub == nil {
+		return
+	}
+	unsubscribe := s.eventHub.Subscribe(runevents.TopicRunStateChanged, func(_ context.Context, envelope events.Envelope) error {
+		runID := strings.TrimSpace(envelope.RunID)
+		if runID == "" {
+			runID = strings.TrimSpace(envelope.SubjectID)
+		}
+		if runID == "" {
+			s.notifyRunStatusChanged()
+			return nil
+		}
+		s.notifyRunStatusChangedForRun(appservice.Run{
+			ID:          runID,
+			WorkspaceID: strings.TrimSpace(envelope.WorkspaceID),
+			State:       schedulerStringValue(envelope.Payload, events.PayloadKeyState),
+		})
+		return nil
+	})
+	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
 }
 
 func (s *serverState) registerGovernanceResolvedResumeWatcher() {

@@ -6,6 +6,51 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 
 ## Evidence Records
 
+### ev:code/skillhub-test-isolation/20260623-036
+
+| Field | Value |
+| --- | --- |
+| claimId | `B7-G3` |
+| workspaceId | n/a |
+| runId | n/a |
+| evidenceKind | contract-audit-and-code-test-output |
+| sourcePath | `internal/modules/application/workorchd/biz/appservice/contextregistryports/skillhub_runner.go`, `internal/modules/application/workorchd/biz/appservice/contextregistryports/skillhub_runner_test.go`, `internal/modules/application/workorchd/biz/appservice/test_helpers_test.go`, `internal/modules/application/workorchd/biz/appservice/skill_hub_service_test.go` |
+| extractCommand | `go test ./internal/modules/application/workorchd/biz/appservice/contextregistryports -run 'SkillHubWorkspaceSkills' -count=1; go test ./internal/modules/application/workorchd/biz/appservice -run 'TestActivateWorkspaceExecution(AppliesTemplateDefaultMCPContext|UsesUpdatedTemplateMCPDefaultWhenWorkspaceHasNoOverride|UsesWorkspaceMCPDefaultOverride|RepairsMissingManagedWorkspaceConfig)' -count=1 -timeout=180s; go test ./internal/modules/application/workorchd/biz/appservice -run 'SkillHub|SelectedSkillsCanResolveSkillHubReferences' -count=1 -timeout=180s; go test ./internal/modules/application/workorchd/biz/appservice/... -count=1 -timeout=300s` |
+| extractedSummary | Contract audit identified the reported `~/.skill-hub/state.json` pollution as a runtime environment isolation gap in appservice tests, not a WorkOrch core state-machine concern. Workspace skill discovery invoked real `skill-hub status --json` inside temporary deliverable directories that did not contain a project-local `.agents/skills` tree; `skill-hub status` then registered those temporary workspaces in the user's global state. The closure makes workspace skill discovery skip `skill-hub status` unless `<deliverableDirectory>/.agents/skills` exists as a directory, and appservice package tests default to a no-op SkillHub runner unless a test explicitly installs a fake runner. SkillHub-specific fixtures now create the expected workspace skill directory before asserting workspace skill resolution. |
+| owner | runtime environment isolation / appservice context registry adapter |
+| closureBatch | 8 |
+| loadByDefault | false |
+
+### ev:code/decision-resolve-scoped-resume-command/20260623-037
+
+| Field | Value |
+| --- | --- |
+| claimId | `B1-SM-001` |
+| workspaceId | n/a |
+| runId | n/a |
+| evidenceKind | contract-audit-and-code-test-output |
+| sourcePath | `internal/modules/application/workorchd/biz/appservice/governanceports/decision_resolve_views.go`, `internal/modules/application/workorchd/biz/appservice/governanceports/decision_batch_resolve_views.go`, `internal/modules/application/workorchd/biz/appservice/governanceports/read_views_test.go`, `internal/modules/application/workorchd/biz/appservice/run_service_test.go` |
+| extractCommand | `go test ./internal/modules/application/workorchd/biz/appservice/governanceports -run 'ResolveDecision|BatchResolveDecision' -count=1; go test ./internal/modules/application/workorchd/biz/appservice -run 'ResolveDecision|ResumeRunWithBackendResolvedReplan|Decision' -count=1 -timeout=180s; go test ./internal/modules/kernel/orchestrator ./internal/modules/kernel/orchestrator/biz -run 'ResumeRun|FinalizeRuntimeStepResultClosesLateResultAfterRunBlocks|RuntimeDecisionResolved' -count=1 -timeout=240s; go test ./internal/modules/application/workorchd/service/server -run 'DecisionResolveEndpoint|DecisionBatchResolveEndpoint|GovernanceRunResume' -count=1 -timeout=180s` |
+| extractedSummary | Contract audit found that governance decision resolve correctly wrote ticket resolution but did not publish the scoped run continuation command expected by the event-driven state loop. REST/TUI callers could resolve a `waiting_decision` ticket while the owner run remained blocked until a separate manual resume command arrived; late runtime results could then be rejected because the run state had not re-entered an accepting continuation state. The closure keeps governance resolution idempotent while publishing `/orchestrator/command/resume-run` with workspace/run scope after successful single or batch decision resolution. The orchestrator remains the owner of run state and continuation; TUI/Web only submit commands and consume projection. |
+| owner | governance port / orchestrator command event path |
+| closureBatch | 8 |
+| loadByDefault | false |
+
+### ev:code/resolved-decision-resume-clears-blocker-before-gap-baseline-refresh/20260623-038
+
+| Field | Value |
+| --- | --- |
+| claimId | `B1-SM-001` |
+| workspaceId | `ws-f24c8afb9713c3c5` |
+| runId | `run-001` |
+| evidenceKind | managed-e2e-failure-and-code-test-output |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_lifecycle.go`, `internal/modules/kernel/orchestrator/biz/runtime_resume_contract_integration_test.go`, `scripts/verify-llm-workspace-execution.sh` |
+| extractCommand | `WORKORCH_MANAGED_VERIFY_TARGET=verify-llm WORKORCH_MANAGED_GO_TEST_PACKAGES='./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice/... ./internal/modules/application/workorchd/service/server' make verify-managed-full; go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_ResumeRunClearsResolvedDecisionBeforeGapBaselineRefresh|ResumeRun|FinalizeRuntimeStepResultClosesLateResultAfterRunBlocks|RuntimeDecisionResolved' -count=1 -timeout=240s` |
+| extractedSummary | Managed `verify-llm` initially failed after decision resolution: the mock provider received and completed `run-001/llm-after-decision`, but the run remained `blocked_on_decision` and the follow-up step output was persisted as `runtime_result_not_accepted`. Event inspection showed the resume command dispatched the follow-up step while publishing/persisting a stale blocked run lifecycle. Root cause was `ensureGapBaselineBeforeDispatch` calling `persistRunProgressUpdate` during resolved-decision resume before the resolved blocker was fully established as the authoritative running lifecycle; progress preservation read the old repo state and copied `BlockingTicketID` back into the resume run. The closure reasserts `running` plus cleared blockers after resolved-decision dispatch spec construction and before publishing/syncing run state, preserving the late-result guard while making resolved decision continuation accepting. The focused unit test and managed `verify-llm` target now pass. |
+| owner | core orchestrator resume lifecycle |
+| closureBatch | 8 |
+| loadByDefault | false |
+
 ### ev:code/already-satisfied-stale-patch-bypasses-exhaustion/20260623-035
 
 | Field | Value |
@@ -1687,6 +1732,36 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 | extractCommand | `go test ./internal/modules/kernel/orchestrator/biz -run 'TestCoverageWorkItemEvidenceReadyAssessmentGapIsNotActionableEvidenceGap|TestConvergenceCoverageFocusRequiresValidationIgnoresStaleNextAllowedForEvidenceReady|TestCoverageConvergenceFullChainActionMatrix|TestDeriveCoverageWorkItemState' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh; git diff --check` |
 | extractedSummary | An `evidence_ready` item with no missing required evidence still carried the display gap `required evidence kinds present; coverage assessment required`. A lower-level open-gap predicate treated the non-empty display message as actionable evidence acquisition, causing duplicate validation/tool graphs instead of assessment. The local closure introduces derived coverage work-item state: `missingEvidenceKinds` is the mechanical evidence gap, while assessment-ready display text maps to `need_assessment`. |
 | owner | core coverage/convergence state machine |
+| closureBatch | 7 |
+| loadByDefault | false |
+
+### ev:code/incremental-artifact-output-mode-preserved-through-convergence/20260623-045
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-INCREMENTAL-ARTIFACT-OUTPUT-MODE-PRESERVED-THROUGH-CONVERGENCE-20260623-045` |
+| workspaceId | `ws-7261e1a5cb7575b3` |
+| runId | `run-001` |
+| evidenceKind | managed-e2e-blocker-and-code-test-output |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_output_mode_selector.go`, `internal/modules/kernel/orchestrator/biz/runtime_convergence.go`, `internal/modules/kernel/orchestrator/biz/runtime_repair_action_package.go`, `internal/modules/kernel/orchestrator/biz/runtime_output_mode_selector_test.go`, `internal/modules/kernel/orchestrator/biz/runtime_convergence_test.go` |
+| extractCommand | `WORKORCH_MANAGED_VERIFY_TARGET=verify-incremental-artifact-e2e WORKORCH_MANAGED_GO_TEST_PACKAGES='./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/service/server' make verify-managed-full; go test ./internal/modules/kernel/orchestrator/biz -run 'TestConvergencePreservesRequestedIncrementalArtifactStateChangeWhenCoverageNeedsValidation|TestBuildConvergenceContractPreservesValidationFocusAfterInvalidStateChangingRepair|TestBuildConvergenceContractDoesNotReopenPrimaryStateChangeWhenOnlyValidationMissing' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s` |
+| extractedSummary | Managed incremental artifact e2e exposed that a run with `requestedOutputMode=incrementalArtifact`, `stateChangingOutputRequired=true`, and artifact output signals could still select `outputMode=executionGraph` when the estimate stayed under the default graph budget; coverage convergence then preserved the wrong mode and returned `artifactPlan` output was rejected with `artifact output requires incrementalArtifact outputMode`. The local closure treats explicit requested incremental artifact mode as authoritative whenever state-changing output is required, treats artifact plan/chunk requiredOutput as state-changing output, and prevents coverage validation convergence from downgrading an explicit pending incremental artifact state-change contract unless state change is already satisfied. Focused regressions preserve ordinary invalid patch repair validation focus while keeping incremental artifact `outputMode`, `requiredOutput.outputMode`, and `artifactOutputContract.phase=artifact_plan` through selector and convergence apply. |
+| owner | core orchestrator output-mode and convergence contract consistency |
+| closureBatch | 7 |
+| loadByDefault | false |
+
+### ev:code/incremental-artifact-completion-follow-up-assessment-preserved/20260623-046
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-INCREMENTAL-ARTIFACT-COMPLETION-FOLLOW-UP-ASSESSMENT-PRESERVED-20260623-046` |
+| workspaceId | `ws-61ff47b5c97fb2aa` |
+| runId | `run-001` |
+| evidenceKind | managed-e2e-blocker-and-code-test-output |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_graph.go`, `internal/modules/kernel/orchestrator/biz/runtime_graph_followup_integration_test.go` |
+| extractCommand | `go test ./internal/modules/kernel/orchestrator/biz -run 'TestCompletionFollowUp(RestoresCoverageStateChangeConvergenceContract|PreservesAssessmentOnlyAfterAcceptedStateChangeEvidence)|TestGraphExpansionLimitFollowUpRestoresCoverageValidationConvergenceContract|TestGraphFollowUpRestoresCoverageValidationConvergenceContract' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -run 'TestOutputModeSelectorHonorsExplicitRequestedIncrementalArtifactWithinGraphBudget|TestConvergencePreservesRequestedIncrementalArtifactStateChangeWhenCoverageNeedsValidation|TestCompletionFollowUpPreservesAssessmentOnlyAfterAcceptedStateChangeEvidence|TestCompletionFollowUpRestoresCoverageStateChangeConvergenceContract|TestGraphExpansionLimitFollowUpRestoresCoverageValidationConvergenceContract|TestGraphFollowUpRestoresCoverageValidationConvergenceContract' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh; WORKORCH_MANAGED_VERIFY_TARGET=verify-incremental-artifact-e2e WORKORCH_MANAGED_GO_TEST_PACKAGES='./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/service/server' make verify-managed-full` |
+| extractedSummary | After `045` fixed incremental artifact output-mode preservation, managed incremental artifact e2e reached artifact apply but exposed a second convergence gap: the artifact apply completion follow-up started as `completionFollowUp=true` and `assessmentOnly=true`, then `restoreCoverageWorkItemContinuationConvergenceContract` rebuilt a coverage validation contract and `ApplyConvergenceContract` removed the assessment-only markers. The mock provider then treated the request as another artifact-plan request and the runtime rejected it with `artifact output requires incrementalArtifact outputMode`. The closure keeps ordinary missing state-change completion follow-ups on the existing executable repair path, but preserves assessment-only completion follow-up when coverage work item state has accepted state-change evidence and the remaining gap is assessment/validation binding. The focused tests prove graph-limit and graph follow-up validation contracts still clear assessment-only, while artifact completion assessment preserves `completionFollowUp`, `assessmentOnly`, and `convergenceContract.state=need_assessment`. The managed incremental artifact e2e now passes end-to-end. |
+| owner | core orchestrator graph/convergence follow-up contract consistency |
 | closureBatch | 7 |
 | loadByDefault | false |
 

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
@@ -36,6 +38,17 @@ func ListSkillHubGlobalSkills(ctx context.Context, runner SkillHubCommandRunner)
 func ListSkillHubWorkspaceSkills(ctx context.Context, runner SkillHubCommandRunner, workspaceID string, deliverableDirectory string) ([]contextregistrycore.Skill, error) {
 	deliverableDirectory = strings.TrimSpace(deliverableDirectory)
 	if deliverableDirectory == "" {
+		return nil, nil
+	}
+	skillDir := filepath.Join(deliverableDirectory, ".agents", "skills")
+	info, err := os.Stat(skillDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !info.IsDir() {
 		return nil, nil
 	}
 	return ListSkillHubSkills(ctx, runner, deliverableDirectory, contextregistrycore.SkillScopeWorkspace, workspaceID, "status", "--json")

@@ -28,6 +28,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	skillHubRunner = testNoopSkillHubRunner{}
 	originalWD, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "get test working directory: %v\n", err)
@@ -47,6 +48,12 @@ func TestMain(m *testing.M) {
 	_ = os.Chdir(originalWD)
 	_ = os.RemoveAll(testWD)
 	os.Exit(code)
+}
+
+type testNoopSkillHubRunner struct{}
+
+func (testNoopSkillHubRunner) RunSkillHub(context.Context, string, ...string) ([]byte, error) {
+	return []byte(`{"items":[]}`), nil
 }
 
 var testSharedBackendSessionCleanup sync.Map

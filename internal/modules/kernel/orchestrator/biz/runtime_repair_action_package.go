@@ -1112,7 +1112,14 @@ func repairActionPackageRequiresStateChangingOutput(pkg map[string]any) bool {
 	if len(pkg) == 0 {
 		return false
 	}
-	return boolValue(mapFromValue(pkg["requiredOutput"])["mustIncludeStateChangingNode"])
+	required := mapFromValue(pkg["requiredOutput"])
+	if boolValue(required["mustIncludeStateChangingNode"]) {
+		return true
+	}
+	return stringFromMap(required, "outputMode") == outputModeIncrementalArtifact ||
+		boolValue(required["mustReturnArtifactPlan"]) ||
+		boolValue(required["mustReturnArtifactChunk"]) ||
+		boolValue(required["stateChangingEvidenceDeferredUntilApply"])
 }
 
 func addStrategyReassessmentRequiredOutputContract(pkg map[string]any, requiredOutput map[string]any) {

@@ -464,6 +464,8 @@ go test ./... -count=1
    - already-satisfied stale patch recovery bypasses repair-exhaustion and duplicate-failure decision gates (`ev:code/already-satisfied-stale-patch-bypasses-exhaustion/20260623-035`)
    - stale patch `baseHash mismatch` with readable current target bypasses repair-exhaustion and duplicate-failure gates into current-snapshot patch refresh (`ev:code/stale-basehash-patch-refresh-bypasses-exhaustion/20260623-036`)
    - final repair output-decision refresh preserves active coverage focus binding after convergence/output-mode projections rebuild requiredOutput (`ev:code/final-repair-output-decision-refresh-preserves-focus/20260623-037`)
+   - explicit incremental artifact output mode is preserved through output-mode selection and coverage convergence (`ev:code/incremental-artifact-output-mode-preserved-through-convergence/20260623-045`)
+   - incremental artifact apply completion follow-up preserves assessment-only closure after accepted state-change evidence, with managed incremental artifact e2e passing (`ev:code/incremental-artifact-completion-follow-up-assessment-preserved/20260623-046`)
 6. Continue Batch 7 regression and live verification.
 7. Re-run live workspace verification against fresh or resumed workspaces after the preceding gates are closed.
 

@@ -1167,8 +1167,58 @@ func restoreCoverageWorkItemContinuationConvergenceContract(run *runModel.Run, i
 		input["repairActionPackage"] = map[string]any{}
 	}
 	ensureCoverageRepairTargetSet(input)
+	if completionFollowUpCanUseAssessmentOnlyCoverageClosure(input, context) {
+		input["convergenceContract"] = compactConvergenceContract(ConvergenceContract{
+			State:            convergenceStateNeedAssessment,
+			RuntimeStage:     runtimeStageVerification,
+			RuntimeStageMode: "strict_convergence",
+			RepairObjective:  "complete_dod_goal_coverage_assessment",
+			TargetEvidence:   convergenceTargetEvidence(input, mapFromValue(input["repairActionPackage"])),
+		})
+		return input
+	}
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
 	return ApplyConvergenceContract(input, contract)
+}
+
+func completionFollowUpCanUseAssessmentOnlyCoverageClosure(input map[string]any, context map[string]any) bool {
+	if !boolValue(input["completionFollowUp"]) || !boolValue(input[stepInputKeyAssessmentOnly]) {
+		return false
+	}
+	if boolValue(input["graphFollowUp"]) || boolValue(input[stepInputKeyGraphLimitFollowUp]) || boolValue(input[stepInputKeyNoActionableFollowUp]) {
+		return false
+	}
+	items := coverageWorkItemContinuationFocusItems(context)
+	if len(items) == 0 {
+		return false
+	}
+	var ready bool
+	for _, item := range items {
+		if len(item) == 0 {
+			continue
+		}
+		if coverageWorkItemFocusHasActionableFailure(item) {
+			return false
+		}
+		state := deriveCoverageWorkItemState(item)
+		missing := stringSet(state.MissingEvidenceKinds)
+		if missing["state_change"] {
+			return false
+		}
+		for kind := range missing {
+			if kind != "validation" {
+				return false
+			}
+		}
+		if stringSliceContains(state.RequiredEvidenceKinds, "state_change") &&
+			coverageWorkItemAcceptedEvidenceCountForKind(item, "state_change", state.RequiredEvidenceKinds) == 0 {
+			return false
+		}
+		if len(missing) == 0 || missing["validation"] {
+			ready = true
+		}
+	}
+	return ready
 }
 
 func coverageWorkItemContinuationHasUnresolvedEvidenceGap(context map[string]any) bool {

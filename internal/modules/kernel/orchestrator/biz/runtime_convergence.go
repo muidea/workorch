@@ -449,6 +449,10 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		return true
 	}
 	if missing["validation"] || missing["artifact"] {
+		if convergenceInputRequiresPendingArtifactStateChangingOutput(input, contract.RepairActionPackage) {
+			populateCoverageWorkItemStateChangeConvergenceContract(input, contract)
+			return true
+		}
 		if convergenceStateChangeAlreadySatisfied(input) &&
 			!convergenceConcreteFailureTargetsOutsideSatisfiedStateChange(input, contract.RepairActionPackage) {
 			populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
@@ -516,10 +520,33 @@ func populateCoverageWorkItemStateChangeConvergenceContract(input map[string]any
 	if contract.RepairActionPackage == nil {
 		contract.RepairActionPackage = map[string]any{}
 	}
-	required := enforceStateChangingRequiredOutputForConvergence(contract.RepairActionPackage, input)
+	alreadyRequiresStateChange := repairActionPackageRequiresStateChangingOutput(contract.RepairActionPackage)
+	required := map[string]any{}
+	if alreadyRequiresStateChange {
+		required = mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	} else {
+		required = enforceStateChangingRequiredOutputForConvergence(contract.RepairActionPackage, input)
+	}
 	required["mustReferenceCoverageWorkItem"] = true
 	contract.RepairActionPackage["requiredOutput"] = required
 	contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
+}
+
+func convergenceInputRequiresPendingArtifactStateChangingOutput(input map[string]any, pkg map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if convergenceStateChangeAlreadySatisfied(input) &&
+		!convergenceConcreteFailureTargetsOutsideSatisfiedStateChange(input, pkg) {
+		return false
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	return strings.TrimSpace(stringFromMap(input, "requestedOutputMode")) == outputModeIncrementalArtifact ||
+		outputModeFromInput(input) == outputModeIncrementalArtifact ||
+		strings.TrimSpace(stringFromMap(required, "outputMode")) == outputModeIncrementalArtifact ||
+		boolValue(required["mustReturnArtifactPlan"]) ||
+		boolValue(required["mustReturnArtifactChunk"]) ||
+		boolValue(required["stateChangingEvidenceDeferredUntilApply"])
 }
 
 func populateCoverageWorkItemValidationConvergenceContract(input map[string]any, contract *ConvergenceContract, includeRepairTargets bool) {

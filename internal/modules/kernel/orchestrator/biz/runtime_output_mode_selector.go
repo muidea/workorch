@@ -355,6 +355,9 @@ func estimatedOutputExceedsGraphBudget(input map[string]any, policy LLMOutputRun
 }
 
 func requestedIncrementalArtifactEligible(input map[string]any, policy LLMOutputRuntimePolicy) bool {
+	if strings.TrimSpace(stringFromMap(input, "requestedOutputMode")) == outputModeIncrementalArtifact {
+		return true
+	}
 	return maxIntFromOutputModeSignal(input, "estimatedPatchContentBytes") > policy.MaxPatchContentBytes ||
 		maxIntFromOutputModeSignal(input, "estimatedGraphBytes") > policy.MaxGraphBytes ||
 		maxIntFromOutputModeSignal(input, "expectedStateChangingArtifactCount") > policy.MaxGraphFileWrites

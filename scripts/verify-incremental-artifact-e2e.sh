@@ -477,7 +477,7 @@ wait_run_terminal() {
     curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$status_file"
     state="$(json_path "$status_file" "status.state")"
     case "$state" in
-      completed|failed|canceled|blocked_on_decision|blocked_on_approval)
+      completed|failed|canceled|superseded)
         echo "$state"
         return
         ;;

@@ -1287,6 +1287,60 @@ func TestCompletionFollowUpRestoresCoverageStateChangeConvergenceContract(t *tes
 	}
 }
 
+func TestCompletionFollowUpPreservesAssessmentOnlyAfterAcceptedStateChangeEvidence(t *testing.T) {
+	runID := common.RunID("run-completion-cwi-assessment-after-state-change")
+	run := &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      "ws-completion-cwi-assessment-after-state-change",
+		DoDID:            "dod",
+		ExecutionContext: map[string]any{},
+		InitialStepKind:  llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:     common.StepID(runID + "/artifact-apply-001"),
+		RunID:  runID,
+		Kind:   "artifact/apply",
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"status": "completed"},
+	}
+
+	input := llmCompletionFollowUpStepInput(run, step)
+	input[coverageWorkItemContextKey] = map[string]any{
+		"currentFocus": map[string]any{
+			"id":                    "cwi-artifact-output",
+			"status":                "open",
+			"sourceScope":           "deliverable",
+			"sourceRequirementId":   "artifact-output",
+			"targetText":            "artifact output exists and needs final assessment",
+			"requiredEvidenceKinds": []string{"state_change", "validation"},
+			"missingEvidenceKinds":  []string{"validation"},
+			"acceptedEvidenceRefs":  []string{"run-completion-cwi-assessment-after-state-change/artifact-apply"},
+			"acceptedEvidenceByKind": map[string]any{
+				"state_change": []string{"run-completion-cwi-assessment-after-state-change/artifact-apply"},
+			},
+		},
+	}
+	input = restoreCoverageWorkItemContinuationConvergenceContract(run, input)
+
+	if input["completionFollowUp"] != true || input[stepInputKeyAssessmentOnly] != true ||
+		input["assessmentOnlyReason"] != "completion_follow_up" {
+		t.Fatalf("input = %+v, want completion assessment-only markers preserved", input)
+	}
+	if input["repairObjective"] != nil || input["boundedValidationRequired"] != nil ||
+		input["stateChangingOutputRequired"] != nil {
+		t.Fatalf("input = %+v, want no executable validation or state-changing contract", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedAssessment ||
+		stringFromMap(contract, "runtimeStage") != runtimeStageVerification {
+		t.Fatalf("convergenceContract = %+v, want need_assessment verification contract", contract)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if len(required) != 0 {
+		t.Fatalf("requiredOutput = %+v, want no executable required output on completion assessment", required)
+	}
+}
+
 func TestGraphExpansionLimitFollowUpRestoresCoverageValidationConvergenceContract(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-graph-limit-cwi-validation")
