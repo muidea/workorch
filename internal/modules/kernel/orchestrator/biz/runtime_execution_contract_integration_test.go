@@ -2542,6 +2542,82 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteScratchFile
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteScratchSetupAndHeredoc(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/controlled-substitute-heredoc"
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-controlled-substitute-heredoc",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-controlled-substitute-heredoc/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					validationScratchDirKey:                    scratch,
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "setup-validation-scratch",
+					"kind": shellcommon.StepKindCommand,
+					"input": map[string]any{
+						"command": "sh",
+						"args":    []string{"-c", `mkdir -p /tmp/workorch-validation-test/controlled-substitute-heredoc`},
+						"validationEvidence": map[string]any{
+							"mode":            "controlled_substitute",
+							"observationType": "controlled_substitute_observation",
+							"substituteFor":   "validation scratch setup",
+						},
+					},
+				},
+				{
+					"id":        "capture-readonly-output",
+					"kind":      shellcommon.StepKindCommand,
+					"dependsOn": []string{"setup-validation-scratch"},
+					"input": map[string]any{
+						"command": "sh",
+						"args": []string{"-c", strings.Join([]string{
+							`printf 'first\n' > /tmp/workorch-validation-test/controlled-substitute-heredoc/validation.log`,
+							`printf 'second\n' >> /tmp/workorch-validation-test/controlled-substitute-heredoc/validation.log`,
+							`cat > /tmp/workorch-validation-test/controlled-substitute-heredoc/probe.txt <<'EOF'`,
+							`temporary validation fixture`,
+							`if observed >= expected { keep }`,
+							`EOF`,
+							`grep -n temporary /tmp/workorch-validation-test/controlled-substitute-heredoc/probe.txt >> /tmp/workorch-validation-test/controlled-substitute-heredoc/validation.log 2>&1`,
+							`cat /tmp/workorch-validation-test/controlled-substitute-heredoc/validation.log`,
+						}, "\n")},
+						"validationEvidence": map[string]any{
+							"mode":            "controlled_substitute",
+							"observationType": "controlled_substitute_observation",
+							"substituteFor":   "temporary validation fixture under validationScratchDir",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want scratch setup and heredoc writes allowed", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsControlledSubstituteWriteWithoutScratchContract(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-controlled-substitute-missing-scratch",

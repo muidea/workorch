@@ -596,6 +596,9 @@ func shellCommandLineContainsWriteRedirection(commandLine string, allowScratchTa
 		if commandLine[idx] != '>' {
 			continue
 		}
+		if shellCommandLineGreaterThanIsComparison(commandLine, idx) {
+			continue
+		}
 		next := byte(0)
 		if idx+1 < len(commandLine) {
 			next = commandLine[idx+1]
@@ -621,6 +624,22 @@ func shellCommandLineContainsWriteRedirection(commandLine string, allowScratchTa
 			}
 		}
 		return true
+	}
+	return false
+}
+
+func shellCommandLineGreaterThanIsComparison(commandLine string, idx int) bool {
+	if idx < 0 || idx >= len(commandLine) || commandLine[idx] != '>' {
+		return false
+	}
+	if idx+1 < len(commandLine) && commandLine[idx+1] == '=' {
+		return true
+	}
+	if idx > 0 {
+		switch commandLine[idx-1] {
+		case '=', '-', '!':
+			return true
+		}
 	}
 	return false
 }

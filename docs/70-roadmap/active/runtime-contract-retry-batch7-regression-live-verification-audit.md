@@ -1742,6 +1742,19 @@ The audited result is:
   `ev:code/final-repair-output-decision-refresh-preserves-focus/20260623-037`
   reapplies the coverage-focus contract during the final output-decision
   refresh after convergence/output-mode projections rebuild `requiredOutput`.
+- After `037`, the redeployed successor run advanced through real patch,
+  build, git, and MCP validation activity and no longer repeated the focus
+  mismatch. The next open decision was a concrete-validation graph rejection:
+  a scratch-bounded heredoc validation script contained a non-shell comparison
+  token (`>=`) inside fixture text, and the generic shell safety scanner
+  treated the `>` byte as a write redirection outside `validationScratchDir`.
+  The local closure in
+  `ev:code/validation-shell-redirection-comparison-token/20260623-038` keeps
+  shell validation strict for real redirections while ignoring neutral
+  comparison/arrow tokens such as `>=`, `=>`, `->`, and `!>` when scanning
+  command text. The closure is core-neutral: it changes only generic command
+  parsing and does not add any template, language, workspace, or target-file
+  rule.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked
