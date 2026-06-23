@@ -66,6 +66,38 @@ func coverageWorkItemSources(executionContext map[string]any) ([]coverageWorkIte
 				TargetText:          item,
 			})
 		}
+		for idx, item := range mapSliceFromValue(dod["items"]) {
+			text := strings.TrimSpace(firstNonEmptyString(
+				stringFromMap(item, "text"),
+				stringFromMap(item, "item"),
+				stringFromMap(item, "targetText"),
+				stringFromMap(item, "requirement"),
+				stringFromMap(item, "description"),
+				stringFromMap(item, "id"),
+			))
+			if text == "" || coverageTextLooksContainer(text) {
+				if text != "" {
+					addExcluded("dod", "dod_item", fmt.Sprintf("%sdod.items[%d]", pathPrefix, idx), text, "container_source")
+				}
+				continue
+			}
+			id := firstNonEmptyString(
+				stringFromMap(item, "id"),
+				stringFromMap(item, "sourceRequirementId"),
+				fmt.Sprintf("%sdod-item-%03d", coverageRequirementPrefix(dodID), idx+1),
+			)
+			sources = append(sources, coverageWorkItemSource{
+				Source:                 "dod",
+				SourceScope:            "dod_item",
+				SourceDoDID:            dodID,
+				SourceRequirementID:    id,
+				SourcePath:             fmt.Sprintf("%sdod.items[%d]", pathPrefix, idx),
+				TargetText:             text,
+				EvidenceRole:           normalizedCoverageEvidenceRole(stringFromMap(item, "evidenceRole")),
+				RequiredEvidenceKinds:  stringSliceFromValue(item["requiredEvidenceKinds"]),
+				RequiredEvidenceCounts: mapIntValue(item["requiredEvidenceCounts"]),
+			})
+		}
 	}
 	addGoal(mapFromValue(executionContext["goal"]), "")
 	for idx, goal := range mapSliceFromValue(executionContext["goals"]) {
@@ -177,6 +209,12 @@ func failedCoverageSourceFromItem(source, scope, pathPrefix string, item map[str
 		SourceRequirementID: id,
 		SourcePath:          pathPrefix + "." + coverageShortHash(item),
 		TargetText:          text,
+		EvidenceRole:        normalizedCoverageEvidenceRole(stringFromMap(item, "evidenceRole")),
+		RequiredEvidenceKinds: stringSliceFromValue(firstNonNil(
+			item["requiredEvidenceKinds"],
+			item["evidenceKinds"],
+		)),
+		RequiredEvidenceCounts: mapIntValue(item["requiredEvidenceCounts"]),
 	}
 }
 

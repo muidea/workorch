@@ -1817,6 +1817,20 @@ The audited result is:
   strict missing-evidence calculation for `open`, `in_progress`, and `failed`
   items and does not add workspace IDs, template IDs, language rules, provider
   names, commands, or target-file rules.
+- Continuing the same live run after `042` showed the previous context
+  reopening defect was closed, but a separate coverage-source neutrality
+  defect remained. `cwi-008` was still `in_progress` with missing `decision`
+  evidence even though the requirement text only described decision-useful
+  response fields; no governance owner ticket was actually required by a
+  structured contract. The old default evidence-kind derivation parsed natural
+  language target text for `decision` / `approval` words and turned ordinary
+  business wording into governance evidence requirements. The local closure in
+  `ev:code/coverage-governance-evidence-kind-structured-only/20260623-043`
+  makes default coverage evidence `validation` unless the coverage source or
+  assessment item explicitly declares `requiredEvidenceKinds` /
+  `evidenceKinds` and optional `requiredEvidenceCounts`. This keeps governance
+  evidence available as structured data while removing core text-keyword
+  inference, preserving the core/template boundary.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked

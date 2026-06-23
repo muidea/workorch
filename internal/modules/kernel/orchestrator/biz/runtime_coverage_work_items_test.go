@@ -1933,10 +1933,24 @@ func TestCoverageWorkItemsGovernanceItemsRequireOwnerEvidence(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-governance-kinds",
 		ExecutionContext: map[string]any{
-			"dod": map[string]any{"items": []string{
-				"two Decision tickets are resolved",
-				"one Approval is approved",
-				"MCP loadtest.governed_result evidence is collected",
+			"dod": map[string]any{"items": []map[string]any{
+				{
+					"id":                    "decision-tickets",
+					"text":                  "resolved governance tickets",
+					"requiredEvidenceKinds": []string{"decision"},
+					"requiredEvidenceCounts": map[string]any{
+						"decision": 2,
+					},
+				},
+				{
+					"id":                    "approval-record",
+					"text":                  "approved governance record",
+					"requiredEvidenceKinds": []string{"approval"},
+				},
+				{
+					"id":   "mcp-validation",
+					"text": "MCP loadtest.governed_result evidence is collected",
+				},
 			}},
 		},
 	}
@@ -1957,14 +1971,53 @@ func TestCoverageWorkItemsGovernanceItemsRequireOwnerEvidence(t *testing.T) {
 	assertRequired(2, "validation")
 }
 
+func TestCoverageWorkItemsDoNotInferGovernanceEvidenceFromBusinessText(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-business-text-decision",
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{"items": []string{
+				"默认输出仅保留决策必需字段，并返回 complete/truncated 元信息",
+				"operator decision text appears here as business data, not a governance ticket",
+			}},
+		},
+	}
+
+	newCoverageSubsystem().ensure(run)
+
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) != 2 {
+		t.Fatalf("coverageWorkItems len = %d, want 2", len(items))
+	}
+	for idx, item := range items {
+		got := stringSliceFromValue(item["requiredEvidenceKinds"])
+		if len(got) != 1 || got[0] != "validation" {
+			t.Fatalf("item[%d] requiredEvidenceKinds = %+v, want [validation]", idx, got)
+		}
+	}
+}
+
 func TestCoverageWorkItemsGovernanceItemsRejectMCPValidationEvidence(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-governance-reject-mcp",
 		ExecutionContext: map[string]any{
-			"dod": map[string]any{"items": []string{
-				"two Decision tickets are resolved",
-				"one Approval is approved",
-				"MCP loadtest.governed_result evidence is collected",
+			"dod": map[string]any{"items": []map[string]any{
+				{
+					"id":                    "decision-tickets",
+					"text":                  "resolved governance tickets",
+					"requiredEvidenceKinds": []string{"decision"},
+					"requiredEvidenceCounts": map[string]any{
+						"decision": 2,
+					},
+				},
+				{
+					"id":                    "approval-record",
+					"text":                  "approved governance record",
+					"requiredEvidenceKinds": []string{"approval"},
+				},
+				{
+					"id":   "mcp-validation",
+					"text": "MCP loadtest.governed_result evidence is collected",
+				},
 			}},
 		},
 	}
@@ -1973,14 +2026,18 @@ func TestCoverageWorkItemsGovernanceItemsRejectMCPValidationEvidence(t *testing.
 	assessment := map[string]any{
 		"items": []map[string]any{
 			{
-				"item":         "two Decision tickets are resolved",
-				"state":        "satisfied",
-				"evidenceRefs": []string{"run-cwi-governance-reject-mcp/graph-001/001-mcp-call"},
+				"id":            "decision-tickets",
+				"item":          "resolved governance tickets",
+				"evidenceKinds": []string{"decision"},
+				"state":         "satisfied",
+				"evidenceRefs":  []string{"run-cwi-governance-reject-mcp/graph-001/001-mcp-call"},
 			},
 			{
-				"item":         "one Approval is approved",
-				"state":        "satisfied",
-				"evidenceRefs": []string{"run-cwi-governance-reject-mcp/graph-001/001-mcp-call"},
+				"id":            "approval-record",
+				"item":          "approved governance record",
+				"evidenceKinds": []string{"approval"},
+				"state":         "satisfied",
+				"evidenceRefs":  []string{"run-cwi-governance-reject-mcp/graph-001/001-mcp-call"},
 			},
 			{
 				"item":         "MCP loadtest.governed_result evidence is collected",
@@ -2012,10 +2069,24 @@ func TestCoverageWorkItemsGovernanceItemsAcceptOwnerEvidenceRefs(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-governance-owner-evidence",
 		ExecutionContext: map[string]any{
-			"dod": map[string]any{"items": []string{
-				"two Decision tickets are resolved",
-				"one Approval is approved",
-				"MCP loadtest.governed_result evidence is collected",
+			"dod": map[string]any{"items": []map[string]any{
+				{
+					"id":                    "decision-tickets",
+					"text":                  "resolved governance tickets",
+					"requiredEvidenceKinds": []string{"decision"},
+					"requiredEvidenceCounts": map[string]any{
+						"decision": 2,
+					},
+				},
+				{
+					"id":                    "approval-record",
+					"text":                  "approved governance record",
+					"requiredEvidenceKinds": []string{"approval"},
+				},
+				{
+					"id":   "mcp-validation",
+					"text": "MCP loadtest.governed_result evidence is collected",
+				},
 			}},
 		},
 	}
@@ -2024,14 +2095,18 @@ func TestCoverageWorkItemsGovernanceItemsAcceptOwnerEvidenceRefs(t *testing.T) {
 	assessment := map[string]any{
 		"items": []map[string]any{
 			{
-				"item":         "two Decision tickets are resolved",
-				"state":        "satisfied",
-				"evidenceRefs": []string{"run-cwi-governance-owner-evidence-step-1-decision", "run-cwi-governance-owner-evidence-step-2-decision", "resolution-run-cwi-governance-owner-evidence-step-1-decision"},
+				"id":            "decision-tickets",
+				"item":          "resolved governance tickets",
+				"evidenceKinds": []string{"decision"},
+				"state":         "satisfied",
+				"evidenceRefs":  []string{"run-cwi-governance-owner-evidence-step-1-decision", "run-cwi-governance-owner-evidence-step-2-decision", "resolution-run-cwi-governance-owner-evidence-step-1-decision"},
 			},
 			{
-				"item":         "one Approval is approved",
-				"state":        "satisfied",
-				"evidenceRefs": []string{"run-cwi-governance-owner-evidence-step-2-approval"},
+				"id":            "approval-record",
+				"item":          "approved governance record",
+				"evidenceKinds": []string{"approval"},
+				"state":         "satisfied",
+				"evidenceRefs":  []string{"run-cwi-governance-owner-evidence-step-2-approval"},
 			},
 			{
 				"item":         "MCP loadtest.governed_result evidence is collected",
@@ -2061,9 +2136,20 @@ func TestCoverageWorkItemsGovernanceOwnerSyncRespectsRequiredCounts(t *testing.T
 		ID:          "run-cwi-governance-owner-sync",
 		WorkspaceID: "ws-cwi-governance-owner-sync",
 		ExecutionContext: map[string]any{
-			"dod": map[string]any{"items": []string{
-				"two Decision tickets are resolved",
-				"one Approval is approved",
+			"dod": map[string]any{"items": []map[string]any{
+				{
+					"id":                    "decision-tickets",
+					"text":                  "resolved governance tickets",
+					"requiredEvidenceKinds": []string{"decision"},
+					"requiredEvidenceCounts": map[string]any{
+						"decision": 2,
+					},
+				},
+				{
+					"id":                    "approval-record",
+					"text":                  "approved governance record",
+					"requiredEvidenceKinds": []string{"approval"},
+				},
 			}},
 		},
 	}

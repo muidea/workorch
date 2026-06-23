@@ -2,9 +2,7 @@ package orchestrator
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -36,123 +34,26 @@ func coverageRequiredEvidenceKindsForSource(run *runModel.Run, source coverageWo
 }
 
 func coverageDefaultRequiredEvidenceKinds(source coverageWorkItemSource) []string {
-	target := strings.ToLower(strings.TrimSpace(source.TargetText))
-	switch {
-	case coverageTextRequiresDecisionEvidence(target):
-		return []string{"decision"}
-	case coverageTextRequiresApprovalEvidence(target):
-		return []string{"approval"}
-	default:
-		return []string{"validation"}
+	if kinds := compactUniqueStrings(source.RequiredEvidenceKinds); len(kinds) > 0 {
+		return kinds
 	}
+	return []string{"validation"}
 }
 
 func coverageRequiredEvidenceCountsForSource(source coverageWorkItemSource, requiredKinds []string) map[string]int {
 	ret := map[string]int{}
-	target := strings.ToLower(strings.TrimSpace(source.TargetText))
 	for _, kind := range requiredKinds {
 		kind = strings.TrimSpace(kind)
 		if kind == "" {
 			continue
 		}
-		switch kind {
-		case "decision":
-			ret[kind] = coverageGovernanceEvidenceMinCount(target, "decision")
-		case "approval":
-			ret[kind] = coverageGovernanceEvidenceMinCount(target, "approval")
-		default:
-			ret[kind] = 1
+		if count := source.RequiredEvidenceCounts[kind]; count > 0 {
+			ret[kind] = count
+			continue
 		}
+		ret[kind] = 1
 	}
 	return ret
-}
-
-func coverageGovernanceEvidenceMinCount(text string, kind string) int {
-	text = strings.ToLower(strings.TrimSpace(text))
-	if text == "" {
-		return 1
-	}
-	kindTerms := []string{kind}
-	switch kind {
-	case "decision":
-		kindTerms = []string{"decision", "decisions", "ticket", "tickets", "决策", "工单"}
-	case "approval":
-		kindTerms = []string{"approval", "approvals", "approved", "审批", "批准"}
-	}
-	for _, term := range kindTerms {
-		if count := coverageCountBeforeTerm(text, term); count > 0 {
-			return count
-		}
-	}
-	return 1
-}
-
-func coverageCountBeforeTerm(text string, term string) int {
-	term = strings.ToLower(strings.TrimSpace(term))
-	if text == "" || term == "" || !strings.Contains(text, term) {
-		return 0
-	}
-	pattern := regexp.MustCompile(`(?i)(\d+|one|two|three|four|five|six|seven|eight|nine|ten|一|一个|一条|一项|两|两个|两条|两项|二|二个|二条|二项|三|三个|三条|三项)\s*(?:[a-z_-]+\s+){0,3}` + regexp.QuoteMeta(term))
-	match := pattern.FindStringSubmatch(text)
-	if len(match) < 2 {
-		return 0
-	}
-	return coverageCountWordValue(match[1])
-}
-
-func coverageCountWordValue(raw string) int {
-	raw = strings.ToLower(strings.TrimSpace(raw))
-	if raw == "" {
-		return 0
-	}
-	if count, err := strconv.Atoi(raw); err == nil {
-		return count
-	}
-	switch raw {
-	case "one", "一", "一个", "一条", "一项":
-		return 1
-	case "two", "两", "两个", "两条", "两项", "二", "二个", "二条", "二项":
-		return 2
-	case "three", "三", "三个", "三条", "三项":
-		return 3
-	case "four":
-		return 4
-	case "five":
-		return 5
-	case "six":
-		return 6
-	case "seven":
-		return 7
-	case "eight":
-		return 8
-	case "nine":
-		return 9
-	case "ten":
-		return 10
-	default:
-		return 0
-	}
-}
-
-func coverageTextRequiresDecisionEvidence(text string) bool {
-	text = strings.ToLower(strings.TrimSpace(text))
-	if text == "" {
-		return false
-	}
-	return strings.Contains(text, "decision") ||
-		strings.Contains(text, "决策") ||
-		strings.Contains(text, "工单")
-}
-
-func coverageTextRequiresApprovalEvidence(text string) bool {
-	text = strings.ToLower(strings.TrimSpace(text))
-	if text == "" {
-		return false
-	}
-	return strings.Contains(text, "approval") ||
-		strings.Contains(text, "approved") ||
-		strings.Contains(text, "审批") ||
-		strings.Contains(text, "批准")
 }
 
 func coverageSourceCanCarryStateChange(source coverageWorkItemSource) bool {
@@ -404,22 +305,15 @@ func coverageAssessmentEvidenceKinds(item map[string]any) []string {
 	if len(item) == 0 {
 		return []string{"validation"}
 	}
-	text := strings.Join([]string{
-		stringFromMap(item, "item"),
-		stringFromMap(item, "goal"),
-		stringFromMap(item, "goalItem"),
-		stringFromMap(item, "requirement"),
-		stringFromMap(item, "targetText"),
-		stringFromMap(item, "summary"),
-	}, " ")
-	switch {
-	case coverageTextRequiresDecisionEvidence(text):
-		return []string{"decision"}
-	case coverageTextRequiresApprovalEvidence(text):
-		return []string{"approval"}
-	default:
-		return []string{"validation"}
+	for _, key := range []string{"evidenceKinds", "requiredEvidenceKinds"} {
+		if kinds := compactUniqueStrings(stringSliceFromValue(item[key])); len(kinds) > 0 {
+			return kinds
+		}
 	}
+	if kind := strings.TrimSpace(stringFromMap(item, "evidenceKind")); kind != "" {
+		return []string{kind}
+	}
+	return []string{"validation"}
 }
 
 func coverageTokensFromAssessmentItem(item map[string]any) []string {

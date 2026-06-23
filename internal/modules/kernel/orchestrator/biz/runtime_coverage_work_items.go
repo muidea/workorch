@@ -24,17 +24,19 @@ const (
 )
 
 type coverageWorkItemSource struct {
-	Source              string
-	SourceScope         string
-	SourceGoalID        string
-	SourceDoDID         string
-	SourceRequirementID string
-	SourceAliases       []string
-	SourcePath          string
-	TargetText          string
-	EvidenceRole        string
-	ParentContext       string
-	ExcludedReason      string
+	Source                 string
+	SourceScope            string
+	SourceGoalID           string
+	SourceDoDID            string
+	SourceRequirementID    string
+	SourceAliases          []string
+	SourcePath             string
+	TargetText             string
+	EvidenceRole           string
+	RequiredEvidenceKinds  []string
+	RequiredEvidenceCounts map[string]int
+	ParentContext          string
+	ExcludedReason         string
 }
 
 type coverageWorkItemUpdate struct {
