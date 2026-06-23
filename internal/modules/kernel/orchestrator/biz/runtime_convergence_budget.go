@@ -35,6 +35,13 @@ func updateConvergenceBudgetFromStep(run *runModel.Run, step *runModel.Step, cov
 	if coverageDelta {
 		budget["noCoverageDeltaRounds"] = int64(0)
 		delete(budget, "lastNoDeltaReason")
+		if convergenceBudgetPositiveCoverageDelta(step) {
+			budget["repairAttempts"] = int64(0)
+			budget["validationOnlyRetries"] = int64(0)
+			budget["repeatedFailureSignatures"] = int64(0)
+			delete(budget, "lastFailureSignature")
+			focus["attempt"] = int64(0)
+		}
 		if convergenceBudgetEscalatedDecision(stringFromMap(budget, "decision")) {
 			budget["decision"] = "continue"
 			budget["state"] = "tracking"
@@ -66,6 +73,10 @@ func updateConvergenceBudgetFromStep(run *runModel.Run, step *runModel.Step, cov
 	run.ExecutionContext[convergenceBudgetKey] = budget
 	run.ExecutionContext[coverageFocusKey] = focus
 	return before != stableCoverageJSON(budget)
+}
+
+func convergenceBudgetPositiveCoverageDelta(step *runModel.Step) bool {
+	return step != nil && step.State == common.StepStateCompleted
 }
 
 func resetConvergenceBudgetForReplanSuccessor(executionContext map[string]any) bool {

@@ -1784,6 +1784,20 @@ The audited result is:
   coverage focus. This preserves the guard against silently redirecting a
   patch to the wrong target and still lets the coverage ledger bind follow-up
   write/tool evidence to the active work item.
+- After redeploying `040`, the fresh successor run no longer failed with
+  `repair_focus_mismatch`. It advanced through real patch and validation
+  nodes and `cwi-039` gained new accepted state-change and validation evidence
+  refs. The next blocker was a different target validation failure, but the
+  convergence budget still escalated on `repairAttempts 4/4` because the
+  focus-level repair counter had not been reset after accepted coverage
+  progress. The local closure in
+  `ev:code/convergence-budget-positive-delta-resets-repair-window/20260623-041`
+  resets repair-attempt, validation-only retry, and repeated-failure counters
+  only when a completed step produces accepted coverage delta. Failed steps
+  that merely add rejected diagnostic evidence keep their repair counters, so
+  the budget still blocks non-progressing retry loops while allowing a
+  genuinely progressing focus to continue repairing the next concrete
+  validation failure.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked

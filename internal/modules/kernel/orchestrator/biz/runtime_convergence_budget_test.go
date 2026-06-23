@@ -109,6 +109,124 @@ func TestUpdateConvergenceBudgetResetsNoDeltaAfterCoverageDelta(t *testing.T) {
 	}
 }
 
+func TestUpdateConvergenceBudgetResetsRepairAttemptsAfterAcceptedCoverageDelta(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-convergence-budget-positive-delta",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			coverageFocusKey: map[string]any{
+				"id":      "focus-item-1",
+				"sliceId": "slice-1",
+				"state":   "active",
+				"attempt": int64(4),
+			},
+			convergenceBudgetKey: map[string]any{
+				"focusId":                   "focus-item-1",
+				"sliceId":                   "slice-1",
+				"state":                     "escalated",
+				"decision":                  "escalate_decision",
+				"lastDecisionReason":        "max_repair_attempts_per_focus_exceeded",
+				"repairAttempts":            int64(4),
+				"validationOnlyRetries":     int64(3),
+				"repeatedFailureSignatures": int64(2),
+				"lastFailureSignature":      "class=shell_command_failed|kind=shell/command|failureTargets=target.txt",
+				"noCoverageDeltaRounds":     int64(2),
+				"lastNoDeltaReason":         "failed_without_coverage_delta:shell_command_failed",
+				"maxRepairAttemptsPerFocus": int64(4),
+				"maxValidationOnlyRetries":  int64(3),
+				"maxNoCoverageDeltaRounds":  int64(3),
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-convergence-budget-positive-delta/graph-001/001-patch",
+		Kind:  "patch/apply",
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"status": "completed",
+		},
+	}
+
+	if !updateConvergenceBudgetFromStep(run, step, true) {
+		t.Fatal("updateConvergenceBudgetFromStep changed = false, want positive coverage delta reset")
+	}
+	budget := mapFromValue(run.ExecutionContext[convergenceBudgetKey])
+	if budget["decision"] != "continue" || budget["state"] != "tracking" {
+		t.Fatalf("budget = %+v, want tracking/continue after accepted coverage delta", budget)
+	}
+	for _, key := range []string{"repairAttempts", "validationOnlyRetries", "repeatedFailureSignatures", "noCoverageDeltaRounds"} {
+		if int64FromValue(budget[key]) != 0 {
+			t.Fatalf("budget[%s] = %v, want reset to zero in %+v", key, budget[key], budget)
+		}
+	}
+	for _, key := range []string{"lastFailureSignature", "lastNoDeltaReason", "lastDecisionReason"} {
+		if _, ok := budget[key]; ok {
+			t.Fatalf("budget retained %s after positive coverage delta: %+v", key, budget)
+		}
+	}
+	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
+	if int64FromValue(focus["attempt"]) != 0 {
+		t.Fatalf("focus attempt = %v, want reset after positive coverage delta", focus["attempt"])
+	}
+}
+
+func TestUpdateConvergenceBudgetDoesNotResetRepairAttemptsForRejectedCoverageDelta(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-convergence-budget-rejected-delta",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			coverageFocusKey: map[string]any{
+				"id":      "focus-item-1",
+				"sliceId": "slice-1",
+				"state":   "active",
+				"attempt": int64(3),
+			},
+			convergenceBudgetKey: map[string]any{
+				"focusId":                   "focus-item-1",
+				"sliceId":                   "slice-1",
+				"state":                     "tracking",
+				"decision":                  "continue",
+				"repairAttempts":            int64(3),
+				"validationOnlyRetries":     int64(1),
+				"repeatedFailureSignatures": int64(1),
+				"lastFailureSignature":      "class=shell_command_failed|kind=shell/command|failureTargets=target.txt",
+				"noCoverageDeltaRounds":     int64(2),
+				"lastNoDeltaReason":         "failed_without_coverage_delta:shell_command_failed",
+				"maxRepairAttemptsPerFocus": int64(4),
+				"maxValidationOnlyRetries":  int64(3),
+				"maxNoCoverageDeltaRounds":  int64(4),
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-convergence-budget-rejected-delta/graph-001/002-verify",
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=target.txt",
+			"error":                   "exit status 1",
+		},
+	}
+
+	if !updateConvergenceBudgetFromStep(run, step, true) {
+		t.Fatal("updateConvergenceBudgetFromStep changed = false, want rejected coverage delta update")
+	}
+	budget := mapFromValue(run.ExecutionContext[convergenceBudgetKey])
+	if int64FromValue(budget["repairAttempts"]) != 3 ||
+		int64FromValue(budget["validationOnlyRetries"]) != 2 ||
+		int64FromValue(budget["repeatedFailureSignatures"]) != 2 {
+		t.Fatalf("budget = %+v, want repair/retry/signature counters retained and failed validation counted", budget)
+	}
+	if int64FromValue(budget["noCoverageDeltaRounds"]) != 0 || budget["lastNoDeltaReason"] != nil {
+		t.Fatalf("budget = %+v, want no-delta reset for recorded rejected evidence", budget)
+	}
+	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
+	if int64FromValue(focus["attempt"]) != 3 {
+		t.Fatalf("focus attempt = %v, want retained after rejected evidence", focus["attempt"])
+	}
+}
+
 func TestResetConvergenceBudgetForReplanSuccessorClearsRuntimeCounters(t *testing.T) {
 	executionContext := map[string]any{
 		convergenceBudgetKey: map[string]any{
