@@ -1182,6 +1182,79 @@ func TestRuntimeOrchestrator_RuntimeRepairInputPrioritizesResourceShapeDiagnosti
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputUsesInheritedShapeDiagnosticsForAlignment(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "resource.go"), []byte("package main\n\ntype ResourceShape struct { ExistingField int }\n"), 0o644); err != nil {
+		t.Fatalf("seed resource.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "resource_contract_test.go"), []byte("package main\n\nfunc TestContract(t *testing.T) {\n\t_ = ResourceShape{MissingShapeField: 4096}\n}\n"), 0o644); err != nil {
+		t.Fatalf("seed contract target: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-inherited-shape-diagnostics")
+	runID := common.RunID("run-inherited-shape-diagnostics")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	signals := map[string]any{
+		"targetRefs":  []string{"resource_contract_test.go"},
+		"identifiers": []string{"MissingShapeField", "ResourceShape"},
+		"messages": []string{
+			"resource_contract_test.go:4:19: unknown field MissingShapeField in resource shape ResourceShape",
+		},
+		"lineRefs": []map[string]any{{"targetRef": "resource_contract_test.go", "line": 4}},
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"stateChangingOutputRequired": true,
+			"failureTargetScope":          "failureTargets=resource_contract_test.go",
+			"structuredFailureSignals":    signals,
+			"repairActionPackage": map[string]any{
+				"structuredFailureSignals": signals,
+				"primaryDiagnosticRepair":  primaryDiagnosticRepairContractFromSignals(signals),
+			},
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"error":                   "exit status 1",
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|stage=runtime_step_failed",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 2, errors.New("exit status 1"))
+
+	targetContext := mapSliceFromValue(input["failureTargetRepairContext"])
+	if len(targetContext) != 1 || targetContext[0]["targetRef"] != "resource_contract_test.go" {
+		t.Fatalf("failureTargetRepairContext = %#v, want target from inherited diagnostics", input["failureTargetRepairContext"])
+	}
+	shapeContext := mapSliceFromValue(input["resourceShapeAlignmentContext"])
+	if len(shapeContext) == 0 {
+		t.Fatalf("resourceShapeAlignmentContext missing for inherited shape diagnostics: %#v", input)
+	}
+	foundResource := false
+	for _, item := range shapeContext {
+		if item["targetRef"] == "resource.go" && strings.Contains(stringFromMap(item, "content"), "ExistingField") {
+			foundResource = true
+			break
+		}
+	}
+	if !foundResource {
+		t.Fatalf("resourceShapeAlignmentContext = %#v, want same-directory resource shape evidence", shapeContext)
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	if len(mapSliceFromValue(actionPackage["resourceShapeAlignmentContext"])) == 0 {
+		t.Fatalf("repairActionPackage.resourceShapeAlignmentContext missing: %#v", actionPackage)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputResolvesUniqueSuffixFailureTarget(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

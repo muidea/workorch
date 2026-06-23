@@ -1698,6 +1698,17 @@ The audited result is:
   `ev:code/graph-node-primary-diagnostic-dependency-evidence/20260623-033`
   allows later same-scope graph-node patches only when completed dependency
   graph evidence already directly satisfies the primary diagnostic contract.
+- The next redeploy verified that the `033` blocker did not recur:
+  `ws-4e...` created a fresh successor run and moved through additional patch
+  and validation activity. It then exposed a distinct resource-shape context
+  gap: the actionable shape diagnostic was inherited through repair input and
+  `repairActionPackage`, while the failed step output only contained wrapper
+  failure metadata. The local closure in
+  `ev:code/shape-alignment-context-from-inherited-diagnostics/20260623-034`
+  makes resource-shape alignment use inherited structured diagnostics and
+  inherited target scope as neutral input evidence, so retry inputs can include
+  same-directory resource-shape snapshots instead of forcing the provider to
+  guess names or attributes.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked

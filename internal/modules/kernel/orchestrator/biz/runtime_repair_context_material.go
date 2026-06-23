@@ -242,6 +242,11 @@ func runtimeRepairNeedsResourceShapeAlignment(failedStep *runModel.Step) bool {
 	if failedStep == nil {
 		return false
 	}
+	for _, signals := range inheritedResourceShapeSignalMaps(failedStep) {
+		if structuredFailureSignalsContainShapeConflict(signals) {
+			return true
+		}
+	}
 	class := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass))
 	signature := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeySignature))
 	if signals := structuredFailureSignalsFromFailureOutput(failedStep.Output, nil, class, signature); structuredFailureSignalsContainShapeConflict(signals) {
@@ -260,6 +265,25 @@ func runtimeRepairNeedsResourceShapeAlignment(failedStep *runModel.Step) bool {
 		}
 	}
 	return false
+}
+
+func inheritedResourceShapeSignalMaps(step *runModel.Step) []map[string]any {
+	if step == nil {
+		return nil
+	}
+	var ret []map[string]any
+	add := func(signals map[string]any) {
+		if len(signals) == 0 {
+			return
+		}
+		ret = append(ret, signals)
+	}
+	add(mapFromValue(step.Input["structuredFailureSignals"]))
+	add(mapFromValue(step.Input["primaryDiagnosticRepair"]))
+	actionPackage := mapFromValue(step.Input["repairActionPackage"])
+	add(mapFromValue(actionPackage["structuredFailureSignals"]))
+	add(mapFromValue(actionPackage["primaryDiagnosticRepair"]))
+	return ret
 }
 
 func sameDirectoryResourceCandidate(path string, failedDirs map[string]bool) bool {
@@ -838,6 +862,9 @@ func failureTargetRepairRefs(step *runModel.Step) []string {
 			for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Input, failureOutputKeySignature)) {
 				add(target)
 			}
+			for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Input, "failureTargetScope")) {
+				add(target)
+			}
 		}
 	}
 	if reassessment := mapFromValue(step.Input["strategyReassessment"]); len(reassessment) > 0 {
@@ -858,6 +885,11 @@ func failureTargetRepairRefs(step *runModel.Step) []string {
 	class := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass))
 	signature := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature))
 	if signals := structuredFailureSignalsFromFailureOutput(step.Output, nil, class, signature); len(signals) > 0 {
+		for _, target := range stringSliceFromValue(signals["targetRefs"]) {
+			add(target)
+		}
+	}
+	for _, signals := range inheritedResourceShapeSignalMaps(step) {
 		for _, target := range stringSliceFromValue(signals["targetRefs"]) {
 			add(target)
 		}

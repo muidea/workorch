@@ -6,6 +6,21 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 
 ## Evidence Records
 
+### ev:code/shape-alignment-context-from-inherited-diagnostics/20260623-034
+
+| Field | Value |
+| --- | --- |
+| claimId | `B7-G3` |
+| workspaceId | `ws-4e83810542ac4d65` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-001` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_repair_context_material.go`, `internal/modules/kernel/orchestrator/biz/runtime_repair_input_integration_test.go` |
+| extractCommand | `curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-4e83810542ac4d65/snapshot; go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_RuntimeRepairInputPrioritizesResourceShapeDiagnostics|TestRuntimeOrchestrator_RuntimeRepairInputUsesInheritedShapeDiagnosticsForAlignment' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh; git diff --check` |
+| extractedSummary | After redeploy, the prior graph-node primary diagnostic dependency blocker no longer recurred and `ws-4e...` advanced through fresh patch and validation activity. The new blocker is a separate shape-alignment context gap: repeated diagnostics reported an unresolved resource-shape field, but the active failed step output only carried wrapper failure metadata while the actionable `structuredFailureSignals` and `primaryDiagnosticRepair` lived in the inherited repair input/action package. Because `runtimeRepairNeedsResourceShapeAlignment` and target extraction only considered output-side diagnostics, repair input omitted same-directory resource shape evidence and the provider guessed another field name. The closure reads inherited structured diagnostic maps from `step.Input` and `repairActionPackage`, and extracts target refs from `failureTargetScope` plus inherited diagnostic `targetRefs`, so shape diagnostics get current resource-shape evidence without adding any project, language, template, or provider special case. Focused and full orchestrator/biz tests passed locally. |
+| owner | core runtime repair context material |
+| closureBatch | 7 |
+| loadByDefault | false |
+
 ### ev:code/convergence-budget-intermediate-graph-nodes/20260623-031
 
 | Field | Value |
