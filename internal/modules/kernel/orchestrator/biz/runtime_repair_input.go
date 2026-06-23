@@ -1185,6 +1185,11 @@ func refreshRuntimeRepairOutputDecisionContract(input map[string]any, failedStep
 	if len(required) == 0 {
 		return
 	}
+	reapplyRepairCoverageFocusContract(input, pkg)
+	required = mapFromValue(pkg["requiredOutput"])
+	if len(required) == 0 {
+		return
+	}
 	var output map[string]any
 	if failedStep != nil {
 		output = failedStep.Output

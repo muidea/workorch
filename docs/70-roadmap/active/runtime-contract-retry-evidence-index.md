@@ -1570,6 +1570,21 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 | closureBatch | 7 |
 | loadByDefault | false |
 
+### ev:code/final-repair-output-decision-refresh-preserves-focus/20260623-037
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-FINAL-REPAIR-OUTPUT-DECISION-REFRESH-PRESERVES-FOCUS-20260623-037` |
+| workspaceId | `ws-4e83810542ac4d65` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-004` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | deployed `http://127.0.0.1:8080` plus `internal/modules/kernel/orchestrator/biz/runtime_repair_input.go`, `internal/modules/kernel/orchestrator/biz/runtime_repair_focus_contract_test.go` |
+| extractCommand | `curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-4e83810542ac4d65/snapshot; jq '{coverageFocus,repairActionPackage:{coverageFocusId:.repairActionPackage.coverageFocusId,coverageWorkItemIds:.repairActionPackage.coverageWorkItemIds,requiredOutput:.repairActionPackage.requiredOutput}}' .workorch-data/internal/workspaces/ws-4e83810542ac4d65/runs/<run>/steps/<run>/022-contract-retry-001-of-follow-up-graph-limit-follow-up-graph-follow-up-graph-follow-up/input.json; go test ./internal/modules/kernel/orchestrator/biz -run 'TestRefreshRuntimeRepairOutputDecisionContractReappliesCoverageFocus|TestStateChangingConvergencePreservesCoverageFocusRequiredOutput|TestValidateLLMRepairCoverageFocus' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s` |
+| extractedSummary | After `036` moved the live run into a fresh successor and through multiple graph/MCP validation steps, graph follow-up expansion reached its limit and the runtime dispatched a contract retry. That retry input still contained `coverageFocus.id=focus-cwi-039`, but the final `repairActionPackage.requiredOutput` no longer contained `mustBindCoverageFocus`, `coverageFocusId`, or `coverageWorkItemIds`. The provider then returned state-changing and validation actions without focus binding, and the validator rejected them with `repair_focus_mismatch`. Local core closure reapplies the neutral coverage-focus contract during the final `refreshRuntimeRepairOutputDecisionContract` pass, after convergence/output-mode projections have had a chance to rebuild `requiredOutput`. The regression test proves an input with active coverage focus but a rebuilt package regains `mustBindCoverageFocus`, the focus id, work item ids, and package-level `coverageFocusBindingRequired`. |
+| owner | core runtime repair focus contract |
+| closureBatch | 7 |
+| loadByDefault | false |
+
 ## Default Load Set For Next Code Closure
 
 Load only:

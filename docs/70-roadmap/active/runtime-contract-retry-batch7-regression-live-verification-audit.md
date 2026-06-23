@@ -1733,6 +1733,15 @@ The audited result is:
   adds a narrow refreshable stale-patch signal for readable current targets and
   lets it bypass exhaustion/duplicate gates into runtime repair. Missing-target
   or non-refreshable stale hash cases still escalate at budget.
+- After `036`, the successor run advanced through real graph and MCP
+  validation activity until graph follow-up expansion reached its limit. The
+  next contract retry still carried the active `coverageFocus`, but the final
+  `repairActionPackage.requiredOutput` had lost `mustBindCoverageFocus`,
+  `coverageFocusId`, and `coverageWorkItemIds`, so provider output was rejected
+  with `repair_focus_mismatch`. The local closure in
+  `ev:code/final-repair-output-decision-refresh-preserves-focus/20260623-037`
+  reapplies the coverage-focus contract during the final output-decision
+  refresh after convergence/output-mode projections rebuild `requiredOutput`.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked

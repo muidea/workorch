@@ -167,6 +167,33 @@ func TestStateChangingConvergencePreservesCoverageFocusRequiredOutput(t *testing
 	}
 }
 
+func TestRefreshRuntimeRepairOutputDecisionContractReappliesCoverageFocus(t *testing.T) {
+	input := repairFocusContractInput()
+	input["repairActionPackage"] = map[string]any{
+		"requiredOutput": map[string]any{
+			"mustIncludeStateChangingNode": true,
+			"acceptedKinds":                []string{"patch/apply", "shell/command", "mcp/tool_call"},
+		},
+	}
+
+	refreshRuntimeRepairOutputDecisionContract(input, &runmodel.Step{})
+
+	pkg := mapFromValue(input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustBindCoverageFocus"]) {
+		t.Fatalf("requiredOutput = %+v, want mustBindCoverageFocus after final output-decision refresh", required)
+	}
+	if got := stringFromMap(required, "coverageFocusId"); got != "focus-cwi-primary" {
+		t.Fatalf("coverageFocusId = %q, want focus-cwi-primary", got)
+	}
+	if got := stringSliceFromValue(required["coverageWorkItemIds"]); len(got) != 1 || got[0] != "cwi-primary" {
+		t.Fatalf("coverageWorkItemIds = %+v, want cwi-primary", got)
+	}
+	if len(mapFromValue(pkg[coverageFocusKey])) == 0 || !boolValue(pkg["coverageFocusBindingRequired"]) {
+		t.Fatalf("repairActionPackage focus fields = %+v, want focus binding required", pkg)
+	}
+}
+
 func TestValidateLLMRepairCoverageFocusAcceptsStateChangingReasonBinding(t *testing.T) {
 	run := repairFocusContractRun()
 	step := repairFocusContractStep()
