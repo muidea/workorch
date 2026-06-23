@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,8 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
+
+var errApprovedPatchApplyFailureHandled = errors.New("approved patch apply failure handled by runtime repair")
 
 func (o *RuntimeOrchestrator) applyApprovedPendingPatchApproval(
 	ctx context.Context,
@@ -73,7 +76,10 @@ func (o *RuntimeOrchestrator) applyApprovedPendingPatchApproval(
 		Output:      output,
 	}
 	if err := o.patchManager().apply(ctx, run, step, toolCall, output, workspace.DeliverableDirectory); err != nil {
-		return nil, err
+		if repairErr := o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch application failed", err); repairErr != nil {
+			return nil, repairErr
+		}
+		return nil, errApprovedPatchApplyFailureHandled
 	}
 	applied := approvedPatchApplicationSummaryFromOutput(approval, output)
 	annotateApprovedPatchApplicationOnBlockedStep(step, applied)

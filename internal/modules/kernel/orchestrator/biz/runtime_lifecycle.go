@@ -307,6 +307,23 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 		case common.ApprovalStateApproved:
 			patchApplication, err := o.applyApprovedPendingPatchApproval(ctx, r, approval)
 			if err != nil {
+				if errors.Is(err, errApprovedPatchApplyFailureHandled) {
+					r.State = common.RunStateRunning
+					r.FailureReason = ""
+					r.BlockingApprovalID = ""
+					mergeRunExecutionContextPatch(r, executionContextPatch)
+					workspace, syncErr := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
+					if syncErr != nil {
+						return syncErr
+					}
+					if publishErr := o.eventPublisher().publishRunStateChanged(ctx, r); publishErr != nil {
+						return publishErr
+					}
+					if publishErr := o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID); publishErr != nil {
+						return publishErr
+					}
+					return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
+				}
 				return o.failResolvedDecisionResume(ctx, r, originalResumeState, executionContextPatch, err)
 			}
 			resumeAfterStepID = approval.StepID

@@ -2232,9 +2232,7 @@ func coverageTargetProfileStateChangeEvidenceSatisfied(target map[string]any) bo
 	}
 	state := deriveCoverageWorkItemState(target)
 	missingKinds := stringSet(state.MissingEvidenceKinds)
-	accepted := mapStringSliceValue(target["acceptedEvidenceByKind"])
-	if coverageEvidenceCountForKind("state_change", accepted["state_change"]) == 0 &&
-		(missingKinds["state_change"] || len(stringSliceFromValue(target["acceptedEvidenceRefs"])) == 0) {
+	if coverageWorkItemAcceptedEvidenceCountForKind(target, "state_change", state.RequiredEvidenceKinds) == 0 {
 		return false
 	}
 	return !missingKinds["state_change"]

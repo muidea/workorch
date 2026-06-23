@@ -186,6 +186,19 @@ No code change should start until the target deviation has a filled gate:
 | Boundary check | Why the change is business-neutral if it touches core. |
 | Required tests | Regression tests that fail before the change and pass after it. |
 
+## Contract Audit: 2026-06-23 Approved Patch And Replan Convergence
+
+- Scope: `ws-7ced70e98ea50c43` / `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-replan-001` / approval `...patch-main-go-fix-observability-approval`; `ws-4e83810542ac4d65` / `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-012` / step `graph-005/002-git-add-changes`.
+- Observed state: `ws-7ced...` approval resolved, then `/patch/failed`, run/workspace `failed`, failure `conflict: patch text_replace oldText not found`, with convergence budget still `continue`. `ws-4e838...` replan created a new run, failed `git/write` with `broad pathspec is not allowed`, then contract retries downgraded to read-only evidence acquisition and opened `dod_assessment_missing_evidence_refs` decision.
+- Expected state: approved patch application failure should enter the same runtime repair path as inline runtime patch failure. A failed profile-required state-changing evidence operation should preserve the profile state-changing contract, not downgrade to read-only evidence acquisition when the failed operation itself already identifies the state-changing surface.
+- Deviation: approval-resume returns raw patch apply errors to `failResolvedDecisionResume`, bypassing `handleRuntimeStepFailure`; profile/deliverable evidence coverage can treat flat accepted refs as satisfying `state_change`, causing `git/write` repair lineage to lose the required state-changing output contract.
+- Owner: workorch core orchestrator state machine and convergence contract.
+- Event path: approval resolved -> `applyApprovedPendingPatchApproval` -> `patchManager.apply` -> `/patch/failed` -> actual raw error -> `failResolvedDecisionResume`; expected path is `handleRuntimeStepFailure` -> runtime repair follow-up. Replan path is `git/write` failed -> runtime repair input -> convergence contract -> expected `need_state_change`; actual read-only evidence contract -> repeated assessment violation -> decision.
+- Contract gap: approved patch application failures are not normalized as runtime step failures; profile evidence state-change satisfaction uses ambiguous flat refs across multi-kind requirements instead of requiring accepted `state_change` evidence.
+- Proposed change: route approved patch apply failure through `handleRuntimeStepFailure` and stop approval resume after repair dispatch; tighten profile state-change evidence satisfaction to require accepted `state_change` evidence by kind for multi-kind requirements.
+- Boundary check: both changes operate on generic patch apply failure, runtime repair, evidence kind, and accepted step kind/operation contracts. They do not inspect workspace template IDs, language, file names, commands, or business text.
+- Verification: add focused orchestrator regression tests for approved patch apply failure and multi-kind profile state-change evidence preservation; run focused tests, boundary contract search, and diff checks.
+
 ## Target State
 
 The closure target is:
