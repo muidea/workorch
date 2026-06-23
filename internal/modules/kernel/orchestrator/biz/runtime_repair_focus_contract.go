@@ -143,6 +143,9 @@ func normalizeRepairCoverageFocusGraphBinding(step *runModel.Step, graph runtime
 		if !repairGraphNodeShouldBindCoverageFocus(node) {
 			continue
 		}
+		if !repairGraphNodeAllowsCoverageFocusNormalization(step, node) {
+			continue
+		}
 		if repairPayloadBindsCoverageFocus(node.Input, contract) {
 			continue
 		}
@@ -172,7 +175,7 @@ func normalizeRepairCoverageFocusGraphBinding(step *runModel.Step, graph runtime
 }
 
 func stepAllowsCoverageFocusEvidenceNormalization(step *runModel.Step) bool {
-	if step == nil || step.Input == nil || boolValue(step.Input["stateChangingOutputRequired"]) {
+	if step == nil || step.Input == nil {
 		return false
 	}
 	if strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) == repairObjectiveAcquireFailureEvidence {
@@ -180,12 +183,25 @@ func stepAllowsCoverageFocusEvidenceNormalization(step *runModel.Step) bool {
 	}
 	pkg := mapFromValue(step.Input["repairActionPackage"])
 	required := mapFromValue(pkg["requiredOutput"])
+	if boolValue(required["mustBindCoverageFocus"]) || boolValue(pkg["coverageFocusBindingRequired"]) {
+		return true
+	}
 	if boolValue(pkg["evidenceAcquisitionRequired"]) || boolValue(pkg["concreteFailureEvidenceRequired"]) {
 		return true
 	}
 	return boolValue(required["mustProduceConcreteValidationEvidence"]) ||
 		boolValue(required["mustProduceConcreteFailureEvidence"]) ||
 		boolValue(required["concreteFailureEvidenceRequired"])
+}
+
+func repairGraphNodeAllowsCoverageFocusNormalization(step *runModel.Step, node runtimemodel.BlockExecutionNode) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	if !inputRequiresStateChangingOutput(step.Input) {
+		return true
+	}
+	return canonicalRuntimeGraphNodeKind(node.Kind) != "patch/apply"
 }
 
 type repairCoverageFocusBindingContract struct {

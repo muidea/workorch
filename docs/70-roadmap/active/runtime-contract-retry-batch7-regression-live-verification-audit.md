@@ -1770,6 +1770,20 @@ The audited result is:
   be normalized when the step is eligible. The closure is core-neutral: it does
   not add workspace IDs, template IDs, language rules, file names, provider
   names, or target-project behavior.
+- A redeploy of `039` proved the scoped replan path itself worked: the open
+  decision resolved into a fresh successor run and entered LLM repair. That
+  run immediately exposed the remaining normalization boundary. The repair
+  graph had a focus-bound primary `patch/apply`, but dependent non-patch
+  action/evidence nodes such as `mcp/tool_call` and `git/write` still lacked
+  explicit focus fields. Because strict state-changing repair disabled all
+  normalization, the graph failed with `repair_focus_mismatch` before those
+  state-change evidence refs could be recorded. The local closure in
+  `ev:code/strict-repair-nonpatch-focus-normalization/20260623-040` keeps
+  `patch/apply` strict in state-changing repair, while allowing non-patch
+  state-changing or validation action nodes to inherit the unambiguous current
+  coverage focus. This preserves the guard against silently redirecting a
+  patch to the wrong target and still lets the coverage ledger bind follow-up
+  write/tool evidence to the active work item.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked
