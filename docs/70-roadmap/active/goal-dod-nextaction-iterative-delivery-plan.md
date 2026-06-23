@@ -27,6 +27,7 @@ Related:
 - [S2.2 Current Definition Revision Binding](./goal-dod-nextaction-s2-2-current-definition-revision-binding.md)
 - [S2.3 Initial Gap Baseline](./goal-dod-nextaction-s2-3-initial-gap-baseline.md)
 - [S2.4 Resume Gap Baseline](./goal-dod-nextaction-s2-4-resume-gap-baseline.md)
+- [S2.5 Replan Definition And Baseline Inheritance](./goal-dod-nextaction-s2-5-replan-definition-baseline.md)
 
 ## Purpose
 

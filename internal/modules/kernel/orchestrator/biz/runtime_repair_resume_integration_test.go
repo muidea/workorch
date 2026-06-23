@@ -51,13 +51,26 @@ func TestRuntimeOrchestrator_RunningResumeReplansFromResolvedDecisionOnFailedNon
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
-		ID:              runID,
-		WorkspaceID:     workspaceID,
-		State:           common.RunStateRunning,
-		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		ID:                 runID,
+		WorkspaceID:        workspaceID,
+		GoalID:             "goal-running-resolved-replan",
+		DoDID:              "dod-running-resolved-replan",
+		DefinitionRevision: "rev-running-resolved-replan",
+		State:              common.RunStateRunning,
+		InitialStepKind:    llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-running-resolved-replan",
 			"goal": map[string]any{
+				"id":   "goal-running-resolved-replan",
 				"text": "- complete the current requested outcome after replan",
+			},
+			"dod": map[string]any{
+				"id": "dod-running-resolved-replan",
+				"items": []map[string]any{{
+					"id":                    "dod-running-resolved-replan-item",
+					"text":                  "current requested outcome remains governed by the current definition",
+					"requiredEvidenceKinds": []string{"validation"},
+				}},
 			},
 			convergenceBudgetKey: map[string]any{
 				"state":                     "escalated",
@@ -123,7 +136,13 @@ func TestRuntimeOrchestrator_RunningResumeReplansFromResolvedDecisionOnFailedNon
 		ID:       resolutionID,
 		TicketID: ticketID,
 		Type:     decisioncommon.ResolutionTypeReplan,
-		Payload:  map[string]any{"source": "auto_governance", "recoveryAction": "replan"},
+		Payload: map[string]any{
+			"source":             "auto_governance",
+			"recoveryAction":     "replan",
+			"goalId":             "goal-from-resolution-should-not-override",
+			"doDId":              "dod-from-resolution-should-not-override",
+			"definitionRevision": "rev-from-resolution-should-not-override",
+		},
 	}); err != nil {
 		t.Fatalf("seed resolution: %v", err)
 	}
@@ -146,6 +165,14 @@ func TestRuntimeOrchestrator_RunningResumeReplansFromResolvedDecisionOnFailedNon
 	}
 	if successor.ExecutionContext == nil || successor.ExecutionContext["replanContinuation"] == nil {
 		t.Fatalf("successor execution context = %#v, want replan continuation", successor.ExecutionContext)
+	}
+	if successor.GoalID != "goal-running-resolved-replan" ||
+		successor.DoDID != "dod-running-resolved-replan" ||
+		successor.DefinitionRevision != "rev-running-resolved-replan" {
+		t.Fatalf("successor definitions = goal:%q dod:%q revision:%q, want predecessor definitions", successor.GoalID, successor.DoDID, successor.DefinitionRevision)
+	}
+	if stringFromMap(successor.ExecutionContext, "definitionRevision") != "rev-running-resolved-replan" {
+		t.Fatalf("successor executionContext.definitionRevision = %q, want inherited current revision", successor.ExecutionContext["definitionRevision"])
 	}
 	successorBudget := mapFromValue(successor.ExecutionContext[convergenceBudgetKey])
 	if stringFromMap(successorBudget, "decision") != "continue" || stringFromMap(successorBudget, "state") != "tracking" {

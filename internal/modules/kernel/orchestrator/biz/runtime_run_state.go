@@ -78,14 +78,15 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 	o.runStateManager().hydrateReplanContextWithInheritedPrimaryFailure(ctx, run, replanContext)
 	successorContext["replanContinuation"] = compactReplanContinuationForRuntimeContext(replanContext)
 	successor := &runModel.Run{
-		ID:               successorID,
-		WorkspaceID:      run.WorkspaceID,
-		GoalID:           run.GoalID,
-		DoDID:            run.DoDID,
-		InitialStepKind:  run.InitialStepKind,
-		ExecutionContext: successorContext,
-		State:            common.RunStateCreated,
-		Priority:         run.Priority,
+		ID:                 successorID,
+		WorkspaceID:        run.WorkspaceID,
+		GoalID:             run.GoalID,
+		DoDID:              run.DoDID,
+		DefinitionRevision: run.DefinitionRevision,
+		InitialStepKind:    run.InitialStepKind,
+		ExecutionContext:   successorContext,
+		State:              common.RunStateCreated,
+		Priority:           run.Priority,
 	}
 	if successor.InitialStepKind == "" {
 		successor.InitialStepKind = initialStepKind(run)
