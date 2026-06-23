@@ -978,6 +978,9 @@ func shouldEscalateRuntimeRepairExhaustion(ctx context.Context, repair *repairSu
 	if !requiresDoDAssessmentCompletionGate(run) || isLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
+	if runtimeRepairPatchFailureAlreadySatisfied(ctx, repair, run, failedStep) {
+		return false
+	}
 	if convergenceBudgetRequiresEscalation(run) {
 		return true
 	}
@@ -1098,10 +1101,20 @@ func shouldAttemptRuntimeRepair(ctx context.Context, repair *repairSubsystem, po
 	if runtimeContextIntegrityGateFailure(failedStep) && !runtimeContextIntegrityGateCanRecoverWithCoverageTargets(failedStep) {
 		return false
 	}
+	if runtimeRepairPatchFailureAlreadySatisfied(ctx, repair, run, failedStep) {
+		return true
+	}
 	if repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= repair.effectiveMaxRuntimeRepairAttempts(ctx, policy, run, failedStep) {
 		return false
 	}
 	return !isLLMProviderRuntimeFailure(run, failedStep)
+}
+
+func runtimeRepairPatchFailureAlreadySatisfied(ctx context.Context, repair *repairSubsystem, run *runModel.Run, failedStep *runModel.Step) bool {
+	if repair == nil || run == nil || failedStep == nil {
+		return false
+	}
+	return len(repair.runtimeRepairPatchAlreadySatisfiedSignals(ctx, run, failedStep)) > 0
 }
 
 func shouldAttemptProviderRetry(ctx context.Context, repair *repairSubsystem, policy RuntimePolicy, runtimeAvailable bool, run *runModel.Run, failedStep *runModel.Step) bool {

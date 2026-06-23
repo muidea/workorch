@@ -3,10 +3,13 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
@@ -1032,6 +1035,91 @@ func TestShouldBlockOnDuplicateRuntimeContractLoopUsingInheritedRepairTargetScop
 	}
 	if !shouldBlockOnDuplicateRuntimeFailureForTest(ctx, orch, run, currentFailed) {
 		t.Fatalf("expected repeated runtime contract loop to use inherited target scope and block at budget")
+	}
+}
+
+func TestRecoveryActionAllowsValidationWhenFailedPatchAlreadySatisfiedAtRepairBudget(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-already-satisfied-patch-budget")
+	workspaceID := common.WorkspaceID("ws-already-satisfied-patch-budget")
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "target.txt"), []byte("alpha\nfresh\nomega\n"), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	workspaceRepo := memory.NewWorkspaceRepository()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "ws",
+		DeliverableDirectory: deliverableDirectory,
+		State:                common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	stepRepo := memory.NewStepRepository()
+	signature := "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|failureTargets=target.txt|error=conflict: patch text_replace oldtext not found"
+	repairAttempt := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001-of-graph-001-001-patch"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  1,
+			stepInputKeyRepairOfFailureClass:  failureClassPatchApply,
+			stepInputKeyRepairOfFailureSig:    signature,
+			stepInputKeyRepairOfRootStepID:    string(common.StepID(string(runID) + "/step-1")),
+		},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: signature,
+			"stage":                   "patch_apply",
+			"error":                   "conflict: patch text_replace oldText not found",
+		},
+	}
+	if err := stepRepo.Create(ctx, repairAttempt); err != nil {
+		t.Fatalf("seed repair attempt: %v", err)
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/001-patch"),
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"targetRef": "target.txt",
+			"patchType": "text_replace",
+			"oldText":   "stale",
+			"newText":   "fresh",
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"stage":                   "patch_apply",
+			"error":                   "conflict: patch text_replace oldText not found",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: signature,
+			"patches": []map[string]any{{
+				"targetRef": "target.txt",
+				"patchType": "text_replace",
+				"oldText":   "stale",
+				"newText":   "fresh",
+			}},
+		},
+	}
+	orch := &RuntimeOrchestrator{
+		runtime:    &stubRuntimeAdapter{},
+		steps:      stepRepo,
+		workspaces: workspaceRepo,
+		tickets:    memory.NewDecisionTicketRepository(),
+		policy:     NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 1}),
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
+	if len(orch.repairManager().runtimeRepairPatchAlreadySatisfiedSignals(ctx, run, failedStep)) != 1 {
+		t.Fatalf("runtimeRepairPatchAlreadySatisfiedSignals missing for satisfied stale patch")
+	}
+	if shouldEscalateRuntimeRepairExhaustion(ctx, orch.repairManager(), orch.policy, true, run, failedStep) {
+		t.Fatalf("shouldEscalateRuntimeRepairExhaustion = true, want false for already-satisfied patch")
+	}
+	if got := runtimeRecoveryActionForFailedStepForTest(ctx, orch, run, failedStep); got != runtimeRecoveryActionRuntimeRepair {
+		t.Fatalf("recovery action = %s, want %s", got, runtimeRecoveryActionRuntimeRepair)
 	}
 }
 

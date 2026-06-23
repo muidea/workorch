@@ -6,6 +6,21 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 
 ## Evidence Records
 
+### ev:code/already-satisfied-stale-patch-bypasses-exhaustion/20260623-035
+
+| Field | Value |
+| --- | --- |
+| claimId | `B7-G3` |
+| workspaceId | `ws-4e83810542ac4d65` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-002` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_repair.go`, `internal/modules/kernel/orchestrator/biz/failure_classification.go`, `internal/modules/kernel/orchestrator/biz/runtime_repair_policy_test.go` |
+| extractCommand | `curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-4e83810542ac4d65/snapshot; jq '.patches[0]' .workorch-data/internal/workspaces/ws-4e83810542ac4d65/runs/run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-002/steps/*/010-graph-003-001-fix-mcp-config/output.json; go test ./internal/modules/kernel/orchestrator/biz -run 'TestRecoveryActionAllowsValidationWhenFailedPatchAlreadySatisfiedAtRepairBudget|TestRuntimeOrchestrator_RuntimeRepairInputDetectsAlreadySatisfiedTextReplacePatch' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh; git diff --check` |
+| extractedSummary | After redeploying `034` and resolving the prior decision with scoped `replan`, the workspace advanced into a new successor run with real file changes, proving the inherited shape-alignment blocker was passed. The next live blocker was a stale `patch/apply` text replacement: the failed patch reported `oldText not found`, while the current target already contained the patch `newText`. Existing repair input code could produce `currentTargetAlreadySatisfiesFailedPatch`, but recovery action selection checked repair exhaustion and duplicate failure before creating the validation-oriented repair input, so the run escalated to a decision. The closure makes both repair-exhaustion and duplicate-failure gates yield to a neutral mechanical already-satisfied patch signal, allowing the runtime to continue through the existing validation evidence contract instead of asking for human decision. |
+| owner | core runtime repair recovery policy |
+| closureBatch | 7 |
+| loadByDefault | false |
+
 ### ev:code/shape-alignment-context-from-inherited-diagnostics/20260623-034
 
 | Field | Value |

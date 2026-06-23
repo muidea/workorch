@@ -611,6 +611,9 @@ func shouldBlockOnDuplicateRuntimeFailure(
 	if requiresDoDAssessmentCompletionGate(run) && schemaInvalidRepairCanContinueWithinBudget(failedStep) && attempts < maxAttempts {
 		return false
 	}
+	if runtimeRepairPatchFailureAlreadySatisfied(ctx, repair, run, failedStep) {
+		return false
+	}
 	if runtimeFailureCanContinueMechanicallyBeforeDuplicateEscalation(class, targetScope, attempts, maxAttempts) {
 		return false
 	}

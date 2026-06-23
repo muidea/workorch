@@ -1709,6 +1709,18 @@ The audited result is:
   inherited target scope as neutral input evidence, so retry inputs can include
   same-directory resource-shape snapshots instead of forcing the provider to
   guess names or attributes.
+- After redeploying `034`, scoped `replan` moved `ws-4e...` into a fresh
+  successor run and produced real file changes, so the shape-alignment blocker
+  was passed. The next blocker was a stale text replacement where the failed
+  patch's `oldText` was no longer present but its `newText` was already present
+  in the current target. Existing repair input code knew how to turn that
+  condition into `currentTargetAlreadySatisfiesFailedPatch` and a validation
+  contract, but recovery action selection escalated to repair-exhausted /
+  duplicate-failure decision before that input could be built. The local
+  closure in
+  `ev:code/already-satisfied-stale-patch-bypasses-exhaustion/20260623-035`
+  makes those governance gates yield to the mechanical already-satisfied patch
+  signal, preserving the existing validation path.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked
