@@ -56,6 +56,7 @@ type Run struct {
 	WorkspaceID        string         `json:"workspaceId"`
 	GoalID             string         `json:"goalId,omitempty"`
 	DoDID              string         `json:"doDId,omitempty"`
+	DefinitionRevision string         `json:"definitionRevision,omitempty"`
 	InitialStepKind    string         `json:"initialStepKind,omitempty"`
 	ExecutionContext   map[string]any `json:"executionContext,omitempty"`
 	State              string         `json:"state"`

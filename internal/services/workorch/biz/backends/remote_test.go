@@ -473,6 +473,77 @@ func TestRemoteRunCommandReplanSendsUnifiedIntent(t *testing.T) {
 	}
 }
 
+func TestRemoteRunCommandRestartSendsWorkspaceRestartCommandMetadata(t *testing.T) {
+	requestBody := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/execution-restarts" {
+			http.NotFound(w, r)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		requestBody <- body
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"accepted":true}`)
+	}))
+	defer server.Close()
+
+	be := NewRemote(server.URL)
+	run, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
+		WorkspaceID:        "ws-remote",
+		Intent:             RunCommandIntentRestart,
+		RequestID:          "request-remote-restart",
+		Reason:             "operator_restart",
+		Source:             "tui",
+		Priority:           6,
+		DefinitionRevision: "rev-remote-restart",
+		DecisionID:         "ticket-remote-restart",
+		ExecutionContextPatch: map[string]any{
+			"latestOperatorInput": map[string]any{"source": "tui", "content": "restart"},
+		},
+		Activation: ActivateRunRequest{
+			GoalID:        "goal-remote-restart",
+			DoDID:         "dod-remote-restart",
+			LLMProviderID: "provider-remote-restart",
+			SoulID:        "soul-remote-restart",
+		},
+	})
+	if err != nil {
+		t.Fatalf("remote run command restart: %v", err)
+	}
+	if run != nil {
+		t.Fatalf("run = %+v, want accepted-only nil run", run)
+	}
+	select {
+	case body := <-requestBody:
+		if body["intent"] != string(RunCommandIntentRestart) ||
+			body["restart"] != true ||
+			body["requestId"] != "request-remote-restart" ||
+			body["reason"] != "operator_restart" ||
+			body["source"] != "tui" ||
+			body["definitionRevision"] != "rev-remote-restart" ||
+			body["decisionId"] != "ticket-remote-restart" ||
+			body["priority"] != float64(6) {
+			t.Fatalf("request body = %+v, want restart command metadata", body)
+		}
+		if body["goalId"] != "goal-remote-restart" ||
+			body["doDId"] != "dod-remote-restart" ||
+			body["llmProviderId"] != "provider-remote-restart" ||
+			body["soulId"] != "soul-remote-restart" {
+			t.Fatalf("request body = %+v, want restart activation payload preserved", body)
+		}
+		if patch, _ := body["executionContextPatch"].(map[string]any); len(patch) == 0 {
+			t.Fatalf("request body = %+v, want execution context patch", body)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("remote server did not receive restart request")
+	}
+}
+
 func TestRemoteRunCommandRejectsUnsupportedIntent(t *testing.T) {
 	requests := atomic.Int64{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -492,6 +563,48 @@ func TestRemoteRunCommandRejectsUnsupportedIntent(t *testing.T) {
 	}
 	if requests.Load() != 0 {
 		t.Fatalf("requests = %d, want no remote request for unsupported intent", requests.Load())
+	}
+}
+
+func TestRemoteRunGetMapsDefinitionRevision(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/runs/run-001" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"service":"workorch","run":{"id":"run-001","workspaceId":"ws-remote","goalId":"goal-001","doDId":"dod-001","definitionRevision":"goal:goal-001|dod:dod-001","state":"running"}}`)
+	}))
+	defer server.Close()
+
+	be := NewRemote(server.URL)
+	got, err := be.Run().Get(context.Background(), "ws-remote", "run-001")
+	if err != nil {
+		t.Fatalf("remote run get: %v", err)
+	}
+	if got.DefinitionRevision != "goal:goal-001|dod:dod-001" {
+		t.Fatalf("definitionRevision = %q, want mapped owner revision", got.DefinitionRevision)
+	}
+}
+
+func TestRemoteRunListMapsDefinitionRevision(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/workorch/runs" || r.URL.Query().Get("workspaceId") != "ws-remote" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"service":"workorch","runs":[{"id":"run-001","workspaceId":"ws-remote","definitionRevision":"rev-list-001","state":"running"}]}`)
+	}))
+	defer server.Close()
+
+	be := NewRemote(server.URL)
+	got, err := be.Run().List(context.Background(), "ws-remote")
+	if err != nil {
+		t.Fatalf("remote run list: %v", err)
+	}
+	if len(got) != 1 || got[0].DefinitionRevision != "rev-list-001" {
+		t.Fatalf("runs = %+v, want mapped definition revision", got)
 	}
 }
 

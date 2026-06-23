@@ -126,11 +126,12 @@ func TestEventHubEventsBackendReceivesProjectionAcrossHubWrappers(t *testing.T) 
 func TestEventHubRunResourceMapCompactsExecutionContext(t *testing.T) {
 	large := strings.Repeat("x", 1024*1024)
 	resource := resourceMap(RunInfo{
-		ID:          "run-1",
-		WorkspaceID: "ws-1",
-		GoalID:      "goal-1",
-		DoDID:       "dod-1",
-		State:       common.RunStateRunning,
+		ID:                 "run-1",
+		WorkspaceID:        "ws-1",
+		GoalID:             "goal-1",
+		DoDID:              "dod-1",
+		DefinitionRevision: "goal:goal-1|dod:dod-1",
+		State:              common.RunStateRunning,
 		ExecutionContext: map[string]any{
 			"goal":               map[string]any{"text": "goal text"},
 			"dod":                map[string]any{"items": []any{"dod item"}},
@@ -147,6 +148,9 @@ func TestEventHubRunResourceMapCompactsExecutionContext(t *testing.T) {
 	}
 	if _, ok := contextMap["processEvidenceTimeline"]; ok {
 		t.Fatalf("ExecutionContext contains processEvidenceTimeline, want heavy runtime fields omitted")
+	}
+	if resource["DefinitionRevision"] != "goal:goal-1|dod:dod-1" {
+		t.Fatalf("DefinitionRevision = %q, want preserved run definition revision", resource["DefinitionRevision"])
 	}
 	goal, _ := contextMap["goal"].(map[string]any)
 	if goal["text"] != "goal text" {

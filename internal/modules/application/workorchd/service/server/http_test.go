@@ -5690,9 +5690,11 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
 		t.Fatalf("read projected workspace snapshot: %v", err)
 	}
 	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.State != "accepted" ||
 		snapshot.RunCommand.Intent != "restart" ||
 		snapshot.RunCommand.RunID != "" ||
 		snapshot.RunCommand.RequestID != "request-http-restart" ||
+		snapshot.RunCommand.IdempotencyKey != "restart/"+workspace.ID ||
 		snapshot.RunCommand.Reason != "operator_restart" ||
 		snapshot.RunCommand.Source != "web" ||
 		snapshot.RunCommand.DefinitionRevision != "rev-http-restart" ||
@@ -5731,6 +5733,15 @@ func TestWorkorchDSchedulerWorkspaceRunCommandEnqueuesWorkspaceRestartByWorkspac
 	if req.WorkspaceID != workspaceID || req.Priority != 6 || !req.Command.Restart || req.Command.GoalID != "goal-restart" || req.Command.DoDID != "dod-restart" || req.Command.LLMProviderID != "llm-restart" {
 		t.Fatalf("workspace restart pending request = %+v, want scoped restart command", req)
 	}
+	state.runContinuations.runMu.Lock()
+	runPendingCount := len(state.runContinuations.runPending)
+	state.runContinuations.runMu.Unlock()
+	state.runContinuations.governanceMu.Lock()
+	governancePendingCount := len(state.runContinuations.governancePending)
+	state.runContinuations.governanceMu.Unlock()
+	if runPendingCount != 0 || governancePendingCount != 0 {
+		t.Fatalf("restart queued runPending=%d governancePending=%d, want only workspace_restart queue", runPendingCount, governancePendingCount)
+	}
 }
 
 func TestWorkorchDWorkspaceRunCommandRestartEnqueuesWorkspaceRestart(t *testing.T) {
@@ -5738,30 +5749,68 @@ func TestWorkorchDWorkspaceRunCommandRestartEnqueuesWorkspaceRestart(t *testing.
 	hub := events.NewMemoryHub()
 	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	const workspaceID = "ws-scheduler-workspace-run-restart"
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"},
+	})
 
-	if err := publishHTTPTestCommand(context.Background(), hub, events.Envelope{
+	envelope := events.Envelope{
 		Topic:       workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
 		WorkspaceID: workspaceID,
+		Revision:    31,
 		Payload: map[string]any{
 			events.PayloadKeyWorkspaceID:   workspaceID,
 			events.PayloadKeyIntent:        "restart",
+			events.PayloadKeyRequestID:     "request-restart-command",
+			events.PayloadKeySource:        "tui",
 			events.PayloadKeyGoalID:        "goal-restart",
 			events.PayloadKeyDoDID:         "dod-restart",
 			events.PayloadKeyLLMProviderID: "llm-restart",
 			events.PayloadKeyPriority:      8,
 		},
-	}); err != nil {
+	}
+	if err := publishHTTPTestCommand(context.Background(), hub, envelope); err != nil {
 		t.Fatalf("publish workspace run restart command: %v", err)
+	}
+	envelope.Revision = 32
+	envelope.Payload[events.PayloadKeyRequestID] = "request-restart-command-duplicate"
+	if err := publishHTTPTestCommand(context.Background(), hub, envelope); err != nil {
+		t.Fatalf("publish duplicate workspace run restart command: %v", err)
 	}
 
 	state.runContinuations.restartMu.Lock()
 	req, pending := state.runContinuations.restartPending["workspace_restart/"+workspaceID]
+	restartPendingCount := len(state.runContinuations.restartPending)
+	restartStartedCount := len(state.runContinuations.restartStarted)
 	state.runContinuations.restartMu.Unlock()
 	if !pending {
 		t.Fatalf("workspace run restart command did not create workspace restart pending entry")
 	}
+	if restartPendingCount != 1 || restartStartedCount != 1 || routine.asyncFunctionCalls != 1 {
+		t.Fatalf("restart pending=%d started=%d background submissions=%d, want duplicate restart coalesced", restartPendingCount, restartStartedCount, routine.asyncFunctionCalls)
+	}
 	if req.WorkspaceID != workspaceID || req.Priority != 8 || !req.Command.Restart || req.Command.GoalID != "goal-restart" || req.Command.DoDID != "dod-restart" || req.Command.LLMProviderID != "llm-restart" {
 		t.Fatalf("workspace run restart pending request = %+v, want scoped restart command", req)
+	}
+	state.runContinuations.runMu.Lock()
+	runPendingCount := len(state.runContinuations.runPending)
+	state.runContinuations.runMu.Unlock()
+	state.runContinuations.governanceMu.Lock()
+	governancePendingCount := len(state.runContinuations.governancePending)
+	state.runContinuations.governanceMu.Unlock()
+	if runPendingCount != 0 || governancePendingCount != 0 {
+		t.Fatalf("workspace run restart queued runPending=%d governancePending=%d, want only workspace_restart queue", runPendingCount, governancePendingCount)
+	}
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspaceID)
+	if err != nil {
+		t.Fatalf("read projected workspace snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.State != "accepted" ||
+		snapshot.RunCommand.Intent != "restart" ||
+		snapshot.RunCommand.RequestID != "request-restart-command-duplicate" ||
+		snapshot.RunCommand.IdempotencyKey != "restart/"+workspaceID ||
+		snapshot.RunCommand.Source != "tui" {
+		t.Fatalf("projected run command = %+v, want scoped restart command projection", snapshot.RunCommand)
 	}
 }
 

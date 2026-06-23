@@ -223,6 +223,12 @@ func TestWorkspaceExecutionContextBaseContextBuildsDefinitionContext(t *testing.
 	if contextData["goalId"] != string(goal.ID) || contextData["doDId"] != string(dod.ID) {
 		t.Fatalf("definition IDs = goal:%v dod:%v", contextData["goalId"], contextData["doDId"])
 	}
+	revision, _ := contextData["definitionRevision"].(map[string]any)
+	if revision["policy"] != "workspace_goal_dod_cumulative" ||
+		revision["effectiveGoalId"] != string(goal.ID) ||
+		revision["effectiveDoDId"] != string(dod.ID) {
+		t.Fatalf("definitionRevision = %+v, want current goal/dod revision", revision)
+	}
 	if contextData["goalDefinitionPolicy"] == "" || contextData["doDDefinitionPolicy"] == "" {
 		t.Fatalf("definition policies missing: %+v", contextData)
 	}
@@ -233,6 +239,30 @@ func TestWorkspaceExecutionContextBaseContextBuildsDefinitionContext(t *testing.
 	storedPolicies, _ := contextData["evidencePolicies"].([]map[string]any)
 	if len(storedPolicies) != 1 || storedPolicies[0]["kind"] != "validation" {
 		t.Fatalf("evidence policies were not cloned: %+v", storedPolicies)
+	}
+}
+
+func TestCurrentWorkspaceDefinitionRevisionContextUsesEffectiveDefinitions(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-revision-context")
+	goal := &workspacemodel.Goal{ID: "goal-revision-context", WorkspaceID: workspaceID, Text: "ship"}
+	dod := &workspacemodel.DoD{ID: "dod-revision-context", WorkspaceID: workspaceID, Items: []string{"done"}}
+
+	revision := CurrentWorkspaceDefinitionRevisionContext(
+		goal,
+		[]map[string]any{{"id": "goal-old"}, {"id": string(goal.ID)}},
+		dod,
+		[]map[string]any{{"id": "dod-old"}, {"id": string(dod.ID)}},
+	)
+	if revision["policy"] != "workspace_goal_dod_cumulative" ||
+		revision["effectiveGoalId"] != string(goal.ID) ||
+		revision["effectiveDoDId"] != string(dod.ID) {
+		t.Fatalf("definitionRevision = %+v, want effective definitions", revision)
+	}
+	if got := revision["goalIds"].([]string); len(got) != 2 || got[0] != "goal-old" || got[1] != string(goal.ID) {
+		t.Fatalf("goalIds = %+v, want ordered goal ids", revision["goalIds"])
+	}
+	if got := revision["doDIds"].([]string); len(got) != 2 || got[0] != "dod-old" || got[1] != string(dod.ID) {
+		t.Fatalf("doDIds = %+v, want ordered DoD ids", revision["doDIds"])
 	}
 }
 

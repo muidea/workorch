@@ -13,6 +13,7 @@ type RunInfo struct {
 	WorkspaceID        common.WorkspaceID
 	GoalID             common.GoalID
 	DoDID              common.DoDID
+	DefinitionRevision string
 	ExecutionContext   map[string]any
 	State              common.RunState
 	Priority           int

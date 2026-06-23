@@ -392,6 +392,7 @@ func remoteRunInfoFromClientRun(r *client.Run) *RunInfo {
 	return &RunInfo{
 		ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
 		GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
+		DefinitionRevision: r.DefinitionRevision,
 		ExecutionContext:   r.ExecutionContext,
 		State:              common.RunState(r.State),
 		BlockingTicketID:   common.TicketID(r.BlockingTicketID),
@@ -410,6 +411,7 @@ func (b *remoteRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id 
 	return &RunInfo{
 		ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
 		GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
+		DefinitionRevision: r.DefinitionRevision,
 		ExecutionContext:   r.ExecutionContext,
 		State:              common.RunState(r.State),
 		BlockingTicketID:   common.TicketID(r.BlockingTicketID),
@@ -427,6 +429,7 @@ func (b *remoteRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([
 		result = append(result, RunInfo{
 			ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
 			GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
+			DefinitionRevision: r.DefinitionRevision,
 			ExecutionContext:   r.ExecutionContext,
 			State:              common.RunState(r.State),
 			BlockingTicketID:   common.TicketID(r.BlockingTicketID),

@@ -17,6 +17,7 @@ func TestRunViewProjectsRunModel(t *testing.T) {
 		WorkspaceID:        "ws-run-view",
 		GoalID:             "goal-run-view",
 		DoDID:              "dod-run-view",
+		DefinitionRevision: "goal:goal-run-view|dod:dod-run-view",
 		InitialStepKind:    "llm/workspace_execution",
 		State:              common.RunStateRunning,
 		Priority:           7,
@@ -31,6 +32,9 @@ func TestRunViewProjectsRunModel(t *testing.T) {
 	}
 	if got.GoalID != string(item.GoalID) || got.DoDID != string(item.DoDID) {
 		t.Fatalf("definition IDs = goal:%q dod:%q, want seeded IDs", got.GoalID, got.DoDID)
+	}
+	if got.DefinitionRevision != item.DefinitionRevision {
+		t.Fatalf("definitionRevision = %q, want %q", got.DefinitionRevision, item.DefinitionRevision)
 	}
 	if got.State != string(item.State) || got.Priority != item.Priority {
 		t.Fatalf("state/priority = %q/%d, want %q/%d", got.State, got.Priority, item.State, item.Priority)

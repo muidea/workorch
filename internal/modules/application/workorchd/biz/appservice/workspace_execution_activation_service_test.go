@@ -1109,6 +1109,13 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestDefinitionRevisionWithou
 	if item.Run.GoalID != updatedGoal.ID || item.Run.DoDID != updatedDoD.ID || item.Run.State != "running" {
 		t.Fatalf("activation run = %+v, want latest updated definition revision running", item.Run)
 	}
+	if item.Run.DefinitionRevision != "goal:"+updatedGoal.ID+"|dod:"+updatedDoD.ID {
+		t.Fatalf("activation run definitionRevision = %q, want latest definition revision", item.Run.DefinitionRevision)
+	}
+	revision, _ := item.Run.ExecutionContext["definitionRevision"].(map[string]any)
+	if revision["effectiveGoalId"] != updatedGoal.ID || revision["effectiveDoDId"] != updatedDoD.ID {
+		t.Fatalf("execution definitionRevision = %+v, want latest goal/dod", revision)
+	}
 	goalContext, _ := item.Run.ExecutionContext["goal"].(map[string]any)
 	if text, _ := goalContext["text"].(string); text != "- first activation goal revised" {
 		t.Fatalf("effective goal text = %q, want revised canonical goal only", text)

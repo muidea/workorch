@@ -65,6 +65,7 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 		WorkspaceID:        string(item.WorkspaceID),
 		GoalID:             string(item.GoalID),
 		DoDID:              string(item.DoDID),
+		DefinitionRevision: item.DefinitionRevision,
 		InitialStepKind:    item.InitialStepKind,
 		ExecutionContext:   CloneContextMap(item.ExecutionContext),
 		State:              string(item.State),

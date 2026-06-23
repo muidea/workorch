@@ -646,6 +646,7 @@ func runInfoResourceMap(run RunInfo) map[string]any {
 		"WorkspaceID":        string(run.WorkspaceID),
 		"GoalID":             string(run.GoalID),
 		"DoDID":              string(run.DoDID),
+		"DefinitionRevision": run.DefinitionRevision,
 		"ExecutionContext":   compactRunExecutionContext(run.ExecutionContext),
 		"State":              string(run.State),
 		"Priority":           run.Priority,

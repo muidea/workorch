@@ -47,6 +47,9 @@ func WorkspaceExecutionContextBaseContext(input WorkspaceExecutionContextBase) m
 	if input.DoD != nil {
 		ret["dod"] = DoDContext(input.DoD)
 	}
+	if revision := CurrentWorkspaceDefinitionRevisionContext(input.Goal, input.GoalContexts, input.DoD, input.DoDContexts); len(revision) > 0 {
+		ret["definitionRevision"] = revision
+	}
 	if len(input.DoDContexts) > 0 {
 		ret["dods"] = CloneContextMapSlice(input.DoDContexts)
 		ret["doDDefinitionPolicy"] = "workspace_dods_are_cumulative_latest_refines_previous"

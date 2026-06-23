@@ -2,7 +2,6 @@ package runports
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 )
 
@@ -11,17 +10,11 @@ func workspaceDefinitionContextPatchFromDefinitions(effectiveGoal *workspacemode
 		return nil
 	}
 	patch := map[string]any{
-		"goalId": string(effectiveGoal.ID),
-		"goal":   activationcore.GoalContext(effectiveGoal),
-		"doDId":  string(effectiveDoD.ID),
-		"dod":    activationcore.DoDContext(effectiveDoD),
-		"definitionRevision": map[string]any{
-			"policy":          "workspace_goal_dod_cumulative",
-			"effectiveGoalId": string(effectiveGoal.ID),
-			"effectiveDoDId":  string(effectiveDoD.ID),
-			"goalIds":         runtimecore.ContextIDs(workspaceGoals, "id"),
-			"doDIds":          runtimecore.ContextIDs(workspaceDoDs, "id"),
-		},
+		"goalId":             string(effectiveGoal.ID),
+		"goal":               activationcore.GoalContext(effectiveGoal),
+		"doDId":              string(effectiveDoD.ID),
+		"dod":                activationcore.DoDContext(effectiveDoD),
+		"definitionRevision": activationcore.CurrentWorkspaceDefinitionRevisionContext(effectiveGoal, workspaceGoals, effectiveDoD, workspaceDoDs),
 	}
 	if len(workspaceGoals) > 0 {
 		patch["goals"] = workspaceGoals

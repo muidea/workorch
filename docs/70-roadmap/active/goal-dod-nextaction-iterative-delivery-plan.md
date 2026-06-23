@@ -21,6 +21,11 @@ Related:
 - [S1.1-S1.2 Run Command Contract](./goal-dod-nextaction-s1-1-s1-2-run-command-contract.md)
 - [S1.3 Run Command Projection](./goal-dod-nextaction-s1-3-run-command-projection.md)
 - [S1.4 Replan Idempotency](./goal-dod-nextaction-s1-4-replan-idempotency.md)
+- [S1.5 Restart Replacement Semantics](./goal-dod-nextaction-s1-5-restart-replacement.md)
+- [S1.6 TUI/REST Command Path Parity](./goal-dod-nextaction-s1-6-command-path-parity.md)
+- [S2.1 Workspace Definition Revision Model](./goal-dod-nextaction-s2-1-definition-revision-model.md)
+- [S2.2 Current Definition Revision Binding](./goal-dod-nextaction-s2-2-current-definition-revision-binding.md)
+- [S2.3 Initial Gap Baseline](./goal-dod-nextaction-s2-3-initial-gap-baseline.md)
 
 ## Purpose
 
