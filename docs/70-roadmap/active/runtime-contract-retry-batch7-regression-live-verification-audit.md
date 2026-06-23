@@ -1664,6 +1664,16 @@ The audited result is:
   preserves real governance blockers by requiring a declared external or
   governance dependency, and explicitly forbids decision requests for
   continuable candidate choices.
+- After redeploy with the current binary and explicit scoped `replan`, both
+  live workspaces created fresh successor runs and produced real patch and
+  validation activity. The new run then exposed a convergence-budget accounting
+  defect: successful intermediate graph nodes that cannot independently move
+  coverage, such as read and patch nodes without `validationEvidence`, consumed
+  `noCoverageDeltaRounds` before downstream validation/result recording could
+  close coverage. The local closure in
+  `ev:code/convergence-budget-intermediate-graph-nodes/20260623-031` skips
+  no-delta accounting for completed non-validation graph nodes while preserving
+  accounting for validation evidence nodes and failed steps.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked

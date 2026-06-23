@@ -293,6 +293,89 @@ func TestUpdateConvergenceBudgetDoesNotCountPendingExecutionGraphAsNoDelta(t *te
 	}
 }
 
+func TestUpdateConvergenceBudgetDoesNotCountIntermediateCompletedGraphNodesAsNoDelta(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-convergence-budget-intermediate-graph",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			coverageFocusKey: map[string]any{
+				"id":      "focus-item-1",
+				"sliceId": "slice-1",
+				"state":   "active",
+			},
+			convergenceBudgetKey: map[string]any{
+				"state":                       "tracking",
+				"decision":                    "continue",
+				"maxNoCoverageDeltaRounds":    int64(2),
+				"maxRepairAttemptsPerFocus":   int64(5),
+				"maxLLMRoundsPerSlice":        int64(5),
+				"maxRepeatedFailureSignature": int64(5),
+			},
+		},
+	}
+	for idx, step := range []*runmodel.Step{
+		{
+			ID:    "run-convergence-budget-intermediate-graph/graph-001/001-read-target",
+			Kind:  "file/read",
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				stepInputKeyGraphNodeID:     "read-target",
+				stepInputKeyGraphRootStepID: "run-convergence-budget-intermediate-graph/step-1",
+				"path":                      "target.txt",
+			},
+			Output: map[string]any{"stage": "file_read", "status": "completed"},
+		},
+		{
+			ID:    "run-convergence-budget-intermediate-graph/graph-001/002-patch-target",
+			Kind:  "patch/apply",
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				stepInputKeyGraphNodeID:     "patch-target",
+				stepInputKeyGraphRootStepID: "run-convergence-budget-intermediate-graph/step-1",
+				"targetRef":                 "target.txt",
+				"patchType":                 "text_replace",
+				"oldText":                   "old",
+				"newText":                   "new",
+			},
+			Output: map[string]any{"stage": "patch_apply", "status": "completed"},
+		},
+	} {
+		changed := updateConvergenceBudgetFromStep(run, step, false)
+		if idx == 0 && !changed {
+			t.Fatalf("updateConvergenceBudgetFromStep(%s) changed = false, want scope update", step.ID)
+		}
+	}
+	budget := mapFromValue(run.ExecutionContext[convergenceBudgetKey])
+	if int64FromValue(budget["noCoverageDeltaRounds"]) != 0 ||
+		budget["decision"] != "continue" ||
+		budget["state"] != "tracking" {
+		t.Fatalf("budget = %+v, want intermediate completed graph nodes not counted as no-delta", budget)
+	}
+
+	validation := &runmodel.Step{
+		ID:    "run-convergence-budget-intermediate-graph/graph-001/003-validate-target",
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID:     "validate-target",
+			stepInputKeyGraphRootStepID: "run-convergence-budget-intermediate-graph/step-1",
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+			},
+		},
+		Output: map[string]any{"stage": "runtime_step", "status": "completed"},
+	}
+	if !updateConvergenceBudgetFromStep(run, validation, false) {
+		t.Fatal("validation update changed = false, want no-delta budget update")
+	}
+	budget = mapFromValue(run.ExecutionContext[convergenceBudgetKey])
+	if int64FromValue(budget["noCoverageDeltaRounds"]) != 1 ||
+		budget["decision"] != "continue" {
+		t.Fatalf("budget = %+v, want validation evidence node counted as no-delta when no coverage moved", budget)
+	}
+}
+
 func TestUpdateConvergenceBudgetDoesNotCountPatchBaseHashMismatchAsNoDelta(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-convergence-budget-patch-basehash",

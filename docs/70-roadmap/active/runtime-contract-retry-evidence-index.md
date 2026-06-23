@@ -6,6 +6,21 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 
 ## Evidence Records
 
+### ev:code/convergence-budget-intermediate-graph-nodes/20260623-031
+
+| Field | Value |
+| --- | --- |
+| claimId | `B7-G3` |
+| workspaceId | `ws-4e83810542ac4d65`, `ws-7ced70e98ea50c43` |
+| runId | `run-003-replan-001-replan-001-replan-001` |
+| evidenceKind | code-and-live-observation |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_convergence_budget.go`, `internal/modules/kernel/orchestrator/biz/runtime_convergence_budget_test.go` |
+| extractCommand | `go test ./internal/modules/kernel/orchestrator/biz -run 'TestUpdateConvergenceBudgetDoesNotCountIntermediateCompletedGraphNodesAsNoDelta|TestUpdateConvergenceBudgetDoesNotCountPendingExecutionGraphAsNoDelta|TestUpdateConvergenceBudgetDoesNotCountPatchBaseHashMismatchAsNoDelta|TestUpdateConvergenceBudgetDoesNotCountPatchOldTextNotFoundAsNoDelta' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh` |
+| extractedSummary | After redeploy and explicit scoped `replan`, both live workspaces created fresh running successor runs and produced accepted execution graphs with real patch/validation activity. `ws-7c...` then escalated on `noCoverageDeltaRounds 4/3` even though several counted rounds were successful intermediate graph nodes such as file reads and patch applications that cannot be expected to move coverage before validation/result recording. The closure makes completed graph nodes without `validationEvidence` skip no-delta accounting while preserving no-delta accounting for completed validation evidence nodes and failed steps. This keeps convergence budget business-neutral and prevents multi-node plans from exhausting coverage budget before their verification nodes run. Focused and full orchestrator/biz tests plus boundary verification passed. |
+| owner | core convergence budget |
+| closureBatch | 7 |
+| loadByDefault | false |
+
 ### ev:code/software-dev-lsp-tool-surface/20260622-019
 
 | Field | Value |

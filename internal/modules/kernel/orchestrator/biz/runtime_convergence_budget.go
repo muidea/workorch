@@ -158,6 +158,9 @@ func convergenceBudgetCountsNoDelta(step *runModel.Step) bool {
 	if convergenceBudgetSkipsNoDeltaForPendingExecutionGraph(step) {
 		return false
 	}
+	if convergenceBudgetSkipsNoDeltaForIntermediateCompletedGraphNode(step) {
+		return false
+	}
 	if stepIsConcreteFailureEvidenceAcquisitionGraphNode(step) {
 		return false
 	}
@@ -176,6 +179,14 @@ func convergenceBudgetSkipsNoDeltaForPendingExecutionGraph(step *runModel.Step) 
 	}
 	graph, ok := runtimeGraphSpecFromValue(step.Output[stepOutputKeyExecutionGraph])
 	return ok && len(graph.Nodes) > 0
+}
+
+func convergenceBudgetSkipsNoDeltaForIntermediateCompletedGraphNode(step *runModel.Step) bool {
+	if step == nil || step.State != common.StepStateCompleted || graphNodeID(step) == "" {
+		return false
+	}
+	return len(mapFromValue(step.Input["validationEvidence"])) == 0 &&
+		len(mapFromValue(step.Output["validationEvidence"])) == 0
 }
 
 func convergenceBudgetSkipsNoDeltaForMechanicalPatchConflict(step *runModel.Step) bool {
