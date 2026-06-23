@@ -2406,6 +2406,25 @@ func TestBuildConvergenceContractCoverageFocusWithAcceptedEvidenceNeedsAssessmen
 	}
 }
 
+func TestCoverageWorkItemEvidenceReadyAssessmentGapIsNotActionableEvidenceGap(t *testing.T) {
+	item := map[string]any{
+		"id":                    "cwi-ready",
+		"status":                "evidence_ready",
+		"requiredEvidenceKinds": []string{"validation", "state_change"},
+		"missingEvidenceKinds":  []string{},
+		"acceptedEvidenceRefs":  []string{"run/graph/001-patch", "run/graph/002-validate"},
+		"acceptedEvidenceByKind": map[string]any{
+			"state_change": []string{"run/graph/001-patch"},
+			"validation":   []string{"run/graph/002-validate"},
+		},
+		"currentGap": "required evidence kinds present; coverage assessment required",
+	}
+
+	if coverageWorkItemHasOpenGap(item) {
+		t.Fatalf("coverageWorkItemHasOpenGap(%+v) = true, want false for evidence_ready assessment-only gap", item)
+	}
+}
+
 func TestBuildConvergenceContractCurrentFocusAssessmentPreemptsHistoricalCoverageGaps(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:      runtimeStageRepair,

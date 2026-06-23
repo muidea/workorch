@@ -1831,6 +1831,25 @@ The audited result is:
   `evidenceKinds` and optional `requiredEvidenceCounts`. This keeps governance
   evidence available as structured data while removing core text-keyword
   inference, preserving the core/template boundary.
+- After redeploying `043`, resolving the open `ws-4e...` decision with a
+  scoped replan created `run-003-...-replan-011` and proved the successor
+  path now rebuilds the stale governance requirement correctly: `cwi-008`
+  became `evidence_ready`, required only `validation`, and no longer carried
+  a missing `decision` evidence kind. The same live run then exposed a
+  different convergence-loop defect. `cwi-039` already had accepted
+  `validation` and `state_change` refs and `missingEvidenceKinds=null`, so
+  its only remaining gap was `required evidence kinds present; coverage
+  assessment required`. A lower-level open-gap predicate still treated that
+  non-empty assessment message as an actionable evidence-acquisition gap, so
+  the repair contract repeatedly asked for bounded concrete validation and
+  generated duplicate `git/status` + `lsp_status` graphs instead of moving to
+  assessment. The local closure in
+  `ev:code/evidence-ready-assessment-gap-not-actionable-evidence-gap/20260623-044`
+  makes `evidence_ready` work items non-actionable for mechanical evidence
+  acquisition when no required evidence kind is missing. Assessment and final
+  acceptance gates remain responsible for closing them. This is core-neutral:
+  it changes only generic ledger state semantics and does not add workspace,
+  template, language, command, provider, or target-project rules.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked

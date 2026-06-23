@@ -12,6 +12,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestEnsureRunCoverageWorkItemsBuildsNeutralBaseline(t *testing.T) {
@@ -1993,6 +1994,120 @@ func TestCoverageWorkItemsDoNotInferGovernanceEvidenceFromBusinessText(t *testin
 		if len(got) != 1 || got[0] != "validation" {
 			t.Fatalf("item[%d] requiredEvidenceKinds = %+v, want [validation]", idx, got)
 		}
+	}
+}
+
+func TestCoverageWorkItemsRebuildNormalizesLegacyInferredGovernanceEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-legacy-inferred-governance",
+		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-current",
+			"goal": map[string]any{
+				"id":   "goal-cwi-legacy",
+				"text": "- 默认输出仅保留决策必需字段，并返回 complete/truncated 元信息",
+			},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                     "cwi-008",
+				"definitionRevision":     "rev-current",
+				"normalizedSourceKey":    "goal:goal_leaf:goal-cwi-legacy-goal-leaf-001",
+				"source":                 "goal",
+				"sourceScope":            "goal_leaf",
+				"sourceGoalId":           "goal-cwi-legacy",
+				"sourceRequirementId":    "goal-cwi-legacy-goal-leaf-001",
+				"sourcePath":             "goal.leaves[0]",
+				"targetText":             "默认输出仅保留决策必需字段，并返回 complete/truncated 元信息",
+				"status":                 "in_progress",
+				"requiredEvidenceKinds":  []string{"decision", "validation"},
+				"missingEvidenceKinds":   []string{"decision"},
+				"acceptedEvidenceRefs":   []string{"run-prev/graph/001-validate"},
+				"acceptedEvidenceByKind": map[string]any{"validation": []string{"run-prev/graph/001-validate"}},
+			}},
+		},
+	}
+
+	if !newCoverageSubsystem().ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want legacy inferred governance requirement normalized")
+	}
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) != 1 {
+		t.Fatalf("coverageWorkItems = %+v, want one normalized item", items)
+	}
+	item := items[0]
+	if got := stringSliceFromValue(item["requiredEvidenceKinds"]); len(got) != 1 || got[0] != "validation" {
+		t.Fatalf("requiredEvidenceKinds = %+v, want validation only", got)
+	}
+	if got := stringSliceFromValue(item["missingEvidenceKinds"]); len(got) != 0 {
+		t.Fatalf("missingEvidenceKinds = %+v, want no missing legacy decision requirement", got)
+	}
+	if got := stringFromMap(item, "status"); got != "evidence_ready" {
+		t.Fatalf("status = %q, want evidence_ready after accepted validation evidence", got)
+	}
+}
+
+func TestCoverageWorkItemsRepositoryHydrationNormalizesLegacyInferredGovernanceEvidence(t *testing.T) {
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-cwi-legacy-inferred-governance-repo")
+	repo := memory.NewCoverageWorkItemRepository()
+	run := &runmodel.Run{
+		ID:          "run-cwi-legacy-inferred-governance-repo",
+		WorkspaceID: "ws-cwi-legacy-inferred-governance-repo",
+		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-current",
+			"goal": map[string]any{
+				"id":   "goal-cwi-legacy-repo",
+				"text": "- 默认输出仅保留决策必需字段，并返回 complete/truncated 元信息",
+			},
+		},
+	}
+	if err := repo.Create(ctx, &runtimecontract.CoverageWorkItem{
+		ID:                    "run-cwi-legacy-inferred-governance-repo-cwi-001",
+		WorkspaceID:           run.WorkspaceID,
+		RunID:                 run.ID,
+		DefinitionRevision:    "rev-current",
+		NormalizedSourceKey:   "goal:goal_leaf:goal-cwi-legacy-repo-goal-leaf-001",
+		SourceScope:           "goal_leaf",
+		SourceRequirementID:   "goal-cwi-legacy-repo-goal-leaf-001",
+		SourceGoalID:          "goal-cwi-legacy-repo",
+		SourcePath:            "goal.leaves[0]",
+		TargetText:            "默认输出仅保留决策必需字段，并返回 complete/truncated 元信息",
+		RequiredEvidenceKinds: []string{"decision", "validation"},
+		Status:                "in_progress",
+		AcceptedEvidenceRefs:  []string{"run-prev/graph/001-validate"},
+		CurrentGap:            "missing accepted evidence binding for required evidence kind: decision",
+		Metadata: map[string]any{
+			"id":                     "cwi-001",
+			"source":                 "goal",
+			"sourceScope":            "goal_leaf",
+			"requiredEvidenceKinds":  []string{"decision", "validation"},
+			"missingEvidenceKinds":   []string{"decision"},
+			"acceptedEvidenceByKind": map[string]any{"validation": []string{"run-prev/graph/001-validate"}},
+		},
+	}); err != nil {
+		t.Fatalf("seed coverage work item: %v", err)
+	}
+
+	changed, err := newCoverageSubsystem(repo).ensureFromRepository(ctx, run)
+	if err != nil {
+		t.Fatalf("coverage.ensureFromRepository: %v", err)
+	}
+	if !changed {
+		t.Fatalf("coverage.ensureFromRepository changed=false, want owner repository normalization")
+	}
+	stored, err := repo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("ListByRun: %v", err)
+	}
+	if len(stored) != 1 {
+		t.Fatalf("stored coverage work items = %+v, want one normalized owner item", stored)
+	}
+	gotKinds := stored[0].RequiredEvidenceKinds
+	if len(gotKinds) != 1 || gotKinds[0] != "validation" {
+		t.Fatalf("stored RequiredEvidenceKinds = %+v, want validation only", gotKinds)
+	}
+	if got := stored[0].Status; got != "evidence_ready" {
+		t.Fatalf("stored status = %q, want evidence_ready", got)
+	}
+	if missing := stringSliceFromValue(stored[0].Metadata["missingEvidenceKinds"]); len(missing) != 0 {
+		t.Fatalf("stored missingEvidenceKinds = %+v, want no missing legacy decision requirement", missing)
 	}
 }
 

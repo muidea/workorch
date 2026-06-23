@@ -1997,6 +1997,9 @@ func coverageWorkItemHasOpenGap(item map[string]any) bool {
 	if len(stringSliceFromValue(item["missingEvidenceKinds"])) > 0 {
 		return true
 	}
+	if status == "evidence_ready" {
+		return false
+	}
 	if strings.TrimSpace(stringFromMap(item, "currentGap")) != "" {
 		return true
 	}
