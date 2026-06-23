@@ -636,7 +636,7 @@ watchdog 不是正常调度链路，也不是 event 丢失的兜底替代。TUI/
 
 触发时机：
 
-- Startup scheduling: 服务启动后只注册 periodic watchdog timer，不自动恢复、重派或失败历史运行态 run。服务重启后需要恢复历史运行时，由用户通过 TUI/Web/REST 显式触发 `/run continue`、replan、restart 或后续专用诊断/恢复入口。
+- Startup scheduling: 服务启动后只注册 periodic watchdog timer，不自动恢复、重派或失败历史运行态 run。服务重启后需要恢复历史运行时，由用户通过 TUI/Web/REST 显式触发 `/run resume`、replan、restart 或后续专用诊断/恢复入口。
 - Periodic watchdog: 服务运行期间每 `30s` 执行一次 timer tick。
 - Stale dispatched 判定不是每 `30s` 直接修改状态；timer 只是检查窗口。真正恢复还需要 dispatched step 年龄超过 `server.staleDispatchedStepMinAge`，默认 `10m`。
 

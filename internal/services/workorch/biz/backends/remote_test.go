@@ -473,6 +473,28 @@ func TestRemoteRunCommandReplanSendsUnifiedIntent(t *testing.T) {
 	}
 }
 
+func TestRemoteRunCommandRejectsUnsupportedIntent(t *testing.T) {
+	requests := atomic.Int64{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	be := NewRemote(server.URL)
+	_, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
+		WorkspaceID:   "ws-remote",
+		ExpectedRunID: "run-001",
+		Intent:        RunCommandIntent("unsupported"),
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want invalid argument", err)
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("requests = %d, want no remote request for unsupported intent", requests.Load())
+	}
+}
+
 func TestRemoteRunStatusUsesWorkspaceScopedPathWhenContextCarriesWorkspace(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/runs/run-001/status" {

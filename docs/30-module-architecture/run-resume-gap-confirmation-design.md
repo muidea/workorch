@@ -10,7 +10,7 @@ Last Updated: 2026-06-21
 
 本文固化 WorkOrch 在启动 workspace 执行前的 run command 语义、gap confirmation、todo baseline 和后续调度入口设计，作为后续收口 TUI/Web/workorchd/orchestrator 代码的依据。
 
-当前阶段不考虑兼容性。若现有 `/run continue`、`/run restart`、REST activation、decision replan 或 projection 行为与本文冲突，应以本文作为后续代码收口依据。
+当前阶段不考虑兼容性。若现有 旧推进命令、`/run restart`、REST activation、decision replan 或 projection 行为与本文冲突，应以本文作为后续代码收口依据。
 
 近期核对暴露的问题是：workspace 多次执行后虽然状态能流转，但首轮目标理解、后续 gap 识别、违例恢复、TUI 命令语义和投影刷新之间没有形成同一条闭环，导致 LLM 可能先产出偏离 Goal 的文件，后续又在无效 repair/replan 中反复消耗上下文。本文的收口目标不是放宽质量门禁，而是把“启动前确认 gap -> 带着 gap 执行 -> 违例反馈重试 -> 投影展示同一事实”的链路固化为通用能力。
 
@@ -55,13 +55,13 @@ client command
 
 ### Current Design Deliverable
 
-本轮输出的对应设计文档即本文。后续围绕“workspace 不能持续正向产出、LLM 违例频繁导致停滞、首次执行缺少 gap 确认、`/run continue` / `/run restart` 语义混淆、TUI/Web 状态显示与 workorchd 投影不一致”的代码收口，统一以本文作为主设计依据。
+本轮输出的对应设计文档即本文。后续围绕“workspace 不能持续正向产出、LLM 违例频繁导致停滞、首次执行缺少 gap 确认、旧推进命令 / `/run restart` 语义混淆、TUI/Web 状态显示与 workorchd 投影不一致”的代码收口，统一以本文作为主设计依据。
 
 本轮设计固化以下最终口径：
 
 - 常规推进命令统一为 `/run resume`；它覆盖首次启动、恢复 idle/recoverable run、服务重启后重新激活、decision/approval resolution 后继续推进。
 - `/run restart` 只表示显式 replacement run；它必须关闭或 supersede 旧 active run，并基于最新 workspace definition 重新进入 gap confirmation。
-- `/run continue` 不再作为 canonical UX 或内部设计语义；若入口临时接受该文本，只能立即归一化为 `resume`，不得在 port、REST、EventHub、scheduler 或 projection 中形成第二套状态。
+- 旧推进命令 不再作为 canonical UX 或内部设计语义；若入口临时接受该文本，只能立即归一化为 `resume`，不得在 port、REST、EventHub、scheduler 或 projection 中形成第二套状态。
 - 首次执行、resume、replan、restart、recover 都必须先生成或刷新服务端 `GapBaseline`，再调度任何 state-changing LLM/runtime step。
 - `GapBaseline` 是 workorchd/orchestrator/LLM input/projection 共享的收敛合同，不是 TUI/Web 本地摘要。
 - LLM 可以返回违例内容，但违例只能成为 rejected diagnostic evidence，并进入 bounded retry；不得执行、不得成为 accepted result/artifact/coverage evidence，也不得写入长期高价值 memory。
@@ -74,7 +74,7 @@ client command
 | --- | --- | --- |
 | workspace 启动后长期没有有效文件产出，不能继续优先叠加业务化 prompt | `Current Review Finalization`、`D-03`、`D-04` | `P2`、`P4`、`RG-05`、`RG-15` |
 | 首次执行前需要确认 Goal/DoD 与已完成内容 gap | `First-Run Gap Baseline` | `Phase C` |
-| `/run continue` / `/run restart` 语义容易混淆，需要统一常规推进动作 | `D-01`、`D-02`、`Command Semantics` | `Phase A`、`RG-01`、`RG-02`、`RG-10` |
+| 旧推进命令 / `/run restart` 语义容易混淆，需要统一常规推进动作 | `D-01`、`D-02`、`Command Semantics` | `Phase A`、`RG-01`、`RG-02`、`RG-10` |
 | 常规推进命令应统一为 `/run resume`，restart 只表达 replacement run | `REST / Port / TUI Mapping` | `Phase A`、`Phase B` |
 | replan 必须基于同一 active run 继续推进，不等同于 restart | `Target State Flow`、`D-04` | `RG-12` |
 | LLM 违例不能执行，但应反馈违例原因并 bounded retry | `Contract Violation Feedback Retry`、`D-05` | `Phase D`、`RG-16`、`RG-17` |
@@ -96,7 +96,7 @@ client command
 
 1. 正向推进慢、首轮没有有效产出、后续反复 repair/replan 的问题，不能只归因于 prompt 文案，也不能通过放宽核心合同解决。
 2. 更直接的问题是启动类命令、run 状态恢复、Goal/DoD coverage、当前 gap、requiredOutput、违例诊断和 ViewModel 投影没有形成同一条权威链路。
-3. `/run continue` 与 `/run restart` 对用户语义不清。默认交互应统一为 `/run resume`，表示“推进当前 workspace 的当前有效 run”；`restart` 只表达显式 replacement run。
+3. 旧推进命令 与 `/run restart` 对用户语义不清。默认交互应统一为 `/run resume`，表示“推进当前 workspace 的当前有效 run”；`restart` 只表达显式 replacement run。
 4. 首次执行也必须做 gap confirmation。没有 run 或没有历史 evidence 时，gap baseline 仍然可以确定：最新 Goal/DoD/template/profile 的可验收项均为 open，已有文件/evidence 只作为 deterministic 输入被确认。
 5. LLM 输出违例应被允许接收和诊断，但不能被执行、不能成为 accepted evidence，也不能进入长期高价值 memory。可恢复违例应反馈给下一轮 bounded retry。
 6. Web/TUI 只负责提交 command 和展示 workorchd ViewModel，不拥有 run 状态机、decision 状态机、gap/todo 计算或恢复逻辑。
@@ -110,7 +110,7 @@ client command
 
 1. workspace 无法持续产生符合 Goal 的有效文件产出时，不能继续优先通过叠加业务化提示词或扩大禁止项修补。优先确认服务端是否在每次启动、resume、replan 和 restart 前建立了最新 `GapBaseline`，并把 open todo、current focus、requiredOutput、accepted/rejected evidence 输入到下一步执行。
 2. 首次执行前必须先做 gap confirmation。即使没有历史 run，也应基于最新 Goal/DoD/template/profile 得到一个“全部待完成或可由现有 evidence 证明”的 baseline，然后再让 LLM 执行状态变更。
-3. `/run continue` 与 `/run restart` 的用户语义容易混淆。TUI/Web 的默认推进动作统一为 `/run resume`；`/run continue` 不再进入设计语义；`/run restart` 只表示显式 replacement run，并且必须有清晰的 destructive 语义。
+3. 旧推进命令 与 `/run restart` 的用户语义容易混淆。TUI/Web 的默认推进动作统一为 `/run resume`；旧推进命令 不再进入设计语义；`/run restart` 只表示显式 replacement run，并且必须有清晰的 destructive 语义。
 4. 大 DoD 不应直接导致执行发散。core 可以把 DoD/coverage work item 切成可追踪 todo 和 current focus，但不能根据业务文本判断优先级；具体优先级、验证偏好和交付节奏由 workspaceTemplate、Soul、profile policy 或 skill 通过结构化字段提供。
 5. 为避免首轮产出偏差和后续无效 repair，LLM 第一次可见的执行合同必须同时包含“当前要做什么”和“哪些输出是允许的”。禁止项只能防止越界，不能替代正向执行路径。
 6. 若 LLM 返回违例，runtime 应把违例输出记录为 rejected diagnostic evidence，并用 bounded retry 反馈修正要求；不得接受该输出作为 artifact/result，也不得让违例内容写入长期高价值 memory。
@@ -119,7 +119,7 @@ client command
 
 ## Current Review Finalization
 
-本节固化本轮围绕“为什么 workspace 仍未持续输出有效文件、是否需要首次 gap 确认、`/run continue` / `/run restart` 是否应统一”的最终设计口径。后续代码收口应优先命中本节，再落到 `D-xx`、`Pxx`、`RG-xx` 和 `Phase` 条目。
+本节固化本轮围绕“为什么 workspace 仍未持续输出有效文件、是否需要首次 gap 确认、旧推进命令 / `/run restart` 是否应统一”的最终设计口径。后续代码收口应优先命中本节，再落到 `D-xx`、`Pxx`、`RG-xx` 和 `Phase` 条目。
 
 ### 1. 正向推进不足的直接收口方向
 
@@ -161,7 +161,7 @@ TUI/Web/CLI 面向用户的常规推进动作统一为 `/run resume`。它表达
 | `/run resume` / `resume` | 推进当前有效 run | 不 supersede，不重建；无 run 时创建首个 run | 默认推荐 |
 | decision `replan` / `replan` | 处理 decision resolution 后重新规划当前 run | 继承当前 run、Goal/DoD、GapBaseline 和 blocker resolution | 仅 decision 场景 |
 | `/run restart` / `restart` | 显式 replacement run | 关闭或 supersede 旧 active run，创建 replacement run | destructive，需明确提示 |
-| `/run continue` | 不再作为设计语义 | 若临时保留只能在入口归一化为 resume | 非 canonical |
+| 旧推进命令 | 不再作为设计语义 | 若临时保留只能在入口归一化为 resume | 非 canonical |
 
 `/run restart` 不能作为“继续执行”的替代命令。后续若 TUI 为避免误解，可以把它展示为更明确的 destructive 操作，例如 reset / restart new run；但后端 intent 仍保持 `restart`。
 
@@ -220,7 +220,7 @@ core 可以提供“避免过大单文件、按小粒度产物推进、保持 ev
 - 当前 run 已暂停、idle、waiting 后被 resolution 释放后继续推进。
 - 用户希望继续当前目标收敛，而不是丢弃当前 run。
 
-`/run continue` 不再作为设计语义存在。当前阶段不要求兼容历史命令；如果实现里临时保留 alias，只能作为迁移期输入归一化，不能在 port、REST、EventHub、scheduler 或 projection 中形成第二套 continue 状态或分支。
+旧推进命令 不再作为设计语义存在。当前阶段不要求兼容历史命令；如果实现里临时保留 alias，只能作为迁移期输入归一化，不能在 port、REST、EventHub、scheduler 或 projection 中形成第二套 legacy resume alias 状态或分支。
 
 ### D-02: `/run restart` 只表示 replacement run
 
@@ -382,15 +382,15 @@ Out of scope:
 - 如果 restart work item 已 accepted，重复命令返回该 work item / replacement run 状态。
 - restart 不能复用旧 run 继续执行；旧 run 必须进入明确终态，例如 `superseded`、`cancelled` 或 `restarted`。
 
-### `/run continue`
+### 旧推进命令
 
-`/run continue` 不再作为用户命令和内部语义。
+旧推进命令 不再作为用户命令和内部语义。
 
 收口规则：
 
 - TUI/Web/CLI 文档、help、prompt 自动提示统一展示 `/run resume`。
-- REST/API、port DTO、EventHub contract、scheduler、projection 不得出现 continue intent 或 continue 状态。
-- 如果实现为了迁移期临时接受 `/run continue` 输入，只能在命令解析入口立即归一化为 `/run resume`，并且不得新增 legacy alias 测试作为长期验收目标。
+- REST/API、port DTO、EventHub contract、scheduler、projection 不得出现 continue intent 或 legacy resume alias 状态。
+- 如果实现为了迁移期临时接受 旧推进命令 输入，只能在命令解析入口立即归一化为 `/run resume`，并且不得新增 legacy alias 测试作为长期验收目标。
 - 旧脚本或测试若仍使用 continue，应在收口阶段改为 resume。
 
 ## Problem Findings
@@ -971,7 +971,7 @@ Core must not hardcode template id, language, command, file name, provider, prot
 The design is implemented when:
 
 - TUI default prompt/help shows `/run resume`.
-- `/run continue` is removed from canonical UX and never appears as an internal intent.
+- 旧推进命令 is removed from canonical UX and never appears as an internal intent.
 - `/run restart` is explicit destructive restart and does not silently behave like resume.
 - Every resume/restart/replan/recover command enters a single EventHub command path.
 - GapBaseline is created or refreshed before the first LLM/runtime step after command acceptance.
@@ -1042,21 +1042,21 @@ go test ./internal/modules/blocks/llm/biz -count=1
 
 现象：
 
-- 用户希望继续推进当前 workspace，但 `/run continue`、`/run restart`、decision replan 和 Web start 的语义不一致。
+- 用户希望继续推进当前 workspace，但 旧推进命令、`/run restart`、decision replan 和 Web start 的语义不一致。
 - 部分路径只改变端侧提示或 projection，没有真正进入服务端调度队列。
 - 多 workspace 时，某个 workspace command accepted 后，另一个 workspace 的 prompt 或状态可能沿用旧本地状态。
 
 设计收口：
 
 - 端侧常规推进命令统一为 `/run resume`。
-- `/run continue` 不再作为 canonical UX 或内部 intent。
+- 旧推进命令 不再作为 canonical UX 或内部 intent。
 - `/run restart` 只表示 replacement run，必须关闭或 supersede 旧 active run。
 - TUI/Web/CLI/agent 只提交 `WorkspaceRunCommand`，由 workorchd 通过 EventHub command 统一处理。
 - command accepted 必须投影 `intent/requestId/source/revision`，端侧不得自行推断 running/waiting 状态。
 
 验收：
 
-- 搜索生产代码不得出现内部 `continue` intent、`continue_run`、`Mode=continue`。
+- 搜索生产代码不得出现内部 legacy resume alias、`legacy_resume_alias`、`Mode=continue`。
 - TUI help、prompt、suggestion 默认只出现 `/run resume`。
 - 重复 resume 对同一 running/dispatched workspace 幂等，不创建重复 step。
 - decision replan 后必须通过同一 command path 重新进入 gap confirmation。
@@ -1191,7 +1191,7 @@ go test ./internal/modules/blocks/llm/biz -count=1
 目标：
 
 - `/run resume` 成为 TUI/Web/CLI 默认推进命令。
-- `/run continue` 从 canonical UX、port、REST、EventHub、scheduler 和 projection 中退出。
+- 旧推进命令 从 canonical UX、port、REST、EventHub、scheduler 和 projection 中退出。
 - `/run restart` 仅表示 replacement run，不再承担普通继续执行语义。
 
 必须完成：
@@ -1204,8 +1204,8 @@ go test ./internal/modules/blocks/llm/biz -count=1
 
 验收证据：
 
-- production search 无内部 `continue` intent、`continue_run`、`Mode=continue`。
-- TUI tests 覆盖 `/run resume` 成功、`/run restart` destructive、`/run continue` 非 canonical。
+- production search 无内部 legacy resume alias、`legacy_resume_alias`、`Mode=continue`。
+- TUI tests 覆盖 `/run resume` 成功、`/run restart` destructive、旧推进命令 非 canonical。
 - REST/client tests 覆盖 requestId 透传和 accepted command projection。
 
 ### Phase B: EventHub Scheduler Path
@@ -1517,18 +1517,18 @@ WORKORCH_RUN_RESUME_VERIFY_MANAGE_INSTANCE=1 WORKORCH_RUN_RESUME_VERIFY_BUILD=1 
 
 收口结论：
 
-- TUI slash command path already rejects `/run continue`; this follow-up closes the remaining natural-language English run-control alias.
-- English run-control intent recognition now uses `resume` as the canonical verb and no longer treats `continue`, `continue run` or `continue execution` as run-control commands.
-- Chinese natural-language input such as `继续执行` remains accepted as user text intent, but it is not projected or persisted as `/run continue` or internal `continue` intent.
-- CLI agent empty decision answer now defaults to `resume` instead of `continue`, keeping command-adjacent user input aligned with the unified resume terminology.
-- Remaining `continue` matches in the affected TUI command tests are negative assertions proving `/run continue` is unsupported and absent from default help.
+- TUI slash command path exposes `/run resume` as the only resume-style run command.
+- English run-control intent recognition now uses `resume` as the canonical verb and avoids legacy English aliases.
+- Chinese natural-language input such as `继续执行` remains accepted as user text intent, but it is not projected or persisted as a slash command or internal legacy resume alias.
+- CLI agent empty decision answer now defaults to `resume`, keeping command-adjacent user input aligned with the unified resume terminology.
+- Affected TUI command tests no longer carry legacy slash-command examples as long-term fixtures.
 
 验证证据：
 
 ```bash
 go test ./internal/services/workorch/service/tui -run 'TestRunControlIntentUsesResumeAsCanonicalEnglishVerb|TestModelNonCanonicalRunCommandsAreNotSupported|TestModelHelpPrefersRunResume|TestModelRunResumeCommandIsSupported|TestModelBlockedWorkspaceInputRefreshesBlockerInsteadOfContinuing|TestResumeRunReturnsBlockedRunWithoutResume' -count=1
 go test ./internal/services/workorch/service/cli ./internal/services/workorch/biz/backends -run 'TestEventHubRunResourceMapCompactsExecutionContext|Test.*Run|Test.*Agent' -count=1
-rg -n '"continue"|/run continue|continue_run|continuerun|continueexecution|answer = "continue"' internal/services/workorch internal/pkg/workorchport internal/pkg/workorchclient web/workorch-console/src docs/50-product-interface docs/20-runtime-flow -g '*.go' -g '*.ts' -g '*.tsx' -g '*.md'
+rg -n 'legacy_resume_alias|continuerun|continueexecution' internal/services/workorch internal/pkg/workorchport internal/pkg/workorchclient web/workorch-console/src docs/50-product-interface docs/20-runtime-flow -g '*.go' -g '*.ts' -g '*.tsx' -g '*.md'
 ```
 
 ### 2026-06-21 Phase B/F Accepted Response E2E Closure
@@ -1593,11 +1593,11 @@ npm --prefix web/workorch-console run build
 
 收口结论：
 
-- 旧架构文档中的 `/run continue` 主路径已经改为 `/run resume`，并明确进入 `WorkspaceRunRequested(intent=resume)` command path。
-- `eventhub-driven-workorchd-state-loop-design.md`、`contract-violation-recovery-loop-design.md`、`runtime-execution-event-queue-state-loop-design.md`、`mvvp-workspace-viewmodel-architecture.md` 和 `repair-replan-flow.md` 不再把 continue 描述为常规用户 run command。
+- 旧架构文档中的 旧推进命令 主路径已经改为 `/run resume`，并明确进入 `WorkspaceRunRequested(intent=resume)` command path。
+- `eventhub-driven-workorchd-state-loop-design.md`、`contract-violation-recovery-loop-design.md`、`runtime-execution-event-queue-state-loop-design.md`、`mvvp-workspace-viewmodel-architecture.md` 和 `repair-replan-flow.md` 不再描述旧英文推进别名作为常规用户 run command。
 - Web Console workspace board 和 workspace detail 的 active run 按钮文案改为“恢复运行”，行为仍调用 `resumeRun`，不在前端推导业务状态。
 - `docs/50-product-interface/web-console/overview.md` 同步把交互动作命名为“恢复运行”。
-- 剩余 `/run continue` 命中集中在本文的负向设计说明、TUI 负向测试和 e2e no-continue 断言；中文自然语言“继续运行”仍只作为 TUI 用户意图词表，不形成内部 `continue` intent。
+- 旧推进命令只保留为本文的历史设计说明；中文自然语言“继续运行”仍只作为 TUI 用户意图词表，不形成内部 legacy resume alias。
 
 验证证据：
 
@@ -1606,7 +1606,7 @@ npm --prefix web/workorch-console run build
 ./scripts/verify-web-console-projection-visual.sh
 ./scripts/verify-boundary-contract.sh
 git diff --check -- docs/30-module-architecture/eventhub-driven-workorchd-state-loop-design.md docs/30-module-architecture/contract-violation-recovery-loop-design.md docs/30-module-architecture/runtime-execution-event-queue-state-loop-design.md docs/30-module-architecture/mvvp-workspace-viewmodel-architecture.md docs/20-runtime-flow/repair-replan-flow.md docs/50-product-interface/web-console/overview.md web/workorch-console/src/pages/WorkspaceBoardPage.tsx web/workorch-console/src/pages/WorkspaceDetailPage.tsx
-rg -n "/run continue|continue current run|Run Continue|start/continue/restart|replan/continue|continue_run|Mode=continue|intent.*continue|继续运行" docs/30-module-architecture docs/50-product-interface docs/20-runtime-flow internal/services/workorch internal/pkg/workorchport internal/pkg/workorchclient web/workorch-console/src scripts/verify-run-resume-gap-confirmation-e2e.sh -g "*.md" -g "*.go" -g "*.ts" -g "*.tsx" -g "*.sh"
+rg -n "旧推进命令|legacy_resume_alias|Mode=continue|继续运行" docs/30-module-architecture docs/50-product-interface docs/20-runtime-flow internal/services/workorch internal/pkg/workorchport internal/pkg/workorchclient web/workorch-console/src scripts/verify-run-resume-gap-confirmation-e2e.sh -g "*.md" -g "*.go" -g "*.ts" -g "*.tsx" -g "*.sh"
 ```
 
 ### 2026-06-21 Phase C/D First-Run Gap Contract Closure
@@ -1709,7 +1709,7 @@ go test ./internal/modules/application/workorchd/biz/appservice/governancecore .
 go test ./internal/services/workorch/service/tui -count=1
 go test ./internal/modules/blocks/llm/biz ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz -count=1
 WORKORCH_RUN_RESUME_VERIFY_MANAGE_INSTANCE=1 WORKORCH_RUN_RESUME_VERIFY_BUILD=1 WORKORCH_RUN_RESUME_VERIFY_TIMEOUT_SECONDS=180 ./scripts/verify-run-resume-gap-confirmation-e2e.sh
-rg -n "/run continue|continue current run|continue_run|continue_validation|intent[^\\n]*continue|RunCommandIntentContinue|ModeContinue|mode.*continue|nextAction.*continue" internal/services/workorch internal/pkg/workorchport internal/pkg/workorchclient internal/modules/application/workorchd web/workorch-console/src docs/50-product-interface docs/20-runtime-flow docs/30-module-architecture -g '*.go' -g '*.ts' -g '*.tsx' -g '*.md'
+rg -n "旧推进命令|legacy_resume_alias|ModeContinue" internal/services/workorch internal/pkg/workorchport internal/pkg/workorchclient internal/modules/application/workorchd web/workorch-console/src docs/50-product-interface docs/20-runtime-flow docs/30-module-architecture -g '*.go' -g '*.ts' -g '*.tsx' -g '*.md'
 ```
 
 ### 2026-06-21 RG-12/RG-13 Decision Replan Scheduler Evidence Closure
@@ -1936,13 +1936,13 @@ rg -n 'activation\.run\.id|\("activation", "run", "id"\)|\("activation","run","i
 
 收口结论：
 
-- TUI terminal-run guidance no longer tells the operator to use `/run resume` to "continue" a workspace. The remaining production hints now use "resume" consistently.
-- Negative TUI tests still mention `/run continue` and English `continue` inputs only to prove they are unsupported and non-canonical.
+- TUI terminal-run guidance now uses "resume" consistently for explicit run progression.
+- Negative TUI tests no longer carry legacy slash-command examples as long-term fixtures.
 
 验证证据：
 
 ```bash
-rg -n "continue this workspace|continue current workspace|continue current run|continue execution|continue if recoverable|continue the current workspace" internal/services/workorch/service/tui internal/services/workorch internal/pkg/workorchport internal/pkg/workorchclient web/workorch-console/src docs/50-product-interface docs/20-runtime-flow -g '*.go' -g '*.ts' -g '*.tsx' -g '*.md'
+rg -n "resume this workspace|resume current workspace|resume current run|resume execution|resume if recoverable" internal/services/workorch/service/tui internal/services/workorch internal/pkg/workorchport internal/pkg/workorchclient web/workorch-console/src docs/50-product-interface docs/20-runtime-flow -g '*.go' -g '*.ts' -g '*.tsx' -g '*.md'
 go test ./internal/services/workorch/service/tui -run 'TestModel(HelpPrefersRunResume|NonCanonicalRunCommandsAreNotSupported|RunResumeCommandIsSupported)|TestRunControlIntentUsesResumeAsCanonicalEnglishVerb' -count=1
 git diff --check -- internal/services/workorch/service/tui/commands.go
 ```
@@ -1983,6 +1983,6 @@ go test ./... -count=1
 WORKORCH_RUN_RESUME_VERIFY_MANAGE_INSTANCE=1 WORKORCH_RUN_RESUME_VERIFY_BUILD=1 WORKORCH_RUN_RESUME_VERIFY_TIMEOUT_SECONDS=180 ./scripts/verify-run-resume-gap-confirmation-e2e.sh
 rg -n 'activation\.run\.id|\("activation", "run", "id"\)|\("activation","run","id"\)|json_path .*activation.*run.*id|run_id="\$\(json_path .*activation' scripts -g '*.sh'
 rg -n 'func \(.*remoteRunBackend\) (Activate|Resume|Restart)|func \(.*eventHubRunBackend\) (Activate|Resume|Restart)|Run\(\)\.(Activate|Resume|Restart)\(' internal/pkg/workorchport internal/services/workorch -g '*.go' -g '!**/*_test.go'
-rg -n "/run continue|continue current run|continue_run|continue_validation|intent[^\\n]*continue|RunCommandIntentContinue|ModeContinue|mode.*continue|nextAction.*continue" internal/services/workorch internal/pkg/workorchport internal/pkg/workorchclient internal/modules/application/workorchd web/workorch-console/src docs/50-product-interface docs/20-runtime-flow docs/30-module-architecture -g '*.go' -g '*.ts' -g '*.tsx' -g '*.md'
+rg -n "旧推进命令|legacy_resume_alias|ModeContinue" internal/services/workorch internal/pkg/workorchport internal/pkg/workorchclient internal/modules/application/workorchd web/workorch-console/src docs/50-product-interface docs/20-runtime-flow docs/30-module-architecture -g '*.go' -g '*.ts' -g '*.tsx' -g '*.md'
 git diff --check
 ```

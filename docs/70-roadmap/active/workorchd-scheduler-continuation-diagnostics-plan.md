@@ -31,7 +31,7 @@ The core decision is:
 3. After workorch restart, process-local scheduler pending maps are empty by
    design. The server must not replay historical process-local pending work.
 4. If users still want execution, they must explicitly submit a new command:
-   run continue, run start/resume, workspace activation/restart, decision
+   run resume, workspace activation/restart, decision
    resolve, approval resolve, or a future manual diagnostic recovery command.
 5. Periodic watchdog may diagnose continuation anomalies, but must not create
    replan continuation from business state.

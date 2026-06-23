@@ -321,7 +321,7 @@ if msg.Decisions != nil {
 ```
 工作流:
   /goal <text>         提交新目标
-  /run continue        继续当前运行
+  /run resume          恢复当前运行
   /run restart         重启工作空间
   /dod <items>         设置验收标准
 

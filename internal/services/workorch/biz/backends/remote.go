@@ -267,8 +267,12 @@ func (b *remoteRunBackend) Command(ctx context.Context, req WorkspaceRunCommand)
 	if req.WorkspaceID == "" {
 		return nil, fmt.Errorf("%w: workspaceId is required", common.ErrInvalidArgument)
 	}
-	switch req.Intent {
-	case "", RunCommandIntentResume:
+	intent, err := NormalizeRunCommandIntent(req.Intent)
+	if err != nil {
+		return nil, err
+	}
+	switch intent {
+	case RunCommandIntentResume:
 		if req.ExpectedRunID == "" {
 			return b.resumeWorkspaceExecution(ctx, req.WorkspaceID, mergeActivationRequest(req.Activation, req))
 		}
@@ -277,11 +281,11 @@ func (b *remoteRunBackend) Command(ctx context.Context, req WorkspaceRunCommand)
 		return b.restart(ctx, req.WorkspaceID, mergeActivationRequest(req.Activation, req))
 	case RunCommandIntentReplan, RunCommandIntentRecover:
 		if req.ExpectedRunID == "" {
-			return nil, fmt.Errorf("%w: expectedRunId is required for %s", common.ErrInvalidArgument, req.Intent)
+			return nil, fmt.Errorf("%w: expectedRunId is required for %s", common.ErrInvalidArgument, intent)
 		}
-		return b.runCommandViaResume(ctx, req, req.Intent)
+		return b.runCommandViaResume(ctx, req, intent)
 	default:
-		return nil, fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, req.Intent)
+		return nil, fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, intent)
 	}
 }
 

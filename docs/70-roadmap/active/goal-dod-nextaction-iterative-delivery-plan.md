@@ -18,6 +18,7 @@ Related:
 - [MVVP Workspace ViewModel Architecture](../../30-module-architecture/mvvp-workspace-viewmodel-architecture.md)
 - [LLM Cache Improvement Design](../../30-module-architecture/llm-cache-improvement-design.md)
 - [S0.1 Command Chain Audit](./goal-dod-nextaction-s0-1-command-chain-audit.md)
+- [S1.1-S1.2 Run Command Contract](./goal-dod-nextaction-s1-1-s1-2-run-command-contract.md)
 
 ## Purpose
 
@@ -112,7 +113,7 @@ P0 Audit Baseline
 | Slice | Deliverable | Owner | Acceptance |
 | --- | --- | --- | --- |
 | S1.1 | 定义 canonical command DTO 和 scope 字段 | port/client | resume/replan/restart/approval/decision DTO 有 workspace scope |
-| S1.2 | 将 `/run continue` 入口归一化为 `resume` | TUI/port | 不产生 continue 内部状态 |
+| S1.2 | 清理旧 `continue` 运行命令表述，统一推进命令为 `/run resume` | TUI/port | 端侧和 port 只暴露 canonical run intent |
 | S1.3 | 实现 resume command accepted/rejected projection | workorchd | projection 可观察 command revision |
 | S1.4 | 实现 replan command scope 与幂等 key | workorchd | 重复 replan 不创建重复调度 |
 | S1.5 | 实现 restart replacement run command 语义 | workorchd | restart 与 resume/replan 明确分离 |

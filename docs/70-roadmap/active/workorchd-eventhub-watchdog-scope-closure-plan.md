@@ -15,7 +15,7 @@ The goal is to guide code closure item by item without expanding watchdog into a
 5. Watchdog is not normal scheduling, not startup recovery, and not an EventHub event-loss fallback.
 6. Watchdog may only compensate external interactions that can fail to return within the expected time limit, and the compensation must be idempotent or backed by durable evidence.
 7. Missing EventHub subscription, failed command enqueue, projection failure, owner command/result failure, or missing runtime notification is a design/implementation defect. These cases must be diagnosed and fixed on the main path, not silently recovered by watchdog.
-8. Service restart does not automatically resume historical running runs. Recovery after restart should be explicit: manual `/run continue`, replan, restart, or a dedicated diagnostic/recovery command.
+8. Service restart does not automatically resume historical running runs. Recovery after restart should be explicit: manual `/run resume`, replan, restart, or a dedicated diagnostic/recovery command.
 
 ## Current Status
 
@@ -227,7 +227,7 @@ Required audit:
 
 Tests:
 
-- Replan/continue for different workspaces can be queued independently.
+- Replan/resume for different workspaces can be queued independently.
 - A long runtime execution does not block command acceptance for another workspace.
 
 ### 6. Workorchd Projection and Client Display Boundary

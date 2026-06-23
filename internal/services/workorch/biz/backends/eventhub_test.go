@@ -372,6 +372,22 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 	t.Fatal("workspace snapshot did not publish CLI command")
 }
 
+func TestEventHubRunCommandRejectsUnsupportedIntent(t *testing.T) {
+	hub := events.NewMemoryHub()
+	be := NewEventHub(hub)
+	_, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
+		WorkspaceID:   "ws-eventhub",
+		ExpectedRunID: "run-001",
+		Intent:        RunCommandIntent("unsupported"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported run command intent") {
+		t.Fatalf("err = %v, want unsupported run command intent", err)
+	}
+	if len(hub.Published()) != 0 {
+		t.Fatalf("published = %+v, want no scheduler command for unsupported intent", hub.Published())
+	}
+}
+
 func TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)

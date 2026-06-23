@@ -48,6 +48,10 @@ const (
 	RunCommandIntentRecover = port.RunCommandIntentRecover
 )
 
+func NormalizeRunCommandIntent(intent RunCommandIntent) (RunCommandIntent, error) {
+	return port.NormalizeRunCommandIntent(intent)
+}
+
 type RunStatusInfo = port.RunStatusInfo
 type RuntimeExecutionInfo = port.RuntimeExecutionInfo
 type ContinuationDiagnosticInfo = port.ContinuationDiagnosticInfo

@@ -350,14 +350,9 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 	if b == nil || b.parent == nil || b.parent.eventHub == nil || req.WorkspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	intent := req.Intent
-	if intent == "" {
-		intent = RunCommandIntentResume
-	}
-	switch intent {
-	case RunCommandIntentResume, RunCommandIntentRestart, RunCommandIntentReplan, RunCommandIntentRecover:
-	default:
-		return nil, fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, req.Intent)
+	intent, err := NormalizeRunCommandIntent(req.Intent)
+	if err != nil {
+		return nil, err
 	}
 	activation := mergeActivationRequest(req.Activation, req)
 	source := normalizedRunCommandSource(firstNonEmptyBackendString(req.Source, activation.Source))

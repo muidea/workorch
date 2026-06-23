@@ -2,6 +2,7 @@ package workorchport
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -45,6 +46,17 @@ const (
 	RunCommandIntentReplan  RunCommandIntent = "replan"
 	RunCommandIntentRecover RunCommandIntent = "recover"
 )
+
+func NormalizeRunCommandIntent(intent RunCommandIntent) (RunCommandIntent, error) {
+	switch intent {
+	case "":
+		return RunCommandIntentResume, nil
+	case RunCommandIntentResume, RunCommandIntentRestart, RunCommandIntentReplan, RunCommandIntentRecover:
+		return intent, nil
+	default:
+		return "", fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, intent)
+	}
+}
 
 type WorkspaceRunCommand struct {
 	WorkspaceID           common.WorkspaceID

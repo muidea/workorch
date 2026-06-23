@@ -141,7 +141,7 @@ func (s *runContinuationScheduler) recoverStartupInactiveRunningWorkspaces(ctx c
 					Kind:           schedulerKindRunContinuation,
 					State:          schedulerDiagnosticStateNotScheduled,
 					Reason:         schedulerReasonServiceRestartedPendingWorkNotRecovered,
-					Detail:         "previous process-local execution is not recoverable after service restart; submit an explicit command to continue",
+					Detail:         "previous process-local execution is not recoverable after service restart; submit /run resume or an equivalent explicit resume command",
 					Recoverability: schedulerRecoverabilityManualRetry,
 					RecommendedActions: []string{
 						"run_resume",

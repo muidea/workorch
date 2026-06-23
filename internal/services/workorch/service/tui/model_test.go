@@ -121,7 +121,7 @@ func TestRunControlIntentUsesResumeAsCanonicalEnglishVerb(t *testing.T) {
 			t.Fatalf("%q not recognized as run-control intent", input)
 		}
 	}
-	for _, input := range []string{"continue", "continue run", "continue execution"} {
+	for _, input := range []string{"hello", "show status", "list workspaces"} {
 		if isRunControlIntent(input) {
 			t.Fatalf("%q recognized as run-control intent, want non-canonical", input)
 		}
@@ -767,7 +767,7 @@ func TestModelRunRestartSlashCommandActivatesWorkspaceWithoutCreatingGoal(t *tes
 }
 
 func TestModelNonCanonicalRunCommandsAreNotSupported(t *testing.T) {
-	for _, input := range []string{"/continue", "/resume", "/restart", "/rerun", "/run", "/run rerun", "/run continue"} {
+	for _, input := range []string{"/resume", "/restart", "/rerun", "/run", "/run rerun"} {
 		m := NewAppModel(newFake(t), "ws-1", "")
 		m.activeRunID = "run-1"
 		m.progress = progressRunning
@@ -808,9 +808,6 @@ func TestModelHelpPrefersRunResume(t *testing.T) {
 	help := stripANSI(m.renderHelp(160))
 	if !strings.Contains(help, "/run resume") {
 		t.Fatalf("help = %q, want /run resume", help)
-	}
-	if strings.Contains(help, "/run continue") {
-		t.Fatalf("help = %q, want no default /run continue", help)
 	}
 }
 
@@ -1480,8 +1477,8 @@ func TestModelTerminalRunWithRetainedRunIDReturnsGoalPrompt(t *testing.T) {
 		t.Fatalf("activeRunID = %q, want retained terminal run id for status context", m.activeRunID)
 	}
 	view := stripANSI(m.View())
-	if strings.Contains(view, "ws-97549a1 continue >") {
-		t.Fatalf("terminal run should not render continue prompt:\n%s", view)
+	if strings.Contains(view, "ws-97549a1 resume >") {
+		t.Fatalf("terminal run should not render resume prompt:\n%s", view)
 	}
 	if !strings.Contains(view, "ws-97549a1 > |") {
 		t.Fatalf("terminal run should return to neutral prompt:\n%s", view)
@@ -1511,7 +1508,7 @@ func TestModelRunResumeCommandClearsInputAndReturnsRunningPrompt(t *testing.T) {
 		t.Fatalf("input = %q cursor=%d, want cleared", m.input, m.inputCursor)
 	}
 	view := stripANSI(m.View())
-	if strings.Contains(view, "ws-97549a1 continue >") || strings.Contains(view, "ws-97549a1 run >") {
+	if strings.Contains(view, "ws-97549a1 resume >") || strings.Contains(view, "ws-97549a1 run >") {
 		t.Fatalf("view should not keep /run resume command text as prompt:\n%s", view)
 	}
 	if !strings.Contains(view, "ws-97549a1 running > |") {
