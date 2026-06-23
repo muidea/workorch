@@ -5,10 +5,11 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func (models *workspaceSnapshotModels) loadRunDerivedItems(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID) error {
+func (models *workspaceSnapshotModels) loadRunDerivedItems(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, projectionRun *runmodel.Run) error {
 	for _, runItem := range models.Runs {
 		if runItem == nil || runItem.WorkspaceID != workspaceID {
 			continue
@@ -27,7 +28,7 @@ func (models *workspaceSnapshotModels) loadRunDerivedItems(ctx context.Context, 
 			}
 			models.Patches = append(models.Patches, items...)
 		}
-		if readers.EventRecords != nil {
+		if readers.EventRecords != nil && projectionRun != nil && runItem.ID == projectionRun.ID {
 			items, err := readers.EventRecords.List(ctx, readmodelcore.RunLLMUsageEventRecordRepositoryQuery(runItem.ID, readmodelcore.DefaultLLMUsageEventRecordLimit))
 			if err != nil {
 				return err

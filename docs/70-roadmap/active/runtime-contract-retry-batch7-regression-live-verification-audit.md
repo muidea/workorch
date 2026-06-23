@@ -1445,6 +1445,95 @@ For each workspace under verification, record only bounded summaries:
   - CPU/RSS and event-record hydrate/write pressure still need bounded live
     observation after redeploy.
 
+## 2026-06-22 B7-G4 Workspace Snapshot LLM Usage Fan-Out Closure
+
+- Closed gate: focused resource-envelope code closure for workspace snapshot
+  read-model assembly.
+- Evidence:
+  - `ev:code/workspace-snapshot-llm-usage-fanout/20260622-026`
+- Observed risk:
+  - The live service remained CPU-bounded, but cumulative event-record payload
+    hydration counters were high during multi-run live execution.
+  - Code audit found that workspace snapshot assembly loaded bounded
+    workspace-scoped LLM usage and then loaded run-scoped LLM usage for every
+    historical run in the workspace.
+  - That fan-out is unnecessary for the high-frequency workspace
+    projection/detail path because the selected projection run is the only run
+    that needs run-scoped fallback usage in the default ViewModel.
+- Code closure:
+  - `loadWorkspaceSnapshotModels` now selects the projection run before loading
+    run-derived read-model items.
+  - `loadRunDerivedItems` keeps existing artifact continuation and patch reads,
+    but limits run-scoped LLM usage event hydration to the selected projection
+    run.
+  - Workspace-scoped latest LLM usage remains loaded once, and explicit run
+    observability/detail endpoints still own historical run drill-down.
+- Boundary result:
+  - The closure is projection/readmodel IO infrastructure.
+  - It does not branch on workspace template ID, Soul ID, live workspace ID,
+    provider, programming language, filenames, LSP, or business-specific text.
+- Verification:
+  - `go test ./internal/modules/application/workorchd/biz/appservice/readmodelports -run 'TestWorkspaceSnapshot(BuildsSnapshotFromReaders|MergesRunScopedLLMUsageEvents|LoadsRunScopedLLMUsageOnlyForProjectionRun|UsesCachedRunSnapshotForProjectionRun)' -count=1 -timeout=180s`
+  - `go test ./internal/modules/application/workorchd/biz/appservice/... -count=1 -timeout=300s`
+  - `./scripts/verify-boundary-contract.sh`
+  - Evidence reference integrity check over `docs/70-roadmap/active/runtime-contract-retry-*.md`: `evidence refs consistent`.
+  - `git diff --check`
+- Result:
+  - Focused readmodelports regression and appservice package regression passed.
+  - Boundary contract verification passed; the change is projection/readmodel IO and did not add business-specific branching to core.
+  - Evidence references remained complete.
+- Not closed by this record:
+  - Positive live goal convergence.
+  - Full real-provider resource verification.
+  - A fresh post-redeploy resource observation with explicit event IO delta
+    thresholds.
+
+## 2026-06-23 B7-G3 Coverage Assessment Required Output Correction Closure
+
+- Closed gate: focused live convergence correction defect for contract
+  violation retries.
+- Evidence:
+  - `ev:code/coverage-assessment-required-output-correction/20260623-027`
+- Observed blocker:
+  - Latest deployed observation had both live workspaces in
+    `waiting_decision` on `dod_assessment_missing_evidence_refs`.
+  - The failed steps' `expectedContract.repairActionPackage.requiredOutput`
+    required evidence acquisition or state-changing output, but the correction
+    profile narrowed the retry to `traceable_coverage_assessment`.
+  - This created a contract mismatch: the retry feedback could tell the LLM to
+    rewrite an assessment when the current stage still required an executable
+    evidence graph or state-changing output.
+- Code closure:
+  - Coverage / DoD-assessment contract violations now inspect the structured
+    `repairActionPackage.requiredOutput` before selecting a correction profile.
+  - If the current required output demands state-changing work, the retry keeps
+    `state_changing_output`.
+  - If it demands concrete validation evidence, the retry keeps
+    `bounded_validation_evidence`.
+  - If it demands concrete failure evidence acquisition, the retry keeps
+    `bounded_failure_evidence`.
+  - Pure assessment-stage coverage violations still use
+    `traceable_coverage_assessment`.
+- Boundary result:
+  - The closure is based only on structured runtime contract fields. It does
+    not branch on workspace ID, template ID, Soul ID, provider, language,
+    filenames, tool names, or business text.
+- Verification:
+  - `go test ./internal/modules/kernel/orchestrator/biz -run 'TestContractViolation(CorrectionProfilesCoverPrimaryRules|CoverageAssessmentPreservesCurrentRequiredOutputShape|RecoveryActionRetriesWithinBudget|RuntimeRepairInputIncludesContractViolationRecovery)' -count=1 -timeout=240s`
+  - `go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s`
+  - `go test ./internal/modules/application/workorchd/biz/appservice/... ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s`
+  - `./scripts/verify-boundary-contract.sh`
+  - Evidence reference integrity check over `docs/70-roadmap/active/runtime-contract-retry-*.md`: `evidence refs consistent`.
+  - `go build -o ./bin/workorch ./application/workorch`
+  - `git diff --check`
+- Result:
+  - Targeted and package regressions passed.
+  - Boundary contract verification passed; the change is driven by structured runtime contract fields only.
+  - Evidence references remained complete, diff whitespace was clean, and `./bin/workorch` rebuilt successfully.
+- Not closed by this record:
+  - Fresh post-redeploy positive live convergence after explicit replan/resume.
+  - Full real-provider resource verification.
+
 ## Batch 7 Decision
 
 Batch 7 verification inventory is audit-complete for the current evidence packet. Unit, boundary, evidence-reference verification, targeted mock LLM deployed e2e, full CI-safe managed deployed e2e, managed mock resource loadtest, live projection observation, and real-runtime preflight have now been executed for the current code closure packet. Live goal convergence and full real-provider resource verification remain pending.

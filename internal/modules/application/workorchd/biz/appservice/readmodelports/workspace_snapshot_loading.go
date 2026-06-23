@@ -18,7 +18,8 @@ func loadWorkspaceSnapshotModels(ctx context.Context, readers WorkspaceSnapshotR
 	if err := readmodelcore.RunTasks(tasks...); err != nil {
 		return workspaceSnapshotModels{}, err
 	}
-	if err := models.loadRunDerivedItems(ctx, readers, workspaceID); err != nil {
+	projectionRun := models.selectProjectionRun()
+	if err := models.loadRunDerivedItems(ctx, readers, workspaceID, projectionRun); err != nil {
 		return workspaceSnapshotModels{}, err
 	}
 	decisions, err := DecisionsForWorkspaceItems(ctx, readers.Resolutions, readers.AutoGovernanceTraces, workspaceID, models.Tickets)

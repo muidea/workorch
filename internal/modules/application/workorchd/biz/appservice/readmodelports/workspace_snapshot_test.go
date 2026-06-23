@@ -43,8 +43,8 @@ func TestWorkspaceSnapshotBuildsSnapshotFromReaders(t *testing.T) {
 	if len(got.Runs) != 1 || got.Runs[0].ID != string(run.ID) {
 		t.Fatalf("runs = %+v, want seeded run", got.Runs)
 	}
-	if events.calls != 3 {
-		t.Fatalf("event reader calls = %d, want workspace events, workspace llm usage and run llm usage queries", events.calls)
+	if events.calls != 2 {
+		t.Fatalf("event reader calls = %d, want workspace events and workspace llm usage queries", events.calls)
 	}
 }
 
@@ -67,16 +67,30 @@ func TestWorkspaceSnapshotMergesRunScopedLLMUsageEvents(t *testing.T) {
 			},
 		},
 	}
+	cached := &readmodelcore.RunSnapshot{
+		Workspace: appmodelcore.Workspace{
+			ID:          string(workspaceID),
+			Title:       "workspace run usage",
+			State:       string(common.WorkspaceStateRunning),
+			ActiveRunID: string(secondRunID),
+		},
+		Run: appmodelcore.Run{
+			ID:          string(secondRunID),
+			WorkspaceID: string(workspaceID),
+			State:       string(common.RunStateRunning),
+		},
+	}
 
 	got, err := WorkspaceSnapshot(context.Background(), WorkspaceSnapshotReaders{
 		Workspaces: fakeRunSnapshotWorkspaceReader{items: []*workspacemodel.Workspace{{
-			ID:    workspaceID,
-			Title: "workspace run usage",
-			State: common.WorkspaceStateActive,
+			ID:          workspaceID,
+			Title:       "workspace run usage",
+			State:       common.WorkspaceStateRunning,
+			ActiveRunID: secondRunID,
 		}}},
 		Runs: fakeRunStatusRunReader{items: []*runmodel.Run{
 			{ID: firstRunID, WorkspaceID: workspaceID, State: common.RunStateCompleted},
-			{ID: secondRunID, WorkspaceID: workspaceID, State: common.RunStateCompleted},
+			{ID: secondRunID, WorkspaceID: workspaceID, State: common.RunStateRunning},
 		}},
 		Results:               fakeWorkspaceSnapshotResultReader{},
 		Artifacts:             fakeRunSnapshotArtifactReader{},
@@ -86,7 +100,7 @@ func TestWorkspaceSnapshotMergesRunScopedLLMUsageEvents(t *testing.T) {
 		Tickets:               fakeTicketReader{},
 		Resolutions:           fakeResolutionReader{},
 		Approvals:             fakeApprovalListReader{},
-	}, workspaceID, nil)
+	}, workspaceID, cached)
 	if err != nil {
 		t.Fatalf("WorkspaceSnapshot: %v", err)
 	}
@@ -146,6 +160,62 @@ func TestWorkspaceSnapshotUsesCachedRunSnapshotForProjectionRun(t *testing.T) {
 	}
 	if got.TaskProgress.Summary != "cached task progress" {
 		t.Fatalf("task progress summary = %q, want cached task progress", got.TaskProgress.Summary)
+	}
+}
+
+func TestWorkspaceSnapshotLoadsRunScopedLLMUsageOnlyForProjectionRun(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-workspace-usage-projection-run")
+	historicalRunID := common.RunID("run-workspace-usage-history")
+	activeRunID := common.RunID("run-workspace-usage-active")
+	reader := &recordingWorkspaceEventReader{}
+	cached := &readmodelcore.RunSnapshot{
+		Workspace: appmodelcore.Workspace{
+			ID:          string(workspaceID),
+			Title:       "cached workspace",
+			State:       string(common.WorkspaceStateRunning),
+			ActiveRunID: string(activeRunID),
+		},
+		Run: appmodelcore.Run{
+			ID:          string(activeRunID),
+			WorkspaceID: string(workspaceID),
+			State:       string(common.RunStateRunning),
+		},
+	}
+
+	_, err := WorkspaceSnapshot(context.Background(), WorkspaceSnapshotReaders{
+		Workspaces: fakeRunSnapshotWorkspaceReader{items: []*workspacemodel.Workspace{{
+			ID:          workspaceID,
+			Title:       "workspace usage projection run",
+			State:       common.WorkspaceStateRunning,
+			ActiveRunID: activeRunID,
+		}}},
+		Runs: fakeRunStatusRunReader{items: []*runmodel.Run{
+			{ID: historicalRunID, WorkspaceID: workspaceID, State: common.RunStateCompleted},
+			{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		}},
+		Results:               fakeWorkspaceSnapshotResultReader{},
+		Artifacts:             fakeRunSnapshotArtifactReader{},
+		ArtifactContinuations: fakeRunSnapshotArtifactContinuationReader{},
+		EventRecords:          reader,
+		Patches:               fakeRunSnapshotPatchReader{},
+		Tickets:               fakeTicketReader{},
+		Resolutions:           fakeResolutionReader{},
+		Approvals:             fakeApprovalListReader{},
+	}, workspaceID, cached)
+	if err != nil {
+		t.Fatalf("WorkspaceSnapshot: %v", err)
+	}
+
+	var runScoped []common.RunID
+	for _, query := range reader.queries {
+		if query.RunID != "" && query.Topic == runevents.TopicRunLLMUsageRecorded {
+			runScoped = append(runScoped, query.RunID)
+		}
+	}
+	if len(runScoped) != 1 || runScoped[0] != activeRunID {
+		t.Fatalf("run-scoped llm usage queries = %+v, want only active projection run %s", runScoped, activeRunID)
 	}
 }
 

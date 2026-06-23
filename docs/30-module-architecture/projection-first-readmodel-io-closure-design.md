@@ -739,6 +739,27 @@ Verification:
 WORKORCH_MANAGED_VERIFY_KEEP_ARTIFACTS=1 make verify-runtime-idle-baseline
 ```
 
+2026-06-22 workspace snapshot LLM usage fan-out closure:
+
+- `WorkspaceSnapshot` already loads bounded workspace-scoped LLM usage events.
+- The historical fallback also queried run-scoped LLM usage for every run in the
+  workspace, which could hydrate event payloads proportional to historical run
+  count during projection rebuild/detail warmup.
+- The fallback now queries run-scoped LLM usage only for the selected
+  projection run. This preserves active-run usage completion while avoiding
+  full historical run fan-out on high-frequency workspace snapshot paths.
+- Historical LLM usage remains available through workspace-scoped latest usage
+  summaries and explicit run observability/detail endpoints.
+
+Verification:
+
+```bash
+go test ./internal/modules/application/workorchd/biz/appservice/readmodelports -run 'TestWorkspaceSnapshot(BuildsSnapshotFromReaders|MergesRunScopedLLMUsageEvents|LoadsRunScopedLLMUsageOnlyForProjectionRun|UsesCachedRunSnapshotForProjectionRun)' -count=1 -timeout=180s
+go test ./internal/modules/application/workorchd/biz/appservice/... -count=1 -timeout=300s
+./scripts/verify-boundary-contract.sh
+git diff --check
+```
+
 ## Source Documents
 
 - `application-workorchd.md`

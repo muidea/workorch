@@ -189,6 +189,11 @@ func TestContractViolationCorrectionProfilesCoverPrimaryRules(t *testing.T) {
 				ensureConcreteValidationScratchContract(failed.Input, pkg, required)
 				failed.Input["repairActionPackage"] = pkg
 			}
+			if tt.wantRule == contractViolationRuleDoDAssessmentEvidenceMissing {
+				failed.Input = map[string]any{
+					stepInputKeyRuntimeStage: "assessment",
+				}
+			}
 			if tt.wantTargetRule {
 				pkg := mapFromValue(failed.Input["repairActionPackage"])
 				pkg["targetSnapshots"] = []map[string]any{{
@@ -222,6 +227,92 @@ func TestContractViolationCorrectionProfilesCoverPrimaryRules(t *testing.T) {
 				if snapshots := mapSliceFromValue(contract["targetSnapshots"]); len(snapshots) != 1 || stringFromMap(snapshots[0], "targetRef") != "target.txt" {
 					t.Fatalf("targetSnapshots = %+v, want compact target snapshot", contract["targetSnapshots"])
 				}
+			}
+		})
+	}
+}
+
+func TestContractViolationCoverageAssessmentPreservesCurrentRequiredOutputShape(t *testing.T) {
+	tests := []struct {
+		name          string
+		configure     func(map[string]any, map[string]any)
+		wantProfile   string
+		wantShape     string
+		wantRequired  string
+		wantForbidden string
+	}{
+		{
+			name: "evidence acquisition",
+			configure: func(input map[string]any, required map[string]any) {
+				input[stepInputKeyRuntimeStage] = runtimeStageRepair
+				input["repairObjective"] = repairObjectiveAcquireFailureEvidence
+				delete(input, "stateChangingOutputRequired")
+				required["mustIncludeStateChangingNode"] = false
+				required["mustProduceConcreteFailureEvidence"] = true
+				required["acceptedKinds"] = []string{"file/read", "shell/command", "mcp/tool_call", "git/read"}
+				required["forbiddenKinds"] = []string{"patch/apply", "llm/workspace_execution"}
+				required["deliverableWriteForbidden"] = true
+			},
+			wantProfile:   "concrete_failure_evidence",
+			wantShape:     "bounded_failure_evidence",
+			wantRequired:  "executionGraph.nodes",
+			wantForbidden: "patch/apply",
+		},
+		{
+			name: "state changing",
+			configure: func(input map[string]any, required map[string]any) {
+				input[stepInputKeyRuntimeStage] = runtimeStageRepair
+				input["repairObjective"] = repairObjectiveStateChangingOutput
+				input["stateChangingOutputRequired"] = true
+				required["mustIncludeStateChangingNode"] = true
+				required["acceptedKinds"] = []string{"patch/apply"}
+			},
+			wantProfile:   "state_changing_required_output",
+			wantShape:     "state_changing_output",
+			wantRequired:  "stateChangingOutputRequired",
+			wantForbidden: "failed_dodAssessment_only",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runID := common.RunID("run-contract-coverage-required-output-" + strings.ReplaceAll(tt.name, " ", "-"))
+			run := &runmodel.Run{ID: runID, WorkspaceID: common.WorkspaceID("ws-" + strings.ReplaceAll(tt.name, " ", "-")), InitialStepKind: llmWorkspaceExecutionStepKind}
+			failed := contractViolationFailedStep(runID, "failed-coverage-required-output")
+			failed.Output = map[string]any{
+				"stage":                   "llm_dod_assessment",
+				"error":                   "invalid argument: dodAssessment is not satisfied",
+				failureOutputKeyClass:     failureClassDoDCoverageMissing,
+				failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+				"dodAssessment": map[string]any{
+					"satisfied": false,
+					"summary":   "not enough evidence",
+				},
+			}
+			pkg := mapFromValue(failed.Input["repairActionPackage"])
+			required := mapFromValue(pkg["requiredOutput"])
+			tt.configure(failed.Input, required)
+			pkg["requiredOutput"] = required
+			failed.Input["repairActionPackage"] = pkg
+
+			attachContractViolationDiagnostics(run, failed, errors.New("invalid argument: dodAssessment is not satisfied"))
+
+			recovery := contractViolationFromFailedOutput(failed)
+			if got := stringFromMap(recovery, "violatedRule"); got != contractViolationRuleDoDAssessmentEvidenceMissing {
+				t.Fatalf("violatedRule = %q, want %s; recovery=%+v", got, contractViolationRuleDoDAssessmentEvidenceMissing, recovery)
+			}
+			if got := stringFromMap(recovery, "correctionProfileId"); got != tt.wantProfile {
+				t.Fatalf("correctionProfileId = %q, want %s; recovery=%+v", got, tt.wantProfile, recovery)
+			}
+			contract := mapFromValue(recovery["correctionContract"])
+			if got := stringFromMap(contract, "requiredOutputShape"); got != tt.wantShape {
+				t.Fatalf("requiredOutputShape = %q, want %s; contract=%+v", got, tt.wantShape, contract)
+			}
+			if !stringSliceContains(stringSliceFromValue(contract["forbiddenOutputs"]), tt.wantForbidden) {
+				t.Fatalf("forbiddenOutputs = %+v, want %s", contract["forbiddenOutputs"], tt.wantForbidden)
+			}
+			if !stringSliceContains(stringSliceFromValue(contract["requiredFields"]), tt.wantRequired) &&
+				!stringSliceContains(stringSliceFromValue(contract["mustSatisfy"]), tt.wantRequired) {
+				t.Fatalf("contract = %+v, want required marker %s", contract, tt.wantRequired)
 			}
 		})
 	}

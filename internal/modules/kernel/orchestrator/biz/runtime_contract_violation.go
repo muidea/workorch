@@ -457,10 +457,14 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 			contract["availableTargetSnapshots"] = snapshots
 		}
 	case contractViolationRuleCoverageMapIncomplete, contractViolationRuleDoDAssessmentEvidenceMissing:
-		profileID = "coverage_evidence_assessment"
-		contract["requiredOutputShape"] = "traceable_coverage_assessment"
-		contract["requiredFields"] = []string{"dodAssessment.items", "evidenceRefs"}
-		contract["forbiddenOutputs"] = []string{"satisfied_item_without_evidenceRefs", "coverage_map_missing_current_goal_or_dod", "untraceable_summary_only"}
+		if profile, ok := contractViolationRequiredOutputCorrectionProfile(step, contract); ok {
+			profileID = profile
+		} else {
+			profileID = "coverage_evidence_assessment"
+			contract["requiredOutputShape"] = "traceable_coverage_assessment"
+			contract["requiredFields"] = []string{"dodAssessment.items", "evidenceRefs"}
+			contract["forbiddenOutputs"] = []string{"satisfied_item_without_evidenceRefs", "coverage_map_missing_current_goal_or_dod", "untraceable_summary_only"}
+		}
 	case contractViolationRuleUnparseableOutput, contractViolationRuleWrongOutputShape:
 		profileID = "json_output_shape"
 		contract["requiredOutputShape"] = "single_valid_json_decision"
@@ -479,6 +483,54 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 		"targetScope": targetScope,
 		"contract":    contract,
 	}
+}
+
+func contractViolationRequiredOutputCorrectionProfile(step *runModel.Step, contract map[string]any) (string, bool) {
+	if step == nil || contract == nil {
+		return "", false
+	}
+	pkg := mapFromValue(step.Input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	if len(required) == 0 {
+		return "", false
+	}
+	if boolValue(step.Input["stateChangingOutputRequired"]) || boolValue(required["mustIncludeStateChangingNode"]) {
+		contract["requiredOutputShape"] = "state_changing_output"
+		contract["allowedOutputs"] = []string{"executionGraph_with_state_changing_node", "patch/apply", "accepted_state_changing_tool_or_shell", "incremental_artifact_state_change", "blocked_on_decision", "blocked_on_approval"}
+		contract["forbiddenOutputs"] = []string{"failed_dodAssessment_only", "read_only_executionGraph", "same_actualOutputSummary"}
+		contract["mustSatisfy"] = []string{"stateChangingOutputRequired", "repairActionPackage.requiredOutput"}
+		return "state_changing_required_output", true
+	}
+	if boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		contract["requiredOutputShape"] = "bounded_validation_evidence"
+		contract["allowedOutputs"] = []string{"executionGraph_with_declared_validationEvidence", "satisfied_dodAssessment_with_concrete_evidenceRefs", "blocked_on_decision", "blocked_on_approval"}
+		contract["requiredFields"] = []string{"validationEvidence.mode", "validationEvidence.observationType"}
+		contract["forbiddenOutputs"] = []string{"failed_dodAssessment_only", "static_inspection_only", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}
+		if scratch := validationScratchDirFromStep(step); scratch != "" {
+			contract[validationScratchDirKey] = scratch
+		}
+		return "concrete_validation_evidence", true
+	}
+	if boolValue(required["mustProduceConcreteFailureEvidence"]) {
+		contract["requiredOutputShape"] = "bounded_failure_evidence"
+		contract["allowedOutputs"] = []string{"executionGraph_with_bounded_evidence_acquisition", "failed_dodAssessment_with_specific_non_recoverable_blocker", "blocked_on_decision", "blocked_on_approval"}
+		contract["requiredFields"] = []string{"executionGraph.nodes", "evidenceRefs_or_specific_blocker"}
+		contract["forbiddenOutputs"] = []string{"failed_dodAssessment_only", "patch/apply", "patch/preview", "llm/workspace_execution", "deliverable_mutating_evidence_acquisition", "untraceable_summary_only"}
+		if acceptedKinds := stringSliceFromValue(required["acceptedKinds"]); len(acceptedKinds) > 0 {
+			contract["acceptedKinds"] = acceptedKinds
+		}
+		if forbiddenKinds := stringSliceFromValue(required["forbiddenKinds"]); len(forbiddenKinds) > 0 {
+			contract["forbiddenKinds"] = forbiddenKinds
+		}
+		if boolValue(required["deliverableWriteForbidden"]) {
+			contract["deliverableWriteForbidden"] = true
+		}
+		if scratch := validationScratchDirFromStep(step); scratch != "" {
+			contract[validationScratchDirKey] = scratch
+		}
+		return "concrete_failure_evidence", true
+	}
+	return "", false
 }
 
 func contractViolationOutputClaimsMissingAvailableSnapshot(step *runModel.Step) bool {

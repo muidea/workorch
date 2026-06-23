@@ -1330,6 +1330,36 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 | closureBatch | 7 |
 | loadByDefault | false |
 
+### ev:code/workspace-snapshot-llm-usage-fanout/20260622-026
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-WORKSPACE-SNAPSHOT-LLM-USAGE-FANOUT-20260622-026` |
+| workspaceId | n/a |
+| runId | n/a |
+| evidenceKind | code-and-test-output |
+| sourcePath | `internal/modules/application/workorchd/biz/appservice/readmodelports/workspace_snapshot_loading.go`, `internal/modules/application/workorchd/biz/appservice/readmodelports/workspace_snapshot_run_derived_loading.go`, `internal/modules/application/workorchd/biz/appservice/readmodelports/workspace_snapshot_test.go` |
+| extractCommand | `go test ./internal/modules/application/workorchd/biz/appservice/readmodelports -run 'TestWorkspaceSnapshot(BuildsSnapshotFromReaders|MergesRunScopedLLMUsageEvents|LoadsRunScopedLLMUsageOnlyForProjectionRun|UsesCachedRunSnapshotForProjectionRun)' -count=1 -timeout=180s` |
+| extractedSummary | Workspace snapshot assembly previously loaded bounded workspace-scoped LLM usage and then loaded run-scoped LLM usage for every historical run. That created payload hydration fan-out on high-frequency workspace snapshot/projection paths as run history grew. Local closure keeps workspace-scoped usage and only supplements run-scoped usage for the selected projection run, preserving active-run usage completeness without hydrating every historical run. Regression tests prove no projection run performs only workspace-level event queries, active projection run usage is still merged, and historical runs are not queried for run-scoped LLM usage. |
+| owner | projection/readmodel IO |
+| closureBatch | 7 |
+| loadByDefault | false |
+
+### ev:code/coverage-assessment-required-output-correction/20260623-027
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-COVERAGE-ASSESSMENT-REQUIRED-OUTPUT-CORRECTION-20260623-027` |
+| workspaceId | `ws-4e83810542ac4d65`, `ws-7ced70e98ea50c43` |
+| runId | `run-003` |
+| evidenceKind | code-and-test-output |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_contract_violation.go`, `internal/modules/kernel/orchestrator/biz/runtime_contract_violation_test.go` |
+| extractCommand | `go test ./internal/modules/kernel/orchestrator/biz -run 'TestContractViolation(CorrectionProfilesCoverPrimaryRules|CoverageAssessmentPreservesCurrentRequiredOutputShape|RecoveryActionRetriesWithinBudget|RuntimeRepairInputIncludesContractViolationRecovery)' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; go test ./internal/modules/application/workorchd/biz/appservice/... ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh; go build -o ./bin/workorch ./application/workorch; git diff --check` |
+| extractedSummary | Latest deployed observation showed both live workspaces blocked on `dod_assessment_missing_evidence_refs` while their `expectedContract.repairActionPackage.requiredOutput` still required evidence acquisition or state-changing output. The previous correction profile always narrowed this rule to `traceable_coverage_assessment`, which could steer the next retry toward another assessment instead of the current required output shape. The closure now derives the correction profile from structured `repairActionPackage.requiredOutput`: state-changing requirements keep `state_changing_output`, concrete validation requirements keep `bounded_validation_evidence`, and concrete failure evidence acquisition keeps `bounded_failure_evidence`. Pure assessment-stage coverage violations still use `traceable_coverage_assessment`. Targeted tests, appservice/orchestrator package tests, boundary verification, evidence reference integrity, whitespace check, and `./bin/workorch` build passed. |
+| owner | core runtime contract retry |
+| closureBatch | 7 |
+| loadByDefault | false |
+
 ### ev:code/patch-basehash-refresh-repair/20260622-021
 
 | Field | Value |
