@@ -184,20 +184,7 @@ func TestRuntimeOrchestrator_ResumeRunClearsResolvedDecisionBeforeGapBaselineRef
 	stepID := common.StepID("run-resume-gap-baseline/step-1")
 	nextStepID := common.StepID("run-resume-gap-baseline/llm-after-decision")
 	ticketID := common.TicketID("ticket-resume-gap-baseline")
-	var runtimeObservedState common.RunState
-	var runtimeObservedTicket common.TicketID
-	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
-		if request.StepID != nextStepID {
-			return map[string]any{"status": "unexpected step"}, nil
-		}
-		current, err := runRepo.Get(ctx, runID)
-		if err != nil {
-			return nil, err
-		}
-		runtimeObservedState = current.State
-		runtimeObservedTicket = current.BlockingTicketID
-		return map[string]any{"status": "ok"}, nil
-	}}
+	runtime := &requestOnlyRuntimeAdapter{}
 	orch := NewRuntimeOrchestratorWithResolutions(
 		runtime,
 		runRepo,
@@ -230,6 +217,15 @@ func TestRuntimeOrchestrator_ResumeRunClearsResolvedDecisionBeforeGapBaselineRef
 		BlockingTicketID: ticketID,
 		InitialStepKind:  llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-resume-gap-baseline",
+			"dod": map[string]any{
+				"id": "dod-resume-gap-baseline",
+				"items": []map[string]any{{
+					"id":                    "dod-resume-gap-baseline-item",
+					"text":                  "resolved decision continuation",
+					"requiredEvidenceKinds": []string{"validation"},
+				}},
+			},
 			coverageWorkItemsKey: []map[string]any{coverageItem},
 			coverageWorkItemContextKey: map[string]any{
 				"definitionRevision":    "rev-resume-gap-baseline",
@@ -238,6 +234,13 @@ func TestRuntimeOrchestrator_ResumeRunClearsResolvedDecisionBeforeGapBaselineRef
 				"currentFocusItems":     []map[string]any{coverageItem},
 				"currentFocus":          coverageItem,
 				"coverageWorkItemCount": 1,
+			},
+			gapBaselineKey: map[string]any{
+				"schemaVersion":    gapBaselineSchema,
+				"workspaceId":      string(workspaceID),
+				"runId":            string(runID),
+				"baselineRevision": "stale-before-resume",
+				"nextAction":       map[string]any{"kind": "schedule_step"},
 			},
 		},
 	}); err != nil {
@@ -278,22 +281,35 @@ func TestRuntimeOrchestrator_ResumeRunClearsResolvedDecisionBeforeGapBaselineRef
 		t.Fatalf("ResumeRun: %v", err)
 	}
 
-	if runtimeObservedState != common.RunStateRunning || runtimeObservedTicket != "" {
-		t.Fatalf("runtime observed run state=%s ticket=%q, want running with no blocker", runtimeObservedState, runtimeObservedTicket)
+	if len(runtime.requests) != 1 || runtime.requests[0].StepID != nextStepID {
+		t.Fatalf("runtime requests = %+v, want one resumed dispatch request", runtime.requests)
+	}
+	runtimeObservedInput := runtime.requests[0].Input
+	observedBaseline := mapFromValue(runtimeObservedInput[gapBaselineKey])
+	if stringFromMap(observedBaseline, "definitionRevision") != "rev-resume-gap-baseline" ||
+		stringFromMap(observedBaseline, "baselineRevision") == "stale-before-resume" {
+		t.Fatalf("runtime gapBaseline = %+v, want refreshed baseline before dispatch", observedBaseline)
+	}
+	if todos := mapSliceFromValue(observedBaseline["todoItems"]); len(todos) != 1 || stringFromMap(todos[0], "id") != "cwi-001" {
+		t.Fatalf("runtime gapBaseline.todoItems = %+v, want current open coverage item", observedBaseline["todoItems"])
 	}
 	runItem, err := runRepo.Get(ctx, runID)
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if runItem.State != common.RunStateCompleted || runItem.BlockingTicketID != "" {
-		t.Fatalf("run = %+v, want completed with cleared decision blocker", runItem)
+	if runItem.State != common.RunStateRunning || runItem.BlockingTicketID != "" {
+		t.Fatalf("run = %+v, want running with cleared decision blocker", runItem)
+	}
+	persistedBaseline := mapFromValue(runItem.ExecutionContext[gapBaselineKey])
+	if stringFromMap(persistedBaseline, "baselineRevision") == "stale-before-resume" {
+		t.Fatalf("persisted gapBaseline = %+v, want refreshed baseline after resume", persistedBaseline)
 	}
 	nextStep, err := stepRepo.Get(ctx, nextStepID)
 	if err != nil {
 		t.Fatalf("get next step: %v", err)
 	}
-	if nextStep.State != common.StepStateCompleted || nextStep.Output["status"] == "ignored" {
-		t.Fatalf("next step = %+v, want accepted completed output", nextStep)
+	if nextStep.State != common.StepStateDispatched {
+		t.Fatalf("next step = %+v, want dispatched request-only step", nextStep)
 	}
 }
 

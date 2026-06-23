@@ -369,6 +369,10 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 					return errors.Join(o.failRunningResume(ctx, r.ID, cause), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 				}
 			}
+			specs, specErr = o.prepareGapBaselineDispatchSpecs(ctx, r, specs)
+			if specErr != nil {
+				return errors.Join(o.failRunningResume(ctx, r.ID, specErr), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
+			}
 			r.State = common.RunStateRunning
 			r.FailureReason = ""
 			mergeRunExecutionContextPatch(r, executionContextPatch)
@@ -438,6 +442,10 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	resumeRun.BlockingTicketID = ""
 	resumeRun.BlockingApprovalID = ""
 	mergeResumeInput(specs, resumeInput)
+	specs, err = o.prepareGapBaselineDispatchSpecs(ctx, resumeRun, specs)
+	if err != nil {
+		return o.failResolvedDecisionResume(ctx, r, originalResumeState, executionContextPatch, err)
+	}
 	r.State = resumeRun.State
 	r.FailureReason = resumeRun.FailureReason
 	r.BlockingTicketID = resumeRun.BlockingTicketID

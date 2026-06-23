@@ -43,6 +43,44 @@ func (o *RuntimeOrchestrator) ensureGapBaselineBeforeDispatch(ctx context.Contex
 	return nil
 }
 
+func (o *RuntimeOrchestrator) prepareGapBaselineDispatchSpecs(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec) ([]stepDispatchSpec, error) {
+	if len(specs) == 0 {
+		return specs, nil
+	}
+	if err := o.ensureGapBaselineBeforeDispatch(ctx, run); err != nil {
+		return nil, err
+	}
+	if gated, err := gapBaselineDispatchGate(run); gated || err != nil {
+		return nil, err
+	}
+	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
+	baseline := mapFromValue(run.ExecutionContext[gapBaselineKey])
+	if len(context) == 0 && len(baseline) == 0 {
+		return specs, nil
+	}
+	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
+	ret := make([]stepDispatchSpec, len(specs))
+	for idx, spec := range specs {
+		ret[idx] = spec
+		input := cloneStepPayload(spec.Input)
+		if input == nil {
+			input = map[string]any{}
+		}
+		if len(context) > 0 {
+			if existing := mapFromValue(input[coverageWorkItemContextKey]); len(existing) > 0 {
+				input[coverageWorkItemContextKey] = coverageWorkItemContextAlignedToFocus(existing, focus)
+			} else {
+				input[coverageWorkItemContextKey] = coverageWorkItemContextAlignedToFocus(context, focus)
+			}
+		}
+		if len(baseline) > 0 {
+			input[gapBaselineKey] = cloneStepPayload(baseline)
+		}
+		ret[idx].Input = input
+	}
+	return ret, nil
+}
+
 func gapBaselineFromRun(run *runModel.Run) map[string]any {
 	if run == nil {
 		return nil
