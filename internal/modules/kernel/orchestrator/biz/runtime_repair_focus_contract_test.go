@@ -32,6 +32,55 @@ func TestRepairActionPackageDeclaresCoverageFocusBinding(t *testing.T) {
 	}
 }
 
+func TestCanonicalRepairCoverageFocusBindingContractIncludesEquivalentTokens(t *testing.T) {
+	focus := map[string]any{
+		"id":                    "focus-cwi-primary",
+		"coverageWorkItemIds":   []string{"cwi-primary"},
+		"sourceRequirementId":   "goal-primary",
+		"targetText":            "primary closure",
+		"targetRefs":            []string{"primary-resource"},
+		"coverageTargetToken":   "goal-primary",
+		"requiredEvidenceKinds": []string{"state_change", "validation"},
+	}
+	required := map[string]any{
+		"mustBindCoverageFocus": true,
+		"coverageWorkItemIds":   []string{"cwi-primary"},
+	}
+	pkg := map[string]any{
+		"coverageRepairRequired": true,
+		"coverageTargetSet": []map[string]any{{
+			"coverageWorkItemId":  "cwi-primary",
+			"coverageTargetToken": "goal-primary",
+			"sourceRequirementId": "goal-primary",
+			"targetText":          "primary closure",
+		}},
+	}
+
+	contract := canonicalRepairCoverageFocusBindingContract(focus, required, pkg)
+	wantTokens := []string{"focus-cwi-primary", "cwi-primary", "goal-primary", "primary closure", "primary-resource"}
+	for _, token := range wantTokens {
+		if !stringSliceContainsNormalizedCoverageToken(contract.ExpectedTokens, token) {
+			t.Fatalf("ExpectedTokens = %+v, want token %q", contract.ExpectedTokens, token)
+		}
+	}
+	if !repairPayloadBindsCoverageFocus(map[string]any{"coverageTargets": []string{"goal-primary"}}, contract) {
+		t.Fatalf("coverageTargets did not bind canonical focus contract: %+v", contract)
+	}
+}
+
+func stringSliceContainsNormalizedCoverageToken(values []string, want string) bool {
+	want = normalizeCoverageGapRepairToken(want)
+	if want == "" {
+		return false
+	}
+	for _, value := range values {
+		if normalizeCoverageGapRepairToken(value) == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestValidateLLMRepairCoverageFocusRejectsUnboundPatchGraph(t *testing.T) {
 	run := repairFocusContractRun()
 	step := repairFocusContractStep()
@@ -140,6 +189,45 @@ func TestRepairCoverageFocusContractSurvivesEvidenceRequiredOutputRebuild(t *tes
 	}
 	if got := stringFromMap(validationRequired, "coverageFocusId"); got != "focus-cwi-primary" {
 		t.Fatalf("validation coverageFocusId = %q, want focus-cwi-primary", got)
+	}
+}
+
+func TestApplyConvergenceContractNeedEvidencePreservesCoverageFocus(t *testing.T) {
+	input := repairFocusContractInput()
+	delete(input, "stateChangingOutputRequired")
+	delete(input, "targetSnapshots")
+	input["repairObjective"] = repairObjectiveAcquireFailureEvidence
+	input["concreteFailureEvidenceRequired"] = true
+	input["repairActionPackage"] = map[string]any{
+		coverageFocusKey:               cloneStepPayload(mapFromValue(input[coverageFocusKey])),
+		"coverageFocusBindingRequired": true,
+		"requiredOutput": map[string]any{
+			"mustReferenceCoverageWorkItem": true,
+		},
+	}
+	contract := ConvergenceContract{
+		State:                           convergenceStateNeedEvidence,
+		RuntimeStage:                    runtimeStageRepair,
+		RuntimeStageMode:                "strict_convergence",
+		RepairObjective:                 repairObjectiveAcquireFailureEvidence,
+		ConcreteFailureEvidenceRequired: true,
+		RepairActionPackage:             cloneStepPayload(mapFromValue(input["repairActionPackage"])),
+	}
+
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	pkg := mapFromValue(applied["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustBindCoverageFocus"]) {
+		t.Fatalf("requiredOutput = %+v, want mustBindCoverageFocus after need_evidence apply", required)
+	}
+	if got := stringFromMap(required, "coverageFocusId"); got != "focus-cwi-primary" {
+		t.Fatalf("coverageFocusId = %q, want focus-cwi-primary", got)
+	}
+	if got := stringSliceFromValue(required["coverageWorkItemIds"]); len(got) != 1 || got[0] != "cwi-primary" {
+		t.Fatalf("coverageWorkItemIds = %+v, want cwi-primary", got)
+	}
+	if len(mapFromValue(pkg[coverageFocusKey])) == 0 || !boolValue(pkg["coverageFocusBindingRequired"]) {
+		t.Fatalf("repairActionPackage focus fields = %+v, want focus binding required", pkg)
 	}
 }
 

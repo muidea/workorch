@@ -236,7 +236,8 @@ func BuildConvergenceContract(
 		contract.ConcreteFailureEvidenceRequired = true
 		contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
 		if len(contract.RepairActionPackage) == 0 {
-			contract.RepairActionPackage = map[string]any{"requiredOutput": evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput())}
+			contract.RepairActionPackage = map[string]any{"requiredOutput": stateChangingRepairRequiredOutput()}
+			contract.RepairActionPackage["requiredOutput"] = evidenceAcquisitionRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
 		}
 		return contract
 	}
@@ -256,7 +257,8 @@ func BuildConvergenceContract(
 		contract.RuntimeStageMode = "strict_convergence"
 		contract.RepairObjective = repairObjectiveAcquireFailureEvidence
 		contract.ConcreteFailureEvidenceRequired = true
-		contract.RepairActionPackage = map[string]any{"requiredOutput": evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput())}
+		contract.RepairActionPackage = map[string]any{"requiredOutput": stateChangingRepairRequiredOutput()}
+		contract.RepairActionPackage["requiredOutput"] = evidenceAcquisitionRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
 		return contract
 	}
 	return contract
@@ -384,10 +386,7 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 	if status == "satisfied" {
 		return false
 	}
-	missing := stringSet(stringSliceFromValue(focus["missingEvidenceKinds"]))
-	if len(missing) == 0 {
-		missing = stringSet(coverageMissingEvidenceKinds(focus))
-	}
+	missing := coverageWorkItemMissingEvidenceKindSet(focus)
 	contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
 	if len(contract.RepairActionPackage) == 0 {
 		contract.RepairActionPackage = map[string]any{}
@@ -414,21 +413,11 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 	if coverageWorkItemFocusReadyForAssessment(focus) &&
 		(!coverageFailureStepHasExplicitCoverageGap(failedStep) ||
 			!explicitCoverageGapShouldPreemptAssessment(input, failedStep)) {
-		contract.State = convergenceStateNeedAssessment
-		contract.RuntimeStage = runtimeStageVerification
-		contract.RuntimeStageMode = "strict_convergence"
-		contract.RepairObjective = "complete_dod_goal_coverage_assessment"
+		populateCoverageWorkItemAssessmentConvergenceContract(contract)
 		return true
 	}
 	if convergenceConcreteValidationCannotAdvanceWithoutTarget(input, failedStep) {
-		contract.State = convergenceStateNeedEvidence
-		contract.RuntimeStage = runtimeStageRepair
-		contract.RuntimeStageMode = "strict_convergence"
-		contract.RepairObjective = repairObjectiveAcquireFailureEvidence
-		contract.ConcreteFailureEvidenceRequired = true
-		required := evidenceAcquisitionRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
-		required["mustReferenceCoverageWorkItem"] = true
-		contract.RepairActionPackage["requiredOutput"] = required
+		populateCoverageWorkItemEvidenceConvergenceContract(input, contract)
 		return true
 	}
 	if coverageWorkItemContextHasMissingEvidenceKind(context, "state_change") {
@@ -443,70 +432,33 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 	if missing["state_change"] {
 		if convergenceStateChangeAlreadySatisfied(input) &&
 			!convergenceConcreteFailureTargetsOutsideSatisfiedStateChange(input, contract.RepairActionPackage) {
-			contract.State = convergenceStateNeedValidation
-			contract.RuntimeStage = runtimeStageVerification
-			contract.RuntimeStageMode = "strict_convergence"
-			contract.RepairObjective = repairObjectiveConcreteValidationEvidence
-			required := concreteValidationEvidenceRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
-			required["mustReferenceCoverageWorkItem"] = true
-			contract.RepairActionPackage["requiredOutput"] = required
+			populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
 			return true
 		}
 		if stateChangingRepairHasActionableImplementationSurface(input, contract.RepairActionPackage) ||
 			len(mapSliceFromValue(contract.RepairActionPackage["targetSnapshots"])) > 0 ||
 			len(filterAdmissibleRuntimeRepairTargetRefs(stringSliceFromValue(contract.RepairActionPackage["repairTargetSet"]))) > 0 {
-			contract.State = convergenceStateNeedStateChange
-			contract.RuntimeStage = runtimeStageRepair
-			contract.RuntimeStageMode = "strict_convergence"
-			contract.RepairObjective = repairObjectiveStateChangingOutput
-			contract.StateChangingOutputRequired = true
-			required := enforceStateChangingRequiredOutputForConvergence(contract.RepairActionPackage, input)
-			required["mustReferenceCoverageWorkItem"] = true
-			contract.RepairActionPackage["requiredOutput"] = required
-			contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
+			populateCoverageWorkItemStateChangeConvergenceContract(input, contract)
 			return true
 		}
-		contract.State = convergenceStateNeedEvidence
-		contract.RuntimeStage = runtimeStageRepair
-		contract.RuntimeStageMode = "strict_convergence"
-		contract.RepairObjective = repairObjectiveAcquireFailureEvidence
-		contract.ConcreteFailureEvidenceRequired = true
-		required := evidenceAcquisitionRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
-		required["mustReferenceCoverageWorkItem"] = true
-		contract.RepairActionPackage["requiredOutput"] = required
+		if (missing["validation"] || missing["artifact"]) && rejectedContinuationSchemaInvalidValidationFirst(run, input, failedStep) {
+			populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
+			return true
+		}
+		populateCoverageWorkItemEvidenceConvergenceContract(input, contract)
 		return true
 	}
 	if missing["validation"] || missing["artifact"] {
 		if convergenceStateChangeAlreadySatisfied(input) &&
 			!convergenceConcreteFailureTargetsOutsideSatisfiedStateChange(input, contract.RepairActionPackage) {
-			contract.State = convergenceStateNeedValidation
-			contract.RuntimeStage = runtimeStageVerification
-			contract.RuntimeStageMode = "strict_convergence"
-			contract.RepairObjective = repairObjectiveConcreteValidationEvidence
-			required := concreteValidationEvidenceRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
-			required["mustReferenceCoverageWorkItem"] = true
-			contract.RepairActionPackage["requiredOutput"] = required
+			populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
 			return true
 		}
 		if concreteValidationFailureCanDriveStateChange(input, contract.RepairActionPackage) {
-			contract.State = convergenceStateNeedStateChange
-			contract.RuntimeStage = runtimeStageRepair
-			contract.RuntimeStageMode = "strict_convergence"
-			contract.RepairObjective = repairObjectiveStateChangingOutput
-			contract.StateChangingOutputRequired = true
-			required := enforceStateChangingRequiredOutputForConvergence(contract.RepairActionPackage, input)
-			required["mustReferenceCoverageWorkItem"] = true
-			contract.RepairActionPackage["requiredOutput"] = required
-			contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
+			populateCoverageWorkItemStateChangeConvergenceContract(input, contract)
 			return true
 		}
-		contract.State = convergenceStateNeedValidation
-		contract.RuntimeStage = runtimeStageVerification
-		contract.RuntimeStageMode = "strict_convergence"
-		contract.RepairObjective = repairObjectiveConcreteValidationEvidence
-		required := concreteValidationEvidenceRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
-		required["mustReferenceCoverageWorkItem"] = true
-		contract.RepairActionPackage["requiredOutput"] = required
+		populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
 		return true
 	}
 	if explicitCoverageGapShouldPreemptAssessment(input, failedStep) {
@@ -514,53 +466,95 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 			populateProfileStateChangingEvidenceConvergenceContract(input, contract, pkg)
 			return true
 		}
-		contract.State = convergenceStateNeedValidation
-		contract.RuntimeStage = runtimeStageVerification
-		contract.RuntimeStageMode = "strict_convergence"
-		contract.RepairObjective = repairObjectiveConcreteValidationEvidence
-		required := concreteValidationEvidenceRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
-		required["mustReferenceCoverageWorkItem"] = true
+		populateCoverageWorkItemValidationConvergenceContract(input, contract, true)
+		return true
+	}
+	if coverageWorkItemFocusHasActionableFailure(focus) {
+		populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
+		return true
+	}
+	populateCoverageWorkItemAssessmentConvergenceContract(contract)
+	return true
+}
+
+func populateCoverageWorkItemAssessmentConvergenceContract(contract *ConvergenceContract) {
+	if contract == nil {
+		return
+	}
+	contract.State = convergenceStateNeedAssessment
+	contract.RuntimeStage = runtimeStageVerification
+	contract.RuntimeStageMode = "strict_convergence"
+	contract.RepairObjective = "complete_dod_goal_coverage_assessment"
+}
+
+func populateCoverageWorkItemEvidenceConvergenceContract(input map[string]any, contract *ConvergenceContract) {
+	if contract == nil {
+		return
+	}
+	contract.State = convergenceStateNeedEvidence
+	contract.RuntimeStage = runtimeStageRepair
+	contract.RuntimeStageMode = "strict_convergence"
+	contract.RepairObjective = repairObjectiveAcquireFailureEvidence
+	contract.ConcreteFailureEvidenceRequired = true
+	if contract.RepairActionPackage == nil {
+		contract.RepairActionPackage = map[string]any{}
+	}
+	required := evidenceAcquisitionRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+	required["mustReferenceCoverageWorkItem"] = true
+	contract.RepairActionPackage["requiredOutput"] = required
+}
+
+func populateCoverageWorkItemStateChangeConvergenceContract(input map[string]any, contract *ConvergenceContract) {
+	if contract == nil {
+		return
+	}
+	contract.State = convergenceStateNeedStateChange
+	contract.RuntimeStage = runtimeStageRepair
+	contract.RuntimeStageMode = "strict_convergence"
+	contract.RepairObjective = repairObjectiveStateChangingOutput
+	contract.StateChangingOutputRequired = true
+	if contract.RepairActionPackage == nil {
+		contract.RepairActionPackage = map[string]any{}
+	}
+	required := enforceStateChangingRequiredOutputForConvergence(contract.RepairActionPackage, input)
+	required["mustReferenceCoverageWorkItem"] = true
+	contract.RepairActionPackage["requiredOutput"] = required
+	contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
+}
+
+func populateCoverageWorkItemValidationConvergenceContract(input map[string]any, contract *ConvergenceContract, includeRepairTargets bool) {
+	if contract == nil {
+		return
+	}
+	contract.State = convergenceStateNeedValidation
+	contract.RuntimeStage = runtimeStageVerification
+	contract.RuntimeStageMode = "strict_convergence"
+	contract.RepairObjective = repairObjectiveConcreteValidationEvidence
+	if contract.RepairActionPackage == nil {
+		contract.RepairActionPackage = map[string]any{}
+	}
+	required := concreteValidationEvidenceRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+	required["mustReferenceCoverageWorkItem"] = true
+	if includeRepairTargets {
 		if targets := coverageTargetSetFromRepairInput(input); len(targets) > 0 {
 			contract.RepairActionPackage["coverageRepairRequired"] = true
 			contract.RepairActionPackage["coverageTargetSet"] = targets
 			required["mustDeclareCoverageTargets"] = true
 			required["coverageTargetMatchRule"] = "validation evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
 		}
-		contract.RepairActionPackage["requiredOutput"] = required
-		return true
 	}
-	if coverageWorkItemFocusHasActionableFailure(focus) {
-		contract.State = convergenceStateNeedValidation
-		contract.RuntimeStage = runtimeStageVerification
-		contract.RuntimeStageMode = "strict_convergence"
-		contract.RepairObjective = repairObjectiveConcreteValidationEvidence
-		required := concreteValidationEvidenceRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
-		required["mustReferenceCoverageWorkItem"] = true
-		contract.RepairActionPackage["requiredOutput"] = required
-		return true
-	}
-	contract.State = convergenceStateNeedAssessment
-	contract.RuntimeStage = runtimeStageVerification
-	contract.RuntimeStageMode = "strict_convergence"
-	contract.RepairObjective = "complete_dod_goal_coverage_assessment"
-	return true
+	contract.RepairActionPackage["requiredOutput"] = required
 }
 
 func coverageWorkItemFocusReadyForAssessment(focus map[string]any) bool {
 	if len(focus) == 0 {
 		return false
 	}
-	missing := stringSet(stringSliceFromValue(focus["missingEvidenceKinds"]))
-	if len(missing) == 0 {
-		missing = stringSet(coverageMissingEvidenceKinds(focus))
-	}
+	missing := coverageWorkItemMissingEvidenceKindSet(focus)
 	if len(missing) > 0 {
 		return false
 	}
-	required := stringSliceFromValue(focus["requiredEvidenceKinds"])
-	if len(required) == 0 {
-		required = []string{"validation"}
-	}
+	required := coverageWorkItemEffectiveRequiredEvidenceKinds(focus)
 	acceptedByKind := mapStringSliceValue(focus["acceptedEvidenceByKind"])
 	requiredCounts := mapIntValue(focus["requiredEvidenceCounts"])
 	for _, kind := range required {
@@ -605,11 +599,11 @@ func coverageWorkItemContextHasMissingEvidenceKind(context map[string]any, evide
 		return false
 	}
 	for _, key := range []string{"currentFocus", "currentFocusItems", "unresolvedItems", "ledgerSummary"} {
-		if item := mapFromValue(context[key]); len(item) > 0 && stringSet(coverageMissingEvidenceKinds(item))[evidenceKind] {
+		if item := mapFromValue(context[key]); len(item) > 0 && coverageWorkItemMissingEvidenceKindSet(item)[evidenceKind] {
 			return true
 		}
 		for _, item := range mapSliceFromValue(context[key]) {
-			if stringSet(coverageMissingEvidenceKinds(item))[evidenceKind] {
+			if coverageWorkItemMissingEvidenceKindSet(item)[evidenceKind] {
 				return true
 			}
 		}
@@ -866,10 +860,11 @@ func convergenceCoverageFocusRequiresValidation(input map[string]any) bool {
 	if len(focus) == 0 {
 		return false
 	}
-	missing := stringSet(stringSliceFromValue(focus["missingEvidenceKinds"]))
-	if len(missing) == 0 {
-		missing = stringSet(coverageMissingEvidenceKinds(focus))
+	state := deriveCoverageWorkItemState(focus)
+	if !state.HasActionableEvidenceGap() {
+		return false
 	}
+	missing := stringSet(state.MissingEvidenceKinds)
 	if missing["state_change"] {
 		return false
 	}
@@ -951,7 +946,7 @@ func repeatedValidationRepairEscalationPackage(run *runModel.Run, input map[stri
 	inheritRepeatedValidationRepairTargetEvidence(pkg, failedStep)
 	if !stateChangingRepairHasConcreteTargetEvidence(input, pkg) &&
 		!stateChangingRepairCanStartWithoutTargetEvidence(input, failedStep) {
-		required := evidenceAcquisitionRequiredOutput(mapFromValue(pkg["requiredOutput"]))
+		required := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
 		required["evidenceAcquisitionRule"] = "current target evidence is required before state-changing patch/apply repair"
 		pkg["requiredOutput"] = required
 		pkg["evidenceAcquisitionRequired"] = true
@@ -1421,7 +1416,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		if len(pkg) == 0 {
 			pkg = map[string]any{}
 		}
-		required := evidenceAcquisitionRequiredOutput(mapFromValue(pkg["requiredOutput"]))
+		required := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
 		pkg["requiredOutput"] = required
 		pkg["evidenceAcquisitionRequired"] = true
 		sanitizeRepairActionPackageTargetEvidence(pkg)
@@ -1902,7 +1897,7 @@ func coverageWorkItemContextItems(context map[string]any) []map[string]any {
 }
 
 func coverageWorkItemResolvedForExplicitGap(item map[string]any) bool {
-	if len(item) == 0 || len(coverageMissingEvidenceKinds(item)) > 0 {
+	if len(item) == 0 || deriveCoverageWorkItemState(item).HasActionableEvidenceGap() {
 		return false
 	}
 	switch strings.TrimSpace(stringFromMap(item, "status")) {
@@ -2063,7 +2058,7 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	if primaryStateChangeRequired {
 		if !stateChangingRepairHasActionableImplementationSurface(input, pkg) {
 			if !profilePrimaryStateChangeCanProceedFromCoverageTargets(input, pkg, targets) {
-				return profileStateChangingEvidenceAcquisitionRepairActionPackage(pkg, required)
+				return profileStateChangingEvidenceAcquisitionRepairActionPackage(input, pkg, required)
 			}
 			pkg["primaryStateChangeWithoutTargetEvidence"] = true
 			pkg["primaryStateChangeCoverageScoped"] = true
@@ -2186,16 +2181,33 @@ func coverageTargetsMissingProfileStateChangeEvidence(targets []map[string]any) 
 	return ret
 }
 
+func rejectedContinuationSchemaInvalidValidationFirst(run *runModel.Run, input map[string]any, failedStep *runModel.Step) bool {
+	if failedStep == nil {
+		return false
+	}
+	class := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(failedStep.Output, failureOutputKeyClass),
+		stringFromMap(mapFromValue(failedStep.Output["runtimeDiagnostics"]), failureOutputKeyClass),
+	))
+	if class != failureClassLLMDecisionInvalid {
+		return false
+	}
+	if len(mapFromValue(input["rejectedResultContinuation"])) > 0 ||
+		len(mapFromValue(mapFromValue(input["executionContext"])["rejectedResultContinuation"])) > 0 {
+		return true
+	}
+	return run != nil && len(mapFromValue(run.ExecutionContext["rejectedResultContinuation"])) > 0
+}
+
 func coverageTargetProfileStateChangeEvidenceSatisfied(target map[string]any) bool {
 	if len(target) == 0 {
 		return false
 	}
-	if coverageTargetExplicitlyDoesNotMissStateChange(target) {
-		return true
-	}
-	missingKinds := stringSet(coverageMissingEvidenceKinds(target))
+	state := deriveCoverageWorkItemState(target)
+	missingKinds := stringSet(state.MissingEvidenceKinds)
 	accepted := mapStringSliceValue(target["acceptedEvidenceByKind"])
-	if coverageEvidenceCountForKind("state_change", accepted["state_change"]) == 0 {
+	if coverageEvidenceCountForKind("state_change", accepted["state_change"]) == 0 &&
+		(missingKinds["state_change"] || len(stringSliceFromValue(target["acceptedEvidenceRefs"])) == 0) {
 		return false
 	}
 	return !missingKinds["state_change"]
@@ -2276,11 +2288,11 @@ func mapKeys(input map[string]bool) []string {
 	return ret
 }
 
-func profileStateChangingEvidenceAcquisitionRepairActionPackage(pkg map[string]any, previousRequired map[string]any) map[string]any {
+func profileStateChangingEvidenceAcquisitionRepairActionPackage(input map[string]any, pkg map[string]any, previousRequired map[string]any) map[string]any {
 	if len(pkg) == 0 {
 		pkg = map[string]any{}
 	}
-	required := evidenceAcquisitionRequiredOutput(mapFromValue(previousRequired))
+	required := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, mapFromValue(previousRequired))
 	required["mustDeclareCoverageTargets"] = true
 	required["coverageTargetMatchRule"] = "evidence acquisition must stay bounded to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
 	required["profileEvidenceRequirementDeferred"] = true
@@ -2364,30 +2376,13 @@ func coverageTargetClosedForPrimaryStateChange(target map[string]any) bool {
 	if len(target) == 0 {
 		return true
 	}
-	if coverageTargetExplicitlyDoesNotMissStateChange(target) {
-		return true
-	}
-	missingKinds := stringSet(coverageMissingEvidenceKinds(target))
-	state := strings.TrimSpace(stringFromMap(target, "state"))
-	if state != "satisfied" && state != "evidence_ready" {
+	derived := deriveCoverageWorkItemState(target)
+	missingKinds := stringSet(derived.MissingEvidenceKinds)
+	status := strings.TrimSpace(firstNonEmptyString(stringFromMap(target, "state"), stringFromMap(target, "status")))
+	if status != "satisfied" && status != "evidence_ready" {
 		return false
 	}
 	return !missingKinds["state_change"]
-}
-
-func coverageTargetExplicitlyDoesNotMissStateChange(target map[string]any) bool {
-	if len(target) == 0 {
-		return false
-	}
-	required := stringSet(stringSliceFromValue(target["requiredEvidenceKinds"]))
-	if !required["state_change"] {
-		return false
-	}
-	if _, ok := target["missingEvidenceKinds"]; !ok {
-		return false
-	}
-	missing := stringSet(stringSliceFromValue(target["missingEvidenceKinds"]))
-	return !missing["state_change"]
 }
 
 func coverageTargetEvidenceKindRequirements(run *runModel.Run, targets []map[string]any) []profileEvidenceKindRequirement {

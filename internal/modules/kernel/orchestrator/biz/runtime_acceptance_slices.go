@@ -232,7 +232,7 @@ func acceptanceSliceGroupMatchesItem(group acceptanceSliceGroupPolicy, item map[
 	if len(group.MatchRequiredKinds) > 0 && !stringSetsIntersect(group.MatchRequiredKinds, stringSliceFromValue(item["requiredEvidenceKinds"])) {
 		return false
 	}
-	if len(group.MatchMissingKinds) > 0 && !stringSetsIntersect(group.MatchMissingKinds, coverageMissingEvidenceKinds(item)) {
+	if len(group.MatchMissingKinds) > 0 && !stringSetsIntersect(group.MatchMissingKinds, deriveCoverageWorkItemState(item).MissingEvidenceKinds) {
 		return false
 	}
 	return len(group.MatchSources) > 0 ||
@@ -449,10 +449,10 @@ func acceptanceSliceRequiredEvidenceKinds(items []map[string]any, override []str
 }
 
 func coverageMissingOrRequiredEvidenceKinds(item map[string]any) []string {
-	if missing := coverageMissingEvidenceKinds(item); len(missing) > 0 {
+	if missing := deriveCoverageWorkItemState(item).MissingEvidenceKinds; len(missing) > 0 {
 		return missing
 	}
-	return stringSliceFromValue(item["requiredEvidenceKinds"])
+	return coverageWorkItemEffectiveRequiredEvidenceKinds(item)
 }
 
 func acceptanceFocusTargetRefs(item map[string]any) []string {

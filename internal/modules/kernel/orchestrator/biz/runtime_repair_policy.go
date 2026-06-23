@@ -326,14 +326,16 @@ func coverageWorkItemRequiresEvidenceKind(item map[string]any, kind string) bool
 	if len(item) == 0 || strings.TrimSpace(kind) == "" {
 		return false
 	}
-	for _, key := range []string{"missingEvidenceKinds", "requiredEvidenceKinds"} {
-		for _, value := range stringSliceFromValue(item[key]) {
-			if strings.TrimSpace(value) == kind {
-				return true
-			}
-		}
+	state := deriveCoverageWorkItemState(item)
+	if !state.HasActionableEvidenceGap() {
+		return false
 	}
-	return false
+	if stringSet(state.MissingEvidenceKinds)[kind] {
+		return true
+	}
+	return len(state.MissingEvidenceKinds) == 0 &&
+		stringSet(state.RequiredEvidenceKinds)[kind] &&
+		!coverageWorkItemHasAcceptedEvidence(item)
 }
 
 func runtimeRepairRunHasCompletedStateChangeEvidence(ctx context.Context, repair *repairSubsystem, runID common.RunID) bool {

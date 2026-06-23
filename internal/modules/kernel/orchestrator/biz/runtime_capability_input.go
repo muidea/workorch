@@ -101,7 +101,7 @@ func capabilityInputLocatorEvidencePackage(input map[string]any, failedStep *run
 	pkg["capabilityInputLocatorInvalid"] = true
 	pkg["evidenceAcquisitionReason"] = "capability_input_locator_invalid"
 	pkg["evidenceAcquisitionRequired"] = true
-	required := evidenceAcquisitionRequiredOutput(mapFromValue(pkg["requiredOutput"]))
+	required := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
 	required["evidenceAcquisitionRule"] = "bounded evidence acquisition is required because the previous capability call used an invalid locator or input position"
 	required["capabilityInputLocatorRule"] = "first obtain a valid locator, symbol, range, target snapshot, or equivalent capability input evidence; do not patch deliverables merely to make the rejected locator valid"
 	pkg["requiredOutput"] = required

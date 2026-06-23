@@ -174,12 +174,13 @@ func gapTodoItemsFromCoverageContext(items []map[string]any) []map[string]any {
 		}
 		source := firstNonEmptyString(stringFromMap(item, "sourceScope"), stringFromMap(item, "source"), "coverage")
 		status := firstNonEmptyString(stringFromMap(item, "status"), "open")
+		state := deriveCoverageWorkItemState(item)
 		todo := map[string]any{
 			"id":                    id,
 			"source":                source,
 			"sourceRef":             gapTodoSourceRefFromCoverageItem(item),
 			"coverageWorkItemIds":   workItemIDs,
-			"requiredEvidenceKinds": stringSliceFromValue(item["missingEvidenceKinds"]),
+			"requiredEvidenceKinds": state.MissingEvidenceKinds,
 			"status":                status,
 			"priority":              idx + 1,
 			"reason":                gapTodoReasonFromCoverageItem(item),

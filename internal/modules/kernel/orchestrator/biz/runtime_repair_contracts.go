@@ -316,10 +316,11 @@ func resetRuntimeRepairInputToRejectedResultContinuation(input map[string]any, r
 		"supersededBy": "rejectedResultContinuation",
 	}
 	pkg := map[string]any{
-		"requiredOutput":              evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
+		"requiredOutput":              stateChangingRepairRequiredOutput(),
 		"evidenceAcquisitionRequired": true,
 		"currentExecutionProgress":    compactLLMContextMap(digest, 0),
 	}
+	pkg["requiredOutput"] = evidenceAcquisitionRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
 	if currentFailure := currentFailureFromProgressDigest(digest); len(currentFailure) > 0 {
 		pkg["currentFailure"] = currentFailure
 	}

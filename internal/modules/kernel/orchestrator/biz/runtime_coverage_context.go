@@ -99,20 +99,20 @@ func coverageWorkItemFocusPriority(item map[string]any) int {
 	if len(item) == 0 {
 		return 100
 	}
-	missing := stringSet(coverageMissingEvidenceKinds(item))
+	state := deriveCoverageWorkItemState(item)
+	missing := stringSet(state.MissingEvidenceKinds)
 	status := strings.TrimSpace(stringFromMap(item, "status"))
-	if len(missing) == 0 && status == "evidence_ready" {
-		return 4
-	}
 	switch {
 	case status == "failed" && missing["state_change"]:
 		return 0
 	case missing["state_change"]:
 		return 1
-	case status == "failed" || len(stringSliceFromValue(item["rejectedEvidenceRefs"])) > 0:
+	case status == "failed" || (len(stringSliceFromValue(item["rejectedEvidenceRefs"])) > 0 && state.HasActionableEvidenceGap()):
 		return 2
 	case missing["validation"] || missing["artifact"]:
 		return 3
+	case state.NeedsAssessment():
+		return 4
 	default:
 		return 4
 	}
@@ -145,6 +145,7 @@ func coverageWorkItemSummary(item map[string]any) map[string]any {
 	if len(item) == 0 {
 		return nil
 	}
+	state := deriveCoverageWorkItemState(item)
 	return map[string]any{
 		"id":                       stringFromMap(item, "id"),
 		"source":                   stringFromMap(item, "source"),
@@ -156,15 +157,16 @@ func coverageWorkItemSummary(item map[string]any) map[string]any {
 		"sourcePath":               stringFromMap(item, "sourcePath"),
 		"targetText":               stringFromMap(item, "targetText"),
 		"normalizedSourceKey":      stringFromMap(item, "normalizedSourceKey"),
-		"requiredEvidenceKinds":    stringSliceFromValue(item["requiredEvidenceKinds"]),
-		"missingEvidenceKinds":     coverageMissingEvidenceKinds(item),
+		"requiredEvidenceKinds":    state.RequiredEvidenceKinds,
+		"missingEvidenceKinds":     state.MissingEvidenceKinds,
 		"status":                   firstNonEmptyString(stringFromMap(item, "status"), "open"),
 		"currentGap":               stringFromMap(item, "currentGap"),
 	}
 }
 
 func coverageWorkItemNextStates(item map[string]any) []string {
-	missing := stringSet(coverageMissingEvidenceKinds(item))
+	state := deriveCoverageWorkItemState(item)
+	missing := stringSet(state.MissingEvidenceKinds)
 	if strings.TrimSpace(stringFromMap(item, "status")) == "failed" {
 		switch {
 		case missing["state_change"]:
@@ -184,10 +186,14 @@ func coverageWorkItemNextStates(item map[string]any) []string {
 	if missing["validation"] || missing["artifact"] {
 		return []string{convergenceStateNeedValidation}
 	}
+	if state.HasActionableEvidenceGap() {
+		return []string{convergenceStateNeedEvidence}
+	}
 	return []string{convergenceStateNeedAssessment}
 }
 
 func coverageWorkItemLedgerSummary(item map[string]any, inFocus bool) map[string]any {
+	state := deriveCoverageWorkItemState(item)
 	ret := map[string]any{
 		"id":                       stringFromMap(item, "id"),
 		"sourceScope":              stringFromMap(item, "sourceScope"),
@@ -195,7 +201,7 @@ func coverageWorkItemLedgerSummary(item map[string]any, inFocus bool) map[string
 		"sourceRequirementId":      stringFromMap(item, "sourceRequirementId"),
 		"sourceRequirementAliases": stringSliceFromValue(item["sourceRequirementAliases"]),
 		"status":                   firstNonEmptyString(stringFromMap(item, "status"), "open"),
-		"missingEvidenceKinds":     coverageMissingEvidenceKinds(item),
+		"missingEvidenceKinds":     state.MissingEvidenceKinds,
 		"acceptedEvidenceRefs":     latestCoverageEvidenceRefs(stringSliceFromValue(item["acceptedEvidenceRefs"]), 2),
 		"rejectedEvidenceRefs":     latestCoverageEvidenceRefs(stringSliceFromValue(item["rejectedEvidenceRefs"]), 2),
 		"omittedFromCurrentFocus":  !inFocus,

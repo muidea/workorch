@@ -2157,7 +2157,11 @@ func TestApplyConvergenceContractNeedEvidenceRemovesStateChangingRequirement(t *
 		},
 		"artifactContinuationId": "artifact-continuation-001",
 		"repairActionPackage": map[string]any{
-			"requiredOutput":              evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
+			"requiredOutput": evidenceAcquisitionRequiredOutput(map[string]any{
+				"mustReferenceCoverageWorkItem": true,
+				"mustDeclareCoverageTargets":    true,
+				"coverageTargetMatchRule":       "validation evidence must map to coverageTargetSet",
+			}),
 			"evidenceAcquisitionRequired": true,
 		},
 	}
@@ -2182,6 +2186,11 @@ func TestApplyConvergenceContractNeedEvidenceRemovesStateChangingRequirement(t *
 	required := mapFromValue(mapFromValue(output["repairActionPackage"])["requiredOutput"])
 	if !boolValue(required["mustProduceConcreteFailureEvidence"]) {
 		t.Fatalf("requiredOutput = %#v, want concrete evidence acquisition", required)
+	}
+	if !boolValue(required["mustReferenceCoverageWorkItem"]) ||
+		!boolValue(required["mustDeclareCoverageTargets"]) ||
+		stringFromMap(required, "coverageTargetMatchRule") == "" {
+		t.Fatalf("requiredOutput = %#v, want coverage focus contract preserved", required)
 	}
 }
 
@@ -2333,6 +2342,10 @@ func TestBuildConvergenceContractAssessmentOnlyFailedGapSwitchesToValidation(t *
 	if !boolValue(required["mustProduceConcreteValidationEvidence"]) {
 		t.Fatalf("requiredOutput = %+v, want concrete validation evidence contract", required)
 	}
+	if !boolValue(required["mustDeclareCoverageTargets"]) ||
+		stringFromMap(required, "coverageTargetMatchRule") == "" {
+		t.Fatalf("requiredOutput = %+v, want coverage target contract preserved", required)
+	}
 	if stringFromMap(required, validationScratchDirKey) == "" ||
 		stringFromMap(mapFromValue(applied["repairActionPackage"]), validationScratchDirKey) != stringFromMap(required, validationScratchDirKey) ||
 		stringFromMap(applied, validationScratchDirKey) != stringFromMap(required, validationScratchDirKey) {
@@ -2422,6 +2435,221 @@ func TestCoverageWorkItemEvidenceReadyAssessmentGapIsNotActionableEvidenceGap(t 
 
 	if coverageWorkItemHasOpenGap(item) {
 		t.Fatalf("coverageWorkItemHasOpenGap(%+v) = true, want false for evidence_ready assessment-only gap", item)
+	}
+}
+
+func TestConvergenceCoverageFocusRequiresValidationIgnoresStaleNextAllowedForEvidenceReady(t *testing.T) {
+	input := map[string]any{
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-ready",
+				"status":                "evidence_ready",
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{},
+				"acceptedEvidenceRefs":  []string{"run/graph/001-validate"},
+				"acceptedEvidenceByKind": map[string][]string{
+					"validation": {"run/graph/001-validate"},
+				},
+				"nextAllowedConvergenceStates": []string{convergenceStateNeedValidation},
+			},
+		},
+	}
+
+	if convergenceCoverageFocusRequiresValidation(input) {
+		t.Fatalf("convergenceCoverageFocusRequiresValidation = true, want false for evidence_ready focus")
+	}
+}
+
+func TestCoverageConvergenceFullChainActionMatrix(t *testing.T) {
+	baseItem := func(id string, values map[string]any) map[string]any {
+		item := map[string]any{
+			"id":                  id,
+			"sourceScope":         "dod_item",
+			"sourceRequirementId": id + "-requirement",
+			"targetText":          id + " neutral target",
+			"status":              "open",
+		}
+		for key, value := range values {
+			item[key] = value
+		}
+		return item
+	}
+	baseInput := func(item map[string]any, pkg map[string]any) map[string]any {
+		if len(pkg) == 0 {
+			pkg = map[string]any{}
+		}
+		pkg[coverageWorkItemContextKey] = map[string]any{
+			"currentFocus":      cloneStepPayload(item),
+			"currentFocusItems": []map[string]any{cloneStepPayload(item)},
+			"summary":           map[string]any{"total": 1, stringFromMap(item, "status"): 1},
+		}
+		return map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeyRuntimeStageMode:      "strict_convergence",
+			stepInputKeyRuntimeRepairFollowUp: true,
+			"repairActionPackage":             pkg,
+			coverageWorkItemContextKey:        pkg[coverageWorkItemContextKey],
+		}
+	}
+
+	tests := []struct {
+		name      string
+		input     map[string]any
+		wantState string
+		check     func(t *testing.T, input map[string]any, contract ConvergenceContract, applied map[string]any)
+	}{
+		{
+			name: "missing validation requires validation graph",
+			input: baseInput(baseItem("cwi-validation", map[string]any{
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{"validation"},
+			}), map[string]any{}),
+			wantState: convergenceStateNeedValidation,
+			check: func(t *testing.T, input map[string]any, contract ConvergenceContract, applied map[string]any) {
+				t.Helper()
+				if applied[stepInputKeyRuntimeStage] != runtimeStageVerification || applied["repairObjective"] != repairObjectiveConcreteValidationEvidence {
+					t.Fatalf("applied = %+v, want verification concrete validation contract", applied)
+				}
+				required := mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])
+				if !boolValue(required["mustProduceConcreteValidationEvidence"]) || boolValue(required["mustIncludeStateChangingNode"]) {
+					t.Fatalf("requiredOutput = %+v, want validation-only graph contract", required)
+				}
+				if !boolValue(required["mustReferenceCoverageWorkItem"]) {
+					t.Fatalf("requiredOutput = %+v, want coverage work item binding", required)
+				}
+			},
+		},
+		{
+			name: "missing state change with target snapshot requires state changing output",
+			input: baseInput(baseItem("cwi-state-change", map[string]any{
+				"requiredEvidenceKinds": []string{"state_change", "validation"},
+				"missingEvidenceKinds":  []string{"state_change"},
+			}), map[string]any{
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "neutral-target.txt",
+					"exists":           true,
+					"contentHash":      "hash-neutral-target",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+			}),
+			wantState: convergenceStateNeedStateChange,
+			check: func(t *testing.T, input map[string]any, contract ConvergenceContract, applied map[string]any) {
+				t.Helper()
+				if applied[stepInputKeyRuntimeStage] != runtimeStageRepair || applied["repairObjective"] != repairObjectiveStateChangingOutput || applied["stateChangingOutputRequired"] != true {
+					t.Fatalf("applied = %+v, want state-changing repair contract", applied)
+				}
+				required := mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])
+				if !boolValue(required["mustIncludeStateChangingNode"]) || !boolValue(required["mustReferenceCoverageWorkItem"]) {
+					t.Fatalf("requiredOutput = %+v, want state-changing coverage work item contract", required)
+				}
+			},
+		},
+		{
+			name: "evidence ready requires assessment only",
+			input: baseInput(baseItem("cwi-ready", map[string]any{
+				"status":                "evidence_ready",
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{},
+				"acceptedEvidenceRefs":  []string{"run/graph/validate-001"},
+				"acceptedEvidenceByKind": map[string][]string{
+					"validation": {"run/graph/validate-001"},
+				},
+			}), map[string]any{
+				"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+			}),
+			wantState: convergenceStateNeedAssessment,
+			check: func(t *testing.T, input map[string]any, contract ConvergenceContract, applied map[string]any) {
+				t.Helper()
+				if applied[stepInputKeyRuntimeStage] != runtimeStageVerification || applied[stepInputKeyAssessmentOnly] != true {
+					t.Fatalf("applied = %+v, want assessment-only verification contract", applied)
+				}
+				required := mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])
+				if len(required) != 0 {
+					t.Fatalf("requiredOutput = %+v, want executable output stripped for assessment", required)
+				}
+			},
+		},
+		{
+			name: "satisfied item does not request repair",
+			input: baseInput(baseItem("cwi-satisfied", map[string]any{
+				"status":                "satisfied",
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{},
+				"acceptedEvidenceRefs":  []string{"run/graph/validate-001"},
+				"acceptedEvidenceByKind": map[string][]string{
+					"validation": {"run/graph/validate-001"},
+				},
+			}), map[string]any{}),
+			wantState: convergenceStateBlocked,
+			check: func(t *testing.T, input map[string]any, contract ConvergenceContract, applied map[string]any) {
+				t.Helper()
+				if _, ok := applied["convergenceContract"]; ok {
+					t.Fatalf("applied = %+v, want no convergence repair contract for satisfied item", applied)
+				}
+			},
+		},
+		{
+			name: "structured decision evidence gap requires governance",
+			input: baseInput(baseItem("cwi-decision", map[string]any{
+				"requiredEvidenceKinds": []string{"decision"},
+				"missingEvidenceKinds":  []string{"decision"},
+				"currentGap":            "structured owner evidence missing",
+			}), map[string]any{}),
+			wantState: convergenceStateNeedGovernance,
+			check: func(t *testing.T, input map[string]any, contract ConvergenceContract, applied map[string]any) {
+				t.Helper()
+				if applied[stepInputKeyRuntimeStage] != runtimeStageDecision || applied["governanceRequired"] != true {
+					t.Fatalf("applied = %+v, want structured governance contract", applied)
+				}
+			},
+		},
+		{
+			name: "structured approval evidence gap requires governance",
+			input: baseInput(baseItem("cwi-approval", map[string]any{
+				"requiredEvidenceKinds": []string{"approval"},
+				"missingEvidenceKinds":  []string{"approval"},
+				"currentGap":            "structured owner evidence missing",
+			}), map[string]any{}),
+			wantState: convergenceStateNeedGovernance,
+			check: func(t *testing.T, input map[string]any, contract ConvergenceContract, applied map[string]any) {
+				t.Helper()
+				if applied[stepInputKeyRuntimeStage] != runtimeStageDecision || applied["governanceRequired"] != true {
+					t.Fatalf("applied = %+v, want structured governance contract", applied)
+				}
+			},
+		},
+		{
+			name: "legacy decision text does not infer governance",
+			input: baseInput(baseItem("cwi-legacy-text", map[string]any{
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{"validation"},
+				"currentGap":            "legacy text mentions decision but structured evidence kind is validation",
+			}), map[string]any{}),
+			wantState: convergenceStateNeedValidation,
+			check: func(t *testing.T, input map[string]any, contract ConvergenceContract, applied map[string]any) {
+				t.Helper()
+				if applied[stepInputKeyRuntimeStage] != runtimeStageVerification || applied["governanceRequired"] == true {
+					t.Fatalf("applied = %+v, want validation contract without governance inferred from text", applied)
+				}
+				required := mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])
+				if !boolValue(required["mustProduceConcreteValidationEvidence"]) {
+					t.Fatalf("requiredOutput = %+v, want validation evidence contract", required)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := cloneStepPayload(tt.input)
+			contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+			if contract.State != tt.wantState {
+				t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, tt.wantState, contract)
+			}
+			applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+			tt.check(t, input, contract, applied)
+		})
 	}
 }
 

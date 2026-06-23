@@ -1585,6 +1585,111 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 | closureBatch | 7 |
 | loadByDefault | false |
 
+### ev:code/validation-shell-redirection-comparison-token/20260623-038
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-VALIDATION-SHELL-REDIRECTION-COMPARISON-TOKEN-20260623-038` |
+| workspaceId | `ws-4e83810542ac4d65` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-004` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_execution_contract.go`, `internal/modules/kernel/orchestrator/biz/runtime_execution_contract_integration_test.go` |
+| extractCommand | `go test ./internal/modules/kernel/orchestrator/biz -run 'TestValidateLLMExecutionOutputContract.*Redirection|TestRuntimeExecutionContract.*Redirection' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh; git diff --check` |
+| extractedSummary | Live scratch-bounded validation was rejected because the shell redirection scanner treated comparison or arrow-like tokens in fixture text as write redirection outside `validationScratchDir`. The local closure keeps shell validation write safety strict for real redirections while ignoring neutral comparison/arrow tokens during generic command scanning. This is core-neutral command parsing and does not add template, language, workspace, provider, or target-file rules. |
+| owner | core runtime contract |
+| closureBatch | 7 |
+| loadByDefault | false |
+
+### ev:code/focus-bound-state-change-write-evidence/20260623-039
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-FOCUS-BOUND-STATE-CHANGE-WRITE-EVIDENCE-20260623-039` |
+| workspaceId | `ws-4e83810542ac4d65` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-004` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_repair_focus_contract.go`, `internal/modules/kernel/orchestrator/biz/runtime_repair_focus_contract_test.go` |
+| extractCommand | `go test ./internal/modules/kernel/orchestrator/biz -run 'TestValidateLLMRepairCoverageFocusNormalizesStateChangingWriteGraphBinding|TestValidateLLMRepairCoverageFocus' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh; git diff --check` |
+| extractedSummary | A focus-bound graph completed state-changing write nodes, but those nodes did not carry `coverageFocusId` / `coverageWorkItemIds`, so the coverage ledger could not bind accepted state-change evidence to the active work item. The local closure makes generic state-changing evidence-producing nodes, including write-category nodes, participate in coverage focus normalization and validation when the step has a unique current focus. `patch/apply` remains strict. |
+| owner | core runtime focus/evidence contract |
+| closureBatch | 7 |
+| loadByDefault | false |
+
+### ev:code/strict-repair-nonpatch-focus-normalization/20260623-040
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-STRICT-REPAIR-NONPATCH-FOCUS-NORMALIZATION-20260623-040` |
+| workspaceId | `ws-4e83810542ac4d65` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-004` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_repair_focus_contract.go`, `internal/modules/kernel/orchestrator/biz/runtime_repair_focus_contract_test.go` |
+| extractCommand | `go test ./internal/modules/kernel/orchestrator/biz -run 'TestValidateLLMRepairCoverageFocusNormalizesStrictNonPatchGraphBinding|TestValidateLLMRepairCoverageFocusRejectsUnboundPatchGraph|TestValidateLLMRepairCoverageFocusAllowsBoundPatchGraph' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh; git diff --check` |
+| extractedSummary | Strict state-changing repair disabled all focus normalization, so dependent non-patch action/evidence nodes such as tool calls and write nodes failed `repair_focus_mismatch` even when the primary patch was focus-bound. The local closure keeps `patch/apply` strict, but allows non-patch state-changing or validation action nodes to inherit an unambiguous current coverage focus. |
+| owner | core runtime focus contract |
+| closureBatch | 7 |
+| loadByDefault | false |
+
+### ev:code/convergence-budget-positive-delta-resets-repair-window/20260623-041
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-CONVERGENCE-BUDGET-POSITIVE-DELTA-RESETS-REPAIR-WINDOW-20260623-041` |
+| workspaceId | `ws-4e83810542ac4d65` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-004` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_convergence_budget.go`, `internal/modules/kernel/orchestrator/biz/runtime_convergence_budget_test.go` |
+| extractCommand | `go test ./internal/modules/kernel/orchestrator/biz -run 'TestUpdateConvergenceBudgetResetsRepairAttemptsAfterAcceptedCoverageDelta|TestUpdateConvergenceBudgetDoesNotResetRepairAttemptsForRejectedCoverageDelta|TestUpdateConvergenceBudget' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh; git diff --check` |
+| extractedSummary | Live execution made accepted coverage progress, but focus-level repair counters still carried stale exhaustion and blocked the next concrete validation repair. The local closure resets repair-attempt, validation-only retry, and repeated-failure counters only when a completed step produces accepted coverage delta. Rejected diagnostic-only evidence does not reset the window, preserving bounded retry behavior. |
+| owner | core convergence budget |
+| closureBatch | 7 |
+| loadByDefault | false |
+
+### ev:code/evidence-ready-compact-ledger-does-not-reopen-missing-evidence/20260623-042
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-EVIDENCE-READY-COMPACT-LEDGER-DOES-NOT-REOPEN-MISSING-EVIDENCE-20260623-042` |
+| workspaceId | `ws-4e83810542ac4d65` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-004` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_coverage_context.go`, `internal/modules/kernel/orchestrator/biz/runtime_coverage_state.go`, `internal/modules/kernel/orchestrator/biz/runtime_coverage_work_items_test.go`, `internal/modules/kernel/orchestrator/biz/runtime_coverage_state_test.go` |
+| extractCommand | `go test ./internal/modules/kernel/orchestrator/biz -run 'TestCoverageWorkItemContextAlignedEvidenceReadyLedgerItemDoesNotReopenMissingEvidence|TestDerivedMissingEvidenceRequiresByKindEvidenceForMultipleRequiredKinds|TestDerivedMissingEvidenceAllowsFlatRefsForSingleRequiredKind' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh; git diff --check` |
+| extractedSummary | Compact `ledgerSummary` items may omit `acceptedEvidenceByKind` to control LLM context size. Recomputing `missingEvidenceKinds` from that compact item reopened an `evidence_ready` work item and forced mechanical evidence acquisition instead of assessment. The local closure keeps by-kind evidence authoritative when present, but permits compact `evidence_ready` / terminal summaries with enough flat accepted refs to remain evidence-complete; ambiguous flat refs that cannot cover all required kinds still reopen missing evidence. |
+| owner | core coverage ledger/context projection |
+| closureBatch | 7 |
+| loadByDefault | false |
+
+### ev:code/coverage-governance-evidence-kind-structured-only/20260623-043
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-COVERAGE-GOVERNANCE-EVIDENCE-KIND-STRUCTURED-ONLY-20260623-043` |
+| workspaceId | `ws-4e83810542ac4d65` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-004` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_coverage_sources.go`, `internal/modules/kernel/orchestrator/biz/runtime_coverage_work_items_test.go`, `internal/modules/kernel/orchestrator/biz/runtime_coverage_state_test.go` |
+| extractCommand | `go test ./internal/modules/kernel/orchestrator/biz -run 'Test.*Governance.*Evidence|Test.*RequiredEvidenceKinds|TestCoverageConvergenceFullChainActionMatrix' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh; git diff --check` |
+| extractedSummary | A coverage item required `decision` evidence because old default derivation inferred governance evidence from natural-language target text. The local closure makes default coverage evidence structured-data driven: governance evidence is required only when `requiredEvidenceKinds`, `evidenceKinds`, owner policy, or equivalent structured metadata declares it. Core no longer infers governance from business wording. |
+| owner | core coverage source derivation |
+| closureBatch | 7 |
+| loadByDefault | false |
+
+### ev:code/evidence-ready-assessment-gap-not-actionable-evidence-gap/20260623-044
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-EVIDENCE-READY-ASSESSMENT-GAP-NOT-ACTIONABLE-EVIDENCE-GAP-20260623-044` |
+| workspaceId | `ws-4e83810542ac4d65` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-004` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | `internal/modules/kernel/orchestrator/biz/runtime_coverage_state.go`, `internal/modules/kernel/orchestrator/biz/runtime_convergence.go`, `internal/modules/kernel/orchestrator/biz/runtime_convergence_test.go`, `internal/modules/kernel/orchestrator/biz/runtime_coverage_state_test.go` |
+| extractCommand | `go test ./internal/modules/kernel/orchestrator/biz -run 'TestCoverageWorkItemEvidenceReadyAssessmentGapIsNotActionableEvidenceGap|TestConvergenceCoverageFocusRequiresValidationIgnoresStaleNextAllowedForEvidenceReady|TestCoverageConvergenceFullChainActionMatrix|TestDeriveCoverageWorkItemState' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh; git diff --check` |
+| extractedSummary | An `evidence_ready` item with no missing required evidence still carried the display gap `required evidence kinds present; coverage assessment required`. A lower-level open-gap predicate treated the non-empty display message as actionable evidence acquisition, causing duplicate validation/tool graphs instead of assessment. The local closure introduces derived coverage work-item state: `missingEvidenceKinds` is the mechanical evidence gap, while assessment-ready display text maps to `need_assessment`. |
+| owner | core coverage/convergence state machine |
+| closureBatch | 7 |
+| loadByDefault | false |
+
 ## Default Load Set For Next Code Closure
 
 Load only:

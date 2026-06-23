@@ -1305,8 +1305,8 @@ func coverageWorkItemsHaveAcceptedPrimaryDeliverableEvidence(run *runModel.Run, 
 		if len(stringSliceFromValue(item["acceptedEvidenceRefs"])) == 0 {
 			continue
 		}
-		required := stringSet(stringSliceFromValue(item["requiredEvidenceKinds"]))
-		missing := stringSet(coverageMissingEvidenceKinds(item))
+		required := stringSet(coverageWorkItemEffectiveRequiredEvidenceKinds(item))
+		missing := coverageWorkItemMissingEvidenceKindSet(item)
 		if required["state_change"] && !missing["state_change"] {
 			return true
 		}

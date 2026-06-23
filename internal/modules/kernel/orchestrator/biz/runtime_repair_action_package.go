@@ -690,7 +690,14 @@ func evidenceAcquisitionRequiredOutput(existing map[string]any) map[string]any {
 	out := map[string]any{}
 	for key, value := range existing {
 		switch key {
-		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "forbiddenStalePatchReuse", "mustAddressValidationDiagnostic", "recommendedEvidenceTargetType":
+		case "mustReturnValidJSON",
+			"mustNotReuseRejectedJSON",
+			"forbiddenStalePatchReuse",
+			"mustAddressValidationDiagnostic",
+			"recommendedEvidenceTargetType",
+			"mustReferenceCoverageWorkItem",
+			"mustDeclareCoverageTargets",
+			"coverageTargetMatchRule":
 			out[key] = value
 		}
 	}
@@ -735,7 +742,13 @@ func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[strin
 	out := map[string]any{}
 	for key, value := range existing {
 		switch key {
-		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "mustReferenceCoverageWorkItem", "mustAddressValidationDiagnostic", "recommendedEvidenceTargetType":
+		case "mustReturnValidJSON",
+			"mustNotReuseRejectedJSON",
+			"mustReferenceCoverageWorkItem",
+			"mustDeclareCoverageTargets",
+			"coverageTargetMatchRule",
+			"mustAddressValidationDiagnostic",
+			"recommendedEvidenceTargetType":
 			out[key] = value
 		}
 	}

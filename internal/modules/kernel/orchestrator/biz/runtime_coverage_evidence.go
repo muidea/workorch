@@ -78,18 +78,7 @@ func normalizedCoverageEvidenceRole(role string) string {
 }
 
 func coverageMissingEvidenceKinds(item map[string]any) []string {
-	required := stringSliceFromValue(item["requiredEvidenceKinds"])
-	if len(required) == 0 {
-		required = []string{"validation"}
-	}
-	acceptedByKind := mapStringSliceValue(item["acceptedEvidenceByKind"])
-	if len(acceptedByKind) == 0 {
-		switch strings.TrimSpace(stringFromMap(item, "status")) {
-		case "evidence_ready", "satisfied":
-			return nil
-		}
-	}
-	return coverageMissingEvidenceKindsFromDetails(required, acceptedByKind, mapIntValue(item["requiredEvidenceCounts"]))
+	return deriveCoverageWorkItemState(item).MissingEvidenceKinds
 }
 
 func coverageMissingEvidenceKindsFromDetails(requiredKinds []string, acceptedByKind map[string][]string, requiredCounts map[string]int) []string {

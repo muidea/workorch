@@ -351,8 +351,9 @@ func (c *coverageSubsystem) validateReadyForAcceptance(run *runModel.Run, contex
 		case "satisfied", "blocked", "skipped":
 			continue
 		}
-		missing := coverageMissingEvidenceKinds(item)
-		if len(missing) == 0 && status == "evidence_ready" {
+		state := deriveCoverageWorkItemState(item)
+		missing := state.MissingEvidenceKinds
+		if len(missing) == 0 && state.NeedsAssessment() {
 			open = append(open, fmt.Sprintf("%s:assessment_pending", stringFromMap(item, "id")))
 			continue
 		}

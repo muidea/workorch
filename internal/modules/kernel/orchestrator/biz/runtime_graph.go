@@ -1186,10 +1186,7 @@ func coverageWorkItemContinuationHasUnresolvedEvidenceGap(context map[string]any
 		if coverageWorkItemFocusHasActionableFailure(item) {
 			return true
 		}
-		missing := stringSet(stringSliceFromValue(item["missingEvidenceKinds"]))
-		if len(missing) == 0 {
-			missing = stringSet(coverageMissingEvidenceKinds(item))
-		}
+		missing := coverageWorkItemMissingEvidenceKindSet(item)
 		for _, kind := range []string{"state_change", "validation", "artifact", "assessment", "decision", "approval", "external_dependency"} {
 			if missing[kind] {
 				return true
@@ -1977,7 +1974,7 @@ func currentFailureFromCoverageWorkItemContext(context map[string]any) map[strin
 	if refs := stringSliceFromValue(focus["acceptedEvidenceRefs"]); len(refs) > 0 {
 		ret["acceptedEvidenceRefs"] = limitedStrings(refs, 8)
 	}
-	if missing := stringSliceFromValue(focus["missingEvidenceKinds"]); len(missing) > 0 {
+	if missing := deriveCoverageWorkItemState(focus).MissingEvidenceKinds; len(missing) > 0 {
 		ret["missingEvidenceKinds"] = limitedStrings(missing, 8)
 	}
 	if required := stringSliceFromValue(focus["requiredEvidenceKinds"]); len(required) > 0 {
@@ -1987,33 +1984,12 @@ func currentFailureFromCoverageWorkItemContext(context map[string]any) map[strin
 }
 
 func coverageWorkItemHasOpenGap(item map[string]any) bool {
-	if len(item) == 0 {
-		return false
-	}
-	status := strings.TrimSpace(strings.ToLower(stringFromMap(item, "status")))
-	if status == "satisfied" || status == "closed" || status == "completed" {
-		return false
-	}
-	if len(stringSliceFromValue(item["missingEvidenceKinds"])) > 0 {
-		return true
-	}
-	if status == "evidence_ready" {
-		return false
-	}
-	if strings.TrimSpace(stringFromMap(item, "currentGap")) != "" {
-		return true
-	}
-	if len(stringSliceFromValue(item["requiredEvidenceKinds"])) > 0 && len(stringSliceFromValue(item["acceptedEvidenceRefs"])) == 0 {
-		return true
-	}
-	return false
+	return deriveCoverageWorkItemState(item).HasActionableEvidenceGap()
 }
 
 func coverageWorkItemMissingEvidenceReason(item map[string]any) string {
-	missing := stringSliceFromValue(item["missingEvidenceKinds"])
-	if len(missing) == 0 {
-		missing = stringSliceFromValue(item["requiredEvidenceKinds"])
-	}
+	state := deriveCoverageWorkItemState(item)
+	missing := state.MissingEvidenceKinds
 	if len(missing) == 0 {
 		return ""
 	}

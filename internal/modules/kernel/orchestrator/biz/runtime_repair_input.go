@@ -1219,7 +1219,7 @@ func applyRuntimeRepairStateChangingTargetEvidenceGate(input map[string]any, fai
 	if len(pkg) == 0 {
 		pkg = map[string]any{}
 	}
-	required := evidenceAcquisitionRequiredOutput(mapFromValue(pkg["requiredOutput"]))
+	required := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
 	pkg["requiredOutput"] = required
 	pkg["evidenceAcquisitionRequired"] = true
 	pkg["evidenceAcquisitionReason"] = "state_changing_repair_target_evidence_missing"

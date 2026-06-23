@@ -846,7 +846,7 @@ func runtimeRepairInputHasUnresolvedCoverageTarget(input map[string]any) bool {
 
 func coverageTargetSetHasMissingEvidence(targets []map[string]any) bool {
 	for _, target := range targets {
-		if len(stringSliceFromValue(target["missingEvidenceKinds"])) > 0 {
+		if deriveCoverageWorkItemState(target).HasActionableEvidenceGap() {
 			return true
 		}
 	}
@@ -857,11 +857,11 @@ func coverageWorkItemContextHasMissingEvidence(context map[string]any) bool {
 	if len(context) == 0 {
 		return false
 	}
-	if len(stringSliceFromValue(mapFromValue(context["currentFocus"])["missingEvidenceKinds"])) > 0 {
+	if deriveCoverageWorkItemState(mapFromValue(context["currentFocus"])).HasActionableEvidenceGap() {
 		return true
 	}
 	for _, item := range mapSliceFromValue(context["currentFocusItems"]) {
-		if len(stringSliceFromValue(item["missingEvidenceKinds"])) > 0 {
+		if deriveCoverageWorkItemState(item).HasActionableEvidenceGap() {
 			return true
 		}
 	}

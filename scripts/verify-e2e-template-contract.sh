@@ -27,7 +27,7 @@ for script in scripts:
         )
         if not creates_workspace:
             continue
-        context = "\n".join(lines[index:index + 12])
+        context = "\n".join(lines[max(0, index - 16):index + 12])
         if "templateId" in context:
             continue
         generated_payload_has_template = (

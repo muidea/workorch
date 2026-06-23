@@ -227,6 +227,13 @@ func repairCoverageFocusBindingContractForStep(step *runModel.Step) repairCovera
 	if len(focus) == 0 {
 		return repairCoverageFocusBindingContract{}
 	}
+	return canonicalRepairCoverageFocusBindingContract(focus, required, pkg)
+}
+
+func canonicalRepairCoverageFocusBindingContract(focus map[string]any, required map[string]any, pkg map[string]any) repairCoverageFocusBindingContract {
+	if len(focus) == 0 {
+		return repairCoverageFocusBindingContract{}
+	}
 	seen := map[string]bool{}
 	tokens := make([]string, 0)
 	add := func(value string) {
