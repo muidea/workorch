@@ -232,6 +232,38 @@ func TestContractViolationCorrectionProfilesCoverPrimaryRules(t *testing.T) {
 	}
 }
 
+func TestContractViolationConcreteValidationForbidsContinuableDecisionBlocker(t *testing.T) {
+	runID := common.RunID("run-contract-continuable-decision-blocker")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-continuable-decision-blocker", InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := contractViolationFailedStep(runID, "failed-continuable-decision")
+	failed.Input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+	pkg := mapFromValue(failed.Input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	required["mustProduceConcreteValidationEvidence"] = true
+	required["acceptedKinds"] = []string{"shell/command", "mcp/tool_call"}
+	pkg["requiredOutput"] = required
+	failed.Input["repairActionPackage"] = pkg
+	failed.Output[outputKeyContractViolationType] = contractViolationValidationEvidenceRequired
+	failed.Output["error"] = "invalid argument: decision requests a continuable candidate choice"
+	failed.Output[failureOutputKeySignature] = "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_decision_required"
+	attachContractViolationDiagnostics(run, failed, common.ErrInvalidArgument)
+
+	recovery := contractViolationFromFailedOutput(failed)
+	contract := mapFromValue(recovery["correctionContract"])
+	allowed := stringSliceFromValue(contract["allowedOutputs"])
+	if stringSliceContains(allowed, "blocked_on_decision") {
+		t.Fatalf("allowedOutputs = %+v, want no bare blocked_on_decision", allowed)
+	}
+	if !stringSliceContains(allowed, "blocked_on_decision_with_required_external_dependency") {
+		t.Fatalf("allowedOutputs = %+v, want external-dependency decision blocker allowed", allowed)
+	}
+	forbidden := stringSliceFromValue(contract["forbiddenOutputs"])
+	if !stringSliceContains(forbidden, "decision_request_when_runtime_can_continue") ||
+		!stringSliceContains(forbidden, "blocked_on_decision_for_continuable_candidate_choice") {
+		t.Fatalf("forbiddenOutputs = %+v, want continuable decision blockers forbidden", forbidden)
+	}
+}
+
 func TestContractViolationCoverageAssessmentPreservesCurrentRequiredOutputShape(t *testing.T) {
 	tests := []struct {
 		name          string

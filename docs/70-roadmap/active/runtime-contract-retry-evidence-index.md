@@ -1465,6 +1465,21 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 | closureBatch | 7 |
 | loadByDefault | false |
 
+### ev:code/contract-correction-governance-blocker-shape/20260623-030
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-CONTRACT-CORRECTION-GOVERNANCE-BLOCKER-SHAPE-20260623-030` |
+| workspaceId | `ws-7ced70e98ea50c43` |
+| runId | `run-003-replan-001-replan-001` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | deployed `http://127.0.0.1:8080` plus `internal/modules/kernel/orchestrator/biz/runtime_contract_violation.go`, `internal/modules/kernel/orchestrator/biz/runtime_contract_violation_test.go` |
+| extractCommand | `curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-7ced70e98ea50c43/snapshot; go test ./internal/modules/kernel/orchestrator/biz -run 'TestContractViolation(ConcreteValidationForbidsContinuableDecisionBlocker|CorrectionProfilesCoverPrimaryRules|CoverageAssessmentPreservesCurrentRequiredOutputShape|RecoveryActionRetriesWithinBudget|RuntimeRepairInputIncludesContractViolationRecovery)' -count=1 -timeout=300s` |
+| extractedSummary | Live verification-stage retry showed `decision requests a continuable candidate choice`: runtime correctly converted a continuable decision blocker into a contract failure, but the correction contract still listed bare `blocked_on_decision` as an allowed output. That made the retry prompt internally contradictory: it asked for bounded validation evidence while allowing another unqualified decision blocker. Local core closure changes correction contracts to allow only `blocked_on_decision_with_required_external_dependency` and `blocked_on_approval_with_required_governance_dependency`, while explicitly forbidding continuable candidate decision requests. The rule is based on generic governance/dependency shape, not workspace title, template, provider, endpoint, command, or language. |
+| owner | core runtime contract retry |
+| closureBatch | 7 |
+| loadByDefault | false |
+
 ## Default Load Set For Next Code Closure
 
 Load only:

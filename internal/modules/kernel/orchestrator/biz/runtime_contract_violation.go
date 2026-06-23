@@ -420,15 +420,15 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 	case contractViolationRuleStateChangingRequiredMissing:
 		profileID = "state_changing_required_output"
 		contract["requiredOutputShape"] = "state_changing_output"
-		contract["allowedOutputs"] = []string{"executionGraph_with_state_changing_node", "patch/apply", "accepted_state_changing_tool_or_shell", "incremental_artifact_state_change", "blocked_on_decision", "blocked_on_approval"}
-		contract["forbiddenOutputs"] = []string{"read_only_executionGraph", "failed_dodAssessment_only", "same_actualOutputSummary"}
+		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_state_changing_node", "patch/apply", "accepted_state_changing_tool_or_shell", "incremental_artifact_state_change")
+		contract["forbiddenOutputs"] = append([]string{"read_only_executionGraph", "failed_dodAssessment_only", "same_actualOutputSummary"}, contractViolationForbiddenContinuableBlockers()...)
 		contract["mustSatisfy"] = []string{"stateChangingOutputRequired", "repairActionPackage.requiredOutput"}
 	case contractViolationRuleConcreteValidationMissing:
 		profileID = "concrete_validation_evidence"
 		contract["requiredOutputShape"] = "bounded_validation_evidence"
-		contract["allowedOutputs"] = []string{"executionGraph_with_declared_validationEvidence", "satisfied_dodAssessment_with_concrete_evidenceRefs", "blocked_on_decision", "blocked_on_approval"}
+		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_declared_validationEvidence", "satisfied_dodAssessment_with_concrete_evidenceRefs")
 		contract["requiredFields"] = []string{"validationEvidence.mode", "validationEvidence.observationType"}
-		contract["forbiddenOutputs"] = []string{"static_inspection_only", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}
+		contract["forbiddenOutputs"] = append([]string{"static_inspection_only", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}, contractViolationForbiddenContinuableBlockers()...)
 		if scratch := validationScratchDirFromStep(step); scratch != "" {
 			contract[validationScratchDirKey] = scratch
 		}
@@ -447,8 +447,8 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 	case contractViolationRuleAvailableSnapshotIgnored:
 		profileID = "available_snapshot_direct_action"
 		contract["requiredOutputShape"] = "state_changing_output_from_available_snapshot"
-		contract["allowedOutputs"] = []string{"patch/apply_against_available_snapshot", "executionGraph_with_patch_apply_against_available_snapshot", "failed_dodAssessment_with_specific_non_snapshot_blocker", "blocked_on_decision", "blocked_on_approval"}
-		contract["forbiddenOutputs"] = []string{"missing_snapshot_claim", "file_read_for_available_target", "context_rehydration_graph", "same_actualOutputSummary"}
+		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("patch/apply_against_available_snapshot", "executionGraph_with_patch_apply_against_available_snapshot", "failed_dodAssessment_with_specific_non_snapshot_blocker")
+		contract["forbiddenOutputs"] = append([]string{"missing_snapshot_claim", "file_read_for_available_target", "context_rehydration_graph", "same_actualOutputSummary"}, contractViolationForbiddenContinuableBlockers()...)
 		contract["mustSatisfy"] = []string{"availableTargetSnapshots", "repairActionPackage.requiredOutput"}
 		if targetScope != "" {
 			contract["targetScope"] = targetScope
@@ -496,16 +496,16 @@ func contractViolationRequiredOutputCorrectionProfile(step *runModel.Step, contr
 	}
 	if boolValue(step.Input["stateChangingOutputRequired"]) || boolValue(required["mustIncludeStateChangingNode"]) {
 		contract["requiredOutputShape"] = "state_changing_output"
-		contract["allowedOutputs"] = []string{"executionGraph_with_state_changing_node", "patch/apply", "accepted_state_changing_tool_or_shell", "incremental_artifact_state_change", "blocked_on_decision", "blocked_on_approval"}
-		contract["forbiddenOutputs"] = []string{"failed_dodAssessment_only", "read_only_executionGraph", "same_actualOutputSummary"}
+		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_state_changing_node", "patch/apply", "accepted_state_changing_tool_or_shell", "incremental_artifact_state_change")
+		contract["forbiddenOutputs"] = append([]string{"failed_dodAssessment_only", "read_only_executionGraph", "same_actualOutputSummary"}, contractViolationForbiddenContinuableBlockers()...)
 		contract["mustSatisfy"] = []string{"stateChangingOutputRequired", "repairActionPackage.requiredOutput"}
 		return "state_changing_required_output", true
 	}
 	if boolValue(required["mustProduceConcreteValidationEvidence"]) {
 		contract["requiredOutputShape"] = "bounded_validation_evidence"
-		contract["allowedOutputs"] = []string{"executionGraph_with_declared_validationEvidence", "satisfied_dodAssessment_with_concrete_evidenceRefs", "blocked_on_decision", "blocked_on_approval"}
+		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_declared_validationEvidence", "satisfied_dodAssessment_with_concrete_evidenceRefs")
 		contract["requiredFields"] = []string{"validationEvidence.mode", "validationEvidence.observationType"}
-		contract["forbiddenOutputs"] = []string{"failed_dodAssessment_only", "static_inspection_only", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}
+		contract["forbiddenOutputs"] = append([]string{"failed_dodAssessment_only", "static_inspection_only", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}, contractViolationForbiddenContinuableBlockers()...)
 		if scratch := validationScratchDirFromStep(step); scratch != "" {
 			contract[validationScratchDirKey] = scratch
 		}
@@ -513,9 +513,9 @@ func contractViolationRequiredOutputCorrectionProfile(step *runModel.Step, contr
 	}
 	if boolValue(required["mustProduceConcreteFailureEvidence"]) {
 		contract["requiredOutputShape"] = "bounded_failure_evidence"
-		contract["allowedOutputs"] = []string{"executionGraph_with_bounded_evidence_acquisition", "failed_dodAssessment_with_specific_non_recoverable_blocker", "blocked_on_decision", "blocked_on_approval"}
+		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_bounded_evidence_acquisition", "failed_dodAssessment_with_specific_non_recoverable_blocker")
 		contract["requiredFields"] = []string{"executionGraph.nodes", "evidenceRefs_or_specific_blocker"}
-		contract["forbiddenOutputs"] = []string{"failed_dodAssessment_only", "patch/apply", "patch/preview", "llm/workspace_execution", "deliverable_mutating_evidence_acquisition", "untraceable_summary_only"}
+		contract["forbiddenOutputs"] = append([]string{"failed_dodAssessment_only", "patch/apply", "patch/preview", "llm/workspace_execution", "deliverable_mutating_evidence_acquisition", "untraceable_summary_only"}, contractViolationForbiddenContinuableBlockers()...)
 		if acceptedKinds := stringSliceFromValue(required["acceptedKinds"]); len(acceptedKinds) > 0 {
 			contract["acceptedKinds"] = acceptedKinds
 		}
@@ -531,6 +531,22 @@ func contractViolationRequiredOutputCorrectionProfile(step *runModel.Step, contr
 		return "concrete_failure_evidence", true
 	}
 	return "", false
+}
+
+func contractViolationAllowedOutputsWithGovernanceBlockers(primary ...string) []string {
+	ret := append([]string{}, primary...)
+	return append(ret,
+		"blocked_on_decision_with_required_external_dependency",
+		"blocked_on_approval_with_required_governance_dependency",
+	)
+}
+
+func contractViolationForbiddenContinuableBlockers() []string {
+	return []string{
+		"blocked_on_decision_for_continuable_candidate_choice",
+		"decision_request_when_runtime_can_continue",
+		"decision_request_for_candidate_selection_without_external_dependency",
+	}
 }
 
 func contractViolationOutputClaimsMissingAvailableSnapshot(step *runModel.Step) bool {

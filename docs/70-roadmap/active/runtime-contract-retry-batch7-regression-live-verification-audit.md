@@ -1656,6 +1656,14 @@ The audited result is:
   keeps LLM rounds and failure signatures visible while preventing pending
   graph plans and stale patch conflicts from prematurely exhausting no-delta
   budget.
+- The same live verification exposed a correction-contract wording defect for
+  verification-stage retries: runtime correctly rejects continuable decision
+  blockers, but the retry correction contract still listed bare
+  `blocked_on_decision` as an allowed output. The local closure in
+  `ev:code/contract-correction-governance-blocker-shape/20260623-030`
+  preserves real governance blockers by requiring a declared external or
+  governance dependency, and explicitly forbids decision requests for
+  continuable candidate choices.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked
