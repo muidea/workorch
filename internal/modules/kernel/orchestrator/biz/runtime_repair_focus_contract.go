@@ -91,6 +91,10 @@ func validateLLMRepairCoverageFocusBindingContract(step *runModel.Step, output m
 		return nil
 	}
 	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
+		if normalized, changed := normalizeRepairCoverageFocusGraphBinding(step, graph, contract); changed {
+			output[stepOutputKeyExecutionGraph] = normalized
+			graph = normalized
+		}
 		return validateRepairCoverageFocusGraphBinding(graph, contract)
 	}
 	requests, err := runtimePatchRequests(output)
@@ -112,6 +116,65 @@ func validateLLMRepairCoverageFocusBindingContract(step *runModel.Step, output m
 		}
 	}
 	return nil
+}
+
+func normalizeRepairCoverageFocusGraphBinding(step *runModel.Step, graph runtimemodel.BlockExecutionGraph, contract repairCoverageFocusBindingContract) (runtimemodel.BlockExecutionGraph, bool) {
+	if step == nil || len(contract.ExpectedTokens) == 0 || !stepAllowsCoverageFocusEvidenceNormalization(step) {
+		return graph, false
+	}
+	if contract.FocusID == "" && len(contract.WorkItemIDs) != 1 && len(contract.TargetRefs) == 0 {
+		return graph, false
+	}
+	changed := false
+	nodes := append([]runtimemodel.BlockExecutionNode(nil), graph.Nodes...)
+	for idx, node := range nodes {
+		kind := canonicalRuntimeGraphNodeKind(node.Kind)
+		switch kind {
+		case "shell/command", "mcp/tool_call":
+			if repairPayloadBindsCoverageFocus(node.Input, contract) {
+				continue
+			}
+			nextInput := cloneStepPayload(node.Input)
+			if nextInput == nil {
+				nextInput = map[string]any{}
+			}
+			if contract.FocusID != "" {
+				nextInput["coverageFocusId"] = contract.FocusID
+			}
+			if len(contract.WorkItemIDs) > 0 {
+				nextInput["coverageWorkItemIds"] = append([]string(nil), contract.WorkItemIDs...)
+				if len(contract.WorkItemIDs) == 1 {
+					nextInput["coverageWorkItemId"] = contract.WorkItemIDs[0]
+				}
+			}
+			if len(contract.TargetRefs) > 0 && len(stringSliceFromValue(nextInput["targetRefs"])) == 0 {
+				nextInput["targetRefs"] = append([]string(nil), contract.TargetRefs...)
+			}
+			nodes[idx].Input = nextInput
+			changed = true
+		}
+	}
+	if !changed {
+		return graph, false
+	}
+	return runtimemodel.BlockExecutionGraph{Nodes: nodes}, true
+}
+
+func stepAllowsCoverageFocusEvidenceNormalization(step *runModel.Step) bool {
+	if step == nil || step.Input == nil || boolValue(step.Input["stateChangingOutputRequired"]) {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) == repairObjectiveAcquireFailureEvidence {
+		return true
+	}
+	pkg := mapFromValue(step.Input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	if boolValue(pkg["evidenceAcquisitionRequired"]) || boolValue(pkg["concreteFailureEvidenceRequired"]) {
+		return true
+	}
+	return boolValue(required["mustProduceConcreteValidationEvidence"]) ||
+		boolValue(required["mustProduceConcreteFailureEvidence"]) ||
+		boolValue(required["concreteFailureEvidenceRequired"])
 }
 
 type repairCoverageFocusBindingContract struct {

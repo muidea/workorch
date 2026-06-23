@@ -119,6 +119,53 @@ func TestValidateLLMRepairCoverageFocusAllowsBoundPatchGraph(t *testing.T) {
 	}
 }
 
+func TestValidateLLMRepairCoverageFocusNormalizesEvidenceGraphBinding(t *testing.T) {
+	run := repairFocusContractRun()
+	step := repairFocusEvidenceContractStep()
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{
+			Nodes: []runtimemodel.BlockExecutionNode{
+				{
+					ID:   "read-primary",
+					Kind: "file/read",
+					Input: map[string]any{
+						"path": "primary-resource",
+					},
+				},
+				{
+					ID:        "validate-primary",
+					Kind:      "shell/command",
+					DependsOn: []string{"read-primary"},
+					Input: map[string]any{
+						"command": "validate-primary",
+						"validationEvidence": map[string]any{
+							"mode":            "executable_contract",
+							"observationType": "executable_contract_observation",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want normalized evidence graph allowed", err)
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok {
+		t.Fatalf("normalized executionGraph missing from output")
+	}
+	if got := stringFromMap(graph.Nodes[1].Input, "coverageFocusId"); got != "focus-cwi-primary" {
+		t.Fatalf("coverageFocusId = %q, want focus-cwi-primary", got)
+	}
+	if got := stringSliceFromValue(graph.Nodes[1].Input["coverageWorkItemIds"]); len(got) != 1 || got[0] != "cwi-primary" {
+		t.Fatalf("coverageWorkItemIds = %+v, want cwi-primary", got)
+	}
+	if got := stringFromMap(graph.Nodes[0].Input, "coverageFocusId"); got != "" {
+		t.Fatalf("read-only support node coverageFocusId = %q, want not injected", got)
+	}
+}
+
 func TestValidateLLMRepairCoverageFocusAllowsStructuredBlocker(t *testing.T) {
 	run := repairFocusContractRun()
 	step := repairFocusContractStep()
@@ -135,6 +182,28 @@ func TestValidateLLMRepairCoverageFocusAllowsStructuredBlocker(t *testing.T) {
 		stepOutputKeyBlockDecisionQuestion: "Provide missing input for the current focus.",
 	}); err != nil {
 		t.Fatalf("validateLLMExecutionOutputContract decision blocker err = %v", err)
+	}
+}
+
+func repairFocusEvidenceContractStep() *runmodel.Step {
+	input := repairFocusContractInput()
+	delete(input, "stateChangingOutputRequired")
+	input["repairObjective"] = repairObjectiveAcquireFailureEvidence
+	input["concreteFailureEvidenceRequired"] = true
+	input["repairActionPackage"] = repairActionPackageFromRepairInput(input)
+	pkg := mapFromValue(input["repairActionPackage"])
+	pkg["evidenceAcquisitionRequired"] = true
+	required := mapFromValue(pkg["requiredOutput"])
+	required["mustProduceConcreteValidationEvidence"] = true
+	required["acceptedKinds"] = []string{"file/read", "file/list", "shell/command", "mcp/tool_call"}
+	pkg["requiredOutput"] = required
+	input["repairActionPackage"] = pkg
+	return &runmodel.Step{
+		ID:    "run-repair-focus-contract/repair-evidence-001",
+		RunID: "run-repair-focus-contract",
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateDispatched,
+		Input: input,
 	}
 }
 

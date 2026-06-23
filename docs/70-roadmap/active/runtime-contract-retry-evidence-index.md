@@ -1435,6 +1435,21 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 | closureBatch | 7 |
 | loadByDefault | false |
 
+### ev:code/focus-bound-evidence-graph-normalization/20260623-028
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-FOCUS-BOUND-EVIDENCE-GRAPH-NORMALIZATION-20260623-028` |
+| workspaceId | `ws-4e83810542ac4d65`, `ws-7ced70e98ea50c43` |
+| runId | `run-003-replan-001` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | deployed `http://127.0.0.1:8080` plus `internal/modules/kernel/orchestrator/biz/runtime_repair_focus_contract.go`, `internal/modules/kernel/orchestrator/biz/runtime_repair_focus_contract_test.go` |
+| extractCommand | `curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-4e83810542ac4d65/snapshot; curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-7ced70e98ea50c43/snapshot; go test ./internal/modules/kernel/orchestrator/biz -run 'TestValidateLLMRepairCoverageFocus' -count=1 -timeout=300s; ./scripts/verify-boundary-contract.sh; git diff --check` |
+| extractedSummary | Post-redeploy live snapshots showed both workspaces blocked on `repair_focus_mismatch` after replan successors reached `repair/strict_convergence` with `repairObjective=acquire_concrete_failure_evidence`. The returned graphs contained bounded evidence-acquisition actions (`shell/command` or `mcp/tool_call`) but did not explicitly repeat the current `coverageFocusId` / `coverageWorkItemIds`, so the runtime consumed retry budget and escalated to decision before dispatching otherwise focus-scoped evidence acquisition. Local core closure now normalizes only non-`patch/apply` evidence graph nodes when the structured repair contract already contains a unique current coverage focus and state-changing output is not required. `patch/apply` remains strictly rejected unless it explicitly binds focus. Focused tests prove evidence nodes receive injected focus metadata and unbound patch graphs still fail. |
+| owner | core runtime contract normalization |
+| closureBatch | 7 |
+| loadByDefault | false |
+
 ## Default Load Set For Next Code Closure
 
 Load only:

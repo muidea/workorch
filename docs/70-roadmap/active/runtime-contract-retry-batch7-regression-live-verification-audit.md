@@ -1634,6 +1634,17 @@ The audited result is:
   substitution` validation failures without adding language or test-framework
   rules to core.
 - Real-runtime preflight passed for service readiness and scheduler/watchdog metrics; real-provider execution remains unverified.
+- Post-redeploy live snapshots showed both active workspaces blocked on
+  `repair_focus_mismatch` after fresh replan successors. The runtime contract
+  had already narrowed the step to structured evidence acquisition for the
+  current coverage focus, but provider outputs omitted repeated
+  `coverageFocusId` / `coverageWorkItemIds` metadata on `shell/command` or
+  `mcp/tool_call` evidence nodes. The local closure in
+  `ev:code/focus-bound-evidence-graph-normalization/20260623-028` normalizes
+  only non-`patch/apply` evidence nodes from the structured current focus when
+  state-changing output is not required. `patch/apply` remains strict and must
+  declare focus binding itself. Redeploy plus explicit replan/resume is still
+  required to verify live convergence past this blocker.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked
