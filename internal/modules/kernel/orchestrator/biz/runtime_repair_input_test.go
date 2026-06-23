@@ -452,7 +452,7 @@ func TestApplyRuntimeRepairPatchContextProjectionRequiresStateChangingRepair(t *
 		"baseHash":  "hash-current",
 	}}
 
-	applyRuntimeRepairPatchContextProjection(input, patchContext, patchSuggestions, nil)
+	applyRuntimeRepairPatchContextProjection(input, patchContext, patchSuggestions, nil, nil)
 
 	if stringFromMap(input, "repairObjective") != repairObjectiveStateChangingOutput {
 		t.Fatalf("repairObjective = %q, want state-changing output", stringFromMap(input, "repairObjective"))
@@ -564,7 +564,7 @@ func TestApplyRuntimeRepairPatchContextProjectionKeepsSatisfiedPatchAsValidation
 		"reason":    "current target already contains intended change",
 	}}
 
-	applyRuntimeRepairPatchContextProjection(input, patchContext, nil, satisfiedSignals)
+	applyRuntimeRepairPatchContextProjection(input, patchContext, nil, satisfiedSignals, nil)
 
 	if input["stateChangeAlreadySatisfiedByCurrentTarget"] != true {
 		t.Fatalf("stateChangeAlreadySatisfiedByCurrentTarget = %v, want true", input["stateChangeAlreadySatisfiedByCurrentTarget"])

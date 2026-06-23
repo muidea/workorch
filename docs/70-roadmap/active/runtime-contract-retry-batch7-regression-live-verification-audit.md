@@ -1721,6 +1721,18 @@ The audited result is:
   `ev:code/already-satisfied-stale-patch-bypasses-exhaustion/20260623-035`
   makes those governance gates yield to the mechanical already-satisfied patch
   signal, preserving the existing validation path.
+- The next live snapshot proved `035` moved the run past the already-satisfied
+  stale text replacement. It then exposed a different stale patch path:
+  `patch/apply` failed with `conflict: patch baseHash mismatch` because the
+  same target had already changed after the failed patch's base hash was
+  captured. Current target evidence existed and was sufficient to rebuild the
+  patch from a fresh `contentHash`, but recovery action selection escalated to
+  `runtime_repair_exhausted` before the existing patch repair context could be
+  used. The local closure in
+  `ev:code/stale-basehash-patch-refresh-bypasses-exhaustion/20260623-036`
+  adds a narrow refreshable stale-patch signal for readable current targets and
+  lets it bypass exhaustion/duplicate gates into runtime repair. Missing-target
+  or non-refreshable stale hash cases still escalate at budget.
 - Batch 7 cannot mark runtime convergence complete until live workspace goal convergence and real-provider resource tiers have bounded pass/fail output; optional full deployed or TUI tiers must be run when a later closure touches those paths.
 - The next live observation must trigger or accompany an explicit
   replan/resume of the open decisions; observing unchanged decision-blocked

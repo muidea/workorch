@@ -490,6 +490,7 @@ func applyRuntimeRepairPatchContextProjection(
 	patchContext []map[string]any,
 	patchSuggestions []map[string]any,
 	satisfiedSignals []map[string]any,
+	refreshableSignals []map[string]any,
 ) {
 	if input == nil || len(patchContext) == 0 {
 		return
@@ -501,6 +502,9 @@ func applyRuntimeRepairPatchContextProjection(
 	if len(satisfiedSignals) > 0 {
 		input["currentTargetAlreadySatisfiesFailedPatch"] = satisfiedSignals
 		input["stateChangeAlreadySatisfiedByCurrentTarget"] = true
+	}
+	if len(refreshableSignals) > 0 {
+		input["currentTargetRefreshRequiredForFailedPatch"] = refreshableSignals
 	}
 	if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) == 0 &&
 		!boolValue(input["concreteFailureEvidenceRequired"]) &&
@@ -527,6 +531,12 @@ func applyRuntimeRepairPatchContextProjection(
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"currentTargetAlreadySatisfiesFailedPatch is a mechanical signal that the failed artifact's intended line changes are already reflected in the current target snapshot.",
 			"Do not repeat the same failed patch when this signal is present; return a bounded concrete validation evidence graph, or a failed dodAssessment/blocker if validation cannot be produced.",
+		)
+	}
+	if len(mapSliceFromValue(input["currentTargetRefreshRequiredForFailedPatch"])) > 0 {
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"currentTargetRefreshRequiredForFailedPatch is a mechanical signal that the failed patch was built against a stale target hash.",
+			"Do not retry the same failed baseHash or patch body; rebuild from patchRepairContext and use the current target contentHash.",
 		)
 	}
 }
@@ -1051,6 +1061,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			patchContext,
 			o.repairManager().runtimeRepairPatchSuggestions(ctx, run, failedStep),
 			o.repairManager().runtimeRepairPatchAlreadySatisfiedSignals(ctx, run, failedStep),
+			o.repairManager().runtimeRepairPatchRefreshableSignals(ctx, run, failedStep),
 		)
 	}
 	targetContext := o.repairManager().runtimeRepairFailureTargetContext(ctx, run, failedStep)

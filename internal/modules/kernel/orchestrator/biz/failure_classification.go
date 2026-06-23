@@ -614,6 +614,9 @@ func shouldBlockOnDuplicateRuntimeFailure(
 	if runtimeRepairPatchFailureAlreadySatisfied(ctx, repair, run, failedStep) {
 		return false
 	}
+	if runtimeRepairPatchFailureCanRefreshCurrentTarget(ctx, repair, run, failedStep) {
+		return false
+	}
 	if runtimeFailureCanContinueMechanicallyBeforeDuplicateEscalation(class, targetScope, attempts, maxAttempts) {
 		return false
 	}

@@ -1123,6 +1123,181 @@ func TestRecoveryActionAllowsValidationWhenFailedPatchAlreadySatisfiedAtRepairBu
 	}
 }
 
+func TestRecoveryActionAllowsPatchRefreshWhenBaseHashStaleAtRepairBudget(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-stale-basehash-patch-budget")
+	workspaceID := common.WorkspaceID("ws-stale-basehash-patch-budget")
+	deliverableDirectory := t.TempDir()
+	currentContent := "alpha\ncurrent\nomega\n"
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "target.txt"), []byte(currentContent), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	workspaceRepo := memory.NewWorkspaceRepository()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "ws",
+		DeliverableDirectory: deliverableDirectory,
+		State:                common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	stepRepo := memory.NewStepRepository()
+	signature := "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|failureTargets=target.txt|error=conflict: patch basehash mismatch"
+	repairAttempt := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001-of-graph-001-001-patch"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  1,
+			stepInputKeyRepairOfFailureClass:  failureClassPatchApply,
+			stepInputKeyRepairOfFailureSig:    signature,
+			stepInputKeyRepairOfRootStepID:    string(common.StepID(string(runID) + "/step-1")),
+		},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: signature,
+			"stage":                   "patch_apply",
+			"error":                   "conflict: patch baseHash mismatch",
+		},
+	}
+	if err := stepRepo.Create(ctx, repairAttempt); err != nil {
+		t.Fatalf("seed repair attempt: %v", err)
+	}
+	staleBaseHash := sha256HexBytes([]byte("alpha\nprevious\nomega\n"))
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/001-patch"),
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"targetRef": "target.txt",
+			"patchType": "text_replace",
+			"baseHash":  staleBaseHash,
+			"oldText":   "current",
+			"newText":   "fresh",
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"stage":                   "patch_apply",
+			"error":                   "conflict: patch baseHash mismatch",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: signature,
+			"patches": []map[string]any{{
+				"targetRef": "target.txt",
+				"patchType": "text_replace",
+				"baseHash":  staleBaseHash,
+				"oldText":   "current",
+				"newText":   "fresh",
+			}},
+		},
+	}
+	orch := &RuntimeOrchestrator{
+		runtime:    &stubRuntimeAdapter{},
+		steps:      stepRepo,
+		workspaces: workspaceRepo,
+		tickets:    memory.NewDecisionTicketRepository(),
+		policy:     NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 1}),
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
+	signals := orch.repairManager().runtimeRepairPatchRefreshableSignals(ctx, run, failedStep)
+	if len(signals) != 1 || stringFromMap(signals[0], "currentContentHash") != sha256HexBytes([]byte(currentContent)) {
+		t.Fatalf("runtimeRepairPatchRefreshableSignals = %#v, want current target refresh signal", signals)
+	}
+	if shouldEscalateRuntimeRepairExhaustion(ctx, orch.repairManager(), orch.policy, true, run, failedStep) {
+		t.Fatalf("shouldEscalateRuntimeRepairExhaustion = true, want false for refreshable stale baseHash patch")
+	}
+	if shouldBlockOnDuplicateRuntimeFailureForTest(ctx, orch, run, failedStep) {
+		t.Fatalf("shouldBlockOnDuplicateRuntimeFailure = true, want false for refreshable stale baseHash patch")
+	}
+	if got := runtimeRecoveryActionForFailedStepForTest(ctx, orch, run, failedStep); got != runtimeRecoveryActionRuntimeRepair {
+		t.Fatalf("recovery action = %s, want %s", got, runtimeRecoveryActionRuntimeRepair)
+	}
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 2, nil)
+	refreshSignals := mapSliceFromValue(input["currentTargetRefreshRequiredForFailedPatch"])
+	if len(refreshSignals) != 1 || stringFromMap(refreshSignals[0], "failedBaseHash") != staleBaseHash {
+		t.Fatalf("currentTargetRefreshRequiredForFailedPatch = %#v, want stale baseHash signal", refreshSignals)
+	}
+}
+
+func TestRecoveryActionDoesNotBypassPatchBudgetWithoutCurrentTargetRefreshEvidence(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-stale-basehash-missing-target")
+	workspaceID := common.WorkspaceID("ws-stale-basehash-missing-target")
+	deliverableDirectory := t.TempDir()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "ws",
+		DeliverableDirectory: deliverableDirectory,
+		State:                common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	stepRepo := memory.NewStepRepository()
+	signature := "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|failureTargets=missing.txt|error=conflict: patch basehash mismatch"
+	repairAttempt := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001-of-graph-001-001-patch"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  1,
+			stepInputKeyRepairOfFailureClass:  failureClassPatchApply,
+			stepInputKeyRepairOfFailureSig:    signature,
+			stepInputKeyRepairOfRootStepID:    string(common.StepID(string(runID) + "/step-1")),
+		},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: signature,
+			"stage":                   "patch_apply",
+			"error":                   "conflict: patch baseHash mismatch",
+		},
+	}
+	if err := stepRepo.Create(ctx, repairAttempt); err != nil {
+		t.Fatalf("seed repair attempt: %v", err)
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/001-patch"),
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"targetRef": "missing.txt",
+			"patchType": "text_replace",
+			"baseHash":  sha256HexBytes([]byte("previous")),
+			"oldText":   "current",
+			"newText":   "fresh",
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"stage":                   "patch_apply",
+			"error":                   "conflict: patch baseHash mismatch",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: signature,
+		},
+	}
+	orch := &RuntimeOrchestrator{
+		runtime:    &stubRuntimeAdapter{},
+		steps:      stepRepo,
+		workspaces: workspaceRepo,
+		tickets:    memory.NewDecisionTicketRepository(),
+		policy:     NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 1}),
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
+	if signals := orch.repairManager().runtimeRepairPatchRefreshableSignals(ctx, run, failedStep); len(signals) != 0 {
+		t.Fatalf("runtimeRepairPatchRefreshableSignals = %#v, want none without current target", signals)
+	}
+	if !shouldEscalateRuntimeRepairExhaustion(ctx, orch.repairManager(), orch.policy, true, run, failedStep) {
+		t.Fatalf("shouldEscalateRuntimeRepairExhaustion = false, want true without current target refresh evidence")
+	}
+	if got := runtimeRecoveryActionForFailedStepForTest(ctx, orch, run, failedStep); got != runtimeRecoveryActionRuntimeRepairExhausted {
+		t.Fatalf("recovery action = %s, want %s", got, runtimeRecoveryActionRuntimeRepairExhausted)
+	}
+}
+
 func TestShouldNotBlockOnDuplicateRuntimeFailureForRepeatedRuntimeContractLoopWithNewEvidence(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-duplicate-runtime-contract-loop-with-evidence")

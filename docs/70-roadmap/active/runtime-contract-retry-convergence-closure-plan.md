@@ -462,6 +462,7 @@ go test ./... -count=1
    - graph-node primary diagnostic dependency evidence reuse after a completed dependency already addressed the diagnostic (`ev:code/graph-node-primary-diagnostic-dependency-evidence/20260623-033`)
    - resource-shape alignment context from inherited structured diagnostics and target scope (`ev:code/shape-alignment-context-from-inherited-diagnostics/20260623-034`)
    - already-satisfied stale patch recovery bypasses repair-exhaustion and duplicate-failure decision gates (`ev:code/already-satisfied-stale-patch-bypasses-exhaustion/20260623-035`)
+   - stale patch `baseHash mismatch` with readable current target bypasses repair-exhaustion and duplicate-failure gates into current-snapshot patch refresh (`ev:code/stale-basehash-patch-refresh-bypasses-exhaustion/20260623-036`)
 6. Continue Batch 7 regression and live verification.
 7. Re-run live workspace verification against fresh or resumed workspaces after the preceding gates are closed.
 

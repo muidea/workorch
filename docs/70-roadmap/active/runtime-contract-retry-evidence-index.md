@@ -1555,6 +1555,21 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 | closureBatch | 7 |
 | loadByDefault | false |
 
+### ev:code/stale-basehash-patch-refresh-bypasses-exhaustion/20260623-036
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-STALE-BASEHASH-PATCH-REFRESH-BYPASSES-EXHAUSTION-20260623-036` |
+| workspaceId | `ws-4e83810542ac4d65` |
+| runId | `run-003-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-003` |
+| evidenceKind | live-blocker-and-code-test-output |
+| sourcePath | deployed `http://127.0.0.1:8080` plus `internal/modules/kernel/orchestrator/biz/runtime_repair.go`, `internal/modules/kernel/orchestrator/biz/runtime_repair_context_material.go`, `internal/modules/kernel/orchestrator/biz/runtime_repair_input.go`, `internal/modules/kernel/orchestrator/biz/runtime_repair_policy_test.go` |
+| extractCommand | `curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-4e83810542ac4d65/snapshot; jq '{targetRef,patchType,baseHash,oldText,newText}' .workorch-data/internal/workspaces/ws-4e83810542ac4d65/runs/<run>/steps/<run>/009-graph-003-002-fix-manifest-bounded-output/input.json; go test ./internal/modules/kernel/orchestrator/biz -run 'TestRecoveryActionAllowsValidationWhenFailedPatchAlreadySatisfiedAtRepairBudget|TestRecoveryActionAllowsPatchRefreshWhenBaseHashStaleAtRepairBudget|TestRecoveryActionDoesNotBypassPatchBudgetWithoutCurrentTargetRefreshEvidence' -count=1 -timeout=240s; go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=300s` |
+| extractedSummary | After `035` moved the live run past an already-satisfied stale text replacement, the next blocker was a different mechanical patch conflict: `patch/apply` failed with `conflict: patch baseHash mismatch` after a previous graph node had already changed the same target. The current target existed and had a new content hash, but recovery action selection escalated to `runtime_repair_exhausted` / duplicate failure before the existing patch repair context could ask the model to rebuild from the current snapshot. Local core closure adds a neutral refreshable stale-patch signal only for `patch/apply` / `patch_apply_failed` baseHash mismatch when the current target is readable, non-binary, and its `contentHash` differs from the failed patch `baseHash`. That signal bypasses repair-exhaustion and duplicate-failure gates for one repair path and is projected as `currentTargetRefreshRequiredForFailedPatch`, while missing-target or non-refreshable cases still escalate at budget. The implementation uses only generic patch mechanics and current workspace file evidence; it does not encode workspace IDs, templates, languages, commands, target file names, providers, or business behavior. |
+| owner | core runtime repair gate |
+| closureBatch | 7 |
+| loadByDefault | false |
+
 ## Default Load Set For Next Code Closure
 
 Load only:

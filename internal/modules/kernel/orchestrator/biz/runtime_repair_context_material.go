@@ -89,6 +89,66 @@ func (r *repairSubsystem) runtimeRepairPatchSuggestions(ctx context.Context, run
 	return ret
 }
 
+func (r *repairSubsystem) runtimeRepairPatchRefreshableSignals(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
+	if r == nil || r.workspaces == nil || run == nil || failedStep == nil {
+		return nil
+	}
+	if !runtimeRepairPatchFailureNeedsCurrentTargetRefresh(failedStep) {
+		return nil
+	}
+	workspace, err := r.workspaces.Get(ctx, run.WorkspaceID)
+	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
+		return nil
+	}
+	targetRefs := patchRepairTargetRefs(failedStep)
+	if len(targetRefs) == 0 {
+		return nil
+	}
+	patches := patchRepairRequestsFromStep(failedStep)
+	if len(patches) == 0 {
+		return nil
+	}
+	allowedTargets := map[string]bool{}
+	for _, targetRef := range targetRefs {
+		allowedTargets[strings.TrimSpace(targetRef)] = true
+	}
+	var ret []map[string]any
+	for _, request := range patches {
+		if len(ret) >= 3 {
+			break
+		}
+		if len(allowedTargets) > 0 && !allowedTargets[request.TargetRef] {
+			continue
+		}
+		failedBaseHash := strings.TrimSpace(request.BaseHash)
+		if failedBaseHash == "" {
+			continue
+		}
+		snapshot := patchRepairTargetSnapshot(workspace.DeliverableDirectory, request.TargetRef)
+		currentHash := strings.TrimSpace(stringFromMap(snapshot, "contentHash"))
+		if len(snapshot) == 0 || !boolValue(snapshot["exists"]) || boolValue(snapshot["isBinary"]) || currentHash == "" {
+			continue
+		}
+		if strings.EqualFold(failedBaseHash, currentHash) {
+			continue
+		}
+		ret = append(ret, map[string]any{
+			"targetRef":          request.TargetRef,
+			"patchType":          request.PatchType,
+			"failedBaseHash":     failedBaseHash,
+			"currentContentHash": currentHash,
+			"contentComplete":    boolValue(snapshot["contentComplete"]),
+			"safeForFileWrite":   boolValue(snapshot["safeForFileWrite"]),
+			"reason":             "current_target_hash_differs_from_failed_patch_base_hash",
+			"guidance":           "The failed patch used a stale baseHash. Rebuild the next patch from patchRepairContext/current target snapshot and copy currentContentHash as baseHash if baseHash is used.",
+			"mechanicalSignal":   true,
+			"businessJudgment":   false,
+			"matchedCurrentFile": true,
+		})
+	}
+	return ret
+}
+
 func (r *repairSubsystem) runtimeRepairPatchAlreadySatisfiedSignals(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
 	if r == nil || r.workspaces == nil || run == nil || failedStep == nil {
 		return nil
@@ -132,6 +192,28 @@ func (r *repairSubsystem) runtimeRepairPatchAlreadySatisfiedSignals(ctx context.
 		}
 	}
 	return ret
+}
+
+func runtimeRepairPatchFailureNeedsCurrentTargetRefresh(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	if strings.TrimSpace(step.Kind) != "patch/apply" &&
+		strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)) != failureClassPatchApply &&
+		!strings.HasPrefix(strings.TrimSpace(stringFromMap(step.Output, "stage")), "patch_") {
+		return false
+	}
+	textValues := repairForbiddenReuseTextValues(step.Input, step.Output)
+	if diagnostics := mapFromValue(step.Output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		textValues = append(textValues,
+			stringFromMap(diagnostics, "error"),
+			stringFromMap(diagnostics, "errorDetail"),
+			stringFromMap(diagnostics, "guidance"),
+		)
+	}
+	text := strings.ToLower(strings.Join(textValues, "\n"))
+	return strings.Contains(text, "basehash mismatch") ||
+		(strings.Contains(text, "basehash") && strings.Contains(text, "mismatch"))
 }
 
 func (r *repairSubsystem) runtimeRepairFailureTargetContext(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
