@@ -1662,6 +1662,125 @@ func TestEnforceProviderRequestBudgetPreservesRepairContractWithoutSnapshots(t *
 	}
 }
 
+func TestEnforceProviderRequestBudgetPreservesStagePacketCriticalFields(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-stage-packet-budget",
+		RunID:       "run-stage-packet-budget",
+		StepID:      "run-stage-packet-budget/step-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"currentSoulStage":     "execution",
+			"failedExecutionGraph": repeatedBudgetItems(300),
+			"graphEvidence":        repeatedBudgetItems(300),
+			"previousResults":      repeatedBudgetItems(300),
+			"stagePacket": map[string]any{
+				"schemaVersion": "workorch.stage_packet.v1",
+				"workspaceId":   "ws-stage-packet-budget",
+				"runId":         "run-stage-packet-budget",
+				"stepId":        "run-stage-packet-budget/step-001",
+				"definition": map[string]any{
+					"revision": "definition-stage-budget",
+					"goalId":   "goal-stage-budget",
+					"doDId":    "dod-stage-budget",
+				},
+				"activeStage": "state_change",
+				"activeFocus": map[string]any{
+					"coverageItemId": "coverage-stage-budget",
+					"currentGap":     "produce accepted evidence",
+				},
+				"requiredOutput": map[string]any{
+					"mustUseCurrentTargetSnapshot": true,
+					"mustBindAcceptedEvidenceRefs": true,
+					"targetRef":                    "target-stage-budget",
+				},
+				"allowedActions":        []string{"state_change"},
+				"forbiddenActions":      []string{"complete_without_evidence"},
+				"requiredEvidenceKinds": []string{"state_change", "validation"},
+				"acceptedEvidenceRefs":  []string{"accepted-stage-1", "accepted-stage-2"},
+				"rejectedEvidenceRefs":  []string{"rejected-stage-1"},
+				"idempotencyKey":        "stage-packet-budget-key",
+				"targetSnapshots": []map[string]any{{
+					"targetRef":             "target-stage-budget",
+					"content":               "snapshot body must not be protected through stagePacket",
+					"contentPreview":        "snapshot preview must not be protected through stagePacket",
+					"contentHash":           "sha256-stage-budget",
+					"contentComplete":       false,
+					"safeForFileWrite":      false,
+					"safeForExactFileWrite": false,
+					"truncated":             true,
+					"integrityState":        "truncated",
+					"source":                "stagePacket",
+					"contextSource":         "runtime",
+				}},
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    4096,
+				MaxInputTokens:         256,
+				ReservedOutputTokens:   128,
+				BytesHardLimit:         8 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil || got.ContextBudget.ShrinkLevel < 4 {
+		t.Fatalf("contextBudget = %+v, want aggressive compaction", got.ContextBudget)
+	}
+	for _, expected := range []string{
+		"input.stagePacket",
+		"input.stagePacket.requiredOutput",
+		"input.stagePacket.requiredEvidenceKinds",
+		"input.stagePacket.acceptedEvidenceRefs",
+		"input.stagePacket.rejectedEvidenceRefs",
+		"input.stagePacket.targetSnapshots",
+	} {
+		if !stringSliceContains(got.ContextBudget.ProtectedFields, expected) {
+			t.Fatalf("protectedFields = %+v, missing %s", got.ContextBudget.ProtectedFields, expected)
+		}
+	}
+	if len(got.ContextBudget.IntegrityWarnings) != 0 {
+		t.Fatalf("integrityWarnings = %+v, want none", got.ContextBudget.IntegrityWarnings)
+	}
+	packet := recordFromAny(got.Input["stagePacket"])
+	required := recordFromAny(packet["requiredOutput"])
+	if !boolValue(required["mustUseCurrentTargetSnapshot"]) ||
+		!boolValue(required["mustBindAcceptedEvidenceRefs"]) ||
+		stringValue(required["targetRef"]) != "target-stage-budget" {
+		t.Fatalf("stagePacket.requiredOutput = %+v, want critical output contract preserved", required)
+	}
+	if gotRefs := stringSliceFromAny(packet["acceptedEvidenceRefs"]); !stringSliceContains(gotRefs, "accepted-stage-1") || !stringSliceContains(gotRefs, "accepted-stage-2") {
+		t.Fatalf("stagePacket.acceptedEvidenceRefs = %+v, want refs preserved", packet["acceptedEvidenceRefs"])
+	}
+	if gotRefs := stringSliceFromAny(packet["rejectedEvidenceRefs"]); !stringSliceContains(gotRefs, "rejected-stage-1") {
+		t.Fatalf("stagePacket.rejectedEvidenceRefs = %+v, want refs preserved", packet["rejectedEvidenceRefs"])
+	}
+	if gotKinds := stringSliceFromAny(packet["requiredEvidenceKinds"]); !stringSliceContains(gotKinds, "state_change") || !stringSliceContains(gotKinds, "validation") {
+		t.Fatalf("stagePacket.requiredEvidenceKinds = %+v, want evidence kinds preserved", packet["requiredEvidenceKinds"])
+	}
+	snapshots := mapSliceFromAny(packet["targetSnapshots"])
+	if len(snapshots) != 1 {
+		t.Fatalf("stagePacket.targetSnapshots = %+v, want one metadata snapshot", packet["targetSnapshots"])
+	}
+	snapshot := snapshots[0]
+	if stringValue(snapshot["targetRef"]) != "target-stage-budget" ||
+		stringValue(snapshot["contentHash"]) != "sha256-stage-budget" ||
+		stringValue(snapshot["integrityState"]) != "truncated" ||
+		boolValue(snapshot["safeForExactFileWrite"]) {
+		t.Fatalf("stagePacket.targetSnapshots[0] = %+v, want integrity metadata preserved", snapshot)
+	}
+	if _, ok := snapshot["content"]; ok {
+		t.Fatalf("stagePacket target snapshot leaked content: %+v", snapshot)
+	}
+	if _, ok := snapshot["contentPreview"]; ok {
+		t.Fatalf("stagePacket target snapshot leaked contentPreview: %+v", snapshot)
+	}
+}
+
 func TestMissingProtectedRepairSnapshotWarningsRequireOriginalRepairSnapshots(t *testing.T) {
 	withoutSnapshots := missingProtectedRepairSnapshotWarnings(
 		map[string]any{"repairActionPackage": map[string]any{"requiredOutput": map[string]any{"mustReturnValidJSON": true}}},

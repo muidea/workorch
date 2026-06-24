@@ -53,6 +53,7 @@ Related:
 - [S6.2 StagePacket Evidence Refs](./goal-dod-nextaction-s6-2-stage-packet-evidence-refs.md)
 - [S6.3 StagePacket Target Snapshot Integrity](./goal-dod-nextaction-s6-3-stage-packet-target-snapshot-integrity.md)
 - [S6.4 LLM Context Partition Boundary Tests](./goal-dod-nextaction-s6-4-llm-context-partition-boundary-tests.md)
+- [S6.5 Context Budget Critical Field Protection](./goal-dod-nextaction-s6-5-context-budget-critical-field-protection.md)
 
 ## Purpose
 

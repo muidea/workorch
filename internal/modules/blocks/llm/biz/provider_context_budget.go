@@ -44,6 +44,7 @@ var providerP0InputKeys = []string{
 	"decisionResolution", "approvalResolution",
 	"contractViolationRecovery",
 	"coverageWorkItemContext",
+	"stagePacket",
 }
 
 var providerP1InputKeys = []string{
@@ -83,6 +84,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	protectedRepairTargets := captureProtectedProviderRepairTargets(request.Input)
 	protectedRuntimeContract := captureProtectedProviderRuntimeContract(request.Input)
 	protectedCoverageWorkItemContext := captureProtectedProviderCoverageWorkItemContext(request.Input)
+	protectedStagePacket := captureProtectedProviderStagePacket(request.Input)
 	if adaptiveLevel := adaptiveShrinkLevelFromInput(request.Input); adaptiveLevel > 0 {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = applyAdaptiveShrinkLevel(request.Input, adaptiveLevel)
@@ -90,6 +92,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
 		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
+		request.Input = restoreProtectedProviderStagePacket(request.Input, protectedStagePacket)
 		rules = append(rules, "adaptive shrink based on provider retry")
 		compressedSections = append(compressedSections, "adaptive")
 		shrinkLevel = adaptiveLevel
@@ -101,6 +104,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
 		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
+		request.Input = restoreProtectedProviderStagePacket(request.Input, protectedStagePacket)
 		rules = append(rules, "compact provider input")
 		compressedSections = append(compressedSections, "p2")
 		shrinkLevel = max(shrinkLevel, 1)
@@ -112,6 +116,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
 		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
+		request.Input = restoreProtectedProviderStagePacket(request.Input, protectedStagePacket)
 		rules = append(rules, "summarize execution context transport fields")
 		compressedSections = append(compressedSections, "p1")
 		shrinkLevel = max(shrinkLevel, 2)
@@ -123,6 +128,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
 		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
+		request.Input = restoreProtectedProviderStagePacket(request.Input, protectedStagePacket)
 		rules = append(rules, "apply priority compaction (P0/P1/P2)")
 		compressedSections = append(compressedSections, "p1", "p2")
 		shrinkLevel = max(shrinkLevel, 3)
@@ -134,6 +140,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
 		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
+		request.Input = restoreProtectedProviderStagePacket(request.Input, protectedStagePacket)
 		rules = append(rules, "fallback to stage-aware minimal provider input (P0/P1)")
 		compressedSections = append(compressedSections, "p2", "older_p1")
 		shrinkLevel = max(shrinkLevel, 4)
@@ -153,7 +160,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	if p0Overflow {
 		rules = append(rules, "p0 overflow: goal/dod contract preserved without compression")
 	}
-	integrityWarnings := providerContextIntegrityWarnings(request.Input, protected, protectedRepairTargets, profile, overBudget)
+	integrityWarnings := providerContextIntegrityWarnings(request.Input, protected, protectedRepairTargets, protectedStagePacket, profile, overBudget)
 	contextGateAction, contextGateReason := providerContextGateDecision(goalDoDCompressed, overBudget, p0Overflow, integrityWarnings)
 	truncated := len(rules) > 1 || overBudget
 	request.ContextBudget = &llmmodels.ProviderContextBudget{
@@ -636,7 +643,7 @@ func prioritizedProviderInput(input map[string]any, includeP2 bool) map[string]a
 	for _, key := range providerP0InputKeys {
 		if value, ok := input[key]; ok {
 			maxDepth := 2
-			if key == "coverageWorkItemContext" {
+			if key == "coverageWorkItemContext" || key == "stagePacket" {
 				maxDepth = 4
 			}
 			out[key] = budgetProviderValue(value, 0, providerBudgetAggressiveBytes, providerBudgetAggressiveItems, providerBudgetAggressiveEntries, maxDepth)
@@ -816,6 +823,31 @@ func providerProtectedContextFields(input map[string]any) []string {
 			fields = append(fields, "input."+key)
 		}
 	}
+	if packet := recordFromAny(input["stagePacket"]); len(packet) > 0 {
+		fields = append(fields, "input.stagePacket")
+		for _, key := range []string{
+			"schemaVersion",
+			"workspaceId",
+			"runId",
+			"stepId",
+			"definition",
+			"activeStage",
+			"activeFocus",
+			"nextAction",
+			"requiredOutput",
+			"allowedActions",
+			"forbiddenActions",
+			"requiredEvidenceKinds",
+			"acceptedEvidenceRefs",
+			"rejectedEvidenceRefs",
+			"targetSnapshots",
+			"idempotencyKey",
+		} {
+			if _, ok := packet[key]; ok {
+				fields = append(fields, "input.stagePacket."+key)
+			}
+		}
+	}
 	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
 		for _, key := range []string{"coverageTargetSet", "currentExecutionProgress", "currentFailure", "lastFailureDiagnostics", "requiredOutput", "outputDecisionContract", "lastRejectedOutputContract", "targetSnapshots"} {
 			if _, ok := pkg[key]; ok {
@@ -829,10 +861,13 @@ func providerProtectedContextFields(input map[string]any) []string {
 	return uniqueStrings(fields)
 }
 
-func providerContextIntegrityWarnings(input map[string]any, protected protectedGoalDoD, repairTargets protectedProviderRepairTargets, profile llmmodels.ProviderContextProfile, overBudget bool) []string {
+func providerContextIntegrityWarnings(input map[string]any, protected protectedGoalDoD, repairTargets protectedProviderRepairTargets, stagePacket protectedProviderStagePacket, profile llmmodels.ProviderContextProfile, overBudget bool) []string {
 	warnings := []string{}
 	if !isProtectedGoalDoDEqual(input, protected) {
 		warnings = append(warnings, "protected_goal_dod_changed_after_context_budget")
+	}
+	if !isProtectedProviderStagePacketEqual(input, stagePacket) {
+		warnings = append(warnings, "protected_stage_packet_changed_after_context_budget")
 	}
 	if overBudget && hasProtectedGoalDoD(protected) {
 		warnings = append(warnings, "request_still_over_budget_with_protected_goal_dod")
@@ -962,6 +997,7 @@ func providerContextGateActionForWarning(warning string) string {
 		"must_declare_coverage_targets_without_target_set":
 		return providerContextGateReplanRequired
 	case "protected_goal_dod_changed_after_context_budget",
+		"protected_stage_packet_changed_after_context_budget",
 		"request_still_over_budget_with_protected_goal_dod",
 		"repair_action_package_required_output_missing",
 		"inadmissible_repair_target_set",
@@ -1201,6 +1237,10 @@ type protectedProviderCoverageWorkItemContext struct {
 	RepairPackage    map[string]any
 }
 
+type protectedProviderStagePacket struct {
+	Packet map[string]any
+}
+
 func captureProtectedGoalDoD(input map[string]any) protectedGoalDoD {
 	ret := protectedGoalDoD{
 		TopLevel:         map[string]any{},
@@ -1255,6 +1295,77 @@ func captureProtectedProviderCoverageWorkItemContext(input map[string]any) prote
 		if context := recordFromAny(repairActionPackage["coverageWorkItemContext"]); len(context) > 0 {
 			ret.RepairPackage = compactProviderCoverageWorkItemContext(context)
 		}
+	}
+	return ret
+}
+
+func captureProtectedProviderStagePacket(input map[string]any) protectedProviderStagePacket {
+	ret := protectedProviderStagePacket{}
+	packet := recordFromAny(input["stagePacket"])
+	if len(packet) == 0 {
+		return ret
+	}
+	ret.Packet = compactProtectedProviderStagePacket(packet)
+	return ret
+}
+
+func compactProtectedProviderStagePacket(packet map[string]any) map[string]any {
+	if len(packet) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{
+		"schemaVersion",
+		"workspaceId",
+		"runId",
+		"stepId",
+		"activeStage",
+		"idempotencyKey",
+	} {
+		copyMapValue(out, key, packet[key])
+	}
+	for _, key := range []string{
+		"definition",
+		"activeFocus",
+		"nextAction",
+		"requiredOutput",
+	} {
+		copyMapValue(out, key, packet[key])
+	}
+	for _, key := range []string{
+		"allowedActions",
+		"forbiddenActions",
+		"requiredEvidenceKinds",
+		"acceptedEvidenceRefs",
+		"rejectedEvidenceRefs",
+	} {
+		if values := stringSliceFromAny(packet[key]); len(values) > 0 {
+			out[key] = values
+		}
+	}
+	if snapshots := compactProtectedProviderStagePacketSnapshots(mapSliceFromAny(packet["targetSnapshots"])); len(snapshots) > 0 {
+		out["targetSnapshots"] = snapshots
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func compactProtectedProviderStagePacketSnapshots(items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		next := compactStagePacketTargetSnapshotForPrompt(item)
+		if len(next) == 0 {
+			continue
+		}
+		ret = append(ret, next)
+	}
+	if len(ret) == 0 {
+		return nil
 	}
 	return ret
 }
@@ -1369,6 +1480,17 @@ func restoreProtectedProviderCoverageWorkItemContext(input map[string]any, prote
 	return restoreProviderCoverageWorkItemContext(input)
 }
 
+func restoreProtectedProviderStagePacket(input map[string]any, protected protectedProviderStagePacket) map[string]any {
+	if len(protected.Packet) == 0 {
+		return input
+	}
+	if len(input) == 0 {
+		input = map[string]any{}
+	}
+	input["stagePacket"] = protected.Packet
+	return input
+}
+
 func providerSafeRepairSnapshotsFromValue(value any) []any {
 	items := providerRepairSnapshotItemsFromValue(value)
 	if len(items) == 0 {
@@ -1458,6 +1580,14 @@ func isProtectedGoalDoDEqual(input map[string]any, protected protectedGoalDoD) b
 
 func hasProtectedGoalDoD(protected protectedGoalDoD) bool {
 	return len(protected.TopLevel) > 0 || len(protected.ExecutionContext) > 0 || len(protected.Package) > 0
+}
+
+func isProtectedProviderStagePacketEqual(input map[string]any, protected protectedProviderStagePacket) bool {
+	if len(protected.Packet) == 0 {
+		return true
+	}
+	current := captureProtectedProviderStagePacket(input)
+	return valuesEqual(current.Packet, protected.Packet)
 }
 
 func withoutProtectedGoalDoD(input map[string]any) map[string]any {
