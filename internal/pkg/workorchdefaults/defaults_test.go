@@ -102,6 +102,25 @@ func TestEmbeddedTemplatesDeclareDefaultSoulIDs(t *testing.T) {
 	}
 }
 
+func TestEmbeddedTemplateStagePolicySchemaWhenDeclared(t *testing.T) {
+	templates, err := loadEmbeddedTemplates()
+	if err != nil {
+		t.Fatalf("loadEmbeddedTemplates: %v", err)
+	}
+	var declared int
+	for _, item := range templates {
+		policy, ok := item.ContextHints["templateStagePolicies"].(map[string]any)
+		if !ok {
+			continue
+		}
+		declared++
+		assertTemplateStagePolicySchema(t, item.ID, policy)
+	}
+	if declared == 0 {
+		t.Fatal("no embedded template declares templateStagePolicies")
+	}
+}
+
 func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuidance(t *testing.T) {
 	souls, err := loadEmbeddedSouls()
 	if err != nil {
@@ -833,6 +852,74 @@ func assertSoftwareDevCapabilityUsagePolicies(t *testing.T, hints map[string]any
 	}
 	if !found {
 		t.Fatalf("capabilityUsagePolicies = %+v, want software-dev-code-semantics-guidance", rawPolicies)
+	}
+}
+
+func assertTemplateStagePolicySchema(t *testing.T, templateID string, policy map[string]any) {
+	t.Helper()
+	if policy["schemaVersion"] != "workorch.template_stage_policy.v1" {
+		t.Fatalf("%s templateStagePolicies schemaVersion = %v, want workorch.template_stage_policy.v1", templateID, policy["schemaVersion"])
+	}
+	stages, ok := policy["stages"].([]any)
+	if !ok || len(stages) == 0 {
+		t.Fatalf("%s templateStagePolicies.stages = %+v, want non-empty list", templateID, policy["stages"])
+	}
+	seen := map[string]bool{}
+	for _, raw := range stages {
+		stage, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("%s templateStagePolicies stage = %+v, want map", templateID, raw)
+		}
+		id := strings.TrimSpace(testStringFromAny(stage["id"]))
+		if id == "" {
+			t.Fatalf("%s templateStagePolicies stage has empty id: %+v", templateID, stage)
+		}
+		if seen[id] {
+			t.Fatalf("%s templateStagePolicies duplicate stage id %q", templateID, id)
+		}
+		seen[id] = true
+		if binding := strings.TrimSpace(testStringFromAny(stage["soulBinding"])); binding != "" {
+			if !isKnownSoulBindingStage(binding) {
+				t.Fatalf("%s templateStagePolicies stage %q soulBinding = %q, want binding key", templateID, id, binding)
+			}
+		}
+		entry, ok := stage["entry"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s templateStagePolicies stage %q entry = %+v, want map", templateID, id, stage["entry"])
+		}
+		if strings.TrimSpace(testStringFromAny(entry["nextAction"])) == "" {
+			t.Fatalf("%s templateStagePolicies stage %q entry.nextAction is empty", templateID, id)
+		}
+		outputs, ok := stage["requiredOutputs"].([]any)
+		if !ok || len(outputs) == 0 {
+			t.Fatalf("%s templateStagePolicies stage %q requiredOutputs = %+v, want non-empty list", templateID, id, stage["requiredOutputs"])
+		}
+		for _, rawOutput := range outputs {
+			output, ok := rawOutput.(map[string]any)
+			if !ok {
+				t.Fatalf("%s templateStagePolicies stage %q output = %+v, want map", templateID, id, rawOutput)
+			}
+			if strings.TrimSpace(testStringFromAny(output["kind"])) == "" {
+				t.Fatalf("%s templateStagePolicies stage %q output has empty kind", templateID, id)
+			}
+			evidenceKinds, ok := output["evidenceKinds"].([]any)
+			if !ok || len(evidenceKinds) == 0 {
+				t.Fatalf("%s templateStagePolicies stage %q output evidenceKinds = %+v, want non-empty list", templateID, id, output["evidenceKinds"])
+			}
+		}
+		completion, ok := stage["completion"].(map[string]any)
+		if !ok || strings.TrimSpace(testStringFromAny(completion["policy"])) == "" {
+			t.Fatalf("%s templateStagePolicies stage %q completion = %+v, want policy", templateID, id, stage["completion"])
+		}
+	}
+}
+
+func isKnownSoulBindingStage(value string) bool {
+	switch value {
+	case "planning", "execution", "decision", "approval", "validation", "artifact":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -36,6 +36,9 @@ func WorkspaceExecutionContract(ctx context.Context, templates WorkspaceTemplate
 	if policy, ok := hints["acceptanceSlicePolicy"].(map[string]any); ok && len(policy) > 0 {
 		contract["acceptanceSlicePolicy"] = cloneContextValue(policy)
 	}
+	if policy, ok := hints["templateStagePolicies"].(map[string]any); ok && len(policy) > 0 {
+		contract["templateStagePolicies"] = cloneContextValue(policy)
+	}
 	return contract
 }
 

@@ -302,6 +302,61 @@ func TestWorkspaceExecutionContractIncludesAcceptanceSlicePolicyFromHints(t *tes
 	}
 }
 
+func TestWorkspaceExecutionContractIncludesTemplateStagePoliciesFromHints(t *testing.T) {
+	workspace := &workspacemodel.Workspace{
+		ID:         "ws-stage-policy",
+		TemplateID: "template-stage-policy",
+	}
+	reader := fakeWorkspaceTemplateReader{item: &repository.WorkspaceTemplate{
+		ID: "template-stage-policy",
+		ContextHints: map[string]any{
+			"templateStagePolicies": map[string]any{
+				"schemaVersion": "workorch.template_stage_policy.v1",
+				"stages": []any{map[string]any{
+					"id":          "neutral-stage",
+					"soulBinding": "execution",
+					"entry": map[string]any{
+						"nextAction":                 "state_change",
+						"requiresDefinitionRevision": true,
+						"requiresGapBaseline":        true,
+					},
+					"requiredOutputs": []any{map[string]any{
+						"kind":          "state_change",
+						"evidenceKinds": []any{"state_change"},
+					}},
+					"completion": map[string]any{
+						"policy": "required_outputs_accepted",
+					},
+				}},
+			},
+		},
+	}}
+
+	contract := WorkspaceExecutionContract(context.Background(), reader, workspace)
+
+	policy, ok := contract["templateStagePolicies"].(map[string]any)
+	if !ok {
+		t.Fatalf("executionContract.templateStagePolicies = %+v, want map", contract["templateStagePolicies"])
+	}
+	if policy["schemaVersion"] != "workorch.template_stage_policy.v1" {
+		t.Fatalf("templateStagePolicies schema = %v, want v1", policy["schemaVersion"])
+	}
+	stages, ok := policy["stages"].([]any)
+	if !ok || len(stages) != 1 {
+		t.Fatalf("templateStagePolicies.stages = %+v, want one stage", policy["stages"])
+	}
+	stage := stages[0].(map[string]any)
+	if stage["id"] != "neutral-stage" || stage["soulBinding"] != "execution" {
+		t.Fatalf("template stage = %+v, want neutral execution stage", stage)
+	}
+
+	source := reader.item.ContextHints["templateStagePolicies"].(map[string]any)
+	source["schemaVersion"] = "mutated"
+	if policy["schemaVersion"] != "workorch.template_stage_policy.v1" {
+		t.Fatalf("templateStagePolicies was not cloned: %+v", policy)
+	}
+}
+
 func TestMergeGovernanceContinuationContextSuppressesContinuationAfterDefinitionChange(t *testing.T) {
 	contextData := map[string]any{}
 	history := []map[string]any{{
