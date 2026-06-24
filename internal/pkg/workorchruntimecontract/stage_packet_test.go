@@ -20,6 +20,8 @@ func TestStagePacketNormalizedCarriesDefinitionFocusAndRequiredOutput(t *testing
 			"mustBindCoverageFocus": true,
 		},
 		RequiredEvidenceKinds: []string{" validation ", "validation"},
+		AcceptedEvidenceRefs:  []string{" evidence-accepted ", "evidence-accepted"},
+		RejectedEvidenceRefs:  []string{" evidence-rejected "},
 	}
 
 	normalized := packet.Normalized()
@@ -40,6 +42,16 @@ func TestStagePacketNormalizedCarriesDefinitionFocusAndRequiredOutput(t *testing
 	}
 	if len(normalized.RequiredEvidenceKinds) != 1 || normalized.RequiredEvidenceKinds[0] != "validation" {
 		t.Fatalf("requiredEvidenceKinds = %+v, want compact validation", normalized.RequiredEvidenceKinds)
+	}
+	if len(normalized.AcceptedEvidenceRefs) != 1 || normalized.AcceptedEvidenceRefs[0] != "evidence-accepted" {
+		t.Fatalf("acceptedEvidenceRefs = %+v, want compact accepted ref", normalized.AcceptedEvidenceRefs)
+	}
+	if len(normalized.RejectedEvidenceRefs) != 1 || normalized.RejectedEvidenceRefs[0] != "evidence-rejected" {
+		t.Fatalf("rejectedEvidenceRefs = %+v, want compact rejected ref", normalized.RejectedEvidenceRefs)
+	}
+	if rendered["acceptedEvidenceRefs"].([]string)[0] != "evidence-accepted" ||
+		rendered["rejectedEvidenceRefs"].([]string)[0] != "evidence-rejected" {
+		t.Fatalf("rendered evidence refs = accepted:%+v rejected:%+v", rendered["acceptedEvidenceRefs"], rendered["rejectedEvidenceRefs"])
 	}
 	if normalized.IdempotencyKey == "" {
 		t.Fatal("idempotencyKey is empty")

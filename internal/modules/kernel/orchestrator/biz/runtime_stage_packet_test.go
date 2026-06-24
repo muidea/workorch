@@ -22,8 +22,10 @@ func TestInitialStepInputAttachesMinimalStagePacket(t *testing.T) {
 				coverageWorkItemContextKey: map[string]any{
 					"definitionRevision": "rev-stage-packet",
 					"currentFocus": map[string]any{
-						"id":         "cwi-stage-packet",
-						"targetText": "neutral target",
+						"id":                   "cwi-stage-packet",
+						"targetText":           "neutral target",
+						"acceptedEvidenceRefs": []string{"accepted-stage-packet"},
+						"rejectedEvidenceRefs": []string{"rejected-stage-packet"},
 					},
 				},
 				"requiredOutput": map[string]any{
@@ -51,6 +53,12 @@ func TestInitialStepInputAttachesMinimalStagePacket(t *testing.T) {
 	if required["mustBindCoverageFocus"] != true || required["mustIncludeStateChangingNode"] != true {
 		t.Fatalf("stagePacket.requiredOutput = %+v, want state-changing focus contract", required)
 	}
+	if refs := stringSliceFromValue(packet["acceptedEvidenceRefs"]); len(refs) != 1 || refs[0] != "accepted-stage-packet" {
+		t.Fatalf("stagePacket.acceptedEvidenceRefs = %+v, want accepted ref", refs)
+	}
+	if refs := stringSliceFromValue(packet["rejectedEvidenceRefs"]); len(refs) != 1 || refs[0] != "rejected-stage-packet" {
+		t.Fatalf("stagePacket.rejectedEvidenceRefs = %+v, want rejected ref", refs)
+	}
 }
 
 func TestFollowUpStepInputRebuildsStagePacketAfterNextInputMutation(t *testing.T) {
@@ -77,7 +85,11 @@ func TestFollowUpStepInputRebuildsStagePacketAfterNextInputMutation(t *testing.T
 			stepOutputKeyNextInput: map[string]any{
 				coverageWorkItemContextKey: map[string]any{
 					"definitionRevision": "rev-follow-up",
-					"currentFocus":       map[string]any{"id": "cwi-mutated"},
+					"currentFocus": map[string]any{
+						"id":                   "cwi-mutated",
+						"acceptedEvidenceRefs": []string{"accepted-mutated"},
+						"rejectedEvidenceRefs": []string{"rejected-mutated"},
+					},
 				},
 				"repairActionPackage": map[string]any{
 					"requiredOutput": map[string]any{"mustReturnValidation": true},
@@ -98,5 +110,11 @@ func TestFollowUpStepInputRebuildsStagePacketAfterNextInputMutation(t *testing.T
 	}
 	if packet["stepId"] != "planning-001" {
 		t.Fatalf("stagePacket.stepId = %v, want previous step scope", packet["stepId"])
+	}
+	if refs := stringSliceFromValue(packet["acceptedEvidenceRefs"]); len(refs) != 1 || refs[0] != "accepted-mutated" {
+		t.Fatalf("stagePacket.acceptedEvidenceRefs = %+v, want rebuilt accepted ref", refs)
+	}
+	if refs := stringSliceFromValue(packet["rejectedEvidenceRefs"]); len(refs) != 1 || refs[0] != "rejected-mutated" {
+		t.Fatalf("stagePacket.rejectedEvidenceRefs = %+v, want rebuilt rejected ref", refs)
 	}
 }

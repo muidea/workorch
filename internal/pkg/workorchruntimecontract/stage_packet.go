@@ -31,6 +31,8 @@ type StagePacket struct {
 	AllowedActions        []string              `json:"allowedActions,omitempty"`
 	ForbiddenActions      []string              `json:"forbiddenActions,omitempty"`
 	RequiredEvidenceKinds []string              `json:"requiredEvidenceKinds,omitempty"`
+	AcceptedEvidenceRefs  []string              `json:"acceptedEvidenceRefs,omitempty"`
+	RejectedEvidenceRefs  []string              `json:"rejectedEvidenceRefs,omitempty"`
 	IdempotencyKey        string                `json:"idempotencyKey"`
 }
 
@@ -45,6 +47,8 @@ func (p StagePacket) Normalized() StagePacket {
 	p.AllowedActions = compactNextActionStrings(p.AllowedActions)
 	p.ForbiddenActions = compactNextActionStrings(p.ForbiddenActions)
 	p.RequiredEvidenceKinds = compactNextActionStrings(p.RequiredEvidenceKinds)
+	p.AcceptedEvidenceRefs = compactNextActionStrings(p.AcceptedEvidenceRefs)
+	p.RejectedEvidenceRefs = compactNextActionStrings(p.RejectedEvidenceRefs)
 	if p.NextAction != nil {
 		next := p.NextAction.Normalized()
 		if next.Type != "" {
@@ -124,6 +128,12 @@ func (p StagePacket) ToMap() map[string]any {
 	if len(p.RequiredEvidenceKinds) > 0 {
 		ret["requiredEvidenceKinds"] = append([]string(nil), p.RequiredEvidenceKinds...)
 	}
+	if len(p.AcceptedEvidenceRefs) > 0 {
+		ret["acceptedEvidenceRefs"] = append([]string(nil), p.AcceptedEvidenceRefs...)
+	}
+	if len(p.RejectedEvidenceRefs) > 0 {
+		ret["rejectedEvidenceRefs"] = append([]string(nil), p.RejectedEvidenceRefs...)
+	}
 	return ret
 }
 
@@ -198,6 +208,8 @@ func StableStagePacketIdempotencyKey(packet StagePacket) string {
 		shortStagePacketDigest(packet.ActiveFocus),
 		shortStagePacketDigest(packet.RequiredOutput),
 		strings.Join(compactNextActionStrings(packet.RequiredEvidenceKinds), ","),
+		strings.Join(compactNextActionStrings(packet.AcceptedEvidenceRefs), ","),
+		strings.Join(compactNextActionStrings(packet.RejectedEvidenceRefs), ","),
 	}
 	return strings.Join(parts, "|")
 }

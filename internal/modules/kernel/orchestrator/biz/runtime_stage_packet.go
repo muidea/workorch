@@ -41,6 +41,8 @@ func buildStagePacketFromStepInput(run *runModel.Run, stepID common.StepID, inpu
 		AllowedActions:        stringSliceFromValue(input["allowedActions"]),
 		ForbiddenActions:      stringSliceFromValue(input["forbiddenActions"]),
 		RequiredEvidenceKinds: stringSliceFromValue(input["requiredEvidenceKinds"]),
+		AcceptedEvidenceRefs:  stagePacketEvidenceRefs(input, "acceptedEvidenceRefs"),
+		RejectedEvidenceRefs:  stagePacketEvidenceRefs(input, "rejectedEvidenceRefs"),
 	}
 	return packet.Normalized()
 }
@@ -127,4 +129,34 @@ func stagePacketRequiredOutput(input map[string]any) map[string]any {
 		}
 	}
 	return nil
+}
+
+func stagePacketEvidenceRefs(input map[string]any, key string) []string {
+	if len(input) == 0 || strings.TrimSpace(key) == "" {
+		return nil
+	}
+	refs := make([]string, 0)
+	for _, source := range stagePacketEvidenceSources(input) {
+		refs = append(refs, stringSliceFromValue(source[key])...)
+		for _, nestedKey := range []string{"currentFocus", "activeFocus"} {
+			refs = append(refs, stringSliceFromValue(mapFromValue(source[nestedKey])[key])...)
+		}
+		for _, listKey := range []string{"currentFocusItems", "ledgerSummary", "coverageTargetSet", "repairTargetSet"} {
+			for _, item := range mapSliceFromValue(source[listKey]) {
+				refs = append(refs, stringSliceFromValue(item[key])...)
+			}
+		}
+	}
+	return compactUniqueStrings(refs)
+}
+
+func stagePacketEvidenceSources(input map[string]any) []map[string]any {
+	return []map[string]any{
+		input,
+		mapFromValue(input["executionContext"]),
+		coverageWorkItemContextFromInput(input),
+		mapFromValue(input["repairActionPackage"]),
+		mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"]),
+		mapFromValue(input["acceptance"]),
+	}
 }
