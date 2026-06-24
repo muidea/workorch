@@ -66,11 +66,128 @@ func TestContractViolationRecoveryActionExhaustsIndependentBudget(t *testing.T) 
 	}
 }
 
+func TestContractViolationRecoveryActionExhaustsRunBudget(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-violation-run-budget")
+	repo := memory.NewStepRepository()
+	failed := contractViolationFailedStep(runID, "failed-run-budget")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-violation-run-budget", InitialStepKind: llmWorkspaceExecutionStepKind}
+	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
+	for attempt := 1; attempt <= 2; attempt++ {
+		step := &runmodel.Step{
+			ID:    common.StepID(string(runID) + "/contract-retry-run-budget-" + string(rune('0'+attempt))),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyContractViolationRecovery: map[string]any{
+					"sourceStepId": "other-source",
+				},
+			},
+			Output: map[string]any{
+				failureOutputKeyClass:     failureClassRuntime,
+				failureOutputKeySignature: "class=runtime_failed|stage=runtime_contract_failed|run-budget",
+			},
+		}
+		if err := repo.Create(ctx, step); err != nil {
+			t.Fatalf("seed run-budget retry step %d: %v", attempt, err)
+		}
+	}
+
+	action := runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{
+		MaxContractViolationRetriesPerStep: 5,
+		MaxContractViolationRetriesPerRun:  2,
+	}), true, true, run, failed)
+
+	if action != runtimeRecoveryActionContractViolationExhausted {
+		t.Fatalf("recovery action = %s, want contract violation exhausted by run budget", action)
+	}
+}
+
+func TestContractViolationRecoveryActionExhaustsRepeatedSignatureBudget(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-violation-signature-budget")
+	repo := memory.NewStepRepository()
+	failed := contractViolationFailedStep(runID, "failed-signature-budget")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-violation-signature-budget", InitialStepKind: llmWorkspaceExecutionStepKind}
+	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
+	signature := stringFromMap(failed.Output, failureOutputKeySignature)
+	for attempt := 1; attempt <= 2; attempt++ {
+		step := &runmodel.Step{
+			ID:    common.StepID(string(runID) + "/contract-retry-signature-budget-" + string(rune('0'+attempt))),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyContractViolationRecovery: map[string]any{
+					"sourceStepId": "previous-source",
+				},
+			},
+			Output: map[string]any{
+				failureOutputKeyClass:     failureClassRuntime,
+				failureOutputKeySignature: signature,
+				stepOutputKeyContractViolation: map[string]any{
+					"violatedRule": contractViolationRuleStateChangingRequiredMissing,
+				},
+			},
+		}
+		if err := repo.Create(ctx, step); err != nil {
+			t.Fatalf("seed signature-budget retry step %d: %v", attempt, err)
+		}
+	}
+
+	action := runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{
+		MaxContractViolationRetriesPerStep:    5,
+		MaxContractViolationRetriesPerRun:     5,
+		MaxRepeatedContractViolationSignature: 1,
+	}), true, true, run, failed)
+
+	if action != runtimeRecoveryActionContractViolationExhausted {
+		t.Fatalf("recovery action = %s, want contract violation exhausted by repeated signature", action)
+	}
+}
+
 func TestRuntimeRepairInputIncludesContractViolationRecovery(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-contract-violation-input")
-	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-violation-input", InitialStepKind: llmWorkspaceExecutionStepKind}
+	coverageContext := map[string]any{
+		"definitionRevision": "rev-contract-retry",
+		"currentFocus": map[string]any{
+			"id":                   "cwi-contract-retry",
+			"targetText":           "neutral contract retry focus",
+			"rejectedEvidenceRefs": []string{"rejected-contract-diagnostic"},
+		},
+		"unresolvedItems": []map[string]any{{
+			"id":                   "cwi-contract-retry",
+			"missingEvidenceKinds": []string{"state_change"},
+		}},
+	}
+	run := &runmodel.Run{
+		ID:                 runID,
+		WorkspaceID:        "ws-contract-violation-input",
+		GoalID:             "goal-contract-retry",
+		DoDID:              "dod-contract-retry",
+		DefinitionRevision: "rev-contract-retry",
+		InitialStepKind:    llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"definitionRevision":       "rev-contract-retry",
+			coverageWorkItemContextKey: coverageContext,
+			gapBaselineKey: map[string]any{
+				"definitionRevision": "rev-contract-retry",
+			},
+		},
+	}
 	failed := contractViolationFailedStep(runID, "failed-001")
+	failed.Input[coverageWorkItemContextKey] = coverageContext
+	pkg := mapFromValue(failed.Input["repairActionPackage"])
+	pkg[coverageWorkItemContextKey] = coverageContext
+	pkg["targetSnapshots"] = []map[string]any{{
+		"targetRef":        "neutral-target",
+		"contentHash":      "sha256:neutral",
+		"contentComplete":  true,
+		"safeForFileWrite": true,
+	}}
+	failed.Input["repairActionPackage"] = pkg
 	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
 	orch := &RuntimeOrchestrator{
 		steps:  memory.NewStepRepository(),
@@ -114,6 +231,31 @@ func TestRuntimeRepairInputIncludesContractViolationRecovery(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"), "contractViolationRecovery.correctionContract") {
 		t.Fatalf("repairGuidance = %+v, want correction contract guidance", input["repairGuidance"])
+	}
+	packet := mapFromValue(input[stepInputKeyStagePacket])
+	if len(packet) == 0 {
+		t.Fatalf("stagePacket missing from contract retry input: %+v", input)
+	}
+	definition := mapFromValue(packet["definition"])
+	if definition["revision"] != "rev-contract-retry" ||
+		definition["goalId"] != "goal-contract-retry" ||
+		definition["doDId"] != "dod-contract-retry" {
+		t.Fatalf("stagePacket.definition = %+v, want current definition", definition)
+	}
+	if packet["activeStage"] != runtimeStageRepair {
+		t.Fatalf("stagePacket.activeStage = %v, want %s", packet["activeStage"], runtimeStageRepair)
+	}
+	focus := mapFromValue(packet["activeFocus"])
+	if focus["id"] != "cwi-contract-retry" {
+		t.Fatalf("stagePacket.activeFocus = %+v, want inherited focus", focus)
+	}
+	required := mapFromValue(packet["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("stagePacket.requiredOutput = %+v, want inherited required output", required)
+	}
+	if refs := stringSliceFromValue(packet["rejectedEvidenceRefs"]); !stringSliceContains(refs, "rejected-contract-diagnostic") {
+		t.Fatalf("stagePacket.rejectedEvidenceRefs = %+v, want rejected diagnostic ref", refs)
 	}
 }
 
@@ -429,11 +571,7 @@ func TestContractViolationClassifiesAvailableSnapshotIgnored(t *testing.T) {
 		"safeForFileWrite": true,
 	}}
 	failed.Input["repairActionPackage"] = pkg
-	failed.Output["error"] = "failed assessment claimed current target snapshot is missing and must read the file before patching"
-	failed.Output["dodAssessment"] = map[string]any{
-		"satisfied": false,
-		"summary":   "cannot proceed because the target snapshot is not provided",
-	}
+	failed.Output[outputKeyContractViolationType] = contractViolationAvailableSnapshotIgnored
 
 	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
 
@@ -458,10 +596,10 @@ func TestContractViolationClassifiesAvailableSnapshotIgnored(t *testing.T) {
 	}
 }
 
-func TestContractViolationClassifiesAvailableSnapshotIgnoredFromNestedChineseOutput(t *testing.T) {
-	runID := common.RunID("run-contract-available-snapshot-ignored-cn")
-	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-available-snapshot-ignored-cn", InitialStepKind: llmWorkspaceExecutionStepKind}
-	failed := contractViolationFailedStep(runID, "failed-available-snapshot-cn")
+func TestContractViolationClassifiesAvailableSnapshotIgnoredFromNestedStructuredContext(t *testing.T) {
+	runID := common.RunID("run-contract-available-snapshot-ignored-nested")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-available-snapshot-ignored-nested", InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := contractViolationFailedStep(runID, "failed-available-snapshot-nested")
 	delete(mapFromValue(failed.Input["repairActionPackage"]), "targetSnapshots")
 	failed.Input["failureTargetRepairContext"] = []map[string]any{{
 		"targetRef":        "target.txt",
@@ -471,7 +609,7 @@ func TestContractViolationClassifiesAvailableSnapshotIgnoredFromNestedChineseOut
 		"safeForFileWrite": true,
 		"exists":           true,
 	}}
-	failed.Output["summary"] = "缺少可安全生成最小补丁所需的当前目标快照文本，无法继续生成 state-changing 输出"
+	failed.Output[outputKeyContractViolationType] = contractViolationAvailableSnapshotIgnored
 
 	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
 
@@ -487,17 +625,26 @@ func TestContractViolationClassifiesAvailableSnapshotIgnoredFromNestedChineseOut
 	}
 }
 
-func TestContractViolationDoesNotClassifyMissingSnapshotWithoutAvailableSnapshot(t *testing.T) {
-	runID := common.RunID("run-contract-missing-snapshot-no-context")
-	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-missing-snapshot-no-context", InitialStepKind: llmWorkspaceExecutionStepKind}
-	failed := contractViolationFailedStep(runID, "failed-no-available-snapshot")
+func TestContractViolationDoesNotClassifyAvailableSnapshotIgnoredFromNaturalLanguage(t *testing.T) {
+	runID := common.RunID("run-contract-missing-snapshot-prose")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-missing-snapshot-prose", InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := contractViolationFailedStep(runID, "failed-prose-available-snapshot")
+	pkg := mapFromValue(failed.Input["repairActionPackage"])
+	pkg["targetSnapshots"] = []map[string]any{{
+		"targetRef":        "target.txt",
+		"content":          "current target content\n",
+		"contentHash":      "sha256-current-target",
+		"contentComplete":  true,
+		"safeForFileWrite": true,
+	}}
+	failed.Input["repairActionPackage"] = pkg
 	failed.Output["error"] = "failed assessment claimed current target snapshot is missing and must read the file before patching"
 
 	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
 
 	recovery := contractViolationFromFailedOutput(failed)
 	if got := stringFromMap(recovery, "violatedRule"); got == contractViolationRuleAvailableSnapshotIgnored {
-		t.Fatalf("violatedRule = %q, want no available snapshot classification without supplied snapshot; recovery=%+v", got, recovery)
+		t.Fatalf("violatedRule = %q, want no available snapshot classification from prose; recovery=%+v", got, recovery)
 	}
 }
 

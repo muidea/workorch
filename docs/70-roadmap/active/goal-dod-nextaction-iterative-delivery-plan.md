@@ -58,6 +58,9 @@ Related:
 - [S7.1 ContractViolation Diagnostic Model](./goal-dod-nextaction-s7-1-contract-violation-diagnostic-model.md)
 - [S7.2 Parse/Schema Gate Recoverable Diagnostic](./goal-dod-nextaction-s7-2-parse-schema-gate-recoverable-diagnostic.md)
 - [S7.3 Contract Gate Blocks Side Effects](./goal-dod-nextaction-s7-3-contract-gate-blocks-side-effects.md)
+- [S7.4 Contract Retry Inherits Stage Contract](./goal-dod-nextaction-s7-4-contract-retry-inherits-stage-contract.md)
+- [S7.5 Contract Retry Budget And Signature Escalation](./goal-dod-nextaction-s7-5-contract-retry-budget-signature-escalation.md)
+- [S7.6 Contract Violation Recovery Projection](./goal-dod-nextaction-s7-6-contract-violation-recovery-projection.md)
 
 ## Purpose
 

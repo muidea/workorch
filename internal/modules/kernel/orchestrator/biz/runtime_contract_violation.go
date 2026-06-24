@@ -314,9 +314,6 @@ func contractViolationRuleFromStep(step *runModel.Step) string {
 	if step == nil {
 		return contractViolationRuleRuntimeContract
 	}
-	if contractViolationOutputClaimsMissingAvailableSnapshot(step) {
-		return contractViolationRuleAvailableSnapshotIgnored
-	}
 	output := step.Output
 	switch strings.TrimSpace(stringFromMap(output, outputKeyContractViolationType)) {
 	case contractViolationRepairNoStateChangingOutput,
@@ -552,115 +549,6 @@ func contractViolationForbiddenContinuableBlockers() []string {
 		"decision_request_when_runtime_can_continue",
 		"decision_request_for_candidate_selection_without_external_dependency",
 	}
-}
-
-func contractViolationOutputClaimsMissingAvailableSnapshot(step *runModel.Step) bool {
-	if len(contractViolationAvailableTargetSnapshotSummary(step)) == 0 {
-		return false
-	}
-	text := strings.ToLower(strings.Join(contractViolationOutputTextFragments(step.Output, 0), "\n"))
-	if strings.TrimSpace(text) == "" {
-		return false
-	}
-	return contractViolationTextMentionsSnapshotOrCurrentTarget(text) && contractViolationTextClaimsMissingSnapshot(text)
-}
-
-func contractViolationTextMentionsSnapshotOrCurrentTarget(text string) bool {
-	for _, marker := range []string{
-		"snapshot",
-		"current target",
-		"current content",
-		"target snapshot",
-		"target content",
-		"快照",
-		"当前目标",
-		"当前内容",
-		"目标文本",
-		"目标快照",
-		"当前诊断",
-	} {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
-}
-
-func contractViolationTextClaimsMissingSnapshot(text string) bool {
-	for _, marker := range []string{
-		"missing",
-		"not available",
-		"unavailable",
-		"not provided",
-		"not supplied",
-		"need to read",
-		"needs to read",
-		"must read",
-		"requires read",
-		"cannot proceed without",
-		"no current",
-		"缺少",
-		"缺失",
-		"未提供",
-		"没有",
-		"无法",
-		"不能",
-		"需要读取",
-		"需读取",
-	} {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
-}
-
-func contractViolationOutputTextFragments(value any, depth int) []string {
-	if depth > 4 || value == nil {
-		return nil
-	}
-	switch typed := value.(type) {
-	case string:
-		if trimmed := strings.TrimSpace(typed); trimmed != "" {
-			return []string{trimmed}
-		}
-	case map[string]any:
-		ret := []string{}
-		for _, item := range typed {
-			ret = append(ret, contractViolationOutputTextFragments(item, depth+1)...)
-			if len(ret) > 80 {
-				return ret[:80]
-			}
-		}
-		return ret
-	case []any:
-		ret := []string{}
-		for _, item := range typed {
-			ret = append(ret, contractViolationOutputTextFragments(item, depth+1)...)
-			if len(ret) > 80 {
-				return ret[:80]
-			}
-		}
-		return ret
-	case []map[string]any:
-		ret := []string{}
-		for _, item := range typed {
-			ret = append(ret, contractViolationOutputTextFragments(item, depth+1)...)
-			if len(ret) > 80 {
-				return ret[:80]
-			}
-		}
-		return ret
-	case []string:
-		ret := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if trimmed := strings.TrimSpace(item); trimmed != "" {
-				ret = append(ret, trimmed)
-			}
-		}
-		return ret
-	}
-	return nil
 }
 
 func contractViolationAvailableTargetSnapshotSummary(step *runModel.Step) []map[string]any {

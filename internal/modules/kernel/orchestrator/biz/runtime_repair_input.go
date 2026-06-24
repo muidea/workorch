@@ -1049,7 +1049,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input = resetRuntimeRepairInputToRejectedResultContinuation(input, run, failedStep)
 		contract := o.convergenceManager().build(run, nil, failedStep, map[string]any{"input": input}, nil)
 		input = o.convergenceManager().apply(input, contract)
-		return input
+		return finalizeRuntimeRepairFollowUpStepInput(run, failedStep, input)
 	}
 	applyRuntimeRepairFailureProjection(input, failedStep)
 	assessmentOnlyCoverageRepair := doDCoverageContractCorrectionRequired(failedStep)
@@ -1169,7 +1169,15 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	ensureAvailableTargetSnapshotsForStateChangingRepair(input)
 	applyLLMOutputModeSelection(ctx, policy.LLMOutput, o.evidence.ArtifactContinuations, run, input, failedStep, attempt)
 	refreshRuntimeRepairOutputDecisionContract(input, failedStep)
-	return input
+	return finalizeRuntimeRepairFollowUpStepInput(run, failedStep, input)
+}
+
+func finalizeRuntimeRepairFollowUpStepInput(run *runModel.Run, failedStep *runModel.Step, input map[string]any) map[string]any {
+	stepID := common.StepID("")
+	if failedStep != nil {
+		stepID = failedStep.ID
+	}
+	return attachStagePacketToStepInput(run, stepID, input)
 }
 
 func refreshRuntimeRepairOutputDecisionContract(input map[string]any, failedStep *runModel.Step) {
