@@ -66,6 +66,24 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 	if snapshotStatus.GlobalRevision != status.GlobalRevision || snapshot.Workspace.State != "running" {
 		t.Fatalf("snapshot/status = %+v/%+v, want running snapshot at same revision", snapshot, snapshotStatus)
 	}
+	if snapshot.ViewModel.WorkspaceID != "ws-a" ||
+		snapshot.ViewModel.GlobalRevision != snapshotStatus.GlobalRevision ||
+		snapshot.ViewModel.WorkspaceRevision != snapshotStatus.WorkspaceRevision ||
+		snapshot.ViewModel.Revision != snapshotStatus.WorkspaceRevision {
+		t.Fatalf("snapshot viewModel = %+v, status = %+v, want projection-owned revisions", snapshot.ViewModel, snapshotStatus)
+	}
+	for _, section := range []string{"list", "activeWorkspace", "runState", "promptMode", "commands", "coverage", "currentFocus", "latestDiagnostic"} {
+		item, ok := snapshot.ViewModel.Sections[section]
+		if !ok {
+			t.Fatalf("snapshot viewModel sections = %+v, missing %s", snapshot.ViewModel.Sections, section)
+		}
+		if item.Revision != snapshot.ViewModel.Revision ||
+			item.WorkspaceRevision != snapshot.ViewModel.WorkspaceRevision ||
+			item.SourceEventRevision != snapshot.ViewModel.SourceEventRevision ||
+			item.ProjectedSourceRevision != snapshot.ViewModel.ProjectedSourceRevision {
+			t.Fatalf("viewModel section %s = %+v, want same revision as %+v", section, item, snapshot.ViewModel)
+		}
+	}
 	if snapshot.Workspace.ContextHints != nil || snapshot.Workspace.EvidencePolicies != nil {
 		t.Fatalf("snapshot workspace = %+v, want detail projection stored", snapshot.Workspace)
 	}

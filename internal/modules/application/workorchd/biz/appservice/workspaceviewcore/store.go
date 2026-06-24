@@ -605,7 +605,51 @@ func (s *Store) GetSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot
 		}
 		return readmodelcore.WorkspaceSnapshot{}, status, common.ErrNotFound
 	}
-	return cloneWorkspaceSnapshot(entry.Snapshot), status, nil
+	snapshot := cloneWorkspaceSnapshot(entry.Snapshot)
+	snapshot.ViewModel = workspaceViewModelFromStatus(snapshot, status)
+	return snapshot, status, nil
+}
+
+func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, status Status) readmodelcore.WorkspaceViewModel {
+	revision := status.WorkspaceRevision
+	if revision == 0 {
+		revision = status.GlobalRevision
+	}
+	ret := readmodelcore.WorkspaceViewModel{
+		WorkspaceID:             snapshot.Workspace.ID,
+		State:                   status.State,
+		Revision:                revision,
+		GlobalRevision:          status.GlobalRevision,
+		WorkspaceRevision:       status.WorkspaceRevision,
+		SourceEventRevision:     status.SourceEventRevision,
+		ProjectedSourceRevision: status.ProjectedSourceRevision,
+		UpdatedAt:               status.UpdatedAt,
+		RebuiltAt:               status.RebuiltAt,
+		Degraded:                status.Degraded,
+		StaleReason:             status.StaleReason,
+		Error:                   status.Error,
+		Sections:                map[string]readmodelcore.WorkspaceViewModelSection{},
+	}
+	for _, name := range []string{
+		"list",
+		"activeWorkspace",
+		"runState",
+		"promptMode",
+		"commands",
+		"coverage",
+		"currentFocus",
+		"latestDiagnostic",
+	} {
+		ret.Sections[name] = readmodelcore.WorkspaceViewModelSection{
+			Name:                    name,
+			Revision:                revision,
+			WorkspaceRevision:       status.WorkspaceRevision,
+			SourceEventRevision:     status.SourceEventRevision,
+			ProjectedSourceRevision: status.ProjectedSourceRevision,
+			State:                   status.State,
+		}
+	}
+	return ret
 }
 
 func (s *Store) RunHeartbeatMetrics(now time.Time) Metrics {
@@ -916,6 +960,7 @@ func cloneWorkspace(item appmodelcore.Workspace) appmodelcore.Workspace {
 
 func cloneWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
 	item.Workspace = cloneWorkspace(item.Workspace)
+	item.ViewModel.Sections = cloneWorkspaceViewModelSections(item.ViewModel.Sections)
 	item.Goals = append([]readmodelcore.Goal(nil), item.Goals...)
 	item.DoDs = append([]readmodelcore.DoD(nil), item.DoDs...)
 	item.Runs = append([]readmodelcore.Run(nil), item.Runs...)
@@ -945,6 +990,17 @@ func cloneWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshot) readmodelcore.
 		item.GapBaseline = &baseline
 	}
 	return item
+}
+
+func cloneWorkspaceViewModelSections(input map[string]readmodelcore.WorkspaceViewModelSection) map[string]readmodelcore.WorkspaceViewModelSection {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make(map[string]readmodelcore.WorkspaceViewModelSection, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
 }
 
 func cloneGapBaseline(item readmodelcore.GapBaseline) readmodelcore.GapBaseline {

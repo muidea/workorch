@@ -72,6 +72,7 @@ func workspaceSnapshotResourceMap(snapshot readmodelcore.WorkspaceSnapshot) map[
 	}
 	return map[string]any{
 		"workspace":             snapshot.Workspace,
+		"viewModel":             snapshot.ViewModel,
 		"outcome":               snapshot.Outcome,
 		"taskProgress":          snapshot.TaskProgress,
 		"runHeartbeat":          snapshot.RunHeartbeat,

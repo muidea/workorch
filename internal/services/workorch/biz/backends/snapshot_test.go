@@ -35,6 +35,56 @@ func TestDecodeSnapshotInfoPreservesRunExecutionContext(t *testing.T) {
 	}
 }
 
+func TestDecodeSnapshotInfoPreservesWorkspaceViewModel(t *testing.T) {
+	snapshot, err := decodeSnapshotInfo(map[string]any{
+		"workspace": map[string]any{"id": "ws-viewmodel", "state": "running"},
+		"viewModel": map[string]any{
+			"workspaceId":             "ws-viewmodel",
+			"state":                   "ready",
+			"revision":                float64(7),
+			"globalRevision":          float64(11),
+			"workspaceRevision":       float64(7),
+			"sourceEventRevision":     float64(20),
+			"projectedSourceRevision": float64(20),
+			"sections": map[string]any{
+				"list": map[string]any{
+					"name":                    "list",
+					"revision":                float64(7),
+					"workspaceRevision":       float64(7),
+					"sourceEventRevision":     float64(20),
+					"projectedSourceRevision": float64(20),
+					"state":                   "ready",
+				},
+				"promptMode": map[string]any{
+					"name":                    "promptMode",
+					"revision":                float64(7),
+					"workspaceRevision":       float64(7),
+					"sourceEventRevision":     float64(20),
+					"projectedSourceRevision": float64(20),
+					"state":                   "ready",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("decodeSnapshotInfo: %v", err)
+	}
+	if snapshot == nil || snapshot.ViewModel.WorkspaceID != "ws-viewmodel" ||
+		snapshot.ViewModel.Revision != 7 ||
+		snapshot.ViewModel.GlobalRevision != 11 ||
+		snapshot.ViewModel.WorkspaceRevision != 7 ||
+		snapshot.ViewModel.SourceEventRevision != 20 ||
+		snapshot.ViewModel.ProjectedSourceRevision != 20 {
+		t.Fatalf("viewModel = %+v, want decoded revisions", snapshot.ViewModel)
+	}
+	for _, section := range []string{"list", "promptMode"} {
+		item, ok := snapshot.ViewModel.Sections[section]
+		if !ok || item.Revision != snapshot.ViewModel.Revision || item.WorkspaceRevision != snapshot.ViewModel.WorkspaceRevision {
+			t.Fatalf("viewModel section %s = %+v, want decoded section revision", section, item)
+		}
+	}
+}
+
 func TestDecodeSnapshotInfoPreservesLLMContextBudget(t *testing.T) {
 	snapshot, err := decodeSnapshotInfo(map[string]any{
 		"workspace": map[string]any{"id": "ws-budget", "state": "running"},

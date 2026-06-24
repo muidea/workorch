@@ -2,6 +2,7 @@ package readmodelcore
 
 type WorkspaceSnapshot struct {
 	Workspace               Workspace               `json:"workspace"`
+	ViewModel               WorkspaceViewModel      `json:"viewModel"`
 	Run                     *Run                    `json:"run,omitempty"`
 	Step                    *StepView               `json:"step,omitempty"`
 	Result                  *Result                 `json:"result,omitempty"`
@@ -34,6 +35,31 @@ type WorkspaceSnapshot struct {
 	EventRecords            []EventRecord           `json:"eventRecords,omitempty"`
 	Decisions               []Decision              `json:"decisions,omitempty"`
 	Approvals               []Approval              `json:"approvals,omitempty"`
+}
+
+type WorkspaceViewModel struct {
+	WorkspaceID             string                               `json:"workspaceId,omitempty"`
+	State                   string                               `json:"state,omitempty"`
+	Revision                int64                                `json:"revision,omitempty"`
+	GlobalRevision          int64                                `json:"globalRevision,omitempty"`
+	WorkspaceRevision       int64                                `json:"workspaceRevision,omitempty"`
+	SourceEventRevision     int64                                `json:"sourceEventRevision,omitempty"`
+	ProjectedSourceRevision int64                                `json:"projectedSourceRevision,omitempty"`
+	UpdatedAt               string                               `json:"updatedAt,omitempty"`
+	RebuiltAt               string                               `json:"rebuiltAt,omitempty"`
+	Degraded                bool                                 `json:"degraded,omitempty"`
+	StaleReason             string                               `json:"staleReason,omitempty"`
+	Error                   string                               `json:"error,omitempty"`
+	Sections                map[string]WorkspaceViewModelSection `json:"sections,omitempty"`
+}
+
+type WorkspaceViewModelSection struct {
+	Name                    string `json:"name"`
+	Revision                int64  `json:"revision,omitempty"`
+	WorkspaceRevision       int64  `json:"workspaceRevision,omitempty"`
+	SourceEventRevision     int64  `json:"sourceEventRevision,omitempty"`
+	ProjectedSourceRevision int64  `json:"projectedSourceRevision,omitempty"`
+	State                   string `json:"state,omitempty"`
 }
 
 type RunCommandStatus struct {

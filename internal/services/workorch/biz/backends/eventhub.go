@@ -680,6 +680,7 @@ func workspaceSnapshotResourceMap(snapshot WorkspaceSnapshotInfo) map[string]any
 	}
 	return map[string]any{
 		"Workspace":               snapshot.Workspace,
+		"ViewModel":               snapshot.ViewModel,
 		"Projection":              snapshot.Projection,
 		"Outcome":                 snapshot.Outcome,
 		"TaskProgress":            snapshot.TaskProgress,

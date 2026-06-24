@@ -148,6 +148,7 @@ type WorkspaceOutcomeInfo struct {
 
 type WorkspaceSnapshotInfo struct {
 	Workspace               WorkspaceInfo
+	ViewModel               WorkspaceViewModelInfo
 	Projection              ProjectionInfo
 	Outcome                 WorkspaceOutcomeInfo
 	TaskProgress            TaskProgressInfo
@@ -177,6 +178,31 @@ type WorkspaceSnapshotInfo struct {
 	EventRecords            []EventRecordInfo
 	Decisions               []DecisionInfo
 	Approvals               []ApprovalInfo
+}
+
+type WorkspaceViewModelInfo struct {
+	WorkspaceID             common.WorkspaceID
+	State                   string
+	Revision                int64
+	GlobalRevision          int64
+	WorkspaceRevision       int64
+	SourceEventRevision     int64
+	ProjectedSourceRevision int64
+	UpdatedAt               string
+	RebuiltAt               string
+	Degraded                bool
+	StaleReason             string
+	Error                   string
+	Sections                map[string]WorkspaceViewModelSectionInfo
+}
+
+type WorkspaceViewModelSectionInfo struct {
+	Name                    string
+	Revision                int64
+	WorkspaceRevision       int64
+	SourceEventRevision     int64
+	ProjectedSourceRevision int64
+	State                   string
 }
 
 type RunCommandStatusInfo struct {
