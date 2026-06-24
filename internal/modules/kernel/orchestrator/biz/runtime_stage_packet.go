@@ -43,6 +43,7 @@ func buildStagePacketFromStepInput(run *runModel.Run, stepID common.StepID, inpu
 		RequiredEvidenceKinds: stringSliceFromValue(input["requiredEvidenceKinds"]),
 		AcceptedEvidenceRefs:  stagePacketEvidenceRefs(input, "acceptedEvidenceRefs"),
 		RejectedEvidenceRefs:  stagePacketEvidenceRefs(input, "rejectedEvidenceRefs"),
+		TargetSnapshots:       stagePacketTargetSnapshots(input),
 	}
 	return packet.Normalized()
 }
@@ -158,5 +159,27 @@ func stagePacketEvidenceSources(input map[string]any) []map[string]any {
 		mapFromValue(input["repairActionPackage"]),
 		mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"]),
 		mapFromValue(input["acceptance"]),
+	}
+}
+
+func stagePacketTargetSnapshots(input map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0)
+	for _, source := range stagePacketSnapshotSources(input) {
+		for _, key := range []string{"targetSnapshots", "failureTargetRepairContext", "patchRepairContext"} {
+			ret = append(ret, mapSliceFromValue(source[key])...)
+		}
+	}
+	return runtimemodel.NormalizeStagePacketTargetSnapshots(ret)
+}
+
+func stagePacketSnapshotSources(input map[string]any) []map[string]any {
+	return []map[string]any{
+		input,
+		mapFromValue(input["executionContext"]),
+		mapFromValue(input["repairActionPackage"]),
+		mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"]),
 	}
 }

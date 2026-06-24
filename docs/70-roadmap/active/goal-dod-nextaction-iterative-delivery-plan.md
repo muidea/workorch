@@ -51,6 +51,7 @@ Related:
 - [S5.8 All Satisfied Complete NextAction](./goal-dod-nextaction-s5-8-all-satisfied-complete-nextaction.md)
 - [S6.1 StagePacket Minimal Model](./goal-dod-nextaction-s6-1-stage-packet-minimal-model.md)
 - [S6.2 StagePacket Evidence Refs](./goal-dod-nextaction-s6-2-stage-packet-evidence-refs.md)
+- [S6.3 StagePacket Target Snapshot Integrity](./goal-dod-nextaction-s6-3-stage-packet-target-snapshot-integrity.md)
 
 ## Purpose
 

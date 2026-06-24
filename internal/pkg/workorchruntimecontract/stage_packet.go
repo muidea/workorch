@@ -33,6 +33,7 @@ type StagePacket struct {
 	RequiredEvidenceKinds []string              `json:"requiredEvidenceKinds,omitempty"`
 	AcceptedEvidenceRefs  []string              `json:"acceptedEvidenceRefs,omitempty"`
 	RejectedEvidenceRefs  []string              `json:"rejectedEvidenceRefs,omitempty"`
+	TargetSnapshots       []map[string]any      `json:"targetSnapshots,omitempty"`
 	IdempotencyKey        string                `json:"idempotencyKey"`
 }
 
@@ -49,6 +50,7 @@ func (p StagePacket) Normalized() StagePacket {
 	p.RequiredEvidenceKinds = compactNextActionStrings(p.RequiredEvidenceKinds)
 	p.AcceptedEvidenceRefs = compactNextActionStrings(p.AcceptedEvidenceRefs)
 	p.RejectedEvidenceRefs = compactNextActionStrings(p.RejectedEvidenceRefs)
+	p.TargetSnapshots = NormalizeStagePacketTargetSnapshots(p.TargetSnapshots)
 	if p.NextAction != nil {
 		next := p.NextAction.Normalized()
 		if next.Type != "" {
@@ -134,6 +136,9 @@ func (p StagePacket) ToMap() map[string]any {
 	if len(p.RejectedEvidenceRefs) > 0 {
 		ret["rejectedEvidenceRefs"] = append([]string(nil), p.RejectedEvidenceRefs...)
 	}
+	if len(p.TargetSnapshots) > 0 {
+		ret["targetSnapshots"] = cloneStagePacketMapSlice(p.TargetSnapshots)
+	}
 	return ret
 }
 
@@ -210,8 +215,115 @@ func StableStagePacketIdempotencyKey(packet StagePacket) string {
 		strings.Join(compactNextActionStrings(packet.RequiredEvidenceKinds), ","),
 		strings.Join(compactNextActionStrings(packet.AcceptedEvidenceRefs), ","),
 		strings.Join(compactNextActionStrings(packet.RejectedEvidenceRefs), ","),
+		shortStagePacketDigest(NormalizeStagePacketTargetSnapshots(packet.TargetSnapshots)),
 	}
 	return strings.Join(parts, "|")
+}
+
+func NormalizeStagePacketTargetSnapshots(items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(items))
+	seen := map[string]bool{}
+	for _, item := range items {
+		next := normalizeStagePacketTargetSnapshot(item)
+		if len(next) == 0 {
+			continue
+		}
+		key := firstNonEmptyStagePacketString(next, "targetRef", "contentHash", "source", "contextSource", "error")
+		if key == "" {
+			key = shortStagePacketDigest(next)
+		}
+		if key != "" && seen[key] {
+			continue
+		}
+		if key != "" {
+			seen[key] = true
+		}
+		ret = append(ret, next)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func normalizeStagePacketTargetSnapshot(item map[string]any) map[string]any {
+	if len(item) == 0 {
+		return nil
+	}
+	next := map[string]any{}
+	for _, key := range []string{
+		"targetRef",
+		"exists",
+		"contentHash",
+		"contentComplete",
+		"safeForFileWrite",
+		"redacted",
+		"truncated",
+		"isBinary",
+		"size",
+		"source",
+		"contextSource",
+		"error",
+	} {
+		if value, ok := item[key]; ok && value != nil {
+			next[key] = value
+		}
+	}
+	if len(next) == 0 {
+		return nil
+	}
+	integrity := stagePacketSnapshotIntegrity(next)
+	next["integrityState"] = integrity
+	next["safeForExactFileWrite"] = integrity == "full"
+	if integrity != "full" {
+		next["safeForFileWrite"] = false
+	}
+	return next
+}
+
+func stagePacketSnapshotIntegrity(item map[string]any) string {
+	switch {
+	case stagePacketBoolValue(item["redacted"]):
+		return "redacted"
+	case stagePacketBoolValue(item["truncated"]):
+		return "truncated"
+	case stagePacketBoolValue(item["contentComplete"]) &&
+		stagePacketBoolValue(item["safeForFileWrite"]) &&
+		!stagePacketBoolValue(item["isBinary"]):
+		return "full"
+	default:
+		return "partial"
+	}
+}
+
+func firstNonEmptyStagePacketString(item map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(stagePacketStringValue(item[key])); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func stagePacketStringValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return ""
+	}
+}
+
+func stagePacketBoolValue(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	default:
+		return false
+	}
 }
 
 func cloneStagePacketMap(input map[string]any) map[string]any {
@@ -221,6 +333,23 @@ func cloneStagePacketMap(input map[string]any) map[string]any {
 	ret := make(map[string]any, len(input))
 	for key, value := range input {
 		ret[key] = value
+	}
+	return ret
+}
+
+func cloneStagePacketMapSlice(input []map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(input))
+	for _, item := range input {
+		if len(item) == 0 {
+			continue
+		}
+		ret = append(ret, cloneStagePacketMap(item))
+	}
+	if len(ret) == 0 {
+		return nil
 	}
 	return ret
 }

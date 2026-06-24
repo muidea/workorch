@@ -32,6 +32,17 @@ func TestInitialStepInputAttachesMinimalStagePacket(t *testing.T) {
 					"mustBindCoverageFocus":        true,
 					"mustIncludeStateChangingNode": true,
 				},
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "target-full",
+					"contentHash":      "sha256:full",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}, {
+					"targetRef":        "target-truncated",
+					"contentComplete":  false,
+					"safeForFileWrite": true,
+					"truncated":        true,
+				}},
 			},
 		},
 	}
@@ -58,6 +69,18 @@ func TestInitialStepInputAttachesMinimalStagePacket(t *testing.T) {
 	}
 	if refs := stringSliceFromValue(packet["rejectedEvidenceRefs"]); len(refs) != 1 || refs[0] != "rejected-stage-packet" {
 		t.Fatalf("stagePacket.rejectedEvidenceRefs = %+v, want rejected ref", refs)
+	}
+	snapshots := mapSliceFromValue(packet["targetSnapshots"])
+	if len(snapshots) != 2 {
+		t.Fatalf("stagePacket.targetSnapshots = %+v, want two snapshots", snapshots)
+	}
+	if snapshots[0]["integrityState"] != "full" || snapshots[0]["safeForExactFileWrite"] != true {
+		t.Fatalf("stagePacket full snapshot = %+v, want exact-write safe", snapshots[0])
+	}
+	if snapshots[1]["integrityState"] != "truncated" ||
+		snapshots[1]["safeForExactFileWrite"] != false ||
+		snapshots[1]["safeForFileWrite"] != false {
+		t.Fatalf("stagePacket truncated snapshot = %+v, want unsafe truncated metadata", snapshots[1])
 	}
 }
 
@@ -93,6 +116,12 @@ func TestFollowUpStepInputRebuildsStagePacketAfterNextInputMutation(t *testing.T
 				},
 				"repairActionPackage": map[string]any{
 					"requiredOutput": map[string]any{"mustReturnValidation": true},
+					"targetSnapshots": []map[string]any{{
+						"targetRef":        "target-redacted",
+						"contentComplete":  true,
+						"safeForFileWrite": true,
+						"redacted":         true,
+					}},
 				},
 			},
 		},
@@ -116,5 +145,9 @@ func TestFollowUpStepInputRebuildsStagePacketAfterNextInputMutation(t *testing.T
 	}
 	if refs := stringSliceFromValue(packet["rejectedEvidenceRefs"]); len(refs) != 1 || refs[0] != "rejected-mutated" {
 		t.Fatalf("stagePacket.rejectedEvidenceRefs = %+v, want rebuilt rejected ref", refs)
+	}
+	snapshots := mapSliceFromValue(packet["targetSnapshots"])
+	if len(snapshots) != 1 || snapshots[0]["integrityState"] != "redacted" || snapshots[0]["safeForExactFileWrite"] != false {
+		t.Fatalf("stagePacket.targetSnapshots = %+v, want rebuilt redacted unsafe snapshot", snapshots)
 	}
 }
