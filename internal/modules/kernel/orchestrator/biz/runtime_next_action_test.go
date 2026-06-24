@@ -392,6 +392,344 @@ func TestDeriveMissingValidationNextActionSkipsWhenStateChangeHasPriority(t *tes
 	}
 }
 
+func TestNextActionForRunRecoverableDiagnosticRequestsRepair(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-diagnostic")
+	runID := common.RunID("run-next-action-diagnostic")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := evidenceRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.EvidenceRecord{
+		ID:          "diagnostic-retry",
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		Kind:        runtimemodel.EvidenceKindDiagnostic,
+		Status:      runtimemodel.EvidenceStatusRejected,
+		SourceType:  evidenceRecordSourceTypeContractViolation,
+		SourceRef:   "run-next-action-diagnostic/failed/contract-violation",
+		Metadata: map[string]any{
+			"recoverability":   runtimemodel.ContractViolationRecoverabilityNarrowContract,
+			"failureClass":     failureClassRuntime,
+			"failureSignature": "class=runtime_failed",
+		},
+		CreatedAt: "2026-06-24T01:00:00Z",
+	}); err != nil {
+		t.Fatalf("create diagnostic evidence: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeRepair || action.Stage != "repair" || action.StageMode != "diagnostic_retry" {
+		t.Fatalf("next action = %+v, want diagnostic repair", action)
+	}
+	if action.SubjectType != "diagnostic" || action.SubjectID != "diagnostic-retry" {
+		t.Fatalf("next action subject = %s/%s, want diagnostic-retry", action.SubjectType, action.SubjectID)
+	}
+	if action.RequiredOutput["diagnosticEvidenceId"] != "diagnostic-retry" ||
+		action.RequiredOutput["recoverability"] != runtimemodel.ContractViolationRecoverabilityNarrowContract {
+		t.Fatalf("required output = %+v, want diagnostic retry contract", action.RequiredOutput)
+	}
+	if !stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeRequestDecision) {
+		t.Fatalf("forbidden actions = %+v, want request_decision forbidden", action.ForbiddenActions)
+	}
+}
+
+func TestNextActionForRunRecoverableDiagnosticHasPriorityOverEvidenceGaps(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-diagnostic-priority")
+	runID := common.RunID("run-next-action-diagnostic-priority")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                    "cwi-state-change-priority",
+				"status":                "open",
+				"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindStateChange},
+				"missingEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := evidenceRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.EvidenceRecord{
+		ID:          "diagnostic-priority",
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		Kind:        runtimemodel.EvidenceKindDiagnostic,
+		Status:      runtimemodel.EvidenceStatusRejected,
+		SourceRef:   "diagnostic-priority-source",
+		Metadata:    map[string]any{"recoverability": runtimemodel.ContractViolationRecoverabilityRetrySameContract},
+	}); err != nil {
+		t.Fatalf("create diagnostic evidence: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeRepair || action.SubjectID != "diagnostic-priority" {
+		t.Fatalf("next action = %+v, want recoverable diagnostic priority", action)
+	}
+}
+
+func TestDeriveRecoverableDiagnosticNextActionSkipsDecisionRequiredAndSuperseded(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-diagnostic-rule",
+		WorkspaceID: "ws-diagnostic-rule",
+		State:       common.RunStateRunning,
+	}
+	records := []*runtimemodel.EvidenceRecord{
+		{
+			ID:          "diagnostic-superseded",
+			WorkspaceID: run.WorkspaceID,
+			RunID:       run.ID,
+			Kind:        runtimemodel.EvidenceKindDiagnostic,
+			Status:      runtimemodel.EvidenceStatusRejected,
+			SourceRef:   "diagnostic-superseded-source",
+			Metadata:    map[string]any{"recoverability": runtimemodel.ContractViolationRecoverabilityRetrySameContract},
+		},
+		{
+			ID:          "diagnostic-superseding",
+			WorkspaceID: run.WorkspaceID,
+			RunID:       run.ID,
+			Kind:        runtimemodel.EvidenceKindDiagnostic,
+			Status:      runtimemodel.EvidenceStatusAccepted,
+			SourceRef:   "diagnostic-superseding-source",
+			Supersedes:  []common.EvidenceRecordID{"diagnostic-superseded"},
+		},
+		{
+			ID:          "diagnostic-decision-required",
+			WorkspaceID: run.WorkspaceID,
+			RunID:       run.ID,
+			Kind:        runtimemodel.EvidenceKindDiagnostic,
+			Status:      runtimemodel.EvidenceStatusRejected,
+			SourceRef:   "diagnostic-decision-required-source",
+			Metadata:    map[string]any{"recoverability": runtimemodel.ContractViolationRecoverabilityDecisionRequired},
+		},
+	}
+	if action, ok := deriveRecoverableDiagnosticNextAction(run, records); ok || action.Type != "" {
+		t.Fatalf("derive unrecoverable diagnostics = %+v/%v, want no repair", action, ok)
+	}
+
+	records = append(records, &runtimemodel.EvidenceRecord{
+		ID:          "diagnostic-nested-retry",
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		Kind:        runtimemodel.EvidenceKindDiagnostic,
+		Status:      runtimemodel.EvidenceStatusRejected,
+		SourceRef:   "diagnostic-nested-retry-source",
+		Metadata: map[string]any{
+			"contractViolation": map[string]any{
+				"recoverability": runtimemodel.ContractViolationRecoverabilityNormalizeThenRetry,
+			},
+		},
+	})
+	action, ok := deriveRecoverableDiagnosticNextAction(run, records)
+	if !ok || action.Type != runtimemodel.NextActionTypeRepair || action.SubjectID != "diagnostic-nested-retry" {
+		t.Fatalf("derive nested recoverable diagnostic = %+v/%v, want repair", action, ok)
+	}
+
+	run.State = common.RunStateCompleted
+	if action, ok := deriveRecoverableDiagnosticNextAction(run, records); ok || action.Type != "" {
+		t.Fatalf("derive terminal run = %+v/%v, want no action", action, ok)
+	}
+}
+
+func TestNextActionForRunAllSatisfiedRequestsComplete(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-complete")
+	runID := common.RunID("run-next-action-complete")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                     "cwi-complete",
+				"status":                 "satisfied",
+				"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+				"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindStateChange: {"patch-001"}, runtimemodel.EvidenceKindValidation: {"validation-001"}},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeComplete || action.Stage != "complete" || action.StageMode != "accepted_evidence" {
+		t.Fatalf("next action = %+v, want complete", action)
+	}
+	if action.SubjectType != "run" || action.SubjectID != string(runID) {
+		t.Fatalf("next action subject = %s/%s, want run %s", action.SubjectType, action.SubjectID, runID)
+	}
+	if action.RequiredOutput["completionReady"] != true || action.RequiredOutput["mustFreezeEvidence"] != true {
+		t.Fatalf("required output = %+v, want completion freeze contract", action.RequiredOutput)
+	}
+	if len(action.FocusCoverageItemIDs) != 1 || action.FocusCoverageItemIDs[0] != "cwi-complete" {
+		t.Fatalf("focus coverage ids = %+v, want cwi-complete", action.FocusCoverageItemIDs)
+	}
+	if !stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeRepair) {
+		t.Fatalf("forbidden actions = %+v, want repair forbidden", action.ForbiddenActions)
+	}
+}
+
+func TestNextActionForRunAllSatisfiedWaitsForRecoverableDiagnostic(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-complete-diagnostic")
+	runID := common.RunID("run-next-action-complete-diagnostic")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                     "cwi-complete-diagnostic",
+				"status":                 "satisfied",
+				"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindValidation},
+				"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindValidation: {"validation-001"}},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := evidenceRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.EvidenceRecord{
+		ID:          "diagnostic-before-complete",
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		Kind:        runtimemodel.EvidenceKindDiagnostic,
+		Status:      runtimemodel.EvidenceStatusRejected,
+		SourceRef:   "diagnostic-before-complete-source",
+		Metadata:    map[string]any{"recoverability": runtimemodel.ContractViolationRecoverabilityRetrySameContract},
+	}); err != nil {
+		t.Fatalf("create diagnostic evidence: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeRepair || action.SubjectID != "diagnostic-before-complete" {
+		t.Fatalf("next action = %+v, want recoverable diagnostic before complete", action)
+	}
+}
+
+func TestDeriveAllSatisfiedCompleteNextActionRequiresSatisfiedAcceptedEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-complete-rule",
+		WorkspaceID: "ws-complete-rule",
+		State:       common.RunStateRunning,
+	}
+	if action, ok := deriveAllSatisfiedCompleteNextAction(run, nil); ok || action.Type != "" {
+		t.Fatalf("derive empty ledger = %+v/%v, want no complete", action, ok)
+	}
+
+	items := []map[string]any{{
+		"id":                     "cwi-evidence-ready",
+		"status":                 "evidence_ready",
+		"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindValidation},
+		"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindValidation: {"validation-001"}},
+	}}
+	if action, ok := deriveAllSatisfiedCompleteNextAction(run, items); ok || action.Type != "" {
+		t.Fatalf("derive evidence_ready item = %+v/%v, want no complete", action, ok)
+	}
+
+	items[0]["status"] = "satisfied"
+	delete(items[0], "acceptedEvidenceByKind")
+	if action, ok := deriveAllSatisfiedCompleteNextAction(run, items); ok || action.Type != "" {
+		t.Fatalf("derive satisfied without evidence = %+v/%v, want no complete", action, ok)
+	}
+
+	items[0]["acceptedEvidenceByKind"] = map[string][]string{runtimemodel.EvidenceKindValidation: {"validation-001"}}
+	action, ok := deriveAllSatisfiedCompleteNextAction(run, items)
+	if !ok || action.Type != runtimemodel.NextActionTypeComplete || action.SubjectID != string(run.ID) {
+		t.Fatalf("derive complete = %+v/%v, want complete", action, ok)
+	}
+
+	run.State = common.RunStateCompleted
+	if action, ok := deriveAllSatisfiedCompleteNextAction(run, items); ok || action.Type != "" {
+		t.Fatalf("derive terminal run = %+v/%v, want no complete", action, ok)
+	}
+}
+
 func TestDeriveOpenDecisionNextActionIgnoresResolvedOrUnreferencedTicket(t *testing.T) {
 	run := &runmodel.Run{
 		ID:               "run-open-decision-rule",

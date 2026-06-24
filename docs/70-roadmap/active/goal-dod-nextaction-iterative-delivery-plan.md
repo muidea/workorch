@@ -47,6 +47,8 @@ Related:
 - [S5.4 Missing Gap Baseline NextAction](./goal-dod-nextaction-s5-4-missing-gap-nextaction.md)
 - [S5.5 Missing State Change NextAction](./goal-dod-nextaction-s5-5-missing-state-change-nextaction.md)
 - [S5.6 Missing Validation NextAction](./goal-dod-nextaction-s5-6-missing-validation-nextaction.md)
+- [S5.7 Recoverable Diagnostic NextAction](./goal-dod-nextaction-s5-7-recoverable-diagnostic-nextaction.md)
+- [S5.8 All Satisfied Complete NextAction](./goal-dod-nextaction-s5-8-all-satisfied-complete-nextaction.md)
 
 ## Purpose
 
