@@ -192,6 +192,69 @@ func TestEmbeddedTemplateStagePolicySchemaWhenDeclared(t *testing.T) {
 	}
 }
 
+func TestEmbeddedNonSoftwareTemplatesDoNotDeclareSoftwareDevStrategy(t *testing.T) {
+	templates, err := loadEmbeddedTemplates()
+	if err != nil {
+		t.Fatalf("loadEmbeddedTemplates: %v", err)
+	}
+	softwareKeys := []string{
+		"stateChangePolicy",
+		"runtimeRepair",
+		"versionControl",
+		"semanticCodeNavigation",
+		"managedWorkspaceConfigs",
+		"acceptanceSlicePolicy",
+		"capabilityUsagePolicies",
+	}
+	var checked int
+	for _, item := range templates {
+		if item.ID == "software-dev" {
+			continue
+		}
+		checked++
+		for _, key := range softwareKeys {
+			if _, ok := item.ContextHints[key]; ok {
+				t.Fatalf("%s contextHints unexpectedly declared software-dev strategy key %q: %+v", item.ID, key, item.ContextHints[key])
+			}
+		}
+		if policies := item.EvidencePolicies; len(policies) != 0 {
+			t.Fatalf("%s evidencePolicies = %+v, want no software-dev evidence policy", item.ID, policies)
+		}
+		if contracts, ok := item.ContextHints["profileContracts"].(map[string]any); ok {
+			if _, ok := contracts["software-dev"]; ok {
+				t.Fatalf("%s profileContracts unexpectedly include software-dev: %+v", item.ID, contracts)
+			}
+		}
+		policy, ok := item.ContextHints["templateStagePolicies"].(map[string]any)
+		if !ok {
+			continue
+		}
+		stages, _ := policy["stages"].([]any)
+		for _, raw := range stages {
+			stage, ok := raw.(map[string]any)
+			if !ok {
+				t.Fatalf("%s templateStagePolicies stage = %+v, want map", item.ID, raw)
+			}
+			policyRefs, ok := stage["policyRefs"].(map[string]any)
+			if !ok {
+				continue
+			}
+			for _, refType := range []string{"evidencePolicies", "capabilityUsagePolicies"} {
+				refs, _ := policyRefs[refType].([]any)
+				for _, rawRef := range refs {
+					ref, _ := rawRef.(string)
+					if strings.Contains(ref, "software-dev") {
+						t.Fatalf("%s stage %q policyRefs.%s includes software-dev ref %q", item.ID, testStringFromAny(stage["id"]), refType, ref)
+					}
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no non-software embedded templates checked")
+	}
+}
+
 func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuidance(t *testing.T) {
 	souls, err := loadEmbeddedSouls()
 	if err != nil {

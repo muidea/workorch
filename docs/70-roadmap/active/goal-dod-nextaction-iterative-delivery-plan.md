@@ -78,6 +78,7 @@ Related:
 - [S10.3 Evidence Policy Coverage Binding](./goal-dod-nextaction-s10-3-evidence-policy-coverage-binding.md)
 - [S10.4 File And Task Granularity Soul Guidance](./goal-dod-nextaction-s10-4-file-task-granularity-soul-guidance.md)
 - [S10.5 Template Capability MCP/LSP Binding](./goal-dod-nextaction-s10-5-template-capability-mcp-lsp-binding.md)
+- [S10.6 Non-Software Template Isolation](./goal-dod-nextaction-s10-6-non-software-template-isolation.md)
 
 ## Purpose
 

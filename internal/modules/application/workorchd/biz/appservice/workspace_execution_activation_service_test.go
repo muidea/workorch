@@ -3335,6 +3335,69 @@ func TestActivateWorkspaceExecutionWithBackendRefreshesExecutionContractFromMatc
 	}
 }
 
+func TestActivateGenericGovernedWorkspaceDoesNotInheritSoftwareDevStrategy(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
+	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:      "generic governed isolation workspace",
+		TemplateID: "generic-governed",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "complete a generic governed task")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"generic result is traceable"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+
+	contract := contextMapFromValue(t, item.Run.ExecutionContext["executionContract"])
+	if contract["stateChangePolicy"] != "allowed_but_not_required" {
+		t.Fatalf("generic-governed stateChangePolicy = %v, want neutral allowed_but_not_required", contract["stateChangePolicy"])
+	}
+	for _, key := range []string{
+		"runtimeRepair",
+		"versionControl",
+		"semanticCodeNavigation",
+		"managedWorkspaceConfigs",
+		"acceptanceSlicePolicy",
+		"capabilityUsagePolicies",
+	} {
+		if _, ok := contract[key]; ok {
+			t.Fatalf("generic-governed executionContract unexpectedly includes software-dev strategy key %q: %+v", key, contract[key])
+		}
+	}
+	profileContracts := contextMapFromValue(t, contract["profileContracts"])
+	if _, ok := profileContracts["software-dev"]; ok {
+		t.Fatalf("generic-governed profileContracts unexpectedly include software-dev: %+v", profileContracts)
+	}
+	if policies := contextMapSliceFromValue(t, item.Run.ExecutionContext["evidencePolicies"]); len(policies) != 0 {
+		t.Fatalf("generic-governed evidencePolicies = %+v, want none", policies)
+	}
+	selection := contextMapFromValue(t, item.Run.ExecutionContext["mcpSelection"])
+	for _, key := range []string{"defaultMCPServerIds", "selectedMCPServerIds", "defaultCapabilityIds", "selectedCapabilityIds"} {
+		if contextStringSliceContains(selection[key], "mcp-lsp-bridge") ||
+			contextStringSliceContains(selection[key], "mcp-lsp-bridge:tool:lsp_status") {
+			t.Fatalf("generic-governed mcpSelection %s = %+v, want no software-dev LSP bridge selection", key, selection[key])
+		}
+	}
+	if servers := contextMapSliceFromValue(t, item.Run.ExecutionContext["mcpServers"]); len(servers) != 0 {
+		t.Fatalf("generic-governed mcpServers = %+v, want no selected MCP servers", servers)
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendUsesSystemDefaultSoul(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	useSystemDefaultSoulConfig(t, "soul-system-default")
