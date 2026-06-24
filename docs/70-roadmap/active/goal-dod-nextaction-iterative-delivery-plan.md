@@ -71,6 +71,7 @@ Related:
 - [S9.2 History Recent Compact Refs](./goal-dod-nextaction-s9-2-history-recent-compact-refs.md)
 - [S9.3 Snapshot Payload On Demand](./goal-dod-nextaction-s9-3-snapshot-payload-on-demand.md)
 - [S9.4 Watchdog External Timeout Scope](./goal-dod-nextaction-s9-4-watchdog-external-timeout-scope.md)
+- [S9.5 Watchdog Idempotency Key](./goal-dod-nextaction-s9-5-watchdog-idempotency-key.md)
 
 ## Purpose
 

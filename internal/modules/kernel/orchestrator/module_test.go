@@ -181,6 +181,7 @@ func TestModuleRecoverRuntimeGapCommandSchedulesBackgroundDispatch(t *testing.T)
 				StepID:         stepID,
 				StepKind:       "llm/workspace_execution",
 				Gap:            "worker_lost",
+				IdempotencyKey: "runtime-gap-recovery|ws-module-runtime-gap-recovery|run-module-runtime-gap-recovery|run-module-runtime-gap-recovery/step-001|worker_lost|request-runtime-gap|queue-runtime-gap",
 				RequestID:      "request-runtime-gap",
 				QueueKey:       "queue-runtime-gap",
 				LatestStepTime: "2026-06-17T14:00:00Z",
@@ -196,6 +197,74 @@ func TestModuleRecoverRuntimeGapCommandSchedulesBackgroundDispatch(t *testing.T)
 	}
 }
 
+func TestModuleRecoverRuntimeGapCommandDeduplicatesInFlightIdempotencyKey(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-module-runtime-gap-recovery-dedupe")
+	stepID := common.StepID("run-module-runtime-gap-recovery-dedupe/step-001")
+	workspaceID := common.WorkspaceID("ws-module-runtime-gap-recovery-dedupe")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := orchestratorbiz.NewRuntimeOrchestrator(
+		moduleNoopRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+	bg := &recordingBackgroundRoutine{}
+	module := &Module{
+		bizPtr:            orch,
+		servicePtr:        orchestratorservice.New(orchestratorServiceDependencies(orch)),
+		backgroundRoutine: bg,
+	}
+	key := "runtime-gap-recovery|ws-module-runtime-gap-recovery-dedupe|run-module-runtime-gap-recovery-dedupe|run-module-runtime-gap-recovery-dedupe/step-001|worker_lost|request-runtime-gap|queue-runtime-gap"
+	envelope := events.Envelope{
+		Topic:       orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap,
+		SubjectType: "run",
+		SubjectID:   string(runID),
+		WorkspaceID: string(workspaceID),
+		RunID:       string(runID),
+		Payload: map[string]any{
+			events.PayloadKeyIdempotencyKey: key,
+			events.PayloadKeyCommand: runcontracts.RecoverRuntimeGapCommand{
+				WorkspaceID:    workspaceID,
+				RunID:          runID,
+				StepID:         stepID,
+				StepKind:       "llm/workspace_execution",
+				Gap:            "worker_lost",
+				IdempotencyKey: key,
+				RequestID:      "request-runtime-gap",
+				QueueKey:       "queue-runtime-gap",
+				LatestStepTime: "2026-06-17T14:00:00Z",
+				Reason:         "stale dispatched runtime gap: worker_lost",
+			},
+		},
+	}
+
+	if err := module.handleCommand(ctx, envelope); err == nil {
+		t.Fatalf("first recover runtime gap command err = nil, want response")
+	} else if _, ok := events.ResponseEnvelope(err); !ok {
+		t.Fatalf("first recover runtime gap command err = %v, want response", err)
+	}
+	if err := module.handleCommand(ctx, envelope); err == nil {
+		t.Fatalf("duplicate recover runtime gap command err = nil, want response")
+	} else if _, ok := events.ResponseEnvelope(err); !ok {
+		t.Fatalf("duplicate recover runtime gap command err = %v, want response", err)
+	}
+	if bg.asyncFunctionCalls != 1 {
+		t.Fatalf("background calls = %d, want duplicate in-flight key to schedule once", bg.asyncFunctionCalls)
+	}
+}
+
 func TestRuntimeGapRecoveryPatchContainsGapSpecificContext(t *testing.T) {
 	cmd := runcontracts.RecoverRuntimeGapCommand{
 		WorkspaceID:    "ws-runtime-gap-patch",
@@ -203,6 +272,7 @@ func TestRuntimeGapRecoveryPatchContainsGapSpecificContext(t *testing.T) {
 		StepID:         "run-runtime-gap-patch/step-001",
 		StepKind:       "llm/workspace_execution",
 		Gap:            "runtime_terminal_not_finalized",
+		IdempotencyKey: "runtime-gap-recovery|ws-runtime-gap-patch|run-runtime-gap-patch|run-runtime-gap-patch/step-001|runtime_terminal_not_finalized|request-runtime-gap-patch|queue-runtime-gap-patch",
 		RequestID:      "request-runtime-gap-patch",
 		QueueKey:       "queue-runtime-gap-patch",
 		LatestStepTime: "2026-06-17T14:00:00Z",
@@ -230,6 +300,7 @@ func TestRuntimeGapRecoveryPatchContainsGapSpecificContext(t *testing.T) {
 		recovery["runId"] != string(cmd.RunID) ||
 		recovery["stepId"] != string(cmd.StepID) ||
 		recovery["gap"] != cmd.Gap ||
+		recovery["idempotencyKey"] != cmd.IdempotencyKey ||
 		recovery["requestId"] != cmd.RequestID ||
 		recovery["queueKey"] != cmd.QueueKey ||
 		recovery["latestStepTime"] != cmd.LatestStepTime ||

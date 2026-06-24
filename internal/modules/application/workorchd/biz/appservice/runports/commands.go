@@ -69,13 +69,19 @@ func RecoverRuntimeGap(ctx context.Context, hub events.Hub, item *runmodel.Run, 
 	if workspaceID == "" {
 		return common.ErrInvalidArgument
 	}
+	idempotencyKey := recovery.IdempotencyKey
+	if idempotencyKey == "" {
+		idempotencyKey = runtimeGapRecoveryIdempotencyKey(workspaceID, item.ID, recovery.StepID, string(recovery.Gap), recovery.RequestID, recovery.QueueKey)
+	}
 	return ownercommandports.Publish(ctx, hub, orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, "run", string(item.ID), workspaceID, item.ID, map[string]any{
+		events.PayloadKeyIdempotencyKey: idempotencyKey,
 		events.PayloadKeyCommand: runcontracts.RecoverRuntimeGapCommand{
 			WorkspaceID:           workspaceID,
 			RunID:                 item.ID,
 			StepID:                recovery.StepID,
 			StepKind:              recovery.StepKind,
 			Gap:                   string(recovery.Gap),
+			IdempotencyKey:        idempotencyKey,
 			RequestID:             recovery.RequestID,
 			QueueKey:              recovery.QueueKey,
 			LatestStepTime:        recovery.LatestStepTime,

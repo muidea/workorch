@@ -155,12 +155,16 @@ func TestRecoverRuntimeGapPublishesGapSpecificCommandPayload(t *testing.T) {
 		cmd.WorkspaceID != run.WorkspaceID ||
 		cmd.StepID != recovery.StepID ||
 		cmd.Gap != string(runtimeExecutionGapWorkerLost) ||
+		cmd.IdempotencyKey != runtimeGapRecoveryIdempotencyKey(run.WorkspaceID, run.ID, recovery.StepID, string(runtimeExecutionGapWorkerLost), recovery.RequestID, recovery.QueueKey) ||
 		cmd.RequestID != recovery.RequestID ||
 		cmd.QueueKey != recovery.QueueKey ||
 		cmd.RecoveryPolicy.WatchdogRecovery != runtimemodel.WatchdogRecoveryRetryExternal ||
 		cmd.RecoverySafety != recovery.RecoverySafety ||
 		cmd.ExecutionContextPatch["mode"] != "recover" {
 		t.Fatalf("command = %+v, want populated runtime gap recovery command", cmd)
+	}
+	if published[0].Payload[events.PayloadKeyIdempotencyKey] != cmd.IdempotencyKey {
+		t.Fatalf("payload idempotency key = %v, want %s", published[0].Payload[events.PayloadKeyIdempotencyKey], cmd.IdempotencyKey)
 	}
 }
 

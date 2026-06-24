@@ -111,6 +111,7 @@ func runtimeGapRecoveryFromStep(item *runmodel.Run, step *runmodel.Step, gap run
 		StepID:         step.ID,
 		StepKind:       step.Kind,
 		Gap:            gap,
+		IdempotencyKey: runtimeGapRecoveryIdempotencyKey(item.WorkspaceID, item.ID, step.ID, string(gap), state.RequestID, state.QueueKey),
 		RequestID:      state.RequestID,
 		QueueKey:       state.QueueKey,
 		LatestStepTime: state.LatestStepTime,
@@ -118,6 +119,23 @@ func runtimeGapRecoveryFromStep(item *runmodel.Run, step *runmodel.Step, gap run
 		RecoverySafety: runtimeGapRecoverySafetyClassification(state),
 		Reason:         reason,
 	}
+}
+
+func runtimeGapRecoveryIdempotencyKey(workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, gap string, requestID string, queueKey string) string {
+	return "runtime-gap-recovery|" +
+		recoveryKeyComponent(string(workspaceID)) + "|" +
+		recoveryKeyComponent(string(runID)) + "|" +
+		recoveryKeyComponent(string(stepID)) + "|" +
+		recoveryKeyComponent(gap) + "|" +
+		recoveryKeyComponent(requestID) + "|" +
+		recoveryKeyComponent(queueKey)
+}
+
+func recoveryKeyComponent(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
 }
 
 func contextWithRunWorkspace(ctx context.Context, item *runmodel.Run) context.Context {

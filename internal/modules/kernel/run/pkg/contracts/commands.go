@@ -32,6 +32,7 @@ type RecoverRuntimeGapCommand struct {
 	StepID                common.StepID
 	StepKind              string
 	Gap                   string
+	IdempotencyKey        string
 	RequestID             string
 	QueueKey              string
 	LatestStepTime        string

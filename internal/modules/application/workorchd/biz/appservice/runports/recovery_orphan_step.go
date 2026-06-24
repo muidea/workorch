@@ -22,6 +22,7 @@ type RuntimeGapRecovery struct {
 	StepID         common.StepID
 	StepKind       string
 	Gap            runtimeExecutionGap
+	IdempotencyKey string
 	RequestID      string
 	QueueKey       string
 	LatestStepTime string

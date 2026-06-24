@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/muidea/magicCommon/task"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
@@ -57,6 +58,9 @@ type Module struct {
 	backgroundRoutine task.BackgroundRoutine
 	patchExecutor     *runtimeevent.Executor
 	unsub             []func()
+
+	recoveryMu       sync.Mutex
+	recoveryInFlight map[string]struct{}
 }
 
 func New() *Module { return &Module{} }
@@ -368,8 +372,14 @@ func (m *Module) handleRecoverRuntimeGapCommand(ctx context.Context, envelope ev
 	if cmd.RunID != "" {
 		runID = cmd.RunID
 	}
+	if cmd.IdempotencyKey == "" {
+		cmd.IdempotencyKey = stringPayload(payload, events.PayloadKeyIdempotencyKey)
+	}
 	if runID == "" || cmd.WorkspaceID == "" || cmd.StepID == "" || cmd.Gap == "" {
 		return common.ErrInvalidArgument
+	}
+	if cmd.IdempotencyKey == "" {
+		cmd.IdempotencyKey = runtimeGapRecoveryCommandIdempotencyKey(cmd)
 	}
 	patch := runtimeGapRecoveryPatch(cmd)
 	if m.backgroundRoutine == nil {
@@ -378,14 +388,19 @@ func (m *Module) handleRecoverRuntimeGapCommand(ctx context.Context, envelope ev
 	if err := m.bizPtr.CanResumeRun(ctx, runID); err != nil {
 		return err
 	}
+	if !m.markRuntimeGapRecoveryInFlight(cmd.IdempotencyKey) {
+		return nil
+	}
 	bgCtx := orchestratorBackgroundContext(ctx, envelope)
 	if err := m.backgroundRoutine.AsyncFunction(func() {
+		defer m.clearRuntimeGapRecoveryInFlight(cmd.IdempotencyKey)
 		err := m.servicePtr.ResumeRunWithExecutionContextPatch(bgCtx, runID, patch)
 		if err == nil || errors.Is(err, context.Canceled) {
 			return
 		}
 		slog.Warn("workorch orchestrator background runtime gap recovery failed", "workspaceID", envelope.WorkspaceID, "runID", runID, "stepID", cmd.StepID, "gap", cmd.Gap, "err", err)
 	}); err != nil {
+		m.clearRuntimeGapRecoveryInFlight(cmd.IdempotencyKey)
 		return err
 	}
 	return nil
@@ -403,6 +418,9 @@ func runtimeGapRecoveryPatch(cmd runcontracts.RecoverRuntimeGapCommand) map[stri
 		"runId":       string(cmd.RunID),
 		"stepId":      string(cmd.StepID),
 		"gap":         cmd.Gap,
+	}
+	if cmd.IdempotencyKey != "" {
+		recovery["idempotencyKey"] = cmd.IdempotencyKey
 	}
 	if cmd.StepKind != "" {
 		recovery["stepKind"] = cmd.StepKind
@@ -427,6 +445,48 @@ func runtimeGapRecoveryPatch(cmd runcontracts.RecoverRuntimeGapCommand) map[stri
 	}
 	patch["runtimeGapRecovery"] = recovery
 	return patch
+}
+
+func runtimeGapRecoveryCommandIdempotencyKey(cmd runcontracts.RecoverRuntimeGapCommand) string {
+	return "runtime-gap-recovery|" +
+		recoveryKeyComponent(string(cmd.WorkspaceID)) + "|" +
+		recoveryKeyComponent(string(cmd.RunID)) + "|" +
+		recoveryKeyComponent(string(cmd.StepID)) + "|" +
+		recoveryKeyComponent(cmd.Gap) + "|" +
+		recoveryKeyComponent(cmd.RequestID) + "|" +
+		recoveryKeyComponent(cmd.QueueKey)
+}
+
+func recoveryKeyComponent(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func (m *Module) markRuntimeGapRecoveryInFlight(key string) bool {
+	if key == "" {
+		return true
+	}
+	m.recoveryMu.Lock()
+	defer m.recoveryMu.Unlock()
+	if m.recoveryInFlight == nil {
+		m.recoveryInFlight = map[string]struct{}{}
+	}
+	if _, ok := m.recoveryInFlight[key]; ok {
+		return false
+	}
+	m.recoveryInFlight[key] = struct{}{}
+	return true
+}
+
+func (m *Module) clearRuntimeGapRecoveryInFlight(key string) {
+	if key == "" {
+		return
+	}
+	m.recoveryMu.Lock()
+	defer m.recoveryMu.Unlock()
+	delete(m.recoveryInFlight, key)
 }
 
 func cloneCommandPatch(input map[string]any) map[string]any {
