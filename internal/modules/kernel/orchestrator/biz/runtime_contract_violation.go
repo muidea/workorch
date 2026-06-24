@@ -112,11 +112,13 @@ func contractViolationFromFailedStep(run *runModel.Run, step *runModel.Step, exe
 		RunID:                run.ID,
 		StepID:               step.ID,
 		SourceStepID:         step.ID,
+		ViolationType:        violationType,
 		Stage:                firstNonEmptyString(stringFromMap(output, "stage"), stringFromMap(mapFromValue(output["runtimeDiagnostics"]), "kind")),
 		RuntimeStage:         runtimeStageFromStepInput(step.Input),
 		RuntimeStageMode:     stringFromMap(step.Input, "runtimeStageMode"),
 		RepairObjective:      stringFromMap(step.Input, "repairObjective"),
 		ViolatedRule:         rule,
+		Signature:            contractViolationSignature(violationType, rule, stringFromMap(output, failureOutputKeySignature)),
 		ExpectedContract:     contractViolationExpectedContract(step),
 		ActualOutputSummary:  contractViolationActualOutputSummary(step, execErr),
 		RejectedOutputRef:    fmt.Sprintf("%s/%s/rejected-output", run.ID, step.ID),
@@ -135,6 +137,7 @@ func contractViolationFromFailedStep(run *runModel.Run, step *runModel.Step, exe
 		SignatureRepeatCount: signatureRepeatCount,
 		CreatedAt:            runtimeEvidenceTimestamp(),
 	}
+	violation = violation.Normalized()
 	return violation, true
 }
 
@@ -827,17 +830,20 @@ func contractViolationSourceRefs(step *runModel.Step) []string {
 }
 
 func contractViolationMap(violation runtimemodel.ContractViolation) map[string]any {
+	violation = violation.Normalized()
 	ret := map[string]any{
 		"id":                   violation.ID,
 		"workspaceId":          string(violation.WorkspaceID),
 		"runId":                string(violation.RunID),
 		"stepId":               string(violation.StepID),
 		"sourceStepId":         string(violation.SourceStepID),
+		"violationType":        violation.ViolationType,
 		"stage":                violation.Stage,
 		"runtimeStage":         violation.RuntimeStage,
 		"runtimeStageMode":     violation.RuntimeStageMode,
 		"repairObjective":      violation.RepairObjective,
 		"violatedRule":         violation.ViolatedRule,
+		"signature":            violation.Signature,
 		"expectedContract":     violation.ExpectedContract,
 		"actualOutputSummary":  violation.ActualOutputSummary,
 		"rejectedOutputRef":    violation.RejectedOutputRef,
@@ -862,6 +868,20 @@ func contractViolationMap(violation runtimemodel.ContractViolation) map[string]a
 		}
 	}
 	return ret
+}
+
+func contractViolationSignature(violationType string, rule string, failureSignature string) string {
+	parts := []string{}
+	if violationType = strings.TrimSpace(violationType); violationType != "" {
+		parts = append(parts, "type="+violationType)
+	}
+	if rule = strings.TrimSpace(rule); rule != "" {
+		parts = append(parts, "rule="+rule)
+	}
+	if failureSignature = strings.TrimSpace(failureSignature); failureSignature != "" {
+		parts = append(parts, "failure="+failureSignature)
+	}
+	return strings.Join(parts, "|")
 }
 
 func contractViolationEmptyValue(value any) bool {

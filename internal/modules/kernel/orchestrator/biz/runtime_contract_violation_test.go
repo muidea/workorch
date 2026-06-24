@@ -79,8 +79,15 @@ func TestRuntimeRepairInputIncludesContractViolationRecovery(t *testing.T) {
 	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failed, 1, common.ErrInvalidArgument)
 
 	recovery := mapFromValue(input[stepInputKeyContractViolationRecovery])
+	if stringFromMap(recovery, "violationType") != contractViolationRepairNoStateChangingOutput {
+		t.Fatalf("contractViolationRecovery = %+v, want violationType", recovery)
+	}
 	if stringFromMap(recovery, "violatedRule") != contractViolationRuleStateChangingRequiredMissing {
 		t.Fatalf("contractViolationRecovery = %+v, want state-changing rule", recovery)
+	}
+	if signature := stringFromMap(recovery, "signature"); !strings.Contains(signature, "type="+contractViolationRepairNoStateChangingOutput) ||
+		!strings.Contains(signature, "rule="+contractViolationRuleStateChangingRequiredMissing) {
+		t.Fatalf("contractViolationRecovery signature = %q, want type and rule", signature)
 	}
 	if recovery["attempt"] != 1 || recovery["maxAttempts"] != NormalizeRuntimePolicy(RuntimePolicy{}).MaxContractViolationRetriesPerStep {
 		t.Fatalf("contractViolationRecovery budget = %+v, want attempt/max", recovery)
