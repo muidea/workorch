@@ -43,6 +43,7 @@ Related:
 - [S4.6 Coverage Summary Projection](./goal-dod-nextaction-s4-6-coverage-summary-projection.md)
 - [S5.1 NextAction Minimal Model](./goal-dod-nextaction-s5-1-nextaction-minimal-model.md)
 - [S5.2 Pending Approval NextAction](./goal-dod-nextaction-s5-2-pending-approval-nextaction.md)
+- [S5.3 Open Decision NextAction](./goal-dod-nextaction-s5-3-open-decision-nextaction.md)
 
 ## Purpose
 
