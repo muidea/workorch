@@ -131,6 +131,27 @@ func viewModelRevision(input backend.WorkspaceViewModelInfo) int64 {
 	return 0
 }
 
+func workspaceContextRevision(msg WorkspaceContextMsg) int64 {
+	if msg.Snapshot != nil {
+		if revision := viewModelRevision(msg.Snapshot.ViewModel); revision > 0 {
+			return revision
+		}
+		if revision := projectionRevision(msg.Snapshot.Projection); revision > 0 {
+			return revision
+		}
+		if revision := projectionRevision(msg.Snapshot.Workspace.Projection); revision > 0 {
+			return revision
+		}
+	}
+	if revision := projectionRevision(msg.Projection); revision > 0 {
+		return revision
+	}
+	if msg.Workspace != nil {
+		return projectionRevision(msg.Workspace.Projection)
+	}
+	return 0
+}
+
 func mergeProjectionInfo(current, incoming backend.ProjectionInfo) backend.ProjectionInfo {
 	if projectionRevision(incoming) == 0 && incoming.GlobalRevision == 0 && incoming.State == "" {
 		return current
@@ -216,6 +237,19 @@ func (m *AppModel) activeWorkspacePromptMode() string {
 		}
 	}
 	return overviewMode
+}
+
+func (m *AppModel) workspaceContextOlderThanOverview(msg WorkspaceContextMsg) bool {
+	entry := m.workspaceRuntimeState(msg.WorkspaceID)
+	if entry == nil || !entry.HasOverview {
+		return false
+	}
+	overviewRevision := projectionRevision(entry.Overview.Projection)
+	if overviewRevision == 0 {
+		return false
+	}
+	contextRevision := workspaceContextRevision(msg)
+	return contextRevision > 0 && contextRevision < overviewRevision
 }
 
 func (m *AppModel) mergeWorkspaceOverview(ws backend.WorkspaceInfo) backend.WorkspaceInfo {

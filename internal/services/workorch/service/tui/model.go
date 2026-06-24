@@ -298,6 +298,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setLastError(msg.Error)
 			return m, nil
 		}
+		if m.workspaceContextOlderThanOverview(msg) {
+			m.lastError = nil
+			m.progressText = "Workspace projection detail is older than list; refreshing state"
+			return m, RetryWorkspaceContext(msg.WorkspaceID, msg.ResetMainViewport)
+		}
 		m.applyWorkspaceContext(msg)
 		m.lastError = nil
 		if msg.ResetMainViewport {

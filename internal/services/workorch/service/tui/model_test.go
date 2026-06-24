@@ -4574,6 +4574,80 @@ func TestModelIgnoresStaleWorkspaceContextResponse(t *testing.T) {
 	}
 }
 
+func TestModelRejectsWorkspaceContextOlderThanOverviewRevision(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:          "ws-a",
+		Title:       "A",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: "run-new",
+		Projection:  backend.ProjectionInfo{WorkspaceRevision: 5},
+	}}})
+	m = asModel(next)
+	m.currentTask = "new task"
+	m.activeRunID = "run-new"
+	entry := m.ensureWorkspaceRuntimeState("ws-a")
+	entry.ContextInFlight = false
+	entry.ContextRequestSeq = 7
+
+	next, cmd := m.Update(WorkspaceContextMsg{
+		RequestSeq:  7,
+		WorkspaceID: "ws-a",
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateRunning, ActiveRunID: "run-old", Projection: backend.ProjectionInfo{WorkspaceRevision: 3}},
+		ActiveRun:   &backend.RunInfo{ID: "run-old", WorkspaceID: "ws-a", State: common.RunStateRunning},
+		DisplayRun: &backend.RunInfo{
+			ID:          "run-old",
+			WorkspaceID: "ws-a",
+			State:       common.RunStateRunning,
+			ExecutionContext: map[string]any{
+				"goal": map[string]any{"text": "old task"},
+			},
+		},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateRunning, ActiveRunID: "run-old", Projection: backend.ProjectionInfo{WorkspaceRevision: 3}},
+			ViewModel: backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", Revision: 3, WorkspaceRevision: 3},
+		},
+		WorkspaceHasLive: true,
+	})
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("older context should schedule projection retry")
+	}
+	if m.currentTask != "new task" || m.activeRunID != "run-new" || !strings.Contains(m.progressText, "older than list") {
+		t.Fatalf("older context applied: task=%q run=%q progress=%q", m.currentTask, m.activeRunID, m.progressText)
+	}
+
+	entry = m.ensureWorkspaceRuntimeState("ws-a")
+	entry.ContextInFlight = false
+	entry.ContextRequestSeq = 8
+	next, cmd = m.Update(WorkspaceContextMsg{
+		RequestSeq:  8,
+		WorkspaceID: "ws-a",
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateRunning, ActiveRunID: "run-current", Projection: backend.ProjectionInfo{WorkspaceRevision: 5}},
+		ActiveRun:   &backend.RunInfo{ID: "run-current", WorkspaceID: "ws-a", State: common.RunStateRunning},
+		DisplayRun: &backend.RunInfo{
+			ID:          "run-current",
+			WorkspaceID: "ws-a",
+			State:       common.RunStateRunning,
+			ExecutionContext: map[string]any{
+				"goal": map[string]any{"text": "current task"},
+			},
+		},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateRunning, ActiveRunID: "run-current", Projection: backend.ProjectionInfo{WorkspaceRevision: 5}},
+			ViewModel: backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", Revision: 5, WorkspaceRevision: 5},
+		},
+		WorkspaceHasLive: true,
+	})
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("same revision context should continue normal blocker/detail refresh path")
+	}
+	if m.currentTask != "current task" || m.activeRunID != "run-current" {
+		t.Fatalf("same revision context not applied: task=%q run=%q", m.currentTask, m.activeRunID)
+	}
+}
+
 func TestModelTransientProjectionErrorSchedulesContextRetry(t *testing.T) {
 	for _, errorText := range []string{
 		"workorch API error (status 409): workspace projection detail not ready",
