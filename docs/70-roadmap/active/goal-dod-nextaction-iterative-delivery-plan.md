@@ -41,6 +41,7 @@ Related:
 - [S4.4 Missing Evidence Kind Calculation](./goal-dod-nextaction-s4-4-missing-evidence-kind-calculation.md)
 - [S4.5 Completion Gate Reads Coverage Ledger](./goal-dod-nextaction-s4-5-completion-gate-reads-coverage-ledger.md)
 - [S4.6 Coverage Summary Projection](./goal-dod-nextaction-s4-6-coverage-summary-projection.md)
+- [S5.1 NextAction Minimal Model](./goal-dod-nextaction-s5-1-nextaction-minimal-model.md)
 
 ## Purpose
 
