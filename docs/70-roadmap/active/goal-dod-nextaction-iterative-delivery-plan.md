@@ -57,6 +57,7 @@ Related:
 - [S6.6 Compact Summary Auxiliary Reference](./goal-dod-nextaction-s6-6-compact-summary-auxiliary-reference.md)
 - [S7.1 ContractViolation Diagnostic Model](./goal-dod-nextaction-s7-1-contract-violation-diagnostic-model.md)
 - [S7.2 Parse/Schema Gate Recoverable Diagnostic](./goal-dod-nextaction-s7-2-parse-schema-gate-recoverable-diagnostic.md)
+- [S7.3 Contract Gate Blocks Side Effects](./goal-dod-nextaction-s7-3-contract-gate-blocks-side-effects.md)
 
 ## Purpose
 

@@ -63,6 +63,9 @@ func (g *graphSubsystem) readyGraphStepSpecsWithSteps(
 	if g == nil || run == nil || last == nil {
 		return nil, nil
 	}
+	if !graphSourceStepAdmitsSideEffects(last) {
+		return nil, nil
+	}
 	graph, ok := runtimeGraphSpecFromStep(last)
 	if !ok || len(graph.Nodes) == 0 {
 		return nil, nil
@@ -75,6 +78,24 @@ func (g *graphSubsystem) readyGraphStepSpecsWithSteps(
 		return nil, nil
 	}
 	return g.readyGraphStepSpecsFromSteps(ctx, run, last, graph, steps), steps
+}
+
+func graphSourceStepAdmitsSideEffects(step *runModel.Step) bool {
+	if step == nil || step.State != common.StepStateCompleted {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(step.Output, outputKeyContractViolationType)) != "" {
+		return false
+	}
+	if len(mapFromValue(step.Output[stepOutputKeyContractViolation])) > 0 {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(stringFromMap(step.Output, "status"))) {
+	case "failed", "failure", "rejected":
+		return false
+	default:
+		return true
+	}
 }
 
 func (g *graphSubsystem) hasActiveGraphWork(ctx context.Context, run *runModel.Run, last *runModel.Step) bool {

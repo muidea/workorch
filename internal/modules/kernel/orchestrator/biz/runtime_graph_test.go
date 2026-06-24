@@ -561,6 +561,73 @@ func TestRuntimeOrchestrator_ReadyGraphStepSpecsReusesLoadedStepsForStepID(t *te
 	}
 }
 
+func TestGraphSourceContractViolationBlocksSideEffectSpecs(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-graph-contract-gate")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-graph-contract-gate"}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "must-not-execute", Kind: "graph/mock"},
+	}}
+	tests := []struct {
+		name      string
+		state     common.StepState
+		output    map[string]any
+		wantSpecs int
+	}{
+		{
+			name:  "failed source with graph",
+			state: common.StepStateFailed,
+			output: map[string]any{
+				"status":                       "failed",
+				stepOutputKeyExecutionGraph:    graph,
+				outputKeyContractViolationType: contractViolationLLMSchemaInvalid,
+			},
+		},
+		{
+			name:  "completed source with contract violation marker",
+			state: common.StepStateCompleted,
+			output: map[string]any{
+				"status":                    "completed",
+				stepOutputKeyExecutionGraph: graph,
+				stepOutputKeyContractViolation: map[string]any{
+					"violatedRule": contractViolationRuleUnparseableOutput,
+				},
+			},
+		},
+		{
+			name:  "completed admitted source",
+			state: common.StepStateCompleted,
+			output: map[string]any{
+				"status":                    "completed",
+				stepOutputKeyExecutionGraph: graph,
+			},
+			wantSpecs: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stepRepo := memoryrepo.NewStepRepository()
+			source := &runmodel.Step{
+				ID:     common.StepID(string(runID) + "/" + strings.ReplaceAll(tt.name, " ", "-")),
+				RunID:  runID,
+				Kind:   llmcommon.StepKindWorkspaceExecution,
+				State:  tt.state,
+				Input:  map[string]any{},
+				Output: tt.output,
+			}
+			if err := stepRepo.Create(ctx, source); err != nil {
+				t.Fatalf("seed source: %v", err)
+			}
+
+			specs, _ := newGraphSubsystem(stepRepo, RuntimeEvidenceRepositories{}).readyGraphStepSpecsWithSteps(ctx, run, source)
+
+			if len(specs) != tt.wantSpecs {
+				t.Fatalf("specs = %+v, want %d", specs, tt.wantSpecs)
+			}
+		})
+	}
+}
+
 func TestConcreteEvidenceAcquisitionGateStopsGraphAndRestoresStateChange(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-evidence-acquisition-gate")
