@@ -30,6 +30,7 @@ Related:
 - [S2.5 Replan Definition And Baseline Inheritance](./goal-dod-nextaction-s2-5-replan-definition-baseline.md)
 - [S2.6 Restart Replacement Baseline](./goal-dod-nextaction-s2-6-restart-replacement-baseline.md)
 - [S3.1 EvidenceRecord Model And Repository](./goal-dod-nextaction-s3-1-evidence-record-model.md)
+- [S3.2 State Change Accepted Evidence Write](./goal-dod-nextaction-s3-2-state-change-evidence-write.md)
 
 ## Purpose
 

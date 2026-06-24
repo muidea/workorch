@@ -321,6 +321,86 @@ func TestRuntimeOrchestratorApplyRuntimePatchesPublishesAppliedAndFailedEvents(t
 	}
 }
 
+func TestRuntimeOrchestratorApplyRuntimePatchRecordsAcceptedStateChangeEvidence(t *testing.T) {
+	ctx := context.Background()
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "accepted.txt"), []byte("before\n"), 0o644); err != nil {
+		t.Fatalf("seed accepted.txt: %v", err)
+	}
+	hub := events.NewMemoryHub()
+	patchRepo := memory.NewPatchRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		memory.NewRunRepository(),
+		memory.NewStepRepository(),
+		memory.NewWorkspaceRepository(),
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{Patches: patchRepo, EvidenceRecords: evidenceRepo},
+		hub,
+	)
+	run := &runmodel.Run{ID: "run-patch-evidence", WorkspaceID: "ws-patch-evidence", DefinitionRevision: "rev-patch-evidence"}
+	step := &runmodel.Step{ID: "run-patch-evidence/step-1", RunID: run.ID}
+	toolCall := &runmodel.ToolCall{ID: "run-patch-evidence/step-1/tool-call"}
+
+	if err := orch.patchManager().apply(ctx, run, step, toolCall, map[string]any{
+		stepOutputKeyPatches: []map[string]any{{
+			"patchType":       "file_write",
+			"targetRef":       "accepted.txt",
+			"content":         "accepted\n",
+			"summary":         "write accepted file",
+			"coverageTargets": []string{"coverage-item-1"},
+		}},
+	}, deliverableDirectory); err != nil {
+		t.Fatalf("apply patch: %v", err)
+	}
+
+	records, err := evidenceRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list evidence records: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %+v, want one accepted state_change record", records)
+	}
+	record := records[0]
+	patchID := common.PatchID("run-patch-evidence/step-1/patch/1")
+	if record.ID == "" || strings.ContainsAny(string(record.ID), `/\`) {
+		t.Fatalf("record ID = %q, want file-repository-safe ID", record.ID)
+	}
+	if record.WorkspaceID != run.WorkspaceID ||
+		record.RunID != run.ID ||
+		record.StepID != step.ID ||
+		record.DefinitionRevision != run.DefinitionRevision ||
+		record.Kind != orchestratormodel.EvidenceKindStateChange ||
+		record.Status != orchestratormodel.EvidenceStatusAccepted ||
+		record.SourceType != evidenceRecordSourceTypePatch ||
+		record.SourceRef != string(patchID) ||
+		record.SubjectType != evidenceRecordSubjectWorkspaceItem ||
+		record.SubjectID != "accepted.txt" {
+		t.Fatalf("record = %+v, want scoped accepted state_change patch evidence", record)
+	}
+	if record.Metadata["patchType"] != "file_write" ||
+		record.Metadata["targetRef"] != "accepted.txt" ||
+		record.Metadata["toolCallId"] != string(toolCall.ID) ||
+		record.Metadata["beforeHash"] == "" ||
+		record.Metadata["afterHash"] == "" {
+		t.Fatalf("metadata = %+v, want patch trace metadata", record.Metadata)
+	}
+	targets, ok := record.Metadata["coverageTargets"].([]string)
+	if !ok || len(targets) != 1 || targets[0] != "coverage-item-1" {
+		t.Fatalf("coverageTargets metadata = %#v, want coverage target ref", record.Metadata["coverageTargets"])
+	}
+	bySource, err := evidenceRepo.ListBySourceRef(ctx, run.ID, string(patchID))
+	if err != nil {
+		t.Fatalf("list by sourceRef: %v", err)
+	}
+	if len(bySource) != 1 || bySource[0].ID != record.ID {
+		t.Fatalf("bySource = %+v, want record %q", bySource, record.ID)
+	}
+}
+
 func TestRuntimeOrchestratorPublishesArtifactContinuationMetadataEvent(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()

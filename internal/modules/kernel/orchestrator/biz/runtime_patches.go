@@ -258,6 +258,9 @@ func (p *patchSubsystem) apply(
 		if err := p.evidence.Patches.Update(ctx, patch); err != nil {
 			return err
 		}
+		if err := p.recordAcceptedStateChangeEvidenceForPatch(ctx, run, step, toolCall, patch); err != nil {
+			return err
+		}
 		annotateAppliedPatchOutput(output, idx, patch)
 		if err := p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchApplied, nil); err != nil {
 			return err
