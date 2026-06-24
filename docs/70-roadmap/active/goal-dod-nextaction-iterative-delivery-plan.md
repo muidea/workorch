@@ -67,6 +67,7 @@ Related:
 - [S8.4 Command Pending And Accepted Display](./goal-dod-nextaction-s8-4-command-pending-accepted-display.md)
 - [S8.5 SSE Reconnect And Last Event ID](./goal-dod-nextaction-s8-5-sse-reconnect-last-event-id.md)
 - [S8.6 Decision And Approval View Regression](./goal-dod-nextaction-s8-6-decision-approval-view-regression.md)
+- [S9.1 Projection Readmodel First](./goal-dod-nextaction-s9-1-projection-readmodel-first.md)
 
 ## Purpose
 

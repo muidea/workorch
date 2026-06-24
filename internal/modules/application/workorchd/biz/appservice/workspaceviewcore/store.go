@@ -610,6 +610,23 @@ func (s *Store) GetSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot
 	return snapshot, status, nil
 }
 
+func (s *Store) NeedsSnapshot(workspaceID string) bool {
+	if s == nil {
+		return false
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.state == StateBuilding || s.state == StateStopped || s.state == StateFailed {
+		return false
+	}
+	entry := s.workspaces[workspaceID]
+	return entry != nil && entry.HasWorkspace && !entry.HasSnapshot
+}
+
 func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, status Status) readmodelcore.WorkspaceViewModel {
 	revision := status.WorkspaceRevision
 	if revision == 0 {

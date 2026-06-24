@@ -402,10 +402,9 @@ func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 	}
 	scheduledFuncs["workspace_projection_rebuild_all"][0](ctx)
 	baselineWorkspaceRebuilds := scheduled["workspace_projection_rebuild"]
-	if baselineWorkspaceRebuilds != 1 {
-		t.Fatalf("baseline workspace rebuilds = %d, want 1", baselineWorkspaceRebuilds)
+	if baselineWorkspaceRebuilds != 0 {
+		t.Fatalf("baseline workspace rebuilds = %d, want no detail fan-out", baselineWorkspaceRebuilds)
 	}
-	scheduledFuncs["workspace_projection_rebuild"][0](ctx)
 	if err := manager.RebuildWorkspace(ctx, "ws-a"); err != nil {
 		t.Fatalf("rebuild workspace: %v", err)
 	}
@@ -488,7 +487,9 @@ func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuild(t *testing.T) {
 		t.Fatalf("start manager: %v", err)
 	}
 	scheduledFuncs["workspace_projection_rebuild_all"][0](ctx)
-	scheduledFuncs["workspace_projection_rebuild"][0](ctx)
+	if err := manager.RebuildWorkspace(ctx, "ws-a"); err != nil {
+		t.Fatalf("rebuild workspace detail: %v", err)
+	}
 	baselineWorkspaceRebuilds := scheduled["workspace_projection_rebuild"]
 
 	if err := hub.Publish(ctx, events.Envelope{
@@ -909,6 +910,41 @@ func TestManagerReschedulesWorkspaceRebuildWhenEventArrivesInFlight(t *testing.T
 	}
 }
 
+func TestManagerFullRebuildDoesNotLoadWorkspaceDetails(t *testing.T) {
+	ctx := context.Background()
+	loader := &countingProjectionLoader{}
+	manager := NewManager(ManagerOptions{
+		Loader: loader,
+		Schedule: func(string, func(context.Context)) bool {
+			return false
+		},
+	})
+
+	if err := manager.RebuildAll(ctx); err != nil {
+		t.Fatalf("rebuild all: %v", err)
+	}
+	if loader.calls != 0 {
+		t.Fatalf("detail snapshot calls after full rebuild = %d, want 0", loader.calls)
+	}
+	items, status, err := manager.ListWorkspaces()
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
+	}
+	if status.State != StateReady || len(items) != 1 || items[0].ID != "ws-a" {
+		t.Fatalf("items/status = %+v/%+v, want ready overview projection", items, status)
+	}
+	if _, _, err := manager.ReadWorkspaceSnapshot("ws-a"); err == nil {
+		t.Fatal("memory snapshot read succeeded before detail load, want detail not ready")
+	}
+	snapshot, _, err := manager.ReadWorkspaceSnapshotWithContext(ctx, "ws-a")
+	if err != nil {
+		t.Fatalf("on-demand snapshot read: %v", err)
+	}
+	if loader.calls != 1 || snapshot.Workspace.Title != "snapshot-1" {
+		t.Fatalf("snapshot title/calls = %q/%d, want single on-demand detail load", snapshot.Workspace.Title, loader.calls)
+	}
+}
+
 func TestManagerSchedulesIndependentWorkspaceRebuildsWithPerWorkspaceDebounce(t *testing.T) {
 	ctx := context.Background()
 	loader := &workspaceCountingProjectionLoader{}
@@ -1065,13 +1101,13 @@ func TestManagerSchedulesFullRebuildAfterGlobalWorkspaceEventDuringFullRebuild(t
 	}
 
 	scheduledMu.Lock()
-	if len(scheduled) != 2 {
-		t.Fatalf("scheduled rebuilds = %d, want baseline workspace rebuild and follow-up full rebuild", len(scheduled))
+	if len(scheduled) != 1 {
+		t.Fatalf("scheduled rebuilds = %d, want follow-up full rebuild only", len(scheduled))
 	}
-	if scheduled[0].name != "workspace_projection_rebuild" || scheduled[1].name != "workspace_projection_rebuild_all" {
-		t.Fatalf("scheduled task names = %q/%q, want workspace rebuild then full rebuild", scheduled[0].name, scheduled[1].name)
+	if scheduled[0].name != "workspace_projection_rebuild_all" {
+		t.Fatalf("scheduled task name = %q, want workspace_projection_rebuild_all", scheduled[0].name)
 	}
-	followup := scheduled[1].fn
+	followup := scheduled[0].fn
 	scheduledMu.Unlock()
 	followup(ctx)
 	if loader.calls != 2 {

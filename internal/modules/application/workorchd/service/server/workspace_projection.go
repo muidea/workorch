@@ -91,7 +91,7 @@ func (s *serverState) readProjectedWorkspaceSnapshot(workspaceID string) (appser
 	if s == nil || s.workspaceProjection == nil {
 		return appservice.WorkspaceSnapshot{}, workspaceProjectionStatus{State: workspaceProjectionStateFailed}, common.ErrConflict
 	}
-	return s.workspaceProjection.ReadWorkspaceSnapshot(workspaceID)
+	return s.workspaceProjection.ReadWorkspaceSnapshotWithContext(context.Background(), workspaceID)
 }
 
 func (s *HTTPServer) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (appservice.WorkspaceSnapshot, error) {

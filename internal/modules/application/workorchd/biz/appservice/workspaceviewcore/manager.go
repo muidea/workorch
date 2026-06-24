@@ -195,6 +195,24 @@ func (m *Manager) ReadWorkspaceSnapshot(workspaceID string) (readmodelcore.Works
 	return m.store.GetSnapshot(workspaceID)
 }
 
+func (m *Manager) ReadWorkspaceSnapshotWithContext(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, Status, error) {
+	snapshot, status, err := m.ReadWorkspaceSnapshot(workspaceID)
+	if err == nil || m == nil || m.store == nil || !m.store.NeedsSnapshot(workspaceID) {
+		return snapshot, status, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if rebuildErr := m.RebuildWorkspace(ctx, workspaceID); rebuildErr != nil {
+		reloaded, reloadedStatus, readErr := m.ReadWorkspaceSnapshot(workspaceID)
+		if readErr == nil {
+			return reloaded, reloadedStatus, nil
+		}
+		return reloaded, reloadedStatus, rebuildErr
+	}
+	return m.ReadWorkspaceSnapshot(workspaceID)
+}
+
 func (m *Manager) UpsertWorkspace(workspace appmodelcore.Workspace) {
 	if m == nil || m.store == nil {
 		return
@@ -278,11 +296,6 @@ func (m *Manager) rebuildAll(ctx context.Context) (err error) {
 	}
 	m.store.ReplaceWorkspaceList(workspaces, nil)
 	m.publishProjectionChanged(ctx, "", "baseline")
-	for _, workspace := range workspaces {
-		if strings.TrimSpace(workspace.ID) != "" {
-			m.ScheduleRebuildWorkspace(workspace.ID)
-		}
-	}
 	return nil
 }
 
