@@ -140,6 +140,9 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 	attachRuntimeFailureClassification(step.Output, classification)
 	attachRuntimeFailureDiagnostics(step, classification, execErr)
 	attachContractViolationDiagnostics(run, step, execErr)
+	if err := o.recordRejectedDiagnosticEvidenceForContractViolation(ctx, run, step); err != nil {
+		return err
+	}
 	_ = o.recordToolCallFailed(ctx, toolCall, execErr, step.Output)
 	errText := ""
 	if execErr != nil {

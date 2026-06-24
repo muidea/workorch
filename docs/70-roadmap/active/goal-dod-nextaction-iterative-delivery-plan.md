@@ -33,6 +33,7 @@ Related:
 - [S3.2 State Change Accepted Evidence Write](./goal-dod-nextaction-s3-2-state-change-evidence-write.md)
 - [S3.3 Validation Accepted And Rejected Evidence Write](./goal-dod-nextaction-s3-3-validation-evidence-write.md)
 - [S3.4 Decision And Approval Governance Evidence Write](./goal-dod-nextaction-s3-4-governance-evidence-write.md)
+- [S3.5 Diagnostic Rejected Evidence Write](./goal-dod-nextaction-s3-5-diagnostic-rejected-evidence-write.md)
 
 ## Purpose
 

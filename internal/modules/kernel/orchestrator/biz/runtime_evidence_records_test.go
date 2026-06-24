@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -107,5 +108,145 @@ func TestRecordValidationResultWritesAcceptedAndRejectedEvidenceRecords(t *testi
 	}
 	if len(bySource) != 1 || bySource[0].ID != failedRecord.ID {
 		t.Fatalf("bySource = %+v, want failed record %q", bySource, failedRecord.ID)
+	}
+}
+
+func TestRecordContractViolationWritesRejectedDiagnosticEvidenceRecord(t *testing.T) {
+	ctx := context.Background()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	resultRepo := memory.NewResultRepository()
+	artifactRepo := memory.NewArtifactRepository()
+	memoryRepo := memory.NewMemoryItemRepository()
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{
+			EvidenceRecords: evidenceRepo,
+			Results:         resultRepo,
+			Artifacts:       artifactRepo,
+			MemoryItems:     memoryRepo,
+		},
+	}
+	run := &runmodel.Run{
+		ID:                 "run-diagnostic-evidence",
+		WorkspaceID:        "ws-diagnostic-evidence",
+		DefinitionRevision: "rev-diagnostic-evidence",
+		InitialStepKind:    llmWorkspaceExecutionStepKind,
+	}
+	failedStep := contractViolationFailedStep(run.ID, "failed-diagnostic")
+	attachContractViolationDiagnostics(run, failedStep, errors.New("state-changing llm repair step returned no state-changing output"))
+
+	if err := orch.recordRejectedDiagnosticEvidenceForContractViolation(ctx, run, failedStep); err != nil {
+		t.Fatalf("record rejected diagnostic evidence: %v", err)
+	}
+	if err := orch.recordRejectedDiagnosticEvidenceForContractViolation(ctx, run, failedStep); err != nil {
+		t.Fatalf("record rejected diagnostic evidence again: %v", err)
+	}
+
+	records, err := evidenceRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list evidence records: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %+v, want one idempotent diagnostic evidence record", records)
+	}
+	record := records[0]
+	if record.ID == "" || strings.ContainsAny(string(record.ID), `/\`) {
+		t.Fatalf("record ID = %q, want file-repository-safe ID", record.ID)
+	}
+	if record.WorkspaceID != run.WorkspaceID ||
+		record.RunID != run.ID ||
+		record.StepID != failedStep.ID ||
+		record.DefinitionRevision != run.DefinitionRevision ||
+		record.Kind != orchestratormodel.EvidenceKindDiagnostic ||
+		record.Status != orchestratormodel.EvidenceStatusRejected ||
+		record.SourceType != evidenceRecordSourceTypeContractViolation ||
+		record.SubjectType != evidenceRecordSubjectRuntimeStep ||
+		record.SubjectID != string(failedStep.ID) {
+		t.Fatalf("record = %+v, want scoped rejected diagnostic evidence", record)
+	}
+	if record.Metadata["violatedRule"] != contractViolationRuleStateChangingRequiredMissing ||
+		record.Metadata["violationType"] != contractViolationRepairNoStateChangingOutput ||
+		record.Metadata["failureClass"] != failureClassRuntime ||
+		record.Metadata["rejectedOutputRef"] == "" {
+		t.Fatalf("metadata = %+v, want contract violation diagnostic refs", record.Metadata)
+	}
+	if len(mapFromValue(record.Metadata["contractViolation"])) == 0 {
+		t.Fatalf("metadata = %+v, want nested contractViolation snapshot", record.Metadata)
+	}
+	bySource, err := evidenceRepo.ListBySourceRef(ctx, run.ID, record.SourceRef)
+	if err != nil {
+		t.Fatalf("list evidence by sourceRef: %v", err)
+	}
+	if len(bySource) != 1 || bySource[0].ID != record.ID {
+		t.Fatalf("bySource = %+v, want diagnostic record %q", bySource, record.ID)
+	}
+	if results, err := resultRepo.ListByRun(ctx, run.ID); err != nil || len(results) != 0 {
+		t.Fatalf("results = %+v err=%v, want no result writes", results, err)
+	}
+	if artifacts, err := artifactRepo.ListByRun(ctx, run.ID); err != nil || len(artifacts) != 0 {
+		t.Fatalf("artifacts = %+v err=%v, want no artifact writes", artifacts, err)
+	}
+	if memories, err := memoryRepo.ListByWorkspaceID(ctx, run.WorkspaceID); err != nil || len(memories) != 0 {
+		t.Fatalf("memories = %+v err=%v, want no memory writes", memories, err)
+	}
+}
+
+func TestHandleRuntimeStepFailureRecordsRejectedDiagnosticEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			EvidenceRecords:   evidenceRepo,
+			ValidationResults: validationRepo,
+		},
+	}
+	run := &runmodel.Run{
+		ID:                 "run-diagnostic-failure-path",
+		WorkspaceID:        "ws-diagnostic-failure-path",
+		DefinitionRevision: "rev-diagnostic-failure-path",
+		InitialStepKind:    llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:     "run-diagnostic-failure-path/step-runtime-contract",
+		RunID:  run.ID,
+		Kind:   llmWorkspaceExecutionStepKind,
+		State:  common.StepStateDispatched,
+		Input:  cloneStepPayload(contractViolationFailedStep(run.ID, "seed").Input),
+		Output: map[string]any{},
+	}
+	step.Input[stepInputKeyGraphBatch] = true
+	if err := stepRepo.Create(ctx, step); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+
+	err := orch.handleRuntimeStepFailure(ctx, run, step, nil, map[string]any{"actualOutputSummary": "rejected"}, "runtime execution contract failed", newRuntimeContractViolationError(contractViolationRepairNoStateChangingOutput, "state-changing llm repair step returned no state-changing output"))
+	if err == nil {
+		t.Fatalf("handleRuntimeStepFailure err = nil, want graph-batch contract error")
+	}
+
+	records, err := evidenceRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list evidence records: %v", err)
+	}
+	diagnostics := 0
+	validations := 0
+	for _, record := range records {
+		switch record.Kind {
+		case orchestratormodel.EvidenceKindDiagnostic:
+			diagnostics++
+			if record.Status != orchestratormodel.EvidenceStatusRejected ||
+				record.SourceType != evidenceRecordSourceTypeContractViolation ||
+				record.SubjectID != string(step.ID) ||
+				record.Metadata["violatedRule"] != contractViolationRuleStateChangingRequiredMissing {
+				t.Fatalf("diagnostic record = %+v, want rejected contract violation evidence", record)
+			}
+		case orchestratormodel.EvidenceKindValidation:
+			validations++
+		}
+	}
+	if diagnostics != 1 || validations != 1 {
+		t.Fatalf("records = %+v, want one diagnostic and one validation evidence record", records)
 	}
 }

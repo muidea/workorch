@@ -6,14 +6,16 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (
-	evidenceRecordSourceTypePatch            = "patch"
-	evidenceRecordSourceTypeValidationResult = "validation_result"
-	evidenceRecordSubjectWorkspaceItem       = "workspace_target"
-	evidenceRecordSubjectRuntimeStep         = "runtime_step"
+	evidenceRecordSourceTypePatch             = "patch"
+	evidenceRecordSourceTypeValidationResult  = "validation_result"
+	evidenceRecordSourceTypeContractViolation = "contract_violation"
+	evidenceRecordSubjectWorkspaceItem        = "workspace_target"
+	evidenceRecordSubjectRuntimeStep          = "runtime_step"
 )
 
 func (p *patchSubsystem) recordAcceptedStateChangeEvidenceForPatch(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, patch *runModel.Patch) error {
@@ -164,6 +166,81 @@ func evidenceStatusForValidationResult(state common.ValidationResultState) strin
 		return orchestratormodel.EvidenceStatusRejected
 	default:
 		return ""
+	}
+}
+
+func (o *RuntimeOrchestrator) recordRejectedDiagnosticEvidenceForContractViolation(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
+	if o == nil || o.evidence.EvidenceRecords == nil || run == nil || step == nil {
+		return nil
+	}
+	record := rejectedDiagnosticEvidenceRecordForContractViolation(run, step)
+	if record == nil {
+		return nil
+	}
+	return repository.CreateOrUpdateEvidenceRecord(ctx, o.evidence.EvidenceRecords, record)
+}
+
+func rejectedDiagnosticEvidenceRecordForContractViolation(run *runModel.Run, step *runModel.Step) *orchestratormodel.EvidenceRecord {
+	if run == nil || step == nil || step.ID == "" {
+		return nil
+	}
+	violation := contractViolationFromFailedOutput(step)
+	if len(violation) == 0 {
+		return nil
+	}
+	sourceRef := strings.TrimSpace(stringFromMap(violation, "id"))
+	if sourceRef == "" {
+		sourceRef = strings.TrimSpace(string(step.ID)) + "/contract-violation"
+	}
+	timestamp := firstNonEmptyString(strings.TrimSpace(stringFromMap(violation, "createdAt")), runtimeEvidenceTimestamp())
+	metadata := map[string]any{
+		"contractViolationId": sourceRef,
+		"sourceStepId":        strings.TrimSpace(firstNonEmptyString(stringFromMap(violation, "sourceStepId"), string(step.ID))),
+		"violatedRule":        strings.TrimSpace(stringFromMap(violation, "violatedRule")),
+		"violationType":       strings.TrimSpace(stringFromMap(step.Output, outputKeyContractViolationType)),
+		"failureClass":        strings.TrimSpace(firstNonEmptyString(stringFromMap(violation, "failureClass"), stringFromMap(step.Output, failureOutputKeyClass))),
+		"failureSignature":    strings.TrimSpace(firstNonEmptyString(stringFromMap(violation, "failureSignature"), stringFromMap(step.Output, failureOutputKeySignature))),
+		"recoverability":      strings.TrimSpace(stringFromMap(violation, "recoverability")),
+		"retryHint":           strings.TrimSpace(stringFromMap(violation, "retryHint")),
+		"rejectedOutputRef":   strings.TrimSpace(stringFromMap(violation, "rejectedOutputRef")),
+	}
+	if runtimeStage := strings.TrimSpace(firstNonEmptyString(stringFromMap(violation, "runtimeStage"), runtimeStageFromStepInput(step.Input))); runtimeStage != "" {
+		metadata["runtimeStage"] = runtimeStage
+	}
+	if stage := strings.TrimSpace(stringFromMap(violation, "stage")); stage != "" {
+		metadata["stage"] = stage
+	}
+	if correctionMode := strings.TrimSpace(stringFromMap(violation, "correctionMode")); correctionMode != "" {
+		metadata["correctionMode"] = correctionMode
+	}
+	if targetScope := strings.TrimSpace(stringFromMap(violation, "targetScope")); targetScope != "" {
+		metadata["targetScope"] = targetScope
+	}
+	if refs := stringSliceFromValue(violation["sourceRefs"]); len(refs) > 0 {
+		metadata["sourceRefs"] = refs
+	}
+	if expected := mapFromValue(violation["expectedContract"]); len(expected) > 0 {
+		metadata["expectedContract"] = expected
+	}
+	if actual := mapFromValue(violation["actualOutputSummary"]); len(actual) > 0 {
+		metadata["actualOutputSummary"] = actual
+	}
+	metadata["contractViolation"] = cloneStepPayload(violation)
+	return &orchestratormodel.EvidenceRecord{
+		ID:                 orchestratormodel.StableEvidenceRecordID(sourceRef, "contract-violation", "diagnostic"),
+		WorkspaceID:        firstNonEmptyWorkspaceID(common.WorkspaceID(stringFromMap(violation, "workspaceId")), run.WorkspaceID),
+		RunID:              firstNonEmptyRunID(common.RunID(stringFromMap(violation, "runId")), run.ID),
+		StepID:             firstNonEmptyStepID(common.StepID(stringFromMap(violation, "stepId")), step.ID),
+		DefinitionRevision: strings.TrimSpace(run.DefinitionRevision),
+		Kind:               orchestratormodel.EvidenceKindDiagnostic,
+		Status:             orchestratormodel.EvidenceStatusRejected,
+		SourceType:         evidenceRecordSourceTypeContractViolation,
+		SourceRef:          sourceRef,
+		SubjectType:        evidenceRecordSubjectRuntimeStep,
+		SubjectID:          strings.TrimSpace(string(step.ID)),
+		CreatedAt:          timestamp,
+		UpdatedAt:          timestamp,
+		Metadata:           metadata,
 	}
 }
 

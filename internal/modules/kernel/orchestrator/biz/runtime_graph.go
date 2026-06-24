@@ -314,6 +314,9 @@ func (o *RuntimeOrchestrator) handleGraphBatchCompletionGateFailure(
 		_ = o.persistRunProgressUpdate(ctx, run)
 	}
 	attachCoverageWorkItemFailureDiagnostics(run, step)
+	if err := o.recordRejectedDiagnosticEvidenceForContractViolation(ctx, run, step); err != nil {
+		return err
+	}
 	_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, summary, "", errText)
 	_ = o.checkpointManager().recordStepCheckpoint(ctx, run, step, "step_failed")
 	_ = o.steps.Update(ctx, step)
