@@ -70,6 +70,7 @@ Related:
 - [S9.1 Projection Readmodel First](./goal-dod-nextaction-s9-1-projection-readmodel-first.md)
 - [S9.2 History Recent Compact Refs](./goal-dod-nextaction-s9-2-history-recent-compact-refs.md)
 - [S9.3 Snapshot Payload On Demand](./goal-dod-nextaction-s9-3-snapshot-payload-on-demand.md)
+- [S9.4 Watchdog External Timeout Scope](./goal-dod-nextaction-s9-4-watchdog-external-timeout-scope.md)
 
 ## Purpose
 

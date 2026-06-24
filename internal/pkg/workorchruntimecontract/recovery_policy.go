@@ -100,6 +100,9 @@ func (p RuntimeRecoveryPolicy) AllowsWatchdogExternalRetry() bool {
 	if p.WatchdogRecovery != WatchdogRecoveryRetryExternal {
 		return false
 	}
+	if !p.HasExternalSideEffectBoundary() {
+		return false
+	}
 	switch p.IdempotencyPolicy {
 	case IdempotencyPolicyIdempotent:
 		return true
@@ -110,6 +113,12 @@ func (p RuntimeRecoveryPolicy) AllowsWatchdogExternalRetry() bool {
 	}
 }
 
+func (p RuntimeRecoveryPolicy) HasExternalSideEffectBoundary() bool {
+	p = p.Normalized()
+	return p.SideEffectPolicy == SideEffectPolicyExternalRead ||
+		p.SideEffectPolicy == SideEffectPolicyExternalWrite
+}
+
 func (p RuntimeRecoveryPolicy) WatchdogRecoverySafety() string {
 	p = p.Normalized()
 	switch {
@@ -117,6 +126,8 @@ func (p RuntimeRecoveryPolicy) WatchdogRecoverySafety() string {
 		return "recoverable_dedupe_key"
 	case p.AllowsWatchdogExternalRetry():
 		return "recoverable_idempotent"
+	case p.WatchdogRecovery == WatchdogRecoveryRetryExternal && !p.HasExternalSideEffectBoundary():
+		return "retry_external_not_external"
 	case p.WatchdogRecovery == WatchdogRecoveryRetryExternal:
 		return "retry_external_not_idempotent"
 	case p.WatchdogRecovery == WatchdogRecoveryFinalizeTerminalOnly:

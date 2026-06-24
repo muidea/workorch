@@ -36,6 +36,14 @@ func nonIdempotentRuntimePolicyForTest() map[string]any {
 	}.ToMap()
 }
 
+func nonExternalRecoverableRuntimePolicyForTest() map[string]any {
+	return runtimemodel.RuntimeRecoveryPolicy{
+		SideEffectPolicy:  runtimemodel.SideEffectPolicyWorkspaceRead,
+		IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
+		WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
+	}.ToMap()
+}
+
 func TestHasContinuationCheckpointUsesLatestRecoveryCheckpoint(t *testing.T) {
 	ctx := context.Background()
 	runtime := bootstrap.NewWithBackend("memory", "")
@@ -845,6 +853,101 @@ func TestRecoverStaleOrphanDispatchedStepSkipsNonIdempotentRuntimeGap(t *testing
 			}
 			if changed || recovered != nil || resumeCalls != 0 {
 				t.Fatalf("non-idempotent gap recovered=%+v changed=%v resumeCalls=%d, want no automatic recovery", recovered, changed, resumeCalls)
+			}
+		})
+	}
+}
+
+func TestRecoverStaleOrphanDispatchedStepSkipsNonExternalRecoverablePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		event     string
+		extraData map[string]any
+	}{
+		{
+			name:      "worker-lost",
+			event:     "runtime_worker_lost",
+			extraData: map[string]any{"workerId": "runtimeevent|request-non-external", "lostAt": "2026-06-09T08:03:00Z"},
+		},
+		{
+			name:      "accepted-in-progress",
+			event:     "runtime_worker_heartbeat",
+			extraData: map[string]any{"workerId": "runtimeevent|request-non-external", "heartbeatAt": "2026-06-09T08:03:00Z"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			runtime := bootstrap.NewWithBackend("memory", "")
+			t.Cleanup(func() {
+				if err := runtime.Shutdown(context.Background()); err != nil {
+					t.Errorf("shutdown runtime: %v", err)
+				}
+			})
+			exports := runtime.Exports()
+			runID := common.RunID("run-stale-non-external-" + tc.name)
+			workspaceID := common.WorkspaceID("ws-stale-non-external-" + tc.name)
+			stepID := common.StepID(string(runID) + "/provider-retry-001")
+			run := &runmodel.Run{
+				ID:          runID,
+				WorkspaceID: workspaceID,
+				State:       common.RunStateRunning,
+			}
+			if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
+				t.Fatalf("seed run: %v", err)
+			}
+			if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+				ID:    stepID,
+				RunID: runID,
+				Kind:  "llm/workspace_execution",
+				State: common.StepStateDispatched,
+			}); err != nil {
+				t.Fatalf("seed dispatched step: %v", err)
+			}
+			if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+				ID:            common.CheckpointID(string(runID) + "/checkpoint/accepted"),
+				WorkspaceID:   workspaceID,
+				RunID:         runID,
+				CurrentStepID: stepID,
+				OccurredAt:    "2026-06-09T08:00:00Z",
+				Data: map[string]any{
+					"event":                 "runtime_execute_accepted",
+					"requestId":             "request-non-external",
+					"acceptedAt":            "2026-06-09T08:00:00Z",
+					"runtimeRecoveryPolicy": nonExternalRecoverableRuntimePolicyForTest(),
+				},
+			}); err != nil {
+				t.Fatalf("seed accepted checkpoint: %v", err)
+			}
+			data := map[string]any{
+				"event":                 tc.event,
+				"requestId":             "request-non-external",
+				"runtimeRecoveryPolicy": nonExternalRecoverableRuntimePolicyForTest(),
+			}
+			for key, value := range tc.extraData {
+				data[key] = value
+			}
+			if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+				ID:            common.CheckpointID(string(runID) + "/checkpoint/gap"),
+				WorkspaceID:   workspaceID,
+				RunID:         runID,
+				CurrentStepID: stepID,
+				OccurredAt:    "2026-06-09T08:03:00Z",
+				Data:          data,
+			}); err != nil {
+				t.Fatalf("seed gap checkpoint: %v", err)
+			}
+
+			now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
+			resumeCalls := 0
+			recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+				resumeCalls++
+				return nil
+			}, 10*time.Minute, now)
+			if err != nil {
+				t.Fatalf("RecoverStaleOrphanDispatchedStep: %v", err)
+			}
+			if changed || recovered != nil || resumeCalls != 0 {
+				t.Fatalf("non-external gap recovered=%+v changed=%v resumeCalls=%d, want no automatic recovery", recovered, changed, resumeCalls)
 			}
 		})
 	}
