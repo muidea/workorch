@@ -3,6 +3,7 @@ package approval
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type countingApprovalRepository struct {
@@ -257,6 +259,92 @@ func TestService_ResolveApproval_PendingTransitions(t *testing.T) {
 			}
 			if approval.State != tc.wantState {
 				t.Fatalf("approval state = %q, want %q", approval.State, tc.wantState)
+			}
+		})
+	}
+}
+
+func TestService_ResolveApproval_RecordsGovernanceEvidence(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name       string
+		approvalID common.ApprovalID
+		resolve    func(*Service, context.Context, approvalservice.ResolveApprovalCommand) (*approvalModel.Approval, error)
+		wantState  common.ApprovalState
+		wantStatus string
+	}{
+		{
+			name:       "approved",
+			approvalID: common.ApprovalID("approval-evidence-approved"),
+			resolve:    (*Service).EnsureApprovedAndReturn,
+			wantState:  common.ApprovalStateApproved,
+			wantStatus: orchestratormodel.EvidenceStatusAccepted,
+		},
+		{
+			name:       "rejected",
+			approvalID: common.ApprovalID("approval-evidence-rejected"),
+			resolve:    (*Service).EnsureRejectedAndReturn,
+			wantState:  common.ApprovalStateRejected,
+			wantStatus: orchestratormodel.EvidenceStatusRejected,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := memory.NewApprovalRepository()
+			evidenceRepo := memory.NewEvidenceRecordRepository()
+			service := NewService(repo, nil, evidenceRepo)
+
+			cmd := approvalservice.CreateApprovalCommand{
+				ApprovalID:  tc.approvalID,
+				WorkspaceID: common.WorkspaceID("ws-evidence"),
+				RunID:       common.RunID("run-evidence"),
+				StepID:      common.StepID("run-evidence/approval"),
+				Reason:      "need human approval",
+				Action:      "apply pending change",
+				Context:     map[string]any{"scope": "runtime governance"},
+			}
+			if err := service.CreateApproval(ctx, cmd); err != nil {
+				t.Fatalf("create approval: %v", err)
+			}
+
+			resolveCmd := approvalservice.ResolveApprovalCommand{
+				ApprovalID: cmd.ApprovalID,
+				Context:    map[string]any{"resolution": tc.name},
+			}
+			if _, err := tc.resolve(service, ctx, resolveCmd); err != nil {
+				t.Fatalf("resolve approval: %v", err)
+			}
+			if _, err := tc.resolve(service, ctx, resolveCmd); err != nil {
+				t.Fatalf("second resolve approval: %v", err)
+			}
+
+			records, err := evidenceRepo.ListByRun(ctx, cmd.RunID)
+			if err != nil {
+				t.Fatalf("list evidence records: %v", err)
+			}
+			if len(records) != 1 {
+				t.Fatalf("len(records) = %d, want one idempotent approval evidence record", len(records))
+			}
+			record := records[0]
+			if record.Kind != orchestratormodel.EvidenceKindApproval || record.Status != tc.wantStatus {
+				t.Fatalf("evidence kind/status = %s/%s, want approval/%s", record.Kind, record.Status, tc.wantStatus)
+			}
+			if record.WorkspaceID != cmd.WorkspaceID || record.RunID != cmd.RunID || record.StepID != cmd.StepID {
+				t.Fatalf("evidence scope = %s/%s/%s, want %s/%s/%s", record.WorkspaceID, record.RunID, record.StepID, cmd.WorkspaceID, cmd.RunID, cmd.StepID)
+			}
+			if record.SourceType != "approval" || record.SourceRef != string(cmd.ApprovalID) {
+				t.Fatalf("evidence source = %s/%s, want approval %s", record.SourceType, record.SourceRef, cmd.ApprovalID)
+			}
+			if record.SubjectType != "approval" || record.SubjectID != string(cmd.ApprovalID) {
+				t.Fatalf("evidence subject = %s/%s, want approval %s", record.SubjectType, record.SubjectID, cmd.ApprovalID)
+			}
+			if record.ID == "" || strings.ContainsAny(string(record.ID), `/\`) {
+				t.Fatalf("evidence id = %q, want non-empty file-safe id", record.ID)
+			}
+			if record.Metadata["approvalId"] != string(cmd.ApprovalID) ||
+				record.Metadata["approvalState"] != string(tc.wantState) ||
+				record.Metadata["action"] != cmd.Action {
+				t.Fatalf("evidence metadata = %#v, want approval refs", record.Metadata)
 			}
 		})
 	}

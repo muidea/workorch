@@ -137,15 +137,17 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 
 	decisionModule := decisionmodule.New()
 	mustSetup("decision", decisionModule.Configure(decisionmodule.Dependencies{
-		Tickets:     repos.ticket,
-		Resolutions: repos.resolution,
-		EventHub:    eventHub,
+		Tickets:         repos.ticket,
+		Resolutions:     repos.resolution,
+		EvidenceRecords: repos.evidenceRecord,
+		EventHub:        eventHub,
 	}))
 
 	approvalModule := approvalmodule.New()
 	mustSetup("approval", approvalModule.Configure(approvalmodule.Dependencies{
-		Approvals: repos.approval,
-		EventHub:  eventHub,
+		Approvals:       repos.approval,
+		EvidenceRecords: repos.evidenceRecord,
+		EventHub:        eventHub,
 	}))
 
 	resultModule := resultmodule.New()

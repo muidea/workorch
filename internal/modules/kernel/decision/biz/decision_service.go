@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"time"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
@@ -13,16 +14,22 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type Service struct {
-	tickets     repository.DecisionTicketRepository
-	resolutions repository.DecisionResolutionRepository
-	eventHub    events.Hub
+	tickets         repository.DecisionTicketRepository
+	resolutions     repository.DecisionResolutionRepository
+	evidenceRecords repository.EvidenceRecordRepository
+	eventHub        events.Hub
 }
 
-func NewService(tickets repository.DecisionTicketRepository, resolutions repository.DecisionResolutionRepository, eventHub events.Hub) *Service {
-	return &Service{tickets: tickets, resolutions: resolutions, eventHub: eventHub}
+func NewService(tickets repository.DecisionTicketRepository, resolutions repository.DecisionResolutionRepository, eventHub events.Hub, evidenceRecords ...repository.EvidenceRecordRepository) *Service {
+	service := &Service{tickets: tickets, resolutions: resolutions, eventHub: eventHub}
+	if len(evidenceRecords) > 0 {
+		service.evidenceRecords = evidenceRecords[0]
+	}
+	return service
 }
 
 func (s *Service) CreateTicket(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) error {
@@ -137,6 +144,9 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 	if err := s.tickets.Update(ctx, ticket); err != nil {
 		return nil, err
 	}
+	if err := s.recordDecisionResolutionEvidence(ctx, ticket, resolution); err != nil {
+		return nil, err
+	}
 	if err := s.publishResolvedTicketEvent(ctx, ticket, resolution); err != nil {
 		return nil, err
 	}
@@ -193,9 +203,14 @@ func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisio
 			if err := s.tickets.Update(ctx, ticket); err != nil {
 				return nil, nil, err
 			}
+			if err := s.recordDecisionResolutionEvidence(ctx, ticket, existingResolution); err != nil {
+				return nil, nil, err
+			}
 			if err := s.publishResolvedTicketEvent(ctx, ticket, existingResolution); err != nil {
 				return nil, nil, err
 			}
+		} else if err := s.recordDecisionResolutionEvidence(ctx, ticket, existingResolution); err != nil {
+			return nil, nil, err
 		}
 		return ticket, existingResolution, nil
 	}
@@ -243,6 +258,56 @@ func (s *Service) publishResolvedTicketEvent(ctx context.Context, ticket *decisi
 			},
 		),
 	})
+}
+
+func (s *Service) recordDecisionResolutionEvidence(ctx context.Context, ticket *decisionModel.Ticket, resolution *decisionModel.Resolution) error {
+	if s == nil || s.evidenceRecords == nil || ticket == nil || resolution == nil || resolution.ID == "" {
+		return nil
+	}
+	timestamp := strings.TrimSpace(ticket.UpdatedAt)
+	if timestamp == "" {
+		timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	metadata := map[string]any{
+		"ticketId":       string(ticket.ID),
+		"resolutionId":   string(resolution.ID),
+		"resolutionType": strings.TrimSpace(resolution.Type),
+		"decisionKind":   strings.TrimSpace(ticket.DecisionKind),
+	}
+	if ticket.Reason != "" {
+		metadata["reason"] = strings.TrimSpace(ticket.Reason)
+	}
+	if ticket.Question != "" {
+		metadata["question"] = strings.TrimSpace(ticket.Question)
+	}
+	if len(resolution.Payload) > 0 {
+		metadata["resolutionPayload"] = clonePayload(resolution.Payload)
+	}
+	if resolution.ContinuationAction != "" {
+		metadata["continuationAction"] = strings.TrimSpace(resolution.ContinuationAction)
+	}
+	if resolution.ResumeRunID != "" {
+		metadata["resumeRunId"] = string(resolution.ResumeRunID)
+	}
+	if resolution.SuccessorRunID != "" {
+		metadata["successorRunId"] = string(resolution.SuccessorRunID)
+	}
+	record := &orchestratormodel.EvidenceRecord{
+		ID:          orchestratormodel.StableEvidenceRecordID(string(resolution.ID), "decision-resolution", "decision"),
+		WorkspaceID: ticket.WorkspaceID,
+		RunID:       ticket.RunID,
+		StepID:      ticket.StepID,
+		Kind:        orchestratormodel.EvidenceKindDecision,
+		Status:      orchestratormodel.EvidenceStatusAccepted,
+		SourceType:  "decision_resolution",
+		SourceRef:   string(resolution.ID),
+		SubjectType: "decision_ticket",
+		SubjectID:   string(ticket.ID),
+		CreatedAt:   timestamp,
+		UpdatedAt:   timestamp,
+		Metadata:    metadata,
+	}
+	return repository.CreateOrUpdateEvidenceRecord(ctx, s.evidenceRecords, record)
 }
 
 func ticketMatchesResolveScope(ticket *decisionModel.Ticket, cmd decisioncontracts.ResolveTicketCommand) bool {

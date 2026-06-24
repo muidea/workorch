@@ -22,9 +22,10 @@ type UpdateTicketCommand = decisioncontracts.UpdateTicketCommand
 type ResolveTicketCommand = decisioncontracts.ResolveTicketCommand
 
 type Dependencies struct {
-	Tickets     repository.DecisionTicketRepository
-	Resolutions repository.DecisionResolutionRepository
-	EventHub    events.Hub
+	Tickets         repository.DecisionTicketRepository
+	Resolutions     repository.DecisionResolutionRepository
+	EvidenceRecords repository.EvidenceRecordRepository
+	EventHub        events.Hub
 }
 
 type Module struct {
@@ -47,7 +48,7 @@ func (m *Module) Configure(deps Dependencies) error {
 	m.eventHub = deps.EventHub
 	m.tickets = deps.Tickets
 	m.resolutions = deps.Resolutions
-	m.bizPtr = decisionbiz.NewService(deps.Tickets, deps.Resolutions, deps.EventHub)
+	m.bizPtr = decisionbiz.NewService(deps.Tickets, deps.Resolutions, deps.EventHub, deps.EvidenceRecords)
 	m.servicePtr = decisionservice.New(decisionservice.Dependencies{
 		CreateTicket:                  m.bizPtr.CreateTicket,
 		EnsureTicket:                  m.bizPtr.EnsureTicket,

@@ -32,6 +32,7 @@ Related:
 - [S3.1 EvidenceRecord Model And Repository](./goal-dod-nextaction-s3-1-evidence-record-model.md)
 - [S3.2 State Change Accepted Evidence Write](./goal-dod-nextaction-s3-2-state-change-evidence-write.md)
 - [S3.3 Validation Accepted And Rejected Evidence Write](./goal-dod-nextaction-s3-3-validation-evidence-write.md)
+- [S3.4 Decision And Approval Governance Evidence Write](./goal-dod-nextaction-s3-4-governance-evidence-write.md)
 
 ## Purpose
 

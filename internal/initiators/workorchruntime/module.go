@@ -136,13 +136,17 @@ func (r repositorySet) Workspace() common.WorkspaceRepositories {
 
 func (r repositorySet) Decision() common.DecisionRepositories {
 	return common.DecisionRepositories{
-		Tickets:     r.Tickets,
-		Resolutions: r.Resolutions,
+		Tickets:         r.Tickets,
+		Resolutions:     r.Resolutions,
+		EvidenceRecords: r.EvidenceRecords,
 	}
 }
 
 func (r repositorySet) Approval() common.ApprovalRepositories {
-	return common.ApprovalRepositories{Approvals: r.Approvals}
+	return common.ApprovalRepositories{
+		Approvals:       r.Approvals,
+		EvidenceRecords: r.EvidenceRecords,
+	}
 }
 
 func (r repositorySet) EventStream() common.EventStreamRepositories {

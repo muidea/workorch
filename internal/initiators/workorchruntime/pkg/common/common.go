@@ -23,12 +23,14 @@ type WorkspaceRepositories struct {
 }
 
 type DecisionRepositories struct {
-	Tickets     repository.DecisionTicketRepository
-	Resolutions repository.DecisionResolutionRepository
+	Tickets         repository.DecisionTicketRepository
+	Resolutions     repository.DecisionResolutionRepository
+	EvidenceRecords repository.EvidenceRecordRepository
 }
 
 type ApprovalRepositories struct {
-	Approvals repository.ApprovalRepository
+	Approvals       repository.ApprovalRepository
+	EvidenceRecords repository.EvidenceRecordRepository
 }
 
 type EventStreamRepositories struct {

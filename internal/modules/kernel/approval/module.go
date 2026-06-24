@@ -22,8 +22,9 @@ type UpdateApprovalCommand = approvalcontracts.UpdateApprovalCommand
 type ResolveApprovalCommand = approvalcontracts.ResolveApprovalCommand
 
 type Dependencies struct {
-	Approvals repository.ApprovalRepository
-	EventHub  events.Hub
+	Approvals       repository.ApprovalRepository
+	EvidenceRecords repository.EvidenceRecordRepository
+	EventHub        events.Hub
 }
 
 type Module struct {
@@ -44,7 +45,7 @@ func (m *Module) Configure(deps Dependencies) error {
 	}
 	m.eventHub = deps.EventHub
 	m.approvals = deps.Approvals
-	m.bizPtr = approvalbiz.NewService(deps.Approvals, deps.EventHub)
+	m.bizPtr = approvalbiz.NewService(deps.Approvals, deps.EventHub, deps.EvidenceRecords)
 	m.servicePtr = approvalservice.New(approvalservice.Dependencies{
 		CreateApproval:          m.bizPtr.CreateApproval,
 		EnsureApproval:          m.bizPtr.EnsureApproval,

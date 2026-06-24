@@ -26,8 +26,9 @@ func (m *Module) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine)
 		return err
 	}
 	if setupErr := m.Configure(Dependencies{
-		Approvals: repos.Approvals,
-		EventHub:  eventHub,
+		Approvals:       repos.Approvals,
+		EvidenceRecords: repos.EvidenceRecords,
+		EventHub:        eventHub,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}

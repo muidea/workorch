@@ -26,9 +26,10 @@ func (m *Module) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine)
 		return err
 	}
 	if setupErr := m.Configure(Dependencies{
-		Tickets:     repos.Tickets,
-		Resolutions: repos.Resolutions,
-		EventHub:    eventHub,
+		Tickets:         repos.Tickets,
+		Resolutions:     repos.Resolutions,
+		EvidenceRecords: repos.EvidenceRecords,
+		EventHub:        eventHub,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}

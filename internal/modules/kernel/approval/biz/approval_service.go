@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"time"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/common"
@@ -13,15 +14,21 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type Service struct {
-	approvals repository.ApprovalRepository
-	eventHub  events.Hub
+	approvals       repository.ApprovalRepository
+	evidenceRecords repository.EvidenceRecordRepository
+	eventHub        events.Hub
 }
 
-func NewService(approvals repository.ApprovalRepository, eventHub events.Hub) *Service {
-	return &Service{approvals: approvals, eventHub: eventHub}
+func NewService(approvals repository.ApprovalRepository, eventHub events.Hub, evidenceRecords ...repository.EvidenceRecordRepository) *Service {
+	service := &Service{approvals: approvals, eventHub: eventHub}
+	if len(evidenceRecords) > 0 {
+		service.evidenceRecords = evidenceRecords[0]
+	}
+	return service
 }
 
 func (s *Service) CreateApproval(ctx context.Context, cmd approvalcontracts.CreateApprovalCommand) error {
@@ -103,6 +110,9 @@ func (s *Service) EnsureApprovedAndReturn(ctx context.Context, cmd approvalcontr
 		return nil, err
 	}
 	if item.State == common.ApprovalStateApproved {
+		if err := s.recordApprovalGovernanceEvidence(ctx, item); err != nil {
+			return nil, err
+		}
 		return item, nil
 	}
 	if item.State == common.ApprovalStateRejected {
@@ -133,6 +143,9 @@ func (s *Service) EnsureRejectedAndReturn(ctx context.Context, cmd approvalcontr
 		return nil, err
 	}
 	if item.State == common.ApprovalStateRejected {
+		if err := s.recordApprovalGovernanceEvidence(ctx, item); err != nil {
+			return nil, err
+		}
 		return item, nil
 	}
 	if item.State == common.ApprovalStateApproved {
@@ -173,6 +186,9 @@ func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval,
 	if err := s.approvals.Update(ctx, item); err != nil {
 		return err
 	}
+	if err := s.recordApprovalGovernanceEvidence(ctx, item); err != nil {
+		return err
+	}
 	if s.eventHub == nil {
 		return nil
 	}
@@ -187,6 +203,60 @@ func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval,
 		StepID:       string(item.StepID),
 		Payload:      events.ApprovalPayload(item.Reason, item.Action, item.Context, item.State),
 	})
+}
+
+func (s *Service) recordApprovalGovernanceEvidence(ctx context.Context, item *approvalModel.Approval) error {
+	if s == nil || s.evidenceRecords == nil || item == nil || item.ID == "" {
+		return nil
+	}
+	status := approvalEvidenceStatus(item.State)
+	if status == "" {
+		return nil
+	}
+	timestamp := strings.TrimSpace(item.UpdatedAt)
+	if timestamp == "" {
+		timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	metadata := map[string]any{
+		"approvalId":    string(item.ID),
+		"approvalState": string(item.State),
+	}
+	if item.Reason != "" {
+		metadata["reason"] = strings.TrimSpace(item.Reason)
+	}
+	if item.Action != "" {
+		metadata["action"] = strings.TrimSpace(item.Action)
+	}
+	if len(item.Context) > 0 {
+		metadata["context"] = cloneApprovalContext(item.Context)
+	}
+	record := &orchestratormodel.EvidenceRecord{
+		ID:          orchestratormodel.StableEvidenceRecordID(string(item.ID), "approval", "approval"),
+		WorkspaceID: item.WorkspaceID,
+		RunID:       item.RunID,
+		StepID:      item.StepID,
+		Kind:        orchestratormodel.EvidenceKindApproval,
+		Status:      status,
+		SourceType:  "approval",
+		SourceRef:   string(item.ID),
+		SubjectType: "approval",
+		SubjectID:   string(item.ID),
+		CreatedAt:   timestamp,
+		UpdatedAt:   timestamp,
+		Metadata:    metadata,
+	}
+	return repository.CreateOrUpdateEvidenceRecord(ctx, s.evidenceRecords, record)
+}
+
+func approvalEvidenceStatus(state common.ApprovalState) string {
+	switch state {
+	case common.ApprovalStateApproved:
+		return orchestratormodel.EvidenceStatusAccepted
+	case common.ApprovalStateRejected:
+		return orchestratormodel.EvidenceStatusRejected
+	default:
+		return ""
+	}
 }
 
 func cloneApprovalContext(input map[string]any) map[string]any {

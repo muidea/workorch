@@ -3,6 +3,7 @@ package decision
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type countingDecisionTicketRepository struct {
@@ -283,6 +285,77 @@ func TestService_ResolveTicket_OpenToResolvedAndPersistsResolution(t *testing.T)
 	}
 	if resolution.Type != resolveCmd.Type {
 		t.Fatalf("resolution type = %q, want %q", resolution.Type, resolveCmd.Type)
+	}
+}
+
+func TestService_ResolveTicket_RecordsDecisionEvidence(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	service := NewService(ticketRepo, resolutionRepo, nil, evidenceRepo)
+
+	createCmd := decisionservice.CreateTicketCommand{
+		TicketID:     common.TicketID("ticket-evidence"),
+		WorkspaceID:  common.WorkspaceID("ws-evidence"),
+		RunID:        common.RunID("run-evidence"),
+		StepID:       common.StepID("run-evidence/decision"),
+		Reason:       "need operator decision",
+		DecisionKind: "runtime_governance",
+		Question:     "which recovery path should continue",
+	}
+	if err := service.CreateTicket(ctx, createCmd); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	resolveCmd := decisionservice.ResolveTicketCommand{
+		ResolutionID:       common.ResolutionID("resolution-evidence"),
+		TicketID:           createCmd.TicketID,
+		WorkspaceID:        createCmd.WorkspaceID,
+		RunID:              createCmd.RunID,
+		StepID:             createCmd.StepID,
+		Type:               decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:            map[string]any{"operatorInput": "continue with current plan"},
+		ContinuationAction: "resume",
+		ResumeRunID:        createCmd.RunID,
+	}
+	if err := service.EnsureResolvedTicket(ctx, resolveCmd); err != nil {
+		t.Fatalf("ensure resolved ticket: %v", err)
+	}
+	if err := service.EnsureResolvedTicket(ctx, resolveCmd); err != nil {
+		t.Fatalf("second ensure resolved ticket: %v", err)
+	}
+
+	records, err := evidenceRepo.ListByRun(ctx, createCmd.RunID)
+	if err != nil {
+		t.Fatalf("list evidence records: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want one idempotent decision evidence record", len(records))
+	}
+	record := records[0]
+	if record.Kind != orchestratormodel.EvidenceKindDecision || record.Status != orchestratormodel.EvidenceStatusAccepted {
+		t.Fatalf("evidence kind/status = %s/%s, want decision/accepted", record.Kind, record.Status)
+	}
+	if record.WorkspaceID != createCmd.WorkspaceID || record.RunID != createCmd.RunID || record.StepID != createCmd.StepID {
+		t.Fatalf("evidence scope = %s/%s/%s, want %s/%s/%s", record.WorkspaceID, record.RunID, record.StepID, createCmd.WorkspaceID, createCmd.RunID, createCmd.StepID)
+	}
+	if record.SourceType != "decision_resolution" || record.SourceRef != string(resolveCmd.ResolutionID) {
+		t.Fatalf("evidence source = %s/%s, want decision resolution %s", record.SourceType, record.SourceRef, resolveCmd.ResolutionID)
+	}
+	if record.SubjectType != "decision_ticket" || record.SubjectID != string(createCmd.TicketID) {
+		t.Fatalf("evidence subject = %s/%s, want decision ticket %s", record.SubjectType, record.SubjectID, createCmd.TicketID)
+	}
+	if record.ID == "" || strings.ContainsAny(string(record.ID), `/\`) {
+		t.Fatalf("evidence id = %q, want non-empty file-safe id", record.ID)
+	}
+	if record.Metadata["ticketId"] != string(createCmd.TicketID) ||
+		record.Metadata["resolutionId"] != string(resolveCmd.ResolutionID) ||
+		record.Metadata["resolutionType"] != resolveCmd.Type ||
+		record.Metadata["decisionKind"] != createCmd.DecisionKind ||
+		record.Metadata["continuationAction"] != resolveCmd.ContinuationAction ||
+		record.Metadata["resumeRunId"] != string(resolveCmd.ResumeRunID) {
+		t.Fatalf("evidence metadata = %#v, want decision resolution refs", record.Metadata)
 	}
 }
 
