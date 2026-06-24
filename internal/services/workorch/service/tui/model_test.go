@@ -3162,6 +3162,7 @@ func TestModelWorkspaceContextDoesNotTreatAcceptedRunCommandAsRunning(t *testing
 			RunCommand: &backend.RunCommandStatusInfo{
 				WorkspaceID: "ws-a",
 				RunID:       "run-accepted",
+				State:       "accepted",
 				Intent:      "replan",
 				RequestID:   "request-accepted",
 				Source:      "tui",
@@ -3175,6 +3176,45 @@ func TestModelWorkspaceContextDoesNotTreatAcceptedRunCommandAsRunning(t *testing
 	}
 	if m.progress == progressSubmitting {
 		t.Fatalf("progress = %s/%q, accepted command projection must not leave stale submitting state", m.progress, m.progressText)
+	}
+	status := stripANSI(m.renderRuntimeStatusBar(120))
+	if !strings.Contains(status, "command accepted replan") {
+		t.Fatalf("status bar = %q, want accepted command projection", status)
+	}
+}
+
+func TestModelWorkspaceContextDisplaysRejectedRunCommandProjection(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	m.progress = progressSubmitting
+	m.progressText = "Submitting run command"
+	next, _ := m.Update(WorkspaceContextMsg{
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
+			RunCommand: &backend.RunCommandStatusInfo{
+				WorkspaceID:    "ws-a",
+				RunID:          "run-rejected",
+				State:          "rejected",
+				Intent:         "resume",
+				RequestID:      "request-rejected",
+				Source:         "tui",
+				RejectedAt:     "2026-06-21T00:01:00Z",
+				Error:          "scheduler command was not queued",
+				IdempotencyKey: "resume/ws-a/run-rejected",
+				Revision:       4,
+			},
+		},
+	})
+	m = asModel(next)
+	if m.progress == progressSubmitting {
+		t.Fatalf("progress = %s/%q, rejected command projection must not leave stale submitting state", m.progress, m.progressText)
+	}
+	status := stripANSI(m.renderRuntimeStatusBar(120))
+	for _, want := range []string{"command rejected resume", "scheduler command was not queued"} {
+		if !strings.Contains(status, want) {
+			t.Fatalf("status bar = %q, missing %q", status, want)
+		}
 	}
 }
 

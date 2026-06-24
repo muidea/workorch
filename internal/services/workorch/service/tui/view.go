@@ -879,6 +879,9 @@ func (m AppModel) renderRuntimeStatusBar(width int) string {
 	if status := runtimeExecutionStatusText(m.runtimeExecution); status != "" {
 		parts = append(parts, status)
 	}
+	if command := runCommandStatusText(m.runCommand); command != "" {
+		parts = append(parts, command)
+	}
 	if decision := m.activeBlockingDecision(); decision != nil && decision.ID != "" {
 		parts = append(parts, "decision "+shortID(string(decision.ID)))
 	}
@@ -889,6 +892,35 @@ func (m AppModel) renderRuntimeStatusBar(width int) string {
 		parts = append(parts, "new updates")
 	}
 	return truncateDisplay(strings.Join(parts, " | "), width-2)
+}
+
+func runCommandStatusText(command *backend.RunCommandStatusInfo) string {
+	if command == nil {
+		return ""
+	}
+	state := strings.ToLower(strings.TrimSpace(command.State))
+	if state == "" {
+		switch {
+		case strings.TrimSpace(command.RejectedAt) != "":
+			state = "rejected"
+		case strings.TrimSpace(command.AcceptedAt) != "":
+			state = "accepted"
+		case strings.TrimSpace(command.RequestID) != "":
+			state = "pending"
+		default:
+			return ""
+		}
+	}
+	parts := []string{"command", state}
+	if intent := strings.TrimSpace(command.Intent); intent != "" {
+		parts = append(parts, intent)
+	}
+	if errText := strings.TrimSpace(command.Error); errText != "" {
+		parts = append(parts, errText)
+	} else if reason := strings.TrimSpace(command.Reason); reason != "" && state == "rejected" {
+		parts = append(parts, reason)
+	}
+	return truncateDisplay(strings.Join(parts, " "), 72)
 }
 
 func (m AppModel) visibleArtifactContinuations() []backend.ArtifactContinuationInfo {

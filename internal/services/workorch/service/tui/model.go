@@ -88,6 +88,7 @@ type AppModel struct {
 	acceptance             backend.AcceptanceProjectionInfo
 	runHeartbeat           backend.RunHeartbeatInfo
 	runtimeExecution       *backend.RuntimeExecutionInfo
+	runCommand             *backend.RunCommandStatusInfo
 	schedulerDiagnostics   *backend.SchedulerDiagnosticsInfo
 	runtimeEvents          []string
 	progress               progressState
@@ -2469,6 +2470,7 @@ func (m *AppModel) clearRunDisplayState() {
 	m.llmContextSummary = backend.LLMContextBudgetSummaryInfo{}
 	m.llmContext = nil
 	m.acceptance = backend.AcceptanceProjectionInfo{}
+	m.runCommand = nil
 	m.runtimeEvents = nil
 	m.repairLoop = ""
 	m.failureReason = ""

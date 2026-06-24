@@ -395,13 +395,17 @@ export type RuntimeExecution = {
 export type RunCommandStatus = {
   workspaceId?: string;
   runId?: string;
+  state?: string;
   intent?: string;
   reason?: string;
   requestId?: string;
+  idempotencyKey?: string;
   source?: string;
   definitionRevision?: string;
   decisionId?: string;
   acceptedAt?: string;
+  rejectedAt?: string;
+  error?: string;
   revision?: number;
 };
 

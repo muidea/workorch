@@ -201,17 +201,22 @@ export function runtimeExecutionDescriptions(runtime?: RuntimeExecution) {
 
 export function runCommandDescriptions(snapshot?: WorkspaceSnapshot) {
   const command = snapshot?.runCommand;
-  if (!command || (!command.intent && !command.requestId && !command.acceptedAt)) {
+  if (!command || (!command.intent && !command.requestId && !command.acceptedAt && !command.rejectedAt)) {
     return [{ key: 'runCommand', label: '调度 ACK', children: '-' }];
   }
+  const commandState = command.state || (command.rejectedAt ? 'rejected' : command.acceptedAt ? 'accepted' : 'pending');
+  const stateColor = commandState === 'accepted' ? 'green' : commandState === 'rejected' ? 'red' : 'gold';
   return [
-    { key: 'intent', label: '调度 ACK', children: <Space wrap><Tag color="gold">accepted</Tag>{command.intent ? <Tag>{command.intent}</Tag> : null}{command.source ? <Tag>{command.source}</Tag> : null}</Space> },
+    { key: 'intent', label: '调度 ACK', children: <Space wrap><Tag color={stateColor}>{commandState}</Tag>{command.intent ? <Tag>{command.intent}</Tag> : null}{command.source ? <Tag>{command.source}</Tag> : null}</Space> },
     { key: 'requestId', label: '请求 ID', children: command.requestId || '-' },
+    { key: 'idempotencyKey', label: '幂等键', children: command.idempotencyKey || '-' },
     { key: 'runId', label: '目标运行', children: command.runId || '-' },
     { key: 'reason', label: '原因', children: command.reason || '-' },
+    { key: 'error', label: '错误', children: command.error || '-' },
     { key: 'decisionId', label: '关联决策', children: command.decisionId || '-' },
     { key: 'definitionRevision', label: '定义 Revision', children: command.definitionRevision || '-' },
     { key: 'acceptedAt', label: '接收时间', children: command.acceptedAt || '-' },
+    { key: 'rejectedAt', label: '拒绝时间', children: command.rejectedAt || '-' },
     { key: 'revision', label: '投影 Revision', children: command.revision ?? '-' }
   ];
 }

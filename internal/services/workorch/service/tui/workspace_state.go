@@ -717,6 +717,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		if msg.Snapshot != nil {
 			m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
 			m.applyRuntimeExecution(msg.Snapshot.RuntimeExecution)
+			m.applyRunCommandStatus(msg.Snapshot.RunCommand)
 			m.applySchedulerDiagnostics(msg.Snapshot.SchedulerDiagnostics)
 		}
 		m.syncBlockingDecisionFromList()
@@ -766,6 +767,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.acceptance = msg.Snapshot.Acceptance
 		m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
 		m.applyRuntimeExecution(msg.Snapshot.RuntimeExecution)
+		m.applyRunCommandStatus(msg.Snapshot.RunCommand)
 		m.applySchedulerDiagnostics(msg.Snapshot.SchedulerDiagnostics)
 		m.repairLoop = repairLoopSummary(msg.Snapshot.TaskProgress)
 	}
@@ -824,6 +826,7 @@ func (m *AppModel) clearRunProjectionState() {
 	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runHeartbeat = backend.RunHeartbeatInfo{}
 	m.runtimeExecution = nil
+	m.runCommand = nil
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""
@@ -1232,6 +1235,30 @@ func (m *AppModel) applyWorkspaceProgress(state common.WorkspaceState) {
 		m.progress = progressIdle
 		m.progressText = ""
 	}
+}
+
+func (m *AppModel) applyRunCommandStatus(status *backend.RunCommandStatusInfo) {
+	if status == nil {
+		m.runCommand = nil
+		return
+	}
+	if status.WorkspaceID != "" && string(status.WorkspaceID) != m.activeWorkspaceID {
+		return
+	}
+	copied := *status
+	m.runCommand = &copied
+	if m.progress == progressSubmitting && runCommandProjectionSettled(copied) {
+		m.progress = progressIdle
+		m.progressText = ""
+	}
+}
+
+func runCommandProjectionSettled(status backend.RunCommandStatusInfo) bool {
+	state := strings.ToLower(strings.TrimSpace(status.State))
+	if state == "accepted" || state == "rejected" {
+		return true
+	}
+	return strings.TrimSpace(status.AcceptedAt) != "" || strings.TrimSpace(status.RejectedAt) != ""
 }
 
 func (m *AppModel) clearBlockingInputState() {
