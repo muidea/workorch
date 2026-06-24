@@ -17,6 +17,7 @@ MAX_CONCURRENT_RUNS="${WORKORCH_MANAGED_MAX_CONCURRENT_RUNS:-1}"
 STALE_DISPATCHED_STEP_MIN_AGE="${WORKORCH_MANAGED_STALE_DISPATCHED_STEP_MIN_AGE:-10m}"
 LLM_CONFIG_JSON="${WORKORCH_MANAGED_LLM_CONFIG_JSON:-}"
 PRECREATE_WORKSPACE_COUNT="${WORKORCH_MANAGED_PRECREATE_WORKSPACE_COUNT:-0}"
+SKIP_PREFLIGHT="${WORKORCH_MANAGED_SKIP_PREFLIGHT:-0}"
 
 select_addr() {
   if [[ -n "${WORKORCH_MANAGED_ADDR:-}" ]]; then
@@ -55,6 +56,7 @@ stop_server() {
   fi
   if ! kill -0 "$SERVER_PID" >/dev/null 2>&1; then
     wait "$SERVER_PID" >/dev/null 2>&1 || true
+    write_runtime_state "stopped"
     SERVER_PID=""
     return
   fi
@@ -68,6 +70,7 @@ stop_server() {
     sleep 0.2
   done
   wait "$SERVER_PID" >/dev/null 2>&1 || true
+  write_runtime_state "stopped"
   SERVER_PID=""
 }
 
@@ -84,6 +87,27 @@ cleanup() {
 run_step() {
   echo "==> $*"
   "$@"
+}
+
+write_runtime_state() {
+  local state="$1"
+  python3 - "$TMP_DIR/managed-runtime-state.json" "$state" "$BASE_URL" "${SERVER_PID:-}" "$CONFIG_DIR" "$DATA_DIR" "$SERVER_LOG" <<'PY'
+import json
+import sys
+
+path, state, base_url, pid, config_dir, data_dir, server_log = sys.argv[1:8]
+payload = {
+    "state": state,
+    "baseUrl": base_url,
+    "pid": int(pid) if pid.isdigit() else None,
+    "configDir": config_dir,
+    "dataDir": data_dir,
+    "serverLog": server_log,
+}
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
 }
 
 write_config() {
@@ -118,11 +142,13 @@ start_server() {
   write_config
   "$BINARY" --server -config-dir "$CONFIG_DIR" >"$SERVER_LOG" 2>&1 &
   SERVER_PID=$!
+  write_runtime_state "starting"
   local deadline=$((SECONDS + 60))
   while (( SECONDS <= deadline )); do
     if curl -fsS "$BASE_URL/healthz" >/dev/null 2>&1 &&
       curl -fsS "$BASE_URL/readyz" >/dev/null 2>&1; then
       echo "managed workorch service ready at $BASE_URL"
+      write_runtime_state "running"
       return
     fi
     if ! kill -0 "$SERVER_PID" >/dev/null 2>&1; then
@@ -255,10 +281,14 @@ cd "$ROOT_DIR"
 
 mkdir -p "$TMP_DIR" "$(dirname "$BINARY")"
 
-run_step make fmt-check
-run_step make console-build
-run_step make vet
-run_step go test $GO_TEST_FLAGS $GO_TEST_PACKAGES
+if [[ "$SKIP_PREFLIGHT" != "1" && "$SKIP_PREFLIGHT" != "true" ]]; then
+  run_step make fmt-check
+  run_step make console-build
+  run_step make vet
+  run_step go test $GO_TEST_FLAGS $GO_TEST_PACKAGES
+else
+  echo "==> skip managed preflight checks"
+fi
 run_step go build -o "$BINARY" ./application/workorch
 
 start_server
