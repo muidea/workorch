@@ -69,6 +69,7 @@ Related:
 - [S8.6 Decision And Approval View Regression](./goal-dod-nextaction-s8-6-decision-approval-view-regression.md)
 - [S9.1 Projection Readmodel First](./goal-dod-nextaction-s9-1-projection-readmodel-first.md)
 - [S9.2 History Recent Compact Refs](./goal-dod-nextaction-s9-2-history-recent-compact-refs.md)
+- [S9.3 Snapshot Payload On Demand](./goal-dod-nextaction-s9-3-snapshot-payload-on-demand.md)
 
 ## Purpose
 

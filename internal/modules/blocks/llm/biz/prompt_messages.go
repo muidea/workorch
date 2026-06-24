@@ -1370,6 +1370,7 @@ func compactRepairSnapshotsForPrompt(items []any, limit int, contentLimit int) [
 	if limit <= 0 || len(items) == 0 {
 		return nil
 	}
+	_ = contentLimit
 	if len(items) > limit {
 		items = items[:limit]
 	}
@@ -1382,6 +1383,8 @@ func compactRepairSnapshotsForPrompt(items []any, limit int, contentLimit int) [
 		out := map[string]any{}
 		for _, key := range []string{
 			"targetRef",
+			"snapshotRef",
+			"payloadRef",
 			"contentHash",
 			"contentComplete",
 			"safeForFileWrite",
@@ -1393,20 +1396,24 @@ func compactRepairSnapshotsForPrompt(items []any, limit int, contentLimit int) [
 		} {
 			copyMapValue(out, key, item[key])
 		}
-		if content, ok := item["content"].(string); ok {
-			if contentLimit > 0 && len(content) > contentLimit {
-				out["content"] = content[:contentLimit] + "\n[TRUNCATED]"
-				out["contentView"] = "partial_prefix"
-				out["contentTruncatedForPrompt"] = true
-				out["contentComplete"] = false
-				out["safeForFileWrite"] = false
-				out["promptContentComplete"] = false
-				out["promptSafeForFileWrite"] = false
-				out["promptExtractionRequired"] = true
-				out["promptSafetyNote"] = "content truncated for provider prompt; do not use as a complete file_write snapshot; acquire exact current content or a targeted segment before complete rewrite"
-			} else {
-				out["content"] = content
-				out["contentView"] = "complete"
+		if _, ok := out["snapshotRef"]; !ok {
+			if ref := promptTargetSnapshotRef(item); ref != "" {
+				out["snapshotRef"] = ref
+			}
+		}
+		content, hasContent := item["content"].(string)
+		preview, hasPreview := item["contentPreview"].(string)
+		if hasContent || hasPreview {
+			out["contentOmitted"] = true
+			out["contentOmittedReason"] = "target snapshot body is available only through snapshotRef or an explicit targeted read"
+			out["promptContentComplete"] = false
+			out["promptSafeForFileWrite"] = false
+			out["promptExtractionRequired"] = true
+			out["promptSafetyNote"] = "prompt snapshot body is omitted by default; acquire exact current content before complete file_write"
+			if strings.TrimSpace(content) != "" {
+				out["contentBytes"] = len([]byte(strings.TrimSpace(content)))
+			} else if strings.TrimSpace(preview) != "" {
+				out["contentPreviewBytes"] = len([]byte(strings.TrimSpace(preview)))
 			}
 		}
 		if len(out) > 0 {
@@ -1414,6 +1421,39 @@ func compactRepairSnapshotsForPrompt(items []any, limit int, contentLimit int) [
 		}
 	}
 	return ret
+}
+
+func promptTargetSnapshotRef(item map[string]any) string {
+	if len(item) == 0 {
+		return ""
+	}
+	for _, key := range []string{"snapshotRef", "payloadRef", "sourceRef"} {
+		if ref := strings.TrimSpace(stringValue(item[key])); ref != "" {
+			return ref
+		}
+	}
+	targetRef := strings.TrimSpace(stringValue(item["targetRef"]))
+	contentHash := strings.TrimSpace(stringValue(firstNonNilValue(item["contentHash"], item["baseHash"])))
+	if targetRef == "" || contentHash == "" {
+		return ""
+	}
+	return "snapshot://target/" + promptSnapshotRefComponent(targetRef) + "#" + promptSnapshotRefComponent(contentHash)
+}
+
+func promptSnapshotRefComponent(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(
+		" ", "%20",
+		"#", "%23",
+		"?", "%3F",
+		"\n", "",
+		"\r", "",
+		"\t", "%09",
+	)
+	return replacer.Replace(value)
 }
 
 func promptRequiredOutputForRepairPackage(pkg map[string]any, contentLimit int) any {
@@ -1459,17 +1499,7 @@ func repairPackageTargetSnapshotsIncompleteForPrompt(pkg map[string]any, limit i
 	if limit > 0 && len(items) > limit {
 		return true
 	}
-	for idx, raw := range items {
-		if limit > 0 && idx >= limit {
-			break
-		}
-		item := recordFromAny(raw)
-		content, ok := item["content"].(string)
-		if ok && contentLimit > 0 && len(content) > contentLimit {
-			return true
-		}
-	}
-	return false
+	return true
 }
 
 func compactWorkspaceFileManifestSignal(value any) map[string]any {
@@ -2392,10 +2422,6 @@ func availableTargetSnapshotsPromptSummary(input map[string]any, snapshotBudget 
 	if limit <= 0 {
 		limit = repairSnapshotPromptItemLimit
 	}
-	contentLimit := snapshotBudget.RepairContentLimit
-	if contentLimit <= 0 {
-		contentLimit = repairSnapshotPromptContentLimit
-	}
 	seen := map[string]bool{}
 	ret := make([]map[string]any, 0, limit)
 	add := func(raw map[string]any, source string) {
@@ -2412,15 +2438,9 @@ func availableTargetSnapshotsPromptSummary(input map[string]any, snapshotBudget 
 			return
 		}
 		seen[key] = true
-		content, _ := raw["content"].(string)
-		promptContentComplete := boolValue(raw["contentComplete"])
-		promptSafeForFileWrite := boolValue(raw["safeForFileWrite"])
-		promptExtractionRequired := false
-		if contentLimit > 0 && len(content) > contentLimit {
-			promptContentComplete = false
-			promptSafeForFileWrite = false
-			promptExtractionRequired = true
-		}
+		promptContentComplete := false
+		promptSafeForFileWrite := false
+		promptExtractionRequired := true
 		if boolValue(raw["redacted"]) || boolValue(raw["truncated"]) || boolValue(raw["isBinary"]) {
 			promptContentComplete = false
 			promptSafeForFileWrite = false
@@ -2428,6 +2448,7 @@ func availableTargetSnapshotsPromptSummary(input map[string]any, snapshotBudget 
 		}
 		item := map[string]any{
 			"targetRef":                targetRef,
+			"snapshotRef":              promptTargetSnapshotRef(raw),
 			"contentHash":              contentHash,
 			"baseHash":                 strings.TrimSpace(stringValue(firstNonNilValue(raw["baseHash"], raw["contentHash"]))),
 			"contentComplete":          boolValue(raw["contentComplete"]),

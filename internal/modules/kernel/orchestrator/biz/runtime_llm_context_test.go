@@ -27,6 +27,9 @@ func TestLLMContextSubsystemUsesStableCompactionRules(t *testing.T) {
 	if len(targets) != 1 || targets[0]["targetRef"] != "main.go" {
 		t.Fatalf("targetSnapshots = %+v, want compact repair target snapshot", targets)
 	}
+	if targets[0]["content"] != nil || targets[0]["contentPreview"] != nil {
+		t.Fatalf("targetSnapshots = %+v, want metadata-only target snapshot", targets)
+	}
 
 	output := llmContext.compactStepOutput(map[string]any{
 		"stderr": strings.Repeat("failure\n", 1024),
@@ -87,8 +90,20 @@ func TestCompactLLMContextDropsHeavyTransportFields(t *testing.T) {
 	}
 	if targets := mapSliceFromValue(actionPackage["targetSnapshots"]); len(targets) != 1 || targets[0]["targetRef"] != "main.go" {
 		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want compact target snapshot", actionPackage["targetSnapshots"])
-	} else if got, want := stringFromMap(targets[0], "content"), strings.TrimSpace(largeRepairContent); got != want {
-		t.Fatalf("repairActionPackage.targetSnapshots[0].content length = %d, want untruncated safe target length %d", len(got), len(want))
+	} else {
+		target := targets[0]
+		if target["content"] != nil || target["contentPreview"] != nil {
+			t.Fatalf("repairActionPackage.targetSnapshots[0] = %#v, want metadata-only snapshot", target)
+		}
+		if target["contentHash"] != "hash-main" || target["contentComplete"] != true || target["safeForFileWrite"] != true {
+			t.Fatalf("repairActionPackage.targetSnapshots[0] = %#v, want retained snapshot safety metadata", target)
+		}
+		if ref := stringFromMap(target, "snapshotRef"); ref != "snapshot://target/main.go#hash-main" {
+			t.Fatalf("snapshotRef = %q, want synthesized stable ref", ref)
+		}
+		if target["contentOmitted"] != true || int64FromValue(target["contentBytes"]) != int64(len([]byte(strings.TrimSpace(largeRepairContent)))) {
+			t.Fatalf("repairActionPackage.targetSnapshots[0] = %#v, want omitted body metadata", target)
+		}
 	}
 
 	output := compactStepOutputForLLMContext(map[string]any{

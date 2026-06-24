@@ -2010,7 +2010,7 @@ func TestRuntimeAdapterRedactsOutboundProviderRequest(t *testing.T) {
 	}
 }
 
-func TestRuntimeAdapterPreservesSafeRepairSnapshotContentInPrompt(t *testing.T) {
+func TestRuntimeAdapterPreservesSafeRepairSnapshotMetadataInPrompt(t *testing.T) {
 	provider := &staticProvider{payload: []byte(`{"completionState":"failed","thoughtSummary":"assessed","dodAssessment":{"summary":"not enough evidence"}}`)}
 	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{ID: "test", Model: "model"}, provider)
 	safeContent := "package main\n\nconst APIKey = \"test-key\"\n"
@@ -2045,11 +2045,27 @@ func TestRuntimeAdapterPreservesSafeRepairSnapshotContentInPrompt(t *testing.T) 
 		t.Fatalf("ExecuteRuntimeStep error = %v", err)
 	}
 	joined := promptContextText(provider.request.PromptContext)
-	if !strings.Contains(joined, "\"content\":\"package main\\n\\nconst APIKey = \\\"test-key\\\"\\n\"") {
-		t.Fatalf("promptContext = %s, want exact safe repair snapshot content", joined)
+	for _, want := range []string{
+		`"targetRef":"main_test.go"`,
+		`"contentHash":"sha256-safe"`,
+		`"snapshotRef":"snapshot://target/main_test.go#sha256-safe"`,
+		`"contentOmitted":true`,
+		`"promptContentComplete":false`,
+		`"promptSafeForFileWrite":false`,
+		`"promptExtractionRequired":true`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("promptContext = %s, want repair snapshot metadata %s", joined, want)
+		}
 	}
-	if strings.Contains(joined, "const APIKey = [REDACTED]") {
-		t.Fatalf("promptContext = %s, should not redact safe current repair snapshot content", joined)
+	for _, leaked := range []string{
+		`"content":"package main`,
+		`const APIKey = \"test-key\"`,
+		`const APIKey = [REDACTED]`,
+	} {
+		if strings.Contains(joined, leaked) {
+			t.Fatalf("promptContext = %s, should omit safe repair snapshot body %q by default", joined, leaked)
+		}
 	}
 }
 

@@ -1850,9 +1850,11 @@ func TestBuildProviderPromptMessagesMarksTruncatedRepairSnapshotUnsafe(t *testin
 		t.Fatalf("missing repair action package section; sections=%+v", promptContextSectionIDsForTest(context))
 	}
 	for _, want := range []string{
-		`"contentTruncatedForPrompt":true`,
-		`"contentComplete":false`,
-		`"safeForFileWrite":false`,
+		`"contentOmitted":true`,
+		`"snapshotRef":"snapshot://target/target.txt#sha256-target"`,
+		`"promptContentComplete":false`,
+		`"promptSafeForFileWrite":false`,
+		`"promptExtractionRequired":true`,
 		`"promptSnapshotContentIncomplete":true`,
 		`"mustNotUsePromptSnapshotForCompleteFileWrite":true`,
 		`"directCompleteFileWriteFromPromptSnapshotAllowed":false`,
@@ -1866,7 +1868,8 @@ func TestBuildProviderPromptMessagesMarksTruncatedRepairSnapshotUnsafe(t *testin
 	}
 	if strings.Contains(repair.Content, `"mustPatchDirectlyFromProvidedSnapshot":true`) ||
 		strings.Contains(repair.Content, `"directCompleteFileWriteFromPromptSnapshot":true`) ||
-		strings.Contains(repair.Content, `"safeForFileWrite":true`) {
+		strings.Contains(repair.Content, `"content":"`) ||
+		strings.Contains(repair.Content, `"contentView":"complete"`) {
 		t.Fatalf("repair prompt retained unsafe complete snapshot contract: %s", repair.Content)
 	}
 
@@ -1933,13 +1936,16 @@ func TestBuildProviderPromptMessagesUsesProviderProfileSnapshotBudget(t *testing
 		t.Fatalf("missing repair action package section; sections=%+v", promptContextSectionIDsForTest(context))
 	}
 	if strings.Contains(repair.Content, "contentTruncatedForPrompt") ||
-		strings.Contains(repair.Content, "promptSnapshotContentIncomplete") {
-		t.Fatalf("repair prompt unexpectedly truncated provider-budgeted snapshot: %s", repair.Content)
+		strings.Contains(repair.Content, `"content":"`) ||
+		strings.Contains(repair.Content, `"contentView":"complete"`) {
+		t.Fatalf("repair prompt unexpectedly included provider-budgeted snapshot body: %s", repair.Content)
 	}
 	for _, want := range []string{
-		`"contentView":"complete"`,
-		`"mustUseCurrentTargetSnapshot":true`,
-		`"mustPatchDirectlyFromProvidedSnapshot":true`,
+		`"contentOmitted":true`,
+		`"snapshotRef":"snapshot://target/target.txt#sha256-target"`,
+		`"promptSnapshotContentIncomplete":true`,
+		`"mustUseCurrentTargetSnapshot":false`,
+		`"mustPatchDirectlyFromProvidedSnapshot":false`,
 	} {
 		if !strings.Contains(repair.Content, want) {
 			t.Fatalf("repair prompt missing %q: %s", want, repair.Content)

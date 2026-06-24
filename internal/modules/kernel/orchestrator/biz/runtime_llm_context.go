@@ -83,6 +83,8 @@ func compactRepairActionTargetSnapshotsForLLMContext(items []map[string]any) []m
 		next := map[string]any{}
 		for _, key := range []string{
 			"targetRef",
+			"snapshotRef",
+			"payloadRef",
 			"exists",
 			"contentHash",
 			"contentComplete",
@@ -99,22 +101,60 @@ func compactRepairActionTargetSnapshotsForLLMContext(items []map[string]any) []m
 				next[key] = compactLLMContextValue(value, 1)
 			}
 		}
+		if _, ok := next["snapshotRef"]; !ok {
+			if ref := compactTargetSnapshotRef(item); ref != "" {
+				next["snapshotRef"] = ref
+			}
+		}
 		content := strings.TrimSpace(stringFromMap(item, "content"))
-		if content != "" && !containsRuntimeRedactionMarker(content) &&
-			boolValue(item["contentComplete"]) && boolValue(item["safeForFileWrite"]) &&
-			!boolValue(item["redacted"]) && !boolValue(item["truncated"]) && !boolValue(item["isBinary"]) &&
-			len(content) <= maxPatchRepairSnapshotBytes {
-			next["content"] = content
-		} else if preview := strings.TrimSpace(stringFromMap(item, "contentPreview")); preview != "" && !containsRuntimeRedactionMarker(preview) {
-			next["contentPreview"] = truncateLLMContextString(preview)
-		} else if content != "" && !containsRuntimeRedactionMarker(content) {
-			next["contentPreview"] = truncateLLMContextString(content)
+		preview := strings.TrimSpace(stringFromMap(item, "contentPreview"))
+		if content != "" || preview != "" {
+			next["contentOmitted"] = true
+			next["contentOmittedReason"] = "target snapshot body is available only through snapshotRef or an explicit targeted read"
+			if content != "" {
+				next["contentBytes"] = len([]byte(content))
+			} else {
+				next["contentPreviewBytes"] = len([]byte(preview))
+			}
 		}
 		if len(next) > 0 {
 			ret = append(ret, next)
 		}
 	}
 	return ret
+}
+
+func compactTargetSnapshotRef(item map[string]any) string {
+	if len(item) == 0 {
+		return ""
+	}
+	for _, key := range []string{"snapshotRef", "payloadRef", "sourceRef"} {
+		if ref := strings.TrimSpace(stringFromMap(item, key)); ref != "" {
+			return ref
+		}
+	}
+	targetRef := strings.TrimSpace(stringFromMap(item, "targetRef"))
+	contentHash := strings.TrimSpace(stringFromMap(item, "contentHash"))
+	if targetRef == "" || contentHash == "" {
+		return ""
+	}
+	return "snapshot://target/" + compactSnapshotRefComponent(targetRef) + "#" + compactSnapshotRefComponent(contentHash)
+}
+
+func compactSnapshotRefComponent(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(
+		" ", "%20",
+		"#", "%23",
+		"?", "%3F",
+		"\n", "",
+		"\r", "",
+		"\t", "%09",
+	)
+	return replacer.Replace(value)
 }
 
 func compactReplanContinuationForRuntimeContext(input map[string]any) map[string]any {
