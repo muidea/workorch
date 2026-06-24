@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -294,6 +295,75 @@ func TestRunExecutionContextPackageIncludesProcessEvidenceTimeline(t *testing.T)
 	}
 	if len(mapFromValue(current.Input[stepInputKeyCurrentProgressDigest])) == 0 {
 		t.Fatalf("top-level currentProgressDigest missing from LLM step input: %+v", current.Input)
+	}
+}
+
+func TestProcessEvidenceTimelineUsesRecentCompleteWindowAndCompactHistory(t *testing.T) {
+	run := &runmodel.Run{ID: "run-process-history-compact", WorkspaceID: "ws-process-history-compact"}
+	steps := make([]*runmodel.Step, 0, maxLLMContextSliceItems+5)
+	for idx := 0; idx < maxLLMContextSliceItems+5; idx++ {
+		state := common.StepStateCompleted
+		output := map[string]any{
+			"summary": strings.Repeat("historical payload ", 80),
+		}
+		if idx == 3 {
+			state = common.StepStateFailed
+			output = map[string]any{
+				failureOutputKeyClass:     failureClassRuntime,
+				failureOutputKeySignature: "class=runtime_failed|kind=runtime_step|target=historical",
+				"error":                   "historical failure",
+			}
+		}
+		steps = append(steps, &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("run-process-history-compact/step-%02d", idx)),
+			RunID: run.ID,
+			Kind:  "runtime/step",
+			State: state,
+			Input: map[string]any{
+				stepInputKeyRuntimeStage: runtimeStageExecution,
+			},
+			Output: output,
+		})
+	}
+
+	timeline := processEvidenceTimelineFromRunSteps(run, steps, "")
+	if len(timeline) != maxLLMContextSliceItems {
+		t.Fatalf("timeline length = %d, want %d: %+v", len(timeline), maxLLMContextSliceItems, timeline)
+	}
+	history := timeline[0]
+	if history["summaryKind"] != "compact_history" || history["historicalOnly"] != true {
+		t.Fatalf("history summary = %+v, want compact historical marker", history)
+	}
+	if history["itemCount"] != 6 {
+		t.Fatalf("history itemCount = %+v, want 6 older items", history["itemCount"])
+	}
+	if refs := stringSliceFromValue(history["sourceRefs"]); len(refs) != 6 ||
+		refs[0] != "step://run-process-history-compact/step-00" ||
+		refs[5] != "step://run-process-history-compact/step-05" {
+		t.Fatalf("history refs = %+v, want older source refs", history["sourceRefs"])
+	}
+	if latestFailure := mapFromValue(history["latestFailure"]); latestFailure["stepId"] != "run-process-history-compact/step-03" ||
+		latestFailure["failureClass"] != failureClassRuntime {
+		t.Fatalf("latestFailure = %+v, want compact historical failure", latestFailure)
+	}
+	if _, ok := history["output"]; ok {
+		t.Fatalf("history summary leaked raw output: %+v", history)
+	}
+	if timeline[1]["stepId"] != "run-process-history-compact/step-06" ||
+		timeline[len(timeline)-1]["stepId"] != "run-process-history-compact/step-24" {
+		t.Fatalf("recent timeline bounds = first %+v last %+v, want recent complete window", timeline[1], timeline[len(timeline)-1])
+	}
+	for idx, item := range timeline {
+		if item["order"] != idx+1 {
+			t.Fatalf("timeline[%d] order = %+v, want %d", idx, item["order"], idx+1)
+		}
+	}
+	compacted := compactProcessEvidenceTimelineForRuntimeContext(timeline)
+	compactedHistory := compacted[0]
+	if compactedHistory["summaryKind"] != "compact_history" ||
+		len(stringSliceFromValue(compactedHistory["sourceRefs"])) != 6 ||
+		len(mapFromValue(compactedHistory["latestFailure"])) == 0 {
+		t.Fatalf("compacted history = %+v, want retained refs and latest failure", compactedHistory)
 	}
 }
 

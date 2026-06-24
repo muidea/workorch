@@ -68,6 +68,7 @@ Related:
 - [S8.5 SSE Reconnect And Last Event ID](./goal-dod-nextaction-s8-5-sse-reconnect-last-event-id.md)
 - [S8.6 Decision And Approval View Regression](./goal-dod-nextaction-s8-6-decision-approval-view-regression.md)
 - [S9.1 Projection Readmodel First](./goal-dod-nextaction-s9-1-projection-readmodel-first.md)
+- [S9.2 History Recent Compact Refs](./goal-dod-nextaction-s9-2-history-recent-compact-refs.md)
 
 ## Purpose
 

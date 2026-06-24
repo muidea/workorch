@@ -506,6 +506,11 @@ func compactProcessEvidenceTimelineForRuntimeContext(input []map[string]any) []m
 			"targetScope",
 			"failureTargetScope",
 			"summary",
+			"summaryKind",
+			"historicalOnly",
+			"itemCount",
+			"firstSourceRef",
+			"lastSourceRef",
 			"inputSummary",
 			"failureClass",
 			"failureSignature",
@@ -521,6 +526,14 @@ func compactProcessEvidenceTimelineForRuntimeContext(input []map[string]any) []m
 		}
 		if refs := stringSliceFromValue(item["evidenceRefs"]); len(refs) > 0 {
 			next["evidenceRefs"] = refs
+		}
+		if refs := stringSliceFromValue(item["sourceRefs"]); len(refs) > 0 {
+			next["sourceRefs"] = limitedStrings(refs, maxLLMContextSliceItems)
+		}
+		for _, key := range []string{"stateCounts", "kindCounts", "stageCounts", "latestFailure"} {
+			if value, ok := item[key]; ok && value != nil {
+				next[key] = compactLLMContextValue(value, 1)
+			}
 		}
 		if output := mapFromValue(item["output"]); len(output) > 0 {
 			next["output"] = compactFailureStepOutputForRuntimeContext(output)

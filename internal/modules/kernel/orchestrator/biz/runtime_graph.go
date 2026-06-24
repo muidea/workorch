@@ -2340,17 +2340,126 @@ func processEvidenceTimelineFromRunSteps(run *runModel.Run, steps []*runModel.St
 		return nil
 	}
 	selected := candidates
+	var historicalSummary map[string]any
 	if len(candidates) > maxLLMContextSliceItems {
-		selected = prioritizedRunEvidenceSummarySteps(candidates, maxLLMContextSliceItems)
+		recentLimit := maxLLMContextSliceItems - 1
+		historical := candidates[:len(candidates)-recentLimit]
+		selected = candidates[len(candidates)-recentLimit:]
+		historicalSummary = compactHistoricalProcessEvidenceTimelineSummary(run, historical)
 	}
-	items := make([]map[string]any, 0, min(len(selected), maxLLMContextSliceItems))
+	items := make([]map[string]any, 0, min(len(selected)+1, maxLLMContextSliceItems))
+	if len(historicalSummary) > 0 {
+		historicalSummary["order"] = 1
+		items = append(items, historicalSummary)
+	}
+	orderOffset := len(items)
 	for idx, step := range selected {
-		item := processEvidenceTimelineItem(run, step, idx+1)
+		item := processEvidenceTimelineItem(run, step, idx+1+orderOffset)
 		if len(item) > 0 {
 			items = append(items, item)
 		}
 	}
 	return items
+}
+
+func compactHistoricalProcessEvidenceTimelineSummary(run *runModel.Run, steps []*runModel.Step) map[string]any {
+	if len(steps) == 0 {
+		return nil
+	}
+	summary := map[string]any{
+		"sourceRef":      processEvidenceHistorySourceRef(run),
+		"summaryKind":    "compact_history",
+		"actionKind":     "history_summary",
+		"historicalOnly": true,
+		"itemCount":      len(steps),
+	}
+	stateCounts := map[string]int{}
+	kindCounts := map[string]int{}
+	stageCounts := map[string]int{}
+	sourceRefs := []string{}
+	var firstRef, lastRef string
+	var latestFailure map[string]any
+	for _, step := range steps {
+		if step == nil || step.ID == "" {
+			continue
+		}
+		ref := "step://" + string(step.ID)
+		if firstRef == "" {
+			firstRef = ref
+		}
+		lastRef = ref
+		sourceRefs = append(sourceRefs, ref)
+		if state := strings.TrimSpace(string(step.State)); state != "" {
+			stateCounts[state]++
+		}
+		if kind := strings.TrimSpace(step.Kind); kind != "" {
+			kindCounts[kind]++
+		}
+		if stage := processEvidenceStage(step); stage != "" {
+			stageCounts[stage]++
+		}
+		if step.State == common.StepStateFailed {
+			latestFailure = compactHistoricalProcessEvidenceFailure(step)
+		}
+	}
+	if firstRef != "" {
+		summary["firstSourceRef"] = firstRef
+	}
+	if lastRef != "" {
+		summary["lastSourceRef"] = lastRef
+	}
+	if refs := limitedStrings(sourceRefs, maxLLMContextSliceItems); len(refs) > 0 {
+		summary["sourceRefs"] = refs
+	}
+	if len(stateCounts) > 0 {
+		summary["stateCounts"] = stateCounts
+	}
+	if len(kindCounts) > 0 {
+		summary["kindCounts"] = kindCounts
+	}
+	if len(stageCounts) > 0 {
+		summary["stageCounts"] = stageCounts
+	}
+	if len(latestFailure) > 0 {
+		summary["latestFailure"] = latestFailure
+	}
+	summary["summary"] = "Older process evidence is compacted; use sourceRefs for lineage and recent detailed timeline for current action."
+	return summary
+}
+
+func processEvidenceHistorySourceRef(run *runModel.Run) string {
+	if run == nil || run.ID == "" {
+		return "history://run/process-evidence"
+	}
+	return "history://runs/" + string(run.ID) + "/process-evidence"
+}
+
+func compactHistoricalProcessEvidenceFailure(step *runModel.Step) map[string]any {
+	if step == nil {
+		return nil
+	}
+	ret := map[string]any{
+		"sourceRef": "step://" + string(step.ID),
+		"stepId":    string(step.ID),
+		"state":     string(step.State),
+	}
+	if step.Kind != "" {
+		ret["kind"] = step.Kind
+	}
+	if class := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)); class != "" {
+		ret["failureClass"] = class
+	}
+	if signature := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature)); signature != "" {
+		ret["failureSignature"] = compactLLMContextString(signature)
+	}
+	if reason := processEvidenceFailureReason(step.Output); reason != "" {
+		ret["failureReason"] = reason
+	}
+	if targetScope := processEvidenceTargetScope(step); targetScope != "" {
+		ret["targetScope"] = targetScope
+		ret["failureTargetScope"] = targetScope
+	}
+	return ret
 }
 
 func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order int) map[string]any {
