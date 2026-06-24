@@ -46,21 +46,30 @@ type workspaceDisplayState struct {
 // Server projection remains authoritative; local fields only protect UI
 // command intent while projection refresh is catching up.
 type workspaceRuntimeState struct {
-	Overview          backend.WorkspaceInfo
-	HasOverview       bool
-	Projection        backend.ProjectionInfo
-	Display           workspaceDisplayState
-	HasDisplay        bool
-	LastRevision      int64
-	RevisionGapCount  int64
-	LastRevisionGap   int64
-	ContextRequestSeq int64
-	ContextInFlight   bool
-	ContextPending    bool
-	ResolvedTickets   map[common.TicketID]struct{}
-	ResolvedApprovals map[common.ApprovalID]struct{}
-	OptimisticRunID   common.RunID
+	Overview           backend.WorkspaceInfo
+	HasOverview        bool
+	Projection         backend.ProjectionInfo
+	PromptMode         string
+	PromptModeRevision int64
+	Display            workspaceDisplayState
+	HasDisplay         bool
+	LastRevision       int64
+	RevisionGapCount   int64
+	LastRevisionGap    int64
+	ContextRequestSeq  int64
+	ContextInFlight    bool
+	ContextPending     bool
+	ResolvedTickets    map[common.TicketID]struct{}
+	ResolvedApprovals  map[common.ApprovalID]struct{}
+	OptimisticRunID    common.RunID
 }
+
+const (
+	workspacePromptModeWorkspace = "workspace"
+	workspacePromptModeRunning   = "running"
+	workspacePromptModeDecision  = "decision"
+	workspacePromptModeApproval  = "approval"
+)
 
 func (m *AppModel) ensureWorkspaceRuntimeState(workspaceID string) *workspaceRuntimeState {
 	workspaceID = strings.TrimSpace(workspaceID)
@@ -108,6 +117,20 @@ func projectionRevision(input backend.ProjectionInfo) int64 {
 	return 0
 }
 
+func viewModelRevision(input backend.WorkspaceViewModelInfo) int64 {
+	for _, value := range []int64{
+		input.Revision,
+		input.WorkspaceRevision,
+		input.ProjectedSourceRevision,
+		input.SourceEventRevision,
+	} {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
 func mergeProjectionInfo(current, incoming backend.ProjectionInfo) backend.ProjectionInfo {
 	if projectionRevision(incoming) == 0 && incoming.GlobalRevision == 0 && incoming.State == "" {
 		return current
@@ -123,6 +146,76 @@ func (m *AppModel) activeWorkspaceOverview() *backend.WorkspaceInfo {
 		return &entry.Overview
 	}
 	return findWorkspace(m.workspaces, m.activeWorkspaceID)
+}
+
+func promptModeFromWorkspaceOverview(ws *backend.WorkspaceInfo) string {
+	if ws == nil {
+		return workspacePromptModeWorkspace
+	}
+	switch ws.State {
+	case common.WorkspaceStateWaitingDecision:
+		if ws.BlockingTicketID != "" {
+			return workspacePromptModeDecision
+		}
+	case common.WorkspaceStateBlocked:
+		if ws.BlockingApprovalID != "" {
+			return workspacePromptModeApproval
+		}
+	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
+		return workspacePromptModeRunning
+	}
+	return workspacePromptModeWorkspace
+}
+
+func normalizePromptMode(mode string) string {
+	switch strings.TrimSpace(mode) {
+	case workspacePromptModeRunning, workspacePromptModeDecision, workspacePromptModeApproval:
+		return strings.TrimSpace(mode)
+	default:
+		return workspacePromptModeWorkspace
+	}
+}
+
+func (m *AppModel) applyWorkspaceViewModel(viewModel backend.WorkspaceViewModelInfo) {
+	if strings.TrimSpace(viewModel.PromptMode) == "" {
+		return
+	}
+	workspaceID := strings.TrimSpace(string(viewModel.WorkspaceID))
+	if workspaceID == "" {
+		workspaceID = m.activeWorkspaceID
+	}
+	if workspaceID == "" {
+		return
+	}
+	entry := m.ensureWorkspaceRuntimeState(workspaceID)
+	if entry == nil {
+		return
+	}
+	revision := viewModelRevision(viewModel)
+	if entry.PromptModeRevision > 0 && revision > 0 && revision < entry.PromptModeRevision {
+		return
+	}
+	entry.PromptMode = normalizePromptMode(viewModel.PromptMode)
+	entry.PromptModeRevision = revision
+}
+
+func (m *AppModel) activeWorkspacePromptMode() string {
+	entry := m.workspaceRuntimeState(m.activeWorkspaceID)
+	ws := m.activeWorkspaceOverview()
+	overviewMode := promptModeFromWorkspaceOverview(ws)
+	overviewRevision := int64(0)
+	if ws != nil {
+		overviewRevision = projectionRevision(ws.Projection)
+	}
+	if overviewMode != workspacePromptModeWorkspace && (overviewRevision == 0 || entry == nil || overviewRevision >= entry.PromptModeRevision) {
+		return overviewMode
+	}
+	if entry != nil && entry.PromptMode != "" {
+		if overviewRevision == 0 || entry.PromptModeRevision >= overviewRevision {
+			return normalizePromptMode(entry.PromptMode)
+		}
+	}
+	return overviewMode
 }
 
 func (m *AppModel) mergeWorkspaceOverview(ws backend.WorkspaceInfo) backend.WorkspaceInfo {
@@ -551,6 +644,9 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		msg.Workspace.Projection = msg.Projection
 	}
 	m.upsertWorkspace(*msg.Workspace)
+	if msg.Snapshot != nil {
+		m.applyWorkspaceViewModel(msg.Snapshot.ViewModel)
+	}
 	if msg.Decisions != nil {
 		m.decisions = append([]backend.DecisionInfo(nil), msg.Decisions...)
 	}

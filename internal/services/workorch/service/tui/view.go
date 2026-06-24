@@ -963,19 +963,13 @@ func (m AppModel) renderInput(width int) string {
 	if prompt == "none" {
 		prompt = "workspace"
 	}
-	if ws := m.activeWorkspaceOverview(); ws != nil {
-		switch ws.State {
-		case common.WorkspaceStateWaitingDecision:
-			if ws.BlockingTicketID != "" {
-				prompt += " decision"
-			}
-		case common.WorkspaceStateBlocked:
-			if ws.BlockingApprovalID != "" {
-				prompt += " approval"
-			}
-		case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
-			prompt += " running"
-		}
+	switch m.activeWorkspacePromptMode() {
+	case workspacePromptModeDecision:
+		prompt += " decision"
+	case workspacePromptModeApproval:
+		prompt += " approval"
+	case workspacePromptModeRunning:
+		prompt += " running"
 	}
 	input := m.renderInputBuffer(prompt, width)
 	if suggestions := m.renderSlashCommandSuggestions(width); suggestions != "" {

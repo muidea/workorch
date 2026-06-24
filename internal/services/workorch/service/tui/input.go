@@ -390,8 +390,8 @@ func baseSlashCommandSuggestions() []slashCommandSuggestion {
 }
 
 func (m AppModel) contextualSlashCommandSuggestions() []slashCommandSuggestion {
-	switch {
-	case m.activeWorkspaceHasDecisionBlocker():
+	switch m.activeWorkspacePromptMode() {
+	case workspacePromptModeDecision:
 		return []slashCommandSuggestion{
 			{Command: "/decision answer", Insert: "/decision answer ", Description: "answer current ticket", Contextual: true},
 			{Command: "/decision replan", Insert: "/decision replan ", Description: "request replan", Contextual: true},
@@ -399,14 +399,14 @@ func (m AppModel) contextualSlashCommandSuggestions() []slashCommandSuggestion {
 			{Command: "/decision show", Description: "show current ticket", Contextual: true},
 			{Command: "/decision list", Description: "list open tickets", Contextual: true},
 		}
-	case m.activeWorkspaceHasApprovalBlocker():
+	case workspacePromptModeApproval:
 		return []slashCommandSuggestion{
 			{Command: "/approval approve", Description: "approve current request", Contextual: true},
 			{Command: "/approval reject", Description: "reject current request", Contextual: true},
 			{Command: "/approval show", Description: "show current approval", Contextual: true},
 			{Command: "/approval list", Description: "list approvals", Contextual: true},
 		}
-	case m.activeRunID != "":
+	case workspacePromptModeRunning:
 		return []slashCommandSuggestion{
 			{Command: "/run resume", Description: "resume current run", Contextual: true},
 			{Command: "/run restart", Insert: "/run restart ", Description: "start a replacement run", Contextual: true},
@@ -419,12 +419,13 @@ func (m AppModel) contextualSlashCommandSuggestions() []slashCommandSuggestion {
 			{Command: "/result", Description: "refresh result", Contextual: true},
 			{Command: "/memory", Description: "show memory recall", Contextual: true},
 		}
-	case m.activeWorkspaceID == "":
-		return []slashCommandSuggestion{
-			{Command: "/workspace create", Insert: "/workspace create ", Description: "create workspace", Contextual: true},
-			{Command: "/workspace", Description: "select workspace", Contextual: true},
-		}
 	default:
+		if m.activeWorkspaceID == "" {
+			return []slashCommandSuggestion{
+				{Command: "/workspace create", Insert: "/workspace create ", Description: "create workspace", Contextual: true},
+				{Command: "/workspace", Description: "select workspace", Contextual: true},
+			}
+		}
 		return nil
 	}
 }

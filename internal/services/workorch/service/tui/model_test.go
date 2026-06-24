@@ -4974,6 +4974,29 @@ func TestModelLiveStateEventClearsStaleDecisionPrompt(t *testing.T) {
 	}
 }
 
+func TestModelPromptModeUsesProjectionOverLocalDecisionCache(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.workspaces = []backend.WorkspaceInfo{{
+		ID:          "ws-a",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: "run-1",
+		Projection:  backend.ProjectionInfo{WorkspaceRevision: 20},
+	}}
+	entry := m.ensureWorkspaceRuntimeState("ws-a")
+	entry.PromptMode = workspacePromptModeDecision
+	entry.PromptModeRevision = 10
+	m.activeRunID = "run-1"
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-old", WorkspaceID: "ws-a", RunID: "run-1", State: "open"}
+	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
+	m.input = "/"
+	m.inputCursor = len([]rune(m.input))
+
+	input := stripANSI(m.renderInput(120))
+	if strings.Contains(input, "decision >") || strings.Contains(input, "/decision answer") || !strings.Contains(input, "ws-a running >") {
+		t.Fatalf("prompt/suggestions used local decision cache instead of projection: %q", input)
+	}
+}
+
 func TestModelLiveRunStateEventClearsStaleDecisionPrompt(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-a", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-1", BlockingTicketID: "ticket-1"}}

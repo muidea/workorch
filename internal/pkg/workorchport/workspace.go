@@ -183,6 +183,7 @@ type WorkspaceSnapshotInfo struct {
 type WorkspaceViewModelInfo struct {
 	WorkspaceID             common.WorkspaceID
 	State                   string
+	PromptMode              string
 	Revision                int64
 	GlobalRevision          int64
 	WorkspaceRevision       int64

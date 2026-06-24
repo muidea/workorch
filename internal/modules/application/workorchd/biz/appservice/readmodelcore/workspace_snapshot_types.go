@@ -40,6 +40,7 @@ type WorkspaceSnapshot struct {
 type WorkspaceViewModel struct {
 	WorkspaceID             string                               `json:"workspaceId,omitempty"`
 	State                   string                               `json:"state,omitempty"`
+	PromptMode              string                               `json:"promptMode,omitempty"`
 	Revision                int64                                `json:"revision,omitempty"`
 	GlobalRevision          int64                                `json:"globalRevision,omitempty"`
 	WorkspaceRevision       int64                                `json:"workspaceRevision,omitempty"`

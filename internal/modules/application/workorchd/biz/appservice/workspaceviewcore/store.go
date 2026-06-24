@@ -618,6 +618,7 @@ func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, stat
 	ret := readmodelcore.WorkspaceViewModel{
 		WorkspaceID:             snapshot.Workspace.ID,
 		State:                   status.State,
+		PromptMode:              workspacePromptMode(snapshot.Workspace),
 		Revision:                revision,
 		GlobalRevision:          status.GlobalRevision,
 		WorkspaceRevision:       status.WorkspaceRevision,
@@ -650,6 +651,22 @@ func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, stat
 		}
 	}
 	return ret
+}
+
+func workspacePromptMode(workspace appmodelcore.Workspace) string {
+	switch common.WorkspaceState(workspace.State) {
+	case common.WorkspaceStateWaitingDecision:
+		if workspace.BlockingTicketID != "" {
+			return "decision"
+		}
+	case common.WorkspaceStateBlocked:
+		if workspace.BlockingApprovalID != "" {
+			return "approval"
+		}
+	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
+		return "running"
+	}
+	return "workspace"
 }
 
 func (s *Store) RunHeartbeatMetrics(now time.Time) Metrics {

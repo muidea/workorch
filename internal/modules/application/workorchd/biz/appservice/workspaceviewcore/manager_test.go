@@ -67,6 +67,7 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 		t.Fatalf("snapshot/status = %+v/%+v, want running snapshot at same revision", snapshot, snapshotStatus)
 	}
 	if snapshot.ViewModel.WorkspaceID != "ws-a" ||
+		snapshot.ViewModel.PromptMode != "running" ||
 		snapshot.ViewModel.GlobalRevision != snapshotStatus.GlobalRevision ||
 		snapshot.ViewModel.WorkspaceRevision != snapshotStatus.WorkspaceRevision ||
 		snapshot.ViewModel.Revision != snapshotStatus.WorkspaceRevision {

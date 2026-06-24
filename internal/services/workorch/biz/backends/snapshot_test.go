@@ -41,6 +41,7 @@ func TestDecodeSnapshotInfoPreservesWorkspaceViewModel(t *testing.T) {
 		"viewModel": map[string]any{
 			"workspaceId":             "ws-viewmodel",
 			"state":                   "ready",
+			"promptMode":              "running",
 			"revision":                float64(7),
 			"globalRevision":          float64(11),
 			"workspaceRevision":       float64(7),
@@ -71,6 +72,7 @@ func TestDecodeSnapshotInfoPreservesWorkspaceViewModel(t *testing.T) {
 	}
 	if snapshot == nil || snapshot.ViewModel.WorkspaceID != "ws-viewmodel" ||
 		snapshot.ViewModel.Revision != 7 ||
+		snapshot.ViewModel.PromptMode != "running" ||
 		snapshot.ViewModel.GlobalRevision != 11 ||
 		snapshot.ViewModel.WorkspaceRevision != 7 ||
 		snapshot.ViewModel.SourceEventRevision != 20 ||
