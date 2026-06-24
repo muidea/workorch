@@ -44,6 +44,9 @@ Related:
 - [S5.1 NextAction Minimal Model](./goal-dod-nextaction-s5-1-nextaction-minimal-model.md)
 - [S5.2 Pending Approval NextAction](./goal-dod-nextaction-s5-2-pending-approval-nextaction.md)
 - [S5.3 Open Decision NextAction](./goal-dod-nextaction-s5-3-open-decision-nextaction.md)
+- [S5.4 Missing Gap Baseline NextAction](./goal-dod-nextaction-s5-4-missing-gap-nextaction.md)
+- [S5.5 Missing State Change NextAction](./goal-dod-nextaction-s5-5-missing-state-change-nextaction.md)
+- [S5.6 Missing Validation NextAction](./goal-dod-nextaction-s5-6-missing-validation-nextaction.md)
 
 ## Purpose
 

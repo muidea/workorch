@@ -127,6 +127,271 @@ func TestNextActionForRunOpenDecisionRequestsDecision(t *testing.T) {
 	}
 }
 
+func TestNextActionForRunMissingGapBaselineRequestsAssessment(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-gap")
+	runID := common.RunID("run-next-action-gap")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeAssessGap || action.Stage != "gap_analysis" || action.StageMode != "baseline" {
+		t.Fatalf("next action = %+v, want assess gap", action)
+	}
+	if action.SubjectType != "run" || action.SubjectID != string(runID) {
+		t.Fatalf("next action subject = %s/%s, want run %s", action.SubjectType, action.SubjectID, runID)
+	}
+	if action.RequiredOutput["gapBaselineRequired"] != true {
+		t.Fatalf("required output = %+v, want gap baseline required", action.RequiredOutput)
+	}
+	if !stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeStateChange) {
+		t.Fatalf("forbidden actions = %+v, want state_change forbidden", action.ForbiddenActions)
+	}
+}
+
+func TestDeriveMissingGapBaselineNextActionSkipsExistingBaselineAndTerminalRuns(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-gap-rule",
+		WorkspaceID: "ws-gap-rule",
+		State:       common.RunStateRunning,
+	}
+	if action, ok := deriveMissingGapBaselineNextAction(run); !ok || action.Type != runtimemodel.NextActionTypeAssessGap {
+		t.Fatalf("derive missing gap baseline = %+v/%v, want assess_gap", action, ok)
+	}
+
+	run.ExecutionContext = map[string]any{
+		gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+	}
+	if action, ok := deriveMissingGapBaselineNextAction(run); ok || action.Type != "" {
+		t.Fatalf("derive with existing baseline = %+v/%v, want no assess_gap", action, ok)
+	}
+
+	run.State = common.RunStateCompleted
+	run.ExecutionContext = nil
+	if action, ok := deriveMissingGapBaselineNextAction(run); ok || action.Type != "" {
+		t.Fatalf("derive terminal run = %+v/%v, want no assess_gap", action, ok)
+	}
+}
+
+func TestNextActionForRunMissingStateChangeRequestsStateChange(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	coverageRepo := memory.NewCoverageWorkItemRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-state-change")
+	runID := common.RunID("run-next-action-state-change")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := coverageRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.CoverageWorkItem{
+		ID:                    "cwi-repo-state-change",
+		WorkspaceID:           workspaceID,
+		RunID:                 runID,
+		DefinitionRevision:    "rev-state-change",
+		NormalizedSourceKey:   "source-state-change",
+		RequiredEvidenceKinds: []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+		Status:                "open",
+		Metadata: map[string]any{
+			"id": "cwi-state-change",
+		},
+	}); err != nil {
+		t.Fatalf("create coverage item: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeStateChange || action.Stage != "state_change" || action.StageMode != "evidence" {
+		t.Fatalf("next action = %+v, want state_change", action)
+	}
+	if action.SubjectType != "coverage" || action.SubjectID != "cwi-state-change" {
+		t.Fatalf("next action subject = %s/%s, want coverage cwi-state-change", action.SubjectType, action.SubjectID)
+	}
+	if len(action.FocusCoverageItemIDs) != 1 || action.FocusCoverageItemIDs[0] != "cwi-state-change" {
+		t.Fatalf("focus coverage ids = %+v, want cwi-state-change", action.FocusCoverageItemIDs)
+	}
+	if !stringSliceContains(action.RequiredEvidenceKinds, runtimemodel.EvidenceKindStateChange) {
+		t.Fatalf("required evidence kinds = %+v, want state_change", action.RequiredEvidenceKinds)
+	}
+	if !stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeComplete) {
+		t.Fatalf("forbidden actions = %+v, want complete forbidden", action.ForbiddenActions)
+	}
+}
+
+func TestDeriveMissingStateChangeNextActionSkipsInactiveOrSatisfiedItems(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-state-change-rule",
+		WorkspaceID: "ws-state-change-rule",
+		State:       common.RunStateRunning,
+	}
+	items := []map[string]any{
+		{
+			"id":                    "cwi-satisfied",
+			"status":                "satisfied",
+			"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindStateChange},
+		},
+		{
+			"id":                    "cwi-validation-only",
+			"status":                "open",
+			"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindValidation},
+			"missingEvidenceKinds":  []string{runtimemodel.EvidenceKindValidation},
+		},
+	}
+	if action, ok := deriveMissingStateChangeNextAction(run, items); ok || action.Type != "" {
+		t.Fatalf("derive without state_change gap = %+v/%v, want no action", action, ok)
+	}
+
+	items = append(items, map[string]any{
+		"id":                    "cwi-state-change",
+		"status":                "open",
+		"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindStateChange},
+		"missingEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange},
+	})
+	action, ok := deriveMissingStateChangeNextAction(run, items)
+	if !ok || action.Type != runtimemodel.NextActionTypeStateChange || action.SubjectID != "cwi-state-change" {
+		t.Fatalf("derive state_change gap = %+v/%v, want cwi-state-change action", action, ok)
+	}
+
+	run.State = common.RunStateCompleted
+	if action, ok := deriveMissingStateChangeNextAction(run, items); ok || action.Type != "" {
+		t.Fatalf("derive terminal run = %+v/%v, want no action", action, ok)
+	}
+}
+
+func TestNextActionForRunMissingValidationRequestsValidation(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-validation")
+	runID := common.RunID("run-next-action-validation")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                     "cwi-validation",
+				"status":                 "open",
+				"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+				"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindStateChange: {"step-state-change"}},
+				"missingEvidenceKinds":   []string{runtimemodel.EvidenceKindValidation},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeValidate || action.Stage != "validate" || action.StageMode != "evidence" {
+		t.Fatalf("next action = %+v, want validate", action)
+	}
+	if action.SubjectType != "coverage" || action.SubjectID != "cwi-validation" {
+		t.Fatalf("next action subject = %s/%s, want coverage cwi-validation", action.SubjectType, action.SubjectID)
+	}
+	if !stringSliceContains(action.RequiredEvidenceKinds, runtimemodel.EvidenceKindValidation) {
+		t.Fatalf("required evidence kinds = %+v, want validation", action.RequiredEvidenceKinds)
+	}
+	if !stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeStateChange) {
+		t.Fatalf("forbidden actions = %+v, want state_change forbidden", action.ForbiddenActions)
+	}
+}
+
+func TestDeriveMissingValidationNextActionSkipsWhenStateChangeHasPriority(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-validation-rule",
+		WorkspaceID: "ws-validation-rule",
+		State:       common.RunStateRunning,
+	}
+	items := []map[string]any{{
+		"id":                    "cwi-both",
+		"status":                "open",
+		"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+		"missingEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+	}}
+	if action, ok := deriveMissingStateChangeNextAction(run, items); !ok || action.Type != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("derive state_change priority = %+v/%v, want state_change", action, ok)
+	}
+
+	items[0]["acceptedEvidenceByKind"] = map[string][]string{runtimemodel.EvidenceKindStateChange: {"step-state-change"}}
+	items[0]["missingEvidenceKinds"] = []string{runtimemodel.EvidenceKindValidation}
+	action, ok := deriveMissingValidationNextAction(run, items)
+	if !ok || action.Type != runtimemodel.NextActionTypeValidate || action.SubjectID != "cwi-both" {
+		t.Fatalf("derive validation gap = %+v/%v, want validate", action, ok)
+	}
+
+	items[0]["status"] = "satisfied"
+	if action, ok := deriveMissingValidationNextAction(run, items); ok || action.Type != "" {
+		t.Fatalf("derive inactive item = %+v/%v, want no action", action, ok)
+	}
+
+	run.State = common.RunStateCompleted
+	items[0]["status"] = "open"
+	if action, ok := deriveMissingValidationNextAction(run, items); ok || action.Type != "" {
+		t.Fatalf("derive terminal run = %+v/%v, want no action", action, ok)
+	}
+}
+
 func TestDeriveOpenDecisionNextActionIgnoresResolvedOrUnreferencedTicket(t *testing.T) {
 	run := &runmodel.Run{
 		ID:               "run-open-decision-rule",
