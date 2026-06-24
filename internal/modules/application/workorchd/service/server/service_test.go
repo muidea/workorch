@@ -147,6 +147,12 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 	if err := svc.Run(ctx); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
+	if routine.asyncFunctionCalls != 2 {
+		t.Fatalf("Run submitted %d background functions, want projection baseline and HTTP server only", routine.asyncFunctionCalls)
+	}
+	if routine.timerCalls != 1 {
+		t.Fatalf("Run submitted %d timers, want watchdog timer only", routine.timerCalls)
+	}
 
 	workspace, err := appservice.ReadWorkspaceWithBackend(ctx, "file", dataRoot, workspaceID)
 	if err != nil {

@@ -856,7 +856,7 @@ func TestRecoverStuckRunningRunsWithBackendFailsRunningRunWithoutContinuationChe
 	}
 }
 
-func TestRecoverStartupInactiveRunningWorkspacesWithBackendResetsWorkspaceToActive(t *testing.T) {
+func TestRecoverStartupInactiveRunningWorkspacesWithBackendResetsWorkspaceToIdleManualActivation(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	const workspaceID = "ws-startup-inactive-running"

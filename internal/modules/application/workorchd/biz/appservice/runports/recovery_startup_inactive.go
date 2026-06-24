@@ -15,7 +15,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-const StartupInactiveRunRecoveryReason = "startup inactive running run recovered: previous process has no active execution; workspace reset to active"
+const StartupInactiveRunRecoveryReason = "startup inactive running run recovered: previous process has no active execution; workspace reset to idle manual activation"
 
 func RecoverStartupInactiveRunningWorkspaceViews(ctx context.Context, hub events.Hub) ([]appmodelcore.Run, error) {
 	if hub == nil {
