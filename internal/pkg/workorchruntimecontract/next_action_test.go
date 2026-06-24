@@ -13,6 +13,8 @@ func TestNextActionNormalizedDerivesStableScopedIdentity(t *testing.T) {
 		WorkspaceID:           "ws-next-action",
 		RunID:                 "run-next-action",
 		Type:                  NextActionTypeStateChange,
+		SubjectType:           " coverage ",
+		SubjectID:             " cwi-001 ",
 		FocusCoverageItemIDs:  []common.CoverageWorkItemID{" cwi-001 ", "cwi-001", "cwi-002"},
 		RequiredEvidenceKinds: []string{" state_change ", "validation", "state_change"},
 		AllowedActions:        []string{"produce_output", "produce_output", "validate"},
@@ -34,7 +36,7 @@ func TestNextActionNormalizedDerivesStableScopedIdentity(t *testing.T) {
 	if len(action.RequiredEvidenceKinds) != 2 || action.RequiredEvidenceKinds[0] != "state_change" || action.RequiredEvidenceKinds[1] != "validation" {
 		t.Fatalf("required evidence kinds = %+v, want compact ordered kinds", action.RequiredEvidenceKinds)
 	}
-	if action.Stage != "state_change" || action.StageMode != "primary" || action.Reason != "missing required evidence" {
+	if action.SubjectType != "coverage" || action.SubjectID != "cwi-001" || action.Stage != "state_change" || action.StageMode != "primary" || action.Reason != "missing required evidence" {
 		t.Fatalf("normalized action = %+v, want trimmed stage and reason", action)
 	}
 }
@@ -79,6 +81,8 @@ func TestNextActionIdentityCanBeRebuiltFromLedgerFields(t *testing.T) {
 		WorkspaceID:           "ws-ledger",
 		RunID:                 "run-ledger",
 		Type:                  NextActionTypeAssessment,
+		SubjectType:           "coverage",
+		SubjectID:             "cwi-001",
 		FocusCoverageItemIDs:  []common.CoverageWorkItemID{"cwi-001", "cwi-002"},
 		RequiredEvidenceKinds: []string{"assessment"},
 		Stage:                 "assessment",
@@ -87,6 +91,8 @@ func TestNextActionIdentityCanBeRebuiltFromLedgerFields(t *testing.T) {
 		WorkspaceID:           "ws-ledger",
 		RunID:                 "run-ledger",
 		Type:                  NextActionTypeAssessment,
+		SubjectType:           "coverage",
+		SubjectID:             "cwi-001",
 		FocusCoverageItemIDs:  []common.CoverageWorkItemID{"cwi-001", "cwi-002"},
 		RequiredEvidenceKinds: []string{"assessment"},
 		Stage:                 "assessment",
@@ -95,5 +101,28 @@ func TestNextActionIdentityCanBeRebuiltFromLedgerFields(t *testing.T) {
 
 	if left.IdempotencyKey != right.IdempotencyKey || left.ID != right.ID {
 		t.Fatalf("rebuilt actions differ: left=%+v right=%+v", left, right)
+	}
+}
+
+func TestNextActionIdentityIncludesGovernanceSubject(t *testing.T) {
+	t.Parallel()
+
+	left := NextAction{
+		WorkspaceID: "ws-governance",
+		RunID:       "run-governance",
+		Type:        NextActionTypeRequestApproval,
+		SubjectType: "approval",
+		SubjectID:   "approval-001",
+	}.Normalized()
+	right := NextAction{
+		WorkspaceID: "ws-governance",
+		RunID:       "run-governance",
+		Type:        NextActionTypeRequestApproval,
+		SubjectType: "approval",
+		SubjectID:   "approval-002",
+	}.Normalized()
+
+	if left.IdempotencyKey == right.IdempotencyKey || left.ID == right.ID {
+		t.Fatalf("governance actions share identity: left=%+v right=%+v", left, right)
 	}
 }

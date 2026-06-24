@@ -34,6 +34,8 @@ The minimal model contains:
 - `workspaceId`
 - `runId`
 - `type`
+- `subjectType`
+- `subjectId`
 - `focusCoverageItemIds`
 - `requiredOutput`
 - `allowedActions`
@@ -60,7 +62,7 @@ Supported action types:
 Identity rules:
 
 - `workspaceId` and `runId` are part of the idempotency key.
-- action `type`, `stage`, `stageMode`, `focusCoverageItemIds` and `requiredEvidenceKinds` are part of the idempotency key.
+- action `type`, `subjectType`, `subjectId`, `stage`, `stageMode`, `focusCoverageItemIds` and `requiredEvidenceKinds` are part of the idempotency key.
 - `reason`, `requiredOutput`, `allowedActions` and `forbiddenActions` do not change identity; they are renderable contract detail.
 
 ## Acceptance

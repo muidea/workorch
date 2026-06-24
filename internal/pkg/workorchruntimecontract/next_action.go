@@ -28,6 +28,8 @@ type NextAction struct {
 	WorkspaceID           common.WorkspaceID          `json:"workspaceId"`
 	RunID                 common.RunID                `json:"runId"`
 	Type                  string                      `json:"type"`
+	SubjectType           string                      `json:"subjectType,omitempty"`
+	SubjectID             string                      `json:"subjectId,omitempty"`
 	FocusCoverageItemIDs  []common.CoverageWorkItemID `json:"focusCoverageItemIds,omitempty"`
 	RequiredOutput        map[string]any              `json:"requiredOutput,omitempty"`
 	AllowedActions        []string                    `json:"allowedActions,omitempty"`
@@ -41,6 +43,8 @@ type NextAction struct {
 
 func (a NextAction) Normalized() NextAction {
 	a.Type = normalizeNextActionType(a.Type)
+	a.SubjectType = strings.TrimSpace(a.SubjectType)
+	a.SubjectID = strings.TrimSpace(a.SubjectID)
 	a.Stage = strings.TrimSpace(a.Stage)
 	a.StageMode = strings.TrimSpace(a.StageMode)
 	a.Reason = strings.TrimSpace(a.Reason)
@@ -78,6 +82,8 @@ func StableNextActionIdempotencyKey(action NextAction) string {
 		string(action.WorkspaceID),
 		string(action.RunID),
 		action.Type,
+		strings.TrimSpace(action.SubjectType),
+		strings.TrimSpace(action.SubjectID),
 		strings.TrimSpace(action.Stage),
 		strings.TrimSpace(action.StageMode),
 		strings.Join(coverageWorkItemIDsToStrings(compactCoverageWorkItemIDs(action.FocusCoverageItemIDs)), ","),
