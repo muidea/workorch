@@ -63,14 +63,49 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	if !ok {
 		t.Fatalf("software-dev semanticCodeNavigation hint = %+v, want map", item.ContextHints["semanticCodeNavigation"])
 	}
+	if semanticNavigation["provider"] != "mcp" {
+		t.Fatalf("software-dev semanticCodeNavigation = %+v, want mcp provider", semanticNavigation)
+	}
+	if semanticNavigation["optional"] != true {
+		t.Fatalf("software-dev semanticCodeNavigation = %+v, want optional capability", semanticNavigation)
+	}
 	if semanticNavigation["evidenceStrength"] != "auxiliary" {
 		t.Fatalf("software-dev semanticCodeNavigation = %+v, want auxiliary evidence", semanticNavigation)
 	}
+	notes, ok := semanticNavigation["notes"].([]any)
+	if !ok || len(notes) == 0 {
+		t.Fatalf("software-dev semanticCodeNavigation notes = %+v, want non-empty notes", semanticNavigation["notes"])
+	}
+	assertStringListContains(t, notes, "semantic navigation is optional and must not replace build/test/lint or direct DoD evidence")
 	assertStringListContains(t, semanticNavigation["defaultMCPServerIds"].([]any), "mcp-lsp-bridge")
-	assertStringListContains(t, semanticNavigation["defaultCapabilityIds"].([]any), "mcp-lsp-bridge:tool:lsp_diagnostics")
-	assertStringListContains(t, semanticNavigation["defaultCapabilityIds"].([]any), "mcp-lsp-bridge:tool:lsp_status")
-	assertStringListContains(t, semanticNavigation["defaultCapabilityIds"].([]any), "mcp-lsp-bridge:tool:lsp_shutdown")
-	assertStringListContains(t, semanticNavigation["defaultCapabilityIds"].([]any), "mcp-lsp-bridge:tool:lsp_repair")
+	defaultCapabilities := semanticNavigation["defaultCapabilityIds"].([]any)
+	for _, want := range []string{
+		"mcp-lsp-bridge:tool:lsp_initialize",
+		"mcp-lsp-bridge:tool:lsp_sync",
+		"mcp-lsp-bridge:tool:lsp_definition",
+		"mcp-lsp-bridge:tool:lsp_hover",
+		"mcp-lsp-bridge:tool:lsp_references",
+		"mcp-lsp-bridge:tool:lsp_diagnostics",
+		"mcp-lsp-bridge:tool:lsp_status",
+		"mcp-lsp-bridge:tool:lsp_shutdown",
+		"mcp-lsp-bridge:tool:lsp_repair",
+	} {
+		assertStringListContains(t, defaultCapabilities, want)
+	}
+	capabilityCatalog, err := loadEmbeddedMCPCapabilities()
+	if err != nil {
+		t.Fatalf("loadEmbeddedMCPCapabilities: %v", err)
+	}
+	capabilityIDs := map[string]struct{}{}
+	for _, capability := range capabilityCatalog {
+		capabilityIDs[capability.ID] = struct{}{}
+	}
+	for _, raw := range defaultCapabilities {
+		id, _ := raw.(string)
+		if _, ok := capabilityIDs[id]; !ok {
+			t.Fatalf("software-dev semanticCodeNavigation capability %q missing from embedded MCP capability catalog", id)
+		}
+	}
 	assertSoftwareDevAcceptanceSlicePolicy(t, item.ContextHints)
 	assertSoftwareDevTemplateStagePolicies(t, item.ContextHints)
 	assertSoftwareDevAcceptanceDimensions(t, item.ContextHints)

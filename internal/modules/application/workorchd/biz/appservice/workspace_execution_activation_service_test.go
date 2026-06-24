@@ -2835,6 +2835,52 @@ func TestActivateWorkspaceExecutionAppliesTemplateDefaultMCPContext(t *testing.T
 	}
 }
 
+func TestActivateWorkspaceExecutionDoesNotSelectMCPWithoutTemplateOrWorkspaceDefaults(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID:           "template-no-mcp-default",
+		Name:         "No MCP Default Template",
+		ContextHints: map[string]any{},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:      "no mcp default workspace",
+		TemplateID: "template-no-mcp-default",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "run without template mcp defaults")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"no implicit mcp defaults"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	selection := contextMapFromValue(t, item.Run.ExecutionContext["mcpSelection"])
+	for _, key := range []string{"defaultMCPServerIds", "selectedMCPServerIds", "defaultCapabilityIds", "selectedCapabilityIds"} {
+		if contextStringSliceContains(selection[key], "mcp-lsp-bridge") || contextStringSliceContains(selection[key], "mcp-lsp-bridge:tool:lsp_status") {
+			t.Fatalf("mcpSelection %s = %+v, want no implicit LSP bridge selection", key, selection[key])
+		}
+	}
+	servers := contextMapSliceFromValue(t, item.Run.ExecutionContext["mcpServers"])
+	if len(servers) != 0 {
+		t.Fatalf("mcpServers = %+v, want no selected MCP servers", servers)
+	}
+}
+
 func TestActivateWorkspaceExecutionUsesUpdatedTemplateMCPDefaultWhenWorkspaceHasNoOverride(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
