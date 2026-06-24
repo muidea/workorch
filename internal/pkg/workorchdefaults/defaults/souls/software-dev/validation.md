@@ -51,6 +51,8 @@ DoD 必须逐项评估。只有证据充分时才允许标记 satisfied。
 - 当 version_control_snapshot 因引用 shell/command、file/read、file/list、LSP 或其他非 git/write commit 证据被拒绝时，必须将 version_control_snapshot 标记 failed，并在 nextActions 中明确要求先 git/read status/diff，再按实际变更执行 git/write add 和 git/write commit；若确无可提交变更，输出 zeroWork/skipped 及原因
 - 如果 runtimeCapabilities.blockKinds 未声明 git/write，不能把 version_control_snapshot 标记 satisfied，也不要建议 shell/command git commit 替代；必须输出真实治理阻塞，说明 WorkOrch runtime capability contract 缺失核心 git/write 能力，要求修复能力声明/接线后继续
 - 如果最近 state-changing 回合主要只修改 placeholder 测试、go.sum、报告文件、coverage_map 或其他辅助资源，而 Goal 对应的生产实现、入口或用户可观察行为仍未真正落地，必须将相关 Goal/DoD 条目标记为 failed，并在 nextActions 中把修复焦点重新指向生产目标文件；不能把这类辅助修补描述为“正常推进”
+- 如果最近 state-changing 回合生成 large generated file、monolithic implementation、catch-all utility 或明显混合多层职责的文件，且这导致 Goal/DoD 证据难以逐项追踪，应将相关条目标记 failed/skipped，并在 nextActions 中要求按 bounded implementation slice 拆分目标文件、测试和验证命令
+- failed/skipped 的 nextActions 必须命名下一步 bounded implementation slice、目标文件、验证命令和需要引用的 evidenceRefs；不要只写“继续完善实现”或“拆分文件”这类不可执行描述
 
 ## evidenceRefs 提示
 - build 证据：shell/command 成功输出

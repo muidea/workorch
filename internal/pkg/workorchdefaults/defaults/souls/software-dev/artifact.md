@@ -24,6 +24,8 @@
 - 不要包含 build 产物二进制文件，除非 Goal 明确要求并且 runtime artifact policy 允许；若 workspace 中存在构建产物、日志或临时文件，应说明是否属于交付范围
 - 不要包含 node_modules、vendor 等第三方代码
 - 不要只写“已完成”而缺少可验证内容
+- source 和 coverage_map 必须说明本次交付的 bounded implementation slice 边界：关闭了哪些 Goal/DoD 缺口、修改了哪些职责明确的文件、验证命令如何对应这些文件和 evidenceRefs
+- 如果存在未拆分的大文件、临时聚合模块、后续需要拆分的测试文件或职责边界风险，必须在残余风险中说明；不要把 monolithic output 描述为长期可维护交付
 
 ## 禁止
 - 不要通过 patch/apply 或 patchRequests 写入 result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等 runtime 管理的报告文件

@@ -76,6 +76,7 @@ Related:
 - [S10.1 Template Stage Policy Schema](./goal-dod-nextaction-s10-1-template-stage-policy-schema.md)
 - [S10.2 Software Dev Stage Policy Binding](./goal-dod-nextaction-s10-2-software-dev-stage-policy-binding.md)
 - [S10.3 Evidence Policy Coverage Binding](./goal-dod-nextaction-s10-3-evidence-policy-coverage-binding.md)
+- [S10.4 File And Task Granularity Soul Guidance](./goal-dod-nextaction-s10-4-file-task-granularity-soul-guidance.md)
 
 ## Purpose
 
