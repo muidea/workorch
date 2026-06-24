@@ -651,6 +651,122 @@ func TestProviderCachePlanKeepsStablePrefixAcrossStagePacketChanges(t *testing.T
 	}
 }
 
+func TestCompactSummaryIsAuxiliaryToLedgerAndStagePacket(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-summary-authority",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"executionContextPackage": map[string]any{
+				"goal":               map[string]any{"text": "stable goal"},
+				"dod":                map[string]any{"items": []any{"stable dod"}},
+				"definitionRevision": "definition-summary-authority",
+			},
+			"currentProgressDigest": map[string]any{
+				"state":              "completed",
+				"summary":            "compact summary claims completion",
+				"nextRequiredAction": "complete",
+			},
+			"coverageWorkItemContext": map[string]any{
+				"schemaVersion":        "workorch.coverageWorkItemContext.v1",
+				"definitionRevision":   "definition-summary-authority",
+				"coverageBaselineHash": "sha256-ledger",
+				"summary":              map[string]any{"open": 1, "satisfied": 0},
+				"currentFocus": map[string]any{
+					"id":                           "coverage-open-001",
+					"definitionRevision":           "definition-summary-authority",
+					"sourceScope":                  "dod",
+					"sourceRequirementId":          "dod-001",
+					"targetText":                   "stable dod",
+					"currentGap":                   "state-changing evidence still missing",
+					"status":                       "open",
+					"missingEvidenceKinds":         []string{"state_change"},
+					"acceptedEvidenceRefs":         []string{},
+					"rejectedEvidenceRefs":         []string{"rejected-summary-claim"},
+					"nextAllowedConvergenceStates": []string{"state_change"},
+				},
+				"unresolvedItems": []map[string]any{{
+					"id":                   "coverage-open-001",
+					"definitionRevision":   "definition-summary-authority",
+					"sourceScope":          "dod",
+					"sourceRequirementId":  "dod-001",
+					"targetText":           "stable dod",
+					"currentGap":           "state-changing evidence still missing",
+					"status":               "open",
+					"missingEvidenceKinds": []string{"state_change"},
+					"acceptedEvidenceRefs": []string{},
+					"rejectedEvidenceRefs": []string{"rejected-summary-claim"},
+				}},
+			},
+			"stagePacket": map[string]any{
+				"schemaVersion": "workorch.stage_packet.v1",
+				"workspaceId":   "ws-summary-authority",
+				"runId":         "run-001",
+				"stepId":        "step-001",
+				"definition":    map[string]any{"revision": "definition-summary-authority", "doDId": "dod-001"},
+				"activeStage":   "state_change",
+				"requiredOutput": map[string]any{
+					"mustProduceStateChangingEvidence": true,
+					"coverageItemId":                   "coverage-open-001",
+				},
+				"requiredEvidenceKinds": []string{"state_change"},
+				"rejectedEvidenceRefs":  []string{"rejected-summary-claim"},
+			},
+			"processEvidenceTimeline": []map[string]any{{
+				"stepId":       "run-001/summary-001",
+				"sourceRef":    "step://run-001/summary-001",
+				"summary":      "historical summary says done",
+				"evidenceRefs": []string{"rejected-summary-claim"},
+			}},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	progress, ok := promptContextSectionByID(context, "C4.current-progress")
+	if !ok {
+		t.Fatalf("missing C4.current-progress; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{"compact summary claims completion", "auxiliary_reference_only", "summary-only completion"} {
+		if !strings.Contains(progress.Content, want) {
+			t.Fatalf("current progress missing %q: %s", want, progress.Content)
+		}
+	}
+
+	coverage, ok := promptContextSectionByID(context, "C4.coverage-work-items")
+	if !ok {
+		t.Fatalf("missing C4.coverage-work-items; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{"coverage_ledger_authoritative", "coverage-open-001", "state-changing evidence still missing", "rejected-summary-claim"} {
+		if !strings.Contains(coverage.Content, want) {
+			t.Fatalf("coverage ledger signal missing %q: %s", want, coverage.Content)
+		}
+	}
+
+	packet, ok := promptContextSectionByID(context, "C3.stage-packet-contract")
+	if !ok {
+		t.Fatalf("missing C3.stage-packet-contract; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{"mustProduceStateChangingEvidence", "coverage-open-001", "requiredEvidenceKinds"} {
+		if !strings.Contains(packet.Content, want) {
+			t.Fatalf("stage packet contract missing %q: %s", want, packet.Content)
+		}
+	}
+
+	timeline, ok := promptContextSectionByID(context, "C4.process-evidence-timeline")
+	if !ok {
+		t.Fatalf("missing C4.process-evidence-timeline; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{"historical summary says done", "auxiliary_reference_only", "sourceRef_or_payloadRef_or_contentHash_required_per_event"} {
+		if !strings.Contains(timeline.Content, want) {
+			t.Fatalf("timeline missing %q: %s", want, timeline.Content)
+		}
+	}
+}
+
 func TestBuildProviderFacingPromptGroupsStablePrefixAndDynamicTail(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-provider-prefix",

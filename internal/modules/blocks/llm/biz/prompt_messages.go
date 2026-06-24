@@ -690,6 +690,7 @@ func compactRepairActionPackagePromptPayload(pkg map[string]any, snapshotBudget 
 		section["coverageWorkItemContextRef"] = context
 	}
 	section["projectionPolicy"] = "bounded C3 repair package; detailed coverage ledger is projected in C4.coverage-work-items when available"
+	section["summaryAuthorityPolicy"] = promptAuxiliarySummaryAuthorityPolicy()
 	return section
 }
 
@@ -1229,6 +1230,9 @@ func currentProgressSignalPayload(input map[string]any, snapshotBudget promptSna
 			payload["exitCriteria"] = budgetProviderValue(value, 0, 768, 6, 12, 2)
 		}
 	}
+	if len(payload) > 0 {
+		payload["summaryAuthorityPolicy"] = promptAuxiliarySummaryAuthorityPolicy()
+	}
 	return payload
 }
 
@@ -1251,6 +1255,7 @@ func coverageWorkItemSignalPayload(input map[string]any) map[string]any {
 		return nil
 	}
 	payload["projectionPolicy"] = "dynamic C4 context; use currentFocus and unresolvedItems as convergence targets, do not rewrite formal Goal or DoD; missing evidence binding means the runtime ledger still needs accepted evidence refs, not that matching evidence is absent from history or memory"
+	payload["ledgerAuthorityPolicy"] = "coverage_ledger_authoritative_for_current_gap_status_evidence_refs_and_completion"
 	return payload
 }
 
@@ -1584,10 +1589,11 @@ func compactProcessEvidenceTimelineSignal(timeline []map[string]any) map[string]
 		return nil
 	}
 	out := map[string]any{
-		"schemaVersion":      "workorch.c4.processEvidenceTimeline.v1",
-		"totalEvents":        len(timeline),
-		"omittedMiddleCount": omittedMiddle,
-		"retentionPolicy":    "preserve first event and most recent events; compact bulky outputs into diagnostic summaries; retain omitted refs for audit",
+		"schemaVersion":          "workorch.c4.processEvidenceTimeline.v1",
+		"totalEvents":            len(timeline),
+		"omittedMiddleCount":     omittedMiddle,
+		"retentionPolicy":        "preserve first event and most recent events; compact bulky outputs into diagnostic summaries; retain omitted refs for audit",
+		"summaryAuthorityPolicy": promptAuxiliarySummaryAuthorityPolicy(),
 		"sourceRefValidation": map[string]any{
 			"policy":             "sourceRef_or_payloadRef_or_contentHash_required_per_event",
 			"checkedEvents":      len(selected),
@@ -2030,6 +2036,9 @@ func memorySignalPayload(input map[string]any) map[string]any {
 			payload["selectedContext"] = selected
 		}
 	}
+	if len(payload) > 0 {
+		payload["summaryAuthorityPolicy"] = promptAuxiliarySummaryAuthorityPolicy()
+	}
 	return payload
 }
 
@@ -2050,7 +2059,18 @@ func cacheAwareSelectedContextMemorySignal(selected map[string]any) map[string]a
 		return nil
 	}
 	summary["cacheability"] = "current_decision_reference"
+	summary["summaryAuthorityPolicy"] = promptAuxiliarySummaryAuthorityPolicy()
 	return summary
+}
+
+func promptAuxiliarySummaryAuthorityPolicy() map[string]any {
+	return map[string]any{
+		"role":               "auxiliary_reference_only",
+		"mustNotOverride":    []string{"stagePacket", "coverageWorkItemContext", "requiredOutput", "acceptedEvidenceRefs", "rejectedEvidenceRefs"},
+		"ledgerAuthority":    "coverage ledger and StagePacket define current convergence state, required output, evidence gaps and completion",
+		"supportRequirement": "summary claims require sourceRef, payloadRef, contentHash or evidenceRefs before use as supporting context",
+		"completionPolicy":   "summary-only completion or progress claims cannot mark coverage satisfied",
+	}
 }
 
 func cacheAwareMemoryRetrievalSummary(retrieval map[string]any) map[string]any {
