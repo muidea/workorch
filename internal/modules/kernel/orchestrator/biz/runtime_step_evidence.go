@@ -237,7 +237,10 @@ func (o *RuntimeOrchestrator) recordValidationResult(
 		if err != common.ErrConflict {
 			return err
 		}
-		return o.evidence.ValidationResults.Update(ctx, item)
+		if err := o.evidence.ValidationResults.Update(ctx, item); err != nil {
+			return err
+		}
+		return o.recordValidationEvidenceRecord(ctx, run, item)
 	}
-	return nil
+	return o.recordValidationEvidenceRecord(ctx, run, item)
 }

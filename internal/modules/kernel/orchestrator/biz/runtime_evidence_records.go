@@ -10,8 +10,10 @@ import (
 )
 
 const (
-	evidenceRecordSourceTypePatch      = "patch"
-	evidenceRecordSubjectWorkspaceItem = "workspace_target"
+	evidenceRecordSourceTypePatch            = "patch"
+	evidenceRecordSourceTypeValidationResult = "validation_result"
+	evidenceRecordSubjectWorkspaceItem       = "workspace_target"
+	evidenceRecordSubjectRuntimeStep         = "runtime_step"
 )
 
 func (p *patchSubsystem) recordAcceptedStateChangeEvidenceForPatch(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, patch *runModel.Patch) error {
@@ -79,6 +81,92 @@ func acceptedStateChangeEvidenceRecordForPatch(run *runModel.Run, step *runModel
 	}
 }
 
+func (o *RuntimeOrchestrator) recordValidationEvidenceRecord(ctx context.Context, run *runModel.Run, validation *runModel.ValidationResult) error {
+	if o == nil || o.evidence.EvidenceRecords == nil || run == nil || validation == nil {
+		return nil
+	}
+	record := evidenceRecordForValidationResult(run, validation)
+	if record == nil {
+		return common.ErrInvalidArgument
+	}
+	if err := o.evidence.EvidenceRecords.Create(ctx, record); err != nil {
+		if err != common.ErrConflict {
+			return err
+		}
+		existing, getErr := o.evidence.EvidenceRecords.Get(ctx, record.ID)
+		if getErr != nil {
+			return getErr
+		}
+		record.CreatedAt = firstNonEmptyString(existing.CreatedAt, record.CreatedAt)
+		if err := o.evidence.EvidenceRecords.Update(ctx, record); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func evidenceRecordForValidationResult(run *runModel.Run, validation *runModel.ValidationResult) *orchestratormodel.EvidenceRecord {
+	if run == nil || validation == nil || validation.ID == "" {
+		return nil
+	}
+	status := evidenceStatusForValidationResult(validation.State)
+	if status == "" {
+		return nil
+	}
+	timestamp := firstNonEmptyString(strings.TrimSpace(validation.EndedAt), strings.TrimSpace(validation.StartedAt), runtimeEvidenceTimestamp())
+	metadata := map[string]any{
+		"validationResultId": string(validation.ID),
+		"validationKind":     strings.TrimSpace(validation.ValidationKind),
+		"validationState":    string(validation.State),
+		"targetRef":          strings.TrimSpace(validation.TargetRef),
+	}
+	if validation.EvidenceRef != "" {
+		metadata["evidenceRef"] = strings.TrimSpace(validation.EvidenceRef)
+	}
+	if validation.EvidenceQuality != "" {
+		metadata["evidenceQuality"] = string(validation.EvidenceQuality)
+	}
+	if validation.EvidenceReason != "" {
+		metadata["evidenceReason"] = strings.TrimSpace(validation.EvidenceReason)
+	}
+	if validation.ZeroWork {
+		metadata["zeroWork"] = true
+	}
+	if len(validation.EvidenceTags) > 0 {
+		metadata["evidenceTags"] = append([]string(nil), validation.EvidenceTags...)
+	}
+	if validation.Summary != "" {
+		metadata["summary"] = strings.TrimSpace(validation.Summary)
+	}
+	return &orchestratormodel.EvidenceRecord{
+		ID:                 validationEvidenceRecordID(validation.ID),
+		WorkspaceID:        firstNonEmptyWorkspaceID(validation.WorkspaceID, run.WorkspaceID),
+		RunID:              firstNonEmptyRunID(validation.RunID, run.ID),
+		StepID:             validation.StepID,
+		DefinitionRevision: strings.TrimSpace(run.DefinitionRevision),
+		Kind:               orchestratormodel.EvidenceKindValidation,
+		Status:             status,
+		SourceType:         evidenceRecordSourceTypeValidationResult,
+		SourceRef:          string(validation.ID),
+		SubjectType:        evidenceRecordSubjectRuntimeStep,
+		SubjectID:          strings.TrimSpace(firstNonEmptyString(validation.TargetRef, string(validation.StepID))),
+		CreatedAt:          timestamp,
+		UpdatedAt:          timestamp,
+		Metadata:           metadata,
+	}
+}
+
+func evidenceStatusForValidationResult(state common.ValidationResultState) string {
+	switch state {
+	case common.ValidationResultStatePassed:
+		return orchestratormodel.EvidenceStatusAccepted
+	case common.ValidationResultStateFailed, common.ValidationResultStateWarning:
+		return orchestratormodel.EvidenceStatusRejected
+	default:
+		return ""
+	}
+}
+
 func stateChangeEvidenceRecordIDForPatch(patchID common.PatchID) common.EvidenceRecordID {
 	raw := strings.TrimSpace(string(patchID))
 	base := runtimeReadableIDPart(raw)
@@ -93,6 +181,22 @@ func stateChangeEvidenceRecordIDForPatch(patchID common.PatchID) common.Evidence
 		sum = sum[:12]
 	}
 	return common.EvidenceRecordID(base + "-" + sum + "-state-change")
+}
+
+func validationEvidenceRecordID(validationID common.ValidationResultID) common.EvidenceRecordID {
+	raw := strings.TrimSpace(string(validationID))
+	base := runtimeReadableIDPart(raw)
+	if base == "" {
+		base = "validation"
+	}
+	if len(base) > 48 {
+		base = strings.Trim(base[:48], "-")
+	}
+	sum := sha256HexBytes([]byte(raw))
+	if len(sum) > 12 {
+		sum = sum[:12]
+	}
+	return common.EvidenceRecordID(base + "-" + sum + "-validation")
 }
 
 func firstNonEmptyWorkspaceID(values ...common.WorkspaceID) common.WorkspaceID {
