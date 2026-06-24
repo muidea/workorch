@@ -49,6 +49,7 @@ Related:
 - [S5.6 Missing Validation NextAction](./goal-dod-nextaction-s5-6-missing-validation-nextaction.md)
 - [S5.7 Recoverable Diagnostic NextAction](./goal-dod-nextaction-s5-7-recoverable-diagnostic-nextaction.md)
 - [S5.8 All Satisfied Complete NextAction](./goal-dod-nextaction-s5-8-all-satisfied-complete-nextaction.md)
+- [S6.1 StagePacket Minimal Model](./goal-dod-nextaction-s6-1-stage-packet-minimal-model.md)
 
 ## Purpose
 

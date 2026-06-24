@@ -84,7 +84,7 @@ func initialStepInput(run *runModel.Run) map[string]any {
 	}
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
 	input = ApplyConvergenceContract(input, contract)
-	return input
+	return attachStagePacketToStepInput(run, "", input)
 }
 
 func applyFirstRunGapBaselineStateChangingContract(input map[string]any) map[string]any {
@@ -500,7 +500,7 @@ func nextStepInputFromOutput(run *runModel.Run, previousStep *runModel.Step) map
 		}
 	}
 	inheritDirectNextLLMStage(input, previousStep)
-	return input
+	return attachStagePacketToStepInput(run, previousStep.ID, input)
 }
 
 func inheritDirectNextLLMStage(input map[string]any, previousStep *runModel.Step) {
