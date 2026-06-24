@@ -37,6 +37,9 @@ Related:
 - [S3.6 Rejected Evidence Output Guard](./goal-dod-nextaction-s3-6-rejected-evidence-output-guard.md)
 - [S4.1 CoverageItem Minimal Model Mapping](./goal-dod-nextaction-s4-1-coverage-item-minimal-model.md)
 - [S4.2 Definition Revision Coverage Ledger Initialization](./goal-dod-nextaction-s4-2-definition-revision-coverage-ledger-initialization.md)
+- [S4.3 Accepted Evidence Coverage Update](./goal-dod-nextaction-s4-3-accepted-evidence-coverage-update.md)
+- [S4.4 Missing Evidence Kind Calculation](./goal-dod-nextaction-s4-4-missing-evidence-kind-calculation.md)
+- [S4.5 Completion Gate Reads Coverage Ledger](./goal-dod-nextaction-s4-5-completion-gate-reads-coverage-ledger.md)
 
 ## Purpose
 
