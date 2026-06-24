@@ -40,6 +40,7 @@ Related:
 - [S4.3 Accepted Evidence Coverage Update](./goal-dod-nextaction-s4-3-accepted-evidence-coverage-update.md)
 - [S4.4 Missing Evidence Kind Calculation](./goal-dod-nextaction-s4-4-missing-evidence-kind-calculation.md)
 - [S4.5 Completion Gate Reads Coverage Ledger](./goal-dod-nextaction-s4-5-completion-gate-reads-coverage-ledger.md)
+- [S4.6 Coverage Summary Projection](./goal-dod-nextaction-s4-6-coverage-summary-projection.md)
 
 ## Purpose
 

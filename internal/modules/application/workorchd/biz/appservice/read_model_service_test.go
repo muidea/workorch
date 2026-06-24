@@ -4252,7 +4252,11 @@ func TestReadWorkspaceSnapshotProjectsCoverageSummaryFromActiveRun(t *testing.T)
 		WorkspaceID: workspaceID,
 		State:       common.RunStateRunning,
 		ExecutionContext: map[string]any{
-			"coverageWorkItems": []map[string]any{{"id": "full-ledger-item"}},
+			"coverageWorkItems": []map[string]any{
+				{"id": "open-item", "status": "open"},
+				{"id": "satisfied-item", "status": "satisfied"},
+				{"id": "blocked-item", "status": "blocked"},
+			},
 			"coverageWorkItemContext": map[string]any{
 				"summary":       "2 open coverage items",
 				"currentFocus":  "focus-A",
@@ -4270,7 +4274,11 @@ func TestReadWorkspaceSnapshotProjectsCoverageSummaryFromActiveRun(t *testing.T)
 	}
 	if snapshot.CoverageSummary["summary"] != "2 open coverage items" ||
 		snapshot.CoverageSummary["currentFocus"] != "focus-A" ||
-		snapshot.CoverageSummary["fullLedgerRef"] != "workorch://coverage/ledger" {
+		snapshot.CoverageSummary["fullLedgerRef"] != "workorch://coverage/ledger" ||
+		snapshot.CoverageSummary["total"] != 3 ||
+		snapshot.CoverageSummary["open"] != 1 ||
+		snapshot.CoverageSummary["satisfied"] != 1 ||
+		snapshot.CoverageSummary["blocked"] != 1 {
 		t.Fatalf("coverageSummary = %+v, want active run coverage summary", snapshot.CoverageSummary)
 	}
 	if _, ok := snapshot.CoverageSummary["coverageWorkItems"]; ok {

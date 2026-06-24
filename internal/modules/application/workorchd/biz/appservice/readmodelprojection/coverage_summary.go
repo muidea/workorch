@@ -5,21 +5,59 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func CoverageSummaryFromRunSnapshot(snapshot readmodelcore.RunSnapshot) map[string]any {
 	ctx := snapshot.CoverageWorkItemContext
-	if len(ctx) == 0 {
-		return nil
-	}
 	ret := map[string]any{}
 	for _, key := range []string{"summary", "currentFocus", "omittedCount", "fullLedgerRef"} {
 		if value, ok := ctx[key]; ok && value != nil {
 			ret[key] = value
 		}
 	}
+	for key, value := range coverageSummaryStatusCounts(snapshot.CoverageWorkItems) {
+		ret[key] = value
+	}
 	if len(ret) == 0 {
 		return nil
+	}
+	return ret
+}
+
+func coverageSummaryStatusCounts(items []map[string]any) map[string]int {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := map[string]int{}
+	for _, item := range items {
+		if len(item) == 0 {
+			continue
+		}
+		ret["total"]++
+		status := strings.ToLower(strings.TrimSpace(stringValue(item, "status")))
+		switch status {
+		case "satisfied":
+			ret["satisfied"]++
+		case "blocked":
+			ret["blocked"]++
+		case "skipped":
+			ret["skipped"]++
+		case "superseded":
+			ret["superseded"]++
+		default:
+			if runtimecontract.CoverageWorkItemStatusActive(status) {
+				ret["open"]++
+			}
+		}
+	}
+	if ret["total"] == 0 {
+		return nil
+	}
+	for _, key := range []string{"open", "satisfied", "blocked"} {
+		if _, ok := ret[key]; !ok {
+			ret[key] = 0
+		}
 	}
 	return ret
 }

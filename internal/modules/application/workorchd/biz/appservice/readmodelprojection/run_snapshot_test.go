@@ -135,6 +135,28 @@ func TestRunSnapshotFromModelsProjectsBlockingDecisionStepAndCoverage(t *testing
 	}
 }
 
+func TestCoverageSummaryFromRunSnapshotDerivesStatusCounts(t *testing.T) {
+	t.Parallel()
+
+	got := CoverageSummaryFromRunSnapshot(readmodelcore.RunSnapshot{
+		CoverageWorkItems: []map[string]any{
+			{"id": "open-item", "status": "open"},
+			{"id": "empty-status-item"},
+			{"id": "evidence-ready-item", "status": "evidence_ready"},
+			{"id": "satisfied-item", "status": "satisfied"},
+			{"id": "blocked-item", "status": "blocked"},
+			{"id": "skipped-item", "status": "skipped"},
+			{"id": "superseded-item", "status": "superseded"},
+		},
+	})
+	if got["total"] != 7 || got["open"] != 3 || got["satisfied"] != 1 || got["blocked"] != 1 || got["skipped"] != 1 || got["superseded"] != 1 {
+		t.Fatalf("CoverageSummary = %+v, want status counts", got)
+	}
+	if _, ok := got["coverageWorkItems"]; ok {
+		t.Fatalf("CoverageSummary = %+v, must not include full ledger", got)
+	}
+}
+
 func TestRunSnapshotFromModelsPrefersPersistedGapBaseline(t *testing.T) {
 	t.Parallel()
 
