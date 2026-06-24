@@ -622,6 +622,30 @@
         "zeroWork": true,
         "evidenceTags": ["software-dev", "test", "zero_work"],
         "evidenceReason": "test command completed without executing matching tests",
+        "coverageRequirements": [
+          {
+            "id": "*",
+            "scope": "dod_item",
+            "requiredEvidenceKinds": ["validation"],
+            "requireDirectEvidence": true,
+            "requireClaimEvidence": true,
+            "requireExecutableBehaviorEvidence": true,
+            "acceptedStepKinds": ["shell/command", "mcp/tool_call"],
+            "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+            "description": "DoD satisfaction claims require direct validation evidence; zero-work validation is inconclusive."
+          },
+          {
+            "id": "*",
+            "scope": "goal_coverage",
+            "requiredEvidenceKinds": ["validation"],
+            "requireDirectEvidence": true,
+            "requireClaimEvidence": true,
+            "requireExecutableBehaviorEvidence": true,
+            "acceptedStepKinds": ["shell/command", "mcp/tool_call"],
+            "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+            "description": "Goal coverage claims require direct validation evidence; zero-work validation is inconclusive."
+          }
+        ],
         "description": "Validation evidence must represent actual executed work before it can support a satisfied DoD item."
       }
     ]

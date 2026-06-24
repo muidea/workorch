@@ -75,6 +75,7 @@ Related:
 - [S9.6 Service Restart Running Recoverable](./goal-dod-nextaction-s9-6-service-restart-running-recoverable.md)
 - [S10.1 Template Stage Policy Schema](./goal-dod-nextaction-s10-1-template-stage-policy-schema.md)
 - [S10.2 Software Dev Stage Policy Binding](./goal-dod-nextaction-s10-2-software-dev-stage-policy-binding.md)
+- [S10.3 Evidence Policy Coverage Binding](./goal-dod-nextaction-s10-3-evidence-policy-coverage-binding.md)
 
 ## Purpose
 

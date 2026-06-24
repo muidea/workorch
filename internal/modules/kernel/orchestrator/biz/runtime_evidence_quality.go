@@ -29,6 +29,7 @@ type profileEvidenceKindRequirement struct {
 	Scope                             string
 	ID                                string
 	EvidenceRole                      string
+	RequiredEvidenceKinds             []string
 	AcceptedStepKinds                 []string
 	AcceptedOperations                []string
 	RejectedStepKinds                 []string
@@ -110,11 +111,14 @@ func evidenceQualityGapRequiresClaimAlignedEvidence(items []map[string]any) bool
 }
 
 func evidenceKindRequirementEvidenceKinds(requirement profileEvidenceKindRequirement) []string {
+	if kinds := compactUniqueStrings(requirement.RequiredEvidenceKinds); len(kinds) > 0 {
+		return kinds
+	}
 	ret := make([]string, 0, 2)
 	hasStateChange := false
 	hasValidation := requirement.RequireDirect || requirement.RequireExecutableBehaviorEvidence || len(requirement.AcceptedStepKinds) > 0
 	for _, kind := range requirement.AcceptedStepKinds {
-		if runtimeStepKindIsStateChangingEvidence(kind) {
+		if stepKindCanProduceStateChangingEvidence(kind) {
 			hasStateChange = true
 		}
 	}
@@ -397,46 +401,63 @@ func profileEvidenceKindRequirementsFromExecutionContext(executionContext map[st
 	}
 	executionContract := mapFromValue(executionContext["executionContract"])
 	profileContracts := mapFromValue(executionContract["profileContracts"])
-	if len(profileContracts) == 0 {
-		return nil
-	}
 	ret := make([]profileEvidenceKindRequirement, 0)
 	for _, rawProfile := range profileContracts {
 		profile := mapFromValue(rawProfile)
-		if len(profile) == 0 {
-			continue
-		}
 		for _, raw := range mapSliceFromValue(profile["evidenceRequirements"]) {
-			id := strings.TrimSpace(stringFromMap(raw, "id"))
-			if id == "" {
-				id = strings.TrimSpace(stringFromMap(raw, "dimension"))
+			if req, ok := profileEvidenceKindRequirementFromMap(raw); ok {
+				ret = append(ret, req)
 			}
-			scope := strings.TrimSpace(firstNonEmptyString(
-				stringFromMap(raw, "scope"),
-				stringFromMap(raw, "appliesTo"),
-			))
-			if id == "" || scope == "" {
-				continue
+		}
+	}
+	for _, policy := range mapSliceFromValue(executionContext["evidencePolicies"]) {
+		for _, raw := range mapSliceFromValue(firstNonNil(
+			policy["coverageRequirements"],
+			policy["coverageBindings"],
+		)) {
+			if req, ok := profileEvidenceKindRequirementFromMap(raw); ok {
+				ret = append(ret, req)
 			}
-			req := profileEvidenceKindRequirement{
-				Scope:                             scope,
-				ID:                                id,
-				EvidenceRole:                      normalizedCoverageEvidenceRole(stringFromMap(raw, "evidenceRole")),
-				AcceptedStepKinds:                 stringSliceFromValue(raw["acceptedStepKinds"]),
-				AcceptedOperations:                stringSliceFromValue(raw["acceptedOperations"]),
-				RejectedStepKinds:                 stringSliceFromValue(raw["rejectedStepKinds"]),
-				Description:                       strings.TrimSpace(stringFromMap(raw, "description")),
-				RequireDirect:                     boolValue(raw["requireDirectEvidence"]),
-				RequireClaimEvidence:              boolValue(raw["requireClaimEvidence"]) || boolValue(raw["requireClaimEvidenceAlignment"]),
-				RequireExecutableBehaviorEvidence: boolValue(raw["requireExecutableBehaviorEvidence"]) || boolValue(raw["requireRuntimeBehaviorEvidence"]),
-			}
-			if len(req.AcceptedStepKinds) == 0 && len(req.AcceptedOperations) == 0 && len(req.RejectedStepKinds) == 0 && !req.RequireDirect && !req.RequireClaimEvidence && !req.RequireExecutableBehaviorEvidence {
-				continue
-			}
-			ret = append(ret, req)
 		}
 	}
 	return ret
+}
+
+func profileEvidenceKindRequirementFromMap(raw map[string]any) (profileEvidenceKindRequirement, bool) {
+	id := strings.TrimSpace(stringFromMap(raw, "id"))
+	if id == "" {
+		id = strings.TrimSpace(stringFromMap(raw, "dimension"))
+	}
+	scope := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(raw, "scope"),
+		stringFromMap(raw, "appliesTo"),
+	))
+	if id == "" || scope == "" {
+		return profileEvidenceKindRequirement{}, false
+	}
+	req := profileEvidenceKindRequirement{
+		Scope:                             scope,
+		ID:                                id,
+		EvidenceRole:                      normalizedCoverageEvidenceRole(stringFromMap(raw, "evidenceRole")),
+		RequiredEvidenceKinds:             stringSliceFromValue(raw["requiredEvidenceKinds"]),
+		AcceptedStepKinds:                 stringSliceFromValue(raw["acceptedStepKinds"]),
+		AcceptedOperations:                stringSliceFromValue(raw["acceptedOperations"]),
+		RejectedStepKinds:                 stringSliceFromValue(raw["rejectedStepKinds"]),
+		Description:                       strings.TrimSpace(stringFromMap(raw, "description")),
+		RequireDirect:                     boolValue(raw["requireDirectEvidence"]),
+		RequireClaimEvidence:              boolValue(raw["requireClaimEvidence"]) || boolValue(raw["requireClaimEvidenceAlignment"]),
+		RequireExecutableBehaviorEvidence: boolValue(raw["requireExecutableBehaviorEvidence"]) || boolValue(raw["requireRuntimeBehaviorEvidence"]),
+	}
+	if len(req.RequiredEvidenceKinds) == 0 &&
+		len(req.AcceptedStepKinds) == 0 &&
+		len(req.AcceptedOperations) == 0 &&
+		len(req.RejectedStepKinds) == 0 &&
+		!req.RequireDirect &&
+		!req.RequireClaimEvidence &&
+		!req.RequireExecutableBehaviorEvidence {
+		return profileEvidenceKindRequirement{}, false
+	}
+	return req, true
 }
 
 func assessmentItemsForEvidenceKindRequirement(scope string, assessment map[string]any) []map[string]any {
@@ -475,7 +496,7 @@ func normalizeEvidenceKindRequirementScope(scope string) string {
 		return "deliverable"
 	case "deliverablecoverage", "producedartifacts":
 		return "deliverable"
-	case "goal", "goal_coverage", "goalcoverage", "goal_outcome_coverage", "goaloutcomecoverage":
+	case "goal", "goal_leaf", "goal_leaves", "goal_coverage", "goalcoverage", "goal_outcome_coverage", "goaloutcomecoverage":
 		return "goal_coverage"
 	case "dod", "dod_item", "doditem", "items", "assessment_item", "assessmentitem":
 		return "dod_item"

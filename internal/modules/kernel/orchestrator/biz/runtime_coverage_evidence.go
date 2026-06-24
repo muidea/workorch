@@ -20,12 +20,7 @@ func coverageRequiredEvidenceKindsForSource(run *runModel.Run, source coverageWo
 		"sourceRequirementAliases": source.SourceAliases,
 	}
 	for _, requirement := range coverageTargetEvidenceKindRequirements(run, []map[string]any{target}) {
-		if profileRequirementRequiresStateChangingEvidence(requirement) {
-			kinds = append(kinds, "state_change")
-		}
-		if requirement.RequireDirect || requirement.RequireClaimEvidence {
-			kinds = append(kinds, "validation")
-		}
+		kinds = append(kinds, evidenceKindRequirementEvidenceKinds(requirement)...)
 	}
 	if runExecutionContractRequiresStateChange(run) && coverageSourceCanCarryStateChange(source) {
 		kinds = append(kinds, "state_change")

@@ -1989,6 +1989,61 @@ func TestCoverageWorkItemsGovernanceItemsRequireOwnerEvidence(t *testing.T) {
 	assertRequired(2, "validation")
 }
 
+func TestCoverageWorkItemsDeriveRequiredEvidenceKindsFromEvidencePolicies(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-policy-required-kinds",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"id":   "goal-policy-required-kinds",
+				"text": "- policy-bound goal coverage",
+			},
+			"dod": map[string]any{
+				"id":    "dod-policy-required-kinds",
+				"items": []string{"policy-bound dod item"},
+			},
+			"evidencePolicies": []map[string]any{
+				{
+					"id": "policy-required-validation",
+					"coverageRequirements": []map[string]any{
+						{
+							"id":                    "*",
+							"scope":                 "goal_coverage",
+							"requiredEvidenceKinds": []string{"assessment"},
+						},
+						{
+							"id":                    "*",
+							"scope":                 "dod_item",
+							"requiredEvidenceKinds": []string{"approval"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	newCoverageSubsystem().ensure(run)
+
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) != 2 {
+		t.Fatalf("coverageWorkItems len = %d, want goal and dod items: %+v", len(items), items)
+	}
+	for _, item := range items {
+		required := stringSliceFromValue(item["requiredEvidenceKinds"])
+		switch stringFromMap(item, "sourceScope") {
+		case "goal_leaf":
+			if !stringSliceContains(required, "assessment") {
+				t.Fatalf("goal item requiredEvidenceKinds = %+v, want policy-bound assessment", required)
+			}
+		case "dod_item":
+			if !stringSliceContains(required, "approval") {
+				t.Fatalf("dod item requiredEvidenceKinds = %+v, want policy-bound approval", required)
+			}
+		default:
+			t.Fatalf("unexpected coverage item scope: %+v", item)
+		}
+	}
+}
+
 func TestCoverageWorkItemsDoNotInferGovernanceEvidenceFromBusinessText(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-business-text-decision",

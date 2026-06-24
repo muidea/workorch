@@ -85,6 +85,41 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	markers := policy["workEvidenceMarkers"].([]any)
 	assertStringListContains(t, markers, "=== RUN")
 	assertStringListContains(t, markers, "--- PASS:")
+	requirements, ok := policy["coverageRequirements"].([]any)
+	if !ok || len(requirements) < 2 {
+		t.Fatalf("software-dev evidence policy coverageRequirements = %+v, want coverage bindings", policy["coverageRequirements"])
+	}
+	requiredScopes := map[string]bool{"dod_item": false, "goal_coverage": false}
+	for _, raw := range requirements {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("software-dev evidence policy coverage requirement = %+v, want map", raw)
+		}
+		scope, _ := item["scope"].(string)
+		if _, ok := requiredScopes[scope]; !ok {
+			continue
+		}
+		requiredScopes[scope] = true
+		if id, _ := item["id"].(string); id != "*" {
+			t.Fatalf("software-dev coverage requirement scope %q id = %q, want wildcard", scope, id)
+		}
+		kinds, ok := item["requiredEvidenceKinds"].([]any)
+		if !ok {
+			t.Fatalf("software-dev coverage requirement %q requiredEvidenceKinds = %+v, want list", scope, item["requiredEvidenceKinds"])
+		}
+		assertStringListContains(t, kinds, "validation")
+		if direct, _ := item["requireDirectEvidence"].(bool); !direct {
+			t.Fatalf("software-dev coverage requirement %q requireDirectEvidence = false, want true", scope)
+		}
+		if executable, _ := item["requireExecutableBehaviorEvidence"].(bool); !executable {
+			t.Fatalf("software-dev coverage requirement %q requireExecutableBehaviorEvidence = false, want true", scope)
+		}
+	}
+	for scope, seen := range requiredScopes {
+		if !seen {
+			t.Fatalf("software-dev evidence policy coverageRequirements missing scope %q in %+v", scope, requirements)
+		}
+	}
 }
 
 func TestEmbeddedTemplatesDeclareDefaultSoulIDs(t *testing.T) {
