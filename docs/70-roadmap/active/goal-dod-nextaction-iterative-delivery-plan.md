@@ -56,6 +56,7 @@ Related:
 - [S6.5 Context Budget Critical Field Protection](./goal-dod-nextaction-s6-5-context-budget-critical-field-protection.md)
 - [S6.6 Compact Summary Auxiliary Reference](./goal-dod-nextaction-s6-6-compact-summary-auxiliary-reference.md)
 - [S7.1 ContractViolation Diagnostic Model](./goal-dod-nextaction-s7-1-contract-violation-diagnostic-model.md)
+- [S7.2 Parse/Schema Gate Recoverable Diagnostic](./goal-dod-nextaction-s7-2-parse-schema-gate-recoverable-diagnostic.md)
 
 ## Purpose
 

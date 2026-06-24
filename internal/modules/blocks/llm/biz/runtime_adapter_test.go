@@ -707,6 +707,11 @@ func TestRuntimeAdapterReportsRepairFailure(t *testing.T) {
 		result.Output["repairRawContentPreview"] == "" {
 		t.Fatalf("output = %+v, want repair failure diagnostics", result.Output)
 	}
+	if result.Output["contractViolationType"] != runtimemodel.ContractViolationTypeLLMSchemaInvalid ||
+		result.Output["contractViolationRule"] != runtimemodel.ContractViolationRuleUnparseableOutput ||
+		result.Output["contractViolationRecoverability"] != runtimemodel.ContractViolationRecoverabilityRetrySameContract {
+		t.Fatalf("contract violation diagnostic = %+v, want recoverable parse/schema diagnostic", result.Output)
+	}
 	if len(provider.requests) != 2 {
 		t.Fatalf("provider calls = %d, want original plus one repair", len(provider.requests))
 	}

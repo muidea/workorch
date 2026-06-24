@@ -13,6 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestContractViolationRecoveryActionRetriesWithinBudget(t *testing.T) {
@@ -113,6 +114,64 @@ func TestRuntimeRepairInputIncludesContractViolationRecovery(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"), "contractViolationRecovery.correctionContract") {
 		t.Fatalf("repairGuidance = %+v, want correction contract guidance", input["repairGuidance"])
+	}
+}
+
+func TestContractViolationClassifiesLLMSchemaInvalidAsRecoverableDiagnostic(t *testing.T) {
+	runID := common.RunID("run-contract-llm-schema-invalid")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-llm-schema-invalid", InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := &runmodel.Step{
+		ID:    common.StepID(runID + "/failed-schema"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: "execution",
+			"requiredOutput": map[string]any{
+				"mustReturnSingleJSONDecision": true,
+			},
+		},
+		Output: map[string]any{
+			"status":      "failed",
+			"stage":       "llm_schema_invalid",
+			"error":       "invalid argument: invalid llm decision json: no json object found",
+			"parseError":  "invalid argument: invalid llm decision json: no json object found",
+			"repairError": "invalid argument: invalid llm decision json: unknown completion state",
+		},
+	}
+	execErr := errors.New("invalid argument: invalid llm decision json: no json object found")
+
+	attachContractViolationType(failed.Output, execErr)
+	classification := classifyRuntimeFailure(failed, failed.Output, "runtime step failed", execErr)
+	attachRuntimeFailureClassification(failed.Output, classification)
+	attachContractViolationDiagnostics(run, failed, execErr)
+
+	if got := stringFromMap(failed.Output, outputKeyContractViolationType); got != contractViolationLLMSchemaInvalid {
+		t.Fatalf("contractViolationType = %q, want %s", got, contractViolationLLMSchemaInvalid)
+	}
+	recovery := contractViolationFromFailedOutput(failed)
+	if got := stringFromMap(recovery, "violationType"); got != contractViolationLLMSchemaInvalid {
+		t.Fatalf("violationType = %q, want %s; recovery=%+v", got, contractViolationLLMSchemaInvalid, recovery)
+	}
+	if got := stringFromMap(recovery, "violatedRule"); got != contractViolationRuleUnparseableOutput {
+		t.Fatalf("violatedRule = %q, want %s; recovery=%+v", got, contractViolationRuleUnparseableOutput, recovery)
+	}
+	if got := stringFromMap(recovery, "recoverability"); got != runtimemodel.ContractViolationRecoverabilityRetrySameContract {
+		t.Fatalf("recoverability = %q, want retry_same_contract; recovery=%+v", got, recovery)
+	}
+	if !strings.Contains(stringFromMap(recovery, "signature"), "type="+contractViolationLLMSchemaInvalid) ||
+		!strings.Contains(stringFromMap(recovery, "signature"), "rule="+contractViolationRuleUnparseableOutput) {
+		t.Fatalf("signature = %q, want type and rule", stringFromMap(recovery, "signature"))
+	}
+	actual := mapFromValue(recovery["actualOutputSummary"])
+	if stringFromMap(actual, "parseError") == "" || stringFromMap(actual, "repairError") == "" {
+		t.Fatalf("actualOutputSummary = %+v, want parse and repair diagnostics", actual)
+	}
+	if got := stringFromMap(recovery, "correctionProfileId"); got != "json_output_shape" {
+		t.Fatalf("correctionProfileId = %q, want json_output_shape; recovery=%+v", got, recovery)
+	}
+	if !failedStepHasRecoverableContractViolation(failed) {
+		t.Fatalf("failed step should have recoverable contract violation: %+v", recovery)
 	}
 }
 

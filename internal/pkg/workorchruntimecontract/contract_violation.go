@@ -7,6 +7,12 @@ import (
 )
 
 const (
+	ContractViolationTypeLLMSchemaInvalid = "llm_schema_invalid"
+
+	ContractViolationRuleUnparseableOutput = "unparseable_output"
+)
+
+const (
 	ContractViolationRecoverabilityRetrySameContract  = "retry_same_contract"
 	ContractViolationRecoverabilityNarrowContract     = "narrow_contract"
 	ContractViolationRecoverabilityNormalizeThenRetry = "normalize_then_retry"

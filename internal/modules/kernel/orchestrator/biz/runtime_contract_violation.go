@@ -21,7 +21,7 @@ const (
 	contractViolationRuleTraceabilityRefMismatch       = "traceability_ref_mismatch"
 	contractViolationRuleDecisionBlockedWhenActionable = "decision_blocked_when_actionable"
 	contractViolationRuleUnsafeOutput                  = "unsafe_output"
-	contractViolationRuleUnparseableOutput             = "unparseable_output"
+	contractViolationRuleUnparseableOutput             = runtimemodel.ContractViolationRuleUnparseableOutput
 	contractViolationRulePatchApplyContractFailed      = "patch_apply_contract_failed"
 	contractViolationRuleAvailableSnapshotIgnored      = "available_snapshot_ignored"
 	contractViolationRuleRuntimeContract               = "runtime_contract_violation"
@@ -73,6 +73,8 @@ func contractViolationRuleFromType(violationType string) string {
 		return contractViolationRuleWrongOutputShape
 	case contractViolationAssessmentOnlyExecutableOutput:
 		return contractViolationRuleWrongOutputShape
+	case contractViolationLLMSchemaInvalid:
+		return contractViolationRuleUnparseableOutput
 	case contractViolationCoverageTargetsRequired:
 		return contractViolationRuleCoverageMapIncomplete
 	case contractViolationDoDAssessmentEvidenceMissing:
@@ -769,6 +771,11 @@ func contractViolationActualOutputSummary(step *runModel.Step, execErr error) ma
 	for _, key := range []string{"status", "stage", "completionState", outputKeyContractViolationType, failureOutputKeyClass, failureOutputKeySignature} {
 		if value := strings.TrimSpace(stringFromMap(output, key)); value != "" {
 			ret[key] = value
+		}
+	}
+	for _, key := range []string{"parseError", "repairError"} {
+		if value := strings.TrimSpace(stringFromMap(output, key)); value != "" {
+			ret[key] = truncateLLMContextString(value)
 		}
 	}
 	if errText := firstNonEmptyString(errorString(execErr), stringFromMap(output, "error"), stringFromMap(output, "reason")); errText != "" {

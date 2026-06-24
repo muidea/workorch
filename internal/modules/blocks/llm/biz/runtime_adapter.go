@@ -334,6 +334,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		repairedDecision, repairPayload, repairErr := repairLLMExecutionDecision(ctx, runtime.Provider, providerReq, payload, err)
 		if repairErr != nil {
 			output := failureOutput(request, "llm_schema_invalid", parseErr.Error(), runtime.Config)
+			attachParseSchemaContractViolation(output)
 			output["repairAttempted"] = true
 			output["parseError"] = parseErr.Error()
 			output["repairError"] = repairErr.Error()
@@ -361,6 +362,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	output, err := NormalizeDecisionOutput(request, decision)
 	if err != nil {
 		failure := failureOutput(request, "llm_decision_invalid", err.Error(), runtime.Config)
+		attachParseSchemaContractViolation(failure)
 		attachContextBudget(failure, providerReq.ContextBudget, runtime.Config.ID, runtime.Config.Model)
 		attachStreamDiagnostics(failure, streamEvents)
 		attachFailoverMetadata(failure, call.failover)
@@ -4119,6 +4121,19 @@ func failureOutput(request runtimemodel.StepExecutionRequest, stage string, reas
 		"failureCategory": llmFailureCategory(stage),
 		"resolutionHint":  llmFailureResolutionHint(stage),
 	}
+}
+
+func attachParseSchemaContractViolation(output map[string]any) {
+	if output == nil {
+		return
+	}
+	stage := strings.TrimSpace(stringValue(output["stage"]))
+	if stage != "llm_schema_invalid" && stage != "llm_decision_invalid" {
+		return
+	}
+	output["contractViolationType"] = runtimemodel.ContractViolationTypeLLMSchemaInvalid
+	output["contractViolationRule"] = runtimemodel.ContractViolationRuleUnparseableOutput
+	output["contractViolationRecoverability"] = runtimemodel.ContractViolationRecoverabilityRetrySameContract
 }
 
 func llmFailureCategory(stage string) string {

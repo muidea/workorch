@@ -64,6 +64,7 @@ const (
 	contractViolationCoverageMapIncomplete          = "coverage_map_incomplete"
 	contractViolationAssessmentOnlyExecutableOutput = "assessment_only_executable_output"
 	contractViolationAvailableSnapshotIgnored       = "available_snapshot_ignored"
+	contractViolationLLMSchemaInvalid               = "llm_schema_invalid"
 )
 
 func runtimeFailureOutput(output map[string]any, execErr error) map[string]any {
@@ -347,6 +348,9 @@ func contractViolationTypeFromFailure(output map[string]any, execErr error) stri
 		return contractViolationPatchContentRequired
 	case strings.Contains(text, "strategyreassessment.required=true"):
 		return contractViolationPatchDispatchInvalid
+	case strings.TrimSpace(stringFromMap(output, "stage")) == contractViolationLLMSchemaInvalid ||
+		strings.Contains(text, "invalid llm decision json"):
+		return contractViolationLLMSchemaInvalid
 	default:
 		return ""
 	}
