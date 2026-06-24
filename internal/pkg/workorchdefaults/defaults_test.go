@@ -72,6 +72,7 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	assertStringListContains(t, semanticNavigation["defaultCapabilityIds"].([]any), "mcp-lsp-bridge:tool:lsp_shutdown")
 	assertStringListContains(t, semanticNavigation["defaultCapabilityIds"].([]any), "mcp-lsp-bridge:tool:lsp_repair")
 	assertSoftwareDevAcceptanceSlicePolicy(t, item.ContextHints)
+	assertSoftwareDevTemplateStagePolicies(t, item.ContextHints)
 	assertSoftwareDevAcceptanceDimensions(t, item.ContextHints)
 	assertSoftwareDevCapabilityUsagePolicies(t, item.ContextHints)
 	if len(item.EvidencePolicies) == 0 {
@@ -853,6 +854,93 @@ func assertSoftwareDevCapabilityUsagePolicies(t *testing.T, hints map[string]any
 	if !found {
 		t.Fatalf("capabilityUsagePolicies = %+v, want software-dev-code-semantics-guidance", rawPolicies)
 	}
+}
+
+func assertSoftwareDevTemplateStagePolicies(t *testing.T, hints map[string]any) {
+	t.Helper()
+	rawPolicy, ok := hints["templateStagePolicies"].(map[string]any)
+	if !ok {
+		t.Fatalf("software-dev templateStagePolicies = %+v, want map", hints["templateStagePolicies"])
+	}
+	assertTemplateStagePolicySchema(t, "software-dev", rawPolicy)
+	stages, ok := rawPolicy["stages"].([]any)
+	if !ok {
+		t.Fatalf("software-dev templateStagePolicies.stages = %+v, want list", rawPolicy["stages"])
+	}
+	byID := map[string]map[string]any{}
+	for _, raw := range stages {
+		stage, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("software-dev stage = %+v, want map", raw)
+		}
+		byID[testStringFromAny(stage["id"])] = stage
+	}
+	for _, id := range []string{"planning", "execution", "repair", "validation", "artifact"} {
+		if byID[id] == nil {
+			t.Fatalf("software-dev templateStagePolicies missing stage %q in %+v", id, stages)
+		}
+	}
+	assertTemplateStageNextAction(t, byID["planning"], "assess_gap")
+	assertTemplateStageNextAction(t, byID["execution"], "state_change")
+	assertTemplateStageNextAction(t, byID["repair"], "repair")
+	assertTemplateStageNextAction(t, byID["validation"], "validate")
+	assertTemplateStageNextAction(t, byID["artifact"], "produce_artifact")
+	assertTemplateStageOutput(t, byID["planning"], "gap_baseline", "assessment")
+	assertTemplateStageOutput(t, byID["execution"], "state_change", "state_change")
+	assertTemplateStageOutput(t, byID["repair"], "state_change", "state_change")
+	assertTemplateStageOutput(t, byID["validation"], "validation", "validation")
+	assertTemplateStageOutput(t, byID["artifact"], "artifact", "artifact")
+	assertTemplateStagePolicyRef(t, byID["repair"], "capabilityUsagePolicies", "software-dev-code-semantics-guidance")
+	assertTemplateStagePolicyRef(t, byID["repair"], "evidencePolicies", "software-dev-validation-evidence")
+	assertTemplateStagePolicyRef(t, byID["validation"], "evidencePolicies", "software-dev-validation-evidence")
+}
+
+func assertTemplateStageNextAction(t *testing.T, stage map[string]any, want string) {
+	t.Helper()
+	entry, ok := stage["entry"].(map[string]any)
+	if !ok {
+		t.Fatalf("stage entry = %+v, want map", stage["entry"])
+	}
+	if got := testStringFromAny(entry["nextAction"]); got != want {
+		t.Fatalf("stage %q nextAction = %q, want %q", testStringFromAny(stage["id"]), got, want)
+	}
+}
+
+func assertTemplateStageOutput(t *testing.T, stage map[string]any, wantKind string, wantEvidenceKind string) {
+	t.Helper()
+	outputs, ok := stage["requiredOutputs"].([]any)
+	if !ok {
+		t.Fatalf("stage %q requiredOutputs = %+v, want list", testStringFromAny(stage["id"]), stage["requiredOutputs"])
+	}
+	for _, raw := range outputs {
+		output, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("stage output = %+v, want map", raw)
+		}
+		if testStringFromAny(output["kind"]) != wantKind {
+			continue
+		}
+		kinds, ok := output["evidenceKinds"].([]any)
+		if !ok {
+			t.Fatalf("stage output evidenceKinds = %+v, want list", output["evidenceKinds"])
+		}
+		assertStringListContains(t, kinds, wantEvidenceKind)
+		return
+	}
+	t.Fatalf("stage %q missing required output %q in %+v", testStringFromAny(stage["id"]), wantKind, outputs)
+}
+
+func assertTemplateStagePolicyRef(t *testing.T, stage map[string]any, refType string, want string) {
+	t.Helper()
+	policyRefs, ok := stage["policyRefs"].(map[string]any)
+	if !ok {
+		t.Fatalf("stage %q policyRefs = %+v, want map", testStringFromAny(stage["id"]), stage["policyRefs"])
+	}
+	values, ok := policyRefs[refType].([]any)
+	if !ok {
+		t.Fatalf("stage %q policyRefs.%s = %+v, want list", testStringFromAny(stage["id"]), refType, policyRefs[refType])
+	}
+	assertStringListContains(t, values, want)
 }
 
 func assertTemplateStagePolicySchema(t *testing.T, templateID string, policy map[string]any) {

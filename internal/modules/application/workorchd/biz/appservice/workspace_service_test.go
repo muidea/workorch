@@ -101,6 +101,76 @@ func TestCreateWorkspaceWithTemplateDoesNotCopyManagedWorkspaceConfig(t *testing
 	}
 }
 
+func TestCreateWorkspaceWithTemplateCopiesTemplateStagePolicies(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID:       "template-stage-policy",
+		Name:     "stage policy template",
+		DoDItems: []string{"stage policy available"},
+		ContextHints: map[string]any{
+			"templateStagePolicies": map[string]any{
+				"schemaVersion": "workorch.template_stage_policy.v1",
+				"stages": []any{
+					map[string]any{
+						"id":          "execution",
+						"soulBinding": "execution",
+						"entry": map[string]any{
+							"nextAction":                 "state_change",
+							"requiresDefinitionRevision": true,
+							"requiresGapBaseline":        true,
+						},
+						"requiredOutputs": []any{
+							map[string]any{
+								"kind":          "state_change",
+								"evidenceKinds": []any{"state_change"},
+							},
+						},
+						"completion": map[string]any{
+							"policy": "required_outputs_accepted",
+						},
+					},
+				},
+			},
+			"semanticCodeNavigation": map[string]any{
+				"defaultMCPServerIds": []any{"mcp-shared-default"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+
+	item, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:      "stage policy workspace",
+		TemplateID: "template-stage-policy",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	policy, ok := item.ContextHints["templateStagePolicies"].(map[string]any)
+	if !ok {
+		t.Fatalf("workspace contextHints.templateStagePolicies = %+v, want map", item.ContextHints["templateStagePolicies"])
+	}
+	if policy["schemaVersion"] != "workorch.template_stage_policy.v1" {
+		t.Fatalf("templateStagePolicies schemaVersion = %v, want workorch.template_stage_policy.v1", policy["schemaVersion"])
+	}
+	if _, ok := item.ContextHints["defaultMCPServerIds"]; ok {
+		t.Fatalf("workspace contextHints copied common tool default at top level: %+v", item.ContextHints)
+	}
+	semantic, _ := item.ContextHints["semanticCodeNavigation"].(map[string]any)
+	if _, ok := semantic["defaultMCPServerIds"]; ok {
+		t.Fatalf("workspace contextHints copied nested common tool default: %+v", semantic)
+	}
+
+	readBack, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, item.ID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
+	}
+	if _, ok := readBack.ContextHints["templateStagePolicies"].(map[string]any); !ok {
+		t.Fatalf("persisted workspace contextHints.templateStagePolicies = %+v, want map", readBack.ContextHints["templateStagePolicies"])
+	}
+}
+
 func TestCreateWorkspaceWithBackendReturnsCreatedWorkspace(t *testing.T) {
 	item, err := CreateWorkspaceWithBackend(context.Background(), "file", t.TempDir(), "appservice created workspace", "appservice description", "workspaces/appservice created workspace")
 	if err != nil {

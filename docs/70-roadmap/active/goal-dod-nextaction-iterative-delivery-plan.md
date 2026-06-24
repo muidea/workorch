@@ -74,6 +74,7 @@ Related:
 - [S9.5 Watchdog Idempotency Key](./goal-dod-nextaction-s9-5-watchdog-idempotency-key.md)
 - [S9.6 Service Restart Running Recoverable](./goal-dod-nextaction-s9-6-service-restart-running-recoverable.md)
 - [S10.1 Template Stage Policy Schema](./goal-dod-nextaction-s10-1-template-stage-policy-schema.md)
+- [S10.2 Software Dev Stage Policy Binding](./goal-dod-nextaction-s10-2-software-dev-stage-policy-binding.md)
 
 ## Purpose
 

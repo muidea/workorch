@@ -2668,6 +2668,29 @@ func TestActivateWorkspaceExecutionWithBackendAddsExecutionContractFromWorkspace
 					"usageMode":         "prefer_when_triggered",
 				},
 			},
+			"templateStagePolicies": map[string]any{
+				"schemaVersion": "workorch.template_stage_policy.v1",
+				"stages": []any{
+					map[string]any{
+						"id":          "execution",
+						"soulBinding": "execution",
+						"entry": map[string]any{
+							"nextAction":                 "state_change",
+							"requiresDefinitionRevision": true,
+							"requiresGapBaseline":        true,
+						},
+						"requiredOutputs": []any{
+							map[string]any{
+								"kind":          "state_change",
+								"evidenceKinds": []any{"state_change"},
+							},
+						},
+						"completion": map[string]any{
+							"policy": "required_outputs_accepted",
+						},
+					},
+				},
+			},
 		},
 	}); err != nil {
 		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
@@ -2708,6 +2731,14 @@ func TestActivateWorkspaceExecutionWithBackendAddsExecutionContractFromWorkspace
 	dimensions := contextMapSliceFromValue(t, softwareDev["acceptanceDimensions"])
 	if len(dimensions) != 1 || dimensions[0]["id"] != "runtime_entrypoint" || dimensions[0]["required"] != true {
 		t.Fatalf("profile contract dimensions = %+v, want runtime_entrypoint required", dimensions)
+	}
+	stagePolicy := contextMapFromValue(t, contract["templateStagePolicies"])
+	if stagePolicy["schemaVersion"] != "workorch.template_stage_policy.v1" {
+		t.Fatalf("templateStagePolicies = %+v, want schema v1", stagePolicy)
+	}
+	stages := contextMapSliceFromValue(t, stagePolicy["stages"])
+	if len(stages) != 1 || stages[0]["id"] != "execution" {
+		t.Fatalf("templateStagePolicies.stages = %+v, want execution stage", stagePolicy["stages"])
 	}
 }
 

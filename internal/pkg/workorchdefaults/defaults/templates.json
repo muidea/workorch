@@ -155,6 +155,141 @@
       "artifact": "soul-software-dev-artifact"
     },
     "contextHints": {
+      "templateStagePolicies": {
+        "schemaVersion": "workorch.template_stage_policy.v1",
+        "stages": [
+          {
+            "id": "planning",
+            "soulBinding": "planning",
+            "entry": {
+              "nextAction": "assess_gap",
+              "requiresDefinitionRevision": true,
+              "requiresGapBaseline": true
+            },
+            "requiredOutputs": [
+              {
+                "kind": "gap_baseline",
+                "evidenceKinds": ["assessment"]
+              }
+            ],
+            "completion": {
+              "policy": "required_outputs_accepted"
+            },
+            "governance": {
+              "decisionMode": "when_required",
+              "approvalMode": "when_required"
+            },
+            "policyRefs": {
+              "evidencePolicies": [],
+              "capabilityUsagePolicies": ["software-dev-code-semantics-guidance"]
+            }
+          },
+          {
+            "id": "execution",
+            "soulBinding": "execution",
+            "entry": {
+              "nextAction": "state_change",
+              "requiresDefinitionRevision": true,
+              "requiresGapBaseline": true
+            },
+            "requiredOutputs": [
+              {
+                "kind": "state_change",
+                "evidenceKinds": ["state_change"]
+              }
+            ],
+            "completion": {
+              "policy": "required_outputs_accepted"
+            },
+            "governance": {
+              "decisionMode": "when_required",
+              "approvalMode": "when_required"
+            },
+            "policyRefs": {
+              "evidencePolicies": [],
+              "capabilityUsagePolicies": ["software-dev-code-semantics-guidance"]
+            }
+          },
+          {
+            "id": "repair",
+            "soulBinding": "execution",
+            "entry": {
+              "nextAction": "repair",
+              "requiresDefinitionRevision": true,
+              "requiresGapBaseline": true
+            },
+            "requiredOutputs": [
+              {
+                "kind": "state_change",
+                "evidenceKinds": ["state_change"]
+              }
+            ],
+            "completion": {
+              "policy": "required_outputs_accepted"
+            },
+            "governance": {
+              "decisionMode": "when_required",
+              "approvalMode": "when_required"
+            },
+            "policyRefs": {
+              "evidencePolicies": ["software-dev-validation-evidence"],
+              "capabilityUsagePolicies": ["software-dev-code-semantics-guidance"]
+            }
+          },
+          {
+            "id": "validation",
+            "soulBinding": "validation",
+            "entry": {
+              "nextAction": "validate",
+              "requiresDefinitionRevision": true,
+              "requiresGapBaseline": true
+            },
+            "requiredOutputs": [
+              {
+                "kind": "validation",
+                "evidenceKinds": ["validation"]
+              }
+            ],
+            "completion": {
+              "policy": "required_outputs_accepted"
+            },
+            "governance": {
+              "decisionMode": "when_required",
+              "approvalMode": "when_required"
+            },
+            "policyRefs": {
+              "evidencePolicies": ["software-dev-validation-evidence"],
+              "capabilityUsagePolicies": ["software-dev-code-semantics-guidance"]
+            }
+          },
+          {
+            "id": "artifact",
+            "soulBinding": "artifact",
+            "entry": {
+              "nextAction": "produce_artifact",
+              "requiresDefinitionRevision": true,
+              "requiresGapBaseline": true
+            },
+            "requiredOutputs": [
+              {
+                "kind": "artifact",
+                "evidenceKinds": ["artifact"]
+              }
+            ],
+            "completion": {
+              "policy": "required_outputs_accepted"
+            },
+            "governance": {
+              "decisionMode": "when_required",
+              "approvalMode": "when_required"
+            },
+            "policyRefs": {
+              "evidencePolicies": ["software-dev-validation-evidence"],
+              "capabilityUsagePolicies": []
+            }
+          }
+        ]
+      },
       "stateChangePolicy": "must_produce_state_change",
       "acceptanceSlicePolicy": {
         "schemaVersion": "workorch.acceptance_slice_policy.v1",
