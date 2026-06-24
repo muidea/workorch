@@ -65,6 +65,7 @@ Related:
 - [S8.2 TUI Prompt Mode From Projection](./goal-dod-nextaction-s8-2-tui-prompt-mode-projection.md)
 - [S8.3 TUI List And Main View Same Revision](./goal-dod-nextaction-s8-3-tui-list-main-same-revision.md)
 - [S8.4 Command Pending And Accepted Display](./goal-dod-nextaction-s8-4-command-pending-accepted-display.md)
+- [S8.5 SSE Reconnect And Last Event ID](./goal-dod-nextaction-s8-5-sse-reconnect-last-event-id.md)
 
 ## Purpose
 

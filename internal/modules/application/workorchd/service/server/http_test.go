@@ -1431,6 +1431,66 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 	}
 }
 
+func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
+	hub := events.NewMemoryHub()
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
+	server := httptest.NewServer(newMuxWithState(state))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream-query-replay", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	lines, readErr := readSSELines(resp.Body)
+	waitSSEConnected(t, lines, readErr)
+
+	if err := hub.Publish(context.Background(), events.Envelope{
+		Topic:       workspaceevents.TopicWorkspaceStateChanged,
+		WorkspaceID: "ws-stream-query-replay",
+		Payload:     events.WorkspacePayload("first", "", "/tmp/first", "", common.WorkspaceStateRunning, ""),
+	}); err != nil {
+		t.Fatalf("publish first event: %v", err)
+	}
+	firstID, first := readSSEEnvelope(t, lines, readErr)
+	if firstID == "" || first.Topic != workspaceevents.TopicWorkspaceStateChanged {
+		t.Fatalf("first replay baseline = %q %+v", firstID, first)
+	}
+	if err := hub.Publish(context.Background(), events.Envelope{
+		Topic:       runevents.TopicRunStateChanged,
+		WorkspaceID: "ws-stream-query-replay",
+		RunID:       "run-query-replay",
+		Payload:     events.RunPayload("", "", common.RunStateRunning, "", "", ""),
+	}); err != nil {
+		t.Fatalf("publish replay event: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	replayURL := server.URL + "/api/v1/workorch/events/stream?workspaceId=ws-stream-query-replay&lastEventId=" + url.QueryEscape(firstID)
+	replayReq, err := http.NewRequestWithContext(ctx, http.MethodGet, replayURL, nil)
+	if err != nil {
+		t.Fatalf("new replay request: %v", err)
+	}
+	replayReq.Header.Set("Accept", "text/event-stream")
+	replayResp, err := http.DefaultClient.Do(replayReq)
+	if err != nil {
+		t.Fatalf("replay stream request: %v", err)
+	}
+	defer replayResp.Body.Close()
+	replayLines, replayErr := readSSELines(replayResp.Body)
+	waitSSEConnected(t, replayLines, replayErr)
+	_, replayed := readSSEEnvelope(t, replayLines, replayErr)
+	if replayed.Topic != runevents.TopicRunStateChanged || replayed.RunID != "run-query-replay" {
+		t.Fatalf("replayed envelope = %+v, want run state event after lastEventId query param", replayed)
+	}
+}
+
 func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
 	hub := events.NewMemoryHub()
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)

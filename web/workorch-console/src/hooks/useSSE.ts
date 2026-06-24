@@ -30,6 +30,7 @@ export function useSSE(onEvent: (event: SSEEvent) => void, options: UseSSEOption
   const retryCountRef = useRef(0);
   const retryTimerRef = useRef<number | undefined>(undefined);
   const lastEventIdRef = useRef('');
+  const exhaustedNotifiedRef = useRef(false);
 
   useEffect(() => { onEventRef.current = onEvent; }, [onEvent]);
   useEffect(() => { onReconnectRef.current = onReconnect; }, [onReconnect]);
@@ -37,6 +38,7 @@ export function useSSE(onEvent: (event: SSEEvent) => void, options: UseSSEOption
   useEffect(() => {
     lastEventIdRef.current = '';
     retryCountRef.current = 0;
+    exhaustedNotifiedRef.current = false;
   }, [workspaceId, runId]);
 
   useEffect(() => {
@@ -51,6 +53,7 @@ export function useSSE(onEvent: (event: SSEEvent) => void, options: UseSSEOption
 
       stream.addEventListener('workorch', (event: MessageEvent<string>) => {
         retryCountRef.current = 0;
+        exhaustedNotifiedRef.current = false;
         try {
           const data = JSON.parse(event.data) as SSEEvent;
           data.id = event.lastEventId || data.id;
@@ -77,6 +80,7 @@ export function useSSE(onEvent: (event: SSEEvent) => void, options: UseSSEOption
       });
 
       stream.onopen = () => {
+        exhaustedNotifiedRef.current = false;
         if (retryCountRef.current > 0) {
           retryCountRef.current = 0;
           onReconnectRef.current?.();
@@ -88,12 +92,16 @@ export function useSSE(onEvent: (event: SSEEvent) => void, options: UseSSEOption
         stream = null;
         if (disposed) return;
         onReconnectRef.current?.();
-        if (retryCountRef.current >= maxRetries) {
+        const exhausted = retryCountRef.current >= maxRetries;
+        if (exhausted && !exhaustedNotifiedRef.current) {
+          exhaustedNotifiedRef.current = true;
           onExhaustedRef.current?.({ retryCount: retryCountRef.current });
-          return;
         }
-        const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 30000);
+        const delay = nextSSERetryDelayMs(retryCountRef.current);
         retryCountRef.current += 1;
+        if (retryTimerRef.current !== undefined) {
+          window.clearTimeout(retryTimerRef.current);
+        }
         retryTimerRef.current = window.setTimeout(connect, delay);
       };
     }
@@ -111,4 +119,9 @@ export function useSSE(onEvent: (event: SSEEvent) => void, options: UseSSEOption
       }
     };
   }, [enabled, debounceMs, maxRetries, workspaceId, runId]);
+}
+
+export function nextSSERetryDelayMs(retryCount: number) {
+  const normalized = Number.isFinite(retryCount) && retryCount > 0 ? retryCount : 0;
+  return Math.min(1000 * Math.pow(2, normalized), 30000);
 }
