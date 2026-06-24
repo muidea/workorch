@@ -44,6 +44,7 @@ type RepositoryExports struct {
 	Patches               repository.PatchRepository
 	ValidationResults     repository.ValidationResultRepository
 	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
+	EvidenceRecords       repository.EvidenceRecordRepository
 	CoverageWorkItems     repository.CoverageWorkItemRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository
 	Tickets               repository.DecisionTicketRepository

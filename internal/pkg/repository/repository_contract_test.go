@@ -265,6 +265,18 @@ func TestRuntimeCheckpointRepositoryContract_File(t *testing.T) {
 	})
 }
 
+func TestEvidenceRecordRepositoryContract_Memory(t *testing.T) {
+	testEvidenceRecordRepositoryContract(t, func() repository.EvidenceRecordRepository {
+		return memory.NewEvidenceRecordRepository()
+	})
+}
+
+func TestEvidenceRecordRepositoryContract_File(t *testing.T) {
+	testEvidenceRecordRepositoryContract(t, func() repository.EvidenceRecordRepository {
+		return file.NewEvidenceRecordRepository(filepath.Join(t.TempDir(), "evidence-records"))
+	})
+}
+
 func TestArtifactContinuationRepositoryContract_Memory(t *testing.T) {
 	testArtifactContinuationRepositoryContract(t, func() repository.ArtifactContinuationRepository {
 		return memory.NewArtifactContinuationRepository()
@@ -346,6 +358,7 @@ func TestRepositoryBundleContract_Memory(t *testing.T) {
 		patches:               memory.NewPatchRepository(),
 		validationResults:     memory.NewValidationResultRepository(),
 		runtimeCheckpoints:    memory.NewRuntimeCheckpointRepository(),
+		evidenceRecords:       memory.NewEvidenceRecordRepository(),
 		coverageWorkItems:     memory.NewCoverageWorkItemRepository(),
 		artifactContinuations: memory.NewArtifactContinuationRepository(),
 		tickets:               memory.NewDecisionTicketRepository(),
@@ -378,6 +391,7 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 			patches:               file.NewPatchRepository(filepath.Join(dir, "patch.json")),
 			validationResults:     file.NewValidationResultRepository(filepath.Join(dir, "validation_result.json")),
 			runtimeCheckpoints:    file.NewRuntimeCheckpointRepository(filepath.Join(dir, "runtime_checkpoint.json")),
+			evidenceRecords:       file.NewEvidenceRecordRepository(filepath.Join(dir, "evidence-records")),
 			coverageWorkItems:     file.NewCoverageWorkItemRepository(filepath.Join(dir, "coverage-work-items")),
 			artifactContinuations: file.NewArtifactContinuationRepository(filepath.Join(dir, "artifact-continuations")),
 			tickets:               file.NewDecisionTicketRepository(filepath.Join(dir, "ticket.json")),
@@ -408,6 +422,7 @@ type repositoryBundle struct {
 	patches               repository.PatchRepository
 	validationResults     repository.ValidationResultRepository
 	runtimeCheckpoints    repository.RuntimeCheckpointRepository
+	evidenceRecords       repository.EvidenceRecordRepository
 	coverageWorkItems     repository.CoverageWorkItemRepository
 	artifactContinuations repository.ArtifactContinuationRepository
 	tickets               repository.DecisionTicketRepository
@@ -2206,6 +2221,128 @@ func testRuntimeCheckpointRepositoryContract(t *testing.T, factory func() reposi
 	}
 }
 
+func testEvidenceRecordRepositoryContract(t *testing.T, factory func() repository.EvidenceRecordRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &orchestratormodel.EvidenceRecord{
+		ID:                 common.EvidenceRecordID("evidence-contract-001"),
+		WorkspaceID:        common.WorkspaceID("ws-contract"),
+		RunID:              common.RunID("run-contract"),
+		StepID:             common.StepID("run-contract/step-1"),
+		DefinitionRevision: "rev-001",
+		Kind:               orchestratormodel.EvidenceKindStateChange,
+		Status:             orchestratormodel.EvidenceStatusAccepted,
+		SourceType:         "step",
+		SourceRef:          "run-contract/step-1",
+		SubjectType:        "coverage",
+		SubjectID:          "dod:001",
+		CoverageItemRefs:   []string{"cwi-contract-001"},
+		CreatedAt:          "2026-06-23T00:00:00Z",
+		Metadata:           map[string]any{"scope": "contract"},
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create evidence record: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate evidence record create err = %v, want conflict", err)
+	}
+
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get evidence record: %v", err)
+	}
+	got.Metadata["scope"] = "mutated"
+	got.CoverageItemRefs[0] = "mutated"
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get fresh evidence record: %v", err)
+	}
+	if fresh.Metadata["scope"] != "contract" ||
+		fresh.CoverageItemRefs[0] != "cwi-contract-001" ||
+		fresh.Kind != orchestratormodel.EvidenceKindStateChange ||
+		fresh.Status != orchestratormodel.EvidenceStatusAccepted ||
+		fresh.SourceRef != "run-contract/step-1" {
+		t.Fatalf("evidence record clone isolation failed: %+v", fresh)
+	}
+
+	rejected := &orchestratormodel.EvidenceRecord{
+		ID:          common.EvidenceRecordID("evidence-contract-002"),
+		WorkspaceID: item.WorkspaceID,
+		RunID:       item.RunID,
+		StepID:      item.StepID,
+		Kind:        orchestratormodel.EvidenceKindDiagnostic,
+		Status:      orchestratormodel.EvidenceStatusRejected,
+		SourceType:  "contract_violation",
+		SourceRef:   "violation:missing-required-output",
+		Supersedes:  []common.EvidenceRecordID{item.ID},
+		CreatedAt:   "2026-06-23T00:00:01Z",
+		Metadata:    map[string]any{"rule": "missing_required_output"},
+	}
+	if err := repo.Create(ctx, rejected); err != nil {
+		t.Fatalf("create rejected evidence record: %v", err)
+	}
+	otherRun := &orchestratormodel.EvidenceRecord{
+		ID:          common.EvidenceRecordID("evidence-contract-other-run"),
+		WorkspaceID: item.WorkspaceID,
+		RunID:       common.RunID("run-other"),
+		Kind:        orchestratormodel.EvidenceKindValidation,
+		Status:      orchestratormodel.EvidenceStatusAccepted,
+		SourceRef:   "validation-other",
+	}
+	if err := repo.Create(ctx, otherRun); err != nil {
+		t.Fatalf("create other run evidence record: %v", err)
+	}
+
+	byRun, err := repo.ListByRun(ctx, item.RunID)
+	if err != nil {
+		t.Fatalf("list evidence records by run: %v", err)
+	}
+	if len(byRun) != 2 || byRun[0].ID != item.ID || byRun[1].ID != rejected.ID {
+		t.Fatalf("evidence records by run = %+v, want accepted and rejected records", byRun)
+	}
+	byStep, err := repo.ListByStep(ctx, item.StepID)
+	if err != nil {
+		t.Fatalf("list evidence records by step: %v", err)
+	}
+	if len(byStep) != 2 || byStep[0].ID != item.ID || byStep[1].ID != rejected.ID {
+		t.Fatalf("evidence records by step = %+v, want accepted and rejected records", byStep)
+	}
+	bySourceRef, err := repo.ListBySourceRef(ctx, item.RunID, item.SourceRef)
+	if err != nil {
+		t.Fatalf("list evidence records by source ref: %v", err)
+	}
+	if len(bySourceRef) != 1 || bySourceRef[0].ID != item.ID {
+		t.Fatalf("evidence records by sourceRef = %+v, want %q", bySourceRef, item.ID)
+	}
+
+	fresh.Status = orchestratormodel.EvidenceStatusSuperseded
+	fresh.UpdatedAt = "2026-06-23T00:00:02Z"
+	if err := repo.Update(ctx, fresh); err != nil {
+		t.Fatalf("update evidence record: %v", err)
+	}
+	updated, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get updated evidence record: %v", err)
+	}
+	if updated.Status != orchestratormodel.EvidenceStatusSuperseded || updated.UpdatedAt == "" {
+		t.Fatalf("updated evidence record = %+v, want superseded", updated)
+	}
+	if err := repo.Delete(ctx, rejected.ID); err != nil {
+		t.Fatalf("delete rejected evidence record: %v", err)
+	}
+	if _, err := repo.Get(ctx, rejected.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get deleted evidence record err = %v, want not found", err)
+	}
+	if _, err := repo.Get(ctx, common.EvidenceRecordID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing get err = %v, want not found", err)
+	}
+	if err := repo.Update(ctx, &orchestratormodel.EvidenceRecord{ID: common.EvidenceRecordID("missing")}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("invalid missing update err = %v, want invalid argument", err)
+	}
+}
+
 func testArtifactContinuationRepositoryContract(t *testing.T, factory func() repository.ArtifactContinuationRepository) {
 	t.Helper()
 	ctx := context.Background()
@@ -2723,6 +2860,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	patchID := common.PatchID("patch-bundle-contract")
 	validationResultID := common.ValidationResultID("validation-bundle-contract")
 	checkpointID := common.CheckpointID("checkpoint-bundle-contract")
+	evidenceRecordID := common.EvidenceRecordID("evidence-bundle-contract")
 	coverageWorkItemID := common.CoverageWorkItemID("cwi-bundle-contract")
 	artifactContinuationID := common.ArtifactContinuationID("artifact-continuation-bundle-contract-001")
 	resultID := common.ResultID("result-bundle-contract")
@@ -3007,6 +3145,29 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 	if err := bundle.runtimeCheckpoints.Create(ctx, checkpoint); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("duplicate runtime checkpoint create err = %v, want conflict", err)
+	}
+
+	evidenceRecord := &orchestratormodel.EvidenceRecord{
+		ID:                 evidenceRecordID,
+		WorkspaceID:        workspaceID,
+		RunID:              runID,
+		StepID:             stepID,
+		DefinitionRevision: "rev-bundle",
+		Kind:               orchestratormodel.EvidenceKindValidation,
+		Status:             orchestratormodel.EvidenceStatusAccepted,
+		SourceType:         "validation_result",
+		SourceRef:          string(validationResultID),
+		SubjectType:        "dod",
+		SubjectID:          string(dodID),
+		CoverageItemRefs:   []string{string(coverageWorkItemID)},
+		CreatedAt:          "2026-05-04T00:00:03Z",
+		Metadata:           map[string]any{"scope": "bundle"},
+	}
+	if err := bundle.evidenceRecords.Create(ctx, evidenceRecord); err != nil {
+		t.Fatalf("create evidence record: %v", err)
+	}
+	if err := bundle.evidenceRecords.Create(ctx, evidenceRecord); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate evidence record create err = %v, want conflict", err)
 	}
 
 	coverageWorkItem := &orchestratormodel.CoverageWorkItem{
@@ -3374,6 +3535,19 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 	if len(reloadedCheckpoints) != 1 || reloadedCheckpoints[0].ID != checkpointID || reloadedCheckpoints[0].Data["thread"] != "main" {
 		t.Fatalf("reloaded runtime checkpoints = %+v, want %q", reloadedCheckpoints, checkpointID)
+	}
+
+	reloadedEvidenceRecords, err := reloaded.evidenceRecords.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("reload evidence records by run: %v", err)
+	}
+	if len(reloadedEvidenceRecords) != 1 ||
+		reloadedEvidenceRecords[0].ID != evidenceRecordID ||
+		reloadedEvidenceRecords[0].Kind != orchestratormodel.EvidenceKindValidation ||
+		reloadedEvidenceRecords[0].Status != orchestratormodel.EvidenceStatusAccepted ||
+		reloadedEvidenceRecords[0].SourceRef != string(validationResultID) ||
+		reloadedEvidenceRecords[0].Metadata["scope"] != "bundle" {
+		t.Fatalf("reloaded evidence records = %+v, want %q", reloadedEvidenceRecords, evidenceRecordID)
 	}
 
 	reloadedCoverageWorkItems, err := reloaded.coverageWorkItems.ListActiveByRun(ctx, runID)

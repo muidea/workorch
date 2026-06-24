@@ -50,6 +50,7 @@ type repositorySet struct {
 	Patches               repository.PatchRepository
 	ValidationResults     repository.ValidationResultRepository
 	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
+	EvidenceRecords       repository.EvidenceRecordRepository
 	CoverageWorkItems     repository.CoverageWorkItemRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository
 	Tickets               repository.DecisionTicketRepository
@@ -173,6 +174,7 @@ func (r repositorySet) Orchestrator() common.OrchestratorRepositories {
 		Patches:               r.Patches,
 		ValidationResults:     r.ValidationResults,
 		RuntimeCheckpoints:    r.RuntimeCheckpoints,
+		EvidenceRecords:       r.EvidenceRecords,
 		CoverageWorkItems:     r.CoverageWorkItems,
 		ArtifactContinuations: r.ArtifactContinuations,
 	}
@@ -226,6 +228,7 @@ func buildRepositories(backend string, dataRoot string) (repositorySet, error) {
 			Patches:               memory.NewPatchRepository(),
 			ValidationResults:     memory.NewValidationResultRepository(),
 			RuntimeCheckpoints:    memory.NewRuntimeCheckpointRepository(),
+			EvidenceRecords:       memory.NewEvidenceRecordRepository(),
 			CoverageWorkItems:     memory.NewCoverageWorkItemRepository(),
 			ArtifactContinuations: memory.NewArtifactContinuationRepository(),
 			Tickets:               memory.NewDecisionTicketRepository(),
@@ -256,6 +259,7 @@ func buildRepositories(backend string, dataRoot string) (repositorySet, error) {
 			Patches:               workspaceScopedRepos.Patches,
 			ValidationResults:     workspaceScopedRepos.ValidationResults,
 			RuntimeCheckpoints:    workspaceScopedRepos.RuntimeCheckpoints,
+			EvidenceRecords:       workspaceScopedRepos.EvidenceRecords,
 			CoverageWorkItems:     workspaceScopedRepos.CoverageWorkItems,
 			ArtifactContinuations: workspaceScopedRepos.ArtifactContinuations,
 			Tickets:               workspaceScopedRepos.Tickets,

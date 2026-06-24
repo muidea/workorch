@@ -41,6 +41,7 @@ type Dependencies struct {
 	Patches               repository.PatchRepository
 	ValidationResults     repository.ValidationResultRepository
 	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
+	EvidenceRecords       repository.EvidenceRecordRepository
 	CoverageWorkItems     repository.CoverageWorkItemRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository
 	RuntimePolicy         orchestratorbiz.RuntimePolicy
@@ -69,6 +70,7 @@ func (m *Module) Configure(deps Dependencies) error {
 		deps.Patches == nil ||
 		deps.ValidationResults == nil ||
 		deps.RuntimeCheckpoints == nil ||
+		deps.EvidenceRecords == nil ||
 		deps.CoverageWorkItems == nil ||
 		deps.ArtifactContinuations == nil ||
 		deps.EventHub == nil {
@@ -89,6 +91,7 @@ func (m *Module) Configure(deps Dependencies) error {
 			Patches:               deps.Patches,
 			ValidationResults:     deps.ValidationResults,
 			RuntimeCheckpoints:    deps.RuntimeCheckpoints,
+			EvidenceRecords:       deps.EvidenceRecords,
 			CoverageWorkItems:     deps.CoverageWorkItems,
 			ArtifactContinuations: deps.ArtifactContinuations,
 			MemoryItems:           memoryEventRepository{hub: deps.EventHub},

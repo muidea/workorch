@@ -85,6 +85,21 @@ func purgeRunEvidence(ctx context.Context, steps repository.StepRepository, evid
 			deleted++
 		}
 	}
+	if evidence.EvidenceRecords != nil {
+		items, err := evidence.EvidenceRecords.ListByRun(ctx, runID)
+		if err != nil {
+			return deleted, err
+		}
+		for _, item := range items {
+			if item == nil {
+				continue
+			}
+			if err := evidence.EvidenceRecords.Delete(ctx, item.ID); err != nil {
+				return deleted, err
+			}
+			deleted++
+		}
+	}
 	if evidence.CoverageWorkItems != nil {
 		items, err := evidence.CoverageWorkItems.ListByRun(ctx, runID)
 		if err != nil {

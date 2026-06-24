@@ -29,6 +29,7 @@ Related:
 - [S2.4 Resume Gap Baseline](./goal-dod-nextaction-s2-4-resume-gap-baseline.md)
 - [S2.5 Replan Definition And Baseline Inheritance](./goal-dod-nextaction-s2-5-replan-definition-baseline.md)
 - [S2.6 Restart Replacement Baseline](./goal-dod-nextaction-s2-6-restart-replacement-baseline.md)
+- [S3.1 EvidenceRecord Model And Repository](./goal-dod-nextaction-s3-1-evidence-record-model.md)
 
 ## Purpose
 

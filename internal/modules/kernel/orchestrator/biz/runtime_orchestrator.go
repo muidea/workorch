@@ -153,6 +153,7 @@ type RuntimeEvidenceRepositories struct {
 	Patches               repository.PatchRepository
 	ValidationResults     repository.ValidationResultRepository
 	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
+	EvidenceRecords       repository.EvidenceRecordRepository
 	CoverageWorkItems     repository.CoverageWorkItemRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository
 	MemoryItems           repository.MemoryItemRepository

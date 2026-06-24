@@ -38,6 +38,7 @@ const (
 	workspaceScopedPatchFile               = "patch.json"
 	workspaceScopedValidationResultFile    = "validation_result.json"
 	workspaceScopedRuntimeCheckpointFile   = "runtime_checkpoint.json"
+	workspaceScopedEvidenceRecordDir       = "evidence-records"
 	workspaceScopedCoverageWorkItemDir     = "coverage-work-items"
 	workspaceScopedArtifactContinuationDir = "artifact-continuations"
 	workspaceScopedResultFile              = "result.json"
@@ -66,6 +67,7 @@ type workspaceScopedFileStore struct {
 	patches               map[string]*fileRepo.PatchRepository
 	validationResults     map[string]*fileRepo.ValidationResultRepository
 	runtimeCheckpoints    map[string]*fileRepo.RuntimeCheckpointRepository
+	evidenceRecords       map[string]*fileRepo.EvidenceRecordRepository
 	coverageWorkItems     map[string]*fileRepo.CoverageWorkItemRepository
 	artifactContinuations map[string]*fileRepo.ArtifactContinuationRepository
 	results               map[string]*fileRepo.ResultRepository
@@ -91,6 +93,7 @@ type WorkspaceScopedFileRepositorySet struct {
 	Patches               repository.PatchRepository
 	ValidationResults     repository.ValidationResultRepository
 	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
+	EvidenceRecords       repository.EvidenceRecordRepository
 	CoverageWorkItems     repository.CoverageWorkItemRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository
 	Tickets               repository.DecisionTicketRepository
@@ -137,6 +140,7 @@ func NewWorkspaceScopedFileRepositorySet(dataRoot string) WorkspaceScopedFileRep
 		Patches:               newWorkspaceScopedPatchRepository(store),
 		ValidationResults:     newWorkspaceScopedValidationResultRepository(store),
 		RuntimeCheckpoints:    newWorkspaceScopedRuntimeCheckpointRepository(store),
+		EvidenceRecords:       newWorkspaceScopedEvidenceRecordRepository(store),
 		CoverageWorkItems:     newWorkspaceScopedCoverageWorkItemRepository(store),
 		ArtifactContinuations: newWorkspaceScopedArtifactContinuationRepository(store),
 		Tickets:               tickets,
@@ -159,6 +163,7 @@ func newWorkspaceScopedFileStore(dataRoot string) *workspaceScopedFileStore {
 		patches:               map[string]*fileRepo.PatchRepository{},
 		validationResults:     map[string]*fileRepo.ValidationResultRepository{},
 		runtimeCheckpoints:    map[string]*fileRepo.RuntimeCheckpointRepository{},
+		evidenceRecords:       map[string]*fileRepo.EvidenceRecordRepository{},
 		coverageWorkItems:     map[string]*fileRepo.CoverageWorkItemRepository{},
 		artifactContinuations: map[string]*fileRepo.ArtifactContinuationRepository{},
 		results:               map[string]*fileRepo.ResultRepository{},
@@ -418,6 +423,17 @@ func (s *workspaceScopedFileStore) runtimeCheckpointRepo(path string) *fileRepo.
 	if !ok {
 		repo = fileRepo.NewRuntimeCheckpointRepository(path)
 		s.runtimeCheckpoints[path] = repo
+	}
+	return repo
+}
+
+func (s *workspaceScopedFileStore) evidenceRecordRepo(path string) *fileRepo.EvidenceRecordRepository {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	repo, ok := s.evidenceRecords[path]
+	if !ok {
+		repo = fileRepo.NewEvidenceRecordRepository(path)
+		s.evidenceRecords[path] = repo
 	}
 	return repo
 }
@@ -1647,6 +1663,114 @@ func (r *workspaceScopedRuntimeCheckpointRepository) Delete(ctx context.Context,
 	return r.store.runtimeCheckpointRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedRuntimeCheckpointFile)).Delete(ctx, id)
 }
 
+type workspaceScopedEvidenceRecordRepository struct {
+	store *workspaceScopedFileStore
+}
+
+func newWorkspaceScopedEvidenceRecordRepository(store *workspaceScopedFileStore) *workspaceScopedEvidenceRecordRepository {
+	return &workspaceScopedEvidenceRecordRepository{store: store}
+}
+
+func (r *workspaceScopedEvidenceRecordRepository) Create(ctx context.Context, item *orchestratormodel.EvidenceRecord) error {
+	if item == nil || item.WorkspaceID == "" || item.RunID == "" || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	return r.repoForRun(item.WorkspaceID, item.RunID).Create(ctx, item)
+}
+
+func (r *workspaceScopedEvidenceRecordRepository) Get(ctx context.Context, id common.EvidenceRecordID) (*orchestratormodel.EvidenceRecord, error) {
+	if id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*orchestratormodel.EvidenceRecord, error) {
+		return r.store.evidenceRecordRepo(r.store.runPath(root, workspaceScopedEvidenceRecordDir)).Get(ctx, id)
+	})
+}
+
+func (r *workspaceScopedEvidenceRecordRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*orchestratormodel.EvidenceRecord, error) {
+	ret := []*orchestratormodel.EvidenceRecord{}
+	roots, err := r.store.runRootsByRunID(ctx, runID)
+	if err != nil {
+		if err == common.ErrNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	for _, root := range roots {
+		items, err := r.store.evidenceRecordRepo(r.store.runPath(root, workspaceScopedEvidenceRecordDir)).ListByRun(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, items...)
+	}
+	sortEvidenceRecords(ret)
+	return nilIfEmpty(ret), nil
+}
+
+func (r *workspaceScopedEvidenceRecordRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*orchestratormodel.EvidenceRecord, error) {
+	if stepID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	ret := []*orchestratormodel.EvidenceRecord{}
+	for _, root := range r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)) {
+		items, err := r.store.evidenceRecordRepo(r.store.runPath(root, workspaceScopedEvidenceRecordDir)).ListByStep(ctx, stepID)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, items...)
+	}
+	sortEvidenceRecords(ret)
+	return nilIfEmpty(ret), nil
+}
+
+func (r *workspaceScopedEvidenceRecordRepository) ListBySourceRef(ctx context.Context, runID common.RunID, sourceRef string) ([]*orchestratormodel.EvidenceRecord, error) {
+	items, err := r.ListByRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	ret := items[:0]
+	for _, item := range items {
+		if item.SourceRef == sourceRef {
+			ret = append(ret, item)
+		}
+	}
+	return nilIfEmpty(ret), nil
+}
+
+func (r *workspaceScopedEvidenceRecordRepository) Update(ctx context.Context, item *orchestratormodel.EvidenceRecord) error {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if item.WorkspaceID != "" && item.RunID != "" {
+		err := r.repoForRun(item.WorkspaceID, item.RunID).Update(ctx, item)
+		if err == nil || err != common.ErrNotFound {
+			return err
+		}
+	}
+	current, err := r.Get(ctx, item.ID)
+	if err != nil {
+		return err
+	}
+	item.WorkspaceID = current.WorkspaceID
+	item.RunID = current.RunID
+	return r.repoForRun(item.WorkspaceID, item.RunID).Update(ctx, item)
+}
+
+func (r *workspaceScopedEvidenceRecordRepository) Delete(ctx context.Context, id common.EvidenceRecordID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.repoForRun(current.WorkspaceID, current.RunID).Delete(ctx, id)
+}
+
+func (r *workspaceScopedEvidenceRecordRepository) repoForRun(workspaceID common.WorkspaceID, runID common.RunID) *fileRepo.EvidenceRecordRepository {
+	return r.store.evidenceRecordRepo(r.store.runPath(r.store.runRoot(workspaceID, runID), workspaceScopedEvidenceRecordDir))
+}
+
 type workspaceScopedCoverageWorkItemRepository struct {
 	store *workspaceScopedFileStore
 }
@@ -2514,6 +2638,21 @@ func sortValidationResults(items []*runmodel.ValidationResult) {
 
 func sortRuntimeCheckpoints(items []*runmodel.RuntimeCheckpoint) {
 	sort.Slice(items, func(i, j int) bool { return string(items[i].ID) < string(items[j].ID) })
+}
+
+func sortEvidenceRecords(items []*orchestratormodel.EvidenceRecord) {
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].RunID != items[j].RunID {
+			return string(items[i].RunID) < string(items[j].RunID)
+		}
+		if items[i].StepID != items[j].StepID {
+			return string(items[i].StepID) < string(items[j].StepID)
+		}
+		if items[i].CreatedAt != items[j].CreatedAt {
+			return items[i].CreatedAt < items[j].CreatedAt
+		}
+		return string(items[i].ID) < string(items[j].ID)
+	})
 }
 
 func sortCoverageWorkItems(items []*orchestratormodel.CoverageWorkItem) {

@@ -42,6 +42,7 @@ func (m *Module) Setup(_ context.Context, _ event.Hub, backgroundRoutine task.Ba
 		Patches:               repos.Patches,
 		ValidationResults:     repos.ValidationResults,
 		RuntimeCheckpoints:    repos.RuntimeCheckpoints,
+		EvidenceRecords:       repos.EvidenceRecords,
 		CoverageWorkItems:     repos.CoverageWorkItems,
 		ArtifactContinuations: repos.ArtifactContinuations,
 		RuntimePolicy:         runtimePolicy,
