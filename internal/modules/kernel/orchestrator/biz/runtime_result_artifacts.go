@@ -136,6 +136,9 @@ func (r *resultSubsystem) recordResultSummaryArtifact(
 	if r == nil || run == nil || step == nil || r.evidence.Artifacts == nil {
 		return nil, nil
 	}
+	if err := r.ensureAcceptedOutputEvidenceRefs(ctx, run.ID, "result summary artifact", evidenceRefs); err != nil {
+		return nil, err
+	}
 	item := &resultmodel.Artifact{
 		ID:           common.ArtifactID(fmt.Sprintf("%s/artifact/result-summary", run.ID)),
 		WorkspaceID:  run.WorkspaceID,
@@ -198,6 +201,9 @@ func (r *resultSubsystem) recordWorkspaceDeliverableManifestArtifact(
 ) (common.ArtifactID, error) {
 	if r == nil || run == nil || step == nil || r.evidence.Artifacts == nil {
 		return "", nil
+	}
+	if err := r.ensureAcceptedOutputEvidenceRefs(ctx, run.ID, "deliverable manifest artifact", evidenceRefs); err != nil {
+		return "", err
 	}
 	item := &resultmodel.Artifact{
 		ID:           common.ArtifactID(fmt.Sprintf("%s/artifact/deliverable-manifest", run.ID)),
@@ -272,6 +278,9 @@ func (r *resultSubsystem) recordPatchDiffArtifact(
 			targetRefs = append(targetRefs, patch.TargetRef)
 		}
 	}
+	if err := r.ensureAcceptedOutputEvidenceRefs(ctx, run.ID, "patch diff artifact", patchIDs); err != nil {
+		return nil, err
+	}
 	item := &resultmodel.Artifact{
 		ID:           patchDiffArtifactID(run),
 		WorkspaceID:  run.WorkspaceID,
@@ -342,6 +351,9 @@ func (r *resultSubsystem) recordWebSourceIndexArtifact(
 		return "", nil
 	}
 	evidenceRefs := resultWebSourceEvidenceRefs(sourceDetails)
+	if err := r.ensureAcceptedOutputEvidenceRefs(ctx, run.ID, "web source artifact", evidenceRefs); err != nil {
+		return "", err
+	}
 	item := &resultmodel.Artifact{
 		ID:           webSourceIndexArtifactID(run),
 		WorkspaceID:  run.WorkspaceID,
@@ -406,6 +418,9 @@ func (r *resultSubsystem) recordGitOperationIndexArtifact(
 		return "", nil
 	}
 	evidenceRefs := resultGitOperationEvidenceRefs(gitDetails)
+	if err := r.ensureAcceptedOutputEvidenceRefs(ctx, run.ID, "git operation artifact", evidenceRefs); err != nil {
+		return "", err
+	}
 	item := &resultmodel.Artifact{
 		ID:           gitOperationIndexArtifactID(run),
 		WorkspaceID:  run.WorkspaceID,

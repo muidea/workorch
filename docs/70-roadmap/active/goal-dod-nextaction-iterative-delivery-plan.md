@@ -34,6 +34,9 @@ Related:
 - [S3.3 Validation Accepted And Rejected Evidence Write](./goal-dod-nextaction-s3-3-validation-evidence-write.md)
 - [S3.4 Decision And Approval Governance Evidence Write](./goal-dod-nextaction-s3-4-governance-evidence-write.md)
 - [S3.5 Diagnostic Rejected Evidence Write](./goal-dod-nextaction-s3-5-diagnostic-rejected-evidence-write.md)
+- [S3.6 Rejected Evidence Output Guard](./goal-dod-nextaction-s3-6-rejected-evidence-output-guard.md)
+- [S4.1 CoverageItem Minimal Model Mapping](./goal-dod-nextaction-s4-1-coverage-item-minimal-model.md)
+- [S4.2 Definition Revision Coverage Ledger Initialization](./goal-dod-nextaction-s4-2-definition-revision-coverage-ledger-initialization.md)
 
 ## Purpose
 

@@ -128,6 +128,9 @@ func (r *resultSubsystem) recordSkillFeedbackMemoryFromValidatedDoDAssessment(
 	if summary == "" {
 		return nil
 	}
+	if err := r.ensureAcceptedOutputEvidenceRefs(ctx, run.ID, "skill feedback memory", doDAssessmentEvidenceRefs(step.ID, assessment)); err != nil {
+		return err
+	}
 	item := &memorymodel.MemoryItem{
 		ID:          common.MemoryID(fmt.Sprintf("%s/memory/skill-feedback", run.ID)),
 		WorkspaceID: run.WorkspaceID,
@@ -189,6 +192,9 @@ func (r *resultSubsystem) recordRunSummaryMemoryFromValidatedDoDAssessment(
 		return nil
 	}
 	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
+	if err := r.ensureAcceptedOutputEvidenceRefs(ctx, run.ID, "run summary memory", evidenceRefs); err != nil {
+		return err
+	}
 	item := &memorymodel.MemoryItem{
 		ID:          common.MemoryID(fmt.Sprintf("%s/memory/run-summary", run.ID)),
 		WorkspaceID: run.WorkspaceID,
@@ -240,6 +246,9 @@ func (r *resultSubsystem) recordValidationCommandMemoriesFromValidatedDoDAssessm
 		return nil
 	}
 	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
+	if err := r.ensureAcceptedOutputEvidenceRefs(ctx, run.ID, "validation command memory", evidenceRefs); err != nil {
+		return err
+	}
 	evidenceDetails := r.resultEvidenceDetails(ctx, evidenceRefs)
 	commands := validationCommandMemoryEntries(evidenceDetails)
 	if len(commands) == 0 {

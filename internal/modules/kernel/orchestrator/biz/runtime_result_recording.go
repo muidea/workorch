@@ -149,6 +149,9 @@ func (r *resultSubsystem) recordRunResultFromValidatedDoDAssessment(
 	patchDetails := results.resultPatchDetails(ctx, run.ID)
 	assessment, summary = resultAssessmentWithRuntimeFacts(run, assessment, summary, patchDetails)
 	evidenceRefs = doDAssessmentEvidenceRefs(step.ID, assessment)
+	if err := r.ensureAcceptedOutputEvidenceRefs(ctx, run.ID, "completion result", evidenceRefs); err != nil {
+		return err
+	}
 	webSourceDetails := results.resultWebSourceDetailsForEvidenceRefs(ctx, run.ID, evidenceRefs)
 	gitOperationDetails := results.resultGitOperationDetails(ctx, run.ID)
 	expectedArtifactRefs := expectedCompletionArtifactRefs(run, patchDetails, webSourceDetails, gitOperationDetails)
@@ -385,6 +388,9 @@ func (r *resultSubsystem) recordAcceptedSliceResult(
 	evidenceRefs = compactUniqueStrings(append(evidenceRefs, string(step.ID)))
 	if len(assessmentItems) == 0 || len(evidenceRefs) == 0 {
 		return nil
+	}
+	if err := r.ensureAcceptedOutputEvidenceRefs(ctx, run.ID, "acceptance slice result", evidenceRefs); err != nil {
+		return err
 	}
 	title := strings.TrimSpace(stringFromMap(slice, "title"))
 	if title == "" {
@@ -699,7 +705,13 @@ func (r *resultSubsystem) recordCompletionEvidenceFromValidatedDoDAssessment(
 	summary string,
 	workspace *workspaceModel.Workspace,
 ) error {
+	if r == nil || run == nil || step == nil || assessment == nil {
+		return nil
+	}
 	if err := ensureRunCanRecordFormalResult(run); err != nil {
+		return err
+	}
+	if err := r.ensureAcceptedOutputEvidenceRefs(ctx, run.ID, "completion evidence", doDAssessmentEvidenceRefs(step.ID, assessment)); err != nil {
 		return err
 	}
 	return runParallel(

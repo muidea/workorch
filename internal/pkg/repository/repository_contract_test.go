@@ -2514,6 +2514,7 @@ func testCoverageWorkItemRepositoryContract(t *testing.T, factory func() reposit
 		NormalizedSourceKey:   "dod:001",
 		SourceScope:           "dod",
 		SourceRequirementID:   "dod-001",
+		SourceGoalID:          common.GoalID("goal-contract"),
 		SourceDoDID:           common.DoDID("dod-contract"),
 		TargetText:            "Requirement text",
 		RequiredEvidenceKinds: []string{"state_change", "validation"},
@@ -2554,6 +2555,8 @@ func testCoverageWorkItemRepositoryContract(t *testing.T, factory func() reposit
 	if fresh.Metadata["scope"] != "contract" ||
 		fresh.RequiredEvidenceKinds[0] != "state_change" ||
 		fresh.AcceptedEvidenceRefs[0] != "ev:accepted" ||
+		fresh.SourceGoalID != common.GoalID("goal-contract") ||
+		fresh.SourceDoDID != common.DoDID("dod-contract") ||
 		fresh.UpdatedByStepID != item.UpdatedByStepID {
 		t.Fatalf("coverage work item clone isolation failed: %+v", fresh)
 	}
@@ -3178,6 +3181,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		NormalizedSourceKey:   "dod:bundle",
 		SourceScope:           "dod",
 		SourceRequirementID:   "dod-bundle",
+		SourceGoalID:          goalID,
 		SourceDoDID:           dodID,
 		TargetText:            "bundle done",
 		RequiredEvidenceKinds: []string{"validation"},
@@ -3556,6 +3560,8 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 	if len(reloadedCoverageWorkItems) != 1 ||
 		reloadedCoverageWorkItems[0].ID != coverageWorkItemID ||
+		reloadedCoverageWorkItems[0].SourceGoalID != goalID ||
+		reloadedCoverageWorkItems[0].SourceDoDID != dodID ||
 		reloadedCoverageWorkItems[0].RequiredEvidenceKinds[0] != "validation" ||
 		reloadedCoverageWorkItems[0].Metadata["scope"] != "bundle" {
 		t.Fatalf("reloaded coverage work items = %+v, want %q", reloadedCoverageWorkItems, coverageWorkItemID)

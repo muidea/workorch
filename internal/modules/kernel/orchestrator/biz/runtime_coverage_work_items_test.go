@@ -19,6 +19,7 @@ func TestEnsureRunCoverageWorkItemsBuildsNeutralBaseline(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-baseline",
 		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-cwi-baseline",
 			"goal": map[string]any{
 				"id":   "goal-cwi",
 				"text": "### Parent\n- first leaf\n- second leaf",
@@ -61,6 +62,22 @@ func TestEnsureRunCoverageWorkItemsBuildsNeutralBaseline(t *testing.T) {
 		if source := stringFromMap(item, "source"); source == "" || source == "software_dev" || source == "test" {
 			t.Fatalf("coverage work item source = %q, want neutral source enum", source)
 		}
+		if revision := stringFromMap(item, "definitionRevision"); revision != "rev-cwi-baseline" {
+			t.Fatalf("coverage work item definitionRevision = %q, want rev-cwi-baseline: %+v", revision, item)
+		}
+	}
+	doDItems := 0
+	for _, item := range items {
+		if stringFromMap(item, "sourceDoDId") != "dod-cwi" {
+			continue
+		}
+		doDItems++
+		if !runtimecontract.CoverageWorkItemStatusActive(stringFromMap(item, "status")) {
+			t.Fatalf("DoD coverage item status = %q, want active: %+v", stringFromMap(item, "status"), item)
+		}
+	}
+	if doDItems != 1 {
+		t.Fatalf("DoD-bound coverage work item count = %d, want 1 leaf item: %+v", doDItems, items)
 	}
 	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
 	if focus := mapFromValue(context["currentFocus"]); stringFromMap(focus, "id") != "cwi-001" {
