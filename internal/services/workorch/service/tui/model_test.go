@@ -2683,8 +2683,12 @@ func TestModelApprovalResolvedRefreshesWorkspaceState(t *testing.T) {
 	if m.approvals[0].State != "resolved" {
 		t.Fatalf("approval state = %q, want resolved", m.approvals[0].State)
 	}
-	if _, ok := cmd().(tea.BatchMsg); !ok {
-		t.Fatalf("refresh command should batch workspace context and list refresh")
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("refresh command should batch workspace context, list refresh, and approval refresh")
+	}
+	if len(batch) < 3 {
+		t.Fatalf("approval refresh batch size = %d, want workspace state plus approval list refresh", len(batch))
 	}
 }
 

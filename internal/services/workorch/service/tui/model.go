@@ -528,7 +528,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.progress = progressSubmitting
 			m.progressText = "Approval resolved; waiting for server continuation"
 		}
-		return m, m.refreshActiveWorkspaceState()
+		cmds := []tea.Cmd{m.refreshActiveWorkspaceState()}
+		if refreshWorkspaceID != "" {
+			cmds = append(cmds, FetchWorkspaceContext(m.be, string(refreshWorkspaceID)), FetchApprovals(m.be, string(refreshWorkspaceID)))
+		}
+		return m, tea.Batch(cmds...)
 	case ConfigMsg:
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
