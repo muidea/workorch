@@ -451,6 +451,206 @@ func TestProviderCachePlanKeepsStablePrefixAcrossCoverageFocusChanges(t *testing
 	}
 }
 
+func TestStagePacketRendersInDynamicPromptPartitions(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-stage-packet",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"executionContextPackage": map[string]any{
+				"goal":               map[string]any{"text": "stable goal"},
+				"dod":                map[string]any{"items": []any{"stable dod"}},
+				"definitionRevision": "definition-stable",
+			},
+			"stagePacket": map[string]any{
+				"schemaVersion": "workorch.stage_packet.v1",
+				"workspaceId":   "ws-stage-packet",
+				"runId":         "run-001",
+				"stepId":        "step-001",
+				"definition": map[string]any{
+					"revision": "definition-stable",
+					"goalId":   "goal-001",
+					"doDId":    "dod-001",
+				},
+				"activeStage": "state_change",
+				"activeFocus": map[string]any{
+					"coverageItemId": "coverage-001",
+				},
+				"requiredOutput": map[string]any{
+					"mustUseCurrentTargetSnapshot": true,
+				},
+				"allowedActions":        []string{"state_change"},
+				"forbiddenActions":      []string{"complete_without_evidence"},
+				"requiredEvidenceKinds": []string{"state_change"},
+				"acceptedEvidenceRefs":  []string{"accepted-ref"},
+				"rejectedEvidenceRefs":  []string{"rejected-ref"},
+				"idempotencyKey":        "stage-packet-key",
+				"targetSnapshots": []map[string]any{{
+					"targetRef":             "target-truncated",
+					"contentHash":           "sha256-target-truncated",
+					"content":               "secret full content must not render",
+					"contentPreview":        "secret preview must not render",
+					"contentComplete":       false,
+					"safeForFileWrite":      false,
+					"safeForExactFileWrite": false,
+					"truncated":             true,
+					"integrityState":        "truncated",
+					"source":                "stagePacket",
+					"contextSource":         "runtime",
+				}},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	contract, ok := promptContextSectionByID(context, "C3.stage-packet-contract")
+	if !ok {
+		t.Fatalf("missing C3.stage-packet-contract; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{
+		"Stage Packet Contract",
+		"mustUseCurrentTargetSnapshot",
+		"accepted-ref",
+		"rejected-ref",
+		"stage-packet-key",
+	} {
+		if !strings.Contains(contract.Content, want) {
+			t.Fatalf("stage packet contract missing %q: %s", want, contract.Content)
+		}
+	}
+	if strings.Contains(contract.Content, "secret full content") || strings.Contains(contract.Content, "secret preview") {
+		t.Fatalf("stage packet contract leaked snapshot body: %s", contract.Content)
+	}
+
+	snapshots, ok := promptContextSectionByID(context, "C5.stage-packet-target-snapshots")
+	if !ok {
+		t.Fatalf("missing C5.stage-packet-target-snapshots; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{"target-truncated", "sha256-target-truncated", "integrityState", "truncated", "safeForExactFileWrite"} {
+		if !strings.Contains(snapshots.Content, want) {
+			t.Fatalf("stage packet snapshot metadata missing %q: %s", want, snapshots.Content)
+		}
+	}
+	for _, forbidden := range []string{"secret full content", "secret preview", "contentPreview"} {
+		if strings.Contains(snapshots.Content, forbidden) {
+			t.Fatalf("stage packet snapshot metadata leaked %q: %s", forbidden, snapshots.Content)
+		}
+	}
+
+	req.PromptContext = context
+	prompt := buildProviderFacingPrompt(req)
+	for _, forbidden := range []string{"mustUseCurrentTargetSnapshot", "accepted-ref", "target-truncated", "stage-packet-key"} {
+		if strings.Contains(prompt.StablePrefix, forbidden) {
+			t.Fatalf("stable prefix leaked stage packet value %q: %s", forbidden, prompt.StablePrefix)
+		}
+	}
+	dynamic := ""
+	for _, message := range prompt.DynamicMessages {
+		dynamic += "\n" + message.SectionID + "\n" + message.Content
+	}
+	for _, want := range []string{"C3.stage-packet-contract", "C5.stage-packet-target-snapshots", "mustUseCurrentTargetSnapshot", "target-truncated"} {
+		if !strings.Contains(dynamic, want) {
+			t.Fatalf("dynamic tail missing %q: %s", want, dynamic)
+		}
+	}
+}
+
+func TestProviderCachePlanKeepsStablePrefixAcrossStagePacketChanges(t *testing.T) {
+	baseInput := map[string]any{
+		"executionContextPackage": map[string]any{
+			"goal":               map[string]any{"text": "stable goal"},
+			"dod":                map[string]any{"items": []any{"stable dod"}},
+			"definitionRevision": "definition-stable",
+		},
+		"stagePacket": map[string]any{
+			"schemaVersion": "workorch.stage_packet.v1",
+			"workspaceId":   "ws-stage-cache",
+			"runId":         "run-001",
+			"stepId":        "step-001",
+			"definition":    map[string]any{"revision": "definition-stable"},
+			"activeStage":   "state_change",
+			"requiredOutput": map[string]any{
+				"mustUseCurrentTargetSnapshot": true,
+				"targetRef":                    "target-a",
+			},
+			"acceptedEvidenceRefs": []string{"accepted-a"},
+			"targetSnapshots": []map[string]any{{
+				"targetRef":             "target-a",
+				"contentHash":           "sha256-a",
+				"contentComplete":       true,
+				"safeForFileWrite":      true,
+				"safeForExactFileWrite": true,
+				"integrityState":        "full",
+			}},
+		},
+	}
+	changedInput := cloneMap(baseInput)
+	changedInput["stagePacket"] = map[string]any{
+		"schemaVersion": "workorch.stage_packet.v1",
+		"workspaceId":   "ws-stage-cache",
+		"runId":         "run-001",
+		"stepId":        "step-002",
+		"definition":    map[string]any{"revision": "definition-stable"},
+		"activeStage":   "state_change",
+		"requiredOutput": map[string]any{
+			"mustUseCurrentTargetSnapshot": true,
+			"targetRef":                    "target-b",
+		},
+		"acceptedEvidenceRefs": []string{"accepted-b"},
+		"rejectedEvidenceRefs": []string{"rejected-b"},
+		"targetSnapshots": []map[string]any{{
+			"targetRef":             "target-b",
+			"contentHash":           "sha256-b",
+			"contentComplete":       false,
+			"safeForFileWrite":      false,
+			"safeForExactFileWrite": false,
+			"truncated":             true,
+			"integrityState":        "truncated",
+		}},
+	}
+
+	base := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-stage-cache",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input:          baseInput,
+	}
+	changed := base
+	changed.StepID = "step-002"
+	changed.Input = changedInput
+	base.PromptContext = buildPromptContextFromRequest(base)
+	changed.PromptContext = buildPromptContextFromRequest(changed)
+	attachProviderCachePlan(&base)
+	attachProviderCachePlan(&changed)
+
+	basePlan := base.ContextBudget.CachePlan
+	changedPlan := changed.ContextBudget.CachePlan
+	if basePlan == nil || changedPlan == nil {
+		t.Fatalf("cache plan missing: base=%+v changed=%+v", base.ContextBudget, changed.ContextBudget)
+	}
+	if basePlan.StablePrefixHash != changedPlan.StablePrefixHash ||
+		basePlan.RenderedStablePrefixHash != changedPlan.RenderedStablePrefixHash ||
+		basePlan.WorkspaceDefinitionHash != changedPlan.WorkspaceDefinitionHash ||
+		basePlan.CapabilityContractHash != changedPlan.CapabilityContractHash ||
+		basePlan.CacheKey != changedPlan.CacheKey {
+		t.Fatalf("cacheable prefix changed under stage packet mutation: base=%+v changed=%+v", basePlan, changedPlan)
+	}
+	if basePlan.StageBundleHash == changedPlan.StageBundleHash {
+		t.Fatalf("stage bundle hash unchanged across stage packet contract mutation: %q", basePlan.StageBundleHash)
+	}
+	if basePlan.LargeRefsHash == changedPlan.LargeRefsHash {
+		t.Fatalf("large refs hash unchanged across stage packet snapshot mutation: %q", basePlan.LargeRefsHash)
+	}
+}
+
 func TestBuildProviderFacingPromptGroupsStablePrefixAndDynamicTail(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-provider-prefix",

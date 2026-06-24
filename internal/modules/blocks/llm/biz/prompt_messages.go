@@ -170,6 +170,7 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 	}))
 	snapshotBudget := promptSnapshotBudgetForRequest(request)
 	appendSection("C3.stage-contract", "user", "normalize_allowed", stageContractPromptSection(request.Input, snapshotBudget))
+	appendSection("C3.stage-packet-contract", "user", "normalize_allowed", stagePacketPromptSection(request.Input, snapshotBudget))
 	appendSection("C3.repair-action-package", "user", "normalize_allowed", repairActionPackagePromptSection(request.Input, snapshotBudget))
 	appendSection("C4.previous-decision", "assistant", "normalize_allowed", previousDecisionPromptSection(request.Input))
 	for _, event := range executionSignalPromptEvents(request) {
@@ -571,6 +572,60 @@ func stageContractPromptSection(input map[string]any, snapshotBudget promptSnaps
 	return marshalPromptSection("Stage Contract", section)
 }
 
+func stagePacketPromptSection(input map[string]any, snapshotBudget promptSnapshotBudget) string {
+	section := stagePacketContractPromptPayload(input, snapshotBudget)
+	if len(section) == 0 {
+		return ""
+	}
+	return marshalPromptSection("Stage Packet Contract", section)
+}
+
+func stagePacketContractPromptPayload(input map[string]any, snapshotBudget promptSnapshotBudget) map[string]any {
+	packet := recordFromAny(input["stagePacket"])
+	if len(packet) == 0 {
+		return nil
+	}
+	section := map[string]any{}
+	for _, key := range []string{
+		"schemaVersion",
+		"workspaceId",
+		"runId",
+		"stepId",
+		"activeStage",
+		"idempotencyKey",
+	} {
+		copyMapValue(section, key, packet[key])
+	}
+	for _, key := range []string{
+		"definition",
+		"activeFocus",
+		"nextAction",
+	} {
+		if value, ok := packet[key]; ok {
+			section[key] = budgetProviderValue(value, 0, 2048, 8, 16, 3)
+		}
+	}
+	if value, ok := packet["requiredOutput"]; ok {
+		limit := min(max(snapshotBudget.RepairContentLimit, 4096), 16384)
+		section["requiredOutput"] = budgetProviderValue(value, 0, limit, 12, 24, 4)
+	}
+	for _, key := range []string{
+		"allowedActions",
+		"forbiddenActions",
+		"requiredEvidenceKinds",
+		"acceptedEvidenceRefs",
+		"rejectedEvidenceRefs",
+	} {
+		if values := stringSliceFromAny(packet[key]); len(values) > 0 {
+			section[key] = limitedStringSlice(values, 32)
+		}
+	}
+	if len(section) == 0 {
+		return nil
+	}
+	return section
+}
+
 func repairActionPackagePromptSection(input map[string]any, snapshotBudget promptSnapshotBudget) string {
 	pkg := recordFromAny(input["repairActionPackage"])
 	if len(pkg) == 0 {
@@ -791,6 +846,9 @@ func executionSignalPromptEvents(request llmmodels.ProviderRequest) []executionS
 	if memory := memorySignalPayload(request.Input); len(memory) > 0 {
 		appendEvent("C4.memory-recall", "Memory Recall Signal", memory)
 	}
+	if snapshots := stagePacketTargetSnapshotsPromptPayload(request.Input, snapshotBudget); len(snapshots) > 0 {
+		appendEvent("C5.stage-packet-target-snapshots", "Stage Packet Target Snapshot Metadata", snapshots)
+	}
 	if len(request.TraceRefs) > 0 {
 		appendEvent("C5.trace-refs", "Trace References", request.TraceRefs)
 	}
@@ -804,6 +862,91 @@ func executionSignalPromptEvents(request llmmodels.ProviderRequest) []executionS
 		appendEvent("C4.execution-signals", "Execution Context and Evidence Signals", executionSignalsPayload(request))
 	}
 	return events
+}
+
+func stagePacketTargetSnapshotsPromptPayload(input map[string]any, snapshotBudget promptSnapshotBudget) []map[string]any {
+	packet := recordFromAny(input["stagePacket"])
+	if len(packet) == 0 {
+		return nil
+	}
+	items := mapSliceFromAny(packet["targetSnapshots"])
+	if len(items) == 0 {
+		return nil
+	}
+	limit := max(1, snapshotBudget.ItemLimit)
+	if len(items) < limit {
+		limit = len(items)
+	}
+	ret := make([]map[string]any, 0, limit)
+	for _, item := range items {
+		if len(ret) >= limit {
+			break
+		}
+		next := compactStagePacketTargetSnapshotForPrompt(item)
+		if len(next) == 0 {
+			continue
+		}
+		ret = append(ret, next)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func compactStagePacketTargetSnapshotForPrompt(item map[string]any) map[string]any {
+	if len(item) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{
+		"targetRef",
+		"exists",
+		"contentHash",
+		"contentComplete",
+		"safeForFileWrite",
+		"safeForExactFileWrite",
+		"integrityState",
+		"redacted",
+		"truncated",
+		"isBinary",
+		"size",
+		"source",
+		"contextSource",
+		"error",
+	} {
+		copyMapValue(out, key, item[key])
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	integrity := strings.TrimSpace(stringValue(out["integrityState"]))
+	if integrity == "" {
+		integrity = stagePacketSnapshotIntegrityForPrompt(out)
+		if integrity != "" {
+			out["integrityState"] = integrity
+		}
+	}
+	if integrity != "" {
+		out["safeForExactFileWrite"] = integrity == "full"
+		if integrity != "full" {
+			out["safeForFileWrite"] = false
+		}
+	}
+	return out
+}
+
+func stagePacketSnapshotIntegrityForPrompt(item map[string]any) string {
+	switch {
+	case boolValue(item["redacted"]):
+		return "redacted"
+	case boolValue(item["truncated"]):
+		return "truncated"
+	case boolValue(item["contentComplete"]) && boolValue(item["safeForFileWrite"]) && !boolValue(item["isBinary"]):
+		return "full"
+	default:
+		return "partial"
+	}
 }
 
 func compactPromptContextBudget(budget *llmmodels.ProviderContextBudget) map[string]any {
