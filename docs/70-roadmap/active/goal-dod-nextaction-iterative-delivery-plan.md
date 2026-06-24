@@ -80,6 +80,7 @@ Related:
 - [S10.5 Template Capability MCP/LSP Binding](./goal-dod-nextaction-s10-5-template-capability-mcp-lsp-binding.md)
 - [S10.6 Non-Software Template Isolation](./goal-dod-nextaction-s10-6-non-software-template-isolation.md)
 - [S11.1 Managed E2E Harness](./goal-dod-nextaction-s11-1-managed-e2e-harness.md)
+- [S11.2 Dual Workspace Resume/Replan E2E](./goal-dod-nextaction-s11-2-dual-workspace-resume-replan-e2e.md)
 
 ## Purpose
 
