@@ -59,6 +59,9 @@ func inheritOutputModeSignalsFromRunExecutionContext(input map[string]any, run *
 	if boolValue(input["completionFollowUp"]) || boolValue(input[stepInputKeyAssessmentOnly]) {
 		return
 	}
+	if outputModeInputBlocksRunExecutionContextInheritance(input) {
+		return
+	}
 	stateChangingInheritanceBlocked := outputModeStateChangingInheritanceBlockedByCurrentContract(input)
 	if !stateChangingInheritanceBlocked {
 		for _, key := range []string{"requestedOutputMode", "stateChangingOutputRequired", "repairObjective"} {
@@ -93,6 +96,18 @@ func inheritOutputModeSignalsFromRunExecutionContext(input map[string]any, run *
 	if changed {
 		targetPkg["requiredOutput"] = targetRequired
 		input["repairActionPackage"] = targetPkg
+	}
+}
+
+func outputModeInputBlocksRunExecutionContextInheritance(input map[string]any) bool {
+	switch strings.TrimSpace(convergenceNextActionKind(nil, input)) {
+	case "assessment", "complete_coverage_assessment",
+		"request_decision", "wait_decision", "request_governance",
+		"request_approval", "wait_approval",
+		"complete", "no_action", "fail", "fail_fast":
+		return true
+	default:
+		return false
 	}
 }
 

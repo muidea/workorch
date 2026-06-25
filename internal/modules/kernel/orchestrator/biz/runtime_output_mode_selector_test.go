@@ -331,6 +331,58 @@ func TestOutputModeSelectorInheritsStateChangingSignalFromRunExecutionContext(t 
 	}
 }
 
+func TestOutputModeSelectorDoesNotInheritStateChangingSignalWhenAuthorityBound(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-output-mode-authority-bound",
+		WorkspaceID: "ws-output-mode-authority-bound",
+		ExecutionContext: map[string]any{
+			"requestedOutputMode":         outputModeIncrementalArtifact,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"estimatedPatchContentBytes":         defaultMaxPatchContentBytes + 1,
+					"expectedStateChangingArtifactCount": 1,
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"nextAction": map[string]any{
+				"kind": "assessment",
+			},
+		},
+		gapBaselineKey: map[string]any{
+			"schemaVersion": gapBaselineSchema,
+			"nextAction": map[string]any{
+				"kind": "assessment",
+			},
+		},
+	}
+	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
+
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, run, input, nil, 0)
+
+	for _, key := range []string{
+		"stateChangingOutputRequired",
+		"repairObjective",
+		"requestedOutputMode",
+		"outputMode",
+		"outputModeSelector",
+		"artifactOutputContract",
+		"repairActionPackage",
+	} {
+		if input[key] != nil {
+			t.Fatalf("%s = %v, want no stale execution-context output-mode signal; input=%+v", key, input[key], input)
+		}
+	}
+	if len(mapFromValue(input[convergenceAuthorityKey])) == 0 || len(mapFromValue(input[gapBaselineKey])) == 0 {
+		t.Fatalf("authority/gapBaseline markers were not preserved: %+v", input)
+	}
+}
+
 func TestOutputModeSelectorDoesNotInheritStateChangingSignalForCompletionFollowUp(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-output-mode-completion-follow-up",
