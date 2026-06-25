@@ -455,6 +455,12 @@ func TestOutputModeSelectorUsesArtifactContextPhaseWhenContinuationRequestsConte
 		!stringSliceContains(stringSliceFromValue(required["allowedArtifactContextKinds"]), "mcp/tool_call") {
 		t.Fatalf("allowedArtifactContextKinds = %+v, want neutral read/tool allowlist", required["allowedArtifactContextKinds"])
 	}
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "file/read") ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "mcp/tool_call") ||
+		!boolValue(required["acceptedKindsOnly"]) ||
+		!boolValue(required["stateChangingForbidden"]) {
+		t.Fatalf("requiredOutput = %+v, want artifact context acceptedKinds to match read-only allowlist", required)
+	}
 }
 
 func TestOutputModeSelectorUsesArtifactContextPhaseAfterChunkReturnedToolGraph(t *testing.T) {

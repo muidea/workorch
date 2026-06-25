@@ -478,6 +478,9 @@ func applyArtifactContextRequiredOutput(input map[string]any, required map[strin
 	required["mustReturnArtifactContextGraph"] = true
 	required["stateChangingEvidenceDeferredUntilApply"] = true
 	required["allowedArtifactContextKinds"] = artifactContextAllowedGraphKinds()
+	required["acceptedKinds"] = artifactContextAllowedGraphKinds()
+	required["acceptedKindsOnly"] = true
+	required["stateChangingForbidden"] = true
 	required["forbiddenTopLevelOutputs"] = []string{"artifactPlan", "artifactChunk", "artifactChunkRepair", "dodAssessment", "memoryWrites", "patches", "patchRequests", "shellCommands", "mcpToolCalls"}
 	required["artifactContextGraphSchema"] = artifactContextRequiredOutputSchema()
 	delete(required, "mustIncludeStateChangingNode")

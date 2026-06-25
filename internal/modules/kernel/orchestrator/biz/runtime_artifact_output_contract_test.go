@@ -529,6 +529,54 @@ func TestValidateIncrementalArtifactChunkOutputContractAcceptsMatchingChunk(t *t
 	}
 }
 
+func TestValidateIncrementalArtifactContextOutputBypassesConcreteEvidenceGate(t *testing.T) {
+	run := &runmodel.Run{ID: "run-artifact-context-gate", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-artifact-context-gate/llm-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"concreteFailureEvidenceRequired": true,
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"stateChangingOutputRequired":     true,
+			"outputMode":                      outputModeIncrementalArtifact,
+			"artifactOutputContract": map[string]any{
+				"phase":         artifactOutputPhaseContext,
+				"maxGraphNodes": 8,
+			},
+			"artifactContinuationContext": map[string]any{
+				"id":               "cont-context-001",
+				"state":            string(common.ArtifactContinuationStateChunking),
+				"artifactId":       "artifact-001",
+				"targetRef":        "deliverable/main.go",
+				"expectedSequence": 1,
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": evidenceAcquisitionRequiredOutput(map[string]any{
+					"outputMode": outputModeIncrementalArtifact,
+				}),
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "read-artifact-context",
+				"kind": "file/read",
+				"input": map[string]any{
+					"targetRef": "deliverable/main.go",
+					"optional":  true,
+				},
+			}},
+		},
+		"llmDecision": map[string]any{"completionState": "continue"},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract() error = %v, want artifact context graph accepted", err)
+	}
+}
+
 func TestValidateIncrementalArtifactChunkOutputContractRejectsSequenceMismatch(t *testing.T) {
 	run := &runmodel.Run{ID: "run-artifact-chunk-seq", InitialStepKind: llmWorkspaceExecutionStepKind}
 	step := &runmodel.Step{

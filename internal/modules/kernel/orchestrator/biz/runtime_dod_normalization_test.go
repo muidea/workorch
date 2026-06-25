@@ -1194,6 +1194,73 @@ func TestNormalizeDoDAssessmentEvidenceRefsMovesTraceableArtifactRefsIntoEvidenc
 	}
 }
 
+func TestNormalizeDoDAssessmentEvidenceRefsInfersKindsFromConcreteRefs(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-assessment-evidence-kind-infer")
+	changeStepID := common.StepID(runID + "/graph-001/001-change")
+	verifyStepID := common.StepID(runID + "/graph-001/002-verify")
+	stepRepo := newCountingStepRepository()
+	for _, step := range []*runmodel.Step{
+		{
+			ID:    changeStepID,
+			RunID: runID,
+			Kind:  "patch/apply",
+			State: common.StepStateCompleted,
+		},
+		{
+			ID:    verifyStepID,
+			RunID: runID,
+			Kind:  "shell/command",
+			State: common.StepStateCompleted,
+			Output: map[string]any{
+				"exitCode": 0,
+			},
+		},
+	} {
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("Create step %s: %v", step.ID, err)
+		}
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-assessment-evidence-kind-infer",
+		DoDID:           "dod-assessment-evidence-kind-infer",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	catalog, err := completionEvidenceRefCatalogForRun(ctx, stepRepo, RuntimeEvidenceRepositories{}, run)
+	if err != nil {
+		t.Fatalf("completionEvidenceRefCatalogForRun: %v", err)
+	}
+	assessment := map[string]any{
+		"satisfied": true,
+		"summary":   "Requirement is satisfied by state change plus validation.",
+		"items": []map[string]any{{
+			"item":         "deliverable ready",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(changeStepID), string(verifyStepID)},
+		}},
+	}
+
+	normalized, changed := normalizeDoDAssessmentEvidenceRefs(ctx, stepRepo, RuntimeEvidenceRepositories{}, catalog, assessment)
+	if !changed {
+		t.Fatalf("normalizeDoDAssessmentEvidenceRefs changed=false, want inferred evidenceKinds")
+	}
+	items, ok := doDAssessmentItemMaps(normalized["items"])
+	if !ok || len(items) != 1 {
+		t.Fatalf("items = %+v, want one item", normalized["items"])
+	}
+	if got := stringSliceFromValue(items[0]["evidenceKinds"]); !reflect.DeepEqual(got, []string{"validation", "state_change"}) {
+		t.Fatalf("evidenceKinds = %+v, want validation and state_change", got)
+	}
+	updates := coverageWorkItemAssessmentUpdates(&runmodel.Step{ID: common.StepID(string(runID) + "/assessment"), RunID: runID}, normalized)
+	if len(updates) != 1 {
+		t.Fatalf("coverageWorkItemAssessmentUpdates = %+v, want one update", updates)
+	}
+	if got := updates[0].EvidenceKinds; !reflect.DeepEqual(got, []string{"validation", "state_change"}) {
+		t.Fatalf("update evidenceKinds = %+v, want validation and inferred state_change", got)
+	}
+}
+
 func TestNormalizeCompletionGateDoDAssessmentOutputUsesEvidenceCandidatesWhenRefsAreNotTraceable(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-goal-coverage-normalize-candidate",

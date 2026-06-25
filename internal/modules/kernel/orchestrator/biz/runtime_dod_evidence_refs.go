@@ -432,6 +432,11 @@ func normalizeAssessmentItemsEvidenceRefs(ctx context.Context, steps repository.
 			normalized["evidenceRefs"] = refs
 			changed = true
 		}
+		if inferred := completionEvidenceKindsForRefs(catalog, evidenceRefsFromValue(normalized["evidenceRefs"])); len(inferred) > 0 &&
+			len(coverageAssessmentEvidenceKindsExplicit(normalized)) == 0 {
+			normalized["evidenceKinds"] = compactUniqueStrings(append([]string{"validation"}, inferred...))
+			changed = true
+		}
 		if refs, artifactRefs, ok := normalizeMisplacedArtifactEvidenceRefs(ctx, steps, evidence, catalog, normalized["evidenceRefs"], normalized["artifactRefs"]); ok {
 			normalized["evidenceRefs"] = refs
 			if len(artifactRefs) > 0 {
@@ -555,6 +560,40 @@ func completionEvidenceCandidateRefs(ctx context.Context, steps repository.StepR
 		refs = append(refs, canonical)
 	}
 	return dedupeEvidenceRefs(refs)
+}
+
+func completionEvidenceKindsForRefs(catalog completionEvidenceRefCatalog, refs []string) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	kinds := make([]string, 0, 2)
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		if coverageEvidenceRefLooksDecision(ref) {
+			kinds = append(kinds, "decision")
+		}
+		if coverageEvidenceRefLooksApproval(ref) {
+			kinds = append(kinds, "approval")
+		}
+		if catalog.patches[ref] {
+			kinds = append(kinds, "state_change")
+			continue
+		}
+		step := catalog.steps[ref]
+		if step == nil {
+			continue
+		}
+		if stepKindCanProduceStateChangingEvidence(step.Kind) {
+			kinds = append(kinds, "state_change")
+		}
+		if coverageStepCanProduceValidationEvidence(step) {
+			kinds = append(kinds, "validation")
+		}
+	}
+	return compactUniqueStrings(kinds)
 }
 
 func completionEvidenceCandidateCanFallback(candidate map[string]any) bool {

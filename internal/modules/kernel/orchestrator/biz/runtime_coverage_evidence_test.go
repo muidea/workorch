@@ -38,6 +38,28 @@ func TestCoverageApplyWorkItemEvidence_AcceptedEvidenceSatisfiesRequiredKind(t *
 	}
 }
 
+func TestEvidenceKindRequirementEvidenceKindsMixedAcceptedKindsDoNotRequireStateChange(t *testing.T) {
+	requirement := profileEvidenceKindRequirement{
+		Scope:         "dod_item",
+		ID:            "*",
+		RequireDirect: true,
+		AcceptedStepKinds: []string{
+			"shell/command",
+			"patch/apply",
+			"mcp/tool_call",
+		},
+	}
+
+	if got := evidenceKindRequirementEvidenceKinds(requirement); len(got) != 1 || got[0] != "validation" {
+		t.Fatalf("evidence kinds = %+v, want validation only for mixed accepted step kinds", got)
+	}
+
+	requirement.AcceptedStepKinds = []string{"patch/apply"}
+	if got := evidenceKindRequirementEvidenceKinds(requirement); !stringSliceContains(got, "validation") || !stringSliceContains(got, "state_change") {
+		t.Fatalf("evidence kinds = %+v, want validation and state_change for state-changing-only requirement", got)
+	}
+}
+
 func TestCoverageApplyWorkItemEvidence_RejectedEvidenceDoesNotSatisfyRequiredKind(t *testing.T) {
 	item := map[string]any{
 		"id":                    "cwi-rejected-evidence",

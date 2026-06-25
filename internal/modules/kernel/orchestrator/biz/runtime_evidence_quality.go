@@ -115,13 +115,8 @@ func evidenceKindRequirementEvidenceKinds(requirement profileEvidenceKindRequire
 		return kinds
 	}
 	ret := make([]string, 0, 2)
-	hasStateChange := false
 	hasValidation := requirement.RequireDirect || requirement.RequireExecutableBehaviorEvidence || len(requirement.AcceptedStepKinds) > 0
-	for _, kind := range requirement.AcceptedStepKinds {
-		if stepKindCanProduceStateChangingEvidence(kind) {
-			hasStateChange = true
-		}
-	}
+	hasStateChange := profileRequirementRequiresStateChangingEvidence(requirement)
 	for _, operation := range requirement.AcceptedOperations {
 		if strings.TrimSpace(strings.ToLower(operation)) == "commit" {
 			hasStateChange = true

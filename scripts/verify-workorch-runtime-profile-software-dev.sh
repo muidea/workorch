@@ -36,6 +36,12 @@ if [[ -z "$SNAPSHOT_FILE" ]]; then
   RUN_FILE="$RUN_DIR/run.json"
   STEP_FILE="$RUN_DIR/step.json"
   RESULT_FILE="$RUN_DIR/result.json"
+  if [[ ! -f "$STEP_FILE" && -d "$RUN_DIR/steps" ]]; then
+    STEP_FILE="$RUN_DIR/steps"
+  fi
+  if [[ ! -f "$RESULT_FILE" && -d "$RUN_DIR/results" ]]; then
+    RESULT_FILE="$RUN_DIR/results"
+  fi
 
   if [[ ! -f "$WORKSPACE_FILE" ]]; then
     echo "missing workspace file: $WORKSPACE_FILE" >&2
@@ -54,11 +60,27 @@ import sys
 snapshot_path, results_page_path, workspace_path, run_path, step_path, result_path, workspace_id, run_id = sys.argv[1:]
 
 def load_items(path):
-    if not os.path.exists(path):
+    if not path or not os.path.exists(path):
         return []
+    if os.path.isdir(path):
+        ret = []
+        for root, dirs, files in os.walk(path):
+            dirs.sort()
+            for name in sorted(files):
+                if not name.endswith(".json"):
+                    continue
+                child = os.path.join(root, name)
+                try:
+                    ret.extend(load_items(child))
+                except Exception as exc:
+                    raise SystemExit(f"failed to load {child}: {exc}") from exc
+        return ret
     with open(path, "r", encoding="utf-8") as handle:
         data = json.load(handle)
     if isinstance(data, dict):
+        for key in ("id", "ID", "runId", "RunID", "workspaceId", "WorkspaceID"):
+            if key in data:
+                return [data]
         return list(data.values())
     if isinstance(data, list):
         return data
@@ -233,8 +255,13 @@ def validate_required_coverage(errors, assessment, profile, profile_key, assessm
         if state != "satisfied":
             errors.append(f"accepted software-dev {assessment_key}.{item_id} is not satisfied")
         refs = value_list(item, evidence_kind)
+        if not refs and evidence_kind == "artifactRefs":
+            refs = value_list(item, "evidenceRefs")
         if not refs:
-            errors.append(f"accepted software-dev {assessment_key}.{item_id} missing {evidence_kind}")
+            label = evidence_kind
+            if evidence_kind == "artifactRefs":
+                label = "artifactRefs or evidenceRefs"
+            errors.append(f"accepted software-dev {assessment_key}.{item_id} missing {label}")
 
 def required_direct_evidence_ids(profile):
     ret = []
@@ -336,14 +363,16 @@ else:
 steps_by_id = step_kind_index(steps)
 direct_requirements = direct_evidence_requirements(profile) if profile else {}
 
-accepted_results = [
+final_results = [
     item for item in results
-    if field(item, "runId", "RunID") == run_id and field(item, "state", "State") == "accepted"
+    if field(item, "runId", "RunID") == run_id
+    and field(item, "state", "State") == "accepted"
+    and str(field(item, "sourceType", "SourceType") or "").strip() != "acceptance_slice"
 ]
-if str(field(run, "state", "State") or "") == "completed" and not accepted_results:
-    errors.append("completed software-dev run has no accepted result")
+if str(field(run, "state", "State") or "") == "completed" and not final_results:
+    errors.append("completed software-dev run has no final dod_assessment result")
 
-for result in accepted_results:
+for result in final_results:
     result_id = str(field(result, "id", "ID") or "<unknown>")
     assessment = assessment_from_result(result)
     if not assessment:

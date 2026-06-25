@@ -585,9 +585,64 @@ func (o *RuntimeOrchestrator) currentRunForRuntimeStepResult(ctx context.Context
 	switch current.State {
 	case common.RunStateRunning, common.RunStateValidating:
 		return current, true, nil
+	case common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
+		accepted, err := o.acceptResolvedGovernanceStepResult(ctx, current, step)
+		if err != nil || accepted {
+			return current, accepted, err
+		}
+		return current, false, nil
 	default:
 		return current, false, nil
 	}
+}
+
+func (o *RuntimeOrchestrator) acceptResolvedGovernanceStepResult(ctx context.Context, run *runModel.Run, step *runModel.Step) (bool, error) {
+	if o == nil || run == nil || step == nil || step.RunID != run.ID {
+		return false, nil
+	}
+	switch run.State {
+	case common.RunStateBlockedOnDecision:
+		if run.BlockingTicketID == "" || o.tickets == nil || len(mapFromValue(step.Input["decisionResolution"])) == 0 {
+			return false, nil
+		}
+		scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID)
+		ticket, err := o.tickets.Get(scopedCtx, run.BlockingTicketID)
+		if err != nil {
+			return false, err
+		}
+		if ticket == nil || ticket.ID != run.BlockingTicketID || ticket.RunID != run.ID || ticket.State != common.DecisionTicketStateResolved {
+			return false, nil
+		}
+	case common.RunStateBlockedOnApproval:
+		if run.BlockingApprovalID == "" || o.approvals == nil || len(mapFromValue(step.Input["approvalResolution"])) == 0 {
+			return false, nil
+		}
+		scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID)
+		approval, err := o.approvals.Get(scopedCtx, run.BlockingApprovalID)
+		if err != nil {
+			return false, err
+		}
+		if approval == nil || approval.ID != run.BlockingApprovalID || approval.RunID != run.ID || approval.State != common.ApprovalStateApproved {
+			return false, nil
+		}
+	default:
+		return false, nil
+	}
+	run.State = common.RunStateRunning
+	run.BlockingTicketID = ""
+	run.BlockingApprovalID = ""
+	run.FailureReason = ""
+	workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, run, common.WorkspaceStateRunning, nil)
+	if err != nil {
+		return false, err
+	}
+	if err := o.eventPublisher().publishRunStateChanged(ctx, run); err != nil {
+		return false, err
+	}
+	if err := o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, run.ID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (o *RuntimeOrchestrator) currentRunCanRecordRuntimeProgress(ctx context.Context, run *runModel.Run, step *runModel.Step) (bool, error) {

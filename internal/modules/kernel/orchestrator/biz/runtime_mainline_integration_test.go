@@ -18,6 +18,7 @@ import (
 	mcpblockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	mcpbiz "github.com/muidea/workorch/internal/modules/kernel/mcp/biz"
 	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
@@ -527,10 +528,104 @@ func TestRuntimeOrchestrator_FinalizeRuntimeStepResultClosesLateResultAfterRunBl
 	}
 }
 
+func TestRuntimeOrchestrator_CurrentRunAcceptsResolvedDecisionContinuationResult(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	hub := events.NewMemoryHub()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&requestOnlyRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{},
+		hub,
+	)
+
+	workspaceID := common.WorkspaceID("ws-resolved-decision-result")
+	runID := common.RunID("run-resolved-decision-result")
+	stepID := common.StepID("run-resolved-decision-result/after-decision")
+	ticketID := common.TicketID("ticket-resolved-decision-result")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateBlockedOnDecision, BlockingTicketID: ticketID}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := ticketRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      "run-resolved-decision-result/step-1",
+		State:       common.DecisionTicketStateResolved,
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	step := &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateDispatched,
+		Input: map[string]any{
+			"decisionResolution": map[string]any{
+				"ticketId":       string(ticketID),
+				"resolutionType": "provide_missing_info",
+			},
+		},
+	}
+	if err := stepRepo.Create(ctx, step); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+
+	current, accepts, err := orch.currentRunForRuntimeStepResult(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, step)
+	if err != nil {
+		t.Fatalf("currentRunForRuntimeStepResult: %v", err)
+	}
+	if !accepts {
+		t.Fatalf("accepts result = false, want true for resolved decision continuation")
+	}
+	if current.State != common.RunStateRunning || current.BlockingTicketID != "" {
+		t.Fatalf("current run = %+v, want running with cleared decision blocker", current)
+	}
+	persisted, err := runRepo.GetByWorkspaceID(ctx, workspaceID, runID)
+	if err != nil {
+		t.Fatalf("get persisted run: %v", err)
+	}
+	if persisted.State != common.RunStateRunning || persisted.BlockingTicketID != "" {
+		t.Fatalf("persisted run = %+v, want running with cleared decision blocker", persisted)
+	}
+	workspace, err := workspaceRepo.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if workspace.State != common.WorkspaceStateRunning || workspace.ActiveRunID != runID {
+		t.Fatalf("workspace = %+v, want active running run", workspace)
+	}
+	if !publishedRunState(hub.Published(), runID, common.RunStateRunning) {
+		t.Fatalf("published events = %+v, want running run state", hub.Published())
+	}
+}
+
 func publishedStepState(items []events.Envelope, stepID common.StepID, state common.StepState) bool {
 	for _, item := range items {
 		if item.Topic == runevents.TopicStepStateChanged &&
 			item.StepID == string(stepID) &&
+			item.Payload[events.PayloadKeyState] == string(state) {
+			return true
+		}
+	}
+	return false
+}
+
+func publishedRunState(items []events.Envelope, runID common.RunID, state common.RunState) bool {
+	for _, item := range items {
+		if item.Topic == runevents.TopicRunStateChanged &&
+			item.RunID == string(runID) &&
 			item.Payload[events.PayloadKeyState] == string(state) {
 			return true
 		}

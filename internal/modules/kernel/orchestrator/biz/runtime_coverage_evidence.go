@@ -286,8 +286,15 @@ func coverageWorkItemAssessmentUpdates(step *runModel.Step, assessment map[strin
 }
 
 func coverageAssessmentEvidenceKinds(item map[string]any) []string {
+	if kinds := coverageAssessmentEvidenceKindsExplicit(item); len(kinds) > 0 {
+		return kinds
+	}
+	return []string{"validation"}
+}
+
+func coverageAssessmentEvidenceKindsExplicit(item map[string]any) []string {
 	if len(item) == 0 {
-		return []string{"validation"}
+		return nil
 	}
 	for _, key := range []string{"evidenceKinds", "requiredEvidenceKinds"} {
 		if kinds := compactUniqueStrings(stringSliceFromValue(item[key])); len(kinds) > 0 {
@@ -297,7 +304,7 @@ func coverageAssessmentEvidenceKinds(item map[string]any) []string {
 	if kind := strings.TrimSpace(stringFromMap(item, "evidenceKind")); kind != "" {
 		return []string{kind}
 	}
-	return []string{"validation"}
+	return nil
 }
 
 func coverageTokensFromAssessmentItem(item map[string]any) []string {

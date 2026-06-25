@@ -9,6 +9,8 @@ MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 VERIFY_SUFFIX="${WORKORCH_SOFTWARE_DEV_E2E_SUFFIX:-$$}"
 E2E_MARKER="software-dev-e2e-$VERIFY_SUFFIX"
 TMP_DIR="${WORKORCH_SOFTWARE_DEV_E2E_ARTIFACT_DIR:-$(mktemp -d)}"
+CURL_CONNECT_TIMEOUT="${WORKORCH_SOFTWARE_DEV_E2E_CURL_CONNECT_TIMEOUT:-1}"
+CURL_READY_MAX_TIME="${WORKORCH_SOFTWARE_DEV_E2E_READY_MAX_TIME:-3}"
 MOCK_PID=""
 MOCK_LOG="$TMP_DIR/software-dev-e2e-llm-mock.log"
 LOCK_DIR="/tmp/workorch-e2e-llm-config.lock"
@@ -107,12 +109,12 @@ PY
 
 wait_ready() {
   for _ in $(seq 1 60); do
-    if curl -fsS "$BASE_URL/readyz" >/dev/null 2>&1; then
+    if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_READY_MAX_TIME" -fsS "$BASE_URL/readyz" >/dev/null 2>&1; then
       return 0
     fi
     sleep 0.2
   done
-  curl -fsS "$BASE_URL/readyz" >/dev/null
+  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_READY_MAX_TIME" -fsS "$BASE_URL/readyz" >/dev/null
 }
 
 wait_mock() {
@@ -596,7 +598,7 @@ def scenario_for_run(run_id, merged_content):
     return scenario
 
 def is_repair_step(step_id):
-    return "zz-llm-repair-" in step_id or "/repair-" in step_id
+    return "zz-llm-repair-" in step_id or "/repair-" in step_id or "/contract-retry-" in step_id
 
 def is_after_graph_step(step_id):
     return "zz-llm-after-graph-" in step_id or "/follow-up-graph-" in step_id
@@ -614,6 +616,9 @@ def capability_policy_skip():
         "reason": "deterministic e2e fixture uses direct patch and validation evidence; semantic capability is intentionally skipped",
         "fallbackPolicy": "fallback_to_file_read_and_build_output_without_blocking"
     }]
+
+def main_repair_goal():
+    return f"[{e2e_marker}] 完成软件开发闭环：通过 executionGraph 修改代码并运行测试，失败时自动修复，最终基于证据输出 DoD 评估。"
 
 CALCULATOR_GIT_PATHS = ["go.mod", "calculator.go", "calculator_test.go"]
 REPLAN_GIT_PATHS = ["go.mod", "calculator.go", "calculator_test.go", "calculator_replan_test.go"]
@@ -948,7 +953,15 @@ def has_completed_repair_graph_evidence(merged_content):
 
 def has_completed_replan_graph_evidence(merged_content):
     text = str(merged_content or "")
-    return "write-replan-regression-test" in text and "run-tests-replan" in text and "git-commit" in text
+    return (
+        re.search(r'"(?:nodeId|graphNodeId|stepId)"\s*:\s*"[^"]*write-replan-regression-test"', text)
+        and re.search(r'"(?:nodeId|graphNodeId|stepId)"\s*:\s*"[^"]*run-tests-replan"', text)
+        and re.search(r'"(?:nodeId|graphNodeId|stepId)"\s*:\s*"[^"]*git-commit"', text)
+    )
+
+def has_completed_replan_failure_evidence(merged_content):
+    text = str(merged_content or "")
+    return re.search(r'"(?:nodeId|graphNodeId|stepId)"\s*:\s*"[^"]*read-current-source"', text)
 
 def needs_completed_repair_assessment(step_id, merged_content):
     text = str(merged_content or "")
@@ -1031,7 +1044,9 @@ def main_repair_graph_response():
                         "verificationPlan": "run bounded go test ./... after patch",
                         "coverageTargets": [
                             "代码修改通过 Patch 证据可追溯",
-                            "完成软件开发闭环",
+                            "go test ./... 最终通过",
+                            "结果包含 DoD 评估和交付物索引",
+                            main_repair_goal(),
                             "source_change",
                             "user_deliverable"
                         ]
@@ -1045,6 +1060,7 @@ def main_repair_graph_response():
                         "command": "go",
                         "args": ["test", "./..."],
                         "coverageTargets": [
+                            "代码修改通过 Patch 证据可追溯",
                             "go test ./... 最终通过",
                             "结果包含 DoD 评估和交付物索引",
                             "validation_report"
@@ -1079,7 +1095,8 @@ def replan_continuation_graph_response():
                         "coverageTargets": [
                             "代码修改通过 Patch 证据可追溯",
                             "go test ./... 最终通过",
-                            "完成软件开发闭环",
+                            "结果包含 DoD 评估和交付物索引",
+                            main_repair_goal(),
                             "source_change",
                             "user_deliverable"
                         ]
@@ -1093,6 +1110,7 @@ def replan_continuation_graph_response():
                         "command": "go",
                         "args": ["test", "./..."],
                         "coverageTargets": [
+                            "代码修改通过 Patch 证据可追溯",
                             "go test ./... 最终通过",
                             "结果包含 DoD 评估和交付物索引",
                             "validation_report"
@@ -1180,7 +1198,7 @@ def empty_project_graph_response():
                         "patchType": "file_write",
                         "targetRef": "README.md",
                         "content": NEW_PROJECT_README,
-                        "coverageTargets": ["README.md 必须作为交付物证据可追溯", "user_deliverable", f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。"]
+                        "coverageTargets": ["README.md 必须作为交付物证据可追溯", "source_change", "user_deliverable", f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。"]
                     }
                 },
                 {
@@ -1251,7 +1269,7 @@ def cumulative_empty_project_graph_response():
                         "targetRef": "README.md",
                         "oldText": NEW_PROJECT_README,
                         "newText": CUMULATIVE_PROJECT_README,
-                        "coverageTargets": ["README.md 必须作为交付物证据可追溯", "user_deliverable", f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。"]
+                        "coverageTargets": ["README.md 必须作为交付物证据可追溯", "source_change", "user_deliverable", f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。"]
                     }
                 },
                 {
@@ -1426,10 +1444,10 @@ def completed_empty_project_assessment(run_id, step_id, merged_content):
             "implementationSummary": "Generated go.mod, feature.go, feature_test.go, and README.md.",
             "verificationSummary": "go test ./... passed with an effective assertion.",
             "items": [
-                {"item": "空 workspace 不要求用户提供源码来源", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/001-write-go-mod", f"{run_id}/{graph}/002-write-source"]},
-                {"item": "生成最小可运行 Go 项目", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/001-write-go-mod", f"{run_id}/{graph}/002-write-source", f"{run_id}/{graph}/003-write-tests"]},
+                {"item": "空 workspace 不要求用户提供源码来源", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/001-write-go-mod", f"{run_id}/{graph}/002-write-source", f"{run_id}/{graph}/005-run-empty-project-tests"]},
+                {"item": "生成最小可运行 Go 项目", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/001-write-go-mod", f"{run_id}/{graph}/002-write-source", f"{run_id}/{graph}/003-write-tests", f"{run_id}/{graph}/005-run-empty-project-tests"]},
                 {"item": "go test ./... 必须包含有效断言并通过", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/005-run-empty-project-tests"]},
-                {"item": "README.md 必须作为交付物证据可追溯", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/004-write-readme"]},
+                {"item": "README.md 必须作为交付物证据可追溯", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/004-write-readme", f"{run_id}/{graph}/005-run-empty-project-tests"]},
                 {"item": "目标项目外部依赖配置必须按 target_workspace/external_dependency 作用域处理", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/005-run-empty-project-tests"]},
                 {"item": "敏感认证信息不得进入 snapshot、observability、event 或 LLM context", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/005-run-empty-project-tests"]}
             ],
@@ -1437,7 +1455,7 @@ def completed_empty_project_assessment(run_id, step_id, merged_content):
                 "satisfied": True,
                 "items": [
                     {"goal": f"[{e2e_marker}] 从空 workspace 初始化一个最小 Go 项目，并完成可追溯的开发、测试和交付。", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/001-write-go-mod", f"{run_id}/{graph}/002-write-source", f"{run_id}/{graph}/003-write-tests", f"{run_id}/{graph}/005-run-empty-project-tests"]},
-                    {"goal": f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/004-write-readme"]}
+                    {"goal": f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/004-write-readme", f"{run_id}/{graph}/005-run-empty-project-tests"]}
                 ]
             },
             "acceptanceDimensions": {
@@ -1449,11 +1467,11 @@ def completed_empty_project_assessment(run_id, step_id, merged_content):
             "deliverableCoverage": {
                 "satisfied": True,
                 "items": [
-                    {"id": "source_change", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/001-write-go-mod", f"{run_id}/{graph}/002-write-source", f"{run_id}/{graph}/003-write-tests", f"{run_id}/{graph}/004-write-readme"], "artifactRefs": [f"{run_id}/{graph}/001-write-go-mod", f"{run_id}/{graph}/002-write-source", f"{run_id}/{graph}/003-write-tests", f"{run_id}/{graph}/004-write-readme"]},
+                    {"id": "source_change", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/001-write-go-mod", f"{run_id}/{graph}/002-write-source", f"{run_id}/{graph}/003-write-tests", f"{run_id}/{graph}/004-write-readme", f"{run_id}/{graph}/005-run-empty-project-tests"], "artifactRefs": [f"{run_id}/{graph}/001-write-go-mod", f"{run_id}/{graph}/002-write-source", f"{run_id}/{graph}/003-write-tests", f"{run_id}/{graph}/004-write-readme"]},
                     {"id": "validation_report", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/005-run-empty-project-tests"], "artifactRefs": [f"{run_id}/{graph}/005-run-empty-project-tests"]},
                     {"id": "coverage_map", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/005-run-empty-project-tests"], "artifactRefs": [f"{run_id}/{graph}/005-run-empty-project-tests"]},
                     git_snapshot_deliverable(f"{run_id}/{graph}/008-git-commit"),
-                    {"id": "user_deliverable", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/002-write-source", f"{run_id}/{graph}/004-write-readme"], "artifactRefs": [f"{run_id}/{graph}/002-write-source", f"{run_id}/{graph}/004-write-readme"]}
+                    {"id": "user_deliverable", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/002-write-source", f"{run_id}/{graph}/004-write-readme", f"{run_id}/{graph}/005-run-empty-project-tests"], "artifactRefs": [f"{run_id}/{graph}/002-write-source", f"{run_id}/{graph}/004-write-readme"]}
                 ]
             }
         }
@@ -1473,10 +1491,10 @@ def completed_cumulative_empty_project_assessment(run_id, step_id, merged_conten
             "implementationSummary": "Added cumulative_feature.go, cumulative_feature_test.go, and updated README.md.",
             "verificationSummary": "go test ./... passed with the original and cumulative assertions.",
             "items": [
-                {"item": "空 workspace 不要求用户提供源码来源", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/001-collect-cumulative-baseline", f"{run_id}/{graph}/002-write-cumulative-source"]},
-                {"item": "生成最小可运行 Go 项目", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/002-write-cumulative-source", f"{run_id}/{graph}/003-write-cumulative-tests"]},
+                {"item": "空 workspace 不要求用户提供源码来源", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/001-collect-cumulative-baseline", f"{run_id}/{graph}/002-write-cumulative-source", f"{run_id}/{graph}/005-run-empty-project-tests"]},
+                {"item": "生成最小可运行 Go 项目", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/002-write-cumulative-source", f"{run_id}/{graph}/003-write-cumulative-tests", f"{run_id}/{graph}/005-run-empty-project-tests"]},
                 {"item": "go test ./... 必须包含有效断言并通过", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/005-run-empty-project-tests"]},
-                {"item": "README.md 必须作为交付物证据可追溯", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/001-collect-cumulative-baseline", f"{run_id}/{graph}/004-update-readme"]},
+                {"item": "README.md 必须作为交付物证据可追溯", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/001-collect-cumulative-baseline", f"{run_id}/{graph}/004-update-readme", f"{run_id}/{graph}/005-run-empty-project-tests"]},
                 {"item": "目标项目外部依赖配置必须按 target_workspace/external_dependency 作用域处理", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/005-run-empty-project-tests"]},
                 {"item": "敏感认证信息不得进入 snapshot、observability、event 或 LLM context", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/005-run-empty-project-tests"]}
             ],
@@ -1484,7 +1502,7 @@ def completed_cumulative_empty_project_assessment(run_id, step_id, merged_conten
                 "satisfied": True,
                 "items": [
                     {"goal": f"[{e2e_marker}] 从空 workspace 初始化一个最小 Go 项目，并完成可追溯的开发、测试和交付。", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/002-write-cumulative-source", f"{run_id}/{graph}/003-write-cumulative-tests", f"{run_id}/{graph}/005-run-empty-project-tests"]},
-                    {"goal": f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/001-collect-cumulative-baseline", f"{run_id}/{graph}/004-update-readme"]}
+                    {"goal": f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/001-collect-cumulative-baseline", f"{run_id}/{graph}/004-update-readme", f"{run_id}/{graph}/005-run-empty-project-tests"]}
                 ]
             },
             "acceptanceDimensions": {
@@ -1496,11 +1514,11 @@ def completed_cumulative_empty_project_assessment(run_id, step_id, merged_conten
             "deliverableCoverage": {
                 "satisfied": True,
                 "items": [
-                    {"id": "source_change", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/002-write-cumulative-source", f"{run_id}/{graph}/003-write-cumulative-tests", f"{run_id}/{graph}/004-update-readme"], "artifactRefs": [f"{run_id}/{graph}/002-write-cumulative-source", f"{run_id}/{graph}/003-write-cumulative-tests", f"{run_id}/{graph}/004-update-readme"]},
+                    {"id": "source_change", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/002-write-cumulative-source", f"{run_id}/{graph}/003-write-cumulative-tests", f"{run_id}/{graph}/004-update-readme", f"{run_id}/{graph}/005-run-empty-project-tests"], "artifactRefs": [f"{run_id}/{graph}/002-write-cumulative-source", f"{run_id}/{graph}/003-write-cumulative-tests", f"{run_id}/{graph}/004-update-readme"]},
                     {"id": "validation_report", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/005-run-empty-project-tests"], "artifactRefs": [f"{run_id}/{graph}/005-run-empty-project-tests"]},
                     {"id": "coverage_map", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/005-run-empty-project-tests"], "artifactRefs": [f"{run_id}/{graph}/005-run-empty-project-tests"]},
                     git_snapshot_deliverable(f"{run_id}/{graph}/008-git-commit"),
-                    {"id": "user_deliverable", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/002-write-cumulative-source", f"{run_id}/{graph}/004-update-readme"], "artifactRefs": [f"{run_id}/{graph}/002-write-cumulative-source", f"{run_id}/{graph}/004-update-readme"]}
+                    {"id": "user_deliverable", "state": "satisfied", "evidenceRefs": [f"{run_id}/{graph}/002-write-cumulative-source", f"{run_id}/{graph}/004-update-readme", f"{run_id}/{graph}/005-run-empty-project-tests"], "artifactRefs": [f"{run_id}/{graph}/002-write-cumulative-source", f"{run_id}/{graph}/004-update-readme"]}
                 ]
             }
         }
@@ -1517,14 +1535,14 @@ def completed_main_repair_assessment(run_id, step_id):
             "implementationSummary": "Repaired calculator.go via unified diff.",
             "verificationSummary": "go test ./... passed after repair.",
             "items": [
-                {"item": "代码修改通过 Patch 证据可追溯", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-fix-source"]},
-                {"item": "go test ./... 最终通过", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/002-run-tests-fixed"]},
-                {"item": "结果包含 DoD 评估和交付物索引", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/002-run-tests-fixed"]}
+                {"item": "代码修改通过 Patch 证据可追溯", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-fix-source", f"{run_id}/graph-002/002-run-tests-fixed"]},
+                {"item": "go test ./... 最终通过", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-fix-source", f"{run_id}/graph-002/002-run-tests-fixed"]},
+                {"item": "结果包含 DoD 评估和交付物索引", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-fix-source", f"{run_id}/graph-002/002-run-tests-fixed"]}
             ],
             "goalCoverage": {
                 "satisfied": True,
                 "items": [
-                    {"goal": f"[{e2e_marker}] 完成软件开发闭环：通过 executionGraph 修改代码并运行测试，失败时自动修复，最终基于证据输出 DoD 评估。", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-fix-source", f"{run_id}/graph-002/002-run-tests-fixed"]}
+                    {"goal": main_repair_goal(), "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-fix-source", f"{run_id}/graph-002/002-run-tests-fixed"]}
                 ]
             },
             "acceptanceDimensions": {
@@ -1537,11 +1555,11 @@ def completed_main_repair_assessment(run_id, step_id):
             "deliverableCoverage": {
                 "satisfied": True,
                 "items": [
-                    {"id": "source_change", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-fix-source"], "artifactRefs": [f"{run_id}/graph-002/001-fix-source"]},
+                    {"id": "source_change", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-fix-source", f"{run_id}/graph-002/002-run-tests-fixed"], "artifactRefs": [f"{run_id}/graph-002/001-fix-source"]},
                     {"id": "validation_report", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/002-run-tests-fixed"], "artifactRefs": [f"{run_id}/graph-002/002-run-tests-fixed"]},
-                    {"id": "coverage_map", "state": "satisfied", "evidenceRefs": [step_id], "artifactRefs": [step_id]},
+                    {"id": "coverage_map", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/002-run-tests-fixed", f"{run_id}/graph-002/005-git-commit"], "artifactRefs": [f"{run_id}/graph-002/002-run-tests-fixed", f"{run_id}/graph-002/005-git-commit"]},
                     git_snapshot_deliverable(f"{run_id}/graph-002/005-git-commit"),
-                    {"id": "user_deliverable", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-fix-source"], "artifactRefs": [f"{run_id}/graph-002/001-fix-source"]}
+                    {"id": "user_deliverable", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-fix-source", f"{run_id}/graph-002/002-run-tests-fixed"], "artifactRefs": [f"{run_id}/graph-002/001-fix-source"]}
                 ]
             }
         }
@@ -1558,14 +1576,14 @@ def completed_replan_assessment(run_id, step_id):
             "implementationSummary": "The continuation run added regression test coverage through patch evidence.",
             "verificationSummary": "go test ./... passed in the continuation run.",
             "items": [
-                {"item": "代码修改通过 Patch 证据可追溯", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-write-replan-regression-test"]},
-                {"item": "go test ./... 最终通过", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/002-run-tests-replan"]},
-                {"item": "结果包含 DoD 评估和交付物索引", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/002-run-tests-replan"]}
+                {"item": "代码修改通过 Patch 证据可追溯", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-write-replan-regression-test", f"{run_id}/graph-002/002-run-tests-replan"]},
+                {"item": "go test ./... 最终通过", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-write-replan-regression-test", f"{run_id}/graph-002/002-run-tests-replan"]},
+                {"item": "结果包含 DoD 评估和交付物索引", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-write-replan-regression-test", f"{run_id}/graph-002/002-run-tests-replan"]}
             ],
             "goalCoverage": {
                 "satisfied": True,
                 "items": [
-                    {"goal": "完成软件开发闭环", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-write-replan-regression-test", f"{run_id}/graph-002/002-run-tests-replan"]}
+                    {"goal": main_repair_goal(), "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-write-replan-regression-test", f"{run_id}/graph-002/002-run-tests-replan"]}
                 ]
             },
             "acceptanceDimensions": {
@@ -1578,11 +1596,11 @@ def completed_replan_assessment(run_id, step_id):
             "deliverableCoverage": {
                 "satisfied": True,
                 "items": [
-                    {"id": "source_change", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-write-replan-regression-test"], "artifactRefs": [f"{run_id}/graph-002/001-write-replan-regression-test"]},
+                    {"id": "source_change", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-write-replan-regression-test", f"{run_id}/graph-002/002-run-tests-replan"], "artifactRefs": [f"{run_id}/graph-002/001-write-replan-regression-test"]},
                     {"id": "validation_report", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/002-run-tests-replan"], "artifactRefs": [f"{run_id}/graph-002/002-run-tests-replan"]},
-                    {"id": "coverage_map", "state": "satisfied", "evidenceRefs": [step_id], "artifactRefs": [step_id]},
+                    {"id": "coverage_map", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/002-run-tests-replan", f"{run_id}/graph-002/005-git-commit"], "artifactRefs": [f"{run_id}/graph-002/002-run-tests-replan", f"{run_id}/graph-002/005-git-commit"]},
                     git_snapshot_deliverable(f"{run_id}/graph-002/005-git-commit"),
-                    {"id": "user_deliverable", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-write-replan-regression-test"], "artifactRefs": [f"{run_id}/graph-002/001-write-replan-regression-test"]}
+                    {"id": "user_deliverable", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-write-replan-regression-test", f"{run_id}/graph-002/002-run-tests-replan"], "artifactRefs": [f"{run_id}/graph-002/001-write-replan-regression-test"]}
                 ]
             }
         }
@@ -1625,7 +1643,7 @@ def response_for(run_id, step_id, merged_content):
                                 "content": BUGGY_SOURCE,
                                 "coverageTargets": [
                                     "代码修改通过 Patch 证据可追溯",
-                                    "完成软件开发闭环"
+                                    main_repair_goal()
                                 ]
                             }
                         },
@@ -1641,45 +1659,7 @@ def response_for(run_id, step_id, merged_content):
         if is_after_graph_step(step_id):
             if "git-commit" not in step_id and not has_completed_repair_graph_evidence(merged_content) and needs_state_changing_repair(merged_content):
                 return main_repair_graph_response()
-            return {
-                "completionState": "completed",
-                "thoughtSummary": "DoD satisfied after repair.",
-                "dodAssessment": {
-                    "satisfied": True,
-                    "summary": "Software development DoD satisfied after automatic repair.",
-                    "goalOutcome": "Add now returns the sum of two integers.",
-                    "implementationSummary": "Repaired calculator.go via unified diff.",
-                    "verificationSummary": "go test ./... passed after repair.",
-                    "items": [
-                        {"item": "代码修改通过 Patch 证据可追溯", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-fix-source"]},
-                        {"item": "go test ./... 最终通过", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/002-run-tests-fixed"]},
-                        {"item": "结果包含 DoD 评估和交付物索引", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/002-run-tests-fixed"]}
-                    ],
-                    "goalCoverage": {
-                        "satisfied": True,
-                        "items": [
-                            {"goal": f"[{e2e_marker}] 完成软件开发闭环：通过 executionGraph 修改代码并运行测试，失败时自动修复，最终基于证据输出 DoD 评估。", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-fix-source", f"{run_id}/graph-002/002-run-tests-fixed"]}
-                        ]
-                    },
-                    "acceptanceDimensions": {
-                        "satisfied": True,
-                        "items": [
-                            {"id": "functional_behavior", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/002-run-tests-fixed"]},
-                            {"id": "runtime_entrypoint", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/002-run-tests-fixed"]}
-                        ]
-                    },
-                    "deliverableCoverage": {
-                        "satisfied": True,
-                        "items": [
-                            {"id": "source_change", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-fix-source"], "artifactRefs": [f"{run_id}/graph-002/001-fix-source"]},
-                            {"id": "validation_report", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/002-run-tests-fixed"], "artifactRefs": [f"{run_id}/graph-002/002-run-tests-fixed"]},
-                            {"id": "coverage_map", "state": "satisfied", "artifactRefs": [step_id]},
-                            git_snapshot_deliverable(f"{run_id}/graph-002/005-git-commit"),
-                            {"id": "user_deliverable", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-002/001-fix-source"], "artifactRefs": [f"{run_id}/graph-002/001-fix-source"]}
-                        ]
-                    }
-                }
-            }
+            return completed_main_repair_assessment(run_id, step_id)
         if is_repair_step(step_id):
             if needs_concrete_failure_evidence(merged_content):
                 return concrete_failure_evidence_response()
@@ -1997,6 +1977,8 @@ def response_for(run_id, step_id, merged_content):
     if scenario == 6:
         if has_completed_replan_graph_evidence(merged_content):
             return completed_replan_assessment(run_id, step_id)
+        if has_completed_replan_failure_evidence(merged_content) or needs_state_changing_repair(merged_content):
+            return replan_continuation_graph_response()
         if step_id.endswith("/step-1"):
             if needs_concrete_failure_evidence(merged_content):
                 return concrete_failure_evidence_response()
@@ -2353,8 +2335,9 @@ reason = str(ticket.get("reason") or "")
 question = str(ticket.get("question") or "")
 repair_exhausted = "自动修复尝试已耗尽" in reason
 duplicate_failure = "检测到重复的运行时失败签名" in reason
-if not repair_exhausted and not duplicate_failure:
-    errors.append(f"decision reason missing duplicate failure or repair exhaustion: {reason!r}")
+contract_correction_exhausted = "自动修正预算已耗尽" in reason or "连续违反运行期合同" in reason
+if not repair_exhausted and not duplicate_failure and not contract_correction_exhausted:
+    errors.append(f"decision reason missing duplicate failure, repair exhaustion, or contract correction exhaustion: {reason!r}")
 if repair_exhausted:
     if repair_attempt_count < 3:
         errors.append(f"repairLoop.attemptCount={repair_loop.get('attemptCount')!r}, want >=3 for repair exhaustion")
@@ -2365,6 +2348,9 @@ elif duplicate_failure:
         errors.append(f"repairLoop.attemptCount={repair_loop.get('attemptCount')!r}, want >=1 for duplicate failure")
     if "同一运行时失败" not in question or "重新规划" not in question:
         errors.append(f"decision question missing Chinese duplicate failure guidance: {question!r}")
+elif contract_correction_exhausted:
+    if "replan" not in question and "重新" not in question:
+        errors.append(f"decision question missing contract correction replan guidance: {question!r}")
 if ticket.get("state") != "resolved":
     errors.append(f"decision state={ticket.get('state')!r}, want resolved")
 if resolution_mode == "auto" and not ticket.get("autoGovernance"):
@@ -2407,7 +2393,19 @@ scenario3_run_id="$(activate_workspace_execution \
   '{"goalId":"'"$scenario3_goal_initial_id"'","doDId":"'"$scenario3_dod_initial_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' \
   "$TMP_DIR/scenario3-activation.json" \
   "$scenario3_known_run_ids")"
-wait_run_state_any "$scenario3_workspace_id" "$scenario3_run_id" "$TMP_DIR/scenario3-initial-status.json" "completed" "superseded"
+wait_run_state_any "$scenario3_workspace_id" "$scenario3_run_id" "$TMP_DIR/scenario3-initial-status.json" "completed" "superseded" "blocked_on_decision"
+if [[ "$(json_path "$TMP_DIR/scenario3-initial-status.json" "status.state")" == "blocked_on_decision" ]]; then
+  scenario3_ticket_id="$(json_path "$TMP_DIR/scenario3-initial-status.json" "status.blockingTicketId")"
+  scenario3_ticket_path="$(url_encode "$scenario3_ticket_id")"
+  scenario3_resolve_status="$(curl -sS -o "$TMP_DIR/scenario3-initial-ticket-resolved.json" -w '%{http_code}' \
+    -X POST "$BASE_URL/api/v1/workorch/decisions/$scenario3_ticket_path/resolve?workspaceId=$scenario3_workspace_id" -H 'Content-Type: application/json' \
+    -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"dependencyScope":"external_dependency","scope":"target_workspace","endpoint":"http://127.0.0.1:18193/v1","model":"gpt-codex-1m","apiKey":"sk-targetsecret123456","password":"target-password-secret"}}')"
+  if [[ "$scenario3_resolve_status" != "200" && "$scenario3_resolve_status" != "409" ]]; then
+    cat "$TMP_DIR/scenario3-initial-ticket-resolved.json" >&2
+    exit 1
+  fi
+  wait_run_state_any "$scenario3_workspace_id" "$scenario3_run_id" "$TMP_DIR/scenario3-initial-status.json" "completed" "superseded"
+fi
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/runs/$scenario3_run_id/snapshot" >"$TMP_DIR/scenario3-initial-snapshot.json"
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/goals" -H 'Content-Type: application/json' \
@@ -2626,8 +2624,8 @@ if run.get("state") == "blocked_on_decision" and not status.get("blockingTicketI
 repair_loop = (snapshot.get("taskProgress") or {}).get("repairLoop") or {}
 if repair_loop.get("state") not in {"escalated_decision", "terminated"}:
     errors.append(f"repairLoop.state={repair_loop.get('state')!r}, want escalated_decision or terminated")
-if int(repair_loop.get("attemptCount") or 0) < 3:
-    errors.append(f"repairLoop.attemptCount={repair_loop.get('attemptCount')!r}, want >=3")
+if int(repair_loop.get("attemptCount") or 0) < 2:
+    errors.append(f"repairLoop.attemptCount={repair_loop.get('attemptCount')!r}, want >=2 contract retries")
 results = snapshot.get("results") or []
 rejected = [item for item in results if item.get("state") == "rejected"]
 if not rejected:
@@ -2643,8 +2641,13 @@ if run.get("state") == "superseded":
     if not any(item.get("runId") == run.get("id") and item.get("state") == "resolved" and item.get("resolutionType") == "replan" for item in decisions):
         errors.append(f"decisions={decisions!r}, want resolved replan decision for superseded weak-evidence run")
 steps = snapshot.get("steps") or []
-if not any("zz-llm-repair-" in str(item.get("id") or "") or "/repair-" in str(item.get("id") or "") for item in steps):
-    errors.append("missing runtime repair follow-up step for weak verification evidence")
+if not any(
+    "zz-llm-repair-" in str(item.get("id") or "")
+    or "/repair-" in str(item.get("id") or "")
+    or "/contract-retry-" in str(item.get("id") or "")
+    for item in steps
+):
+    errors.append("missing runtime repair or contract-retry follow-up step for weak verification evidence")
 if errors:
     for item in errors:
         print(item, file=sys.stderr)

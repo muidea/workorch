@@ -239,6 +239,9 @@ func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, outpu
 	if step == nil || step.Input == nil || output == nil || !inputRequiresConcreteValidationEvidence(step.Input) {
 		return nil
 	}
+	if outputModeIsIncrementalArtifact(step.Input) && artifactOutputPhaseFromInput(step.Input) == artifactOutputPhaseContext {
+		return nil
+	}
 	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
 		if !graphIsConcreteValidationEvidenceGraph(graph) {
 			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph or a satisfied dodAssessment with concrete evidenceRefs")
