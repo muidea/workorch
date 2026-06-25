@@ -2558,6 +2558,60 @@ func TestInitialStepInputAuthorityAssessmentPreemptsStaleReplanStateChange(t *te
 	}
 }
 
+func TestBuildConvergenceContractAuthorityPreemptsReplanWithoutInputPollution(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"nextAction":    map[string]any{"kind": "assessment"},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocusItems": []map[string]any{{
+				"id":                    "cwi-authority-assessment",
+				"source":                "dod",
+				"sourcePath":            "dod.items[0]",
+				"targetText":            "ready coverage",
+				"status":                "open",
+				"requiredEvidenceKinds": []string{"validation"},
+				"acceptedEvidenceByKind": map[string]any{
+					"validation": []string{"evidence-validation"},
+				},
+				"acceptedEvidenceRefs": []string{"evidence-validation"},
+			}},
+		},
+		"replanContinuation": map[string]any{
+			"predecessorRunId": "run-stale",
+			"reason":           "stale repair lineage",
+			"repairActionPackage": map[string]any{
+				"requiredOutput": stateChangingRepairRequiredOutput(),
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "stale-target",
+					"contentHash":      "hash-stale",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+			},
+			"stateChangingOutputRequired": true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+		},
+	}
+	run := &runmodel.Run{
+		ID:               "run-authority-preempts-replan",
+		WorkspaceID:      "ws-authority-preempts-replan",
+		ExecutionContext: input,
+	}
+
+	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
+
+	if contract.State != convergenceStateNeedAssessment {
+		t.Fatalf("contract state = %q, want %q", contract.State, convergenceStateNeedAssessment)
+	}
+	for _, key := range []string{"stateChangingOutputRequired", "repairObjective", "repairActionPackage"} {
+		if _, ok := input[key]; ok {
+			t.Fatalf("input[%s] = %+v, want authority next-action to avoid stale replan pollution", key, input[key])
+		}
+	}
+}
+
 func TestCoverageWorkItemEvidenceReadyAssessmentGapIsNotActionableEvidenceGap(t *testing.T) {
 	item := map[string]any{
 		"id":                    "cwi-ready",

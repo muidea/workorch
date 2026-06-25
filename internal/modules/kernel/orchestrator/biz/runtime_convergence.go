@@ -71,6 +71,15 @@ func BuildConvergenceContract(
 	if len(input) == 0 && failedStep != nil {
 		input = failedStep.Input
 	}
+	contract := ConvergenceContract{
+		State:            convergenceStateBlocked,
+		RuntimeStage:     runtimeStageRepair,
+		RuntimeStageMode: "strict_convergence",
+		SourceRefs:       convergenceSourceRefs(currentStep, failedStep, lineage, evidence),
+	}
+	if populateConvergenceContractFromNextAction(run, input, failedStep, &contract) {
+		return contract
+	}
 	for _, sourceKey := range []string{"ticketContext", "replanContinuation", "rejectedResultContinuation"} {
 		source := mapFromValue(input[sourceKey])
 		if len(source) == 0 && run != nil {
@@ -118,15 +127,6 @@ func BuildConvergenceContract(
 	enrichRepairInputWithProgressFailureSignals(input)
 	hydrateConvergenceTargetEvidence(input)
 	refreshConvergenceCoverageTargets(input)
-	contract := ConvergenceContract{
-		State:            convergenceStateBlocked,
-		RuntimeStage:     runtimeStageRepair,
-		RuntimeStageMode: "strict_convergence",
-		SourceRefs:       convergenceSourceRefs(currentStep, failedStep, lineage, evidence),
-	}
-	if populateConvergenceContractFromNextAction(run, input, failedStep, &contract) {
-		return contract
-	}
 	if governanceReason := convergenceGovernanceReason(input, failedStep); governanceReason != "" {
 		contract.State = convergenceStateNeedGovernance
 		contract.RuntimeStage = runtimeStageDecision
