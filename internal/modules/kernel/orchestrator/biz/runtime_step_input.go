@@ -753,7 +753,6 @@ func runExecutionInput(run *runModel.Run, previousStepID common.StepID) map[stri
 	if executionContext := slimExecutionContextForStepInput(run.ExecutionContext); len(executionContext) > 0 {
 		input["executionContext"] = executionContext
 	}
-	inheritRuntimeContractSignalsFromExecutionContext(input, run.ExecutionContext)
 	if context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]); len(context) > 0 {
 		input[coverageWorkItemContextKey] = coverageWorkItemContextAlignedToFocus(context, coverageFocus)
 	}
@@ -763,6 +762,7 @@ func runExecutionInput(run *runModel.Run, previousStepID common.StepID) map[stri
 	if authority := mapFromValue(run.ExecutionContext[convergenceAuthorityKey]); len(authority) > 0 {
 		input[convergenceAuthorityKey] = authority
 	}
+	inheritRuntimeContractSignalsFromExecutionContext(input, run.ExecutionContext)
 	if acceptance := runtimeAcceptanceSignalFromExecutionContext(run.ExecutionContext); len(acceptance) > 0 {
 		input["acceptance"] = acceptance
 		if len(coverageFocus) > 0 {
@@ -776,17 +776,21 @@ func inheritRuntimeContractSignalsFromExecutionContext(input map[string]any, exe
 	if len(input) == 0 || len(executionContext) == 0 {
 		return
 	}
-	for _, key := range []string{
-		"stateChangingOutputRequired",
-		"repairObjective",
-		"requestedOutputMode",
-		"llmOutputPolicy",
-	} {
+	authorityBound := len(mapFromValue(input[convergenceAuthorityKey])) > 0 || len(mapFromValue(input[gapBaselineKey])) > 0
+	keys := []string{"llmOutputPolicy"}
+	if !authorityBound {
+		keys = append(keys,
+			"stateChangingOutputRequired",
+			"repairObjective",
+			"requestedOutputMode",
+		)
+	}
+	for _, key := range keys {
 		if value, ok := executionContext[key]; ok && value != nil {
 			input[key] = cloneStepInputValue(value)
 		}
 	}
-	if pkg := mapFromValue(executionContext["repairActionPackage"]); len(pkg) > 0 {
+	if pkg := mapFromValue(executionContext["repairActionPackage"]); !authorityBound && len(pkg) > 0 {
 		input["repairActionPackage"] = cloneStepPayload(pkg)
 	}
 	if contract := mapFromValue(executionContext["executionContract"]); len(contract) > 0 {

@@ -482,6 +482,9 @@ func TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket(t *tes
 					"acceptedKinds":                      []string{"file/read"},
 				},
 			},
+			"stateChangingOutputRequired": true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"requestedOutputMode":         outputModeIncrementalArtifact,
 			"convergenceContract": map[string]any{
 				"state":           convergenceStateNeedEvidence,
 				"repairObjective": repairObjectiveAcquireFailureEvidence,
@@ -506,6 +509,11 @@ func TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket(t *tes
 	}
 
 	input := runExecutionInput(run, "")
+	for _, key := range []string{"stateChangingOutputRequired", "repairObjective", "requestedOutputMode", "repairActionPackage"} {
+		if value, ok := input[key]; ok {
+			t.Fatalf("input[%s] = %+v, want authority-bound step input without stale dynamic executionContext field", key, value)
+		}
+	}
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
 	if contract.State != convergenceStateNeedAssessment {
 		t.Fatalf("convergenceContract = %+v, want need_assessment from authority next action", contract)
