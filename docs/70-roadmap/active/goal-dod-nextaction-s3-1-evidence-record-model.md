@@ -1,6 +1,6 @@
 # S3.1 EvidenceRecord Model And Repository
 
-Status: implemented
+Status: completed
 
 Type: contract-audit
 

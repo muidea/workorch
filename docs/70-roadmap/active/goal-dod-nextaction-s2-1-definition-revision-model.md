@@ -1,10 +1,10 @@
 # Goal/DoD NextAction S2.1 Workspace Definition Revision Model
 
-Status: active
+Status: completed
 
 Type: contract-audit
 
-Last Updated: 2026-06-23
+Last Updated: 2026-06-25
 
 Related:
 

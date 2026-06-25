@@ -1,6 +1,6 @@
 # Goal/DoD NextAction Iterative Delivery Plan
 
-Status: active
+Status: completed
 
 Type: roadmap
 
@@ -18,6 +18,11 @@ Related:
 - [MVVP Workspace ViewModel Architecture](../../30-module-architecture/mvvp-workspace-viewmodel-architecture.md)
 - [LLM Cache Improvement Design](../../30-module-architecture/llm-cache-improvement-design.md)
 - [S0.1 Command Chain Audit](./goal-dod-nextaction-s0-1-command-chain-audit.md)
+- [S0.2 Goal/DoD Run Coverage Field Audit](./goal-dod-nextaction-s0-2-goal-dod-run-coverage-field-audit.md)
+- [S0.3 Evidence/Result/Artifact/Memory Write Path Audit](./goal-dod-nextaction-s0-3-evidence-result-artifact-memory-write-path-audit.md)
+- [S0.4 LLM Request And Context Budget Audit](./goal-dod-nextaction-s0-4-llm-request-context-budget-audit.md)
+- [S0.5 Projection ViewModel TUI Prompt Audit](./goal-dod-nextaction-s0-5-projection-viewmodel-tui-prompt-audit.md)
+- [S0.6 Core Template Boundary Search Audit](./goal-dod-nextaction-s0-6-core-template-boundary-search-audit.md)
 - [S1.1-S1.2 Run Command Contract](./goal-dod-nextaction-s1-1-s1-2-run-command-contract.md)
 - [S1.3 Run Command Projection](./goal-dod-nextaction-s1-3-run-command-projection.md)
 - [S1.4 Replan Idempotency](./goal-dod-nextaction-s1-4-replan-idempotency.md)
@@ -94,6 +99,16 @@ Related:
 后续实现必须按本文编号推进。每个功能点完成时，需要在提交说明、PR 描述或对应收口记录中引用功能点 ID，并补充验收证据。未满足当前功能点验收条件时，不进入下一个依赖功能点。
 
 当前阶段不考虑兼容性。若现有实现、端侧命令、测试脚本或文档与本文冲突，应按本文逐步收口。
+
+## Completion Audit
+
+2026-06-25 roadmap coverage audit:
+
+- planned slices: 75
+- documented slices: 75
+- missing slice documents: none
+- slice document status: all completed
+- closure mode: S0.2-S0.6 are audit baseline documents; they index evidence from the later implementation slices and do not add runtime behavior.
 
 ## Delivery Principles
 

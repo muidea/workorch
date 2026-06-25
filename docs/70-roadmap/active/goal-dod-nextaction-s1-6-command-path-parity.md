@@ -1,10 +1,10 @@
 # Goal/DoD NextAction S1.6 TUI/REST Command Path Parity
 
-Status: active
+Status: completed
 
 Type: contract-audit
 
-Last Updated: 2026-06-23
+Last Updated: 2026-06-25
 
 Related:
 
