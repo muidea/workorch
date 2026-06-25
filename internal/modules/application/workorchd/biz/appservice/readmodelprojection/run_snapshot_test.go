@@ -288,6 +288,74 @@ func TestRunSnapshotFromModelsNormalizesStalePersistedGapBaselineNextAction(t *t
 	}
 }
 
+func TestRunSnapshotFromModelsUsesConvergenceAuthorityNextAction(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-authority-next-action-projection")
+	runID := common.RunID("run-authority-next-action-projection")
+	got := RunSnapshotFromModels(RunSnapshotModelInput{
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "authority projection", State: common.WorkspaceStateRunning},
+		Run: &runmodel.Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       common.RunStateRunning,
+			ExecutionContext: map[string]any{
+				"coverageWorkItemContext": map[string]any{
+					"definitionRevision": "rev-stale-context",
+					"currentFocus": map[string]any{
+						"id":                   "cwi-stale",
+						"status":               "open",
+						"missingEvidenceKinds": []any{"state_change"},
+					},
+					"unresolvedItems": []any{map[string]any{
+						"id":                   "cwi-stale",
+						"status":               "open",
+						"missingEvidenceKinds": []any{"state_change"},
+					}},
+				},
+				"convergenceAuthority": map[string]any{
+					"schemaVersion":      "workorch.convergence_authority.v1",
+					"workspaceId":        string(workspaceID),
+					"runId":              string(runID),
+					"definitionRevision": "rev-authority",
+					"currentFocus": map[string]any{
+						"id":     "cwi-ready",
+						"status": "evidence_ready",
+					},
+					"nextAction": map[string]any{
+						"kind":   "assessment",
+						"reason": "authority-selected assessment",
+					},
+					"coverageWorkItemContext": map[string]any{
+						"definitionRevision": "rev-authority",
+						"currentFocus": map[string]any{
+							"id":     "cwi-ready",
+							"status": "evidence_ready",
+						},
+					},
+				},
+				"gapBaseline": map[string]any{
+					"definitionRevision": "rev-persisted",
+					"nextAction": map[string]any{
+						"kind":   "state_change",
+						"reason": "stale persisted action",
+					},
+				},
+			},
+		},
+	})
+
+	if got.GapBaseline == nil {
+		t.Fatal("GapBaseline = nil, want authority-backed baseline")
+	}
+	if got.GapBaseline.NextAction.Kind != "assessment" {
+		t.Fatalf("GapBaseline.NextAction = %+v, want authority assessment", got.GapBaseline.NextAction)
+	}
+	if len(got.GapBaseline.Diagnostics) != 1 || got.GapBaseline.Diagnostics[0].Code != "stale_persisted_next_action" {
+		t.Fatalf("GapBaseline.Diagnostics = %+v, want stale persisted next action diagnostic", got.GapBaseline.Diagnostics)
+	}
+}
+
 func TestRunRecoverySnapshotFromModelsUsesCheckpointStep(t *testing.T) {
 	t.Parallel()
 

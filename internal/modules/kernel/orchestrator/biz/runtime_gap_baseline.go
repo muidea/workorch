@@ -10,9 +10,61 @@ import (
 )
 
 const (
-	gapBaselineKey    = "gapBaseline"
-	gapBaselineSchema = "workorch.gap_baseline.v1"
+	gapBaselineKey             = "gapBaseline"
+	gapBaselineSchema          = "workorch.gap_baseline.v1"
+	convergenceAuthorityKey    = "convergenceAuthority"
+	convergenceAuthoritySchema = "workorch.convergence_authority.v1"
 )
+
+type ConvergenceAuthoritySnapshot struct {
+	SchemaVersion           string
+	WorkspaceID             string
+	RunID                   string
+	DefinitionRevision      string
+	BaselineRevision        string
+	CurrentFocus            map[string]any
+	NextAction              map[string]any
+	CoverageWorkItemContext map[string]any
+	AcceptedEvidenceRefs    []string
+	RejectedEvidenceRefs    []string
+	BudgetScope             map[string]any
+}
+
+func (s ConvergenceAuthoritySnapshot) ToMap() map[string]any {
+	ret := map[string]any{
+		"schemaVersion": s.SchemaVersion,
+		"workspaceId":   s.WorkspaceID,
+		"runId":         s.RunID,
+	}
+	if ret["schemaVersion"] == "" {
+		ret["schemaVersion"] = convergenceAuthoritySchema
+	}
+	if strings.TrimSpace(s.DefinitionRevision) != "" {
+		ret["definitionRevision"] = s.DefinitionRevision
+	}
+	if strings.TrimSpace(s.BaselineRevision) != "" {
+		ret["baselineRevision"] = s.BaselineRevision
+	}
+	if len(s.CurrentFocus) > 0 {
+		ret["currentFocus"] = cloneStepPayload(s.CurrentFocus)
+	}
+	if len(s.NextAction) > 0 {
+		ret["nextAction"] = cloneStepPayload(s.NextAction)
+	}
+	if len(s.CoverageWorkItemContext) > 0 {
+		ret[coverageWorkItemContextKey] = cloneStepPayload(s.CoverageWorkItemContext)
+	}
+	if len(s.AcceptedEvidenceRefs) > 0 {
+		ret["acceptedEvidenceRefs"] = compactUniqueStrings(s.AcceptedEvidenceRefs)
+	}
+	if len(s.RejectedEvidenceRefs) > 0 {
+		ret["rejectedEvidenceRefs"] = compactUniqueStrings(s.RejectedEvidenceRefs)
+	}
+	if len(s.BudgetScope) > 0 {
+		ret["budgetScope"] = cloneStepPayload(s.BudgetScope)
+	}
+	return ret
+}
 
 func (o *RuntimeOrchestrator) ensureGapBaselineBeforeDispatch(ctx context.Context, run *runModel.Run) error {
 	if o == nil || run == nil {
@@ -58,7 +110,8 @@ func (o *RuntimeOrchestrator) prepareGapBaselineDispatchSpecs(ctx context.Contex
 	}
 	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
 	baseline := mapFromValue(run.ExecutionContext[gapBaselineKey])
-	if len(context) == 0 && len(baseline) == 0 {
+	authority := mapFromValue(run.ExecutionContext[convergenceAuthorityKey])
+	if len(context) == 0 && len(baseline) == 0 && len(authority) == 0 {
 		return specs, nil
 	}
 	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
@@ -79,6 +132,9 @@ func (o *RuntimeOrchestrator) prepareGapBaselineDispatchSpecs(ctx context.Contex
 		if len(baseline) > 0 {
 			input[gapBaselineKey] = cloneStepPayload(baseline)
 		}
+		if len(authority) > 0 {
+			input[convergenceAuthorityKey] = cloneStepPayload(authority)
+		}
 		ret[idx].Input = input
 	}
 	return ret, nil
@@ -88,6 +144,7 @@ func gapBaselineFromRun(run *runModel.Run) map[string]any {
 	if run == nil {
 		return nil
 	}
+	authority := convergenceAuthoritySnapshotForRun(run)
 	ctx := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
 	if len(ctx) == 0 {
 		return nil
@@ -108,7 +165,22 @@ func gapBaselineFromRun(run *runModel.Run) map[string]any {
 		"acceptedEvidenceRefs":  gapEvidenceRefsFromCoverageItems(items, true),
 		"rejectedEvidenceRefs":  gapEvidenceRefsFromCoverageItems(items, false),
 		"todoItems":             gapTodoItemsFromCoverageContext(unresolved),
-		"nextAction":            gapNextActionForRun(run, unresolved),
+		"nextAction":            authority.NextAction,
+	}
+	if strings.TrimSpace(authority.DefinitionRevision) != "" {
+		baseline["definitionRevision"] = authority.DefinitionRevision
+	}
+	if strings.TrimSpace(authority.BaselineRevision) != "" {
+		baseline["baselineRevision"] = authority.BaselineRevision
+	}
+	if len(authority.CurrentFocus) > 0 {
+		baseline["currentFocus"] = cloneStepPayload(authority.CurrentFocus)
+	}
+	if len(authority.AcceptedEvidenceRefs) > 0 {
+		baseline["acceptedEvidenceRefs"] = compactUniqueStrings(authority.AcceptedEvidenceRefs)
+	}
+	if len(authority.RejectedEvidenceRefs) > 0 {
+		baseline["rejectedEvidenceRefs"] = compactUniqueStrings(authority.RejectedEvidenceRefs)
 	}
 	if len(mapFromValue(baseline["currentFocus"])) == 0 {
 		delete(baseline, "currentFocus")
@@ -342,7 +414,69 @@ func refreshRunConvergenceAuthority(run *runModel.Run) bool {
 			changed = true
 		}
 	}
+	authority := convergenceAuthoritySnapshotForRun(run).ToMap()
+	if len(authority) > 0 && stableCoverageJSON(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])) != stableCoverageJSON(authority) {
+		run.ExecutionContext[convergenceAuthorityKey] = authority
+		changed = true
+	}
 	return changed
+}
+
+func convergenceAuthoritySnapshotForRun(run *runModel.Run) ConvergenceAuthoritySnapshot {
+	if run == nil {
+		return ConvergenceAuthoritySnapshot{}
+	}
+	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	unresolved := mapSliceFromValue(context["unresolvedItems"])
+	if len(unresolved) == 0 {
+		unresolved = mapSliceFromValue(context["currentFocusItems"])
+	}
+	focus := authoritativeCoverageFocusFromContext(run, context)
+	currentFocus := coverageWorkItemPrimaryFocus(context)
+	nextAction := gapNextActionForRun(run, unresolved)
+	budgetScope := convergenceAuthorityBudgetScope(run)
+	return ConvergenceAuthoritySnapshot{
+		SchemaVersion:           convergenceAuthoritySchema,
+		WorkspaceID:             string(run.WorkspaceID),
+		RunID:                   string(run.ID),
+		DefinitionRevision:      stringFromMap(context, "definitionRevision"),
+		BaselineRevision:        firstNonEmptyString(stringFromMap(context, "coverageBaselineHash"), stringFromMap(context, "baselineRevision")),
+		CurrentFocus:            currentFocus,
+		NextAction:              nextAction,
+		CoverageWorkItemContext: coverageWorkItemContextAlignedToFocus(context, focus),
+		AcceptedEvidenceRefs:    gapEvidenceRefsFromCoverageItems(items, true),
+		RejectedEvidenceRefs:    gapEvidenceRefsFromCoverageItems(items, false),
+		BudgetScope:             budgetScope,
+	}
+}
+
+func convergenceAuthorityBudgetScope(run *runModel.Run) map[string]any {
+	if run == nil {
+		return nil
+	}
+	budget := mapFromValue(run.ExecutionContext[convergenceBudgetKey])
+	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
+	ret := map[string]any{}
+	for _, key := range []string{"focusId", "sliceId", "state", "decision"} {
+		if value := strings.TrimSpace(stringFromMap(budget, key)); value != "" {
+			ret[key] = value
+		}
+	}
+	if _, ok := ret["focusId"]; !ok {
+		if value := strings.TrimSpace(stringFromMap(focus, "id")); value != "" {
+			ret["focusId"] = value
+		}
+	}
+	if _, ok := ret["sliceId"]; !ok {
+		if value := strings.TrimSpace(stringFromMap(focus, "sliceId")); value != "" {
+			ret["sliceId"] = value
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func authoritativeCoverageFocusFromContext(run *runModel.Run, context map[string]any) map[string]any {

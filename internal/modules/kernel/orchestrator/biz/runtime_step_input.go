@@ -99,7 +99,7 @@ func applyFirstRunGapBaselineStateChangingContract(input map[string]any) map[str
 		return input
 	}
 	switch strings.TrimSpace(stringFromMap(mapFromValue(baseline["nextAction"]), "kind")) {
-	case "schedule_step", "state_change":
+	case "state_change":
 	default:
 		return input
 	}
@@ -759,6 +759,9 @@ func runExecutionInput(run *runModel.Run, previousStepID common.StepID) map[stri
 	if baseline := mapFromValue(run.ExecutionContext[gapBaselineKey]); len(baseline) > 0 {
 		input[gapBaselineKey] = baseline
 	}
+	if authority := mapFromValue(run.ExecutionContext[convergenceAuthorityKey]); len(authority) > 0 {
+		input[convergenceAuthorityKey] = authority
+	}
 	if acceptance := runtimeAcceptanceSignalFromExecutionContext(run.ExecutionContext); len(acceptance) > 0 {
 		input["acceptance"] = acceptance
 		if len(coverageFocus) > 0 {
@@ -836,6 +839,9 @@ func slimExecutionContextForStepInput(executionContext map[string]any) map[strin
 	}
 	if value := mapFromValue(executionContext[gapBaselineKey]); len(value) > 0 {
 		ret[gapBaselineKey] = value
+	}
+	if value := mapFromValue(executionContext[convergenceAuthorityKey]); len(value) > 0 {
+		ret[convergenceAuthorityKey] = value
 	}
 	if acceptance := runtimeAcceptanceSignalFromExecutionContext(executionContext); len(acceptance) > 0 {
 		ret["acceptance"] = acceptance

@@ -296,16 +296,10 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 		populateCoverageWorkItemStateChangeConvergenceContract(input, contract)
 		return true
 	case "validate", "validation", "produce_validation_evidence", "artifact", "produce_artifact_evidence":
-		if convergenceInputHasActionableReplanContinuation(input) {
-			return false
-		}
 		convergenceContractAttachCoverageContext(input, contract)
 		populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
 		return true
 	case "repair", "acquire_evidence":
-		if convergenceInputHasActionableReplanContinuation(input) {
-			return false
-		}
 		convergenceContractAttachCoverageContext(input, contract)
 		populateCoverageWorkItemEvidenceConvergenceContract(input, contract)
 		return true
@@ -317,6 +311,9 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 func convergenceNextActionAuthorityAllowed(input map[string]any) bool {
 	if len(input) == 0 {
 		return false
+	}
+	if kind := convergenceNextActionKind(nil, input); kind != "" {
+		return true
 	}
 	if boolValue(input["replanBudgetResetPending"]) ||
 		boolValue(input[stepInputKeyRuntimeRepairFollowUp]) ||
@@ -358,6 +355,8 @@ func convergenceInputHasActionableReplanContinuation(input map[string]any) bool 
 
 func convergenceNextActionKind(run *runModel.Run, input map[string]any) string {
 	for _, source := range []map[string]any{
+		mapFromValue(input[convergenceAuthorityKey]),
+		mapFromValue(mapFromValue(input["executionContext"])[convergenceAuthorityKey]),
 		mapFromValue(input[gapBaselineKey]),
 		mapFromValue(mapFromValue(input["executionContext"])[gapBaselineKey]),
 	} {
@@ -366,6 +365,9 @@ func convergenceNextActionKind(run *runModel.Run, input map[string]any) string {
 		}
 	}
 	if run != nil {
+		if kind := strings.TrimSpace(stringFromMap(mapFromValue(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])["nextAction"]), "kind")); kind != "" && kind != "schedule_step" {
+			return kind
+		}
 		if kind := strings.TrimSpace(stringFromMap(mapFromValue(mapFromValue(run.ExecutionContext[gapBaselineKey])["nextAction"]), "kind")); kind != "" && kind != "schedule_step" {
 			return kind
 		}
@@ -1610,6 +1612,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		input[stepInputKeySoulStage] = soulStageValidation
 		input["repairObjective"] = repairObjectiveConcreteValidationEvidence
 		input["boundedValidationRequired"] = true
+		delete(input, "replanStateChangingContinuation")
 		delete(input, stepInputKeyAssessmentOnly)
 		delete(input, "assessmentOnlyReason")
 		delete(input, "stateChangingOutputRequired")
@@ -1653,6 +1656,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		setRuntimeStage(input, runtimeStageVerification)
 		input[stepInputKeySoulStage] = soulStageValidation
 		input[stepInputKeyAssessmentOnly] = true
+		delete(input, "replanStateChangingContinuation")
 		if boolValue(input["assessmentOnlyContractCorrection"]) {
 			delete(input, "repairObjective")
 		} else {
@@ -1666,6 +1670,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 	case convergenceStateNeedGovernance:
 		setRuntimeStage(input, runtimeStageDecision)
 		input[stepInputKeySoulStage] = soulStageDecision
+		delete(input, "replanStateChangingContinuation")
 		delete(input, stepInputKeyAssessmentOnly)
 		delete(input, "assessmentOnlyReason")
 		delete(input, "runtimeRepairFollowUp")

@@ -1492,19 +1492,19 @@ func TestActivateWorkspaceExecutionWithBackendPromotesResolvedReplanHistoryToCon
 		return len(snapshot.Steps) == 1
 	})
 	step := runSnapshot.Steps[0]
-	if step.Input["runtimeStage"] != "repair" ||
-		step.Input["soulStage"] != "execution" ||
-		step.Input["repairObjective"] != "acquire_concrete_failure_evidence" ||
-		step.Input["concreteFailureEvidenceRequired"] != true ||
-		step.Input["replanStateChangingContinuation"] != true {
-		t.Fatalf("first step input = %+v, want evidence-grounded replan continuation", step.Input)
+	if step.Input["runtimeStage"] != "verification" ||
+		step.Input["soulStage"] != "validation" ||
+		step.Input["repairObjective"] != "produce_concrete_validation_evidence" ||
+		step.Input["boundedValidationRequired"] != true ||
+		step.Input["replanStateChangingContinuation"] != nil {
+		t.Fatalf("first step input = %+v, want authority-selected validation with replan lineage downgraded to diagnostics", step.Input)
 	}
 	actionPackage := contextMapFromValue(t, step.Input["repairActionPackage"])
 	requiredOutput := contextMapFromValue(t, actionPackage["requiredOutput"])
-	if actionPackage["evidenceAcquisitionRequired"] != true ||
-		requiredOutput["mustProduceConcreteFailureEvidence"] != true ||
+	if actionPackage["evidenceAcquisitionRequired"] != nil ||
+		requiredOutput["mustProduceConcreteValidationEvidence"] != true ||
 		requiredOutput["mustIncludeStateChangingNode"] != false {
-		t.Fatalf("repairActionPackage = %+v, want concrete failure evidence acquisition before state-changing repair", actionPackage)
+		t.Fatalf("repairActionPackage = %+v, want validation required output from current authority", actionPackage)
 	}
 	stepContext := contextMapFromValue(t, step.Input["executionContext"])
 	if len(contextMapFromValue(t, stepContext["replanContinuation"])) == 0 {
@@ -1620,10 +1620,17 @@ func TestActivationDefinitionChangeSuppressesPriorActionableContinuations(t *tes
 		return len(snapshot.Steps) == 1
 	})
 	step := runSnapshot.Steps[0]
-	if step.Input["runtimeStage"] == "repair" ||
-		step.Input["replanStateChangingContinuation"] == true ||
-		step.Input["repairObjective"] != nil {
-		t.Fatalf("first step input = %+v, want definition-change run to start from normal planning", step.Input)
+	if step.Input["runtimeStage"] != "verification" ||
+		step.Input["soulStage"] != "validation" ||
+		step.Input["repairObjective"] != "produce_concrete_validation_evidence" ||
+		step.Input["boundedValidationRequired"] != true ||
+		step.Input["replanStateChangingContinuation"] == true {
+		t.Fatalf("first step input = %+v, want definition-change run to use current authority without prior continuation", step.Input)
+	}
+	authority := contextMapFromValue(t, step.Input["convergenceAuthority"])
+	nextAction := contextMapFromValue(t, authority["nextAction"])
+	if got := nextAction["kind"]; got != "validate" {
+		t.Fatalf("convergenceAuthority = %+v, want validate next action", step.Input["convergenceAuthority"])
 	}
 	stepContext := contextMapFromValue(t, step.Input["executionContextPackage"])
 	if impact := contextMapFromValue(t, stepContext["definitionChangeImpact"]); impact["changed"] != true {

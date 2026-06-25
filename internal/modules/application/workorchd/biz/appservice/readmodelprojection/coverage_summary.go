@@ -79,6 +79,10 @@ func GapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *readmodelco
 
 func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *readmodelcore.GapBaseline {
 	ctx := snapshot.CoverageWorkItemContext
+	authority := MapValue(snapshot.Run.ExecutionContext["convergenceAuthority"])
+	if len(ctx) == 0 {
+		ctx = MapValue(authority["coverageWorkItemContext"])
+	}
 	if len(ctx) == 0 {
 		return nil
 	}
@@ -89,6 +93,15 @@ func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *read
 		BaselineRevision:   stringValue(ctx, "coverageBaselineHash", "baselineRevision"),
 		CurrentFocus:       CloneMap(MapValue(ctx["currentFocus"])),
 	}
+	if value := stringValue(authority, "definitionRevision"); value != "" {
+		baseline.DefinitionRevision = value
+	}
+	if value := stringValue(authority, "baselineRevision"); value != "" {
+		baseline.BaselineRevision = value
+	}
+	if focus := MapValue(authority["currentFocus"]); len(focus) > 0 {
+		baseline.CurrentFocus = CloneMap(focus)
+	}
 	unresolved := MapSliceValue(ctx["unresolvedItems"])
 	if len(unresolved) == 0 {
 		unresolved = MapSliceValue(ctx["currentFocusItems"])
@@ -96,8 +109,17 @@ func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *read
 	baseline.OpenCoverageWorkItems = readModelMapSliceValue(unresolved)
 	baseline.AcceptedEvidenceRefs = gapEvidenceRefsFromCoverageItems(snapshot.CoverageWorkItems, true)
 	baseline.RejectedEvidenceRefs = gapEvidenceRefsFromCoverageItems(snapshot.CoverageWorkItems, false)
+	if refs := readModelStringSliceValue(authority["acceptedEvidenceRefs"]); len(refs) > 0 {
+		baseline.AcceptedEvidenceRefs = refs
+	}
+	if refs := readModelStringSliceValue(authority["rejectedEvidenceRefs"]); len(refs) > 0 {
+		baseline.RejectedEvidenceRefs = refs
+	}
 	baseline.TodoItems = gapTodoItemsFromCoverageItems(unresolved)
 	baseline.NextAction = gapNextActionFromSnapshot(snapshot, len(unresolved))
+	if nextAction := gapNextActionFromMap(MapValue(authority["nextAction"])); nextAction.Kind != "" {
+		baseline.NextAction = nextAction
+	}
 	if baseline.DefinitionRevision == "" && baseline.BaselineRevision == "" && len(baseline.OpenCoverageWorkItems) == 0 && len(baseline.CurrentFocus) == 0 && len(baseline.AcceptedEvidenceRefs) == 0 && len(baseline.RejectedEvidenceRefs) == 0 {
 		return nil
 	}
@@ -149,7 +171,7 @@ func gapNextActionGovernedOrTerminal(kind string) bool {
 
 func gapNextActionFocusSensitive(kind string) bool {
 	switch strings.TrimSpace(kind) {
-	case "acquire_evidence", "produce_state_change", "produce_validation_evidence", "produce_artifact_evidence", "complete_coverage_assessment":
+	case "acquire_evidence", "repair", "state_change", "produce_state_change", "validate", "validation", "produce_validation_evidence", "artifact", "produce_artifact_evidence", "assessment", "complete_coverage_assessment":
 		return true
 	default:
 		return false

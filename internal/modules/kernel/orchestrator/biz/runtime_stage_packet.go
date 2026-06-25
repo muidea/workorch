@@ -89,6 +89,7 @@ func stagePacketActiveStage(input map[string]any) string {
 
 func stagePacketActiveFocus(input map[string]any) map[string]any {
 	for _, source := range []map[string]any{
+		mapFromValue(input[convergenceAuthorityKey]),
 		coverageWorkItemContextFromInput(input),
 		mapFromValue(input["repairActionPackage"]),
 		mapFromValue(input["acceptance"]),
@@ -154,7 +155,9 @@ func stagePacketEvidenceRefs(input map[string]any, key string) []string {
 func stagePacketEvidenceSources(input map[string]any) []map[string]any {
 	return []map[string]any{
 		input,
+		mapFromValue(input[convergenceAuthorityKey]),
 		mapFromValue(input["executionContext"]),
+		mapFromValue(mapFromValue(input["executionContext"])[convergenceAuthorityKey]),
 		coverageWorkItemContextFromInput(input),
 		mapFromValue(input["repairActionPackage"]),
 		mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"]),

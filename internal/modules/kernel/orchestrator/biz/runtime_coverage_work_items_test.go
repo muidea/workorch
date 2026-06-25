@@ -439,6 +439,87 @@ func TestRefreshRunConvergenceAuthorityAlignsFocusAndBudgetToCurrentCoverage(t *
 	}
 }
 
+func TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-authority-snapshot",
+		WorkspaceID: "ws-authority-snapshot",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			activeSliceIDKey: "slice-authority",
+			coverageFocusKey: map[string]any{
+				"id":                  "focus-cwi-stale",
+				"sliceId":             "slice-authority",
+				"coverageWorkItemIds": []string{"cwi-stale"},
+				"state":               "active",
+			},
+			convergenceBudgetKey: map[string]any{
+				"focusId":                   "focus-cwi-stale",
+				"sliceId":                   "slice-authority",
+				"state":                     "escalated",
+				"decision":                  "escalate_decision",
+				"repairAttempts":            int64(3),
+				"maxRepairAttemptsPerFocus": int64(9),
+			},
+			coverageWorkItemContextKey: map[string]any{
+				"definitionRevision":   "rev-authority-snapshot",
+				"coverageBaselineHash": "sha256:authority-snapshot",
+				"currentFocus": map[string]any{
+					"id":                    "cwi-ready",
+					"status":                "evidence_ready",
+					"requiredEvidenceKinds": []string{"validation"},
+					"acceptedEvidenceRefs":  []string{"step-validation"},
+				},
+				"unresolvedItems": []map[string]any{{
+					"id":                    "cwi-ready",
+					"status":                "evidence_ready",
+					"requiredEvidenceKinds": []string{"validation"},
+					"acceptedEvidenceRefs":  []string{"step-validation"},
+				}},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteFailureEvidence": true,
+					"acceptedKinds":                      []string{"file/read"},
+				},
+			},
+			"convergenceContract": map[string]any{
+				"state":           convergenceStateNeedEvidence,
+				"repairObjective": repairObjectiveAcquireFailureEvidence,
+			},
+		},
+	}
+
+	if !refreshRunConvergenceAuthority(run) {
+		t.Fatal("refreshRunConvergenceAuthority changed = false, want authority snapshot")
+	}
+	authority := mapFromValue(run.ExecutionContext[convergenceAuthorityKey])
+	if got := stringFromMap(mapFromValue(authority["nextAction"]), "kind"); got != "assessment" {
+		t.Fatalf("convergenceAuthority.nextAction = %+v, want assessment", authority["nextAction"])
+	}
+	if got := stringFromMap(mapFromValue(authority["currentFocus"]), "id"); got != "cwi-ready" {
+		t.Fatalf("convergenceAuthority.currentFocus = %+v, want raw current coverage work item", authority["currentFocus"])
+	}
+
+	baseline := gapBaselineFromRun(run)
+	if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got != "assessment" {
+		t.Fatalf("gapBaseline.nextAction = %+v, want assessment", baseline["nextAction"])
+	}
+
+	input := runExecutionInput(run, "")
+	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
+	if contract.State != convergenceStateNeedAssessment {
+		t.Fatalf("convergenceContract = %+v, want need_assessment from authority next action", contract)
+	}
+	applied := ApplyConvergenceContract(input, contract)
+	if boolValue(applied["concreteFailureEvidenceRequired"]) || boolValue(mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])["mustProduceConcreteFailureEvidence"]) {
+		t.Fatalf("applied input = %+v, stale evidence acquisition contract leaked into current assessment", applied)
+	}
+	packet := buildStagePacketFromStepInput(run, "assessment-001", applied)
+	if got := stringFromMap(packet.ActiveFocus, "id"); got != "cwi-ready" {
+		t.Fatalf("stagePacket.activeFocus = %+v, want current authority focus", packet.ActiveFocus)
+	}
+}
+
 func TestInitialDispatchBuildsStateChangingContractFromGapBaseline(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-gap-baseline-state-changing")

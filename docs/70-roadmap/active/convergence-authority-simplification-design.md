@@ -352,3 +352,16 @@ Live verification after code closure:
 - TUI/Web/CLI only access WorkOrch through scoped commands and projection/ViewModel.
 - Projection no longer hides owner-state conflicts; any conflict is visible as diagnostic until owner refresh removes it.
 - Core remains business-neutral and contains no template/language/provider/workspace-specific behavior branches.
+
+## Closure Progress
+
+| Item | Status | Evidence |
+| --- | --- | --- |
+| S1 Authority Snapshot Model | code-closed | Runtime now writes `convergenceAuthority` with current focus, structured NextAction, evidence refs and budget scope. `TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket` covers authority-driven baseline/contract/stage packet derivation. |
+| S2 Single Refresh Entry | code-closed | `ensureGapBaselineBeforeDispatch` routes through `refreshRunConvergenceAuthority` before dispatch and persists one aligned snapshot. |
+| S3 NextAction Interpreter | code-closed | `BuildConvergenceContract` accepts current structured NextAction from `convergenceAuthority` / `gapBaseline` without requiring replan flags; runtime no longer treats `schedule_step` as a valid first-run action. |
+| S4 Stage Contract From NextAction | code-closed | Validation/assessment contracts clear stale `replanStateChangingContinuation`; old `repairActionPackage` cannot override authority-selected assessment/validation. |
+| S5 Candidate Violation Handling | code-closed | Existing bounded contract-violation tests remain in orchestrator; this pass keeps rejected diagnostics out of authority and focuses on stale lineage preemption. |
+| S6 Projection/ViewModel Alignment | code-closed | Projection reads `convergenceAuthority.nextAction` before local derivation and emits `stale_persisted_next_action` diagnostic on persisted baseline conflict. |
+| S7 Access Boundary Cleanup | verified | Precise search found no user-visible `/run continue` command or `Intent("continue")`; remote mode remains on-demand through projection events unless agent requires full stream. |
+| S8 Regression and Boundary Gate | code-closed | Added authority snapshot and projection authority regression tests; targeted package tests and full `go test ./... -count=1` pass. |
