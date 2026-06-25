@@ -3,11 +3,11 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP_DIR="$(mktemp -d)"
+TMP_DIR="${WORKORCH_CONTRACT_VIOLATION_VERIFY_ARTIFACT_DIR:-$(mktemp -d)}"
 KEEP_TMP="${WORKORCH_VERIFY_KEEP_TMP:-0}"
 BASE_URL="${WORKORCH_CONTRACT_VIOLATION_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
-MOCK_ADDR="${WORKORCH_CONTRACT_VIOLATION_VERIFY_MOCK_ADDR:-127.0.0.1:18189}"
-MOCK_BASE_URL="http://$MOCK_ADDR/v1"
+MOCK_ADDR="${WORKORCH_CONTRACT_VIOLATION_VERIFY_MOCK_ADDR:-}"
+MOCK_BASE_URL=""
 VERIFY_SUFFIX="${WORKORCH_CONTRACT_VIOLATION_VERIFY_SUFFIX:-$$}"
 CURL_CONNECT_TIMEOUT="${WORKORCH_VERIFY_CURL_CONNECT_TIMEOUT_SECONDS:-5}"
 CURL_MAX_TIME="${WORKORCH_VERIFY_CURL_MAX_TIME_SECONDS:-30}"
@@ -18,6 +18,21 @@ PROVIDER_ID="verify-contract-violation-$VERIFY_SUFFIX"
 MOCK_PID=""
 WATCHDOG_PID=""
 MOCK_LOG="$TMP_DIR/llm-mock.log"
+workspace_id=""
+
+select_addr() {
+  if [[ -n "$MOCK_ADDR" ]]; then
+    printf '%s\n' "$MOCK_ADDR"
+    return
+  fi
+  python3 - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(f"127.0.0.1:{sock.getsockname()[1]}")
+PY
+}
 
 curl() {
   local status url arg
@@ -91,6 +106,7 @@ report_failure() {
 }
 
 cleanup() {
+  local status=$?
   if [[ -n "$WATCHDOG_PID" ]]; then
     kill "$WATCHDOG_PID" >/dev/null 2>&1 || true
     wait "$WATCHDOG_PID" >/dev/null 2>&1 || true
@@ -100,11 +116,14 @@ cleanup() {
       "$BASE_URL/api/v1/workorch/configuration/llm" \
       -d @"$TMP_DIR/original-llm-update.json" >/dev/null 2>&1 || true
   fi
+  if [[ -n "${workspace_id:-}" ]]; then
+    curl -fsS -X DELETE "$BASE_URL/api/v1/workorch/workspaces/$workspace_id?purge=true" >/dev/null 2>&1 || true
+  fi
   if [[ -n "$MOCK_PID" ]]; then
     kill "$MOCK_PID" >/dev/null 2>&1 || true
     wait "$MOCK_PID" >/dev/null 2>&1 || true
   fi
-  if [[ "$KEEP_TMP" == "1" || "$KEEP_TMP" == "true" ]]; then
+  if [[ "$KEEP_TMP" == "1" || "$KEEP_TMP" == "true" || $status -ne 0 ]]; then
     echo "keeping verification temp dir: $TMP_DIR" >&2
   else
     rm -rf "$TMP_DIR"
@@ -112,6 +131,8 @@ cleanup() {
 }
 
 start_mock_provider() {
+  MOCK_ADDR="$(select_addr)"
+  MOCK_BASE_URL="http://$MOCK_ADDR/v1"
   python3 - "$MOCK_ADDR" >"$TMP_DIR/llm_mock_provider.py" <<'PY'
 import sys
 
@@ -255,14 +276,14 @@ PY
 
 wait_mock() {
   for _ in $(seq 1 50); do
-    if curl -fsS -X POST "http://$MOCK_ADDR/v1/chat/completions" \
+    if curl -fsS -X POST "$MOCK_BASE_URL/chat/completions" \
       -H 'Content-Type: application/json' \
       -d '{"messages":[{"role":"user","content":"{\"runId\":\"probe\",\"stepId\":\"probe\"}"}]}' >/dev/null 2>&1; then
       return 0
     fi
     sleep 0.2
   done
-  curl -fsS -X POST "http://$MOCK_ADDR/v1/chat/completions" \
+  curl -fsS -X POST "$MOCK_BASE_URL/chat/completions" \
     -H 'Content-Type: application/json' \
     -d '{"messages":[{"role":"user","content":"{\"runId\":\"probe\",\"stepId\":\"probe\"}"}]}' >/dev/null
 }
