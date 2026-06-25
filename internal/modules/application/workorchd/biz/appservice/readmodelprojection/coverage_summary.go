@@ -262,10 +262,70 @@ func gapNextActionFromSnapshot(snapshot readmodelcore.RunSnapshot, openItems int
 		return readmodelcore.GapNextAction{Kind: "fail_fast", Reason: "run failed"}
 	default:
 		if openItems > 0 {
-			return readmodelcore.GapNextAction{Kind: "schedule_step", Reason: "open coverage work items"}
+			return gapNextActionForOpenCoverage(snapshot)
 		}
 		return readmodelcore.GapNextAction{Kind: "no_action", Reason: "no open coverage work items"}
 	}
+}
+
+func gapNextActionForOpenCoverage(snapshot readmodelcore.RunSnapshot) readmodelcore.GapNextAction {
+	item := gapNextActionFocusItem(snapshot)
+	if len(item) == 0 {
+		return readmodelcore.GapNextAction{Kind: "acquire_evidence", Reason: "open coverage work items"}
+	}
+	status := strings.ToLower(strings.TrimSpace(stringValue(item, "status")))
+	if status == "blocked" {
+		return readmodelcore.GapNextAction{Kind: "request_governance", Reason: "coverage work item is blocked"}
+	}
+	missing := readModelStringSet(readModelStringSliceValue(item["missingEvidenceKinds"]))
+	switch {
+	case missing["decision"] || missing["approval"] || missing["external_dependency"]:
+		return readmodelcore.GapNextAction{Kind: "request_governance", Reason: "coverage work item requires governance evidence"}
+	case missing["state_change"]:
+		return readmodelcore.GapNextAction{Kind: "produce_state_change", Reason: "coverage work item is missing state_change evidence"}
+	case missing["validation"]:
+		return readmodelcore.GapNextAction{Kind: "produce_validation_evidence", Reason: "coverage work item is missing validation evidence"}
+	case missing["artifact"]:
+		return readmodelcore.GapNextAction{Kind: "produce_artifact_evidence", Reason: "coverage work item is missing artifact evidence"}
+	case missing["assessment"]:
+		return readmodelcore.GapNextAction{Kind: "complete_coverage_assessment", Reason: "coverage work item is missing assessment evidence"}
+	case len(missing) > 0:
+		return readmodelcore.GapNextAction{Kind: "acquire_evidence", Reason: "coverage work item is missing evidence"}
+	case status == "evidence_ready":
+		return readmodelcore.GapNextAction{Kind: "complete_coverage_assessment", Reason: "coverage work item evidence is ready for assessment"}
+	default:
+		return readmodelcore.GapNextAction{Kind: "complete_coverage_assessment", Reason: "open coverage work item requires assessment"}
+	}
+}
+
+func gapNextActionFocusItem(snapshot readmodelcore.RunSnapshot) map[string]any {
+	ctx := snapshot.CoverageWorkItemContext
+	for _, key := range []string{"currentFocus"} {
+		if item := MapValue(ctx[key]); len(item) > 0 {
+			return item
+		}
+	}
+	for _, key := range []string{"unresolvedItems", "currentFocusItems"} {
+		items := MapSliceValue(ctx[key])
+		if len(items) > 0 {
+			return items[0]
+		}
+	}
+	if len(snapshot.CoverageWorkItems) > 0 {
+		return snapshot.CoverageWorkItems[0]
+	}
+	return nil
+}
+
+func readModelStringSet(values []string) map[string]bool {
+	ret := map[string]bool{}
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" {
+			ret[value] = true
+		}
+	}
+	return ret
 }
 
 func gapTodoSourceRef(item map[string]any) string {

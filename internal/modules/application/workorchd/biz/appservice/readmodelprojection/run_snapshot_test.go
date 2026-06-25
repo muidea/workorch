@@ -157,6 +157,68 @@ func TestCoverageSummaryFromRunSnapshotDerivesStatusCounts(t *testing.T) {
 	}
 }
 
+func TestGapBaselineNextActionDerivesFromMissingEvidenceKind(t *testing.T) {
+	t.Parallel()
+
+	got := GapBaselineFromRunSnapshot(readmodelcore.RunSnapshot{
+		Run: readmodelcore.Run{
+			State: "running",
+		},
+		CoverageWorkItemContext: map[string]any{
+			"definitionRevision":   "rev-next-action",
+			"coverageBaselineHash": "sha256:next-action",
+			"currentFocus": map[string]any{
+				"id":                   "cwi-state-change",
+				"status":               "open",
+				"missingEvidenceKinds": []any{"state_change", "validation"},
+			},
+			"unresolvedItems": []any{map[string]any{
+				"id":                   "cwi-state-change",
+				"status":               "open",
+				"missingEvidenceKinds": []any{"state_change", "validation"},
+			}},
+		},
+	})
+
+	if got == nil {
+		t.Fatal("GapBaseline = nil, want derived baseline")
+	}
+	if got.NextAction.Kind != "produce_state_change" {
+		t.Fatalf("NextAction = %+v, want produce_state_change for missing state_change evidence", got.NextAction)
+	}
+}
+
+func TestGapBaselineNextActionDerivesValidationAfterStateChangeEvidence(t *testing.T) {
+	t.Parallel()
+
+	got := GapBaselineFromRunSnapshot(readmodelcore.RunSnapshot{
+		Run: readmodelcore.Run{
+			State: "running",
+		},
+		CoverageWorkItemContext: map[string]any{
+			"definitionRevision":   "rev-next-validation",
+			"coverageBaselineHash": "sha256:next-validation",
+			"currentFocus": map[string]any{
+				"id":                   "cwi-validation",
+				"status":               "open",
+				"missingEvidenceKinds": []any{"validation"},
+			},
+			"unresolvedItems": []any{map[string]any{
+				"id":                   "cwi-validation",
+				"status":               "open",
+				"missingEvidenceKinds": []any{"validation"},
+			}},
+		},
+	})
+
+	if got == nil {
+		t.Fatal("GapBaseline = nil, want derived baseline")
+	}
+	if got.NextAction.Kind != "produce_validation_evidence" {
+		t.Fatalf("NextAction = %+v, want produce_validation_evidence for missing validation evidence", got.NextAction)
+	}
+}
+
 func TestRunSnapshotFromModelsPrefersPersistedGapBaseline(t *testing.T) {
 	t.Parallel()
 

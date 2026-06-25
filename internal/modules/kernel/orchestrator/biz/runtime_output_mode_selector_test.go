@@ -45,6 +45,48 @@ func TestOutputModeSelectorKeepsSmallStateChangingRepairOnExecutionGraph(t *test
 	}
 }
 
+func TestOutputModeSelectorDoesNotReinheritStateChangeWhenCurrentContractRequiresEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-output-mode-evidence-lock",
+		WorkspaceID: "ws-output-mode-evidence-lock",
+		ExecutionContext: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": stateChangingRepairRequiredOutput(),
+			},
+		},
+	}
+	input := map[string]any{
+		"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+		"concreteFailureEvidenceRequired": true,
+		"repairActionPackage": map[string]any{
+			"evidenceAcquisitionRequired": true,
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode":       false,
+				"mustProduceConcreteFailureEvidence": true,
+				"stateChangingForbidden":             true,
+			},
+		},
+	}
+
+	applyLLMOutputModeSelection(context.Background(), NormalizeRuntimePolicy(RuntimePolicy{}).LLMOutput, nil, run, input, nil, 1)
+
+	if input["stateChangingOutputRequired"] != nil {
+		t.Fatalf("stateChangingOutputRequired = %v, want no inherited state-changing requirement", input["stateChangingOutputRequired"])
+	}
+	if input["repairObjective"] != repairObjectiveAcquireFailureEvidence {
+		t.Fatalf("repairObjective = %v, want %s", input["repairObjective"], repairObjectiveAcquireFailureEvidence)
+	}
+	if input["outputMode"] != nil || input["outputModeSelector"] != nil {
+		t.Fatalf("input = %+v, want no output mode selection for evidence acquisition", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustProduceConcreteFailureEvidence"] != true || required["mustIncludeStateChangingNode"] != false {
+		t.Fatalf("requiredOutput = %+v, want evidence acquisition contract preserved", required)
+	}
+}
+
 func TestOutputModeSelectorUsesIncrementalArtifactForLargeSchemaInvalidPreview(t *testing.T) {
 	runID := common.RunID("run-output-mode-large-schema")
 	failed := &runmodel.Step{

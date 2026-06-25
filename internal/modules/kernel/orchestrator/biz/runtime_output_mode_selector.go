@@ -59,9 +59,12 @@ func inheritOutputModeSignalsFromRunExecutionContext(input map[string]any, run *
 	if boolValue(input["completionFollowUp"]) || boolValue(input[stepInputKeyAssessmentOnly]) {
 		return
 	}
-	for _, key := range []string{"requestedOutputMode", "stateChangingOutputRequired", "repairObjective"} {
-		if _, exists := input[key]; !exists && run.ExecutionContext[key] != nil {
-			input[key] = cloneStepInputValue(run.ExecutionContext[key])
+	stateChangingInheritanceBlocked := outputModeStateChangingInheritanceBlockedByCurrentContract(input)
+	if !stateChangingInheritanceBlocked {
+		for _, key := range []string{"requestedOutputMode", "stateChangingOutputRequired", "repairObjective"} {
+			if _, exists := input[key]; !exists && run.ExecutionContext[key] != nil {
+				input[key] = cloneStepInputValue(run.ExecutionContext[key])
+			}
 		}
 	}
 	sourcePkg := mapFromValue(run.ExecutionContext["repairActionPackage"])
@@ -91,6 +94,31 @@ func inheritOutputModeSignalsFromRunExecutionContext(input map[string]any, run *
 		targetPkg["requiredOutput"] = targetRequired
 		input["repairActionPackage"] = targetPkg
 	}
+}
+
+func outputModeStateChangingInheritanceBlockedByCurrentContract(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	objective := strings.TrimSpace(stringFromMap(input, "repairObjective"))
+	if objective == repairObjectiveAcquireFailureEvidence ||
+		objective == repairObjectiveConcreteValidationEvidence ||
+		objective == "complete_dod_goal_coverage_assessment" {
+		return true
+	}
+	if boolValue(input["concreteFailureEvidenceRequired"]) ||
+		boolValue(input["boundedValidationRequired"]) ||
+		boolValue(input[stepInputKeyAssessmentOnly]) {
+		return true
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if boolValue(pkg["evidenceAcquisitionRequired"]) {
+		return true
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	return boolValue(required["mustProduceConcreteFailureEvidence"]) ||
+		boolValue(required["mustProduceConcreteValidationEvidence"]) ||
+		boolValue(required["stateChangingForbidden"])
 }
 
 func selectOutputMode(ctx context.Context, runtimePolicy LLMOutputRuntimePolicy, continuations repository.ArtifactContinuationRepository, run *runModel.Run, input map[string]any, failedStep *runModel.Step, attempt int) outputModeSelection {
