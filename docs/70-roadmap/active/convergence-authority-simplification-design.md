@@ -257,7 +257,7 @@ projection 可暴露 `authorityDiagnostics`，例如“persisted derived field s
 
 ### Should Remove or Downgrade
 
-- 将 persisted `schedule_step` 作为 runtime 权威 next action 的逻辑。
+- 将历史占位 next action 作为 runtime 权威 next action 的逻辑。
 - 从旧 `repairActionPackage`、`replanContinuation`、旧 graph、旧 decision text 反推当前 requiredOutput 的逻辑。
 - projection 对 owner state 进行“修复式归一化”的逻辑；可保留为 diagnostic，但最终应由 owner refresh 消除冲突。
 - TUI/Web 端对 decision/approval/run/coverage 状态的本地推断。
@@ -281,7 +281,7 @@ projection 可暴露 `authorityDiagnostics`，例如“persisted derived field s
 
 - Make structured NextAction the only action selector.
 - Cover `assess_gap`、`state_change`、`validate`、`assessment`、`request_decision`、`request_approval`、`complete`、`fail`。
-- Acceptance: no generic `schedule_step` persists as authority.
+- Acceptance: no generic historical placeholder persists as authority.
 
 ### S4: Stage Contract From NextAction
 
@@ -331,7 +331,7 @@ Boundary search:
 ```bash
 rg -n "software-dev|weather-query|code-review|go test|npm test|no tests to run|city|ssh|server" internal/modules/kernel internal/modules/application/workorchd/biz/appservice internal/pkg
 rg -n "replanContinuation|repairActionPackage|convergenceContract|gapBaseline|coverageFocus|convergenceBudget|stagePacket" internal/modules/kernel internal/modules/application/workorchd/biz/appservice internal/pkg
-rg -n "schedule_step|continue current run|/run continue|Intent\\(\"continue\"\\)" internal/services internal/modules internal/pkg web
+rg -n "continue current run|/run continue|Intent\\(\"continue\"\\)" internal/services internal/modules internal/pkg web
 ```
 
 Live verification after code closure:
@@ -359,9 +359,9 @@ Live verification after code closure:
 | --- | --- | --- |
 | S1 Authority Snapshot Model | code-closed | Runtime now writes `convergenceAuthority` with current focus, structured NextAction, evidence refs and budget scope. `TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket` covers authority-driven baseline/contract/stage packet derivation. |
 | S2 Single Refresh Entry | code-closed | `ensureGapBaselineBeforeDispatch` routes through `refreshRunConvergenceAuthority` before dispatch and persists one aligned snapshot. `initialStepInput` also refreshes authority before rendering the first step input, so replan successor startup cannot bypass the authority snapshot. Event-driven dispatch consumption now re-derives and overwrites `gapBaseline` / `convergenceAuthority` from current owner state before runtime execution, removes stale queued payload snapshots when no current snapshot exists, and `mergeResumeInput` no longer allows resume wrappers to overwrite `gapBaseline` / `convergenceAuthority` / `coverageFocus` / `convergenceBudget`. `runExecutionInput` now binds authority/gapBaseline before dynamic runtime contract inheritance, `BuildConvergenceContract` honors authority nextAction before merging stale continuation lineage, and authority refresh strips runtime retry diagnostics from `coverageFocus`, keeping current focus derived from coverage ledger only. |
-| S3 NextAction Interpreter | code-closed | `BuildConvergenceContract` accepts current structured NextAction from `convergenceAuthority` / `gapBaseline` without requiring replan flags; runtime no longer treats `schedule_step` as a valid first-run action. |
+| S3 NextAction Interpreter | code-closed | `BuildConvergenceContract` accepts current structured NextAction from `convergenceAuthority` / `gapBaseline` without requiring replan flags; runtime no longer carries a historical placeholder next-action compatibility path. |
 | S4 Stage Contract From NextAction | code-closed | Validation/assessment contracts clear stale `replanStateChangingContinuation`; old `repairActionPackage` cannot override authority-selected assessment/validation and no longer crosses replan successor hydration as current lineage. `repairActionPackageFromReplanContinuation` rebuilds the package from current failure/timeline/digest instead of merging old continuation packages, and output-mode selection ignores stale `replanContinuation` budget signals. Output-mode selection still blocks stale `requestedOutputMode`、`stateChangingOutputRequired`、`repairObjective` and required-output budget inheritance from `run.ExecutionContext` when `convergenceAuthority` / `gapBaseline` has already selected a non state-changing NextAction, while preserving legitimate current state-change budget signals. `TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket`, `TestInitialStepInputAuthorityAssessmentPreemptsStaleReplanStateChange`, `TestBuildConvergenceContractAuthorityPreemptsReplanWithoutInputPollution`, `TestRuntimeOrchestrator_InitialReplanStateChangingInputIgnoresStaleContinuationRepairPackage`, `TestRuntimeOrchestrator_ReplanSuccessorRecoversConcreteFailureFromAncestorLineage` and `TestOutputModeSelectorIgnoresStaleReplanContinuationBudgetSignal` cover stale replan/state-changing lineage being preempted by current authority without polluting the current input. |
 | S5 Candidate Violation Handling | code-closed | Existing bounded contract-violation tests remain in orchestrator; this pass keeps rejected diagnostics out of authority and focuses on stale lineage preemption. |
-| S6 Projection/ViewModel Alignment | code-closed | Projection reads `convergenceAuthority.nextAction` before local derivation and emits `stale_persisted_next_action` diagnostic on any persisted baseline nextAction mismatch. `coverage_summary.go` no longer treats `schedule_step` as a special compatibility branch. |
+| S6 Projection/ViewModel Alignment | code-closed | Projection reads `convergenceAuthority.nextAction` before local derivation and emits `stale_persisted_next_action` diagnostic on any persisted baseline nextAction mismatch. `coverage_summary.go` no longer treats historical placeholder next actions as a special compatibility branch. |
 | S7 Access Boundary Cleanup | verified | Precise search found no user-visible `/run continue` command or `Intent("continue")`; remote mode remains on-demand through projection events unless agent requires full stream. |
 | S8 Regression and Boundary Gate | code-closed | Added authority snapshot, event-driven dispatch stale-payload overwrite, resume-wrapper authority skip, focus diagnostic stripping, projection authority, stale replan repair package suppression and stale replan output-mode budget suppression regression tests; targeted package tests and full `go test ./... -count=1` pass. |

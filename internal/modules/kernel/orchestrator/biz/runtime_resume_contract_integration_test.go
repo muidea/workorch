@@ -303,7 +303,7 @@ func TestRuntimeOrchestrator_ResumeRunClearsResolvedDecisionBeforeGapBaselineRef
 				"workspaceId":      string(workspaceID),
 				"runId":            string(runID),
 				"baselineRevision": "stale-before-resume",
-				"nextAction":       map[string]any{"kind": "schedule_step"},
+				"nextAction":       map[string]any{"kind": "state_change"},
 			},
 		},
 	}); err != nil {

@@ -780,7 +780,7 @@ func TestContractViolationRetryInputPreservesGapBaselineFromFailedStep(t *testin
 			"id":     "todo-001",
 			"status": "open",
 		}},
-		"nextAction": map[string]any{"kind": "schedule_step"},
+		"nextAction": map[string]any{"kind": "state_change"},
 	}
 	run := &runmodel.Run{
 		ID:              runID,
@@ -814,14 +814,14 @@ func TestContractViolationRetryInputKeepsLatestRunGapBaseline(t *testing.T) {
 		"workspaceId":      "ws-contract-violation-run-gap-baseline",
 		"runId":            string(runID),
 		"baselineRevision": "gap-from-run",
-		"nextAction":       map[string]any{"kind": "schedule_step"},
+		"nextAction":       map[string]any{"kind": "state_change"},
 	}
 	stepBaseline := map[string]any{
 		"schemaVersion":    gapBaselineSchema,
 		"workspaceId":      "ws-contract-violation-run-gap-baseline",
 		"runId":            string(runID),
 		"baselineRevision": "gap-from-failed-step",
-		"nextAction":       map[string]any{"kind": "schedule_step"},
+		"nextAction":       map[string]any{"kind": "state_change"},
 	}
 	run := &runmodel.Run{
 		ID:              runID,

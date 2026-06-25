@@ -360,15 +360,15 @@ func convergenceNextActionKind(run *runModel.Run, input map[string]any) string {
 		mapFromValue(input[gapBaselineKey]),
 		mapFromValue(mapFromValue(input["executionContext"])[gapBaselineKey]),
 	} {
-		if kind := strings.TrimSpace(stringFromMap(mapFromValue(source["nextAction"]), "kind")); kind != "" && kind != "schedule_step" {
+		if kind := strings.TrimSpace(stringFromMap(mapFromValue(source["nextAction"]), "kind")); kind != "" {
 			return kind
 		}
 	}
 	if run != nil {
-		if kind := strings.TrimSpace(stringFromMap(mapFromValue(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])["nextAction"]), "kind")); kind != "" && kind != "schedule_step" {
+		if kind := strings.TrimSpace(stringFromMap(mapFromValue(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])["nextAction"]), "kind")); kind != "" {
 			return kind
 		}
-		if kind := strings.TrimSpace(stringFromMap(mapFromValue(mapFromValue(run.ExecutionContext[gapBaselineKey])["nextAction"]), "kind")); kind != "" && kind != "schedule_step" {
+		if kind := strings.TrimSpace(stringFromMap(mapFromValue(mapFromValue(run.ExecutionContext[gapBaselineKey])["nextAction"]), "kind")); kind != "" {
 			return kind
 		}
 	}

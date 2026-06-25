@@ -260,7 +260,7 @@ func TestRunSnapshotFromModelsNormalizesStalePersistedGapBaselineNextAction(t *t
 						"reason":                "persisted baseline checkpoint",
 					}},
 					"nextAction": map[string]any{
-						"kind":   "schedule_step",
+						"kind":   "state_change",
 						"reason": "persisted next action",
 					},
 				},
