@@ -808,11 +808,28 @@ func mergeResumeInput(specs []stepDispatchSpec, resumeInput map[string]any) {
 			specs[idx].Input = map[string]any{}
 		}
 		for key, value := range resumeInput {
+			if resumeInputAuthorityKey(key) {
+				continue
+			}
 			if resumeInputShouldPreserveExistingStage(key, specs[idx].Input) {
 				continue
 			}
 			specs[idx].Input[key] = value
 		}
+	}
+}
+
+func resumeInputAuthorityKey(key string) bool {
+	switch strings.TrimSpace(key) {
+	case gapBaselineKey,
+		convergenceAuthorityKey,
+		coverageFocusKey,
+		convergenceBudgetKey,
+		coverageWorkItemContextKey,
+		coverageWorkItemsKey:
+		return true
+	default:
+		return false
 	}
 }
 

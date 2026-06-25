@@ -170,6 +170,69 @@ func TestMergeResumeInputDoesNotOverrideExistingStageWithResolutionStage(t *test
 	}
 }
 
+func TestMergeResumeInputSkipsAuthoritySnapshotFields(t *testing.T) {
+	specs := []stepDispatchSpec{{
+		ID:   "run-authority-merge/step-1",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			gapBaselineKey: map[string]any{
+				"schemaVersion": gapBaselineSchema,
+				"workspaceId":   "ws-current",
+				"runId":         "run-current",
+				"nextAction":    map[string]any{"kind": "assessment"},
+			},
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"workspaceId":   "ws-current",
+				"runId":         "run-current",
+				"nextAction":    map[string]any{"kind": "assessment"},
+			},
+			coverageFocusKey: map[string]any{
+				"id":      "focus-current",
+				"sliceId": "slice-current",
+			},
+			convergenceBudgetKey: map[string]any{
+				"focusId": "focus-current",
+				"state":   "tracking",
+			},
+		},
+	}}
+	resumeInput := map[string]any{
+		gapBaselineKey: map[string]any{
+			"schemaVersion": gapBaselineSchema,
+			"workspaceId":   "ws-stale",
+			"runId":         "run-stale",
+			"nextAction":    map[string]any{"kind": "state_change"},
+		},
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"workspaceId":   "ws-stale",
+			"runId":         "run-stale",
+			"nextAction":    map[string]any{"kind": "state_change"},
+		},
+		coverageFocusKey: map[string]any{
+			"id":      "focus-stale",
+			"sliceId": "slice-stale",
+		},
+		convergenceBudgetKey: map[string]any{
+			"focusId": "focus-stale",
+			"state":   "escalated",
+		},
+	}
+
+	mergeResumeInput(specs, resumeInput)
+
+	input := specs[0].Input
+	if stringFromMap(mapFromValue(input[gapBaselineKey]), "workspaceId") != "ws-current" ||
+		stringFromMap(mapFromValue(input[convergenceAuthorityKey]), "workspaceId") != "ws-current" {
+		t.Fatalf("authority snapshot fields were overridden: %+v", input)
+	}
+	if stringFromMap(mapFromValue(input[coverageFocusKey]), "id") != "focus-current" ||
+		stringFromMap(mapFromValue(input[convergenceBudgetKey]), "focusId") != "focus-current" {
+		t.Fatalf("coverage scope fields were overridden: %+v", input)
+	}
+}
+
 func TestRuntimeOrchestrator_ResumeRunClearsResolvedDecisionBeforeGapBaselineRefresh(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
