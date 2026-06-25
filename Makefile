@@ -18,7 +18,7 @@ CONSOLE_DEPS_STAMP := $(CONSOLE_NODE_MODULES)/.workorch-deps-stamp
 NPM_CI_FLAGS ?=
 NPM_INSTALL_FLAGS ?=
 
-.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-incremental-artifact-e2e verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e observe-runtime-closure verify-runtime-idle-baseline verify-web-console-projection-visual verify-tui-web-projection-e2e verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full verify-managed-full verify-managed-service-smoke loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-workspace-switch-visual verify-tui-terminal-render verify-tui-long-output release release-check install-latest ci
+.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-incremental-artifact-e2e verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e observe-runtime-closure verify-runtime-idle-baseline verify-cpu-io-observation-e2e verify-web-console-projection-visual verify-tui-web-projection-e2e verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full verify-managed-full verify-managed-service-smoke loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-workspace-switch-visual verify-tui-terminal-render verify-tui-long-output release release-check install-latest ci
 
 help:
 	@echo "Targets:"
@@ -61,6 +61,7 @@ help:
 	@echo "  verify-approval-decision-resolution-e2e - verify deployed decision/approval resolution continuation"
 	@echo "  observe-runtime-closure - collect deployed runtime projection, SSE, heartbeat, and optional LLM cache observations"
 	@echo "  verify-runtime-idle-baseline - verify managed latest service idle CPU/IO and event IO pressure baseline"
+	@echo "  verify-cpu-io-observation-e2e - verify S11.7 managed CPU/IO idle observation baseline"
 	@echo "  verify-web-console-projection-visual - verify Web Console projection and heartbeat display contract"
 	@echo "  verify-tui-web-projection-e2e - verify service projection, Web display, and TUI projection rendering contracts"
 	@echo "  verify-incremental-artifact-e2e - verify deployed neutral incremental artifact plan/chunk/apply lifecycle"
@@ -266,8 +267,10 @@ verify-runtime-idle-baseline:
 	WORKORCH_OBSERVE_MAX_RUNTIME_EVENT_PUBLISH_FAILURES_DELTA=$${WORKORCH_OBSERVE_MAX_RUNTIME_EVENT_PUBLISH_FAILURES_DELTA:-0} \
 	WORKORCH_OBSERVE_MAX_PROCESS_CPU_PERCENT=$${WORKORCH_OBSERVE_MAX_PROCESS_CPU_PERCENT:-20} \
 	WORKORCH_OBSERVE_MAX_PROCESS_READ_BYTES_DELTA=$${WORKORCH_OBSERVE_MAX_PROCESS_READ_BYTES_DELTA:-0} \
-	WORKORCH_OBSERVE_MAX_PROCESS_WRITE_BYTES_DELTA=$${WORKORCH_OBSERVE_MAX_PROCESS_WRITE_BYTES_DELTA:-0} \
+	WORKORCH_OBSERVE_MAX_PROCESS_WRITE_BYTES_DELTA=$${WORKORCH_OBSERVE_MAX_PROCESS_WRITE_BYTES_DELTA:-65536} \
 	./scripts/verify-workorch-managed-full.sh
+
+verify-cpu-io-observation-e2e: verify-runtime-idle-baseline
 
 verify-web-console-projection-visual: console-build
 	./scripts/verify-web-console-projection-visual.sh
@@ -310,7 +313,7 @@ verify-deployed-full: verify-ci-mvp verify-skillhub verify-mvp verify-real-runti
 
 verify-tui-web-projection-e2e: verify-workspace-projection-switch verify-web-console-projection-visual verify-tui-agent verify-tui-workspace-switch-visual verify-tui-terminal-render verify-tui-long-output
 
-verify-e2e-full: verify-e2e-template-contract verify-service verify-workspace-template-soul verify-llm verify-incremental-artifact-e2e verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-mcp-stdio verify-skillhub verify-auto-governance-ticket-approval verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration-deployed verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e verify-tui-web-projection-e2e verify-weather-ticket-approval-mock
+verify-e2e-full: verify-e2e-template-contract verify-service verify-workspace-template-soul verify-llm verify-incremental-artifact-e2e verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-mcp-stdio verify-skillhub verify-auto-governance-ticket-approval verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration-deployed verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e verify-tui-web-projection-e2e verify-cpu-io-observation-e2e verify-weather-ticket-approval-mock
 
 verify-managed-full:
 	./scripts/verify-workorch-managed-full.sh

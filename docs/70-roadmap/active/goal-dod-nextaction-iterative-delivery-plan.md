@@ -85,6 +85,7 @@ Related:
 - [S11.4 Contract Violation Retry E2E](./goal-dod-nextaction-s11-4-contract-violation-retry-e2e.md)
 - [S11.5 Service Restart Recoverable E2E](./goal-dod-nextaction-s11-5-service-restart-recoverable-e2e.md)
 - [S11.6 TUI/Web Projection E2E](./goal-dod-nextaction-s11-6-tui-web-projection-e2e.md)
+- [S11.7 CPU/IO Observation E2E](./goal-dod-nextaction-s11-7-cpu-io-observation-e2e.md)
 
 ## Purpose
 

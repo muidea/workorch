@@ -718,7 +718,9 @@ git diff --check
 - the default gate observes 2 idle workspaces, requires process resource
   snapshots, requires pending projection rebuilds to stay at 0, requires
   projection schedule drops to stay at 0, requires event metadata scan delta and
-  payload hydrate delta to stay at 0, and bounds process CPU at 20%.
+  payload hydrate delta to stay at 0, bounds process CPU at 20%, and allows a
+  small bounded process write delta for the managed observer's own access-log
+  writes.
 - 2026-06-21 latest-code managed run passed with artifacts at
   `/tmp/tmp.NxI6aSS9dM/observe-runtime-closure`:
   - `workspaceTotal=2`
@@ -732,6 +734,26 @@ git diff --check
   - `processResource.cpuPercent=0.03322078528846294`
   - `processResource.readBytesDelta=0`
   - `processResource.writeBytesDelta=0`
+
+2026-06-25 S11.7 CPU/IO observation e2e closure:
+
+- added `make verify-cpu-io-observation-e2e` as the explicit roadmap S11.7
+  validation target for managed CPU/IO idle observation.
+- `verify-e2e-full` now includes the S11.7 target.
+- the managed idle baseline keeps strict zero-delta gates for projection pending
+  rebuilds, projection schedule drops, event metadata record scans, payload
+  hydrates, payload hydrate bytes, runtime event publish failures, and process
+  read bytes.
+- process write bytes use a bounded default threshold of 65536 bytes because the
+  observation window itself performs HTTP/SSE requests that are logged by the
+  managed service. This keeps the gate focused on sustained rewrite churn rather
+  than observer-induced access-log writes.
+
+Verification:
+
+```bash
+WORKORCH_MANAGED_SKIP_PREFLIGHT=1 WORKORCH_MANAGED_VERIFY_KEEP_ARTIFACTS=1 make verify-cpu-io-observation-e2e
+```
 
 Verification:
 
