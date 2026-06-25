@@ -2485,6 +2485,79 @@ func TestBuildConvergenceContractNextActionAssessmentPreemptsStaleEvidenceAcquis
 	}
 }
 
+func TestInitialStepInputAuthorityAssessmentPreemptsStaleReplanStateChange(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-replan-authority-assessment",
+		WorkspaceID:     "ws-replan-authority-assessment",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		State:           common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-replan-authority-assessment",
+			"dod": map[string]any{
+				"id": "dod-authority",
+				"items": []map[string]any{{
+					"id":                    "dod-ready",
+					"text":                  "neutral completed coverage needs final assessment",
+					"requiredEvidenceKinds": []string{"validation"},
+				}},
+			},
+			coverageWorkItemsKey: []map[string]any{{
+				"definitionRevision":   "rev-replan-authority-assessment",
+				"source":               "dod",
+				"sourceScope":          "dod_item",
+				"sourceRequirementId":  "dod-ready",
+				"sourcePath":           "dod.items[0]",
+				"targetText":           "neutral completed coverage needs final assessment",
+				"status":               "open",
+				"acceptedEvidenceRefs": []string{"evidence-validation-ready"},
+				"acceptedEvidenceByKind": map[string][]string{
+					"validation": {"evidence-validation-ready"},
+				},
+			}},
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-stale-state-change",
+				"reason":           "historical repair exhausted",
+				"repairActionPackage": map[string]any{
+					"requiredOutput": stateChangingRepairRequiredOutput(),
+					"targetSnapshots": []map[string]any{{
+						"targetRef":        "stale-target.txt",
+						"exists":           true,
+						"contentHash":      "hash-stale",
+						"contentComplete":  true,
+						"safeForFileWrite": true,
+					}},
+				},
+				"stateChangingOutputRequired": true,
+				"repairObjective":             repairObjectiveStateChangingOutput,
+			},
+		},
+	}
+
+	input := initialStepInput(run)
+
+	if got := stringFromMap(mapFromValue(mapFromValue(input[convergenceAuthorityKey])["nextAction"]), "kind"); got != "assessment" {
+		t.Fatalf("convergenceAuthority.nextAction = %q, want assessment; input=%+v", got, input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedAssessment {
+		t.Fatalf("convergenceContract = %+v, want need_assessment", contract)
+	}
+	if input[stepInputKeyRuntimeStage] != runtimeStageVerification ||
+		input[stepInputKeyAssessmentOnly] != true ||
+		input["repairObjective"] != "complete_dod_goal_coverage_assessment" {
+		t.Fatalf("input = %+v, want assessment-only verification contract", input)
+	}
+	for _, key := range []string{"replanStateChangingContinuation", "stateChangingOutputRequired", "concreteFailureEvidenceRequired"} {
+		if _, ok := input[key]; ok {
+			t.Fatalf("input[%s] = %+v, want stale replan repair flag stripped", key, input[key])
+		}
+	}
+	if required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]); len(required) > 0 {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want stale state-changing requiredOutput stripped", required)
+	}
+}
+
 func TestCoverageWorkItemEvidenceReadyAssessmentGapIsNotActionableEvidenceGap(t *testing.T) {
 	item := map[string]any{
 		"id":                    "cwi-ready",

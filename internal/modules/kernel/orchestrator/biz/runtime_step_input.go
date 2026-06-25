@@ -25,6 +25,7 @@ func initialStepKind(run *runModel.Run) string {
 
 func initialStepInput(run *runModel.Run) map[string]any {
 	newCoverageSubsystem().ensure(run)
+	refreshRunConvergenceAuthority(run)
 	input := nextStepInput(run, "")
 	if input == nil {
 		return nil
