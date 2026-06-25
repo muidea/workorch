@@ -390,6 +390,7 @@ func refreshRunConvergenceAuthority(run *runModel.Run) bool {
 	}
 	changed := false
 	currentFocus := mapFromValue(run.ExecutionContext[coverageFocusKey])
+	stripCoverageFocusRuntimeDiagnostics(currentFocus)
 	if !coverageFocusSameScope(currentFocus, focus) {
 		run.ExecutionContext[coverageFocusKey] = focus
 		resetConvergenceBudgetScopeForFocus(run.ExecutionContext, focus)
@@ -401,6 +402,7 @@ func refreshRunConvergenceAuthority(run *runModel.Run) bool {
 				next[key] = cloneStepInputValue(value)
 			}
 		}
+		stripCoverageFocusRuntimeDiagnostics(next)
 		if stableCoverageJSON(currentFocus) != stableCoverageJSON(next) {
 			run.ExecutionContext[coverageFocusKey] = next
 			changed = true

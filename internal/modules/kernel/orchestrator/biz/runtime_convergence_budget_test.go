@@ -62,10 +62,12 @@ func TestUpdateConvergenceBudgetEscalatesNoDeltaRepeatedFailure(t *testing.T) {
 		t.Fatalf("budget counters = %+v, want no-delta/repeated/repair counters", budget)
 	}
 	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
-	if focus["failureClass"] != failureClassShellCommand ||
-		focus["failureSignature"] != "class=shell_command_failed|kind=shell/command|target=one" ||
-		int64FromValue(focus["attempt"]) != 2 {
-		t.Fatalf("focus = %+v, want failure and attempt projected", focus)
+	if focus["failureClass"] != nil || focus["failureSignature"] != nil || focus["attempt"] != nil {
+		t.Fatalf("focus = %+v, want no retry diagnostics projected into current focus", focus)
+	}
+	if budget["lastFailureClass"] != failureClassShellCommand ||
+		budget["lastFailureSignature"] != "class=shell_command_failed|kind=shell/command|target=one" {
+		t.Fatalf("budget = %+v, want failure diagnostics retained in budget scope", budget)
 	}
 }
 
@@ -159,14 +161,14 @@ func TestUpdateConvergenceBudgetResetsRepairAttemptsAfterAcceptedCoverageDelta(t
 			t.Fatalf("budget[%s] = %v, want reset to zero in %+v", key, budget[key], budget)
 		}
 	}
-	for _, key := range []string{"lastFailureSignature", "lastNoDeltaReason", "lastDecisionReason"} {
+	for _, key := range []string{"lastFailureSignature", "lastFailureClass", "lastNoDeltaReason", "lastDecisionReason"} {
 		if _, ok := budget[key]; ok {
 			t.Fatalf("budget retained %s after positive coverage delta: %+v", key, budget)
 		}
 	}
 	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
-	if int64FromValue(focus["attempt"]) != 0 {
-		t.Fatalf("focus attempt = %v, want reset after positive coverage delta", focus["attempt"])
+	if focus["attempt"] != nil || focus["failureClass"] != nil || focus["failureSignature"] != nil {
+		t.Fatalf("focus = %+v, want retry diagnostics cleared after positive coverage delta", focus)
 	}
 }
 
@@ -222,8 +224,8 @@ func TestUpdateConvergenceBudgetDoesNotResetRepairAttemptsForRejectedCoverageDel
 		t.Fatalf("budget = %+v, want no-delta reset for recorded rejected evidence", budget)
 	}
 	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
-	if int64FromValue(focus["attempt"]) != 3 {
-		t.Fatalf("focus attempt = %v, want retained after rejected evidence", focus["attempt"])
+	if focus["attempt"] != nil || focus["failureClass"] != nil || focus["failureSignature"] != nil {
+		t.Fatalf("focus = %+v, want retry diagnostics absent from current focus", focus)
 	}
 }
 

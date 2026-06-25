@@ -19,6 +19,7 @@ func updateConvergenceBudgetFromStep(run *runModel.Run, step *runModel.Step, cov
 	if len(focus) == 0 {
 		return false
 	}
+	stripCoverageFocusRuntimeDiagnostics(focus)
 	focusID := strings.TrimSpace(stringFromMap(focus, "id"))
 	if focusID == "" {
 		return false
@@ -34,7 +35,6 @@ func updateConvergenceBudgetFromStep(run *runModel.Run, step *runModel.Step, cov
 	}
 	if convergenceBudgetCountsRepairAttempt(step) {
 		budget["repairAttempts"] = int64FromValue(budget["repairAttempts"]) + 1
-		focus["attempt"] = int64FromValue(budget["repairAttempts"])
 	}
 	if coverageDelta {
 		budget["noCoverageDeltaRounds"] = int64(0)
@@ -44,7 +44,7 @@ func updateConvergenceBudgetFromStep(run *runModel.Run, step *runModel.Step, cov
 			budget["validationOnlyRetries"] = int64(0)
 			budget["repeatedFailureSignatures"] = int64(0)
 			delete(budget, "lastFailureSignature")
-			focus["attempt"] = int64(0)
+			delete(budget, "lastFailureClass")
 		}
 		if convergenceBudgetEscalatedDecision(stringFromMap(budget, "decision")) {
 			budget["decision"] = "continue"
@@ -64,10 +64,9 @@ func updateConvergenceBudgetFromStep(run *runModel.Run, step *runModel.Step, cov
 				budget["repeatedFailureSignatures"] = int64(1)
 				budget["lastFailureSignature"] = signature
 			}
-			focus["failureSignature"] = signature
 		}
 		if class := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)); class != "" {
-			focus["failureClass"] = class
+			budget["lastFailureClass"] = class
 		}
 		if convergenceBudgetCountsValidationOnlyRetry(step) {
 			budget["validationOnlyRetries"] = int64FromValue(budget["validationOnlyRetries"]) + 1
@@ -129,6 +128,7 @@ func ensureConvergenceBudgetFocusScope(budget map[string]any, focus map[string]a
 		"validationOnlyRetries",
 		"noCoverageDeltaRounds",
 		"lastFailureSignature",
+		"lastFailureClass",
 		"lastNoDeltaReason",
 		"lastDecisionReason",
 	} {
@@ -138,7 +138,16 @@ func ensureConvergenceBudgetFocusScope(budget map[string]any, focus map[string]a
 	budget["sliceId"] = sliceID
 	budget["state"] = "tracking"
 	budget["decision"] = "continue"
-	focus["attempt"] = int64(0)
+	stripCoverageFocusRuntimeDiagnostics(focus)
+}
+
+func stripCoverageFocusRuntimeDiagnostics(focus map[string]any) {
+	if len(focus) == 0 {
+		return
+	}
+	for _, key := range []string{"attempt", "failureClass", "failureSignature"} {
+		delete(focus, key)
+	}
 }
 
 func convergenceBudgetCountsLLMRound(run *runModel.Run, step *runModel.Step) bool {

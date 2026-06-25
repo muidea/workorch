@@ -593,6 +593,63 @@ func TestInitialDispatchBuildsStateChangingContractFromGapBaseline(t *testing.T)
 	}
 }
 
+func TestRefreshConvergenceAuthorityStripsCoverageFocusRuntimeDiagnostics(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-authority-focus-diagnostics",
+		WorkspaceID: "ws-authority-focus-diagnostics",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			activeSliceIDKey: "slice-authority",
+			coverageFocusKey: map[string]any{
+				"id":                  "focus-cwi-ready",
+				"sliceId":             "slice-authority",
+				"coverageWorkItemIds": []string{"cwi-ready"},
+				"state":               "active",
+				"attempt":             int64(3),
+				"failureClass":        failureClassShellCommand,
+				"failureSignature":    "class=shell_command_failed|target=stale",
+			},
+			convergenceBudgetKey: map[string]any{
+				"focusId":  "focus-cwi-ready",
+				"sliceId":  "slice-authority",
+				"state":    "tracking",
+				"decision": "continue",
+			},
+			coverageWorkItemContextKey: map[string]any{
+				"definitionRevision":   "rev-authority-focus-diagnostics",
+				"coverageBaselineHash": "sha256:authority-focus-diagnostics",
+				"currentFocus": map[string]any{
+					"id":                    "cwi-ready",
+					"status":                "open",
+					"requiredEvidenceKinds": []string{"validation"},
+					"missingEvidenceKinds":  []string{"validation"},
+				},
+				"unresolvedItems": []map[string]any{{
+					"id":                    "cwi-ready",
+					"status":                "open",
+					"requiredEvidenceKinds": []string{"validation"},
+					"missingEvidenceKinds":  []string{"validation"},
+				}},
+			},
+		},
+	}
+
+	if !refreshRunConvergenceAuthority(run) {
+		t.Fatal("refreshRunConvergenceAuthority changed = false, want focus diagnostics stripped")
+	}
+	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
+	if got := stringFromMap(focus, "id"); got != "focus-cwi-ready" {
+		t.Fatalf("coverageFocus = %+v, want same focus scope retained", focus)
+	}
+	if focus["attempt"] != nil || focus["failureClass"] != nil || focus["failureSignature"] != nil {
+		t.Fatalf("coverageFocus = %+v, want runtime diagnostics stripped", focus)
+	}
+	authorityFocus := mapFromValue(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])["currentFocus"])
+	if authorityFocus["attempt"] != nil || authorityFocus["failureClass"] != nil || authorityFocus["failureSignature"] != nil {
+		t.Fatalf("convergenceAuthority.currentFocus = %+v, want pure coverage ledger focus", authorityFocus)
+	}
+}
+
 func TestGapBaselineFromRunPreservesAcceptedAndRejectedEvidenceRefs(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-gap-baseline-evidence",
