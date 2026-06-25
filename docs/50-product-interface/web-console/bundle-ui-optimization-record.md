@@ -55,7 +55,7 @@ Last Updated: 2026-05-29
 ```bash
 npm --prefix web/workorch-console run build
 git diff --check
-rg -n "@ant-design/pro-components|ant-pro" web/workorch-console internal/modules/application/workorchd/service/server/consoleassets/dist
+rg -n "@ant-design/pro-components|ant-pro" web/workorch-console web/consoleassets/dist
 rg -n "<ProCard[^>]*gutter=|<ProCard[^>]*split=|<ProCard[^>]*wrap" web/workorch-console/src
 ```
 

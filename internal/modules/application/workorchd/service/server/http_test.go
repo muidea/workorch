@@ -33,7 +33,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server/consoleassets"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
@@ -48,6 +47,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
+	"github.com/muidea/workorch/web/consoleassets"
 )
 
 func TestMain(m *testing.M) {
@@ -1732,8 +1732,14 @@ func TestConsoleRoutesServeEmbeddedAssets(t *testing.T) {
 	faviconReq := httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
 	faviconRec := httptest.NewRecorder()
 	mux.ServeHTTP(faviconRec, faviconReq)
-	if faviconRec.Code != http.StatusNoContent {
-		t.Fatalf("favicon status = %d, want 204", faviconRec.Code)
+	if faviconRec.Code != http.StatusOK {
+		t.Fatalf("favicon status = %d, want 200", faviconRec.Code)
+	}
+	if got := faviconRec.Header().Get("Content-Type"); !strings.HasPrefix(got, "image/png") {
+		t.Fatalf("favicon content type = %q, want image/png", got)
+	}
+	if !strings.HasPrefix(faviconRec.Body.String(), "\x89PNG") {
+		t.Fatalf("favicon body does not contain PNG data")
 	}
 
 	for _, uri := range []string{"/console", "/console/", "/console/workspaces"} {
@@ -1748,6 +1754,9 @@ func TestConsoleRoutesServeEmbeddedAssets(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), "workorch Console") {
 			t.Fatalf("%s body does not contain console HTML", uri)
 		}
+		if !strings.Contains(rec.Body.String(), "/console/workorch.png") {
+			t.Fatalf("%s body does not contain console icon reference", uri)
+		}
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/console/assets/workorch-console.css", nil)
@@ -1758,6 +1767,16 @@ func TestConsoleRoutesServeEmbeddedAssets(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "workorch-section") {
 		t.Fatalf("asset body does not contain console css")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/console/workorch.png", nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("console icon status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "image/png") {
+		t.Fatalf("console icon content type = %q, want image/png", got)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/console/assets/workorch-console.js", nil)

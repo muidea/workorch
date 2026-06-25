@@ -73,7 +73,7 @@ function ConsoleApp() {
       <AntApp>
         <ProLayout
           title="workorch 控制台"
-          logo={false}
+          logo={<img src="/console/workorch.png" alt="" className="workorch-console-logo" />}
           route={{ path: '/', routes }}
           location={{ pathname: `/${view}` }}
           menuItemRender={(item, dom) => (

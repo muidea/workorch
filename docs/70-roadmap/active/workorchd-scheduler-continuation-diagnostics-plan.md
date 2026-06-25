@@ -487,7 +487,7 @@ go test ./internal/modules/application/workorchd/service/server -count=1 -timeou
 go test ./internal/modules/application/workorchd/service/server -run 'TestWorkorchDSchedulerCommandReturnsErrorWhenRunContinuationQueueFails|TestWorkorchDRESTCommandsReturnConflictWhenSchedulerQueueFails|TestSchedulerRecommendedActionsUseResumeTerminology' -count=1 -timeout=180s
 go test ./internal/modules/application/workorchd/service/server -run 'TestServerStateWatchdogDoesNotRecoverReplanContinuations|TestServerStateRecoverReplanContinuationsSchedulesWaitingDecisionActiveSupersededRun|TestHTTPServerStartupOnlySchedulesWatchdogTimer' -count=1 -timeout=180s
 make verify-boundary-contract
-rg -n "/api/v1/workorch/workspaces/\\{workspaceId\\}/decisions|workspaces/.*/decisions|/workorch/workspaces/.*/decisions" internal web scripts docs -g '!internal/modules/application/workorchd/service/server/consoleassets/dist/**'
+rg -n "/api/v1/workorch/workspaces/\\{workspaceId\\}/decisions|workspaces/.*/decisions|/workorch/workspaces/.*/decisions" internal web scripts docs -g '!web/consoleassets/dist/**'
 ```
 
 Suggested commands:

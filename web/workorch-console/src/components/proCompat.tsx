@@ -19,7 +19,7 @@ type ProLayoutProps = {
   contentWidth?: string;
 };
 
-export function ProLayout({ title, logo: _logo, route, location, children, menuItemRender, layout: _layout, contentWidth: _contentWidth }: ProLayoutProps) {
+export function ProLayout({ title, logo, route, location, children, menuItemRender, layout: _layout, contentWidth: _contentWidth }: ProLayoutProps) {
   const selectedPath = location?.pathname || route?.routes?.[0]?.path || '/';
   const items = (route?.routes ?? []).map((item) => {
     const label = menuItemRender ? menuItemRender(item, item.name) : item.name;
@@ -33,7 +33,10 @@ export function ProLayout({ title, logo: _logo, route, location, children, menuI
   return (
     <Layout className="workorch-console-layout">
       <Layout.Sider className="workorch-console-sider" width={224} breakpoint="lg" collapsedWidth={0}>
-        <div className="workorch-console-title">{title}</div>
+        <div className="workorch-console-title">
+          {logo && <span className="workorch-console-logo-wrap">{logo}</span>}
+          <span className="workorch-console-title-text">{title}</span>
+        </div>
         <Menu mode="inline" selectedKeys={[selectedPath]} items={items} />
       </Layout.Sider>
       <Layout className="workorch-console-main">

@@ -38,7 +38,7 @@ Commands:
 go test ./internal/pkg/workorchport -count=1
 go test ./internal/services/workorch/biz/backends -run 'RunCommand|RunRestart|FirstResume|ResumeSends|Replan|UnsupportedIntent' -count=1
 go test ./internal/services/workorch/service/tui -run 'NonCanonicalRunCommands|RunResumeCommand|HelpPrefersRunResume' -count=1
-rg -n "CommandRun[A-Za-z]+|RunCommandIntent[A-Za-z]+" internal/pkg/workorchport internal/services/workorch internal/pkg/workorchclient internal/modules/application/workorchd -g '!service/server/consoleassets/dist/**' -S
+rg -n "CommandRun[A-Za-z]+|RunCommandIntent[A-Za-z]+" internal/pkg/workorchport internal/services/workorch internal/pkg/workorchclient internal/modules/application/workorchd -g '!web/consoleassets/dist/**' -S
 rg -n "software-dev|weather-query|code-review|go test|npm test|no tests to run|city|ssh|pkg/lsp|mcp-lsp-bridge" internal/pkg/workorchport/run.go internal/pkg/workorchport/run_test.go internal/services/workorch/biz/backends/remote.go internal/services/workorch/biz/backends/eventhub.go internal/services/workorch/biz/backends/remote_test.go internal/services/workorch/biz/backends/eventhub_test.go docs/70-roadmap/active/goal-dod-nextaction-s1-1-s1-2-run-command-contract.md -S
 ```
 

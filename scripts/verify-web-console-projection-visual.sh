@@ -4,7 +4,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_DIR="$ROOT_DIR/web/workorch-console/src"
-DIST_ASSETS="$ROOT_DIR/internal/modules/application/workorchd/service/server/consoleassets/dist/assets"
+DIST_ASSETS="$ROOT_DIR/web/consoleassets/dist/assets"
 BASE_URL="${WORKORCH_WEB_CONSOLE_VISUAL_BASE_URL:-${WORKORCH_BASE_URL:-}}"
 TMP_DIR="${WORKORCH_WEB_CONSOLE_VISUAL_ARTIFACT_DIR:-$(mktemp -d)}"
 KEEP_ARTIFACTS="${WORKORCH_WEB_CONSOLE_VISUAL_KEEP_ARTIFACTS:-1}"

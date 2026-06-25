@@ -19,7 +19,7 @@ configured.
 - `internal/initiators/workorchruntime`: workorch runtime initiator that provides repository providers, EventHub access, runtime policy, and bootstrap helpers to plugin-loaded modules
 - `internal/modules/application/workorchd`: server-side application module plus `biz` / `service` / `pkg` implementation packages
 - `web/workorch-console`: React/TypeScript management console source, built into workorch server assets
-- `internal/modules/application/workorchd/service/server/consoleassets`: embedded management console build output served by `workorch --server`
+- `web/consoleassets`: embedded management console build output served by `workorch --server`
 - `internal/modules/kernel/{workspace,run,decision,approval,orchestrator,eventstream,mcp,memory,skill,soul,result,system}`: workorch kernel modules
 - `internal/modules/kernel/result`: formal Result / Artifact business outcome models
 - `internal/modules/blocks/{file,git,llm,mcp,shell,ssh,web}`: reusable runtime capability block modules

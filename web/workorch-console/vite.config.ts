@@ -3,8 +3,9 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   base: '/console/',
+  publicDir: '../assets',
   build: {
-    outDir: '../../internal/modules/application/workorchd/service/server/consoleassets/dist',
+    outDir: '../consoleassets/dist',
     emptyOutDir: true,
     rollupOptions: {
       output: {

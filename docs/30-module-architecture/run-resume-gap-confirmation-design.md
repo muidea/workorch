@@ -1963,7 +1963,7 @@ git diff --check -- internal/services/workorch/service/tui/commands.go
 
 - Focused restart verification confirms `intent=restart` remains an explicit replacement path: the appservice replacement run test, HTTP workspace restart scheduler tests and embedded EventHub restart publication test all pass on the current worktree.
 - The core orchestrator, workorchd server, appservice and TUI packages all pass package-level verification after the run-resume/gap-baseline changes.
-- The full Go test suite passes after regenerating embedded Web console assets. The first full run failed only because `consoleassets/dist/assets/*` had not yet been rebuilt; `npm --prefix web/workorch-console run build` regenerated the tracked bundle inputs, and the subsequent `go test ./... -count=1` passed.
+- The full Go test suite passes after regenerating embedded Web console assets. The first full run failed only because `web/consoleassets/dist/assets/*` had not yet been rebuilt; `npm --prefix web/workorch-console run build` regenerated the tracked bundle inputs, and the subsequent `go test ./... -count=1` passed.
 - The deployed-instance run-resume gap confirmation e2e passes in managed-instance mode. The script built the current source binary, started a temporary workorch service, verified resume command metadata, run materialization, projection command state and `GapBaseline`, then stopped the managed instance.
 - Boundary verification passes, and reverse searches show no remaining production `activation.run.id` script contract, no client-facing `Run().Activate/Resume/Restart` production calls, and no production internal `continue` run intent outside this design document and TUI negative tests.
 

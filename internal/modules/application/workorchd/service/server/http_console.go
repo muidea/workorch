@@ -12,15 +12,15 @@ import (
 	"time"
 
 	engine "github.com/muidea/magicEngine/http"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server/consoleassets"
+	"github.com/muidea/workorch/web/consoleassets"
 )
 
 func registerConsoleRoutes(router engine.RouteRegistry) {
 	handler := func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		serveConsoleAsset(w, r)
 	}
-	router.AddHandler("/favicon.ico", http.MethodGet, func(_ context.Context, w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
+	router.AddHandler("/favicon.ico", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		serveConsoleStaticFile(w, r, "workorch.png")
 	})
 	router.AddHandler("/console", http.MethodGet, handler)
 	router.AddHandler("/console/", http.MethodGet, handler)
@@ -28,21 +28,26 @@ func registerConsoleRoutes(router engine.RouteRegistry) {
 }
 
 func serveConsoleAsset(w http.ResponseWriter, r *http.Request) {
+	assetPath := strings.TrimPrefix(r.URL.Path, "/console")
+	switch {
+	case assetPath == "" || assetPath == "/":
+		serveConsoleStaticFile(w, r, "index.html")
+	case assetPath == "/workorch.png":
+		serveConsoleStaticFile(w, r, "workorch.png")
+	case strings.HasPrefix(assetPath, "/assets/"):
+		serveConsoleStaticFile(w, r, strings.TrimPrefix(assetPath, "/"))
+	default:
+		serveConsoleStaticFile(w, r, "index.html")
+	}
+}
+
+func serveConsoleStaticFile(w http.ResponseWriter, r *http.Request, name string) {
 	staticFS, err := fs.Sub(consoleassets.Assets, "dist")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
 	}
-
-	assetPath := strings.TrimPrefix(r.URL.Path, "/console")
-	switch {
-	case assetPath == "" || assetPath == "/":
-		serveConsoleFile(w, r, staticFS, "index.html")
-	case strings.HasPrefix(assetPath, "/assets/"):
-		serveConsoleFile(w, r, staticFS, strings.TrimPrefix(assetPath, "/"))
-	default:
-		serveConsoleFile(w, r, staticFS, "index.html")
-	}
+	serveConsoleFile(w, r, staticFS, name)
 }
 
 func serveConsoleFile(w http.ResponseWriter, r *http.Request, staticFS fs.FS, name string) {

@@ -52,5 +52,5 @@ Related:
 - `go test ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server -count=1`
 - `go test ./... -count=1`
 - `git diff --check`
-- Boundary search for business/template terms: `rg -n "software-dev|weather-query|code-review|go test|npm test|no tests to run|city|ssh" internal/modules/application/workorchd/biz/appservice/runports internal/modules/application/workorchd/service/server -g '!**/consoleassets/**'`
+- Boundary search for business/template terms: `rg -n "software-dev|weather-query|code-review|go test|npm test|no tests to run|city|ssh" internal/modules/application/workorchd/biz/appservice/runports internal/modules/application/workorchd/service/server web -g '!web/consoleassets/**'`
 - Boundary review note: the generic term `server` is package and HTTP/MCP terminology in `service/server`, so it is reviewed through the touched diff instead of used as a broad recursive grep term for this slice.
