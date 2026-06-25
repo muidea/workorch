@@ -83,6 +83,7 @@ Related:
 - [S11.2 Dual Workspace Resume/Replan E2E](./goal-dod-nextaction-s11-2-dual-workspace-resume-replan-e2e.md)
 - [S11.3 Approval And Decision E2E](./goal-dod-nextaction-s11-3-approval-decision-e2e.md)
 - [S11.4 Contract Violation Retry E2E](./goal-dod-nextaction-s11-4-contract-violation-retry-e2e.md)
+- [S11.5 Service Restart Recoverable E2E](./goal-dod-nextaction-s11-5-service-restart-recoverable-e2e.md)
 
 ## Purpose
 
