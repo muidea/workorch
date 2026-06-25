@@ -145,37 +145,7 @@ func normalizePersistedGapBaselineProjection(persisted *readmodelcore.GapBaselin
 func gapNextActionNeedsProjectionNormalization(persisted, derived readmodelcore.GapNextAction) bool {
 	persistedKind := strings.TrimSpace(persisted.Kind)
 	derivedKind := strings.TrimSpace(derived.Kind)
-	if derivedKind == "" || persistedKind == "" {
-		return false
-	}
-	if persistedKind == "schedule_step" {
-		return true
-	}
-	if gapNextActionGovernedOrTerminal(persistedKind) || gapNextActionGovernedOrTerminal(derivedKind) {
-		return false
-	}
-	if gapNextActionFocusSensitive(persistedKind) && gapNextActionFocusSensitive(derivedKind) && persistedKind != derivedKind {
-		return true
-	}
-	return false
-}
-
-func gapNextActionGovernedOrTerminal(kind string) bool {
-	switch strings.TrimSpace(kind) {
-	case "wait_decision", "wait_approval", "request_decision", "request_approval", "no_action", "complete", "fail_fast", "fail":
-		return true
-	default:
-		return false
-	}
-}
-
-func gapNextActionFocusSensitive(kind string) bool {
-	switch strings.TrimSpace(kind) {
-	case "acquire_evidence", "repair", "state_change", "produce_state_change", "validate", "validation", "produce_validation_evidence", "artifact", "produce_artifact_evidence", "assessment", "complete_coverage_assessment":
-		return true
-	default:
-		return false
-	}
+	return derivedKind != "" && persistedKind != derivedKind
 }
 
 func gapNextActionProjectionConflictMessage(previous, derived readmodelcore.GapNextAction) string {
