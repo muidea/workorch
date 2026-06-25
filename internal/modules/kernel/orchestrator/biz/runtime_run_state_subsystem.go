@@ -64,9 +64,6 @@ func (s *runStateSubsystem) hydrateReplanContextWithInheritedPrimaryFailure(ctx 
 	} else if digest := mapFromValue(inherited[stepInputKeyCurrentProgressDigest]); len(digest) > 0 {
 		replanContext[stepInputKeyCurrentProgressDigest] = digest
 	}
-	if pkg := mapFromValue(inherited["repairActionPackage"]); len(pkg) > 0 && len(mapFromValue(replanContext["repairActionPackage"])) == 0 {
-		replanContext["repairActionPackage"] = pkg
-	}
 }
 
 func (s *runStateSubsystem) findInheritedActionableReplanContinuation(ctx context.Context, run *runModel.Run, visited map[common.RunID]bool) map[string]any {

@@ -419,8 +419,6 @@ func maxIntFromOutputModeSignal(input map[string]any, key string) int {
 	visit(required)
 	visit(mapFromValue(input["executionContract"]))
 	visit(mapFromValue(mapFromValue(input["executionContext"])["executionContract"]))
-	visit(mapFromValue(input["replanContinuation"]))
-	visit(mapFromValue(mapFromValue(input["replanContinuation"])["repairActionPackage"]))
 	return maxValue
 }
 

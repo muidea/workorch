@@ -1450,6 +1450,74 @@ func TestRuntimeOrchestrator_InitialReplanStateChangingInputIncludesRepairAction
 	}
 }
 
+func TestRuntimeOrchestrator_InitialReplanStateChangingInputIgnoresStaleContinuationRepairPackage(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-replan-stale-action-package",
+		WorkspaceID:     "ws-replan-stale-action-package",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-before-replan-stale-action-package",
+				"reason":           "runtime_repair_exhausted_requires_strategy",
+				"repairActionPackage": map[string]any{
+					"requiredOutput": map[string]any{
+						"outputMode":                   outputModeIncrementalArtifact,
+						"mustReturnArtifactPlan":       true,
+						"estimatedPatchContentBytes":   defaultMaxPatchContentBytes + 1,
+						"mustIncludeStateChangingNode": false,
+					},
+					"targetSnapshots": []map[string]any{{
+						"targetRef":        "old-target.txt",
+						"exists":           true,
+						"contentHash":      "hash-stale",
+						"contentComplete":  true,
+						"safeForFileWrite": true,
+					}},
+				},
+				"failureContext": map[string]any{
+					failureOutputKeyClass:     failureClassRuntime,
+					failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|failureTargets=current-target.txt",
+					"failureTargetScope":      "failureTargets=current-target.txt",
+					"failedStepId":            "run-before-replan-stale-action-package/repair-003",
+					"failedStepKind":          llmWorkspaceExecutionStepKind,
+					"failureTargetRepairContext": []map[string]any{{
+						"targetRef":        "current-target.txt",
+						"exists":           true,
+						"contentHash":      "hash-current",
+						"contentComplete":  true,
+						"safeForFileWrite": true,
+						"content":          "current content",
+					}},
+					"failedStepOutput": map[string]any{
+						"error": "invalid argument: state-changing llm repair step returned executionGraph without patch/apply",
+					},
+				},
+			},
+		},
+	}
+
+	input := initialStepInput(run)
+
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["targetRef"] != "current-target.txt" || targets[0]["contentHash"] != "hash-current" {
+		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want current failure context target only", actionPackage["targetSnapshots"])
+	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["outputMode"] == outputModeIncrementalArtifact ||
+		required["mustReturnArtifactPlan"] != nil ||
+		intFromAny(required["estimatedPatchContentBytes"]) > defaultMaxPatchContentBytes {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want stale continuation package ignored", required)
+	}
+	if required["mustIncludeStateChangingNode"] != true {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want current state-changing contract", required)
+	}
+	if strings.Contains(stringFromMap(mapFromValue(actionPackage["currentFailure"]), "failureSignature"), "old-target.txt") {
+		t.Fatalf("repairActionPackage.currentFailure = %+v, want current failure context", actionPackage["currentFailure"])
+	}
+}
+
 func TestRuntimeOrchestrator_InitialRejectedResultContinuationSupersedesReplanStateChangingInput(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-rejected-supersedes-replan-input",

@@ -169,13 +169,6 @@ func repairActionPackageFromReplanContinuation(run *runModel.Run) map[string]any
 		"reason":           stringFromMap(continuation, "reason"),
 		"requiresCurrentTargetSnapshotForStateChange": true,
 	}
-	if continuationPkg := mapFromValue(continuation["repairActionPackage"]); len(continuationPkg) > 0 {
-		for key, value := range continuationPkg {
-			if value != nil {
-				pkg[key] = value
-			}
-		}
-	}
 	primaryFailure := primaryActionableFailureFromReplanContinuation(continuation)
 	if len(primaryFailure) > 0 {
 		pkg["currentFailure"] = primaryFailure

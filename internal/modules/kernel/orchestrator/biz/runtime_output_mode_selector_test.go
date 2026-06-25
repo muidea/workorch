@@ -256,6 +256,38 @@ func TestOutputModeSelectorUsesIncrementalArtifactForRequestedModeWithInheritedB
 	}
 }
 
+func TestOutputModeSelectorIgnoresStaleReplanContinuationBudgetSignal(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+		"replanContinuation": map[string]any{
+			"estimatedGraphBytes": defaultMaxGraphBytes + 1,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"estimatedPatchContentBytes": defaultMaxPatchContentBytes + 1,
+				},
+			},
+		},
+	}
+	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
+
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, nil, &runmodel.Run{ID: "run-output-mode-stale-replan", WorkspaceID: "ws-output-mode-stale-replan"}, input, nil, 0)
+
+	if outputModeFromInput(input) != outputModeExecutionGraph {
+		t.Fatalf("outputMode = %v, want executionGraph when only stale replan lineage has budget signal", input["outputMode"])
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["outputMode"] != outputModeExecutionGraph || required["mustReturnArtifactPlan"] != nil {
+		t.Fatalf("requiredOutput = %+v, want execution graph contract without stale artifact plan", required)
+	}
+	if intFromAny(required["estimatedPatchContentBytes"]) > 0 || intFromAny(required["estimatedGraphBytes"]) > 0 {
+		t.Fatalf("requiredOutput = %+v, want stale replan budget signal excluded", required)
+	}
+}
+
 func TestOutputModeSelectorHonorsExplicitRequestedIncrementalArtifactWithinGraphBudget(t *testing.T) {
 	input := map[string]any{
 		"stateChangingOutputRequired": true,

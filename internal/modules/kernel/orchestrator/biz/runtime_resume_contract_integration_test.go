@@ -856,6 +856,13 @@ func TestRuntimeOrchestrator_ReplanSuccessorRecoversConcreteFailureFromAncestorL
 		ExecutionContext: map[string]any{
 			"replanContinuation": map[string]any{
 				"predecessorRunId": "run-before-root",
+				"repairActionPackage": map[string]any{
+					"requiredOutput": map[string]any{
+						"outputMode":             outputModeIncrementalArtifact,
+						"mustReturnArtifactPlan": true,
+					},
+					"repairTargetSet": []string{"stale-target.txt"},
+				},
 				stepInputKeyProcessEvidenceTimeline: []map[string]any{{
 					"stepId":                    "run-before-root/graph-001/009-build",
 					"kind":                      shellcommon.StepKindCommand,
@@ -937,6 +944,9 @@ func TestRuntimeOrchestrator_ReplanSuccessorRecoversConcreteFailureFromAncestorL
 		t.Fatalf("get successor: %v", err)
 	}
 	replan := mapFromValue(successor.ExecutionContext["replanContinuation"])
+	if len(mapFromValue(replan["repairActionPackage"])) > 0 {
+		t.Fatalf("successor replan repairActionPackage = %+v, want diagnostic lineage without stale repair package", replan["repairActionPackage"])
+	}
 	digest := mapFromValue(replan[stepInputKeyCurrentProgressDigest])
 	if stringFromMap(mapFromValue(digest["lastObservedFailure"]), "failureClass") != failureClassShellCommand {
 		t.Fatalf("successor replan digest = %+v, want inherited concrete failure persisted", digest)

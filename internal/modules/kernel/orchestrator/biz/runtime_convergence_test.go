@@ -3721,7 +3721,7 @@ func TestDecisionResolutionInputAppliesConvergenceContract(t *testing.T) {
 	}
 }
 
-func TestInitialStepInputCarriesReplanConvergenceContract(t *testing.T) {
+func TestInitialStepInputTreatsReplanRepairPackageAsDiagnosticLineage(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-replan-contract",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
@@ -3753,8 +3753,17 @@ func TestInitialStepInputCarriesReplanConvergenceContract(t *testing.T) {
 		t.Fatalf("runtimeStage = %q, want %q", got, runtimeStageRepair)
 	}
 	contract := mapFromValue(input["convergenceContract"])
-	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
-		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+	if stringFromMap(contract, "state") != convergenceStateNeedEvidence ||
+		input["repairObjective"] != repairObjectiveAcquireFailureEvidence ||
+		input["concreteFailureEvidenceRequired"] != true {
+		t.Fatalf("input = %+v, want stale replan repair package to require current evidence", input)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if targets := mapSliceFromValue(pkg["targetSnapshots"]); len(targets) > 0 {
+		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want stale replan target ignored", targets)
+	}
+	if required := mapFromValue(pkg["requiredOutput"]); boolValue(required["mustIncludeStateChangingNode"]) {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want evidence acquisition contract", required)
 	}
 }
 
