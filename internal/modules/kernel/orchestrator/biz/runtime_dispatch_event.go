@@ -124,13 +124,33 @@ func (o *RuntimeOrchestrator) DispatchRequestedStep(ctx context.Context, cmd orc
 			cmd.Input[coverageWorkItemContextKey] = coverageWorkItemContextAlignedToFocus(context, focus)
 		}
 	}
-	if baseline := mapFromValue(run.ExecutionContext[gapBaselineKey]); len(baseline) > 0 {
+	baseline := gapBaselineFromRun(run)
+	if len(baseline) == 0 {
+		baseline = mapFromValue(run.ExecutionContext[gapBaselineKey])
+	}
+	if len(baseline) > 0 {
 		if cmd.Input == nil {
 			cmd.Input = map[string]any{}
 		}
-		if _, ok := cmd.Input[gapBaselineKey]; !ok {
-			cmd.Input[gapBaselineKey] = baseline
+		cmd.Input[gapBaselineKey] = cloneStepPayload(baseline)
+	} else if cmd.Input != nil {
+		delete(cmd.Input, gapBaselineKey)
+	}
+	authority := map[string]any{}
+	if len(mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])) > 0 {
+		authority = convergenceAuthoritySnapshotForRun(run).ToMap()
+	}
+	if dispatchAuthoritySnapshotMeaningful(authority) {
+		if cmd.Input == nil {
+			cmd.Input = map[string]any{}
 		}
+		cmd.Input[convergenceAuthorityKey] = cloneStepPayload(authority)
+	} else if cmd.Input != nil {
+		delete(cmd.Input, convergenceAuthorityKey)
 	}
 	return o.dispatchStepWithWorkspace(ctx, run, cmd.StepID, cmd.Kind, cloneStepPayload(cmd.Input), workspace)
+}
+
+func dispatchAuthoritySnapshotMeaningful(authority map[string]any) bool {
+	return len(mapFromValue(authority["nextAction"])) > 0 || len(mapFromValue(authority["currentFocus"])) > 0
 }

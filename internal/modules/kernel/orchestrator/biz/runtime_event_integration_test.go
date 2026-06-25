@@ -17,6 +17,7 @@ import (
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -25,6 +26,98 @@ import (
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestRuntimeOrchestrator_DispatchRequestedStepRefreshesAuthoritySnapshot(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-dispatch-authority-refresh")
+	runID := common.RunID("run-dispatch-authority-refresh")
+	stepID := common.StepID(runID + "/step-1")
+	runtime := &requestCapturingRuntimeAdapter{output: map[string]any{"status": "completed"}}
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			coverageWorkItemContextKey: map[string]any{
+				"definitionRevision": "def-current",
+				"currentFocus": map[string]any{
+					"id":                    "cwi-current",
+					"status":                "evidence_ready",
+					"targetText":            "current neutral coverage target",
+					"requiredEvidenceKinds": []string{"assessment"},
+				},
+				"unresolvedItems": []map[string]any{{
+					"id":                    "cwi-current",
+					"status":                "evidence_ready",
+					"targetText":            "current neutral coverage target",
+					"requiredEvidenceKinds": []string{"assessment"},
+				}},
+			},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                    "cwi-current",
+				"status":                "evidence_ready",
+				"targetText":            "current neutral coverage target",
+				"requiredEvidenceKinds": []string{"assessment"},
+			}},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository(), events.NewMemoryHub())
+
+	err := orch.DispatchRequestedStep(ctx, orchestratorcontracts.DispatchStepCommand{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		Kind:        llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			gapBaselineKey: map[string]any{
+				"schemaVersion": gapBaselineSchema,
+				"workspaceId":   "stale-workspace",
+				"runId":         "stale-run",
+				"nextAction":    map[string]any{"kind": "stale_action"},
+			},
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"workspaceId":   "stale-workspace",
+				"runId":         "stale-run",
+				"nextAction":    map[string]any{"kind": "stale_action"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DispatchRequestedStep: %v", err)
+	}
+	if len(runtime.requests) != 1 {
+		t.Fatalf("runtime requests = %d, want 1", len(runtime.requests))
+	}
+	input := runtime.requests[0].Input
+	baseline := mapFromValue(input[gapBaselineKey])
+	if len(baseline) > 0 {
+		if stringFromMap(baseline, "workspaceId") != string(workspaceID) || stringFromMap(baseline, "runId") != string(runID) {
+			t.Fatalf("gapBaseline scope = %+v, want current workspace/run; input=%+v", baseline, input)
+		}
+		if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got == "" || got == "stale_action" {
+			t.Fatalf("gapBaseline.nextAction.kind = %q, want current owner-derived action; input=%+v", got, input)
+		}
+	}
+	authority := mapFromValue(input[convergenceAuthorityKey])
+	if len(authority) > 0 {
+		if stringFromMap(authority, "workspaceId") != string(workspaceID) || stringFromMap(authority, "runId") != string(runID) {
+			t.Fatalf("convergenceAuthority scope = %+v, want current workspace/run; input=%+v", authority, input)
+		}
+		if got := stringFromMap(mapFromValue(authority["nextAction"]), "kind"); got == "" || got == "stale_action" {
+			t.Fatalf("convergenceAuthority.nextAction.kind = %q, want current owner-derived action; input=%+v", got, input)
+		}
+	}
+}
 
 func TestRuntimeOrchestrator_StartRunAppliesUnifiedDiffPatchEvidence(t *testing.T) {
 	ctx := context.Background()
