@@ -25,6 +25,9 @@ func (o *RuntimeOrchestrator) ensureGapBaselineBeforeDispatch(ctx context.Contex
 	if err != nil {
 		return err
 	}
+	if refreshRunConvergenceAuthority(run) {
+		changed = true
+	}
 	baseline := gapBaselineFromRun(run)
 	current := mapFromValue(run.ExecutionContext[gapBaselineKey])
 	switch {
@@ -105,7 +108,7 @@ func gapBaselineFromRun(run *runModel.Run) map[string]any {
 		"acceptedEvidenceRefs":  gapEvidenceRefsFromCoverageItems(items, true),
 		"rejectedEvidenceRefs":  gapEvidenceRefsFromCoverageItems(items, false),
 		"todoItems":             gapTodoItemsFromCoverageContext(unresolved),
-		"nextAction":            gapNextActionForRun(run, len(unresolved)),
+		"nextAction":            gapNextActionForRun(run, unresolved),
 	}
 	if len(mapFromValue(baseline["currentFocus"])) == 0 {
 		delete(baseline, "currentFocus")
@@ -144,13 +147,13 @@ func gapBaselineDispatchGate(run *runModel.Run) (bool, error) {
 	}
 	nextAction := mapFromValue(baseline["nextAction"])
 	switch strings.TrimSpace(stringFromMap(nextAction, "kind")) {
-	case "", "schedule_step":
+	case "", "assess_gap", "repair", "state_change", "validate", "validation", "assessment", "artifact":
 		return false, nil
-	case "wait_decision", "wait_approval":
+	case "wait_decision", "wait_approval", "request_decision", "request_approval":
 		return true, common.ErrBlocked
-	case "no_action":
+	case "no_action", "complete":
 		return true, nil
-	case "fail_fast":
+	case "fail_fast", "fail":
 		return true, common.ErrConflict
 	default:
 		return true, common.ErrConflict
@@ -232,25 +235,160 @@ func gapTodoItemsFromCoverageContext(items []map[string]any) []map[string]any {
 	return ret
 }
 
-func gapNextActionForRun(run *runModel.Run, openItems int) map[string]any {
+func gapNextActionForRun(run *runModel.Run, unresolved []map[string]any) map[string]any {
 	if run == nil {
 		return nil
 	}
 	switch run.State {
 	case common.RunStateBlockedOnDecision:
-		return map[string]any{"kind": "wait_decision", "reason": "run waiting for decision"}
+		return map[string]any{"kind": "request_decision", "reason": "run waiting for decision"}
 	case common.RunStateBlockedOnApproval:
-		return map[string]any{"kind": "wait_approval", "reason": "run waiting for approval"}
+		return map[string]any{"kind": "request_approval", "reason": "run waiting for approval"}
 	case common.RunStateCompleted:
-		return map[string]any{"kind": "no_action", "reason": "run completed"}
+		return map[string]any{"kind": "complete", "reason": "run completed"}
 	case common.RunStateFailed:
-		return map[string]any{"kind": "fail_fast", "reason": "run failed"}
+		return map[string]any{"kind": "fail", "reason": "run failed"}
 	default:
-		if openItems > 0 {
-			return map[string]any{"kind": "schedule_step", "reason": "open coverage work items"}
+		item := gapNextActionFocusItem(run, unresolved)
+		if len(item) > 0 {
+			return gapNextActionForCoverageItem(item)
 		}
-		return map[string]any{"kind": "no_action", "reason": "no open coverage work items"}
+		return map[string]any{"kind": "complete", "reason": "no open coverage work items"}
 	}
+}
+
+func gapNextActionFocusItem(run *runModel.Run, unresolved []map[string]any) map[string]any {
+	if run == nil {
+		return nil
+	}
+	ctx := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
+	if item := mapFromValue(ctx["currentFocus"]); len(item) > 0 {
+		return item
+	}
+	if len(unresolved) > 0 {
+		return unresolved[0]
+	}
+	for _, key := range []string{"currentFocusItems", "ledgerSummary"} {
+		if items := mapSliceFromValue(ctx[key]); len(items) > 0 {
+			return items[0]
+		}
+	}
+	return nil
+}
+
+func gapNextActionForCoverageItem(item map[string]any) map[string]any {
+	status := strings.ToLower(strings.TrimSpace(stringFromMap(item, "status")))
+	if status == "blocked" {
+		return map[string]any{"kind": "request_decision", "reason": "coverage work item is blocked"}
+	}
+	missing := stringSet(deriveCoverageWorkItemState(item).MissingEvidenceKinds)
+	switch {
+	case missing["approval"]:
+		return map[string]any{"kind": "request_approval", "reason": "coverage work item requires approval evidence"}
+	case missing["decision"] || missing["external_dependency"]:
+		return map[string]any{"kind": "request_decision", "reason": "coverage work item requires governance evidence"}
+	case missing["state_change"]:
+		return map[string]any{"kind": "state_change", "reason": "coverage work item is missing state_change evidence"}
+	case missing["validation"]:
+		return map[string]any{"kind": "validate", "reason": "coverage work item is missing validation evidence"}
+	case missing["artifact"]:
+		return map[string]any{"kind": "artifact", "reason": "coverage work item is missing artifact evidence"}
+	case missing["assessment"]:
+		return map[string]any{"kind": "assessment", "reason": "coverage work item is missing assessment evidence"}
+	case len(missing) > 0:
+		return map[string]any{"kind": "repair", "reason": "coverage work item is missing evidence"}
+	case status == "evidence_ready":
+		return map[string]any{"kind": "assessment", "reason": "coverage work item evidence is ready for assessment"}
+	default:
+		return map[string]any{"kind": "assessment", "reason": "open coverage work item requires assessment"}
+	}
+}
+
+func refreshRunConvergenceAuthority(run *runModel.Run) bool {
+	if run == nil || run.ExecutionContext == nil {
+		return false
+	}
+	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
+	if len(context) == 0 {
+		return false
+	}
+	focus := authoritativeCoverageFocusFromContext(run, context)
+	if len(focus) == 0 {
+		return false
+	}
+	changed := false
+	currentFocus := mapFromValue(run.ExecutionContext[coverageFocusKey])
+	if !coverageFocusSameScope(currentFocus, focus) {
+		run.ExecutionContext[coverageFocusKey] = focus
+		resetConvergenceBudgetScopeForFocus(run.ExecutionContext, focus)
+		changed = true
+	} else if len(currentFocus) > 0 {
+		next := cloneStepPayload(currentFocus)
+		for _, key := range []string{"coverageWorkItemIds", "requiredEvidenceKinds", "acceptedEvidenceRefs", "rejectedEvidenceRefs", "targetRefs", "state"} {
+			if value, ok := focus[key]; ok && value != nil {
+				next[key] = cloneStepInputValue(value)
+			}
+		}
+		if stableCoverageJSON(currentFocus) != stableCoverageJSON(next) {
+			run.ExecutionContext[coverageFocusKey] = next
+			changed = true
+		}
+	}
+	if budget := mapFromValue(run.ExecutionContext[convergenceBudgetKey]); len(budget) > 0 {
+		before := stableCoverageJSON(budget)
+		ensureConvergenceBudgetFocusScope(budget, mapFromValue(run.ExecutionContext[coverageFocusKey]))
+		if before != stableCoverageJSON(budget) {
+			run.ExecutionContext[convergenceBudgetKey] = budget
+			changed = true
+		}
+	}
+	return changed
+}
+
+func authoritativeCoverageFocusFromContext(run *runModel.Run, context map[string]any) map[string]any {
+	if len(context) == 0 {
+		return nil
+	}
+	item := coverageWorkItemPrimaryFocus(context)
+	if len(item) == 0 {
+		return nil
+	}
+	sliceID := firstNonEmptyString(
+		stringFromMap(mapFromValue(run.ExecutionContext[coverageFocusKey]), "sliceId"),
+		stringFromMap(run.ExecutionContext, activeSliceIDKey),
+		stringFromMap(item, "sliceId"),
+	)
+	return coverageFocusFromWorkItem(sliceID, item)
+}
+
+func coverageFocusSameScope(left, right map[string]any) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return len(left) == len(right)
+	}
+	return strings.TrimSpace(stringFromMap(left, "id")) == strings.TrimSpace(stringFromMap(right, "id")) &&
+		strings.TrimSpace(stringFromMap(left, "sliceId")) == strings.TrimSpace(stringFromMap(right, "sliceId"))
+}
+
+func resetConvergenceBudgetScopeForFocus(executionContext map[string]any, focus map[string]any) {
+	if len(executionContext) == 0 || len(focus) == 0 {
+		return
+	}
+	existing := mapFromValue(executionContext[convergenceBudgetKey])
+	reset := map[string]any{}
+	for key := range defaultConvergenceBudgetLimits() {
+		if value := positiveIntFromValue(existing[key], 0); value > 0 {
+			reset[key] = value
+		}
+	}
+	if focusID := strings.TrimSpace(stringFromMap(focus, "id")); focusID != "" {
+		reset["focusId"] = focusID
+	}
+	if sliceID := strings.TrimSpace(stringFromMap(focus, "sliceId")); sliceID != "" {
+		reset["sliceId"] = sliceID
+	}
+	reset["state"] = "tracking"
+	reset["decision"] = "continue"
+	executionContext[convergenceBudgetKey] = reset
 }
 
 func gapTodoSourceRefFromCoverageItem(item map[string]any) string {

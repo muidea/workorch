@@ -25,7 +25,30 @@ func TestRuntimeOrchestrator_RunningResumeReplansFromResolvedDecisionOnFailedNon
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	runtime := &requestCapturingRuntimeAdapter{output: map[string]any{"status": "completed"}}
+	runtime := &requestCapturingRuntimeAdapter{fn: func(request runtimemodel.StepExecutionRequest) map[string]any {
+		if request.Input["repairObjective"] == repairObjectiveConcreteValidationEvidence || boolValue(request.Input["boundedValidationRequired"]) {
+			return map[string]any{
+				"status": "completed",
+				"stage":  "llm_execution_graph_plan",
+				stepOutputKeyExecutionGraph: map[string]any{
+					"nodes": []map[string]any{{
+						"id":   "verify",
+						"kind": shellcommon.StepKindCommand,
+						"input": map[string]any{
+							"command": "sh",
+							"args":    []string{"-c", "printf ok"},
+							"validationEvidence": map[string]any{
+								"mode":            "controlled_substitute",
+								"observationType": "controlled_substitute_observation",
+								"substituteFor":   "runtime replan resume test fixture",
+							},
+						},
+					}},
+				},
+			}
+		}
+		return map[string]any{"status": "completed"}
+	}}
 	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		runtime,
 		runRepo,

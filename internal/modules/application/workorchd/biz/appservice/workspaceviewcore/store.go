@@ -1043,6 +1043,7 @@ func cloneGapBaseline(item readmodelcore.GapBaseline) readmodelcore.GapBaseline 
 	item.AcceptedEvidenceRefs = append([]string(nil), item.AcceptedEvidenceRefs...)
 	item.RejectedEvidenceRefs = append([]string(nil), item.RejectedEvidenceRefs...)
 	item.TodoItems = append([]readmodelcore.GapTodoItem(nil), item.TodoItems...)
+	item.Diagnostics = append([]readmodelcore.GapDiagnostic(nil), item.Diagnostics...)
 	for idx := range item.TodoItems {
 		item.TodoItems[idx].CoverageWorkItemIDs = append([]string(nil), item.TodoItems[idx].CoverageWorkItemIDs...)
 		item.TodoItems[idx].RequiredEvidenceKinds = append([]string(nil), item.TodoItems[idx].RequiredEvidenceKinds...)

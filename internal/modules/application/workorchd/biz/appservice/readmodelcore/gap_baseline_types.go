@@ -11,6 +11,7 @@ type GapBaseline struct {
 	RejectedEvidenceRefs  []string         `json:"rejectedEvidenceRefs,omitempty"`
 	TodoItems             []GapTodoItem    `json:"todoItems,omitempty"`
 	NextAction            GapNextAction    `json:"nextAction,omitempty"`
+	Diagnostics           []GapDiagnostic  `json:"diagnostics,omitempty"`
 }
 
 type GapTodoItem struct {
@@ -28,4 +29,10 @@ type GapTodoItem struct {
 type GapNextAction struct {
 	Kind   string `json:"kind,omitempty"`
 	Reason string `json:"reason,omitempty"`
+}
+
+type GapDiagnostic struct {
+	Code     string `json:"code,omitempty"`
+	Severity string `json:"severity,omitempty"`
+	Message  string `json:"message,omitempty"`
 }

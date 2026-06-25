@@ -2419,6 +2419,72 @@ func TestBuildConvergenceContractCoverageFocusWithAcceptedEvidenceNeedsAssessmen
 	}
 }
 
+func TestBuildConvergenceContractNextActionAssessmentPreemptsStaleEvidenceAcquisition(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:          runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:      "strict_convergence",
+		"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+		"concreteFailureEvidenceRequired": true,
+		gapBaselineKey: map[string]any{
+			"schemaVersion":    gapBaselineSchema,
+			"baselineRevision": "sha256:assessment-ready",
+			"nextAction":       map[string]any{"kind": "assessment", "reason": "coverage work item evidence is ready for assessment"},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"definitionRevision":   "rev-assessment-ready",
+			"coverageBaselineHash": "sha256:assessment-ready",
+			"currentFocus": map[string]any{
+				"id":                    "cwi-ready",
+				"status":                "evidence_ready",
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{},
+				"acceptedEvidenceByKind": map[string][]string{
+					"validation": {"run/graph/001-validate"},
+				},
+				"acceptedEvidenceRefs": []string{"run/graph/001-validate"},
+			},
+			"currentFocusItems": []map[string]any{{
+				"id":                    "cwi-ready",
+				"status":                "evidence_ready",
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{},
+				"acceptedEvidenceByKind": map[string][]string{
+					"validation": {"run/graph/001-validate"},
+				},
+				"acceptedEvidenceRefs": []string{"run/graph/001-validate"},
+			}},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustAcquireConcreteFailureEvidence": true,
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+	if contract.State != convergenceStateNeedAssessment {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedAssessment, contract)
+	}
+	if contract.ConcreteFailureEvidenceRequired || contract.StateChangingOutputRequired || contract.RepairObjective != "complete_dod_goal_coverage_assessment" {
+		t.Fatalf("contract = %+v, want assessment to preempt stale evidence acquisition", contract)
+	}
+
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if applied[stepInputKeyRuntimeStage] != runtimeStageVerification ||
+		applied[stepInputKeyAssessmentOnly] != true ||
+		applied["repairObjective"] != "complete_dod_goal_coverage_assessment" {
+		t.Fatalf("applied = %+v, want assessment-only contract", applied)
+	}
+	for _, key := range []string{"concreteFailureEvidenceRequired", "stateChangingOutputRequired", "boundedValidationRequired", "evidenceRepairRequired"} {
+		if _, ok := applied[key]; ok {
+			t.Fatalf("applied[%s] still present in assessment next-action contract: %+v", key, applied[key])
+		}
+	}
+	if required := mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"]); len(required) > 0 {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want stale executable output stripped", required)
+	}
+}
+
 func TestCoverageWorkItemEvidenceReadyAssessmentGapIsNotActionableEvidenceGap(t *testing.T) {
 	item := map[string]any{
 		"id":                    "cwi-ready",

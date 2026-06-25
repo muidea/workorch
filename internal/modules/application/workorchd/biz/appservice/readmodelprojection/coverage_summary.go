@@ -63,6 +63,7 @@ func coverageSummaryStatusCounts(items []map[string]any) map[string]int {
 }
 
 func GapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *readmodelcore.GapBaseline {
+	derived := derivedGapBaselineFromRunSnapshot(snapshot)
 	if persisted := gapBaselineFromMap(MapValue(snapshot.Run.ExecutionContext["gapBaseline"])); persisted != nil {
 		if persisted.WorkspaceID == "" {
 			persisted.WorkspaceID = snapshot.Workspace.ID
@@ -70,8 +71,13 @@ func GapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *readmodelco
 		if persisted.RunID == "" {
 			persisted.RunID = snapshot.Run.ID
 		}
+		normalizePersistedGapBaselineProjection(persisted, derived)
 		return persisted
 	}
+	return derived
+}
+
+func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *readmodelcore.GapBaseline {
 	ctx := snapshot.CoverageWorkItemContext
 	if len(ctx) == 0 {
 		return nil
@@ -96,6 +102,70 @@ func GapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *readmodelco
 		return nil
 	}
 	return baseline
+}
+
+func normalizePersistedGapBaselineProjection(persisted *readmodelcore.GapBaseline, derived *readmodelcore.GapBaseline) {
+	if persisted == nil || derived == nil {
+		return
+	}
+	if !gapNextActionNeedsProjectionNormalization(persisted.NextAction, derived.NextAction) {
+		return
+	}
+	previous := persisted.NextAction
+	persisted.NextAction = derived.NextAction
+	persisted.Diagnostics = append(persisted.Diagnostics, readmodelcore.GapDiagnostic{
+		Code:     "stale_persisted_next_action",
+		Severity: "warning",
+		Message:  gapNextActionProjectionConflictMessage(previous, derived.NextAction),
+	})
+}
+
+func gapNextActionNeedsProjectionNormalization(persisted, derived readmodelcore.GapNextAction) bool {
+	persistedKind := strings.TrimSpace(persisted.Kind)
+	derivedKind := strings.TrimSpace(derived.Kind)
+	if derivedKind == "" || persistedKind == "" {
+		return false
+	}
+	if persistedKind == "schedule_step" {
+		return true
+	}
+	if gapNextActionGovernedOrTerminal(persistedKind) || gapNextActionGovernedOrTerminal(derivedKind) {
+		return false
+	}
+	if gapNextActionFocusSensitive(persistedKind) && gapNextActionFocusSensitive(derivedKind) && persistedKind != derivedKind {
+		return true
+	}
+	return false
+}
+
+func gapNextActionGovernedOrTerminal(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case "wait_decision", "wait_approval", "request_decision", "request_approval", "no_action", "complete", "fail_fast", "fail":
+		return true
+	default:
+		return false
+	}
+}
+
+func gapNextActionFocusSensitive(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case "acquire_evidence", "produce_state_change", "produce_validation_evidence", "produce_artifact_evidence", "complete_coverage_assessment":
+		return true
+	default:
+		return false
+	}
+}
+
+func gapNextActionProjectionConflictMessage(previous, derived readmodelcore.GapNextAction) string {
+	previousKind := strings.TrimSpace(previous.Kind)
+	if previousKind == "" {
+		previousKind = "empty"
+	}
+	derivedKind := strings.TrimSpace(derived.Kind)
+	if derivedKind == "" {
+		derivedKind = "empty"
+	}
+	return fmt.Sprintf("persisted gapBaseline nextAction %q was normalized to %q from current projection focus", previousKind, derivedKind)
 }
 
 func gapBaselineFromMap(input map[string]any) *readmodelcore.GapBaseline {

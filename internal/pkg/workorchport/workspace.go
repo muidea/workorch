@@ -114,6 +114,7 @@ type GapBaselineInfo struct {
 	RejectedEvidenceRefs  []string
 	TodoItems             []GapTodoItemInfo
 	NextAction            GapNextActionInfo
+	Diagnostics           []GapDiagnosticInfo
 }
 
 type GapTodoItemInfo struct {
@@ -131,6 +132,12 @@ type GapTodoItemInfo struct {
 type GapNextActionInfo struct {
 	Kind   string
 	Reason string
+}
+
+type GapDiagnosticInfo struct {
+	Code     string
+	Severity string
+	Message  string
 }
 
 type WorkspaceOutcomeInfo struct {

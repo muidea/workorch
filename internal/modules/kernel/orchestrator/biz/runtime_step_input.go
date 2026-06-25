@@ -95,7 +95,12 @@ func applyFirstRunGapBaselineStateChangingContract(input map[string]any) map[str
 		return input
 	}
 	baseline := mapFromValue(input[gapBaselineKey])
-	if len(baseline) == 0 || strings.TrimSpace(stringFromMap(mapFromValue(baseline["nextAction"]), "kind")) != "schedule_step" {
+	if len(baseline) == 0 {
+		return input
+	}
+	switch strings.TrimSpace(stringFromMap(mapFromValue(baseline["nextAction"]), "kind")) {
+	case "schedule_step", "state_change":
+	default:
 		return input
 	}
 	context := coverageWorkItemContextFromInput(input)

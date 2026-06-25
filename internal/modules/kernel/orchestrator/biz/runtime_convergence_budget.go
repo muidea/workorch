@@ -11,6 +11,10 @@ func updateConvergenceBudgetFromStep(run *runModel.Run, step *runModel.Step, cov
 	if run == nil || step == nil || run.ExecutionContext == nil {
 		return false
 	}
+	if boolValue(run.ExecutionContext["replanBudgetResetPending"]) {
+		resetConvergenceBudgetForReplanSuccessor(run.ExecutionContext)
+		delete(run.ExecutionContext, "replanBudgetResetPending")
+	}
 	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
 	if len(focus) == 0 {
 		return false

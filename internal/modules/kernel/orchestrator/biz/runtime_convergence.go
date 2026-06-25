@@ -124,6 +124,9 @@ func BuildConvergenceContract(
 		RuntimeStageMode: "strict_convergence",
 		SourceRefs:       convergenceSourceRefs(currentStep, failedStep, lineage, evidence),
 	}
+	if populateConvergenceContractFromNextAction(run, input, failedStep, &contract) {
+		return contract
+	}
 	if governanceReason := convergenceGovernanceReason(input, failedStep); governanceReason != "" {
 		contract.State = convergenceStateNeedGovernance
 		contract.RuntimeStage = runtimeStageDecision
@@ -262,6 +265,132 @@ func BuildConvergenceContract(
 		return contract
 	}
 	return contract
+}
+
+func populateConvergenceContractFromNextAction(run *runModel.Run, input map[string]any, failedStep *runModel.Step, contract *ConvergenceContract) bool {
+	if contract == nil {
+		return false
+	}
+	if !convergenceNextActionAuthorityAllowed(input) {
+		return false
+	}
+	switch convergenceNextActionKind(run, input) {
+	case "request_decision", "wait_decision", "request_governance":
+		contract.State = convergenceStateNeedGovernance
+		contract.RuntimeStage = runtimeStageDecision
+		contract.RuntimeStageMode = "structured_governance"
+		contract.GovernanceReason = "current next action requires decision"
+		return true
+	case "request_approval", "wait_approval":
+		contract.State = convergenceStateNeedGovernance
+		contract.RuntimeStage = runtimeStageDecision
+		contract.RuntimeStageMode = "structured_governance"
+		contract.GovernanceReason = "current next action requires approval"
+		return true
+	case "assessment", "complete_coverage_assessment":
+		convergenceContractAttachCoverageContext(input, contract)
+		populateCoverageWorkItemAssessmentConvergenceContract(contract)
+		return true
+	case "state_change", "produce_state_change":
+		convergenceContractAttachCoverageContext(input, contract)
+		populateCoverageWorkItemStateChangeConvergenceContract(input, contract)
+		return true
+	case "validate", "validation", "produce_validation_evidence", "artifact", "produce_artifact_evidence":
+		if convergenceInputHasActionableReplanContinuation(input) {
+			return false
+		}
+		convergenceContractAttachCoverageContext(input, contract)
+		populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
+		return true
+	case "repair", "acquire_evidence":
+		if convergenceInputHasActionableReplanContinuation(input) {
+			return false
+		}
+		convergenceContractAttachCoverageContext(input, contract)
+		populateCoverageWorkItemEvidenceConvergenceContract(input, contract)
+		return true
+	default:
+		return false
+	}
+}
+
+func convergenceNextActionAuthorityAllowed(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if boolValue(input["replanBudgetResetPending"]) ||
+		boolValue(input[stepInputKeyRuntimeRepairFollowUp]) ||
+		boolValue(input[stepInputKeyProviderRetryFollowUp]) {
+		return true
+	}
+	if len(mapFromValue(input["replanContinuation"])) > 0 {
+		return true
+	}
+	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
+		if boolValue(executionContext["replanBudgetResetPending"]) ||
+			boolValue(executionContext[stepInputKeyRuntimeRepairFollowUp]) ||
+			boolValue(executionContext[stepInputKeyProviderRetryFollowUp]) ||
+			len(mapFromValue(executionContext["replanContinuation"])) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func convergenceInputHasActionableReplanContinuation(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if len(mapFromValue(input["replanContinuation"])) > 0 {
+		return true
+	}
+	if replanContinuationCarriesActionableFailure(input) {
+		return true
+	}
+	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
+		if len(mapFromValue(executionContext["replanContinuation"])) > 0 {
+			return true
+		}
+		return replanContinuationCarriesActionableFailure(executionContext)
+	}
+	return false
+}
+
+func convergenceNextActionKind(run *runModel.Run, input map[string]any) string {
+	for _, source := range []map[string]any{
+		mapFromValue(input[gapBaselineKey]),
+		mapFromValue(mapFromValue(input["executionContext"])[gapBaselineKey]),
+	} {
+		if kind := strings.TrimSpace(stringFromMap(mapFromValue(source["nextAction"]), "kind")); kind != "" && kind != "schedule_step" {
+			return kind
+		}
+	}
+	if run != nil {
+		if kind := strings.TrimSpace(stringFromMap(mapFromValue(mapFromValue(run.ExecutionContext[gapBaselineKey])["nextAction"]), "kind")); kind != "" && kind != "schedule_step" {
+			return kind
+		}
+	}
+	return ""
+}
+
+func convergenceContractAttachCoverageContext(input map[string]any, contract *ConvergenceContract) {
+	if contract == nil {
+		return
+	}
+	context := coverageWorkItemContextFromInput(input)
+	if len(context) == 0 {
+		return
+	}
+	if contract.RepairActionPackage == nil {
+		contract.RepairActionPackage = map[string]any{}
+	}
+	contract.RepairActionPackage[coverageWorkItemContextKey] = context
+	if len(mapSliceFromValue(contract.RepairActionPackage["coverageTargetSet"])) == 0 {
+		if targets := coverageTargetSetFromWorkItemContext(context); len(targets) > 0 {
+			contract.RepairActionPackage["coverageRepairRequired"] = true
+			contract.RepairActionPackage["coverageTargetSet"] = targets
+		}
+	}
 }
 
 func contractViolationRecoveryStateChangingContract(input map[string]any, failedStep *runModel.Step, sourceRefs []map[string]any) (ConvergenceContract, bool) {

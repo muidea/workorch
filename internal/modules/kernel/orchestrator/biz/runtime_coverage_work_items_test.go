@@ -332,8 +332,110 @@ func TestNextDispatchSpecsPersistsGapBaselineBeforeInitialStep(t *testing.T) {
 	}
 	if baseline := mapFromValue(persisted.ExecutionContext[gapBaselineKey]); len(baseline) == 0 {
 		t.Fatalf("persisted executionContext = %+v, want gapBaseline before dispatch", persisted.ExecutionContext)
-	} else if stringFromMap(mapFromValue(baseline["nextAction"]), "kind") != "schedule_step" {
-		t.Fatalf("gapBaseline.nextAction = %+v, want schedule_step", baseline["nextAction"])
+	} else if stringFromMap(mapFromValue(baseline["nextAction"]), "kind") != "validate" {
+		t.Fatalf("gapBaseline.nextAction = %+v, want validate", baseline["nextAction"])
+	}
+}
+
+func TestGapBaselineNextActionUsesEvidenceReadyAssessment(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-gap-baseline-assessment",
+		WorkspaceID: "ws-gap-baseline-assessment",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			coverageWorkItemContextKey: map[string]any{
+				"definitionRevision":   "rev-assessment",
+				"coverageBaselineHash": "sha256:assessment",
+				"currentFocus": map[string]any{
+					"id":                    "cwi-ready",
+					"status":                "evidence_ready",
+					"requiredEvidenceKinds": []string{"validation"},
+					"acceptedEvidenceRefs":  []string{"step-validation"},
+					"currentGap":            "required evidence kinds present; coverage assessment required",
+				},
+				"unresolvedItems": []map[string]any{{
+					"id":                    "cwi-ready",
+					"status":                "evidence_ready",
+					"requiredEvidenceKinds": []string{"validation"},
+					"acceptedEvidenceRefs":  []string{"step-validation"},
+					"currentGap":            "required evidence kinds present; coverage assessment required",
+				}},
+			},
+		},
+	}
+
+	baseline := gapBaselineFromRun(run)
+	if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got != "assessment" {
+		t.Fatalf("gapBaseline.nextAction = %+v, want assessment", baseline["nextAction"])
+	}
+}
+
+func TestRefreshRunConvergenceAuthorityAlignsFocusAndBudgetToCurrentCoverage(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-refresh-authority",
+		WorkspaceID: "ws-refresh-authority",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			activeSliceIDKey: "slice-primary",
+			coverageFocusKey: map[string]any{
+				"id":                  "focus-cwi-stale",
+				"sliceId":             "slice-primary",
+				"coverageWorkItemIds": []string{"cwi-stale"},
+				"state":               "active",
+			},
+			convergenceBudgetKey: map[string]any{
+				"focusId":                   "focus-cwi-stale",
+				"sliceId":                   "slice-primary",
+				"state":                     "escalated",
+				"decision":                  "escalate_decision",
+				"repairAttempts":            int64(4),
+				"noCoverageDeltaRounds":     int64(3),
+				"repeatedFailureSignatures": int64(2),
+				"lastDecisionReason":        "max_no_coverage_delta_rounds_exceeded",
+				"maxNoCoverageDeltaRounds":  int64(7),
+			},
+			coverageWorkItemContextKey: map[string]any{
+				"definitionRevision":   "rev-refresh-authority",
+				"coverageBaselineHash": "sha256:refresh-authority",
+				"currentFocus": map[string]any{
+					"id":                    "cwi-ready",
+					"status":                "evidence_ready",
+					"requiredEvidenceKinds": []string{"validation"},
+					"acceptedEvidenceRefs":  []string{"step-validation"},
+					"currentGap":            "required evidence kinds present; coverage assessment required",
+				},
+				"unresolvedItems": []map[string]any{{
+					"id":                    "cwi-ready",
+					"status":                "evidence_ready",
+					"requiredEvidenceKinds": []string{"validation"},
+					"acceptedEvidenceRefs":  []string{"step-validation"},
+					"currentGap":            "required evidence kinds present; coverage assessment required",
+				}},
+			},
+		},
+	}
+
+	if !refreshRunConvergenceAuthority(run) {
+		t.Fatal("refreshRunConvergenceAuthority changed = false, want focus/budget alignment")
+	}
+	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
+	if got := stringFromMap(focus, "id"); got != "focus-cwi-ready" {
+		t.Fatalf("coverageFocus = %+v, want focus-cwi-ready", focus)
+	}
+	budget := mapFromValue(run.ExecutionContext[convergenceBudgetKey])
+	if budget["decision"] != "continue" || budget["state"] != "tracking" {
+		t.Fatalf("budget = %+v, want reset tracking budget", budget)
+	}
+	if budget["focusId"] != "focus-cwi-ready" || budget["sliceId"] != "slice-primary" {
+		t.Fatalf("budget = %+v, want current focus scope", budget)
+	}
+	if int64FromValue(budget["maxNoCoverageDeltaRounds"]) != 7 {
+		t.Fatalf("budget = %+v, want neutral limits preserved", budget)
+	}
+	for _, key := range []string{"repairAttempts", "noCoverageDeltaRounds", "repeatedFailureSignatures", "lastDecisionReason"} {
+		if _, ok := budget[key]; ok {
+			t.Fatalf("budget retained stale key %s: %+v", key, budget)
+		}
 	}
 }
 

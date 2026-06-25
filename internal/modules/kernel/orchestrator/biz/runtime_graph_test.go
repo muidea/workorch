@@ -300,8 +300,8 @@ func TestRuntimeOrchestrator_NextDispatchSpecsHonorsGapBaselineWaitAction(t *tes
 		t.Fatalf("get run: %v", err)
 	}
 	baseline := mapFromValue(persisted.ExecutionContext[gapBaselineKey])
-	if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got != "wait_decision" {
-		t.Fatalf("gapBaseline.nextAction = %+v, want wait_decision", baseline["nextAction"])
+	if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got != "request_decision" {
+		t.Fatalf("gapBaseline.nextAction = %+v, want request_decision", baseline["nextAction"])
 	}
 }
 
@@ -362,8 +362,8 @@ func TestRuntimeOrchestrator_DispatchRequestedStepHonorsGapBaselineWaitAction(t 
 		t.Fatalf("get run: %v", err)
 	}
 	baseline := mapFromValue(persisted.ExecutionContext[gapBaselineKey])
-	if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got != "wait_approval" {
-		t.Fatalf("gapBaseline.nextAction = %+v, want wait_approval", baseline["nextAction"])
+	if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got != "request_approval" {
+		t.Fatalf("gapBaseline.nextAction = %+v, want request_approval", baseline["nextAction"])
 	}
 }
 

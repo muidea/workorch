@@ -50,6 +50,7 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 	}
 	delete(successorContext, "replanContinuation")
 	resetConvergenceBudgetForReplanSuccessor(successorContext)
+	successorContext["replanBudgetResetPending"] = true
 	replanContext := map[string]any{
 		"predecessorRunId": string(run.ID),
 		"reason":           "decision_replan",

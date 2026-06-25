@@ -219,7 +219,7 @@ func TestGapBaselineNextActionDerivesValidationAfterStateChangeEvidence(t *testi
 	}
 }
 
-func TestRunSnapshotFromModelsPrefersPersistedGapBaseline(t *testing.T) {
+func TestRunSnapshotFromModelsNormalizesStalePersistedGapBaselineNextAction(t *testing.T) {
 	t.Parallel()
 
 	workspaceID := common.WorkspaceID("ws-run-snapshot-persisted-gap")
@@ -234,10 +234,14 @@ func TestRunSnapshotFromModelsPrefersPersistedGapBaseline(t *testing.T) {
 				"coverageWorkItemContext": map[string]any{
 					"definitionRevision":   "rev-derived",
 					"coverageBaselineHash": "sha256:derived",
+					"currentFocus": map[string]any{
+						"id":     "cwi-derived",
+						"status": "evidence_ready",
+					},
 					"unresolvedItems": []any{map[string]any{
-						"id":                   "cwi-derived",
-						"sourcePath":           "goal.derived",
-						"missingEvidenceKinds": []any{"validation"},
+						"id":         "cwi-derived",
+						"sourcePath": "goal.derived",
+						"status":     "evidence_ready",
 					}},
 				},
 				"gapBaseline": map[string]any{
@@ -276,8 +280,11 @@ func TestRunSnapshotFromModelsPrefersPersistedGapBaseline(t *testing.T) {
 	if len(got.GapBaseline.RejectedEvidenceRefs) != 1 || got.GapBaseline.RejectedEvidenceRefs[0] != "evidence-rejected" {
 		t.Fatalf("GapBaseline.RejectedEvidenceRefs = %+v, want persisted rejected evidence", got.GapBaseline.RejectedEvidenceRefs)
 	}
-	if got.GapBaseline.NextAction.Kind != "schedule_step" || got.GapBaseline.NextAction.Reason != "persisted next action" {
-		t.Fatalf("GapBaseline.NextAction = %+v, want persisted next action", got.GapBaseline.NextAction)
+	if got.GapBaseline.NextAction.Kind != "complete_coverage_assessment" {
+		t.Fatalf("GapBaseline.NextAction = %+v, want normalized assessment action", got.GapBaseline.NextAction)
+	}
+	if len(got.GapBaseline.Diagnostics) != 1 || got.GapBaseline.Diagnostics[0].Code != "stale_persisted_next_action" {
+		t.Fatalf("GapBaseline.Diagnostics = %+v, want stale next action diagnostic", got.GapBaseline.Diagnostics)
 	}
 }
 
