@@ -116,6 +116,7 @@ func workspaceInfoFromClient(ws *client.Workspace) WorkspaceInfo {
 		ProfileID:            ws.ProfileID,
 		DefaultSoulID:        common.SoulID(ws.DefaultSoulID),
 		SoulBindings:         commonSoulBindings(ws.SoulBindings),
+		Projection:           projectionInfoFromClient(ws.Projection),
 	}
 }
 
@@ -161,7 +162,6 @@ func (b *remoteWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, err
 	result := make([]WorkspaceInfo, 0, len(list))
 	for _, ws := range list {
 		item := workspaceInfoFromClient(&ws)
-		item.Projection = projectionInfoFromClient(projection.Projection)
 		result = append(result, item)
 	}
 	return result, nil

@@ -8,9 +8,14 @@ DIST_ASSETS="$ROOT_DIR/internal/modules/application/workorchd/service/server/con
 BASE_URL="${WORKORCH_WEB_CONSOLE_VISUAL_BASE_URL:-${WORKORCH_BASE_URL:-}}"
 TMP_DIR="${WORKORCH_WEB_CONSOLE_VISUAL_ARTIFACT_DIR:-$(mktemp -d)}"
 KEEP_ARTIFACTS="${WORKORCH_WEB_CONSOLE_VISUAL_KEEP_ARTIFACTS:-1}"
+RUNTIME_BASE_URL=""
+TMP_WORKSPACE_ID=""
 
 cleanup() {
   local status=$?
+  if [[ -n "$RUNTIME_BASE_URL" && -n "$TMP_WORKSPACE_ID" ]]; then
+    curl -fsS -X DELETE "$RUNTIME_BASE_URL/api/v1/workorch/workspaces/$TMP_WORKSPACE_ID?purge=true" >/dev/null 2>&1 || true
+  fi
   if [[ "$KEEP_ARTIFACTS" != "1" && "$KEEP_ARTIFACTS" != "true" && $status -eq 0 ]]; then
     rm -rf "$TMP_DIR"
   else
@@ -73,7 +78,8 @@ require_file_contains "$SRC_DIR/pages/WorkspaceBoardPage.tsx" "/workorchd/worksp
 require_file_contains "$SRC_DIR/pages/WorkspaceBoardPage.tsx" "workorchApi.readWorkspaceSnapshotProjection(workspace.id)" "workspace board uses server workspace projection for activation hints"
 require_file_contains "$SRC_DIR/api.ts" "readRunSnapshot: async (runId: string, workspaceId: string)" "run snapshot API requires workspace scope"
 require_file_contains "$SRC_DIR/api.ts" "runPath(workspaceId, runId, 'snapshot')" "run snapshot API uses workspace-scoped path"
-require_file_contains "$SRC_DIR/api.ts" "runCommandBody('resume', workspaceId, runId)" "web resume sends canonical resume intent"
+require_file_contains "$SRC_DIR/api.ts" "runCommandBody('resume', workspaceId, runId" "web resume sends canonical resume intent"
+require_file_contains "$SRC_DIR/api.ts" "executionContextPatch" "web resume preserves execution context patch"
 require_file_contains "$SRC_DIR/api.ts" "source: 'web'" "web run command carries source"
 require_file_contains "$SRC_DIR/api.ts" "reason: 'user_requested'" "web run command carries reason"
 
@@ -96,6 +102,24 @@ require_dist_contains "workspace_projection_changed" "projection changed payload
 
 if [[ -n "$BASE_URL" ]]; then
   base_url="${BASE_URL%/}"
+  RUNTIME_BASE_URL="$base_url"
+  runtime_suffix="${WORKORCH_WEB_CONSOLE_VISUAL_SUFFIX:-$$}"
+  curl -fsS -H "Content-Type: application/json" -X POST \
+    "$base_url/api/v1/workorch/workspaces" \
+    -d '{"title":"Web console projection visual '"$runtime_suffix"'","description":"verify Web Console runtime projection visual contract","templateId":"generic-governed"}' \
+    >"$TMP_DIR/web-console-workspace-create.json"
+  TMP_WORKSPACE_ID="$(python3 - "$TMP_DIR/web-console-workspace-create.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+workspace_id = ((data.get("workspace") or {}).get("id") or "").strip()
+if not workspace_id:
+    raise SystemExit(f"workspace id missing from create response: {data}")
+print(workspace_id)
+PY
+)"
   curl -fsS "$base_url/readyz" >"$TMP_DIR/readyz.json"
   curl -fsS "$base_url/api/v1/workorch/workspaces" >"$TMP_DIR/workspaces.json"
   curl -fsS "$base_url/console" >"$TMP_DIR/console.html"
@@ -118,13 +142,14 @@ if [[ -n "$BASE_URL" ]]; then
     "workspace_projection_changed"; do
     grep -F "$marker" "$TMP_DIR/workorch-console-all.js" >/dev/null
   done
-  python3 - "$TMP_DIR" "$base_url" <<'PY'
+  python3 - "$TMP_DIR" "$base_url" "$TMP_WORKSPACE_ID" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 artifact_dir = Path(sys.argv[1])
 base_url = sys.argv[2]
+created_workspace_id = sys.argv[3]
 readyz = json.loads((artifact_dir / "readyz.json").read_text(encoding="utf-8"))
 workspaces = json.loads((artifact_dir / "workspaces.json").read_text(encoding="utf-8"))
 chunks = [
@@ -133,11 +158,13 @@ chunks = [
     if line.strip()
 ]
 projection = workspaces.get("projection") or {}
+workspace_ids = [item.get("id") for item in workspaces.get("workspaces") or []]
 summary = {
     "baseUrl": base_url,
+    "workspaceId": created_workspace_id,
     "serviceReady": readyz.get("status") == "ready",
     "projectionState": projection.get("state"),
-    "workspaceTotal": len(workspaces.get("workspaces") or []),
+    "workspaceTotal": len(workspace_ids),
     "consoleHTMLBytes": (artifact_dir / "console.html").stat().st_size,
     "consoleBundleBytes": (artifact_dir / "workorch-console-all.js").stat().st_size,
     "chunkCount": len(chunks),
@@ -160,8 +187,8 @@ if not summary["serviceReady"]:
     raise SystemExit("service is not ready")
 if summary["projectionState"] != "ready":
     raise SystemExit(f"projection state = {summary['projectionState']!r}, want ready")
-if summary["workspaceTotal"] <= 0:
-    raise SystemExit("workspace list is empty")
+if created_workspace_id not in workspace_ids:
+    raise SystemExit(f"workspace list missing created workspace {created_workspace_id}; ids={workspace_ids}")
 PY
 fi
 

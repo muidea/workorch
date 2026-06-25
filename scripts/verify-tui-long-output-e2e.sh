@@ -270,8 +270,18 @@ wait_run_state() {
   local deadline=$((SECONDS + 180))
 
   while (( SECONDS <= deadline )); do
-    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$output_file"
-    if grep '"state": "'"$expected_state"'"' "$output_file" >/dev/null; then
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status?waitState=$expected_state&waitTimeoutMillis=1000&waitIntervalMillis=100" >"$output_file"
+    if python3 - "$output_file" "$expected_state" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+status = data.get("status") or {}
+if status.get("state") != sys.argv[2]:
+    raise SystemExit(1)
+PY
+    then
       return 0
     fi
     sleep 1

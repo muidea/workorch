@@ -4,7 +4,7 @@ Status: active
 
 Type: roadmap
 
-Last Updated: 2026-06-23
+Last Updated: 2026-06-25
 
 Design Source:
 
@@ -84,6 +84,7 @@ Related:
 - [S11.3 Approval And Decision E2E](./goal-dod-nextaction-s11-3-approval-decision-e2e.md)
 - [S11.4 Contract Violation Retry E2E](./goal-dod-nextaction-s11-4-contract-violation-retry-e2e.md)
 - [S11.5 Service Restart Recoverable E2E](./goal-dod-nextaction-s11-5-service-restart-recoverable-e2e.md)
+- [S11.6 TUI/Web Projection E2E](./goal-dod-nextaction-s11-6-tui-web-projection-e2e.md)
 
 ## Purpose
 

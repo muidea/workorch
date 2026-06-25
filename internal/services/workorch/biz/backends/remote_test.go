@@ -145,6 +145,40 @@ func TestRemoteProjectionEventsBackendRequestsProjectionStreamView(t *testing.T)
 	}
 }
 
+func TestRemoteWorkspaceListPreservesWorkspaceProjection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/workorch/workspaces" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{
+			"service":"workorch",
+			"projection":{"state":"ready","globalRevision":99,"sourceEventRevision":99,"projectedSourceRevision":99},
+			"workspaces":[{
+				"id":"ws-remote",
+				"title":"Remote",
+				"state":"completed",
+				"projection":{"state":"ready","globalRevision":21,"workspaceRevision":7,"sourceEventRevision":12,"projectedSourceRevision":12}
+			}]
+		}`)
+	}))
+	defer server.Close()
+
+	be := NewRemote(server.URL)
+	got, err := be.Workspace().List(context.Background())
+	if err != nil {
+		t.Fatalf("remote workspace list: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("workspaces = %+v, want one workspace", got)
+	}
+	projection := got[0].Projection
+	if projection.GlobalRevision != 21 || projection.WorkspaceRevision != 7 || projection.SourceEventRevision != 12 || projection.ProjectedSourceRevision != 12 {
+		t.Fatalf("workspace projection = %+v, want item projection without envelope global overwrite", projection)
+	}
+}
+
 func TestRemoteEventsBackendReconnectsAndSignalsWorkspaceListRefresh(t *testing.T) {
 	var requests atomic.Int32
 	envelope := events.Envelope{

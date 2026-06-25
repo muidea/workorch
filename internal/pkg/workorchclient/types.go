@@ -16,6 +16,7 @@ type Workspace struct {
 	ProfileID            string            `json:"profileId,omitempty"`
 	DefaultSoulID        string            `json:"defaultSoulId,omitempty"`
 	SoulBindings         map[string]string `json:"soulBindings,omitempty"`
+	Projection           ProjectionStatus  `json:"projection,omitempty"`
 }
 
 type ProjectionStatus struct {
