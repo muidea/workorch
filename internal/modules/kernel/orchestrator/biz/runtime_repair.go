@@ -28,6 +28,7 @@ type repairDispatchSpecBuilder interface {
 type repairBlockedRecoveryExecutor interface {
 	blockOnProviderRetryExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, execErr error) error
 	blockOnRuntimeRepairExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, execErr error) error
+	blockOnContractViolationRecoveryExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, execErr error) error
 	blockOnDuplicateRuntimeFailure(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, execErr error) error
 	blockOnContextIntegrityGate(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, execErr error) error
 }
@@ -44,6 +45,11 @@ const (
 	repairObjectiveConcreteValidationEvidence = "produce_concrete_validation_evidence"
 	repairObjectiveTransientExecutionRetry    = "retry_or_adjust_transient_execution"
 	repairObjectiveAcquireFailureEvidence     = "acquire_concrete_failure_evidence"
+)
+
+const (
+	stepInputKeyDecisionEligibilityDenied       = "decisionEligibilityDenied"
+	stepInputKeyDecisionEligibilityDeniedReason = "decisionEligibilityDeniedReason"
 )
 
 const (
@@ -524,6 +530,9 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 		if !ok {
 			return common.ErrInvalidArgument
 		}
+		if contractViolationExhaustionDecisionNotEligible(ctx, o.repairManager(), policy, run, failedStep) {
+			spec.Input = annotateDecisionEligibilityDeniedRetry(spec.Input, "continuable_contract_violation_retry_available")
+		}
 		if err := o.eventPublisher().publishContractViolationRetryRequested(ctx, run, failedStep, spec.ID, mapFromValue(spec.Input[stepInputKeyContractViolationRecovery])); err != nil {
 			return err
 		}
@@ -537,6 +546,9 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 		}
 		if !ok {
 			return common.ErrInvalidArgument
+		}
+		if runtimeRepairExhaustionDecisionNotEligible(run, failedStep) {
+			spec.Input = annotateDecisionEligibilityDeniedRetry(spec.Input, "continuable_runtime_repair_available")
 		}
 		return o.requestDispatchStep(ctx, run.ID, run.WorkspaceID, spec)
 	case runtimeRecoveryActionFailRun:
@@ -583,11 +595,17 @@ func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *
 		if runtimeAvailable && contractViolationRetryWithinBudget(ctx, r, runtimePolicy, run, failedStep) {
 			return runtimeRecoveryActionContractViolationRetry
 		}
+		if runtimeAvailable && contractViolationExhaustionDecisionNotEligible(ctx, r, runtimePolicy, run, failedStep) {
+			return runtimeRecoveryActionContractViolationRetry
+		}
 		if canCreateDecisionTicket {
 			return runtimeRecoveryActionContractViolationExhausted
 		}
 	}
 	if shouldEscalateRuntimeRepairExhaustion(ctx, r, runtimePolicy, canCreateDecisionTicket, run, failedStep) {
+		if runtimeAvailable && runtimeRepairExhaustionDecisionNotEligible(run, failedStep) {
+			return runtimeRecoveryActionRuntimeRepair
+		}
 		return runtimeRecoveryActionRuntimeRepairExhausted
 	}
 	if shouldBlockOnDuplicateRuntimeFailure(ctx, r.steps, r, runtimePolicy, canCreateDecisionTicket, run, failedStep) {
@@ -604,6 +622,112 @@ func runtimeRecoveryActionForFailedStep(ctx context.Context, repair *repairSubsy
 		return runtimeRecoveryActionFailRun
 	}
 	return repair.recoveryActionForFailedStep(ctx, run, failedStep, policy, runtimeAvailable, canCreateDecisionTicket)
+}
+
+func contractViolationExhaustionDecisionNotEligible(ctx context.Context, repair *repairSubsystem, policy RuntimePolicy, run *runModel.Run, failedStep *runModel.Step) bool {
+	if repair == nil || run == nil || failedStep == nil || decisionEligibilityDeniedAlreadyAttempted(failedStep) {
+		return false
+	}
+	if !failedStepHasRecoverableContractViolation(failedStep) || !contractViolationCurrentActionAllowsLLMRetry(run, failedStep) {
+		return false
+	}
+	if contractViolationRetryWithinBudget(ctx, repair, policy, run, failedStep) {
+		return false
+	}
+	return continuableContractViolationRule(contractViolationRuleFromStep(failedStep))
+}
+
+func runtimeRepairExhaustionDecisionNotEligible(run *runModel.Run, failedStep *runModel.Step) bool {
+	if run == nil || failedStep == nil || decisionEligibilityDeniedAlreadyAttempted(failedStep) {
+		return false
+	}
+	if failedStepRequestsContinuableDecision(failedStep) && !failedStepHasExternalDecisionDependency(failedStep) {
+		return true
+	}
+	switch strings.TrimSpace(convergenceNextActionKind(run, failedStep.Input)) {
+	case "assess_gap", "repair", "acquire_target_snapshot", "state_change", "produce_state_change",
+		"validate", "validation", "produce_validation_evidence",
+		"assessment", "complete_coverage_assessment",
+		"artifact", "produce_artifact_evidence":
+		return !failedStepHasExternalDecisionDependency(failedStep)
+	default:
+		return false
+	}
+}
+
+func continuableContractViolationRule(rule string) bool {
+	switch strings.TrimSpace(rule) {
+	case contractViolationRuleConcreteValidationMissing,
+		contractViolationRuleCoverageAssessmentIncomplete,
+		contractViolationRuleStateChangingRequiredMissing,
+		contractViolationRulePatchApplyContractFailed,
+		contractViolationRuleAvailableSnapshotIgnored,
+		contractViolationRuleCoverageMapIncomplete,
+		contractViolationRuleDoDAssessmentEvidenceMissing:
+		return true
+	default:
+		return false
+	}
+}
+
+func failedStepRequestsContinuableDecision(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		stringFromMap(step.Output, "error"),
+		stringFromMap(step.Output, "reason"),
+		stringFromMap(step.Output, "summary"),
+	}, " ")))
+	return strings.Contains(text, "decision requests a continuable candidate choice") ||
+		boolValue(step.Output["continuableDecisionConvertedToRepair"])
+}
+
+func failedStepHasExternalDecisionDependency(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	for _, source := range []map[string]any{
+		step.Output,
+		mapFromValue(step.Output[stepOutputKeyBlockDecisionContext]),
+		mapFromValue(step.Output["runtimeDiagnostics"]),
+		mapFromValue(step.Input["ticketContext"]),
+	} {
+		if len(source) == 0 {
+			continue
+		}
+		if strings.TrimSpace(stringFromMap(source, decisionContextKeyDependency)) != "" ||
+			strings.TrimSpace(stringFromMap(source, "externalDependency")) != "" ||
+			boolValue(source["requiresExternalInput"]) ||
+			boolValue(source["requiresUserChoice"]) ||
+			boolValue(source["requiresCredential"]) ||
+			boolValue(source["requiresPermission"]) {
+			return true
+		}
+	}
+	return false
+}
+
+func decisionEligibilityDeniedAlreadyAttempted(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	return boolValue(step.Input[stepInputKeyDecisionEligibilityDenied])
+}
+
+func annotateDecisionEligibilityDeniedRetry(input map[string]any, reason string) map[string]any {
+	if input == nil {
+		input = map[string]any{}
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "continuable_next_action_available"
+	}
+	input[stepInputKeyDecisionEligibilityDenied] = true
+	input[stepInputKeyDecisionEligibilityDeniedReason] = reason
+	input["decisionNotEligibleReason"] = reason
+	input["decisionEligibilityGate"] = "automatic_next_action"
+	return input
 }
 
 // blockRecoveryActionFromFailedStep first lets the executor persist the selected
@@ -627,6 +751,11 @@ func (r *repairSubsystem) blockRecoveryActionFromFailedStep(
 		return common.ErrBlocked
 	case runtimeRecoveryActionRuntimeRepairExhausted:
 		if err := executor.blockOnRuntimeRepairExhaustion(ctx, run, failedStep, execErr); err != nil {
+			return err
+		}
+		return common.ErrBlocked
+	case runtimeRecoveryActionContractViolationExhausted:
+		if err := executor.blockOnContractViolationRecoveryExhaustion(ctx, run, failedStep, execErr); err != nil {
 			return err
 		}
 		return common.ErrBlocked

@@ -262,6 +262,327 @@ func TestNextActionForRunMissingStateChangeRequestsStateChange(t *testing.T) {
 	}
 }
 
+func TestNextActionForRunMissingStateChangeAcquiresTargetSnapshotFirst(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	coverageRepo := memory.NewCoverageWorkItemRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-acquire-snapshot")
+	runID := common.RunID("run-next-action-acquire-snapshot")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			"repairActionPackage": map[string]any{
+				"requiresCurrentTargetSnapshotForStateChange": true,
+				"repairTargetSet": []string{
+					"target.txt",
+				},
+				"requiredOutput": map[string]any{
+					"mustUseCurrentTargetSnapshot": true,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := coverageRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.CoverageWorkItem{
+		ID:                    "cwi-repo-acquire-snapshot",
+		WorkspaceID:           workspaceID,
+		RunID:                 runID,
+		DefinitionRevision:    "rev-acquire-snapshot",
+		NormalizedSourceKey:   "source-acquire-snapshot",
+		RequiredEvidenceKinds: []string{runtimemodel.EvidenceKindStateChange},
+		Status:                "open",
+		Metadata: map[string]any{
+			"id": "cwi-acquire-snapshot",
+		},
+	}); err != nil {
+		t.Fatalf("create coverage item: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeAcquireTargetSnapshot || action.Stage != runtimemodel.NextActionTypeAcquireTargetSnapshot || action.StageMode != "target_snapshot_acquisition" {
+		t.Fatalf("next action = %+v, want acquire_target_snapshot", action)
+	}
+	if action.RequiredOutput["mustAcquireCurrentTargetSnapshot"] != true || action.RequiredOutput["mustUseReadOnlySnapshotAcquisition"] != true {
+		t.Fatalf("required output = %+v, want read-only target snapshot acquisition", action.RequiredOutput)
+	}
+	if !stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeStateChange) {
+		t.Fatalf("forbidden actions = %+v, want state_change forbidden before snapshot", action.ForbiddenActions)
+	}
+}
+
+func TestNextActionForRunHydratesAcceptedTargetSnapshotEvidenceBeforeStateChange(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	coverageRepo := memory.NewCoverageWorkItemRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	patchRepo := memory.NewPatchRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo, EvidenceRecords: evidenceRepo, Patches: patchRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-accepted-snapshot")
+	runID := common.RunID("run-next-action-accepted-snapshot")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	run := &runmodel.Run{
+		ID:                 runID,
+		WorkspaceID:        workspaceID,
+		State:              common.RunStateRunning,
+		DefinitionRevision: "rev-accepted-snapshot",
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			"repairActionPackage": map[string]any{
+				"requiresCurrentTargetSnapshotForStateChange": true,
+				"repairTargetSet": []string{"target.txt"},
+				"requiredOutput": map[string]any{
+					"mustUseCurrentTargetSnapshot": true,
+				},
+			},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := coverageRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.CoverageWorkItem{
+		ID:                    "cwi-repo-accepted-snapshot",
+		WorkspaceID:           workspaceID,
+		RunID:                 runID,
+		DefinitionRevision:    run.DefinitionRevision,
+		NormalizedSourceKey:   "source-accepted-snapshot",
+		RequiredEvidenceKinds: []string{runtimemodel.EvidenceKindStateChange},
+		Status:                "open",
+		Metadata: map[string]any{
+			"id": "cwi-accepted-snapshot",
+		},
+	}); err != nil {
+		t.Fatalf("create coverage item: %v", err)
+	}
+	step := &runmodel.Step{
+		ID:    "run-next-action-accepted-snapshot/read-target",
+		RunID: runID,
+		Kind:  "file/read",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphRootStepID: "run-next-action-accepted-snapshot/root",
+			stepInputKeyGraphNodeID:     "read-target",
+		},
+		Output: map[string]any{
+			"stage":            "file_read",
+			"path":             "target.txt",
+			"exists":           true,
+			"content":          "current target content\n",
+			"contentHash":      "hash-accepted-snapshot",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+			"truncated":        false,
+			"isBinary":         false,
+		},
+	}
+	if err := stepRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), step); err != nil {
+		t.Fatalf("create source step: %v", err)
+	}
+	record := acceptedTargetSnapshotEvidenceRecordForStep(run, step)
+	if record == nil {
+		t.Fatalf("accepted target snapshot evidence record = nil")
+	}
+	if err := evidenceRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), record); err != nil {
+		t.Fatalf("create target snapshot evidence: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("next action = %+v, want state_change using accepted target snapshot evidence", action)
+	}
+	if stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeStateChange) ||
+		stringSliceContains(action.AllowedActions, runtimemodel.NextActionTypeAcquireTargetSnapshot) {
+		t.Fatalf("next action actions = allowed:%+v forbidden:%+v, want state_change contract without snapshot acquisition", action.AllowedActions, action.ForbiddenActions)
+	}
+	reloadedRun, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if len(mapSliceFromValue(mapFromValue(reloadedRun.ExecutionContext["repairActionPackage"])["targetSnapshots"])) != 0 {
+		t.Fatalf("persisted run context = %+v, want hydration scoped to current authority calculation", reloadedRun.ExecutionContext)
+	}
+}
+
+func TestNextActionForRunIgnoresAcceptedTargetSnapshotAfterLaterAppliedPatch(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	coverageRepo := memory.NewCoverageWorkItemRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	patchRepo := memory.NewPatchRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo, EvidenceRecords: evidenceRepo, Patches: patchRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-stale-snapshot")
+	runID := common.RunID("run-next-action-stale-snapshot")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	run := &runmodel.Run{
+		ID:                 runID,
+		WorkspaceID:        workspaceID,
+		State:              common.RunStateRunning,
+		DefinitionRevision: "rev-stale-snapshot",
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			"repairActionPackage": map[string]any{
+				"requiresCurrentTargetSnapshotForStateChange": true,
+				"repairTargetSet": []string{"target.txt"},
+				"requiredOutput": map[string]any{
+					"mustUseCurrentTargetSnapshot": true,
+				},
+			},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := coverageRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.CoverageWorkItem{
+		ID:                    "cwi-repo-stale-snapshot",
+		WorkspaceID:           workspaceID,
+		RunID:                 runID,
+		DefinitionRevision:    run.DefinitionRevision,
+		NormalizedSourceKey:   "source-stale-snapshot",
+		RequiredEvidenceKinds: []string{runtimemodel.EvidenceKindStateChange},
+		Status:                "open",
+		Metadata: map[string]any{
+			"id": "cwi-stale-snapshot",
+		},
+	}); err != nil {
+		t.Fatalf("create coverage item: %v", err)
+	}
+	step := &runmodel.Step{
+		ID:    "run-next-action-stale-snapshot/read-target",
+		RunID: runID,
+		Kind:  "file/read",
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"stage":            "file_read",
+			"path":             "target.txt",
+			"exists":           true,
+			"content":          "old target content\n",
+			"contentHash":      "hash-old-snapshot",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+			"truncated":        false,
+			"isBinary":         false,
+		},
+	}
+	if err := stepRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), step); err != nil {
+		t.Fatalf("create source step: %v", err)
+	}
+	record := acceptedTargetSnapshotEvidenceRecordForStep(run, step)
+	if record == nil {
+		t.Fatalf("accepted target snapshot evidence record = nil")
+	}
+	record.CreatedAt = "2026-06-26T01:00:00Z"
+	record.UpdatedAt = record.CreatedAt
+	if record.Metadata == nil {
+		record.Metadata = map[string]any{}
+	}
+	record.Metadata["capturedAt"] = record.CreatedAt
+	if err := evidenceRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), record); err != nil {
+		t.Fatalf("create target snapshot evidence: %v", err)
+	}
+	if err := patchRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runmodel.Patch{
+		ID:          "run-next-action-stale-snapshot/patch/after-snapshot",
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      "run-next-action-stale-snapshot/patch-step",
+		PatchType:   "file_write",
+		TargetRef:   "target.txt",
+		State:       common.PatchStateApplied,
+		BeforeHash:  "hash-old-snapshot",
+		AfterHash:   "hash-new-snapshot",
+		AppliedAt:   "2026-06-26T01:01:00Z",
+	}); err != nil {
+		t.Fatalf("create later applied patch: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeAcquireTargetSnapshot {
+		t.Fatalf("next action = %+v, want acquire_target_snapshot because accepted snapshot is stale", action)
+	}
+}
+
+func TestDeriveAcquireTargetSnapshotNextActionSkipsWhenSnapshotExists(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-acquire-snapshot-skip",
+		WorkspaceID: "ws-acquire-snapshot-skip",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			"repairActionPackage": map[string]any{
+				"requiresCurrentTargetSnapshotForStateChange": true,
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "target.txt",
+					"exists":           true,
+					"contentHash":      "hash-target",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+				"requiredOutput": map[string]any{
+					"mustUseCurrentTargetSnapshot": true,
+				},
+			},
+		},
+	}
+	stateChange := runtimemodel.NextAction{
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		Type:        runtimemodel.NextActionTypeStateChange,
+	}.Normalized()
+	if action, ok := deriveAcquireTargetSnapshotNextAction(run, stateChange); ok || action.Type != "" {
+		t.Fatalf("derive acquire snapshot with existing target snapshot = %+v/%v, want no action", action, ok)
+	}
+}
+
 func TestDeriveMissingStateChangeNextActionSkipsInactiveOrSatisfiedItems(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-state-change-rule",

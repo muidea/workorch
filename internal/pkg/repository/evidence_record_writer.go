@@ -21,11 +21,26 @@ func CreateOrUpdateEvidenceRecord(ctx context.Context, repo EvidenceRecordReposi
 			return getErr
 		}
 		record.CreatedAt = firstNonEmptyEvidenceRecordString(existing.CreatedAt, record.CreatedAt)
+		preserveEvidenceRecordMetadataValue(record, existing, "capturedAt")
 		if err := repo.Update(ctx, record); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func preserveEvidenceRecordMetadataValue(record *orchestratormodel.EvidenceRecord, existing *orchestratormodel.EvidenceRecord, key string) {
+	if record == nil || existing == nil || key == "" || len(existing.Metadata) == 0 {
+		return
+	}
+	value, ok := existing.Metadata[key]
+	if !ok {
+		return
+	}
+	if record.Metadata == nil {
+		record.Metadata = map[string]any{}
+	}
+	record.Metadata[key] = value
 }
 
 func firstNonEmptyEvidenceRecordString(values ...string) string {

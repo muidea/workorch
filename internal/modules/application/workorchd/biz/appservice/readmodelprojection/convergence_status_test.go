@@ -29,6 +29,23 @@ func TestMapConvergenceStatusProjectsCompactRunState(t *testing.T) {
 				Recoverability: "recompute_authority",
 			},
 		},
+		Steps: []readmodelcore.StepView{
+			{
+				ID: "step-old-denied",
+				Input: map[string]any{
+					"decisionEligibilityDenied":       true,
+					"decisionEligibilityDeniedReason": "older_reason",
+				},
+			},
+			{
+				ID: "step-latest-denied",
+				Input: map[string]any{
+					"decisionEligibilityDenied":       true,
+					"decisionEligibilityDeniedReason": "continuable_next_action_available",
+					"decisionNotEligibleReason":       "legacy_alias_reason",
+				},
+			},
+		},
 	})
 	if got == nil {
 		t.Fatal("ConvergenceStatus is nil")
@@ -47,6 +64,11 @@ func TestMapConvergenceStatusProjectsCompactRunState(t *testing.T) {
 	}
 	if got.LatestContractViolationRule != "coverage_assessment_incomplete" || got.LatestRecovery != "recompute_authority" {
 		t.Fatalf("violation/recovery = %q/%q", got.LatestContractViolationRule, got.LatestRecovery)
+	}
+	if !got.DecisionEligibilityDenied ||
+		got.DecisionNotEligibleReason != "continuable_next_action_available" ||
+		got.DecisionNotEligibleStepID != "step-latest-denied" {
+		t.Fatalf("decision eligibility fields = %+v, want latest denied reason projection", got)
 	}
 }
 

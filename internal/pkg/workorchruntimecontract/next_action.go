@@ -11,16 +11,17 @@ import (
 const NextActionSchema = "workorch.next_action.v1"
 
 const (
-	NextActionTypeAssessGap       = "assess_gap"
-	NextActionTypePlan            = "plan"
-	NextActionTypeStateChange     = "state_change"
-	NextActionTypeValidate        = "validate"
-	NextActionTypeAssessment      = "assessment"
-	NextActionTypeRepair          = "repair"
-	NextActionTypeRequestDecision = "request_decision"
-	NextActionTypeRequestApproval = "request_approval"
-	NextActionTypeComplete        = "complete"
-	NextActionTypeFail            = "fail"
+	NextActionTypeAssessGap             = "assess_gap"
+	NextActionTypePlan                  = "plan"
+	NextActionTypeAcquireTargetSnapshot = "acquire_target_snapshot"
+	NextActionTypeStateChange           = "state_change"
+	NextActionTypeValidate              = "validate"
+	NextActionTypeAssessment            = "assessment"
+	NextActionTypeRepair                = "repair"
+	NextActionTypeRequestDecision       = "request_decision"
+	NextActionTypeRequestApproval       = "request_approval"
+	NextActionTypeComplete              = "complete"
+	NextActionTypeFail                  = "fail"
 )
 
 type NextAction struct {
@@ -97,6 +98,7 @@ func normalizeNextActionType(value string) string {
 	switch value {
 	case NextActionTypeAssessGap,
 		NextActionTypePlan,
+		NextActionTypeAcquireTargetSnapshot,
 		NextActionTypeStateChange,
 		NextActionTypeValidate,
 		NextActionTypeAssessment,

@@ -111,6 +111,162 @@ func TestRecordValidationResultWritesAcceptedAndRejectedEvidenceRecords(t *testi
 	}
 }
 
+func TestRecordAcceptedTargetSnapshotEvidenceForCompletedFileRead(t *testing.T) {
+	ctx := context.Background()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{
+			EvidenceRecords: evidenceRepo,
+		},
+	}
+	run := &runmodel.Run{
+		ID:                 "run-target-snapshot-evidence",
+		WorkspaceID:        "ws-target-snapshot-evidence",
+		DefinitionRevision: "rev-target-snapshot-evidence",
+	}
+	step := &runmodel.Step{
+		ID:    "run-target-snapshot-evidence/read-target",
+		RunID: run.ID,
+		Kind:  "file/read",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphRootStepID: "run-target-snapshot-evidence/root",
+			stepInputKeyGraphNodeID:     "read-target-node",
+		},
+		Output: map[string]any{
+			"stage":            "file_read",
+			"path":             "target.txt",
+			"exists":           true,
+			"content":          "current target content\n",
+			"contentHash":      "hash-target",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+			"truncated":        false,
+			"isBinary":         false,
+			"size":             23,
+		},
+	}
+
+	if err := orch.recordAcceptedTargetSnapshotEvidenceForStep(ctx, run, step); err != nil {
+		t.Fatalf("record target snapshot evidence: %v", err)
+	}
+	if err := orch.recordAcceptedTargetSnapshotEvidenceForStep(ctx, run, step); err != nil {
+		t.Fatalf("record target snapshot evidence again: %v", err)
+	}
+
+	records, err := evidenceRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list evidence records: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %+v, want one idempotent target snapshot evidence record", records)
+	}
+	record := records[0]
+	if record.ID == "" || strings.ContainsAny(string(record.ID), `/\`) {
+		t.Fatalf("record ID = %q, want file-repository-safe ID", record.ID)
+	}
+	if record.WorkspaceID != run.WorkspaceID ||
+		record.RunID != run.ID ||
+		record.StepID != step.ID ||
+		record.DefinitionRevision != run.DefinitionRevision ||
+		record.Kind != orchestratormodel.EvidenceKindTargetSnapshot ||
+		record.Status != orchestratormodel.EvidenceStatusAccepted ||
+		record.SourceType != evidenceRecordSourceTypeTargetSnapshot ||
+		record.SubjectType != evidenceRecordSubjectWorkspaceItem ||
+		record.SubjectID != "target.txt" {
+		t.Fatalf("record = %+v, want scoped accepted target snapshot evidence", record)
+	}
+	if record.Metadata["targetRef"] != "target.txt" ||
+		record.Metadata["contentHash"] != "hash-target" ||
+		record.Metadata["contentComplete"] != true ||
+		record.Metadata["safeForFileWrite"] != true ||
+		record.Metadata["snapshotIntegrity"] != "complete_unredacted_text" ||
+		record.Metadata["snapshotValidity"] != "valid_for_recorded_step_output" ||
+		record.Metadata["capturedAt"] != record.CreatedAt ||
+		record.Metadata["graphRootStepId"] != "run-target-snapshot-evidence/root" ||
+		record.Metadata["graphNodeId"] != "read-target-node" ||
+		record.Metadata["sourceOutputRef"] != record.SourceRef {
+		t.Fatalf("metadata = %+v, want target snapshot trace metadata", record.Metadata)
+	}
+	if _, ok := record.Metadata["content"]; ok {
+		t.Fatalf("metadata = %+v, want content kept in step output ref rather than evidence metadata", record.Metadata)
+	}
+	bySource, err := evidenceRepo.ListBySourceRef(ctx, run.ID, record.SourceRef)
+	if err != nil {
+		t.Fatalf("list evidence by sourceRef: %v", err)
+	}
+	if len(bySource) != 1 || bySource[0].ID != record.ID {
+		t.Fatalf("bySource = %+v, want target snapshot record %q", bySource, record.ID)
+	}
+}
+
+func TestRecordAcceptedTargetSnapshotEvidenceRejectsUnsafeFileRead(t *testing.T) {
+	ctx := context.Background()
+	run := &runmodel.Run{
+		ID:                 "run-unsafe-target-snapshot-evidence",
+		WorkspaceID:        "ws-unsafe-target-snapshot-evidence",
+		DefinitionRevision: "rev-unsafe-target-snapshot-evidence",
+	}
+	cases := map[string]map[string]any{
+		"truncated": {
+			"stage":            "file_read",
+			"path":             "target-truncated.txt",
+			"exists":           true,
+			"content":          "partial",
+			"contentComplete":  false,
+			"safeForFileWrite": false,
+			"truncated":        true,
+		},
+		"redacted": {
+			"stage":            "file_read",
+			"path":             "target-redacted.txt",
+			"exists":           true,
+			"content":          "[workorch redacted runtime content]",
+			"contentComplete":  true,
+			"safeForFileWrite": false,
+			"redacted":         true,
+		},
+		"binary": {
+			"stage":    "file_read",
+			"path":     "target-binary.bin",
+			"exists":   true,
+			"isBinary": true,
+		},
+		"missing": {
+			"stage":  "file_read",
+			"path":   "target-missing.txt",
+			"exists": false,
+		},
+	}
+	for name, output := range cases {
+		t.Run(name, func(t *testing.T) {
+			evidenceRepo := memory.NewEvidenceRecordRepository()
+			orch := &RuntimeOrchestrator{
+				evidence: RuntimeEvidenceRepositories{
+					EvidenceRecords: evidenceRepo,
+				},
+			}
+			step := &runmodel.Step{
+				ID:     common.StepID("run-unsafe-target-snapshot-evidence/" + name),
+				RunID:  run.ID,
+				Kind:   "file/read",
+				State:  common.StepStateCompleted,
+				Output: output,
+			}
+			if err := orch.recordAcceptedTargetSnapshotEvidenceForStep(ctx, run, step); err != nil {
+				t.Fatalf("record target snapshot evidence: %v", err)
+			}
+			records, err := evidenceRepo.ListByRun(ctx, run.ID)
+			if err != nil {
+				t.Fatalf("list evidence records: %v", err)
+			}
+			if len(records) != 0 {
+				t.Fatalf("records = %+v, want no accepted target snapshot evidence for unsafe output", records)
+			}
+		})
+	}
+}
+
 func TestRecordContractViolationWritesRejectedDiagnosticEvidenceRecord(t *testing.T) {
 	ctx := context.Background()
 	evidenceRepo := memory.NewEvidenceRecordRepository()

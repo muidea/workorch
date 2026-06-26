@@ -88,8 +88,13 @@ func TestContractViolationRecoveryActionExhaustsIndependentBudget(t *testing.T) 
 
 	action := runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{MaxContractViolationRetriesPerStep: 2}), true, true, run, failed)
 
+	if action != runtimeRecoveryActionContractViolationRetry {
+		t.Fatalf("recovery action = %s, want contract violation retry through decision eligibility gate", action)
+	}
+	failed.Input[stepInputKeyDecisionEligibilityDenied] = true
+	action = runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{MaxContractViolationRetriesPerStep: 2}), true, true, run, failed)
 	if action != runtimeRecoveryActionContractViolationExhausted {
-		t.Fatalf("recovery action = %s, want contract violation exhausted", action)
+		t.Fatalf("recovery action after denied retry = %s, want contract violation exhausted", action)
 	}
 }
 
@@ -126,8 +131,16 @@ func TestContractViolationRecoveryActionExhaustsRunBudget(t *testing.T) {
 		MaxContractViolationRetriesPerRun:  2,
 	}), true, true, run, failed)
 
+	if action != runtimeRecoveryActionContractViolationRetry {
+		t.Fatalf("recovery action = %s, want contract violation retry through decision eligibility gate", action)
+	}
+	failed.Input[stepInputKeyDecisionEligibilityDenied] = true
+	action = runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{
+		MaxContractViolationRetriesPerStep: 5,
+		MaxContractViolationRetriesPerRun:  2,
+	}), true, true, run, failed)
 	if action != runtimeRecoveryActionContractViolationExhausted {
-		t.Fatalf("recovery action = %s, want contract violation exhausted by run budget", action)
+		t.Fatalf("recovery action after denied retry = %s, want contract violation exhausted by run budget", action)
 	}
 }
 
@@ -169,8 +182,17 @@ func TestContractViolationRecoveryActionExhaustsRepeatedSignatureBudget(t *testi
 		MaxRepeatedContractViolationSignature: 1,
 	}), true, true, run, failed)
 
+	if action != runtimeRecoveryActionContractViolationRetry {
+		t.Fatalf("recovery action = %s, want contract violation retry through decision eligibility gate", action)
+	}
+	failed.Input[stepInputKeyDecisionEligibilityDenied] = true
+	action = runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{
+		MaxContractViolationRetriesPerStep:    5,
+		MaxContractViolationRetriesPerRun:     5,
+		MaxRepeatedContractViolationSignature: 1,
+	}), true, true, run, failed)
 	if action != runtimeRecoveryActionContractViolationExhausted {
-		t.Fatalf("recovery action = %s, want contract violation exhausted by repeated signature", action)
+		t.Fatalf("recovery action after denied retry = %s, want contract violation exhausted by repeated signature", action)
 	}
 }
 

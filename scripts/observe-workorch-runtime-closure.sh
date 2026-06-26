@@ -729,6 +729,9 @@ def workspace_live_summary(workspace_id, snapshot_body):
             "latestEffectiveProgressAt": convergence.get("latestEffectiveProgressAt"),
             "latestContractViolationRule": convergence.get("latestContractViolationRule"),
             "latestRecovery": convergence.get("latestRecovery"),
+            "decisionEligibilityDenied": bool(convergence.get("decisionEligibilityDenied")),
+            "decisionNotEligibleReason": convergence.get("decisionNotEligibleReason"),
+            "decisionNotEligibleStepId": convergence.get("decisionNotEligibleStepId"),
             "stalled": bool(convergence.get("stalled")),
             "ineffectiveRetry": bool(convergence.get("ineffectiveRetry")),
         },
@@ -873,12 +876,23 @@ def evaluate_workspace_progress(summary):
             f"workspaceState={workspace_state!r} runState={run_state!r} "
             f"acceptedResults={accepted_results} openDecisions={open_decisions} pendingApprovals={pending_approvals}"
         )
+    if has_decision_blocker and convergence.get("decisionEligibilityDenied"):
+        reason = str(convergence.get("decisionNotEligibleReason") or "").strip()
+        issues.append(
+            "workspace has an open decision while convergenceStatus marks decision eligibility denied: "
+            f"reason={reason!r} stepId={convergence.get('decisionNotEligibleStepId')!r}"
+        )
     return {
         "workspaceId": workspace_id,
         "workspaceState": workspace_state,
         "runId": run.get("id") or workspace.get("activeRunId"),
         "runState": run_state,
         "mode": mode,
+        "decisionEligibility": {
+            "denied": bool(convergence.get("decisionEligibilityDenied")),
+            "reason": convergence.get("decisionNotEligibleReason"),
+            "stepId": convergence.get("decisionNotEligibleStepId"),
+        },
         "pass": not issues,
         "issues": issues,
     }

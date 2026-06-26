@@ -5,13 +5,14 @@ import "github.com/muidea/workorch/internal/pkg/common"
 const EvidenceRecordSchema = "workorch.evidence_record.v1"
 
 const (
-	EvidenceKindStateChange = "state_change"
-	EvidenceKindValidation  = "validation"
-	EvidenceKindAssessment  = "assessment"
-	EvidenceKindArtifact    = "artifact"
-	EvidenceKindDecision    = "decision"
-	EvidenceKindApproval    = "approval"
-	EvidenceKindDiagnostic  = "diagnostic"
+	EvidenceKindStateChange    = "state_change"
+	EvidenceKindValidation     = "validation"
+	EvidenceKindAssessment     = "assessment"
+	EvidenceKindArtifact       = "artifact"
+	EvidenceKindTargetSnapshot = "target_snapshot"
+	EvidenceKindDecision       = "decision"
+	EvidenceKindApproval       = "approval"
+	EvidenceKindDiagnostic     = "diagnostic"
 )
 
 const (

@@ -36,6 +36,11 @@ func (s *repairBlockedRecoveryExecutorStub) blockOnRuntimeRepairExhaustion(conte
 	return s.err
 }
 
+func (s *repairBlockedRecoveryExecutorStub) blockOnContractViolationRecoveryExhaustion(context.Context, *runmodel.Run, *runmodel.Step, error) error {
+	s.called = runtimeRecoveryActionContractViolationExhausted
+	return s.err
+}
+
 func (s *repairBlockedRecoveryExecutorStub) blockOnDuplicateRuntimeFailure(context.Context, *runmodel.Run, *runmodel.Step, error) error {
 	s.called = runtimeRecoveryActionDuplicateFailure
 	return s.err
@@ -128,6 +133,68 @@ func TestRepairSubsystemRecoveryDispatchSpecPlansRuntimeRepairWithExactScope(t *
 	}
 	if spec.Input[stepInputKeyRuntimeRepairAttempt] != 2 {
 		t.Fatalf("runtime repair attempt = %#v, want 2", spec.Input[stepInputKeyRuntimeRepairAttempt])
+	}
+}
+
+func TestDecisionEligibilityDeniedAnnotationMarksRetryInput(t *testing.T) {
+	input := annotateDecisionEligibilityDeniedRetry(map[string]any{"existing": true}, "continuable_next_action_available")
+
+	if input["existing"] != true {
+		t.Fatalf("input existing marker lost: %+v", input)
+	}
+	if input[stepInputKeyDecisionEligibilityDenied] != true ||
+		input[stepInputKeyDecisionEligibilityDeniedReason] != "continuable_next_action_available" ||
+		input["decisionNotEligibleReason"] != "continuable_next_action_available" ||
+		input["decisionEligibilityGate"] != "automatic_next_action" {
+		t.Fatalf("decision eligibility annotation = %+v, want structured denied retry markers", input)
+	}
+}
+
+func TestRuntimeRepairExhaustionDecisionGateAllowsOneContinuableRetry(t *testing.T) {
+	run := &runmodel.Run{ID: "run-decision-gate", WorkspaceID: "ws-decision-gate"}
+	failed := &runmodel.Step{
+		ID:    "run-decision-gate/failed",
+		RunID: run.ID,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": "state_change"},
+			},
+		},
+		Output: map[string]any{
+			"error": "invalid argument: decision requests a continuable candidate choice",
+		},
+	}
+
+	if !runtimeRepairExhaustionDecisionNotEligible(run, failed) {
+		t.Fatal("runtimeRepairExhaustionDecisionNotEligible = false, want automatic retry for continuable next action")
+	}
+	failed.Input = annotateDecisionEligibilityDeniedRetry(failed.Input, "continuable_runtime_repair_available")
+	if runtimeRepairExhaustionDecisionNotEligible(run, failed) {
+		t.Fatal("runtimeRepairExhaustionDecisionNotEligible = true after denied retry marker, want escalation allowed")
+	}
+}
+
+func TestRuntimeRepairExhaustionDecisionGateAllowsExternalDependencyDecision(t *testing.T) {
+	run := &runmodel.Run{ID: "run-decision-gate-external", WorkspaceID: "ws-decision-gate-external"}
+	failed := &runmodel.Step{
+		ID:    "run-decision-gate-external/failed",
+		RunID: run.ID,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": "state_change"},
+			},
+		},
+		Output: map[string]any{
+			"error":                      "invalid argument: decision requests a continuable candidate choice",
+			"requiresExternalInput":      true,
+			decisionContextKeyDependency: "external_information",
+		},
+	}
+
+	if runtimeRepairExhaustionDecisionNotEligible(run, failed) {
+		t.Fatal("runtimeRepairExhaustionDecisionNotEligible = true, want decision eligibility for external dependency")
 	}
 }
 

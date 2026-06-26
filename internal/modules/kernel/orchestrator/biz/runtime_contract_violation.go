@@ -365,7 +365,7 @@ func contractViolationCurrentActionAllowsLLMRetry(run *runModel.Run, failedStep 
 		return true
 	}
 	switch kind {
-	case "assess_gap", "repair", "state_change", "produce_state_change",
+	case "assess_gap", "repair", "acquire_target_snapshot", "state_change", "produce_state_change",
 		"validate", "validation", "produce_validation_evidence",
 		"assessment", "complete_coverage_assessment",
 		"artifact", "produce_artifact_evidence":

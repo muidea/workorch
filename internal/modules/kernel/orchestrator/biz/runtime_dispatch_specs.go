@@ -637,9 +637,25 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			if !ok {
 				return nil, common.ErrConflict
 			}
+			if runtimeRepairExhaustionDecisionNotEligible(run, last) {
+				spec.Input = annotateDecisionEligibilityDeniedRetry(spec.Input, "continuable_runtime_repair_available")
+			}
+			return []stepDispatchSpec{spec}, nil
+		case runtimeRecoveryActionContractViolationRetry:
+			spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, last, nil, action, maxProviderRetryAttemptsForPolicy(policy), o, false)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, common.ErrConflict
+			}
+			if contractViolationExhaustionDecisionNotEligible(ctx, o.repairManager(), policy, run, last) {
+				spec.Input = annotateDecisionEligibilityDeniedRetry(spec.Input, "continuable_contract_violation_retry_available")
+			}
 			return []stepDispatchSpec{spec}, nil
 		case runtimeRecoveryActionProviderRetryExhausted,
 			runtimeRecoveryActionRuntimeRepairExhausted,
+			runtimeRecoveryActionContractViolationExhausted,
 			runtimeRecoveryActionDuplicateFailure,
 			runtimeRecoveryActionContextIntegrityBlocked:
 			if err := o.blockRecoveryActionFromFailedStep(ctx, run, last, nil, action); err != nil {

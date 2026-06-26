@@ -36,6 +36,11 @@ func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *readmodelcore.Con
 		ret.LatestContractViolationRule = strings.TrimSpace(violation.ViolatedRule)
 		ret.LatestRecovery = strings.TrimSpace(violation.Recoverability)
 	}
+	if denied := latestDecisionEligibilityDenied(snapshot.Steps); denied != nil {
+		ret.DecisionEligibilityDenied = true
+		ret.DecisionNotEligibleReason = denied.reason
+		ret.DecisionNotEligibleStepID = denied.stepID
+	}
 	if ret.WorkspaceID == "" && snapshot.Workspace.ID != "" {
 		ret.WorkspaceID = snapshot.Workspace.ID
 	}
@@ -80,6 +85,29 @@ func MapWorkspaceConvergenceStatus(snapshot readmodelcore.WorkspaceSnapshot) *re
 		ret.IneffectiveRetry = snapshot.RunHeartbeat.IneffectiveRetry
 	}
 	return ret
+}
+
+type decisionEligibilityDeniedProjection struct {
+	stepID string
+	reason string
+}
+
+func latestDecisionEligibilityDenied(steps []readmodelcore.StepView) *decisionEligibilityDeniedProjection {
+	for idx := len(steps) - 1; idx >= 0; idx-- {
+		step := steps[idx]
+		if !readModelBoolValue(step.Input["decisionEligibilityDenied"]) {
+			continue
+		}
+		reason := firstNonEmptyString(
+			readModelStringValue(step.Input["decisionEligibilityDeniedReason"]),
+			readModelStringValue(step.Input["decisionNotEligibleReason"]),
+		)
+		return &decisionEligibilityDeniedProjection{
+			stepID: strings.TrimSpace(step.ID),
+			reason: reason,
+		}
+	}
+	return nil
 }
 
 func focusIDFromMap(item map[string]any) string {

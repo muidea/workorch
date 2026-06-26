@@ -292,8 +292,22 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 		populateCoverageWorkItemAssessmentConvergenceContract(contract)
 		return true
 	case "state_change", "produce_state_change":
+		if contract.RepairActionPackage == nil {
+			contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+		}
 		convergenceContractAttachCoverageContext(input, contract)
+		if stateChangeRequiresTargetSnapshotAcquisition(input, contract.RepairActionPackage) {
+			populateTargetSnapshotAcquisitionConvergenceContract(input, contract)
+			return true
+		}
 		populateCoverageWorkItemStateChangeConvergenceContract(input, contract)
+		return true
+	case "acquire_target_snapshot":
+		if contract.RepairActionPackage == nil {
+			contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+		}
+		convergenceContractAttachCoverageContext(input, contract)
+		populateTargetSnapshotAcquisitionConvergenceContract(input, contract)
 		return true
 	case "validate", "validation", "produce_validation_evidence", "artifact", "produce_artifact_evidence":
 		convergenceContractAttachCoverageContext(input, contract)
@@ -639,6 +653,37 @@ func populateCoverageWorkItemEvidenceConvergenceContract(input map[string]any, c
 	contract.RepairActionPackage["requiredOutput"] = required
 }
 
+func populateTargetSnapshotAcquisitionConvergenceContract(input map[string]any, contract *ConvergenceContract) {
+	if contract == nil {
+		return
+	}
+	contract.State = convergenceStateNeedEvidence
+	contract.RuntimeStage = runtimeStageRepair
+	contract.RuntimeStageMode = "target_snapshot_acquisition"
+	contract.RepairObjective = repairObjectiveAcquireFailureEvidence
+	contract.ConcreteFailureEvidenceRequired = true
+	if contract.RepairActionPackage == nil {
+		contract.RepairActionPackage = map[string]any{}
+	}
+	pkg := contract.RepairActionPackage
+	pkg["requiresCurrentTargetSnapshotForStateChange"] = true
+	pkg["targetSnapshotAcquisitionRequired"] = true
+	if targetSet := repairActionTargetSet(input, pkg); len(targetSet) > 0 {
+		pkg["repairTargetSet"] = targetSet
+	}
+	required := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
+	required["mustAcquireCurrentTargetSnapshot"] = true
+	required["mustUseReadOnlySnapshotAcquisition"] = true
+	required["mustNotMutateWorkspace"] = true
+	required["forbiddenKinds"] = appendUniqueStrings(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply", "file/write", "shell/write")
+	if len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
+		required["mustTargetRepairTargetSet"] = true
+	}
+	pkg["requiredOutput"] = required
+	contract.RepairActionPackage = pkg
+	contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+}
+
 func populateCoverageWorkItemStateChangeConvergenceContract(input map[string]any, contract *ConvergenceContract) {
 	if contract == nil {
 		return
@@ -661,6 +706,37 @@ func populateCoverageWorkItemStateChangeConvergenceContract(input map[string]any
 	required["mustReferenceCoverageWorkItem"] = true
 	contract.RepairActionPackage["requiredOutput"] = required
 	contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
+}
+
+func stateChangeRequiresTargetSnapshotAcquisition(input map[string]any, pkg map[string]any) bool {
+	if len(input) == 0 && len(pkg) == 0 {
+		return false
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	inputRequired := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	requiresSnapshot := boolValue(input["requiresCurrentTargetSnapshotForStateChange"]) ||
+		boolValue(pkg["requiresCurrentTargetSnapshotForStateChange"]) ||
+		boolValue(required["mustUseCurrentTargetSnapshot"]) ||
+		boolValue(inputRequired["mustUseCurrentTargetSnapshot"])
+	if !requiresSnapshot {
+		return false
+	}
+	return !stateChangeHasCurrentTargetSnapshot(input, pkg)
+}
+
+func stateChangeHasCurrentTargetSnapshot(input map[string]any, pkg map[string]any) bool {
+	if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 || len(mapSliceFromValue(pkg["currentTargetSnapshots"])) > 0 {
+		return true
+	}
+	if len(repairActionTargetSnapshots(input)) > 0 {
+		return true
+	}
+	for _, key := range []string{"targetSnapshots", "currentTargetSnapshots", "failureTargetRepairContext", "patchRepairContext", "rootCauseCandidateContext"} {
+		if repairContextHasAdmissibleTargetEvidence(input[key]) {
+			return true
+		}
+	}
+	return false
 }
 
 func convergenceInputRequiresPendingArtifactStateChangingOutput(input map[string]any, pkg map[string]any) bool {

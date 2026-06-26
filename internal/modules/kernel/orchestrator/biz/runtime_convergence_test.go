@@ -5035,3 +5035,73 @@ func TestBuildConvergenceContractValidationReadOnlyContractLoopNeedsEvidenceWhen
 		t.Fatalf("applied input = %+v, want evidence acquisition repair", applied)
 	}
 }
+
+func TestBuildConvergenceContractStateChangeRequiresTargetSnapshotAcquisition(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": "state_change"},
+		},
+		"repairActionPackage": map[string]any{
+			"requiresCurrentTargetSnapshotForStateChange": true,
+			"repairTargetSet": []string{
+				"target.txt",
+			},
+			"requiredOutput": map[string]any{
+				"mustUseCurrentTargetSnapshot": true,
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedEvidence ||
+		contract.RuntimeStageMode != "target_snapshot_acquisition" ||
+		contract.RepairObjective != repairObjectiveAcquireFailureEvidence {
+		t.Fatalf("convergenceContract = %+v, want target snapshot acquisition", contract)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if required["mustAcquireCurrentTargetSnapshot"] != true ||
+		required["mustUseReadOnlySnapshotAcquisition"] != true ||
+		required["mustNotMutateWorkspace"] != true {
+		t.Fatalf("requiredOutput = %+v, want read-only target snapshot acquisition contract", required)
+	}
+	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want no state-changing accepted kind during snapshot acquisition", required)
+	}
+}
+
+func TestBuildConvergenceContractStateChangeUsesExistingTargetSnapshot(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": "state_change"},
+		},
+		"repairActionPackage": map[string]any{
+			"requiresCurrentTargetSnapshotForStateChange": true,
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "target.txt",
+				"exists":           true,
+				"contentHash":      "hash-target",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+			"requiredOutput": map[string]any{
+				"mustUseCurrentTargetSnapshot": true,
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange ||
+		contract.RepairObjective != repairObjectiveStateChangingOutput ||
+		!contract.StateChangingOutputRequired {
+		t.Fatalf("convergenceContract = %+v, want state_change with existing snapshot", contract)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if required["mustAcquireCurrentTargetSnapshot"] == true {
+		t.Fatalf("requiredOutput = %+v, want no acquisition requirement when snapshot exists", required)
+	}
+	if !boolValue(required["mustUseCurrentTargetSnapshot"]) {
+		t.Fatalf("requiredOutput = %+v, want direct snapshot patch contract", required)
+	}
+}

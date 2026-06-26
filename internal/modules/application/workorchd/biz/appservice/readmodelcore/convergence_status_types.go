@@ -13,6 +13,9 @@ type ConvergenceStatus struct {
 	LatestEffectiveProgressAt   string   `json:"latestEffectiveProgressAt,omitempty"`
 	LatestContractViolationRule string   `json:"latestContractViolationRule,omitempty"`
 	LatestRecovery              string   `json:"latestRecovery,omitempty"`
+	DecisionEligibilityDenied   bool     `json:"decisionEligibilityDenied,omitempty"`
+	DecisionNotEligibleReason   string   `json:"decisionNotEligibleReason,omitempty"`
+	DecisionNotEligibleStepID   string   `json:"decisionNotEligibleStepId,omitempty"`
 	Stalled                     bool     `json:"stalled,omitempty"`
 	IneffectiveRetry            bool     `json:"ineffectiveRetry,omitempty"`
 }

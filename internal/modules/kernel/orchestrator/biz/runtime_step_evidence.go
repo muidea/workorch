@@ -110,6 +110,9 @@ func (o *RuntimeOrchestrator) recordCompletedRuntimeStepEvidence(ctx context.Con
 		func() error {
 			return o.recordValidationResult(ctx, run, step, common.ValidationResultStatePassed, localizedStepCompletionSummary(language), evidenceRef, "")
 		},
+		func() error {
+			return o.recordAcceptedTargetSnapshotEvidenceForStep(ctx, run, step)
+		},
 	)
 }
 

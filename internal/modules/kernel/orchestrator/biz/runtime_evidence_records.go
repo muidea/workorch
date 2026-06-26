@@ -12,6 +12,7 @@ import (
 
 const (
 	evidenceRecordSourceTypePatch             = "patch"
+	evidenceRecordSourceTypeTargetSnapshot    = "target_snapshot"
 	evidenceRecordSourceTypeValidationResult  = "validation_result"
 	evidenceRecordSourceTypeContractViolation = "contract_violation"
 	evidenceRecordSubjectWorkspaceItem        = "workspace_target"
@@ -166,6 +167,99 @@ func evidenceStatusForValidationResult(state common.ValidationResultState) strin
 		return orchestratormodel.EvidenceStatusRejected
 	default:
 		return ""
+	}
+}
+
+func (o *RuntimeOrchestrator) recordAcceptedTargetSnapshotEvidenceForStep(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
+	if o == nil || o.evidence.EvidenceRecords == nil || run == nil || step == nil {
+		return nil
+	}
+	record := acceptedTargetSnapshotEvidenceRecordForStep(run, step)
+	if record == nil {
+		return nil
+	}
+	return repository.CreateOrUpdateEvidenceRecord(ctx, o.evidence.EvidenceRecords, record)
+}
+
+func acceptedTargetSnapshotEvidenceRecordForStep(run *runModel.Run, step *runModel.Step) *orchestratormodel.EvidenceRecord {
+	if run == nil || step == nil || step.ID == "" {
+		return nil
+	}
+	output := mapFromValue(step.Output)
+	if len(output) == 0 || strings.TrimSpace(stringFromMap(output, "stage")) != "file_read" {
+		return nil
+	}
+	if !boolValue(output["exists"]) || boolValue(output["isBinary"]) || boolValue(output["truncated"]) || boolValue(output["redacted"]) {
+		return nil
+	}
+	targetRef := strings.TrimSpace(firstNonEmptyString(stringFromMap(output, "path"), stringFromMap(output, "targetRef")))
+	if targetRef == "" {
+		return nil
+	}
+	content := stringFromMap(output, "content")
+	if strings.TrimSpace(content) == "" || containsRuntimeRedactionMarker(content) {
+		return nil
+	}
+	contentComplete := true
+	if value, ok := output["contentComplete"]; ok {
+		contentComplete = boolValue(value)
+	}
+	safeForFileWrite := true
+	if value, ok := output["safeForFileWrite"]; ok {
+		safeForFileWrite = boolValue(value)
+	}
+	if !contentComplete || !safeForFileWrite {
+		return nil
+	}
+	contentHash := strings.TrimSpace(stringFromMap(output, "contentHash"))
+	if contentHash == "" {
+		contentHash = sha256HexBytes([]byte(content))
+	}
+	sourceRef := runtimeRawPayloadRef(run.WorkspaceID, run.ID, "steps", string(step.ID), "output.json")
+	timestamp := runtimeEvidenceTimestamp()
+	graphRootID := graphRootStepID(step)
+	metadata := map[string]any{
+		"targetRef":         targetRef,
+		"contentHash":       contentHash,
+		"contentComplete":   true,
+		"safeForFileWrite":  true,
+		"redacted":          false,
+		"truncated":         false,
+		"isBinary":          false,
+		"snapshotIntegrity": "complete_unredacted_text",
+		"snapshotValidity":  "valid_for_recorded_step_output",
+		"capturedAt":        timestamp,
+		"sourceStepId":      strings.TrimSpace(string(step.ID)),
+		"sourceOutputRef":   sourceRef,
+		"consumption":       "state_change_target_snapshot",
+	}
+	if graphRootID != "" {
+		metadata["graphRootStepId"] = string(graphRootID)
+	}
+	if nodeID := strings.TrimSpace(graphNodeID(step)); nodeID != "" {
+		metadata["graphNodeId"] = nodeID
+	}
+	if size, ok := output["size"]; ok {
+		metadata["size"] = compactLLMContextValue(size, 1)
+	}
+	if source := strings.TrimSpace(stringFromMap(output, "source")); source != "" {
+		metadata["source"] = source
+	}
+	return &orchestratormodel.EvidenceRecord{
+		ID:                 orchestratormodel.StableEvidenceRecordID(sourceRef, "target-snapshot", targetRef),
+		WorkspaceID:        run.WorkspaceID,
+		RunID:              firstNonEmptyRunID(step.RunID, run.ID),
+		StepID:             step.ID,
+		DefinitionRevision: strings.TrimSpace(run.DefinitionRevision),
+		Kind:               orchestratormodel.EvidenceKindTargetSnapshot,
+		Status:             orchestratormodel.EvidenceStatusAccepted,
+		SourceType:         evidenceRecordSourceTypeTargetSnapshot,
+		SourceRef:          sourceRef,
+		SubjectType:        evidenceRecordSubjectWorkspaceItem,
+		SubjectID:          targetRef,
+		CreatedAt:          timestamp,
+		UpdatedAt:          timestamp,
+		Metadata:           metadata,
 	}
 }
 
