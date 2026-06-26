@@ -1,10 +1,12 @@
 # Convergence Authority Simplification Design
 
-Status: active
+Status: closed
 
 Type: closure-design
 
-Last Updated: 2026-06-25
+Last Updated: 2026-06-26
+
+Closed At: 2026-06-26
 
 Related:
 
@@ -365,3 +367,33 @@ Live verification after code closure:
 | S6 Projection/ViewModel Alignment | code-closed | Projection reads `convergenceAuthority.nextAction` before local derivation and emits `stale_persisted_next_action` diagnostic on any persisted baseline nextAction mismatch. `coverage_summary.go` no longer treats historical placeholder next actions as a special compatibility branch. |
 | S7 Access Boundary Cleanup | verified | Precise search found no user-visible `/run continue` command or `Intent("continue")`; remote mode remains on-demand through projection events unless agent requires full stream. |
 | S8 Regression and Boundary Gate | code-closed | Added authority snapshot, event-driven dispatch stale-payload overwrite, resume-wrapper authority skip, focus diagnostic stripping, projection authority, stale replan repair package suppression and stale replan output-mode budget suppression regression tests; targeted package tests and full `go test ./... -count=1` pass. |
+
+## Final Closure Verification
+
+Closed scope:
+
+- Runtime convergence authority is now selected from structured owner state before dispatch.
+- `gapBaseline`、`convergenceContract`、`stagePacket` and `repairActionPackage` are derived from the current authority snapshot, not from stale continuation lineage.
+- Replan successor hydration no longer carries old `repairActionPackage` as current action authority.
+- Output-mode selection no longer reads stale replan continuation budget signals.
+- Historical placeholder next-action compatibility paths have been removed.
+- TUI/Web/CLI command semantics remain scoped command submission plus projection/ViewModel display.
+
+Closure commits:
+
+- `a6e21135 remove legacy next action compatibility`
+- `51c0ad68 fix replan authority lineage pollution`
+- `0abf5b7c fix resume authority field merge`
+- `1184ec57 fix dispatch authority snapshot refresh`
+- `74fb3053 fix authority output mode inheritance`
+
+Verification commands completed:
+
+```bash
+go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice/readmodelprojection -count=1
+go test ./... -count=1
+rg -n "<legacy-placeholder-next-action>" internal/modules/kernel/orchestrator/biz internal/modules/application/workorchd/biz/appservice internal/pkg docs/70-roadmap/active/convergence-authority-simplification-design.md -g '*.go' -g '*.md'
+git diff --check
+```
+
+The legacy placeholder next-action boundary search intentionally returns no matches after closure.
