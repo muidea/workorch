@@ -16,6 +16,7 @@ const (
 	ContractViolationRecoverabilityRetrySameContract  = "retry_same_contract"
 	ContractViolationRecoverabilityNarrowContract     = "narrow_contract"
 	ContractViolationRecoverabilityNormalizeThenRetry = "normalize_then_retry"
+	ContractViolationRecoverabilityRecomputeAuthority = "recompute_authority"
 	ContractViolationRecoverabilityDecisionRequired   = "decision_required"
 	ContractViolationRecoverabilityFailFast           = "fail_fast"
 )
@@ -107,6 +108,7 @@ func normalizedContractViolationRecoverability(value string) string {
 	case ContractViolationRecoverabilityRetrySameContract,
 		ContractViolationRecoverabilityNarrowContract,
 		ContractViolationRecoverabilityNormalizeThenRetry,
+		ContractViolationRecoverabilityRecomputeAuthority,
 		ContractViolationRecoverabilityDecisionRequired,
 		ContractViolationRecoverabilityFailFast:
 		return strings.TrimSpace(value)

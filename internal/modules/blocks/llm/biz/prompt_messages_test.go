@@ -252,6 +252,44 @@ func TestBuildPromptContextIncludesAcceptanceFocusAsVolatileTail(t *testing.T) {
 	}
 }
 
+func TestBuildPromptContextSuppressesAcceptanceFocusWhenStagePacketHasActiveFocus(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-acceptance-authority",
+		RunID:          "run-acceptance-authority",
+		StepID:         "step-acceptance-authority",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"stagePacket": map[string]any{
+				"activeFocus": map[string]any{
+					"id": "cwi-current",
+				},
+			},
+			"acceptance": map[string]any{
+				"activeSliceId": "slice-stale",
+				"currentFocus": map[string]any{
+					"id":                  "focus-cwi-stale",
+					"coverageWorkItemIds": []any{"cwi-stale"},
+				},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	if section, ok := promptContextSectionByID(context, "C4.acceptance-focus"); ok {
+		t.Fatalf("C4.acceptance-focus = %s, want suppressed when C3 stagePacket has activeFocus", section.Content)
+	}
+	contract, ok := promptContextSectionByID(context, "C3.stage-packet-contract")
+	if !ok {
+		t.Fatalf("missing C3.stage-packet-contract; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	if !strings.Contains(contract.Content, "cwi-current") || strings.Contains(contract.Content, "focus-cwi-stale") {
+		t.Fatalf("stage packet contract content = %s, want only authority focus", contract.Content)
+	}
+}
+
 func TestBuildPromptContextKeepsCacheableSectionsAsContiguousPrefix(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-cache-prefix",

@@ -493,6 +493,7 @@ type deleteWorkspaceFunc func(context.Context, string, string, string, appservic
 type refreshWorkspaceTemplateBindingFunc func(context.Context, string, string, string) (appservice.Workspace, error)
 type readWorkspaceFunc func(context.Context, string, string, string) (appservice.Workspace, error)
 type readWorkspaceSnapshotFunc func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error)
+type readProjectionSnapshotFunc func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error)
 type readWorkspaceSoulBindingsFunc func(context.Context, string, string, string) (appservice.WorkspaceSoulBindings, error)
 type updateWorkspaceSoulBindingsFunc func(context.Context, string, string, string, appservice.WorkspaceSoulBindings) (appservice.WorkspaceSoulBindings, error)
 type listWorkspacesFunc func(context.Context, string, string) ([]appservice.Workspace, error)
@@ -588,6 +589,7 @@ type serverState struct {
 	refreshWorkspaceTemplate     refreshWorkspaceTemplateBindingFunc
 	readWorkspace                readWorkspaceFunc
 	readWorkspaceSnapshot        readWorkspaceSnapshotFunc
+	readProjectionSnapshot       readProjectionSnapshotFunc
 	readWorkspaceSoulBindings    readWorkspaceSoulBindingsFunc
 	updateWorkspaceSoulBindings  updateWorkspaceSoulBindingsFunc
 	listWorkspaces               listWorkspacesFunc
@@ -1042,6 +1044,7 @@ func newServerStateWithBackground(config Config, eventHub events.Hub, background
 		refreshWorkspaceTemplate:     defaultRefreshWorkspaceTemplateBinding,
 		readWorkspace:                defaultReadWorkspace,
 		readWorkspaceSnapshot:        defaultReadWorkspaceSnapshot,
+		readProjectionSnapshot:       defaultReadWorkspaceProjectionSnapshot,
 		readWorkspaceSoulBindings:    defaultReadWorkspaceSoulBindings,
 		updateWorkspaceSoulBindings:  defaultUpdateWorkspaceSoulBindings,
 		listWorkspaces:               defaultListWorkspaces,
@@ -1211,6 +1214,15 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceSnapshotWithSession(ctx, session, workspaceID)
+			return err
+		})
+		return ret, err
+	}
+	s.readProjectionSnapshot = func(ctx context.Context, _, _, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+		var ret appservice.WorkspaceSnapshot
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadWorkspaceProjectionSnapshotWithSession(ctx, session, workspaceID)
 			return err
 		})
 		return ret, err

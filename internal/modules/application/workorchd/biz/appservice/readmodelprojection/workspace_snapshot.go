@@ -26,6 +26,7 @@ func WorkspaceSnapshotFromModels(input WorkspaceSnapshotModelInput) readmodelcor
 	ret.TaskProgress = MapLocalizedWorkspaceTaskProgress(ret)
 	ret.Outcome = MapWorkspaceOutcome(ret)
 	ret.RunHeartbeat = MapRunHeartbeat(ret)
+	ret.ConvergenceStatus = MapWorkspaceConvergenceStatus(ret)
 	ret = WorkspaceSnapshotWithContextBundle(ret)
 	return ret
 }

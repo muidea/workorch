@@ -153,6 +153,7 @@ func (s *runStateSubsystem) syncRunAndWorkspaceForActiveState(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
+	normalizeRunConvergenceOwnerState(run)
 	ws.ActiveRunID = run.ID
 	ws.State = state
 	if err := runParallel(

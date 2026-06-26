@@ -102,6 +102,44 @@ func TestRunObservabilityUsesCompleteEventTimeline(t *testing.T) {
 	}
 }
 
+func TestRunSnapshotProjectionUsesCompactEventTimeline(t *testing.T) {
+	t.Parallel()
+
+	workspace := &workspacemodel.Workspace{ID: "ws-run-projection-events", Title: "run projection events", State: common.WorkspaceStateRunning}
+	run := &runmodel.Run{ID: "run-projection-events", WorkspaceID: workspace.ID, State: common.RunStateRunning}
+	events := &fakeRunSnapshotEventReader{}
+
+	_, err := RunSnapshot(context.Background(), RunSnapshotReaders{
+		Workspaces:            fakeRunSnapshotWorkspaceReader{items: []*workspacemodel.Workspace{workspace}},
+		Runs:                  fakeRunStatusRunReader{items: []*runmodel.Run{run}},
+		Steps:                 fakeRunStatusStepReader{},
+		ToolCalls:             fakeRunSnapshotToolCallReader{},
+		Patches:               fakeRunSnapshotPatchReader{},
+		Validations:           fakeRunSnapshotValidationReader{},
+		Checkpoints:           fakeRunStatusCheckpointReader{},
+		Results:               fakeRunSnapshotResultReader{},
+		Artifacts:             fakeRunSnapshotArtifactReader{},
+		ArtifactContinuations: fakeRunSnapshotArtifactContinuationReader{},
+		EventRecords:          events,
+		MemoryRecalls:         fakeRunSnapshotMemoryRecallReader{},
+		Tickets:               fakeTicketReader{},
+		Resolutions:           fakeResolutionReader{},
+		Approvals:             fakeApprovalListReader{},
+	}, run.ID)
+	if err != nil {
+		t.Fatalf("RunSnapshot: %v", err)
+	}
+	if len(events.queries) < 1 {
+		t.Fatalf("event reader queries = %d, want projection event query", len(events.queries))
+	}
+	if events.queries[0].IncludePayload {
+		t.Fatalf("projection include payload = true, want compact metadata-only query")
+	}
+	if len(events.queries[0].ExcludeTopics) != 1 || events.queries[0].ExcludeTopics[0] != runevents.TopicRunLLMStreamProgress {
+		t.Fatalf("projection exclude topics = %+v, want stream progress excluded", events.queries[0].ExcludeTopics)
+	}
+}
+
 func TestRunSnapshotViewHelpersProjectDirectSnapshots(t *testing.T) {
 	t.Parallel()
 

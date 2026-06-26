@@ -66,7 +66,8 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		state.metrics.workspaceSnapshotRequests.Add(1)
-		item, projection, err := state.readProjectedWorkspaceSnapshot(workspaceID)
+		projection := state.workspaceProjectionStatus()
+		item, err := state.readWorkspaceSnapshot(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
 		if err != nil {
 			writeJSON(w, projectionHTTPStatus(err), workspaceSnapshotResponse{
 				Service:    "workorch",
@@ -76,6 +77,10 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 				Error:      err.Error(),
 			})
 			return
+		}
+		if projected, projectedStatus, readErr := state.readProjectedWorkspaceSnapshot(workspaceID); readErr == nil {
+			item = mergeWorkspaceProjectionOverlay(item, projected)
+			projection = projectedStatus
 		}
 		writeJSON(w, http.StatusOK, workspaceSnapshotResponse{
 			Service:    "workorch",

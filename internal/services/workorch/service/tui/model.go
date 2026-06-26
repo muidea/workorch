@@ -88,6 +88,7 @@ type AppModel struct {
 	acceptance             backend.AcceptanceProjectionInfo
 	runHeartbeat           backend.RunHeartbeatInfo
 	runtimeExecution       *backend.RuntimeExecutionInfo
+	convergenceStatus      *backend.ConvergenceStatusInfo
 	runCommand             *backend.RunCommandStatusInfo
 	schedulerDiagnostics   *backend.SchedulerDiagnosticsInfo
 	runtimeEvents          []string

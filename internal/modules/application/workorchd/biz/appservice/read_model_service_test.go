@@ -414,8 +414,8 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 			t.Fatalf("snapshot event contains raw output payload: %+v", item.Payload)
 		}
 	}
-	if snapshot.LLMUsageSummary.EntryTotal != 1 || snapshot.LLMUsageSummary.TotalTokens != 44 {
-		t.Fatalf("llm usage summary = %+v, want one late usage event with 44 tokens", snapshot.LLMUsageSummary)
+	if snapshot.LLMUsageSummary.EntryTotal != 0 || snapshot.LLMUsageSummary.TotalTokens != 0 {
+		t.Fatalf("compact llm usage summary = %+v, want metadata-only snapshot without usage payload hydration", snapshot.LLMUsageSummary)
 	}
 }
 

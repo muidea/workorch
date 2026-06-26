@@ -57,6 +57,11 @@ func (m AppModel) renderInspectStatus() string {
 			b.WriteString("\n")
 		}
 	}
+	if status := convergenceStatusText(m.convergenceStatus); status != "" {
+		b.WriteString("- convergence: ")
+		b.WriteString(status)
+		b.WriteString("\n")
+	}
 	if scheduler := schedulerDiagnosticsStatusText(m.schedulerDiagnostics); scheduler != "" {
 		b.WriteString(scheduler)
 		b.WriteString("\n")

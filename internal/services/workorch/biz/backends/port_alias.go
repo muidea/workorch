@@ -56,6 +56,7 @@ func NormalizeRunCommandIntent(intent RunCommandIntent) (RunCommandIntent, error
 
 type RunStatusInfo = port.RunStatusInfo
 type RuntimeExecutionInfo = port.RuntimeExecutionInfo
+type ConvergenceStatusInfo = port.ConvergenceStatusInfo
 type ContinuationDiagnosticInfo = port.ContinuationDiagnosticInfo
 type ContinuationDiagnosticCountInfo = port.ContinuationDiagnosticCountInfo
 type WatchdogDiagnosticsInfo = port.WatchdogDiagnosticsInfo

@@ -48,6 +48,7 @@ func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshot) re
 		}
 		ret.Approvals = projected
 	}
+	ret.ConvergenceStatus = MapWorkspaceConvergenceStatus(ret)
 	return ret
 }
 

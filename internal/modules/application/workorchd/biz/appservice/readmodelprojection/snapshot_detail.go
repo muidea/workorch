@@ -8,5 +8,13 @@ func ProjectRunSnapshotDetail(snapshot readmodelcore.RunSnapshot) readmodelcore.
 	projectRunSnapshotRuntimeDetails(&ret)
 	projectRunSnapshotResultDetails(&ret)
 	projectRunSnapshotGovernanceDetails(&ret)
+	ret.ConvergenceStatus = MapConvergenceStatus(ret)
+	return ret
+}
+
+func ProjectRunSnapshotCompact(snapshot readmodelcore.RunSnapshot) readmodelcore.RunSnapshot {
+	ret := snapshot
+	projectRunSnapshotStepDetails(&ret)
+	ret.ConvergenceStatus = MapConvergenceStatus(ret)
 	return ret
 }

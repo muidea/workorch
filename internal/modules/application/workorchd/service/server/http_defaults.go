@@ -74,6 +74,10 @@ func defaultReadWorkspaceSnapshot(ctx context.Context, backend string, dataRoot 
 	return appservice.ReadWorkspaceSnapshotWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
+func defaultReadWorkspaceProjectionSnapshot(ctx context.Context, backend string, dataRoot string, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+	return appservice.ReadWorkspaceProjectionSnapshotWithBackend(ctx, backend, dataRoot, workspaceID)
+}
+
 func defaultReadWorkspaceSoulBindings(ctx context.Context, backend string, dataRoot string, workspaceID string) (appservice.WorkspaceSoulBindings, error) {
 	return appservice.ReadWorkspaceSoulBindingsWithBackend(ctx, backend, dataRoot, workspaceID)
 }

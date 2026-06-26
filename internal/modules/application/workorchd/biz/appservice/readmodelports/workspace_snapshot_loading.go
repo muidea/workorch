@@ -8,18 +8,18 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func loadWorkspaceSnapshotModels(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (workspaceSnapshotModels, error) {
+func loadWorkspaceSnapshotModels(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot, options workspaceSnapshotLoadOptions) (workspaceSnapshotModels, error) {
 	var models workspaceSnapshotModels
 	if cachedRunSnapshot != nil && cachedRunSnapshot.Workspace.ID == string(workspaceID) {
 		models.Workspace = workspacecore.WorkspaceModelFromView(cachedRunSnapshot.Workspace)
 	}
 
-	tasks := workspaceSnapshotBaseLoadTasks(ctx, readers, workspaceID, &models)
+	tasks := workspaceSnapshotBaseLoadTasks(ctx, readers, workspaceID, options, &models)
 	if err := readmodelcore.RunTasks(tasks...); err != nil {
 		return workspaceSnapshotModels{}, err
 	}
 	projectionRun := models.selectProjectionRun()
-	if err := models.loadRunDerivedItems(ctx, readers, workspaceID, projectionRun); err != nil {
+	if err := models.loadRunDerivedItems(ctx, readers, workspaceID, projectionRun, options); err != nil {
 		return workspaceSnapshotModels{}, err
 	}
 	decisions, err := DecisionsForWorkspaceItems(ctx, readers.Resolutions, readers.AutoGovernanceTraces, workspaceID, models.Tickets)

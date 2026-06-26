@@ -22,5 +22,7 @@ func MapRunStatus(snapshot readmodelcore.RunSnapshot) readmodelcore.RunStatus {
 		ret.CurrentStepKind = llmcommon.CanonicalRuntimeBlockKind(snapshot.Step.Kind)
 		ret.CurrentStepState = snapshot.Step.State
 	}
+	ret.RuntimeExecution = snapshot.RuntimeExecution
+	ret.ConvergenceStatus = MapConvergenceStatus(snapshot)
 	return ret
 }

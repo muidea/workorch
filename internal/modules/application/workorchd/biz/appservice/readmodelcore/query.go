@@ -44,7 +44,7 @@ func RunObservabilityEventRecordRepositoryQuery(runID common.RunID, limit int) r
 }
 
 func RunProjectionEventRecordRepositoryQuery(runID common.RunID, limit int) repository.EventRecordQuery {
-	query := RunObservabilityEventRecordRepositoryQuery(runID, limit)
+	query := RunEventRecordRepositoryQuery(runID, limit)
 	query.ExcludeTopics = []string{runevents.TopicRunLLMStreamProgress}
 	return query
 }

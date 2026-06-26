@@ -192,6 +192,7 @@ func runStatusFromWorkspaceSnapshot(snapshot *backend.WorkspaceSnapshotInfo, run
 		BlockingApprovalID: run.BlockingApprovalID,
 		FailureReason:      run.FailureReason,
 		RuntimeExecution:   cloneRuntimeExecutionInfoPtr(snapshot.RuntimeExecution),
+		ConvergenceStatus:  cloneConvergenceStatusInfoPtr(snapshot.ConvergenceStatus),
 	}
 	if snapshot.TaskProgress.RunID == "" || snapshot.TaskProgress.RunID == run.ID {
 		if snapshot.TaskProgress.State != "" {

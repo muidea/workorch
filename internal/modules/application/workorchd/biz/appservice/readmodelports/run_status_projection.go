@@ -36,5 +36,14 @@ func projectRunStatus(item *runmodel.Run, related runStatusRelatedModels) readmo
 		}
 	}
 	ret.RuntimeExecution = readmodelprojection.MapRuntimeExecutionState(stepViews, readmodelprojection.MapRuntimeCheckpoints(related.checkpoints), currentStep)
+	ret.ConvergenceStatus = &readmodelcore.ConvergenceStatus{
+		WorkspaceID: string(item.WorkspaceID),
+		RunID:       string(item.ID),
+		RunState:    string(item.State),
+	}
+	if ret.RuntimeExecution != nil && ret.RuntimeExecution.ContractViolation != nil {
+		ret.ConvergenceStatus.LatestContractViolationRule = ret.RuntimeExecution.ContractViolation.ViolatedRule
+		ret.ConvergenceStatus.LatestRecovery = ret.RuntimeExecution.ContractViolation.Recoverability
+	}
 	return ret
 }

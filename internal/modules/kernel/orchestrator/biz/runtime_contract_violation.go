@@ -17,6 +17,7 @@ const (
 	contractViolationRuleStateChangingRequiredMissing  = "state_changing_required_missing"
 	contractViolationRuleConcreteValidationMissing     = "concrete_validation_contract_missing"
 	contractViolationRuleDoDAssessmentEvidenceMissing  = "dod_assessment_missing_evidence_refs"
+	contractViolationRuleCoverageAssessmentIncomplete  = "coverage_assessment_incomplete"
 	contractViolationRuleCoverageMapIncomplete         = "coverage_map_incomplete"
 	contractViolationRuleTraceabilityRefMismatch       = "traceability_ref_mismatch"
 	contractViolationRuleDecisionBlockedWhenActionable = "decision_blocked_when_actionable"
@@ -184,6 +185,11 @@ func applyContractViolationRecoveryProjection(input map[string]any, failedStep *
 		violation["targetScope"] = stringFromMap(correction, "targetScope")
 		violation["correctionContract"] = mapFromValue(correction["contract"])
 	}
+	budgetScope := contractViolationRecoveryBudgetScope(input, failedStep)
+	if len(budgetScope) > 0 {
+		input[stepInputKeyRecoveryBudgetScope] = budgetScope
+		violation["budgetScope"] = cloneStepPayload(budgetScope)
+	}
 	input[stepInputKeyContractViolationRecovery] = violation
 	input["contractViolationRetry"] = true
 	input[stepInputKeyRecoveryLineageType] = "contract_violation_retry"
@@ -193,6 +199,39 @@ func applyContractViolationRecoveryProjection(input map[string]any, failedStep *
 		"Use contractViolationRecovery.correctionContract as the current narrow retry contract; if correctionMode is forced_narrow, return only an allowed output shape from that contract or a real governance blocker.",
 		"Return one valid JSON decision that satisfies the same runtimeStage and repairObjective; do not weaken Goal, DoD, evidence, or approval requirements.",
 	)
+}
+
+func contractViolationRecoveryBudgetScope(input map[string]any, failedStep *runModel.Step) map[string]any {
+	if failedStep == nil {
+		return nil
+	}
+	rootStepID := runtimeRepairRootStepID(failedStep)
+	scope := recoveryBudgetScope(
+		"contract_violation_retry",
+		rootStepID,
+		stringFromMap(failedStep.Output, failureOutputKeyClass),
+		stringFromMap(failedStep.Output, failureOutputKeySignature),
+	)
+	focus := dispatchAuthorityCurrentFocus(input)
+	if len(focus) == 0 {
+		focus = mapFromValue(input[coverageFocusKey])
+	}
+	if len(focus) == 0 {
+		focus = mapFromValue(mapFromValue(input[coverageWorkItemContextKey])["currentFocus"])
+	}
+	if len(focus) == 0 {
+		focus = mapFromValue(mapFromValue(input[gapBaselineKey])["currentFocus"])
+	}
+	if focusID := strings.TrimSpace(stringFromMap(focus, "id")); focusID != "" {
+		scope["focusId"] = focusID
+	}
+	if sliceID := strings.TrimSpace(stringFromMap(focus, "sliceId")); sliceID != "" {
+		scope["sliceId"] = sliceID
+	}
+	if ids := dispatchFocusWorkItemIDs(focus); len(ids) > 0 {
+		scope["coverageWorkItemIds"] = ids
+	}
+	return scope
 }
 
 func contractViolationFromFailedOutput(step *runModel.Step) map[string]any {
@@ -209,6 +248,9 @@ func contractViolationFromFailedOutput(step *runModel.Step) map[string]any {
 func failedStepHasRecoverableContractViolation(step *runModel.Step) bool {
 	violation := contractViolationFromFailedOutput(step)
 	if len(violation) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(violation, "violatedRule")) == contractViolationRuleCoverageAssessmentIncomplete {
 		return false
 	}
 	switch strings.TrimSpace(stringFromMap(violation, "recoverability")) {
@@ -297,6 +339,9 @@ func contractViolationRetryWithinBudget(ctx context.Context, repair *repairSubsy
 	if repair == nil || run == nil || failedStep == nil || !failedStepHasRecoverableContractViolation(failedStep) {
 		return false
 	}
+	if !contractViolationCurrentActionAllowsLLMRetry(run, failedStep) {
+		return false
+	}
 	policy = NormalizeRuntimePolicy(policy)
 	if contractViolationRetryAttemptCount(ctx, repair, run.ID, failedStep) >= policy.MaxContractViolationRetriesPerStep {
 		return false
@@ -308,6 +353,29 @@ func contractViolationRetryWithinBudget(ctx context.Context, repair *repairSubsy
 		return false
 	}
 	return true
+}
+
+func contractViolationCurrentActionAllowsLLMRetry(run *runModel.Run, failedStep *runModel.Step) bool {
+	input := map[string]any{}
+	if failedStep != nil {
+		input = failedStep.Input
+	}
+	kind := strings.TrimSpace(convergenceNextActionKind(run, input))
+	if kind == "" {
+		return true
+	}
+	switch kind {
+	case "assess_gap", "repair", "state_change", "produce_state_change",
+		"validate", "validation", "produce_validation_evidence",
+		"assessment", "complete_coverage_assessment",
+		"artifact", "produce_artifact_evidence":
+		return true
+	case "request_decision", "wait_decision", "request_approval", "wait_approval",
+		"request_governance", "no_action", "complete", "fail", "fail_fast":
+		return false
+	default:
+		return false
+	}
 }
 
 func contractViolationRuleFromStep(step *runModel.Step) string {
@@ -342,12 +410,30 @@ func contractViolationRuleFromStep(step *runModel.Step) string {
 		return contractViolationRuleAvailableSnapshotIgnored
 	}
 	if strings.TrimSpace(stringFromMap(output, failureOutputKeyClass)) == failureClassDoDCoverageMissing {
+		if doDCoverageMissingOutputHasStructuredCoverageGaps(output) {
+			return contractViolationRuleCoverageAssessmentIncomplete
+		}
 		return contractViolationRuleDoDAssessmentEvidenceMissing
 	}
 	if strings.TrimSpace(stringFromMap(output, "stage")) == "llm_schema_invalid" {
 		return contractViolationRuleUnparseableOutput
 	}
 	return contractViolationRuleRuntimeContract
+}
+
+func doDCoverageMissingOutputHasStructuredCoverageGaps(output map[string]any) bool {
+	if len(output) == 0 {
+		return false
+	}
+	if len(missingDoDItemsFromFailureOutput(output)) > 0 ||
+		len(missingGoalCoverageFromFailureOutput(output)) > 0 ||
+		len(missingDeliverableCoverageFromFailureOutput(output)) > 0 {
+		return true
+	}
+	diagnostics := mapFromValue(output["runtimeDiagnostics"])
+	return len(mapSliceFromValue(diagnostics["missingDoDItems"])) > 0 ||
+		len(mapSliceFromValue(diagnostics["missingGoalCoverage"])) > 0 ||
+		len(mapSliceFromValue(diagnostics["missingDeliverableCoverage"])) > 0
 }
 
 func contractViolationRecoverabilityForRule(rule string) string {
@@ -358,6 +444,8 @@ func contractViolationRecoverabilityForRule(rule string) string {
 		return runtimemodel.ContractViolationRecoverabilityNarrowContract
 	case contractViolationRuleTraceabilityRefMismatch:
 		return runtimemodel.ContractViolationRecoverabilityNormalizeThenRetry
+	case contractViolationRuleCoverageAssessmentIncomplete:
+		return runtimemodel.ContractViolationRecoverabilityRecomputeAuthority
 	default:
 		return runtimemodel.ContractViolationRecoverabilityRetrySameContract
 	}
@@ -458,6 +546,12 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 		if snapshots := contractViolationAvailableTargetSnapshotSummary(step); len(snapshots) > 0 {
 			contract["availableTargetSnapshots"] = snapshots
 		}
+	case contractViolationRuleCoverageAssessmentIncomplete:
+		profileID = "coverage_next_action_recompute"
+		contract["requiredOutputShape"] = "authority_recomputed_next_action"
+		contract["allowedOutputs"] = []string{"recomputed_convergence_authority_next_action", "bounded_focus_assessment_if_current_action_is_assessment"}
+		contract["requiredFields"] = []string{"missingGoalCoverage_or_missingDeliverableCoverage", "convergenceAuthority.nextAction"}
+		contract["forbiddenOutputs"] = []string{"same_failed_global_dodAssessment", "satisfied_global_assessment_with_open_coverage", "untraceable_summary_only"}
 	case contractViolationRuleCoverageMapIncomplete, contractViolationRuleDoDAssessmentEvidenceMissing:
 		if profile, ok := contractViolationRequiredOutputCorrectionProfile(step, contract); ok {
 			profileID = profile

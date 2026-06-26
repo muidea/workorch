@@ -22,11 +22,22 @@ func (o *RuntimeOrchestrator) requestDispatchStep(ctx context.Context, runID com
 	if o == nil || runID == "" || spec.ID == "" || spec.Kind == "" {
 		return common.ErrInvalidArgument
 	}
+	run, err := o.runtimeEventRun(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), runID)
+	if err != nil {
+		return err
+	}
+	if workspaceID == "" {
+		workspaceID = run.WorkspaceID
+	}
+	prepared, err := o.prepareGapBaselineDispatchSpecs(ctx, run, []stepDispatchSpec{spec})
+	if err != nil {
+		return err
+	}
+	if len(prepared) != 1 {
+		return common.ErrConflict
+	}
+	spec = prepared[0]
 	if !o.eventDrivenDispatch {
-		run, err := o.runtimeEventRun(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), runID)
-		if err != nil {
-			return err
-		}
 		return o.dispatchStepWithWorkspace(ctx, run, spec.ID, spec.Kind, spec.Input, nil)
 	}
 	idempotencyKey := dispatchStepIdempotencyKey(workspaceID, runID, spec.ID, spec.Kind)

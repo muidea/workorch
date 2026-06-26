@@ -618,6 +618,90 @@ func renderRuntimeExecutionCompact(item *backend.RuntimeExecutionInfo, width int
 	return b.String()
 }
 
+func convergenceStatusText(item *backend.ConvergenceStatusInfo) string {
+	if item == nil {
+		return ""
+	}
+	parts := compactStrings([]string{
+		convergenceFocusText(item),
+		convergenceNextActionText(item),
+		convergenceGapText(item),
+		convergenceEvidenceText(item),
+		convergenceViolationText(item),
+		convergenceHeartbeatText(item),
+	})
+	return strings.Join(parts, " | ")
+}
+
+func convergenceFocusText(item *backend.ConvergenceStatusInfo) string {
+	if item == nil || strings.TrimSpace(item.CurrentFocusID) == "" {
+		return ""
+	}
+	return "focus " + strings.TrimSpace(item.CurrentFocusID)
+}
+
+func convergenceNextActionText(item *backend.ConvergenceStatusInfo) string {
+	if item == nil || strings.TrimSpace(item.NextActionKind) == "" {
+		return ""
+	}
+	return "next " + strings.TrimSpace(item.NextActionKind)
+}
+
+func convergenceGapText(item *backend.ConvergenceStatusInfo) string {
+	if item == nil || strings.TrimSpace(item.CurrentGap) == "" {
+		return ""
+	}
+	return "gap " + strings.TrimSpace(item.CurrentGap)
+}
+
+func convergenceEvidenceText(item *backend.ConvergenceStatusInfo) string {
+	if item == nil {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	if len(item.MissingEvidenceKinds) > 0 {
+		parts = append(parts, "missing "+strings.Join(item.MissingEvidenceKinds, ","))
+	}
+	if item.AcceptedEvidenceCount > 0 {
+		parts = append(parts, fmt.Sprintf("accepted %d", item.AcceptedEvidenceCount))
+	}
+	if item.RejectedEvidenceCount > 0 {
+		parts = append(parts, fmt.Sprintf("rejected %d", item.RejectedEvidenceCount))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "evidence " + strings.Join(parts, " ")
+}
+
+func convergenceViolationText(item *backend.ConvergenceStatusInfo) string {
+	if item == nil || strings.TrimSpace(item.LatestContractViolationRule) == "" {
+		return ""
+	}
+	return strings.TrimSpace(strings.Join(compactStrings([]string{
+		"violation",
+		item.LatestContractViolationRule,
+		item.LatestRecovery,
+	}), " "))
+}
+
+func convergenceHeartbeatText(item *backend.ConvergenceStatusInfo) string {
+	if item == nil {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	if item.Stalled {
+		parts = append(parts, "stalled")
+	}
+	if item.IneffectiveRetry {
+		parts = append(parts, "ineffectiveRetry")
+	}
+	if strings.TrimSpace(item.LatestEffectiveProgressAt) != "" {
+		parts = append(parts, "progress "+strings.TrimSpace(item.LatestEffectiveProgressAt))
+	}
+	return strings.Join(parts, " ")
+}
+
 func runtimeExecutionStatusText(item *backend.RuntimeExecutionInfo) string {
 	if item == nil {
 		return ""
@@ -877,6 +961,9 @@ func (m AppModel) renderRuntimeStatusBar(width int) string {
 		parts = append(parts, active)
 	}
 	if status := runtimeExecutionStatusText(m.runtimeExecution); status != "" {
+		parts = append(parts, status)
+	}
+	if status := convergenceStatusText(m.convergenceStatus); status != "" {
 		parts = append(parts, status)
 	}
 	if command := runCommandStatusText(m.runCommand); command != "" {

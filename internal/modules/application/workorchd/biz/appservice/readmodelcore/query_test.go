@@ -114,8 +114,8 @@ func TestRunEventRecordRepositoryQueries(t *testing.T) {
 	}
 
 	projection := RunProjectionEventRecordRepositoryQuery(common.RunID(" run-001 "), 100)
-	if projection.RunID != common.RunID("run-001") || !projection.IncludePayload {
-		t.Fatalf("projection query = %+v, want run scoped hydrated projection query", projection)
+	if projection.RunID != common.RunID("run-001") || projection.IncludePayload {
+		t.Fatalf("projection query = %+v, want run scoped compact projection query", projection)
 	}
 	if len(projection.ExcludeTopics) != 1 || projection.ExcludeTopics[0] != runevents.TopicRunLLMStreamProgress {
 		t.Fatalf("projection exclude topics = %+v, want stream progress excluded", projection.ExcludeTopics)

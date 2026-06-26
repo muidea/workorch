@@ -250,6 +250,53 @@ func TestStoreMarksStaleWithSourceEventRevision(t *testing.T) {
 	}
 }
 
+func TestStoreStaleSnapshotKeepsLastReadyViewModel(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {
+			Workspace: readmodelcore.Workspace{
+				ID:               "ws-a",
+				State:            "waiting_decision",
+				ActiveRunID:      "run-a",
+				BlockingTicketID: "ticket-a",
+			},
+		},
+	}, nil)
+
+	readySnapshot, readyStatus, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get ready snapshot: %v", err)
+	}
+	if readySnapshot.ViewModel.PromptMode != "decision" {
+		t.Fatalf("ready viewModel = %+v, want decision prompt", readySnapshot.ViewModel)
+	}
+
+	store.MarkStale("ws-a", 42)
+
+	staleSnapshot, staleStatus, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get stale snapshot: %v", err)
+	}
+	if staleStatus.State != StateStale || staleStatus.StaleReason != "source_event" {
+		t.Fatalf("stale status = %+v, want source_event stale state", staleStatus)
+	}
+	if staleSnapshot.Workspace.State != readySnapshot.Workspace.State ||
+		staleSnapshot.Workspace.BlockingTicketID != readySnapshot.Workspace.BlockingTicketID {
+		t.Fatalf("stale workspace = %+v, ready = %+v, want last ready workspace state", staleSnapshot.Workspace, readySnapshot.Workspace)
+	}
+	if staleSnapshot.ViewModel.PromptMode != "decision" {
+		t.Fatalf("stale viewModel = %+v, want last ready decision prompt", staleSnapshot.ViewModel)
+	}
+	if staleSnapshot.ViewModel.State != StateStale ||
+		staleSnapshot.ViewModel.StaleReason != "source_event" ||
+		staleSnapshot.ViewModel.SourceEventRevision != 42 {
+		t.Fatalf("stale viewModel = %+v, want stale source revision metadata", staleSnapshot.ViewModel)
+	}
+	if staleSnapshot.ViewModel.ProjectedSourceRevision != readyStatus.ProjectedSourceRevision {
+		t.Fatalf("stale viewModel projected revision = %d, want last ready projected revision %d", staleSnapshot.ViewModel.ProjectedSourceRevision, readyStatus.ProjectedSourceRevision)
+	}
+}
+
 func TestStoreWorkspaceStatusUsesGlobalRevisionForQuietSnapshot(t *testing.T) {
 	store := NewStore()
 	store.ReplaceAll([]appmodelcore.Workspace{
@@ -553,6 +600,80 @@ func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuildOrProjectionFanout(
 	}
 	if progressProjectionCount != 0 {
 		t.Fatalf("published runtime_progress projection events = %d, want none; events=%+v", progressProjectionCount, hub.Published())
+	}
+}
+
+func TestManagerAppliesStepEventsWithoutFullWorkspaceRebuild(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	scheduled := map[string]int{}
+	scheduledFuncs := map[string][]func(context.Context){}
+	manager := NewManager(ManagerOptions{
+		Loader: fakeProjectionLoader{
+			workspaces: []appmodelcore.Workspace{{ID: "ws-a", State: "running", ActiveRunID: "run-a"}},
+			snapshots: map[string]readmodelcore.WorkspaceSnapshot{
+				"ws-a": {
+					Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
+					Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateRunning)},
+				},
+			},
+		},
+		Hub: hub,
+		Schedule: func(name string, fn func(context.Context)) bool {
+			scheduled[name]++
+			scheduledFuncs[name] = append(scheduledFuncs[name], fn)
+			return true
+		},
+	})
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("start manager: %v", err)
+	}
+	scheduledFuncs["workspace_projection_rebuild_all"][0](ctx)
+	if err := manager.RebuildWorkspace(ctx, "ws-a"); err != nil {
+		t.Fatalf("rebuild workspace detail: %v", err)
+	}
+	baselineWorkspaceRebuilds := scheduled["workspace_projection_rebuild"]
+
+	if err := hub.Publish(ctx, events.Envelope{
+		Version:     events.WorkorchEventVersion,
+		Topic:       runevents.TopicStepDispatched,
+		WorkspaceID: "ws-a",
+		RunID:       "run-a",
+		StepID:      "run-a/step-2",
+		Payload:     events.StepPayload("llm/workspace_execution", common.StepStateDispatched, nil, nil),
+	}); err != nil {
+		t.Fatalf("publish step dispatched event: %v", err)
+	}
+	if err := hub.Publish(ctx, events.Envelope{
+		Version:     events.WorkorchEventVersion,
+		Topic:       runevents.TopicStepStateChanged,
+		WorkspaceID: "ws-a",
+		RunID:       "run-a",
+		StepID:      "run-a/step-2",
+		Payload:     events.StepPayload("llm/workspace_execution", common.StepStateCompleted, nil, nil),
+	}); err != nil {
+		t.Fatalf("publish step state event: %v", err)
+	}
+	if scheduled["workspace_projection_rebuild"] != baselineWorkspaceRebuilds {
+		t.Fatalf("workspace rebuilds after step events = %d, want unchanged %d", scheduled["workspace_projection_rebuild"], baselineWorkspaceRebuilds)
+	}
+	snapshot, status, err := manager.ReadWorkspaceSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("read snapshot after step events: %v", err)
+	}
+	if status.State != StateReady || status.SourceEventRevision == 0 || status.ProjectedSourceRevision != status.SourceEventRevision {
+		t.Fatalf("status after step events = %+v, want ready projected progress revision", status)
+	}
+	if snapshot.RunHeartbeat.LatestEventTopic != runevents.TopicStepStateChanged ||
+		snapshot.RunHeartbeat.LatestStepID != "run-a/step-2" ||
+		snapshot.RunHeartbeat.LatestStepState != string(common.StepStateCompleted) {
+		t.Fatalf("heartbeat after step events = %+v", snapshot.RunHeartbeat)
+	}
+	if snapshot.RuntimeExecution == nil ||
+		snapshot.RuntimeExecution.StepID != "run-a/step-2" ||
+		snapshot.RuntimeExecution.StepState != string(common.StepStateCompleted) ||
+		snapshot.RuntimeExecution.LastProgressStage != "step_state" {
+		t.Fatalf("runtime execution after step events = %+v", snapshot.RuntimeExecution)
 	}
 }
 
@@ -917,6 +1038,41 @@ func TestManagerReschedulesWorkspaceRebuildWhenEventArrivesInFlight(t *testing.T
 	}
 	if snapshot.Workspace.Title != "snapshot-2" || loader.calls != 2 {
 		t.Fatalf("snapshot title/calls = %q/%d, want second rebuild to win", snapshot.Workspace.Title, loader.calls)
+	}
+}
+
+func TestManagerCoalescesWorkspaceRebuildsBeforeScheduledTaskRuns(t *testing.T) {
+	ctx := context.Background()
+	loader := &countingProjectionLoader{}
+	var scheduled []func(context.Context)
+	manager := NewManager(ManagerOptions{
+		Loader: loader,
+		Schedule: func(name string, fn func(context.Context)) bool {
+			if name != "workspace_projection_rebuild" {
+				t.Fatalf("scheduled task = %q, want workspace_projection_rebuild", name)
+			}
+			scheduled = append(scheduled, fn)
+			return true
+		},
+		RebuildCoalesceDelay: time.Nanosecond,
+	})
+
+	manager.ScheduleRebuildWorkspace("ws-a")
+	manager.ScheduleRebuildWorkspace("ws-a")
+	manager.ScheduleRebuildWorkspace("ws-a")
+	if len(scheduled) != 1 {
+		t.Fatalf("scheduled rebuilds = %d, want one coalesced task", len(scheduled))
+	}
+	if metrics := manager.Metrics(); metrics.WorkspaceRebuildDebouncedTotal != 2 || metrics.PendingWorkspaceRebuilds != 1 {
+		t.Fatalf("debounce metrics = %+v, want two coalesced events and one pending scheduled workspace", metrics)
+	}
+
+	scheduled[0](ctx)
+	if loader.calls != 1 {
+		t.Fatalf("loader calls = %d, want one rebuild after coalescing", loader.calls)
+	}
+	if metrics := manager.Metrics(); metrics.PendingWorkspaceRebuilds != 0 {
+		t.Fatalf("pending workspace rebuilds = %d, want drained", metrics.PendingWorkspaceRebuilds)
 	}
 }
 

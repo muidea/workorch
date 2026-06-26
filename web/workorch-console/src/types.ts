@@ -392,6 +392,23 @@ export type RuntimeExecution = {
   gap?: string;
 };
 
+export type ConvergenceStatus = {
+  workspaceId?: string;
+  runId?: string;
+  runState?: string;
+  currentFocusId?: string;
+  nextActionKind?: string;
+  currentGap?: string;
+  missingEvidenceKinds?: string[];
+  acceptedEvidenceCount?: number;
+  rejectedEvidenceCount?: number;
+  latestEffectiveProgressAt?: string;
+  latestContractViolationRule?: string;
+  latestRecovery?: string;
+  stalled?: boolean;
+  ineffectiveRetry?: boolean;
+};
+
 export type RunCommandStatus = {
   workspaceId?: string;
   runId?: string;
@@ -1484,6 +1501,7 @@ export type RunSnapshot = {
   acceptance: AcceptanceProjection;
   gapBaseline?: GapBaseline;
   runtimeExecution?: RuntimeExecution;
+  convergenceStatus?: ConvergenceStatus;
   taskDecompositions?: TaskDecomposition[];
   taskPlans?: TaskPlan[];
   executionSections?: ExecutionSection[];
@@ -1514,6 +1532,7 @@ export type WorkspaceSnapshot = {
   taskProgress: TaskProgress;
   runHeartbeat?: RunHeartbeat;
   runtimeExecution?: RuntimeExecution;
+  convergenceStatus?: ConvergenceStatus;
   runCommand?: RunCommandStatus;
   contextBundle?: ContextBundle;
   coverageSummary?: Record<string, unknown>;

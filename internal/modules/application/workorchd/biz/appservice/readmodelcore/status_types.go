@@ -14,5 +14,6 @@ type RunStatus struct {
 	BlockingApprovalID   string                 `json:"blockingApprovalId,omitempty"`
 	FailureReason        string                 `json:"failureReason,omitempty"`
 	RuntimeExecution     *RuntimeExecutionState `json:"runtimeExecution,omitempty"`
+	ConvergenceStatus    *ConvergenceStatus     `json:"convergenceStatus,omitempty"`
 	SchedulerDiagnostics *SchedulerDiagnostics  `json:"schedulerDiagnostics,omitempty"`
 }

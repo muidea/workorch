@@ -399,7 +399,25 @@ type RunStatus struct {
 	BlockingApprovalID   string                `json:"blockingApprovalId,omitempty"`
 	FailureReason        string                `json:"failureReason,omitempty"`
 	RuntimeExecution     *RuntimeExecution     `json:"runtimeExecution,omitempty"`
+	ConvergenceStatus    *ConvergenceStatus    `json:"convergenceStatus,omitempty"`
 	SchedulerDiagnostics *SchedulerDiagnostics `json:"schedulerDiagnostics,omitempty"`
+}
+
+type ConvergenceStatus struct {
+	WorkspaceID                 string   `json:"workspaceId,omitempty"`
+	RunID                       string   `json:"runId,omitempty"`
+	RunState                    string   `json:"runState,omitempty"`
+	CurrentFocusID              string   `json:"currentFocusId,omitempty"`
+	NextActionKind              string   `json:"nextActionKind,omitempty"`
+	CurrentGap                  string   `json:"currentGap,omitempty"`
+	MissingEvidenceKinds        []string `json:"missingEvidenceKinds,omitempty"`
+	AcceptedEvidenceCount       int      `json:"acceptedEvidenceCount,omitempty"`
+	RejectedEvidenceCount       int      `json:"rejectedEvidenceCount,omitempty"`
+	LatestEffectiveProgressAt   string   `json:"latestEffectiveProgressAt,omitempty"`
+	LatestContractViolationRule string   `json:"latestContractViolationRule,omitempty"`
+	LatestRecovery              string   `json:"latestRecovery,omitempty"`
+	Stalled                     bool     `json:"stalled,omitempty"`
+	IneffectiveRetry            bool     `json:"ineffectiveRetry,omitempty"`
 }
 
 type RuntimeExecution struct {
@@ -791,6 +809,7 @@ type WorkspaceSnapshot struct {
 	TaskProgress            TaskProgress            `json:"taskProgress"`
 	RunHeartbeat            RunHeartbeat            `json:"runHeartbeat,omitempty"`
 	RuntimeExecution        *RuntimeExecution       `json:"runtimeExecution,omitempty"`
+	ConvergenceStatus       *ConvergenceStatus      `json:"convergenceStatus,omitempty"`
 	RunCommand              *RunCommandStatus       `json:"runCommand,omitempty"`
 	SchedulerDiagnostics    *SchedulerDiagnostics   `json:"schedulerDiagnostics,omitempty"`
 	ContextBundle           map[string]any          `json:"contextBundle,omitempty"`
@@ -894,6 +913,7 @@ type RunSnapshot struct {
 	TaskDecompositions      []TaskDecomposition     `json:"taskDecompositions,omitempty"`
 	TaskPlans               []TaskPlan              `json:"taskPlans,omitempty"`
 	RuntimeExecution        *RuntimeExecution       `json:"runtimeExecution,omitempty"`
+	ConvergenceStatus       *ConvergenceStatus      `json:"convergenceStatus,omitempty"`
 	SchedulerDiagnostics    *SchedulerDiagnostics   `json:"schedulerDiagnostics,omitempty"`
 	Steps                   []Step                  `json:"steps,omitempty"`
 	ToolCalls               []ToolCall              `json:"toolCalls,omitempty"`

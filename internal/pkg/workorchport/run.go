@@ -87,8 +87,26 @@ type RunStatusInfo struct {
 	BlockingApprovalID   common.ApprovalID
 	FailureReason        string
 	RuntimeExecution     *RuntimeExecutionInfo
+	ConvergenceStatus    *ConvergenceStatusInfo
 	SchedulerDiagnostics *SchedulerDiagnosticsInfo
 	Acceptance           AcceptanceProjectionInfo
+}
+
+type ConvergenceStatusInfo struct {
+	WorkspaceID                 common.WorkspaceID
+	RunID                       common.RunID
+	RunState                    common.RunState
+	CurrentFocusID              string
+	NextActionKind              string
+	CurrentGap                  string
+	MissingEvidenceKinds        []string
+	AcceptedEvidenceCount       int
+	RejectedEvidenceCount       int
+	LatestEffectiveProgressAt   string
+	LatestContractViolationRule string
+	LatestRecovery              string
+	Stalled                     bool
+	IneffectiveRetry            bool
 }
 
 type RuntimeExecutionInfo struct {

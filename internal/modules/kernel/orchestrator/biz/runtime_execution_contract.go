@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -242,6 +243,7 @@ func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, outpu
 	if outputModeIsIncrementalArtifact(step.Input) && artifactOutputPhaseFromInput(step.Input) == artifactOutputPhaseContext {
 		return nil
 	}
+	normalizeConcreteValidationScratchSetupOutput(step, output)
 	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
 		if !graphIsConcreteValidationEvidenceGraph(graph) {
 			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph or a satisfied dodAssessment with concrete evidenceRefs")
@@ -264,6 +266,133 @@ func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, outpu
 		return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph; plain failed dodAssessment does not satisfy repairActionPackage.requiredOutput")
 	}
 	return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph or a satisfied dodAssessment with concrete evidenceRefs")
+}
+
+func normalizeConcreteValidationScratchSetupOutput(step *runModel.Step, output map[string]any) {
+	if step == nil || output == nil {
+		return
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok {
+		return
+	}
+	normalized, changed := normalizeConcreteValidationScratchSetupGraph(step, graph)
+	if !changed {
+		return
+	}
+	output[stepOutputKeyExecutionGraph] = normalized
+}
+
+func normalizeConcreteValidationScratchSetupGraph(step *runModel.Step, graph runtimemodel.BlockExecutionGraph) (runtimemodel.BlockExecutionGraph, bool) {
+	scratch := validationScratchDirFromStep(step)
+	if scratch == "" || len(graph.Nodes) == 0 {
+		return graph, false
+	}
+	changed := false
+	nodes := make([]runtimemodel.BlockExecutionNode, 0, len(graph.Nodes))
+	for _, node := range graph.Nodes {
+		next, ok := normalizeConcreteValidationScratchSetupNode(node, scratch)
+		if ok {
+			changed = true
+		}
+		nodes = append(nodes, next)
+	}
+	if !changed {
+		return graph, false
+	}
+	return runtimemodel.BlockExecutionGraph{Nodes: nodes}, true
+}
+
+func normalizeConcreteValidationScratchSetupNode(node runtimemodel.BlockExecutionNode, validationScratchDir string) (runtimemodel.BlockExecutionNode, bool) {
+	if canonicalRuntimeGraphNodeKind(node.Kind) != "shell/command" || strings.TrimSpace(validationScratchDir) == "" {
+		return node, false
+	}
+	mode := nodeValidationEvidenceMode(node)
+	if !validationEvidenceModeAllowsScratchWrites(mode) {
+		return node, false
+	}
+	target, ok := shellCommandLineSingleMkdirTarget(node.Input)
+	if !ok || strings.TrimSpace(target) == "" {
+		return node, false
+	}
+	if shellCommandLineMentionsPath(target, validationScratchDir) {
+		return node, false
+	}
+	evidence := mapFromValue(node.Input["validationEvidence"])
+	intent := strings.ToLower(strings.Join([]string{
+		node.ID,
+		stringFromMap(evidence, "substituteFor"),
+		stringFromMap(evidence, "substitute"),
+		target,
+	}, " "))
+	if !strings.Contains(intent, "scratch") {
+		return node, false
+	}
+	next := node
+	next.Input = cloneStepPayload(node.Input)
+	next.Input["validationScratchDir"] = validationScratchDir
+	next.Input["validationScratchDirNormalized"] = true
+	if normalizeShellMkdirInputToScratch(next.Input, validationScratchDir) {
+		return next, true
+	}
+	return node, false
+}
+
+func shellCommandLineSingleMkdirTarget(input map[string]any) (string, bool) {
+	if len(input) == 0 {
+		return "", false
+	}
+	command := strings.TrimSpace(stringFromMap(input, "command"))
+	args := stringSliceFromValue(input["args"])
+	if command == "mkdir" {
+		return shellMkdirArgsSingleTarget(args)
+	}
+	if command != "sh" && command != "bash" {
+		return "", false
+	}
+	if len(args) != 2 || strings.TrimSpace(args[0]) != "-c" {
+		return "", false
+	}
+	return shellMkdirScriptSingleTarget(args[1])
+}
+
+func shellMkdirScriptSingleTarget(script string) (string, bool) {
+	fields := strings.Fields(strings.TrimSpace(script))
+	return shellMkdirArgsSingleTarget(fields)
+}
+
+func shellMkdirArgsSingleTarget(args []string) (string, bool) {
+	if len(args) < 2 {
+		return "", false
+	}
+	if strings.TrimSpace(args[0]) != "-p" && strings.TrimSpace(args[0]) != "mkdir" {
+		return "", false
+	}
+	start := 0
+	if strings.TrimSpace(args[0]) == "mkdir" {
+		start = 1
+	}
+	if start >= len(args) || strings.TrimSpace(args[start]) != "-p" {
+		return "", false
+	}
+	if len(args) != start+2 {
+		return "", false
+	}
+	return strings.Trim(strings.TrimSpace(args[start+1]), `"'`), true
+}
+
+func normalizeShellMkdirInputToScratch(input map[string]any, validationScratchDir string) bool {
+	command := strings.TrimSpace(stringFromMap(input, "command"))
+	args := stringSliceFromValue(input["args"])
+	if command == "mkdir" {
+		input["args"] = []string{"-p", validationScratchDir}
+		return true
+	}
+	if (command == "sh" || command == "bash") && len(args) == 2 && strings.TrimSpace(args[0]) == "-c" {
+		input["args"] = []string{"-c", "mkdir -p " + strconv.Quote(validationScratchDir)}
+		return true
+	}
+	return false
 }
 
 func validateConcreteValidationBehaviorEvidenceGraph(step *runModel.Step, graph runtimemodel.BlockExecutionGraph) error {

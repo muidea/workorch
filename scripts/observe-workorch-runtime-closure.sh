@@ -659,6 +659,7 @@ def workspace_live_summary(workspace_id, snapshot_body):
     workspace = snapshot.get("workspace") or {}
     run = snapshot.get("run") or {}
     heartbeat = snapshot.get("runHeartbeat") or {}
+    convergence = snapshot.get("convergenceStatus") or {}
     coverage_summary = snapshot.get("coverageSummary") or {}
     current_focus = coverage_summary.get("currentFocus") or {}
     decisions = list_value(snapshot.get("decisions"))
@@ -714,6 +715,23 @@ def workspace_live_summary(workspace_id, snapshot_body):
             "stalled": bool(heartbeat.get("stalled")),
             "ineffectiveRetry": bool(heartbeat.get("ineffectiveRetry")),
         },
+        "convergenceStatus": {
+            "present": bool(convergence),
+            "workspaceId": convergence.get("workspaceId"),
+            "runId": convergence.get("runId"),
+            "runState": convergence.get("runState"),
+            "currentFocusId": convergence.get("currentFocusId"),
+            "nextActionKind": convergence.get("nextActionKind"),
+            "currentGap": convergence.get("currentGap"),
+            "missingEvidenceKinds": convergence.get("missingEvidenceKinds") or [],
+            "acceptedEvidenceCount": convergence.get("acceptedEvidenceCount"),
+            "rejectedEvidenceCount": convergence.get("rejectedEvidenceCount"),
+            "latestEffectiveProgressAt": convergence.get("latestEffectiveProgressAt"),
+            "latestContractViolationRule": convergence.get("latestContractViolationRule"),
+            "latestRecovery": convergence.get("latestRecovery"),
+            "stalled": bool(convergence.get("stalled")),
+            "ineffectiveRetry": bool(convergence.get("ineffectiveRetry")),
+        },
         "projection": {
             "state": projection.get("state"),
             "workspaceRevision": projection.get("workspaceRevision"),
@@ -767,10 +785,13 @@ def workspace_live_summary(workspace_id, snapshot_body):
             "nodeRunning": latest_task_decomposition.get("nodeRunning"),
         },
         "coverage": {
-            "currentFocusId": current_focus.get("id"),
+            "currentFocusId": convergence.get("currentFocusId") or current_focus.get("id"),
             "definitionRevision": current_focus.get("definitionRevision"),
-            "currentGap": current_focus.get("currentGap"),
-            "missingEvidenceKinds": current_focus.get("missingEvidenceKinds") or [],
+            "currentGap": convergence.get("currentGap") or current_focus.get("currentGap"),
+            "missingEvidenceKinds": convergence.get("missingEvidenceKinds") or current_focus.get("missingEvidenceKinds") or [],
+            "nextActionKind": convergence.get("nextActionKind"),
+            "latestContractViolationRule": convergence.get("latestContractViolationRule"),
+            "latestRecovery": convergence.get("latestRecovery"),
             "nextAllowedConvergenceStates": current_focus.get("nextAllowedConvergenceStates") or [],
         },
     }
@@ -810,6 +831,7 @@ def evaluate_workspace_progress(summary):
     counts = summary.get("counts") or {}
     blockers = summary.get("blockers") or {}
     heartbeat = summary.get("heartbeat") or {}
+    convergence = summary.get("convergenceStatus") or {}
     workspace_id = summary.get("workspaceId") or workspace.get("id") or ""
     workspace_state = str(workspace.get("state") or "").strip()
     run_state = str(run.get("state") or "").strip()
@@ -866,6 +888,7 @@ def evaluate_goal_convergence(summary):
     workspace = summary.get("workspace") or {}
     run = summary.get("run") or {}
     heartbeat = summary.get("heartbeat") or {}
+    convergence = summary.get("convergenceStatus") or {}
     counts = summary.get("counts") or {}
     coverage = summary.get("coverage") or {}
     latest_result = summary.get("latestResult") or {}
@@ -884,10 +907,10 @@ def evaluate_goal_convergence(summary):
         issues.append(f"open decisions remain: {counts.get('openDecisions')}")
     if int(counts.get("pendingApprovals") or 0) > 0:
         issues.append(f"pending approvals remain: {counts.get('pendingApprovals')}")
-    if bool(heartbeat.get("stalled")):
-        issues.append("run heartbeat is marked stalled")
-    if bool(heartbeat.get("ineffectiveRetry")):
-        issues.append("run heartbeat is marked ineffectiveRetry")
+    if bool(convergence.get("stalled")) or bool(heartbeat.get("stalled")):
+        issues.append("run convergence status is marked stalled")
+    if bool(convergence.get("ineffectiveRetry")) or bool(heartbeat.get("ineffectiveRetry")):
+        issues.append("run convergence status is marked ineffectiveRetry")
 
     accepted_results = int(counts.get("acceptedResults") or 0)
     if accepted_results < min_goal_accepted_results:

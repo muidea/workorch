@@ -32,11 +32,11 @@ type RunSnapshotReaders struct {
 }
 
 func RunSnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) (readmodelcore.RunSnapshot, error) {
-	return runSnapshot(ctx, readers, runID, runSnapshotLoadProjection, false)
+	return runSnapshot(ctx, readers, runID, runSnapshotLoadCompact, false)
 }
 
 func RunRecoverySnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) (readmodelcore.RunSnapshot, error) {
-	return runSnapshot(ctx, readers, runID, runSnapshotLoadProjection, true)
+	return runSnapshot(ctx, readers, runID, runSnapshotLoadCompact, true)
 }
 
 func runSnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.RunID, loadMode runSnapshotLoadMode, recovery bool) (readmodelcore.RunSnapshot, error) {
@@ -58,5 +58,9 @@ func runSnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.R
 	input.SelectedResolution = models.Decisions.SelectedResolution
 	input.SelectedApproval = models.Approvals.SelectedApproval
 	input.PublishedEvents = readers.Published
-	return readmodelprojection.RunSnapshotFromModels(input), nil
+	ret := readmodelprojection.RunSnapshotFromModels(input)
+	if loadMode == runSnapshotLoadViewCompact {
+		ret = readmodelprojection.ProjectRunSnapshotCompact(ret)
+	}
+	return ret, nil
 }

@@ -10,11 +10,13 @@ type WorkspaceSnapshot struct {
 	TaskProgress            TaskProgress            `json:"taskProgress"`
 	RunHeartbeat            RunHeartbeat            `json:"runHeartbeat,omitempty"`
 	RuntimeExecution        *RuntimeExecutionState  `json:"runtimeExecution,omitempty"`
+	ConvergenceStatus       *ConvergenceStatus      `json:"convergenceStatus,omitempty"`
 	RunCommand              *RunCommandStatus       `json:"runCommand,omitempty"`
 	SchedulerDiagnostics    *SchedulerDiagnostics   `json:"schedulerDiagnostics,omitempty"`
 	ContextBundle           *ContextBundle          `json:"contextBundle,omitempty"`
 	CoverageSummary         map[string]any          `json:"coverageSummary,omitempty"`
 	GapBaseline             *GapBaseline            `json:"gapBaseline,omitempty"`
+	AuthorityDiagnostics    []GapDiagnostic         `json:"authorityDiagnostics,omitempty"`
 	Acceptance              AcceptanceProjection    `json:"acceptance"`
 	TaskDecompositions      []TaskDecomposition     `json:"taskDecompositions,omitempty"`
 	TaskPlans               []TaskPlan              `json:"taskPlans,omitempty"`

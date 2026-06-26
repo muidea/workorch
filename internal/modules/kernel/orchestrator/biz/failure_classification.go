@@ -31,6 +31,7 @@ const (
 	failureClassMCPCapabilityDenied      = "mcp_capability_denied"
 	failureClassMCPRuntime               = "mcp_runtime_failed"
 	failureClassRuntime                  = "runtime_failed"
+	failureClassRuntimeContractMisalign  = "runtime_internal_contract_misalignment"
 
 	failureOutputKeyClass     = "failureClass"
 	failureOutputKeySignature = "failureSignature"
@@ -64,6 +65,8 @@ func classifyRuntimeFailure(step *runModel.Step, output map[string]any, summary 
 		class = failureClassProviderStreamIncomplete
 	} else if isDoDCoverageMissingFailure(lowerStage, execErr, output) {
 		class = failureClassDoDCoverageMissing
+	} else if isRuntimeInternalContractMisalignment(lowerStage, execErr, output) {
+		class = failureClassRuntimeContractMisalign
 	} else if isRuntimeContractFailure(lowerStage, execErr, output) {
 		class = failureClassRuntime
 	} else if isLLMProviderAuthOrConfigFailure(lowerStage, execErr, output) {
@@ -89,6 +92,17 @@ func classifyRuntimeFailure(step *runModel.Step, output map[string]any, summary 
 	classification := runtimeFailureClassification{Class: class, Stage: stage}
 	classification.Signature = runtimeFailureSignature(classification.Class, step, output, execErr)
 	return classification
+}
+
+func isRuntimeInternalContractMisalignment(lowerStage string, execErr error, output map[string]any) bool {
+	if lowerStage == failureClassRuntimeContractMisalign {
+		return true
+	}
+	if strings.TrimSpace(stringFromMap(output, failureOutputKeyClass)) == failureClassRuntimeContractMisalign {
+		return true
+	}
+	errText := providerFailureErrorText(execErr, output)
+	return strings.Contains(errText, failureClassRuntimeContractMisalign)
 }
 
 func attachRuntimeFailureClassification(output map[string]any, classification runtimeFailureClassification) {

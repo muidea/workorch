@@ -491,8 +491,31 @@ func (b *remoteRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, 
 		BlockingApprovalID:   common.ApprovalID(s.BlockingApprovalID),
 		FailureReason:        s.FailureReason,
 		RuntimeExecution:     runtimeExecutionInfoFromClient(s.RuntimeExecution),
+		ConvergenceStatus:    convergenceStatusInfoFromClient(s.ConvergenceStatus),
 		SchedulerDiagnostics: schedulerDiagnosticsInfoFromClient(s.SchedulerDiagnostics),
 	}, nil
+}
+
+func convergenceStatusInfoFromClient(input *client.ConvergenceStatus) *ConvergenceStatusInfo {
+	if input == nil {
+		return nil
+	}
+	return &ConvergenceStatusInfo{
+		WorkspaceID:                 common.WorkspaceID(input.WorkspaceID),
+		RunID:                       common.RunID(input.RunID),
+		RunState:                    common.RunState(input.RunState),
+		CurrentFocusID:              input.CurrentFocusID,
+		NextActionKind:              input.NextActionKind,
+		CurrentGap:                  input.CurrentGap,
+		MissingEvidenceKinds:        append([]string(nil), input.MissingEvidenceKinds...),
+		AcceptedEvidenceCount:       input.AcceptedEvidenceCount,
+		RejectedEvidenceCount:       input.RejectedEvidenceCount,
+		LatestEffectiveProgressAt:   input.LatestEffectiveProgressAt,
+		LatestContractViolationRule: input.LatestContractViolationRule,
+		LatestRecovery:              input.LatestRecovery,
+		Stalled:                     input.Stalled,
+		IneffectiveRetry:            input.IneffectiveRetry,
+	}
 }
 
 func runtimeExecutionInfoFromClient(input *client.RuntimeExecution) *RuntimeExecutionInfo {

@@ -18,6 +18,24 @@ func ReadWorkspaceSnapshotWithRunSnapshotWithSession(ctx context.Context, sessio
 	})
 }
 
+func ReadWorkspaceProjectionSnapshotWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret WorkspaceSnapshot, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (WorkspaceSnapshot, error) {
+		return readWorkspaceProjectionSnapshot(ctx, deps, common.WorkspaceID(workspaceID), nil)
+	})
+}
+
+func ReadWorkspaceProjectionSnapshotWithRunSnapshotWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, runSnapshot RunSnapshot) (ret WorkspaceSnapshot, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (WorkspaceSnapshot, error) {
+		return readWorkspaceProjectionSnapshot(ctx, deps, common.WorkspaceID(workspaceID), &runSnapshot)
+	})
+}
+
+func ReadWorkspaceProjectionSnapshotWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (WorkspaceSnapshot, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (WorkspaceSnapshot, error) {
+		return ReadWorkspaceProjectionSnapshotWithSession(ctx, session, workspaceID)
+	})
+}
+
 func ReadWorkspaceSnapshotWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (WorkspaceSnapshot, error) {
 	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (WorkspaceSnapshot, error) {
 		return ReadWorkspaceSnapshotWithSession(ctx, session, workspaceID)

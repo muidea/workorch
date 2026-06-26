@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-06-23
+Last Updated: 2026-06-26
 
 Related:
 
@@ -18,6 +18,9 @@ Related:
 - [Runtime Contract Retry Convergence Closure Plan](../70-roadmap/active/runtime-contract-retry-convergence-closure-plan.md)
 - [Runtime Coverage Convergence State Machine Closure Plan](../70-roadmap/active/runtime-coverage-convergence-state-machine-closure-plan.md)
 - [Workspace Goal Convergence Acceleration Design](../70-roadmap/active/workspace-goal-convergence-acceleration-design.md)
+- [Convergence Authority Simplification Design](../70-roadmap/active/convergence-authority-simplification-design.md)
+- [Convergence Authority Dispatch Closure Checklist](../70-roadmap/active/convergence-authority-dispatch-closure-checklist.md)
+- [Convergence Authority Dispatch Live Verification](../60-verification/convergence-authority-dispatch-live-verification.md)
 
 ## Purpose
 
@@ -371,6 +374,14 @@ StageRule
 
 Stage Packet 是长会话阶段衔接的唯一结构化载体。每次 LLM 请求、runtime step、decision/replan/resume 都必须能重建当前 Stage Packet。
 
+Stage Packet 也是 provider dispatch 前的完整性边界。任何 LLM/runtime
+step 在进入 provider、block adapter 或其他外部执行前，都必须已经具备非空
+Stage Packet，并且 Stage Packet、current focus、NextAction、requiredOutput、
+convergenceContract 和 gapBaseline 必须来自同一次 convergence authority
+snapshot。若 dispatch 前发现这些派生字段不一致，runtime 必须刷新 authority
+并重建派生字段；若刷新后仍不一致，应按 runtime internal contract
+misalignment fail-fast，不得把互相矛盾的合同发送给 LLM。
+
 ```text
 StagePacket
   workspaceId
@@ -412,6 +423,9 @@ StagePacket
 - 在 Stage Packet 中混入 provider 私有缓存字段。
 - 缺少 workspace/run scope。
 - 使用被截断快照要求 LLM 输出 exact complete file。
+- 从旧 failed-step input、旧 repairActionPackage、旧 replanContinuation、旧
+  contract violation recovery 或旧 budget scope 继承当前动作权威。旧 lineage
+  只能作为 rejected diagnostic evidence、trace refs 或 retry hint。
 
 ## LLM Request Partition
 
@@ -423,6 +437,12 @@ LLM 上下文按稳定性分区：
 - `C3`: Stage Packet 中的 stage contract、requiredOutput、allowed/forbidden actions。
 - `C4`: 当前 progress、failure、rejected diagnostics、current requested action、retry hint。
 - `C5`: 大对象引用、target snapshots、tool outputs、process evidence timeline。
+
+C3 Stage Packet 是 LLM 可见上下文里的唯一当前 action/focus contract。若
+Stage Packet 已存在 `activeFocus`，C4 不得再渲染并列的 `acceptance-focus`
+当前权威信号；acceptance、历史 focus、旧 slice 或旧 repair lineage 如需保留，
+只能作为 diagnostic/historical context，或必须在 dispatch 前由当前
+convergence authority 重新派生。
 
 缓存目标：
 
@@ -534,7 +554,8 @@ ViewModel 至少包含：
 - workspace list 状态、active workspace、run state、decision/approval summary。
 - current prompt mode、allowed commands、input hint。
 - coverage summary、current focus、latest stage、latest diagnostic。
-- projection revision、last event id、refresh state。
+- deterministic NextAction、authority diagnostics、blocking ticket/approval。
+- projection revision、source revision、projected source revision、last event id、refresh state。
 
 TUI/Web 规则：
 
@@ -542,6 +563,18 @@ TUI/Web 规则：
 - 切换 workspace 只切换展示目标，不触发本地业务状态推断。
 - 端侧命令提交后先显示 command accepted/pending，再等待 projection revision 更新。
 - SSE 中断需要重连和 last event id，不得造成永久白屏或状态停滞。
+
+Projection health 语义：
+
+- `ready` projection 必须保证 projected source revision 与 source revision 对齐。
+- `stale` / `degraded` projection 可以暴露落后的 projected source revision，但这
+  是可显示的 projection health 状态，不等价于 display contract 失败。
+- Projection 可以暴露 `authorityDiagnostics`，例如 persisted derived field
+  stale 或 source/projected revision lag，但不得修复 owner state，也不得成为第二套
+  runtime 状态机。
+- TUI/Web prompt、workspace list、main view 和 status bar 必须优先消费
+  server-projected ViewModel；没有 ViewModel 时只能显示 degraded/loading 状态，
+  不得用本地 blocker cache 推断业务状态。
 
 ## Long Session Handoff
 
@@ -590,6 +623,14 @@ Watchdog 的必要性仅限于运行中健康检查和幂等补偿，主要覆�
 - 每个 run/step 更新只重算受影响 workspace 的 projection，不全局 rebuild。
 - memory recall 只召回当前 action 有用的高价值条目，diagnostic-only、stale、superseded、低置信内容不得注入正文。
 - 文件扫描、证据抽取、snapshot 构建必须有预算和缓存。
+- 高频 `run.llm_stream_progress` 应作为进度心跳或观测事件处理，不应强制触发完整
+  `workspace_projection_changed` fan-out、列表 refetch 或 detail hydrate。
+- 普通 projection/detail snapshot 可以排除高频 stream progress timeline 记录；
+  observability/debug 查询必须保留完整事件时间线。LLM usage/cache 等读模型必需数据
+  仍应按结构化查询保留。
+- 普通 run/workspace projection 的 event timeline 默认使用 metadata-only 查询；
+  只有显式 observability/debug 入口允许 hydrate 完整 payload。任何新增 detail
+  接口若需要完整 payload，必须通过显式参数或独立 observability API 表达。
 
 ## Template Strategy For Software Development
 
@@ -683,6 +724,10 @@ Workspace 不能仅因 LLM 声称完成而 complete。Completion gate 必须检�
 7. IO 回归证明 view refresh、history access、workspace execution 不持续全量扫描。
 8. e2e 覆盖双 workspace 并发、decision replan、approval approve、service restart recoverable、SSE reconnect。
 9. live verification 记录 workspaceId、runId、command time、projection revision、LLM request hash、accepted/rejected evidence refs、最终状态。
+10. dispatch authority live verification 至少观察两个 workspace，并区分
+    `workspaceProgress` 与 `goalConvergence`：in-flight 观测只要求 accepted
+    evidence、正确治理阻塞或 active progress heartbeat；最终 Goal/DoD completion
+    需要显式开启更严格 gate。
 
 ## Acceptance Criteria
 
@@ -691,6 +736,8 @@ Workspace 不能仅因 LLM 声称完成而 complete。Completion gate 必须检�
 - 任何 workspace 执行都能从 Goal/DoD definition revision 推导 coverage ledger。
 - resume/replan/restart 都进入 EventHub command 主路径，并能在 projection 中观察 accepted command 与后续 NextAction。
 - 每个 LLM step input 都包含当前 Stage Packet，且不依赖旧历史自然语言来恢复关键状态。
+- 每个 LLM/runtime dispatch 前都有 provider-before-dispatch integrity gate，证明
+  current focus、NextAction、Stage Packet、requiredOutput 和 convergenceContract 对齐。
 - LLM 违例输出只成为 rejected diagnostic evidence，可恢复时 bounded retry，不可恢复时治理升级。
 - accepted evidence 是 coverage satisfied 的唯一依据。
 - TUI/Web 不再出现本地状态和 workorchd 投影不一致的 prompt/main view/workspace list。

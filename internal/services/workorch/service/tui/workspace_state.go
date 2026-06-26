@@ -28,6 +28,7 @@ type workspaceDisplayState struct {
 	Acceptance            backend.AcceptanceProjectionInfo
 	RunHeartbeat          backend.RunHeartbeatInfo
 	RuntimeExecution      *backend.RuntimeExecutionInfo
+	ConvergenceStatus     *backend.ConvergenceStatusInfo
 	RuntimeEvents         []string
 	Progress              progressState
 	ProgressText          string
@@ -709,6 +710,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		if msg.Snapshot != nil {
 			m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
 			m.applyRuntimeExecution(msg.Snapshot.RuntimeExecution)
+			m.applyConvergenceStatus(msg.Snapshot.ConvergenceStatus)
 			m.applyRunCommandStatus(msg.Snapshot.RunCommand)
 			m.applySchedulerDiagnostics(msg.Snapshot.SchedulerDiagnostics)
 		}
@@ -759,6 +761,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.acceptance = msg.Snapshot.Acceptance
 		m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
 		m.applyRuntimeExecution(msg.Snapshot.RuntimeExecution)
+		m.applyConvergenceStatus(msg.Snapshot.ConvergenceStatus)
 		m.applyRunCommandStatus(msg.Snapshot.RunCommand)
 		m.applySchedulerDiagnostics(msg.Snapshot.SchedulerDiagnostics)
 		m.repairLoop = repairLoopSummary(msg.Snapshot.TaskProgress)
@@ -789,6 +792,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	}
 	if msg.Status != nil {
 		m.applyRuntimeExecution(msg.Status.RuntimeExecution)
+		m.applyConvergenceStatus(msg.Status.ConvergenceStatus)
 		if msg.Status.SchedulerDiagnostics != nil {
 			m.applySchedulerDiagnostics(msg.Status.SchedulerDiagnostics)
 		}
@@ -990,6 +994,7 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 		Acceptance:            m.acceptance,
 		RunHeartbeat:          m.runHeartbeat,
 		RuntimeExecution:      cloneRuntimeExecutionInfoPtr(m.runtimeExecution),
+		ConvergenceStatus:     cloneConvergenceStatusInfoPtr(m.convergenceStatus),
 		RuntimeEvents:         append([]string(nil), m.runtimeEvents...),
 		RepairLoop:            m.repairLoop,
 	}
@@ -1019,6 +1024,7 @@ func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
 	m.acceptance = cached.Acceptance
 	m.runHeartbeat = cached.RunHeartbeat
 	m.runtimeExecution = cloneRuntimeExecutionInfoPtr(cached.RuntimeExecution)
+	m.convergenceStatus = cloneConvergenceStatusInfoPtr(cached.ConvergenceStatus)
 	m.schedulerDiagnostics = nil
 	m.runtimeEvents = append([]string(nil), cached.RuntimeEvents...)
 	m.repairLoop = cached.RepairLoop
@@ -1078,6 +1084,15 @@ func cloneRuntimeExecutionInfoPtr(input *backend.RuntimeExecutionInfo) *backend.
 	return &ret
 }
 
+func cloneConvergenceStatusInfoPtr(input *backend.ConvergenceStatusInfo) *backend.ConvergenceStatusInfo {
+	if input == nil {
+		return nil
+	}
+	ret := *input
+	ret.MissingEvidenceKinds = append([]string(nil), input.MissingEvidenceKinds...)
+	return &ret
+}
+
 func cloneSchedulerDiagnosticsInfoPtr(input *backend.SchedulerDiagnosticsInfo) *backend.SchedulerDiagnosticsInfo {
 	if input == nil {
 		return nil
@@ -1114,6 +1129,10 @@ func (m *AppModel) applyRuntimeExecution(item *backend.RuntimeExecutionInfo) {
 		return
 	}
 	m.runtimeExecution = cloneRuntimeExecutionInfoPtr(item)
+}
+
+func (m *AppModel) applyConvergenceStatus(item *backend.ConvergenceStatusInfo) {
+	m.convergenceStatus = cloneConvergenceStatusInfoPtr(item)
 }
 
 func (m *AppModel) applySchedulerDiagnostics(item *backend.SchedulerDiagnosticsInfo) {

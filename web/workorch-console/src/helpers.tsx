@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, Decision, DoD, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
@@ -196,6 +196,23 @@ export function runtimeExecutionDescriptions(runtime?: RuntimeExecution) {
     { key: 'acceptedAt', label: '接收时间', children: runtime.acceptedAt || '-' },
     { key: 'lastProgress', label: '最近进展', children: [runtime.lastProgressSummary, runtime.lastProgressEvent, runtime.lastProgressStage, runtime.lastProgressAt].filter(Boolean).join(' / ') || '-' },
     { key: 'terminal', label: '终态事件', children: [runtime.doneAt ? `done ${runtime.doneAt}` : '', runtime.failedAt ? `failed ${runtime.failedAt}` : '', runtime.finalizedAt ? `finalized ${runtime.finalizedAt}` : '', runtime.finalizeEvent].filter(Boolean).join(' / ') || '-' }
+  ];
+}
+
+export function convergenceStatusDescriptions(status?: ConvergenceStatus) {
+  if (!status || (!status.runId && !status.currentFocusId && !status.nextActionKind && !status.currentGap && !status.latestContractViolationRule)) {
+    return [{ key: 'convergenceStatus', label: '收敛状态', children: '-' }];
+  }
+  return [
+    { key: 'run', label: '收敛运行', children: [status.runId, status.runState].filter(Boolean).join(' / ') || '-' },
+    { key: 'focus', label: '当前 Focus', children: status.currentFocusId || '-' },
+    { key: 'nextAction', label: '下一动作', children: status.nextActionKind ? <Tag color="blue">{status.nextActionKind}</Tag> : '-' },
+    { key: 'gap', label: '当前 Gap', children: boundedParagraph(status.currentGap, { rows: 2 }) },
+    { key: 'missingEvidence', label: '缺失证据', children: compactTags(status.missingEvidenceKinds ?? [], 4) },
+    { key: 'evidenceCount', label: '证据计数', children: <Space wrap><Tag color="green">accepted {status.acceptedEvidenceCount ?? 0}</Tag><Tag color="red">rejected {status.rejectedEvidenceCount ?? 0}</Tag></Space> },
+    { key: 'latestProgress', label: '最近有效进展', children: status.latestEffectiveProgressAt || '-' },
+    { key: 'contractViolation', label: '最近合同违例', children: status.latestContractViolationRule ? <Space wrap><Tag color="red">{status.latestContractViolationRule}</Tag>{status.latestRecovery ? <Tag color="gold">{status.latestRecovery}</Tag> : null}</Space> : '-' },
+    { key: 'problemSignals', label: '问题信号', children: <Space wrap>{status.stalled ? <Tag color="red">stalled</Tag> : null}{status.ineffectiveRetry ? <Tag color="gold">ineffective retry</Tag> : null}{!status.stalled && !status.ineffectiveRetry ? '-' : null}</Space> }
   ];
 }
 

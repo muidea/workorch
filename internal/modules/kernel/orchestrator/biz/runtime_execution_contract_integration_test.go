@@ -2434,6 +2434,80 @@ func TestValidateLLMExecutionOutputContractRejectsConcreteValidationShellFileRed
 	}
 }
 
+func TestValidateLLMExecutionOutputContractNormalizesConcreteValidationScratchSetup(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/normalized-scratch-setup"
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-normalized-scratch-setup",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-normalized-scratch-setup/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					validationScratchDirKey:                    scratch,
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "setup-validation-scratch",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "mkdir -p .workorch-data/validation-scratch"},
+					"validationEvidence": map[string]any{
+						"mode":            "controlled_substitute",
+						"observationType": "controlled_substitute_observation",
+						"substituteFor":   "validation scratch directory",
+					},
+				},
+			}, {
+				"id":        "verify",
+				"kind":      shellcommon.StepKindCommand,
+				"dependsOn": []string{"setup-validation-scratch"},
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "printf ok"},
+					"validationEvidence": map[string]any{
+						"mode":            "runtime_behavior",
+						"observationType": "runtime_observation",
+					},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want normalized scratch setup allowed", err)
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok || len(graph.Nodes) != 2 {
+		t.Fatalf("normalized graph = %+v, ok=%v", graph, ok)
+	}
+	args := stringSliceFromValue(graph.Nodes[0].Input["args"])
+	if len(args) != 2 || args[0] != "-c" || !strings.Contains(args[1], scratch) {
+		t.Fatalf("normalized setup args = %+v, want runtime validationScratchDir", args)
+	}
+	if graph.Nodes[0].Input[validationScratchDirKey] != scratch || graph.Nodes[0].Input["validationScratchDirNormalized"] != true {
+		t.Fatalf("normalized setup input = %+v, want scratch metadata", graph.Nodes[0].Input)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsConcreteValidationShellDevNullRedirection(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-dev-null-validation",

@@ -23,6 +23,7 @@ func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshot, 
 	ret.RuntimeExecution = runSnapshot.RuntimeExecution
 	ret.CoverageSummary = CoverageSummaryFromRunSnapshot(*runSnapshot)
 	ret.GapBaseline = runSnapshot.GapBaseline
+	ret.AuthorityDiagnostics = append([]readmodelcore.GapDiagnostic(nil), runSnapshot.AuthorityDiagnostics...)
 	ret.Acceptance = runSnapshot.Acceptance
 	ret.TaskDecompositions = runSnapshot.TaskDecompositions
 	ret.TaskPlans = runSnapshot.TaskPlans
@@ -39,6 +40,7 @@ func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshot, 
 	ret.LLMUsageSummary = SummarizeLLMUsage(ret.LLMUsageTraces)
 	ret.Outcome = MapWorkspaceOutcome(ret)
 	ret.RunHeartbeat = MapRunHeartbeat(ret)
+	ret.ConvergenceStatus = MapWorkspaceConvergenceStatus(ret)
 	bundle := MapRunContextBundle(*runSnapshot)
 	ret.ContextBundle = &bundle
 	return ret

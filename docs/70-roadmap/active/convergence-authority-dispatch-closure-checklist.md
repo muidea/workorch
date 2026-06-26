@@ -11,6 +11,7 @@ Related:
 - `../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md`
 - `../../60-verification/convergence-authority-dispatch-live-verification.md`
 - `convergence-authority-simplification-design.md`
+- `convergence-authority-focus-drift-closure-plan.md`
 - `runtime-convergence-authority-final-fix-scope.md`
 - `goal-dod-nextaction-iterative-delivery-plan.md`
 

@@ -18,10 +18,11 @@ import (
 )
 
 type Manager struct {
-	loader   Loader
-	hub      events.Hub
-	schedule Scheduler
-	store    *Store
+	loader               Loader
+	hub                  events.Hub
+	schedule             Scheduler
+	store                *Store
+	rebuildCoalesceDelay time.Duration
 
 	mu                 sync.Mutex
 	unsubscribers      []func()
@@ -37,6 +38,7 @@ type workspaceRebuildState struct {
 	inFlight         bool
 	pending          bool
 	pendingAfterFull bool
+	scheduled        bool
 }
 
 type managerMetrics struct {
@@ -56,11 +58,12 @@ type workspaceRebuildMetrics struct {
 
 func NewManager(options ManagerOptions) *Manager {
 	return &Manager{
-		loader:            options.Loader,
-		hub:               options.Hub,
-		schedule:          options.Schedule,
-		store:             NewStore(),
-		workspaceRebuilds: map[string]*workspaceRebuildState{},
+		loader:               options.Loader,
+		hub:                  options.Hub,
+		schedule:             options.Schedule,
+		store:                NewStore(),
+		rebuildCoalesceDelay: options.RebuildCoalesceDelay,
+		workspaceRebuilds:    map[string]*workspaceRebuildState{},
 	}
 }
 
@@ -351,15 +354,58 @@ func (m *Manager) ScheduleRebuildWorkspace(workspaceID string) {
 		m.mu.Unlock()
 		return
 	}
-	rebuildState.inFlight = true
+	delay := m.rebuildCoalesceDelay
+	if delay <= 0 {
+		rebuildState.inFlight = true
+		m.mu.Unlock()
+		m.submitWorkspaceRebuild(workspaceID, 0)
+		return
+	}
+	if rebuildState.scheduled {
+		m.metrics.workspaceRebuildDebouncedTotal++
+		m.mu.Unlock()
+		return
+	}
+	rebuildState.scheduled = true
 	m.mu.Unlock()
+	m.submitWorkspaceRebuild(workspaceID, delay)
+}
+
+func (m *Manager) submitWorkspaceRebuild(workspaceID string, delay time.Duration) {
+	if m == nil {
+		return
+	}
 	if !m.submit("workspace_projection_rebuild", func(ctx context.Context) {
+		if delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return
+			}
+		}
+		m.mu.Lock()
+		rebuildState := m.workspaceRebuilds[workspaceID]
+		if rebuildState == nil || m.closed {
+			if rebuildState != nil {
+				rebuildState.scheduled = false
+				m.pruneWorkspaceRebuildStateLocked(workspaceID)
+			}
+			m.mu.Unlock()
+			return
+		}
+		rebuildState.scheduled = false
+		rebuildState.inFlight = true
+		m.mu.Unlock()
 		if err := m.RebuildWorkspace(ctx, workspaceID); err != nil && !m.isClosed() {
 			slog.Warn("workorch workspace projection rebuild failed", "workspaceID", workspaceID, "err", err)
 		}
 		reschedule := false
 		m.mu.Lock()
-		rebuildState := m.workspaceRebuilds[workspaceID]
+		rebuildState = m.workspaceRebuilds[workspaceID]
 		if rebuildState != nil && rebuildState.pending && !m.closed {
 			rebuildState.pending = false
 			reschedule = true
@@ -379,6 +425,7 @@ func (m *Manager) ScheduleRebuildWorkspace(workspaceID string) {
 			rebuildState.inFlight = false
 			rebuildState.pending = false
 			rebuildState.pendingAfterFull = false
+			rebuildState.scheduled = false
 		}
 		m.pruneWorkspaceRebuildStateLocked(workspaceID)
 		m.mu.Unlock()
@@ -476,7 +523,7 @@ func (m *Manager) handleEvent(_ context.Context, envelope events.Envelope) error
 	if envelope.Topic == workorchdevents.TopicWorkspaceProjectionChanged {
 		return nil
 	}
-	if envelope.Topic == runevents.TopicRunLLMStreamProgress {
+	if projectionEventIsRuntimeProgressOnly(envelope.Topic) {
 		return m.handleRuntimeProgressEvent(envelope)
 	}
 	if strings.TrimSpace(envelope.WorkspaceID) != "" {
@@ -494,6 +541,18 @@ func (m *Manager) handleEvent(_ context.Context, envelope events.Envelope) error
 		m.ScheduleRebuildAll()
 	}
 	return nil
+}
+
+func projectionEventIsRuntimeProgressOnly(topic string) bool {
+	switch strings.TrimSpace(topic) {
+	case runevents.TopicRunLLMStreamProgress,
+		runevents.TopicRunLLMUsageRecorded,
+		runevents.TopicStepDispatched,
+		runevents.TopicStepStateChanged:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *Manager) handleRuntimeProgressEvent(envelope events.Envelope) error {
@@ -514,9 +573,9 @@ func (m *Manager) handleRuntimeProgressEvent(envelope events.Envelope) error {
 		Topic:         envelope.Topic,
 		Revision:      envelope.Revision,
 		OccurredAt:    strings.TrimSpace(firstNonEmptyString(envelope.OccurredAt, stringFromPayload(envelope.Payload, "occurredAt"))),
-		Event:         strings.TrimSpace(firstNonEmptyString(stringFromPayload(envelope.Payload, "event"), "runtime_step_progress")),
-		Stage:         strings.TrimSpace(firstNonEmptyString(stringFromPayload(envelope.Payload, events.PayloadKeyStage), "llm_stream")),
-		Summary:       strings.TrimSpace(firstNonEmptyString(progress.Summary, stringFromPayload(envelope.Payload, events.PayloadKeySummary))),
+		Event:         runtimeProgressEventName(envelope.Topic),
+		Stage:         strings.TrimSpace(firstNonEmptyString(stringFromPayload(envelope.Payload, events.PayloadKeyStage), runtimeProgressStageName(envelope.Topic))),
+		Summary:       strings.TrimSpace(firstNonEmptyString(progress.Summary, stringFromPayload(envelope.Payload, events.PayloadKeySummary), runtimeProgressSummary(envelope.Topic))),
 		RequestID:     strings.TrimSpace(stringFromPayload(envelope.Payload, "requestId")),
 		QueueKey:      strings.TrimSpace(stringFromPayload(envelope.Payload, "queueKey")),
 		WorkerID:      strings.TrimSpace(stringFromPayload(envelope.Payload, "workerId")),
@@ -532,6 +591,51 @@ func (m *Manager) handleRuntimeProgressEvent(envelope events.Envelope) error {
 	}
 	m.ScheduleRebuildWorkspace(workspaceID)
 	return nil
+}
+
+func runtimeProgressEventName(topic string) string {
+	switch strings.TrimSpace(topic) {
+	case runevents.TopicRunLLMStreamProgress:
+		return "runtime_step_progress"
+	case runevents.TopicRunLLMUsageRecorded:
+		return "runtime_usage_recorded"
+	case runevents.TopicStepDispatched:
+		return "runtime_step_dispatched"
+	case runevents.TopicStepStateChanged:
+		return "runtime_step_state_changed"
+	default:
+		return "runtime_progress"
+	}
+}
+
+func runtimeProgressStageName(topic string) string {
+	switch strings.TrimSpace(topic) {
+	case runevents.TopicRunLLMStreamProgress:
+		return "llm_stream"
+	case runevents.TopicRunLLMUsageRecorded:
+		return "llm_usage"
+	case runevents.TopicStepDispatched:
+		return "step_dispatched"
+	case runevents.TopicStepStateChanged:
+		return "step_state"
+	default:
+		return "runtime_progress"
+	}
+}
+
+func runtimeProgressSummary(topic string) string {
+	switch strings.TrimSpace(topic) {
+	case runevents.TopicRunLLMStreamProgress:
+		return "provider stream receiving"
+	case runevents.TopicRunLLMUsageRecorded:
+		return "llm usage recorded"
+	case runevents.TopicStepDispatched:
+		return "step dispatched"
+	case runevents.TopicStepStateChanged:
+		return "step state changed"
+	default:
+		return "runtime progress"
+	}
 }
 
 func (m *Manager) rememberPendingWorkspaceRebuild(workspaceID string) {
@@ -563,7 +667,7 @@ func (m *Manager) pendingWorkspaceRebuildsLocked() int {
 	}
 	ret := 0
 	for _, item := range m.workspaceRebuilds {
-		if item != nil && (item.pending || item.pendingAfterFull) {
+		if item != nil && (item.pending || item.pendingAfterFull || item.scheduled) {
 			ret++
 		}
 	}
@@ -609,7 +713,7 @@ func (m *Manager) pruneWorkspaceRebuildStateLocked(workspaceID string) {
 	if rebuildState == nil {
 		return
 	}
-	if !rebuildState.inFlight && !rebuildState.pending && !rebuildState.pendingAfterFull {
+	if !rebuildState.inFlight && !rebuildState.pending && !rebuildState.pendingAfterFull && !rebuildState.scheduled {
 		delete(m.workspaceRebuilds, workspaceID)
 	}
 }

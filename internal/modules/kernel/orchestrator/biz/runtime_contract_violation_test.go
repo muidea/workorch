@@ -31,6 +31,33 @@ func TestContractViolationRecoveryActionRetriesWithinBudget(t *testing.T) {
 	}
 }
 
+func TestContractViolationRecoveryActionSkipsRetryWhenCurrentActionIsGovernance(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-violation-governance-action")
+	repo := memory.NewStepRepository()
+	failed := contractViolationFailedStep(runID, "failed-governance-action")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-contract-violation-governance-action",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"workspaceId":   "ws-contract-violation-governance-action",
+				"runId":         string(runID),
+				"nextAction":    map[string]any{"kind": "request_decision"},
+			},
+		},
+	}
+	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
+
+	action := runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{}), true, true, run, failed)
+
+	if action != runtimeRecoveryActionContractViolationExhausted {
+		t.Fatalf("recovery action = %s, want governance escalation without contract retry", action)
+	}
+}
+
 func TestContractViolationRecoveryActionExhaustsIndependentBudget(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-contract-violation-exhausted")
@@ -147,6 +174,121 @@ func TestContractViolationRecoveryActionExhaustsRepeatedSignatureBudget(t *testi
 	}
 }
 
+func TestContractViolationClassifiesStructuredCoverageGapsAsCoverageIncomplete(t *testing.T) {
+	runID := common.RunID("run-contract-coverage-incomplete")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-coverage-incomplete", InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := contractViolationFailedStep(runID, "failed-coverage-incomplete")
+	failed.Input = map[string]any{
+		stepInputKeyRuntimeStage: runtimeStageVerification,
+		"repairObjective":        "complete_dod_goal_coverage_assessment",
+	}
+	failed.Output = map[string]any{
+		"stage":                   "llm_dod_assessment",
+		"error":                   "invalid argument: dodAssessment is not satisfied",
+		failureOutputKeyClass:     failureClassDoDCoverageMissing,
+		failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+		"runtimeDiagnostics": map[string]any{
+			"kind": failureClassDoDCoverageMissing,
+			"missingGoalCoverage": []map[string]any{{
+				"goalRequirementId": "goal-neutral",
+				"item":              "neutral goal leaf",
+				"state":             "evidence_ready",
+				"evidenceRefs":      []string{"run/graph/verify"},
+			}},
+		},
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"items": []map[string]any{{
+				"item":         "neutral DoD item",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run/graph/verify"},
+			}},
+			"goalCoverage": map[string]any{
+				"satisfied": false,
+				"items": []map[string]any{{
+					"goalRequirementId": "goal-neutral",
+					"item":              "neutral goal leaf",
+					"state":             "evidence_ready",
+					"evidenceRefs":      []string{"run/graph/verify"},
+				}},
+			},
+		},
+	}
+
+	attachContractViolationDiagnostics(run, failed, errors.New("invalid argument: dodAssessment is not satisfied"))
+
+	recovery := contractViolationFromFailedOutput(failed)
+	if got := stringFromMap(recovery, "violatedRule"); got != contractViolationRuleCoverageAssessmentIncomplete {
+		t.Fatalf("violatedRule = %q, want %s; recovery=%+v", got, contractViolationRuleCoverageAssessmentIncomplete, recovery)
+	}
+	if got := stringFromMap(recovery, "recoverability"); got != runtimemodel.ContractViolationRecoverabilityRecomputeAuthority {
+		t.Fatalf("recoverability = %q, want recompute_authority", got)
+	}
+	contract := mapFromValue(recovery["correctionContract"])
+	if got := stringFromMap(contract, "requiredOutputShape"); got != "authority_recomputed_next_action" {
+		t.Fatalf("requiredOutputShape = %q, want authority_recomputed_next_action; contract=%+v", got, contract)
+	}
+	if !stringSliceContains(stringSliceFromValue(contract["forbiddenOutputs"]), "same_failed_global_dodAssessment") {
+		t.Fatalf("forbiddenOutputs = %+v, want same_failed_global_dodAssessment", contract["forbiddenOutputs"])
+	}
+}
+
+func TestCoverageAssessmentIncompleteSkipsContractRetryForRuntimeRepair(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-coverage-incomplete-runtime-repair")
+	repo := memory.NewStepRepository()
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-coverage-incomplete-runtime-repair",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		DoDID:           "dod-coverage-incomplete",
+	}
+	failed := contractViolationFailedStep(runID, "failed-coverage-incomplete")
+	failed.Input = map[string]any{
+		stepInputKeyRuntimeStage: runtimeStageVerification,
+		"repairObjective":        "complete_dod_goal_coverage_assessment",
+	}
+	failed.Output = map[string]any{
+		"stage":                   "llm_dod_assessment",
+		"error":                   "invalid argument: dodAssessment is not satisfied",
+		failureOutputKeyClass:     failureClassDoDCoverageMissing,
+		failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+		"runtimeDiagnostics": map[string]any{
+			"kind": failureClassDoDCoverageMissing,
+			"missingGoalCoverage": []map[string]any{{
+				"goalRequirementId": "goal-neutral",
+				"item":              "neutral goal leaf",
+				"state":             "evidence_ready",
+				"evidenceRefs":      []string{"run/graph/verify"},
+			}},
+		},
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"items": []map[string]any{{
+				"item":         "neutral DoD item",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run/graph/verify"},
+			}},
+			"goalCoverage": map[string]any{
+				"satisfied": false,
+				"items": []map[string]any{{
+					"goalRequirementId": "goal-neutral",
+					"item":              "neutral goal leaf",
+					"state":             "evidence_ready",
+					"evidenceRefs":      []string{"run/graph/verify"},
+				}},
+			},
+		},
+	}
+	attachContractViolationDiagnostics(run, failed, errors.New("invalid argument: dodAssessment is not satisfied"))
+
+	action := runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{}), true, true, run, failed)
+
+	if action != runtimeRecoveryActionRuntimeRepair {
+		t.Fatalf("recovery action = %s, want runtime repair authority recompute path", action)
+	}
+}
+
 func TestRuntimeRepairInputIncludesContractViolationRecovery(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-contract-violation-input")
@@ -225,6 +367,16 @@ func TestRuntimeRepairInputIncludesContractViolationRecovery(t *testing.T) {
 	}
 	if input[stepInputKeyRecoveryLineageType] != "contract_violation_retry" {
 		t.Fatalf("recovery lineage = %v, want contract_violation_retry", input[stepInputKeyRecoveryLineageType])
+	}
+	budgetScope := mapFromValue(input[stepInputKeyRecoveryBudgetScope])
+	if stringFromMap(budgetScope, "lineageType") != "contract_violation_retry" ||
+		stringFromMap(budgetScope, "focusId") != "cwi-contract-retry" ||
+		!stringSliceContains(stringSliceFromValue(budgetScope["coverageWorkItemIds"]), "cwi-contract-retry") {
+		t.Fatalf("recoveryBudgetScope = %+v, want contract violation retry scoped to current authority focus", budgetScope)
+	}
+	recoveryBudget := mapFromValue(recovery["budgetScope"])
+	if stableCoverageJSON(recoveryBudget) != stableCoverageJSON(budgetScope) {
+		t.Fatalf("contractViolationRecovery.budgetScope = %+v, want recoveryBudgetScope %+v", recoveryBudget, budgetScope)
 	}
 	if !strings.Contains(strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"), "contractViolationRecovery.expectedContract") {
 		t.Fatalf("repairGuidance = %+v, want contract violation guidance", input["repairGuidance"])

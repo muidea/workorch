@@ -1260,6 +1260,9 @@ func coverageWorkItemSignalPayload(input map[string]any) map[string]any {
 }
 
 func acceptanceFocusSignalPayload(input map[string]any) map[string]any {
+	if len(recordFromAny(recordFromAny(input["stagePacket"])["activeFocus"])) > 0 {
+		return nil
+	}
 	acceptance := recordFromAny(input["acceptance"])
 	if len(acceptance) == 0 {
 		acceptance = recordFromAny(recordFromAny(input["executionContext"])["acceptance"])

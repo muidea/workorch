@@ -17,6 +17,7 @@ type RunSnapshot struct {
 	ValidationResults       []ValidationResult      `json:"validationResults,omitempty"`
 	RuntimeCheckpoints      []RuntimeCheckpoint     `json:"runtimeCheckpoints,omitempty"`
 	RuntimeExecution        *RuntimeExecutionState  `json:"runtimeExecution,omitempty"`
+	ConvergenceStatus       *ConvergenceStatus      `json:"convergenceStatus,omitempty"`
 	SchedulerDiagnostics    *SchedulerDiagnostics   `json:"schedulerDiagnostics,omitempty"`
 	Results                 []Result                `json:"results,omitempty"`
 	ClosureTraces           []ClosureTrace          `json:"closureTraces,omitempty"`
@@ -32,6 +33,7 @@ type RunSnapshot struct {
 	CoverageWorkItems       []map[string]any        `json:"coverageWorkItems,omitempty"`
 	CoverageWorkItemContext map[string]any          `json:"coverageWorkItemContext,omitempty"`
 	GapBaseline             *GapBaseline            `json:"gapBaseline,omitempty"`
+	AuthorityDiagnostics    []GapDiagnostic         `json:"authorityDiagnostics,omitempty"`
 	Acceptance              AcceptanceProjection    `json:"acceptance"`
 	MemoryRecallTraces      []MemoryRecallTrace     `json:"memoryRecallTraces,omitempty"`
 	SelectedCapabilities    []RuntimeCapability     `json:"selectedCapabilities,omitempty"`

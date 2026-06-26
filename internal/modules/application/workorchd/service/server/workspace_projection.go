@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
@@ -20,6 +21,8 @@ const (
 	workspaceProjectionStateDegraded = workspaceviewcore.StateDegraded
 	workspaceProjectionStateFailed   = workspaceviewcore.StateFailed
 	workspaceProjectionStateStopped  = workspaceviewcore.StateStopped
+
+	workspaceProjectionRebuildCoalesceDelay = 100 * time.Millisecond
 )
 
 type workspaceProjectionLoader struct {
@@ -28,9 +31,10 @@ type workspaceProjectionLoader struct {
 
 func newWorkspaceProjectionManager(state *serverState) *workspaceProjectionManager {
 	return workspaceviewcore.NewManager(workspaceviewcore.ManagerOptions{
-		Loader:   workspaceProjectionLoader{state: state},
-		Hub:      state.eventHub,
-		Schedule: state.scheduleBackground,
+		Loader:               workspaceProjectionLoader{state: state},
+		Hub:                  state.eventHub,
+		Schedule:             state.scheduleBackground,
+		RebuildCoalesceDelay: workspaceProjectionRebuildCoalesceDelay,
 	})
 }
 
@@ -55,7 +59,7 @@ func (l workspaceProjectionLoader) ReadWorkspaceSnapshot(ctx context.Context, wo
 		return appservice.WorkspaceSnapshot{}, common.ErrInvalidArgument
 	}
 	ctx = appservice.ContextWithEventHub(ctx, l.state.eventHub)
-	return l.state.readWorkspaceSnapshot(ctx, l.state.config.Backend, l.state.config.DataRoot, workspaceID)
+	return l.state.readProjectionSnapshot(ctx, l.state.config.Backend, l.state.config.DataRoot, workspaceID)
 }
 
 func (s *serverState) startWorkspaceProjection(ctx context.Context) error {
@@ -103,6 +107,22 @@ func (s *HTTPServer) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID 
 		return appservice.WorkspaceSnapshot{}, err
 	}
 	return appservice.ProjectWorkspaceSnapshotDetail(snapshot), nil
+}
+
+func mergeWorkspaceProjectionOverlay(detail appservice.WorkspaceSnapshot, projected appservice.WorkspaceSnapshot) appservice.WorkspaceSnapshot {
+	if projected.ViewModel.WorkspaceID != "" {
+		detail.ViewModel = projected.ViewModel
+	}
+	if projected.Workspace.ViewModel.WorkspaceID != "" {
+		detail.Workspace.ViewModel = projected.Workspace.ViewModel
+	}
+	if projected.RunCommand != nil {
+		detail.RunCommand = projected.RunCommand
+	}
+	if projected.SchedulerDiagnostics != nil {
+		detail.SchedulerDiagnostics = projected.SchedulerDiagnostics
+	}
+	return detail
 }
 
 func (s *serverState) upsertProjectedWorkspace(workspace appservice.Workspace) {

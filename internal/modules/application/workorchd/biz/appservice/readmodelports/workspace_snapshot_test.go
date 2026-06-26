@@ -219,6 +219,59 @@ func TestWorkspaceSnapshotLoadsRunScopedLLMUsageOnlyForProjectionRun(t *testing.
 	}
 }
 
+func TestWorkspaceProjectionSnapshotSkipsLLMUsagePayloadQueries(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-workspace-projection-usage-skip")
+	activeRunID := common.RunID("run-workspace-projection-usage-skip")
+	reader := &recordingWorkspaceEventReader{}
+	cached := &readmodelcore.RunSnapshot{
+		Workspace: appmodelcore.Workspace{
+			ID:          string(workspaceID),
+			Title:       "cached workspace",
+			State:       string(common.WorkspaceStateRunning),
+			ActiveRunID: string(activeRunID),
+		},
+		Run: appmodelcore.Run{
+			ID:          string(activeRunID),
+			WorkspaceID: string(workspaceID),
+			State:       string(common.RunStateRunning),
+		},
+	}
+
+	_, err := WorkspaceProjectionSnapshot(context.Background(), WorkspaceSnapshotReaders{
+		Workspaces: fakeRunSnapshotWorkspaceReader{items: []*workspacemodel.Workspace{{
+			ID:          workspaceID,
+			Title:       "workspace projection usage skip",
+			State:       common.WorkspaceStateRunning,
+			ActiveRunID: activeRunID,
+		}}},
+		Runs: fakeRunStatusRunReader{items: []*runmodel.Run{
+			{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		}},
+		Results:               fakeWorkspaceSnapshotResultReader{},
+		Artifacts:             fakeRunSnapshotArtifactReader{},
+		ArtifactContinuations: fakeRunSnapshotArtifactContinuationReader{},
+		EventRecords:          reader,
+		Patches:               fakeRunSnapshotPatchReader{},
+		Tickets:               fakeTicketReader{},
+		Resolutions:           fakeResolutionReader{},
+		Approvals:             fakeApprovalListReader{},
+	}, workspaceID, cached)
+	if err != nil {
+		t.Fatalf("WorkspaceProjectionSnapshot: %v", err)
+	}
+
+	for _, query := range reader.queries {
+		if query.Topic == runevents.TopicRunLLMUsageRecorded || query.IncludePayload {
+			t.Fatalf("projection snapshot event query = %+v, want no llm usage payload queries", query)
+		}
+	}
+	if len(reader.queries) != 1 {
+		t.Fatalf("event query count = %d, want only workspace projection event metadata query", len(reader.queries))
+	}
+}
+
 type failGetWorkspaceReader struct{}
 
 func (failGetWorkspaceReader) Get(context.Context, common.WorkspaceID) (*workspacemodel.Workspace, error) {

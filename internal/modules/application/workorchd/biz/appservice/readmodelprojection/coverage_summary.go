@@ -77,6 +77,66 @@ func GapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *readmodelco
 	return derived
 }
 
+func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []readmodelcore.GapDiagnostic {
+	context := snapshot.Run.ExecutionContext
+	authority := MapValue(context["convergenceAuthority"])
+	authorityFocus := MapValue(authority["currentFocus"])
+	if len(authorityFocus) == 0 {
+		return nil
+	}
+	var ret []readmodelcore.GapDiagnostic
+	addFocusDiagnostic := func(label string, focus map[string]any) {
+		if len(focus) == 0 || readModelFocusAligned(authorityFocus, focus) {
+			return
+		}
+		ret = append(ret, readmodelcore.GapDiagnostic{
+			Code:             "authority_focus_drift",
+			Severity:         "warning",
+			Kind:             "stale_persisted_derived_field",
+			Source:           label,
+			Candidate:        readModelFocusDebugToken(focus),
+			CurrentAuthority: readModelFocusDebugToken(authorityFocus),
+			Message:          fmt.Sprintf("%s focus %q differs from convergenceAuthority current focus %q", label, readModelFocusDebugToken(focus), readModelFocusDebugToken(authorityFocus)),
+		})
+	}
+	addRequiredDiagnostic := func(label string, required map[string]any) {
+		if len(required) == 0 {
+			return
+		}
+		if focusID := strings.TrimSpace(stringValue(required, "coverageFocusId", "focusId")); focusID != "" {
+			if !readModelFocusAligned(authorityFocus, map[string]any{"id": focusID}) {
+				ret = append(ret, readmodelcore.GapDiagnostic{
+					Code:             "authority_focus_drift",
+					Severity:         "warning",
+					Kind:             "stale_persisted_derived_field",
+					Source:           label,
+					Candidate:        focusID,
+					CurrentAuthority: readModelFocusDebugToken(authorityFocus),
+					Message:          fmt.Sprintf("%s coverageFocusId %q differs from convergenceAuthority current focus %q", label, focusID, readModelFocusDebugToken(authorityFocus)),
+				})
+			}
+		}
+		if ids := readModelStringSliceValue(required["coverageWorkItemIds"]); len(ids) > 0 && !readModelFocusAligned(authorityFocus, map[string]any{"coverageWorkItemIds": ids}) {
+			ret = append(ret, readmodelcore.GapDiagnostic{
+				Code:             "authority_focus_drift",
+				Severity:         "warning",
+				Kind:             "stale_persisted_derived_field",
+				Source:           label,
+				Candidate:        strings.Join(ids, ","),
+				CurrentAuthority: readModelFocusDebugToken(authorityFocus),
+				Message:          fmt.Sprintf("%s coverageWorkItemIds %q differ from convergenceAuthority current focus %q", label, strings.Join(ids, ","), readModelFocusDebugToken(authorityFocus)),
+			})
+		}
+	}
+	addFocusDiagnostic("gapBaseline.currentFocus", MapValue(MapValue(context["gapBaseline"])["currentFocus"]))
+	addFocusDiagnostic("coverageFocus", MapValue(context["coverageFocus"]))
+	addFocusDiagnostic("acceptance.currentFocus", MapValue(MapValue(context["acceptance"])["currentFocus"]))
+	addFocusDiagnostic("stagePacket.activeFocus", MapValue(MapValue(context["stagePacket"])["activeFocus"]))
+	addRequiredDiagnostic("repairActionPackage.requiredOutput", MapValue(MapValue(context["repairActionPackage"])["requiredOutput"]))
+	addRequiredDiagnostic("stagePacket.requiredOutput", MapValue(MapValue(context["stagePacket"])["requiredOutput"]))
+	return ret
+}
+
 func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *readmodelcore.GapBaseline {
 	ctx := snapshot.CoverageWorkItemContext
 	authority := MapValue(snapshot.Run.ExecutionContext["convergenceAuthority"])
@@ -124,6 +184,62 @@ func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *read
 		return nil
 	}
 	return baseline
+}
+
+func readModelFocusAligned(authorityFocus map[string]any, candidate map[string]any) bool {
+	authorityIDs := readModelStringSet(readModelFocusWorkItemIDs(authorityFocus))
+	candidateIDs := readModelFocusWorkItemIDs(candidate)
+	if len(authorityIDs) == 0 || len(candidateIDs) == 0 {
+		return strings.TrimSpace(stringValue(authorityFocus, "id")) == strings.TrimSpace(stringValue(candidate, "id"))
+	}
+	for _, id := range candidateIDs {
+		if authorityIDs[id] {
+			return true
+		}
+	}
+	return false
+}
+
+func readModelFocusWorkItemIDs(focus map[string]any) []string {
+	if len(focus) == 0 {
+		return nil
+	}
+	var ids []string
+	ids = append(ids, readModelStringSliceValue(focus["coverageWorkItemIds"])...)
+	ids = append(ids, readModelStringSliceValue(focus["coverageWorkItemIDs"])...)
+	for _, key := range []string{"coverageWorkItemId", "coverageItemId", "workItemId"} {
+		if value := strings.TrimSpace(stringValue(focus, key)); value != "" {
+			ids = append(ids, value)
+		}
+	}
+	if id := strings.TrimSpace(stringValue(focus, "id")); id != "" {
+		ids = append(ids, strings.TrimPrefix(id, "focus-"))
+	}
+	return compactReadModelStrings(ids)
+}
+
+func readModelFocusDebugToken(focus map[string]any) string {
+	if ids := readModelFocusWorkItemIDs(focus); len(ids) > 0 {
+		return strings.Join(ids, ",")
+	}
+	return strings.TrimSpace(stringValue(focus, "id"))
+}
+
+func compactReadModelStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ret []string
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	return ret
 }
 
 func normalizePersistedGapBaselineProjection(persisted *readmodelcore.GapBaseline, derived *readmodelcore.GapBaseline) {

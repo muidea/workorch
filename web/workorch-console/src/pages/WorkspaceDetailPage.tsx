@@ -32,6 +32,7 @@ const {
   runtimeStepPageLimit, runtimeTarget, runtimeToolCallPageLimit, runtimeValidationPageLimit,
   runCommandDescriptions, setupDoDItems, skillDisplayLabel, soulBindingStageLabel, splitLines, stageBindings,
   projectionStatusDescriptions, projectionStatusSummary, runHeartbeatDescriptions, runtimeExecutionDescriptions,
+  convergenceStatusDescriptions,
   stateLabel, stateTag, taskPlanCard, taskProgressCard, timelineLabel,
   timelineOccurredAtContent, timelineStreamContent, webSourceCard, webSourceRows,
   workspaceProcessItems, workspaceProjectionRunLabel,
@@ -1327,6 +1328,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const currentArtifactContinuations = runSnapshot?.artifactContinuations ?? snapshot?.artifactContinuations ?? [];
   const currentRunHeartbeat = runSnapshot?.runHeartbeat ?? snapshot?.runHeartbeat;
   const currentRuntimeExecution = runSnapshot?.runtimeExecution ?? snapshot?.runtimeExecution;
+  const currentConvergenceStatus = runSnapshot?.convergenceStatus ?? snapshot?.convergenceStatus;
   const dodDefinitionRows = dods.flatMap((dod) => dod.items.map((text, index) => ({
     key: `${dod.id}-${index}`,
     id: dod.id,
@@ -1478,6 +1480,11 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 column={{ xs: 1, md: 2 }}
                 size="small"
                 items={runHeartbeatDescriptions(currentRunHeartbeat)}
+              />
+              <Descriptions
+                column={{ xs: 1, md: 2 }}
+                size="small"
+                items={convergenceStatusDescriptions(currentConvergenceStatus)}
               />
               <Descriptions
                 column={{ xs: 1, md: 2 }}

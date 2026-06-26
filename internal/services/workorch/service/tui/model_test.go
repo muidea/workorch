@@ -2941,6 +2941,19 @@ func TestModelInspectStatusIncludesRunHeartbeat(t *testing.T) {
 		Gap:                 "worker_lost",
 		LastProgressSummary: "worker heartbeat lost",
 	}
+	m.convergenceStatus = &backend.ConvergenceStatusInfo{
+		WorkspaceID:                 "ws-a",
+		RunID:                       "run-a",
+		RunState:                    common.RunStateRunning,
+		CurrentFocusID:              "focus-a",
+		NextActionKind:              "validate",
+		CurrentGap:                  "missing accepted evidence",
+		MissingEvidenceKinds:        []string{"validation"},
+		AcceptedEvidenceCount:       2,
+		RejectedEvidenceCount:       1,
+		LatestContractViolationRule: "coverage_assessment_incomplete",
+		LatestRecovery:              "recompute_authority",
+	}
 
 	got := m.renderInspectStatus()
 	for _, want := range []string{
@@ -2949,10 +2962,15 @@ func TestModelInspectStatusIncludesRunHeartbeat(t *testing.T) {
 		"latest progress: 2026-06-10T00:00:00Z",
 		"runtime execution: runtime pending | gap worker_lost | step step-a llm/workspace_execution running",
 		"runtime progress: worker heartbeat lost",
+		"convergence: focus focus-a | next validate | gap missing accepted evidence | evidence missing validation accepted 2 rejected 1 | violation coverage_assessment_incomplete recompute_authority",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status = %q, missing %q", got, want)
 		}
+	}
+	statusBar := stripANSI(m.renderRuntimeStatusBar(180))
+	if !strings.Contains(statusBar, "focus focus-a") || !strings.Contains(statusBar, "next validate") {
+		t.Fatalf("status bar = %q, want compact convergence status", statusBar)
 	}
 }
 

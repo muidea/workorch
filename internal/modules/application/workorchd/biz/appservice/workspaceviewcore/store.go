@@ -126,7 +126,7 @@ func (s *Store) statusForWorkspaceLocked(workspaceID string) Status {
 	}
 	if projectedSourceRevision == 0 {
 		projectedSourceRevision = s.projectedSourceRevision
-		if projectedSourceRevision == 0 || (!stale && strings.TrimSpace(errText) == "" && projectedSourceRevision < sourceRevision) {
+		if !stale && (projectedSourceRevision == 0 || (strings.TrimSpace(errText) == "" && projectedSourceRevision < sourceRevision)) {
 			projectedSourceRevision = sourceRevision
 		}
 	}
@@ -1059,6 +1059,7 @@ func cloneWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshot) readmodelcore.
 		baseline := cloneGapBaseline(*item.GapBaseline)
 		item.GapBaseline = &baseline
 	}
+	item.AuthorityDiagnostics = append([]readmodelcore.GapDiagnostic(nil), item.AuthorityDiagnostics...)
 	return item
 }
 

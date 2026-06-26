@@ -11,6 +11,10 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 	return readmodelports.WorkspaceSnapshot(ctx, workspaceSnapshotReaders(deps), workspaceID, cachedRunSnapshot)
 }
 
+func readWorkspaceProjectionSnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID, cachedRunSnapshot *RunSnapshot) (WorkspaceSnapshot, error) {
+	return readmodelports.WorkspaceProjectionSnapshot(ctx, workspaceSnapshotReaders(deps), workspaceID, cachedRunSnapshot)
+}
+
 func readWorkspaceTaskProgress(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID) (TaskProgress, error) {
 	return readmodelports.WorkspaceTaskProgress(ctx, workspaceSnapshotReaders(deps), workspaceID)
 }

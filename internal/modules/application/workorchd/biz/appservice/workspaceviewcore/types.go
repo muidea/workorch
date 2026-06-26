@@ -2,6 +2,7 @@ package workspaceviewcore
 
 import (
 	"context"
+	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
@@ -113,7 +114,8 @@ type Loader interface {
 type Scheduler func(name string, fn func(context.Context)) bool
 
 type ManagerOptions struct {
-	Loader   Loader
-	Hub      events.Hub
-	Schedule Scheduler
+	Loader               Loader
+	Hub                  events.Hub
+	Schedule             Scheduler
+	RebuildCoalesceDelay time.Duration
 }

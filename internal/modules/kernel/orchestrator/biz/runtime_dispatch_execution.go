@@ -121,6 +121,21 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return common.ErrConflict
 	}
 	o.enrichLLMStepInputContext(ctx, run, step, workspace)
+	if kind == llmWorkspaceExecutionStepKind {
+		if err := validateConvergenceDispatchInput(step.Input); err != nil {
+			output := map[string]any{
+				"status":              "failed",
+				"stage":               failureClassRuntimeContractMisalign,
+				"error":               err.Error(),
+				failureOutputKeyClass: failureClassRuntimeContractMisalign,
+				failureOutputKeySignature: runtimeFailureSignature(failureClassRuntimeContractMisalign, step, map[string]any{
+					"stage": failureClassRuntimeContractMisalign,
+					"error": err.Error(),
+				}, err),
+			}
+			return o.handleRuntimeStepFailure(ctx, run, step, nil, output, "runtime convergence authority dispatch gate failed", err)
+		}
+	}
 	if err := o.steps.Update(ctx, step); err != nil {
 		return err
 	}

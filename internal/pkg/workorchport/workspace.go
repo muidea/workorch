@@ -162,6 +162,7 @@ type WorkspaceSnapshotInfo struct {
 	TaskProgress            TaskProgressInfo
 	RunHeartbeat            RunHeartbeatInfo
 	RuntimeExecution        *RuntimeExecutionInfo
+	ConvergenceStatus       *ConvergenceStatusInfo
 	RunCommand              *RunCommandStatusInfo
 	SchedulerDiagnostics    *SchedulerDiagnosticsInfo
 	ContextBundle           map[string]any

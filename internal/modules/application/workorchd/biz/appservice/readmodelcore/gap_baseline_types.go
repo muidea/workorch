@@ -32,7 +32,11 @@ type GapNextAction struct {
 }
 
 type GapDiagnostic struct {
-	Code     string `json:"code,omitempty"`
-	Severity string `json:"severity,omitempty"`
-	Message  string `json:"message,omitempty"`
+	Code             string `json:"code,omitempty"`
+	Severity         string `json:"severity,omitempty"`
+	Kind             string `json:"kind,omitempty"`
+	Source           string `json:"source,omitempty"`
+	Candidate        string `json:"candidate,omitempty"`
+	CurrentAuthority string `json:"currentAuthority,omitempty"`
+	Message          string `json:"message,omitempty"`
 }

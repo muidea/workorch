@@ -121,12 +121,20 @@ func stagePacketActiveFocus(input map[string]any) map[string]any {
 }
 
 func stagePacketRequiredOutput(input map[string]any) map[string]any {
+	state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state"))
+	if state == convergenceStateNeedAssessment || state == convergenceStateNeedGovernance {
+		return nil
+	}
+	authorityFocus := dispatchAuthorityCurrentFocus(input)
 	for _, source := range []map[string]any{
 		mapFromValue(input["repairActionPackage"]),
 		mapFromValue(input),
 		mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"]),
 	} {
 		if required := mapFromValue(source["requiredOutput"]); len(required) > 0 {
+			if len(authorityFocus) > 0 {
+				return normalizeRequiredOutputFocusBinding(required, dispatchCoverageFocusFromAuthority(input, authorityFocus))
+			}
 			return cloneStepPayload(required)
 		}
 	}

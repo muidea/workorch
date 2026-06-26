@@ -310,6 +310,7 @@ func (o *RuntimeOrchestrator) persistRunProgressUpdate(ctx context.Context, run 
 	if o == nil || o.runs == nil || run == nil {
 		return common.ErrInvalidArgument
 	}
+	normalizeRunConvergenceOwnerState(run)
 	readCtx := ctx
 	if run.WorkspaceID != "" {
 		readCtx = common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID)

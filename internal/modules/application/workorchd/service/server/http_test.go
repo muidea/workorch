@@ -3967,6 +3967,9 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal workspace snapshot: %v", err)
 	}
+	if body.Projection.WorkspaceRevision <= 0 {
+		t.Fatalf("projection workspace revision = %d, want positive workspace-scoped revision", body.Projection.WorkspaceRevision)
+	}
 	if body.Snapshot.Workspace.ContextHints != nil || body.Snapshot.Workspace.EvidencePolicies != nil {
 		t.Fatalf("workspace heavy fields = %+v, want compact projection", body.Snapshot.Workspace)
 	}

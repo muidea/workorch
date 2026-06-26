@@ -356,6 +356,66 @@ func TestRunSnapshotFromModelsUsesConvergenceAuthorityNextAction(t *testing.T) {
 	}
 }
 
+func TestRunSnapshotFromModelsProjectsAuthorityFocusDriftDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-authority-focus-drift-projection")
+	runID := common.RunID("run-authority-focus-drift-projection")
+	got := RunSnapshotFromModels(RunSnapshotModelInput{
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "authority focus drift", State: common.WorkspaceStateRunning},
+		Run: &runmodel.Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       common.RunStateRunning,
+			ExecutionContext: map[string]any{
+				"convergenceAuthority": map[string]any{
+					"currentFocus": map[string]any{"id": "cwi-current"},
+					"nextAction":   map[string]any{"kind": "validate"},
+				},
+				"gapBaseline": map[string]any{
+					"currentFocus": map[string]any{"id": "cwi-current"},
+					"nextAction":   map[string]any{"kind": "validate"},
+				},
+				"coverageFocus": map[string]any{
+					"id":                  "focus-cwi-stale",
+					"coverageWorkItemIds": []any{"cwi-stale"},
+				},
+				"acceptance": map[string]any{
+					"currentFocus": map[string]any{
+						"id":                  "focus-cwi-stale",
+						"coverageWorkItemIds": []any{"cwi-stale"},
+					},
+				},
+				"repairActionPackage": map[string]any{
+					"requiredOutput": map[string]any{
+						"coverageFocusId":     "focus-cwi-stale",
+						"coverageWorkItemIds": []any{"cwi-stale"},
+					},
+				},
+				"stagePacket": map[string]any{
+					"activeFocus": map[string]any{"id": "cwi-current"},
+					"requiredOutput": map[string]any{
+						"coverageFocusId": "focus-cwi-stale",
+					},
+				},
+			},
+		},
+	})
+
+	if len(got.AuthorityDiagnostics) < 3 {
+		t.Fatalf("AuthorityDiagnostics = %+v, want focus drift diagnostics", got.AuthorityDiagnostics)
+	}
+	for _, diagnostic := range got.AuthorityDiagnostics {
+		if diagnostic.Code != "authority_focus_drift" || diagnostic.Severity != "warning" {
+			t.Fatalf("AuthorityDiagnostics item = %+v, want warning authority_focus_drift", diagnostic)
+		}
+		if diagnostic.Kind != "stale_persisted_derived_field" || diagnostic.Source == "" ||
+			diagnostic.Candidate == "" || diagnostic.CurrentAuthority != "cwi-current" {
+			t.Fatalf("AuthorityDiagnostics item = %+v, want stale persisted derived field source/candidate/authority", diagnostic)
+		}
+	}
+}
+
 func TestRunRecoverySnapshotFromModelsUsesCheckpointStep(t *testing.T) {
 	t.Parallel()
 

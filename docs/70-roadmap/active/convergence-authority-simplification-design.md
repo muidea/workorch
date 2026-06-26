@@ -13,6 +13,8 @@ Related:
 - `../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md`
 - `../../30-module-architecture/mvvp-workspace-viewmodel-architecture.md`
 - `../../30-module-architecture/eventhub-driven-workorchd-state-loop-design.md`
+- `../../60-verification/convergence-authority-dispatch-live-verification.md`
+- `convergence-authority-dispatch-closure-checklist.md`
 - `runtime-convergence-authority-final-fix-scope.md`
 - `goal-dod-nextaction-iterative-delivery-plan.md`
 
@@ -164,6 +166,22 @@ authority snapshot
 
 如果 NextAction 不需要 LLM 生成内容，例如已有足够证据可完成 assessment gate 或需要治理等待，则 runtime 不应继续请求 LLM 生成“自我判断”。
 
+dispatch 前必须执行最终完整性门禁：
+
+- current focus、deterministic NextAction、convergenceContract、Stage Packet、
+  requiredOutput、gapBaseline 必须来自同一次 authority snapshot。
+- `coverageFocus`、current `acceptance.currentFocus`、
+  `repairActionPackage.requiredOutput`、top-level `requiredOutput` and
+  `stagePacket.requiredOutput` are focus-bearing derived fields. They must be
+  rebound from the current authority focus before provider dispatch, or marked
+  diagnostic-only if retained as historical lineage.
+- replan、resume、provider retry、contract retry、follow-up 和 event-driven dispatch
+  都不能绕过该门禁。
+- 若发现派生字段不一致，先刷新 authority 并重建 dispatch input；若仍不一致，
+  按 runtime internal contract misalignment fail-fast，不作为普通 LLM 违例处理。
+- 旧 failed-step input、旧 repairActionPackage、旧 replanContinuation、旧 violation
+  recovery 和旧 budget scope 只能保留为诊断 lineage，不能覆盖当前 dispatch authority。
+
 ### 4. Candidate Gate
 
 LLM 或 block 输出先进入合同门禁：
@@ -196,6 +214,14 @@ owner snapshot
 
 projection 可暴露 `authorityDiagnostics`，例如“persisted derived field stale”，但不能修复或写回 owner state。
 
+projection health 只表达显示链路健康：
+
+- `ready` projection 必须保证 source revision 与 projected source revision 对齐。
+- `stale` / `degraded` projection 可以显示滞后的 projected revision，并通过
+  ViewModel 暴露为 projection health，而不是在 TUI/Web 侧重新推断业务状态。
+- TUI/Web prompt、workspace list、main view 和 status bar 只能消费
+  workorchd ViewModel；缺少 ViewModel 时显示 degraded/loading，不恢复本地业务状态机。
+
 ## Access Inventory
 
 ### External Client Access
@@ -223,9 +249,10 @@ projection 可暴露 `authorityDiagnostics`，例如“persisted derived field s
 | --- | --- | --- | --- |
 | `gapBaseline` | authority refresh | projection, LLM input | dispatch 前重建，不能作为权威输入 |
 | `convergenceContract` | authority refresh | Stage Packet, contract gate | 从 NextAction 生成 |
-| `repairActionPackage` | Stage Packet/contract renderer | LLM C4, contract gate | 只表达当前 requiredOutput |
-| `stagePacket` | Stage Packet builder | LLM input/block adapter | 不继承旧 dynamic field |
-| `coverageFocus` | authority refresh | budget, contract renderer | focus scope 变化时 reset budget |
+| `repairActionPackage` | Stage Packet/contract renderer | LLM C4, contract gate | 只表达当前 requiredOutput；不得继承旧 focus binding |
+| `stagePacket` | Stage Packet builder | LLM input/block adapter | 不继承旧 dynamic field；`requiredOutput` 必须绑定 current authority focus |
+| `coverageFocus` | authority refresh | budget, contract renderer | focus scope 变化时 reset budget；dispatch 前必须与 authority focus 对齐 |
+| `acceptance.currentFocus` | authority refresh / dispatch input renderer | LLM C4, projection | 作为 current signal 时必须由 authority 派生；旧 slice focus 只能诊断化 |
 | `convergenceBudget` | authority refresh/budget recorder | escalation gate | 只对当前 focus 生效 |
 
 ### LLM Context Access
@@ -235,8 +262,8 @@ projection 可暴露 `authorityDiagnostics`，例如“persisted derived field s
 | C0 stable contract | 长期稳定 runtime schema、语言规则、中立合同 | workspace/run/step、当前失败、repair mode、provider retry、Goal/DoD 正文 |
 | C1 definition | 当前 Goal/DoD revision、definition hash | transient failure、old repair lineage |
 | C2 capability | 声明式 capability/profile/policy refs | 当前阶段临时允许/禁止项 |
-| C3 stage contract | NextAction、stagePacket、requiredOutput | 旧 step 的 authority 字段 |
-| C4 current action | 当前 progress、current focus、diagnostics、rejected evidence | 可长期召回但无 provenance 的历史流水 |
+| C3 stage contract | NextAction、stagePacket、requiredOutput、唯一 current focus/action contract | 旧 step 的 authority 字段 |
+| C4 current action | 当前 progress、authority-derived diagnostics、rejected evidence、retry hint | 并列的 stale current focus、可长期召回但无 provenance 的历史流水 |
 | C5 large refs | snapshots、artifact refs、trace refs | 被截断却标记为完整可 patch 的内容 |
 
 ## Code Scope
@@ -317,6 +344,37 @@ projection 可暴露 `authorityDiagnostics`，例如“persisted derived field s
 - Run core business-neutral boundary search.
 - Acceptance: tests fail on old drift class and pass after closure.
 
+## Dispatch Closure Addendum
+
+`convergence-authority-dispatch-closure-checklist.md` 将本文的简化模型落成了
+P0/P1/P2 收口清单。该 checklist 没有改变本文的权威模型，但补充了实现侧必须长期保持的闭环规则：
+
+- P0: before every provider/block dispatch, one refreshed convergence authority
+  snapshot must drive current focus、NextAction、gapBaseline、convergenceContract、
+  Stage Packet and requiredOutput. Contradictory derived fields are runtime
+  internal contract errors, not LLM/provider errors.
+- P1: accepted/rejected evidence remains the only coverage state transition
+  basis; rejected diagnostics can guide bounded retry but cannot satisfy
+  coverage or become high-value memory.
+- P1: LLM context must keep stable C0/C1/C2 separate from volatile C3/C4/C5;
+  Stage Packet and current action diagnostics belong to the volatile/stage
+  partitions.
+- P1: ViewModel completeness is part of the runtime contract. Active run,
+  current focus, NextAction, authority diagnostics, projection revision and
+  blocking governance objects must be carried through port/client/backend DTOs.
+- P2: high-frequency stream progress is an in-memory/progress signal and should
+  not force full projection fan-out or detail hydration. Normal projection reads
+  may exclude stream progress from hydrated timelines; observability reads keep
+  the complete timeline.
+- P2: live verification distinguishes `workspaceProgress` from final
+  `goalConvergence`. In-flight verification passes when each workspace has
+  accepted evidence, a correct governed blocker, or active progress heartbeat.
+  Final Goal/DoD convergence requires an explicit stricter gate.
+
+These rules remain business neutral. They must not introduce branches based on
+template ID、Soul ID、language、command、provider、workspace title or live
+workspace ID.
+
 ## Verification Plan
 
 Targeted tests:
@@ -362,11 +420,11 @@ Live verification after code closure:
 | S1 Authority Snapshot Model | code-closed | Runtime now writes `convergenceAuthority` with current focus, structured NextAction, evidence refs and budget scope. `TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket` covers authority-driven baseline/contract/stage packet derivation. |
 | S2 Single Refresh Entry | code-closed | `ensureGapBaselineBeforeDispatch` routes through `refreshRunConvergenceAuthority` before dispatch and persists one aligned snapshot. `initialStepInput` also refreshes authority before rendering the first step input, so replan successor startup cannot bypass the authority snapshot. Event-driven dispatch consumption now re-derives and overwrites `gapBaseline` / `convergenceAuthority` from current owner state before runtime execution, removes stale queued payload snapshots when no current snapshot exists, and `mergeResumeInput` no longer allows resume wrappers to overwrite `gapBaseline` / `convergenceAuthority` / `coverageFocus` / `convergenceBudget`. `runExecutionInput` now binds authority/gapBaseline before dynamic runtime contract inheritance, `BuildConvergenceContract` honors authority nextAction before merging stale continuation lineage, and authority refresh strips runtime retry diagnostics from `coverageFocus`, keeping current focus derived from coverage ledger only. |
 | S3 NextAction Interpreter | code-closed | `BuildConvergenceContract` accepts current structured NextAction from `convergenceAuthority` / `gapBaseline` without requiring replan flags; runtime no longer carries a historical placeholder next-action compatibility path. |
-| S4 Stage Contract From NextAction | code-closed | Validation/assessment contracts clear stale `replanStateChangingContinuation`; old `repairActionPackage` cannot override authority-selected assessment/validation and no longer crosses replan successor hydration as current lineage. `repairActionPackageFromReplanContinuation` rebuilds the package from current failure/timeline/digest instead of merging old continuation packages, and output-mode selection ignores stale `replanContinuation` budget signals. Output-mode selection still blocks stale `requestedOutputMode`、`stateChangingOutputRequired`、`repairObjective` and required-output budget inheritance from `run.ExecutionContext` when `convergenceAuthority` / `gapBaseline` has already selected a non state-changing NextAction, while preserving legitimate current state-change budget signals. `TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket`, `TestInitialStepInputAuthorityAssessmentPreemptsStaleReplanStateChange`, `TestBuildConvergenceContractAuthorityPreemptsReplanWithoutInputPollution`, `TestRuntimeOrchestrator_InitialReplanStateChangingInputIgnoresStaleContinuationRepairPackage`, `TestRuntimeOrchestrator_ReplanSuccessorRecoversConcreteFailureFromAncestorLineage` and `TestOutputModeSelectorIgnoresStaleReplanContinuationBudgetSignal` cover stale replan/state-changing lineage being preempted by current authority without polluting the current input. |
+| S4 Stage Contract From NextAction | code-closed | Validation/assessment contracts clear stale `replanStateChangingContinuation`; old `repairActionPackage` cannot override authority-selected assessment/validation and no longer crosses replan successor hydration as current lineage. `repairActionPackageFromReplanContinuation` rebuilds the package from current failure/timeline/digest instead of merging old continuation packages, and output-mode selection ignores stale `replanContinuation` budget signals. Output-mode selection still blocks stale `requestedOutputMode`、`stateChangingOutputRequired`、`repairObjective` and required-output budget inheritance from `run.ExecutionContext` when `convergenceAuthority` / `gapBaseline` has already selected a non state-changing NextAction, while preserving legitimate current state-change budget signals. Dispatch input now also rebinds stale `coverageFocus`、current `acceptance.currentFocus`、`repairActionPackage.requiredOutput`、top-level `requiredOutput` and `stagePacket.requiredOutput` to the current authority focus before provider dispatch; assessment/governance actions drop stale executable required output. `TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket`, `TestInitialStepInputAuthorityAssessmentPreemptsStaleReplanStateChange`, `TestBuildConvergenceContractAuthorityPreemptsReplanWithoutInputPollution`, `TestRuntimeOrchestrator_InitialReplanStateChangingInputIgnoresStaleContinuationRepairPackage`, `TestRuntimeOrchestrator_ReplanSuccessorRecoversConcreteFailureFromAncestorLineage`, `TestOutputModeSelectorIgnoresStaleReplanContinuationBudgetSignal`, `TestRebuildDispatchInputAlignsStaleFocusFieldsToAuthority`, `TestRebuildDispatchInputDropsStaleRequiredOutputForAssessmentAuthority` and `TestValidateConvergenceDispatchInputRejectsFocusDrift` cover stale lineage/focus preemption before LLM dispatch. |
 | S5 Candidate Violation Handling | code-closed | Existing bounded contract-violation tests remain in orchestrator; this pass keeps rejected diagnostics out of authority and focuses on stale lineage preemption. |
-| S6 Projection/ViewModel Alignment | code-closed | Projection reads `convergenceAuthority.nextAction` before local derivation and emits `stale_persisted_next_action` diagnostic on any persisted baseline nextAction mismatch. `coverage_summary.go` no longer treats historical placeholder next actions as a special compatibility branch. |
+| S6 Projection/ViewModel Alignment | code-closed | Projection reads `convergenceAuthority.nextAction` before local derivation and emits `stale_persisted_next_action` diagnostic on any persisted baseline nextAction mismatch. Projection also exposes read-only `authorityDiagnostics` when persisted `coverageFocus`、`acceptance.currentFocus` or requiredOutput focus bindings disagree with current authority; projection does not repair owner state. `coverage_summary.go` no longer treats historical placeholder next actions as a special compatibility branch. Normal run projection uses metadata-only event queries; explicit observability remains the full payload hydrate path. |
 | S7 Access Boundary Cleanup | verified | Precise search found no user-visible `/run continue` command or `Intent("continue")`; remote mode remains on-demand through projection events unless agent requires full stream. |
-| S8 Regression and Boundary Gate | code-closed | Added authority snapshot, event-driven dispatch stale-payload overwrite, resume-wrapper authority skip, focus diagnostic stripping, projection authority, stale replan repair package suppression and stale replan output-mode budget suppression regression tests; targeted package tests and full `go test ./... -count=1` pass. |
+| S8 Regression and Boundary Gate | code-closed | Added authority snapshot, event-driven dispatch stale-payload overwrite, resume-wrapper authority skip, focus diagnostic stripping, projection authority, stale replan repair package suppression, stale replan output-mode budget suppression, focus drift dispatch gate, prompt C4 acceptance-focus suppression, authority diagnostics and metadata-only projection regression tests; targeted package tests pass. |
 
 ## Final Closure Verification
 

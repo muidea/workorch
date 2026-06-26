@@ -74,6 +74,93 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchSerializesLLMDispatchRequests(
 	}
 }
 
+func TestRuntimeOrchestrator_EventDrivenDispatchPublishesAuthorityAlignedInput(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-event-driven-authority")
+	stepID := common.StepID(runID + "/step-1")
+	workspaceID := common.WorkspaceID("ws-event-driven-authority")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	hub := events.NewMemoryHub()
+	run := runWithAuthorityFocusForTest("validate")
+	run.ID = runID
+	run.WorkspaceID = workspaceID
+	run.State = common.RunStateRunning
+	run.ExecutionContext[convergenceAuthorityKey].(map[string]any)["workspaceId"] = string(workspaceID)
+	run.ExecutionContext[convergenceAuthorityKey].(map[string]any)["runId"] = string(runID)
+	run.ExecutionContext[gapBaselineKey].(map[string]any)["workspaceId"] = string(workspaceID)
+	run.ExecutionContext[gapBaselineKey].(map[string]any)["runId"] = string(runID)
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{output: map[string]any{"completionState": "completed"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		hub,
+	)
+	orch.EnableEventDrivenDispatch()
+
+	err := orch.RequestUniqueDispatchStep(ctx, run, stepID, llmWorkspaceExecutionStepKind, map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"workspaceId":   "stale-workspace",
+			"runId":         "stale-run",
+			"currentFocus": map[string]any{
+				"id":                  "focus-cwi-stale",
+				"coverageWorkItemIds": []string{"cwi-stale"},
+			},
+			"nextAction": map[string]any{"kind": "validate"},
+		},
+		coverageFocusKey: map[string]any{
+			"id":                  "focus-cwi-stale",
+			"coverageWorkItemIds": []string{"cwi-stale"},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"coverageFocusId":     "focus-cwi-stale",
+				"coverageWorkItemIds": []string{"cwi-stale"},
+			},
+		},
+	}, workspaceID)
+	if err != nil {
+		t.Fatalf("RequestUniqueDispatchStep: %v", err)
+	}
+	var dispatch events.Envelope
+	for _, envelope := range hub.Published() {
+		if envelope.Topic == orchestratorevents.TopicOrchestratorDispatchStepRequested {
+			dispatch = envelope
+		}
+	}
+	if dispatch.Topic == "" {
+		t.Fatalf("published events = %+v, want dispatch requested", hub.Published())
+	}
+	cmd, ok := dispatch.Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
+	if !ok {
+		t.Fatalf("dispatch command = %#v, want DispatchStepCommand", dispatch.Payload[events.PayloadKeyCommand])
+	}
+	input := cmd.Input
+	authority := mapFromValue(input[convergenceAuthorityKey])
+	if stringFromMap(authority, "workspaceId") != string(workspaceID) || stringFromMap(authority, "runId") != string(runID) {
+		t.Fatalf("queued authority = %+v, want current workspace/run", authority)
+	}
+	assertFocusIDForTest(t, mapFromValue(authority["currentFocus"]), "cwi-current")
+	assertFocusIDForTest(t, mapFromValue(input[coverageFocusKey]), "focus-cwi-current")
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if got := stringFromMap(required, "coverageFocusId"); got != "focus-cwi-current" {
+		t.Fatalf("queued repairActionPackage.requiredOutput = %+v, want current focus", required)
+	}
+	packet := mapFromValue(input[stepInputKeyStagePacket])
+	assertFocusIDForTest(t, mapFromValue(packet["activeFocus"]), "cwi-current")
+}
+
 func TestRuntimeOrchestrator_NextDispatchReusesActiveLLMWorkspaceExecution(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-active-llm-lane")

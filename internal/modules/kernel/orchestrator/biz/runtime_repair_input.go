@@ -1177,6 +1177,7 @@ func finalizeRuntimeRepairFollowUpStepInput(run *runModel.Run, failedStep *runMo
 	if failedStep != nil {
 		stepID = failedStep.ID
 	}
+	input = normalizeDispatchInputAuthorityFocus(input)
 	return attachStagePacketToStepInput(run, stepID, input)
 }
 

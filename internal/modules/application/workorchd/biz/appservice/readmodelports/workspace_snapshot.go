@@ -9,8 +9,16 @@ import (
 )
 
 func WorkspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
+	return workspaceSnapshot(ctx, readers, workspaceID, cachedRunSnapshot, workspaceSnapshotDetailLoadOptions())
+}
+
+func WorkspaceProjectionSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
+	return workspaceSnapshot(ctx, readers, workspaceID, cachedRunSnapshot, workspaceSnapshotProjectionLoadOptions())
+}
+
+func workspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot, options workspaceSnapshotLoadOptions) (readmodelcore.WorkspaceSnapshot, error) {
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
-	models, err := loadWorkspaceSnapshotModels(ctx, readers, workspaceID, cachedRunSnapshot)
+	models, err := loadWorkspaceSnapshotModels(ctx, readers, workspaceID, cachedRunSnapshot, options)
 	if err != nil {
 		return readmodelcore.WorkspaceSnapshot{}, err
 	}
@@ -21,16 +29,16 @@ func WorkspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, wo
 		return ret, nil
 	}
 
-	var runSnapshot readmodelcore.RunSnapshot
+	var selectedRunSnapshot readmodelcore.RunSnapshot
 	if cachedRunSnapshot != nil &&
 		cachedRunSnapshot.Run.ID == string(projectionRun.ID) &&
 		cachedRunSnapshot.Run.WorkspaceID == string(workspaceID) {
-		runSnapshot = *cachedRunSnapshot
+		selectedRunSnapshot = *cachedRunSnapshot
 	} else {
-		runSnapshot, err = RunSnapshot(ctx, effectiveWorkspaceRunSnapshotReaders(readers), projectionRun.ID)
+		selectedRunSnapshot, err = runSnapshot(ctx, effectiveWorkspaceRunSnapshotReaders(readers), projectionRun.ID, options.projectionRunLoadMode, false)
 		if err != nil {
 			return readmodelcore.WorkspaceSnapshot{}, err
 		}
 	}
-	return readmodelprojection.WorkspaceSnapshotWithRunSnapshot(ret, &runSnapshot), nil
+	return readmodelprojection.WorkspaceSnapshotWithRunSnapshot(ret, &selectedRunSnapshot), nil
 }
