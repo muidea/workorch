@@ -117,6 +117,7 @@ func workspaceInfoFromClient(ws *client.Workspace) WorkspaceInfo {
 		DefaultSoulID:        common.SoulID(ws.DefaultSoulID),
 		SoulBindings:         commonSoulBindings(ws.SoulBindings),
 		Projection:           projectionInfoFromClient(ws.Projection),
+		ViewModel:            workspaceViewModelInfoFromClient(ws.ViewModel),
 	}
 }
 
@@ -133,6 +134,38 @@ func projectionInfoFromClient(input client.ProjectionStatus) ProjectionInfo {
 		StaleReason:             input.StaleReason,
 		Error:                   input.Error,
 	}
+}
+
+func workspaceViewModelInfoFromClient(input client.WorkspaceViewModel) WorkspaceViewModelInfo {
+	ret := WorkspaceViewModelInfo{
+		WorkspaceID:             common.WorkspaceID(input.WorkspaceID),
+		State:                   input.State,
+		PromptMode:              input.PromptMode,
+		Revision:                input.Revision,
+		GlobalRevision:          input.GlobalRevision,
+		WorkspaceRevision:       input.WorkspaceRevision,
+		SourceEventRevision:     input.SourceEventRevision,
+		ProjectedSourceRevision: input.ProjectedSourceRevision,
+		UpdatedAt:               input.UpdatedAt,
+		RebuiltAt:               input.RebuiltAt,
+		Degraded:                input.Degraded,
+		StaleReason:             input.StaleReason,
+		Error:                   input.Error,
+	}
+	if len(input.Sections) > 0 {
+		ret.Sections = make(map[string]WorkspaceViewModelSectionInfo, len(input.Sections))
+		for key, value := range input.Sections {
+			ret.Sections[key] = WorkspaceViewModelSectionInfo{
+				Name:                    value.Name,
+				Revision:                value.Revision,
+				WorkspaceRevision:       value.WorkspaceRevision,
+				SourceEventRevision:     value.SourceEventRevision,
+				ProjectedSourceRevision: value.ProjectedSourceRevision,
+				State:                   value.State,
+			}
+		}
+	}
+	return ret
 }
 
 func (b *remoteWorkspaceBackend) Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error) {

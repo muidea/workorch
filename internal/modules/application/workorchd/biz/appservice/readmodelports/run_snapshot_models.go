@@ -7,7 +7,14 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 )
 
-func loadRunSnapshotModels(ctx context.Context, readers RunSnapshotReaders, item *runmodel.Run, recovery bool) (runSnapshotModels, error) {
+type runSnapshotLoadMode string
+
+const (
+	runSnapshotLoadProjection    runSnapshotLoadMode = "projection"
+	runSnapshotLoadObservability runSnapshotLoadMode = "observability"
+)
+
+func loadRunSnapshotModels(ctx context.Context, readers RunSnapshotReaders, item *runmodel.Run, loadMode runSnapshotLoadMode, recovery bool) (runSnapshotModels, error) {
 	var models runSnapshotModels
 	tasks := []func() error{
 		func() error {
@@ -63,7 +70,7 @@ func loadRunSnapshotModels(ctx context.Context, readers RunSnapshotReaders, item
 			return err
 		})
 	}
-	tasks = appendRunSnapshotObservabilityTasks(ctx, tasks, readers, item, &models)
+	tasks = appendRunSnapshotObservabilityTasks(ctx, tasks, readers, item, loadMode, &models)
 	tasks = appendRunSnapshotGovernanceTasks(ctx, tasks, readers, item, &models)
 	tasks = appendRunSnapshotCapabilityTasks(ctx, tasks, readers, recovery, &models)
 	if err := readmodelcore.RunTasks(tasks...); err != nil {

@@ -23,9 +23,10 @@ Last Updated: 2026-05-30
 9. [verification-layer-code-alignment-checklist.md](verification-layer-code-alignment-checklist.md)
 10. [profile-software-dev-verifier.md](profile-software-dev-verifier.md)
 11. [workorch-runtime-closure-modification-spec.md](workorch-runtime-closure-modification-spec.md)
-12. [loadtest-baseline.md](loadtest-baseline.md)
-13. [audits/overview.md](audits/overview.md)
-14. `tui/`
+12. [convergence-authority-dispatch-live-verification.md](convergence-authority-dispatch-live-verification.md)
+13. [loadtest-baseline.md](loadtest-baseline.md)
+14. [audits/overview.md](audits/overview.md)
+15. `tui/`
    - [tui-agent-acceptance.md](tui/tui-agent-acceptance.md)
    - [display-closure-tracking.md](tui/display-closure-tracking.md)
 
@@ -39,6 +40,8 @@ Last Updated: 2026-05-30
   - 验证 software-dev 的 coverage、evidence、entrypoint integrity 和 profile-specific 规则
 - Runtime closure modification spec
   - 约束线上 workspace / TUI / projection / repair / CPU-IO 问题收口时的修改落点、审核顺序和反打圈检查
+- Convergence authority dispatch live verification
+  - 固化两 workspace convergence authority dispatch 的部署后观测入口、artifact schema、projection/goal convergence/cache/CPU-IO 验收口径
 - Audits
   - 承接 design-vs-implementation、runtime contract、full-chain、Codex comparison 等核查材料
 - TUI verification
@@ -65,6 +68,8 @@ Last Updated: 2026-05-30
   - 承接 software-dev profile 的 coverage/evidence/deliverable 闭环验证
 - `workorch-runtime-closure-modification-spec.md`
   - 承接运行期异常收口、core/template 边界和修改审核规范
+- `convergence-authority-dispatch-live-verification.md`
+  - 承接 convergence authority dispatch closure 的 live verification 命令和 artifact 验收合同
 - `tui/*`
   - 承接 TUI acceptance、display closure 与 review boundary
 - `loadtest-baseline.md`

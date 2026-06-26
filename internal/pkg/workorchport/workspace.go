@@ -27,6 +27,7 @@ type WorkspaceInfo struct {
 	DefaultSoulID        common.SoulID
 	SoulBindings         map[string]common.SoulID
 	Projection           ProjectionInfo
+	ViewModel            WorkspaceViewModelInfo
 }
 
 type ProjectionInfo struct {

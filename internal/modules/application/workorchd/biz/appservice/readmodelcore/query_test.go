@@ -43,6 +43,7 @@ func TestEventRecordRepositoryQueryNormalizesFields(t *testing.T) {
 		WorkspaceID:    " ws-001 ",
 		RunID:          " run-001 ",
 		Topic:          " /topic ",
+		ExcludeTopics:  []string{" /exclude-a ", " /exclude-a ", "", "/exclude-b"},
 		SubjectType:    " run ",
 		SubjectID:      " subject-001 ",
 		CursorAfterID:  " evt-001 ",
@@ -65,6 +66,9 @@ func TestEventRecordRepositoryQueryNormalizesFields(t *testing.T) {
 	}
 	if got.Topic != "/topic" || got.SubjectType != "run" || got.SubjectID != "subject-001" {
 		t.Fatalf("event filters mismatch: topic=%q subjectType=%q subjectID=%q", got.Topic, got.SubjectType, got.SubjectID)
+	}
+	if len(got.ExcludeTopics) != 2 || got.ExcludeTopics[0] != "/exclude-a" || got.ExcludeTopics[1] != "/exclude-b" {
+		t.Fatalf("exclude topics = %+v, want normalized unique topics", got.ExcludeTopics)
 	}
 	if got.OccurredAfter != "2026-01-01T00:00:00Z" || got.OccurredBefore != "2026-01-02T00:00:00Z" {
 		t.Fatalf("time filters mismatch: after=%q before=%q", got.OccurredAfter, got.OccurredBefore)
@@ -104,6 +108,17 @@ func TestRunEventRecordRepositoryQueries(t *testing.T) {
 	}
 	if !observability.IncludePayload {
 		t.Fatalf("observability include payload = false, want true")
+	}
+	if len(observability.ExcludeTopics) != 0 {
+		t.Fatalf("observability exclude topics = %+v, want complete event timeline", observability.ExcludeTopics)
+	}
+
+	projection := RunProjectionEventRecordRepositoryQuery(common.RunID(" run-001 "), 100)
+	if projection.RunID != common.RunID("run-001") || !projection.IncludePayload {
+		t.Fatalf("projection query = %+v, want run scoped hydrated projection query", projection)
+	}
+	if len(projection.ExcludeTopics) != 1 || projection.ExcludeTopics[0] != runevents.TopicRunLLMStreamProgress {
+		t.Fatalf("projection exclude topics = %+v, want stream progress excluded", projection.ExcludeTopics)
 	}
 
 	llm := RunLLMUsageEventRecordRepositoryQuery(common.RunID(" run-001 "), 5000)

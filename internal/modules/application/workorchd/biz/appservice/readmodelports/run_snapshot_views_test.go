@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -60,6 +61,44 @@ func TestRunSnapshotViewsBuildDerivedViewsFromReaders(t *testing.T) {
 
 	if _, err := RunTaskDecompositions(context.Background(), readers, run.ID); err != nil {
 		t.Fatalf("RunTaskDecompositions: %v", err)
+	}
+}
+
+func TestRunObservabilityUsesCompleteEventTimeline(t *testing.T) {
+	t.Parallel()
+
+	workspace := &workspacemodel.Workspace{ID: "ws-run-observability-events", Title: "run observability events", State: common.WorkspaceStateRunning}
+	run := &runmodel.Run{ID: "run-observability-events", WorkspaceID: workspace.ID, State: common.RunStateRunning}
+	events := &fakeRunSnapshotEventReader{}
+
+	_, err := RunObservability(context.Background(), RunSnapshotReaders{
+		Workspaces:            fakeRunSnapshotWorkspaceReader{items: []*workspacemodel.Workspace{workspace}},
+		Runs:                  fakeRunStatusRunReader{items: []*runmodel.Run{run}},
+		Steps:                 fakeRunStatusStepReader{},
+		ToolCalls:             fakeRunSnapshotToolCallReader{},
+		Patches:               fakeRunSnapshotPatchReader{},
+		Validations:           fakeRunSnapshotValidationReader{},
+		Checkpoints:           fakeRunStatusCheckpointReader{},
+		Results:               fakeRunSnapshotResultReader{},
+		Artifacts:             fakeRunSnapshotArtifactReader{},
+		ArtifactContinuations: fakeRunSnapshotArtifactContinuationReader{},
+		EventRecords:          events,
+		MemoryRecalls:         fakeRunSnapshotMemoryRecallReader{},
+		Tickets:               fakeTicketReader{},
+		Resolutions:           fakeResolutionReader{},
+		Approvals:             fakeApprovalListReader{},
+	}, run.ID)
+	if err != nil {
+		t.Fatalf("RunObservability: %v", err)
+	}
+	if len(events.queries) < 1 {
+		t.Fatalf("event reader queries = %d, want observability event query", len(events.queries))
+	}
+	if len(events.queries[0].ExcludeTopics) != 0 {
+		t.Fatalf("observability exclude topics = %+v, want complete event timeline including %s", events.queries[0].ExcludeTopics, runevents.TopicRunLLMStreamProgress)
+	}
+	if !events.queries[0].IncludePayload {
+		t.Fatalf("observability include payload = false, want true")
 	}
 }
 

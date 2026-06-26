@@ -32,20 +32,20 @@ type RunSnapshotReaders struct {
 }
 
 func RunSnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) (readmodelcore.RunSnapshot, error) {
-	return runSnapshot(ctx, readers, runID, false)
+	return runSnapshot(ctx, readers, runID, runSnapshotLoadProjection, false)
 }
 
 func RunRecoverySnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) (readmodelcore.RunSnapshot, error) {
-	return runSnapshot(ctx, readers, runID, true)
+	return runSnapshot(ctx, readers, runID, runSnapshotLoadProjection, true)
 }
 
-func runSnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.RunID, recovery bool) (readmodelcore.RunSnapshot, error) {
+func runSnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.RunID, loadMode runSnapshotLoadMode, recovery bool) (readmodelcore.RunSnapshot, error) {
 	item, err := readmodelcore.GetRunFromReader(ctx, readers.Runs, runID)
 	if err != nil {
 		return readmodelcore.RunSnapshot{}, err
 	}
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
-	models, err := loadRunSnapshotModels(ctx, readers, item, recovery)
+	models, err := loadRunSnapshotModels(ctx, readers, item, loadMode, recovery)
 	if err != nil {
 		return readmodelcore.RunSnapshot{}, err
 	}

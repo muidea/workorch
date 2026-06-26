@@ -39,6 +39,17 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	kind = canonicalLLMWorkspaceStepKind(kind)
 	var unlockLLMDispatch func()
 	if kind == llmWorkspaceExecutionStepKind {
+		if err := o.ensureGapBaselineBeforeDispatch(ctx, run); err != nil {
+			return err
+		}
+		if gated, err := gapBaselineDispatchGate(run); gated || err != nil {
+			return err
+		}
+		var rebuildErr error
+		input, rebuildErr = rebuildDispatchInputFromConvergenceAuthority(run, stepID, cloneStepPayload(input))
+		if rebuildErr != nil {
+			return rebuildErr
+		}
 		unlockLLMDispatch = o.lockRunLLMDispatch(run.ID)
 		defer func() {
 			if unlockLLMDispatch != nil {

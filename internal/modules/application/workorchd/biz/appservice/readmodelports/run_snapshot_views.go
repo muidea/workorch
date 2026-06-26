@@ -9,7 +9,7 @@ import (
 )
 
 func RunObservability(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) (readmodelcore.RunObservability, error) {
-	snapshot, err := RunSnapshot(ctx, readers, runID)
+	snapshot, err := runSnapshot(ctx, readers, runID, runSnapshotLoadObservability, false)
 	if err != nil {
 		return readmodelcore.RunObservability{}, err
 	}

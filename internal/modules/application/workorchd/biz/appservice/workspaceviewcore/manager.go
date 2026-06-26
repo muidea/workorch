@@ -523,7 +523,6 @@ func (m *Manager) handleRuntimeProgressEvent(envelope events.Envelope) error {
 		WorkerEventAt: strings.TrimSpace(firstNonEmptyString(stringFromPayload(envelope.Payload, "heartbeatAt"), stringFromPayload(envelope.Payload, "workerHeartbeatAt"))),
 	}
 	if m.store.ApplyRuntimeProgress(update) {
-		m.publishProjectionChanged(context.Background(), workspaceID, "runtime_progress")
 		return nil
 	}
 	m.store.MarkStale(workspaceID, envelope.Revision)

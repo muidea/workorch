@@ -58,6 +58,16 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 	if len(items) != 2 || items[0].ID != "ws-a" || items[0].Title != "A+" || items[1].ID != "ws-b" {
 		t.Fatalf("items = %+v, want sorted snapshot-backed workspaces", items)
 	}
+	if items[0].ViewModel.WorkspaceID != "ws-a" ||
+		items[0].ViewModel.PromptMode != "running" ||
+		items[0].ViewModel.GlobalRevision != status.GlobalRevision ||
+		items[0].ViewModel.WorkspaceRevision == 0 ||
+		items[0].ViewModel.Revision != items[0].ViewModel.WorkspaceRevision {
+		t.Fatalf("list viewModel = %+v, status = %+v, want projection-owned running prompt", items[0].ViewModel, status)
+	}
+	if item, ok := items[0].ViewModel.Sections["promptMode"]; !ok || item.Revision != items[0].ViewModel.Revision {
+		t.Fatalf("list promptMode section = %+v, want section revision from viewModel %+v", item, items[0].ViewModel)
+	}
 
 	snapshot, snapshotStatus, err := store.GetSnapshot("ws-a")
 	if err != nil {
@@ -461,7 +471,7 @@ func TestManagerPublishesProjectionChangedThroughAsyncHub(t *testing.T) {
 	}
 }
 
-func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuild(t *testing.T) {
+func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuildOrProjectionFanout(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
 	scheduled := map[string]int{}
@@ -535,14 +545,14 @@ func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuild(t *testing.T) {
 		!snapshot.RuntimeExecution.Pending {
 		t.Fatalf("runtime execution after progress = %+v", snapshot.RuntimeExecution)
 	}
-	var progressProjection events.Envelope
+	var progressProjectionCount int
 	for _, item := range hub.Published() {
 		if item.Topic == workorchdevents.TopicWorkspaceProjectionChanged && item.Payload["changeKind"] == "runtime_progress" {
-			progressProjection = item
+			progressProjectionCount++
 		}
 	}
-	if progressProjection.Topic == "" {
-		t.Fatalf("published events = %+v, want runtime_progress projection event", hub.Published())
+	if progressProjectionCount != 0 {
+		t.Fatalf("published runtime_progress projection events = %d, want none; events=%+v", progressProjectionCount, hub.Published())
 	}
 }
 

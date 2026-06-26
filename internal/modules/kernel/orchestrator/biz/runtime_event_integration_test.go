@@ -41,27 +41,22 @@ func TestRuntimeOrchestrator_DispatchRequestedStepRefreshesAuthoritySnapshot(t *
 		WorkspaceID: workspaceID,
 		State:       common.RunStateRunning,
 		ExecutionContext: map[string]any{
-			coverageWorkItemContextKey: map[string]any{
-				"definitionRevision": "def-current",
-				"currentFocus": map[string]any{
-					"id":                    "cwi-current",
-					"status":                "evidence_ready",
-					"targetText":            "current neutral coverage target",
-					"requiredEvidenceKinds": []string{"assessment"},
-				},
-				"unresolvedItems": []map[string]any{{
-					"id":                    "cwi-current",
-					"status":                "evidence_ready",
-					"targetText":            "current neutral coverage target",
-					"requiredEvidenceKinds": []string{"assessment"},
+			"definitionRevision": "def-current",
+			"dod": map[string]any{
+				"id": "dod-dispatch-authority-refresh",
+				"items": []map[string]any{{
+					"id":                    "dispatch-authority-validation",
+					"text":                  "current neutral coverage target",
+					"requiredEvidenceKinds": []string{"validation"},
 				}},
 			},
-			coverageWorkItemsKey: []map[string]any{{
-				"id":                    "cwi-current",
-				"status":                "evidence_ready",
-				"targetText":            "current neutral coverage target",
-				"requiredEvidenceKinds": []string{"assessment"},
-			}},
+			"convergenceContract": map[string]any{
+				"state":                       convergenceStateNeedStateChange,
+				"repairObjective":             repairObjectiveStateChangingOutput,
+				"stateChangingOutputRequired": true,
+			},
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
 		},
 	}
 	if err := runRepo.Create(ctx, run); err != nil {
@@ -90,15 +85,24 @@ func TestRuntimeOrchestrator_DispatchRequestedStepRefreshesAuthoritySnapshot(t *
 				"runId":         "stale-run",
 				"nextAction":    map[string]any{"kind": "stale_action"},
 			},
+			"stateChangingOutputRequired": true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
 		},
 	})
 	if err != nil {
 		t.Fatalf("DispatchRequestedStep: %v", err)
 	}
-	if len(runtime.requests) != 1 {
-		t.Fatalf("runtime requests = %d, want 1", len(runtime.requests))
+	var requestInput map[string]any
+	for _, request := range runtime.requests {
+		if request.StepID == stepID {
+			requestInput = request.Input
+			break
+		}
 	}
-	input := runtime.requests[0].Input
+	if len(requestInput) == 0 {
+		t.Fatalf("runtime requests = %+v, want request for %s", runtime.requests, stepID)
+	}
+	input := requestInput
 	baseline := mapFromValue(input[gapBaselineKey])
 	if len(baseline) > 0 {
 		if stringFromMap(baseline, "workspaceId") != string(workspaceID) || stringFromMap(baseline, "runId") != string(runID) {
@@ -106,6 +110,8 @@ func TestRuntimeOrchestrator_DispatchRequestedStepRefreshesAuthoritySnapshot(t *
 		}
 		if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got == "" || got == "stale_action" {
 			t.Fatalf("gapBaseline.nextAction.kind = %q, want current owner-derived action; input=%+v", got, input)
+		} else if got != "validate" {
+			t.Fatalf("gapBaseline.nextAction.kind = %q, want validate; input=%+v", got, input)
 		}
 	}
 	authority := mapFromValue(input[convergenceAuthorityKey])
@@ -115,7 +121,23 @@ func TestRuntimeOrchestrator_DispatchRequestedStepRefreshesAuthoritySnapshot(t *
 		}
 		if got := stringFromMap(mapFromValue(authority["nextAction"]), "kind"); got == "" || got == "stale_action" {
 			t.Fatalf("convergenceAuthority.nextAction.kind = %q, want current owner-derived action; input=%+v", got, input)
+		} else if got != "validate" {
+			t.Fatalf("convergenceAuthority.nextAction.kind = %q, want validate; input=%+v", got, input)
 		}
+	}
+	if boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("stateChangingOutputRequired leaked through event dispatch: %+v", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if got := stringFromMap(contract, "state"); got != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want need_validation", contract)
+	}
+	packet := mapFromValue(input[stepInputKeyStagePacket])
+	if len(packet) == 0 {
+		t.Fatalf("stagePacket missing from event dispatch input: %+v", input)
+	}
+	if got := stringFromMap(mapFromValue(packet["activeFocus"]), "id"); got != "cwi-001" {
+		t.Fatalf("stagePacket.activeFocus = %+v, want cwi-001", packet["activeFocus"])
 	}
 }
 

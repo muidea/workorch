@@ -528,6 +528,94 @@ func TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket(t *tes
 	}
 }
 
+func TestPrepareGapBaselineDispatchSpecsRebuildsStaleDynamicContractFromAuthority(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-authority-dispatch",
+		WorkspaceID:     "ws-authority-dispatch",
+		State:           common.RunStateRunning,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-authority-dispatch",
+			"dod": map[string]any{
+				"id": "dod-authority-dispatch",
+				"items": []map[string]any{{
+					"id":                    "dod-validate",
+					"text":                  "validation evidence must be present",
+					"requiredEvidenceKinds": []string{"validation"},
+				}},
+			},
+			coverageFocusKey: map[string]any{
+				"id":                  "focus-cwi-stale",
+				"sliceId":             "slice-stale",
+				"coverageWorkItemIds": []string{"cwi-stale"},
+			},
+			convergenceBudgetKey: map[string]any{
+				"focusId":        "focus-cwi-stale",
+				"state":          "escalated",
+				"decision":       "escalate_decision",
+				"repairAttempts": int64(4),
+			},
+			"convergenceContract": map[string]any{
+				"state":                       convergenceStateNeedStateChange,
+				"repairObjective":             repairObjectiveStateChangingOutput,
+				"stateChangingOutputRequired": true,
+			},
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+		},
+	}
+	specs := []stepDispatchSpec{{
+		ID:   "run-authority-dispatch/step-1",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{"mustIncludeStateChangingNode": true},
+			},
+		},
+	}}
+
+	orch := &RuntimeOrchestrator{}
+	prepared, err := orch.prepareGapBaselineDispatchSpecs(context.Background(), run, specs)
+	if err != nil {
+		t.Fatalf("prepareGapBaselineDispatchSpecs: %v", err)
+	}
+	if len(prepared) != 1 {
+		t.Fatalf("prepared specs = %+v, want one spec", prepared)
+	}
+	input := prepared[0].Input
+	if boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("stateChangingOutputRequired leaked into validation dispatch input: %+v", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if got := stringFromMap(contract, "state"); got != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want need_validation", contract)
+	}
+	if got := stringFromMap(input, "repairObjective"); got != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("repairObjective = %q, want validation evidence objective", got)
+	}
+	packet := mapFromValue(input[stepInputKeyStagePacket])
+	if len(packet) == 0 {
+		t.Fatalf("stagePacket missing from prepared input: %+v", input)
+	}
+	if got := stringFromMap(mapFromValue(packet["activeFocus"]), "id"); got != "cwi-001" {
+		t.Fatalf("stagePacket.activeFocus = %+v, want cwi-001", packet["activeFocus"])
+	}
+	runContract := mapFromValue(run.ExecutionContext["convergenceContract"])
+	if got := stringFromMap(runContract, "state"); got != convergenceStateNeedValidation {
+		t.Fatalf("run convergenceContract = %+v, want need_validation", runContract)
+	}
+	if boolValue(run.ExecutionContext["stateChangingOutputRequired"]) {
+		t.Fatalf("run executionContext retained stale stateChangingOutputRequired: %+v", run.ExecutionContext)
+	}
+}
+
 func TestInitialDispatchBuildsStateChangingContractFromGapBaseline(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-gap-baseline-state-changing")

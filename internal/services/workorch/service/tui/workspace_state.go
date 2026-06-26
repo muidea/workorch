@@ -222,20 +222,11 @@ func (m *AppModel) applyWorkspaceViewModel(viewModel backend.WorkspaceViewModelI
 
 func (m *AppModel) activeWorkspacePromptMode() string {
 	entry := m.workspaceRuntimeState(m.activeWorkspaceID)
+	if entry != nil && entry.PromptMode != "" {
+		return normalizePromptMode(entry.PromptMode)
+	}
 	ws := m.activeWorkspaceOverview()
 	overviewMode := promptModeFromWorkspaceOverview(ws)
-	overviewRevision := int64(0)
-	if ws != nil {
-		overviewRevision = projectionRevision(ws.Projection)
-	}
-	if overviewMode != workspacePromptModeWorkspace && (overviewRevision == 0 || entry == nil || overviewRevision >= entry.PromptModeRevision) {
-		return overviewMode
-	}
-	if entry != nil && entry.PromptMode != "" {
-		if overviewRevision == 0 || entry.PromptModeRevision >= overviewRevision {
-			return normalizePromptMode(entry.PromptMode)
-		}
-	}
 	return overviewMode
 }
 
@@ -257,6 +248,7 @@ func (m *AppModel) mergeWorkspaceOverview(ws backend.WorkspaceInfo) backend.Work
 	if entry == nil {
 		return ws
 	}
+	m.applyWorkspaceViewModel(ws.ViewModel)
 	if ws.Projection.State == "" && projectionRevision(ws.Projection) == 0 && entry.Projection.State != "" {
 		ws.Projection = entry.Projection
 	}

@@ -8,6 +8,7 @@ import (
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -52,6 +53,12 @@ func TestRunSnapshotBuildsSnapshotFromReaders(t *testing.T) {
 	}
 	if events.calls != 2 {
 		t.Fatalf("event reader calls = %d, want run events and llm usage queries", events.calls)
+	}
+	if len(events.queries) != 2 {
+		t.Fatalf("event reader queries = %d, want run events and llm usage queries", len(events.queries))
+	}
+	if len(events.queries[0].ExcludeTopics) != 1 || events.queries[0].ExcludeTopics[0] != runevents.TopicRunLLMStreamProgress {
+		t.Fatalf("snapshot event exclude topics = %+v, want stream progress excluded", events.queries[0].ExcludeTopics)
 	}
 }
 
@@ -121,11 +128,13 @@ func (fakeRunSnapshotArtifactContinuationReader) ListByRun(context.Context, comm
 }
 
 type fakeRunSnapshotEventReader struct {
-	calls int
+	calls   int
+	queries []repository.EventRecordQuery
 }
 
-func (f *fakeRunSnapshotEventReader) List(context.Context, repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func (f *fakeRunSnapshotEventReader) List(_ context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	f.calls++
+	f.queries = append(f.queries, query)
 	return nil, nil
 }
 

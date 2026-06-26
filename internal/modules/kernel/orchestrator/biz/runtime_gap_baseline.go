@@ -92,6 +92,9 @@ func (o *RuntimeOrchestrator) ensureGapBaselineBeforeDispatch(ctx context.Contex
 		run.ExecutionContext[gapBaselineKey] = baseline
 		changed = true
 	}
+	if syncRunConvergenceDerivedFields(run) {
+		changed = true
+	}
 	if changed && o.runs != nil {
 		return o.persistRunProgressUpdate(ctx, run)
 	}
@@ -135,9 +138,161 @@ func (o *RuntimeOrchestrator) prepareGapBaselineDispatchSpecs(ctx context.Contex
 		if len(authority) > 0 {
 			input[convergenceAuthorityKey] = cloneStepPayload(authority)
 		}
+		if canonicalLLMWorkspaceStepKind(ret[idx].Kind) == llmWorkspaceExecutionStepKind {
+			var err error
+			input, err = rebuildDispatchInputFromConvergenceAuthority(run, ret[idx].ID, input)
+			if err != nil {
+				return nil, err
+			}
+		}
 		ret[idx].Input = input
 	}
 	return ret, nil
+}
+
+func syncRunConvergenceDerivedFields(run *runModel.Run) bool {
+	if run == nil || run.ExecutionContext == nil {
+		return false
+	}
+	if len(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])) == 0 &&
+		len(mapFromValue(run.ExecutionContext[gapBaselineKey])) == 0 {
+		return false
+	}
+	input := runExecutionInput(run, "")
+	if len(input) == 0 {
+		return false
+	}
+	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+	input = ApplyConvergenceContract(input, contract)
+	input = attachStagePacketToStepInput(run, "", input)
+	changed := false
+	for _, key := range convergenceDerivedExecutionContextKeys() {
+		value, ok := input[key]
+		if !ok || value == nil {
+			if _, exists := run.ExecutionContext[key]; exists {
+				delete(run.ExecutionContext, key)
+				changed = true
+			}
+			continue
+		}
+		if stableCoverageJSON(mapFromValueOrScalar(run.ExecutionContext[key])) == stableCoverageJSON(mapFromValueOrScalar(value)) {
+			continue
+		}
+		run.ExecutionContext[key] = cloneStepInputValue(value)
+		changed = true
+	}
+	return changed
+}
+
+func convergenceDerivedExecutionContextKeys() []string {
+	return []string{
+		"convergenceContract",
+		stepInputKeyStagePacket,
+		stepInputKeySoulStage,
+		stepInputKeyRuntimeStage,
+		stepInputKeyRuntimeStageMode,
+		"repairObjective",
+		"stateChangingOutputRequired",
+		"concreteFailureEvidenceRequired",
+		"boundedValidationRequired",
+		"evidenceRepairRequired",
+		stepInputKeyAssessmentOnly,
+		"assessmentOnlyReason",
+		"repairActionPackage",
+		"coverageRepairRequired",
+		"coverageTargetSet",
+		"governanceRequired",
+		"governanceReason",
+	}
+}
+
+func mapFromValueOrScalar(value any) map[string]any {
+	if mapped := mapFromValue(value); len(mapped) > 0 {
+		return mapped
+	}
+	if value == nil {
+		return nil
+	}
+	return map[string]any{"value": value}
+}
+
+func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID common.StepID, input map[string]any) (map[string]any, error) {
+	if input == nil {
+		input = map[string]any{}
+	}
+	if !dispatchInputHasConvergenceAuthority(run, input) {
+		input = attachStagePacketToStepInput(run, stepID, input)
+		return input, validateConvergenceDispatchInput(input)
+	}
+	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+	input = ApplyConvergenceContract(input, contract)
+	input = attachStagePacketToStepInput(run, stepID, input)
+	if err := validateConvergenceDispatchInput(input); err != nil {
+		return nil, err
+	}
+	return input, nil
+}
+
+func dispatchInputHasConvergenceAuthority(run *runModel.Run, input map[string]any) bool {
+	if len(mapFromValue(input[convergenceAuthorityKey])) > 0 || len(mapFromValue(input[gapBaselineKey])) > 0 {
+		return true
+	}
+	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
+		if len(mapFromValue(executionContext[convergenceAuthorityKey])) > 0 || len(mapFromValue(executionContext[gapBaselineKey])) > 0 {
+			return true
+		}
+	}
+	if run == nil || run.ExecutionContext == nil {
+		return false
+	}
+	return len(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])) > 0 || len(mapFromValue(run.ExecutionContext[gapBaselineKey])) > 0
+}
+
+func validateConvergenceDispatchInput(input map[string]any) error {
+	if len(input) == 0 {
+		return nil
+	}
+	nextAction := strings.TrimSpace(convergenceNextActionKind(nil, input))
+	if nextAction == "" {
+		return nil
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	state := strings.TrimSpace(stringFromMap(contract, "state"))
+	stateChanging := boolValue(input["stateChangingOutputRequired"]) || boolValue(contract["stateChangingOutputRequired"])
+	switch nextAction {
+	case "validate", "validation", "produce_validation_evidence", "artifact", "produce_artifact_evidence":
+		if state != convergenceStateNeedValidation {
+			return fmt.Errorf("%w: convergence dispatch mismatch: nextAction=%s contractState=%s", common.ErrConflict, nextAction, state)
+		}
+		if stateChanging {
+			return fmt.Errorf("%w: convergence dispatch mismatch: validation action requires state-changing output", common.ErrConflict)
+		}
+	case "assessment", "complete_coverage_assessment":
+		if state != convergenceStateNeedAssessment {
+			return fmt.Errorf("%w: convergence dispatch mismatch: nextAction=%s contractState=%s", common.ErrConflict, nextAction, state)
+		}
+		if stateChanging {
+			return fmt.Errorf("%w: convergence dispatch mismatch: assessment action requires state-changing output", common.ErrConflict)
+		}
+	case "state_change", "produce_state_change":
+		if state != convergenceStateNeedStateChange {
+			return fmt.Errorf("%w: convergence dispatch mismatch: nextAction=%s contractState=%s", common.ErrConflict, nextAction, state)
+		}
+		if !stateChanging {
+			return fmt.Errorf("%w: convergence dispatch mismatch: state_change action lacks state-changing output contract", common.ErrConflict)
+		}
+	case "request_decision", "wait_decision", "request_approval", "wait_approval", "request_governance":
+		if state != convergenceStateNeedGovernance {
+			return fmt.Errorf("%w: convergence dispatch mismatch: governed action has contractState=%s", common.ErrConflict, state)
+		}
+		if stateChanging {
+			return fmt.Errorf("%w: convergence dispatch mismatch: governed action requires state-changing output", common.ErrConflict)
+		}
+	}
+	if len(mapFromValue(input[stepInputKeyStagePacket])) == 0 {
+		return fmt.Errorf("%w: convergence dispatch mismatch: missing stagePacket", common.ErrConflict)
+	}
+	return nil
 }
 
 func gapBaselineFromRun(run *runModel.Run) map[string]any {

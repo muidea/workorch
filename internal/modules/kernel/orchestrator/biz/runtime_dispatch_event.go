@@ -148,6 +148,13 @@ func (o *RuntimeOrchestrator) DispatchRequestedStep(ctx context.Context, cmd orc
 	} else if cmd.Input != nil {
 		delete(cmd.Input, convergenceAuthorityKey)
 	}
+	if canonicalLLMWorkspaceStepKind(cmd.Kind) == llmWorkspaceExecutionStepKind {
+		var rebuildErr error
+		cmd.Input, rebuildErr = rebuildDispatchInputFromConvergenceAuthority(run, cmd.StepID, cloneStepPayload(cmd.Input))
+		if rebuildErr != nil {
+			return rebuildErr
+		}
+	}
 	return o.dispatchStepWithWorkspace(ctx, run, cmd.StepID, cmd.Kind, cloneStepPayload(cmd.Input), workspace)
 }
 

@@ -14,6 +14,7 @@ type EventRecordQuery struct {
 	WorkspaceID    string
 	RunID          string
 	Topic          string
+	ExcludeTopics  []string
 	SubjectType    string
 	SubjectID      string
 	CursorAfterID  string

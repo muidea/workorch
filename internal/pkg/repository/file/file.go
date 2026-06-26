@@ -3819,6 +3819,11 @@ func eventRecordMatches(item *eventstream.EventRecord, query repository.EventRec
 	if query.Topic != "" && item.Topic != query.Topic {
 		return false
 	}
+	for _, topic := range query.ExcludeTopics {
+		if strings.TrimSpace(topic) != "" && item.Topic == strings.TrimSpace(topic) {
+			return false
+		}
+	}
 	if query.SubjectType != "" && item.SubjectType != query.SubjectType {
 		return false
 	}

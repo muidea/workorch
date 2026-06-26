@@ -579,7 +579,9 @@ func (s *Store) List() ([]appmodelcore.Workspace, Status, error) {
 	ret := make([]appmodelcore.Workspace, 0, len(s.workspaceOrder))
 	for _, id := range s.workspaceOrder {
 		if entry := s.workspaces[id]; entry != nil && entry.HasWorkspace {
-			ret = append(ret, cloneWorkspace(entry.Workspace))
+			item := cloneWorkspace(entry.Workspace)
+			item.ViewModel = appWorkspaceViewModelFromStatus(item, s.statusForWorkspaceLocked(id))
+			ret = append(ret, item)
 		}
 	}
 	return ret, status, nil
@@ -665,6 +667,39 @@ func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, stat
 			SourceEventRevision:     status.SourceEventRevision,
 			ProjectedSourceRevision: status.ProjectedSourceRevision,
 			State:                   status.State,
+		}
+	}
+	return ret
+}
+
+func appWorkspaceViewModelFromStatus(workspace appmodelcore.Workspace, status Status) appmodelcore.WorkspaceViewModel {
+	source := workspaceViewModelFromStatus(readmodelcore.WorkspaceSnapshot{Workspace: workspace}, status)
+	ret := appmodelcore.WorkspaceViewModel{
+		WorkspaceID:             source.WorkspaceID,
+		State:                   source.State,
+		PromptMode:              source.PromptMode,
+		Revision:                source.Revision,
+		GlobalRevision:          source.GlobalRevision,
+		WorkspaceRevision:       source.WorkspaceRevision,
+		SourceEventRevision:     source.SourceEventRevision,
+		ProjectedSourceRevision: source.ProjectedSourceRevision,
+		UpdatedAt:               source.UpdatedAt,
+		RebuiltAt:               source.RebuiltAt,
+		Degraded:                source.Degraded,
+		StaleReason:             source.StaleReason,
+		Error:                   source.Error,
+	}
+	if len(source.Sections) > 0 {
+		ret.Sections = make(map[string]appmodelcore.WorkspaceViewModelSection, len(source.Sections))
+		for key, value := range source.Sections {
+			ret.Sections[key] = appmodelcore.WorkspaceViewModelSection{
+				Name:                    value.Name,
+				Revision:                value.Revision,
+				WorkspaceRevision:       value.WorkspaceRevision,
+				SourceEventRevision:     value.SourceEventRevision,
+				ProjectedSourceRevision: value.ProjectedSourceRevision,
+				State:                   value.State,
+			}
 		}
 	}
 	return ret
@@ -989,6 +1024,7 @@ func cloneWorkspace(item appmodelcore.Workspace) appmodelcore.Workspace {
 	item.SoulBindings = cloneStringStringMap(item.SoulBindings)
 	item.ContextHints = cloneStringAnyMap(item.ContextHints)
 	item.EvidencePolicies = cloneMapSlice(item.EvidencePolicies)
+	item.ViewModel.Sections = cloneAppWorkspaceViewModelSections(item.ViewModel.Sections)
 	return item
 }
 
@@ -1031,6 +1067,17 @@ func cloneWorkspaceViewModelSections(input map[string]readmodelcore.WorkspaceVie
 		return nil
 	}
 	ret := make(map[string]readmodelcore.WorkspaceViewModelSection, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
+}
+
+func cloneAppWorkspaceViewModelSections(input map[string]appmodelcore.WorkspaceViewModelSection) map[string]appmodelcore.WorkspaceViewModelSection {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make(map[string]appmodelcore.WorkspaceViewModelSection, len(input))
 	for key, value := range input {
 		ret[key] = value
 	}

@@ -4,19 +4,20 @@ import runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecont
 
 // Workspace resource types (matches workorchd HTTP JSON format with lowercase camelCase tags).
 type Workspace struct {
-	ID                   string            `json:"id"`
-	Title                string            `json:"title"`
-	Description          string            `json:"description,omitempty"`
-	DeliverableDirectory string            `json:"deliverableDirectory,omitempty"`
-	State                string            `json:"state"`
-	ActiveRunID          string            `json:"activeRunId,omitempty"`
-	BlockingTicketID     string            `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID   string            `json:"blockingApprovalId,omitempty"`
-	TemplateID           string            `json:"templateId,omitempty"`
-	ProfileID            string            `json:"profileId,omitempty"`
-	DefaultSoulID        string            `json:"defaultSoulId,omitempty"`
-	SoulBindings         map[string]string `json:"soulBindings,omitempty"`
-	Projection           ProjectionStatus  `json:"projection,omitempty"`
+	ID                   string             `json:"id"`
+	Title                string             `json:"title"`
+	Description          string             `json:"description,omitempty"`
+	DeliverableDirectory string             `json:"deliverableDirectory,omitempty"`
+	State                string             `json:"state"`
+	ActiveRunID          string             `json:"activeRunId,omitempty"`
+	BlockingTicketID     string             `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID   string             `json:"blockingApprovalId,omitempty"`
+	TemplateID           string             `json:"templateId,omitempty"`
+	ProfileID            string             `json:"profileId,omitempty"`
+	DefaultSoulID        string             `json:"defaultSoulId,omitempty"`
+	SoulBindings         map[string]string  `json:"soulBindings,omitempty"`
+	Projection           ProjectionStatus   `json:"projection,omitempty"`
+	ViewModel            WorkspaceViewModel `json:"viewModel,omitempty"`
 }
 
 type ProjectionStatus struct {

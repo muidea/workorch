@@ -1,21 +1,48 @@
 package appmodelcore
 
 type Workspace struct {
-	ID                   string            `json:"id"`
-	Title                string            `json:"title"`
-	Description          string            `json:"description"`
-	DeliverableDirectory string            `json:"deliverableDirectory"`
-	InternalDirectory    string            `json:"-"`
-	State                string            `json:"state"`
-	ActiveRunID          string            `json:"activeRunId,omitempty"`
-	BlockingTicketID     string            `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID   string            `json:"blockingApprovalId,omitempty"`
-	TemplateID           string            `json:"templateId,omitempty"`
-	ProfileID            string            `json:"profileId,omitempty"`
-	DefaultSoulID        string            `json:"defaultSoulId,omitempty"`
-	SoulBindings         map[string]string `json:"soulBindings,omitempty"`
-	ContextHints         map[string]any    `json:"contextHints,omitempty"`
-	EvidencePolicies     []map[string]any  `json:"evidencePolicies,omitempty"`
+	ID                   string             `json:"id"`
+	Title                string             `json:"title"`
+	Description          string             `json:"description"`
+	DeliverableDirectory string             `json:"deliverableDirectory"`
+	InternalDirectory    string             `json:"-"`
+	State                string             `json:"state"`
+	ActiveRunID          string             `json:"activeRunId,omitempty"`
+	BlockingTicketID     string             `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID   string             `json:"blockingApprovalId,omitempty"`
+	TemplateID           string             `json:"templateId,omitempty"`
+	ProfileID            string             `json:"profileId,omitempty"`
+	DefaultSoulID        string             `json:"defaultSoulId,omitempty"`
+	SoulBindings         map[string]string  `json:"soulBindings,omitempty"`
+	ContextHints         map[string]any     `json:"contextHints,omitempty"`
+	EvidencePolicies     []map[string]any   `json:"evidencePolicies,omitempty"`
+	ViewModel            WorkspaceViewModel `json:"viewModel,omitempty"`
+}
+
+type WorkspaceViewModel struct {
+	WorkspaceID             string                               `json:"workspaceId,omitempty"`
+	State                   string                               `json:"state,omitempty"`
+	PromptMode              string                               `json:"promptMode,omitempty"`
+	Revision                int64                                `json:"revision,omitempty"`
+	GlobalRevision          int64                                `json:"globalRevision,omitempty"`
+	WorkspaceRevision       int64                                `json:"workspaceRevision,omitempty"`
+	SourceEventRevision     int64                                `json:"sourceEventRevision,omitempty"`
+	ProjectedSourceRevision int64                                `json:"projectedSourceRevision,omitempty"`
+	UpdatedAt               string                               `json:"updatedAt,omitempty"`
+	RebuiltAt               string                               `json:"rebuiltAt,omitempty"`
+	Degraded                bool                                 `json:"degraded,omitempty"`
+	StaleReason             string                               `json:"staleReason,omitempty"`
+	Error                   string                               `json:"error,omitempty"`
+	Sections                map[string]WorkspaceViewModelSection `json:"sections,omitempty"`
+}
+
+type WorkspaceViewModelSection struct {
+	Name                    string `json:"name"`
+	Revision                int64  `json:"revision,omitempty"`
+	WorkspaceRevision       int64  `json:"workspaceRevision,omitempty"`
+	SourceEventRevision     int64  `json:"sourceEventRevision,omitempty"`
+	ProjectedSourceRevision int64  `json:"projectedSourceRevision,omitempty"`
+	State                   string `json:"state,omitempty"`
 }
 
 type CreateWorkspaceCommand struct {

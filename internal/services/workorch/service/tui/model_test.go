@@ -5099,10 +5099,12 @@ func TestModelPromptModeUsesProjectionOverLocalDecisionCache(t *testing.T) {
 		State:       common.WorkspaceStateRunning,
 		ActiveRunID: "run-1",
 		Projection:  backend.ProjectionInfo{WorkspaceRevision: 20},
+		ViewModel:   backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", PromptMode: workspacePromptModeRunning, WorkspaceRevision: 20},
 	}}
 	entry := m.ensureWorkspaceRuntimeState("ws-a")
 	entry.PromptMode = workspacePromptModeDecision
 	entry.PromptModeRevision = 10
+	m.applyWorkspaceViewModel(m.workspaces[0].ViewModel)
 	m.activeRunID = "run-1"
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-old", WorkspaceID: "ws-a", RunID: "run-1", State: "open"}
 	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
@@ -5112,6 +5114,33 @@ func TestModelPromptModeUsesProjectionOverLocalDecisionCache(t *testing.T) {
 	input := stripANSI(m.renderInput(120))
 	if strings.Contains(input, "decision >") || strings.Contains(input, "/decision answer") || !strings.Contains(input, "ws-a running >") {
 		t.Fatalf("prompt/suggestions used local decision cache instead of projection: %q", input)
+	}
+}
+
+func TestModelWorkspaceListViewModelDrivesPromptMode(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-old", WorkspaceID: "ws-a", RunID: "run-old", State: "open"}
+	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
+	m.progress = progressWaitingDecision
+	m.width = 120
+	m.height = 24
+
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:          "ws-a",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: "run-1",
+		Projection:  backend.ProjectionInfo{WorkspaceRevision: 12},
+		ViewModel:   backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", PromptMode: workspacePromptModeRunning, WorkspaceRevision: 12},
+	}}})
+	m = asModel(next)
+	m.setInput("/")
+
+	view := stripANSI(m.renderInput(120))
+	if strings.Contains(view, "decision >") || !strings.Contains(view, "ws-a running >") {
+		t.Fatalf("input prompt = %q, want list ViewModel running prompt", view)
+	}
+	if matches := m.slashCommandSuggestions("/"); len(matches) == 0 || matches[0].Command != "/run resume" {
+		t.Fatalf("slash suggestions = %+v, want running contextual commands from list ViewModel", matches)
 	}
 }
 

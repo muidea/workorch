@@ -45,6 +45,7 @@ Last Updated: 2026-05-29
 - [llm-context-budget-todo.md](llm-context-budget-todo.md)
 - [run-closure-quality-improvement-plan.md](run-closure-quality-improvement-plan.md)
 - [workorchd-state-loop-and-projection-closure-plan.md](workorchd-state-loop-and-projection-closure-plan.md)
+- [convergence-authority-dispatch-closure-checklist.md](convergence-authority-dispatch-closure-checklist.md)
 
 ## Layering
 

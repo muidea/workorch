@@ -10,6 +10,7 @@ CURL_CONNECT_TIMEOUT="${WORKORCH_VERIFY_CURL_CONNECT_TIMEOUT_SECONDS:-5}"
 CURL_MAX_TIME="${WORKORCH_VERIFY_CURL_MAX_TIME_SECONDS:-30}"
 WORKSPACE_IDS="${WORKORCH_OBSERVE_WORKSPACE_IDS:-}"
 AUTO_SNAPSHOT_LIMIT="${WORKORCH_OBSERVE_AUTO_SNAPSHOT_LIMIT:-20}"
+MIN_WORKSPACE_COUNT="${WORKORCH_OBSERVE_MIN_WORKSPACE_COUNT:-0}"
 AI_PROXY_LOG="${WORKORCH_OBSERVE_AI_PROXY_LOG:-}"
 AI_PROXY_INTERACTIONS_DIR="${WORKORCH_OBSERVE_AI_PROXY_INTERACTIONS_DIR:-}"
 MIN_CACHE_HIT_RATE="${WORKORCH_OBSERVE_MIN_CACHE_HIT_RATE:-}"
@@ -352,7 +353,7 @@ if [[ -n "$WORKSPACE_IDS" ]]; then
   done
 fi
 
-python3 - "$TMP_DIR" "$WORKSPACE_IDS" "$AI_PROXY_LOG" "$AI_PROXY_INTERACTIONS_DIR" "$MIN_CACHE_HIT_RATE" "$REQUIRE_CACHE_SAMPLES" "$MIN_CACHE_SAMPLE_COUNT" "$CACHE_PROVIDER" "$CACHE_MODEL" "$CACHE_SINCE" "$CACHE_UNTIL" "$CACHE_BASELINE_FILE" "$MIN_CACHE_AVERAGE_DELTA" "$MIN_CACHE_LATEST_DELTA" "$EXPECTED_STALE_DISPATCHED_STEP_MIN_AGE_SECONDS" "$SYNTHETIC_WORKSPACE_COUNT" "$TMP_DIR/synthetic-workspace-ids.txt" "$ENABLE_PPROF_CHECK" "$REQUIRE_PPROF" "$ENABLE_CPU_PROFILE_CHECK" "$REQUIRE_CPU_PROFILE" "$MAX_PENDING_REBUILDS" "$MAX_PROJECTION_SCHEDULE_DROPPED_DELTA" "$MAX_SUSPICIOUS_CPU_FLAT_PERCENT" "$MAX_SUSPICIOUS_CPU_CUM_PERCENT" "$REQUIRE_GOVERNANCE_CONTINUATION" <<'PY'
+python3 - "$TMP_DIR" "$WORKSPACE_IDS" "$MIN_WORKSPACE_COUNT" "$AI_PROXY_LOG" "$AI_PROXY_INTERACTIONS_DIR" "$MIN_CACHE_HIT_RATE" "$REQUIRE_CACHE_SAMPLES" "$MIN_CACHE_SAMPLE_COUNT" "$CACHE_PROVIDER" "$CACHE_MODEL" "$CACHE_SINCE" "$CACHE_UNTIL" "$CACHE_BASELINE_FILE" "$MIN_CACHE_AVERAGE_DELTA" "$MIN_CACHE_LATEST_DELTA" "$EXPECTED_STALE_DISPATCHED_STEP_MIN_AGE_SECONDS" "$SYNTHETIC_WORKSPACE_COUNT" "$TMP_DIR/synthetic-workspace-ids.txt" "$ENABLE_PPROF_CHECK" "$REQUIRE_PPROF" "$ENABLE_CPU_PROFILE_CHECK" "$REQUIRE_CPU_PROFILE" "$MAX_PENDING_REBUILDS" "$MAX_PROJECTION_SCHEDULE_DROPPED_DELTA" "$MAX_SUSPICIOUS_CPU_FLAT_PERCENT" "$MAX_SUSPICIOUS_CPU_CUM_PERCENT" "$REQUIRE_GOVERNANCE_CONTINUATION" <<'PY'
 import json
 import os
 import re
@@ -362,30 +363,31 @@ from pathlib import Path
 
 artifact_dir = Path(sys.argv[1])
 workspace_ids = [item.strip() for item in sys.argv[2].split(",") if item.strip()]
-ai_proxy_log = sys.argv[3].strip()
-ai_proxy_interactions_dir = sys.argv[4].strip()
-min_cache_hit_rate = sys.argv[5].strip()
-require_cache_samples = sys.argv[6].strip() in {"1", "true", "yes"}
-min_cache_sample_count = sys.argv[7].strip()
-cache_provider = sys.argv[8].strip()
-cache_model = sys.argv[9].strip()
-cache_since = sys.argv[10].strip()
-cache_until = sys.argv[11].strip()
-cache_baseline_file = sys.argv[12].strip()
-min_cache_average_delta = sys.argv[13].strip()
-min_cache_latest_delta = sys.argv[14].strip()
-expected_stale_dispatched_step_min_age_seconds = sys.argv[15].strip()
-synthetic_workspace_count = int(sys.argv[16].strip() or "0")
-synthetic_workspace_ids_path = Path(sys.argv[17])
-enable_pprof_check = sys.argv[18].strip() in {"1", "true", "yes"}
-require_pprof = sys.argv[19].strip() in {"1", "true", "yes"}
-enable_cpu_profile_check = sys.argv[20].strip() in {"1", "true", "yes"}
-require_cpu_profile = sys.argv[21].strip() in {"1", "true", "yes"}
-max_pending_rebuilds = int(sys.argv[22].strip() or "10")
-max_projection_schedule_dropped_delta = int(sys.argv[23].strip() or "0")
-max_suspicious_cpu_flat_percent = float(sys.argv[24].strip() or "50")
-max_suspicious_cpu_cum_percent = float(sys.argv[25].strip() or "90")
-require_governance_continuation = sys.argv[26].strip() in {"1", "true", "yes"}
+min_workspace_count = int(sys.argv[3].strip() or "0")
+ai_proxy_log = sys.argv[4].strip()
+ai_proxy_interactions_dir = sys.argv[5].strip()
+min_cache_hit_rate = sys.argv[6].strip()
+require_cache_samples = sys.argv[7].strip() in {"1", "true", "yes"}
+min_cache_sample_count = sys.argv[8].strip()
+cache_provider = sys.argv[9].strip()
+cache_model = sys.argv[10].strip()
+cache_since = sys.argv[11].strip()
+cache_until = sys.argv[12].strip()
+cache_baseline_file = sys.argv[13].strip()
+min_cache_average_delta = sys.argv[14].strip()
+min_cache_latest_delta = sys.argv[15].strip()
+expected_stale_dispatched_step_min_age_seconds = sys.argv[16].strip()
+synthetic_workspace_count = int(sys.argv[17].strip() or "0")
+synthetic_workspace_ids_path = Path(sys.argv[18])
+enable_pprof_check = sys.argv[19].strip() in {"1", "true", "yes"}
+require_pprof = sys.argv[20].strip() in {"1", "true", "yes"}
+enable_cpu_profile_check = sys.argv[21].strip() in {"1", "true", "yes"}
+require_cpu_profile = sys.argv[22].strip() in {"1", "true", "yes"}
+max_pending_rebuilds = int(sys.argv[23].strip() or "10")
+max_projection_schedule_dropped_delta = int(sys.argv[24].strip() or "0")
+max_suspicious_cpu_flat_percent = float(sys.argv[25].strip() or "50")
+max_suspicious_cpu_cum_percent = float(sys.argv[26].strip() or "90")
+require_governance_continuation = sys.argv[27].strip() in {"1", "true", "yes"}
 governance_resolve_workspace_id = os.environ.get("WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_WORKSPACE_ID", "").strip()
 governance_resolve_ticket_id = os.environ.get("WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_TICKET_ID", "").strip()
 max_event_metadata_records_scanned_delta = os.environ.get("WORKORCH_OBSERVE_MAX_EVENT_METADATA_RECORDS_SCANNED_DELTA", "").strip()
@@ -541,7 +543,7 @@ def validate_projection_display_contract(projection, scope, require_workspace_re
         issues.append(f"{scope}: projection state {state!r} is not displayable")
     source_revision = int(projection.get("sourceEventRevision") or 0)
     projected_revision = int(projection.get("projectedSourceRevision") or 0)
-    if source_revision and projected_revision < source_revision:
+    if state == "ready" and source_revision and projected_revision < source_revision:
         issues.append(f"{scope}: projectedSourceRevision behind sourceEventRevision: {projection}")
     return {
         "scope": scope,
@@ -795,10 +797,69 @@ def csv_env(name, default):
     return {item.strip() for item in value.split(",") if item.strip()}
 
 require_goal_convergence = bool_env("WORKORCH_OBSERVE_REQUIRE_GOAL_CONVERGENCE")
+require_workspace_progress = bool_env("WORKORCH_OBSERVE_REQUIRE_WORKSPACE_PROGRESS")
 goal_convergence_run_states = csv_env("WORKORCH_OBSERVE_GOAL_CONVERGENCE_RUN_STATES", "completed")
 min_goal_accepted_results = int_env("WORKORCH_OBSERVE_MIN_GOAL_ACCEPTED_RESULTS", 1)
 min_goal_artifacts = int_env("WORKORCH_OBSERVE_MIN_GOAL_ARTIFACTS", 0)
 require_goal_coverage_closed = bool_env("WORKORCH_OBSERVE_REQUIRE_GOAL_COVERAGE_CLOSED", True)
+
+def evaluate_workspace_progress(summary):
+    issues = []
+    workspace = summary.get("workspace") or {}
+    run = summary.get("run") or {}
+    counts = summary.get("counts") or {}
+    blockers = summary.get("blockers") or {}
+    heartbeat = summary.get("heartbeat") or {}
+    workspace_id = summary.get("workspaceId") or workspace.get("id") or ""
+    workspace_state = str(workspace.get("state") or "").strip()
+    run_state = str(run.get("state") or "").strip()
+    accepted_results = int(counts.get("acceptedResults") or 0)
+    open_decisions = int(counts.get("openDecisions") or 0)
+    pending_approvals = int(counts.get("pendingApprovals") or 0)
+    has_decision_blocker = open_decisions > 0 and (
+        workspace.get("blockingTicketId")
+        or run.get("blockingTicketId")
+        or blockers.get("openDecisions")
+        or workspace_state == "waiting_decision"
+        or run_state == "blocked_on_decision"
+    )
+    has_approval_blocker = pending_approvals > 0 and (
+        workspace.get("blockingApprovalId")
+        or run.get("blockingApprovalId")
+        or blockers.get("pendingApprovals")
+        or workspace_state == "waiting_approval"
+        or run_state == "blocked_on_approval"
+    )
+    has_accepted_evidence = accepted_results > 0
+    has_terminal_success = run_state == "completed" and accepted_results >= min_goal_accepted_results
+    has_live_activity = bool(heartbeat.get("latestEffectiveProgressAt")) and run_state in {"running", "dispatching"}
+
+    if has_terminal_success:
+        mode = "completed_with_accepted_evidence"
+    elif has_accepted_evidence:
+        mode = "positive_progress_with_accepted_evidence"
+    elif has_decision_blocker:
+        mode = "governed_decision_blocker"
+    elif has_approval_blocker:
+        mode = "governed_approval_blocker"
+    elif has_live_activity:
+        mode = "active_runtime_progress_without_accepted_evidence"
+    else:
+        mode = "no_positive_progress_or_governed_blocker"
+        issues.append(
+            "workspace has no accepted evidence, no governed blocker, and no active progress heartbeat: "
+            f"workspaceState={workspace_state!r} runState={run_state!r} "
+            f"acceptedResults={accepted_results} openDecisions={open_decisions} pendingApprovals={pending_approvals}"
+        )
+    return {
+        "workspaceId": workspace_id,
+        "workspaceState": workspace_state,
+        "runId": run.get("id") or workspace.get("activeRunId"),
+        "runState": run_state,
+        "mode": mode,
+        "pass": not issues,
+        "issues": issues,
+    }
 
 def evaluate_goal_convergence(summary):
     issues = []
@@ -871,6 +932,12 @@ def evaluate_goal_convergence(summary):
 
 errors = []
 warnings = []
+if min_workspace_count > 0 and len(workspace_ids) < min_workspace_count:
+    errors.append(
+        "observed workspace count below threshold: "
+        f"observed={len(workspace_ids)} threshold={min_workspace_count}; "
+        "set WORKORCH_OBSERVE_WORKSPACE_IDS or WORKORCH_OBSERVE_AUTO_SNAPSHOT_LIMIT"
+    )
 readyz = read_json(artifact_dir / "readyz.json")
 scheduler_diagnostics_observed = scheduler_diagnostics_from_payload(readyz.get("diagnostics") or {}, "readyz")
 if readyz.get("status") != "ready":
@@ -885,6 +952,7 @@ workspace_set = {item.get("id") for item in workspace_items}
 workspace_list_projection = workspaces.get("projection") or {}
 workspace_summaries = []
 goal_convergence = []
+workspace_progress = []
 display_contract = {
     "listProjection": validate_projection_display_contract(workspace_list_projection, "workspace-list", False),
     "workspaceListItems": [
@@ -927,6 +995,7 @@ for workspace_id in workspace_ids:
         live_summary = workspace_live_summary(workspace_id, snapshot_body)
         workspace_summaries.append(live_summary)
         goal_convergence.append(evaluate_goal_convergence(live_summary))
+        workspace_progress.append(evaluate_workspace_progress(live_summary))
         scheduler_diagnostics_observed.extend(
             scheduler_diagnostics_from_payload(snapshot.get("schedulerDiagnostics") or {}, f"workspace-snapshot[{workspace_id}]")
         )
@@ -1597,6 +1666,24 @@ goal_convergence_summary = {
     },
     "workspaces": goal_convergence,
 }
+workspace_progress_summary = {
+    "required": require_workspace_progress,
+    "pass": bool(workspace_progress) and all(item.get("pass") for item in workspace_progress),
+    "workspaceCount": len(workspace_progress),
+    "workspaces": workspace_progress,
+}
+if require_workspace_progress:
+    if not workspace_progress:
+        errors.append(
+            "workspace progress verification requested but no workspace snapshots were observed; "
+            "set WORKORCH_OBSERVE_WORKSPACE_IDS or allow WORKORCH_OBSERVE_AUTO_SNAPSHOT_LIMIT > 0"
+        )
+    for item in workspace_progress:
+        if not item.get("pass"):
+            errors.append(
+                f"{item.get('workspaceId')}: workspace progress check failed: "
+                + "; ".join(item.get("issues") or [])
+            )
 if require_goal_convergence:
     if not goal_convergence:
         errors.append(
@@ -1615,7 +1702,9 @@ summary = {
     "projectionState": projection.get("state"),
     "workspaceTotal": len(workspace_items),
     "observedWorkspaceIds": workspace_ids,
+    "observedWorkspaceThreshold": min_workspace_count,
     "workspaceSummaries": workspace_summaries,
+    "workspaceProgress": workspace_progress_summary,
     "goalConvergence": goal_convergence_summary,
     "syntheticWorkspaceIds": synthetic_workspace_ids,
     "sseTopicCounts": topic_counts,
