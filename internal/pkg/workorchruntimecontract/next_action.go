@@ -24,6 +24,16 @@ const (
 	NextActionTypeFail                  = "fail"
 )
 
+const (
+	ValidationRouteExistingEvidence = "validate_existing_evidence"
+	ValidationRouteRuntimeAction    = "validate_runtime_action"
+	ValidationRouteLLMGraph         = "validate_llm_graph"
+	ValidationRouteManagedHarness   = "validate_managed_harness"
+	ValidationRouteDeferred         = "validate_deferred"
+	ValidationRouteRequestDecision  = "request_decision"
+	ValidationRouteFail             = "fail"
+)
+
 type NextAction struct {
 	ID                    common.NextActionID         `json:"id"`
 	WorkspaceID           common.WorkspaceID          `json:"workspaceId"`

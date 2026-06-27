@@ -19,6 +19,11 @@ func (o *RuntimeOrchestrator) ensureCoverageLedger(ctx context.Context, run *run
 	if o.coverageLedger().updateFromGovernanceEvidence(run, decisionRefs, approvalRefs, "governance-owner-sync", ctx) {
 		changed = true
 	}
+	if evidenceChanged, _, err := o.reconcileCoverageAcceptedEvidenceRecords(ctx, run); err != nil {
+		return changed, err
+	} else if evidenceChanged {
+		changed = true
+	}
 	return changed, nil
 }
 

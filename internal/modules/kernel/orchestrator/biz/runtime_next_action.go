@@ -60,6 +60,11 @@ func (o *RuntimeOrchestrator) NextActionForRun(ctx context.Context, runID common
 	} else if ok {
 		return action, nil
 	}
+	if action, ok, err := o.missingAssessmentNextAction(ctx, run); err != nil {
+		return runtimemodel.NextAction{}, err
+	} else if ok {
+		return action, nil
+	}
 	if action, ok, err := o.allSatisfiedCompleteNextAction(ctx, run); err != nil {
 		return runtimemodel.NextAction{}, err
 	} else if ok {
@@ -130,6 +135,21 @@ func (o *RuntimeOrchestrator) missingValidationNextAction(ctx context.Context, r
 	})
 }
 
+func (o *RuntimeOrchestrator) missingAssessmentNextAction(ctx context.Context, run *runmodel.Run) (runtimemodel.NextAction, bool, error) {
+	if run == nil || !runStateAllowsGapAssessment(run.State) {
+		return runtimemodel.NextAction{}, false, nil
+	}
+	if len(mapFromValue(run.ExecutionContext[gapBaselineKey])) == 0 {
+		return runtimemodel.NextAction{}, false, nil
+	}
+	items, err := o.coverageItemsForNextAction(ctx, run)
+	if err != nil {
+		return runtimemodel.NextAction{}, false, err
+	}
+	action, ok := deriveMissingAssessmentNextAction(run, items)
+	return action, ok, nil
+}
+
 type missingCoverageEvidenceNextActionSpec struct {
 	ActionType       string
 	EvidenceKind     string
@@ -152,6 +172,20 @@ func (o *RuntimeOrchestrator) missingCoverageEvidenceNextAction(ctx context.Cont
 	items, err := o.coverageItemsForNextAction(ctx, run)
 	if err != nil {
 		return runtimemodel.NextAction{}, false, err
+	}
+	if len(items) > 0 && o != nil && o.evidence.EvidenceRecords != nil {
+		changed, _, err := o.reconcileCoverageAcceptedEvidenceRecords(ctx, run)
+		if err != nil {
+			return runtimemodel.NextAction{}, false, err
+		}
+		if changed && o.runs != nil {
+			if err := o.persistRunProgressUpdate(ctx, run); err != nil {
+				return runtimemodel.NextAction{}, false, err
+			}
+		}
+		if changed {
+			items = mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+		}
 	}
 	action, ok := deriveMissingCoverageEvidenceNextAction(run, items, spec)
 	if ok && spec.ActionType == runtimemodel.NextActionTypeStateChange {
@@ -417,6 +451,52 @@ func deriveMissingValidationNextAction(run *runmodel.Run, items []map[string]any
 	})
 }
 
+func deriveMissingAssessmentNextAction(run *runmodel.Run, items []map[string]any) (runtimemodel.NextAction, bool) {
+	if run == nil || run.ID == "" || run.WorkspaceID == "" || !runStateAllowsGapAssessment(run.State) {
+		return runtimemodel.NextAction{}, false
+	}
+	for _, item := range items {
+		if !runtimemodel.CoverageWorkItemStatusActive(stringFromMap(item, "status")) {
+			continue
+		}
+		state := deriveCoverageWorkItemState(item)
+		if !state.NeedsAssessment() {
+			continue
+		}
+		itemID := common.CoverageWorkItemID(firstNonEmptyString(stringFromMap(item, "id"), stringFromMap(item, "repositoryId")))
+		if itemID == "" {
+			continue
+		}
+		requiredOutput := map[string]any{
+			"coverageWorkItemIds":        []string{string(itemID)},
+			"acceptedEvidenceRefs":       compactUniqueStrings(state.AcceptedEvidenceRefs),
+			"requiredEvidenceKinds":      compactUniqueStrings(state.RequiredEvidenceKinds),
+			"mustAssessAcceptedEvidence": true,
+			"mustNotMutateWorkspace":     true,
+		}
+		return runtimemodel.NextAction{
+			WorkspaceID:          run.WorkspaceID,
+			RunID:                run.ID,
+			Type:                 runtimemodel.NextActionTypeAssessment,
+			SubjectType:          "coverage",
+			SubjectID:            string(itemID),
+			FocusCoverageItemIDs: []common.CoverageWorkItemID{itemID},
+			RequiredOutput:       requiredOutput,
+			AllowedActions:       []string{runtimemodel.NextActionTypeAssessment},
+			ForbiddenActions: []string{
+				runtimemodel.NextActionTypeStateChange,
+				runtimemodel.NextActionTypeValidate,
+				runtimemodel.NextActionTypeComplete,
+			},
+			RequiredEvidenceKinds: []string{runtimemodel.EvidenceKindAssessment},
+			Stage:                 runtimemodel.NextActionTypeAssessment,
+			StageMode:             "accepted_evidence",
+			Reason:                "coverage work item evidence is ready for assessment",
+		}.Normalized(), true
+	}
+	return runtimemodel.NextAction{}, false
+}
+
 func deriveMissingCoverageEvidenceNextAction(run *runmodel.Run, items []map[string]any, spec missingCoverageEvidenceNextActionSpec) (runtimemodel.NextAction, bool) {
 	if run == nil || run.ID == "" || run.WorkspaceID == "" || !runStateAllowsGapAssessment(run.State) {
 		return runtimemodel.NextAction{}, false
@@ -433,27 +513,251 @@ func deriveMissingCoverageEvidenceNextAction(run *runmodel.Run, items []map[stri
 		if itemID == "" {
 			continue
 		}
+		requiredOutput := map[string]any{
+			"coverageWorkItemIds":   []string{string(itemID)},
+			"requiredEvidenceKinds": []string{spec.EvidenceKind},
+			"mustBindCoverageFocus": true,
+		}
+		stageMode := "evidence"
+		actionType := spec.ActionType
+		allowedActions := []string{spec.ActionType}
+		forbiddenActions := append([]string(nil), spec.ForbiddenActions...)
+		reason := spec.Reason
+		if spec.ActionType == runtimemodel.NextActionTypeValidate {
+			route := validationNextActionRouteForCoverageItem(run, item, spec.EvidenceKind)
+			requiredOutput = applyValidationRouteToRequiredOutput(requiredOutput, route)
+			stageMode = firstNonEmptyString(route.StageMode, stageMode)
+			if route.ActionType != "" && route.ActionType != spec.ActionType {
+				actionType = route.ActionType
+				allowedActions = []string{route.ActionType}
+			}
+			if route.Reason != "" {
+				reason = route.Reason
+			}
+			if route.ActionType == runtimemodel.NextActionTypeRequestDecision {
+				forbiddenActions = append(forbiddenActions, runtimemodel.NextActionTypeValidate)
+			}
+		}
 		return runtimemodel.NextAction{
-			WorkspaceID:          run.WorkspaceID,
-			RunID:                run.ID,
-			Type:                 spec.ActionType,
-			SubjectType:          "coverage",
-			SubjectID:            string(itemID),
-			FocusCoverageItemIDs: []common.CoverageWorkItemID{itemID},
-			RequiredOutput: map[string]any{
-				"coverageWorkItemIds":   []string{string(itemID)},
-				"requiredEvidenceKinds": []string{spec.EvidenceKind},
-				"mustBindCoverageFocus": true,
-			},
-			AllowedActions:        []string{spec.ActionType},
-			ForbiddenActions:      append([]string(nil), spec.ForbiddenActions...),
+			WorkspaceID:           run.WorkspaceID,
+			RunID:                 run.ID,
+			Type:                  actionType,
+			SubjectType:           "coverage",
+			SubjectID:             string(itemID),
+			FocusCoverageItemIDs:  []common.CoverageWorkItemID{itemID},
+			RequiredOutput:        requiredOutput,
+			AllowedActions:        allowedActions,
+			ForbiddenActions:      forbiddenActions,
 			RequiredEvidenceKinds: []string{spec.EvidenceKind},
-			Stage:                 spec.ActionType,
-			StageMode:             "evidence",
-			Reason:                spec.Reason,
+			Stage:                 actionType,
+			StageMode:             stageMode,
+			Reason:                reason,
 		}.Normalized(), true
 	}
 	return runtimemodel.NextAction{}, false
+}
+
+type validationNextActionRoute struct {
+	Route                 string
+	ActionType            string
+	StageMode             string
+	PolicyRef             string
+	ValidationSafetyClass string
+	ManagedHarnessRef     string
+	DeferredEvidenceKind  string
+	GovernanceReason      string
+	Reason                string
+}
+
+func validationNextActionRouteForCoverageItem(run *runmodel.Run, item map[string]any, evidenceKind string) validationNextActionRoute {
+	defaultRoute := validationNextActionRoute{
+		Route:      runtimemodel.ValidationRouteLLMGraph,
+		ActionType: runtimemodel.NextActionTypeValidate,
+		StageMode:  "evidence",
+		Reason:     "missing validation evidence",
+	}
+	if run == nil || len(item) == 0 || strings.TrimSpace(evidenceKind) != runtimemodel.EvidenceKindValidation {
+		return defaultRoute
+	}
+	for _, policy := range validationPoliciesForRun(run) {
+		if !validationPolicyAppliesToCoverageItem(policy, item, evidenceKind) {
+			continue
+		}
+		route := validationRouteFromPolicy(policy, defaultRoute)
+		if route.Route != "" {
+			return route
+		}
+	}
+	return defaultRoute
+}
+
+func validationPoliciesForRun(run *runmodel.Run) []map[string]any {
+	if run == nil || run.ExecutionContext == nil {
+		return nil
+	}
+	policies := make([]map[string]any, 0)
+	for _, key := range []string{"validationPolicies", "evidencePolicies"} {
+		policies = append(policies, mapSliceFromValue(run.ExecutionContext[key])...)
+	}
+	if executionContract := mapFromValue(run.ExecutionContext["executionContract"]); len(executionContract) > 0 {
+		for _, key := range []string{"validationPolicies", "evidencePolicies"} {
+			policies = append(policies, mapSliceFromValue(executionContract[key])...)
+		}
+	}
+	return policies
+}
+
+func validationPolicyAppliesToCoverageItem(policy map[string]any, item map[string]any, evidenceKind string) bool {
+	if len(policy) == 0 || len(item) == 0 {
+		return false
+	}
+	if kinds := compactUniqueStrings(stringSliceFromValue(policy["appliesToEvidenceKinds"])); len(kinds) > 0 && !stringSliceContains(kinds, evidenceKind) {
+		return false
+	}
+	if ids := compactUniqueStrings(stringSliceFromValue(policy["sourceRequirementIds"])); len(ids) > 0 &&
+		!coverageStructuredIDsIntersect(ids, coverageWorkItemSourceRequirementIDs(item)) {
+		return false
+	}
+	if ids := compactUniqueStrings(stringSliceFromValue(policy["coverageTargetIds"])); len(ids) > 0 &&
+		!coverageStructuredIDsIntersect(ids, coverageWorkItemCoverageTargetIDs(item)) {
+		return false
+	}
+	if refs := compactUniqueStrings(stringSliceFromValue(policy["targetRefs"])); len(refs) > 0 &&
+		!coverageTargetRefsIntersect(refs, coverageWorkItemTargetRefs(item)) {
+		return false
+	}
+	requirements := mapSliceFromValue(policy["coverageRequirements"])
+	if len(requirements) == 0 {
+		return true
+	}
+	for _, requirement := range requirements {
+		if len(compactUniqueStrings(stringSliceFromValue(requirement["requiredEvidenceKinds"]))) > 0 &&
+			!stringSliceContains(stringSliceFromValue(requirement["requiredEvidenceKinds"]), evidenceKind) {
+			continue
+		}
+		if ids := compactUniqueStrings(stringSliceFromValue(requirement["sourceRequirementIds"])); len(ids) > 0 &&
+			!coverageStructuredIDsIntersect(ids, coverageWorkItemSourceRequirementIDs(item)) {
+			continue
+		}
+		if ids := compactUniqueStrings(stringSliceFromValue(requirement["coverageTargetIds"])); len(ids) > 0 &&
+			!coverageStructuredIDsIntersect(ids, coverageWorkItemCoverageTargetIDs(item)) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func validationRouteFromPolicy(policy map[string]any, fallback validationNextActionRoute) validationNextActionRoute {
+	route := fallback
+	route.PolicyRef = strings.TrimSpace(firstNonEmptyString(stringFromMap(policy, "policyRef"), stringFromMap(policy, "id")))
+	route.ValidationSafetyClass = strings.TrimSpace(stringFromMap(policy, "validationSafetyClass"))
+	route.ManagedHarnessRef = strings.TrimSpace(stringFromMap(policy, "managedHarnessRef"))
+	route.DeferredEvidenceKind = strings.TrimSpace(stringFromMap(policy, "deferredEvidenceKind"))
+	route.GovernanceReason = strings.TrimSpace(stringFromMap(policy, "governanceReason"))
+	modes := stringSet(stringSliceFromValue(policy["allowedExecutionModes"]))
+	switch {
+	case modes["runtime_action"] && len(mapFromValue(policy["runtimeAction"])) > 0:
+		route.Route = runtimemodel.ValidationRouteRuntimeAction
+		route.StageMode = "runtime_action"
+		route.Reason = "validation policy routes to deterministic runtime action"
+	case modes["managed_harness"] && route.ManagedHarnessRef != "":
+		route.Route = runtimemodel.ValidationRouteManagedHarness
+		route.StageMode = "managed_harness"
+		route.Reason = "validation policy routes to managed harness"
+	case modes["deferred"]:
+		route.Route = runtimemodel.ValidationRouteDeferred
+		route.StageMode = "deferred"
+		route.Reason = "validation policy routes to deferred evidence"
+	case modes["decision"]:
+		route.Route = runtimemodel.ValidationRouteRequestDecision
+		route.ActionType = runtimemodel.NextActionTypeRequestDecision
+		route.StageMode = "governance"
+		route.Reason = firstNonEmptyString(route.GovernanceReason, "validation policy requires governance")
+	case modes["fail"]:
+		route.Route = runtimemodel.ValidationRouteFail
+		route.ActionType = runtimemodel.NextActionTypeFail
+		route.StageMode = "fail"
+		route.Reason = "validation policy disallows automatic validation"
+	case validationSafetyClassRequiresNonLLMRoute(route.ValidationSafetyClass):
+		route = validationRouteForUnsafePolicy(route, modes)
+	case modes["llm_graph"] || len(modes) == 0:
+		route.Route = runtimemodel.ValidationRouteLLMGraph
+		route.StageMode = "evidence"
+	}
+	return route
+}
+
+func validationSafetyClassRequiresNonLLMRoute(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "destructive", "external", "ci_only", "manual":
+		return true
+	default:
+		return false
+	}
+}
+
+func validationRouteForUnsafePolicy(route validationNextActionRoute, modes map[string]bool) validationNextActionRoute {
+	switch {
+	case modes["managed_harness"] && route.ManagedHarnessRef != "":
+		route.Route = runtimemodel.ValidationRouteManagedHarness
+		route.StageMode = "managed_harness"
+		route.Reason = "unsafe validation policy routes to managed harness"
+	case modes["deferred"] || route.DeferredEvidenceKind != "":
+		route.Route = runtimemodel.ValidationRouteDeferred
+		route.StageMode = "deferred"
+		route.Reason = "unsafe validation policy routes to deferred evidence"
+	case modes["decision"]:
+		route.Route = runtimemodel.ValidationRouteRequestDecision
+		route.ActionType = runtimemodel.NextActionTypeRequestDecision
+		route.StageMode = "governance"
+		route.Reason = firstNonEmptyString(route.GovernanceReason, "unsafe validation policy requires governance")
+	default:
+		route.Route = runtimemodel.ValidationRouteFail
+		route.ActionType = runtimemodel.NextActionTypeFail
+		route.StageMode = "fail"
+		route.Reason = "unsafe validation policy has no allowed non-LLM route"
+	}
+	return route
+}
+
+func applyValidationRouteToRequiredOutput(requiredOutput map[string]any, route validationNextActionRoute) map[string]any {
+	next := cloneStepPayload(requiredOutput)
+	if next == nil {
+		next = map[string]any{}
+	}
+	next["validationRoute"] = firstNonEmptyString(route.Route, runtimemodel.ValidationRouteLLMGraph)
+	next["validationRouteOwner"] = "runtime_next_action"
+	next["mustProduceConcreteValidationEvidence"] = true
+	next["mustNotMutateWorkspace"] = true
+	if route.PolicyRef != "" {
+		next["validationPolicyRef"] = route.PolicyRef
+	}
+	if route.ValidationSafetyClass != "" {
+		next["validationSafetyClass"] = route.ValidationSafetyClass
+	}
+	if route.ManagedHarnessRef != "" {
+		next["managedHarnessRef"] = route.ManagedHarnessRef
+	}
+	if route.DeferredEvidenceKind != "" {
+		next["deferredEvidenceKind"] = route.DeferredEvidenceKind
+	}
+	if route.GovernanceReason != "" {
+		next["governanceReason"] = route.GovernanceReason
+	}
+	switch route.Route {
+	case runtimemodel.ValidationRouteRuntimeAction:
+		next["mustUseRuntimeAction"] = true
+	case runtimemodel.ValidationRouteManagedHarness:
+		next["mustUseManagedHarness"] = true
+	case runtimemodel.ValidationRouteDeferred:
+		next["mustRecordDeferredEvidenceRequirement"] = true
+	case runtimemodel.ValidationRouteRequestDecision:
+		next["mustRequestGovernance"] = true
+	case runtimemodel.ValidationRouteFail:
+		next["mustFailFast"] = true
+	}
+	return next
 }
 
 func deriveAcquireTargetSnapshotNextAction(run *runmodel.Run, stateChangeAction runtimemodel.NextAction) (runtimemodel.NextAction, bool) {

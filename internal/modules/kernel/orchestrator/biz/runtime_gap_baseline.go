@@ -669,19 +669,24 @@ func gapBaselineFromRun(run *runModel.Run) map[string]any {
 	if len(unresolved) == 0 {
 		unresolved = mapSliceFromValue(ctx["currentFocusItems"])
 	}
+	openFocus := gapBaselineOpenCoverageWorkItems(ctx, unresolved)
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	baseline := map[string]any{
-		"schemaVersion":         gapBaselineSchema,
-		"workspaceId":           string(run.WorkspaceID),
-		"runId":                 string(run.ID),
-		"definitionRevision":    stringFromMap(ctx, "definitionRevision"),
-		"baselineRevision":      firstNonEmptyString(stringFromMap(ctx, "coverageBaselineHash"), stringFromMap(ctx, "baselineRevision")),
-		"currentFocus":          cloneStepPayload(mapFromValue(ctx["currentFocus"])),
-		"openCoverageWorkItems": cloneCoverageMapSlice(unresolved),
-		"acceptedEvidenceRefs":  gapEvidenceRefsFromCoverageItems(items, true),
-		"rejectedEvidenceRefs":  gapEvidenceRefsFromCoverageItems(items, false),
-		"todoItems":             gapTodoItemsFromCoverageContext(unresolved),
-		"nextAction":            authority.NextAction,
+		"schemaVersion":              gapBaselineSchema,
+		"workspaceId":                string(run.WorkspaceID),
+		"runId":                      string(run.ID),
+		"definitionRevision":         stringFromMap(ctx, "definitionRevision"),
+		"baselineRevision":           firstNonEmptyString(stringFromMap(ctx, "coverageBaselineHash"), stringFromMap(ctx, "baselineRevision")),
+		"currentFocus":               cloneStepPayload(mapFromValue(ctx["currentFocus"])),
+		"openCoverageWorkItems":      cloneCoverageMapSlice(openFocus),
+		"openCoverageWorkItemCount":  len(unresolved),
+		"openCoverageItemsTruncated": len(unresolved) > len(openFocus),
+		"ledgerRef":                  firstNonEmptyString(stringFromMap(ctx, "fullLedgerRef"), "run.executionContext.coverageWorkItems"),
+		"ledgerSummaryRef":           "run.executionContext.coverageWorkItemContext.ledgerSummary",
+		"acceptedEvidenceRefs":       gapEvidenceRefsFromCoverageItems(items, true),
+		"rejectedEvidenceRefs":       gapEvidenceRefsFromCoverageItems(items, false),
+		"todoItems":                  gapTodoItemsFromCoverageContext(openFocus),
+		"nextAction":                 authority.NextAction,
 	}
 	if strings.TrimSpace(authority.DefinitionRevision) != "" {
 		baseline["definitionRevision"] = authority.DefinitionRevision
@@ -723,6 +728,28 @@ func gapBaselineFromRun(run *runModel.Run) map[string]any {
 		return nil
 	}
 	return baseline
+}
+
+func gapBaselineOpenCoverageWorkItems(context map[string]any, unresolved []map[string]any) []map[string]any {
+	if len(context) > 0 {
+		if focus := mapSliceFromValue(context["currentFocusItems"]); len(focus) > 0 {
+			return focus
+		}
+		if focus := mapFromValue(context["currentFocus"]); len(focus) > 0 {
+			return []map[string]any{focus}
+		}
+	}
+	return limitedCoverageMapSlice(unresolved, maxLLMContextSliceItems)
+}
+
+func limitedCoverageMapSlice(items []map[string]any, limit int) []map[string]any {
+	if len(items) == 0 || limit <= 0 {
+		return nil
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return cloneCoverageMapSlice(items)
 }
 
 func gapBaselineDispatchGate(run *runModel.Run) (bool, error) {
