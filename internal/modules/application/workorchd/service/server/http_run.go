@@ -26,7 +26,7 @@ func registerRunReadRoutes(router engine.RouteRegistry, state *serverState) {
 			Service:  "workorch",
 			Backend:  state.config.Backend,
 			DataRoot: state.config.DataRoot,
-			Runs:     items,
+			Runs:     runListMetadata(items),
 		})
 	})
 	router.AddHandler("/api/v1/workorch/artifacts/content", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -98,7 +98,7 @@ func registerRunWriteRoutes(router engine.RouteRegistry, state *serverState) {
 			Service:  "workorch",
 			Backend:  state.config.Backend,
 			DataRoot: state.config.DataRoot,
-			Runs:     items,
+			Runs:     runListMetadata(items),
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs/:runId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -110,6 +110,15 @@ func registerRunWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.handleWorkspaceScopedRunPost(w, r)
 	})
+}
+
+func runListMetadata(items []appservice.Run) []appservice.Run {
+	ret := make([]appservice.Run, 0, len(items))
+	for _, item := range items {
+		item.ExecutionContext = nil
+		ret = append(ret, item)
+	}
+	return ret
 }
 
 func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http.Request) {

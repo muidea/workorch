@@ -33,6 +33,10 @@ func TestRebuildDispatchInputAlignsStaleFocusFieldsToAuthority(t *testing.T) {
 		},
 		"acceptance": map[string]any{
 			"activeSliceId": "slice-a",
+			"activeSlice": map[string]any{
+				"id":                  "slice-a",
+				"coverageWorkItemIds": []string{"cwi-stale"},
+			},
 			"currentFocus": map[string]any{
 				"id":                  "focus-cwi-stale",
 				"coverageWorkItemIds": []string{"cwi-stale"},
@@ -52,7 +56,14 @@ func TestRebuildDispatchInputAlignsStaleFocusFieldsToAuthority(t *testing.T) {
 	}
 
 	assertFocusIDForTest(t, mapFromValue(got[coverageFocusKey]), "focus-cwi-current")
-	assertFocusIDForTest(t, mapFromValue(mapFromValue(got["acceptance"])["currentFocus"]), "focus-cwi-current")
+	acceptance := mapFromValue(got["acceptance"])
+	assertFocusIDForTest(t, mapFromValue(acceptance["currentFocus"]), "focus-cwi-current")
+	if activeSlice := mapFromValue(acceptance["activeSlice"]); len(activeSlice) > 0 {
+		t.Fatalf("acceptance.activeSlice = %+v, want stale slice removed from current action", activeSlice)
+	}
+	if stale := mapFromValue(mapFromValue(acceptance["diagnosticLineage"])["staleAcceptance"]); len(mapFromValue(stale["activeSlice"])) == 0 {
+		t.Fatalf("acceptance.diagnosticLineage = %+v, want stale activeSlice lineage", acceptance["diagnosticLineage"])
+	}
 	required := mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"])
 	if stringFromMap(required, "coverageFocusId") != "focus-cwi-current" {
 		t.Fatalf("repairActionPackage.requiredOutput = %+v, want current coverageFocusId", required)
@@ -137,7 +148,7 @@ func TestDispatchNextStepPreparesInputFromCurrentAuthority(t *testing.T) {
 	}
 }
 
-func TestRebuildDispatchInputDropsStaleRequiredOutputForAssessmentAuthority(t *testing.T) {
+func TestRebuildDispatchInputReplacesStaleRequiredOutputForAssessmentAuthority(t *testing.T) {
 	run := runWithAuthorityFocusForTest("assessment")
 	input := map[string]any{
 		convergenceAuthorityKey: cloneStepPayload(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])),
@@ -166,10 +177,15 @@ func TestRebuildDispatchInputDropsStaleRequiredOutputForAssessmentAuthority(t *t
 	packet := mapFromValue(got[stepInputKeyStagePacket])
 	assertFocusIDForTest(t, mapFromValue(packet["activeFocus"]), "cwi-current")
 	if required := mapFromValue(packet["requiredOutput"]); len(required) > 0 {
-		t.Fatalf("stagePacket.requiredOutput = %+v, want empty for assessment authority", required)
+		if stringFromMap(required, "assessmentScope") != "current_focus" {
+			t.Fatalf("stagePacket.requiredOutput = %+v, want focus-scoped assessment contract", required)
+		}
+		if ids := stringSliceFromValue(required["coverageWorkItemIds"]); len(ids) != 1 || ids[0] != "cwi-current" {
+			t.Fatalf("stagePacket.requiredOutput.coverageWorkItemIds = %+v, want [cwi-current]", ids)
+		}
 	}
-	if required := mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]); len(required) > 0 {
-		t.Fatalf("repairActionPackage.requiredOutput = %+v, want empty for assessment authority", required)
+	if required := mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]); stringFromMap(required, "assessmentScope") != "current_focus" {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want focus-scoped assessment contract", required)
 	}
 }
 
@@ -212,8 +228,12 @@ func TestStagePacketRequiredOutputDropsExecutableOutputForAssessmentAuthority(t 
 	}
 
 	packet := buildStagePacketFromStepInput(run, "step-assessment", input).ToMap()
-	if required := mapFromValue(packet["requiredOutput"]); len(required) > 0 {
-		t.Fatalf("stagePacket.requiredOutput = %+v, want empty for assessment authority", required)
+	required := mapFromValue(packet["requiredOutput"])
+	if stringFromMap(required, "assessmentScope") != "current_focus" {
+		t.Fatalf("stagePacket.requiredOutput = %+v, want focus-scoped assessment contract", required)
+	}
+	if ids := stringSliceFromValue(required["coverageWorkItemIds"]); len(ids) != 1 || ids[0] != "cwi-current" {
+		t.Fatalf("stagePacket.requiredOutput.coverageWorkItemIds = %+v, want [cwi-current]", ids)
 	}
 }
 
@@ -428,6 +448,36 @@ func TestValidateConvergenceDispatchInputRejectsTopLevelRequiredOutputFocusDrift
 	err := validateConvergenceDispatchInput(input)
 	if err == nil {
 		t.Fatal("validateConvergenceDispatchInput returned nil, want requiredOutput focus mismatch")
+	}
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want ErrConflict", err)
+	}
+	if !strings.Contains(err.Error(), failureClassRuntimeContractMisalign) {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want %s marker", err, failureClassRuntimeContractMisalign)
+	}
+}
+
+func TestValidateConvergenceDispatchInputRejectsAcceptanceActiveSliceFocusDrift(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"currentFocus": map[string]any{"id": "cwi-current"},
+			"nextAction":   map[string]any{"kind": "validate"},
+		},
+		"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
+		"acceptance": map[string]any{
+			"activeSlice": map[string]any{
+				"id":                  "slice-stale",
+				"coverageWorkItemIds": []string{"cwi-stale"},
+			},
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"activeFocus": map[string]any{"id": "cwi-current"},
+		},
+	}
+
+	err := validateConvergenceDispatchInput(input)
+	if err == nil {
+		t.Fatal("validateConvergenceDispatchInput returned nil, want activeSlice focus mismatch")
 	}
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("validateConvergenceDispatchInput error = %v, want ErrConflict", err)

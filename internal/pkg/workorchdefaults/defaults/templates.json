@@ -489,6 +489,27 @@
             "If version_control_snapshot is unresolved after meaningful workspace output changes, create git/write add and git/write commit evidence; shell/command git invocations are only supporting diagnostics and must not be cited as the satisfied snapshot evidence.",
             "If version_control_snapshot was rejected because it cited shell/command, file/read, file/list, LSP, or other non git/write commit evidence, the next repair must converge on git/read status/diff followed by git/write add and git/write commit, or return a zeroWork/skipped assessment when no commit-worthy change exists."
           ],
+          "validationEnvironmentPolicy": {
+            "schemaVersion": "workorch.software_dev.validation_environment.v1",
+            "scratchIsolationRequired": true,
+            "preferManagedSessionFor": ["service", "proxy", "streaming", "long_running", "temporary_port", "process_cleanup"],
+            "boundedForegroundOnly": true,
+            "cleanupRequired": true,
+            "languageProfiles": {
+              "go": {
+                "scratchBuildEnv": {
+                  "GOFLAGS": "-buildvcs=false"
+                },
+                "reason": "Scratch validation copies may not contain a complete VCS checkout; disabling VCS stamping avoids false-negative build failures."
+              }
+            },
+            "guidance": [
+              "Run validation from an isolated scratch directory or managed validation session when the check needs temporary files, generated harnesses, ports, or subprocess cleanup.",
+              "For Go scratch builds, set GOFLAGS=-buildvcs=false unless the validation is intentionally checking VCS stamping behavior.",
+              "Prefer validation/managed_session for service, proxy, streaming, long-running, temporary-port, or cleanup-sensitive checks when that capability is available.",
+              "Use bounded foreground commands or project test harnesses when managed validation is unavailable; do not use detached background processes as validation evidence."
+            ]
+          },
           "evidenceRequirements": [
             {
               "id": "runtime_entrypoint",

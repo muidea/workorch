@@ -122,10 +122,13 @@ func stagePacketActiveFocus(input map[string]any) map[string]any {
 
 func stagePacketRequiredOutput(input map[string]any) map[string]any {
 	state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state"))
-	if state == convergenceStateNeedAssessment || state == convergenceStateNeedGovernance {
+	if state == convergenceStateNeedGovernance {
 		return nil
 	}
 	authorityFocus := dispatchAuthorityCurrentFocus(input)
+	if state == convergenceStateNeedAssessment {
+		return assessmentRequiredOutputForAuthorityFocus(dispatchCoverageFocusFromAuthority(input, authorityFocus))
+	}
 	for _, source := range []map[string]any{
 		mapFromValue(input["repairActionPackage"]),
 		mapFromValue(input),

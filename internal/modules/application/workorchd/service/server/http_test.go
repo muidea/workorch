@@ -3037,6 +3037,11 @@ func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
 	if len(listed.Runs) != 2 || listed.Runs[0].ID != "run-a" || listed.Runs[1].ID != "run-b" {
 		t.Fatalf("listed runs = %+v, want run-a/run-b", listed.Runs)
 	}
+	for _, item := range listed.Runs {
+		if len(item.ExecutionContext) > 0 {
+			t.Fatalf("listed run %s executionContext = %+v, want metadata-only list response", item.ID, item.ExecutionContext)
+		}
+	}
 
 	filteredReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs?workspaceId="+workspaceB.ID, nil)
 	filteredRec := httptest.NewRecorder()
@@ -3051,6 +3056,9 @@ func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
 	if len(filtered.Runs) != 1 || filtered.Runs[0].ID != "run-b" {
 		t.Fatalf("filtered runs = %+v, want run-b", filtered.Runs)
 	}
+	if len(filtered.Runs[0].ExecutionContext) > 0 {
+		t.Fatalf("filtered run executionContext = %+v, want metadata-only list response", filtered.Runs[0].ExecutionContext)
+	}
 
 	workspaceScopedReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/runs", nil)
 	workspaceScopedRec := httptest.NewRecorder()
@@ -3064,6 +3072,9 @@ func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
 	}
 	if len(workspaceScoped.Runs) != 1 || workspaceScoped.Runs[0].ID != "run-a" || workspaceScoped.Runs[0].WorkspaceID != workspaceA.ID {
 		t.Fatalf("workspace scoped runs = %+v, want run-a for %s", workspaceScoped.Runs, workspaceA.ID)
+	}
+	if len(workspaceScoped.Runs[0].ExecutionContext) > 0 {
+		t.Fatalf("workspace scoped run executionContext = %+v, want metadata-only list response", workspaceScoped.Runs[0].ExecutionContext)
 	}
 
 	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/runs/run-a", nil)

@@ -337,7 +337,7 @@ func normalizeDispatchInputAuthorityFocus(input map[string]any) map[string]any {
 		return input
 	}
 	state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state"))
-	if state == convergenceStateNeedAssessment || state == convergenceStateNeedGovernance {
+	if state == convergenceStateNeedGovernance {
 		delete(input, "requiredOutput")
 	}
 	coverageFocus := dispatchCoverageFocusFromAuthority(input, authorityFocus)
@@ -370,6 +370,19 @@ func normalizeDispatchInputAuthorityFocus(input map[string]any) map[string]any {
 			pkg[coverageFocusKey] = compactLLMContextMap(coverageFocus, 1)
 		}
 		input["repairActionPackage"] = normalizeRepairActionPackageRequiredOutputForAuthority(input, pkg, coverageFocus)
+	}
+	if state == convergenceStateNeedAssessment {
+		required := assessmentRequiredOutputForAuthorityFocus(coverageFocus)
+		if len(required) > 0 {
+			input["requiredOutput"] = required
+			pkg := mapFromValue(input["repairActionPackage"])
+			if len(pkg) == 0 {
+				pkg = map[string]any{}
+			}
+			pkg["requiredOutput"] = cloneStepPayload(required)
+			input["repairActionPackage"] = pkg
+		}
+		return input
 	}
 	if required := mapFromValue(input["requiredOutput"]); len(required) > 0 {
 		input["requiredOutput"] = normalizeRequiredOutputFocusBinding(required, coverageFocus)
@@ -434,9 +447,37 @@ func acceptanceSignalAlignedToAuthorityFocus(acceptance map[string]any, coverage
 		return acceptance
 	}
 	next := cloneStepPayload(acceptance)
+	stale := map[string]any{}
+	if activeSlice := mapFromValue(next["activeSlice"]); len(activeSlice) > 0 && !dispatchFocusAligned(coverageFocus, activeSlice) {
+		stale["activeSlice"] = cloneStepPayload(activeSlice)
+		delete(next, "activeSlice")
+	}
+	if currentFocus := mapFromValue(next["currentFocus"]); len(currentFocus) > 0 && !dispatchFocusAligned(coverageFocus, currentFocus) {
+		stale["currentFocus"] = cloneStepPayload(currentFocus)
+	}
+	if len(stale) > 0 {
+		appendDiagnosticLineage(next, "staleAcceptance", stale)
+	}
 	next["currentFocus"] = cloneStepPayload(coverageFocus)
+	if sliceID := strings.TrimSpace(stringFromMap(coverageFocus, "sliceId")); sliceID != "" {
+		next["activeSliceId"] = sliceID
+	} else if len(mapFromValue(next["activeSlice"])) == 0 {
+		delete(next, "activeSliceId")
+	}
 	next["projectionPolicy"] = "dynamic C4 context; currentFocus is derived from convergenceAuthority before runtime dispatch"
 	return next
+}
+
+func appendDiagnosticLineage(target map[string]any, key string, value map[string]any) {
+	if len(target) == 0 || strings.TrimSpace(key) == "" || len(value) == 0 {
+		return
+	}
+	lineage := cloneStepPayload(mapFromValue(target["diagnosticLineage"]))
+	if lineage == nil {
+		lineage = map[string]any{}
+	}
+	lineage[key] = cloneStepPayload(value)
+	target["diagnosticLineage"] = lineage
 }
 
 func normalizeRepairActionPackageRequiredOutputForAuthority(input map[string]any, pkg map[string]any, coverageFocus map[string]any) map[string]any {
@@ -444,7 +485,18 @@ func normalizeRepairActionPackageRequiredOutputForAuthority(input map[string]any
 		return pkg
 	}
 	state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state"))
-	if state == convergenceStateNeedAssessment || state == convergenceStateNeedGovernance {
+	if state == convergenceStateNeedAssessment {
+		if required := assessmentRequiredOutputForAuthorityFocus(coverageFocus); len(required) > 0 {
+			pkg["requiredOutput"] = required
+		} else {
+			delete(pkg, "requiredOutput")
+		}
+		for _, key := range []string{"forbiddenActions", "exitCriteria", "evidenceAcquisitionRequired"} {
+			delete(pkg, key)
+		}
+		return pkg
+	}
+	if state == convergenceStateNeedGovernance {
 		for _, key := range []string{"requiredOutput", "forbiddenActions", "exitCriteria", "evidenceAcquisitionRequired"} {
 			delete(pkg, key)
 		}
@@ -473,6 +525,31 @@ func normalizeRequiredOutputFocusBinding(required map[string]any, coverageFocus 
 	return next
 }
 
+func assessmentRequiredOutputForAuthorityFocus(coverageFocus map[string]any) map[string]any {
+	if len(coverageFocus) == 0 {
+		return nil
+	}
+	ret := map[string]any{
+		"mustAssessAcceptedEvidence": true,
+		"assessmentScope":            "current_focus",
+		"requiredFields":             []string{"dodAssessment.items", "evidenceRefs"},
+		"forbiddenOutputs":           []string{"executionGraph", "patchRequests", "shellCommands", "mcpToolCalls", "memoryWrites"},
+	}
+	if focusID := strings.TrimSpace(stringFromMap(coverageFocus, "id")); focusID != "" {
+		ret["coverageFocusId"] = focusID
+	}
+	if ids := dispatchFocusWorkItemIDs(coverageFocus); len(ids) > 0 {
+		ret["coverageWorkItemIds"] = ids
+	}
+	if refs := stringSliceFromValue(coverageFocus["acceptedEvidenceRefs"]); len(refs) > 0 {
+		ret["acceptedEvidenceRefs"] = refs
+	}
+	if refs := stringSliceFromValue(coverageFocus["targetRefs"]); len(refs) > 0 {
+		ret["allowedTargetRefs"] = refs
+	}
+	return ret
+}
+
 func validateConvergenceDispatchFocusAlignment(input map[string]any) error {
 	authorityFocus := dispatchAuthorityCurrentFocus(input)
 	if len(authorityFocus) == 0 {
@@ -494,6 +571,16 @@ func validateConvergenceDispatchFocusAlignment(input map[string]any) error {
 		return err
 	}
 	if err := checkFocus("acceptance.currentFocus", mapFromValue(mapFromValue(input["acceptance"])["currentFocus"])); err != nil {
+		return err
+	}
+	if err := checkFocus("acceptance.activeSlice", mapFromValue(mapFromValue(input["acceptance"])["activeSlice"])); err != nil {
+		return err
+	}
+	executionContext := mapFromValue(input["executionContext"])
+	if err := checkFocus("executionContext.acceptance.currentFocus", mapFromValue(mapFromValue(executionContext["acceptance"])["currentFocus"])); err != nil {
+		return err
+	}
+	if err := checkFocus("executionContext.acceptance.activeSlice", mapFromValue(mapFromValue(executionContext["acceptance"])["activeSlice"])); err != nil {
 		return err
 	}
 	for label, required := range map[string]map[string]any{

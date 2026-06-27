@@ -3342,6 +3342,51 @@ func TestActivateWorkspaceExecutionWithBackendRefreshesExecutionContractFromMatc
 	}
 }
 
+func TestActivateSoftwareDevWorkspaceBindsValidationEnvironmentPolicy(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
+	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:      "software dev validation policy workspace",
+		TemplateID: "software-dev",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "implement a bounded software change")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"software validation policy is visible"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+
+	contract := contextMapFromValue(t, item.Run.ExecutionContext["executionContract"])
+	profileContracts := contextMapFromValue(t, contract["profileContracts"])
+	softwareDev := contextMapFromValue(t, profileContracts["software-dev"])
+	policy := contextMapFromValue(t, softwareDev["validationEnvironmentPolicy"])
+	if policy["schemaVersion"] != "workorch.software_dev.validation_environment.v1" ||
+		policy["scratchIsolationRequired"] != true ||
+		policy["boundedForegroundOnly"] != true {
+		t.Fatalf("validationEnvironmentPolicy = %+v, want software-dev validation policy bound into executionContract", policy)
+	}
+	languageProfiles := contextMapFromValue(t, policy["languageProfiles"])
+	goProfile := contextMapFromValue(t, languageProfiles["go"])
+	env := contextMapFromValue(t, goProfile["scratchBuildEnv"])
+	if env["GOFLAGS"] != "-buildvcs=false" {
+		t.Fatalf("go scratchBuildEnv = %+v, want GOFLAGS=-buildvcs=false", env)
+	}
+}
+
 func TestActivateGenericGovernedWorkspaceDoesNotInheritSoftwareDevStrategy(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()

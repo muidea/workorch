@@ -771,6 +771,25 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			t.Fatalf("software-dev deliverableExpectations missing required %q in %+v", id, deliverables)
 		}
 	}
+	validationPolicy, ok := softwareDev["validationEnvironmentPolicy"].(map[string]any)
+	if !ok {
+		t.Fatalf("software-dev validationEnvironmentPolicy = %+v, want map", softwareDev["validationEnvironmentPolicy"])
+	}
+	if validationPolicy["scratchIsolationRequired"] != true || validationPolicy["boundedForegroundOnly"] != true {
+		t.Fatalf("validationEnvironmentPolicy = %+v, want scratch isolation and bounded foreground", validationPolicy)
+	}
+	languageProfiles, ok := validationPolicy["languageProfiles"].(map[string]any)
+	if !ok {
+		t.Fatalf("validationEnvironmentPolicy.languageProfiles = %+v, want map", validationPolicy["languageProfiles"])
+	}
+	goProfile, ok := languageProfiles["go"].(map[string]any)
+	if !ok {
+		t.Fatalf("validationEnvironmentPolicy.languageProfiles.go = %+v, want map", languageProfiles["go"])
+	}
+	env, ok := goProfile["scratchBuildEnv"].(map[string]any)
+	if !ok || env["GOFLAGS"] != "-buildvcs=false" {
+		t.Fatalf("go scratchBuildEnv = %+v, want GOFLAGS=-buildvcs=false", goProfile["scratchBuildEnv"])
+	}
 	requirements, ok := softwareDev["evidenceRequirements"].([]any)
 	if !ok || len(requirements) < 4 {
 		t.Fatalf("software-dev evidenceRequirements = %+v, want declared requirements", softwareDev["evidenceRequirements"])
