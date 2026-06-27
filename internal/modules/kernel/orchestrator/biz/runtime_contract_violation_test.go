@@ -863,6 +863,70 @@ func TestContractViolationRetryUsesForcedNarrowAfterRepeatedRule(t *testing.T) {
 	}
 }
 
+func TestContractViolationRetryForcedNarrowValidationRequiredOutput(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-violation-forced-narrow-validation")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-violation-forced-narrow-validation", InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/failed-validation"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: "validation",
+			"repairObjective":        repairObjectiveConcreteValidationEvidence,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode":          true,
+					"mustProduceConcreteValidationEvidence": true,
+					"acceptedKinds":                         []string{"patch/apply", "shell/command"},
+				},
+			},
+		},
+		Output: map[string]any{
+			"stage":                        "runtime_contract_failed",
+			"error":                        "concrete validation evidence graph must not start detached or background processes",
+			outputKeyContractViolationType: contractViolationValidationEvidenceRequired,
+			failureOutputKeyClass:          failureClassRuntime,
+			failureOutputKeySignature:      "class=runtime_failed|stage=runtime_contract_failed|rule=concrete_validation_contract_missing",
+		},
+	}
+	attachContractViolationDiagnostics(run, failed, errors.New("concrete validation evidence graph must not start detached or background processes"))
+	orch := &RuntimeOrchestrator{
+		steps:  memory.NewStepRepository(),
+		policy: NormalizeRuntimePolicy(RuntimePolicy{}),
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failed, 2, common.ErrInvalidArgument)
+
+	recovery := mapFromValue(input[stepInputKeyContractViolationRecovery])
+	if got := stringFromMap(recovery, "correctionMode"); got != contractViolationCorrectionModeForcedNarrow {
+		t.Fatalf("correctionMode = %q, want forced_narrow; recovery=%+v", got, recovery)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["contractViolationRetryNarrowed"] != true ||
+		stringFromMap(required, "contractViolationRequiredOutputShape") != "bounded_validation_evidence" {
+		t.Fatalf("requiredOutput = %+v, want forced-narrow bounded validation marker", required)
+	}
+	if required["mustProduceConcreteValidationEvidence"] != true || required["mustIncludeStateChangingNode"] != false {
+		t.Fatalf("requiredOutput = %+v, want validation-only output contract", required)
+	}
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "shell/command") ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want bounded validation tools only", required["acceptedKinds"])
+	}
+	if !stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") ||
+		!stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "file_mutating_shell_validation") {
+		t.Fatalf("requiredOutput.forbiddenKinds = %+v, want state-changing and mutating validation forbidden", required["forbiddenKinds"])
+	}
+	stageRequired := mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"])
+	if stageRequired["contractViolationRetryNarrowed"] != true ||
+		stageRequired["mustProduceConcreteValidationEvidence"] != true ||
+		stageRequired["mustIncludeStateChangingNode"] != false {
+		t.Fatalf("stagePacket.requiredOutput = %+v, want same forced-narrow validation contract", stageRequired)
+	}
+}
+
 func TestContractViolationRetryPreservesStateChangingExpectedContract(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-contract-violation-state-contract")

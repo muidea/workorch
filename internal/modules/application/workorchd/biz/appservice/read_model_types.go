@@ -42,6 +42,7 @@ type RuntimeEvidenceSummary = readmodelcore.RuntimeEvidenceSummary
 type RuntimeTimelineItem = readmodelcore.RuntimeTimelineItem
 type ArtifactContinuation = readmodelcore.ArtifactContinuation
 type ContinuationDiagnostic = readmodelcore.ContinuationDiagnostic
+type ContinuationReadbackDiagnostic = readmodelcore.ContinuationReadbackDiagnostic
 type ContinuationDiagnosticCount = readmodelcore.ContinuationDiagnosticCount
 type WatchdogDiagnostics = readmodelcore.WatchdogDiagnostics
 type SchedulerDiagnostics = readmodelcore.SchedulerDiagnostics

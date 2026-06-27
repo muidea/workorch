@@ -759,7 +759,7 @@ func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[strin
 	out["mustAttemptControlledSubstituteWhenPrerequisiteUnavailable"] = true
 	out["mustDeclareValidationEvidenceMode"] = true
 	out["mustDeclareValidationEvidenceObservation"] = true
-	out["acceptedKinds"] = []string{"shell/command", "mcp/tool_call"}
+	out["acceptedKinds"] = []string{"shell/command", "mcp/tool_call", managedValidationSessionNodeKind}
 	out["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(existing["forbiddenKinds"]),
 		"patch/apply",
 		"read_only_graph",
@@ -770,7 +770,7 @@ func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[strin
 		"observability_only_graph",
 		"file_mutating_shell_validation",
 	))
-	out["validationEvidenceRule"] = "bounded validation evidence is required for unresolved Goal/DoD/deliverable coverage; patch/apply is only valid after separate concrete implementation target evidence appears"
+	out["validationEvidenceRule"] = "bounded validation evidence is required for unresolved Goal/DoD/deliverable coverage; patch/apply is only valid after separate concrete implementation target evidence appears; validation/managed_session may be used when runtime-managed timeout, scratch, cleanup, or port allocation is needed"
 	out["controlledSubstituteRule"] = "when a dependency or environment prerequisite is unavailable, first try a neutral local fixture, mock/stub, temporary config, isolated working directory, or alternate available port through accepted validation tools; all controlled-substitute writes must stay under validationScratchDir; static inspection alone does not close runtime-behavior coverage"
 	out["validationEvidenceModeRule"] = "each shell/command or mcp/tool_call node intended to close runtime-behavior coverage must declare input.validationEvidence.mode as runtime_behavior, controlled_substitute, executable_contract, or dynamic_execution; static_inspection/source_inspection metadata cannot close runtime-behavior coverage"
 	out["validationEvidenceObservationRule"] = "each concrete validation node must also declare input.validationEvidence.observationType as runtime_observation, controlled_substitute_observation, executable_contract_observation, or dynamic_execution_observation; controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute"

@@ -513,6 +513,14 @@ func convergenceStatusInfoFromClient(input *client.ConvergenceStatus) *Convergen
 		LatestEffectiveProgressAt:   input.LatestEffectiveProgressAt,
 		LatestContractViolationRule: input.LatestContractViolationRule,
 		LatestRecovery:              input.LatestRecovery,
+		LatestRejectedDiagnosticRef: input.LatestRejectedDiagnosticRef,
+		DecisionCause:               input.DecisionCause,
+		RetryAttempt:                input.RetryAttempt,
+		RetryMaxAttempts:            input.RetryMaxAttempts,
+		RetrySignatureRepeatCount:   input.RetrySignatureRepeatCount,
+		RetryBudgetScope:            clonePayloadMap(input.RetryBudgetScope),
+		NarrowedRetryAttempted:      input.NarrowedRetryAttempted,
+		ManagedValidationAvailable:  input.ManagedValidationAvailable,
 		Stalled:                     input.Stalled,
 		IneffectiveRetry:            input.IneffectiveRetry,
 	}
@@ -591,12 +599,40 @@ func continuationDiagnosticFromClient(input client.ContinuationDiagnostic) Conti
 		State:              input.State,
 		Reason:             input.Reason,
 		Detail:             input.Detail,
+		Readback:           continuationReadbackDiagnosticFromClient(input.Readback),
 		Recoverability:     input.Recoverability,
 		RecommendedActions: append([]string(nil), input.RecommendedActions...),
 		DedupeKey:          input.DedupeKey,
 		Attempt:            input.Attempt,
 		OccurredAt:         input.OccurredAt,
 		Source:             input.Source,
+	}
+}
+
+func continuationReadbackDiagnosticFromClient(input *client.ContinuationReadbackDiagnostic) *ContinuationReadbackDiagnosticInfo {
+	if input == nil {
+		return nil
+	}
+	return &ContinuationReadbackDiagnosticInfo{
+		WorkspaceID:             input.WorkspaceID,
+		RunID:                   input.RunID,
+		Action:                  input.Action,
+		Found:                   input.Found,
+		OldRunState:             input.OldRunState,
+		NewRunState:             input.NewRunState,
+		OldBlockingTicketID:     input.OldBlockingTicketID,
+		NewBlockingTicketID:     input.NewBlockingTicketID,
+		OldBlockingApprovalID:   input.OldBlockingApprovalID,
+		NewBlockingApprovalID:   input.NewBlockingApprovalID,
+		SuccessorRunID:          input.SuccessorRunID,
+		LatestStepID:            input.LatestStepID,
+		Terminal:                input.Terminal,
+		GovernedWait:            input.GovernedWait,
+		Advanced:                input.Advanced,
+		Reason:                  input.Reason,
+		ProjectionRevision:      input.ProjectionRevision,
+		SourceEventRevision:     input.SourceEventRevision,
+		ProjectedSourceRevision: input.ProjectedSourceRevision,
 	}
 }
 

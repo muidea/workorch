@@ -212,6 +212,9 @@ export function convergenceStatusDescriptions(status?: ConvergenceStatus) {
     { key: 'evidenceCount', label: '证据计数', children: <Space wrap><Tag color="green">accepted {status.acceptedEvidenceCount ?? 0}</Tag><Tag color="red">rejected {status.rejectedEvidenceCount ?? 0}</Tag></Space> },
     { key: 'latestProgress', label: '最近有效进展', children: status.latestEffectiveProgressAt || '-' },
     { key: 'contractViolation', label: '最近合同违例', children: status.latestContractViolationRule ? <Space wrap><Tag color="red">{status.latestContractViolationRule}</Tag>{status.latestRecovery ? <Tag color="gold">{status.latestRecovery}</Tag> : null}</Space> : '-' },
+    { key: 'decisionCause', label: '决策原因', children: status.decisionCause ? <Tag color="gold">{status.decisionCause}</Tag> : '-' },
+    { key: 'retryState', label: 'Retry 状态', children: <Space wrap>{status.retryAttempt ? <Tag>retry {status.retryMaxAttempts ? `${status.retryAttempt}/${status.retryMaxAttempts}` : status.retryAttempt}</Tag> : null}{status.narrowedRetryAttempted ? <Tag color="blue">narrowed</Tag> : null}{status.managedValidationAvailable ? <Tag color="cyan">managed validation</Tag> : null}{status.retrySignatureRepeatCount ? <Tag color="gold">repeat {status.retrySignatureRepeatCount}</Tag> : null}{!status.retryAttempt && !status.narrowedRetryAttempted && !status.managedValidationAvailable && !status.retrySignatureRepeatCount ? '-' : null}</Space> },
+    { key: 'rejectedDiagnostic', label: 'Rejected Diagnostic', children: status.latestRejectedDiagnosticRef || '-' },
     { key: 'problemSignals', label: '问题信号', children: <Space wrap>{status.stalled ? <Tag color="red">stalled</Tag> : null}{status.ineffectiveRetry ? <Tag color="gold">ineffective retry</Tag> : null}{!status.stalled && !status.ineffectiveRetry ? '-' : null}</Space> }
   ];
 }

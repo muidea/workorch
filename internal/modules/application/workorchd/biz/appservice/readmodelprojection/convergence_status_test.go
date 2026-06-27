@@ -25,8 +25,19 @@ func TestMapConvergenceStatusProjectsCompactRunState(t *testing.T) {
 		},
 		RuntimeExecution: &readmodelcore.RuntimeExecutionState{
 			ContractViolation: &runtimemodel.ContractViolation{
-				ViolatedRule:   "coverage_assessment_incomplete",
-				Recoverability: "recompute_authority",
+				ViolatedRule:         "coverage_assessment_incomplete",
+				Recoverability:       "recompute_authority",
+				RejectedOutputRef:    "run-a/step-a/rejected-output",
+				Attempt:              2,
+				MaxAttempts:          2,
+				SignatureRepeatCount: 1,
+				CorrectionMode:       "forced_narrow",
+				BudgetScope:          map[string]any{"lineageType": "contract_violation_retry", "focusId": "focus-a"},
+				CorrectionContract: map[string]any{
+					"requiredOutput": map[string]any{
+						"acceptedKinds": []any{"validation/managed_session"},
+					},
+				},
 			},
 		},
 		Steps: []readmodelcore.StepView{
@@ -65,10 +76,60 @@ func TestMapConvergenceStatusProjectsCompactRunState(t *testing.T) {
 	if got.LatestContractViolationRule != "coverage_assessment_incomplete" || got.LatestRecovery != "recompute_authority" {
 		t.Fatalf("violation/recovery = %q/%q", got.LatestContractViolationRule, got.LatestRecovery)
 	}
+	if got.LatestRejectedDiagnosticRef != "run-a/step-a/rejected-output" ||
+		got.DecisionCause != "" ||
+		got.RetryAttempt != 2 ||
+		got.RetryMaxAttempts != 2 ||
+		got.RetrySignatureRepeatCount != 1 ||
+		!got.NarrowedRetryAttempted ||
+		!got.ManagedValidationAvailable ||
+		got.RetryBudgetScope["focusId"] != "focus-a" {
+		t.Fatalf("retry diagnostics = %+v, want retry exhaustion projection", got)
+	}
 	if !got.DecisionEligibilityDenied ||
 		got.DecisionNotEligibleReason != "continuable_next_action_available" ||
 		got.DecisionNotEligibleStepID != "step-latest-denied" {
 		t.Fatalf("decision eligibility fields = %+v, want latest denied reason projection", got)
+	}
+}
+
+func TestMapConvergenceStatusClassifiesRetryExhaustionDecision(t *testing.T) {
+	t.Parallel()
+
+	got := MapConvergenceStatus(readmodelcore.RunSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-a"},
+		Run:       readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: "waiting_decision"},
+		RuntimeExecution: &readmodelcore.RuntimeExecutionState{
+			ContractViolation: &runtimemodel.ContractViolation{
+				ViolatedRule:         "state_changing_required_missing",
+				Recoverability:       "decision_required",
+				RejectedOutputRef:    "run-a/step-a/rejected-output",
+				Attempt:              2,
+				MaxAttempts:          2,
+				SignatureRepeatCount: 1,
+				CorrectionMode:       "forced_narrow",
+				BudgetScope:          map[string]any{"lineageType": "contract_violation_retry", "focusId": "focus-a"},
+				ExpectedContract: map[string]any{
+					"acceptedKinds": []any{"validation/managed_session"},
+				},
+			},
+		},
+	})
+	if got == nil {
+		t.Fatal("ConvergenceStatus is nil")
+	}
+	if got.DecisionCause != "retry_exhaustion" ||
+		got.LatestContractViolationRule != "state_changing_required_missing" ||
+		got.LatestRecovery != "decision_required" ||
+		got.LatestRejectedDiagnosticRef != "run-a/step-a/rejected-output" ||
+		got.RetryAttempt != 2 ||
+		got.RetryMaxAttempts != 2 ||
+		got.RetrySignatureRepeatCount != 1 ||
+		!got.NarrowedRetryAttempted ||
+		!got.ManagedValidationAvailable ||
+		got.RetryBudgetScope["lineageType"] != "contract_violation_retry" ||
+		got.RetryBudgetScope["focusId"] != "focus-a" {
+		t.Fatalf("ConvergenceStatus = %+v, want retry exhaustion diagnostics", got)
 	}
 }
 

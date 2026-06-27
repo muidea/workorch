@@ -11,7 +11,9 @@ func ProjectStepOutput(kind string, output map[string]any) map[string]any {
 		if !isStepOutputAllowedKey(key) {
 			continue
 		}
-		ret[key] = value
+		if projected := compactTraceValue(value, 0); projected != nil {
+			ret[key] = projected
+		}
 	}
 	if strings.TrimSpace(kind) == "mcp/tool_call" {
 		if result := projectMCPToolCallResult(output["result"]); len(result) > 0 {

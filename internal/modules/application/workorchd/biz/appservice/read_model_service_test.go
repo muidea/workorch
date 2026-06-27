@@ -3308,10 +3308,11 @@ func TestMapTaskProgressProjectsRepairLoopEscalation(t *testing.T) {
 		},
 		Decisions: []Decision{
 			{
-				ID:     "ticket-repair-exhausted",
-				RunID:  "run-repair-escalation",
-				Reason: "runtime repair attempts exhausted after 2 attempts",
-				State:  string(common.DecisionTicketStateOpen),
+				ID:          "ticket-repair-exhausted",
+				WorkspaceID: "ws-repair-escalation",
+				RunID:       "run-repair-escalation",
+				Reason:      "runtime repair attempts exhausted after 2 attempts",
+				State:       string(common.DecisionTicketStateOpen),
 				Context: map[string]any{
 					"attempts":         2,
 					"failureClass":     "shell_command_failed",

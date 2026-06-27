@@ -68,6 +68,9 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 	if item, ok := items[0].ViewModel.Sections["promptMode"]; !ok || item.Revision != items[0].ViewModel.Revision {
 		t.Fatalf("list promptMode section = %+v, want section revision from viewModel %+v", item, items[0].ViewModel)
 	}
+	if items[0].ContextHints != nil || items[0].EvidencePolicies != nil {
+		t.Fatalf("list workspace = %+v, want compact overview without large policy/context fields", items[0])
+	}
 
 	snapshot, snapshotStatus, err := store.GetSnapshot("ws-a")
 	if err != nil {
@@ -136,6 +139,36 @@ func TestStoreDegradedAndDetailNotReady(t *testing.T) {
 		t.Fatal("get missing detail succeeded, want error")
 	} else if detailStatus.State != StateDegraded {
 		t.Fatalf("detail status = %+v, want degraded", detailStatus)
+	}
+}
+
+func TestStoreListUsesCompactWorkspaceOverviewWithoutSnapshot(t *testing.T) {
+	store := NewStore()
+	store.ReplaceWorkspaceList([]appmodelcore.Workspace{{
+		ID:               "ws-list-compact",
+		Title:            "List Compact",
+		State:            "active",
+		SoulBindings:     map[string]string{"planning": "soul-a"},
+		ContextHints:     map[string]any{"large": strings.Repeat("x", 4096)},
+		EvidencePolicies: []map[string]any{{"policy": strings.Repeat("x", 4096)}},
+	}}, nil)
+
+	items, status, err := store.List()
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
+	}
+	if status.State != StateReady || len(items) != 1 {
+		t.Fatalf("status/items = %+v/%+v, want one ready workspace", status, items)
+	}
+	item := items[0]
+	if item.ContextHints != nil || item.EvidencePolicies != nil {
+		t.Fatalf("workspace overview = %+v, want compact list fields", item)
+	}
+	if item.SoulBindings["planning"] != "soul-a" {
+		t.Fatalf("workspace overview soul bindings = %+v, want retained lightweight bindings", item.SoulBindings)
+	}
+	if item.ViewModel.WorkspaceID != "ws-list-compact" || item.ViewModel.Revision == 0 {
+		t.Fatalf("workspace viewModel = %+v, want projected revision", item.ViewModel)
 	}
 }
 
@@ -260,6 +293,12 @@ func TestStoreStaleSnapshotKeepsLastReadyViewModel(t *testing.T) {
 				ActiveRunID:      "run-a",
 				BlockingTicketID: "ticket-a",
 			},
+			Decisions: []readmodelcore.Decision{{
+				ID:          "ticket-a",
+				WorkspaceID: "ws-a",
+				RunID:       "run-a",
+				State:       "open",
+			}},
 		},
 	}, nil)
 
@@ -294,6 +333,49 @@ func TestStoreStaleSnapshotKeepsLastReadyViewModel(t *testing.T) {
 	}
 	if staleSnapshot.ViewModel.ProjectedSourceRevision != readyStatus.ProjectedSourceRevision {
 		t.Fatalf("stale viewModel projected revision = %d, want last ready projected revision %d", staleSnapshot.ViewModel.ProjectedSourceRevision, readyStatus.ProjectedSourceRevision)
+	}
+}
+
+func TestStoreDoesNotUseResolvedDecisionForPromptMode(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{
+		ID:               "ws-resolved",
+		State:            "waiting_decision",
+		ActiveRunID:      "run-resolved",
+		BlockingTicketID: "ticket-resolved",
+	}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-resolved": {
+			Workspace: readmodelcore.Workspace{
+				ID:               "ws-resolved",
+				State:            "waiting_decision",
+				ActiveRunID:      "run-resolved",
+				BlockingTicketID: "ticket-resolved",
+			},
+			Decisions: []readmodelcore.Decision{{
+				ID:          "ticket-resolved",
+				WorkspaceID: "ws-resolved",
+				RunID:       "run-resolved",
+				State:       "resolved",
+			}},
+		},
+	}, nil)
+
+	items, _, err := store.List()
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("workspaces = %d, want 1", len(items))
+	}
+	if items[0].ViewModel.PromptMode == "decision" || items[0].BlockingTicketID != "" {
+		t.Fatalf("list workspace = %+v, want no decision prompt for resolved ticket", items[0])
+	}
+	snapshot, _, err := store.GetSnapshot("ws-resolved")
+	if err != nil {
+		t.Fatalf("get snapshot: %v", err)
+	}
+	if snapshot.ViewModel.PromptMode == "decision" || snapshot.Workspace.BlockingTicketID != "" {
+		t.Fatalf("snapshot workspace = %+v viewModel = %+v, want no decision prompt for resolved ticket", snapshot.Workspace, snapshot.ViewModel)
 	}
 }
 
@@ -340,6 +422,49 @@ func TestStoreWorkspaceStatusUsesGlobalRevisionForQuietSnapshot(t *testing.T) {
 	}
 	if quietStatus.WorkspaceRevision == 0 || quietStatus.UpdatedAt == "" || quietStatus.RebuiltAt == "" {
 		t.Fatalf("quiet status display metadata = %+v, want workspace revision and timestamps", quietStatus)
+	}
+}
+
+func TestStoreGlobalStatusSourceRevisionCoversWorkspaceProjectedRevision(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{
+		{ID: "ws-quiet", State: "active"},
+		{ID: "ws-active", State: "running", ActiveRunID: "run-active"},
+	}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-quiet": {
+			Workspace: readmodelcore.Workspace{ID: "ws-quiet", State: "active"},
+		},
+		"ws-active": {
+			Workspace: readmodelcore.Workspace{ID: "ws-active", State: "running", ActiveRunID: "run-active"},
+			Run:       &readmodelcore.Run{ID: "run-active", WorkspaceID: "ws-active", State: string(common.RunStateRunning)},
+		},
+	}, nil)
+
+	if !store.ApplyRuntimeProgress(RuntimeProgressUpdate{
+		WorkspaceID: "ws-active",
+		RunID:       "run-active",
+		StepID:      "step-active",
+		StepKind:    "llm/workspace_execution",
+		StepState:   string(common.StepStateDispatched),
+		Topic:       "run.step.dispatched",
+		Revision:    3193,
+	}) {
+		t.Fatal("ApplyRuntimeProgress returned false")
+	}
+
+	_, globalStatus, err := store.List()
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
+	}
+	if globalStatus.ProjectedSourceRevision != 3193 || globalStatus.SourceEventRevision != 3193 {
+		t.Fatalf("global status = %+v, want source/projected revisions to cover workspace progress revision", globalStatus)
+	}
+	_, quietStatus, err := store.GetSnapshot("ws-quiet")
+	if err != nil {
+		t.Fatalf("get quiet snapshot: %v", err)
+	}
+	if quietStatus.SourceEventRevision != 3193 || quietStatus.ProjectedSourceRevision != 3193 {
+		t.Fatalf("quiet status = %+v, want fallback revisions to stay consistent with global progress", quietStatus)
 	}
 }
 

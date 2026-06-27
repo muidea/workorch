@@ -46,6 +46,7 @@ type ContractViolation struct {
 	CorrectionMode       string             `json:"correctionMode,omitempty"`
 	CorrectionContract   map[string]any     `json:"correctionContract,omitempty"`
 	TargetScope          string             `json:"targetScope,omitempty"`
+	BudgetScope          map[string]any     `json:"budgetScope,omitempty"`
 	SourceRefs           []string           `json:"sourceRefs,omitempty"`
 	Attempt              int                `json:"attempt,omitempty"`
 	MaxAttempts          int                `json:"maxAttempts,omitempty"`

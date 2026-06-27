@@ -601,6 +601,44 @@ func TestResolveDecisionWithSessionRejectsInlineProviderConfigForProviderRecover
 	}
 }
 
+func TestResolveDecisionWithSessionRejectsEmptyProvideMissingInfo(t *testing.T) {
+	session, tickets, resolutions := newCountingDecisionRuntimeSession(t)
+	ctx := context.Background()
+	ticketID := common.TicketID("ticket-empty-provide-missing-info")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: common.WorkspaceID("ws-empty-provide-missing-info"),
+		RunID:       common.RunID("run-empty-provide-missing-info"),
+		StepID:      common.StepID("run-empty-provide-missing-info/step-1"),
+		Reason:      "runtime needs a valid decision resolution",
+		Question:    "Provide missing information, replan, or reject current path.",
+		State:       common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	_, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+		ResolutionPayload: map[string]any{
+			"answer":   "/",
+			"operator": "tui",
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("ResolveDecisionWithSession err = %v, want invalid argument", err)
+	}
+	item, getErr := tickets.Get(ctx, ticketID)
+	if getErr != nil {
+		t.Fatalf("get ticket: %v", getErr)
+	}
+	if item.State != common.DecisionTicketStateOpen {
+		t.Fatalf("ticket state = %s, want open", item.State)
+	}
+	if _, getErr = resolutions.GetByTicketID(ctx, ticketID); !errors.Is(getErr, common.ErrNotFound) {
+		t.Fatalf("resolution err = %v, want not found", getErr)
+	}
+}
+
 func TestResolveDecisionWithSessionAllowsProviderRecoveryConfirmationWithoutSecrets(t *testing.T) {
 	session, tickets, _ := newCountingDecisionRuntimeSession(t)
 	ctx := context.Background()

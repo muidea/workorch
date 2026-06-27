@@ -109,6 +109,7 @@ func contractViolationFromFailedStep(run *runModel.Run, step *runModel.Step, exe
 	rule := contractViolationRuleFromStep(step)
 	recoverability := contractViolationRecoverabilityForRule(rule)
 	correction := contractViolationCorrectionProfileForStep(step, rule, attempt, signatureRepeatCount)
+	budgetScope := contractViolationRecoveryBudgetScope(step.Input, step)
 	violation := runtimemodel.ContractViolation{
 		ID:                   fmt.Sprintf("%s/%s/contract-violation", run.ID, step.ID),
 		WorkspaceID:          run.WorkspaceID,
@@ -134,6 +135,7 @@ func contractViolationFromFailedStep(run *runModel.Run, step *runModel.Step, exe
 		CorrectionMode:       stringFromMap(correction, "mode"),
 		CorrectionContract:   mapFromValue(correction["contract"]),
 		TargetScope:          stringFromMap(correction, "targetScope"),
+		BudgetScope:          budgetScope,
 		SourceRefs:           contractViolationSourceRefs(step),
 		Attempt:              attempt,
 		MaxAttempts:          maxAttempts,
@@ -184,6 +186,7 @@ func applyContractViolationRecoveryProjection(input map[string]any, failedStep *
 		violation["correctionMode"] = stringFromMap(correction, "mode")
 		violation["targetScope"] = stringFromMap(correction, "targetScope")
 		violation["correctionContract"] = mapFromValue(correction["contract"])
+		applyForcedNarrowContractViolationRequiredOutput(input, failedStep, correction)
 	}
 	budgetScope := contractViolationRecoveryBudgetScope(input, failedStep)
 	if len(budgetScope) > 0 {
@@ -199,6 +202,106 @@ func applyContractViolationRecoveryProjection(input map[string]any, failedStep *
 		"Use contractViolationRecovery.correctionContract as the current narrow retry contract; if correctionMode is forced_narrow, return only an allowed output shape from that contract or a real governance blocker.",
 		"Return one valid JSON decision that satisfies the same runtimeStage and repairObjective; do not weaken Goal, DoD, evidence, or approval requirements.",
 	)
+}
+
+func applyForcedNarrowContractViolationRequiredOutput(input map[string]any, failedStep *runModel.Step, correction map[string]any) {
+	if len(input) == 0 || failedStep == nil || len(correction) == 0 {
+		return
+	}
+	if stringFromMap(correction, "mode") != contractViolationCorrectionModeForcedNarrow {
+		return
+	}
+	contract := mapFromValue(correction["contract"])
+	required := forcedNarrowContractViolationRequiredOutput(input, failedStep, correction, contract)
+	if len(required) == 0 {
+		return
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	required["contractViolationRetryNarrowed"] = true
+	required["contractViolationCorrectionProfileId"] = stringFromMap(correction, "profileId")
+	required["contractViolationRequiredOutputShape"] = stringFromMap(contract, "requiredOutputShape")
+	if targetScope := strings.TrimSpace(stringFromMap(correction, "targetScope")); targetScope != "" {
+		required["targetScope"] = targetScope
+	}
+	if allowed := stringSliceFromValue(contract["allowedOutputs"]); len(allowed) > 0 {
+		required["allowedOutputShapes"] = allowed
+	}
+	if forbidden := stringSliceFromValue(contract["forbiddenOutputs"]); len(forbidden) > 0 {
+		required["forbiddenOutputShapes"] = forbidden
+	}
+	pkg["requiredOutput"] = required
+	input["repairActionPackage"] = pkg
+	input["requiredOutput"] = cloneStepPayload(required)
+	if packet := mapFromValue(input[stepInputKeyStagePacket]); len(packet) > 0 {
+		packet["requiredOutput"] = cloneStepPayload(required)
+		input[stepInputKeyStagePacket] = packet
+	}
+}
+
+func reapplyForcedNarrowContractViolationRequiredOutput(input map[string]any, failedStep *runModel.Step) {
+	if len(input) == 0 || failedStep == nil {
+		return
+	}
+	recovery := mapFromValue(input[stepInputKeyContractViolationRecovery])
+	if len(recovery) == 0 || stringFromMap(recovery, "correctionMode") != contractViolationCorrectionModeForcedNarrow {
+		return
+	}
+	correction := map[string]any{
+		"profileId":   stringFromMap(recovery, "correctionProfileId"),
+		"mode":        stringFromMap(recovery, "correctionMode"),
+		"targetScope": stringFromMap(recovery, "targetScope"),
+		"contract":    mapFromValue(recovery["correctionContract"]),
+	}
+	applyForcedNarrowContractViolationRequiredOutput(input, failedStep, correction)
+}
+
+func forcedNarrowContractViolationRequiredOutput(input map[string]any, failedStep *runModel.Step, correction map[string]any, contract map[string]any) map[string]any {
+	shape := strings.TrimSpace(stringFromMap(contract, "requiredOutputShape"))
+	pkg := mapFromValue(input["repairActionPackage"])
+	existing := mapFromValue(pkg["requiredOutput"])
+	switch shape {
+	case "bounded_validation_evidence":
+		return concreteValidationEvidenceRequiredOutputWithScratch(input, pkg, existing)
+	case "valid_patch_apply",
+		"state_changing_output",
+		"state_changing_output_from_available_snapshot":
+		required := stateChangingRepairRequiredOutput()
+		for _, key := range []string{
+			"mustBindCoverageFocus",
+			"coverageFocusId",
+			"coverageWorkItemIds",
+			"mustDeclareCoverageTargets",
+			"coverageTargetMatchRule",
+			"mustAddressPrimaryDiagnostics",
+			"primaryDiagnosticMatchRule",
+			"mustTargetFailureScope",
+			"targetRelation",
+		} {
+			if value, ok := existing[key]; ok {
+				required[key] = value
+			}
+		}
+		if shape == "valid_patch_apply" || shape == "state_changing_output_from_available_snapshot" {
+			required["acceptedKinds"] = []string{"patch/apply"}
+			applyCurrentSnapshotDirectPatchContract(required)
+		}
+		if snapshots := contractViolationAvailableTargetSnapshotSummary(failedStep); len(snapshots) > 0 {
+			required["availableTargetSnapshots"] = snapshots
+		} else if snapshots := contractViolationTargetSnapshotSummary(failedStep); len(snapshots) > 0 {
+			required["targetSnapshots"] = snapshots
+		}
+		return required
+	case "bounded_failure_evidence":
+		required := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, existing)
+		required["mustProduceConcreteFailureEvidence"] = true
+		required["mustIncludeStateChangingNode"] = false
+		return required
+	default:
+		return nil
+	}
 }
 
 func contractViolationRecoveryBudgetScope(input map[string]any, failedStep *runModel.Step) map[string]any {
@@ -516,7 +619,7 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 	case contractViolationRuleConcreteValidationMissing:
 		profileID = "concrete_validation_evidence"
 		contract["requiredOutputShape"] = "bounded_validation_evidence"
-		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_declared_validationEvidence", "satisfied_dodAssessment_with_concrete_evidenceRefs")
+		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_declared_validationEvidence", "executionGraph_with_managed_validation_session", "satisfied_dodAssessment_with_concrete_evidenceRefs")
 		contract["requiredFields"] = []string{"validationEvidence.mode", "validationEvidence.observationType"}
 		contract["forbiddenOutputs"] = append([]string{"static_inspection_only", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}, contractViolationForbiddenContinuableBlockers()...)
 		if scratch := validationScratchDirFromStep(step); scratch != "" {
@@ -599,7 +702,7 @@ func contractViolationRequiredOutputCorrectionProfile(step *runModel.Step, contr
 	}
 	if boolValue(required["mustProduceConcreteValidationEvidence"]) {
 		contract["requiredOutputShape"] = "bounded_validation_evidence"
-		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_declared_validationEvidence", "satisfied_dodAssessment_with_concrete_evidenceRefs")
+		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_declared_validationEvidence", "executionGraph_with_managed_validation_session", "satisfied_dodAssessment_with_concrete_evidenceRefs")
 		contract["requiredFields"] = []string{"validationEvidence.mode", "validationEvidence.observationType"}
 		contract["forbiddenOutputs"] = append([]string{"failed_dodAssessment_only", "static_inspection_only", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}, contractViolationForbiddenContinuableBlockers()...)
 		if scratch := validationScratchDirFromStep(step); scratch != "" {
@@ -845,6 +948,7 @@ func contractViolationMap(violation runtimemodel.ContractViolation) map[string]a
 		"correctionMode":       violation.CorrectionMode,
 		"correctionContract":   violation.CorrectionContract,
 		"targetScope":          violation.TargetScope,
+		"budgetScope":          violation.BudgetScope,
 		"sourceRefs":           violation.SourceRefs,
 		"attempt":              violation.Attempt,
 		"maxAttempts":          violation.MaxAttempts,

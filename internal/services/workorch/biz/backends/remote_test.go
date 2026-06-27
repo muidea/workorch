@@ -16,6 +16,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	client "github.com/muidea/workorch/internal/pkg/workorchclient"
 )
 
 func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
@@ -71,6 +72,42 @@ func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for remote SSE event")
 		}
+	}
+}
+
+func TestRemoteSchedulerDiagnosticsPreservesContinuationReadback(t *testing.T) {
+	got := schedulerDiagnosticsInfoFromClient(&client.SchedulerDiagnostics{
+		LatestContinuation: &client.ContinuationDiagnostic{
+			WorkspaceID: "ws-remote-readback",
+			RunID:       "run-remote-readback",
+			Kind:        "run_continuation",
+			State:       "failed",
+			Reason:      "owner_readback_not_advanced",
+			Readback: &client.ContinuationReadbackDiagnostic{
+				WorkspaceID:             "ws-remote-readback",
+				RunID:                   "run-remote-readback",
+				Action:                  "resume",
+				Found:                   true,
+				OldRunState:             "blocked_on_decision",
+				NewRunState:             "blocked_on_decision",
+				OldBlockingTicketID:     "ticket-old",
+				NewBlockingTicketID:     "ticket-old",
+				Reason:                  "blocked_on_resolved_decision",
+				ProjectionRevision:      11,
+				SourceEventRevision:     12,
+				ProjectedSourceRevision: 12,
+			},
+		},
+	})
+	if got == nil || got.LatestContinuation == nil || got.LatestContinuation.Readback == nil {
+		t.Fatalf("diagnostics = %+v, want readback", got)
+	}
+	readback := got.LatestContinuation.Readback
+	if readback.Action != "resume" ||
+		readback.NewBlockingTicketID != "ticket-old" ||
+		readback.Reason != "blocked_on_resolved_decision" ||
+		readback.ProjectionRevision != 11 {
+		t.Fatalf("readback = %+v, want preserved remote readback", readback)
 	}
 }
 

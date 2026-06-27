@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 
@@ -176,5 +177,78 @@ func TestRunStateSubsystemReconcileWorkspaceActiveRunUsesScopedGetter(t *testing
 	}
 	if runRepo.getByWorkspaceIDCalls.Load() != 1 {
 		t.Fatalf("GetByWorkspaceID calls = %d, want 1", runRepo.getByWorkspaceIDCalls.Load())
+	}
+}
+
+func TestRunStateSubsystemRejectsIncompatibleActiveWorkspaceState(t *testing.T) {
+	ctx := context.Background()
+	runRepo := memory.NewRunRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	subsystem := newRunStateSubsystem(runRepo, workspaceRepo)
+	workspaceID := common.WorkspaceID("ws-incompatible-active-state")
+	runID := common.RunID("run-incompatible-active-state")
+	ticketID := common.TicketID("ticket-incompatible-active-state")
+
+	run := &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+	}
+	workspace := &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "ws",
+		State:       common.WorkspaceStateWaitingDecision,
+		ActiveRunID: runID,
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	if _, err := subsystem.syncRunAndWorkspaceForActiveState(ctx, run, common.WorkspaceStateRunning, workspace); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("sync incompatible state error = %v, want conflict", err)
+	}
+	gotRun, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	gotWorkspace, err := workspaceRepo.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if gotRun.State != common.RunStateBlockedOnDecision || gotRun.BlockingTicketID != ticketID {
+		t.Fatalf("run = %+v, want unchanged blocked decision", gotRun)
+	}
+	if gotWorkspace.State != common.WorkspaceStateWaitingDecision || gotWorkspace.ActiveRunID != runID {
+		t.Fatalf("workspace = %+v, want unchanged waiting decision", gotWorkspace)
+	}
+}
+
+func TestWorkspaceStateCompatibleWithRun(t *testing.T) {
+	cases := []struct {
+		name           string
+		runState       common.RunState
+		workspaceState common.WorkspaceState
+		want           bool
+	}{
+		{name: "created starts running", runState: common.RunStateCreated, workspaceState: common.WorkspaceStateRunning, want: true},
+		{name: "running", runState: common.RunStateRunning, workspaceState: common.WorkspaceStateRunning, want: true},
+		{name: "validating", runState: common.RunStateValidating, workspaceState: common.WorkspaceStateValidating, want: true},
+		{name: "decision", runState: common.RunStateBlockedOnDecision, workspaceState: common.WorkspaceStateWaitingDecision, want: true},
+		{name: "approval", runState: common.RunStateBlockedOnApproval, workspaceState: common.WorkspaceStateBlocked, want: true},
+		{name: "decision cannot run workspace", runState: common.RunStateBlockedOnDecision, workspaceState: common.WorkspaceStateRunning, want: false},
+		{name: "approval cannot run workspace", runState: common.RunStateBlockedOnApproval, workspaceState: common.WorkspaceStateRunning, want: false},
+		{name: "terminal not active", runState: common.RunStateCompleted, workspaceState: common.WorkspaceStateRunning, want: false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			run := &runmodel.Run{ID: "run", WorkspaceID: "ws", State: tt.runState}
+			if got := workspaceStateCompatibleWithRun(run, tt.workspaceState); got != tt.want {
+				t.Fatalf("compatible = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

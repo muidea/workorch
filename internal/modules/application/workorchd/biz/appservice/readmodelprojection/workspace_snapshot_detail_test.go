@@ -1,6 +1,7 @@
 package readmodelprojection
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -76,6 +77,196 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 	}
 	if got.LLMUsageSummary.EntryTotal != len(traces) {
 		t.Fatalf("summary entry total = %d, want full total %d", got.LLMUsageSummary.EntryTotal, len(traces))
+	}
+}
+
+func TestProjectWorkspaceSnapshotDetailCompactsRuntimeAndTaskGraphFields(t *testing.T) {
+	t.Parallel()
+
+	largeInput := map[string]any{
+		"repairActionPackage": map[string]any{
+			"targetSnapshot": strings.Repeat("s", workspaceSnapshotTraceStringLimit*4),
+			"sectionHashes":  repeatedStrings("section-hash", workspaceSnapshotTraceSliceLimit+4),
+		},
+		"contextBudget": map[string]any{
+			"actualBytes": 731429,
+			"cachePlan":   strings.Repeat("c", workspaceSnapshotTraceStringLimit*4),
+		},
+	}
+	nodes := make([]readmodelcore.TaskDecompositionNode, 0, workspaceSnapshotTraceSliceLimit+3)
+	for idx := 0; idx < workspaceSnapshotTraceSliceLimit+3; idx++ {
+		nodes = append(nodes, readmodelcore.TaskDecompositionNode{
+			ID:               "node-" + strconv.Itoa(idx),
+			Title:            strings.Repeat("n", workspaceSnapshotTraceStringLimit+200),
+			State:            "pending",
+			DependsOn:        repeatedStrings("dependency", workspaceSnapshotTraceSliceLimit+3),
+			EvidenceRefs:     repeatedStrings("evidence", workspaceSnapshotTraceSliceLimit+3),
+			CoverageTargets:  repeatedStrings("coverage", workspaceSnapshotTraceSliceLimit+3),
+			FailureSignature: strings.Repeat("f", workspaceSnapshotTraceStringLimit+200),
+			Input:            largeInput,
+		})
+	}
+	decompositions := make([]readmodelcore.TaskDecomposition, 0, workspaceSnapshotTraceSliceLimit+3)
+	plans := make([]readmodelcore.TaskPlan, 0, workspaceSnapshotTraceSliceLimit+3)
+	for idx := 0; idx < workspaceSnapshotTraceSliceLimit+3; idx++ {
+		decompositions = append(decompositions, readmodelcore.TaskDecomposition{
+			ID:           "decomposition-" + strconv.Itoa(idx),
+			Summary:      strings.Repeat("d", workspaceSnapshotTraceStringLimit+200),
+			Nodes:        nodes,
+			EvidenceRefs: repeatedStrings("decomposition-evidence", workspaceSnapshotTraceSliceLimit+3),
+		})
+		plans = append(plans, readmodelcore.TaskPlan{
+			ID:           "plan-" + strconv.Itoa(idx),
+			Summary:      strings.Repeat("p", workspaceSnapshotTraceStringLimit+200),
+			Nodes:        nodes,
+			EvidenceRefs: repeatedStrings("plan-evidence", workspaceSnapshotTraceSliceLimit+3),
+		})
+	}
+
+	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-runtime-compact"},
+		Step: &readmodelcore.StepView{
+			ID:    "current-step",
+			Kind:  "llm/workspace_execution",
+			State: "running",
+			Output: map[string]any{
+				"summary":       "current summary",
+				"contextBudget": map[string]any{"actualBytes": 731429},
+			},
+		},
+		TaskProgress:       readmodelcore.TaskProgress{CurrentStepID: "step-1"},
+		TaskDecompositions: decompositions,
+		TaskPlans:          plans,
+	})
+
+	if got.Step == nil || got.Step.Output["summary"] != "current summary" {
+		t.Fatalf("current step = %+v, want projected summary", got.Step)
+	}
+	if budget, ok := got.Step.Output["contextBudget"].(map[string]any); !ok || budget["actualBytes"] == nil {
+		t.Fatalf("current step output = %+v, want bounded contextBudget summary", got.Step.Output)
+	} else if cachePlan, ok := budget["cachePlan"].(string); ok && len(cachePlan) > workspaceSnapshotTraceStringLimit+len("...[truncated]") {
+		t.Fatalf("current step contextBudget cachePlan length = %d, want bounded", len(cachePlan))
+	}
+	if len(got.TaskDecompositions) != workspaceSnapshotTraceSliceLimit {
+		t.Fatalf("task decompositions = %d, want %d", len(got.TaskDecompositions), workspaceSnapshotTraceSliceLimit)
+	}
+	if got.TaskDecompositions[0].ID != "decomposition-3" {
+		t.Fatalf("first decomposition = %q, want latest retained", got.TaskDecompositions[0].ID)
+	}
+	if len(got.TaskDecompositions[0].Nodes) != workspaceSnapshotTraceSliceLimit {
+		t.Fatalf("decomposition nodes = %d, want %d", len(got.TaskDecompositions[0].Nodes), workspaceSnapshotTraceSliceLimit)
+	}
+	if len(got.TaskPlans) != workspaceSnapshotTraceSliceLimit {
+		t.Fatalf("task plans = %d, want %d", len(got.TaskPlans), workspaceSnapshotTraceSliceLimit)
+	}
+	node := got.TaskPlans[0].Nodes[0]
+	if len(node.DependsOn) != workspaceSnapshotTraceSliceLimit || len(node.EvidenceRefs) != workspaceSnapshotTraceSliceLimit || len(node.CoverageTargets) != workspaceSnapshotTraceSliceLimit {
+		t.Fatalf("projected node refs = %+v, want bounded refs", node)
+	}
+	if len(node.Title) > workspaceSnapshotTraceStringLimit+len("...[truncated]") || len(node.FailureSignature) > workspaceSnapshotTraceStringLimit+len("...[truncated]") {
+		t.Fatalf("projected node text not bounded: title=%d signature=%d", len(node.Title), len(node.FailureSignature))
+	}
+	if node.Input == nil || node.Input["repairActionPackage"] == nil {
+		t.Fatalf("projected node input = %+v, want bounded diagnostic input retained", node.Input)
+	}
+	if text, ok := node.Input["contextBudget"].(map[string]any)["cachePlan"].(string); ok && len(text) > workspaceSnapshotTraceStringLimit+len("...[truncated]") {
+		t.Fatalf("projected node input cachePlan length = %d, want bounded", len(text))
+	}
+}
+
+func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testing.T) {
+	t.Parallel()
+
+	nodes := []readmodelcore.TaskDecompositionNode{{
+		ID:    "node-heavy",
+		Title: strings.Repeat("node-title", 200),
+		Input: map[string]any{
+			"repairActionPackage": map[string]any{
+				"targetSnapshot": strings.Repeat("snapshot", 2000),
+				"sectionHashes":  repeatedStrings("hash", workspaceSnapshotTraceSliceLimit+5),
+			},
+		},
+		EvidenceRefs: repeatedStrings("node-evidence", workspaceSnapshotTraceSliceLimit+5),
+	}}
+	result := readmodelcore.Result{
+		ID:      "result-heavy",
+		State:   "rejected",
+		Summary: strings.Repeat("result-summary", 200),
+		SummaryDetail: &readmodelcore.ResultSummary{
+			GoalOutcome:           strings.Repeat("goal-outcome", 200),
+			ImplementationSummary: strings.Repeat("implementation", 200),
+			Diagnostics: map[string]any{
+				"runtimeDiagnostics": map[string]any{
+					"contractViolation": map[string]any{
+						"actualOutputSummary": map[string]any{"error": strings.Repeat("diagnostic", 2000)},
+					},
+				},
+			},
+		},
+	}
+	decision := readmodelcore.Decision{
+		ID:    "decision-heavy",
+		State: "open",
+		Context: map[string]any{
+			"failedStepInput": map[string]any{
+				"failureTargetRepairContext": []any{
+					map[string]any{"contentPreview": strings.Repeat("preview", 2000)},
+				},
+			},
+			"failedStepOutput": map[string]any{
+				"error": strings.Repeat("decision-error", 2000),
+			},
+		},
+	}
+
+	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-context-typed"},
+		ContextBundle: &readmodelcore.ContextBundle{
+			WorkspaceID: "ws-context-typed",
+			Sections: []readmodelcore.ContextSection{
+				{
+					ID:      "formal_outputs",
+					Data:    map[string]any{"results": []readmodelcore.Result{result}},
+					Summary: strings.Repeat("formal", 200),
+				},
+				{
+					ID:   "task_decomposition",
+					Data: map[string]any{"taskPlans": []readmodelcore.TaskPlan{{ID: "plan-heavy", Nodes: nodes}}},
+				},
+				{
+					ID:   "governance",
+					Data: map[string]any{"decisions": []readmodelcore.Decision{decision}},
+				},
+				{
+					ID: "memory_recall",
+					Data: map[string]any{"memoryRecallTraces": []readmodelcore.MemoryRecallTrace{{
+						ID:                  "memory-heavy",
+						QueryTextPreview:    strings.Repeat("query", 2000),
+						CandidateMemoryIDs:  repeatedStrings("candidate", workspaceSnapshotTraceSliceLimit+5),
+						RetrievedMemoryHits: repeatedMemoryHits(workspaceSnapshotTraceSliceLimit + 5),
+					}}},
+				},
+			},
+		},
+	})
+
+	if got.ContextBundle == nil || len(got.ContextBundle.Sections) != 4 {
+		t.Fatalf("sections = %+v, want projected typed sections", got.ContextBundle)
+	}
+	for _, section := range got.ContextBundle.Sections {
+		dataBytes := jsonSize(t, section.Data)
+		if dataBytes > 20000 {
+			t.Fatalf("section %s data bytes = %d, want bounded projection data", section.ID, dataBytes)
+		}
+		assertNoLongStringInJSONValue(t, section.Data, workspaceSnapshotTraceStringLimit+len("...[truncated]"))
+	}
+	formalOutputs := contextSectionByID(got.ContextBundle.Sections, "formal_outputs")
+	if results, ok := formalOutputs.Data["results"].([]any); !ok || len(results) != 1 || results[0].(map[string]any)["id"] != "result-heavy" {
+		t.Fatalf("formal output data = %+v, want projected result id retained", formalOutputs.Data)
+	}
+	taskSection := contextSectionByID(got.ContextBundle.Sections, "task_decomposition")
+	if plans, ok := taskSection.Data["taskPlans"].([]any); !ok || len(plans) != 1 || plans[0].(map[string]any)["id"] != "plan-heavy" {
+		t.Fatalf("task data = %+v, want projected task plan id retained", taskSection.Data)
 	}
 }
 
@@ -306,4 +497,53 @@ func repeatedCompressionCandidates(count int, refs int) []readmodelcore.ContextC
 		})
 	}
 	return ret
+}
+
+func contextSectionByID(items []readmodelcore.ContextSection, id string) readmodelcore.ContextSection {
+	for _, item := range items {
+		if item.ID == id {
+			return item
+		}
+	}
+	return readmodelcore.ContextSection{}
+}
+
+func jsonSize(t *testing.T, value any) int {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal json: %v", err)
+	}
+	return len(raw)
+}
+
+func assertNoLongStringInJSONValue(t *testing.T, value any, limit int) {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal json: %v", err)
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal json: %v", err)
+	}
+	assertNoLongString(t, decoded, limit)
+}
+
+func assertNoLongString(t *testing.T, value any, limit int) {
+	t.Helper()
+	switch typed := value.(type) {
+	case string:
+		if len(typed) > limit {
+			t.Fatalf("string length = %d, want <= %d", len(typed), limit)
+		}
+	case []any:
+		for _, item := range typed {
+			assertNoLongString(t, item, limit)
+		}
+	case map[string]any:
+		for _, item := range typed {
+			assertNoLongString(t, item, limit)
+		}
+	}
 }

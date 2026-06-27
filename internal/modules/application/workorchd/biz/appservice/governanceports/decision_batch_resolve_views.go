@@ -43,6 +43,9 @@ func BatchResolveDecisionViews(ctx context.Context, hub events.Hub, traces gover
 		if r.err != nil {
 			return nil, r.err
 		}
+		if decisionResolutionMissingRequiredInfo(semantic, cmd.ResolutionPayload) {
+			return nil, common.ErrInvalidArgument
+		}
 		if _, _, err := prepareDecisionResolution(r.item, resolutionType, payload, scope); err != nil {
 			return nil, err
 		}

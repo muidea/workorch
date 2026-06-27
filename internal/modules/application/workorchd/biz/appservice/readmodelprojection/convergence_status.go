@@ -35,12 +35,21 @@ func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *readmodelcore.Con
 		violation := snapshot.RuntimeExecution.ContractViolation
 		ret.LatestContractViolationRule = strings.TrimSpace(violation.ViolatedRule)
 		ret.LatestRecovery = strings.TrimSpace(violation.Recoverability)
+		ret.LatestRejectedDiagnosticRef = strings.TrimSpace(violation.RejectedOutputRef)
+		ret.RetryAttempt = violation.Attempt
+		ret.RetryMaxAttempts = violation.MaxAttempts
+		ret.RetrySignatureRepeatCount = violation.SignatureRepeatCount
+		ret.RetryBudgetScope = cloneReadModelMap(violation.BudgetScope)
+		ret.NarrowedRetryAttempted = strings.TrimSpace(violation.CorrectionMode) != ""
+		ret.ManagedValidationAvailable = convergenceContractHasManagedValidation(violation.ExpectedContract) ||
+			convergenceContractHasManagedValidation(violation.CorrectionContract)
 	}
 	if denied := latestDecisionEligibilityDenied(snapshot.Steps); denied != nil {
 		ret.DecisionEligibilityDenied = true
 		ret.DecisionNotEligibleReason = denied.reason
 		ret.DecisionNotEligibleStepID = denied.stepID
 	}
+	ret.DecisionCause = convergenceDecisionCause(ret)
 	if ret.WorkspaceID == "" && snapshot.Workspace.ID != "" {
 		ret.WorkspaceID = snapshot.Workspace.ID
 	}
@@ -48,6 +57,51 @@ func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *readmodelcore.Con
 		return nil
 	}
 	return &ret
+}
+
+func convergenceDecisionCause(status readmodelcore.ConvergenceStatus) string {
+	runState := strings.TrimSpace(status.RunState)
+	waitingDecision := runState == "waiting_decision" || runState == "blocked_on_decision"
+	if !waitingDecision && status.NextActionKind != "wait_decision" {
+		return ""
+	}
+	if status.DecisionEligibilityDenied {
+		return "decision_not_eligible"
+	}
+	if status.LatestContractViolationRule != "" {
+		if status.RetryMaxAttempts > 0 && status.RetryAttempt >= status.RetryMaxAttempts {
+			return "retry_exhaustion"
+		}
+		if status.LatestRecovery == "decision_required" {
+			return "contract_violation_governance"
+		}
+		return "contract_violation"
+	}
+	return "governance_required"
+}
+
+func convergenceContractHasManagedValidation(contract map[string]any) bool {
+	if len(contract) == 0 {
+		return false
+	}
+	for key, value := range contract {
+		if strings.EqualFold(strings.TrimSpace(key), "acceptedKinds") {
+			for _, item := range readModelStringSliceValue(value) {
+				if strings.TrimSpace(item) == "validation/managed_session" {
+					return true
+				}
+			}
+		}
+		if nested := readModelMapValue(value); len(nested) > 0 && convergenceContractHasManagedValidation(nested) {
+			return true
+		}
+		for _, nestedItem := range readModelMapSliceValue(value) {
+			if convergenceContractHasManagedValidation(nestedItem) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func MapWorkspaceConvergenceStatus(snapshot readmodelcore.WorkspaceSnapshot) *readmodelcore.ConvergenceStatus {

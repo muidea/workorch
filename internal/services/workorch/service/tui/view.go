@@ -628,6 +628,8 @@ func convergenceStatusText(item *backend.ConvergenceStatusInfo) string {
 		convergenceGapText(item),
 		convergenceEvidenceText(item),
 		convergenceViolationText(item),
+		convergenceDecisionCauseText(item),
+		convergenceRetryText(item),
 		convergenceHeartbeatText(item),
 	})
 	return strings.Join(parts, " | ")
@@ -683,6 +685,37 @@ func convergenceViolationText(item *backend.ConvergenceStatusInfo) string {
 		item.LatestContractViolationRule,
 		item.LatestRecovery,
 	}), " "))
+}
+
+func convergenceDecisionCauseText(item *backend.ConvergenceStatusInfo) string {
+	if item == nil || strings.TrimSpace(item.DecisionCause) == "" {
+		return ""
+	}
+	return "decision " + strings.TrimSpace(item.DecisionCause)
+}
+
+func convergenceRetryText(item *backend.ConvergenceStatusInfo) string {
+	if item == nil {
+		return ""
+	}
+	parts := make([]string, 0, 4)
+	if item.RetryAttempt > 0 {
+		if item.RetryMaxAttempts > 0 {
+			parts = append(parts, fmt.Sprintf("retry %d/%d", item.RetryAttempt, item.RetryMaxAttempts))
+		} else {
+			parts = append(parts, fmt.Sprintf("retry %d", item.RetryAttempt))
+		}
+	}
+	if item.NarrowedRetryAttempted {
+		parts = append(parts, "narrowed")
+	}
+	if item.ManagedValidationAvailable {
+		parts = append(parts, "managedValidation")
+	}
+	if strings.TrimSpace(item.LatestRejectedDiagnosticRef) != "" {
+		parts = append(parts, "rejected "+strings.TrimSpace(item.LatestRejectedDiagnosticRef))
+	}
+	return strings.Join(parts, " ")
 }
 
 func convergenceHeartbeatText(item *backend.ConvergenceStatusInfo) string {

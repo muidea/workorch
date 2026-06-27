@@ -160,6 +160,55 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 	}
 }
 
+func TestResolveDecisionViewRejectsNonSemanticMissingInfoPayload(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload map[string]any
+	}{
+		{name: "empty explicit answer", payload: map[string]any{"answer": ""}},
+		{name: "whitespace explicit answer", payload: map[string]any{"answer": "   "}},
+		{name: "slash only", payload: map[string]any{"answer": "/"}},
+		{name: "decision command prefix only", payload: map[string]any{"answer": "/decision answer"}},
+		{name: "run command prefix only", payload: map[string]any{"answer": "/run resume"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			hub := events.NewMemoryHub()
+			workspaceID := common.WorkspaceID("ws-governance-invalid-missing-info")
+			hub.Subscribe(decisionevents.TopicDecisionCommandGetTicket, func(_ context.Context, envelope events.Envelope) error {
+				return events.Response(events.Envelope{
+					Topic: envelope.Topic + "/response",
+					Payload: map[string]any{
+						events.PayloadKeyTicket: &decisionmodel.Ticket{
+							ID:          "ticket-invalid-missing-info",
+							WorkspaceID: workspaceID,
+							RunID:       "run-invalid-missing-info",
+							State:       common.DecisionTicketStateOpen,
+						},
+					},
+				})
+			})
+			resolved := false
+			hub.Subscribe(decisionevents.TopicDecisionCommandEnsureResolved, func(_ context.Context, envelope events.Envelope) error {
+				resolved = true
+				return events.Response(events.Envelope{Topic: envelope.Topic + "/response"})
+			})
+
+			_, err := ResolveDecisionView(ctx, hub, nil, "ticket-invalid-missing-info", appmodelcore.ResolveDecisionCommand{
+				ResolutionType:    "provide_missing_info",
+				ResolutionPayload: tc.payload,
+			}, workspaceID)
+			if !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("ResolveDecisionView err = %v, want invalid argument", err)
+			}
+			if resolved {
+				t.Fatal("invalid missing-info payload resolved the ticket")
+			}
+		})
+	}
+}
+
 func TestDecisionViewReadsTicketWithExplicitScope(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()

@@ -161,6 +161,9 @@ func shellBaseOutput(input map[string]any, command string, args []string, workin
 	if evidence := mapFromShellInput(input, "validationEvidence"); len(evidence) > 0 {
 		output["validationEvidence"] = evidence
 	}
+	if managed := mapFromShellInput(input, "managedValidation"); len(managed) > 0 {
+		output["managedValidation"] = managed
+	}
 	if refs := shellStringSliceFromValue(input["targetRefs"]); len(refs) > 0 {
 		output["targetRefs"] = refs
 	}

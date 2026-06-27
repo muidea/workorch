@@ -25,6 +25,7 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	if err := validateIncrementalArtifactOutputContract(run, step, output); err != nil {
 		return err
 	}
+	normalizeManagedValidationOutput(step, output)
 	if err := validateLLMExecutionGraphOutputContract(step, output); err != nil {
 		return err
 	}
@@ -243,6 +244,7 @@ func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, outpu
 	if outputModeIsIncrementalArtifact(step.Input) && artifactOutputPhaseFromInput(step.Input) == artifactOutputPhaseContext {
 		return nil
 	}
+	normalizeManagedValidationOutput(step, output)
 	normalizeConcreteValidationScratchSetupOutput(step, output)
 	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
 		if !graphIsConcreteValidationEvidenceGraph(graph) {

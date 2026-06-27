@@ -105,6 +105,14 @@ type ConvergenceStatusInfo struct {
 	LatestEffectiveProgressAt   string
 	LatestContractViolationRule string
 	LatestRecovery              string
+	LatestRejectedDiagnosticRef string
+	DecisionCause               string
+	RetryAttempt                int
+	RetryMaxAttempts            int
+	RetrySignatureRepeatCount   int
+	RetryBudgetScope            map[string]any
+	NarrowedRetryAttempted      bool
+	ManagedValidationAvailable  bool
 	Stalled                     bool
 	IneffectiveRetry            bool
 }

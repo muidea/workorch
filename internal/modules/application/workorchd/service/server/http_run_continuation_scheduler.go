@@ -398,7 +398,7 @@ func (s *runContinuationScheduler) recordContinuation(input schedulerDiagnosticI
 	s.state.schedulerDiagnostics.recordContinuation(input)
 }
 
-func (s *runContinuationScheduler) recordContinuationFailed(workspaceID, runID, kind, reason string, err error) {
+func (s *runContinuationScheduler) recordContinuationFailed(workspaceID, runID, kind, reason string, err error, readback ...*appservice.ContinuationReadbackDiagnostic) {
 	detail := ""
 	if err != nil {
 		detail = err.Error()
@@ -410,11 +410,12 @@ func (s *runContinuationScheduler) recordContinuationFailed(workspaceID, runID, 
 		State:       schedulerDiagnosticStateFailed,
 		Reason:      reason,
 		Detail:      detail,
+		Readback:    firstContinuationReadback(readback),
 		DedupeKey:   schedulerDedupeKey(workspaceID, runID, kind, reason),
 	})
 }
 
-func (s *runContinuationScheduler) recordContinuationNoAction(workspaceID, runID, kind, reason string, detail string) {
+func (s *runContinuationScheduler) recordContinuationNoAction(workspaceID, runID, kind, reason string, detail string, readback ...*appservice.ContinuationReadbackDiagnostic) {
 	s.recordContinuation(schedulerDiagnosticInput{
 		WorkspaceID:    workspaceID,
 		RunID:          runID,
@@ -422,20 +423,31 @@ func (s *runContinuationScheduler) recordContinuationNoAction(workspaceID, runID
 		State:          schedulerDiagnosticStateNoActionNeeded,
 		Reason:         reason,
 		Detail:         detail,
+		Readback:       firstContinuationReadback(readback),
 		Recoverability: schedulerRecoverabilityNoAction,
 		DedupeKey:      schedulerDedupeKey(workspaceID, runID, kind, reason),
 	})
 }
 
-func (s *runContinuationScheduler) recordContinuationCompleted(workspaceID, runID, kind string) {
+func (s *runContinuationScheduler) recordContinuationCompleted(workspaceID, runID, kind string, readback ...*appservice.ContinuationReadbackDiagnostic) {
 	s.recordContinuation(schedulerDiagnosticInput{
 		WorkspaceID:    workspaceID,
 		RunID:          runID,
 		Kind:           kind,
 		State:          schedulerDiagnosticStateCompleted,
+		Readback:       firstContinuationReadback(readback),
 		Recoverability: schedulerRecoverabilityNoAction,
 		DedupeKey:      schedulerDedupeKey(workspaceID, runID, kind, schedulerDiagnosticStateCompleted),
 	})
+}
+
+func firstContinuationReadback(items []*appservice.ContinuationReadbackDiagnostic) *appservice.ContinuationReadbackDiagnostic {
+	for _, item := range items {
+		if item != nil {
+			return item
+		}
+	}
+	return nil
 }
 
 func (s *runContinuationScheduler) recordSchedulerEnqueueFailure(workspaceID, runID, kind, detail string) {
@@ -600,7 +612,19 @@ func (s *runContinuationScheduler) drainGovernanceResumeQueue(priority int) bool
 			}
 			completePending = true
 			state.metrics.observeRunOutcome(item)
-			s.recordContinuationCompleted(resumeRef.WorkspaceID, item.ID, schedulerKindGovernanceContinuation)
+			ok, detail, readback := s.runContinuationConfirmedAdvanced(ctx, runContinuationRequest{
+				WorkspaceID: resumeRef.WorkspaceID,
+				RunID:       resumeRef.RunID,
+				Action:      "resume",
+				Priority:    priority,
+			}, item)
+			if !ok {
+				completePending = false
+				s.recordContinuationFailed(resumeRef.WorkspaceID, resumeRef.RunID, schedulerKindGovernanceContinuation, schedulerReasonOwnerReadbackNotAdvanced, fmt.Errorf("%s", detail), readback)
+				slog.Warn("workorch governance resume owner readback did not advance", "workspaceID", resumeRef.WorkspaceID, "runID", resumeRef.RunID, "detail", detail)
+				return
+			}
+			s.recordContinuationCompleted(resumeRef.WorkspaceID, item.ID, schedulerKindGovernanceContinuation, readback)
 			if item.State == string(common.RunStateSuperseded) {
 				s.scheduleReplanContinuationIfNeeded(ctx, item.WorkspaceID, item.ID, priority)
 			}
@@ -718,7 +742,15 @@ func (s *runContinuationScheduler) scheduleReplanContinuationIfNeeded(ctx contex
 			return
 		}
 		state.metrics.observeRunOutcome(activation.Run)
-		s.recordContinuationCompleted(workspaceID, activation.Run.ID, schedulerKindReplanContinuation)
+		ok, detail, readback := s.replanContinuationConfirmedAdvanced(runCtx, workspaceID, runID, activation.Run)
+		if !ok {
+			s.clearReplanContinuationStarted(key)
+			s.recordContinuationFailed(workspaceID, runID, schedulerKindReplanContinuation, schedulerReasonOwnerReadbackNotAdvanced, fmt.Errorf("%s", detail), readback)
+			slog.Warn("workorch replan continuation owner readback did not advance", "workspaceID", workspaceID, "runID", runID, "detail", detail)
+			state.notifyRunStatusChanged()
+			return
+		}
+		s.recordContinuationCompleted(workspaceID, activation.Run.ID, schedulerKindReplanContinuation, readback)
 		state.notifyRunStatusChangedForRun(activation.Run)
 	}) {
 		s.clearReplanContinuationStarted(key)
@@ -776,6 +808,48 @@ func (s *runContinuationScheduler) workspaceHasReplanSuccessor(ctx context.Conte
 		}
 	}
 	return false
+}
+
+func (s *runContinuationScheduler) replanContinuationConfirmedAdvanced(ctx context.Context, workspaceID string, runID string, item appservice.Run) (bool, string, *appservice.ContinuationReadbackDiagnostic) {
+	readbackDiagnostic := s.newContinuationReadbackDiagnostic(workspaceID, runID, "replan", item)
+	if s == nil || s.state == nil {
+		readbackDiagnostic.Advanced = true
+		return true, "", readbackDiagnostic
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	runID = strings.TrimSpace(runID)
+	if workspaceID == "" || runID == "" {
+		readbackDiagnostic.Reason = "missing_scope"
+		return false, "replan continuation readback missing workspace or run scope", readbackDiagnostic
+	}
+	if strings.TrimSpace(item.ID) != "" && strings.TrimSpace(item.ID) != runID {
+		readbackDiagnostic.Advanced = true
+		readbackDiagnostic.SuccessorRunID = strings.TrimSpace(item.ID)
+		readbackDiagnostic.Reason = "successor_returned"
+		return true, "", readbackDiagnostic
+	}
+	if s.workspaceHasReplanSuccessor(ctx, workspaceID, runID) {
+		readbackDiagnostic.Advanced = true
+		readbackDiagnostic.Reason = schedulerReasonReplanSuccessorExists
+		return true, "", readbackDiagnostic
+	}
+	readback, found, err := s.readRunForContinuation(ctx, workspaceID, runID)
+	if err != nil {
+		readbackDiagnostic.Reason = "read_failed"
+		return false, fmt.Sprintf("replan continuation readback failed: %v", err), readbackDiagnostic
+	}
+	applyContinuationReadbackRun(readbackDiagnostic, readback, found)
+	if !found {
+		readbackDiagnostic.Reason = "target_run_not_found"
+		return false, "replan continuation readback did not find target run or successor", readbackDiagnostic
+	}
+	if continuationReadbackTerminalState(readback.State) && common.RunState(readback.State) != common.RunStateSuperseded {
+		readbackDiagnostic.Advanced = true
+		readbackDiagnostic.Reason = "target_terminal"
+		return true, "", readbackDiagnostic
+	}
+	readbackDiagnostic.Reason = "successor_not_found"
+	return false, "replan continuation completed without a successor run or terminal target state", readbackDiagnostic
 }
 
 func (s *runContinuationScheduler) scheduleWorkspaceRestart(req workspaceRestartRequest) bool {
@@ -1027,9 +1101,16 @@ func (s *runContinuationScheduler) drainRunContinuationQueue() bool {
 				}
 				return
 			}
+			ok, detail, readback := s.runContinuationConfirmedAdvanced(runCtx, req, item)
+			if !ok {
+				state.notifyRunStatusChangedForRun(item)
+				s.recordContinuationFailed(req.WorkspaceID, req.RunID, schedulerKindRunContinuation, schedulerReasonOwnerReadbackNotAdvanced, fmt.Errorf("%s", detail), readback)
+				slog.Warn("workorch run continuation owner readback did not advance", "workspaceID", req.WorkspaceID, "runID", req.RunID, "action", req.Action, "detail", detail)
+				return
+			}
 			s.clearRunContinuationPending(key)
 			state.metrics.observeRunOutcome(item)
-			s.recordContinuationCompleted(req.WorkspaceID, item.ID, schedulerKindRunContinuation)
+			s.recordContinuationCompleted(req.WorkspaceID, item.ID, schedulerKindRunContinuation, readback)
 			if item.State == string(common.RunStateSuperseded) {
 				s.scheduleReplanContinuationIfNeeded(runCtx, item.WorkspaceID, item.ID, req.Priority)
 			}
@@ -1041,6 +1122,148 @@ func (s *runContinuationScheduler) drainRunContinuationQueue() bool {
 			return false
 		}
 	}
+}
+
+func (s *runContinuationScheduler) runContinuationConfirmedAdvanced(ctx context.Context, req runContinuationRequest, item appservice.Run) (bool, string, *appservice.ContinuationReadbackDiagnostic) {
+	if s == nil || s.state == nil {
+		return true, "", nil
+	}
+	workspaceID := strings.TrimSpace(req.WorkspaceID)
+	runID := strings.TrimSpace(req.RunID)
+	action := strings.TrimSpace(req.Action)
+	readbackDiagnostic := s.newContinuationReadbackDiagnostic(workspaceID, runID, action, item)
+	if workspaceID == "" || runID == "" || action == "" {
+		readbackDiagnostic.Reason = "missing_scope"
+		return false, "run continuation readback missing workspace, run, or action scope", readbackDiagnostic
+	}
+	readback, found, err := s.readRunForContinuation(ctx, workspaceID, runID)
+	if err != nil {
+		readbackDiagnostic.Reason = "read_failed"
+		return false, fmt.Sprintf("run continuation readback failed: %v", err), readbackDiagnostic
+	}
+	applyContinuationReadbackRun(readbackDiagnostic, readback, found)
+	if !found {
+		switch common.RunState(item.State) {
+		case common.RunStateSuperseded, common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled:
+			readbackDiagnostic.Advanced = true
+			readbackDiagnostic.Terminal = continuationReadbackTerminalState(item.State)
+			return true, "", readbackDiagnostic
+		default:
+			readbackDiagnostic.Reason = "target_run_not_found"
+			return false, "run continuation readback did not find target run", readbackDiagnostic
+		}
+	}
+	switch action {
+	case "start":
+		if common.RunState(readback.State) != common.RunStateCreated {
+			readbackDiagnostic.Advanced = true
+			readbackDiagnostic.Reason = "run_state_advanced"
+			return true, "", readbackDiagnostic
+		}
+		readbackDiagnostic.Reason = "run_remains_created"
+		return false, "start command accepted but run remains created", readbackDiagnostic
+	case "resume":
+		switch common.RunState(readback.State) {
+		case common.RunStateBlockedOnDecision:
+			if strings.TrimSpace(readback.BlockingTicketID) == "" {
+				readbackDiagnostic.Reason = "blocked_decision_without_ticket"
+				return false, "resume command accepted but run remains blocked on decision without ticket", readbackDiagnostic
+			}
+			if s.runHasResolvedDecision(ctx, workspaceID, runID, readback.BlockingTicketID) {
+				readbackDiagnostic.Reason = "blocked_on_resolved_decision"
+				return false, "resume command accepted but run remains blocked on resolved decision", readbackDiagnostic
+			}
+			readbackDiagnostic.Advanced = true
+			readbackDiagnostic.GovernedWait = true
+			readbackDiagnostic.Reason = "governed_wait_decision"
+			return true, "", readbackDiagnostic
+		case common.RunStateBlockedOnApproval:
+			if strings.TrimSpace(readback.BlockingApprovalID) == "" {
+				readbackDiagnostic.Reason = "blocked_approval_without_approval"
+				return false, "resume command accepted but run remains blocked on approval without approval id", readbackDiagnostic
+			}
+			if s.runHasResolvedApproval(ctx, workspaceID, runID, readback.BlockingApprovalID) {
+				readbackDiagnostic.Reason = "blocked_on_resolved_approval"
+				return false, "resume command accepted but run remains blocked on resolved approval", readbackDiagnostic
+			}
+			readbackDiagnostic.Advanced = true
+			readbackDiagnostic.GovernedWait = true
+			readbackDiagnostic.Reason = "governed_wait_approval"
+			return true, "", readbackDiagnostic
+		default:
+			readbackDiagnostic.Advanced = true
+			readbackDiagnostic.Terminal = continuationReadbackTerminalState(readback.State)
+			readbackDiagnostic.Reason = "run_state_advanced"
+			return true, "", readbackDiagnostic
+		}
+	default:
+		readbackDiagnostic.Reason = "unsupported_action"
+		return false, "unsupported run continuation action", readbackDiagnostic
+	}
+}
+
+func (s *runContinuationScheduler) newContinuationReadbackDiagnostic(workspaceID, runID, action string, item appservice.Run) *appservice.ContinuationReadbackDiagnostic {
+	ret := &appservice.ContinuationReadbackDiagnostic{
+		WorkspaceID:           strings.TrimSpace(workspaceID),
+		RunID:                 strings.TrimSpace(runID),
+		Action:                strings.TrimSpace(action),
+		OldRunState:           strings.TrimSpace(item.State),
+		OldBlockingTicketID:   strings.TrimSpace(item.BlockingTicketID),
+		OldBlockingApprovalID: strings.TrimSpace(item.BlockingApprovalID),
+	}
+	if ret.WorkspaceID == "" {
+		ret.WorkspaceID = strings.TrimSpace(item.WorkspaceID)
+	}
+	if ret.RunID == "" {
+		ret.RunID = strings.TrimSpace(item.ID)
+	}
+	if s != nil && s.state != nil {
+		status := s.state.workspaceProjectionStatus()
+		ret.ProjectionRevision = status.GlobalRevision
+		ret.SourceEventRevision = status.SourceEventRevision
+		ret.ProjectedSourceRevision = status.ProjectedSourceRevision
+	}
+	return ret
+}
+
+func applyContinuationReadbackRun(ret *appservice.ContinuationReadbackDiagnostic, run appservice.Run, found bool) {
+	if ret == nil {
+		return
+	}
+	ret.Found = found
+	if !found {
+		return
+	}
+	ret.NewRunState = strings.TrimSpace(run.State)
+	ret.NewBlockingTicketID = strings.TrimSpace(run.BlockingTicketID)
+	ret.NewBlockingApprovalID = strings.TrimSpace(run.BlockingApprovalID)
+	ret.Terminal = continuationReadbackTerminalState(run.State)
+	ret.GovernedWait = common.RunState(run.State) == common.RunStateBlockedOnDecision || common.RunState(run.State) == common.RunStateBlockedOnApproval
+}
+
+func continuationReadbackTerminalState(state string) bool {
+	switch common.RunState(strings.TrimSpace(state)) {
+	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *runContinuationScheduler) readRunForContinuation(ctx context.Context, workspaceID string, runID string) (appservice.Run, bool, error) {
+	if s == nil || s.state == nil || s.state.listRuns == nil {
+		return appservice.Run{}, false, nil
+	}
+	runs, err := s.state.listRuns(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID)), s.state.config.Backend, s.state.config.DataRoot, workspaceID)
+	if err != nil {
+		return appservice.Run{}, false, err
+	}
+	for _, run := range runs {
+		if run.WorkspaceID == workspaceID && run.ID == runID {
+			return run, true, nil
+		}
+	}
+	return appservice.Run{}, false, nil
 }
 
 func (s *runContinuationScheduler) nextPendingRunContinuation() (string, runContinuationRequest, bool) {

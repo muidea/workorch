@@ -751,6 +751,22 @@ func previousExecutionStepID(step *runModel.Step) common.StepID {
 
 type dispatchGraphStepBatchWithWorkspaceFunc func(context.Context, *runModel.Run, []stepDispatchSpec, *workspaceModel.Workspace) error
 
+func (o *RuntimeOrchestrator) dispatchPreparedStepSpecsWithWorkspace(
+	ctx context.Context,
+	run *runModel.Run,
+	specs []stepDispatchSpec,
+	workspace *workspaceModel.Workspace,
+) error {
+	if o == nil {
+		return common.ErrInvalidArgument
+	}
+	prepared, err := o.prepareGapBaselineDispatchSpecs(ctx, run, specs)
+	if err != nil {
+		return err
+	}
+	return dispatchStepSpecsWithWorkspace(ctx, o.dispatchStepWithWorkspace, o.dispatchGraphStepBatchWithWorkspace, run, prepared, workspace)
+}
+
 func dispatchStepSpecsWithWorkspace(
 	ctx context.Context,
 	dispatchStep dispatchStepWithWorkspaceFunc,

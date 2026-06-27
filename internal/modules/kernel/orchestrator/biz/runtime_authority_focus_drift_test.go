@@ -68,6 +68,75 @@ func TestRebuildDispatchInputAlignsStaleFocusFieldsToAuthority(t *testing.T) {
 	}
 }
 
+func TestDispatchNextStepPreparesInputFromCurrentAuthority(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-dispatch-next-authority")
+	workspaceID := common.WorkspaceID("ws-dispatch-next-authority")
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	run := runWithAuthorityFocusForTest("validate")
+	run.ID = runID
+	run.WorkspaceID = workspaceID
+	run.InitialStepKind = llmWorkspaceExecutionStepKind
+	updateAuthorityScopeForTest(run, workspaceID, runID)
+	run.ExecutionContext["stateChangingOutputRequired"] = true
+	run.ExecutionContext["repairObjective"] = repairObjectiveStateChangingOutput
+	run.ExecutionContext["repairActionPackage"] = map[string]any{
+		"requiredOutput": map[string]any{
+			"mustIncludeStateChangingNode": true,
+			"coverageFocusId":              "focus-cwi-stale",
+			"coverageWorkItemIds":          []string{"cwi-stale"},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	var captured map[string]any
+	runtime := &stubRuntimeAdapter{
+		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			captured = cloneStepPayload(request.Input)
+			return map[string]any{"completionState": "continue"}, nil
+		},
+	}
+	orch := NewRuntimeOrchestrator(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+
+	if err := orch.DispatchNextStep(ctx, runID); err != nil {
+		t.Fatalf("DispatchNextStep: %v", err)
+	}
+	if len(captured) == 0 {
+		t.Fatal("runtime input was not captured")
+	}
+	if boolValue(captured["stateChangingOutputRequired"]) {
+		t.Fatalf("runtime input retained stale stateChangingOutputRequired: %+v", captured)
+	}
+	contract := mapFromValue(captured["convergenceContract"])
+	if got := stringFromMap(contract, "state"); got != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want need_validation", contract)
+	}
+	assertFocusIDForTest(t, mapFromValue(captured[coverageFocusKey]), "focus-cwi-current")
+	packet := mapFromValue(captured[stepInputKeyStagePacket])
+	assertFocusIDForTest(t, mapFromValue(packet["activeFocus"]), "cwi-current")
+	required := mapFromValue(mapFromValue(captured["repairActionPackage"])["requiredOutput"])
+	if boolValue(required["mustIncludeStateChangingNode"]) {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want validation contract without stale state-changing marker", required)
+	}
+	if got := stringFromMap(required, "coverageFocusId"); got != "focus-cwi-current" {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want current focus", required)
+	}
+}
+
 func TestRebuildDispatchInputDropsStaleRequiredOutputForAssessmentAuthority(t *testing.T) {
 	run := runWithAuthorityFocusForTest("assessment")
 	input := map[string]any{

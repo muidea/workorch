@@ -36,6 +36,37 @@ func TestSchedulerDiagnosticsStatusShowsWatchdogTimerRegistration(t *testing.T) 
 	}
 }
 
+func TestSchedulerDiagnosticsStatusShowsReadback(t *testing.T) {
+	text := schedulerDiagnosticsStatusText(&backend.SchedulerDiagnosticsInfo{
+		LatestContinuation: &backend.ContinuationDiagnosticInfo{
+			Kind:   "run_continuation",
+			State:  "failed",
+			Reason: "owner_readback_not_advanced",
+			Readback: &backend.ContinuationReadbackDiagnosticInfo{
+				Action:              "resume",
+				Advanced:            false,
+				Reason:              "blocked_on_resolved_decision",
+				OldRunState:         "blocked_on_decision",
+				NewRunState:         "blocked_on_decision",
+				NewBlockingTicketID: "ticket-readback",
+				ProjectionRevision:  9,
+			},
+		},
+	})
+	for _, want := range []string{
+		"scheduler readback",
+		"resume",
+		"advanced=false",
+		"blocked_on_resolved_decision",
+		"ticket=ticket-readback",
+		"projection=9",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("status text = %q, want %q", text, want)
+		}
+	}
+}
+
 func TestLatestLLMContextBudgetPrefersProjectedBudgetTrace(t *testing.T) {
 	got := latestLLMContextBudget([]backend.LLMContextBudgetTraceInfo{
 		{
@@ -2953,6 +2984,12 @@ func TestModelInspectStatusIncludesRunHeartbeat(t *testing.T) {
 		RejectedEvidenceCount:       1,
 		LatestContractViolationRule: "coverage_assessment_incomplete",
 		LatestRecovery:              "recompute_authority",
+		LatestRejectedDiagnosticRef: "run-a/step-a/rejected-output",
+		DecisionCause:               "retry_exhaustion",
+		RetryAttempt:                2,
+		RetryMaxAttempts:            2,
+		NarrowedRetryAttempted:      true,
+		ManagedValidationAvailable:  true,
 	}
 
 	got := m.renderInspectStatus()
@@ -2962,7 +2999,7 @@ func TestModelInspectStatusIncludesRunHeartbeat(t *testing.T) {
 		"latest progress: 2026-06-10T00:00:00Z",
 		"runtime execution: runtime pending | gap worker_lost | step step-a llm/workspace_execution running",
 		"runtime progress: worker heartbeat lost",
-		"convergence: focus focus-a | next validate | gap missing accepted evidence | evidence missing validation accepted 2 rejected 1 | violation coverage_assessment_incomplete recompute_authority",
+		"convergence: focus focus-a | next validate | gap missing accepted evidence | evidence missing validation accepted 2 rejected 1 | violation coverage_assessment_incomplete recompute_authority | decision retry_exhaustion | retry 2/2 narrowed managedValidation rejected run-a/step-a/rejected-output",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status = %q, missing %q", got, want)

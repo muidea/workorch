@@ -190,6 +190,42 @@ func TestRuntimeAdapter_ExecuteRuntimeStepAddsValidationFailureDiagnostic(t *tes
 	}
 }
 
+func TestRuntimeAdapter_ExecuteRuntimeStepCarriesManagedValidationMetadata(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command": "sh",
+			"args":    []any{"-c", "printf managed-ok"},
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+			},
+			"managedValidation": map[string]any{
+				"runtimeManaged": true,
+				"autoCleanup":    true,
+				"cleanupPolicy":  "process_group_on_timeout_or_completion",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v", err)
+	}
+	managed, _ := result.Output["managedValidation"].(map[string]any)
+	if managed["runtimeManaged"] != true ||
+		managed["autoCleanup"] != true ||
+		managed["cleanupPolicy"] != "process_group_on_timeout_or_completion" {
+		t.Fatalf("managedValidation = %+v, want carried runtime-managed metadata", managed)
+	}
+	evidence, _ := result.Output["validationEvidence"].(map[string]any)
+	if evidence["mode"] != "runtime_behavior" || evidence["observationType"] != "runtime_observation" {
+		t.Fatalf("validationEvidence = %+v, want carried validation evidence", evidence)
+	}
+}
+
 func TestRuntimeAdapter_ExecuteRuntimeStepClassifiesUnavailableCommand(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()

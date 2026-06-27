@@ -2,6 +2,8 @@ package governanceports
 
 import (
 	"context"
+	"strings"
+	"unicode"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
@@ -25,6 +27,9 @@ func ResolveDecisionView(ctx context.Context, hub events.Hub, traces governancec
 	if err != nil {
 		return readmodelcore.Decision{}, err
 	}
+	if decisionResolutionMissingRequiredInfo(semantic, cmd.ResolutionPayload) {
+		return readmodelcore.Decision{}, common.ErrInvalidArgument
+	}
 	item, resolution, err := resolveDecisionTicket(ctx, hub, ticket, resolutionType, payload, scope)
 	if err != nil {
 		return readmodelcore.Decision{}, err
@@ -34,6 +39,84 @@ func ResolveDecisionView(ctx context.Context, hub events.Hub, traces governancec
 		return readmodelcore.Decision{}, err
 	}
 	return readmodelprojection.MapDecision(item, resolution, autoGovernance), nil
+}
+
+func decisionResolutionMissingRequiredInfo(semantic governancecommon.DecisionSemanticNormalization, payload map[string]any) bool {
+	if strings.TrimSpace(semantic.ResolutionType) != decisioncommon.ResolutionTypeProvideMissingInfo {
+		return false
+	}
+	switch strings.TrimSpace(semantic.Intent) {
+	case governancecommon.GovernanceIntentRequestReplan,
+		governancecommon.GovernanceIntentRequestTerminate,
+		governancecommon.GovernanceIntentRejectExecution:
+		return false
+	}
+	rawInput := strings.TrimSpace(semantic.RawInput)
+	if rawInput == "" && !decisionResolutionPayloadHasExplicitRawInput(payload) {
+		return false
+	}
+	if decisionResolutionSlashCommandOnly(rawInput) {
+		return true
+	}
+	for _, r := range rawInput {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func decisionResolutionSlashCommandOnly(rawInput string) bool {
+	fields := strings.Fields(strings.TrimSpace(rawInput))
+	if len(fields) == 0 {
+		return false
+	}
+	first := strings.ToLower(fields[0])
+	if !strings.HasPrefix(first, "/") {
+		return false
+	}
+	command := strings.TrimPrefix(first, "/")
+	if len(fields) == 1 {
+		switch command {
+		case "", "decision", "approval", "run", "goal", "dod", "status", "coverage", "timeline", "memory", "config", "help", "exit":
+			return true
+		default:
+			return false
+		}
+	}
+	if len(fields) != 2 {
+		return false
+	}
+	subcommand := strings.ToLower(fields[1])
+	switch command {
+	case "decision":
+		switch subcommand {
+		case "answer", "resolve", "replan", "terminate", "reject", "show", "list":
+			return true
+		}
+	case "approval":
+		switch subcommand {
+		case "approve", "reject", "show", "list":
+			return true
+		}
+	case "run":
+		switch subcommand {
+		case "resume", "restart":
+			return true
+		}
+	case "goal", "dod", "workspace":
+		return true
+	}
+	return false
+}
+
+func decisionResolutionPayloadHasExplicitRawInput(payload map[string]any) bool {
+	for _, key := range []string{"answer", "value", "input", "note", "text", "message"} {
+		if _, ok := payload[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func ReadDecisionTicketForResolution(ctx context.Context, hub events.Hub, ticketID common.TicketID, scope common.WorkspaceID) (*decisionmodel.Ticket, error) {

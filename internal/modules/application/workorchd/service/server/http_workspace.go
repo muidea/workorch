@@ -67,7 +67,32 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 		}
 		state.metrics.workspaceSnapshotRequests.Add(1)
 		projection := state.workspaceProjectionStatus()
-		item, err := state.readWorkspaceSnapshot(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
+		if workspaceSnapshotObservabilityRead(r) {
+			item, err := state.readWorkspaceSnapshotCached(r.Context(), workspaceID)
+			if err != nil {
+				writeJSON(w, projectionHTTPStatus(err), workspaceSnapshotResponse{
+					Service:    "workorch",
+					Backend:    state.config.Backend,
+					DataRoot:   state.config.DataRoot,
+					Projection: projection,
+					Error:      err.Error(),
+				})
+				return
+			}
+			if projected, projectedStatus, readErr := state.readProjectedWorkspaceSnapshot(workspaceID); readErr == nil {
+				item = mergeWorkspaceProjectionOverlay(item, projected)
+				projection = projectedStatus
+			}
+			writeJSON(w, http.StatusOK, workspaceSnapshotResponse{
+				Service:    "workorch",
+				Backend:    state.config.Backend,
+				DataRoot:   state.config.DataRoot,
+				Projection: projection,
+				Snapshot:   item,
+			})
+			return
+		}
+		item, projectedStatus, err := state.readProjectedWorkspaceSnapshot(workspaceID)
 		if err != nil {
 			writeJSON(w, projectionHTTPStatus(err), workspaceSnapshotResponse{
 				Service:    "workorch",
@@ -78,10 +103,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			})
 			return
 		}
-		if projected, projectedStatus, readErr := state.readProjectedWorkspaceSnapshot(workspaceID); readErr == nil {
-			item = mergeWorkspaceProjectionOverlay(item, projected)
-			projection = projectedStatus
-		}
+		projection = projectedStatus
 		writeJSON(w, http.StatusOK, workspaceSnapshotResponse{
 			Service:    "workorch",
 			Backend:    state.config.Backend,
@@ -220,6 +242,14 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			DoD:      item,
 		})
 	})
+}
+
+func workspaceSnapshotObservabilityRead(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	view := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("view")))
+	return view == "observability" || view == "debug"
 }
 
 func projectionHTTPStatus(err error) int {

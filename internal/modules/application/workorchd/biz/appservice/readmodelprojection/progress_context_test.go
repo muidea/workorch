@@ -98,6 +98,87 @@ func TestWorkspaceTaskProgressOnlyUsesActiveRunBlockers(t *testing.T) {
 	}
 }
 
+func TestWorkspaceGovernanceProjectionClearsResolvedDecisionBlocker(t *testing.T) {
+	t.Parallel()
+
+	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{
+			ID:               "ws-resolved-blocker",
+			State:            string(common.WorkspaceStateWaitingDecision),
+			ActiveRunID:      "run-current",
+			BlockingTicketID: "ticket-resolved",
+		},
+		Run: &readmodelcore.Run{
+			ID:               "run-current",
+			WorkspaceID:      "ws-resolved-blocker",
+			State:            string(common.RunStateBlockedOnDecision),
+			BlockingTicketID: "ticket-resolved",
+		},
+		TaskProgress: readmodelcore.TaskProgress{
+			WorkspaceID:      "ws-resolved-blocker",
+			RunID:            "run-current",
+			State:            string(common.RunStateBlockedOnDecision),
+			BlockingTicketID: "ticket-resolved",
+			Recovery: readmodelcore.RecoveryPlan{
+				Mode:             "wait_decision",
+				NextAction:       "resolve_decision_ticket",
+				BlockingTicketID: "ticket-resolved",
+			},
+		},
+		Decisions: []readmodelcore.Decision{{
+			ID:          "ticket-resolved",
+			WorkspaceID: "ws-resolved-blocker",
+			RunID:       "run-current",
+			State:       string(common.DecisionTicketStateResolved),
+		}},
+	})
+
+	if got.Workspace.State == string(common.WorkspaceStateWaitingDecision) ||
+		got.Workspace.BlockingTicketID != "" ||
+		got.TaskProgress.BlockingTicketID != "" ||
+		got.TaskProgress.Recovery.BlockingTicketID != "" ||
+		got.TaskProgress.Recovery.Mode == "wait_decision" {
+		t.Fatalf("snapshot = %+v progress = %+v, want resolved decision not projected as normal blocker", got.Workspace, got.TaskProgress)
+	}
+}
+
+func TestWorkspaceGovernanceProjectionKeepsOpenDecisionBlocker(t *testing.T) {
+	t.Parallel()
+
+	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{
+			ID:               "ws-open-blocker",
+			State:            string(common.WorkspaceStateWaitingDecision),
+			ActiveRunID:      "run-current",
+			BlockingTicketID: "ticket-open",
+		},
+		Run: &readmodelcore.Run{
+			ID:               "run-current",
+			WorkspaceID:      "ws-open-blocker",
+			State:            string(common.RunStateBlockedOnDecision),
+			BlockingTicketID: "ticket-open",
+		},
+		TaskProgress: readmodelcore.TaskProgress{
+			WorkspaceID: "ws-open-blocker",
+			RunID:       "run-current",
+			State:       string(common.RunStateBlockedOnDecision),
+		},
+		Decisions: []readmodelcore.Decision{{
+			ID:          "ticket-open",
+			WorkspaceID: "ws-open-blocker",
+			RunID:       "run-current",
+			State:       string(common.DecisionTicketStateOpen),
+		}},
+	})
+
+	if got.Workspace.State != string(common.WorkspaceStateWaitingDecision) ||
+		got.Workspace.BlockingTicketID != "ticket-open" ||
+		got.TaskProgress.BlockingTicketID != "ticket-open" ||
+		got.TaskProgress.Recovery.Mode != "wait_decision" {
+		t.Fatalf("snapshot = %+v progress = %+v, want open decision blocker retained", got.Workspace, got.TaskProgress)
+	}
+}
+
 func TestWorkspaceContextBundleFromSnapshotsPrefersRunSnapshot(t *testing.T) {
 	t.Parallel()
 

@@ -47,6 +47,7 @@ func (e *workspaceProjectionEntry) syncSnapshotWorkspace() {
 		return
 	}
 	e.Snapshot.Workspace = cloneWorkspace(e.Workspace)
+	e.Snapshot = readmodelprojection.NormalizeWorkspaceGovernanceProjection(e.Snapshot)
 }
 
 func NewStore() *Store {
@@ -580,11 +581,26 @@ func (s *Store) List() ([]appmodelcore.Workspace, Status, error) {
 	for _, id := range s.workspaceOrder {
 		if entry := s.workspaces[id]; entry != nil && entry.HasWorkspace {
 			item := cloneWorkspace(entry.Workspace)
-			item.ViewModel = appWorkspaceViewModelFromStatus(item, s.statusForWorkspaceLocked(id))
+			item = compactWorkspaceListOverview(item)
+			if entry.HasSnapshot {
+				snapshot := cloneWorkspaceSnapshot(entry.Snapshot)
+				item.State = snapshot.Workspace.State
+				item.BlockingTicketID = snapshot.Workspace.BlockingTicketID
+				item.BlockingApprovalID = snapshot.Workspace.BlockingApprovalID
+				item.ViewModel = appWorkspaceViewModelFromSnapshot(snapshot, s.statusForWorkspaceLocked(id))
+			} else {
+				item.ViewModel = appWorkspaceViewModelFromStatus(item, s.statusForWorkspaceLocked(id))
+			}
 			ret = append(ret, item)
 		}
 	}
 	return ret, status, nil
+}
+
+func compactWorkspaceListOverview(item appmodelcore.Workspace) appmodelcore.Workspace {
+	item.ContextHints = nil
+	item.EvidencePolicies = nil
+	return item
 }
 
 func (s *Store) GetSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot, Status, error) {
@@ -637,7 +653,7 @@ func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, stat
 	ret := readmodelcore.WorkspaceViewModel{
 		WorkspaceID:             snapshot.Workspace.ID,
 		State:                   status.State,
-		PromptMode:              workspacePromptMode(snapshot.Workspace),
+		PromptMode:              workspacePromptMode(snapshot),
 		Revision:                revision,
 		GlobalRevision:          status.GlobalRevision,
 		WorkspaceRevision:       status.WorkspaceRevision,
@@ -674,6 +690,15 @@ func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, stat
 
 func appWorkspaceViewModelFromStatus(workspace appmodelcore.Workspace, status Status) appmodelcore.WorkspaceViewModel {
 	source := workspaceViewModelFromStatus(readmodelcore.WorkspaceSnapshot{Workspace: workspace}, status)
+	return appWorkspaceViewModelFromReadModel(source)
+}
+
+func appWorkspaceViewModelFromSnapshot(snapshot readmodelcore.WorkspaceSnapshot, status Status) appmodelcore.WorkspaceViewModel {
+	source := workspaceViewModelFromStatus(snapshot, status)
+	return appWorkspaceViewModelFromReadModel(source)
+}
+
+func appWorkspaceViewModelFromReadModel(source readmodelcore.WorkspaceViewModel) appmodelcore.WorkspaceViewModel {
 	ret := appmodelcore.WorkspaceViewModel{
 		WorkspaceID:             source.WorkspaceID,
 		State:                   source.State,
@@ -705,14 +730,19 @@ func appWorkspaceViewModelFromStatus(workspace appmodelcore.Workspace, status St
 	return ret
 }
 
-func workspacePromptMode(workspace appmodelcore.Workspace) string {
+func workspacePromptMode(snapshot readmodelcore.WorkspaceSnapshot) string {
+	workspace := snapshot.Workspace
+	activeRunID := strings.TrimSpace(workspace.ActiveRunID)
+	if activeRunID == "" && snapshot.Run != nil {
+		activeRunID = strings.TrimSpace(snapshot.Run.ID)
+	}
 	switch common.WorkspaceState(workspace.State) {
 	case common.WorkspaceStateWaitingDecision:
-		if workspace.BlockingTicketID != "" {
+		if readmodelprojection.HasOpenDecisionBlocker(snapshot.Decisions, workspace.ID, activeRunID, workspace.BlockingTicketID) {
 			return "decision"
 		}
 	case common.WorkspaceStateBlocked:
-		if workspace.BlockingApprovalID != "" {
+		if readmodelprojection.HasOpenApprovalBlocker(snapshot.Approvals, workspace.ID, activeRunID, workspace.BlockingApprovalID) {
 			return "approval"
 		}
 	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
@@ -839,12 +869,25 @@ func (s *Store) hasStaleWorkspaceLocked() bool {
 }
 
 func (s *Store) refreshProjectedSourceRevisionLocked() {
-	var projected int64
+	var source, projected int64
+	if s.sourceRevision > source {
+		source = s.sourceRevision
+	}
 	for _, entry := range s.workspaces {
-		if entry != nil && entry.ProjectedSourceRevision > projected {
+		if entry == nil {
+			continue
+		}
+		if entry.SourceRevision > source {
+			source = entry.SourceRevision
+		}
+		if entry.ProjectedSourceRevision > projected {
 			projected = entry.ProjectedSourceRevision
 		}
 	}
+	if projected > source {
+		source = projected
+	}
+	s.sourceRevision = source
 	s.projectedSourceRevision = projected
 }
 

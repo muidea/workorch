@@ -67,7 +67,7 @@ func (o *RuntimeOrchestrator) dispatchAcceptedRun(ctx context.Context, r *runMod
 	if err != nil {
 		return errors.Join(o.failRunningResume(ctx, r.ID, err), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 	}
-	if err := dispatchStepSpecsWithWorkspace(ctx, o.dispatchStepWithWorkspace, o.dispatchGraphStepBatchWithWorkspace, r, specs, ws); err != nil {
+	if err := o.dispatchPreparedStepSpecsWithWorkspace(ctx, r, specs, ws); err != nil {
 		return errors.Join(o.failRunningResume(ctx, r.ID, err), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 	}
 	return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
@@ -89,7 +89,7 @@ func (o *RuntimeOrchestrator) DispatchNextStep(ctx context.Context, runID common
 	if err != nil {
 		return err
 	}
-	return dispatchStepSpecsWithWorkspace(ctx, o.dispatchStepWithWorkspace, o.dispatchGraphStepBatchWithWorkspace, r, specs, nil)
+	return o.dispatchPreparedStepSpecsWithWorkspace(ctx, r, specs, nil)
 }
 
 func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.RunID, ticketID common.TicketID) error {
@@ -369,10 +369,6 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 					return errors.Join(o.failRunningResume(ctx, r.ID, cause), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 				}
 			}
-			specs, specErr = o.prepareGapBaselineDispatchSpecs(ctx, r, specs)
-			if specErr != nil {
-				return errors.Join(o.failRunningResume(ctx, r.ID, specErr), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
-			}
 			r.State = common.RunStateRunning
 			r.FailureReason = ""
 			mergeRunExecutionContextPatch(r, executionContextPatch)
@@ -386,7 +382,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			if publishErr := o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID); publishErr != nil {
 				return publishErr
 			}
-			if dispatchErr := dispatchStepSpecsWithWorkspace(ctx, o.dispatchStepWithWorkspace, o.dispatchGraphStepBatchWithWorkspace, r, specs, workspace); dispatchErr != nil {
+			if dispatchErr := o.dispatchPreparedStepSpecsWithWorkspace(ctx, r, specs, workspace); dispatchErr != nil {
 				return errors.Join(o.failRunningResume(ctx, r.ID, dispatchErr), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 			}
 			return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
@@ -442,10 +438,6 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	resumeRun.BlockingTicketID = ""
 	resumeRun.BlockingApprovalID = ""
 	mergeResumeInput(specs, resumeInput)
-	specs, err = o.prepareGapBaselineDispatchSpecs(ctx, resumeRun, specs)
-	if err != nil {
-		return o.failResolvedDecisionResume(ctx, r, originalResumeState, executionContextPatch, err)
-	}
 	r.State = resumeRun.State
 	r.FailureReason = resumeRun.FailureReason
 	r.BlockingTicketID = resumeRun.BlockingTicketID
@@ -461,7 +453,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	if err := o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID); err != nil {
 		return err
 	}
-	if err := dispatchStepSpecsWithWorkspace(ctx, o.dispatchStepWithWorkspace, o.dispatchGraphStepBatchWithWorkspace, r, specs, workspace); err != nil {
+	if err := o.dispatchPreparedStepSpecsWithWorkspace(ctx, r, specs, workspace); err != nil {
 		return errors.Join(o.failRunningResume(ctx, r.ID, err), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 	}
 	return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)

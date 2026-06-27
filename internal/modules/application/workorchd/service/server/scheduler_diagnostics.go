@@ -37,6 +37,7 @@ const (
 	schedulerReasonServiceShuttingDown                     = "service_shutting_down"
 	schedulerReasonWorkspaceNotEligible                    = "workspace_not_eligible"
 	schedulerReasonRunNotEligible                          = "run_not_eligible"
+	schedulerReasonOwnerReadbackNotAdvanced                = "owner_readback_not_advanced"
 	schedulerReasonReplanSuccessorExists                   = "replan_successor_exists"
 	schedulerReasonServiceRestartedPendingWorkNotRecovered = "service_restarted_pending_scheduler_work_not_recovered"
 
@@ -52,6 +53,7 @@ type schedulerDiagnosticInput struct {
 	State              string
 	Reason             string
 	Detail             string
+	Readback           *appservice.ContinuationReadbackDiagnostic
 	Recoverability     string
 	RecommendedActions []string
 	DedupeKey          string
@@ -129,6 +131,7 @@ func (s *schedulerDiagnosticsStore) recordContinuation(input schedulerDiagnostic
 		State:              schedulerLabel(input.State, schedulerDiagnosticStateFailed),
 		Reason:             schedulerLabel(input.Reason, ""),
 		Detail:             truncateSchedulerDetail(input.Detail),
+		Readback:           cloneContinuationReadbackDiagnostic(input.Readback),
 		Recoverability:     strings.TrimSpace(input.Recoverability),
 		RecommendedActions: compactSchedulerActions(input.RecommendedActions),
 		DedupeKey:          strings.TrimSpace(input.DedupeKey),
@@ -340,7 +343,16 @@ func sortedLabelPairs(values map[labelPair]uint64) []labelPair {
 
 func cloneContinuationDiagnostic(item appservice.ContinuationDiagnostic) appservice.ContinuationDiagnostic {
 	item.RecommendedActions = append([]string(nil), item.RecommendedActions...)
+	item.Readback = cloneContinuationReadbackDiagnostic(item.Readback)
 	return item
+}
+
+func cloneContinuationReadbackDiagnostic(input *appservice.ContinuationReadbackDiagnostic) *appservice.ContinuationReadbackDiagnostic {
+	if input == nil {
+		return nil
+	}
+	ret := *input
+	return &ret
 }
 
 func compactSchedulerActions(input []string) []string {
@@ -389,7 +401,7 @@ func schedulerRecoverabilityFor(state, reason string) string {
 	switch reason {
 	case schedulerReasonWorkspaceNotEligible, schedulerReasonRunNotEligible, schedulerReasonReplanSuccessorExists:
 		return schedulerRecoverabilityNoAction
-	case schedulerReasonOwnerCommandFailed, schedulerReasonBackgroundFailed:
+	case schedulerReasonOwnerCommandFailed, schedulerReasonBackgroundFailed, schedulerReasonOwnerReadbackNotAdvanced:
 		return schedulerRecoverabilityInspect
 	default:
 		return schedulerRecoverabilityManualRetry

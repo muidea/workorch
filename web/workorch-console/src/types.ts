@@ -405,6 +405,14 @@ export type ConvergenceStatus = {
   latestEffectiveProgressAt?: string;
   latestContractViolationRule?: string;
   latestRecovery?: string;
+  latestRejectedDiagnosticRef?: string;
+  decisionCause?: string;
+  retryAttempt?: number;
+  retryMaxAttempts?: number;
+  retrySignatureRepeatCount?: number;
+  retryBudgetScope?: Record<string, unknown>;
+  narrowedRetryAttempted?: boolean;
+  managedValidationAvailable?: boolean;
   stalled?: boolean;
   ineffectiveRetry?: boolean;
 };

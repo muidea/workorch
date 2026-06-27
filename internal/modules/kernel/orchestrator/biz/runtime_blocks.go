@@ -247,7 +247,8 @@ func concreteValidationDecisionShouldRepair(step *runModel.Step, spec runtimeDec
 	}
 	required := mapFromValue(mapFromValue(step.Input["repairActionPackage"])["requiredOutput"])
 	return stringSliceContains(stringListFromValue(required["acceptedKinds"]), "shell/command") ||
-		stringSliceContains(stringListFromValue(required["acceptedKinds"]), "mcp/tool_call")
+		stringSliceContains(stringListFromValue(required["acceptedKinds"]), "mcp/tool_call") ||
+		stringSliceContains(stringListFromValue(required["acceptedKinds"]), managedValidationSessionNodeKind)
 }
 
 func concreteValidationEvidenceRequired(input map[string]any) bool {

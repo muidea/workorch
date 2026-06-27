@@ -3984,14 +3984,136 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 			t.Fatalf("run %s execution context = %+v, want compact run", item.ID, item.ExecutionContext)
 		}
 	}
-	if len(body.Snapshot.LLMUsageTraces) != 20 {
-		t.Fatalf("llm usage traces = %d, want latest 20 traces", len(body.Snapshot.LLMUsageTraces))
+	if len(body.Snapshot.LLMUsageTraces) >= 20 {
+		t.Fatalf("llm usage traces = %d, want bounded projection detail rather than full workspace usage", len(body.Snapshot.LLMUsageTraces))
 	}
-	if body.Snapshot.LLMUsageTraces[0].ID != "usage-04" {
-		t.Fatalf("first usage trace = %q, want latest traces retained", body.Snapshot.LLMUsageTraces[0].ID)
+	if body.Snapshot.LLMUsageSummary.EntryTotal >= 24 {
+		t.Fatalf("summary entry total = %d, want projected detail summary rather than full workspace usage", body.Snapshot.LLMUsageSummary.EntryTotal)
 	}
-	if body.Snapshot.LLMUsageSummary.EntryTotal != 24 {
-		t.Fatalf("summary entry total = %d, want full total", body.Snapshot.LLMUsageSummary.EntryTotal)
+
+	fullRec := httptest.NewRecorder()
+	fullReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+string(workspaceID)+"/snapshot?view=observability", nil)
+	handler.ServeHTTP(fullRec, fullReq)
+	if fullRec.Code != http.StatusOK {
+		t.Fatalf("observability workspace snapshot status = %d, want 200, body=%s", fullRec.Code, fullRec.Body.String())
+	}
+	var fullBody workspaceSnapshotResponse
+	if err := json.Unmarshal(fullRec.Body.Bytes(), &fullBody); err != nil {
+		t.Fatalf("unmarshal observability workspace snapshot: %v", err)
+	}
+	if len(fullBody.Snapshot.LLMUsageTraces) != 24 {
+		t.Fatalf("observability llm usage traces = %d, want full workspace usage", len(fullBody.Snapshot.LLMUsageTraces))
+	}
+	if fullBody.Snapshot.LLMUsageTraces[0].ID != "usage-00" {
+		t.Fatalf("observability first usage trace = %q, want full trace history retained", fullBody.Snapshot.LLMUsageTraces[0].ID)
+	}
+	if fullBody.Snapshot.LLMUsageSummary.EntryTotal != 24 {
+		t.Fatalf("observability summary entry total = %d, want full total", fullBody.Snapshot.LLMUsageSummary.EntryTotal)
+	}
+}
+
+func TestWorkspaceSnapshotEndpointDefaultUsesProjectedDetailOnly(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-projected-detail-only")
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	handler := newMuxWithState(state)
+	state.workspaceProjection.UpsertWorkspace(appservice.Workspace{
+		ID:          string(workspaceID),
+		State:       string(common.WorkspaceStateRunning),
+		ActiveRunID: "run-projected-detail-only",
+	})
+	state.workspaceProjection.UpsertSnapshot(appservice.WorkspaceSnapshot{
+		Workspace: appservice.Workspace{
+			ID:                   string(workspaceID),
+			State:                string(common.WorkspaceStateRunning),
+			ActiveRunID:          "run-projected-detail-only",
+			ContextHints:         map[string]any{"large": strings.Repeat("x", 128)},
+			EvidencePolicies:     []map[string]any{{"large": strings.Repeat("x", 128)}},
+			DeliverableDirectory: "workspaces/projected-detail-only",
+		},
+		Run: &appservice.Run{
+			ID:               "run-projected-detail-only",
+			WorkspaceID:      string(workspaceID),
+			State:            string(common.RunStateRunning),
+			ExecutionContext: map[string]any{"large": strings.Repeat("x", 128)},
+		},
+	})
+	var fullReads atomic.Int32
+	state.readWorkspaceSnapshot = func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error) {
+		fullReads.Add(1)
+		return appservice.WorkspaceSnapshot{}, errors.New("full snapshot read should not be used for default detail")
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+string(workspaceID)+"/snapshot", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("workspace snapshot status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if fullReads.Load() != 0 {
+		t.Fatalf("full snapshot reads = %d, want default projection-only detail", fullReads.Load())
+	}
+	var body workspaceSnapshotResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal workspace snapshot: %v", err)
+	}
+	if body.Snapshot.Workspace.ContextHints != nil || body.Snapshot.Workspace.EvidencePolicies != nil {
+		t.Fatalf("workspace heavy fields = %+v, want projected compact detail", body.Snapshot.Workspace)
+	}
+	if body.Snapshot.Run == nil || body.Snapshot.Run.ExecutionContext != nil {
+		t.Fatalf("run = %+v, want projected compact run", body.Snapshot.Run)
+	}
+}
+
+func TestWorkspaceSnapshotEndpointObservabilityUsesExplicitFullRead(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-observability-full-read")
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state.workspaceProjection.UpsertSnapshot(appservice.WorkspaceSnapshot{
+		Workspace: appservice.Workspace{
+			ID:          string(workspaceID),
+			State:       string(common.WorkspaceStateRunning),
+			ActiveRunID: "run-observability-full-read",
+		},
+	})
+	var fullReads atomic.Int32
+	state.readWorkspaceSnapshot = func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error) {
+		fullReads.Add(1)
+		return appservice.WorkspaceSnapshot{
+			Workspace: appservice.Workspace{
+				ID:                   string(workspaceID),
+				State:                string(common.WorkspaceStateRunning),
+				ActiveRunID:          "run-observability-full-read",
+				ContextHints:         map[string]any{"large": strings.Repeat("x", 128)},
+				EvidencePolicies:     []map[string]any{{"large": strings.Repeat("x", 128)}},
+				DeliverableDirectory: "workspaces/observability-full-read",
+			},
+			Run: &appservice.Run{
+				ID:               "run-observability-full-read",
+				WorkspaceID:      string(workspaceID),
+				State:            string(common.RunStateRunning),
+				ExecutionContext: map[string]any{"large": strings.Repeat("x", 128)},
+			},
+		}, nil
+	}
+	handler := newMuxWithState(state)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+string(workspaceID)+"/snapshot?view=observability", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("workspace snapshot status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if fullReads.Load() != 1 {
+		t.Fatalf("full snapshot reads = %d, want explicit observability read", fullReads.Load())
+	}
+	var body workspaceSnapshotResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal workspace snapshot: %v", err)
+	}
+	if body.Snapshot.Workspace.ContextHints == nil || body.Snapshot.Workspace.EvidencePolicies == nil {
+		t.Fatalf("workspace = %+v, want observability heavy fields retained", body.Snapshot.Workspace)
+	}
+	if body.Snapshot.Run == nil || body.Snapshot.Run.ExecutionContext == nil {
+		t.Fatalf("run = %+v, want observability full run retained", body.Snapshot.Run)
 	}
 }
 
@@ -4291,6 +4413,44 @@ func TestDecisionResolveEndpointResolvesTicketAndAllowsRunResume(t *testing.T) {
 	resumed := waitRunStateForHTTP(t, dataRoot, runID, string(common.RunStateFailed))
 	if resumed.BlockingTicketID != "" {
 		t.Fatalf("resumed run = %+v, want cleared decision blocker", resumed)
+	}
+}
+
+func TestDecisionResolveEndpointRejectsInvalidMissingInfoAndKeepsTicketOpen(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "empty explicit answer", body: `{"resolutionType":"provide_missing_info","resolutionPayload":{"answer":""}}`},
+		{name: "whitespace explicit answer", body: `{"resolutionType":"provide_missing_info","resolutionPayload":{"answer":"   "}}`},
+		{name: "slash only", body: `{"resolutionType":"provide_missing_info","resolutionPayload":{"answer":"/"}}`},
+		{name: "command prefix only", body: `{"resolutionType":"provide_missing_info","resolutionPayload":{"answer":"/decision answer"}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dataRoot := t.TempDir()
+			handler := newFileMuxWithCleanup(t, dataRoot)
+			runID := "run-decision-invalid-missing-info-http"
+			_, started := seedBlockedDecisionRunForHTTP(t, dataRoot, "decision invalid missing info http workspace", runID)
+
+			resolveReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+started.BlockingTicketID+"/resolve", strings.NewReader(tc.body))
+			resolveReq.Header.Set("Content-Type", "application/json")
+			resolveRec := httptest.NewRecorder()
+			handler.ServeHTTP(resolveRec, resolveReq)
+			if resolveRec.Code != http.StatusBadRequest {
+				t.Fatalf("decision resolve status = %d, want 400, body=%s", resolveRec.Code, resolveRec.Body.String())
+			}
+			if files := resolutionFilesForHTTP(t, dataRoot); len(files) != 0 {
+				t.Fatalf("resolution files = %v, want none for invalid missing-info payload", files)
+			}
+			ticket, err := appservice.ReadDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID)
+			if err != nil {
+				t.Fatalf("read decision: %v", err)
+			}
+			if ticket.State != string(common.DecisionTicketStateOpen) {
+				t.Fatalf("decision state = %q, want open after invalid missing-info payload", ticket.State)
+			}
+		})
 	}
 }
 
@@ -5121,16 +5281,17 @@ func TestServerStateRecoversResolvedDecisionBlockedRun(t *testing.T) {
 	const runID = "run-resolved-decision-recovery"
 	const ticketID = "ticket-resolved-decision-recovery"
 	resumed := make(chan common.WorkspaceID, 1)
+	currentRun := appservice.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		State:            string(common.RunStateBlockedOnDecision),
+		BlockingTicketID: ticketID,
+	}
 	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
 		return []appservice.Workspace{{ID: workspaceID, State: string(common.WorkspaceStateBlocked), ActiveRunID: runID}}, nil
 	}
 	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
-		return []appservice.Run{{
-			ID:               runID,
-			WorkspaceID:      workspaceID,
-			State:            string(common.RunStateBlockedOnDecision),
-			BlockingTicketID: ticketID,
-		}}, nil
+		return []appservice.Run{currentRun}, nil
 	}
 	state.listDecisions = func(context.Context, string, string, string, string) ([]appservice.Decision, error) {
 		return []appservice.Decision{{
@@ -5146,7 +5307,8 @@ func TestServerStateRecoversResolvedDecisionBlockedRun(t *testing.T) {
 		}
 		workspaceScope := common.RuntimeWorkspaceIDFromContext(ctx)
 		resumed <- workspaceScope
-		return appservice.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateRunning)}, nil
+		currentRun = appservice.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateRunning)}
+		return currentRun, nil
 	}
 
 	if err := state.runContinuations.recoverResolvedGovernanceBlockedRuns(context.Background()); err != nil {
@@ -5173,6 +5335,20 @@ func TestServerStateRecoversResolvedDecisionBlockedRunWithWorkspaceScope(t *test
 	const ticketA = "ticket-resolved-decision-scope-a"
 	const ticketB = "ticket-resolved-decision-scope-b"
 	resumed := make(chan common.WorkspaceID, 1)
+	runsByWorkspace := map[string]appservice.Run{
+		workspaceA: {
+			ID:               runID,
+			WorkspaceID:      workspaceA,
+			State:            string(common.RunStateBlockedOnDecision),
+			BlockingTicketID: ticketA,
+		},
+		workspaceB: {
+			ID:               runID,
+			WorkspaceID:      workspaceB,
+			State:            string(common.RunStateBlockedOnDecision),
+			BlockingTicketID: ticketB,
+		},
+	}
 	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
 		return []appservice.Workspace{
 			{ID: workspaceA, State: string(common.WorkspaceStateBlocked), ActiveRunID: runID},
@@ -5180,24 +5356,11 @@ func TestServerStateRecoversResolvedDecisionBlockedRunWithWorkspaceScope(t *test
 		}, nil
 	}
 	state.listRuns = func(_ context.Context, _, _, workspaceID string) ([]appservice.Run, error) {
-		switch workspaceID {
-		case workspaceA:
-			return []appservice.Run{{
-				ID:               runID,
-				WorkspaceID:      workspaceA,
-				State:            string(common.RunStateBlockedOnDecision),
-				BlockingTicketID: ticketA,
-			}}, nil
-		case workspaceB:
-			return []appservice.Run{{
-				ID:               runID,
-				WorkspaceID:      workspaceB,
-				State:            string(common.RunStateBlockedOnDecision),
-				BlockingTicketID: ticketB,
-			}}, nil
-		default:
+		run, ok := runsByWorkspace[workspaceID]
+		if !ok {
 			return nil, common.ErrNotFound
 		}
+		return []appservice.Run{run}, nil
 	}
 	state.listDecisions = func(_ context.Context, _, _, workspaceID, gotRunID string) ([]appservice.Decision, error) {
 		if gotRunID != runID {
@@ -5228,7 +5391,9 @@ func TestServerStateRecoversResolvedDecisionBlockedRunWithWorkspaceScope(t *test
 		}
 		workspaceScope := common.RuntimeWorkspaceIDFromContext(ctx)
 		resumed <- workspaceScope
-		return appservice.Run{ID: runID, WorkspaceID: string(workspaceScope), State: string(common.RunStateRunning)}, nil
+		run := appservice.Run{ID: runID, WorkspaceID: string(workspaceScope), State: string(common.RunStateRunning)}
+		runsByWorkspace[string(workspaceScope)] = run
+		return run, nil
 	}
 
 	if err := state.runContinuations.recoverResolvedGovernanceBlockedRuns(context.Background()); err != nil {
@@ -5269,13 +5434,18 @@ func TestServerStateGovernanceResumeKeepsPendingAfterBackgroundSubmitFailure(t *
 
 	routine.err = nil
 	resumed := make(chan common.WorkspaceID, 1)
+	currentRun := appservice.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateRunning)}
 	state.resumeRun = func(ctx context.Context, _, _, id string, _ ...map[string]any) (appservice.Run, error) {
 		if id != runID {
 			t.Fatalf("runID = %q, want %s", id, runID)
 		}
 		workspaceScope := common.RuntimeWorkspaceIDFromContext(ctx)
 		resumed <- workspaceScope
-		return appservice.Run{ID: runID, WorkspaceID: string(workspaceScope), State: string(common.RunStateRunning)}, nil
+		currentRun = appservice.Run{ID: runID, WorkspaceID: string(workspaceScope), State: string(common.RunStateRunning)}
+		return currentRun, nil
+	}
+	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
+		return []appservice.Run{currentRun}, nil
 	}
 	state.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{
 		WorkspaceID: workspaceID,
@@ -5298,6 +5468,63 @@ func TestServerStateGovernanceResumeKeepsPendingAfterBackgroundSubmitFailure(t *
 	state.runContinuations.governanceMu.Unlock()
 	if pending {
 		t.Fatalf("governance resume pending entry was not cleared after successful resume")
+	}
+}
+
+func TestServerStateGovernanceResumeDoesNotCompleteWhenReadbackStillBlockedOnResolvedDecision(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	const workspaceID = "ws-governance-readback"
+	const runID = "run-governance-readback"
+	const ticketID = "ticket-governance-readback"
+	staleRun := appservice.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		State:            string(common.RunStateBlockedOnDecision),
+		BlockingTicketID: ticketID,
+	}
+	state.resumeRun = func(context.Context, string, string, string, ...map[string]any) (appservice.Run, error) {
+		return staleRun, nil
+	}
+	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
+		return []appservice.Run{staleRun}, nil
+	}
+	state.listDecisions = func(context.Context, string, string, string, string) ([]appservice.Decision, error) {
+		return []appservice.Decision{{
+			ID:          ticketID,
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			State:       string(common.DecisionTicketStateResolved),
+		}}, nil
+	}
+
+	state.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+	}}, 0)
+	if routine.function == nil {
+		t.Fatal("governance resume background function was not queued")
+	}
+	routine.function()
+
+	pendingKey := governanceRunResumeKey(governanceRunResumeRef{WorkspaceID: workspaceID, RunID: runID})
+	state.runContinuations.governanceMu.Lock()
+	_, pending := state.runContinuations.governancePending[pendingKey]
+	state.runContinuations.governanceMu.Unlock()
+	if !pending {
+		t.Fatalf("governance resume pending entry was cleared despite unresolved owner readback")
+	}
+	diagnostics := state.schedulerDiagnostics.snapshot(workspaceID, runID)
+	if diagnostics == nil || diagnostics.LatestContinuation == nil {
+		t.Fatalf("scheduler diagnostics = %+v, want owner readback failure", diagnostics)
+	}
+	latest := diagnostics.LatestContinuation
+	if latest.Kind != schedulerKindGovernanceContinuation ||
+		latest.State != schedulerDiagnosticStateFailed ||
+		latest.Reason != schedulerReasonOwnerReadbackNotAdvanced ||
+		latest.Readback == nil ||
+		latest.Readback.Reason != "blocked_on_resolved_decision" {
+		t.Fatalf("latest continuation = %+v, want governance readback failure", latest)
 	}
 }
 
@@ -5389,6 +5616,12 @@ func TestServerStateRunContinuationKeepsPendingAfterBackgroundSubmitFailure(t *t
 		started <- workspaceScope
 		return appservice.Run{ID: runID, WorkspaceID: string(workspaceScope), State: string(common.RunStateRunning)}, nil
 	}
+	state.listRuns = func(_ context.Context, _, _, gotWorkspaceID string) ([]appservice.Run, error) {
+		if gotWorkspaceID != workspaceID {
+			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
+		}
+		return []appservice.Run{{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateRunning)}}, nil
+	}
 	if !state.runContinuations.scheduleRunContinuation(req) {
 		t.Fatalf("run continuation scheduling failed after background routine recovery")
 	}
@@ -5409,6 +5642,78 @@ func TestServerStateRunContinuationKeepsPendingAfterBackgroundSubmitFailure(t *t
 	state.runContinuations.runMu.Unlock()
 	if pending {
 		t.Fatalf("run continuation pending entry was not cleared after successful start")
+	}
+}
+
+func TestServerStateRunContinuationDoesNotCompleteWhenReadbackStillBlockedOnResolvedDecision(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	const workspaceID = "ws-run-continuation-readback"
+	const runID = "run-continuation-readback"
+	const ticketID = "ticket-run-continuation-readback"
+	req := runContinuationRequest{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		Action:      "resume",
+		Priority:    2,
+	}
+	staleRun := appservice.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		State:            string(common.RunStateBlockedOnDecision),
+		BlockingTicketID: ticketID,
+	}
+	state.resumeRun = func(ctx context.Context, _, _, gotRunID string, _ ...map[string]any) (appservice.Run, error) {
+		if gotRunID != runID {
+			t.Fatalf("runID = %q, want %s", gotRunID, runID)
+		}
+		if got := common.RuntimeWorkspaceIDFromContext(ctx); got != workspaceID {
+			t.Fatalf("workspace scope = %q, want %s", got, workspaceID)
+		}
+		return staleRun, nil
+	}
+	state.listRuns = func(_ context.Context, _, _, gotWorkspaceID string) ([]appservice.Run, error) {
+		if gotWorkspaceID != workspaceID {
+			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
+		}
+		return []appservice.Run{staleRun}, nil
+	}
+	state.listDecisions = func(_ context.Context, _, _, gotWorkspaceID, gotRunID string) ([]appservice.Decision, error) {
+		if gotWorkspaceID != workspaceID || gotRunID != runID {
+			t.Fatalf("decision lookup scope = %s/%s, want %s/%s", gotWorkspaceID, gotRunID, workspaceID, runID)
+		}
+		return []appservice.Decision{{
+			ID:          ticketID,
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			State:       string(common.DecisionTicketStateResolved),
+		}}, nil
+	}
+
+	if !state.runContinuations.scheduleRunContinuation(req) {
+		t.Fatalf("run continuation scheduling failed")
+	}
+	if routine.function == nil {
+		t.Fatal("run continuation background function was not queued")
+	}
+	routine.function()
+
+	state.runContinuations.runMu.Lock()
+	_, pending := state.runContinuations.runPending[workspaceID+"/"+runID+"/resume"]
+	state.runContinuations.runMu.Unlock()
+	if !pending {
+		t.Fatalf("run continuation pending entry was cleared despite unresolved owner readback")
+	}
+	diagnostics := state.schedulerDiagnostics.snapshot(workspaceID, runID)
+	if diagnostics == nil || diagnostics.LatestContinuation == nil {
+		t.Fatalf("scheduler diagnostics = %+v, want owner readback failure", diagnostics)
+	}
+	latest := diagnostics.LatestContinuation
+	if latest.Kind != schedulerKindRunContinuation ||
+		latest.State != schedulerDiagnosticStateFailed ||
+		latest.Reason != schedulerReasonOwnerReadbackNotAdvanced ||
+		latest.Recoverability != schedulerRecoverabilityInspect {
+		t.Fatalf("latest continuation = %+v, want owner readback failure", latest)
 	}
 }
 

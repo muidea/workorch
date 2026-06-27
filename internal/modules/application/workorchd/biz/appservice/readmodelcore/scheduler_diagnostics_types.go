@@ -1,18 +1,41 @@
 package readmodelcore
 
 type ContinuationDiagnostic struct {
-	WorkspaceID        string   `json:"workspaceId,omitempty"`
-	RunID              string   `json:"runId,omitempty"`
-	Kind               string   `json:"kind"`
-	State              string   `json:"state"`
-	Reason             string   `json:"reason,omitempty"`
-	Detail             string   `json:"detail,omitempty"`
-	Recoverability     string   `json:"recoverability,omitempty"`
-	RecommendedActions []string `json:"recommendedActions,omitempty"`
-	DedupeKey          string   `json:"dedupeKey,omitempty"`
-	Attempt            int      `json:"attempt,omitempty"`
-	OccurredAt         string   `json:"occurredAt,omitempty"`
-	Source             string   `json:"source,omitempty"`
+	WorkspaceID        string                          `json:"workspaceId,omitempty"`
+	RunID              string                          `json:"runId,omitempty"`
+	Kind               string                          `json:"kind"`
+	State              string                          `json:"state"`
+	Reason             string                          `json:"reason,omitempty"`
+	Detail             string                          `json:"detail,omitempty"`
+	Readback           *ContinuationReadbackDiagnostic `json:"readback,omitempty"`
+	Recoverability     string                          `json:"recoverability,omitempty"`
+	RecommendedActions []string                        `json:"recommendedActions,omitempty"`
+	DedupeKey          string                          `json:"dedupeKey,omitempty"`
+	Attempt            int                             `json:"attempt,omitempty"`
+	OccurredAt         string                          `json:"occurredAt,omitempty"`
+	Source             string                          `json:"source,omitempty"`
+}
+
+type ContinuationReadbackDiagnostic struct {
+	WorkspaceID             string `json:"workspaceId,omitempty"`
+	RunID                   string `json:"runId,omitempty"`
+	Action                  string `json:"action,omitempty"`
+	Found                   bool   `json:"found,omitempty"`
+	OldRunState             string `json:"oldRunState,omitempty"`
+	NewRunState             string `json:"newRunState,omitempty"`
+	OldBlockingTicketID     string `json:"oldBlockingTicketId,omitempty"`
+	NewBlockingTicketID     string `json:"newBlockingTicketId,omitempty"`
+	OldBlockingApprovalID   string `json:"oldBlockingApprovalId,omitempty"`
+	NewBlockingApprovalID   string `json:"newBlockingApprovalId,omitempty"`
+	SuccessorRunID          string `json:"successorRunId,omitempty"`
+	LatestStepID            string `json:"latestStepId,omitempty"`
+	Terminal                bool   `json:"terminal,omitempty"`
+	GovernedWait            bool   `json:"governedWait,omitempty"`
+	Advanced                bool   `json:"advanced,omitempty"`
+	Reason                  string `json:"reason,omitempty"`
+	ProjectionRevision      int64  `json:"projectionRevision,omitempty"`
+	SourceEventRevision     int64  `json:"sourceEventRevision,omitempty"`
+	ProjectedSourceRevision int64  `json:"projectedSourceRevision,omitempty"`
 }
 
 type ContinuationDiagnosticCount struct {

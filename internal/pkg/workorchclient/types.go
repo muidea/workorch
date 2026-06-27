@@ -404,20 +404,28 @@ type RunStatus struct {
 }
 
 type ConvergenceStatus struct {
-	WorkspaceID                 string   `json:"workspaceId,omitempty"`
-	RunID                       string   `json:"runId,omitempty"`
-	RunState                    string   `json:"runState,omitempty"`
-	CurrentFocusID              string   `json:"currentFocusId,omitempty"`
-	NextActionKind              string   `json:"nextActionKind,omitempty"`
-	CurrentGap                  string   `json:"currentGap,omitempty"`
-	MissingEvidenceKinds        []string `json:"missingEvidenceKinds,omitempty"`
-	AcceptedEvidenceCount       int      `json:"acceptedEvidenceCount,omitempty"`
-	RejectedEvidenceCount       int      `json:"rejectedEvidenceCount,omitempty"`
-	LatestEffectiveProgressAt   string   `json:"latestEffectiveProgressAt,omitempty"`
-	LatestContractViolationRule string   `json:"latestContractViolationRule,omitempty"`
-	LatestRecovery              string   `json:"latestRecovery,omitempty"`
-	Stalled                     bool     `json:"stalled,omitempty"`
-	IneffectiveRetry            bool     `json:"ineffectiveRetry,omitempty"`
+	WorkspaceID                 string         `json:"workspaceId,omitempty"`
+	RunID                       string         `json:"runId,omitempty"`
+	RunState                    string         `json:"runState,omitempty"`
+	CurrentFocusID              string         `json:"currentFocusId,omitempty"`
+	NextActionKind              string         `json:"nextActionKind,omitempty"`
+	CurrentGap                  string         `json:"currentGap,omitempty"`
+	MissingEvidenceKinds        []string       `json:"missingEvidenceKinds,omitempty"`
+	AcceptedEvidenceCount       int            `json:"acceptedEvidenceCount,omitempty"`
+	RejectedEvidenceCount       int            `json:"rejectedEvidenceCount,omitempty"`
+	LatestEffectiveProgressAt   string         `json:"latestEffectiveProgressAt,omitempty"`
+	LatestContractViolationRule string         `json:"latestContractViolationRule,omitempty"`
+	LatestRecovery              string         `json:"latestRecovery,omitempty"`
+	LatestRejectedDiagnosticRef string         `json:"latestRejectedDiagnosticRef,omitempty"`
+	DecisionCause               string         `json:"decisionCause,omitempty"`
+	RetryAttempt                int            `json:"retryAttempt,omitempty"`
+	RetryMaxAttempts            int            `json:"retryMaxAttempts,omitempty"`
+	RetrySignatureRepeatCount   int            `json:"retrySignatureRepeatCount,omitempty"`
+	RetryBudgetScope            map[string]any `json:"retryBudgetScope,omitempty"`
+	NarrowedRetryAttempted      bool           `json:"narrowedRetryAttempted,omitempty"`
+	ManagedValidationAvailable  bool           `json:"managedValidationAvailable,omitempty"`
+	Stalled                     bool           `json:"stalled,omitempty"`
+	IneffectiveRetry            bool           `json:"ineffectiveRetry,omitempty"`
 }
 
 type RuntimeExecution struct {
@@ -476,18 +484,41 @@ type GapNextAction struct {
 }
 
 type ContinuationDiagnostic struct {
-	WorkspaceID        string   `json:"workspaceId,omitempty"`
-	RunID              string   `json:"runId,omitempty"`
-	Kind               string   `json:"kind"`
-	State              string   `json:"state"`
-	Reason             string   `json:"reason,omitempty"`
-	Detail             string   `json:"detail,omitempty"`
-	Recoverability     string   `json:"recoverability,omitempty"`
-	RecommendedActions []string `json:"recommendedActions,omitempty"`
-	DedupeKey          string   `json:"dedupeKey,omitempty"`
-	Attempt            int      `json:"attempt,omitempty"`
-	OccurredAt         string   `json:"occurredAt,omitempty"`
-	Source             string   `json:"source,omitempty"`
+	WorkspaceID        string                          `json:"workspaceId,omitempty"`
+	RunID              string                          `json:"runId,omitempty"`
+	Kind               string                          `json:"kind"`
+	State              string                          `json:"state"`
+	Reason             string                          `json:"reason,omitempty"`
+	Detail             string                          `json:"detail,omitempty"`
+	Readback           *ContinuationReadbackDiagnostic `json:"readback,omitempty"`
+	Recoverability     string                          `json:"recoverability,omitempty"`
+	RecommendedActions []string                        `json:"recommendedActions,omitempty"`
+	DedupeKey          string                          `json:"dedupeKey,omitempty"`
+	Attempt            int                             `json:"attempt,omitempty"`
+	OccurredAt         string                          `json:"occurredAt,omitempty"`
+	Source             string                          `json:"source,omitempty"`
+}
+
+type ContinuationReadbackDiagnostic struct {
+	WorkspaceID             string `json:"workspaceId,omitempty"`
+	RunID                   string `json:"runId,omitempty"`
+	Action                  string `json:"action,omitempty"`
+	Found                   bool   `json:"found,omitempty"`
+	OldRunState             string `json:"oldRunState,omitempty"`
+	NewRunState             string `json:"newRunState,omitempty"`
+	OldBlockingTicketID     string `json:"oldBlockingTicketId,omitempty"`
+	NewBlockingTicketID     string `json:"newBlockingTicketId,omitempty"`
+	OldBlockingApprovalID   string `json:"oldBlockingApprovalId,omitempty"`
+	NewBlockingApprovalID   string `json:"newBlockingApprovalId,omitempty"`
+	SuccessorRunID          string `json:"successorRunId,omitempty"`
+	LatestStepID            string `json:"latestStepId,omitempty"`
+	Terminal                bool   `json:"terminal,omitempty"`
+	GovernedWait            bool   `json:"governedWait,omitempty"`
+	Advanced                bool   `json:"advanced,omitempty"`
+	Reason                  string `json:"reason,omitempty"`
+	ProjectionRevision      int64  `json:"projectionRevision,omitempty"`
+	SourceEventRevision     int64  `json:"sourceEventRevision,omitempty"`
+	ProjectedSourceRevision int64  `json:"projectedSourceRevision,omitempty"`
 }
 
 type ContinuationDiagnosticCount struct {

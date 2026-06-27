@@ -58,6 +58,7 @@ type RunStatusInfo = port.RunStatusInfo
 type RuntimeExecutionInfo = port.RuntimeExecutionInfo
 type ConvergenceStatusInfo = port.ConvergenceStatusInfo
 type ContinuationDiagnosticInfo = port.ContinuationDiagnosticInfo
+type ContinuationReadbackDiagnosticInfo = port.ContinuationReadbackDiagnosticInfo
 type ContinuationDiagnosticCountInfo = port.ContinuationDiagnosticCountInfo
 type WatchdogDiagnosticsInfo = port.WatchdogDiagnosticsInfo
 type SchedulerDiagnosticsInfo = port.SchedulerDiagnosticsInfo

@@ -115,6 +115,11 @@ func schedulerDiagnosticsStatusText(item *backend.SchedulerDiagnosticsInfo) stri
 			}), " ")))
 			b.WriteString("\n")
 		}
+		if latest.Readback != nil {
+			b.WriteString("- scheduler readback: ")
+			b.WriteString(schedulerReadbackStatusText(latest.Readback))
+			b.WriteString("\n")
+		}
 	}
 	if item.Watchdog.LatestTickAt != "" {
 		b.WriteString("- watchdog: ")
@@ -135,6 +140,31 @@ func schedulerDiagnosticsStatusText(item *backend.SchedulerDiagnosticsInfo) stri
 		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func schedulerReadbackStatusText(item *backend.ContinuationReadbackDiagnosticInfo) string {
+	if item == nil {
+		return ""
+	}
+	parts := compactStrings([]string{
+		item.Action,
+		fmt.Sprintf("advanced=%t", item.Advanced),
+		item.Reason,
+	})
+	state := strings.TrimSpace(strings.Join(compactStrings([]string{item.OldRunState, "->", item.NewRunState}), " "))
+	if state != "->" && state != "" {
+		parts = append(parts, state)
+	}
+	if item.NewBlockingTicketID != "" {
+		parts = append(parts, "ticket="+item.NewBlockingTicketID)
+	}
+	if item.NewBlockingApprovalID != "" {
+		parts = append(parts, "approval="+item.NewBlockingApprovalID)
+	}
+	if item.ProjectionRevision > 0 {
+		parts = append(parts, fmt.Sprintf("projection=%d", item.ProjectionRevision))
+	}
+	return strings.TrimSpace(strings.Join(compactStrings(parts), " "))
 }
 
 func (m AppModel) renderInspectCoverage() string {

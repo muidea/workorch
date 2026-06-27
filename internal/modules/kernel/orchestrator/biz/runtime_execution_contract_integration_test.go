@@ -2232,6 +2232,90 @@ func TestValidateLLMExecutionOutputContractAllowsConcreteValidationGraphWithEvid
 	}
 }
 
+func TestValidateLLMExecutionOutputContractNormalizesManagedValidationSession(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/managed-validation"
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-managed-validation",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	requiredOutput := concreteValidationEvidenceRequiredOutputWithScratch(
+		map[string]any{validationScratchDirKey: scratch},
+		map[string]any{},
+		nil,
+	)
+	if !stringSliceContains(stringSliceFromValue(requiredOutput["acceptedKinds"]), managedValidationSessionNodeKind) {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want managed validation capability", requiredOutput["acceptedKinds"])
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-managed-validation/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": requiredOutput,
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "managed-verify",
+				"kind": managedValidationSessionNodeKind,
+				"input": map[string]any{
+					"allocatePort": true,
+					"observation": map[string]any{
+						"command":       "sh",
+						"args":          []string{"-c", "printf managed-validation-ok:{{managedValidation.port}}"},
+						"timeoutMillis": int64(5000),
+						"validationEvidence": map[string]any{
+							"mode":            "runtime_behavior",
+							"observationType": "runtime_observation",
+						},
+					},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want managed validation declaration allowed", err)
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok || len(graph.Nodes) != 1 {
+		t.Fatalf("executionGraph = %+v, want normalized graph", output[stepOutputKeyExecutionGraph])
+	}
+	node := graph.Nodes[0]
+	if node.Kind != shellcommon.StepKindCommand {
+		t.Fatalf("normalized node kind = %q, want shell/command", node.Kind)
+	}
+	if stringFromMap(node.Input, "command") != "sh" ||
+		!strings.Contains(strings.Join(stringSliceFromValue(node.Input["args"]), " "), "managed-validation-ok:") ||
+		strings.Contains(strings.Join(stringSliceFromValue(node.Input["args"]), " "), "{{managedValidation.port}}") {
+		t.Fatalf("normalized node input = %+v, want observation command", node.Input)
+	}
+	if stringFromMap(node.Input, validationScratchDirKey) != scratch {
+		t.Fatalf("validationScratchDir = %q, want %q", stringFromMap(node.Input, validationScratchDirKey), scratch)
+	}
+	managed := mapFromValue(node.Input["managedValidation"])
+	if managed["runtimeManaged"] != true ||
+		managed["autoCleanup"] != true ||
+		stringFromMap(managed, "cleanupPolicy") != "process_group_on_timeout_or_completion" {
+		t.Fatalf("managedValidation = %+v, want runtime-managed cleanup metadata", managed)
+	}
+	if port, ok := managedValidationInt(managed["allocatedPort"]); !ok || port <= 0 || node.Input["managedValidationPort"] != port {
+		t.Fatalf("managedValidation = %+v input=%+v, want allocated port mirrored to input", managed, node.Input)
+	}
+	if evidence := mapFromValue(node.Input["validationEvidence"]); stringFromMap(evidence, "mode") != "runtime_behavior" {
+		t.Fatalf("validationEvidence = %+v, want copied observation evidence", evidence)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithProcessTermination(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-process-termination",

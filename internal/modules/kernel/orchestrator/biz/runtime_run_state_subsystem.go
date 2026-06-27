@@ -136,6 +136,9 @@ func (s *runStateSubsystem) releaseWorkspaceForTerminalRun(ctx context.Context, 
 }
 
 func (s *runStateSubsystem) syncWorkspaceForActiveRunState(ctx context.Context, run *runModel.Run, state common.WorkspaceState, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {
+	if !workspaceStateCompatibleWithRun(run, state) {
+		return nil, common.ErrConflict
+	}
 	ws, err := s.workspaceForActiveRunState(ctx, run, workspace)
 	if err != nil {
 		return nil, err
@@ -149,6 +152,9 @@ func (s *runStateSubsystem) syncWorkspaceForActiveRunState(ctx context.Context, 
 }
 
 func (s *runStateSubsystem) syncRunAndWorkspaceForActiveState(ctx context.Context, run *runModel.Run, state common.WorkspaceState, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {
+	if !workspaceStateCompatibleWithRun(run, state) {
+		return nil, common.ErrConflict
+	}
 	ws, err := s.workspaceForActiveRunState(ctx, run, workspace)
 	if err != nil {
 		return nil, err
@@ -167,6 +173,24 @@ func (s *runStateSubsystem) syncRunAndWorkspaceForActiveState(ctx context.Contex
 		return nil, err
 	}
 	return ws, nil
+}
+
+func workspaceStateCompatibleWithRun(run *runModel.Run, state common.WorkspaceState) bool {
+	if run == nil {
+		return false
+	}
+	switch run.State {
+	case common.RunStateCreated, common.RunStateRunning:
+		return state == common.WorkspaceStateRunning
+	case common.RunStateValidating:
+		return state == common.WorkspaceStateValidating
+	case common.RunStateBlockedOnDecision:
+		return state == common.WorkspaceStateWaitingDecision
+	case common.RunStateBlockedOnApproval:
+		return state == common.WorkspaceStateBlocked
+	default:
+		return false
+	}
 }
 
 func (s *runStateSubsystem) syncRunAndWorkspaceForValidation(ctx context.Context, run *runModel.Run, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {

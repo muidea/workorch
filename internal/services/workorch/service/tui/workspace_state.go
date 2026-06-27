@@ -1090,6 +1090,7 @@ func cloneConvergenceStatusInfoPtr(input *backend.ConvergenceStatusInfo) *backen
 	}
 	ret := *input
 	ret.MissingEvidenceKinds = append([]string(nil), input.MissingEvidenceKinds...)
+	ret.RetryBudgetScope = clonePayloadMap(input.RetryBudgetScope)
 	return &ret
 }
 
@@ -1101,15 +1102,25 @@ func cloneSchedulerDiagnosticsInfoPtr(input *backend.SchedulerDiagnosticsInfo) *
 	if input.LatestContinuation != nil {
 		latest := *input.LatestContinuation
 		latest.RecommendedActions = append([]string(nil), input.LatestContinuation.RecommendedActions...)
+		latest.Readback = cloneContinuationReadbackDiagnosticInfo(input.LatestContinuation.Readback)
 		ret.LatestContinuation = &latest
 	}
 	ret.RecentContinuations = append([]backend.ContinuationDiagnosticInfo(nil), input.RecentContinuations...)
 	for idx := range ret.RecentContinuations {
 		ret.RecentContinuations[idx].RecommendedActions = append([]string(nil), input.RecentContinuations[idx].RecommendedActions...)
+		ret.RecentContinuations[idx].Readback = cloneContinuationReadbackDiagnosticInfo(input.RecentContinuations[idx].Readback)
 	}
 	ret.ContinuationFailureCounts = append([]backend.ContinuationDiagnosticCountInfo(nil), input.ContinuationFailureCounts...)
 	ret.ContinuationNoActionCounts = append([]backend.ContinuationDiagnosticCountInfo(nil), input.ContinuationNoActionCounts...)
 	ret.ContinuationCompletedCounts = append([]backend.ContinuationDiagnosticCountInfo(nil), input.ContinuationCompletedCounts...)
+	return &ret
+}
+
+func cloneContinuationReadbackDiagnosticInfo(input *backend.ContinuationReadbackDiagnosticInfo) *backend.ContinuationReadbackDiagnosticInfo {
+	if input == nil {
+		return nil
+	}
+	ret := *input
 	return &ret
 }
 

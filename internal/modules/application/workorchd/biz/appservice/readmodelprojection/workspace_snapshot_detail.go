@@ -1,6 +1,7 @@
 package readmodelprojection
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
@@ -23,6 +24,7 @@ const (
 func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
 	ret := snapshot
 	projectWorkspaceSnapshotCompactFields(&ret)
+	ret = NormalizeWorkspaceGovernanceProjection(ret)
 	if ret.ContextBundle == nil {
 		ret = WorkspaceSnapshotWithContextBundle(ret)
 	}
@@ -148,6 +150,8 @@ func projectWorkspaceSnapshotCompactFields(ret *readmodelcore.WorkspaceSnapshot)
 	}
 	ret.Workspace.ContextHints = nil
 	ret.Workspace.EvidencePolicies = nil
+	projectWorkspaceSnapshotRuntimeFields(ret)
+	projectWorkspaceSnapshotTaskFields(ret)
 	if ret.Run != nil {
 		projected := compactWorkspaceSnapshotRun(*ret.Run)
 		ret.Run = &projected
@@ -183,6 +187,97 @@ func projectWorkspaceSnapshotCompactFields(ret *readmodelcore.WorkspaceSnapshot)
 	for idx := range ret.ExecutionSections {
 		ret.ExecutionSections[idx] = projectExecutionSectionView(ret.ExecutionSections[idx])
 	}
+}
+
+func projectWorkspaceSnapshotRuntimeFields(ret *readmodelcore.WorkspaceSnapshot) {
+	if ret == nil {
+		return
+	}
+	if ret.Step != nil {
+		projected := ProjectStepView(*ret.Step)
+		ret.Step = &projected
+	}
+}
+
+func projectWorkspaceSnapshotTaskFields(ret *readmodelcore.WorkspaceSnapshot) {
+	if ret == nil {
+		return
+	}
+	ret.TaskProgress = projectTaskProgressView(ret.TaskProgress)
+	if len(ret.TaskDecompositions) > 0 {
+		ret.TaskDecompositions = projectTaskDecompositionViews(ret.TaskDecompositions, workspaceSnapshotTraceSliceLimit)
+	}
+	if len(ret.TaskPlans) > 0 {
+		ret.TaskPlans = projectTaskPlanViews(ret.TaskPlans, workspaceSnapshotTraceSliceLimit)
+	}
+}
+
+func projectTaskDecompositionViews(items []readmodelcore.TaskDecomposition, limit int) []readmodelcore.TaskDecomposition {
+	if limit <= 0 || len(items) == 0 {
+		return nil
+	}
+	start := len(items) - limit
+	if start < 0 {
+		start = 0
+	}
+	ret := make([]readmodelcore.TaskDecomposition, 0, len(items[start:]))
+	for _, item := range items[start:] {
+		ret = append(ret, projectTaskDecompositionView(item))
+	}
+	return ret
+}
+
+func projectTaskPlanViews(items []readmodelcore.TaskPlan, limit int) []readmodelcore.TaskPlan {
+	if limit <= 0 || len(items) == 0 {
+		return nil
+	}
+	start := len(items) - limit
+	if start < 0 {
+		start = 0
+	}
+	ret := make([]readmodelcore.TaskPlan, 0, len(items[start:]))
+	for _, item := range items[start:] {
+		ret = append(ret, projectTaskPlanView(item))
+	}
+	return ret
+}
+
+func projectTaskDecompositionView(item readmodelcore.TaskDecomposition) readmodelcore.TaskDecomposition {
+	item.Summary = trimTraceString(item.Summary)
+	item.EvidenceRefs = compactStringSlice(item.EvidenceRefs, workspaceSnapshotTraceSliceLimit)
+	item.Nodes = projectTaskDecompositionNodeViews(item.Nodes, workspaceSnapshotTraceSliceLimit)
+	return item
+}
+
+func projectTaskPlanView(item readmodelcore.TaskPlan) readmodelcore.TaskPlan {
+	item.Summary = trimTraceString(item.Summary)
+	item.EvidenceRefs = compactStringSlice(item.EvidenceRefs, workspaceSnapshotTraceSliceLimit)
+	item.Nodes = projectTaskDecompositionNodeViews(item.Nodes, workspaceSnapshotTraceSliceLimit)
+	return item
+}
+
+func projectTaskDecompositionNodeViews(items []readmodelcore.TaskDecompositionNode, limit int) []readmodelcore.TaskDecompositionNode {
+	if limit <= 0 || len(items) == 0 {
+		return nil
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	ret := make([]readmodelcore.TaskDecompositionNode, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, projectTaskDecompositionNodeView(item))
+	}
+	return ret
+}
+
+func projectTaskDecompositionNodeView(item readmodelcore.TaskDecompositionNode) readmodelcore.TaskDecompositionNode {
+	item.Title = trimTraceString(item.Title)
+	item.FailureSignature = trimTraceString(item.FailureSignature)
+	item.DependsOn = compactStringSlice(item.DependsOn, workspaceSnapshotTraceSliceLimit)
+	item.EvidenceRefs = compactStringSlice(item.EvidenceRefs, workspaceSnapshotTraceSliceLimit)
+	item.CoverageTargets = compactStringSlice(item.CoverageTargets, workspaceSnapshotTraceSliceLimit)
+	item.Input = compactTraceValueMap(item.Input, 0)
+	return item
 }
 
 func compactWorkspaceSnapshotRuns(items []readmodelcore.Run, activeRunID string, limit int) []readmodelcore.Run {
@@ -416,8 +511,20 @@ func compactTraceValue(value any, depth int) any {
 	case map[string]any:
 		return compactTraceValueMap(typed, depth+1)
 	default:
-		return typed
+		return compactJSONCompatibleTraceValue(typed)
 	}
+}
+
+func compactJSONCompatibleTraceValue(value any) any {
+	raw, err := json.Marshal(value)
+	if err != nil || len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return trimTraceString(string(raw))
+	}
+	return compactTraceValue(decoded, 0)
 }
 
 func trimTraceString(value string) string {
