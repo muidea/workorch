@@ -2049,22 +2049,25 @@ func TestRuntimeAdapterPreservesSafeRepairSnapshotMetadataInPrompt(t *testing.T)
 		`"targetRef":"main_test.go"`,
 		`"contentHash":"sha256-safe"`,
 		`"snapshotRef":"snapshot://target/main_test.go#sha256-safe"`,
-		`"contentOmitted":true`,
-		`"promptContentComplete":false`,
-		`"promptSafeForFileWrite":false`,
-		`"promptExtractionRequired":true`,
+		`"contentView":"complete"`,
+		`"promptContentComplete":true`,
+		`"promptSafeForFileWrite":true`,
+		`"promptExtractionRequired":false`,
+		`"content":"package main\n\nconst APIKey = \"test-key\"\n"`,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("promptContext = %s, want repair snapshot metadata %s", joined, want)
 		}
 	}
-	for _, leaked := range []string{
-		`"content":"package main`,
-		`const APIKey = \"test-key\"`,
+	for _, forbidden := range []string{
+		`"contentOmitted":true`,
+		`"promptContentComplete":false`,
+		`"promptSafeForFileWrite":false`,
+		`"promptExtractionRequired":true`,
 		`const APIKey = [REDACTED]`,
 	} {
-		if strings.Contains(joined, leaked) {
-			t.Fatalf("promptContext = %s, should omit safe repair snapshot body %q by default", joined, leaked)
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("promptContext = %s, should not mark safe repair snapshot unavailable %q", joined, forbidden)
 		}
 	}
 }

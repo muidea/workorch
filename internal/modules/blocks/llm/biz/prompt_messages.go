@@ -1373,7 +1373,6 @@ func compactRepairSnapshotsForPrompt(items []any, limit int, contentLimit int) [
 	if limit <= 0 || len(items) == 0 {
 		return nil
 	}
-	_ = contentLimit
 	if len(items) > limit {
 		items = items[:limit]
 	}
@@ -1406,7 +1405,16 @@ func compactRepairSnapshotsForPrompt(items []any, limit int, contentLimit int) [
 		}
 		content, hasContent := item["content"].(string)
 		preview, hasPreview := item["contentPreview"].(string)
-		if hasContent || hasPreview {
+		visibleContent, contentVisible := promptVisibleSnapshotContent(item, contentLimit)
+		if contentVisible {
+			out["content"] = visibleContent
+			out["contentBytes"] = len([]byte(visibleContent))
+			out["contentView"] = "complete"
+			out["promptContentComplete"] = true
+			out["promptSafeForFileWrite"] = true
+			out["promptExtractionRequired"] = false
+			out["promptSafetyNote"] = "prompt snapshot body is complete and safe for exact patch/apply with matching baseHash"
+		} else if hasContent || hasPreview {
 			out["contentOmitted"] = true
 			out["contentOmittedReason"] = "target snapshot body is available only through snapshotRef or an explicit targeted read"
 			out["promptContentComplete"] = false
@@ -1502,7 +1510,35 @@ func repairPackageTargetSnapshotsIncompleteForPrompt(pkg map[string]any, limit i
 	if limit > 0 && len(items) > limit {
 		return true
 	}
-	return true
+	for _, raw := range items {
+		if _, ok := promptVisibleSnapshotContent(recordFromAny(raw), contentLimit); !ok {
+			return true
+		}
+	}
+	return false
+}
+
+func promptVisibleSnapshotContent(item map[string]any, contentLimit int) (string, bool) {
+	if len(item) == 0 {
+		return "", false
+	}
+	if boolValue(item["redacted"]) || boolValue(item["truncated"]) || boolValue(item["isBinary"]) {
+		return "", false
+	}
+	if !boolValue(item["contentComplete"]) || !boolValue(item["safeForFileWrite"]) {
+		return "", false
+	}
+	content, ok := item["content"].(string)
+	if !ok {
+		return "", false
+	}
+	if strings.TrimSpace(content) == "" {
+		return "", false
+	}
+	if contentLimit > 0 && len([]byte(content)) > contentLimit {
+		return "", false
+	}
+	return content, true
 }
 
 func compactWorkspaceFileManifestSignal(value any) map[string]any {
@@ -2408,9 +2444,13 @@ func marshalCurrentActionPromptSection(section map[string]any, input map[string]
 	if recovery := contractViolationRecoveryPromptPayload(input); len(recovery) > 0 {
 		section["contractViolationRecovery"] = recovery
 		requirements := stringSliceFromAny(section["requirements"])
+		recoveryRequirement := "Do not repeat contractViolationRecovery.actualOutputSummary; return one valid output that satisfies contractViolationRecovery.expectedContract and the current requiredOutput."
+		if recovery["expectedContractAuthoritative"] == false {
+			recoveryRequirement = "contractViolationRecovery.expectedContract is diagnostic lineage only; satisfy the current correctionContract and requiredOutput."
+		}
 		requirements = append(requirements,
 			"The previous LLM output was rejected by the runtime contract before side effects were executed; use contractViolationRecovery as the precise correction target.",
-			"Do not repeat contractViolationRecovery.actualOutputSummary; return one valid output that satisfies contractViolationRecovery.expectedContract and the current requiredOutput.",
+			recoveryRequirement,
 		)
 		section["requirements"] = requirements
 	}
@@ -2441,14 +2481,10 @@ func availableTargetSnapshotsPromptSummary(input map[string]any, snapshotBudget 
 			return
 		}
 		seen[key] = true
-		promptContentComplete := false
-		promptSafeForFileWrite := false
-		promptExtractionRequired := true
-		if boolValue(raw["redacted"]) || boolValue(raw["truncated"]) || boolValue(raw["isBinary"]) {
-			promptContentComplete = false
-			promptSafeForFileWrite = false
-			promptExtractionRequired = true
-		}
+		_, contentVisible := promptVisibleSnapshotContent(raw, snapshotBudget.RepairContentLimit)
+		promptContentComplete := contentVisible
+		promptSafeForFileWrite := contentVisible
+		promptExtractionRequired := !contentVisible
 		item := map[string]any{
 			"targetRef":                targetRef,
 			"snapshotRef":              promptTargetSnapshotRef(raw),
@@ -2467,6 +2503,8 @@ func availableTargetSnapshotsPromptSummary(input map[string]any, snapshotBudget 
 		}
 		if promptExtractionRequired {
 			item["promptSafetyNote"] = "prompt snapshot is not safe for complete file_write; use exact targeted replacement, unified_diff with visible context, or acquire exact current content first"
+		} else {
+			item["promptSafetyNote"] = "prompt snapshot is complete and safe for exact patch/apply with matching baseHash"
 		}
 		for key, value := range item {
 			if promptSnapshotSummaryEmptyValue(value) {

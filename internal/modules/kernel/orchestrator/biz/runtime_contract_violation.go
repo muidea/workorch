@@ -258,6 +258,147 @@ func reapplyForcedNarrowContractViolationRequiredOutput(input map[string]any, fa
 	applyForcedNarrowContractViolationRequiredOutput(input, failedStep, correction)
 }
 
+func normalizeCurrentActionContract(input map[string]any, failedStep *runModel.Step) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	recovery := mapFromValue(input[stepInputKeyContractViolationRecovery])
+	if len(recovery) == 0 || stringFromMap(recovery, "correctionMode") != contractViolationCorrectionModeForcedNarrow {
+		return input
+	}
+	contract := mapFromValue(recovery["correctionContract"])
+	shape := strings.TrimSpace(stringFromMap(contract, "requiredOutputShape"))
+	switch shape {
+	case "bounded_validation_evidence":
+		return normalizeCurrentActionValidationEvidenceContract(input, failedStep, recovery)
+	case "bounded_failure_evidence":
+		return normalizeCurrentActionFailureEvidenceContract(input, failedStep, recovery)
+	case "valid_patch_apply", "state_changing_output", "state_changing_output_from_available_snapshot":
+		reapplyForcedNarrowContractViolationRequiredOutput(input, failedStep)
+		return input
+	default:
+		return input
+	}
+}
+
+func normalizeCurrentActionValidationEvidenceContract(input map[string]any, failedStep *runModel.Step, recovery map[string]any) map[string]any {
+	required := forcedNarrowRequiredOutputFromRecovery(input, failedStep, recovery)
+	if len(required) == 0 {
+		return input
+	}
+	setRuntimeStage(input, runtimeStageVerification)
+	input[stepInputKeySoulStage] = soulStageValidation
+	input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+	input["boundedValidationRequired"] = true
+	input["evidenceRepairRequired"] = true
+	delete(input, "stateChangingOutputRequired")
+	delete(input, "concreteFailureEvidenceRequired")
+	delete(input, stepInputKeyAssessmentOnly)
+	delete(input, "assessmentOnlyReason")
+	currentActionSetRequiredOutput(input, required)
+	input["convergenceContract"] = map[string]any{
+		"state":            convergenceStateNeedValidation,
+		"runtimeStage":     runtimeStageVerification,
+		"runtimeStageMode": firstNonEmptyString(stringFromMap(input, stepInputKeyRuntimeStageMode), "strict_convergence"),
+		"repairObjective":  repairObjectiveConcreteValidationEvidence,
+	}
+	currentActionSetNextAction(input, map[string]any{
+		"kind":   "produce_validation_evidence",
+		"reason": "current forced-narrow correction contract requires bounded validation evidence",
+	})
+	return input
+}
+
+func normalizeCurrentActionFailureEvidenceContract(input map[string]any, failedStep *runModel.Step, recovery map[string]any) map[string]any {
+	required := forcedNarrowRequiredOutputFromRecovery(input, failedStep, recovery)
+	if len(required) == 0 {
+		return input
+	}
+	setRuntimeStage(input, runtimeStageRepair)
+	input[stepInputKeySoulStage] = soulStageExecution
+	input["repairObjective"] = repairObjectiveAcquireFailureEvidence
+	input["concreteFailureEvidenceRequired"] = true
+	delete(input, "stateChangingOutputRequired")
+	delete(input, "boundedValidationRequired")
+	delete(input, "evidenceRepairRequired")
+	delete(input, stepInputKeyAssessmentOnly)
+	delete(input, "assessmentOnlyReason")
+	currentActionSetRequiredOutput(input, required)
+	input["convergenceContract"] = map[string]any{
+		"state":                           convergenceStateNeedEvidence,
+		"runtimeStage":                    runtimeStageRepair,
+		"runtimeStageMode":                firstNonEmptyString(stringFromMap(input, stepInputKeyRuntimeStageMode), "strict_convergence"),
+		"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+		"concreteFailureEvidenceRequired": true,
+	}
+	currentActionSetNextAction(input, map[string]any{
+		"kind":   "acquire_evidence",
+		"reason": "current forced-narrow correction contract requires bounded evidence acquisition",
+	})
+	return input
+}
+
+func forcedNarrowRequiredOutputFromRecovery(input map[string]any, failedStep *runModel.Step, recovery map[string]any) map[string]any {
+	if len(input) == 0 || len(recovery) == 0 {
+		return nil
+	}
+	correction := map[string]any{
+		"profileId":   stringFromMap(recovery, "correctionProfileId"),
+		"mode":        stringFromMap(recovery, "correctionMode"),
+		"targetScope": stringFromMap(recovery, "targetScope"),
+		"contract":    mapFromValue(recovery["correctionContract"]),
+	}
+	required := forcedNarrowContractViolationRequiredOutput(input, failedStep, correction, mapFromValue(correction["contract"]))
+	if len(required) == 0 {
+		return nil
+	}
+	required["contractViolationRetryNarrowed"] = true
+	required["contractViolationCorrectionProfileId"] = stringFromMap(correction, "profileId")
+	required["contractViolationRequiredOutputShape"] = stringFromMap(mapFromValue(correction["contract"]), "requiredOutputShape")
+	if targetScope := strings.TrimSpace(stringFromMap(correction, "targetScope")); targetScope != "" {
+		required["targetScope"] = targetScope
+	}
+	contract := mapFromValue(correction["contract"])
+	if allowed := stringSliceFromValue(contract["allowedOutputs"]); len(allowed) > 0 {
+		required["allowedOutputShapes"] = allowed
+	}
+	if forbidden := stringSliceFromValue(contract["forbiddenOutputs"]); len(forbidden) > 0 {
+		required["forbiddenOutputShapes"] = forbidden
+	}
+	return required
+}
+
+func currentActionSetRequiredOutput(input map[string]any, required map[string]any) {
+	if len(input) == 0 || len(required) == 0 {
+		return
+	}
+	nextRequired := cloneStepPayload(required)
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	pkg["requiredOutput"] = cloneStepPayload(nextRequired)
+	input["repairActionPackage"] = pkg
+	input["requiredOutput"] = cloneStepPayload(nextRequired)
+	if packet := mapFromValue(input[stepInputKeyStagePacket]); len(packet) > 0 {
+		packet["requiredOutput"] = cloneStepPayload(nextRequired)
+		input[stepInputKeyStagePacket] = packet
+	}
+}
+
+func currentActionSetNextAction(input map[string]any, action map[string]any) {
+	if len(input) == 0 || len(action) == 0 {
+		return
+	}
+	syncConvergenceNextActionMap(input, convergenceAuthorityKey, action)
+	syncConvergenceNextActionMap(input, gapBaselineKey, action)
+	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
+		syncConvergenceNextActionMap(executionContext, convergenceAuthorityKey, action)
+		syncConvergenceNextActionMap(executionContext, gapBaselineKey, action)
+		input["executionContext"] = executionContext
+	}
+}
+
 func forcedNarrowContractViolationRequiredOutput(input map[string]any, failedStep *runModel.Step, correction map[string]any, contract map[string]any) map[string]any {
 	shape := strings.TrimSpace(stringFromMap(contract, "requiredOutputShape"))
 	pkg := mapFromValue(input["repairActionPackage"])

@@ -1178,7 +1178,9 @@ func finalizeRuntimeRepairFollowUpStepInput(run *runModel.Run, failedStep *runMo
 		stepID = failedStep.ID
 	}
 	reapplyForcedNarrowContractViolationRequiredOutput(input, failedStep)
+	input = normalizeCurrentActionContract(input, failedStep)
 	input = normalizeDispatchInputAuthorityFocus(input)
+	input = normalizeCurrentActionContract(input, failedStep)
 	return attachStagePacketToStepInput(run, stepID, input)
 }
 

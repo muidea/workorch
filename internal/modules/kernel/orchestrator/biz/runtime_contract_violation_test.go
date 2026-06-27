@@ -919,11 +919,72 @@ func TestContractViolationRetryForcedNarrowValidationRequiredOutput(t *testing.T
 		!stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "file_mutating_shell_validation") {
 		t.Fatalf("requiredOutput.forbiddenKinds = %+v, want state-changing and mutating validation forbidden", required["forbiddenKinds"])
 	}
+	topRequired := mapFromValue(input["requiredOutput"])
+	if topRequired["contractViolationRetryNarrowed"] != true ||
+		topRequired["mustProduceConcreteValidationEvidence"] != true ||
+		topRequired["mustIncludeStateChangingNode"] != false ||
+		stringSliceContains(stringSliceFromValue(topRequired["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("top-level requiredOutput = %+v, want same forced-narrow validation contract", topRequired)
+	}
 	stageRequired := mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"])
 	if stageRequired["contractViolationRetryNarrowed"] != true ||
 		stageRequired["mustProduceConcreteValidationEvidence"] != true ||
-		stageRequired["mustIncludeStateChangingNode"] != false {
+		stageRequired["mustIncludeStateChangingNode"] != false ||
+		stringSliceContains(stringSliceFromValue(stageRequired["acceptedKinds"]), "patch/apply") {
 		t.Fatalf("stagePacket.requiredOutput = %+v, want same forced-narrow validation contract", stageRequired)
+	}
+	if boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("stateChangingOutputRequired = %v, want cleared for forced-narrow validation", input["stateChangingOutputRequired"])
+	}
+	if got := stringFromMap(input, "repairObjective"); got != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("repairObjective = %q, want %s", got, repairObjectiveConcreteValidationEvidence)
+	}
+	convergence := mapFromValue(input["convergenceContract"])
+	if got := stringFromMap(convergence, "state"); got != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want %s", convergence, convergenceStateNeedValidation)
+	}
+	if err := validateConvergenceDispatchInput(input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput() error = %v; input=%+v", err, input)
+	}
+}
+
+func TestConvergenceDispatchRejectsSplitCurrentActionRequiredOutput(t *testing.T) {
+	input := map[string]any{
+		"convergenceContract": map[string]any{
+			"state":                       convergenceStateNeedStateChange,
+			"stateChangingOutputRequired": true,
+		},
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		gapBaselineKey: map[string]any{
+			"nextAction": map[string]any{"kind": "state_change"},
+		},
+		"requiredOutput": map[string]any{
+			"contractViolationRequiredOutputShape":  "bounded_validation_evidence",
+			"mustProduceConcreteValidationEvidence": true,
+			"mustIncludeStateChangingNode":          false,
+			"acceptedKinds":                         []string{"shell/command"},
+			"forbiddenKinds":                        []string{"patch/apply"},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode": true,
+				"acceptedKinds":                []string{"patch/apply"},
+			},
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode": true,
+				"acceptedKinds":                []string{"patch/apply"},
+			},
+		},
+	}
+	err := validateConvergenceDispatchInput(input)
+	if err == nil {
+		t.Fatal("validateConvergenceDispatchInput returned nil, want split current action contract conflict")
+	}
+	if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), failureClassRuntimeContractMisalign) {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want runtime contract misalignment conflict", err)
 	}
 }
 

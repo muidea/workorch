@@ -318,6 +318,9 @@ func validateConvergenceDispatchInput(input map[string]any) error {
 	if len(mapFromValue(input[stepInputKeyStagePacket])) == 0 {
 		return convergenceDispatchMisalignmentError("missing stagePacket")
 	}
+	if err := validateConvergenceDispatchRequiredOutputSemantics(input); err != nil {
+		return err
+	}
 	return validateConvergenceDispatchFocusAlignment(input)
 }
 
@@ -503,6 +506,87 @@ func validateConvergenceDispatchFocusAlignment(input map[string]any) error {
 		}
 	}
 	return nil
+}
+
+func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) error {
+	if len(input) == 0 {
+		return nil
+	}
+	sources := map[string]map[string]any{
+		"requiredOutput":                     mapFromValue(input["requiredOutput"]),
+		"repairActionPackage.requiredOutput": mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":         mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+	}
+	state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state"))
+	top := firstRequiredOutputForSemantics(sources)
+	if len(top) == 0 {
+		return nil
+	}
+	topStateChanging := requiredOutputRequiresStateChanging(top)
+	topValidationOnly := requiredOutputValidationOnly(top)
+	if state == convergenceStateNeedStateChange && !topStateChanging {
+		return convergenceDispatchMisalignmentError("contractState=%s requires state-changing requiredOutput", state)
+	}
+	if state == convergenceStateNeedValidation && topStateChanging {
+		return convergenceDispatchMisalignmentError("contractState=%s has state-changing requiredOutput", state)
+	}
+	for label, required := range sources {
+		if len(required) == 0 {
+			continue
+		}
+		if requiredOutputRequiresStateChanging(required) != topStateChanging {
+			return convergenceDispatchMisalignmentError("requiredOutput state-changing mismatch: %s", label)
+		}
+		if requiredOutputValidationOnly(required) != topValidationOnly {
+			return convergenceDispatchMisalignmentError("requiredOutput validation-only mismatch: %s", label)
+		}
+		if topValidationOnly && requiredOutputAcceptsKind(required, "patch/apply") {
+			return convergenceDispatchMisalignmentError("validation-only requiredOutput accepts patch/apply: %s", label)
+		}
+	}
+	shape := strings.TrimSpace(stringFromMap(top, "contractViolationRequiredOutputShape"))
+	objective := strings.TrimSpace(stringFromMap(input, "repairObjective"))
+	switch shape {
+	case "bounded_validation_evidence":
+		if objective == repairObjectiveStateChangingOutput || boolValue(input["stateChangingOutputRequired"]) {
+			return convergenceDispatchMisalignmentError("bounded validation retry has state-changing objective")
+		}
+	case "bounded_failure_evidence":
+		if objective == repairObjectiveStateChangingOutput || boolValue(input["stateChangingOutputRequired"]) {
+			return convergenceDispatchMisalignmentError("bounded evidence retry has state-changing objective")
+		}
+	}
+	return nil
+}
+
+func firstRequiredOutputForSemantics(sources map[string]map[string]any) map[string]any {
+	for _, label := range []string{"requiredOutput", "repairActionPackage.requiredOutput", "stagePacket.requiredOutput"} {
+		if required := sources[label]; len(required) > 0 {
+			return required
+		}
+	}
+	return nil
+}
+
+func requiredOutputRequiresStateChanging(required map[string]any) bool {
+	if len(required) == 0 {
+		return false
+	}
+	return boolValue(required["mustIncludeStateChangingNode"])
+}
+
+func requiredOutputValidationOnly(required map[string]any) bool {
+	if len(required) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(required, "contractViolationRequiredOutputShape")) == "bounded_validation_evidence" {
+		return true
+	}
+	return boolValue(required["mustProduceConcreteValidationEvidence"]) && !requiredOutputRequiresStateChanging(required)
+}
+
+func requiredOutputAcceptsKind(required map[string]any, kind string) bool {
+	return stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), kind)
 }
 
 func validateRequiredOutputFocusAlignment(authorityFocus map[string]any, label string, required map[string]any) error {

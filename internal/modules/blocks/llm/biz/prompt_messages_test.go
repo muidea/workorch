@@ -874,9 +874,13 @@ func TestContractViolationRecoveryRendersInCurrentActionOnly(t *testing.T) {
 			"stateChangingOutputRequired": true,
 			"repairObjective":             "produce_state_changing_output",
 			"contractViolationRecovery": map[string]any{
-				"violatedRule":     "state_changing_required_missing",
-				"recoverability":   "retry_same_contract",
-				"expectedContract": map[string]any{"stateChangingOutputRequired": true},
+				"violatedRule":                  "state_changing_required_missing",
+				"recoverability":                "retry_same_contract",
+				"expectedContractAuthoritative": false,
+				"expectedContract":              map[string]any{"stateChangingOutputRequired": true},
+				"correctionContract": map[string]any{
+					"requiredOutputShape": "bounded_validation_evidence",
+				},
 				"actualOutputSummary": map[string]any{
 					"graphNodeKinds": []string{"file/read"},
 				},
@@ -901,11 +905,16 @@ func TestContractViolationRecoveryRendersInCurrentActionOnly(t *testing.T) {
 		"state_changing_required_missing",
 		"retry_same_contract",
 		"expectedContract",
+		"diagnostic lineage only",
+		"correctionContract",
 		"actualOutputSummary",
 	} {
 		if !strings.Contains(current.Content, want) {
 			t.Fatalf("current action missing %q: %s", want, current.Content)
 		}
+	}
+	if strings.Contains(current.Content, "satisfies contractViolationRecovery.expectedContract") {
+		t.Fatalf("current action treats diagnostic expectedContract as authoritative: %s", current.Content)
 	}
 	prompt := buildProviderFacingPrompt(req)
 	if strings.Contains(prompt.StablePrefix, "contractViolationRecovery") ||
@@ -1844,6 +1853,90 @@ func TestBuildProviderPromptMessagesPrioritizesStateChangingOverAssessmentOnly(t
 	}
 }
 
+func TestBuildProviderPromptMessagesKeepsCompleteRepairSnapshotUsable(t *testing.T) {
+	content := "package main\n\nfunc main() {\n\tprintln(\"ok\")\n}\n"
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-complete-snapshot",
+		RunID:          "run-complete-snapshot",
+		StepID:         "step-complete-snapshot",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             "produce_state_changing_output",
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                             []string{"patch/apply"},
+					"mustUseCurrentTargetSnapshot":              true,
+					"mustPatchDirectlyFromProvidedSnapshot":     true,
+					"directCompleteFileWriteFromPromptSnapshot": true,
+				},
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "target.go",
+					"content":          content,
+					"contentHash":      "sha256-target",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+					"redacted":         false,
+					"truncated":        false,
+					"isBinary":         false,
+				}},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	repair, ok := promptContextSectionByID(context, "C3.repair-action-package")
+	if !ok {
+		t.Fatalf("missing repair action package section; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{
+		`"contentView":"complete"`,
+		`"promptContentComplete":true`,
+		`"promptSafeForFileWrite":true`,
+		`"promptExtractionRequired":false`,
+		`"mustUseCurrentTargetSnapshot":true`,
+		`"mustPatchDirectlyFromProvidedSnapshot":true`,
+		`"directCompleteFileWriteFromPromptSnapshot":true`,
+	} {
+		if !strings.Contains(repair.Content, want) {
+			t.Fatalf("repair prompt missing %q: %s", want, repair.Content)
+		}
+	}
+	for _, forbidden := range []string{
+		`"contentOmitted":true`,
+		`"promptSnapshotContentIncomplete":true`,
+		`"mustNotUsePromptSnapshotForCompleteFileWrite":true`,
+		`"mustUseCurrentTargetSnapshot":false`,
+		`"mustPatchDirectlyFromProvidedSnapshot":false`,
+	} {
+		if strings.Contains(repair.Content, forbidden) {
+			t.Fatalf("repair prompt contains forbidden %q: %s", forbidden, repair.Content)
+		}
+	}
+
+	stage, ok := promptContextSectionByID(context, "C3.stage-contract")
+	if !ok {
+		t.Fatalf("missing stage contract section; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	if !strings.Contains(stage.Content, `"mustPatchDirectlyFromProvidedSnapshot":true`) ||
+		strings.Contains(stage.Content, `"promptSnapshotContentIncomplete":true`) {
+		t.Fatalf("stage contract did not keep complete snapshot contract: %s", stage.Content)
+	}
+
+	current, ok := promptContextSectionByID(context, "C4.current-action")
+	if !ok {
+		t.Fatalf("missing current action section; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	if !strings.Contains(current.Content, `"promptContentComplete":true`) ||
+		!strings.Contains(current.Content, `"promptSafeForFileWrite":true`) ||
+		strings.Contains(current.Content, `"promptExtractionRequired":true`) {
+		t.Fatalf("current action did not keep complete snapshot available: %s", current.Content)
+	}
+}
+
 func TestBuildProviderPromptMessagesMarksTruncatedRepairSnapshotUnsafe(t *testing.T) {
 	longContent := "package main\n" + strings.Repeat("x", repairSnapshotPromptContentLimit+64)
 	req := llmmodels.ProviderRequest{
@@ -1974,16 +2067,17 @@ func TestBuildProviderPromptMessagesUsesProviderProfileSnapshotBudget(t *testing
 		t.Fatalf("missing repair action package section; sections=%+v", promptContextSectionIDsForTest(context))
 	}
 	if strings.Contains(repair.Content, "contentTruncatedForPrompt") ||
-		strings.Contains(repair.Content, `"content":"`) ||
-		strings.Contains(repair.Content, `"contentView":"complete"`) {
-		t.Fatalf("repair prompt unexpectedly included provider-budgeted snapshot body: %s", repair.Content)
+		strings.Contains(repair.Content, `"contentOmitted":true`) ||
+		strings.Contains(repair.Content, `"promptSnapshotContentIncomplete":true`) {
+		t.Fatalf("repair prompt unexpectedly treated provider-budgeted snapshot as incomplete: %s", repair.Content)
 	}
 	for _, want := range []string{
-		`"contentOmitted":true`,
 		`"snapshotRef":"snapshot://target/target.txt#sha256-target"`,
-		`"promptSnapshotContentIncomplete":true`,
-		`"mustUseCurrentTargetSnapshot":false`,
-		`"mustPatchDirectlyFromProvidedSnapshot":false`,
+		`"contentView":"complete"`,
+		`"promptContentComplete":true`,
+		`"promptSafeForFileWrite":true`,
+		`"mustUseCurrentTargetSnapshot":true`,
+		`"mustPatchDirectlyFromProvidedSnapshot":true`,
 	} {
 		if !strings.Contains(repair.Content, want) {
 			t.Fatalf("repair prompt missing %q: %s", want, repair.Content)
