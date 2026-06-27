@@ -12,7 +12,11 @@ import (
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-var shellAssignmentPattern = regexp.MustCompile(`(?m)([a-z_][a-z0-9_]*)=("[^"]*"|'[^']*'|[^ \t\r\n;]+)`)
+var (
+	shellAssignmentPattern        = regexp.MustCompile(`(?m)([a-z_][a-z0-9_]*)=("[^"]*"|'[^']*'|[^ \t\r\n;]+)`)
+	shellHereDocRedirectPattern   = regexp.MustCompile(`<<-?\s*(?:'([^']+)'|"([^"]+)"|\\?([A-Za-z_][A-Za-z0-9_.-]*))`)
+	shellHereDocMaskedBodyComment = "# workorch heredoc body masked"
+)
 
 func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, output map[string]any) error {
 	if run == nil || step == nil || output == nil || step.Kind != initialStepKind(run) {
@@ -285,7 +289,7 @@ func validateConcreteValidationRouteOutputContract(step *runModel.Step, output m
 	switch route {
 	case runtimemodel.ValidationRouteManagedHarness:
 		if !hasGraph || !graphHasManagedValidationNode(graph) {
-			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "managed validation route requires validation/managed_session or runtimeManaged managedValidation executionGraph node")
+			return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleManagedValidationRequired, "managed validation route requires validation/managed_session or runtimeManaged managedValidation executionGraph node")
 		}
 	case runtimemodel.ValidationRouteRuntimeAction:
 		if hasGraph {
@@ -454,10 +458,31 @@ func validateConcreteValidationBehaviorEvidenceGraph(step *runModel.Step, graph 
 		!boolValue(required["mustDeclareValidationEvidenceObservation"]) {
 		return nil
 	}
-	if graphHasDeclaredConcreteValidationEvidenceNode(graph) {
-		return validateConcreteValidationGraphShellSafety(step, graph)
+	if err := validateConcreteValidationGraphEvidenceMetadata(graph); err != nil {
+		return err
 	}
-	return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair returned executionGraph without a declared non-static validationEvidence contract; shell/command or mcp/tool_call nodes must declare validationEvidence.mode and validationEvidence.observationType, and controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute")
+	return validateConcreteValidationGraphShellSafety(step, graph)
+}
+
+func validateConcreteValidationGraphEvidenceMetadata(graph runtimemodel.BlockExecutionGraph) error {
+	hasEvidenceProducer := false
+	for _, node := range graph.Nodes {
+		kind := canonicalRuntimeGraphNodeKind(node.Kind)
+		if graphNodeIsReadOnlyEvidenceSupportKind(kind) {
+			continue
+		}
+		switch kind {
+		case "shell/command", "mcp/tool_call":
+			hasEvidenceProducer = true
+			if !nodeValidationEvidenceContractIsConcrete(node) {
+				return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationEvidenceMetadataMissing, "concrete validation evidence repair returned executionGraph with a validation node missing declared non-static validationEvidence contract; every shell/command or mcp/tool_call producer must declare validationEvidence.mode and validationEvidence.observationType, and controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute")
+			}
+		}
+	}
+	if !hasEvidenceProducer {
+		return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationEvidenceMetadataMissing, "concrete validation evidence repair returned executionGraph without a declared non-static validationEvidence contract; shell/command or mcp/tool_call nodes must declare validationEvidence.mode and validationEvidence.observationType, and controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute")
+	}
+	return nil
 }
 
 func validateConcreteValidationGraphShellSafety(step *runModel.Step, graph runtimemodel.BlockExecutionGraph) error {
@@ -470,18 +495,19 @@ func validateConcreteValidationGraphShellSafety(step *runModel.Step, graph runti
 		if commandLine == "" {
 			continue
 		}
-		if shellCommandLineContainsProcessTermination(commandLine) {
-			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence graph must use non-destructive bounded validation; shell process termination is not allowed")
+		executableCommandLine := shellCommandLineMaskHereDocBodies(commandLine)
+		if shellCommandLineContainsProcessTermination(executableCommandLine) {
+			return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationProcessControlForbidden, "concrete validation evidence graph must use non-destructive bounded validation; shell process termination is not allowed")
 		}
-		if shellCommandLineStartsDetachedProcess(commandLine) {
-			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence graph must not start detached or background processes; use a bounded foreground command, timeout-controlled harness, or controlled substitute")
+		if shellCommandLineStartsDetachedProcess(executableCommandLine) {
+			return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationDetachedProcessForbidden, "concrete validation evidence graph must not start detached or background processes; use a bounded foreground command, timeout-controlled harness, or controlled substitute")
 		}
 		allowScratchWrites := validationEvidenceModeAllowsScratchWrites(nodeValidationEvidenceMode(node))
-		if shellCommandLineContainsWorkspaceFileMutation(commandLine, allowScratchWrites, validationScratchDir) {
+		if shellCommandLineContainsWorkspaceFileMutation(executableCommandLine, allowScratchWrites, validationScratchDir) {
 			if allowScratchWrites && validationScratchDir == "" {
-				return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence graph with controlled substitute writes requires runtime validationScratchDir")
+				return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationScratchRequired, "concrete validation evidence graph with controlled substitute writes requires runtime validationScratchDir")
 			}
-			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence graph must not mutate workspace files or write outside validationScratchDir through shell/command; use patch/apply for file state changes and keep validation shell commands read-only or scratch-bounded")
+			return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationScratchEscape, "concrete validation evidence graph must not mutate workspace files or write outside validationScratchDir through shell/command; use patch/apply for file state changes and keep validation shell commands read-only or scratch-bounded")
 		}
 	}
 	return nil
@@ -558,6 +584,7 @@ func shellCommandLineStartsDetachedProcess(commandLine string) bool {
 }
 
 func shellCommandLineContainsWorkspaceFileMutation(commandLine string, allowScratchWrites bool, validationScratchDir string) bool {
+	commandLine = shellCommandLineMaskHereDocBodies(commandLine)
 	lower := strings.ToLower(strings.TrimSpace(commandLine))
 	if lower == "" {
 		return false
@@ -596,6 +623,7 @@ func shellCommandLineContainsWorkspaceFileMutation(commandLine string, allowScra
 }
 
 func shellCommandLineContainsWorkspaceFileMutationOutsideValidationScratch(commandLine string, validationScratchDir string) bool {
+	commandLine = shellCommandLineMaskHereDocBodies(commandLine)
 	scratchAliases := shellCommandLineValidationScratchAliases(commandLine, validationScratchDir)
 	inScratchCWD := false
 	for _, segment := range strings.FieldsFunc(commandLine, func(r rune) bool {
@@ -644,6 +672,50 @@ func shellCommandLineContainsWorkspaceFileMutationOutsideValidationScratch(comma
 		}
 	}
 	return false
+}
+
+func shellCommandLineMaskHereDocBodies(commandLine string) string {
+	if strings.TrimSpace(commandLine) == "" || !strings.Contains(commandLine, "<<") {
+		return commandLine
+	}
+	lines := strings.Split(commandLine, "\n")
+	masked := make([]string, 0, len(lines))
+	var terminators []string
+	for _, line := range lines {
+		if len(terminators) > 0 {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == terminators[0] {
+				masked = append(masked, line)
+				terminators = terminators[1:]
+				if len(terminators) == 0 {
+					terminators = shellCommandLineHereDocTerminators(line)
+				}
+				continue
+			}
+			masked = append(masked, shellHereDocMaskedBodyComment)
+			continue
+		}
+		masked = append(masked, line)
+		terminators = shellCommandLineHereDocTerminators(line)
+	}
+	return strings.Join(masked, "\n")
+}
+
+func shellCommandLineHereDocTerminators(line string) []string {
+	matches := shellHereDocRedirectPattern.FindAllStringSubmatch(line, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(matches))
+	for _, match := range matches {
+		for idx := 1; idx < len(match); idx++ {
+			if value := strings.TrimSpace(match[idx]); value != "" {
+				ret = append(ret, value)
+				break
+			}
+		}
+	}
+	return ret
 }
 
 func shellCommandLineReferencesValidationScratch(commandLine string, validationScratchDir string) bool {
@@ -846,18 +918,6 @@ func shellCommandLineContainsStandaloneAmpersand(commandLine string) bool {
 		nextBoundary := nextIdx >= len(commandLine) || strings.ContainsRune(" \t\r\n;(){}|", rune(commandLine[nextIdx]))
 		if prevBoundary && nextBoundary {
 			return true
-		}
-	}
-	return false
-}
-
-func graphHasDeclaredConcreteValidationEvidenceNode(graph runtimemodel.BlockExecutionGraph) bool {
-	for _, node := range graph.Nodes {
-		switch strings.TrimSpace(node.Kind) {
-		case "shell/command", "mcp/tool_call":
-			if nodeValidationEvidenceContractIsConcrete(node) {
-				return true
-			}
 		}
 	}
 	return false

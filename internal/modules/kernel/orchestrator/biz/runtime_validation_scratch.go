@@ -8,6 +8,7 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const validationScratchDirKey = "validationScratchDir"
@@ -44,6 +45,25 @@ func concreteValidationEvidenceRequiredOutputWithScratch(input map[string]any, p
 	required := concreteValidationEvidenceRequiredOutput(existing)
 	ensureConcreteValidationScratchContract(input, pkg, required)
 	applyRepairCoverageFocusContract(input, pkg, required)
+	return required
+}
+
+func managedValidationEvidenceRequiredOutputWithScratch(input map[string]any, pkg map[string]any, existing map[string]any) map[string]any {
+	required := concreteValidationEvidenceRequiredOutputWithScratch(input, pkg, existing)
+	required["validationRoute"] = runtimemodel.ValidationRouteManagedHarness
+	required["mustUseManagedHarness"] = true
+	required["acceptedKinds"] = []string{managedValidationSessionNodeKind}
+	required["acceptedKindsOnly"] = true
+	required["allowedOutputShapes"] = []string{"executionGraph_with_managed_validation_session"}
+	required["forbiddenOutputShapes"] = []string{"plain_shell_validation", "top_level_shellCommands"}
+	required["managedValidation"] = map[string]any{
+		"scratchRequired": true,
+		"timeoutRequired": true,
+		"cleanupPolicy":   "process_group_on_timeout_or_completion",
+		"portAllocation":  "optional",
+	}
+	required["managedValidationRule"] = "return validation/managed_session only; runtime owns scratch, timeout, cleanup, and optional port allocation for this retry"
+	delete(required, "validationEvidenceNodeExample")
 	return required
 }
 

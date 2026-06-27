@@ -166,6 +166,13 @@ func allowedValidationDiagnosticClass(value string) string {
 		runtimemodel.ValidationDiagnosticOutputInconclusive,
 		runtimemodel.ValidationDiagnosticEvidenceBindingMissing,
 		runtimemodel.ValidationDiagnosticContractViolation,
+		runtimemodel.ValidationDiagnosticEvidenceMetadataMissing,
+		runtimemodel.ValidationDiagnosticScratchRequired,
+		runtimemodel.ValidationDiagnosticScratchEscape,
+		runtimemodel.ValidationDiagnosticProcessControlForbidden,
+		runtimemodel.ValidationDiagnosticDetachedProcessForbidden,
+		runtimemodel.ValidationDiagnosticShellSafetyUnproven,
+		runtimemodel.ValidationDiagnosticManagedValidationRequired,
 		runtimemodel.ValidationDiagnosticImplementationGap,
 		runtimemodel.ValidationDiagnosticExternalDependency,
 		runtimemodel.ValidationDiagnosticProviderTransient,
@@ -192,7 +199,14 @@ func defaultValidationDiagnosticTargetType(class string) string {
 		return runtimemodel.ValidationEvidenceTargetValidationOutput
 	case runtimemodel.ValidationDiagnosticTestFailed:
 		return runtimemodel.ValidationEvidenceTargetBehaviorEvidence
-	case runtimemodel.ValidationDiagnosticContractViolation:
+	case runtimemodel.ValidationDiagnosticContractViolation,
+		runtimemodel.ValidationDiagnosticEvidenceMetadataMissing,
+		runtimemodel.ValidationDiagnosticScratchRequired,
+		runtimemodel.ValidationDiagnosticScratchEscape,
+		runtimemodel.ValidationDiagnosticProcessControlForbidden,
+		runtimemodel.ValidationDiagnosticDetachedProcessForbidden,
+		runtimemodel.ValidationDiagnosticShellSafetyUnproven,
+		runtimemodel.ValidationDiagnosticManagedValidationRequired:
 		return runtimemodel.ValidationEvidenceTargetCommandContract
 	case runtimemodel.ValidationDiagnosticImplementationGap:
 		return runtimemodel.ValidationEvidenceTargetFailureSurface

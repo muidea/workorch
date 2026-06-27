@@ -11,21 +11,28 @@ import (
 )
 
 const (
-	contractViolationRuleRequiredOutputMissing         = "required_output_missing"
-	contractViolationRuleWrongOutputShape              = "wrong_output_shape"
-	contractViolationRuleAcceptedKindMismatch          = "accepted_kind_mismatch"
-	contractViolationRuleStateChangingRequiredMissing  = "state_changing_required_missing"
-	contractViolationRuleConcreteValidationMissing     = "concrete_validation_contract_missing"
-	contractViolationRuleDoDAssessmentEvidenceMissing  = "dod_assessment_missing_evidence_refs"
-	contractViolationRuleCoverageAssessmentIncomplete  = "coverage_assessment_incomplete"
-	contractViolationRuleCoverageMapIncomplete         = "coverage_map_incomplete"
-	contractViolationRuleTraceabilityRefMismatch       = "traceability_ref_mismatch"
-	contractViolationRuleDecisionBlockedWhenActionable = "decision_blocked_when_actionable"
-	contractViolationRuleUnsafeOutput                  = "unsafe_output"
-	contractViolationRuleUnparseableOutput             = runtimemodel.ContractViolationRuleUnparseableOutput
-	contractViolationRulePatchApplyContractFailed      = "patch_apply_contract_failed"
-	contractViolationRuleAvailableSnapshotIgnored      = "available_snapshot_ignored"
-	contractViolationRuleRuntimeContract               = "runtime_contract_violation"
+	contractViolationRuleRequiredOutputMissing              = "required_output_missing"
+	contractViolationRuleWrongOutputShape                   = "wrong_output_shape"
+	contractViolationRuleAcceptedKindMismatch               = "accepted_kind_mismatch"
+	contractViolationRuleStateChangingRequiredMissing       = "state_changing_required_missing"
+	contractViolationRuleConcreteValidationMissing          = "concrete_validation_contract_missing"
+	contractViolationRuleValidationEvidenceMetadataMissing  = "validation_evidence_metadata_missing"
+	contractViolationRuleValidationScratchRequired          = "validation_scratch_required"
+	contractViolationRuleValidationScratchEscape            = "validation_scratch_escape"
+	contractViolationRuleValidationProcessControlForbidden  = "validation_process_control_forbidden"
+	contractViolationRuleValidationDetachedProcessForbidden = "validation_detached_process_forbidden"
+	contractViolationRuleValidationShellSafetyUnproven      = "validation_shell_safety_unproven"
+	contractViolationRuleManagedValidationRequired          = "managed_validation_required"
+	contractViolationRuleDoDAssessmentEvidenceMissing       = "dod_assessment_missing_evidence_refs"
+	contractViolationRuleCoverageAssessmentIncomplete       = "coverage_assessment_incomplete"
+	contractViolationRuleCoverageMapIncomplete              = "coverage_map_incomplete"
+	contractViolationRuleTraceabilityRefMismatch            = "traceability_ref_mismatch"
+	contractViolationRuleDecisionBlockedWhenActionable      = "decision_blocked_when_actionable"
+	contractViolationRuleUnsafeOutput                       = "unsafe_output"
+	contractViolationRuleUnparseableOutput                  = runtimemodel.ContractViolationRuleUnparseableOutput
+	contractViolationRulePatchApplyContractFailed           = "patch_apply_contract_failed"
+	contractViolationRuleAvailableSnapshotIgnored           = "available_snapshot_ignored"
+	contractViolationRuleRuntimeContract                    = "runtime_contract_violation"
 
 	stepOutputKeyContractViolation        = "contractViolation"
 	stepInputKeyContractViolationRecovery = "contractViolationRecovery"
@@ -42,11 +49,19 @@ type runtimeContractViolationError struct {
 }
 
 func newRuntimeContractViolationError(violationType string, message string) error {
+	return newRuntimeContractViolationRuleError(violationType, contractViolationRuleFromType(violationType), message)
+}
+
+func newRuntimeContractViolationRuleError(violationType string, rule string, message string) error {
+	rule = strings.TrimSpace(rule)
+	if rule == "" {
+		rule = contractViolationRuleFromType(violationType)
+	}
 	return runtimeContractViolationError{
 		cause:          fmt.Errorf("%w: %s", common.ErrInvalidArgument, strings.TrimSpace(message)),
 		violationType:  strings.TrimSpace(violationType),
-		rule:           contractViolationRuleFromType(violationType),
-		recoverability: contractViolationRecoverabilityForRule(contractViolationRuleFromType(violationType)),
+		rule:           rule,
+		recoverability: contractViolationRecoverabilityForRule(rule),
 	}
 }
 
@@ -355,7 +370,7 @@ func normalizeCurrentActionContract(input map[string]any, failedStep *runModel.S
 	contract := mapFromValue(recovery["correctionContract"])
 	shape := strings.TrimSpace(stringFromMap(contract, "requiredOutputShape"))
 	switch shape {
-	case "bounded_validation_evidence":
+	case "bounded_validation_evidence", "managed_validation_evidence":
 		return normalizeCurrentActionValidationEvidenceContract(input, failedStep, recovery)
 	case "bounded_failure_evidence":
 		return normalizeCurrentActionFailureEvidenceContract(input, failedStep, recovery)
@@ -492,6 +507,8 @@ func forcedNarrowContractViolationRequiredOutput(input map[string]any, failedSte
 	switch shape {
 	case "bounded_validation_evidence":
 		return concreteValidationEvidenceRequiredOutputWithScratch(input, pkg, existing)
+	case "managed_validation_evidence":
+		return managedValidationEvidenceRequiredOutputWithScratch(input, pkg, existing)
 	case "valid_patch_apply",
 		"state_changing_output",
 		"state_changing_output_from_available_snapshot":
@@ -746,6 +763,12 @@ func contractViolationRuleFromStep(step *runModel.Step) string {
 		return contractViolationRuleRuntimeContract
 	}
 	output := step.Output
+	if rule := strings.TrimSpace(stringFromMap(output, "contractViolationRule")); rule != "" {
+		return rule
+	}
+	if rule := strings.TrimSpace(stringFromMap(mapFromValue(output[stepOutputKeyContractViolation]), "violatedRule")); rule != "" {
+		return rule
+	}
 	switch strings.TrimSpace(stringFromMap(output, outputKeyContractViolationType)) {
 	case contractViolationRepairNoStateChangingOutput,
 		contractViolationRepairGraphWithoutPatchApply,
@@ -805,6 +828,12 @@ func contractViolationRecoverabilityForRule(rule string) string {
 		return runtimemodel.ContractViolationRecoverabilityFailFast
 	case contractViolationRuleAcceptedKindMismatch:
 		return runtimemodel.ContractViolationRecoverabilityNarrowContract
+	case contractViolationRuleManagedValidationRequired,
+		contractViolationRuleValidationScratchEscape,
+		contractViolationRuleValidationProcessControlForbidden,
+		contractViolationRuleValidationDetachedProcessForbidden,
+		contractViolationRuleValidationShellSafetyUnproven:
+		return runtimemodel.ContractViolationRecoverabilityNarrowContract
 	case contractViolationRuleTraceabilityRefMismatch:
 		return runtimemodel.ContractViolationRecoverabilityNormalizeThenRetry
 	case contractViolationRuleCoverageAssessmentIncomplete:
@@ -820,6 +849,20 @@ func contractViolationRetryHint(rule string) string {
 		return "return output that satisfies stateChangingOutputRequired and requiredOutput without repeating a read-only graph"
 	case contractViolationRuleConcreteValidationMissing:
 		return "return bounded concrete validation evidence with validationEvidence mode and observation metadata"
+	case contractViolationRuleValidationEvidenceMetadataMissing:
+		return "return concrete validation evidence with validationEvidence.mode and validationEvidence.observationType on every validation node"
+	case contractViolationRuleValidationScratchRequired:
+		return "return scratch-bounded validation evidence using the runtime validationScratchDir contract"
+	case contractViolationRuleValidationScratchEscape:
+		return "keep controlled substitute and validation output writes inside validationScratchDir or use managed validation"
+	case contractViolationRuleValidationProcessControlForbidden:
+		return "use a runtime-managed validation session or a bounded foreground command without kill/pkill/killall/fuser -k"
+	case contractViolationRuleValidationDetachedProcessForbidden:
+		return "use validation/managed_session or a bounded foreground command instead of nohup, setsid, or background processes"
+	case contractViolationRuleValidationShellSafetyUnproven:
+		return "return validation/managed_session so runtime can provide scratch, timeout, cleanup, and bounded execution"
+	case contractViolationRuleManagedValidationRequired:
+		return "return validation/managed_session only; plain shell/command is not accepted for this validation route"
 	case contractViolationRuleDoDAssessmentEvidenceMissing, contractViolationRuleCoverageMapIncomplete:
 		return "rewrite the assessment so every satisfied item has traceable evidenceRefs and current coverage"
 	case contractViolationRuleUnparseableOutput:
@@ -839,6 +882,20 @@ func contractViolationForbiddenRepeat(rule string) []string {
 		return []string{"read-only graph without accepted state-changing evidence", "dodAssessment without required executable output"}
 	case contractViolationRuleConcreteValidationMissing:
 		return []string{"validation graph without validationEvidence contract", "detached or unbounded validation command"}
+	case contractViolationRuleValidationEvidenceMetadataMissing:
+		return []string{"validation node without validationEvidence.mode or validationEvidence.observationType"}
+	case contractViolationRuleValidationScratchRequired:
+		return []string{"controlled substitute write without runtime validationScratchDir"}
+	case contractViolationRuleValidationScratchEscape:
+		return []string{"workspace-mutating validation shell", "write outside validationScratchDir"}
+	case contractViolationRuleValidationProcessControlForbidden:
+		return []string{"kill/pkill/killall/fuser -k in validation shell"}
+	case contractViolationRuleValidationDetachedProcessForbidden:
+		return []string{"nohup/setsid/background process in validation shell"}
+	case contractViolationRuleValidationShellSafetyUnproven:
+		return []string{"complex shell validation that cannot be statically proven safe"}
+	case contractViolationRuleManagedValidationRequired:
+		return []string{"plain shell/command when managed validation route is mandatory"}
 	case contractViolationRuleDoDAssessmentEvidenceMissing:
 		return []string{"satisfied assessment item without evidenceRefs"}
 	case contractViolationRuleUnparseableOutput:
@@ -876,7 +933,14 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_state_changing_node", "patch/apply", "accepted_state_changing_tool_or_shell", "incremental_artifact_state_change")
 		contract["forbiddenOutputs"] = append([]string{"read_only_executionGraph", "failed_dodAssessment_only", "same_actualOutputSummary"}, contractViolationForbiddenContinuableBlockers()...)
 		contract["mustSatisfy"] = []string{"stateChangingOutputRequired", "repairActionPackage.requiredOutput"}
-	case contractViolationRuleConcreteValidationMissing:
+	case contractViolationRuleConcreteValidationMissing,
+		contractViolationRuleValidationEvidenceMetadataMissing,
+		contractViolationRuleValidationScratchRequired,
+		contractViolationRuleValidationScratchEscape,
+		contractViolationRuleValidationProcessControlForbidden,
+		contractViolationRuleValidationDetachedProcessForbidden,
+		contractViolationRuleValidationShellSafetyUnproven,
+		contractViolationRuleManagedValidationRequired:
 		profileID = "concrete_validation_evidence"
 		contract["requiredOutputShape"] = "bounded_validation_evidence"
 		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_declared_validationEvidence", "executionGraph_with_managed_validation_session", "satisfied_dodAssessment_with_concrete_evidenceRefs")
@@ -884,6 +948,10 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 		contract["forbiddenOutputs"] = append([]string{"static_inspection_only", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}, contractViolationForbiddenContinuableBlockers()...)
 		if scratch := validationScratchDirFromStep(step); scratch != "" {
 			contract[validationScratchDirKey] = scratch
+		}
+		if contractViolationRuleRequiresManagedValidationNarrow(rule) && mode == contractViolationCorrectionModeForcedNarrow {
+			profileID = "managed_validation_evidence"
+			applyManagedValidationCorrectionContract(contract)
 		}
 	case contractViolationRulePatchApplyContractFailed:
 		profileID = "patch_apply_contract"
@@ -941,6 +1009,37 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 		"mode":        mode,
 		"targetScope": targetScope,
 		"contract":    contract,
+	}
+}
+
+func contractViolationRuleRequiresManagedValidationNarrow(rule string) bool {
+	switch strings.TrimSpace(rule) {
+	case contractViolationRuleValidationScratchEscape,
+		contractViolationRuleValidationProcessControlForbidden,
+		contractViolationRuleValidationDetachedProcessForbidden,
+		contractViolationRuleValidationShellSafetyUnproven,
+		contractViolationRuleManagedValidationRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+func applyManagedValidationCorrectionContract(contract map[string]any) {
+	if contract == nil {
+		return
+	}
+	contract["requiredOutputShape"] = "managed_validation_evidence"
+	contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_managed_validation_session")
+	contract["requiredFields"] = []string{"validation/managed_session", "validationEvidence.mode", "validationEvidence.observationType"}
+	contract["forbiddenOutputs"] = append([]string{"plain_shell_validation", "top_level_shellCommands", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}, contractViolationForbiddenContinuableBlockers()...)
+	contract["validationRoute"] = runtimemodel.ValidationRouteManagedHarness
+	contract["mustUseManagedHarness"] = true
+	contract["managedValidation"] = map[string]any{
+		"scratchRequired": true,
+		"timeoutRequired": true,
+		"cleanupPolicy":   "process_group_on_timeout_or_completion",
+		"portAllocation":  "optional",
 	}
 }
 

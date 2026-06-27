@@ -658,6 +658,13 @@ func runtimeRepairExhaustionDecisionNotEligible(run *runModel.Run, failedStep *r
 func continuableContractViolationRule(rule string) bool {
 	switch strings.TrimSpace(rule) {
 	case contractViolationRuleConcreteValidationMissing,
+		contractViolationRuleValidationEvidenceMetadataMissing,
+		contractViolationRuleValidationScratchRequired,
+		contractViolationRuleValidationScratchEscape,
+		contractViolationRuleValidationProcessControlForbidden,
+		contractViolationRuleValidationDetachedProcessForbidden,
+		contractViolationRuleValidationShellSafetyUnproven,
+		contractViolationRuleManagedValidationRequired,
 		contractViolationRuleCoverageAssessmentIncomplete,
 		contractViolationRuleStateChangingRequiredMissing,
 		contractViolationRulePatchApplyContractFailed,

@@ -2384,6 +2384,68 @@ func TestValidateLLMExecutionOutputContractManagedRouteRejectsPlainShellGraph(t 
 	if err == nil || !strings.Contains(err.Error(), "managed validation route requires") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want managed route contract rejection", err)
 	}
+	var violation runtimeContractViolationError
+	if !errors.As(err, &violation) || violation.rule != contractViolationRuleManagedValidationRequired {
+		t.Fatalf("contract violation = %+v, want rule %s", violation, contractViolationRuleManagedValidationRequired)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsMixedValidationGraphMissingEvidenceMetadata(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-validation-mixed-metadata",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-validation-mixed-metadata/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "declared-validation",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "printf ok"},
+					"validationEvidence": map[string]any{
+						"mode":            "runtime_behavior",
+						"observationType": "runtime_observation",
+					},
+				},
+			}, {
+				"id":   "missing-validation-metadata",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "printf also-ok"},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "validation node missing") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want metadata contract rejection", err)
+	}
+	var violation runtimeContractViolationError
+	if !errors.As(err, &violation) || violation.rule != contractViolationRuleValidationEvidenceMetadataMissing {
+		t.Fatalf("contract violation = %+v, want rule %s", violation, contractViolationRuleValidationEvidenceMetadataMissing)
+	}
 }
 
 func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithProcessTermination(t *testing.T) {
@@ -2843,6 +2905,128 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteScratchSetu
 
 	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want scratch setup and heredoc writes allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsScratchBoundHereDocBodyOperators(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/heredoc-body-operators"
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-heredoc-body-operators",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-heredoc-body-operators/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					validationScratchDirKey:                    scratch,
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "capture-probe",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args": []string{"-c", strings.Join([]string{
+						`set -eu`,
+						`scratch="/tmp/workorch-validation-test/heredoc-body-operators"`,
+						`mkdir -p "$scratch"`,
+						`probe="$scratch/probe.txt"`,
+						`cat > "$probe" <<'EOF'`,
+						`if idx > 0 {`,
+						`  value := "mkdir outside and kill are text inside the here-doc body"`,
+						`}`,
+						`EOF`,
+						`cat "$probe" >/dev/null`,
+					}, "\n")},
+					"validationEvidence": map[string]any{
+						"mode":            "controlled_substitute",
+						"observationType": "controlled_substitute_observation",
+						"substituteFor":   "temporary validation probe under validationScratchDir",
+					},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want scratch-bound here-doc body operators ignored", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsHereDocTargetOutsideScratch(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/heredoc-target-outside"
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-heredoc-target-outside",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-heredoc-target-outside/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					validationScratchDirKey:                    scratch,
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "capture-probe",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args": []string{"-c", strings.Join([]string{
+						`cat > validation.log <<'EOF'`,
+						`idx > 0`,
+						`EOF`,
+					}, "\n")},
+					"validationEvidence": map[string]any{
+						"mode":            "controlled_substitute",
+						"observationType": "controlled_substitute_observation",
+						"substituteFor":   "temporary validation probe under validationScratchDir",
+					},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "write outside validationScratchDir") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want here-doc target outside scratch rejected", err)
+	}
+	var violation runtimeContractViolationError
+	if !errors.As(err, &violation) || violation.rule != contractViolationRuleValidationScratchEscape {
+		t.Fatalf("contract violation = %+v, want rule %s", violation, contractViolationRuleValidationScratchEscape)
 	}
 }
 

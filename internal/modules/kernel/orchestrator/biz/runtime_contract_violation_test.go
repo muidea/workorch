@@ -908,8 +908,9 @@ func TestContractViolationRetryForcedNarrowValidationRequiredOutput(t *testing.T
 			"stage":                        "runtime_contract_failed",
 			"error":                        "concrete validation evidence graph must not start detached or background processes",
 			outputKeyContractViolationType: contractViolationValidationEvidenceRequired,
+			"contractViolationRule":        contractViolationRuleValidationDetachedProcessForbidden,
 			failureOutputKeyClass:          failureClassRuntime,
-			failureOutputKeySignature:      "class=runtime_failed|stage=runtime_contract_failed|rule=concrete_validation_contract_missing",
+			failureOutputKeySignature:      "class=runtime_failed|stage=runtime_contract_failed|rule=validation_detached_process_forbidden",
 		},
 	}
 	attachContractViolationDiagnostics(run, failed, errors.New("concrete validation evidence graph must not start detached or background processes"))
@@ -926,32 +927,38 @@ func TestContractViolationRetryForcedNarrowValidationRequiredOutput(t *testing.T
 	}
 	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
 	if required["contractViolationRetryNarrowed"] != true ||
-		stringFromMap(required, "contractViolationRequiredOutputShape") != "bounded_validation_evidence" {
-		t.Fatalf("requiredOutput = %+v, want forced-narrow bounded validation marker", required)
+		stringFromMap(required, "contractViolationRequiredOutputShape") != "managed_validation_evidence" {
+		t.Fatalf("requiredOutput = %+v, want forced-narrow managed validation marker", required)
 	}
 	if required["mustProduceConcreteValidationEvidence"] != true || required["mustIncludeStateChangingNode"] != false {
 		t.Fatalf("requiredOutput = %+v, want validation-only output contract", required)
 	}
-	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "shell/command") ||
-		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
-		t.Fatalf("requiredOutput.acceptedKinds = %+v, want bounded validation tools only", required["acceptedKinds"])
+	if stringFromMap(required, "validationRoute") != runtimemodel.ValidationRouteManagedHarness ||
+		required["mustUseManagedHarness"] != true {
+		t.Fatalf("requiredOutput = %+v, want managed validation route", required)
 	}
-	if !stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") ||
-		!stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "file_mutating_shell_validation") {
-		t.Fatalf("requiredOutput.forbiddenKinds = %+v, want state-changing and mutating validation forbidden", required["forbiddenKinds"])
+	if got := stringSliceFromValue(required["acceptedKinds"]); len(got) != 1 || got[0] != managedValidationSessionNodeKind {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want managed session only", required["acceptedKinds"])
+	}
+	if !stringSliceContains(stringSliceFromValue(required["forbiddenOutputShapes"]), "plain_shell_validation") {
+		t.Fatalf("requiredOutput.forbiddenOutputShapes = %+v, want plain shell forbidden", required["forbiddenOutputShapes"])
 	}
 	topRequired := mapFromValue(input["requiredOutput"])
 	if topRequired["contractViolationRetryNarrowed"] != true ||
 		topRequired["mustProduceConcreteValidationEvidence"] != true ||
 		topRequired["mustIncludeStateChangingNode"] != false ||
-		stringSliceContains(stringSliceFromValue(topRequired["acceptedKinds"]), "patch/apply") {
+		stringFromMap(topRequired, "validationRoute") != runtimemodel.ValidationRouteManagedHarness ||
+		!stringSliceContains(stringSliceFromValue(topRequired["acceptedKinds"]), managedValidationSessionNodeKind) ||
+		stringSliceContains(stringSliceFromValue(topRequired["acceptedKinds"]), "shell/command") {
 		t.Fatalf("top-level requiredOutput = %+v, want same forced-narrow validation contract", topRequired)
 	}
 	stageRequired := mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"])
 	if stageRequired["contractViolationRetryNarrowed"] != true ||
 		stageRequired["mustProduceConcreteValidationEvidence"] != true ||
 		stageRequired["mustIncludeStateChangingNode"] != false ||
-		stringSliceContains(stringSliceFromValue(stageRequired["acceptedKinds"]), "patch/apply") {
+		stringFromMap(stageRequired, "validationRoute") != runtimemodel.ValidationRouteManagedHarness ||
+		!stringSliceContains(stringSliceFromValue(stageRequired["acceptedKinds"]), managedValidationSessionNodeKind) ||
+		stringSliceContains(stringSliceFromValue(stageRequired["acceptedKinds"]), "shell/command") {
 		t.Fatalf("stagePacket.requiredOutput = %+v, want same forced-narrow validation contract", stageRequired)
 	}
 	if boolValue(input["stateChangingOutputRequired"]) {

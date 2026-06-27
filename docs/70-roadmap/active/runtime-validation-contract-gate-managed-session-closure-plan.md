@@ -382,6 +382,40 @@ Acceptance:
 - Define retention/compaction policy for LLM request/response and checkpoints.
 - Record live resource verification after code closure.
 
+## 2026-06-27 Code Closure Notes
+
+- S1 closed:
+  - `runtime_execution_contract.go` now masks here-doc body text before shell
+    mutation, redirection, detached-process and process-control scans.
+  - Here-doc opener lines remain visible, so real redirect targets are still
+    checked against `validationScratchDir`.
+  - Regression coverage admits scratch-bound here-doc bodies containing shell-like
+    text while still rejecting non-scratch here-doc targets.
+- S2 closed:
+  - Validation contract gate now emits specific neutral rules:
+    `validation_evidence_metadata_missing`, `validation_scratch_required`,
+    `validation_scratch_escape`, `validation_process_control_forbidden`,
+    `validation_detached_process_forbidden`, `validation_shell_safety_unproven`
+    and `managed_validation_required`.
+  - The metadata gate now requires every concrete validation producer node to
+    declare concrete `validationEvidence`, not only one node in the graph.
+- S3 closed:
+  - Repeated shell-safety validation violations narrow the correction contract to
+    `managed_validation_evidence`.
+  - The forced-narrow required output sets `validationRoute=managed_harness`,
+    `mustUseManagedHarness=true` and `acceptedKinds=["validation/managed_session"]`.
+  - Plain shell under a managed route is rejected with
+    `managed_validation_required`.
+- S4 verified:
+  - Managed route fields are produced through current-action/requiredOutput
+    volatile contract data. Existing LLM prompt/cache tests confirm stable prefix
+    hashes are unchanged by dynamic stage/current-action mutations.
+- S5 audited:
+  - Existing `projection-event-io-resource-closure-plan.md` closure notes and
+    repository/readmodel tests cover metadata-only default event reads and
+    payload-on-demand hydration. This plan keeps live RSS/CPU/IO verification as
+    a deployment observation item rather than adding another core branch.
+
 ## Non-Goals
 
 - Do not weaken contract gate to accept unbounded shell.
