@@ -58,6 +58,27 @@ func TestContractViolationRecoveryActionSkipsRetryWhenCurrentActionIsGovernance(
 	}
 }
 
+func TestContractViolationRecoveryActionSkipsLLMRetryForDeterministicValidationRoute(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-violation-runtime-action-route")
+	repo := memory.NewStepRepository()
+	failed := contractViolationFailedStep(runID, "failed-runtime-action-route")
+	pkg := mapFromValue(failed.Input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	required["validationRoute"] = runtimemodel.ValidationRouteRuntimeAction
+	required["mustUseRuntimeAction"] = true
+	pkg["requiredOutput"] = required
+	failed.Input["repairActionPackage"] = pkg
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-violation-runtime-action-route", InitialStepKind: llmWorkspaceExecutionStepKind}
+	attachContractViolationDiagnostics(run, failed, errors.New("concrete validation evidence repair returned invalid LLM graph for runtime action route"))
+
+	action := runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{}), true, true, run, failed)
+
+	if action == runtimeRecoveryActionContractViolationRetry {
+		t.Fatalf("recovery action = %s, want no LLM retry for deterministic runtime_action validation route", action)
+	}
+}
+
 func TestContractViolationRecoveryActionExhaustsIndependentBudget(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-contract-violation-exhausted")

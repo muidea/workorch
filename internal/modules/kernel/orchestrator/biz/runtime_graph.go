@@ -269,7 +269,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	if err := o.recordCoverageProgressFromCompletionAssessment(ctx, currentRun, last, last.Output); err != nil {
 		return o.handleGraphBatchCompletionGateFailure(ctx, currentRun, last, last.Output, "runtime completion gate failed", err)
 	}
-	assessment, summary, err := validatedCompletionDoDAssessment(currentRun, last.Output)
+	assessment, summary, err := validatedCompletionDoDAssessmentForStep(currentRun, last, last.Output)
 	if err != nil {
 		return o.handleGraphBatchCompletionGateFailure(ctx, currentRun, last, last.Output, "runtime completion gate failed", err)
 	}

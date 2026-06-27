@@ -780,7 +780,7 @@ func TestNextActionForRunRecoverableDiagnosticRequestsRepair(t *testing.T) {
 	}
 }
 
-func TestNextActionForRunRecoverableDiagnosticHasPriorityOverEvidenceGaps(t *testing.T) {
+func TestNextActionForRunEvidenceGapPreemptsRecoverableDiagnostic(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -805,6 +805,7 @@ func TestNextActionForRunRecoverableDiagnosticHasPriorityOverEvidenceGaps(t *tes
 		WorkspaceID: workspaceID,
 		State:       common.RunStateRunning,
 		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
 				"id":                    "cwi-state-change-priority",
 				"status":                "open",
@@ -831,8 +832,8 @@ func TestNextActionForRunRecoverableDiagnosticHasPriorityOverEvidenceGaps(t *tes
 	if err != nil {
 		t.Fatalf("NextActionForRun: %v", err)
 	}
-	if action.Type != runtimemodel.NextActionTypeRepair || action.SubjectID != "diagnostic-priority" {
-		t.Fatalf("next action = %+v, want recoverable diagnostic priority", action)
+	if action.Type != runtimemodel.NextActionTypeStateChange || action.SubjectID != "cwi-state-change-priority" {
+		t.Fatalf("next action = %+v, want state_change from coverage ledger before diagnostic retry", action)
 	}
 }
 
@@ -956,7 +957,7 @@ func TestNextActionForRunAllSatisfiedRequestsComplete(t *testing.T) {
 	}
 }
 
-func TestNextActionForRunAllSatisfiedWaitsForRecoverableDiagnostic(t *testing.T) {
+func TestNextActionForRunAllSatisfiedPreemptsRecoverableDiagnostic(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -1008,8 +1009,57 @@ func TestNextActionForRunAllSatisfiedWaitsForRecoverableDiagnostic(t *testing.T)
 	if err != nil {
 		t.Fatalf("NextActionForRun: %v", err)
 	}
-	if action.Type != runtimemodel.NextActionTypeRepair || action.SubjectID != "diagnostic-before-complete" {
-		t.Fatalf("next action = %+v, want recoverable diagnostic before complete", action)
+	if action.Type != runtimemodel.NextActionTypeComplete || action.SubjectID != string(runID) {
+		t.Fatalf("next action = %+v, want complete before diagnostic retry", action)
+	}
+}
+
+func TestNextActionForRunEvidenceReadyAcceptedItemsRequestComplete(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-evidence-ready-complete")
+	runID := common.RunID("run-next-action-evidence-ready-complete")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                    "cwi-evidence-ready-complete",
+				"status":                "evidence_ready",
+				"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindValidation},
+				"missingEvidenceKinds":  []string{},
+				"acceptedEvidenceByKind": map[string][]string{
+					runtimemodel.EvidenceKindValidation: {"validation-001"},
+				},
+				"acceptedEvidenceRefs": []string{"validation-001"},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeComplete || action.Stage != "complete" {
+		t.Fatalf("next action = %+v, want deterministic complete from accepted evidence-ready ledger", action)
 	}
 }
 
@@ -1029,8 +1079,8 @@ func TestDeriveAllSatisfiedCompleteNextActionRequiresSatisfiedAcceptedEvidence(t
 		"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindValidation},
 		"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindValidation: {"validation-001"}},
 	}}
-	if action, ok := deriveAllSatisfiedCompleteNextAction(run, items); ok || action.Type != "" {
-		t.Fatalf("derive evidence_ready item = %+v/%v, want no complete", action, ok)
+	if action, ok := deriveAllSatisfiedCompleteNextAction(run, items); !ok || action.Type != runtimemodel.NextActionTypeComplete {
+		t.Fatalf("derive evidence_ready item = %+v/%v, want complete when accepted evidence is sufficient", action, ok)
 	}
 
 	items[0]["status"] = "satisfied"

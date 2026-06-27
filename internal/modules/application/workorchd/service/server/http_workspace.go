@@ -10,6 +10,8 @@ import (
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -50,6 +52,11 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 		if err != nil {
 			writeBusinessError(w, err)
 			return
+		}
+		if projected, _, readErr := state.readProjectedWorkspaceSnapshot(workspaceID); readErr == nil {
+			if projected.ViewModel.WorkspaceID != "" {
+				item.ViewModel = workspaceMetadataViewModelFromProjection(projected.ViewModel)
+			}
 		}
 		writeJSON(w, http.StatusOK, workspaceResponse{
 			Service:   "workorch",
@@ -242,6 +249,38 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			DoD:      item,
 		})
 	})
+}
+
+func workspaceMetadataViewModelFromProjection(input readmodelcore.WorkspaceViewModel) appmodelcore.WorkspaceViewModel {
+	ret := appmodelcore.WorkspaceViewModel{
+		WorkspaceID:             input.WorkspaceID,
+		State:                   input.State,
+		PromptMode:              input.PromptMode,
+		Revision:                input.Revision,
+		GlobalRevision:          input.GlobalRevision,
+		WorkspaceRevision:       input.WorkspaceRevision,
+		SourceEventRevision:     input.SourceEventRevision,
+		ProjectedSourceRevision: input.ProjectedSourceRevision,
+		UpdatedAt:               input.UpdatedAt,
+		RebuiltAt:               input.RebuiltAt,
+		Degraded:                input.Degraded,
+		StaleReason:             input.StaleReason,
+		Error:                   input.Error,
+	}
+	if len(input.Sections) > 0 {
+		ret.Sections = make(map[string]appmodelcore.WorkspaceViewModelSection, len(input.Sections))
+		for key, value := range input.Sections {
+			ret.Sections[key] = appmodelcore.WorkspaceViewModelSection{
+				Name:                    value.Name,
+				Revision:                value.Revision,
+				WorkspaceRevision:       value.WorkspaceRevision,
+				SourceEventRevision:     value.SourceEventRevision,
+				ProjectedSourceRevision: value.ProjectedSourceRevision,
+				State:                   value.State,
+			}
+		}
+	}
+	return ret
 }
 
 func workspaceSnapshotObservabilityRead(r *http.Request) bool {

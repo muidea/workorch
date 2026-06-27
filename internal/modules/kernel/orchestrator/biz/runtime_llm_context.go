@@ -58,7 +58,198 @@ func compactStepInputForLLMContext(input map[string]any) map[string]any {
 	if contract := mapFromValue(input["artifactOutputContract"]); len(contract) > 0 {
 		ret["artifactOutputContract"] = compactArtifactOutputContractForLLMContext(contract)
 	}
+	ret = compactFocusScopedAssessmentInputForLLMContext(input, ret)
 	return ret
+}
+
+func compactFocusScopedAssessmentInputForLLMContext(input map[string]any, ret map[string]any) map[string]any {
+	if len(input) == 0 || len(ret) == 0 || !stepInputCurrentActionIsAssessment(input) {
+		return ret
+	}
+	focus := focusScopedAssessmentFocus(input)
+	if len(focus) == 0 {
+		return ret
+	}
+	ret["focusScopedContextPolicy"] = "assessment action: current focus evidence is retained; unrelated coverage evidence refs are summarized"
+	if context := coverageWorkItemContextFromInput(input); len(context) > 0 {
+		ret[coverageWorkItemContextKey] = compactFocusScopedCoverageContextForLLM(context, focus)
+	}
+	if packet := mapFromValue(ret[stepInputKeyStagePacket]); len(packet) > 0 {
+		packet["activeFocus"] = compactLLMContextMap(focus, 1)
+		packet["acceptedEvidenceRefs"] = focusScopedRetainedEvidenceRefs(input, focus, true)
+		packet["rejectedEvidenceRefs"] = focusScopedRetainedEvidenceRefs(input, focus, false)
+		ret[stepInputKeyStagePacket] = packet
+	}
+	for _, key := range []string{convergenceAuthorityKey, "repairActionPackage"} {
+		value := mapFromValue(ret[key])
+		if len(value) == 0 {
+			continue
+		}
+		value["currentFocus"] = compactLLMContextMap(focus, 1)
+		if context := mapFromValue(mapFromValue(input[key])[coverageWorkItemContextKey]); len(context) > 0 {
+			value[coverageWorkItemContextKey] = compactFocusScopedCoverageContextForLLM(context, focus)
+		}
+		if key == convergenceAuthorityKey {
+			value["acceptedEvidenceRefs"] = focusScopedRetainedEvidenceRefs(input, focus, true)
+			value["rejectedEvidenceRefs"] = focusScopedRetainedEvidenceRefs(input, focus, false)
+		}
+		ret[key] = value
+	}
+	return ret
+}
+
+func compactFocusScopedCoverageContextForLLM(context map[string]any, focus map[string]any) map[string]any {
+	if len(context) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"schemaVersion",
+		"definitionRevision",
+		"coverageBaselineHash",
+		"summary",
+		"omittedCount",
+		"omittedStatusDistribution",
+		"omittedSourceScopeDistribution",
+		"fullLedgerRef",
+	} {
+		if value, ok := context[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	current := focus
+	if len(current) == 0 {
+		current = coverageWorkItemPrimaryFocus(context)
+	}
+	if len(current) > 0 {
+		ret["currentFocus"] = compactLLMContextMap(current, 1)
+	}
+	if items := focusScopedCoverageContextItems(context, current); len(items) > 0 {
+		ret["currentFocusItems"] = items
+	}
+	if ledger := focusScopedLedgerSummaryForLLM(mapSliceFromValue(context["ledgerSummary"]), current); len(ledger) > 0 {
+		ret["ledgerSummary"] = ledger
+	}
+	if unresolved := focusScopedLedgerSummaryForLLM(mapSliceFromValue(context["unresolvedItems"]), current); len(unresolved) > 0 {
+		ret["unresolvedItems"] = unresolved
+	}
+	return ret
+}
+
+func focusScopedCoverageContextItems(context map[string]any, focus map[string]any) []map[string]any {
+	if len(context) == 0 || len(focus) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, 3)
+	seen := map[string]bool{}
+	add := func(item map[string]any) {
+		if len(item) == 0 || len(ret) >= 3 || !coverageContextItemMatchesFocus(item, focus) {
+			return
+		}
+		key := firstNonEmptyString(stringFromMap(item, "id"), stringFromMap(item, "coverageWorkItemId"), stringFromMap(item, "sourceRequirementId"), stringFromMap(item, "targetText"))
+		if key != "" && seen[key] {
+			return
+		}
+		if key != "" {
+			seen[key] = true
+		}
+		ret = append(ret, compactLLMContextMap(item, 1))
+	}
+	add(mapFromValue(context["currentFocus"]))
+	for _, item := range mapSliceFromValue(context["currentFocusItems"]) {
+		add(item)
+	}
+	for _, item := range mapSliceFromValue(context["ledgerSummary"]) {
+		add(item)
+	}
+	return ret
+}
+
+func focusScopedLedgerSummaryForLLM(items []map[string]any, focus map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, min(len(items), maxLLMContextSliceItems))
+	for _, item := range items {
+		next := compactLLMContextMap(item, 1)
+		if coverageContextItemMatchesFocus(item, focus) {
+			next["omittedFromCurrentFocus"] = false
+			ret = append(ret, next)
+			continue
+		}
+		if refs := stringSliceFromValue(item["acceptedEvidenceRefs"]); len(refs) > 0 {
+			next["acceptedEvidenceRefCount"] = len(refs)
+		}
+		if refs := stringSliceFromValue(item["rejectedEvidenceRefs"]); len(refs) > 0 {
+			next["rejectedEvidenceRefCount"] = len(refs)
+		}
+		delete(next, "acceptedEvidenceRefs")
+		delete(next, "rejectedEvidenceRefs")
+		next["omittedFromCurrentFocus"] = true
+		next["evidenceDetailOmitted"] = true
+		ret = append(ret, next)
+		if len(ret) >= maxLLMContextSliceItems {
+			break
+		}
+	}
+	return ret
+}
+
+func focusScopedRetainedEvidenceRefs(input map[string]any, focus map[string]any, accepted bool) []string {
+	if len(input) == 0 || len(focus) == 0 {
+		return nil
+	}
+	key := "acceptedEvidenceRefs"
+	byKindKey := "acceptedEvidenceByKind"
+	if !accepted {
+		key = "rejectedEvidenceRefs"
+		byKindKey = "rejectedEvidenceByKind"
+	}
+	refs := make([]string, 0)
+	add := func(item map[string]any) {
+		if len(item) == 0 || !coverageContextItemMatchesFocus(item, focus) {
+			return
+		}
+		refs = append(refs, stringSliceFromValue(item[key])...)
+		for _, values := range mapStringSliceValue(item[byKindKey]) {
+			refs = append(refs, values...)
+		}
+	}
+	add(focus)
+	for _, source := range []map[string]any{
+		coverageWorkItemContextFromInput(input),
+		mapFromValue(mapFromValue(input[convergenceAuthorityKey])[coverageWorkItemContextKey]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])[coverageWorkItemContextKey]),
+	} {
+		add(mapFromValue(source["currentFocus"]))
+		for _, listKey := range []string{"currentFocusItems", "ledgerSummary", "unresolvedItems"} {
+			for _, item := range mapSliceFromValue(source[listKey]) {
+				add(item)
+			}
+		}
+	}
+	return compactUniqueStrings(refs)
+}
+
+func coverageContextItemMatchesFocus(item map[string]any, focus map[string]any) bool {
+	if len(item) == 0 || len(focus) == 0 {
+		return false
+	}
+	if coverageWorkItemMatchesFocus(item, focus) {
+		return true
+	}
+	for _, key := range []string{"id", "coverageWorkItemId", "sourceRequirementId", "normalizedSourceKey", "targetText", "sourcePath"} {
+		left := strings.TrimSpace(stringFromMap(item, key))
+		if left == "" {
+			continue
+		}
+		for _, focusKey := range []string{"id", "coverageWorkItemId", "sourceRequirementId", "normalizedSourceKey", "targetText", "sourcePath"} {
+			if coverageRepairTokenMatches(left, stringFromMap(focus, focusKey)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func compactRepairActionPackageForLLMContext(pkg map[string]any) map[string]any {

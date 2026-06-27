@@ -263,7 +263,7 @@
   {
     "id": "soul-software-dev-validation",
     "name": "软件开发-验证",
-    "description": "验证代码质量——编译、测试、lint 全部通过。",
+    "description": "验证代码质量——编译、测试、lint 全部通过；服务、代理、流式或长运行入口验证优先使用 runtime-managed validation session。",
     "businessDomains": [
       "软件开发"
     ],

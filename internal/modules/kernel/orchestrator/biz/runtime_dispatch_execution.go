@@ -448,7 +448,7 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 	if err := o.recordCoverageProgressFromCompletionAssessment(ctx, run, step, output); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
-	assessment, summary, err := validatedCompletionDoDAssessment(run, output)
+	assessment, summary, err := validatedCompletionDoDAssessmentForStep(run, step, output)
 	if err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}

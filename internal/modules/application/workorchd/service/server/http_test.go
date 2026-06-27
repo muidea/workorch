@@ -2733,6 +2733,33 @@ func TestWorkspaceListAndGetEndpointsReturnPersistedWorkspaces(t *testing.T) {
 	}
 }
 
+func TestWorkspaceGetEndpointOverlaysProjectedViewModel(t *testing.T) {
+	server := newTestHTTPServer(t, Config{Backend: "file", DataRoot: t.TempDir()})
+	handler := server.http.Handler
+
+	workspace := createWorkspaceForHTTP(t, handler, "http projected workspace", "workspaces/ws-http-projected")
+	if err := server.state.workspaceProjection.RebuildWorkspace(context.Background(), workspace.ID); err != nil {
+		t.Fatalf("RebuildWorkspace: %v", err)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID, nil)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get status = %d, want 200, body=%s", getRec.Code, getRec.Body.String())
+	}
+	var fetched workspaceResponse
+	if err := json.Unmarshal(getRec.Body.Bytes(), &fetched); err != nil {
+		t.Fatalf("unmarshal fetched workspace: %v", err)
+	}
+	if fetched.Workspace.ViewModel.WorkspaceID != workspace.ID ||
+		fetched.Workspace.ViewModel.WorkspaceRevision == 0 ||
+		fetched.Workspace.ViewModel.PromptMode == "" {
+		t.Fatalf("workspace viewModel = %+v, want projected ViewModel overlay", fetched.Workspace.ViewModel)
+	}
+}
+
 func TestWorkspaceDeleteEndpointDeletesWorkspaceAndSupportsPurge(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})

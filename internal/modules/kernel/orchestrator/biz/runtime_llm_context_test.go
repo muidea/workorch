@@ -159,6 +159,81 @@ func TestCompactLLMContextDropsHeavyTransportFields(t *testing.T) {
 	}
 }
 
+func TestCompactStepInputForLLMContextScopesAssessmentEvidenceToCurrentFocus(t *testing.T) {
+	input := compactStepInputForLLMContext(map[string]any{
+		stepInputKeyAssessmentOnly: true,
+		"repairObjective":          "complete_dod_goal_coverage_assessment",
+		stepInputKeyStagePacket: map[string]any{
+			"activeFocus": map[string]any{
+				"id":                   "cwi-001",
+				"targetText":           "first DoD item",
+				"acceptedEvidenceRefs": []string{"run-1/block/focus-validation"},
+			},
+			"nextAction": map[string]any{"type": "assessment"},
+			"requiredOutput": map[string]any{
+				"coverageWorkItemIds":        []string{"cwi-001"},
+				"acceptedEvidenceRefs":       []string{"run-1/block/focus-validation"},
+				"mustAssessAcceptedEvidence": true,
+			},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"schemaVersion":      coverageWorkItemContextSchema,
+			"definitionRevision": "rev-1",
+			"summary":            map[string]any{"total": 2, "evidence_ready": 1, "open": 1},
+			"currentFocus": map[string]any{
+				"id":                   "cwi-001",
+				"targetText":           "first DoD item",
+				"acceptedEvidenceRefs": []string{"run-1/block/focus-validation"},
+			},
+			"ledgerSummary": []map[string]any{
+				{
+					"id":                   "cwi-001",
+					"targetText":           "first DoD item",
+					"acceptedEvidenceRefs": []string{"run-1/block/focus-validation"},
+				},
+				{
+					"id":                   "cwi-002",
+					"targetText":           "second DoD item",
+					"acceptedEvidenceRefs": []string{"run-1/block/unrelated-a", "run-1/block/unrelated-b"},
+					"rejectedEvidenceRefs": []string{"run-1/block/unrelated-rejected"},
+				},
+			},
+		},
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"type": "assessment"},
+			"currentFocus": map[string]any{
+				"id":         "cwi-001",
+				"targetText": "first DoD item",
+			},
+		},
+	})
+
+	if input["focusScopedContextPolicy"] == nil {
+		t.Fatalf("compact input = %+v, want focus scoped context policy", input)
+	}
+	context := mapFromValue(input[coverageWorkItemContextKey])
+	if stringFromMap(mapFromValue(context["currentFocus"]), "id") != "cwi-001" {
+		t.Fatalf("coverageWorkItemContext.currentFocus = %+v, want cwi-001", context["currentFocus"])
+	}
+	ledger := mapSliceFromValue(context["ledgerSummary"])
+	if len(ledger) != 2 {
+		t.Fatalf("ledgerSummary = %+v, want two summary items", ledger)
+	}
+	if refs := stringSliceFromValue(ledger[0]["acceptedEvidenceRefs"]); len(refs) != 1 || refs[0] != "run-1/block/focus-validation" {
+		t.Fatalf("focus ledger refs = %+v, want retained focus ref", ledger[0]["acceptedEvidenceRefs"])
+	}
+	if refs := stringSliceFromValue(ledger[1]["acceptedEvidenceRefs"]); len(refs) != 0 {
+		t.Fatalf("unrelated ledger accepted refs = %+v, want omitted", refs)
+	}
+	if ledger[1]["acceptedEvidenceRefCount"] != 2 || ledger[1]["rejectedEvidenceRefCount"] != 1 || ledger[1]["evidenceDetailOmitted"] != true {
+		t.Fatalf("unrelated ledger item = %+v, want evidence counts only", ledger[1])
+	}
+	packet := mapFromValue(input[stepInputKeyStagePacket])
+	if refs := stringSliceFromValue(packet["acceptedEvidenceRefs"]); len(refs) != 1 || refs[0] != "run-1/block/focus-validation" {
+		t.Fatalf("stagePacket.acceptedEvidenceRefs = %+v, want focus ref only", packet["acceptedEvidenceRefs"])
+	}
+}
+
 func TestGenericLLMContextCompactionMarksTruncatedTargetSnapshotUnsafe(t *testing.T) {
 	fullContent := "package main\n" + strings.Repeat("func currentShape() {}\n", 300)
 	compacted := compactLLMContextValue(map[string]any{

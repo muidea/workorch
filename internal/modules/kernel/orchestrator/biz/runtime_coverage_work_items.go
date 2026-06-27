@@ -351,6 +351,9 @@ func (c *coverageSubsystem) validateReadyForAcceptance(run *runModel.Run, contex
 		case "satisfied", "blocked", "skipped":
 			continue
 		}
+		if coverageWorkItemCompletionReady(item) {
+			continue
+		}
 		state := deriveCoverageWorkItemState(item)
 		missing := state.MissingEvidenceKinds
 		if len(missing) == 0 && state.NeedsAssessment() {

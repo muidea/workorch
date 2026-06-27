@@ -604,6 +604,9 @@ func contractViolationCurrentActionAllowsLLMRetry(run *runModel.Run, failedStep 
 	if failedStep != nil {
 		input = failedStep.Input
 	}
+	if validationRouteRequiresDeterministicHandling(input) {
+		return false
+	}
 	kind := strings.TrimSpace(convergenceNextActionKind(run, input))
 	if kind == "" {
 		return true
@@ -620,6 +623,36 @@ func contractViolationCurrentActionAllowsLLMRetry(run *runModel.Run, failedStep 
 	default:
 		return false
 	}
+}
+
+func validationRouteRequiresDeterministicHandling(input map[string]any) bool {
+	route := validationRouteFromStepInput(input)
+	switch route {
+	case runtimemodel.ValidationRouteRuntimeAction,
+		runtimemodel.ValidationRouteDeferred,
+		runtimemodel.ValidationRouteFail:
+		return true
+	default:
+		return false
+	}
+}
+
+func validationRouteFromStepInput(input map[string]any) string {
+	if len(input) == 0 {
+		return ""
+	}
+	for _, source := range []map[string]any{
+		mapFromValue(input["requiredOutput"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		mapFromValue(mapFromValue(input["executionContext"])["requiredOutput"]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"])["requiredOutput"]),
+	} {
+		if route := strings.TrimSpace(stringFromMap(source, "validationRoute")); route != "" {
+			return route
+		}
+	}
+	return ""
 }
 
 func contractViolationRuleFromStep(step *runModel.Step) string {

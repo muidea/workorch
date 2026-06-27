@@ -84,6 +84,118 @@ func TestValidatedCompletionDoDAssessmentRejectsMissingGoalCoverage(t *testing.T
 	}
 }
 
+func TestValidatedCompletionDoDAssessmentForStepAllowsFocusScopedAssessment(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-focus-assessment",
+		WorkspaceID:     "ws-focus-assessment",
+		DoDID:           "dod-focus-assessment",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": "first goal remains globally incomplete\nsecond goal remains globally incomplete",
+			},
+			"dod": map[string]any{
+				"items": []string{
+					"first DoD item",
+					"second DoD item",
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-focus-assessment/assessment",
+		RunID: run.ID,
+		Input: map[string]any{
+			stepInputKeyAssessmentOnly: true,
+			"repairObjective":          "complete_dod_goal_coverage_assessment",
+			stepInputKeyStagePacket: map[string]any{
+				"activeFocus": map[string]any{
+					"id":                   "cwi-001",
+					"targetText":           "first DoD item",
+					"acceptedEvidenceRefs": []string{"run-focus-assessment/block/validation-001"},
+				},
+				"nextAction": map[string]any{
+					"type": "assessment",
+				},
+				"requiredOutput": map[string]any{
+					"coverageWorkItemIds":        []string{"cwi-001"},
+					"acceptedEvidenceRefs":       []string{"run-focus-assessment/block/validation-001"},
+					"mustAssessAcceptedEvidence": true,
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "current focus evidence satisfies cwi-001",
+			"items": []map[string]any{{
+				"coverageWorkItemId": "cwi-001",
+				"item":               "first DoD item",
+				"state":              "satisfied",
+				"evidenceRefs":       []string{"run-focus-assessment/block/validation-001"},
+			}},
+		},
+	}
+
+	if _, _, err := validatedCompletionDoDAssessment(run, output); err == nil ||
+		!strings.Contains(err.Error(), "does not cover all current DoD items") {
+		t.Fatalf("validatedCompletionDoDAssessment err = %v, want full completion gate to reject missing global coverage", err)
+	}
+	assessment, summary, err := validatedCompletionDoDAssessmentForStep(run, step, output)
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessmentForStep: %v", err)
+	}
+	if summary == "" || !boolValue(assessment["satisfied"]) {
+		t.Fatalf("focus assessment = %+v summary=%q, want satisfied assessment", assessment, summary)
+	}
+}
+
+func TestValidatedCompletionDoDAssessmentForStepRejectsFocusScopedAssessmentOutsideEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-focus-assessment-bad-ref",
+		WorkspaceID:     "ws-focus-assessment-bad-ref",
+		DoDID:           "dod-focus-assessment-bad-ref",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:    "run-focus-assessment-bad-ref/assessment",
+		RunID: run.ID,
+		Input: map[string]any{
+			stepInputKeyAssessmentOnly: true,
+			"repairObjective":          "complete_dod_goal_coverage_assessment",
+			stepInputKeyStagePacket: map[string]any{
+				"activeFocus": map[string]any{
+					"id":                   "cwi-001",
+					"targetText":           "first DoD item",
+					"acceptedEvidenceRefs": []string{"run-focus-assessment-bad-ref/block/validation-001"},
+				},
+				"nextAction": map[string]any{"type": "assessment"},
+				"requiredOutput": map[string]any{
+					"coverageWorkItemIds":        []string{"cwi-001"},
+					"acceptedEvidenceRefs":       []string{"run-focus-assessment-bad-ref/block/validation-001"},
+					"mustAssessAcceptedEvidence": true,
+				},
+			},
+		},
+	}
+	_, _, err := validatedCompletionDoDAssessmentForStep(run, step, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "uses evidence from another focus",
+			"items": []map[string]any{{
+				"coverageWorkItemId": "cwi-001",
+				"item":               "first DoD item",
+				"state":              "satisfied",
+				"evidenceRefs":       []string{"run-focus-assessment-bad-ref/block/unrelated"},
+			}},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "current focus") {
+		t.Fatalf("validatedCompletionDoDAssessmentForStep err = %v, want current focus evidence rejection", err)
+	}
+}
+
 func TestNormalizedRunGoalCoverageItemsIncludeStableRequirementIDs(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-goal-coverage-stable-id",

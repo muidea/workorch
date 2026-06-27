@@ -246,6 +246,9 @@ func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, outpu
 	}
 	normalizeManagedValidationOutput(step, output)
 	normalizeConcreteValidationScratchSetupOutput(step, output)
+	if err := validateConcreteValidationRouteOutputContract(step, output); err != nil {
+		return err
+	}
 	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
 		if !graphIsConcreteValidationEvidenceGraph(graph) {
 			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph or a satisfied dodAssessment with concrete evidenceRefs")
@@ -268,6 +271,49 @@ func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, outpu
 		return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph; plain failed dodAssessment does not satisfy repairActionPackage.requiredOutput")
 	}
 	return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph or a satisfied dodAssessment with concrete evidenceRefs")
+}
+
+func validateConcreteValidationRouteOutputContract(step *runModel.Step, output map[string]any) error {
+	if step == nil || output == nil {
+		return nil
+	}
+	route := validationRouteFromStepInput(step.Input)
+	if route == "" || route == runtimemodel.ValidationRouteLLMGraph {
+		return nil
+	}
+	graph, hasGraph := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	switch route {
+	case runtimemodel.ValidationRouteManagedHarness:
+		if !hasGraph || !graphHasManagedValidationNode(graph) {
+			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "managed validation route requires validation/managed_session or runtimeManaged managedValidation executionGraph node")
+		}
+	case runtimemodel.ValidationRouteRuntimeAction:
+		if hasGraph {
+			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "runtime_action validation route must be executed by runtime action, not by LLM executionGraph")
+		}
+	case runtimemodel.ValidationRouteDeferred:
+		if hasGraph {
+			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "deferred validation route must record deferred evidence requirement, not return LLM executionGraph")
+		}
+	case runtimemodel.ValidationRouteFail:
+		if hasGraph || doDAssessmentFromOutput(output) != nil {
+			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "fail validation route must fail fast without LLM validation output")
+		}
+	}
+	return nil
+}
+
+func graphHasManagedValidationNode(graph runtimemodel.BlockExecutionGraph) bool {
+	for _, node := range graph.Nodes {
+		if strings.TrimSpace(node.Kind) == managedValidationSessionNodeKind {
+			return true
+		}
+		managed := mapFromValue(node.Input["managedValidation"])
+		if boolValue(managed["runtimeManaged"]) || strings.TrimSpace(stringFromMap(managed, "kind")) == managedValidationSessionNodeKind {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeConcreteValidationScratchSetupOutput(step *runModel.Step, output map[string]any) {

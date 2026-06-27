@@ -2316,6 +2316,76 @@ func TestValidateLLMExecutionOutputContractNormalizesManagedValidationSession(t 
 	}
 }
 
+func TestConcreteValidationRequiredOutputIncludesManagedSessionExample(t *testing.T) {
+	requiredOutput := concreteValidationEvidenceRequiredOutput(nil)
+	if !stringSliceContains(stringSliceFromValue(requiredOutput["acceptedKinds"]), managedValidationSessionNodeKind) {
+		t.Fatalf("acceptedKinds = %+v, want managed session kind", requiredOutput["acceptedKinds"])
+	}
+	example := mapFromValue(requiredOutput["managedValidationNodeExample"])
+	if stringFromMap(example, "kind") != managedValidationSessionNodeKind {
+		t.Fatalf("managedValidationNodeExample = %+v, want managed session node", example)
+	}
+	input := mapFromValue(example["input"])
+	if !boolValue(input["allocatePort"]) {
+		t.Fatalf("managedValidationNodeExample.input = %+v, want runtime allocated port", input)
+	}
+	observation := mapFromValue(input["observation"])
+	if stringFromMap(observation, "command") == "" ||
+		intFromAny(observation["timeoutMillis"]) <= 0 {
+		t.Fatalf("managedValidationNodeExample.observation = %+v, want bounded command and timeout", observation)
+	}
+	evidence := mapFromValue(observation["validationEvidence"])
+	if stringFromMap(evidence, "mode") != "runtime_behavior" ||
+		stringFromMap(evidence, "observationType") != "runtime_observation" {
+		t.Fatalf("managedValidationNodeExample.validationEvidence = %+v, want runtime observation", evidence)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractManagedRouteRejectsPlainShellGraph(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-managed-route-rejects-plain-shell",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	requiredOutput := concreteValidationEvidenceRequiredOutput(nil)
+	requiredOutput["validationRoute"] = runtimemodel.ValidationRouteManagedHarness
+	requiredOutput["mustUseManagedHarness"] = true
+	step := &runmodel.Step{
+		ID:   "run-managed-route-rejects-plain-shell/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": requiredOutput,
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "plain-shell",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "printf ok"},
+					"validationEvidence": map[string]any{
+						"mode":            "runtime_behavior",
+						"observationType": "runtime_observation",
+					},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if err == nil || !strings.Contains(err.Error(), "managed validation route requires") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want managed route contract rejection", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithProcessTermination(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-process-termination",

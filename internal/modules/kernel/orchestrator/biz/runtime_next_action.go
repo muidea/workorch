@@ -42,11 +42,6 @@ func (o *RuntimeOrchestrator) NextActionForRun(ctx context.Context, runID common
 			return action, nil
 		}
 	}
-	if action, ok, err := o.recoverableDiagnosticNextAction(ctx, run); err != nil {
-		return runtimemodel.NextAction{}, err
-	} else if ok {
-		return action, nil
-	}
 	if action, ok := deriveMissingGapBaselineNextAction(run); ok {
 		return action, nil
 	}
@@ -60,12 +55,17 @@ func (o *RuntimeOrchestrator) NextActionForRun(ctx context.Context, runID common
 	} else if ok {
 		return action, nil
 	}
+	if action, ok, err := o.allSatisfiedCompleteNextAction(ctx, run); err != nil {
+		return runtimemodel.NextAction{}, err
+	} else if ok {
+		return action, nil
+	}
 	if action, ok, err := o.missingAssessmentNextAction(ctx, run); err != nil {
 		return runtimemodel.NextAction{}, err
 	} else if ok {
 		return action, nil
 	}
-	if action, ok, err := o.allSatisfiedCompleteNextAction(ctx, run); err != nil {
+	if action, ok, err := o.recoverableDiagnosticNextAction(ctx, run); err != nil {
 		return runtimemodel.NextAction{}, err
 	} else if ok {
 		return action, nil
@@ -934,11 +934,11 @@ func deriveAllSatisfiedCompleteNextAction(run *runmodel.Run, items []map[string]
 	requiredKinds := make([]string, 0)
 	for _, item := range items {
 		itemID := common.CoverageWorkItemID(firstNonEmptyString(stringFromMap(item, "id"), stringFromMap(item, "repositoryId")))
-		if itemID == "" || !coverageWorkItemCompletionStatusSatisfied(item) || !coverageWorkItemHasAcceptedEvidence(item) {
+		if itemID == "" || !coverageWorkItemCompletionReady(item) {
 			return runtimemodel.NextAction{}, false
 		}
 		state := deriveCoverageWorkItemState(item)
-		if len(state.MissingEvidenceKinds) > 0 || state.NeedsAssessment() {
+		if len(state.MissingEvidenceKinds) > 0 {
 			return runtimemodel.NextAction{}, false
 		}
 		coverageIDs = append(coverageIDs, itemID)
@@ -982,6 +982,20 @@ func coverageWorkItemCompletionStatusSatisfied(item map[string]any) bool {
 	default:
 		return false
 	}
+}
+
+func coverageWorkItemCompletionReady(item map[string]any) bool {
+	if len(item) == 0 || !coverageWorkItemHasAcceptedEvidence(item) {
+		return false
+	}
+	if coverageWorkItemCompletionStatusSatisfied(item) {
+		return true
+	}
+	if strings.TrimSpace(stringFromMap(item, "status")) != "evidence_ready" {
+		return false
+	}
+	state := deriveCoverageWorkItemState(item)
+	return len(state.MissingEvidenceKinds) == 0 && coverageWorkItemRequiredEvidenceComplete(item)
 }
 
 func deriveOpenDecisionNextAction(run *runmodel.Run, ticket *decisionmodel.Ticket) (runtimemodel.NextAction, bool) {

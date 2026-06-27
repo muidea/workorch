@@ -787,6 +787,24 @@ func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[strin
 			},
 		},
 	}
+	if stringSliceContains(stringSliceFromValue(out["acceptedKinds"]), managedValidationSessionNodeKind) {
+		out["managedValidationNodeExample"] = map[string]any{
+			"id":   "verify_managed_behavior",
+			"kind": managedValidationSessionNodeKind,
+			"input": map[string]any{
+				"allocatePort": true,
+				"observation": map[string]any{
+					"command":       "sh",
+					"args":          []string{"-c", "printf managed-validation-ok:{{managedValidation.port}}"},
+					"timeoutMillis": managedValidationTimeoutMillis,
+					"validationEvidence": map[string]any{
+						"mode":            "runtime_behavior",
+						"observationType": "runtime_observation",
+					},
+				},
+			},
+		}
+	}
 	out["destructiveValidationApprovalRule"] = "if a shell/process-termination validation command is rejected by runtime policy, do not request approval to run it; use a non-destructive controlled substitute or return a failed assessment with the missing evidence"
 	out["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(out["forbiddenKinds"]),
 		"destructive_shell_approval",

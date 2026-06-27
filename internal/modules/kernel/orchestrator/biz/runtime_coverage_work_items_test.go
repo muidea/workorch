@@ -2283,6 +2283,28 @@ func TestCoverageWorkItemsAcceptanceGateAllowsSatisfiedEvidence(t *testing.T) {
 	}
 }
 
+func TestCoverageWorkItemsAcceptanceGateAllowsEvidenceReadyAcceptedEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-evidence-ready-acceptance",
+		ExecutionContext: map[string]any{
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                    "cwi-evidence-ready",
+				"status":                "evidence_ready",
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{},
+				"acceptedEvidenceByKind": map[string][]string{
+					"validation": {"run-cwi-evidence-ready-acceptance/validate"},
+				},
+				"acceptedEvidenceRefs": []string{"run-cwi-evidence-ready-acceptance/validate"},
+			}},
+		},
+	}
+
+	if err := newCoverageSubsystem().validateReadyForAcceptance(run); err != nil {
+		t.Fatalf("coverage.validateReadyForAcceptance: %v, want evidence_ready accepted evidence to pass deterministic gate", err)
+	}
+}
+
 func TestCoverageWorkItemsGovernanceItemsRequireOwnerEvidence(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-governance-kinds",

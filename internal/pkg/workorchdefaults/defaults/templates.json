@@ -483,7 +483,7 @@
             "Read-only file/read, file/list, shell validation, LSP, or MCP inspection nodes may prepare context, but they cannot by themselves satisfy a state-changing repair contract.",
             "When targetSnapshots, failureTargetRepairContext, or repairTargetSet already identify existing implementation or entrypoint files for an unresolved Goal/DoD/source_change gap, patch those targets first; do not spend the primary state-changing turn on placeholder tests, go.sum, coverage_map, report-only files, or other supplemental evidence resources unless the current diagnostics explicitly target them.",
             "Supplemental deliverables such as validation_report, coverage_map, user_deliverable, and version_control_snapshot must not replace the primary source_change state-changing output when source_change remains unresolved.",
-            "Service, proxy, streaming, or long-running entrypoint validation must use bounded foreground commands, project test harnesses, local fake/stub servers, temporary ports, or equivalent MCP/tool evidence; do not use nohup, setsid, background '&' launches, process termination commands, or approval requests for process termination as validation strategy.",
+            "Service, proxy, streaming, or long-running entrypoint validation should prefer validation/managed_session when repairActionPackage.requiredOutput.acceptedKinds includes it; otherwise use bounded foreground commands, project test harnesses, local fake/stub servers, temporary ports, or equivalent MCP/tool evidence. Do not use nohup, setsid, background '&' launches, process termination commands, or approval requests for process termination as validation strategy.",
             "Validation graphs must not fail solely because test discovery, listing, or name-filter output does not match a speculative pattern. Execute the smallest bounded real validation command for the target scope, or return explicit inconclusive/skipped validation evidence with the reason and impact.",
             "When repairActionPackage.shapeContractEvidenceRequired is present, the next graph must first acquire bounded evidence for the actual API, dependency, schema, constructor, method, field, or capability contract shape via file/read, shell/command, mcp/tool_call, or git/read; do not guess SDK or dependency shapes from diagnostics alone.",
             "If version_control_snapshot is unresolved after meaningful workspace output changes, create git/write add and git/write commit evidence; shell/command git invocations are only supporting diagnostics and must not be cited as the satisfied snapshot evidence.",
@@ -495,9 +495,9 @@
               "scope": "acceptanceDimension",
               "requireDirectEvidence": true,
               "requireExecutableBehaviorEvidence": true,
-              "acceptedStepKinds": ["shell/command", "mcp/tool_call"],
+              "acceptedStepKinds": ["shell/command", "mcp/tool_call", "validation/managed_session"],
               "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
-              "description": "Entrypoint claims must be supported by direct executable validation or equivalent action evidence, not only by read-only inspection or summary artifacts."
+              "description": "Entrypoint claims must be supported by direct executable validation or equivalent action evidence, not only by read-only inspection or summary artifacts; service lifecycle validation should prefer runtime-managed validation session when available."
             },
             {
               "id": "persistence_or_side_effect",
@@ -513,9 +513,9 @@
               "scope": "acceptanceDimension",
               "requireDirectEvidence": true,
               "requireExecutableBehaviorEvidence": true,
-              "acceptedStepKinds": ["shell/command", "mcp/tool_call"],
+              "acceptedStepKinds": ["shell/command", "mcp/tool_call", "validation/managed_session"],
               "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
-              "description": "Streaming or long-running behavior must be supported by executed validation or equivalent runtime action evidence."
+              "description": "Streaming or long-running behavior must be supported by executed validation or equivalent runtime action evidence; prefer runtime-managed validation session when available."
             },
             {
               "id": "external_contract",

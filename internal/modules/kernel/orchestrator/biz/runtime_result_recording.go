@@ -293,7 +293,7 @@ func (o *RuntimeOrchestrator) recordCoverageProgressFromCompletionAssessment(ctx
 	if len(assessment) == 0 {
 		return nil
 	}
-	if _, _, err := validatedCompletionDoDAssessment(run, output); err == nil {
+	if _, _, err := validatedCompletionDoDAssessmentForStep(run, step, output); err == nil {
 		return nil
 	} else {
 		var violation runtimeContractViolationError

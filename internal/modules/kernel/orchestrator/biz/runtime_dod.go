@@ -10,11 +10,19 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func completionDoDAssessmentError(run *runModel.Run, output map[string]any) error {
 	_, _, err := validatedCompletionDoDAssessment(run, output)
 	return err
+}
+
+func validatedCompletionDoDAssessmentForStep(run *runModel.Run, step *runModel.Step, output map[string]any) (map[string]any, string, error) {
+	if ctx, ok := focusScopedAssessmentContextFromStep(step); ok {
+		return validatedFocusScopedDoDAssessment(run, output, ctx)
+	}
+	return validatedCompletionDoDAssessment(run, output)
 }
 
 func validatedCompletionDoDAssessment(run *runModel.Run, output map[string]any) (map[string]any, string, error) {
@@ -60,6 +68,256 @@ func validatedCompletionDoDAssessment(run *runModel.Run, output map[string]any) 
 
 func requiresDoDAssessmentCompletionGate(run *runModel.Run) bool {
 	return run != nil && run.DoDID != "" && initialStepKind(run) == llmWorkspaceExecutionStepKind
+}
+
+type focusScopedAssessmentContext struct {
+	Focus       map[string]any
+	AllowedRefs map[string]bool
+}
+
+func focusScopedAssessmentContextFromStep(step *runModel.Step) (focusScopedAssessmentContext, bool) {
+	if step == nil || len(step.Input) == 0 {
+		return focusScopedAssessmentContext{}, false
+	}
+	if !boolValue(step.Input[stepInputKeyAssessmentOnly]) {
+		return focusScopedAssessmentContext{}, false
+	}
+	if strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) != "complete_dod_goal_coverage_assessment" {
+		return focusScopedAssessmentContext{}, false
+	}
+	if !stepInputCurrentActionIsAssessment(step.Input) {
+		return focusScopedAssessmentContext{}, false
+	}
+	focus := focusScopedAssessmentFocus(step.Input)
+	if len(focus) == 0 {
+		return focusScopedAssessmentContext{}, false
+	}
+	refs := focusScopedAssessmentAllowedEvidenceRefs(step.Input, focus)
+	if len(refs) == 0 {
+		return focusScopedAssessmentContext{}, false
+	}
+	return focusScopedAssessmentContext{Focus: focus, AllowedRefs: refs}, true
+}
+
+func stepInputCurrentActionIsAssessment(input map[string]any) bool {
+	for _, source := range []map[string]any{
+		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["nextAction"]),
+		mapFromValue(mapFromValue(input[convergenceAuthorityKey])["nextAction"]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])[convergenceAuthorityKey])["nextAction"]),
+	} {
+		if isAssessmentNextActionMap(source) {
+			return true
+		}
+		if isCompleteNextActionMap(source) {
+			return false
+		}
+	}
+	for _, source := range []map[string]any{
+		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		mapFromValue(input["requiredOutput"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"])["requiredOutput"]),
+	} {
+		if boolValue(source["completionReady"]) {
+			return false
+		}
+		if boolValue(source["mustAssessAcceptedEvidence"]) {
+			return true
+		}
+	}
+	allowed := stringSet(stringSliceFromValue(input["allowedActions"]))
+	if allowed[runtimemodel.NextActionTypeAssessment] {
+		return true
+	}
+	return false
+}
+
+func isAssessmentNextActionMap(action map[string]any) bool {
+	return strings.TrimSpace(stringFromMap(action, "type")) == runtimemodel.NextActionTypeAssessment ||
+		strings.TrimSpace(stringFromMap(action, "kind")) == runtimemodel.NextActionTypeAssessment
+}
+
+func isCompleteNextActionMap(action map[string]any) bool {
+	return strings.TrimSpace(stringFromMap(action, "type")) == runtimemodel.NextActionTypeComplete ||
+		strings.TrimSpace(stringFromMap(action, "kind")) == runtimemodel.NextActionTypeComplete
+}
+
+func focusScopedAssessmentFocus(input map[string]any) map[string]any {
+	for _, source := range []map[string]any{
+		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["activeFocus"]),
+		mapFromValue(mapFromValue(input[convergenceAuthorityKey])["currentFocus"]),
+		mapFromValue(input[coverageFocusKey]),
+		mapFromValue(mapFromValue(input["executionContext"])[coverageFocusKey]),
+		coverageWorkItemPrimaryFocus(coverageWorkItemContextFromInput(input)),
+	} {
+		if len(source) > 0 {
+			return cloneStepPayload(source)
+		}
+	}
+	return nil
+}
+
+func focusScopedAssessmentAllowedEvidenceRefs(input map[string]any, focus map[string]any) map[string]bool {
+	refs := make([]string, 0)
+	addFocusRefs := func(item map[string]any) {
+		if len(item) == 0 || !focusScopedAssessmentItemMatchesFocus(item, focus) {
+			return
+		}
+		refs = append(refs, stringSliceFromValue(item["acceptedEvidenceRefs"])...)
+		for _, byKind := range mapStringSliceValue(item["acceptedEvidenceByKind"]) {
+			refs = append(refs, byKind...)
+		}
+	}
+	addFocusRefs(focus)
+	for _, source := range []map[string]any{
+		coverageWorkItemContextFromInput(input),
+		mapFromValue(mapFromValue(input[convergenceAuthorityKey])[coverageWorkItemContextKey]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])[convergenceAuthorityKey])[coverageWorkItemContextKey]),
+	} {
+		addFocusRefs(mapFromValue(source["currentFocus"]))
+		for _, key := range []string{"currentFocusItems", "ledgerSummary", "unresolvedItems"} {
+			for _, item := range mapSliceFromValue(source[key]) {
+				addFocusRefs(item)
+			}
+		}
+	}
+	for _, source := range []map[string]any{
+		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		mapFromValue(input["requiredOutput"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+	} {
+		if len(source) == 0 {
+			continue
+		}
+		if !requiredOutputReferencesFocus(source, focus) {
+			continue
+		}
+		refs = append(refs, stringSliceFromValue(source["acceptedEvidenceRefs"])...)
+	}
+	return stringSet(compactUniqueStrings(refs))
+}
+
+func requiredOutputReferencesFocus(required map[string]any, focus map[string]any) bool {
+	if len(required) == 0 || len(focus) == 0 {
+		return false
+	}
+	ids := stringSet(stringSliceFromValue(required["coverageWorkItemIds"]))
+	focusID := strings.TrimSpace(stringFromMap(focus, "id"))
+	if focusID != "" && ids[focusID] {
+		return true
+	}
+	if len(ids) == 0 {
+		return boolValue(required["mustAssessAcceptedEvidence"])
+	}
+	return false
+}
+
+func validatedFocusScopedDoDAssessment(run *runModel.Run, output map[string]any, ctx focusScopedAssessmentContext) (map[string]any, string, error) {
+	if !requiresDoDAssessmentCompletionGate(run) {
+		return nil, "", nil
+	}
+	assessment := doDAssessmentFromOutput(output)
+	if assessment == nil {
+		return nil, "", fmt.Errorf("%w: dodAssessment is required for focus-scoped assessment", common.ErrInvalidArgument)
+	}
+	satisfied, ok := assessment["satisfied"].(bool)
+	if !ok {
+		return nil, "", fmt.Errorf("%w: dodAssessment.satisfied is required", common.ErrInvalidArgument)
+	}
+	if !satisfied {
+		return nil, "", newDoDAssessmentUnsatisfiedError(assessment)
+	}
+	summary := strings.TrimSpace(stringFromMap(assessment, "summary"))
+	if summary == "" {
+		return nil, "", fmt.Errorf("%w: dodAssessment.summary is required for focus-scoped assessment", common.ErrInvalidArgument)
+	}
+	if err := validateDoDAssessmentItems(assessment["items"]); err != nil {
+		return nil, "", err
+	}
+	if err := validateDoDAssessmentHasNoOpenEvidenceGaps(assessment); err != nil {
+		return nil, "", err
+	}
+	if err := validateFocusScopedDoDAssessmentItems(assessment, ctx); err != nil {
+		return nil, "", err
+	}
+	return assessment, summary, nil
+}
+
+func validateFocusScopedDoDAssessmentItems(assessment map[string]any, ctx focusScopedAssessmentContext) error {
+	items := focusScopedAssessmentItems(assessment)
+	if len(items) == 0 {
+		return newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "focus-scoped dodAssessment requires at least one assessment item")
+	}
+	matched := false
+	for _, item := range items {
+		if strings.TrimSpace(stringFromMap(item, "state")) != "satisfied" {
+			continue
+		}
+		if !focusScopedAssessmentItemMatchesFocus(item, ctx.Focus) {
+			return newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "focus-scoped dodAssessment item is outside current focus")
+		}
+		refs := evidenceRefsFromValue(item["evidenceRefs"])
+		if len(refs) == 0 {
+			return newRuntimeContractViolationError(contractViolationDoDAssessmentEvidenceMissing, "focus-scoped dodAssessment item requires evidenceRefs")
+		}
+		for _, ref := range refs {
+			if !ctx.AllowedRefs[strings.TrimSpace(ref)] {
+				return newRuntimeContractViolationError(contractViolationDoDAssessmentEvidenceMissing, "focus-scoped dodAssessment evidenceRefs must reference accepted evidence for the current focus")
+			}
+		}
+		matched = true
+	}
+	if !matched {
+		return newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "focus-scoped dodAssessment must satisfy the current focus")
+	}
+	return nil
+}
+
+func focusScopedAssessmentItems(assessment map[string]any) []map[string]any {
+	items := make([]map[string]any, 0)
+	if values, ok := doDAssessmentItemMaps(assessment["items"]); ok {
+		items = append(items, values...)
+	}
+	for _, key := range []string{"goalCoverage", "deliverableCoverage", "acceptanceDimensions"} {
+		if values, ok := doDAssessmentItemMaps(mapFromValue(assessment[key])["items"]); ok {
+			items = append(items, values...)
+		}
+	}
+	return items
+}
+
+func focusScopedAssessmentItemMatchesFocus(item map[string]any, focus map[string]any) bool {
+	if len(item) == 0 || len(focus) == 0 {
+		return false
+	}
+	itemIDs := stringSet(compactUniqueStrings(append(
+		stringSliceFromValue(item["coverageWorkItemIds"]),
+		stringFromMap(item, "coverageWorkItemId"),
+		stringFromMap(item, "workItemId"),
+		stringFromMap(item, "id"),
+		stringFromMap(item, "goalRequirementId"),
+		stringFromMap(item, "sourceRequirementId"),
+	)))
+	for _, key := range []string{"id", "coverageWorkItemId", "sourceRequirementId", "normalizedSourceKey"} {
+		value := strings.TrimSpace(stringFromMap(focus, key))
+		if value != "" && itemIDs[value] {
+			return true
+		}
+	}
+	tokens := coverageTokensFromAssessmentItem(item)
+	for _, focusValue := range []string{
+		stringFromMap(focus, "targetText"),
+		stringFromMap(focus, "sourcePath"),
+		stringFromMap(focus, "sourceRequirementId"),
+		stringFromMap(focus, "normalizedSourceKey"),
+	} {
+		for _, token := range tokens {
+			if coverageRepairTokenMatches(token, focusValue) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func doDAssessmentFromOutput(output map[string]any) map[string]any {
