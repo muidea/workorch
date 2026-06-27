@@ -12,6 +12,11 @@ const (
 	ValidationDiagnosticTimeout                = "validation_timeout"
 	ValidationDiagnosticOutputInconclusive     = "validation_output_inconclusive"
 	ValidationDiagnosticEvidenceBindingMissing = "validation_evidence_binding_missing"
+	ValidationDiagnosticContractViolation      = "validation_contract_violation"
+	ValidationDiagnosticImplementationGap      = "implementation_gap_detected"
+	ValidationDiagnosticExternalDependency     = "external_dependency_missing"
+	ValidationDiagnosticProviderTransient      = "provider_transient_failure"
+	ValidationDiagnosticRuntimeMisalignment    = "runtime_internal_contract_misalignment"
 
 	ValidationEvidenceTargetCommandContract    = "command_contract"
 	ValidationEvidenceTargetEnvironment        = "environment"

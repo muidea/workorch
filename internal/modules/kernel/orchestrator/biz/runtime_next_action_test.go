@@ -678,6 +678,176 @@ func TestNextActionForRunMissingValidationRequestsValidation(t *testing.T) {
 	}
 }
 
+func TestNextActionForRunValidationImplementationGapRequestsStateChange(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-validation-implementation-gap")
+	runID := common.RunID("run-next-action-validation-implementation-gap")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                     "cwi-implementation-gap",
+				"status":                 "open",
+				"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+				"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindStateChange: {"step-state-change"}},
+				"missingEvidenceKinds":   []string{runtimemodel.EvidenceKindValidation},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := evidenceRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.EvidenceRecord{
+		ID:               "diagnostic-implementation-gap",
+		WorkspaceID:      workspaceID,
+		RunID:            runID,
+		Kind:             runtimemodel.EvidenceKindDiagnostic,
+		Status:           runtimemodel.EvidenceStatusRejected,
+		SourceRef:        "diagnostic-implementation-gap-source",
+		CoverageItemRefs: []string{"cwi-implementation-gap"},
+		Metadata: map[string]any{
+			"validationFailureDiagnostic": map[string]any{
+				"class": runtimemodel.ValidationDiagnosticImplementationGap,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("create diagnostic evidence: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeStateChange || action.Stage != runtimemodel.NextActionTypeStateChange || action.StageMode != "implementation_gap" {
+		t.Fatalf("next action = %+v, want state_change for implementation gap", action)
+	}
+	if action.SubjectID != "cwi-implementation-gap" {
+		t.Fatalf("subject = %s, want current coverage item", action.SubjectID)
+	}
+	if !stringSliceContains(action.RequiredEvidenceKinds, runtimemodel.EvidenceKindStateChange) {
+		t.Fatalf("required evidence kinds = %+v, want state_change", action.RequiredEvidenceKinds)
+	}
+	if action.RequiredOutput["mustAddressValidationFailureDiagnostic"] != true ||
+		action.RequiredOutput["diagnosticEvidenceId"] != "diagnostic-implementation-gap" {
+		t.Fatalf("required output = %+v, want diagnostic-bound state_change", action.RequiredOutput)
+	}
+	if action.RequiredOutput["mustNotMutateWorkspace"] == true || action.RequiredOutput["mustProduceConcreteValidationEvidence"] == true {
+		t.Fatalf("required output = %+v, want state_change without validation-only mutation guard", action.RequiredOutput)
+	}
+}
+
+func TestNextActionForRunValidationContractRetryExhaustedFailsFast(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-validation-contract-exhausted")
+	runID := common.RunID("run-next-action-validation-contract-exhausted")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			"validationPolicies": []map[string]any{{
+				"id":                               "test-validation-policy",
+				"appliesToEvidenceKinds":           []string{runtimemodel.EvidenceKindValidation},
+				"maxValidationOnlyRetriesPerFocus": 2,
+			}},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                     "cwi-validation-contract",
+				"status":                 "open",
+				"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+				"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindStateChange: {"step-state-change"}},
+				"missingEvidenceKinds":   []string{runtimemodel.EvidenceKindValidation},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for _, id := range []string{"diagnostic-contract-1", "diagnostic-contract-2"} {
+		if err := evidenceRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.EvidenceRecord{
+			ID:               common.EvidenceRecordID(id),
+			WorkspaceID:      workspaceID,
+			RunID:            runID,
+			Kind:             runtimemodel.EvidenceKindDiagnostic,
+			Status:           runtimemodel.EvidenceStatusRejected,
+			SourceRef:        id + "-source",
+			CoverageItemRefs: []string{"cwi-validation-contract"},
+			Metadata: map[string]any{
+				"validationFailureDiagnostic": map[string]any{"class": runtimemodel.ValidationDiagnosticContractViolation},
+				"violatedRule":                "validation_contract_rule",
+				"failureSignature":            "signature-a",
+			},
+		}); err != nil {
+			t.Fatalf("create diagnostic evidence %s: %v", id, err)
+		}
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeFail || action.Stage != runtimemodel.NextActionTypeFail || action.StageMode != "fail" {
+		t.Fatalf("next action = %+v, want fail after validation contract retry exhaustion", action)
+	}
+	if action.RequiredOutput["failureReason"] != "contract_retry_exhausted" ||
+		action.RequiredOutput["retryAttempt"] != 2 ||
+		action.RequiredOutput["retryMaxAttempts"] != 2 {
+		t.Fatalf("required output = %+v, want retry exhaustion details", action.RequiredOutput)
+	}
+}
+
+func TestValidationDiagnosticEvidenceRequiresCoverageScope(t *testing.T) {
+	record := &runtimemodel.EvidenceRecord{
+		ID:     "diagnostic-unscoped",
+		Kind:   runtimemodel.EvidenceKindDiagnostic,
+		Status: runtimemodel.EvidenceStatusRejected,
+		Metadata: map[string]any{
+			"validationFailureDiagnostic": map[string]any{"class": runtimemodel.ValidationDiagnosticImplementationGap},
+		},
+	}
+	item := map[string]any{"id": "cwi-scoped"}
+	if validationDiagnosticEvidenceMatchesCoverageItem(record, item) {
+		t.Fatal("unscoped validation diagnostic matched coverage item, want ignored")
+	}
+	record.Metadata["budgetScope"] = map[string]any{"focusId": "focus-cwi-scoped"}
+	if !validationDiagnosticEvidenceMatchesCoverageItem(record, item) {
+		t.Fatal("budget-scoped validation diagnostic did not match coverage item")
+	}
+}
+
 func TestDeriveMissingValidationNextActionSkipsWhenStateChangeHasPriority(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-validation-rule",

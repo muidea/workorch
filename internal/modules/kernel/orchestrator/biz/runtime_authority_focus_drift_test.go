@@ -48,6 +48,42 @@ func TestRebuildDispatchInputAlignsStaleFocusFieldsToAuthority(t *testing.T) {
 				"coverageWorkItemIds": []string{"cwi-stale"},
 			},
 		},
+		"convergenceBudget": map[string]any{
+			"focusId":             "focus-cwi-stale",
+			"coverageWorkItemIds": []string{"cwi-stale"},
+		},
+		"executionContext": map[string]any{
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": map[string]any{
+					"id":                  "focus-cwi-stale",
+					"coverageWorkItemIds": []string{"cwi-stale"},
+				},
+			},
+			"convergenceBudget": map[string]any{
+				"focusId":             "focus-cwi-stale",
+				"coverageWorkItemIds": []string{"cwi-stale"},
+			},
+			"requiredOutput": map[string]any{
+				"coverageFocusId":     "focus-cwi-stale",
+				"coverageWorkItemIds": []string{"cwi-stale"},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"coverageFocusId":     "focus-cwi-stale",
+					"coverageWorkItemIds": []string{"cwi-stale"},
+				},
+			},
+			stepInputKeyStagePacket: map[string]any{
+				"activeFocus": map[string]any{
+					"id":                  "focus-cwi-stale",
+					"coverageWorkItemIds": []string{"cwi-stale"},
+				},
+				"requiredOutput": map[string]any{
+					"coverageFocusId":     "focus-cwi-stale",
+					"coverageWorkItemIds": []string{"cwi-stale"},
+				},
+			},
+		},
 	}
 
 	got, err := rebuildDispatchInputFromConvergenceAuthority(run, "step-current", input)
@@ -70,6 +106,25 @@ func TestRebuildDispatchInputAlignsStaleFocusFieldsToAuthority(t *testing.T) {
 	}
 	if ids := stringSliceFromValue(required["coverageWorkItemIds"]); len(ids) != 1 || ids[0] != "cwi-current" {
 		t.Fatalf("repairActionPackage.requiredOutput.coverageWorkItemIds = %+v, want [cwi-current]", ids)
+	}
+	if budget := mapFromValue(got["convergenceBudget"]); stringFromMap(budget, "focusId") != "focus-cwi-current" {
+		t.Fatalf("convergenceBudget = %+v, want current focus", budget)
+	}
+	executionContext := mapFromValue(got["executionContext"])
+	if budget := mapFromValue(executionContext["convergenceBudget"]); stringFromMap(budget, "focusId") != "focus-cwi-current" {
+		t.Fatalf("executionContext.convergenceBudget = %+v, want current focus", budget)
+	}
+	if contextFocus := mapFromValue(mapFromValue(executionContext[coverageWorkItemContextKey])["currentFocus"]); !dispatchFocusAligned(mapFromValue(got[coverageFocusKey]), contextFocus) {
+		t.Fatalf("executionContext.%s.currentFocus = %+v, want current focus", coverageWorkItemContextKey, contextFocus)
+	}
+	if required := mapFromValue(executionContext["requiredOutput"]); stringFromMap(required, "coverageFocusId") != "focus-cwi-current" {
+		t.Fatalf("executionContext.requiredOutput = %+v, want current focus", required)
+	}
+	if required := mapFromValue(mapFromValue(executionContext["repairActionPackage"])["requiredOutput"]); stringFromMap(required, "coverageFocusId") != "focus-cwi-current" {
+		t.Fatalf("executionContext.repairActionPackage.requiredOutput = %+v, want current focus", required)
+	}
+	if required := mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["requiredOutput"]); stringFromMap(required, "coverageFocusId") != "focus-cwi-current" {
+		t.Fatalf("executionContext.stagePacket.requiredOutput = %+v, want current focus", required)
 	}
 	packet := mapFromValue(got[stepInputKeyStagePacket])
 	assertFocusIDForTest(t, mapFromValue(packet["activeFocus"]), "cwi-current")

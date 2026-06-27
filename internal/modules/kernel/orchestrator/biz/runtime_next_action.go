@@ -151,10 +151,11 @@ func (o *RuntimeOrchestrator) missingAssessmentNextAction(ctx context.Context, r
 }
 
 type missingCoverageEvidenceNextActionSpec struct {
-	ActionType       string
-	EvidenceKind     string
-	ForbiddenActions []string
-	Reason           string
+	ActionType          string
+	EvidenceKind        string
+	ForbiddenActions    []string
+	Reason              string
+	RejectedDiagnostics []*runtimemodel.EvidenceRecord
 }
 
 func (o *RuntimeOrchestrator) missingCoverageEvidenceNextAction(ctx context.Context, run *runmodel.Run, spec missingCoverageEvidenceNextActionSpec) (runtimemodel.NextAction, bool, error) {
@@ -185,6 +186,16 @@ func (o *RuntimeOrchestrator) missingCoverageEvidenceNextAction(ctx context.Cont
 		}
 		if changed {
 			items = mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+		}
+		if spec.ActionType == runtimemodel.NextActionTypeValidate {
+			records, err := o.evidence.EvidenceRecords.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID), run.ID)
+			if err != nil {
+				if !errors.Is(err, common.ErrNotFound) {
+					return runtimemodel.NextAction{}, false, err
+				}
+			} else {
+				spec.RejectedDiagnostics = records
+			}
 		}
 	}
 	action, ok := deriveMissingCoverageEvidenceNextAction(run, items, spec)
@@ -520,11 +531,15 @@ func deriveMissingCoverageEvidenceNextAction(run *runmodel.Run, items []map[stri
 		}
 		stageMode := "evidence"
 		actionType := spec.ActionType
+		requiredEvidenceKind := spec.EvidenceKind
 		allowedActions := []string{spec.ActionType}
 		forbiddenActions := append([]string(nil), spec.ForbiddenActions...)
 		reason := spec.Reason
 		if spec.ActionType == runtimemodel.NextActionTypeValidate {
 			route := validationNextActionRouteForCoverageItem(run, item, spec.EvidenceKind)
+			if diagnosticRoute := validationNextActionRouteForRejectedDiagnostics(run, item, spec.RejectedDiagnostics); diagnosticRoute.Route != "" {
+				route = diagnosticRoute
+			}
 			requiredOutput = applyValidationRouteToRequiredOutput(requiredOutput, route)
 			stageMode = firstNonEmptyString(route.StageMode, stageMode)
 			if route.ActionType != "" && route.ActionType != spec.ActionType {
@@ -533,6 +548,25 @@ func deriveMissingCoverageEvidenceNextAction(run *runmodel.Run, items []map[stri
 			}
 			if route.Reason != "" {
 				reason = route.Reason
+			}
+			switch route.ActionType {
+			case runtimemodel.NextActionTypeStateChange:
+				requiredEvidenceKind = runtimemodel.EvidenceKindStateChange
+				requiredOutput = validationFailureStateChangeRequiredOutput(requiredOutput, route)
+				allowedActions = []string{runtimemodel.NextActionTypeStateChange}
+				forbiddenActions = []string{
+					runtimemodel.NextActionTypeComplete,
+					runtimemodel.NextActionTypeValidate,
+					runtimemodel.NextActionTypeAssessment,
+				}
+			case runtimemodel.NextActionTypeFail:
+				requiredOutput = validationFailureFailRequiredOutput(requiredOutput, route)
+				allowedActions = []string{runtimemodel.NextActionTypeFail}
+				forbiddenActions = []string{
+					runtimemodel.NextActionTypeStateChange,
+					runtimemodel.NextActionTypeValidate,
+					runtimemodel.NextActionTypeComplete,
+				}
 			}
 			if route.ActionType == runtimemodel.NextActionTypeRequestDecision {
 				forbiddenActions = append(forbiddenActions, runtimemodel.NextActionTypeValidate)
@@ -548,7 +582,7 @@ func deriveMissingCoverageEvidenceNextAction(run *runmodel.Run, items []map[stri
 			RequiredOutput:        requiredOutput,
 			AllowedActions:        allowedActions,
 			ForbiddenActions:      forbiddenActions,
-			RequiredEvidenceKinds: []string{spec.EvidenceKind},
+			RequiredEvidenceKinds: []string{requiredEvidenceKind},
 			Stage:                 actionType,
 			StageMode:             stageMode,
 			Reason:                reason,
@@ -567,6 +601,68 @@ type validationNextActionRoute struct {
 	DeferredEvidenceKind  string
 	GovernanceReason      string
 	Reason                string
+	DiagnosticEvidenceID  string
+	DiagnosticClass       string
+	ViolatedRule          string
+	FailureSignature      string
+	RetryAttempt          int
+	RetryMaxAttempts      int
+	EscalationReason      string
+}
+
+func validationNextActionRouteForRejectedDiagnostics(run *runmodel.Run, item map[string]any, records []*runtimemodel.EvidenceRecord) validationNextActionRoute {
+	if run == nil || len(item) == 0 || len(records) == 0 {
+		return validationNextActionRoute{}
+	}
+	latest := latestRejectedValidationDiagnosticForCoverageItem(run, item, records)
+	if latest == nil {
+		return validationNextActionRoute{}
+	}
+	class := validationDiagnosticClassFromEvidenceRecord(latest)
+	if class == "" {
+		return validationNextActionRoute{}
+	}
+	policy := validationDiagnosticPolicyForCoverageItem(run, item)
+	if validationDiagnosticImpliesStateChange(class, policy) {
+		return validationNextActionRoute{
+			Route:                "validation_failure_state_change",
+			ActionType:           runtimemodel.NextActionTypeStateChange,
+			StageMode:            "implementation_gap",
+			PolicyRef:            strings.TrimSpace(firstNonEmptyString(stringFromMap(policy, "policyRef"), stringFromMap(policy, "id"))),
+			Reason:               "validation diagnostic requires state-changing closure",
+			DiagnosticEvidenceID: string(latest.ID),
+			DiagnosticClass:      class,
+		}
+	}
+	if validationDiagnosticIsContractViolation(class, latest) {
+		count := repeatedValidationDiagnosticCountForCoverageItem(run, item, records, latest)
+		maxRetries := validationOnlyRetryMaxForPolicy(policy)
+		if maxRetries > 0 && count >= maxRetries {
+			route := validationNextActionRoute{
+				Route:                "validation_contract_retry_exhausted",
+				ActionType:           runtimemodel.NextActionTypeFail,
+				StageMode:            "fail",
+				PolicyRef:            strings.TrimSpace(firstNonEmptyString(stringFromMap(policy, "policyRef"), stringFromMap(policy, "id"))),
+				Reason:               "validation contract retry exhausted",
+				DiagnosticEvidenceID: string(latest.ID),
+				DiagnosticClass:      class,
+				ViolatedRule:         validationDiagnosticViolatedRule(latest),
+				FailureSignature:     validationDiagnosticFailureSignature(latest),
+				RetryAttempt:         count,
+				RetryMaxAttempts:     maxRetries,
+				EscalationReason:     "contract_retry_exhausted",
+			}
+			if validationDiagnosticManagedHarnessAvailable(policy) {
+				route.Route = runtimemodel.ValidationRouteManagedHarness
+				route.ActionType = runtimemodel.NextActionTypeValidate
+				route.StageMode = "managed_harness"
+				route.ManagedHarnessRef = strings.TrimSpace(stringFromMap(policy, "managedHarnessRef"))
+				route.Reason = "validation contract retry exhausted; routing to managed harness"
+			}
+			return route
+		}
+	}
+	return validationNextActionRoute{}
 }
 
 func validationNextActionRouteForCoverageItem(run *runmodel.Run, item map[string]any, evidenceKind string) validationNextActionRoute {
@@ -605,6 +701,181 @@ func validationPoliciesForRun(run *runmodel.Run) []map[string]any {
 		}
 	}
 	return policies
+}
+
+func validationDiagnosticPolicyForCoverageItem(run *runmodel.Run, item map[string]any) map[string]any {
+	for _, policy := range validationPoliciesForRun(run) {
+		if validationPolicyAppliesToCoverageItem(policy, item, runtimemodel.EvidenceKindValidation) {
+			return policy
+		}
+	}
+	return nil
+}
+
+func latestRejectedValidationDiagnosticForCoverageItem(run *runmodel.Run, item map[string]any, records []*runtimemodel.EvidenceRecord) *runtimemodel.EvidenceRecord {
+	if run == nil || len(item) == 0 || len(records) == 0 {
+		return nil
+	}
+	superseded := supersededEvidenceRecordSet(records)
+	for idx := len(records) - 1; idx >= 0; idx-- {
+		record := records[idx]
+		if record == nil ||
+			record.WorkspaceID != run.WorkspaceID ||
+			record.RunID != run.ID ||
+			record.Kind != runtimemodel.EvidenceKindDiagnostic ||
+			record.Status != runtimemodel.EvidenceStatusRejected ||
+			superseded[record.ID] {
+			continue
+		}
+		if validationDiagnosticEvidenceMatchesCoverageItem(record, item) {
+			return record
+		}
+	}
+	return nil
+}
+
+func validationDiagnosticEvidenceMatchesCoverageItem(record *runtimemodel.EvidenceRecord, item map[string]any) bool {
+	if record == nil || len(item) == 0 {
+		return false
+	}
+	itemID := strings.TrimSpace(firstNonEmptyString(stringFromMap(item, "id"), stringFromMap(item, "repositoryId")))
+	if itemID == "" {
+		return false
+	}
+	refs := compactUniqueStrings(append([]string{}, record.CoverageItemRefs...))
+	refs = append(refs, stringSliceFromValue(record.Metadata["coverageWorkItemIds"])...)
+	refs = append(refs, stringSliceFromValue(record.Metadata["coverageItemRefs"])...)
+	refs = append(refs, stringSliceFromValue(mapFromValue(record.Metadata["budgetScope"])["coverageWorkItemIds"])...)
+	refs = append(refs, stringSliceFromValue(mapFromValue(record.Metadata["contractViolation"])["coverageWorkItemIds"])...)
+	refs = append(refs, stringSliceFromValue(mapFromValue(mapFromValue(record.Metadata["contractViolation"])["budgetScope"])["coverageWorkItemIds"])...)
+	if len(refs) == 0 {
+		for _, focusID := range []string{
+			stringFromMap(record.Metadata, "focusId"),
+			stringFromMap(mapFromValue(record.Metadata["budgetScope"]), "focusId"),
+			stringFromMap(mapFromValue(record.Metadata["contractViolation"]), "focusId"),
+			stringFromMap(mapFromValue(mapFromValue(record.Metadata["contractViolation"])["budgetScope"]), "focusId"),
+		} {
+			focusID = strings.TrimSpace(focusID)
+			if focusID != "" && dispatchFocusAligned(map[string]any{"id": focusID}, item) {
+				return true
+			}
+		}
+		return false
+	}
+	return stringSliceContains(compactUniqueStrings(refs), itemID)
+}
+
+func validationDiagnosticClassFromEvidenceRecord(record *runtimemodel.EvidenceRecord) string {
+	if record == nil {
+		return ""
+	}
+	for _, source := range []map[string]any{
+		mapFromValue(record.Metadata["validationFailureDiagnostic"]),
+		mapFromValue(mapFromValue(record.Metadata["runtimeDiagnostics"])["validationFailureDiagnostic"]),
+		record.Metadata,
+	} {
+		if class := allowedValidationDiagnosticClass(firstNonEmptyString(
+			stringFromMap(source, "class"),
+			stringFromMap(source, "diagnosticClass"),
+			stringFromMap(source, "failureClass"),
+		)); class != "" {
+			return class
+		}
+	}
+	if validationDiagnosticViolatedRule(record) != "" {
+		return runtimemodel.ValidationDiagnosticContractViolation
+	}
+	return ""
+}
+
+func validationDiagnosticViolatedRule(record *runtimemodel.EvidenceRecord) string {
+	if record == nil {
+		return ""
+	}
+	return strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(record.Metadata, "violatedRule"),
+		stringFromMap(mapFromValue(record.Metadata["contractViolation"]), "violatedRule"),
+	))
+}
+
+func validationDiagnosticFailureSignature(record *runtimemodel.EvidenceRecord) string {
+	if record == nil {
+		return ""
+	}
+	return strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(record.Metadata, "failureSignature"),
+		stringFromMap(mapFromValue(record.Metadata["contractViolation"]), "failureSignature"),
+		stringFromMap(mapFromValue(record.Metadata["contractViolation"]), "signature"),
+	))
+}
+
+func validationDiagnosticImpliesStateChange(class string, policy map[string]any) bool {
+	class = allowedValidationDiagnosticClass(class)
+	if class == runtimemodel.ValidationDiagnosticImplementationGap {
+		return true
+	}
+	if class == "" || len(policy) == 0 || !boolValue(policy["validationFailureImpliesStateChange"]) {
+		return false
+	}
+	classes := compactUniqueStrings(append(
+		stringSliceFromValue(policy["implementationGapDiagnosticClasses"]),
+		stringSliceFromValue(policy["validationFailureStateChangeDiagnosticClasses"])...,
+	))
+	return len(classes) > 0 && stringSliceContains(classes, class)
+}
+
+func validationDiagnosticIsContractViolation(class string, record *runtimemodel.EvidenceRecord) bool {
+	if allowedValidationDiagnosticClass(class) == runtimemodel.ValidationDiagnosticContractViolation {
+		return true
+	}
+	return validationDiagnosticViolatedRule(record) != ""
+}
+
+func validationOnlyRetryMaxForPolicy(policy map[string]any) int {
+	maxRetries := int(int64FromValue(policy["maxValidationOnlyRetriesPerFocus"]))
+	if maxRetries < 0 {
+		return 0
+	}
+	return maxRetries
+}
+
+func repeatedValidationDiagnosticCountForCoverageItem(run *runmodel.Run, item map[string]any, records []*runtimemodel.EvidenceRecord, latest *runtimemodel.EvidenceRecord) int {
+	if run == nil || latest == nil {
+		return 0
+	}
+	latestClass := validationDiagnosticClassFromEvidenceRecord(latest)
+	latestRule := validationDiagnosticViolatedRule(latest)
+	latestSignature := validationDiagnosticFailureSignature(latest)
+	count := 0
+	for _, record := range records {
+		if record == nil ||
+			record.WorkspaceID != run.WorkspaceID ||
+			record.RunID != run.ID ||
+			record.Kind != runtimemodel.EvidenceKindDiagnostic ||
+			record.Status != runtimemodel.EvidenceStatusRejected ||
+			!validationDiagnosticEvidenceMatchesCoverageItem(record, item) {
+			continue
+		}
+		if latestSignature != "" && validationDiagnosticFailureSignature(record) == latestSignature {
+			count++
+			continue
+		}
+		if latestRule != "" && validationDiagnosticViolatedRule(record) == latestRule {
+			count++
+			continue
+		}
+		if latestRule == "" && latestSignature == "" && validationDiagnosticClassFromEvidenceRecord(record) == latestClass {
+			count++
+		}
+	}
+	return count
+}
+
+func validationDiagnosticManagedHarnessAvailable(policy map[string]any) bool {
+	if len(policy) == 0 || strings.TrimSpace(stringFromMap(policy, "managedHarnessRef")) == "" {
+		return false
+	}
+	return stringSet(stringSliceFromValue(policy["allowedExecutionModes"]))["managed_harness"]
 }
 
 func validationPolicyAppliesToCoverageItem(policy map[string]any, item map[string]any, evidenceKind string) bool {
@@ -756,6 +1027,80 @@ func applyValidationRouteToRequiredOutput(requiredOutput map[string]any, route v
 		next["mustRequestGovernance"] = true
 	case runtimemodel.ValidationRouteFail:
 		next["mustFailFast"] = true
+	}
+	return next
+}
+
+func validationFailureStateChangeRequiredOutput(requiredOutput map[string]any, route validationNextActionRoute) map[string]any {
+	next := cloneStepPayload(requiredOutput)
+	if next == nil {
+		next = map[string]any{}
+	}
+	for _, key := range []string{
+		"validationRoute",
+		"validationRouteOwner",
+		"mustProduceConcreteValidationEvidence",
+		"mustNotMutateWorkspace",
+		"mustUseRuntimeAction",
+		"mustUseManagedHarness",
+		"mustRecordDeferredEvidenceRequirement",
+		"mustRequestGovernance",
+		"mustFailFast",
+	} {
+		delete(next, key)
+	}
+	next["requiredEvidenceKinds"] = []string{runtimemodel.EvidenceKindStateChange}
+	next["mustIncludeStateChangingNode"] = true
+	next["mustAddressValidationFailureDiagnostic"] = true
+	next["mustNotRepeatRejectedValidationOnlyOutput"] = true
+	next["validationFailureToStateChange"] = true
+	if route.DiagnosticEvidenceID != "" {
+		next["diagnosticEvidenceId"] = route.DiagnosticEvidenceID
+	}
+	if route.DiagnosticClass != "" {
+		next["validationFailureDiagnosticClass"] = route.DiagnosticClass
+	}
+	if route.PolicyRef != "" {
+		next["validationPolicyRef"] = route.PolicyRef
+	}
+	return next
+}
+
+func validationFailureFailRequiredOutput(requiredOutput map[string]any, route validationNextActionRoute) map[string]any {
+	next := cloneStepPayload(requiredOutput)
+	if next == nil {
+		next = map[string]any{}
+	}
+	for _, key := range []string{
+		"mustProduceConcreteValidationEvidence",
+		"mustNotMutateWorkspace",
+		"mustIncludeStateChangingNode",
+		"mustUseRuntimeAction",
+		"mustUseManagedHarness",
+		"mustRecordDeferredEvidenceRequirement",
+		"mustRequestGovernance",
+	} {
+		delete(next, key)
+	}
+	next["mustFailFast"] = true
+	next["failureReason"] = firstNonEmptyString(route.EscalationReason, "validation_failure_not_recoverable")
+	if route.DiagnosticEvidenceID != "" {
+		next["diagnosticEvidenceId"] = route.DiagnosticEvidenceID
+	}
+	if route.DiagnosticClass != "" {
+		next["validationFailureDiagnosticClass"] = route.DiagnosticClass
+	}
+	if route.ViolatedRule != "" {
+		next["violatedRule"] = route.ViolatedRule
+	}
+	if route.FailureSignature != "" {
+		next["failureSignature"] = route.FailureSignature
+	}
+	if route.RetryAttempt > 0 {
+		next["retryAttempt"] = route.RetryAttempt
+	}
+	if route.RetryMaxAttempts > 0 {
+		next["retryMaxAttempts"] = route.RetryMaxAttempts
 	}
 	return next
 }

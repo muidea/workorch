@@ -1044,6 +1044,13 @@ func assertSoftwareDevValidationPolicies(t *testing.T, hints map[string]any) {
 		assertStringListContains(t, item["allowedExecutionModes"].([]any), "llm_graph")
 		assertStringListContains(t, item["allowedExecutionModes"].([]any), "managed_harness")
 		assertStringListContains(t, item["allowedValidationModes"].([]any), "controlled_substitute")
+		if item["validationFailureImpliesStateChange"] != true || item["preferMinimalPatchBeforeRepeatedValidation"] != true {
+			t.Fatalf("validation policy = %+v, want state-change failure policy and minimal patch preference", item)
+		}
+		if got := testIntFromAny(item["maxValidationOnlyRetriesPerFocus"]); got != 2 {
+			t.Fatalf("validation policy maxValidationOnlyRetriesPerFocus = %v, want 2", item["maxValidationOnlyRetriesPerFocus"])
+		}
+		assertStringListContains(t, item["implementationGapDiagnosticClasses"].([]any), "implementation_gap_detected")
 		if item["ifNoTargetRoute"] != "failed_assessment_with_missing_evidence_or_deferred" {
 			t.Fatalf("validation policy ifNoTargetRoute = %v", item["ifNoTargetRoute"])
 		}

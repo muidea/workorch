@@ -164,7 +164,12 @@ func allowedValidationDiagnosticClass(value string) string {
 		runtimemodel.ValidationDiagnosticTestFailed,
 		runtimemodel.ValidationDiagnosticTimeout,
 		runtimemodel.ValidationDiagnosticOutputInconclusive,
-		runtimemodel.ValidationDiagnosticEvidenceBindingMissing:
+		runtimemodel.ValidationDiagnosticEvidenceBindingMissing,
+		runtimemodel.ValidationDiagnosticContractViolation,
+		runtimemodel.ValidationDiagnosticImplementationGap,
+		runtimemodel.ValidationDiagnosticExternalDependency,
+		runtimemodel.ValidationDiagnosticProviderTransient,
+		runtimemodel.ValidationDiagnosticRuntimeMisalignment:
 		return strings.TrimSpace(value)
 	default:
 		return ""
@@ -187,6 +192,16 @@ func defaultValidationDiagnosticTargetType(class string) string {
 		return runtimemodel.ValidationEvidenceTargetValidationOutput
 	case runtimemodel.ValidationDiagnosticTestFailed:
 		return runtimemodel.ValidationEvidenceTargetBehaviorEvidence
+	case runtimemodel.ValidationDiagnosticContractViolation:
+		return runtimemodel.ValidationEvidenceTargetCommandContract
+	case runtimemodel.ValidationDiagnosticImplementationGap:
+		return runtimemodel.ValidationEvidenceTargetFailureSurface
+	case runtimemodel.ValidationDiagnosticExternalDependency:
+		return runtimemodel.ValidationEvidenceTargetDependencyContract
+	case runtimemodel.ValidationDiagnosticProviderTransient:
+		return runtimemodel.ValidationEvidenceTargetEnvironment
+	case runtimemodel.ValidationDiagnosticRuntimeMisalignment:
+		return runtimemodel.ValidationEvidenceTargetValidationOutput
 	default:
 		return runtimemodel.ValidationEvidenceTargetFailureSurface
 	}

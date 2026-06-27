@@ -248,7 +248,15 @@ func coverageWorkItemContextAlignedToFocus(context map[string]any, focus map[str
 	}
 	matches := coverageWorkItemContextFocusMatches(context, focus)
 	if len(matches) == 0 {
-		return context
+		ret := cloneStepPayload(context)
+		if current := mapFromValue(ret["currentFocus"]); len(current) > 0 && !dispatchFocusAligned(focus, current) {
+			appendDiagnosticLineage(ret, "staleCoverageWorkItemContext", map[string]any{"currentFocus": current})
+		}
+		ret["currentFocus"] = cloneStepPayload(focus)
+		ret["currentFocusItems"] = []map[string]any{cloneStepPayload(focus)}
+		ret["focusAlignmentPolicy"] = "coverageWorkItemContext currentFocus is rebuilt from active coverageFocus before runtime dispatch"
+		ret["focusAligned"] = true
+		return ret
 	}
 	ret := cloneStepPayload(context)
 	ret["currentFocus"] = coverageWorkItemFocusWithActiveFocus(matches[0], focus)

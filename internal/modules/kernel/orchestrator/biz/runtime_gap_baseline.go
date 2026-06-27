@@ -352,15 +352,36 @@ func normalizeDispatchInputAuthorityFocus(input map[string]any) map[string]any {
 	if context := coverageWorkItemContextFromInput(input); len(context) > 0 {
 		input[coverageWorkItemContextKey] = coverageWorkItemContextAlignedToFocus(context, coverageFocus)
 	}
+	if budget := mapFromValue(input["convergenceBudget"]); len(budget) > 0 {
+		input["convergenceBudget"] = normalizeConvergenceBudgetFocusBinding(budget, coverageFocus)
+	}
 	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
 		if context := mapFromValue(executionContext[coverageWorkItemContextKey]); len(context) > 0 {
 			executionContext[coverageWorkItemContextKey] = coverageWorkItemContextAlignedToFocus(context, coverageFocus)
+		}
+		if budget := mapFromValue(executionContext["convergenceBudget"]); len(budget) > 0 {
+			executionContext["convergenceBudget"] = normalizeConvergenceBudgetFocusBinding(budget, coverageFocus)
 		}
 		if len(coverageFocus) > 0 {
 			executionContext[coverageFocusKey] = cloneStepPayload(coverageFocus)
 		}
 		if acceptance := mapFromValue(executionContext["acceptance"]); len(acceptance) > 0 {
 			executionContext["acceptance"] = acceptanceSignalAlignedToAuthorityFocus(acceptance, coverageFocus)
+		}
+		if required := mapFromValue(executionContext["requiredOutput"]); len(required) > 0 {
+			executionContext["requiredOutput"] = normalizeRequiredOutputFocusBinding(required, coverageFocus)
+		}
+		if pkg := mapFromValue(executionContext["repairActionPackage"]); len(pkg) > 0 {
+			executionContext["repairActionPackage"] = normalizeRepairActionPackageRequiredOutputForAuthority(input, pkg, coverageFocus)
+		}
+		if packet := mapFromValue(executionContext[stepInputKeyStagePacket]); len(packet) > 0 {
+			if required := mapFromValue(packet["requiredOutput"]); len(required) > 0 {
+				packet["requiredOutput"] = normalizeRequiredOutputFocusBinding(required, coverageFocus)
+			}
+			if len(coverageFocus) > 0 {
+				packet["activeFocus"] = cloneStepPayload(coverageFocus)
+			}
+			executionContext[stepInputKeyStagePacket] = packet
 		}
 		input["executionContext"] = executionContext
 	}
@@ -530,6 +551,20 @@ func normalizeRequiredOutputFocusBinding(required map[string]any, coverageFocus 
 	return next
 }
 
+func normalizeConvergenceBudgetFocusBinding(budget map[string]any, coverageFocus map[string]any) map[string]any {
+	if len(budget) == 0 || len(coverageFocus) == 0 {
+		return budget
+	}
+	next := cloneStepPayload(budget)
+	if focusID := strings.TrimSpace(stringFromMap(coverageFocus, "id")); focusID != "" {
+		next["focusId"] = focusID
+	}
+	if ids := dispatchFocusWorkItemIDs(coverageFocus); len(ids) > 0 {
+		next["coverageWorkItemIds"] = ids
+	}
+	return next
+}
+
 func assessmentRequiredOutputForAuthorityFocus(coverageFocus map[string]any) map[string]any {
 	if len(coverageFocus) == 0 {
 		return nil
@@ -575,6 +610,12 @@ func validateConvergenceDispatchFocusAlignment(input map[string]any) error {
 	if err := checkFocus("coverageFocus", mapFromValue(input[coverageFocusKey])); err != nil {
 		return err
 	}
+	if err := checkFocus("coverageWorkItemContext.currentFocus", mapFromValue(mapFromValue(input[coverageWorkItemContextKey])["currentFocus"])); err != nil {
+		return err
+	}
+	if err := validateConvergenceBudgetFocusAlignment(authorityFocus, "convergenceBudget", mapFromValue(input["convergenceBudget"])); err != nil {
+		return err
+	}
 	if err := checkFocus("acceptance.currentFocus", mapFromValue(mapFromValue(input["acceptance"])["currentFocus"])); err != nil {
 		return err
 	}
@@ -588,16 +629,42 @@ func validateConvergenceDispatchFocusAlignment(input map[string]any) error {
 	if err := checkFocus("executionContext.acceptance.activeSlice", mapFromValue(mapFromValue(executionContext["acceptance"])["activeSlice"])); err != nil {
 		return err
 	}
+	if err := checkFocus("executionContext.coverageWorkItemContext.currentFocus", mapFromValue(mapFromValue(executionContext[coverageWorkItemContextKey])["currentFocus"])); err != nil {
+		return err
+	}
+	if err := validateConvergenceBudgetFocusAlignment(authorityFocus, "executionContext.convergenceBudget", mapFromValue(executionContext["convergenceBudget"])); err != nil {
+		return err
+	}
 	for label, required := range map[string]map[string]any{
-		"repairActionPackage.requiredOutput": mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
-		"stagePacket.requiredOutput":         mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
-		"requiredOutput":                     mapFromValue(input["requiredOutput"]),
+		"repairActionPackage.requiredOutput":                  mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":                          mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"requiredOutput":                                      mapFromValue(input["requiredOutput"]),
+		"executionContext.requiredOutput":                     mapFromValue(executionContext["requiredOutput"]),
+		"executionContext.repairActionPackage.requiredOutput": mapFromValue(mapFromValue(executionContext["repairActionPackage"])["requiredOutput"]),
+		"executionContext.stagePacket.requiredOutput":         mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["requiredOutput"]),
 	} {
 		if err := validateRequiredOutputFocusAlignment(authorityFocus, label, required); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func validateConvergenceBudgetFocusAlignment(authorityFocus map[string]any, label string, budget map[string]any) error {
+	if len(authorityFocus) == 0 || len(budget) == 0 {
+		return nil
+	}
+	candidate := map[string]any{}
+	if focusID := strings.TrimSpace(firstNonEmptyString(stringFromMap(budget, "focusId"), stringFromMap(budget, "coverageFocusId"))); focusID != "" {
+		candidate["id"] = focusID
+	}
+	if ids := stringSliceFromValue(budget["coverageWorkItemIds"]); len(ids) > 0 {
+		candidate["coverageWorkItemIds"] = ids
+	}
+	if len(candidate) == 0 || dispatchFocusAligned(authorityFocus, candidate) {
+		return nil
+	}
+	return convergenceDispatchMisalignmentError("focus mismatch: %s=%s authority=%s", label, dispatchFocusDebugToken(candidate), dispatchFocusDebugToken(authorityFocus))
 }
 
 func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) error {
