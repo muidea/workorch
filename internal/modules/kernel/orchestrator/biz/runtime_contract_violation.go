@@ -198,8 +198,8 @@ func applyContractViolationRecoveryProjection(input map[string]any, failedStep *
 	input[stepInputKeyRecoveryLineageType] = "contract_violation_retry"
 	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 		"The previous LLM output was rejected by the runtime contract before any side effects were executed.",
-		"Use contractViolationRecovery.expectedContract as the required output contract and do not repeat contractViolationRecovery.actualOutputSummary.",
-		"Use contractViolationRecovery.correctionContract as the current narrow retry contract; if correctionMode is forced_narrow, return only an allowed output shape from that contract or a real governance blocker.",
+		"Treat contractViolationRecovery.expectedContract as diagnostic lineage only; it explains the rejected output but must not override the current narrow retry contract.",
+		"Use contractViolationRecovery.correctionContract and the current repairActionPackage.requiredOutput as the authoritative retry contract; if correctionMode is forced_narrow, return only an allowed output shape from that contract or a real governance blocker.",
 		"Return one valid JSON decision that satisfies the same runtimeStage and repairObjective; do not weaken Goal, DoD, evidence, or approval requirements.",
 	)
 }
@@ -569,7 +569,7 @@ func contractViolationRetryHint(rule string) string {
 	case contractViolationRuleAvailableSnapshotIgnored:
 		return "use the available complete target snapshots already supplied in the current action instead of claiming they are missing or returning another read-only acquisition graph"
 	default:
-		return "return a valid output that satisfies expectedContract and does not repeat actualOutputSummary"
+		return "return a valid output that satisfies the current correction contract and does not repeat actualOutputSummary"
 	}
 }
 
@@ -954,6 +954,10 @@ func contractViolationMap(violation runtimemodel.ContractViolation) map[string]a
 		"maxAttempts":          violation.MaxAttempts,
 		"signatureRepeatCount": violation.SignatureRepeatCount,
 		"createdAt":            violation.CreatedAt,
+	}
+	if len(mapFromValue(ret["expectedContract"])) > 0 {
+		ret["expectedContractRole"] = "diagnostic_lineage"
+		ret["expectedContractAuthoritative"] = false
 	}
 	for key, value := range ret {
 		if contractViolationEmptyValue(value) {

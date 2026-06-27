@@ -300,6 +300,13 @@ func validateConvergenceDispatchInput(input map[string]any) error {
 		if !stateChanging {
 			return convergenceDispatchMisalignmentError("state_change action lacks state-changing output contract")
 		}
+	case "repair", "acquire_evidence", "acquire_target_snapshot":
+		if state != convergenceStateNeedEvidence {
+			return convergenceDispatchMisalignmentError("nextAction=%s contractState=%s", nextAction, state)
+		}
+		if stateChanging {
+			return convergenceDispatchMisalignmentError("evidence action requires state-changing output")
+		}
 	case "request_decision", "wait_decision", "request_approval", "wait_approval", "request_governance":
 		if state != convergenceStateNeedGovernance {
 			return convergenceDispatchMisalignmentError("governed action has contractState=%s", state)

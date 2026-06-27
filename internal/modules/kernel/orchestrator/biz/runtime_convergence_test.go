@@ -2558,6 +2558,137 @@ func TestInitialStepInputAuthorityAssessmentPreemptsStaleReplanStateChange(t *te
 	}
 }
 
+func TestCoverageAssessmentIncompleteRecomputePreemptsStaleAssessmentAuthorityWithEvidenceGap(t *testing.T) {
+	focus := map[string]any{
+		"id":                   "cwi-state-change",
+		"status":               "open",
+		"sourceScope":          "deliverable",
+		"sourceRequirementId":  "source_change",
+		"targetText":           "neutral state-changing deliverable",
+		"missingEvidenceKinds": []string{"state_change"},
+		"requiredEvidenceKinds": []string{
+			"state_change",
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            "complete_dod_goal_coverage_assessment",
+		stepInputKeyAssessmentOnly:   true,
+		"contractViolationRetry":     true,
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus":  focus,
+			"nextAction":    map[string]any{"kind": "assessment"},
+		},
+		gapBaselineKey: map[string]any{
+			"schemaVersion": gapBaselineSchema,
+			"currentFocus":  focus,
+			"nextAction":    map[string]any{"kind": "assessment"},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": focus,
+			"unresolvedItems": []map[string]any{
+				focus,
+			},
+		},
+		"coverageTargetSet": []map[string]any{{
+			"kind":                 "deliverable",
+			"sourceScope":          "deliverable",
+			"sourceRequirementId":  "source_change",
+			"targetText":           "neutral state-changing deliverable",
+			"status":               "open",
+			"missingEvidenceKinds": []string{"state_change"},
+			"requiredEvidenceKinds": []string{
+				"state_change",
+			},
+		}},
+		stepInputKeyContractViolationRecovery: map[string]any{
+			"violatedRule":   contractViolationRuleCoverageAssessmentIncomplete,
+			"recoverability": "recompute_authority",
+			"correctionMode": contractViolationCorrectionModeForcedNarrow,
+			"correctionContract": map[string]any{
+				"requiredOutputShape": "authority_recomputed_next_action",
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+	if contract.State == convergenceStateNeedAssessment {
+		t.Fatalf("contract state = %q, want runtime recompute to avoid repeated assessment-only; contract=%+v", contract.State, contract)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if applied[stepInputKeyAssessmentOnly] != nil {
+		t.Fatalf("%s = %v, want removed when recompute selects non-assessment action", stepInputKeyAssessmentOnly, applied[stepInputKeyAssessmentOnly])
+	}
+	if got := stringFromMap(mapFromValue(mapFromValue(applied[convergenceAuthorityKey])["nextAction"]), "kind"); got == "assessment" || got == "" {
+		t.Fatalf("convergenceAuthority.nextAction = %q, want recomputed non-assessment action; applied=%+v", got, applied)
+	}
+	if got := stringFromMap(mapFromValue(mapFromValue(applied[gapBaselineKey])["nextAction"]), "kind"); got == "assessment" || got == "" {
+		t.Fatalf("gapBaseline.nextAction = %q, want recomputed non-assessment action; applied=%+v", got, applied)
+	}
+}
+
+func TestCoverageAssessmentIncompleteStateChangeRecomputeSyncsEvidenceNextAction(t *testing.T) {
+	focus := map[string]any{
+		"id":                   "cwi-state-change",
+		"status":               "open",
+		"sourceScope":          "deliverable",
+		"sourceRequirementId":  "source_change",
+		"targetText":           "neutral state-changing deliverable",
+		"missingEvidenceKinds": []string{"state_change"},
+		"requiredEvidenceKinds": []string{
+			"validation",
+			"state_change",
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:  "strict_convergence",
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus":  focus,
+			"nextAction":    map[string]any{"kind": "state_change", "reason": "state change evidence is missing"},
+		},
+		gapBaselineKey: map[string]any{
+			"schemaVersion": gapBaselineSchema,
+			"currentFocus":  focus,
+			"nextAction":    map[string]any{"kind": "state_change", "reason": "state change evidence is missing"},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": focus,
+			"unresolvedItems": []map[string]any{
+				focus,
+			},
+		},
+		stepInputKeyContractViolationRecovery: map[string]any{
+			"violatedRule":   contractViolationRuleCoverageAssessmentIncomplete,
+			"recoverability": "recompute_authority",
+			"correctionContract": map[string]any{
+				"requiredOutputShape": "authority_recomputed_next_action",
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+	if contract.State != convergenceStateNeedEvidence {
+		t.Fatalf("contract state = %q, want %q before state-changing dispatch is actionable; contract=%+v", contract.State, convergenceStateNeedEvidence, contract)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if got := stringFromMap(mapFromValue(mapFromValue(applied[convergenceAuthorityKey])["nextAction"]), "kind"); got != "acquire_evidence" {
+		t.Fatalf("convergenceAuthority.nextAction = %q, want acquire_evidence; applied=%+v", got, applied)
+	}
+	if got := stringFromMap(mapFromValue(mapFromValue(applied[gapBaselineKey])["nextAction"]), "kind"); got != "acquire_evidence" {
+		t.Fatalf("gapBaseline.nextAction = %q, want acquire_evidence; applied=%+v", got, applied)
+	}
+	applied[stepInputKeyStagePacket] = map[string]any{"schemaVersion": "workorch.stage_packet.v1"}
+	if err := validateConvergenceDispatchInput(applied); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput() error = %v; applied=%+v", err, applied)
+	}
+}
+
 func TestBuildConvergenceContractAuthorityPreemptsReplanWithoutInputPollution(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{
@@ -3333,6 +3464,66 @@ func TestShouldCreateDecisionTicketBlocksMechanicalConcreteValidationDecision(t 
 
 	if ShouldCreateDecisionTicket(input, output, contract) {
 		t.Fatalf("ShouldCreateDecisionTicket = true, want false for mechanically continuable validation evidence contract")
+	}
+}
+
+func TestBuildConvergenceContractDoesNotPromoteDiagnosticExpectedContractOverNarrowValidation(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:  "strict_convergence",
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		"contractViolationRetry":      true,
+		stepInputKeyContractViolationRecovery: map[string]any{
+			"violatedRule":   contractViolationRuleConcreteValidationMissing,
+			"correctionMode": contractViolationCorrectionModeForcedNarrow,
+			"correctionContract": map[string]any{
+				"requiredOutputShape": "bounded_validation_evidence",
+				"mode":                contractViolationCorrectionModeForcedNarrow,
+				"allowedOutputs":      []string{"executionGraph_with_declared_validationEvidence"},
+				"forbiddenOutputs":    []string{"decision_request_when_runtime_can_continue"},
+			},
+			"expectedContract": map[string]any{
+				"stateChangingOutputRequired": true,
+				"repairObjective":             repairObjectiveStateChangingOutput,
+				"convergenceContract": map[string]any{
+					"state":                       convergenceStateNeedStateChange,
+					"stateChangingOutputRequired": true,
+					"repairObjective":             repairObjectiveStateChangingOutput,
+				},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+		},
+	}
+	step := &runmodel.Step{ID: "run-convergence/validation-retry", Input: input, Output: map[string]any{
+		failureOutputKeyClass:     failureClassRuntime,
+		failureOutputKeySignature: "class=runtime_failed|rule=concrete_validation_contract_missing",
+	}}
+
+	contract := BuildConvergenceContract(nil, step, step, map[string]any{"input": input}, nil)
+	if contract.State != convergenceStateNeedValidation {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedValidation, contract)
+	}
+	if contract.StateChangingOutputRequired {
+		t.Fatalf("contract = %+v, want diagnostic expectedContract not to require state change", contract)
+	}
+
+	output := decisionOutputFromSpec(runtimeDecisionBlockSpec{
+		Reason:       "diagnostic expected contract appears contradictory",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Please resolve the stale expected contract contradiction.",
+		Context: map[string]any{
+			"requiresHumanFields": []string{"resolution"},
+			"knownValues": map[string]any{
+				"requiredStateChanging": true,
+			},
+			"runtimeCanContinue": false,
+		},
+	})
+	if ShouldCreateDecisionTicket(input, output, contract) {
+		t.Fatalf("ShouldCreateDecisionTicket = true, want false for stale diagnostic expectedContract blocker")
 	}
 }
 

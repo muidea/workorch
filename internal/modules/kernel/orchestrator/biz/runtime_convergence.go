@@ -274,6 +274,19 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 	if !convergenceNextActionAuthorityAllowed(input) {
 		return false
 	}
+	if contractViolationRecoveryRequiresAuthorityRecompute(input) {
+		recomputed := ConvergenceContract{
+			State:            convergenceStateBlocked,
+			RuntimeStage:     runtimeStageRepair,
+			RuntimeStageMode: "strict_convergence",
+			SourceRefs:       contract.SourceRefs,
+		}
+		if populateCoverageWorkItemConvergenceContract(run, input, failedStep, &recomputed) &&
+			recomputed.State != convergenceStateNeedAssessment {
+			*contract = recomputed
+			return true
+		}
+	}
 	switch convergenceNextActionKind(run, input) {
 	case "request_decision", "wait_decision", "request_governance":
 		contract.State = convergenceStateNeedGovernance
@@ -320,6 +333,21 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 	default:
 		return false
 	}
+}
+
+func contractViolationRecoveryRequiresAuthorityRecompute(input map[string]any) bool {
+	recovery := mapFromValue(input[stepInputKeyContractViolationRecovery])
+	if len(recovery) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(recovery, "violatedRule")) == contractViolationRuleCoverageAssessmentIncomplete {
+		return true
+	}
+	if strings.TrimSpace(stringFromMap(recovery, "recoverability")) == "recompute_authority" {
+		return true
+	}
+	correction := mapFromValue(recovery["correctionContract"])
+	return strings.TrimSpace(stringFromMap(correction, "requiredOutputShape")) == "authority_recomputed_next_action"
 }
 
 func convergenceNextActionAuthorityAllowed(input map[string]any) bool {
@@ -417,6 +445,9 @@ func contractViolationRecoveryStateChangingContract(input map[string]any, failed
 	if len(recovery) == 0 {
 		return ConvergenceContract{}, false
 	}
+	if contractViolationRecoveryCurrentContractPreemptsExpectedStateChange(input, recovery) {
+		return ConvergenceContract{}, false
+	}
 	expected := mapFromValue(recovery["expectedContract"])
 	if len(expected) == 0 {
 		return ConvergenceContract{}, false
@@ -456,6 +487,27 @@ func contractViolationRecoveryStateChangingContract(input map[string]any, failed
 		TargetEvidence:              convergenceTargetEvidence(input, pkg),
 		SourceRefs:                  sourceRefs,
 	}, true
+}
+
+func contractViolationRecoveryCurrentContractPreemptsExpectedStateChange(input map[string]any, recovery map[string]any) bool {
+	correction := mapFromValue(recovery["correctionContract"])
+	switch strings.TrimSpace(stringFromMap(correction, "requiredOutputShape")) {
+	case "bounded_validation_evidence",
+		"bounded_failure_evidence",
+		"authority_recomputed_next_action",
+		"traceable_coverage_assessment",
+		"single_valid_json_decision":
+		return true
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if len(required) == 0 {
+		required = mapFromValue(input["requiredOutput"])
+	}
+	if boolValue(required["mustIncludeStateChangingNode"]) {
+		return false
+	}
+	return boolValue(required["mustProduceConcreteValidationEvidence"]) ||
+		boolValue(required["mustProduceConcreteFailureEvidence"])
 }
 
 func convergenceStateChangingRepairActionPackage(input map[string]any, failedStep *runModel.Step) map[string]any {
@@ -510,10 +562,11 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 	if contract == nil {
 		return false
 	}
-	if boolValue(input["assessmentOnlyContractCorrection"]) ||
+	recomputeAuthority := contractViolationRecoveryRequiresAuthorityRecompute(input)
+	if !recomputeAuthority && (boolValue(input["assessmentOnlyContractCorrection"]) ||
 		(strings.TrimSpace(stringFromMap(input, "repairObjective")) == "complete_dod_goal_coverage_assessment" &&
 			!coverageWorkItemContextHasActionableFailure(coverageWorkItemContextFromInput(input)) &&
-			!explicitCoverageGapShouldPreemptAssessment(input, failedStep)) {
+			!explicitCoverageGapShouldPreemptAssessment(input, failedStep))) {
 		return false
 	}
 	if !coverageWorkItemConvergenceEligible(input) {
@@ -1635,6 +1688,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 	}
 	clearConvergenceDerivedOutputModeFields(input)
 	input["convergenceContract"] = compactConvergenceContract(contract)
+	syncConvergenceNextActionWithContract(input, contract)
 	switch contract.State {
 	case convergenceStateNeedEvidence:
 		setRuntimeStage(input, runtimeStageRepair)
@@ -1764,6 +1818,59 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		}
 	}
 	return input
+}
+
+func syncConvergenceNextActionWithContract(input map[string]any, contract ConvergenceContract) {
+	if len(input) == 0 {
+		return
+	}
+	action := convergenceNextActionForContract(contract)
+	if len(action) == 0 {
+		return
+	}
+	syncConvergenceNextActionMap(input, convergenceAuthorityKey, action)
+	syncConvergenceNextActionMap(input, gapBaselineKey, action)
+	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
+		syncConvergenceNextActionMap(executionContext, convergenceAuthorityKey, action)
+		syncConvergenceNextActionMap(executionContext, gapBaselineKey, action)
+		input["executionContext"] = executionContext
+	}
+}
+
+func syncConvergenceNextActionMap(input map[string]any, key string, action map[string]any) {
+	if len(input) == 0 || len(action) == 0 {
+		return
+	}
+	source := mapFromValue(input[key])
+	if len(source) == 0 {
+		return
+	}
+	next := cloneStepPayload(source)
+	next["nextAction"] = cloneStepPayload(action)
+	input[key] = next
+}
+
+func convergenceNextActionForContract(contract ConvergenceContract) map[string]any {
+	switch contract.State {
+	case convergenceStateNeedEvidence:
+		kind := "acquire_evidence"
+		reason := "current convergence contract requires bounded evidence before continuing"
+		if contract.RuntimeStageMode == "target_snapshot_acquisition" {
+			kind = "acquire_target_snapshot"
+			reason = "current convergence contract requires target snapshot evidence before state change"
+		}
+		return map[string]any{"kind": kind, "reason": reason}
+	case convergenceStateNeedStateChange:
+		return map[string]any{"kind": "state_change", "reason": "current convergence contract requires state-changing output"}
+	case convergenceStateNeedValidation:
+		return map[string]any{"kind": "validate", "reason": "current convergence contract requires bounded validation evidence"}
+	case convergenceStateNeedAssessment:
+		return map[string]any{"kind": "assessment", "reason": "current convergence contract requires bounded coverage assessment"}
+	case convergenceStateNeedGovernance:
+		return map[string]any{"kind": "request_governance", "reason": firstNonEmptyString(contract.GovernanceReason, "current convergence contract requires governance")}
+	default:
+		return nil
+	}
 }
 
 func stripRepairActionPackageImplementationTargetEvidence(pkg map[string]any) {
