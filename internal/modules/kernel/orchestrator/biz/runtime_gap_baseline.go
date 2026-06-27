@@ -240,12 +240,14 @@ func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID comm
 	}
 	if !dispatchInputHasConvergenceAuthority(run, input) {
 		input = attachStagePacketToStepInput(run, stepID, input)
+		input = scrubConvergenceDispatchDiagnosticAdvice(input)
 		return input, validateConvergenceDispatchInput(input)
 	}
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
 	input = ApplyConvergenceContract(input, contract)
 	input = normalizeDispatchInputAuthorityFocus(input)
 	input = attachStagePacketToStepInput(run, stepID, input)
+	input = scrubConvergenceDispatchDiagnosticAdvice(input)
 	if err := validateConvergenceDispatchInput(input); err != nil {
 		return nil, err
 	}
@@ -319,6 +321,9 @@ func validateConvergenceDispatchInput(input map[string]any) error {
 		return convergenceDispatchMisalignmentError("missing stagePacket")
 	}
 	if err := validateConvergenceDispatchRequiredOutputSemantics(input); err != nil {
+		return err
+	}
+	if err := validateConvergenceDispatchOutputShapeAdvice(input); err != nil {
 		return err
 	}
 	return validateConvergenceDispatchFocusAlignment(input)
@@ -644,6 +649,138 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		}
 	}
 	return nil
+}
+
+func scrubConvergenceDispatchDiagnosticAdvice(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	next := cloneStepPayload(input)
+	if recovery := mapFromValue(next[stepInputKeyContractViolationRecovery]); len(recovery) > 0 {
+		next[stepInputKeyContractViolationRecovery] = contractViolationDiagnosticOnlyMap(recovery, next)
+	}
+	guidance := stringSliceFromValue(next["repairGuidance"])
+	if len(guidance) == 0 {
+		return next
+	}
+	kept := make([]string, 0, len(guidance))
+	removed := 0
+	for _, item := range guidance {
+		if outputShapeAdviceConflictsWithRequiredOutput(item, next) {
+			removed++
+			continue
+		}
+		kept = append(kept, item)
+	}
+	if removed == 0 {
+		return next
+	}
+	if len(kept) > 0 {
+		next["repairGuidance"] = kept
+	} else {
+		delete(next, "repairGuidance")
+	}
+	appendAuthorityDiagnostic(next, "stale_diagnostic_action_advice_removed", "info", "diagnostic_lineage", "repairGuidance", fmt.Sprintf("%d conflicting output-shape guidance item(s) removed before dispatch", removed))
+	return next
+}
+
+func validateConvergenceDispatchOutputShapeAdvice(input map[string]any) error {
+	if len(input) == 0 {
+		return nil
+	}
+	for _, item := range stringSliceFromValue(input["repairGuidance"]) {
+		if outputShapeAdviceConflictsWithRequiredOutput(item, input) {
+			appendAuthorityDiagnostic(input, "output_shape_conflict", "error", "internal_authority_mismatch", "repairGuidance", "repairGuidance contradicts current requiredOutput.allowedOutputShapes")
+			return convergenceDispatchMisalignmentError("output-shape advice conflicts with requiredOutput: repairGuidance")
+		}
+	}
+	for _, source := range []map[string]any{
+		mapFromValue(input[stepInputKeyContractViolationRecovery]),
+		mapFromValue(input["contractViolationRecovery"]),
+	} {
+		if len(source) == 0 {
+			continue
+		}
+		for _, key := range []string{"retryHint", "summary", "reason"} {
+			if outputShapeAdviceConflictsWithRequiredOutput(stringFromMap(source, key), input) {
+				appendAuthorityDiagnostic(input, "output_shape_conflict", "error", "internal_authority_mismatch", "contractViolationRecovery."+key, "contract violation diagnostic contradicts current requiredOutput.allowedOutputShapes")
+				return convergenceDispatchMisalignmentError("output-shape advice conflicts with requiredOutput: contractViolationRecovery.%s", key)
+			}
+		}
+	}
+	return nil
+}
+
+func outputShapeAdviceConflictsWithRequiredOutput(text string, input map[string]any) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	required := currentRequiredOutputForAuthority(input)
+	if len(required) == 0 {
+		return false
+	}
+	if adviceSuggestsTopLevelShellCommands(text) && !requiredOutputAllowsTopLevelShape(required, "shellCommands") {
+		return true
+	}
+	return false
+}
+
+func adviceSuggestsTopLevelShellCommands(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	lower = strings.NewReplacer("`", "", "'", "", "\"", "").Replace(lower)
+	if lower == "" || strings.Contains(lower, "do not") || strings.Contains(lower, "forbid") || strings.Contains(lower, "forbidden") {
+		return false
+	}
+	return strings.Contains(lower, "top-level shellcommands") ||
+		strings.Contains(lower, "top level shellcommands") ||
+		strings.Contains(lower, "return shellcommands") ||
+		strings.Contains(lower, "produce shellcommands") ||
+		strings.Contains(lower, "use shellcommands")
+}
+
+func requiredOutputAllowsTopLevelShape(required map[string]any, shape string) bool {
+	if len(required) == 0 {
+		return false
+	}
+	shape = strings.TrimSpace(shape)
+	if shape == "" {
+		return false
+	}
+	for _, value := range append(stringSliceFromValue(required["allowedOutputShapes"]), stringSliceFromValue(required["allowedOutputs"])...) {
+		normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(value), "_", ""))
+		if normalized == "" {
+			continue
+		}
+		if shape == "shellCommands" && (normalized == "shellcommands" || normalized == "toplevelshellcommands") {
+			return true
+		}
+	}
+	return false
+}
+
+func appendAuthorityDiagnostic(input map[string]any, code string, severity string, kind string, source string, message string) {
+	if len(input) == 0 {
+		return
+	}
+	item := map[string]any{
+		"code":     strings.TrimSpace(code),
+		"severity": strings.TrimSpace(severity),
+		"kind":     strings.TrimSpace(kind),
+		"source":   strings.TrimSpace(source),
+		"message":  strings.TrimSpace(message),
+	}
+	for key, value := range item {
+		if strings.TrimSpace(stringFromAny(value)) == "" {
+			delete(item, key)
+		}
+	}
+	if len(item) == 0 {
+		return
+	}
+	diagnostics := mapSliceFromValue(input["authorityDiagnostics"])
+	diagnostics = append(diagnostics, item)
+	input["authorityDiagnostics"] = diagnostics
 }
 
 func firstRequiredOutputForSemantics(sources map[string]map[string]any) map[string]any {

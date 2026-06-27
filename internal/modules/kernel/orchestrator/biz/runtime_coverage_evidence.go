@@ -166,7 +166,7 @@ func coverageWorkItemStepUpdate(step *runModel.Step) coverageWorkItemUpdate {
 		EvidenceRefs: coverageStepEvidenceRefs(step),
 		Accepted:     step.State == common.StepStateCompleted,
 	}
-	if stepKindCanProduceStateChangingEvidence(step.Kind) {
+	if stepKindCanProduceStateChangingEvidence(step.Kind) || runtimeStepDeclaresStateChangingEvidence(step) {
 		update.EvidenceKinds = append(update.EvidenceKinds, "state_change")
 	}
 	if coverageStepCanProduceValidationEvidence(step) {

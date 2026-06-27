@@ -60,6 +60,54 @@ func TestAcceptedEvidenceRecordReusesAcrossMatchingCoverageItems(t *testing.T) {
 	}
 }
 
+func TestAcceptedStateChangeEvidenceRecordReusesByCoverageTargets(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-evidence-reuse-coverage-target",
+		WorkspaceID: "ws-evidence-reuse-coverage-target",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                    "cwi-target",
+				"status":                "open",
+				"sourceRequirementId":   "target-001",
+				"coverageTargetToken":   "target-001",
+				"normalizedSourceKey":   "source:target-001",
+				"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindStateChange},
+				"missingEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange},
+			}},
+		},
+	}
+	records := []*runtimemodel.EvidenceRecord{{
+		ID:          "evidence-state-change-target-001",
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		StepID:      "step-state-change-001",
+		Kind:        runtimemodel.EvidenceKindStateChange,
+		Status:      runtimemodel.EvidenceStatusAccepted,
+		SourceRef:   "step-state-change-001/output.json",
+		Metadata: map[string]any{
+			"coverageTargets": []string{"target-001"},
+			"stateChanging":   true,
+		},
+	}}
+
+	changed, bound := newCoverageSubsystem().reconcileAcceptedEvidenceRecords(run, records)
+	if !changed || bound != 1 {
+		t.Fatalf("reconcile changed/bound = %v/%d, want true/1", changed, bound)
+	}
+	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	if missing := coverageMissingEvidenceKinds(item); len(missing) != 0 {
+		t.Fatalf("missingEvidenceKinds = %+v, want none", missing)
+	}
+	accepted := mapStringSliceValue(item["acceptedEvidenceByKind"])
+	if refs := accepted[runtimemodel.EvidenceKindStateChange]; !stringSliceContains(refs, "step-state-change-001/output.json") {
+		t.Fatalf("accepted state_change refs = %+v, want source ref", refs)
+	}
+	if edges := mapSliceFromValue(item["evidenceReuseRefs"]); len(edges) != 1 || edges[0]["matchedBy"] != "coverage_target_id" {
+		t.Fatalf("evidenceReuseRefs = %+v, want coverage_target_id edge", edges)
+	}
+}
+
 func TestAcceptedEvidenceRecordReuseSkipsNonMatchingRejectedAndSupersededRecords(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-evidence-reuse-skip",

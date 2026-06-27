@@ -111,6 +111,9 @@ func (o *RuntimeOrchestrator) recordCompletedRuntimeStepEvidence(ctx context.Con
 			return o.recordValidationResult(ctx, run, step, common.ValidationResultStatePassed, localizedStepCompletionSummary(language), evidenceRef, "")
 		},
 		func() error {
+			return o.recordAcceptedStateChangeEvidenceForRuntimeStep(ctx, run, step, toolCall)
+		},
+		func() error {
 			return o.recordAcceptedTargetSnapshotEvidenceForStep(ctx, run, step)
 		},
 	)
@@ -243,7 +246,7 @@ func (o *RuntimeOrchestrator) recordValidationResult(
 		if err := o.evidence.ValidationResults.Update(ctx, item); err != nil {
 			return err
 		}
-		return o.recordValidationEvidenceRecord(ctx, run, item)
+		return o.recordValidationEvidenceRecordForStep(ctx, run, step, item)
 	}
-	return o.recordValidationEvidenceRecord(ctx, run, item)
+	return o.recordValidationEvidenceRecordForStep(ctx, run, step, item)
 }

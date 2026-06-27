@@ -1857,6 +1857,104 @@ func TestCoverageWorkItemsAdvanceFromStepAndAssessmentEvidence(t *testing.T) {
 	}
 }
 
+func TestCoverageWorkItemsAcceptDeclaredStateChangingRuntimeStep(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-runtime-state-changing-step",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{"text": "stateful outcome"},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                "goal-leaf-001",
+							"scope":             "goal_coverage",
+							"acceptedStepKinds": []string{"artifact/write"},
+						}},
+					},
+				},
+			},
+		},
+	}
+	if !newCoverageSubsystem().ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want baseline")
+	}
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) != 1 {
+		t.Fatalf("coverageWorkItems = %+v, want one item", items)
+	}
+	step := &runmodel.Step{
+		ID:    "run-cwi-runtime-state-changing-step/001-runtime-state-change",
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"stateChanging":       true,
+			"coverageWorkItemIds": []string{stringFromMap(items[0], "id")},
+			"coverageTargets":     []string{"stateful outcome"},
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+			},
+		},
+		Output: map[string]any{"exitCode": 0},
+	}
+
+	if !newCoverageSubsystem().updateFromCompletedStep(run, step) {
+		t.Fatalf("coverage.updateFromCompletedStep changed = false, want state_change and validation evidence update")
+	}
+	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	if missing := coverageMissingEvidenceKinds(item); len(missing) != 0 {
+		t.Fatalf("missingEvidenceKinds = %+v, want none", missing)
+	}
+	accepted := mapStringSliceValue(item["acceptedEvidenceByKind"])
+	if len(accepted["state_change"]) == 0 || len(accepted["validation"]) == 0 {
+		t.Fatalf("acceptedEvidenceByKind = %+v, want state_change and validation refs", accepted)
+	}
+	if got := stringFromMap(item, "status"); got != "evidence_ready" {
+		t.Fatalf("status = %q, want evidence_ready", got)
+	}
+}
+
+func TestCoverageWorkItemsDoNotAcceptValidationOnlyRuntimeStepAsStateChange(t *testing.T) {
+	item := map[string]any{
+		"id":                    "cwi-validation-only",
+		"status":                "open",
+		"requiredEvidenceKinds": []string{"state_change", "validation"},
+		"requiredEvidenceCounts": map[string]any{
+			"state_change": 1,
+			"validation":   1,
+		},
+		"missingEvidenceKinds": []string{"state_change", "validation"},
+	}
+	step := &runmodel.Step{
+		ID:    "run-cwi-validation-only/001-validate",
+		RunID: "run-cwi-validation-only",
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"coverageWorkItemIds": []string{"cwi-validation-only"},
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+			},
+		},
+		Output: map[string]any{"exitCode": 0},
+	}
+	update := coverageWorkItemStepUpdate(step)
+
+	if !coverageApplyWorkItemEvidence(item, update.EvidenceKinds, update.EvidenceRefs, update.Accepted, false, string(step.ID), "") {
+		t.Fatalf("coverageApplyWorkItemEvidence changed = false, want validation evidence update")
+	}
+	accepted := mapStringSliceValue(item["acceptedEvidenceByKind"])
+	if len(accepted["state_change"]) != 0 || len(accepted["validation"]) == 0 {
+		t.Fatalf("acceptedEvidenceByKind = %+v, want validation only", accepted)
+	}
+	missing := stringSet(coverageMissingEvidenceKinds(item))
+	if !missing["state_change"] || missing["validation"] {
+		t.Fatalf("missingEvidenceKinds = %+v, want state_change only", coverageMissingEvidenceKinds(item))
+	}
+}
+
 func TestCoverageTargetSetPreservesStateChangingWorkItemContract(t *testing.T) {
 	context := map[string]any{
 		"currentFocus": map[string]any{

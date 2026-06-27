@@ -192,7 +192,11 @@ func coverageEvidenceRecordCoverageTargetRefs(record *runtimecontract.EvidenceRe
 	if record == nil {
 		return nil
 	}
-	return compactUniqueStrings(stringSliceFromValue(record.Metadata["coverageTargetIds"]))
+	refs := make([]string, 0)
+	for _, key := range []string{"coverageTargetIds", "coverageTargets", "coverageTargetTokens"} {
+		refs = append(refs, stringSliceFromValue(record.Metadata[key])...)
+	}
+	return compactUniqueStrings(refs)
 }
 
 func coverageEvidenceRecordTargetRefs(record *runtimecontract.EvidenceRecord) []string {

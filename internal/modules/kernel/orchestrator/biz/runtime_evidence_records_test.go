@@ -111,6 +111,135 @@ func TestRecordValidationResultWritesAcceptedAndRejectedEvidenceRecords(t *testi
 	}
 }
 
+func TestRecordCompletedRuntimeStepEvidenceWritesScopedStateChangeForDeclaredStateChangingStep(t *testing.T) {
+	ctx := context.Background()
+	validationRepo := memory.NewValidationResultRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: validationRepo,
+			EvidenceRecords:   evidenceRepo,
+		},
+	}
+	run := &runmodel.Run{
+		ID:                 "run-runtime-state-change-evidence",
+		WorkspaceID:        "ws-runtime-state-change-evidence",
+		DefinitionRevision: "rev-runtime-state-change-evidence",
+	}
+	step := &runmodel.Step{
+		ID:    "run-runtime-state-change-evidence/step-state-change",
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"stateChanging":       true,
+			"coverageFocusId":     "focus-cwi-001",
+			"coverageWorkItemIds": []string{"cwi-001"},
+			"coverageTargets":     []string{"neutral-deliverable"},
+			"targetRefs":          []string{"workspace://neutral-deliverable"},
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+			},
+		},
+		Output: map[string]any{"exitCode": 0},
+	}
+	toolCall := &runmodel.ToolCall{ID: "run-runtime-state-change-evidence/step-state-change/tool-call/runtime-execute"}
+
+	if err := orch.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, step.Output); err != nil {
+		t.Fatalf("record completed runtime step evidence: %v", err)
+	}
+	if err := orch.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, step.Output); err != nil {
+		t.Fatalf("record completed runtime step evidence again: %v", err)
+	}
+
+	records, err := evidenceRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list evidence records: %v", err)
+	}
+	var stateChanges []*orchestratormodel.EvidenceRecord
+	var validations []*orchestratormodel.EvidenceRecord
+	for _, record := range records {
+		switch record.Kind {
+		case orchestratormodel.EvidenceKindStateChange:
+			stateChanges = append(stateChanges, record)
+		case orchestratormodel.EvidenceKindValidation:
+			validations = append(validations, record)
+		}
+	}
+	if len(stateChanges) != 1 || len(validations) != 1 {
+		t.Fatalf("records = %+v, want exactly one state_change and one validation", records)
+	}
+	stateChange := stateChanges[0]
+	if stateChange.Status != orchestratormodel.EvidenceStatusAccepted ||
+		stateChange.SourceType != evidenceRecordSourceTypeRuntimeStep ||
+		stateChange.StepID != step.ID ||
+		stateChange.Metadata["stateChanging"] != true ||
+		stateChange.Metadata["coverageFocusId"] != "focus-cwi-001" ||
+		stateChange.Metadata["toolCallId"] != string(toolCall.ID) ||
+		stateChange.Metadata["sourceOutputRef"] != stateChange.SourceRef {
+		t.Fatalf("state_change record = %+v, want scoped accepted runtime step evidence", stateChange)
+	}
+	if got := stateChange.CoverageItemRefs; len(got) != 1 || got[0] != "cwi-001" {
+		t.Fatalf("CoverageItemRefs = %+v, want cwi-001", got)
+	}
+	if got := stringSliceFromValue(stateChange.Metadata["coverageTargets"]); len(got) != 1 || got[0] != "neutral-deliverable" {
+		t.Fatalf("state_change metadata coverageTargets = %+v, want neutral-deliverable", stateChange.Metadata)
+	}
+	validation := validations[0]
+	if validation.Status != orchestratormodel.EvidenceStatusAccepted ||
+		validation.Metadata["coverageFocusId"] != "focus-cwi-001" {
+		t.Fatalf("validation record = %+v, want accepted validation with coverage scope", validation)
+	}
+	if got := validation.CoverageItemRefs; len(got) != 1 || got[0] != "cwi-001" {
+		t.Fatalf("validation CoverageItemRefs = %+v, want cwi-001", got)
+	}
+}
+
+func TestRecordCompletedRuntimeStepEvidenceDoesNotWriteStateChangeForValidationOnlyStep(t *testing.T) {
+	ctx := context.Background()
+	validationRepo := memory.NewValidationResultRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: validationRepo,
+			EvidenceRecords:   evidenceRepo,
+		},
+	}
+	run := &runmodel.Run{
+		ID:                 "run-runtime-validation-only-evidence",
+		WorkspaceID:        "ws-runtime-validation-only-evidence",
+		DefinitionRevision: "rev-runtime-validation-only-evidence",
+	}
+	step := &runmodel.Step{
+		ID:    "run-runtime-validation-only-evidence/step-validate",
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"coverageWorkItemIds": []string{"cwi-validate"},
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+			},
+		},
+		Output: map[string]any{"exitCode": 0},
+	}
+
+	if err := orch.recordCompletedRuntimeStepEvidence(ctx, run, step, nil, step.Output); err != nil {
+		t.Fatalf("record completed runtime step evidence: %v", err)
+	}
+	records, err := evidenceRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list evidence records: %v", err)
+	}
+	for _, record := range records {
+		if record.Kind == orchestratormodel.EvidenceKindStateChange {
+			t.Fatalf("records = %+v, want no state_change for validation-only step", records)
+		}
+	}
+}
+
 func TestRecordAcceptedTargetSnapshotEvidenceForCompletedFileRead(t *testing.T) {
 	ctx := context.Background()
 	evidenceRepo := memory.NewEvidenceRecordRepository()

@@ -81,10 +81,18 @@ func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []r
 	context := snapshot.Run.ExecutionContext
 	authority := MapValue(context["convergenceAuthority"])
 	authorityFocus := MapValue(authority["currentFocus"])
-	if len(authorityFocus) == 0 {
-		return nil
-	}
 	var ret []readmodelcore.GapDiagnostic
+	ret = append(ret, authorityDiagnosticsFromRaw("run.executionContext.authorityDiagnostics", context["authorityDiagnostics"])...)
+	for idx := range snapshot.Steps {
+		source := "step.input.authorityDiagnostics"
+		if snapshot.Steps[idx].ID != "" {
+			source = fmt.Sprintf("step[%s].input.authorityDiagnostics", snapshot.Steps[idx].ID)
+		}
+		ret = append(ret, authorityDiagnosticsFromRaw(source, snapshot.Steps[idx].Input["authorityDiagnostics"])...)
+	}
+	if len(authorityFocus) == 0 {
+		return ret
+	}
 	addFocusDiagnostic := func(label string, focus map[string]any) {
 		if len(focus) == 0 || readModelFocusAligned(authorityFocus, focus) {
 			return
@@ -134,6 +142,36 @@ func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []r
 	addFocusDiagnostic("stagePacket.activeFocus", MapValue(MapValue(context["stagePacket"])["activeFocus"]))
 	addRequiredDiagnostic("repairActionPackage.requiredOutput", MapValue(MapValue(context["repairActionPackage"])["requiredOutput"]))
 	addRequiredDiagnostic("stagePacket.requiredOutput", MapValue(MapValue(context["stagePacket"])["requiredOutput"]))
+	return ret
+}
+
+func authorityDiagnosticsFromRaw(defaultSource string, value any) []readmodelcore.GapDiagnostic {
+	items := MapSliceValue(value)
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]readmodelcore.GapDiagnostic, 0, len(items))
+	for _, item := range items {
+		diagnostic := readmodelcore.GapDiagnostic{
+			Code:             stringValue(item, "code"),
+			Severity:         stringValue(item, "severity"),
+			Kind:             stringValue(item, "kind"),
+			Source:           stringValue(item, "source"),
+			Candidate:        stringValue(item, "candidate"),
+			CurrentAuthority: stringValue(item, "currentAuthority"),
+			Message:          stringValue(item, "message"),
+		}
+		if diagnostic.Source == "" {
+			diagnostic.Source = defaultSource
+		}
+		if diagnostic.Severity == "" {
+			diagnostic.Severity = "warning"
+		}
+		if diagnostic.Code == "" && diagnostic.Message == "" {
+			continue
+		}
+		ret = append(ret, diagnostic)
+	}
 	return ret
 }
 

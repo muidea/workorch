@@ -110,6 +110,7 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	assertSoftwareDevTemplateStagePolicies(t, item.ContextHints)
 	assertSoftwareDevAcceptanceDimensions(t, item.ContextHints)
 	assertSoftwareDevCapabilityUsagePolicies(t, item.ContextHints)
+	assertSoftwareDevValidationPolicies(t, item.ContextHints)
 	if len(item.EvidencePolicies) == 0 {
 		t.Fatalf("software-dev evidencePolicies missing")
 	}
@@ -528,6 +529,7 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	assertSoftwareDevAcceptanceSlicePolicy(t, template.ContextHints)
 	assertSoftwareDevAcceptanceDimensions(t, template.ContextHints)
 	assertSoftwareDevCapabilityUsagePolicies(t, template.ContextHints)
+	assertSoftwareDevValidationPolicies(t, template.ContextHints)
 	assertContainsAnyDoDItem(t, template.DoDItems, "evidenceRefs")
 	if len(template.EvidencePolicies) == 0 {
 		t.Fatalf("software-dev evidence policies were not refreshed: %+v", template)
@@ -1016,6 +1018,38 @@ func assertSoftwareDevCapabilityUsagePolicies(t *testing.T, hints map[string]any
 	}
 	if !found {
 		t.Fatalf("capabilityUsagePolicies = %+v, want software-dev-code-semantics-guidance", rawPolicies)
+	}
+}
+
+func assertSoftwareDevValidationPolicies(t *testing.T, hints map[string]any) {
+	t.Helper()
+	rawPolicies, ok := hints["validationPolicies"].([]any)
+	if !ok || len(rawPolicies) == 0 {
+		t.Fatalf("contextHints.validationPolicies = %+v, want non-empty policies", hints["validationPolicies"])
+	}
+	var found bool
+	for _, raw := range rawPolicies {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("validation policy item = %+v, want map", raw)
+		}
+		if item["id"] != "software-dev-validation-discovery-first" {
+			continue
+		}
+		found = true
+		if item["discoveryRequired"] != true || item["validationScratchRequired"] != true {
+			t.Fatalf("validation policy = %+v, want discovery and scratch requirements", item)
+		}
+		assertStringListContains(t, item["appliesToEvidenceKinds"].([]any), "validation")
+		assertStringListContains(t, item["allowedExecutionModes"].([]any), "llm_graph")
+		assertStringListContains(t, item["allowedExecutionModes"].([]any), "managed_harness")
+		assertStringListContains(t, item["allowedValidationModes"].([]any), "controlled_substitute")
+		if item["ifNoTargetRoute"] != "failed_assessment_with_missing_evidence_or_deferred" {
+			t.Fatalf("validation policy ifNoTargetRoute = %v", item["ifNoTargetRoute"])
+		}
+	}
+	if !found {
+		t.Fatalf("validationPolicies = %+v, want software-dev-validation-discovery-first", rawPolicies)
 	}
 }
 

@@ -1318,6 +1318,110 @@ func TestEventSubsystemPublishesNotificationsThroughAsyncHub(t *testing.T) {
 	}
 }
 
+func TestContractViolationRecoveryScrubsConflictingDiagnosticOutputShapeAdvice(t *testing.T) {
+	runID := common.RunID("run-contract-violation-diagnostic-scrub")
+	failed := contractViolationFailedStep(runID, "failed-diagnostic-scrub")
+	failed.Input = map[string]any{
+		stepInputKeyRuntimeStage: runtimeStageVerification,
+		"repairObjective":        repairObjectiveConcreteValidationEvidence,
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+			},
+		},
+		"requiredOutput": map[string]any{
+			"mustProduceConcreteValidationEvidence": true,
+		},
+	}
+	failed.Output = map[string]any{
+		"stage":                        "runtime_contract_failed",
+		"error":                        "return top-level `shellCommands` with validationEvidence",
+		outputKeyContractViolationType: contractViolationValidationEvidenceRequired,
+		failureOutputKeyClass:          failureClassRuntime,
+		failureOutputKeySignature:      "class=runtime_failed|stage=runtime_contract_failed|rule=concrete_validation_contract_missing",
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-violation-diagnostic-scrub", InitialStepKind: llmWorkspaceExecutionStepKind}
+	attachContractViolationDiagnostics(run, failed, errors.New("return top-level `shellCommands` with validationEvidence"))
+	input := cloneStepPayload(failed.Input)
+
+	applyContractViolationRecoveryProjection(input, failed, 1, 2, 0)
+
+	recovery := mapFromValue(input[stepInputKeyContractViolationRecovery])
+	if !boolValue(recovery["diagnosticOnly"]) || boolValue(recovery["actionAdviceAuthoritative"]) {
+		t.Fatalf("contractViolationRecovery = %+v, want diagnostic-only non-authoritative recovery", recovery)
+	}
+	actual := mapFromValue(recovery["actualOutputSummary"])
+	if strings.Contains(strings.ToLower(stableCoverageJSON(actual)), "top-level shellcommands") {
+		t.Fatalf("actualOutputSummary = %+v, want conflicting output-shape advice scrubbed", actual)
+	}
+	hint := stringFromMap(recovery, "retryHint")
+	if !strings.Contains(hint, "Do not return top-level shellCommands") ||
+		!strings.Contains(hint, "input.validationEvidence.mode") {
+		t.Fatalf("retryHint = %q, want requiredOutput-derived validation instruction", hint)
+	}
+}
+
+func TestValidateConvergenceDispatchRejectsOutputShapeAdviceConflict(t *testing.T) {
+	input := map[string]any{
+		"convergenceContract": map[string]any{
+			"state": convergenceStateNeedValidation,
+		},
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": "validate"},
+		},
+		"requiredOutput": map[string]any{
+			"mustProduceConcreteValidationEvidence": true,
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+			},
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+			},
+		},
+		"repairGuidance": []string{"return top-level `shellCommands` for this validation"},
+	}
+
+	err := validateConvergenceDispatchInput(input)
+
+	if err == nil || !strings.Contains(err.Error(), "output-shape advice conflicts") {
+		t.Fatalf("validateConvergenceDispatchInput err = %v, want output-shape conflict", err)
+	}
+	diagnostics := mapSliceFromValue(input["authorityDiagnostics"])
+	if len(diagnostics) == 0 || stringFromMap(diagnostics[0], "code") != "output_shape_conflict" {
+		t.Fatalf("authorityDiagnostics = %+v, want output_shape_conflict", diagnostics)
+	}
+}
+
+func TestScrubConvergenceDispatchDiagnosticAdviceRemovesConflictingGuidance(t *testing.T) {
+	input := map[string]any{
+		"requiredOutput": map[string]any{
+			"mustProduceConcreteValidationEvidence": true,
+		},
+		"repairGuidance": []string{
+			"return top-level `shellCommands` for validation",
+			"Use the current requiredOutput as authority.",
+		},
+	}
+
+	got := scrubConvergenceDispatchDiagnosticAdvice(input)
+
+	guidance := strings.Join(stringSliceFromValue(got["repairGuidance"]), "\n")
+	if strings.Contains(strings.ToLower(guidance), "top-level shellcommands") {
+		t.Fatalf("repairGuidance = %q, want conflicting stale guidance removed", guidance)
+	}
+	if !strings.Contains(guidance, "current requiredOutput") {
+		t.Fatalf("repairGuidance = %q, want non-conflicting guidance preserved", guidance)
+	}
+	diagnostics := mapSliceFromValue(got["authorityDiagnostics"])
+	if len(diagnostics) == 0 || stringFromMap(diagnostics[0], "code") != "stale_diagnostic_action_advice_removed" {
+		t.Fatalf("authorityDiagnostics = %+v, want stale advice diagnostic", diagnostics)
+	}
+}
+
 func TestContractViolationEscalationCorrectionContextUsesLastRetryRecovery(t *testing.T) {
 	runID := common.RunID("run-contract-violation-escalation-correction")
 	failed := contractViolationFailedStep(runID, "failed-escalation-correction")

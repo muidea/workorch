@@ -416,6 +416,43 @@ func TestRunSnapshotFromModelsProjectsAuthorityFocusDriftDiagnostics(t *testing.
 	}
 }
 
+func TestAuthorityDiagnosticsFromRunSnapshotIncludesRuntimeDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
+		Run: readmodelcore.Run{
+			ID: "run-authority-diagnostic",
+			ExecutionContext: map[string]any{
+				"authorityDiagnostics": []any{map[string]any{
+					"code":    "output_shape_conflict",
+					"kind":    "internal_authority_mismatch",
+					"message": "requiredOutput conflicts with stale guidance",
+				}},
+			},
+		},
+		Steps: []readmodelcore.StepView{{
+			ID: "step-contract-retry",
+			Input: map[string]any{
+				"authorityDiagnostics": []any{map[string]any{
+					"code":     "stale_diagnostic_action_advice_removed",
+					"severity": "info",
+					"source":   "repairGuidance",
+				}},
+			},
+		}},
+	})
+
+	if len(got) != 2 {
+		t.Fatalf("AuthorityDiagnostics = %+v, want run and step diagnostics", got)
+	}
+	if got[0].Code != "output_shape_conflict" || got[0].Source != "run.executionContext.authorityDiagnostics" {
+		t.Fatalf("run diagnostic = %+v, want default source", got[0])
+	}
+	if got[1].Code != "stale_diagnostic_action_advice_removed" || got[1].Severity != "info" || got[1].Source != "repairGuidance" {
+		t.Fatalf("step diagnostic = %+v, want explicit source and severity", got[1])
+	}
+}
+
 func TestRunRecoverySnapshotFromModelsUsesCheckpointStep(t *testing.T) {
 	t.Parallel()
 

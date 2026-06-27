@@ -12,6 +12,7 @@ import (
 
 const (
 	evidenceRecordSourceTypePatch             = "patch"
+	evidenceRecordSourceTypeRuntimeStep       = "runtime_step"
 	evidenceRecordSourceTypeTargetSnapshot    = "target_snapshot"
 	evidenceRecordSourceTypeValidationResult  = "validation_result"
 	evidenceRecordSourceTypeContractViolation = "contract_violation"
@@ -85,6 +86,10 @@ func acceptedStateChangeEvidenceRecordForPatch(run *runModel.Run, step *runModel
 }
 
 func (o *RuntimeOrchestrator) recordValidationEvidenceRecord(ctx context.Context, run *runModel.Run, validation *runModel.ValidationResult) error {
+	return o.recordValidationEvidenceRecordForStep(ctx, run, nil, validation)
+}
+
+func (o *RuntimeOrchestrator) recordValidationEvidenceRecordForStep(ctx context.Context, run *runModel.Run, step *runModel.Step, validation *runModel.ValidationResult) error {
 	if o == nil || o.evidence.EvidenceRecords == nil || run == nil || validation == nil {
 		return nil
 	}
@@ -92,6 +97,7 @@ func (o *RuntimeOrchestrator) recordValidationEvidenceRecord(ctx context.Context
 	if record == nil {
 		return common.ErrInvalidArgument
 	}
+	enrichEvidenceRecordWithRuntimeStepCoverageScope(record, step)
 	if err := o.evidence.EvidenceRecords.Create(ctx, record); err != nil {
 		if err != common.ErrConflict {
 			return err
@@ -106,6 +112,25 @@ func (o *RuntimeOrchestrator) recordValidationEvidenceRecord(ctx context.Context
 		}
 	}
 	return nil
+}
+
+func enrichEvidenceRecordWithRuntimeStepCoverageScope(record *orchestratormodel.EvidenceRecord, step *runModel.Step) {
+	if record == nil || step == nil {
+		return
+	}
+	scope := runtimeStepCoverageScopeMetadata(step)
+	if len(scope) == 0 {
+		return
+	}
+	if record.Metadata == nil {
+		record.Metadata = map[string]any{}
+	}
+	for key, value := range scope {
+		record.Metadata[key] = value
+	}
+	if refs := stringSliceFromValue(scope["coverageWorkItemIds"]); len(refs) > 0 {
+		record.CoverageItemRefs = compactUniqueStrings(append(record.CoverageItemRefs, refs...))
+	}
 }
 
 func evidenceRecordForValidationResult(run *runModel.Run, validation *runModel.ValidationResult) *orchestratormodel.EvidenceRecord {
@@ -157,6 +182,153 @@ func evidenceRecordForValidationResult(run *runModel.Run, validation *runModel.V
 		UpdatedAt:          timestamp,
 		Metadata:           metadata,
 	}
+}
+
+func (o *RuntimeOrchestrator) recordAcceptedStateChangeEvidenceForRuntimeStep(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall) error {
+	if o == nil || o.evidence.EvidenceRecords == nil || run == nil || step == nil {
+		return nil
+	}
+	record := acceptedStateChangeEvidenceRecordForRuntimeStep(run, step, toolCall)
+	if record == nil {
+		return nil
+	}
+	return repository.CreateOrUpdateEvidenceRecord(ctx, o.evidence.EvidenceRecords, record)
+}
+
+func acceptedStateChangeEvidenceRecordForRuntimeStep(run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall) *orchestratormodel.EvidenceRecord {
+	if run == nil || step == nil || step.ID == "" || step.State != common.StepStateCompleted {
+		return nil
+	}
+	if !runtimeStepDeclaresStateChangingEvidence(step) || runtimeStepStateChangeEvidenceRecordedByDedicatedApply(step) {
+		return nil
+	}
+	sourceRef := runtimeRawPayloadRef(run.WorkspaceID, run.ID, "steps", string(step.ID), "output.json")
+	timestamp := runtimeEvidenceTimestamp()
+	scope := runtimeStepCoverageScopeMetadata(step)
+	metadata := map[string]any{
+		"sourceStepId":    strings.TrimSpace(string(step.ID)),
+		"stepKind":        strings.TrimSpace(step.Kind),
+		"stateChanging":   true,
+		"sourceOutputRef": sourceRef,
+	}
+	if toolCall != nil && toolCall.ID != "" {
+		metadata["toolCallId"] = string(toolCall.ID)
+	}
+	for key, value := range scope {
+		metadata[key] = value
+	}
+	if graphRootID := graphRootStepID(step); graphRootID != "" {
+		metadata["graphRootStepId"] = string(graphRootID)
+	}
+	if nodeID := strings.TrimSpace(graphNodeID(step)); nodeID != "" {
+		metadata["graphNodeId"] = nodeID
+	}
+	subjectID := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(scope, "targetRef"),
+		firstStringFromSlice(stringSliceFromValue(scope["targetRefs"])),
+		firstStringFromSlice(stringSliceFromValue(scope["coverageTargets"])),
+		string(step.ID),
+	))
+	return &orchestratormodel.EvidenceRecord{
+		ID:                 orchestratormodel.StableEvidenceRecordID(sourceRef, "runtime-step", "state-change"),
+		WorkspaceID:        run.WorkspaceID,
+		RunID:              firstNonEmptyRunID(step.RunID, run.ID),
+		StepID:             step.ID,
+		DefinitionRevision: strings.TrimSpace(run.DefinitionRevision),
+		Kind:               orchestratormodel.EvidenceKindStateChange,
+		Status:             orchestratormodel.EvidenceStatusAccepted,
+		SourceType:         evidenceRecordSourceTypeRuntimeStep,
+		SourceRef:          sourceRef,
+		SubjectType:        evidenceRecordSubjectRuntimeStep,
+		SubjectID:          subjectID,
+		CoverageItemRefs:   stringSliceFromValue(scope["coverageWorkItemIds"]),
+		CreatedAt:          timestamp,
+		UpdatedAt:          timestamp,
+		Metadata:           metadata,
+	}
+}
+
+func runtimeStepDeclaresStateChangingEvidence(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	return boolValue(step.Input["stateChanging"]) || boolValue(step.Input["stateChange"])
+}
+
+func runtimeStepStateChangeEvidenceRecordedByDedicatedApply(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	switch strings.TrimSpace(step.Kind) {
+	case "patch/apply", artifactApplyStepKind:
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeStepCoverageScopeMetadata(step *runModel.Step) map[string]any {
+	ret := map[string]any{}
+	if step == nil {
+		return ret
+	}
+	addString := func(key, value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			ret[key] = value
+		}
+	}
+	addStrings := func(key string, values []string) {
+		if values = compactUniqueStrings(values); len(values) > 0 {
+			ret[key] = values
+		}
+	}
+	input := step.Input
+	output := step.Output
+	addString("coverageFocusId", firstNonEmptyString(stringFromMap(input, "coverageFocusId"), stringFromMap(output, "coverageFocusId")))
+	addStrings("coverageWorkItemIds", append(stringSliceFromValue(input["coverageWorkItemIds"]), stringSliceFromValue(output["coverageWorkItemIds"])...))
+	addStrings("coverageTargets", runtimeStepCoverageTargetRefs(step))
+	addString("targetRef", firstNonEmptyString(stringFromMap(input, "targetRef"), stringFromMap(output, "targetRef")))
+	addStrings("targetRefs", append(stringSliceFromValue(input["targetRefs"]), stringSliceFromValue(output["targetRefs"])...))
+	if runtimeStepDeclaresStateChangingEvidence(step) {
+		ret["stateChanging"] = true
+	}
+	return ret
+}
+
+func runtimeStepCoverageTargetRefs(step *runModel.Step) []string {
+	if step == nil {
+		return nil
+	}
+	refs := make([]string, 0)
+	addFromPayload := func(payload map[string]any) {
+		if len(payload) == 0 {
+			return
+		}
+		refs = append(refs, stringSliceFromValue(payload["coverageTargets"])...)
+		for _, target := range mapSliceFromValue(payload["coverageTargets"]) {
+			refs = append(refs,
+				stringFromMap(target, "id"),
+				stringFromMap(target, "coverageTargetId"),
+				stringFromMap(target, "coverageTargetToken"),
+				stringFromMap(target, "sourceRequirementId"),
+				stringFromMap(target, "targetRef"),
+				stringFromMap(target, "targetText"),
+			)
+		}
+	}
+	addFromPayload(step.Input)
+	addFromPayload(step.Output)
+	return compactUniqueStrings(refs)
+}
+
+func firstStringFromSlice(values []string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func evidenceStatusForValidationResult(state common.ValidationResultState) string {

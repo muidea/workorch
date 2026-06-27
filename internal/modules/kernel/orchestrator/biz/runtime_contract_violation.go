@@ -188,6 +188,10 @@ func applyContractViolationRecoveryProjection(input map[string]any, failedStep *
 		violation["correctionContract"] = mapFromValue(correction["contract"])
 		applyForcedNarrowContractViolationRequiredOutput(input, failedStep, correction)
 	}
+	violation = contractViolationDiagnosticOnlyMap(violation, input)
+	if hint := contractViolationRetryHintFromAuthority(input, violation); hint != "" {
+		violation["retryHint"] = hint
+	}
 	budgetScope := contractViolationRecoveryBudgetScope(input, failedStep)
 	if len(budgetScope) > 0 {
 		input[stepInputKeyRecoveryBudgetScope] = budgetScope
@@ -200,8 +204,90 @@ func applyContractViolationRecoveryProjection(input map[string]any, failedStep *
 		"The previous LLM output was rejected by the runtime contract before any side effects were executed.",
 		"Treat contractViolationRecovery.expectedContract as diagnostic lineage only; it explains the rejected output but must not override the current narrow retry contract.",
 		"Use contractViolationRecovery.correctionContract and the current repairActionPackage.requiredOutput as the authoritative retry contract; if correctionMode is forced_narrow, return only an allowed output shape from that contract or a real governance blocker.",
+		contractViolationRetryHintFromAuthority(input, violation),
 		"Return one valid JSON decision that satisfies the same runtimeStage and repairObjective; do not weaken Goal, DoD, evidence, or approval requirements.",
 	)
+}
+
+func contractViolationDiagnosticOnlyMap(violation map[string]any, input map[string]any) map[string]any {
+	if len(violation) == 0 {
+		return violation
+	}
+	next := cloneStepPayload(violation)
+	next["diagnosticOnly"] = true
+	next["actionAdviceAuthoritative"] = false
+	if actual := mapFromValue(next["actualOutputSummary"]); len(actual) > 0 {
+		next["actualOutputSummary"] = scrubDiagnosticActionAdvice(actual, input)
+	}
+	if expected := mapFromValue(next["expectedContract"]); len(expected) > 0 {
+		expected["diagnosticOnly"] = true
+		expected["authoritativeForNextOutput"] = false
+		next["expectedContract"] = expected
+	}
+	return next
+}
+
+func scrubDiagnosticActionAdvice(value map[string]any, input map[string]any) map[string]any {
+	if len(value) == 0 {
+		return value
+	}
+	next := cloneStepPayload(value)
+	for _, key := range []string{"error", "reason", "summary", "parseError", "repairError"} {
+		text := strings.TrimSpace(stringFromMap(next, key))
+		if text == "" {
+			continue
+		}
+		if outputShapeAdviceConflictsWithRequiredOutput(text, input) {
+			next[key+"DiagnosticRef"] = "scrubbed_conflicting_output_shape_advice"
+			delete(next, key)
+		}
+	}
+	return next
+}
+
+func contractViolationRetryHintFromAuthority(input map[string]any, violation map[string]any) string {
+	required := currentRequiredOutputForAuthority(input)
+	contract := mapFromValue(violation["correctionContract"])
+	if len(required) == 0 && len(contract) == 0 {
+		return ""
+	}
+	allowed := compactUniqueStrings(append(stringSliceFromValue(contract["allowedOutputs"]), stringSliceFromValue(required["allowedOutputShapes"])...))
+	requiredFields := compactUniqueStrings(append(stringSliceFromValue(contract["requiredFields"]), stringSliceFromValue(required["requiredFields"])...))
+	forbidden := compactUniqueStrings(append(stringSliceFromValue(contract["forbiddenOutputs"]), stringSliceFromValue(required["forbiddenOutputShapes"])...))
+	parts := []string{}
+	if len(allowed) > 0 {
+		parts = append(parts, "Allowed output shapes: "+strings.Join(allowed, ", ")+".")
+	}
+	if len(requiredFields) > 0 {
+		parts = append(parts, "Required fields: "+strings.Join(requiredFields, ", ")+".")
+	}
+	if boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		parts = append(parts, "If returning executionGraph validation, each validation node must declare input.validationEvidence.mode and input.validationEvidence.observationType.")
+	}
+	if !requiredOutputAllowsTopLevelShape(required, "shellCommands") && !requiredOutputAllowsTopLevelShape(contract, "shellCommands") {
+		forbidden = append(forbidden, "top_level_shellCommands")
+		parts = append(parts, "Do not return top-level shellCommands unless the current requiredOutput.allowedOutputShapes explicitly permits that shape.")
+	}
+	if len(forbidden) > 0 {
+		parts = append(parts, "Forbidden output shapes: "+strings.Join(compactUniqueStrings(forbidden), ", ")+".")
+	}
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func currentRequiredOutputForAuthority(input map[string]any) map[string]any {
+	for _, source := range []map[string]any{
+		mapFromValue(input["requiredOutput"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		mapFromValue(mapFromValue(input["executionContext"])["requiredOutput"]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"])["requiredOutput"]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])[stepInputKeyStagePacket])["requiredOutput"]),
+	} {
+		if len(source) > 0 {
+			return source
+		}
+	}
+	return nil
 }
 
 func applyForcedNarrowContractViolationRequiredOutput(input map[string]any, failedStep *runModel.Step, correction map[string]any) {
