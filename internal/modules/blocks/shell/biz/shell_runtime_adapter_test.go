@@ -193,13 +193,21 @@ func TestRuntimeAdapter_ExecuteRuntimeStepAddsValidationFailureDiagnostic(t *tes
 func TestRuntimeAdapter_ExecuteRuntimeStepCarriesManagedValidationMetadata(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
+	scratchDirectory := filepath.Join(os.TempDir(), "workorch-shell-managed-validation-test", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
+	t.Cleanup(func() {
+		_ = os.RemoveAll(scratchDirectory)
+	})
 
 	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceID:                   "ws-managed-validation",
+		RunID:                         "run-managed-validation",
+		StepID:                        "run-managed-validation/verify",
 		WorkspaceDeliverableDirectory: deliverableDirectory,
 		Kind:                          "shell/command",
 		Input: map[string]any{
-			"command": "sh",
-			"args":    []any{"-c", "printf managed-ok"},
+			"command":              "sh",
+			"args":                 []any{"-c", "mkdir -p \"$1\"; printf managed-ok > \"$1/out.txt\"; printf managed-ok", "sh", scratchDirectory},
+			"validationScratchDir": scratchDirectory,
 			"validationEvidence": map[string]any{
 				"mode":            "runtime_behavior",
 				"observationType": "runtime_observation",
@@ -223,6 +231,28 @@ func TestRuntimeAdapter_ExecuteRuntimeStepCarriesManagedValidationMetadata(t *te
 	evidence, _ := result.Output["validationEvidence"].(map[string]any)
 	if evidence["mode"] != "runtime_behavior" || evidence["observationType"] != "runtime_observation" {
 		t.Fatalf("validationEvidence = %+v, want carried validation evidence", evidence)
+	}
+	if managed["resourceCount"] != 2 || managed["resourcesReleased"] != true {
+		t.Fatalf("managedValidation = %+v, want released process and scratch resources", managed)
+	}
+	resources, ok := result.Output["validationResources"].([]map[string]any)
+	if !ok || len(resources) != 2 {
+		t.Fatalf("validationResources = %#v, want two resource records", result.Output["validationResources"])
+	}
+	kinds := map[string]string{}
+	for _, resource := range resources {
+		kinds[stringFromShellValue(resource["kind"])] = stringFromShellValue(resource["status"])
+		if resource["workspaceId"] != "ws-managed-validation" ||
+			resource["runId"] != "run-managed-validation" ||
+			resource["stepId"] != "run-managed-validation/verify" {
+			t.Fatalf("resource = %+v, want scoped workspace/run/step ids", resource)
+		}
+	}
+	if kinds["process"] != "released" || kinds["scratch_dir"] != "released" {
+		t.Fatalf("resource statuses = %+v, want released process and scratch_dir", kinds)
+	}
+	if _, statErr := os.Stat(scratchDirectory); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("scratchDirectory stat = %v, want removed by managed validation cleanup", statErr)
 	}
 }
 

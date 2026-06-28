@@ -250,6 +250,9 @@ func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, outpu
 	}
 	normalizeManagedValidationOutput(step, output)
 	normalizeConcreteValidationScratchSetupOutput(step, output)
+	if err := validateManagedValidationGraphContract(step, output); err != nil {
+		return err
+	}
 	if err := validateConcreteValidationRouteOutputContract(step, output); err != nil {
 		return err
 	}
@@ -318,6 +321,86 @@ func graphHasManagedValidationNode(graph runtimemodel.BlockExecutionGraph) bool 
 		}
 	}
 	return false
+}
+
+func validateManagedValidationGraphContract(step *runModel.Step, output map[string]any) error {
+	if step == nil || output == nil {
+		return nil
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok {
+		return nil
+	}
+	for _, node := range graph.Nodes {
+		if !runtimeGraphNodeIsManagedValidation(node) {
+			continue
+		}
+		if err := validateManagedValidationNodeContract(step, node); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runtimeGraphNodeIsManagedValidation(node runtimemodel.BlockExecutionNode) bool {
+	if strings.TrimSpace(node.Kind) == managedValidationSessionNodeKind {
+		return true
+	}
+	managed := mapFromValue(node.Input["managedValidation"])
+	return boolValue(managed["runtimeManaged"]) ||
+		strings.TrimSpace(stringFromMap(managed, "kind")) == managedValidationSessionNodeKind ||
+		strings.TrimSpace(stringFromMap(managed, "originalNodeKind")) == managedValidationSessionNodeKind
+}
+
+func validateManagedValidationNodeContract(step *runModel.Step, node runtimemodel.BlockExecutionNode) error {
+	if canonicalRuntimeGraphNodeKind(node.Kind) != "shell/command" {
+		return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleManagedValidationRequired, "managed validation session must normalize to a bounded shell/command runtime node")
+	}
+	if !nodeValidationEvidenceContractIsConcrete(node) {
+		return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationEvidenceMetadataMissing, "managed validation session requires concrete validationEvidence.mode and validationEvidence.observationType")
+	}
+	if len(managedValidationTargetRefs(node)) == 0 {
+		return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationEvidenceMetadataMissing, "managed validation session requires validationEvidence.targetRefs or input.targetRefs to bind evidence to current coverage")
+	}
+	scratch := strings.TrimSpace(stringFromMap(node.Input, validationScratchDirKey))
+	if scratch == "" {
+		scratch = strings.TrimSpace(stringFromMap(mapFromValue(node.Input["managedValidation"]), validationScratchDirKey))
+	}
+	if scratch == "" || validationScratchDirFromStep(step) == "" {
+		return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationScratchRequired, "managed validation session requires runtime-scoped validationScratchDir")
+	}
+	timeoutMillis := intFromAny(node.Input["timeoutMillis"])
+	if timeoutMillis < 1000 {
+		return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleManagedValidationRequired, "managed validation session requires timeoutMillis >= 1000")
+	}
+	managed := mapFromValue(node.Input["managedValidation"])
+	if strings.TrimSpace(stringFromMap(managed, "cleanupPolicy")) == "" || !boolValue(managed["autoCleanup"]) {
+		return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleManagedValidationRequired, "managed validation session requires runtime autoCleanup and cleanupPolicy")
+	}
+	return nil
+}
+
+func managedValidationTargetRefs(node runtimemodel.BlockExecutionNode) []string {
+	seen := map[string]bool{}
+	ret := []string{}
+	add := func(values []string) {
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" || seen[value] {
+				continue
+			}
+			seen[value] = true
+			ret = append(ret, value)
+		}
+	}
+	add(stringSliceFromValue(node.Input["targetRefs"]))
+	evidence := mapFromValue(node.Input["validationEvidence"])
+	add(stringSliceFromValue(evidence["targetRefs"]))
+	add(stringSliceFromValue(evidence["coverageTargets"]))
+	if target := strings.TrimSpace(stringFromMap(evidence, "targetRef")); target != "" {
+		add([]string{target})
+	}
+	return ret
 }
 
 func normalizeConcreteValidationScratchSetupOutput(step *runModel.Step, output map[string]any) {

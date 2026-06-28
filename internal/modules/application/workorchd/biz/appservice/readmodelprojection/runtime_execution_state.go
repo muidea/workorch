@@ -40,8 +40,9 @@ func MapRuntimeExecutionState(steps []StepView, checkpoints []readmodelcore.Runt
 		}
 		applyRuntimeExecutionCheckpoint(state, checkpoint)
 	}
+	state.ResourceHealth = RuntimeResourceHealthFromSteps(steps)
 	deriveRuntimeExecutionGap(state)
-	if state.RequestID == "" && state.AcceptedAt == "" && state.LastProgressAt == "" && state.DoneAt == "" && state.FailedAt == "" && state.FinalizedAt == "" && state.Gap == "" && state.ContractViolation == nil {
+	if state.RequestID == "" && state.AcceptedAt == "" && state.LastProgressAt == "" && state.DoneAt == "" && state.FailedAt == "" && state.FinalizedAt == "" && state.Gap == "" && state.ContractViolation == nil && len(state.ResourceHealth) == 0 {
 		return nil
 	}
 	return state

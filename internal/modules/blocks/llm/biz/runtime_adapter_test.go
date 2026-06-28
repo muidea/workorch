@@ -584,6 +584,39 @@ func TestRuntimeAdapterEmitsProviderStreamProgressWithoutRawDelta(t *testing.T) 
 	}
 }
 
+func TestProviderStreamProgressThrottlesIntermediateDeltas(t *testing.T) {
+	var progressItems []runtimemodel.StepExecutionProgress
+	progress := newProviderStreamProgress(func(progress runtimemodel.StepExecutionProgress) error {
+		progressItems = append(progressItems, progress)
+		return nil
+	})
+
+	if err := progress.observe(llmmodels.ProviderStreamEvent{Type: "delta", Delta: "a"}); err != nil {
+		t.Fatalf("observe first delta: %v", err)
+	}
+	for i := 0; i < 20; i++ {
+		if err := progress.observe(llmmodels.ProviderStreamEvent{Type: "delta", Delta: "b"}); err != nil {
+			t.Fatalf("observe intermediate delta: %v", err)
+		}
+	}
+	if len(progressItems) != 1 {
+		t.Fatalf("progressItems = %+v, want only first-token milestone before throttle interval", progressItems)
+	}
+	progress.lastEmittedAt = time.Now().Add(-providerStreamProgressMilestoneInterval - time.Second)
+	if err := progress.observe(llmmodels.ProviderStreamEvent{Type: "delta", Delta: "c"}); err != nil {
+		t.Fatalf("observe heartbeat delta: %v", err)
+	}
+	if len(progressItems) != 2 {
+		t.Fatalf("progressItems = %+v, want periodic heartbeat after throttle interval", progressItems)
+	}
+	if err := progress.observe(llmmodels.ProviderStreamEvent{Type: "done"}); err != nil {
+		t.Fatalf("observe done: %v", err)
+	}
+	if len(progressItems) != 3 || progressItems[2].Event != "runtime_step_done" {
+		t.Fatalf("progressItems = %+v, want final done milestone", progressItems)
+	}
+}
+
 func TestRuntimeAdapterRepairsInvalidDecisionOnce(t *testing.T) {
 	provider := &sequenceProvider{payloads: [][]byte{
 		[]byte(`{

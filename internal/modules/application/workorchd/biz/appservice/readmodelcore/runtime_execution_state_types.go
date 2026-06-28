@@ -27,4 +27,5 @@ type RuntimeExecutionState struct {
 	FinalizeEvent         string                          `json:"finalizeEvent,omitempty"`
 	Pending               bool                            `json:"pending,omitempty"`
 	Gap                   string                          `json:"gap,omitempty"`
+	ResourceHealth        map[string]any                  `json:"resourceHealth,omitempty"`
 }

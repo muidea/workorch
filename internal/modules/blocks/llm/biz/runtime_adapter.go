@@ -898,6 +898,8 @@ type providerStreamProgress struct {
 	lastObservedErrMsg string
 }
 
+const providerStreamProgressMilestoneInterval = 30 * time.Second
+
 func newProviderStreamProgress(progress runtimemodel.StepExecutionProgressFunc) *providerStreamProgress {
 	return &providerStreamProgress{progress: progress}
 }
@@ -931,7 +933,7 @@ func (p *providerStreamProgress) observe(event llmmodels.ProviderStreamEvent) er
 		p.firstDeltaEmitted = true
 		return p.emit("runtime_step_progress", "provider stream receiving")
 	}
-	if p.lastEmittedAt.IsZero() || time.Since(p.lastEmittedAt) >= 5*time.Second {
+	if p.lastEmittedAt.IsZero() || time.Since(p.lastEmittedAt) >= providerStreamProgressMilestoneInterval {
 		return p.emit("runtime_step_progress", "provider stream receiving")
 	}
 	return nil

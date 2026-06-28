@@ -2276,6 +2276,7 @@ func TestValidateLLMExecutionOutputContractNormalizesManagedValidationSession(t 
 						"validationEvidence": map[string]any{
 							"mode":            "runtime_behavior",
 							"observationType": "runtime_observation",
+							"targetRefs":      []string{"managed-runtime-behavior"},
 						},
 					},
 				},
@@ -2313,6 +2314,8 @@ func TestValidateLLMExecutionOutputContractNormalizesManagedValidationSession(t 
 	}
 	if evidence := mapFromValue(node.Input["validationEvidence"]); stringFromMap(evidence, "mode") != "runtime_behavior" {
 		t.Fatalf("validationEvidence = %+v, want copied observation evidence", evidence)
+	} else if refs := stringSliceFromValue(evidence["targetRefs"]); len(refs) == 0 {
+		t.Fatalf("validationEvidence = %+v, want copied targetRefs", evidence)
 	}
 }
 
@@ -2338,6 +2341,66 @@ func TestConcreteValidationRequiredOutputIncludesManagedSessionExample(t *testin
 	if stringFromMap(evidence, "mode") != "runtime_behavior" ||
 		stringFromMap(evidence, "observationType") != "runtime_observation" {
 		t.Fatalf("managedValidationNodeExample.validationEvidence = %+v, want runtime observation", evidence)
+	}
+	if refs := stringSliceFromValue(evidence["targetRefs"]); len(refs) == 0 {
+		t.Fatalf("managedValidationNodeExample.validationEvidence = %+v, want targetRefs", evidence)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsManagedValidationWithoutTargetRefs(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/managed-validation-missing-targets"
+	run := &runmodel.Run{
+		ID:              "run-managed-validation-missing-targets",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	requiredOutput := concreteValidationEvidenceRequiredOutputWithScratch(
+		map[string]any{validationScratchDirKey: scratch},
+		map[string]any{},
+		nil,
+	)
+	step := &runmodel.Step{
+		ID:   "run-managed-validation-missing-targets/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": requiredOutput,
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "managed-verify",
+				"kind": managedValidationSessionNodeKind,
+				"input": map[string]any{
+					"observation": map[string]any{
+						"command":       "sh",
+						"args":          []string{"-c", "printf managed-validation-ok"},
+						"timeoutMillis": int64(5000),
+						"validationEvidence": map[string]any{
+							"mode":            "runtime_behavior",
+							"observationType": "runtime_observation",
+						},
+					},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "targetRefs") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want targetRefs contract rejection", err)
+	}
+	var violation runtimeContractViolationError
+	if !errors.As(err, &violation) || violation.rule != contractViolationRuleValidationEvidenceMetadataMissing {
+		t.Fatalf("contract violation = %+v, want rule %s", violation, contractViolationRuleValidationEvidenceMetadataMissing)
 	}
 }
 

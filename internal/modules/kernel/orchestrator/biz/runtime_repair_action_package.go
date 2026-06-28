@@ -800,6 +800,7 @@ func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[strin
 					"validationEvidence": map[string]any{
 						"mode":            "runtime_behavior",
 						"observationType": "runtime_observation",
+						"targetRefs":      []string{"current_coverage_focus"},
 					},
 				},
 			},

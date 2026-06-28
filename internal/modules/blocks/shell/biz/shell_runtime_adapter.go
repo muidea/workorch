@@ -109,7 +109,14 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	stderr := newLimitedOutputBuffer(MaxCommandOutputBytes)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	err = cmd.Run()
+	pid := 0
+	err = cmd.Start()
+	if err == nil {
+		if cmd.Process != nil {
+			pid = cmd.Process.Pid
+		}
+		err = cmd.Wait()
+	}
 	duration := time.Since(startedAt)
 	exitCode := 0
 	if cmd.ProcessState != nil {
@@ -136,15 +143,18 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	if runCtx.Err() == context.DeadlineExceeded {
 		output["status"] = "timeout"
 		output["stage"] = "shell_command_timeout"
+		attachManagedValidationResources(output, request, pid, startedAt, time.Now().UTC(), "timeout")
 		attachShellValidationFailureDiagnostic(output, request.Input, execCommand, exitCode, true, false, context.DeadlineExceeded)
 		return runtimemodel.StepExecutionResult{Output: output}, context.DeadlineExceeded
 	}
 	if err != nil {
 		output["status"] = "failed"
+		attachManagedValidationResources(output, request, pid, startedAt, time.Now().UTC(), "failed")
 		attachShellCommandFailureDiagnostics(output, execCommand, err)
 		attachShellValidationFailureDiagnostic(output, request.Input, execCommand, exitCode, false, false, err)
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
+	attachManagedValidationResources(output, request, pid, startedAt, time.Now().UTC(), "released")
 	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
 
@@ -168,6 +178,129 @@ func shellBaseOutput(input map[string]any, command string, args []string, workin
 		output["targetRefs"] = refs
 	}
 	return output
+}
+
+func attachManagedValidationResources(output map[string]any, request runtimemodel.StepExecutionRequest, pid int, startedAt time.Time, finishedAt time.Time, processStatus string) {
+	if output == nil || !shellInputHasManagedValidation(request.Input) {
+		return
+	}
+	resources := make([]map[string]any, 0, 2)
+	if pid > 0 {
+		resources = append(resources, map[string]any{
+			"id":            shellManagedValidationResourceID(request, "process"),
+			"workspaceId":   string(request.WorkspaceID),
+			"runId":         string(request.RunID),
+			"stepId":        string(request.StepID),
+			"kind":          "process",
+			"pid":           pid,
+			"status":        processStatus,
+			"cleanupPolicy": "process_group_on_timeout_or_completion",
+			"createdAt":     startedAt.Format(time.RFC3339Nano),
+			"releasedAt":    finishedAt.Format(time.RFC3339Nano),
+		})
+	}
+	if scratch := strings.TrimSpace(stringFromShellValue(request.Input["validationScratchDir"])); scratch != "" {
+		record := map[string]any{
+			"id":            shellManagedValidationResourceID(request, "scratch_dir"),
+			"workspaceId":   string(request.WorkspaceID),
+			"runId":         string(request.RunID),
+			"stepId":        string(request.StepID),
+			"kind":          "scratch_dir",
+			"path":          scratch,
+			"status":        "released",
+			"cleanupPolicy": "remove_step_scoped_scratch_on_completion",
+			"createdAt":     startedAt.Format(time.RFC3339Nano),
+			"releasedAt":    finishedAt.Format(time.RFC3339Nano),
+		}
+		if cleanupErr := cleanupManagedValidationScratch(request.Input, request.WorkspaceDeliverableDirectory); cleanupErr != nil {
+			record["status"] = "cleanup_failed"
+			record["cleanupError"] = cleanupErr.Error()
+		}
+		resources = append(resources, record)
+	}
+	if len(resources) == 0 {
+		return
+	}
+	output["validationResources"] = resources
+	managed := mapFromShellOutput(output, "managedValidation")
+	if managed == nil {
+		managed = map[string]any{}
+	}
+	managed["resourceCount"] = len(resources)
+	managed["resourcesReleased"] = managedValidationResourcesReleased(resources)
+	output["managedValidation"] = managed
+	runtimeDiagnostics := mapFromShellOutput(output, "runtimeDiagnostics")
+	if runtimeDiagnostics == nil {
+		runtimeDiagnostics = map[string]any{}
+	}
+	runtimeDiagnostics["validationResourceLifecycle"] = map[string]any{
+		"resourceCount": len(resources),
+		"released":      managed["resourcesReleased"],
+	}
+	output["runtimeDiagnostics"] = runtimeDiagnostics
+}
+
+func shellInputHasManagedValidation(input map[string]any) bool {
+	managed := mapFromShellInput(input, "managedValidation")
+	return boolFromShellValue(managed["runtimeManaged"]) ||
+		stringFromShellValue(managed["kind"]) == "validation/managed_session" ||
+		stringFromShellValue(managed["originalNodeKind"]) == "validation/managed_session"
+}
+
+func shellManagedValidationResourceID(request runtimemodel.StepExecutionRequest, kind string) string {
+	parts := []string{
+		string(request.WorkspaceID),
+		string(request.RunID),
+		string(request.StepID),
+		strings.TrimSpace(kind),
+	}
+	return strings.Join(parts, ":")
+}
+
+func managedValidationResourcesReleased(resources []map[string]any) bool {
+	for _, resource := range resources {
+		if stringFromShellValue(resource["status"]) != "released" {
+			return false
+		}
+	}
+	return true
+}
+
+func cleanupManagedValidationScratch(input map[string]any, deliverableDirectory string) error {
+	if !managedValidationScratchAutoCleanupEnabled(input) {
+		return nil
+	}
+	scratch := strings.TrimSpace(stringFromShellValue(input["validationScratchDir"]))
+	if scratch == "" {
+		return nil
+	}
+	scratchAbs, err := filepath.Abs(scratch)
+	if err != nil {
+		return err
+	}
+	deliverableAbs, err := filepath.Abs(strings.TrimSpace(deliverableDirectory))
+	if err != nil {
+		return err
+	}
+	if scratchAbs == deliverableAbs || strings.HasPrefix(scratchAbs, deliverableAbs+string(os.PathSeparator)) {
+		return fmt.Errorf("%w: managed validation scratch cleanup must not target workspace deliverable directory", common.ErrInvalidArgument)
+	}
+	tempRoot, err := filepath.Abs(os.TempDir())
+	if err != nil {
+		return err
+	}
+	if scratchAbs == tempRoot || !strings.HasPrefix(scratchAbs, tempRoot+string(os.PathSeparator)) {
+		return fmt.Errorf("%w: managed validation scratch cleanup must stay under temporary directory", common.ErrInvalidArgument)
+	}
+	if filepath.Base(scratchAbs) == "" || scratchAbs == string(os.PathSeparator) {
+		return fmt.Errorf("%w: managed validation scratch cleanup target is invalid", common.ErrInvalidArgument)
+	}
+	return os.RemoveAll(scratchAbs)
+}
+
+func managedValidationScratchAutoCleanupEnabled(input map[string]any) bool {
+	managed := mapFromShellInput(input, "managedValidation")
+	return boolFromShellValue(managed["autoCleanup"])
 }
 
 func attachShellCommandFailureDiagnostics(output map[string]any, execCommand string, err error) {
