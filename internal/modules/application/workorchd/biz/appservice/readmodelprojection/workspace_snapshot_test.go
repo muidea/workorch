@@ -88,6 +88,39 @@ func TestSelectTerminalResultRunIgnoresAcceptedSlice(t *testing.T) {
 	}
 }
 
+func TestSelectTerminalResultRunIgnoresCompletedRunWithOpenCoverage(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-terminal-result-open-coverage")
+	runID := common.RunID("run-terminal-result-open-coverage")
+	result, run := SelectTerminalResultRun(workspaceID, map[common.RunID]*runmodel.Run{
+		runID: {
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       common.RunStateCompleted,
+			ExecutionContext: map[string]any{
+				"coverageWorkItems": []any{map[string]any{
+					"id":     "cwi-open",
+					"status": "open",
+				}},
+			},
+		},
+	}, []*resultmodel.Result{
+		{
+			ID:           "run-terminal-result-open-coverage/result/dod-assessment",
+			WorkspaceID:  workspaceID,
+			RunID:        runID,
+			State:        common.ResultStateAccepted,
+			SourceType:   resultcommon.SourceTypeDoDAssessment,
+			Summary:      "accepted current focus only",
+			EvidenceRefs: []string{"run-terminal-result-open-coverage/step-1"},
+		},
+	})
+	if result != nil || run != nil {
+		t.Fatalf("SelectTerminalResultRun = %+v/%+v, want open coverage accepted result ignored", result, run)
+	}
+}
+
 func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 	t.Parallel()
 

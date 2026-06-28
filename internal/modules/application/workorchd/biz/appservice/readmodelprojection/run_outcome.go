@@ -19,11 +19,29 @@ func MapRunOutcome(snapshot readmodelcore.RunSnapshot) readmodelcore.RunOutcome 
 		ret.Summary = ret.Reason
 		return ret
 	}
-	runsByID := map[string]*readmodelcore.Run{snapshot.Run.ID: &snapshot.Run}
-	if result := latestTerminalWorkspaceResult(runScopedResults(snapshot), runsByID); result != nil {
+	if result := latestTerminalRunSnapshotResult(snapshot); result != nil {
 		applyRunOutcomeTerminalResult(&ret, *result)
 		return ret
 	}
 	applyRunOutcomeTerminalRunState(&ret, snapshot)
 	return ret
+}
+
+func latestTerminalRunSnapshotResult(snapshot readmodelcore.RunSnapshot) *readmodelcore.Result {
+	var selected *readmodelcore.Result
+	items := runScopedResults(snapshot)
+	for idx := range items {
+		switch common.ResultState(items[idx].State) {
+		case common.ResultStateAccepted, common.ResultStateRejected:
+		default:
+			continue
+		}
+		if !isTerminalOutcomeEligibleResultForSnapshot(items[idx], snapshot) {
+			continue
+		}
+		if selected == nil || resultTimeValue(items[idx]) >= resultTimeValue(*selected) {
+			selected = &items[idx]
+		}
+	}
+	return selected
 }

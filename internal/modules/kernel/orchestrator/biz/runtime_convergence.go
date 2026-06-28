@@ -347,7 +347,7 @@ func contractViolationRecoveryRequiresAuthorityRecompute(input map[string]any) b
 		return true
 	}
 	correction := mapFromValue(recovery["correctionContract"])
-	return strings.TrimSpace(stringFromMap(correction, "requiredOutputShape")) == "authority_recomputed_next_action"
+	return len(mapFromValue(correction["runtimeRecomputedAuthority"])) > 0
 }
 
 func convergenceNextActionAuthorityAllowed(input map[string]any) bool {
@@ -494,7 +494,6 @@ func contractViolationRecoveryCurrentContractPreemptsExpectedStateChange(input m
 	switch strings.TrimSpace(stringFromMap(correction, "requiredOutputShape")) {
 	case "bounded_validation_evidence",
 		"bounded_failure_evidence",
-		"authority_recomputed_next_action",
 		"traceable_coverage_assessment",
 		"single_valid_json_decision":
 		return true

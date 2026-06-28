@@ -78,17 +78,26 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	}
 	execCommand, execArgs, commandNormalization := normalizeShellExecutionCommand(command, args)
 	if err := validateShellCommandPolicy(execCommand, execArgs, deliverableDirectory); err != nil {
+		now := time.Now().UTC()
 		output := shellBaseOutput(request.Input, command, args, deliverableDirectory, commandNormalization, execCommand)
 		output["status"] = "failed"
 		output["stage"] = "shell_command_policy_rejected"
 		output["reason"] = err.Error()
+		attachManagedValidationResources(output, request, 0, now, now, "released")
 		attachShellValidationFailureDiagnostic(output, request.Input, execCommand, 0, false, true, err)
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 
 	timeout, err := shellCommandTimeout(request.Input, a.timeout)
 	if err != nil {
-		return runtimemodel.StepExecutionResult{}, err
+		now := time.Now().UTC()
+		output := shellBaseOutput(request.Input, command, args, deliverableDirectory, commandNormalization, execCommand)
+		output["status"] = "failed"
+		output["stage"] = "shell_command_timeout_policy_rejected"
+		output["reason"] = err.Error()
+		attachManagedValidationResources(output, request, 0, now, now, "released")
+		attachShellValidationFailureDiagnostic(output, request.Input, execCommand, 0, false, true, err)
+		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -181,9 +190,10 @@ func shellBaseOutput(input map[string]any, command string, args []string, workin
 }
 
 func attachManagedValidationResources(output map[string]any, request runtimemodel.StepExecutionRequest, pid int, startedAt time.Time, finishedAt time.Time, processStatus string) {
-	if output == nil || !shellInputHasManagedValidation(request.Input) {
+	if output == nil || !shellInputHasValidationResourceLifecycle(request.Input) {
 		return
 	}
+	managedInput := shellInputHasManagedValidation(request.Input)
 	resources := make([]map[string]any, 0, 2)
 	if pid > 0 {
 		resources = append(resources, map[string]any{
@@ -208,7 +218,7 @@ func attachManagedValidationResources(output map[string]any, request runtimemode
 			"kind":          "scratch_dir",
 			"path":          scratch,
 			"status":        "released",
-			"cleanupPolicy": "remove_step_scoped_scratch_on_completion",
+			"cleanupPolicy": "remove_step_scoped_validation_scratch_on_completion",
 			"createdAt":     startedAt.Format(time.RFC3339Nano),
 			"releasedAt":    finishedAt.Format(time.RFC3339Nano),
 		}
@@ -222,22 +232,30 @@ func attachManagedValidationResources(output map[string]any, request runtimemode
 		return
 	}
 	output["validationResources"] = resources
-	managed := mapFromShellOutput(output, "managedValidation")
-	if managed == nil {
-		managed = map[string]any{}
+	released := managedValidationResourcesReleased(resources)
+	if managedInput {
+		managed := mapFromShellOutput(output, "managedValidation")
+		if managed == nil {
+			managed = map[string]any{}
+		}
+		managed["resourceCount"] = len(resources)
+		managed["resourcesReleased"] = released
+		output["managedValidation"] = managed
 	}
-	managed["resourceCount"] = len(resources)
-	managed["resourcesReleased"] = managedValidationResourcesReleased(resources)
-	output["managedValidation"] = managed
 	runtimeDiagnostics := mapFromShellOutput(output, "runtimeDiagnostics")
 	if runtimeDiagnostics == nil {
 		runtimeDiagnostics = map[string]any{}
 	}
 	runtimeDiagnostics["validationResourceLifecycle"] = map[string]any{
 		"resourceCount": len(resources),
-		"released":      managed["resourcesReleased"],
+		"released":      released,
 	}
 	output["runtimeDiagnostics"] = runtimeDiagnostics
+}
+
+func shellInputHasValidationResourceLifecycle(input map[string]any) bool {
+	return shellInputHasManagedValidation(input) ||
+		strings.TrimSpace(stringFromShellValue(input["validationScratchDir"])) != ""
 }
 
 func shellInputHasManagedValidation(input map[string]any) bool {
@@ -259,7 +277,9 @@ func shellManagedValidationResourceID(request runtimemodel.StepExecutionRequest,
 
 func managedValidationResourcesReleased(resources []map[string]any) bool {
 	for _, resource := range resources {
-		if stringFromShellValue(resource["status"]) != "released" {
+		switch stringFromShellValue(resource["status"]) {
+		case "released", "timeout", "failed":
+		default:
 			return false
 		}
 	}
@@ -300,7 +320,13 @@ func cleanupManagedValidationScratch(input map[string]any, deliverableDirectory 
 
 func managedValidationScratchAutoCleanupEnabled(input map[string]any) bool {
 	managed := mapFromShellInput(input, "managedValidation")
-	return boolFromShellValue(managed["autoCleanup"])
+	if _, ok := managed["autoCleanup"]; ok {
+		return boolFromShellValue(managed["autoCleanup"])
+	}
+	if _, ok := input["validationScratchAutoCleanup"]; ok {
+		return boolFromShellValue(input["validationScratchAutoCleanup"])
+	}
+	return strings.TrimSpace(stringFromShellValue(input["validationScratchDir"])) != ""
 }
 
 func attachShellCommandFailureDiagnostics(output map[string]any, execCommand string, err error) {

@@ -198,6 +198,13 @@ func (m *Manager) ReadWorkspaceSnapshot(workspaceID string) (readmodelcore.Works
 	return m.store.GetSnapshot(workspaceID)
 }
 
+func (m *Manager) ReadWorkspaceSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot, Status, error) {
+	if m == nil || m.store == nil {
+		return readmodelcore.WorkspaceSnapshot{}, Status{State: StateFailed}, common.ErrConflict
+	}
+	return m.store.GetSummarySnapshot(workspaceID)
+}
+
 func (m *Manager) ReadWorkspaceSnapshotWithContext(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, Status, error) {
 	snapshot, status, err := m.ReadWorkspaceSnapshot(workspaceID)
 	if err == nil || m == nil || m.store == nil || !m.store.NeedsSnapshot(workspaceID) {

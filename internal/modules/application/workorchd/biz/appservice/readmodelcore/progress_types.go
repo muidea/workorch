@@ -8,6 +8,8 @@ type TaskProgress struct {
 	CurrentStepID      string              `json:"currentStepId,omitempty"`
 	CurrentStepKind    string              `json:"currentStepKind,omitempty"`
 	CurrentStepState   string              `json:"currentStepState,omitempty"`
+	CurrentActionLabel string              `json:"currentActionLabel,omitempty"`
+	DiagnosticLineage  string              `json:"diagnosticLineage,omitempty"`
 	CurrentMilestone   string              `json:"currentMilestone,omitempty"`
 	BlockingTicketID   string              `json:"blockingTicketId,omitempty"`
 	BlockingApprovalID string              `json:"blockingApprovalId,omitempty"`
@@ -16,7 +18,21 @@ type TaskProgress struct {
 	Blockers           []ProgressBlocker   `json:"blockers,omitempty"`
 	Recovery           RecoveryPlan        `json:"recovery"`
 	RepairLoop         RepairLoop          `json:"repairLoop"`
+	AssessmentOutcome  AssessmentOutcome   `json:"assessmentOutcome,omitempty"`
 	EvidenceRefs       []string            `json:"evidenceRefs,omitempty"`
+}
+
+type AssessmentOutcome struct {
+	State                       string `json:"state,omitempty"`
+	AcceptedSlices              int    `json:"acceptedSlices,omitempty"`
+	AcceptedResultCount         int    `json:"acceptedResultCount,omitempty"`
+	RejectedGlobalAssessments   int    `json:"rejectedGlobalAssessments,omitempty"`
+	SatisfiedCoverageCount      int    `json:"satisfiedCoverageCount,omitempty"`
+	RemainingCoverageCount      int    `json:"remainingCoverageCount,omitempty"`
+	NewlySatisfiedCoverageCount int    `json:"newlySatisfiedCoverageCount,omitempty"`
+	LatestAcceptedResultID      string `json:"latestAcceptedResultId,omitempty"`
+	LatestRejectedResultID      string `json:"latestRejectedResultId,omitempty"`
+	LatestRejectedReason        string `json:"latestRejectedReason,omitempty"`
 }
 
 type ProgressMilestone struct {

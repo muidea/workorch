@@ -396,6 +396,68 @@ func TestRuntimeOrchestratorRecordsSliceResultBeforeFinalCompletionGate(t *testi
 	}
 }
 
+func TestRuntimeOrchestratorRejectsFinalResultWhenCoverageOpen(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-final-result-open-coverage")
+	runID := common.RunID("run-final-result-open-coverage")
+	stepID := common.StepID("run-final-result-open-coverage/step-1")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-final-result-open-coverage",
+		State:           common.RunStateValidating,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: map[string]any{
+			coverageWorkItemsKey: []any{map[string]any{
+				"id":                   "cwi-open",
+				"status":               "open",
+				"missingEvidenceKinds": []any{runtimemodel.EvidenceKindValidation},
+			}},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+	}
+	assessment := map[string]any{
+		"satisfied": true,
+		"items": []map[string]any{{
+			"item":         "generic requirement",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(stepID)},
+		}},
+		"summary": "current focus accepted",
+	}
+	resultRepo := memory.NewResultRepository()
+	artifactRepo := memory.NewArtifactRepository()
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{
+			Results:   resultRepo,
+			Artifacts: artifactRepo,
+		},
+	}
+
+	err := orch.resultManager().recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "current focus accepted", nil)
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("record final result err = %v, want conflict from open coverage", err)
+	}
+	results, listErr := resultRepo.ListByRun(ctx, runID)
+	if listErr != nil {
+		t.Fatalf("list results: %v", listErr)
+	}
+	if len(results) != 0 {
+		t.Fatalf("results = %+v, want no final accepted result", results)
+	}
+	artifacts, listErr := artifactRepo.ListByRun(ctx, runID)
+	if listErr != nil {
+		t.Fatalf("list artifacts: %v", listErr)
+	}
+	if len(artifacts) != 0 {
+		t.Fatalf("artifacts = %+v, want no final result artifacts", artifacts)
+	}
+}
+
 func TestRuntimeOrchestrator_ReusesValidatedDoDAssessmentForCompletionEvidence(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-dod-assessment-reuse")

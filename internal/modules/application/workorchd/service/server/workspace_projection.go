@@ -98,6 +98,13 @@ func (s *serverState) readProjectedWorkspaceSnapshot(workspaceID string) (appser
 	return s.workspaceProjection.ReadWorkspaceSnapshotWithContext(context.Background(), workspaceID)
 }
 
+func (s *serverState) readProjectedWorkspaceSummarySnapshot(workspaceID string) (appservice.WorkspaceSnapshot, workspaceProjectionStatus, error) {
+	if s == nil || s.workspaceProjection == nil {
+		return appservice.WorkspaceSnapshot{}, workspaceProjectionStatus{State: workspaceProjectionStateFailed}, common.ErrConflict
+	}
+	return s.workspaceProjection.ReadWorkspaceSummarySnapshot(workspaceID)
+}
+
 func (s *HTTPServer) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (appservice.WorkspaceSnapshot, error) {
 	if s == nil || s.state == nil {
 		return appservice.WorkspaceSnapshot{}, common.ErrInvalidArgument

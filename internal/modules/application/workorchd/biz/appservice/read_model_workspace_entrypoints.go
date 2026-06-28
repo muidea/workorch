@@ -24,6 +24,12 @@ func ReadWorkspaceProjectionSnapshotWithSession(ctx context.Context, session *Ru
 	})
 }
 
+func ReadWorkspaceSummarySnapshotWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret WorkspaceSnapshot, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (WorkspaceSnapshot, error) {
+		return readWorkspaceSummarySnapshot(ctx, deps, common.WorkspaceID(workspaceID), nil)
+	})
+}
+
 func ReadWorkspaceProjectionSnapshotWithRunSnapshotWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, runSnapshot RunSnapshot) (ret WorkspaceSnapshot, err error) {
 	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (WorkspaceSnapshot, error) {
 		return readWorkspaceProjectionSnapshot(ctx, deps, common.WorkspaceID(workspaceID), &runSnapshot)

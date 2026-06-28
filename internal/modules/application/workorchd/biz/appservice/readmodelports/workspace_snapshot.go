@@ -9,11 +9,27 @@ import (
 )
 
 func WorkspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
-	return workspaceSnapshot(ctx, readers, workspaceID, cachedRunSnapshot, workspaceSnapshotDetailLoadOptions())
+	return workspaceSnapshot(ctx, readers, workspaceID, cachedRunSnapshot, workspaceSnapshotObservabilityLoadOptions())
 }
 
 func WorkspaceProjectionSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
-	return workspaceSnapshot(ctx, readers, workspaceID, cachedRunSnapshot, workspaceSnapshotProjectionLoadOptions())
+	return WorkspaceDetailSnapshot(ctx, readers, workspaceID, cachedRunSnapshot)
+}
+
+func WorkspaceDetailSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
+	return workspaceSnapshot(ctx, readers, workspaceID, cachedRunSnapshot, workspaceSnapshotDetailLoadOptions())
+}
+
+func WorkspaceSummarySnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
+	snapshot, err := workspaceSnapshot(ctx, readers, workspaceID, cachedRunSnapshot, workspaceSnapshotSummaryLoadOptions())
+	if err != nil {
+		return readmodelcore.WorkspaceSnapshot{}, err
+	}
+	return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot), nil
+}
+
+func WorkspaceObservabilitySnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
+	return workspaceSnapshot(ctx, readers, workspaceID, cachedRunSnapshot, workspaceSnapshotObservabilityLoadOptions())
 }
 
 func workspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot, options workspaceSnapshotLoadOptions) (readmodelcore.WorkspaceSnapshot, error) {
@@ -26,6 +42,9 @@ func workspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, wo
 	projectionRun := models.selectProjectionRun()
 	ret := readmodelprojection.WorkspaceSnapshotFromModels(models.projectionInput(projectionRun))
 	if projectionRun == nil {
+		return ret, nil
+	}
+	if !options.includeProjectionRunSnapshot {
 		return ret, nil
 	}
 

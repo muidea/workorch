@@ -80,6 +80,8 @@ type RunStatusInfo struct {
 	CurrentStepID        common.StepID
 	CurrentStepKind      string
 	CurrentStepState     common.StepState
+	CurrentActionLabel   string
+	DiagnosticLineage    common.StepID
 	StepCount            int
 	DecisionCount        int
 	ApprovalCount        int

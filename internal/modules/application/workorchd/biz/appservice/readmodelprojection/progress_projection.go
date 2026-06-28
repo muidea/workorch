@@ -32,6 +32,7 @@ func MapTaskProgress(snapshot readmodelcore.RunSnapshot, labels RunTaskProgressL
 	ret.BlockingTicketID = ret.Recovery.BlockingTicketID
 	ret.BlockingApprovalID = ret.Recovery.BlockingApprovalID
 	ret.RepairLoop = MapTaskProgressRepairLoop(snapshot, ret.Recovery)
+	ret.AssessmentOutcome = TaskProgressAssessmentOutcome(snapshot)
 	ret.Summary = TaskProgressSummary(ret, &snapshot)
 	return ret
 }

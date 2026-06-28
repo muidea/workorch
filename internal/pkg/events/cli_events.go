@@ -26,17 +26,24 @@ type CLICommandPayload struct {
 
 // CLIResultPayload carries a command result from the runtime back to the CLI.
 type CLIResultPayload struct {
-	CorrelationID string             `json:"correlationId"`
-	CommandID     string             `json:"commandId"`
-	OK            bool               `json:"ok"`
-	Error         string             `json:"error,omitempty"`
-	Resource      map[string]any     `json:"resource,omitempty"`  // single result object
-	Resources     []map[string]any   `json:"resources,omitempty"` // list result
-	Snapshot      map[string]any     `json:"snapshot,omitempty"`
-	OccurredAt    time.Time          `json:"occurredAt"`
-	WorkspaceID   common.WorkspaceID `json:"workspaceId,omitempty"`
-	RunID         common.RunID       `json:"runId,omitempty"`
+	CorrelationID  string             `json:"correlationId"`
+	CommandID      string             `json:"commandId"`
+	OK             bool               `json:"ok"`
+	Error          string             `json:"error,omitempty"`
+	Resource       map[string]any     `json:"resource,omitempty"`  // single result object
+	Resources      []map[string]any   `json:"resources,omitempty"` // list result
+	TypedResource  any                `json:"-"`
+	TypedResources []any              `json:"-"`
+	Snapshot       map[string]any     `json:"snapshot,omitempty"`
+	OccurredAt     time.Time          `json:"occurredAt"`
+	WorkspaceID    common.WorkspaceID `json:"workspaceId,omitempty"`
+	RunID          common.RunID       `json:"runId,omitempty"`
 }
+
+const (
+	CLIResultTypedResourceKey  = "__workorchTypedResource"
+	CLIResultTypedResourcesKey = "__workorchTypedResources"
+)
 
 // ── Progress Payload ──
 
@@ -170,16 +177,18 @@ func DecodeCLICommandPayload(payload map[string]any) (CLICommandPayload, bool) {
 
 func CLIResultPayloadMap(payload CLIResultPayload) map[string]any {
 	return map[string]any{
-		"correlationId": payload.CorrelationID,
-		"commandId":     payload.CommandID,
-		"ok":            payload.OK,
-		"error":         payload.Error,
-		"resource":      clonePayloadMap(payload.Resource),
-		"resources":     clonePayloadMaps(payload.Resources),
-		"snapshot":      clonePayloadMap(payload.Snapshot),
-		"occurredAt":    payload.OccurredAt.Format(time.RFC3339Nano),
-		"workspaceId":   string(payload.WorkspaceID),
-		"runId":         string(payload.RunID),
+		"correlationId":            payload.CorrelationID,
+		"commandId":                payload.CommandID,
+		"ok":                       payload.OK,
+		"error":                    payload.Error,
+		"resource":                 clonePayloadMap(payload.Resource),
+		"resources":                clonePayloadMaps(payload.Resources),
+		CLIResultTypedResourceKey:  payload.TypedResource,
+		CLIResultTypedResourcesKey: clonePayloadSlice(payload.TypedResources),
+		"snapshot":                 clonePayloadMap(payload.Snapshot),
+		"occurredAt":               payload.OccurredAt.Format(time.RFC3339Nano),
+		"workspaceId":              string(payload.WorkspaceID),
+		"runId":                    string(payload.RunID),
 	}
 }
 
@@ -201,10 +210,16 @@ func DecodeCLIResultPayload(payload map[string]any) (CLIResultPayload, bool) {
 	if !ok {
 		return CLIResultPayload{}, false
 	}
+	typedResource := payload[CLIResultTypedResourceKey]
+	if typedResource == nil && resource != nil {
+		typedResource = resource[CLIResultTypedResourceKey]
+		delete(resource, CLIResultTypedResourceKey)
+	}
 	resources, ok := optionalMapSliceField(payload, "resources")
 	if !ok {
 		return CLIResultPayload{}, false
 	}
+	typedResources := optionalTypedResources(payload, resources)
 	snapshot, ok := optionalMapField(payload, "snapshot")
 	if !ok {
 		return CLIResultPayload{}, false
@@ -218,17 +233,49 @@ func DecodeCLIResultPayload(payload map[string]any) (CLIResultPayload, bool) {
 	workspaceID, _ := optionalStringField(payload, "workspaceId")
 	runID, _ := optionalStringField(payload, "runId")
 	return CLIResultPayload{
-		CorrelationID: correlationID,
-		CommandID:     commandID,
-		OK:            okValue,
-		Error:         errorText,
-		Resource:      resource,
-		Resources:     resources,
-		Snapshot:      snapshot,
-		OccurredAt:    occurredAt,
-		WorkspaceID:   common.WorkspaceID(workspaceID),
-		RunID:         common.RunID(runID),
+		CorrelationID:  correlationID,
+		CommandID:      commandID,
+		OK:             okValue,
+		Error:          errorText,
+		Resource:       resource,
+		Resources:      resources,
+		TypedResource:  typedResource,
+		TypedResources: typedResources,
+		Snapshot:       snapshot,
+		OccurredAt:     occurredAt,
+		WorkspaceID:    common.WorkspaceID(workspaceID),
+		RunID:          common.RunID(runID),
 	}, true
+}
+
+func optionalTypedResources(payload map[string]any, resources []map[string]any) []any {
+	if payload == nil {
+		return nil
+	}
+	if typed, ok := payload[CLIResultTypedResourcesKey].([]any); ok {
+		return clonePayloadSlice(typed)
+	}
+	var ret []any
+	for _, resource := range resources {
+		if resource == nil {
+			continue
+		}
+		typed := resource[CLIResultTypedResourceKey]
+		delete(resource, CLIResultTypedResourceKey)
+		if typed != nil {
+			ret = append(ret, typed)
+		}
+	}
+	return ret
+}
+
+func clonePayloadSlice(items []any) []any {
+	if items == nil {
+		return nil
+	}
+	ret := make([]any, len(items))
+	copy(ret, items)
+	return ret
 }
 
 func clonePayloadMaps(items []map[string]any) []map[string]any {

@@ -268,8 +268,11 @@ func TestContractViolationClassifiesStructuredCoverageGapsAsCoverageIncomplete(t
 		t.Fatalf("recoverability = %q, want recompute_authority", got)
 	}
 	contract := mapFromValue(recovery["correctionContract"])
-	if got := stringFromMap(contract, "requiredOutputShape"); got != "authority_recomputed_next_action" {
-		t.Fatalf("requiredOutputShape = %q, want authority_recomputed_next_action; contract=%+v", got, contract)
+	if got := stringFromMap(contract, "requiredOutputShape"); got != "traceable_coverage_assessment" {
+		t.Fatalf("requiredOutputShape = %q, want traceable_coverage_assessment; contract=%+v", got, contract)
+	}
+	if runtimeAuthority := mapFromValue(contract["runtimeRecomputedAuthority"]); stringFromMap(runtimeAuthority, "owner") != "runtime" {
+		t.Fatalf("runtimeRecomputedAuthority = %+v, want runtime-owned diagnostic", runtimeAuthority)
 	}
 	if !stringSliceContains(stringSliceFromValue(contract["forbiddenOutputs"]), "same_failed_global_dodAssessment") {
 		t.Fatalf("forbiddenOutputs = %+v, want same_failed_global_dodAssessment", contract["forbiddenOutputs"])
@@ -718,6 +721,13 @@ func TestContractViolationCoverageAssessmentPreservesCurrentRequiredOutputShape(
 				"error":                   "invalid argument: dodAssessment is not satisfied",
 				failureOutputKeyClass:     failureClassDoDCoverageMissing,
 				failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+				"runtimeDiagnostics": map[string]any{
+					"missingGoalCoverage": []map[string]any{{
+						"goalRequirementId": "goal-current",
+						"item":              "neutral current gap",
+						"state":             "open",
+					}},
+				},
 				"dodAssessment": map[string]any{
 					"satisfied": false,
 					"summary":   "not enough evidence",
@@ -728,12 +738,15 @@ func TestContractViolationCoverageAssessmentPreservesCurrentRequiredOutputShape(
 			tt.configure(failed.Input, required)
 			pkg["requiredOutput"] = required
 			failed.Input["repairActionPackage"] = pkg
+			failed.Input[convergenceAuthorityKey] = map[string]any{
+				"nextAction": map[string]any{"kind": "validate"},
+			}
 
 			attachContractViolationDiagnostics(run, failed, errors.New("invalid argument: dodAssessment is not satisfied"))
 
 			recovery := contractViolationFromFailedOutput(failed)
-			if got := stringFromMap(recovery, "violatedRule"); got != contractViolationRuleDoDAssessmentEvidenceMissing {
-				t.Fatalf("violatedRule = %q, want %s; recovery=%+v", got, contractViolationRuleDoDAssessmentEvidenceMissing, recovery)
+			if got := stringFromMap(recovery, "violatedRule"); got != contractViolationRuleCoverageAssessmentIncomplete {
+				t.Fatalf("violatedRule = %q, want %s; recovery=%+v", got, contractViolationRuleCoverageAssessmentIncomplete, recovery)
 			}
 			if got := stringFromMap(recovery, "correctionProfileId"); got != tt.wantProfile {
 				t.Fatalf("correctionProfileId = %q, want %s; recovery=%+v", got, tt.wantProfile, recovery)
@@ -741,6 +754,9 @@ func TestContractViolationCoverageAssessmentPreservesCurrentRequiredOutputShape(
 			contract := mapFromValue(recovery["correctionContract"])
 			if got := stringFromMap(contract, "requiredOutputShape"); got != tt.wantShape {
 				t.Fatalf("requiredOutputShape = %q, want %s; contract=%+v", got, tt.wantShape, contract)
+			}
+			if got := stringFromMap(mapFromValue(contract["runtimeRecomputedAuthority"]), "llmRequiredOutputShape"); got != tt.wantShape {
+				t.Fatalf("runtimeRecomputedAuthority = %+v, want llmRequiredOutputShape %s", contract["runtimeRecomputedAuthority"], tt.wantShape)
 			}
 			if !stringSliceContains(stringSliceFromValue(contract["forbiddenOutputs"]), tt.wantForbidden) {
 				t.Fatalf("forbiddenOutputs = %+v, want %s", contract["forbiddenOutputs"], tt.wantForbidden)
@@ -750,6 +766,50 @@ func TestContractViolationCoverageAssessmentPreservesCurrentRequiredOutputShape(
 				t.Fatalf("contract = %+v, want required marker %s", contract, tt.wantRequired)
 			}
 		})
+	}
+}
+
+func TestContractViolationEvidenceAcquisitionPreservesFailureEvidenceShape(t *testing.T) {
+	runID := common.RunID("run-contract-failure-evidence-shape")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-failure-evidence-shape", InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := contractViolationFailedStep(runID, "failed-failure-evidence-shape")
+	failed.Input[stepInputKeyRuntimeStage] = runtimeStageRepair
+	failed.Input["repairObjective"] = repairObjectiveAcquireFailureEvidence
+	pkg := mapFromValue(failed.Input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	required["mustProduceConcreteFailureEvidence"] = true
+	required["mustProduceConcreteValidationEvidence"] = false
+	required["acceptedKinds"] = []string{"file/read", "shell/command", "mcp/tool_call"}
+	required["forbiddenKinds"] = []string{"patch/apply", "llm/workspace_execution"}
+	required["deliverableWriteForbidden"] = true
+	pkg["requiredOutput"] = required
+	failed.Input["repairActionPackage"] = pkg
+	failed.Output = map[string]any{
+		"stage":                        "runtime_contract_failed",
+		"error":                        "concrete failure evidence acquisition must return bounded read-only evidence without patch/apply or deliverable writes",
+		outputKeyContractViolationType: contractViolationValidationEvidenceRequired,
+		failureOutputKeyClass:          failureClassRuntime,
+		failureOutputKeySignature:      "class=runtime_failed|stage=runtime_contract_failed|rule=validation_evidence_required",
+	}
+	attachContractViolationDiagnostics(run, failed, common.ErrInvalidArgument)
+
+	recovery := contractViolationFromFailedOutput(failed)
+	if got := stringFromMap(recovery, "correctionProfileId"); got != "concrete_failure_evidence" {
+		t.Fatalf("correctionProfileId = %q, want concrete_failure_evidence; recovery=%+v", got, recovery)
+	}
+	contract := mapFromValue(recovery["correctionContract"])
+	if got := stringFromMap(contract, "requiredOutputShape"); got != "bounded_failure_evidence" {
+		t.Fatalf("requiredOutputShape = %q, want bounded_failure_evidence; contract=%+v", got, contract)
+	}
+	if !boolValue(contract["deliverableWriteForbidden"]) {
+		t.Fatalf("contract = %+v, want deliverableWriteForbidden preserved", contract)
+	}
+	if !stringSliceContains(stringSliceFromValue(contract["forbiddenKinds"]), "patch/apply") ||
+		!stringSliceContains(stringSliceFromValue(contract["forbiddenKinds"]), "llm/workspace_execution") {
+		t.Fatalf("forbiddenKinds = %+v, want current failure-evidence forbidden kinds preserved", contract["forbiddenKinds"])
+	}
+	if !failedStepHasRecoverableContractViolation(failed) {
+		t.Fatalf("failed step should remain recoverable under same current action: %+v", recovery)
 	}
 }
 

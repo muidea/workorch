@@ -6,6 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func isFinalOutcomeResult(item readmodelcore.Result) bool {
@@ -32,12 +33,50 @@ func isTerminalOutcomeEligibleResult(item readmodelcore.Result, run readmodelcor
 	}
 	switch common.ResultState(item.State) {
 	case common.ResultStateAccepted:
-		return common.RunState(run.State) == common.RunStateCompleted
+		return common.RunState(run.State) == common.RunStateCompleted && !runHasActiveCoverageWorkItems(run.ExecutionContext)
 	case common.ResultStateRejected:
 		return IsTerminalRunState(run.State) && common.RunState(run.State) != common.RunStateSuperseded
 	default:
 		return false
 	}
+}
+
+func isTerminalOutcomeEligibleResultForSnapshot(item readmodelcore.Result, snapshot readmodelcore.RunSnapshot) bool {
+	if !isFinalOutcomeResult(item) {
+		return false
+	}
+	switch common.ResultState(item.State) {
+	case common.ResultStateAccepted:
+		return common.RunState(snapshot.Run.State) == common.RunStateCompleted && !snapshotHasActiveCoverageWorkItems(snapshot)
+	case common.ResultStateRejected:
+		return IsTerminalRunState(snapshot.Run.State) && common.RunState(snapshot.Run.State) != common.RunStateSuperseded
+	default:
+		return false
+	}
+}
+
+func snapshotHasActiveCoverageWorkItems(snapshot readmodelcore.RunSnapshot) bool {
+	if coverageWorkItemsHaveActive(snapshot.CoverageWorkItems) {
+		return true
+	}
+	return runHasActiveCoverageWorkItems(snapshot.Run.ExecutionContext)
+}
+
+func runHasActiveCoverageWorkItems(context map[string]any) bool {
+	if len(context) == 0 {
+		return false
+	}
+	return coverageWorkItemsHaveActive(MapSliceValue(context["coverageWorkItems"]))
+}
+
+func coverageWorkItemsHaveActive(items []map[string]any) bool {
+	for _, item := range items {
+		status := strings.ToLower(strings.TrimSpace(stringValue(item, "status")))
+		if runtimecontract.CoverageWorkItemStatusActive(status) {
+			return true
+		}
+	}
+	return false
 }
 
 func stringFromAny(value any) string {

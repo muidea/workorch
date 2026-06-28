@@ -13,17 +13,20 @@ func resultProgressStateFromOutputs(snapshot readmodelcore.RunSnapshot, results 
 		return "pending"
 	}
 	for _, item := range results {
-		if item.State == string(common.ResultStateAccepted) && isTerminalOutcomeEligibleResult(item, snapshot.Run) {
+		if item.State == string(common.ResultStateAccepted) && isTerminalOutcomeEligibleResultForSnapshot(item, snapshot) {
 			return "completed"
 		}
 	}
 	if IsTerminalRunState(snapshot.Run.State) {
 		for _, item := range results {
-			if item.State == string(common.ResultStateRejected) && isTerminalOutcomeEligibleResult(item, snapshot.Run) {
+			if item.State == string(common.ResultStateRejected) && isTerminalOutcomeEligibleResultForSnapshot(item, snapshot) {
 				return "failed"
 			}
 		}
 		if snapshot.Run.State == string(common.RunStateCompleted) {
+			if snapshotHasActiveCoverageWorkItems(snapshot) {
+				return "failed"
+			}
 			return "completed"
 		}
 		return "failed"

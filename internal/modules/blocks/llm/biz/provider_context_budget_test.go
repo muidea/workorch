@@ -789,6 +789,10 @@ func TestEnforceProviderRequestBudgetPreservesAssessmentOnlyRuntimeContract(t *t
 		!stringSliceContains(got.ContextBudget.ProtectedFields, "input.runtimeStage") {
 		t.Fatalf("protectedFields = %+v, want runtime contract controls recorded", got.ContextBudget.ProtectedFields)
 	}
+	if stringSliceContains(got.ContextBudget.IntegrityWarnings, "protected_runtime_contract_changed_after_context_budget") ||
+		got.ContextBudget.ContextGateReason == "protected_runtime_contract_changed_after_context_budget" {
+		t.Fatalf("contextBudget = %+v, want protected runtime contract preserved without drift warning", got.ContextBudget)
+	}
 }
 
 func TestEnforceProviderRequestBudgetCompactsWhenTokenBudgetExceeded(t *testing.T) {

@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -81,6 +83,64 @@ func TestInitialStepInputAttachesMinimalStagePacket(t *testing.T) {
 		snapshots[1]["safeForExactFileWrite"] != false ||
 		snapshots[1]["safeForFileWrite"] != false {
 		t.Fatalf("stagePacket truncated snapshot = %+v, want unsafe truncated metadata", snapshots[1])
+	}
+}
+
+func TestStagePacketUsesOnlyAuthorityCurrentFocusWhenStaleFocusExists(t *testing.T) {
+	run := &runModel.Run{
+		ID:                 common.RunID("run-stage-packet-authority"),
+		WorkspaceID:        common.WorkspaceID("ws-stage-packet-authority"),
+		GoalID:             common.GoalID("goal-stage-packet-authority"),
+		DoDID:              common.DoDID("dod-stage-packet-authority"),
+		DefinitionRevision: "rev-stage-packet-authority",
+		State:              common.RunStateRunning,
+	}
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus": map[string]any{
+				"id":                   "cwi-current",
+				"targetText":           "current neutral target",
+				"missingEvidenceKinds": []string{"validation"},
+			},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":         "cwi-stale",
+				"targetText": "stale target must not become active",
+			},
+			"currentFocusItems": []map[string]any{{
+				"id":         "cwi-stale-list",
+				"targetText": "stale list target must not become active",
+			}},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"coverageFocusId":     "focus-cwi-stale",
+				"coverageWorkItemIds": []string{"cwi-stale"},
+			},
+		},
+	}
+
+	packet := buildStagePacketFromStepInput(run, "step-stage-packet-authority", input).ToMap()
+
+	focus := mapFromValue(packet["activeFocus"])
+	if focus["id"] != "cwi-current" || focus["targetText"] != "current neutral target" {
+		t.Fatalf("stagePacket.activeFocus = %+v, want authority current focus", focus)
+	}
+	required := mapFromValue(packet["requiredOutput"])
+	if required["coverageFocusId"] != "focus-cwi-current" {
+		t.Fatalf("stagePacket.requiredOutput = %+v, want rebound authority focus", required)
+	}
+	if ids := stringSliceFromValue(required["coverageWorkItemIds"]); len(ids) != 1 || ids[0] != "cwi-current" {
+		t.Fatalf("stagePacket.requiredOutput.coverageWorkItemIds = %+v, want [cwi-current]", ids)
+	}
+	encoded, err := json.Marshal(packet)
+	if err != nil {
+		t.Fatalf("marshal stage packet: %v", err)
+	}
+	if strings.Contains(string(encoded), "cwi-stale") {
+		t.Fatalf("stagePacket leaked stale focus: %s", encoded)
 	}
 }
 

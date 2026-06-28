@@ -941,13 +941,17 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 		contractViolationRuleValidationDetachedProcessForbidden,
 		contractViolationRuleValidationShellSafetyUnproven,
 		contractViolationRuleManagedValidationRequired:
-		profileID = "concrete_validation_evidence"
-		contract["requiredOutputShape"] = "bounded_validation_evidence"
-		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_declared_validationEvidence", "executionGraph_with_managed_validation_session", "satisfied_dodAssessment_with_concrete_evidenceRefs")
-		contract["requiredFields"] = []string{"validationEvidence.mode", "validationEvidence.observationType", "validationEvidence.targetRefs", "validationEvidence.observedClaims"}
-		contract["forbiddenOutputs"] = append([]string{"static_inspection_only", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}, contractViolationForbiddenContinuableBlockers()...)
-		if scratch := validationScratchDirFromStep(step); scratch != "" {
-			contract[validationScratchDirKey] = scratch
+		if profile, ok := contractViolationRequiredOutputCorrectionProfile(step, contract); ok {
+			profileID = profile
+		} else {
+			profileID = "concrete_validation_evidence"
+			contract["requiredOutputShape"] = "bounded_validation_evidence"
+			contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_declared_validationEvidence", "executionGraph_with_managed_validation_session", "satisfied_dodAssessment_with_concrete_evidenceRefs")
+			contract["requiredFields"] = []string{"validationEvidence.mode", "validationEvidence.observationType", "validationEvidence.targetRefs", "validationEvidence.observedClaims"}
+			contract["forbiddenOutputs"] = append([]string{"static_inspection_only", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}, contractViolationForbiddenContinuableBlockers()...)
+			if scratch := validationScratchDirFromStep(step); scratch != "" {
+				contract[validationScratchDirKey] = scratch
+			}
 		}
 		if contractViolationRuleRequiresManagedValidationNarrow(rule) && mode == contractViolationCorrectionModeForcedNarrow {
 			profileID = "managed_validation_evidence"
@@ -979,10 +983,34 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 		}
 	case contractViolationRuleCoverageAssessmentIncomplete:
 		profileID = "coverage_next_action_recompute"
-		contract["requiredOutputShape"] = "authority_recomputed_next_action"
-		contract["allowedOutputs"] = []string{"recomputed_convergence_authority_next_action", "bounded_focus_assessment_if_current_action_is_assessment"}
-		contract["requiredFields"] = []string{"missingGoalCoverage_or_missingDeliverableCoverage", "convergenceAuthority.nextAction"}
-		contract["forbiddenOutputs"] = []string{"same_failed_global_dodAssessment", "satisfied_global_assessment_with_open_coverage", "untraceable_summary_only"}
+		contract["runtimeRecomputedAuthority"] = map[string]any{
+			"owner":    "runtime",
+			"required": true,
+			"source":   "coverage_ledger",
+		}
+		if convergenceNextActionKind(nil, step.Input) != "" {
+			if profile, ok := contractViolationRequiredOutputCorrectionProfile(step, contract); ok {
+				profileID = profile
+				contract["runtimeRecomputedAuthority"] = map[string]any{
+					"owner":                  "runtime",
+					"required":               true,
+					"source":                 "coverage_ledger",
+					"llmRequiredOutputShape": contract["requiredOutputShape"],
+				}
+			}
+		}
+		if stringFromMap(contract, "requiredOutputShape") == "" {
+			contract["requiredOutputShape"] = "traceable_coverage_assessment"
+			contract["llmRequiredOutputShape"] = "traceable_coverage_assessment"
+			contract["allowedOutputs"] = []string{"bounded_focus_assessment_if_current_action_is_assessment"}
+			contract["requiredFields"] = []string{"missingGoalCoverage_or_missingDeliverableCoverage", "evidenceRefs"}
+		}
+		contract["forbiddenOutputs"] = compactUniqueStrings(append(
+			stringSliceFromValue(contract["forbiddenOutputs"]),
+			"same_failed_global_dodAssessment",
+			"satisfied_global_assessment_with_open_coverage",
+			"untraceable_summary_only",
+		))
 	case contractViolationRuleCoverageMapIncomplete, contractViolationRuleDoDAssessmentEvidenceMissing:
 		if profile, ok := contractViolationRequiredOutputCorrectionProfile(step, contract); ok {
 			profileID = profile
@@ -1052,13 +1080,6 @@ func contractViolationRequiredOutputCorrectionProfile(step *runModel.Step, contr
 	if len(required) == 0 {
 		return "", false
 	}
-	if boolValue(step.Input["stateChangingOutputRequired"]) || boolValue(required["mustIncludeStateChangingNode"]) {
-		contract["requiredOutputShape"] = "state_changing_output"
-		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_state_changing_node", "patch/apply", "accepted_state_changing_tool_or_shell", "incremental_artifact_state_change")
-		contract["forbiddenOutputs"] = append([]string{"failed_dodAssessment_only", "read_only_executionGraph", "same_actualOutputSummary"}, contractViolationForbiddenContinuableBlockers()...)
-		contract["mustSatisfy"] = []string{"stateChangingOutputRequired", "repairActionPackage.requiredOutput"}
-		return "state_changing_required_output", true
-	}
 	if boolValue(required["mustProduceConcreteValidationEvidence"]) {
 		contract["requiredOutputShape"] = "bounded_validation_evidence"
 		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_declared_validationEvidence", "executionGraph_with_managed_validation_session", "satisfied_dodAssessment_with_concrete_evidenceRefs")
@@ -1087,6 +1108,13 @@ func contractViolationRequiredOutputCorrectionProfile(step *runModel.Step, contr
 			contract[validationScratchDirKey] = scratch
 		}
 		return "concrete_failure_evidence", true
+	}
+	if boolValue(step.Input["stateChangingOutputRequired"]) || boolValue(required["mustIncludeStateChangingNode"]) {
+		contract["requiredOutputShape"] = "state_changing_output"
+		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_state_changing_node", "patch/apply", "accepted_state_changing_tool_or_shell", "incremental_artifact_state_change")
+		contract["forbiddenOutputs"] = append([]string{"failed_dodAssessment_only", "read_only_executionGraph", "same_actualOutputSummary"}, contractViolationForbiddenContinuableBlockers()...)
+		contract["mustSatisfy"] = []string{"stateChangingOutputRequired", "repairActionPackage.requiredOutput"}
+		return "state_changing_required_output", true
 	}
 	return "", false
 }

@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -154,6 +155,106 @@ func TestCoverageSummaryFromRunSnapshotDerivesStatusCounts(t *testing.T) {
 	}
 	if _, ok := got["coverageWorkItems"]; ok {
 		t.Fatalf("CoverageSummary = %+v, must not include full ledger", got)
+	}
+}
+
+func TestRunOutcomeIgnoresAcceptedResultWhenCompletedRunHasOpenCoverage(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := "ws-run-outcome-open-coverage"
+	runID := "run-outcome-open-coverage"
+	snapshot := readmodelcore.RunSnapshot{
+		Workspace: readmodelcore.Workspace{ID: workspaceID},
+		Run: readmodelcore.Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       string(common.RunStateCompleted),
+		},
+		Results: []readmodelcore.Result{{
+			ID:           runID + "/result/dod-assessment",
+			WorkspaceID:  workspaceID,
+			RunID:        runID,
+			State:        string(common.ResultStateAccepted),
+			SourceType:   resultcommon.SourceTypeDoDAssessment,
+			Summary:      "accepted current focus only",
+			EvidenceRefs: []string{runID + "/step-1"},
+		}},
+		CoverageWorkItems: []map[string]any{{
+			"id":     "cwi-open",
+			"status": "open",
+		}},
+	}
+
+	if HasAcceptedRunResult(snapshot) {
+		t.Fatalf("HasAcceptedRunResult = true, want false while coverage is open")
+	}
+	if got := ResultProgressState(snapshot); got == "completed" {
+		t.Fatalf("ResultProgressState = %q, want non-completed while coverage is open", got)
+	}
+	outcome := MapRunOutcome(snapshot)
+	if outcome.Accepted || outcome.State == "accepted" || outcome.ResultID != "" {
+		t.Fatalf("MapRunOutcome = %+v, want accepted result ineligible while coverage is open", outcome)
+	}
+	if outcome.State != "failed" || outcome.Reason != "run completed without accepted result" {
+		t.Fatalf("MapRunOutcome = %+v, want completed drift fallback failure", outcome)
+	}
+	diagnostics := AuthorityDiagnosticsFromRunSnapshot(snapshot)
+	if len(diagnostics) != 1 || diagnostics[0].Code != "completion_gate_failed_but_run_completed" {
+		t.Fatalf("AuthorityDiagnostics = %+v, want completion gate drift diagnostic", diagnostics)
+	}
+}
+
+func TestTaskProgressAssessmentOutcomeShowsPartialProgressAndRejectedGlobalAssessment(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := "ws-partial-assessment-outcome"
+	runID := "run-partial-assessment-outcome"
+	progress := MapLocalizedTaskProgress(readmodelcore.RunSnapshot{
+		Workspace: readmodelcore.Workspace{ID: workspaceID},
+		Run: readmodelcore.Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       string(common.RunStateRunning),
+		},
+		Results: []readmodelcore.Result{{
+			ID:          runID + "/result/acceptance-slice/slice-001",
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			State:       string(common.ResultStateAccepted),
+			SourceType:  resultcommon.SourceTypeAcceptanceSlice,
+			Summary:     "current focus accepted",
+			SummaryDetail: &readmodelcore.ResultSummary{
+				Diagnostics: map[string]any{
+					"resultScope":              resultcommon.SourceTypeAcceptanceSlice,
+					"finalCompletionGateState": "not_final_result",
+				},
+			},
+		}, {
+			ID:          runID + "/result/dod-assessment",
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			State:       string(common.ResultStateRejected),
+			SourceType:  resultcommon.SourceTypeDoDAssessment,
+			Summary:     "dod_coverage_missing",
+			DoDAssessment: &readmodelcore.DoDAssessment{
+				Satisfied: false,
+			},
+		}},
+		CoverageWorkItems: []map[string]any{
+			{"id": "cwi-satisfied", "status": "satisfied"},
+			{"id": "cwi-open", "status": "open"},
+			{"id": "cwi-evidence-ready", "status": "evidence_ready"},
+		},
+	})
+
+	if progress.AssessmentOutcome.State != "partial_progress_accepted_global_assessment_rejected" {
+		t.Fatalf("AssessmentOutcome = %+v, want partial progress plus rejected global assessment", progress.AssessmentOutcome)
+	}
+	if progress.AssessmentOutcome.AcceptedSlices != 1 ||
+		progress.AssessmentOutcome.RejectedGlobalAssessments != 1 ||
+		progress.AssessmentOutcome.SatisfiedCoverageCount != 1 ||
+		progress.AssessmentOutcome.RemainingCoverageCount != 2 {
+		t.Fatalf("AssessmentOutcome = %+v, want accepted/rejected/coverage counts", progress.AssessmentOutcome)
 	}
 }
 
@@ -413,6 +514,47 @@ func TestRunSnapshotFromModelsProjectsAuthorityFocusDriftDiagnostics(t *testing.
 			diagnostic.Candidate == "" || diagnostic.CurrentAuthority != "cwi-current" {
 			t.Fatalf("AuthorityDiagnostics item = %+v, want stale persisted derived field source/candidate/authority", diagnostic)
 		}
+	}
+}
+
+func TestTaskProgressSeparatesCurrentActionLabelFromDiagnosticLineage(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-current-action-label")
+	runID := common.RunID("run-current-action-label")
+	got := RunSnapshotFromModels(RunSnapshotModelInput{
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "current action label", State: common.WorkspaceStateRunning},
+		Run: &runmodel.Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       common.RunStateRunning,
+			ExecutionContext: map[string]any{
+				"convergenceAuthority": map[string]any{
+					"currentFocus": map[string]any{"id": "cwi-009"},
+					"nextAction":   map[string]any{"kind": "produce_validation_evidence"},
+				},
+				"gapBaseline": map[string]any{
+					"currentFocus": map[string]any{"id": "cwi-009"},
+					"nextAction":   map[string]any{"kind": "produce_validation_evidence"},
+				},
+			},
+		},
+		Steps: []*runmodel.Step{{
+			ID:    common.StepID(string(runID) + "/verify-focus-cwi-006/retry"),
+			RunID: runID,
+			Kind:  "llm/workspace_execution",
+			State: common.StepStateDispatched,
+		}},
+	})
+
+	if got.TaskProgress.CurrentStepID != string(runID)+"/verify-focus-cwi-006/retry" {
+		t.Fatalf("CurrentStepID = %q, want raw diagnostic lineage", got.TaskProgress.CurrentStepID)
+	}
+	if got.TaskProgress.DiagnosticLineage != got.TaskProgress.CurrentStepID {
+		t.Fatalf("DiagnosticLineage = %q, want raw current step id", got.TaskProgress.DiagnosticLineage)
+	}
+	if got.TaskProgress.CurrentActionLabel != "produce_validation_evidence cwi-009" {
+		t.Fatalf("CurrentActionLabel = %q, want current authority focus label", got.TaskProgress.CurrentActionLabel)
 	}
 }
 

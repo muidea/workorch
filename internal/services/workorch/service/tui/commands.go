@@ -134,13 +134,9 @@ func FetchDecisions(be backend.Backend, workspaceID string) tea.Cmd {
 		defer cancel()
 		wsID := common.WorkspaceID(workspaceID)
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
-		snapshot, err := be.Workspace().Snapshot(ctx, wsID)
+		items, err := be.Decision().List(ctx, wsID)
 		if err != nil {
 			return DecisionListMsg{WorkspaceID: workspaceID, Error: err}
-		}
-		var items []backend.DecisionInfo
-		if snapshot != nil {
-			items = filterSnapshotDecisionsForRun(snapshot, selectSnapshotDisplayRun(snapshot))
 		}
 		return DecisionListMsg{WorkspaceID: workspaceID, Decisions: items, Error: err}
 	}
@@ -199,6 +195,8 @@ func runStatusFromWorkspaceSnapshot(snapshot *backend.WorkspaceSnapshotInfo, run
 			status.State = common.RunState(snapshot.TaskProgress.State)
 		}
 		status.CurrentStepID = snapshot.TaskProgress.Recovery.StepID
+		status.CurrentActionLabel = snapshot.TaskProgress.CurrentActionLabel
+		status.DiagnosticLineage = snapshot.TaskProgress.DiagnosticLineage
 		if status.BlockingTicketID == "" {
 			status.BlockingTicketID = snapshot.TaskProgress.Recovery.BlockingTicketID
 		}
@@ -285,11 +283,10 @@ func FetchDecision(be backend.Backend, workspaceID string, ticketID string) tea.
 		defer cancel()
 		wsID := common.WorkspaceID(workspaceID)
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
-		snapshot, err := be.Workspace().Snapshot(ctx, wsID)
+		item, err := be.Decision().Get(ctx, wsID, common.TicketID(ticketID))
 		if err != nil {
 			return DecisionDetailMsg{WorkspaceID: workspaceID, Error: err}
 		}
-		item := findSnapshotDecision(snapshot, common.TicketID(ticketID))
 		if item == nil {
 			err = common.ErrNotFound
 		}
@@ -303,13 +300,9 @@ func FetchApprovals(be backend.Backend, workspaceID string) tea.Cmd {
 		defer cancel()
 		wsID := common.WorkspaceID(workspaceID)
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
-		snapshot, err := be.Workspace().Snapshot(ctx, wsID)
+		items, err := be.Approval().List(ctx, wsID)
 		if err != nil {
 			return ApprovalListMsg{WorkspaceID: workspaceID, Error: err}
-		}
-		var items []backend.ApprovalInfo
-		if snapshot != nil {
-			items = filterSnapshotApprovalsForRun(snapshot, selectSnapshotDisplayRun(snapshot))
 		}
 		return ApprovalListMsg{WorkspaceID: workspaceID, Approvals: items, Error: err}
 	}
@@ -321,40 +314,15 @@ func FetchApproval(be backend.Backend, workspaceID string, approvalID string) te
 		defer cancel()
 		wsID := common.WorkspaceID(workspaceID)
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
-		snapshot, err := be.Workspace().Snapshot(ctx, wsID)
+		item, err := be.Approval().Get(ctx, wsID, common.ApprovalID(approvalID))
 		if err != nil {
 			return ApprovalDetailMsg{WorkspaceID: workspaceID, Error: err}
 		}
-		item := findSnapshotApproval(snapshot, common.ApprovalID(approvalID))
 		if item == nil {
 			err = common.ErrNotFound
 		}
 		return ApprovalDetailMsg{WorkspaceID: workspaceID, Approval: item, Error: err}
 	}
-}
-
-func findSnapshotDecision(snapshot *backend.WorkspaceSnapshotInfo, ticketID common.TicketID) *backend.DecisionInfo {
-	if snapshot == nil || ticketID == "" {
-		return nil
-	}
-	for idx := range snapshot.Decisions {
-		if snapshot.Decisions[idx].ID == ticketID {
-			return &snapshot.Decisions[idx]
-		}
-	}
-	return nil
-}
-
-func findSnapshotApproval(snapshot *backend.WorkspaceSnapshotInfo, approvalID common.ApprovalID) *backend.ApprovalInfo {
-	if snapshot == nil || approvalID == "" {
-		return nil
-	}
-	for idx := range snapshot.Approvals {
-		if snapshot.Approvals[idx].ID == approvalID {
-			return &snapshot.Approvals[idx]
-		}
-	}
-	return nil
 }
 
 func FetchBlockers(be backend.Backend, workspaceID string) tea.Cmd {

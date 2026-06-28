@@ -14,10 +14,43 @@ func applyTaskProgressCurrentStep(ret *readmodelcore.TaskProgress, snapshot read
 		ret.CurrentStepState = snapshot.Step.State
 		ret.Recovery.StepID = snapshot.Step.ID
 	}
+	ret.CurrentActionLabel = currentActionLabelFromRunSnapshot(snapshot)
+	ret.DiagnosticLineage = ret.CurrentStepID
 	if result := TerminalTaskProgressResult(snapshot); result != nil {
 		ret.CurrentStepID = firstNonEmptyTimelineString(result.SourceRef, result.ID)
 		ret.CurrentStepKind = "result/" + strings.TrimSpace(firstNonEmptyTimelineString(result.SourceType, "terminal"))
 		ret.CurrentStepState = result.State
 		ret.Recovery.StepID = ret.CurrentStepID
+		ret.DiagnosticLineage = ret.CurrentStepID
+	}
+}
+
+func currentActionLabelFromRunSnapshot(snapshot readmodelcore.RunSnapshot) string {
+	action := ""
+	if snapshot.GapBaseline != nil {
+		action = strings.TrimSpace(snapshot.GapBaseline.NextAction.Kind)
+	}
+	if action == "" {
+		action = strings.TrimSpace(stringValue(MapValue(MapValue(snapshot.Run.ExecutionContext["convergenceAuthority"])["nextAction"]), "kind"))
+	}
+	focus := ""
+	if snapshot.Acceptance.CurrentFocus != nil {
+		focus = strings.TrimSpace(snapshot.Acceptance.CurrentFocus.ID)
+	}
+	if focus == "" && snapshot.GapBaseline != nil {
+		focus = strings.TrimSpace(stringValue(snapshot.GapBaseline.CurrentFocus, "id"))
+	}
+	if focus == "" {
+		focus = strings.TrimSpace(stringValue(MapValue(snapshot.Run.ExecutionContext["coverageFocus"]), "id"))
+	}
+	switch {
+	case action != "" && focus != "":
+		return action + " " + focus
+	case action != "":
+		return action
+	case focus != "":
+		return "focus " + focus
+	default:
+		return ""
 	}
 }

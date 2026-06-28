@@ -192,6 +192,24 @@ func TestEventHubSnapshotResourceMapCompactsRunExecutionContext(t *testing.T) {
 	}
 }
 
+func TestDecodeResultResourceUsesTypedPayloadBeforeJSONFallback(t *testing.T) {
+	want := WorkspaceSnapshotInfo{
+		Workspace: WorkspaceInfo{ID: "ws-typed", State: common.WorkspaceStateRunning},
+	}
+	got, err := decodeResultResource[WorkspaceSnapshotInfo](events.CLIResultPayload{
+		TypedResource: &want,
+		Resource: map[string]any{
+			"cannotJSONMarshal": make(chan struct{}),
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("decode typed resource: %v", err)
+	}
+	if got == nil || got.Workspace.ID != "ws-typed" {
+		t.Fatalf("typed resource = %+v, want workspace ws-typed", got)
+	}
+}
+
 func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 	ctx := context.Background()
 	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)

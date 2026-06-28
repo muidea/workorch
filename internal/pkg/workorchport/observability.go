@@ -230,12 +230,28 @@ type RepairLoopInfo struct {
 }
 
 type TaskProgressInfo struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	State       string
-	Summary     string
-	Recovery    RecoveryPlanInfo
-	RepairLoop  RepairLoopInfo
+	WorkspaceID        common.WorkspaceID
+	RunID              common.RunID
+	State              string
+	Summary            string
+	CurrentActionLabel string
+	DiagnosticLineage  common.StepID
+	Recovery           RecoveryPlanInfo
+	RepairLoop         RepairLoopInfo
+	AssessmentOutcome  AssessmentOutcomeInfo
+}
+
+type AssessmentOutcomeInfo struct {
+	State                       string
+	AcceptedSlices              int
+	AcceptedResultCount         int
+	RejectedGlobalAssessments   int
+	SatisfiedCoverageCount      int
+	RemainingCoverageCount      int
+	NewlySatisfiedCoverageCount int
+	LatestAcceptedResultID      common.ResultID
+	LatestRejectedResultID      common.ResultID
+	LatestRejectedReason        string
 }
 
 type RunObservabilityInfo struct {

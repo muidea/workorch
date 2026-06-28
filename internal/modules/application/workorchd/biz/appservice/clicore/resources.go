@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/events"
+	port "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 func ResourceMap(v any) map[string]any {
@@ -70,7 +72,7 @@ func workspaceSnapshotResourceMap(snapshot readmodelcore.WorkspaceSnapshot) map[
 			"payloadRef":     record.PayloadRef,
 		})
 	}
-	return map[string]any{
+	resource := map[string]any{
 		"workspace":             snapshot.Workspace,
 		"viewModel":             snapshot.ViewModel,
 		"outcome":               snapshot.Outcome,
@@ -93,6 +95,22 @@ func workspaceSnapshotResourceMap(snapshot readmodelcore.WorkspaceSnapshot) map[
 		"decisions":             snapshot.Decisions,
 		"approvals":             snapshot.Approvals,
 	}
+	if typed := typedWorkspaceSnapshotInfo(snapshot); typed != nil {
+		resource[events.CLIResultTypedResourceKey] = typed
+	}
+	return resource
+}
+
+func typedWorkspaceSnapshotInfo(snapshot readmodelcore.WorkspaceSnapshot) *port.WorkspaceSnapshotInfo {
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil
+	}
+	var out port.WorkspaceSnapshotInfo
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil
+	}
+	return &out
 }
 
 func ResourceMapAlias(v any) map[string]any {

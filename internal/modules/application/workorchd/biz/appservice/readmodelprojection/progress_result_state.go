@@ -36,7 +36,7 @@ func ResultProgressState(snapshot readmodelcore.RunSnapshot) string {
 
 func HasAcceptedRunResult(snapshot readmodelcore.RunSnapshot) bool {
 	for _, item := range RunScopedResults(snapshot) {
-		if item.State == string(common.ResultStateAccepted) && isTerminalOutcomeEligibleResult(item, snapshot.Run) {
+		if item.State == string(common.ResultStateAccepted) && isTerminalOutcomeEligibleResultForSnapshot(item, snapshot) {
 			return true
 		}
 	}

@@ -256,6 +256,62 @@ func TestRuntimeAdapter_ExecuteRuntimeStepCarriesManagedValidationMetadata(t *te
 	}
 }
 
+func TestRuntimeAdapter_ExecuteRuntimeStepReleasesOrdinaryValidationScratch(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+	scratchDirectory := filepath.Join(os.TempDir(), "workorch-shell-validation-scratch-test", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
+	t.Cleanup(func() {
+		_ = os.RemoveAll(scratchDirectory)
+	})
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceID:                   "ws-validation-scratch",
+		RunID:                         "run-validation-scratch",
+		StepID:                        "run-validation-scratch/verify",
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command":              "sh",
+			"args":                 []any{"-c", "mkdir -p \"$1\"; printf ordinary-ok > \"$1/out.txt\"; printf ordinary-ok", "sh", scratchDirectory},
+			"validationScratchDir": scratchDirectory,
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v", err)
+	}
+	if _, ok := result.Output["managedValidation"].(map[string]any); ok {
+		t.Fatalf("managedValidation = %+v, want ordinary validation lifecycle without managed metadata", result.Output["managedValidation"])
+	}
+	resources, ok := result.Output["validationResources"].([]map[string]any)
+	if !ok || len(resources) != 2 {
+		t.Fatalf("validationResources = %#v, want process and scratch resource records", result.Output["validationResources"])
+	}
+	statuses := map[string]string{}
+	for _, resource := range resources {
+		statuses[stringFromShellValue(resource["kind"])] = stringFromShellValue(resource["status"])
+		if resource["workspaceId"] != "ws-validation-scratch" ||
+			resource["runId"] != "run-validation-scratch" ||
+			resource["stepId"] != "run-validation-scratch/verify" {
+			t.Fatalf("resource = %+v, want scoped workspace/run/step ids", resource)
+		}
+	}
+	if statuses["process"] != "released" || statuses["scratch_dir"] != "released" {
+		t.Fatalf("resource statuses = %+v, want released process and scratch_dir", statuses)
+	}
+	runtimeDiagnostics, _ := result.Output["runtimeDiagnostics"].(map[string]any)
+	lifecycle, _ := runtimeDiagnostics["validationResourceLifecycle"].(map[string]any)
+	if lifecycle["released"] != true {
+		t.Fatalf("runtimeDiagnostics = %+v, want released ordinary validation lifecycle", runtimeDiagnostics)
+	}
+	if _, statErr := os.Stat(scratchDirectory); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("scratchDirectory stat = %v, want removed by ordinary validation scratch cleanup", statErr)
+	}
+}
+
 func TestRuntimeAdapter_ExecuteRuntimeStepClassifiesUnavailableCommand(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
@@ -318,6 +374,55 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReturnsPolicyDiagnostic(t *testing.T) 
 		diagnostic["commandPolicyViolation"] != true ||
 		diagnostic["recommendedEvidenceTargetType"] != runtimemodel.ValidationEvidenceTargetCommandContract {
 		t.Fatalf("validationFailureDiagnostic = %+v, want command invalid policy diagnostic", diagnostic)
+	}
+}
+
+func TestRuntimeAdapter_ExecuteRuntimeStepReleasesManagedValidationScratchOnPolicyReject(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+	scratchDirectory := filepath.Join(os.TempDir(), "workorch-shell-managed-validation-test", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
+	if err := os.MkdirAll(scratchDirectory, 0o755); err != nil {
+		t.Fatalf("mkdir scratch: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(scratchDirectory)
+	})
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceID:                   "ws-managed-validation-policy-reject",
+		RunID:                         "run-managed-validation-policy-reject",
+		StepID:                        "run-managed-validation-policy-reject/verify",
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command":              "kill",
+			"args":                 []any{"123"},
+			"validationScratchDir": scratchDirectory,
+			"managedValidation": map[string]any{
+				"runtimeManaged": true,
+				"autoCleanup":    true,
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("ExecuteRuntimeStep err = %v, want invalid argument", err)
+	}
+	if result.Output["stage"] != "shell_command_policy_rejected" {
+		t.Fatalf("stage = %v, want shell_command_policy_rejected", result.Output["stage"])
+	}
+	resources, ok := result.Output["validationResources"].([]map[string]any)
+	if !ok || len(resources) != 1 {
+		t.Fatalf("validationResources = %#v, want released scratch resource", result.Output["validationResources"])
+	}
+	if resources[0]["kind"] != "scratch_dir" || resources[0]["status"] != "released" {
+		t.Fatalf("resource = %+v, want released scratch_dir", resources[0])
+	}
+	managed, _ := result.Output["managedValidation"].(map[string]any)
+	if managed["resourcesReleased"] != true {
+		t.Fatalf("managedValidation = %+v, want resources released", managed)
+	}
+	if _, statErr := os.Stat(scratchDirectory); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("scratchDirectory stat = %v, want removed by policy rejection cleanup", statErr)
 	}
 }
 
@@ -493,6 +598,69 @@ func TestRuntimeAdapter_ExecuteRuntimeStepTimeoutKillsProcessGroup(t *testing.T)
 	}
 	if result.Output["status"] != "timeout" {
 		t.Fatalf("status = %v, want timeout", result.Output["status"])
+	}
+}
+
+func TestRuntimeAdapter_ExecuteRuntimeStepReleasesManagedValidationResourcesOnTimeout(t *testing.T) {
+	adapter := NewRuntimeAdapterWithTimeout(50 * time.Millisecond)
+	deliverableDirectory := t.TempDir()
+	scratchDirectory := filepath.Join(os.TempDir(), "workorch-shell-managed-validation-test", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
+	t.Cleanup(func() {
+		_ = os.RemoveAll(scratchDirectory)
+	})
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceID:                   "ws-managed-validation-timeout",
+		RunID:                         "run-managed-validation-timeout",
+		StepID:                        "run-managed-validation-timeout/verify",
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command":              "sh",
+			"args":                 []any{"-c", "mkdir -p \"$1\"; printf pending > \"$1/out.txt\"; sleep 5", "sh", scratchDirectory},
+			"validationScratchDir": scratchDirectory,
+			"managedValidation": map[string]any{
+				"runtimeManaged": true,
+				"autoCleanup":    true,
+			},
+		},
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ExecuteRuntimeStep err = %v, want deadline exceeded", err)
+	}
+	if result.Output["status"] != "timeout" {
+		t.Fatalf("status = %v, want timeout", result.Output["status"])
+	}
+	resources, ok := result.Output["validationResources"].([]map[string]any)
+	if !ok || len(resources) != 2 {
+		t.Fatalf("validationResources = %#v, want process and scratch records", result.Output["validationResources"])
+	}
+	statuses := map[string]string{}
+	for _, resource := range resources {
+		statuses[stringFromShellValue(resource["kind"])] = stringFromShellValue(resource["status"])
+		if resource["workspaceId"] != "ws-managed-validation-timeout" ||
+			resource["runId"] != "run-managed-validation-timeout" ||
+			resource["stepId"] != "run-managed-validation-timeout/verify" {
+			t.Fatalf("resource = %+v, want scoped workspace/run/step ids", resource)
+		}
+		if strings.TrimSpace(stringFromShellValue(resource["releasedAt"])) == "" {
+			t.Fatalf("resource = %+v, want releasedAt diagnostic", resource)
+		}
+	}
+	if statuses["process"] != "timeout" || statuses["scratch_dir"] != "released" {
+		t.Fatalf("resource statuses = %+v, want timeout process and released scratch", statuses)
+	}
+	managed, _ := result.Output["managedValidation"].(map[string]any)
+	if managed["resourceCount"] != 2 || managed["resourcesReleased"] != true {
+		t.Fatalf("managedValidation = %+v, want resources released after timeout cleanup", managed)
+	}
+	runtimeDiagnostics, _ := result.Output["runtimeDiagnostics"].(map[string]any)
+	lifecycle, _ := runtimeDiagnostics["validationResourceLifecycle"].(map[string]any)
+	if lifecycle["released"] != true {
+		t.Fatalf("runtimeDiagnostics = %+v, want released lifecycle diagnostic", runtimeDiagnostics)
+	}
+	if _, statErr := os.Stat(scratchDirectory); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("scratchDirectory stat = %v, want removed after timeout cleanup", statErr)
 	}
 }
 

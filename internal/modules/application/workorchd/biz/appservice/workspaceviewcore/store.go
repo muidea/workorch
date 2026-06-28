@@ -628,6 +628,32 @@ func (s *Store) GetSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot
 	return snapshot, status, nil
 }
 
+func (s *Store) GetSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot, Status, error) {
+	if s == nil {
+		return readmodelcore.WorkspaceSnapshot{}, Status{State: StateFailed}, common.ErrConflict
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	status := s.statusForWorkspaceLocked(workspaceID)
+	if s.state == StateBuilding || s.state == StateStopped {
+		return readmodelcore.WorkspaceSnapshot{}, status, fmt.Errorf("%w: workspace projection %s", common.ErrConflict, s.state)
+	}
+	if s.state == StateFailed {
+		return readmodelcore.WorkspaceSnapshot{}, status, fmt.Errorf("%w: workspace projection failed: %s", common.ErrConflict, s.errText)
+	}
+	entry := s.workspaces[workspaceID]
+	if entry == nil || !entry.HasWorkspace {
+		return readmodelcore.WorkspaceSnapshot{}, status, common.ErrNotFound
+	}
+	snapshot := readmodelcore.WorkspaceSnapshot{Workspace: cloneWorkspace(entry.Workspace)}
+	if entry.HasSnapshot {
+		snapshot = cloneWorkspaceSnapshot(entry.Snapshot)
+		snapshot.Workspace = cloneWorkspace(entry.Workspace)
+	}
+	snapshot.ViewModel = workspaceViewModelFromStatus(snapshot, status)
+	return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot), status, nil
+}
+
 func (s *Store) NeedsSnapshot(workspaceID string) bool {
 	if s == nil {
 		return false

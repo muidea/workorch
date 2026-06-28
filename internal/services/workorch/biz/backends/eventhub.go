@@ -789,6 +789,9 @@ func decodeResultResource[T any](result events.CLIResultPayload, err error) (*T,
 	if err != nil {
 		return nil, err
 	}
+	if typed, ok := typedResultResource[T](result.TypedResource); ok {
+		return typed, nil
+	}
 	if result.Resource == nil {
 		return nil, nil
 	}
@@ -807,6 +810,20 @@ func decodeResultResources[T any](result events.CLIResultPayload, err error) ([]
 	if err != nil {
 		return nil, err
 	}
+	if len(result.TypedResources) > 0 {
+		out := make([]T, 0, len(result.TypedResources))
+		for _, resource := range result.TypedResources {
+			item, ok := typedResultResource[T](resource)
+			if !ok || item == nil {
+				out = nil
+				break
+			}
+			out = append(out, *item)
+		}
+		if out != nil {
+			return out, nil
+		}
+	}
 	out := make([]T, 0, len(result.Resources))
 	for _, resource := range result.Resources {
 		item, err := decodeResultResource[T](events.CLIResultPayload{Resource: resource}, nil)
@@ -818,6 +835,22 @@ func decodeResultResources[T any](result events.CLIResultPayload, err error) ([]
 		}
 	}
 	return out, nil
+}
+
+func typedResultResource[T any](resource any) (*T, bool) {
+	switch typed := resource.(type) {
+	case nil:
+		return nil, false
+	case T:
+		return &typed, true
+	case *T:
+		if typed == nil {
+			return nil, true
+		}
+		return typed, true
+	default:
+		return nil, false
+	}
 }
 
 func decodeOrZero[T any](payload map[string]any) *T {

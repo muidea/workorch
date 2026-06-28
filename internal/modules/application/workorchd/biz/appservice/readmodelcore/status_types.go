@@ -7,6 +7,8 @@ type RunStatus struct {
 	CurrentStepID        string                 `json:"currentStepId,omitempty"`
 	CurrentStepKind      string                 `json:"currentStepKind,omitempty"`
 	CurrentStepState     string                 `json:"currentStepState,omitempty"`
+	CurrentActionLabel   string                 `json:"currentActionLabel,omitempty"`
+	DiagnosticLineage    string                 `json:"diagnosticLineage,omitempty"`
 	StepCount            int                    `json:"stepCount"`
 	DecisionCount        int                    `json:"decisionCount"`
 	ApprovalCount        int                    `json:"approvalCount"`

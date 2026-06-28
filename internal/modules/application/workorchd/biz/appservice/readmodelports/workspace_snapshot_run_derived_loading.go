@@ -10,6 +10,9 @@ import (
 )
 
 func (models *workspaceSnapshotModels) loadRunDerivedItems(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, projectionRun *runmodel.Run, options workspaceSnapshotLoadOptions) error {
+	if !options.includeRunDerivedCollections {
+		return nil
+	}
 	for _, runItem := range models.Runs {
 		if runItem == nil || runItem.WorkspaceID != workspaceID {
 			continue

@@ -1989,6 +1989,91 @@ func TestProviderCachePlanKeepsStablePrefixForStateChangingContract(t *testing.T
 	}
 }
 
+func TestProviderCachePlanKeepsC0C1C2StableForProviderRetryStateChangingContract(t *testing.T) {
+	baseInput := map[string]any{
+		"executionContextPackage": map[string]any{
+			"goal":               map[string]any{"text": "goal text"},
+			"dod":                map[string]any{"items": []any{"dod item"}},
+			"definitionRevision": "definition-001",
+		},
+		"currentRuntimeStage":     "execution",
+		"currentRuntimeStageMode": "strict_convergence",
+	}
+	retryInput := cloneMap(baseInput)
+	retryInput["currentRuntimeStage"] = "repair"
+	retryInput["providerRetryFollowUp"] = true
+	retryInput["providerRetryAttempt"] = 2
+	retryInput["failureClass"] = "provider_timeout"
+	retryInput["runtimeRepairFollowUp"] = true
+	retryInput["stateChangingOutputRequired"] = true
+	retryInput["repairObjective"] = "produce_state_changing_output"
+	retryInput["stateChangingRecoveryMode"] = "direct_state_change"
+	retryInput["repairActionPackage"] = map[string]any{
+		"currentFailure": map[string]any{
+			"failureClass": "provider_timeout",
+			"sourceRef":    "run-001/step-001",
+		},
+		"requiredOutput": map[string]any{
+			"acceptedKinds":                []string{llmcommon.RuntimeBlockKindPatchApply},
+			"forbiddenKinds":               []string{"read_only_graph", "shell_only_graph"},
+			"mustIncludeStateChangingNode": true,
+		},
+	}
+	base := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-cache-provider-retry-state-changing",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		RuntimeCapabilities: llmmodels.RuntimeCapabilities{
+			BlockKinds: []llmmodels.RuntimeBlockCapability{
+				{Kind: llmcommon.StepKindWorkspaceExecution, Description: "plan next step"},
+				{Kind: llmcommon.RuntimeBlockKindPatchApply, Description: "apply patch"},
+				{Kind: "shell/command", Description: "run command"},
+			},
+		},
+		Input: baseInput,
+	}
+	retry := base
+	retry.StepID = "step-001-provider-retry-002"
+	retry.Input = retryInput
+	base.PromptContext = buildPromptContextFromRequest(base)
+	retry.PromptContext = buildPromptContextFromRequest(retry)
+	attachProviderCachePlan(&base)
+	attachProviderCachePlan(&retry)
+
+	if base.ContextBudget == nil || base.ContextBudget.CachePlan == nil ||
+		retry.ContextBudget == nil || retry.ContextBudget.CachePlan == nil {
+		t.Fatalf("cachePlan missing: base=%+v retry=%+v", base.ContextBudget, retry.ContextBudget)
+	}
+	if base.ContextBudget.CachePlan.StablePrefixHash != retry.ContextBudget.CachePlan.StablePrefixHash {
+		t.Fatalf("stablePrefixHash base=%q retry=%q, want C0 unchanged by provider retry/state-changing fields", base.ContextBudget.CachePlan.StablePrefixHash, retry.ContextBudget.CachePlan.StablePrefixHash)
+	}
+	if base.ContextBudget.CachePlan.RenderedStablePrefixHash != retry.ContextBudget.CachePlan.RenderedStablePrefixHash {
+		t.Fatalf("renderedStablePrefixHash base=%q retry=%q, want provider-facing stable prefix unchanged", base.ContextBudget.CachePlan.RenderedStablePrefixHash, retry.ContextBudget.CachePlan.RenderedStablePrefixHash)
+	}
+	if base.ContextBudget.CachePlan.WorkspaceDefinitionHash != retry.ContextBudget.CachePlan.WorkspaceDefinitionHash {
+		t.Fatalf("workspaceDefinitionHash base=%q retry=%q, want C1 unchanged by retry/state-changing fields", base.ContextBudget.CachePlan.WorkspaceDefinitionHash, retry.ContextBudget.CachePlan.WorkspaceDefinitionHash)
+	}
+	if base.ContextBudget.CachePlan.CapabilityContractHash != retry.ContextBudget.CachePlan.CapabilityContractHash {
+		t.Fatalf("capabilityContractHash base=%q retry=%q, want C2 unchanged by retry/state-changing fields", base.ContextBudget.CachePlan.CapabilityContractHash, retry.ContextBudget.CachePlan.CapabilityContractHash)
+	}
+	if base.ContextBudget.CachePlan.VolatileTailHash == retry.ContextBudget.CachePlan.VolatileTailHash {
+		t.Fatalf("volatileTailHash base=%q retry=%q, want C4 to carry retry/state-changing differences", base.ContextBudget.CachePlan.VolatileTailHash, retry.ContextBudget.CachePlan.VolatileTailHash)
+	}
+	c0, ok := promptContextSectionByID(retry.PromptContext, "C0.language-and-contract")
+	if !ok {
+		t.Fatalf("missing C0.language-and-contract; sections=%+v", promptContextSectionIDsForTest(retry.PromptContext))
+	}
+	for _, forbidden := range []string{"providerRetryFollowUp", "provider_timeout", "State-changing output is required by the current Stage Contract"} {
+		if strings.Contains(c0.Content, forbidden) {
+			t.Fatalf("C0 leaked dynamic retry/state-changing marker %q: %s", forbidden, c0.Content)
+		}
+	}
+}
+
 func providerCacheBreakersContain(items []llmmodels.ProviderCacheBreaker, sectionID, reason string) bool {
 	for _, item := range items {
 		if item.SectionID == sectionID && item.Reason == reason {

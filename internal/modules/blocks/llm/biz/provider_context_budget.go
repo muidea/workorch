@@ -161,7 +161,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	if p0Overflow {
 		rules = append(rules, "p0 overflow: goal/dod contract preserved without compression")
 	}
-	integrityWarnings := providerContextIntegrityWarnings(request.Input, protected, protectedRepairTargets, protectedStagePacket, profile, overBudget)
+	integrityWarnings := providerContextIntegrityWarnings(request.Input, protected, protectedRepairTargets, protectedRuntimeContract, protectedCoverageWorkItemContext, protectedStagePacket, profile, overBudget)
 	contextGateAction, contextGateReason := providerContextGateDecision(goalDoDCompressed, overBudget, p0Overflow, integrityWarnings)
 	truncated := len(rules) > 1 || overBudget
 	request.ContextBudget = &llmmodels.ProviderContextBudget{
@@ -863,10 +863,16 @@ func providerProtectedContextFields(input map[string]any) []string {
 	return uniqueStrings(fields)
 }
 
-func providerContextIntegrityWarnings(input map[string]any, protected protectedGoalDoD, repairTargets protectedProviderRepairTargets, stagePacket protectedProviderStagePacket, profile llmmodels.ProviderContextProfile, overBudget bool) []string {
+func providerContextIntegrityWarnings(input map[string]any, protected protectedGoalDoD, repairTargets protectedProviderRepairTargets, runtimeContract protectedProviderRuntimeContract, coverageContext protectedProviderCoverageWorkItemContext, stagePacket protectedProviderStagePacket, profile llmmodels.ProviderContextProfile, overBudget bool) []string {
 	warnings := []string{}
 	if !isProtectedGoalDoDEqual(input, protected) {
 		warnings = append(warnings, "protected_goal_dod_changed_after_context_budget")
+	}
+	if !isProtectedProviderRuntimeContractEqual(input, runtimeContract) {
+		warnings = append(warnings, "protected_runtime_contract_changed_after_context_budget")
+	}
+	if !isProtectedProviderCoverageWorkItemContextEqual(input, coverageContext) {
+		warnings = append(warnings, "protected_coverage_work_item_context_changed_after_context_budget")
 	}
 	if !isProtectedProviderStagePacketEqual(input, stagePacket) {
 		warnings = append(warnings, "protected_stage_packet_changed_after_context_budget")
@@ -999,6 +1005,8 @@ func providerContextGateActionForWarning(warning string) string {
 		"must_declare_coverage_targets_without_target_set":
 		return providerContextGateReplanRequired
 	case "protected_goal_dod_changed_after_context_budget",
+		"protected_runtime_contract_changed_after_context_budget",
+		"protected_coverage_work_item_context_changed_after_context_budget",
 		"protected_stage_packet_changed_after_context_budget",
 		"request_still_over_budget_with_protected_goal_dod",
 		"repair_action_package_required_output_missing",
@@ -1582,6 +1590,28 @@ func isProtectedGoalDoDEqual(input map[string]any, protected protectedGoalDoD) b
 
 func hasProtectedGoalDoD(protected protectedGoalDoD) bool {
 	return len(protected.TopLevel) > 0 || len(protected.ExecutionContext) > 0 || len(protected.Package) > 0
+}
+
+func isProtectedProviderRuntimeContractEqual(input map[string]any, protected protectedProviderRuntimeContract) bool {
+	if len(protected.TopLevel) == 0 {
+		return true
+	}
+	current := captureProtectedProviderRuntimeContract(input)
+	return valuesEqual(current.TopLevel, protected.TopLevel)
+}
+
+func isProtectedProviderCoverageWorkItemContextEqual(input map[string]any, protected protectedProviderCoverageWorkItemContext) bool {
+	if len(protected.TopLevel) == 0 &&
+		len(protected.ExecutionContext) == 0 &&
+		len(protected.Package) == 0 &&
+		len(protected.RepairPackage) == 0 {
+		return true
+	}
+	current := captureProtectedProviderCoverageWorkItemContext(input)
+	return valuesEqual(current.TopLevel, protected.TopLevel) &&
+		valuesEqual(current.ExecutionContext, protected.ExecutionContext) &&
+		valuesEqual(current.Package, protected.Package) &&
+		valuesEqual(current.RepairPackage, protected.RepairPackage)
 }
 
 func isProtectedProviderStagePacketEqual(input map[string]any, protected protectedProviderStagePacket) bool {

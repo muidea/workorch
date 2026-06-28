@@ -13,6 +13,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestWorkspaceSnapshotBuildsSnapshotFromReaders(t *testing.T) {
@@ -272,6 +273,60 @@ func TestWorkspaceProjectionSnapshotSkipsLLMUsagePayloadQueries(t *testing.T) {
 	}
 }
 
+func TestWorkspaceProjectionSnapshotSkipsHistoricalRunDerivedCollections(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-workspace-projection-derived-skip")
+	activeRunID := common.RunID("run-workspace-projection-derived-active")
+	historicalRunID := common.RunID("run-workspace-projection-derived-history")
+	patches := &recordingWorkspacePatchReader{}
+	continuations := &recordingWorkspaceArtifactContinuationReader{}
+	cached := &readmodelcore.RunSnapshot{
+		Workspace: appmodelcore.Workspace{
+			ID:          string(workspaceID),
+			Title:       "cached workspace",
+			State:       string(common.WorkspaceStateRunning),
+			ActiveRunID: string(activeRunID),
+		},
+		Run: appmodelcore.Run{
+			ID:          string(activeRunID),
+			WorkspaceID: string(workspaceID),
+			State:       string(common.RunStateRunning),
+		},
+	}
+
+	_, err := WorkspaceProjectionSnapshot(context.Background(), WorkspaceSnapshotReaders{
+		Workspaces: fakeRunSnapshotWorkspaceReader{items: []*workspacemodel.Workspace{{
+			ID:          workspaceID,
+			Title:       "workspace projection derived skip",
+			State:       common.WorkspaceStateRunning,
+			ActiveRunID: activeRunID,
+		}}},
+		Runs: fakeRunStatusRunReader{items: []*runmodel.Run{
+			{ID: historicalRunID, WorkspaceID: workspaceID, State: common.RunStateCompleted},
+			{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		}},
+		Results:               fakeWorkspaceSnapshotResultReader{},
+		Artifacts:             fakeRunSnapshotArtifactReader{},
+		ArtifactContinuations: continuations,
+		EventRecords:          &recordingWorkspaceEventReader{},
+		Patches:               patches,
+		Tickets:               fakeTicketReader{},
+		Resolutions:           fakeResolutionReader{},
+		Approvals:             fakeApprovalListReader{},
+	}, workspaceID, cached)
+	if err != nil {
+		t.Fatalf("WorkspaceProjectionSnapshot: %v", err)
+	}
+
+	if len(patches.runIDs) != 0 {
+		t.Fatalf("patch run queries = %+v, want projection load to skip historical run-derived patches", patches.runIDs)
+	}
+	if len(continuations.runIDs) != 0 {
+		t.Fatalf("artifact continuation run queries = %+v, want projection load to skip historical run-derived continuations", continuations.runIDs)
+	}
+}
+
 type failGetWorkspaceReader struct{}
 
 func (failGetWorkspaceReader) Get(context.Context, common.WorkspaceID) (*workspacemodel.Workspace, error) {
@@ -327,6 +382,24 @@ func (r *workspaceEventReaderByQuery) List(_ context.Context, query repository.E
 	if query.WorkspaceID != "" && query.Topic == runevents.TopicRunLLMUsageRecorded {
 		return r.workspaceRecords, nil
 	}
+	return nil, nil
+}
+
+type recordingWorkspacePatchReader struct {
+	runIDs []common.RunID
+}
+
+func (r *recordingWorkspacePatchReader) ListByRun(_ context.Context, runID common.RunID) ([]*runmodel.Patch, error) {
+	r.runIDs = append(r.runIDs, runID)
+	return nil, nil
+}
+
+type recordingWorkspaceArtifactContinuationReader struct {
+	runIDs []common.RunID
+}
+
+func (r *recordingWorkspaceArtifactContinuationReader) ListByRun(_ context.Context, runID common.RunID) ([]*orchestratormodel.ArtifactContinuation, error) {
+	r.runIDs = append(r.runIDs, runID)
 	return nil, nil
 }
 

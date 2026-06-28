@@ -4102,6 +4102,48 @@ func TestWorkspaceSnapshotEndpointDefaultUsesProjectedDetailOnly(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSnapshotEndpointSummaryDoesNotHydrateDetail(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-summary-no-detail-hydrate")
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	handler := newMuxWithState(state)
+	state.workspaceProjection.UpsertWorkspace(appservice.Workspace{
+		ID:          string(workspaceID),
+		State:       string(common.WorkspaceStateRunning),
+		ActiveRunID: "run-summary-no-detail-hydrate",
+	})
+	var projectionReads atomic.Int32
+	state.readProjectionSnapshot = func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error) {
+		projectionReads.Add(1)
+		return appservice.WorkspaceSnapshot{}, errors.New("detail projection read should not be used for summary")
+	}
+	state.readWorkspaceSnapshot = func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error) {
+		return appservice.WorkspaceSnapshot{}, errors.New("full snapshot read should not be used for summary")
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+string(workspaceID)+"/snapshot?view=summary", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("workspace summary status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if projectionReads.Load() != 0 {
+		t.Fatalf("projection detail reads = %d, want summary from projection overview only", projectionReads.Load())
+	}
+	var body workspaceSnapshotResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal workspace summary: %v", err)
+	}
+	if body.Snapshot.Workspace.ID != string(workspaceID) || body.Snapshot.Workspace.ActiveRunID != "run-summary-no-detail-hydrate" {
+		t.Fatalf("workspace summary = %+v, want projected overview", body.Snapshot.Workspace)
+	}
+	if body.Snapshot.Run != nil || len(body.Snapshot.Runs) != 0 || len(body.Snapshot.Results) != 0 || len(body.Snapshot.EventRecords) != 0 {
+		t.Fatalf("summary snapshot includes detail fields: run=%+v runs=%d results=%d events=%d", body.Snapshot.Run, len(body.Snapshot.Runs), len(body.Snapshot.Results), len(body.Snapshot.EventRecords))
+	}
+	if body.Snapshot.ViewModel.WorkspaceID != string(workspaceID) || body.Snapshot.ViewModel.PromptMode == "" {
+		t.Fatalf("viewModel = %+v, want summary projection view model", body.Snapshot.ViewModel)
+	}
+}
+
 func TestWorkspaceSnapshotEndpointObservabilityUsesExplicitFullRead(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-observability-full-read")
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)

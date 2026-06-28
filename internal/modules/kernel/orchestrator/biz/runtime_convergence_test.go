@@ -2608,7 +2608,11 @@ func TestCoverageAssessmentIncompleteRecomputePreemptsStaleAssessmentAuthorityWi
 			"recoverability": "recompute_authority",
 			"correctionMode": contractViolationCorrectionModeForcedNarrow,
 			"correctionContract": map[string]any{
-				"requiredOutputShape": "authority_recomputed_next_action",
+				"requiredOutputShape": "traceable_coverage_assessment",
+				"runtimeRecomputedAuthority": map[string]any{
+					"owner":    "runtime",
+					"required": true,
+				},
 			},
 		},
 	}
@@ -2667,7 +2671,11 @@ func TestCoverageAssessmentIncompleteStateChangeRecomputeSyncsEvidenceNextAction
 			"violatedRule":   contractViolationRuleCoverageAssessmentIncomplete,
 			"recoverability": "recompute_authority",
 			"correctionContract": map[string]any{
-				"requiredOutputShape": "authority_recomputed_next_action",
+				"requiredOutputShape": "bounded_failure_evidence",
+				"runtimeRecomputedAuthority": map[string]any{
+					"owner":    "runtime",
+					"required": true,
+				},
 			},
 		},
 	}

@@ -21,7 +21,9 @@ func MapRunStatus(snapshot readmodelcore.RunSnapshot) readmodelcore.RunStatus {
 		ret.CurrentStepID = snapshot.Step.ID
 		ret.CurrentStepKind = llmcommon.CanonicalRuntimeBlockKind(snapshot.Step.Kind)
 		ret.CurrentStepState = snapshot.Step.State
+		ret.DiagnosticLineage = snapshot.Step.ID
 	}
+	ret.CurrentActionLabel = currentActionLabelFromRunSnapshot(snapshot)
 	ret.RuntimeExecution = snapshot.RuntimeExecution
 	ret.ConvergenceStatus = MapConvergenceStatus(snapshot)
 	return ret

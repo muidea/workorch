@@ -56,6 +56,10 @@ func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshot) re
 	return readmodelprojection.ProjectWorkspaceSnapshotDetail(snapshot)
 }
 
+func ProjectWorkspaceSnapshotSummary(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
+	return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot)
+}
+
 func ProjectDecisionView(item readmodelcore.Decision) readmodelcore.Decision {
 	return readmodelprojection.ProjectDecisionView(item)
 }

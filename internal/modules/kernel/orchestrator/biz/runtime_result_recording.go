@@ -12,6 +12,7 @@ import (
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func (r *resultSubsystem) recordRunResultFromDoDAssessment(
@@ -139,6 +140,9 @@ func (r *resultSubsystem) recordRunResultFromValidatedDoDAssessment(
 	if err := ensureRunCanRecordFormalResult(run); err != nil {
 		return err
 	}
+	if err := ensureRunCoverageReadyForFinalResult(run); err != nil {
+		return err
+	}
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
 		return nil
@@ -255,6 +259,7 @@ func (r *resultSubsystem) recordRunResultFromValidatedDoDAssessment(
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
+	item.SummaryDetail = finalCompletionResultSummary(item.SummaryDetail)
 	if err := r.evidence.Results.Create(ctx, item); err != nil {
 		if err != common.ErrConflict {
 			return err
@@ -738,4 +743,45 @@ func ensureRunCanRecordFormalResult(run *runModel.Run) error {
 		return common.ErrConflict
 	}
 	return nil
+}
+
+func ensureRunCoverageReadyForFinalResult(run *runModel.Run) error {
+	if run == nil {
+		return nil
+	}
+	if active := activeCoverageWorkItemIDs(run.ExecutionContext); len(active) > 0 {
+		return fmt.Errorf("%w: final result coverage gate not ready: unresolved coverage work items: %s", common.ErrConflict, strings.Join(active, ","))
+	}
+	if err := newCoverageSubsystem().validateReadyForAcceptance(run); err != nil {
+		return fmt.Errorf("%w: final result coverage gate not ready: %v", common.ErrConflict, err)
+	}
+	return nil
+}
+
+func activeCoverageWorkItemIDs(context map[string]any) []string {
+	var ret []string
+	for _, item := range mapSliceFromValue(context[coverageWorkItemsKey]) {
+		status := strings.ToLower(strings.TrimSpace(stringFromMap(item, "status")))
+		if !runtimecontract.CoverageWorkItemStatusActive(status) {
+			continue
+		}
+		id := strings.TrimSpace(stringFromMap(item, "id"))
+		if id == "" {
+			id = strings.TrimSpace(stringFromMap(item, "normalizedSourceKey"))
+		}
+		if id == "" {
+			id = "unknown"
+		}
+		ret = append(ret, id)
+	}
+	return compactUniqueStrings(ret)
+}
+
+func finalCompletionResultSummary(summary resultmodel.ResultSummary) resultmodel.ResultSummary {
+	if summary.Diagnostics == nil {
+		summary.Diagnostics = map[string]any{}
+	}
+	summary.Diagnostics["resultScope"] = "final_completion"
+	summary.Diagnostics["finalCompletionGateState"] = "final_result"
+	return summary
 }

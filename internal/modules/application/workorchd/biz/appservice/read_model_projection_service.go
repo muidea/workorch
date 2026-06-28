@@ -10,6 +10,10 @@ func ProjectWorkspaceSnapshotDetail(snapshot WorkspaceSnapshot) WorkspaceSnapsho
 	return readmodelports.ProjectWorkspaceSnapshotDetail(snapshot)
 }
 
+func ProjectWorkspaceSnapshotSummary(snapshot WorkspaceSnapshot) WorkspaceSnapshot {
+	return readmodelports.ProjectWorkspaceSnapshotSummary(snapshot)
+}
+
 func ProjectDecisionView(item Decision) Decision {
 	return readmodelports.ProjectDecisionView(item)
 }

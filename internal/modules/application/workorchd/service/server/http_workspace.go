@@ -74,7 +74,8 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 		}
 		state.metrics.workspaceSnapshotRequests.Add(1)
 		projection := state.workspaceProjectionStatus()
-		if workspaceSnapshotObservabilityRead(r) {
+		switch workspaceSnapshotReadView(r) {
+		case workspaceSnapshotViewObservability:
 			item, err := state.readWorkspaceSnapshotCached(r.Context(), workspaceID)
 			if err != nil {
 				writeJSON(w, projectionHTTPStatus(err), workspaceSnapshotResponse{
@@ -96,6 +97,27 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 				DataRoot:   state.config.DataRoot,
 				Projection: projection,
 				Snapshot:   item,
+			})
+			return
+		case workspaceSnapshotViewSummary:
+			item, projectedStatus, err := state.readProjectedWorkspaceSummarySnapshot(workspaceID)
+			if err != nil {
+				writeJSON(w, projectionHTTPStatus(err), workspaceSnapshotResponse{
+					Service:    "workorch",
+					Backend:    state.config.Backend,
+					DataRoot:   state.config.DataRoot,
+					Projection: projection,
+					Error:      err.Error(),
+				})
+				return
+			}
+			projection = projectedStatus
+			writeJSON(w, http.StatusOK, workspaceSnapshotResponse{
+				Service:    "workorch",
+				Backend:    state.config.Backend,
+				DataRoot:   state.config.DataRoot,
+				Projection: projection,
+				Snapshot:   appservice.ProjectWorkspaceSnapshotSummary(item),
 			})
 			return
 		}
@@ -251,6 +273,26 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 	})
 }
 
+const (
+	workspaceSnapshotViewSummary       = "summary"
+	workspaceSnapshotViewDetail        = "detail"
+	workspaceSnapshotViewObservability = "observability"
+)
+
+func workspaceSnapshotReadView(r *http.Request) string {
+	if r == nil {
+		return workspaceSnapshotViewDetail
+	}
+	switch strings.TrimSpace(strings.ToLower(r.URL.Query().Get("view"))) {
+	case "summary", "overview", "status":
+		return workspaceSnapshotViewSummary
+	case "observability", "debug":
+		return workspaceSnapshotViewObservability
+	default:
+		return workspaceSnapshotViewDetail
+	}
+}
+
 func workspaceMetadataViewModelFromProjection(input readmodelcore.WorkspaceViewModel) appmodelcore.WorkspaceViewModel {
 	ret := appmodelcore.WorkspaceViewModel{
 		WorkspaceID:             input.WorkspaceID,
@@ -281,14 +323,6 @@ func workspaceMetadataViewModelFromProjection(input readmodelcore.WorkspaceViewM
 		}
 	}
 	return ret
-}
-
-func workspaceSnapshotObservabilityRead(r *http.Request) bool {
-	if r == nil {
-		return false
-	}
-	view := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("view")))
-	return view == "observability" || view == "debug"
 }
 
 func projectionHTTPStatus(err error) int {
