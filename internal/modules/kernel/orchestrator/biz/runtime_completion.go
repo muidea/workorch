@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -21,6 +22,9 @@ func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunI
 	}
 	if requiresDoDAssessmentCompletionGate(r) && !o.resultManager().hasAcceptedCompletionResult(ctx, r) {
 		return common.ErrConflict
+	}
+	if err := o.validateRunReadyForCompletion(ctx, r); err != nil {
+		return err
 	}
 	r.State = common.RunStateCompleted
 	r.BlockingTicketID = ""
@@ -79,6 +83,9 @@ func (o *RuntimeOrchestrator) validateAndCompleteRunWithWorkspace(ctx context.Co
 		return err
 	}
 
+	if err := o.validateRunReadyForCompletion(ctx, run); err != nil {
+		return err
+	}
 	workspace, err = o.runStateManager().syncRunAndWorkspaceForCompletion(ctx, run, workspace)
 	if err != nil {
 		return err
@@ -87,4 +94,14 @@ func (o *RuntimeOrchestrator) validateAndCompleteRunWithWorkspace(ctx context.Co
 		return err
 	}
 	return o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, run.ID)
+}
+
+func (o *RuntimeOrchestrator) validateRunReadyForCompletion(ctx context.Context, run *runModel.Run) error {
+	if o == nil || run == nil {
+		return common.ErrInvalidArgument
+	}
+	if err := o.coverageLedger().validateReadyForAcceptance(run, ctx); err != nil {
+		return fmt.Errorf("%w: completion gate not ready: %v", common.ErrConflict, err)
+	}
+	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -90,6 +91,8 @@ func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []r
 		}
 		ret = append(ret, authorityDiagnosticsFromRaw(source, snapshot.Steps[idx].Input["authorityDiagnostics"])...)
 	}
+	ret = append(ret, completionGateDriftDiagnosticsFromRunSnapshot(snapshot)...)
+	ret = append(ret, staleValidationResourceDiagnosticsFromRunSnapshot(snapshot)...)
 	if len(authorityFocus) == 0 {
 		return ret
 	}
@@ -143,6 +146,79 @@ func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []r
 	addRequiredDiagnostic("repairActionPackage.requiredOutput", MapValue(MapValue(context["repairActionPackage"])["requiredOutput"]))
 	addRequiredDiagnostic("stagePacket.requiredOutput", MapValue(MapValue(context["stagePacket"])["requiredOutput"]))
 	return ret
+}
+
+func completionGateDriftDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []readmodelcore.GapDiagnostic {
+	if snapshot.Run.State != string(common.RunStateCompleted) {
+		return nil
+	}
+	open := 0
+	for _, item := range snapshot.CoverageWorkItems {
+		status := strings.ToLower(strings.TrimSpace(stringValue(item, "status")))
+		if runtimecontract.CoverageWorkItemStatusActive(status) {
+			open++
+		}
+	}
+	if open == 0 {
+		return nil
+	}
+	return []readmodelcore.GapDiagnostic{{
+		Code:      "completion_gate_failed_but_run_completed",
+		Severity:  "error",
+		Kind:      "owner_projection_drift",
+		Source:    "run.state+coverageWorkItems",
+		Candidate: fmt.Sprintf("completed_with_open_coverage:%d", open),
+		Message:   fmt.Sprintf("run is completed while %d coverage work item(s) remain active", open),
+	}}
+}
+
+func staleValidationResourceDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []readmodelcore.GapDiagnostic {
+	var ret []readmodelcore.GapDiagnostic
+	for _, step := range snapshot.Steps {
+		outputResources := MapSliceValue(step.Output["validationResources"])
+		resources := outputResources
+		sourceField := "output"
+		if len(resources) == 0 && readModelStepStateTerminal(step.State) {
+			resources = MapSliceValue(step.Input["validationResources"])
+			sourceField = "input"
+		}
+		for _, resource := range resources {
+			status := strings.ToLower(strings.TrimSpace(readModelStringValue(resource["status"])))
+			if status == "" || status == "released" {
+				continue
+			}
+			kind := strings.TrimSpace(readModelStringValue(resource["kind"]))
+			if kind == "" {
+				kind = "unknown"
+			}
+			source := fmt.Sprintf("step.%s.validationResources", sourceField)
+			if step.ID != "" {
+				source = fmt.Sprintf("step[%s].%s.validationResources", step.ID, sourceField)
+			}
+			message := fmt.Sprintf("validation resource %s is %s", kind, status)
+			if cleanupError := strings.TrimSpace(readModelStringValue(resource["cleanupError"])); cleanupError != "" {
+				message = fmt.Sprintf("%s: %s", message, cleanupError)
+			}
+			ret = append(ret, readmodelcore.GapDiagnostic{
+				Code:      "stale_validation_resource_lifecycle",
+				Severity:  "warning",
+				Kind:      "resource_lifecycle",
+				Source:    source,
+				Candidate: fmt.Sprintf("%s:%s", kind, status),
+				Message:   message,
+			})
+		}
+	}
+	return ret
+}
+
+func readModelStepStateTerminal(state string) bool {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "completed", "failed", "cancelled", "canceled", "superseded":
+		return true
+	default:
+		return false
+	}
 }
 
 func authorityDiagnosticsFromRaw(defaultSource string, value any) []readmodelcore.GapDiagnostic {

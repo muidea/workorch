@@ -1267,6 +1267,7 @@ func TestRuntimeOrchestrator_CompleteRunRequiresAcceptedResultForDoDGatedRun(t *
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	resultRepo := memory.NewResultRepository()
+	coverageRepo := memory.NewCoverageWorkItemRepository()
 	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		&stubRuntimeAdapter{output: map[string]any{"status": "ok"}},
 		runRepo,
@@ -1275,7 +1276,7 @@ func TestRuntimeOrchestrator_CompleteRunRequiresAcceptedResultForDoDGatedRun(t *
 		ticketRepo,
 		nil,
 		approvalRepo,
-		RuntimeEvidenceRepositories{Results: resultRepo},
+		RuntimeEvidenceRepositories{Results: resultRepo, CoverageWorkItems: coverageRepo},
 		events.NewMemoryHub(),
 	)
 
@@ -1354,6 +1355,97 @@ func TestRuntimeOrchestrator_CompleteRunRequiresAcceptedResultForDoDGatedRun(t *
 	}
 	if got.State != common.RunStateCompleted {
 		t.Fatalf("run state = %q, want completed", got.State)
+	}
+}
+
+func TestRuntimeOrchestrator_CompleteRunRejectsOpenCoverageLedger(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	resultRepo := memory.NewResultRepository()
+	coverageRepo := memory.NewCoverageWorkItemRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{output: map[string]any{"status": "ok"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{Results: resultRepo, CoverageWorkItems: coverageRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-complete-coverage-gate")
+	runID := common.RunID("run-complete-coverage-gate")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "ws",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-complete-coverage-gate",
+		State:           common.RunStateValidating,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := coverageRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.CoverageWorkItem{
+		ID:                    "cwi-open-validation",
+		WorkspaceID:           workspaceID,
+		RunID:                 runID,
+		DefinitionRevision:    "rev-complete-coverage-gate",
+		NormalizedSourceKey:   "source-complete-coverage-gate",
+		RequiredEvidenceKinds: []string{runtimemodel.EvidenceKindValidation},
+		Status:                "open",
+		Metadata: map[string]any{
+			"id":                   "cwi-open-validation",
+			"missingEvidenceKinds": []string{runtimemodel.EvidenceKindValidation},
+		},
+	}); err != nil {
+		t.Fatalf("seed coverage work item: %v", err)
+	}
+	if err := resultRepo.Create(ctx, &resultmodel.Result{
+		ID:           "run-complete-coverage-gate/result/dod-assessment",
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
+		DoDID:        "dod-complete-coverage-gate",
+		State:        common.ResultStateAccepted,
+		Summary:      "formal DoD assessment accepted",
+		SourceType:   resultcommon.SourceTypeDoDAssessment,
+		SourceRef:    "run-complete-coverage-gate/step-1",
+		EvidenceRefs: []string{"run-complete-coverage-gate/step-1/validation/runtime-step"},
+		DoDAssessment: resultmodel.DoDAssessment{
+			Satisfied: true,
+			Summary:   "formal DoD assessment accepted",
+			Items: []resultmodel.DoDAssessmentItem{{
+				Item:         "generic completion item",
+				State:        "satisfied",
+				EvidenceRefs: []string{"run-complete-coverage-gate/step-1/validation/runtime-step"},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("seed accepted result: %v", err)
+	}
+
+	err := orch.CompleteRun(ctx, runID)
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("CompleteRun err = %v, want conflict from open coverage ledger", err)
+	}
+	got, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run after rejected complete: %v", err)
+	}
+	if got.State != common.RunStateValidating {
+		t.Fatalf("run state = %q, want validating after coverage gate rejection", got.State)
 	}
 }
 

@@ -1054,6 +1054,14 @@ func graphFollowUpExpansionStep(step *runModel.Step) bool {
 	return ok
 }
 
+func graphFollowUpConcreteValidationExpansionStep(step *runModel.Step) bool {
+	if !graphFollowUpExpansionStep(step) {
+		return false
+	}
+	graph, ok := runtimeGraphSpecFromValue(step.Output[stepOutputKeyExecutionGraph])
+	return ok && graphIsConcreteValidationEvidenceGraph(graph)
+}
+
 func (g *graphSubsystem) graphFollowUpExpansionCount(ctx context.Context, runID common.RunID) int {
 	if g == nil || g.steps == nil || runID == "" {
 		return 0
@@ -1065,6 +1073,23 @@ func (g *graphSubsystem) graphFollowUpExpansionCount(ctx context.Context, runID 
 	count := 0
 	for _, step := range steps {
 		if graphFollowUpExpansionStep(step) {
+			count++
+		}
+	}
+	return count
+}
+
+func (g *graphSubsystem) graphFollowUpConcreteValidationExpansionCount(ctx context.Context, runID common.RunID) int {
+	if g == nil || g.steps == nil || runID == "" {
+		return 0
+	}
+	steps, err := g.steps.ListByRun(ctx, runID)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, step := range steps {
+		if graphFollowUpConcreteValidationExpansionStep(step) {
 			count++
 		}
 	}
@@ -1187,6 +1212,18 @@ func restoreCoverageWorkItemContinuationConvergenceContract(run *runModel.Run, i
 		return input
 	}
 	applyCoverageWorkItemContext(input, context)
+	if graphLimitFollowUpCanUseAssessmentOnlyCoverageClosure(input, context) {
+		input[stepInputKeyAssessmentOnly] = true
+		input["convergenceContract"] = compactConvergenceContract(ConvergenceContract{
+			State:            convergenceStateNeedAssessment,
+			RuntimeStage:     runtimeStageVerification,
+			RuntimeStageMode: "strict_convergence",
+			RepairObjective:  "complete_dod_goal_coverage_assessment",
+			TargetEvidence:   convergenceTargetEvidence(input, mapFromValue(input["repairActionPackage"])),
+		})
+		clearExecutableCoverageContinuationContract(input)
+		return input
+	}
 	if len(mapFromValue(input["repairActionPackage"])) == 0 {
 		input["repairActionPackage"] = map[string]any{}
 	}
@@ -1203,6 +1240,35 @@ func restoreCoverageWorkItemContinuationConvergenceContract(run *runModel.Run, i
 	}
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
 	return ApplyConvergenceContract(input, contract)
+}
+
+func graphLimitFollowUpCanUseAssessmentOnlyCoverageClosure(input map[string]any, context map[string]any) bool {
+	if !boolValue(input[stepInputKeyGraphLimitFollowUp]) || !boolValue(input[stepInputKeyAssessmentOnly]) {
+		return false
+	}
+	return len(coverageWorkItemContinuationFocusItems(context)) > 0
+}
+
+func clearExecutableCoverageContinuationContract(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	for _, key := range []string{
+		"repairObjective",
+		"boundedValidationRequired",
+		"evidenceRepairRequired",
+		"coverageRepairRequired",
+		"stateChangingOutputRequired",
+		"concreteFailureEvidenceRequired",
+		"repairActionPackage",
+		"requiredOutput",
+		"outputMode",
+		"requestedOutputMode",
+		"outputModeSelector",
+		"artifactOutputContract",
+	} {
+		delete(input, key)
+	}
 }
 
 func completionFollowUpCanUseAssessmentOnlyCoverageClosure(input map[string]any, context map[string]any) bool {

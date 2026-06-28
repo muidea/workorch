@@ -12,7 +12,7 @@ func RuntimeResourceHealthFromSteps(steps []StepView) map[string]any {
 	stepsWithResources := map[string]struct{}{}
 	var latestIssue map[string]any
 	for _, step := range steps {
-		resources := MapSliceValue(step.Output["validationResources"])
+		resources := validationResourceRecordsForStep(step)
 		if len(resources) == 0 {
 			continue
 		}
@@ -30,7 +30,7 @@ func RuntimeResourceHealthFromSteps(steps []StepView) map[string]any {
 			byKind[kind]++
 			byStatus[status]++
 			switch status {
-			case "released":
+			case "released", "pending":
 			default:
 				latestIssue = map[string]any{
 					"stepId": step.ID,
@@ -63,4 +63,11 @@ func RuntimeResourceHealthFromSteps(steps []StepView) map[string]any {
 		health["latestIssue"] = latestIssue
 	}
 	return health
+}
+
+func validationResourceRecordsForStep(step StepView) []map[string]any {
+	if resources := MapSliceValue(step.Output["validationResources"]); len(resources) > 0 {
+		return resources
+	}
+	return MapSliceValue(step.Input["validationResources"])
 }

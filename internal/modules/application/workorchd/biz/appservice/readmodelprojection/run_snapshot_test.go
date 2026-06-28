@@ -453,6 +453,100 @@ func TestAuthorityDiagnosticsFromRunSnapshotIncludesRuntimeDiagnostics(t *testin
 	}
 }
 
+func TestAuthorityDiagnosticsFromRunSnapshotReportsCompletedOpenCoverageDrift(t *testing.T) {
+	t.Parallel()
+
+	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
+		Run: readmodelcore.Run{
+			ID:    "run-completed-open-coverage",
+			State: string(common.RunStateCompleted),
+		},
+		CoverageWorkItems: []map[string]any{{
+			"id":     "cwi-open",
+			"status": "open",
+		}, {
+			"id":     "cwi-satisfied",
+			"status": "satisfied",
+		}},
+	})
+
+	if len(got) != 1 {
+		t.Fatalf("AuthorityDiagnostics = %+v, want one completion drift diagnostic", got)
+	}
+	if got[0].Code != "completion_gate_failed_but_run_completed" ||
+		got[0].Severity != "error" ||
+		got[0].Kind != "owner_projection_drift" ||
+		got[0].Source != "run.state+coverageWorkItems" {
+		t.Fatalf("diagnostic = %+v, want completed/open coverage drift", got[0])
+	}
+}
+
+func TestAuthorityDiagnosticsFromRunSnapshotReportsStaleValidationResources(t *testing.T) {
+	t.Parallel()
+
+	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
+		Run: readmodelcore.Run{
+			ID:    "run-stale-validation-resource",
+			State: string(common.RunStateRunning),
+		},
+		Steps: []readmodelcore.StepView{{
+			ID:    "run-stale-validation-resource/verify",
+			State: string(common.StepStateCompleted),
+			Output: map[string]any{
+				"validationResources": []any{map[string]any{
+					"kind":   "process",
+					"status": "released",
+				}, map[string]any{
+					"kind":         "scratch_dir",
+					"status":       "cleanup_failed",
+					"cleanupError": "permission denied",
+				}},
+			},
+		}},
+	})
+
+	if len(got) != 1 {
+		t.Fatalf("AuthorityDiagnostics = %+v, want one stale resource diagnostic", got)
+	}
+	if got[0].Code != "stale_validation_resource_lifecycle" ||
+		got[0].Severity != "warning" ||
+		got[0].Kind != "resource_lifecycle" ||
+		got[0].Source != "step[run-stale-validation-resource/verify].output.validationResources" ||
+		got[0].Candidate != "scratch_dir:cleanup_failed" {
+		t.Fatalf("diagnostic = %+v, want stale validation resource lifecycle diagnostic", got[0])
+	}
+}
+
+func TestAuthorityDiagnosticsFromRunSnapshotReportsTerminalPlannedValidationResourcesWithoutOutput(t *testing.T) {
+	t.Parallel()
+
+	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
+		Run: readmodelcore.Run{
+			ID:    "run-terminal-pending-validation-resource",
+			State: string(common.RunStateRunning),
+		},
+		Steps: []readmodelcore.StepView{{
+			ID:    "run-terminal-pending-validation-resource/verify",
+			State: string(common.StepStateFailed),
+			Input: map[string]any{
+				"validationResources": []any{map[string]any{
+					"kind":   "process_group",
+					"status": "pending",
+				}},
+			},
+		}},
+	})
+
+	if len(got) != 1 {
+		t.Fatalf("AuthorityDiagnostics = %+v, want one stale planned resource diagnostic", got)
+	}
+	if got[0].Code != "stale_validation_resource_lifecycle" ||
+		got[0].Source != "step[run-terminal-pending-validation-resource/verify].input.validationResources" ||
+		got[0].Candidate != "process_group:pending" {
+		t.Fatalf("diagnostic = %+v, want pending planned validation resource diagnostic", got[0])
+	}
+}
+
 func TestRunRecoverySnapshotFromModelsUsesCheckpointStep(t *testing.T) {
 	t.Parallel()
 

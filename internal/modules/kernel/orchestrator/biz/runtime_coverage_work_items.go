@@ -280,6 +280,9 @@ func (c *coverageSubsystem) updateFromGovernanceEvidence(run *runModel.Run, deci
 	if run == nil {
 		return false
 	}
+	if len(decisionRefs) == 0 && len(approvalRefs) == 0 {
+		return false
+	}
 	c.ensure(run, contexts...)
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) == 0 {
@@ -336,10 +339,20 @@ func coverageApplyUnlinkedAssessmentRejectedEvidence(items []map[string]any, upd
 }
 
 func (c *coverageSubsystem) validateReadyForAcceptance(run *runModel.Run, contexts ...context.Context) error {
-	if run == nil || len(run.ExecutionContext) == 0 {
+	if run == nil {
 		return nil
 	}
-	c.ensure(run, contexts...)
+	hydrated := false
+	if c != nil && c.items != nil && run.ID != "" {
+		var err error
+		hydrated, err = c.hydrateProjectionFromRepository(coverageRepositoryContext(run, contexts...), run)
+		if err != nil {
+			return err
+		}
+	}
+	if !hydrated {
+		c.ensure(run, contexts...)
+	}
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) == 0 {
 		return nil

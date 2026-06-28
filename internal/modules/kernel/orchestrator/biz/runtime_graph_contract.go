@@ -567,8 +567,13 @@ func assessmentOnlyContractCorrectionStepInput(step *runModel.Step, output map[s
 		sanitized["assessmentOnlyContractViolation"] = true
 		input["previousInvalidAssessmentOutput"] = compactStepOutputForLLMContext(sanitized)
 	}
-	contract := BuildConvergenceContract(nil, step, step, map[string]any{"input": input}, nil)
-	input = ApplyConvergenceContract(input, contract)
+	input["convergenceContract"] = compactConvergenceContract(ConvergenceContract{
+		State:            convergenceStateNeedAssessment,
+		RuntimeStage:     runtimeStageVerification,
+		RuntimeStageMode: "strict_convergence",
+		RepairObjective:  "complete_dod_goal_coverage_assessment",
+	})
+	clearExecutableCoverageContinuationContract(input)
 	return input
 }
 

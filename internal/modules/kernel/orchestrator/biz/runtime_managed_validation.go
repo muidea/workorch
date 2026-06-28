@@ -4,8 +4,10 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -186,4 +188,75 @@ func replaceManagedValidationPortPlaceholders(value string, portText string) str
 		value = strings.ReplaceAll(value, placeholder, portText)
 	}
 	return value
+}
+
+func attachManagedValidationResourceOwnership(input map[string]any, request runtimemodel.StepExecutionRequest, now time.Time) bool {
+	if len(input) == 0 || !inputHasManagedValidation(input) {
+		return false
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	createdAt := now.UTC().Format(time.RFC3339Nano)
+	resources := make([]map[string]any, 0, 2)
+	resources = append(resources, map[string]any{
+		"id":            managedValidationResourceID(request.WorkspaceID, request.RunID, request.StepID, "process_group"),
+		"workspaceId":   string(request.WorkspaceID),
+		"runId":         string(request.RunID),
+		"stepId":        string(request.StepID),
+		"kind":          "process_group",
+		"status":        "pending",
+		"cleanupPolicy": "process_group_on_timeout_or_completion",
+		"createdAt":     createdAt,
+		"source":        "runtime_dispatch",
+	})
+	if scratch := strings.TrimSpace(stringFromMap(input, validationScratchDirKey)); scratch != "" {
+		resources = append(resources, map[string]any{
+			"id":            managedValidationResourceID(request.WorkspaceID, request.RunID, request.StepID, "scratch_dir"),
+			"workspaceId":   string(request.WorkspaceID),
+			"runId":         string(request.RunID),
+			"stepId":        string(request.StepID),
+			"kind":          "scratch_dir",
+			"path":          scratch,
+			"status":        "pending",
+			"cleanupPolicy": "remove_step_scoped_scratch_on_completion",
+			"createdAt":     createdAt,
+			"source":        "runtime_dispatch",
+		})
+	}
+	if len(resources) == 0 {
+		return false
+	}
+	input["validationResources"] = resources
+	managed := mapFromValue(input["managedValidation"])
+	if managed == nil {
+		managed = map[string]any{}
+	}
+	refs := make([]string, 0, len(resources))
+	for _, resource := range resources {
+		if id := strings.TrimSpace(stringFromMap(resource, "id")); id != "" {
+			refs = append(refs, id)
+		}
+	}
+	managed["resourceOwnershipPersisted"] = true
+	managed["ownedResourceRefs"] = refs
+	input["managedValidation"] = managed
+	return true
+}
+
+func inputHasManagedValidation(input map[string]any) bool {
+	managed := mapFromValue(input["managedValidation"])
+	return boolValue(managed["runtimeManaged"]) ||
+		strings.TrimSpace(stringFromMap(managed, "kind")) == managedValidationSessionNodeKind ||
+		strings.TrimSpace(stringFromMap(managed, "originalNodeKind")) == managedValidationSessionNodeKind
+}
+
+func managedValidationResourceID(workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, kind string) string {
+	parts := []string{
+		string(workspaceID),
+		string(runID),
+		string(stepID),
+		strings.TrimSpace(kind),
+	}
+	return strings.Join(parts, ":")
 }

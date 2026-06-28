@@ -100,6 +100,7 @@ func (c *coverageSubsystem) reconcileValidationEvidence(
 				continue
 			}
 			seenPairs[pairKey] = true
+			beforeAccepted := coverageEvidenceCountForKind("validation", mapStringSliceValue(item["acceptedEvidenceByKind"])["validation"])
 			if coverageApplyWorkItemEvidenceWithOptions(
 				item,
 				[]string{"validation"},
@@ -110,7 +111,10 @@ func (c *coverageSubsystem) reconcileValidationEvidence(
 				"reconciled from runtime_step validation",
 				coverageEvidenceAcceptanceOptionsFromValidationResult(validation),
 			) {
-				bound++
+				afterAccepted := coverageEvidenceCountForKind("validation", mapStringSliceValue(item["acceptedEvidenceByKind"])["validation"])
+				if afterAccepted > beforeAccepted {
+					bound++
+				}
 				changed = true
 			}
 		}

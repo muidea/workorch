@@ -610,6 +610,8 @@ type validationNextActionRoute struct {
 	EscalationReason      string
 }
 
+const validationNoDeltaLoopRejectedThreshold = 3
+
 func validationNextActionRouteForRejectedDiagnostics(run *runmodel.Run, item map[string]any, records []*runtimemodel.EvidenceRecord) validationNextActionRoute {
 	if run == nil || len(item) == 0 || len(records) == 0 {
 		return validationNextActionRoute{}
@@ -660,6 +662,24 @@ func validationNextActionRouteForRejectedDiagnostics(run *runmodel.Run, item map
 				route.Reason = "validation contract retry exhausted; routing to managed harness"
 			}
 			return route
+		}
+	}
+	if validationDiagnosticAllowsNoDeltaStateChange(class) {
+		count := validationNoDeltaRejectedDiagnosticCountForCoverageItem(run, item, records)
+		if count >= validationNoDeltaLoopRejectedThreshold {
+			return validationNextActionRoute{
+				Route:                "validation_loop_without_state_change",
+				ActionType:           runtimemodel.NextActionTypeStateChange,
+				StageMode:            "validation_no_delta",
+				PolicyRef:            strings.TrimSpace(firstNonEmptyString(stringFromMap(policy, "policyRef"), stringFromMap(policy, "id"))),
+				Reason:               "validation loop made no accepted evidence delta",
+				DiagnosticEvidenceID: string(latest.ID),
+				DiagnosticClass:      class,
+				FailureSignature:     validationDiagnosticFailureSignature(latest),
+				RetryAttempt:         count,
+				RetryMaxAttempts:     validationNoDeltaLoopRejectedThreshold,
+				EscalationReason:     "validation_loop_without_state_change",
+			}
 		}
 	}
 	return validationNextActionRoute{}
@@ -831,6 +851,19 @@ func validationDiagnosticIsContractViolation(class string, record *runtimemodel.
 	return validationDiagnosticViolatedRule(record) != ""
 }
 
+func validationDiagnosticAllowsNoDeltaStateChange(class string) bool {
+	switch allowedValidationDiagnosticClass(class) {
+	case runtimemodel.ValidationDiagnosticBuildFailed,
+		runtimemodel.ValidationDiagnosticTestFailed,
+		runtimemodel.ValidationDiagnosticOutputInconclusive,
+		runtimemodel.ValidationDiagnosticEvidenceBindingMissing,
+		runtimemodel.ValidationDiagnosticEvidenceMetadataMissing:
+		return true
+	default:
+		return false
+	}
+}
+
 func validationOnlyRetryMaxForPolicy(policy map[string]any) int {
 	maxRetries := int(int64FromValue(policy["maxValidationOnlyRetriesPerFocus"]))
 	if maxRetries < 0 {
@@ -869,6 +902,83 @@ func repeatedValidationDiagnosticCountForCoverageItem(run *runmodel.Run, item ma
 		}
 	}
 	return count
+}
+
+func validationNoDeltaRejectedDiagnosticCountForCoverageItem(run *runmodel.Run, item map[string]any, records []*runtimemodel.EvidenceRecord) int {
+	if run == nil || len(item) == 0 || len(records) == 0 {
+		return 0
+	}
+	latestAcceptedIndex := -1
+	latestAcceptedTime := ""
+	for idx, record := range records {
+		if !acceptedEvidenceDeltaMatchesCoverageItem(run, item, record) {
+			continue
+		}
+		latestAcceptedIndex = idx
+		if ts := evidenceRecordTimestamp(record); ts != "" {
+			latestAcceptedTime = ts
+		}
+	}
+	count := 0
+	for idx, record := range records {
+		if record == nil ||
+			record.WorkspaceID != run.WorkspaceID ||
+			record.RunID != run.ID ||
+			record.Kind != runtimemodel.EvidenceKindDiagnostic ||
+			record.Status != runtimemodel.EvidenceStatusRejected ||
+			!validationDiagnosticEvidenceMatchesCoverageItem(record, item) {
+			continue
+		}
+		if latestAcceptedTime != "" {
+			if !runtimeTimestampAfter(evidenceRecordTimestamp(record), latestAcceptedTime) {
+				continue
+			}
+		} else if idx <= latestAcceptedIndex {
+			continue
+		}
+		if !validationDiagnosticAllowsNoDeltaStateChange(validationDiagnosticClassFromEvidenceRecord(record)) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func acceptedEvidenceDeltaMatchesCoverageItem(run *runmodel.Run, item map[string]any, record *runtimemodel.EvidenceRecord) bool {
+	if run == nil || record == nil ||
+		record.WorkspaceID != run.WorkspaceID ||
+		record.RunID != run.ID ||
+		record.Status != runtimemodel.EvidenceStatusAccepted {
+		return false
+	}
+	switch record.Kind {
+	case runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation:
+	default:
+		return false
+	}
+	return validationDiagnosticEvidenceMatchesCoverageItem(record, item)
+}
+
+func evidenceRecordTimestamp(record *runtimemodel.EvidenceRecord) string {
+	if record == nil {
+		return ""
+	}
+	return strings.TrimSpace(firstNonEmptyString(record.UpdatedAt, record.CreatedAt))
+}
+
+func removeStringsFromSlice(values []string, removals ...string) []string {
+	if len(values) == 0 || len(removals) == 0 {
+		return compactUniqueStrings(values)
+	}
+	removeSet := stringSet(removals)
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		if removeSet[strings.TrimSpace(value)] {
+			continue
+		}
+		ret = append(ret, value)
+	}
+	return compactUniqueStrings(ret)
 }
 
 func validationDiagnosticManagedHarnessAvailable(policy map[string]any) bool {
@@ -1051,9 +1161,15 @@ func validationFailureStateChangeRequiredOutput(requiredOutput map[string]any, r
 	}
 	next["requiredEvidenceKinds"] = []string{runtimemodel.EvidenceKindStateChange}
 	next["mustIncludeStateChangingNode"] = true
+	next["acceptedKinds"] = stateChangingRepairAcceptedKinds()
+	next["forbiddenKinds"] = removeStringsFromSlice(stringSliceFromValue(next["forbiddenKinds"]), stateChangingRepairAcceptedKinds()...)
 	next["mustAddressValidationFailureDiagnostic"] = true
 	next["mustNotRepeatRejectedValidationOnlyOutput"] = true
 	next["validationFailureToStateChange"] = true
+	if route.Route == "validation_loop_without_state_change" {
+		next["validationNoDeltaReason"] = route.Route
+		next["validationNoDeltaRejectedAttempts"] = route.RetryAttempt
+	}
 	if route.DiagnosticEvidenceID != "" {
 		next["diagnosticEvidenceId"] = route.DiagnosticEvidenceID
 	}

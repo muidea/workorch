@@ -39,6 +39,36 @@ func TestRuntimeResourceHealthFromStepsSummarizesValidationResources(t *testing.
 	}
 }
 
+func TestRuntimeResourceHealthFromStepsUsesPlannedInputResourcesWhenOutputMissing(t *testing.T) {
+	steps := []StepView{{
+		ID:    "run-resource-health/verify",
+		Kind:  "shell/command",
+		State: "dispatched",
+		Input: map[string]any{
+			"validationResources": []map[string]any{{
+				"kind":   "process_group",
+				"status": "pending",
+			}, {
+				"kind":   "scratch_dir",
+				"status": "pending",
+			}},
+		},
+	}}
+
+	health := RuntimeResourceHealthFromSteps(steps)
+	if health["resourceCount"] != 2 || health["stepsWithResources"] != 1 || health["released"] != false {
+		t.Fatalf("health = %+v, want planned pending input resources counted", health)
+	}
+	byKind, _ := health["byKind"].(map[string]int)
+	if byKind["process_group"] != 1 || byKind["scratch_dir"] != 1 {
+		t.Fatalf("byKind = %+v, want process_group and scratch_dir counts", byKind)
+	}
+	byStatus, _ := health["byStatus"].(map[string]int)
+	if byStatus["pending"] != 2 {
+		t.Fatalf("byStatus = %+v, want pending planned resources", byStatus)
+	}
+}
+
 func TestMapRuntimeExecutionStateIncludesResourceHealthWithoutCheckpoints(t *testing.T) {
 	steps := []StepView{{
 		ID:    "run-resource-health/verify",

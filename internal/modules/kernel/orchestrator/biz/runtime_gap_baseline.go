@@ -7,6 +7,7 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (
@@ -238,6 +239,19 @@ func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID comm
 	if input == nil {
 		input = map[string]any{}
 	}
+	if dispatchInputUsesLocalAssessmentContract(input) {
+		input = stripDispatchInputOwnerAuthority(input)
+		input["convergenceContract"] = compactConvergenceContract(ConvergenceContract{
+			State:            convergenceStateNeedAssessment,
+			RuntimeStage:     runtimeStageVerification,
+			RuntimeStageMode: "strict_convergence",
+			RepairObjective:  "complete_dod_goal_coverage_assessment",
+		})
+		clearExecutableCoverageContinuationContract(input)
+		input = attachStagePacketToStepInput(run, stepID, input)
+		input = scrubConvergenceDispatchDiagnosticAdvice(input)
+		return input, validateConvergenceDispatchInput(input)
+	}
 	if !dispatchInputHasConvergenceAuthority(run, input) {
 		input = attachStagePacketToStepInput(run, stepID, input)
 		input = scrubConvergenceDispatchDiagnosticAdvice(input)
@@ -252,6 +266,29 @@ func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID comm
 		return nil, err
 	}
 	return input, nil
+}
+
+func dispatchInputUsesLocalAssessmentContract(input map[string]any) bool {
+	if len(input) == 0 || !boolValue(input[stepInputKeyAssessmentOnly]) {
+		return false
+	}
+	return boolValue(input[stepInputKeyGraphLimitFollowUp]) ||
+		boolValue(input["assessmentOnlyContractCorrection"])
+}
+
+func stripDispatchInputOwnerAuthority(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	delete(input, convergenceAuthorityKey)
+	delete(input, gapBaselineKey)
+	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
+		executionContext = cloneStepPayload(executionContext)
+		delete(executionContext, convergenceAuthorityKey)
+		delete(executionContext, gapBaselineKey)
+		input["executionContext"] = executionContext
+	}
+	return input
 }
 
 func dispatchInputHasConvergenceAuthority(run *runModel.Run, input map[string]any) bool {
@@ -677,6 +714,7 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		"stagePacket.requiredOutput":         mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
 	}
 	state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state"))
+	nextAction := strings.TrimSpace(convergenceNextActionKind(nil, input))
 	top := firstRequiredOutputForSemantics(sources)
 	if len(top) == 0 {
 		return nil
@@ -688,6 +726,14 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 	}
 	if state == convergenceStateNeedValidation && topStateChanging {
 		return convergenceDispatchMisalignmentError("contractState=%s has state-changing requiredOutput", state)
+	}
+	if (state == convergenceStateNeedStateChange || nextAction == runtimemodel.NextActionTypeStateChange) && !requiredOutputHasAllowedStateChangingKind(top) {
+		appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "state_change requiredOutput lacks an allowed state-changing accepted kind")
+		return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: state_change lacks allowed state-changing accepted kind")
+	}
+	if (state == convergenceStateNeedValidation || nextAction == runtimemodel.NextActionTypeValidate) && requiredOutputAcceptsKind(top, "patch/apply") {
+		appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "validation requiredOutput accepts workspace-mutating output")
+		return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: validation accepts workspace-mutating output")
 	}
 	for label, required := range sources {
 		if len(required) == 0 {
@@ -701,6 +747,10 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		}
 		if topValidationOnly && requiredOutputAcceptsKind(required, "patch/apply") {
 			return convergenceDispatchMisalignmentError("validation-only requiredOutput accepts patch/apply: %s", label)
+		}
+		if topStateChanging && !requiredOutputHasAllowedStateChangingKind(required) {
+			appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", label, "state-changing requiredOutput has no allowed accepted kind")
+			return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: state-changing requiredOutput has no allowed accepted kind: %s", label)
 		}
 	}
 	shape := strings.TrimSpace(stringFromMap(top, "contractViolationRequiredOutputShape"))
@@ -878,6 +928,23 @@ func requiredOutputValidationOnly(required map[string]any) bool {
 
 func requiredOutputAcceptsKind(required map[string]any, kind string) bool {
 	return stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), kind)
+}
+
+func requiredOutputHasAllowedStateChangingKind(required map[string]any) bool {
+	if len(required) == 0 || !requiredOutputRequiresStateChanging(required) {
+		return false
+	}
+	accepted := compactUniqueStrings(stringSliceFromValue(required["acceptedKinds"]))
+	if len(accepted) == 0 {
+		return false
+	}
+	forbidden := stringSet(stringSliceFromValue(required["forbiddenKinds"]))
+	for _, kind := range accepted {
+		if strings.TrimSpace(kind) != "" && !forbidden[kind] {
+			return true
+		}
+	}
+	return false
 }
 
 func validateRequiredOutputFocusAlignment(authorityFocus map[string]any, label string, required map[string]any) error {

@@ -26,23 +26,62 @@ func TestRuntimeOrchestrator_RunningResumeReplansFromResolvedDecisionOnFailedNon
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	runtime := &requestCapturingRuntimeAdapter{fn: func(request runtimemodel.StepExecutionRequest) map[string]any {
-		if request.Input["repairObjective"] == repairObjectiveConcreteValidationEvidence || boolValue(request.Input["boundedValidationRequired"]) {
+		if boolValue(request.Input["graphFollowUp"]) ||
+			boolValue(request.Input[stepInputKeyAssessmentOnly]) ||
+			boolValue(request.Input[stepInputKeyGraphLimitFollowUp]) ||
+			boolValue(request.Input["assessmentOnlyContractCorrection"]) {
+			evidenceRefs := []string{string(request.StepID)}
+			if evidence := mapSliceFromValue(request.Input[stepInputKeyGraphEvidence]); len(evidence) > 0 {
+				for _, item := range evidence {
+					if ref := stringFromMap(item, "stepId"); ref != "" {
+						evidenceRefs = append(evidenceRefs, ref)
+					}
+				}
+				evidenceRefs = compactUniqueStrings(evidenceRefs)
+			}
 			return map[string]any{
 				"status": "completed",
-				"stage":  "llm_execution_graph_plan",
-				stepOutputKeyExecutionGraph: map[string]any{
-					"nodes": []map[string]any{{
-						"id":   "verify",
-						"kind": shellcommon.StepKindCommand,
-						"input": map[string]any{
-							"command": "sh",
-							"args":    []string{"-c", "printf ok"},
-							"validationEvidence": map[string]any{
-								"mode":            "controlled_substitute",
-								"observationType": "controlled_substitute_observation",
-								"substituteFor":   "runtime replan resume test fixture",
-							},
-						},
+				stepOutputKeyDoDAssessment: map[string]any{
+					"satisfied":   true,
+					"summary":     "runtime replan resume assessment completed",
+					"goalOutcome": "runtime replan resume test fixture completed",
+					"items": []map[string]any{{
+						"coverageWorkItemId":    "cwi-001",
+						"item":                  "current requested outcome remains governed by the current definition",
+						"state":                 "satisfied",
+						"requiredEvidenceKinds": []string{"validation"},
+						"evidenceRefs":          evidenceRefs,
+					}},
+				},
+			}
+		}
+		if request.Input["repairObjective"] == repairObjectiveConcreteValidationEvidence || boolValue(request.Input["boundedValidationRequired"]) {
+			return map[string]any{
+				"status":             "completed",
+				"stage":              "llm_completion_assessment",
+				"coverageWorkItemId": "cwi-001",
+				"coverageTargets": []map[string]any{{
+					"coverageWorkItemId":  "cwi-001",
+					"sourceRequirementId": "dod-running-resolved-replan-item",
+					"targetText":          "current requested outcome remains governed by the current definition",
+				}},
+				"validationEvidence": map[string]any{
+					"mode":            "controlled_substitute",
+					"observationType": "controlled_substitute_observation",
+					"substituteFor":   "runtime replan resume test fixture",
+					"targetRefs":      []string{"current requested outcome remains governed by the current definition"},
+					"observedClaims":  []string{"runtime replan resume test fixture completed"},
+				},
+				stepOutputKeyDoDAssessment: map[string]any{
+					"satisfied":   true,
+					"summary":     "runtime replan resume assessment completed",
+					"goalOutcome": "runtime replan resume test fixture completed",
+					"items": []map[string]any{{
+						"coverageWorkItemId":    "cwi-001",
+						"item":                  "current requested outcome remains governed by the current definition",
+						"state":                 "satisfied",
+						"requiredEvidenceKinds": []string{"validation"},
+						"evidenceRefs":          []string{string(request.StepID), string(request.StepID) + "/validation/runtime-step"},
 					}},
 				},
 			}

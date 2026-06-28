@@ -146,6 +146,8 @@ func TestReconcile_Idempotent(t *testing.T) {
 
 	step := reconcileStepShell("run-recon-1/graph-007/002-go-build-verify", "go")
 	validation := reconcileValidValidation("val-003", step.ID)
+	validation.TargetRef = "go-build-verify"
+	validation.Summary = "go-build-verify validation observed"
 
 	if changed, bound := c.reconcileValidationEvidence(run, []*runmodel.ValidationResult{validation}, []*runmodel.Step{step}); !changed || bound != 1 {
 		t.Fatalf("first reconcile = (%v,%d), want (true,1)", changed, bound)
@@ -289,6 +291,7 @@ func TestReconcile_GraphLeafFuzzyMatchBinds(t *testing.T) {
 
 	step := reconcileStepShell("run-recon-1/graph-007/002-go-build-verify", "go")
 	validation := reconcileValidValidation("val-009", step.ID)
+	validation.TargetRef = "go-build-verify"
 
 	changed, bound := c.reconcileValidationEvidence(run, []*runmodel.ValidationResult{validation}, []*runmodel.Step{step})
 	if !changed || bound != 1 {

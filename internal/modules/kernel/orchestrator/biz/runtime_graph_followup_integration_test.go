@@ -1375,23 +1375,22 @@ func TestGraphExpansionLimitFollowUpRestoresCoverageValidationConvergenceContrac
 
 	input := orch.graphManager().graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx, run, anchor, steps, maxGraphFollowUpExpansionAttempts+1)
 
-	if input[stepInputKeyAssessmentOnly] == true {
-		t.Fatalf("input = %+v, want coverage convergence contract to clear graph-limit assessment-only", input)
+	if input[stepInputKeyAssessmentOnly] != true ||
+		input["assessmentOnlyReason"] != "graph_follow_up_expansion_limit_exceeded" {
+		t.Fatalf("input = %+v, want graph-limit assessment-only contract", input)
 	}
 	if input[stepInputKeyRuntimeStage] != runtimeStageVerification ||
-		input["repairObjective"] != repairObjectiveConcreteValidationEvidence ||
-		input["boundedValidationRequired"] != true {
-		t.Fatalf("input = %+v, want concrete validation convergence contract", input)
+		input["repairObjective"] != nil ||
+		input["boundedValidationRequired"] != nil {
+		t.Fatalf("input = %+v, want no executable validation contract", input)
 	}
 	contract := mapFromValue(input["convergenceContract"])
-	if stringFromMap(contract, "state") != convergenceStateNeedValidation {
-		t.Fatalf("convergenceContract = %+v, want need_validation", contract)
+	if stringFromMap(contract, "state") != convergenceStateNeedAssessment {
+		t.Fatalf("convergenceContract = %+v, want need_assessment", contract)
 	}
 	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
-	if required["mustProduceConcreteValidationEvidence"] != true ||
-		required["mustDeclareCoverageTargets"] != true ||
-		required["mustReferenceCoverageWorkItem"] != true {
-		t.Fatalf("requiredOutput = %+v, want coverage-bound validation contract", required)
+	if len(required) != 0 {
+		t.Fatalf("requiredOutput = %+v, want no executable required output", required)
 	}
 	targets := mapSliceFromValue(input["coverageTargetSet"])
 	if len(targets) != 1 || targets[0]["sourceRequirementId"] != "dod-validation-dod-item-001" {
@@ -1847,6 +1846,105 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAllowsConcreteValidation
 	}
 	if boolValue(current.Output["ignoredExecutionGraph"]) {
 		t.Fatalf("concrete validation graph was ignored: %+v", current.Output)
+	}
+}
+
+func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToRepeatedConcreteValidationEvidenceGraph(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{
+		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			if boolValue(request.Input[stepInputKeyAssessmentOnly]) {
+				return map[string]any{
+					"completionState": "completed",
+					stepOutputKeyDoDAssessment: map[string]any{
+						"satisfied":   true,
+						"summary":     "bounded concrete validation graph expansion assessed",
+						"goalOutcome": "bounded",
+						"items": []map[string]any{{
+							"item":         "bounded",
+							"state":        "satisfied",
+							"evidenceRefs": []string{string(request.StepID)},
+						}},
+					},
+				}, nil
+			}
+			return map[string]any{"status": "completed"}, nil
+		},
+	}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-graph-limit-repeated-validation-evidence")
+	runID := common.RunID("run-graph-limit-repeated-validation-evidence")
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		State:           common.RunStateRunning,
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	for i := 0; i < maxGraphFollowUpExpansionAttempts; i++ {
+		step := &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/follow-up-validation-%d", runID, i)),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateCompleted,
+			Input: map[string]any{"graphFollowUp": true},
+			Output: map[string]any{
+				stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+					{ID: fmt.Sprintf("verify-%d", i), Kind: "shell/command", Input: map[string]any{"command": "true"}},
+				}},
+			},
+		}
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed expansion step: %v", err)
+		}
+	}
+	current := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/follow-up-current"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"graphFollowUp":              true,
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+		},
+		Output: map[string]any{
+			stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+				{ID: "verify-current", Kind: "shell/command", Input: map[string]any{"command": "true"}},
+			}},
+		},
+	}
+	if err := stepRepo.Create(ctx, current); err != nil {
+		t.Fatalf("seed current step: %v", err)
+	}
+
+	handled, err := orch.validateGraphExpansionBoundary(ctx, run, current, nil, current.Output, workspace)
+	if err != nil {
+		t.Fatalf("validate graph expansion boundary: %v", err)
+	}
+	if !handled {
+		t.Fatalf("handled = false, want repeated concrete validation evidence graph to obey graph expansion limit")
+	}
+	stored, err := stepRepo.Get(ctx, current.ID)
+	if err != nil {
+		t.Fatalf("get current step: %v", err)
+	}
+	if !boolValue(stored.Output["ignoredExecutionGraph"]) ||
+		stored.Output["graphFollowUpExpansionKind"] != "concrete_validation_evidence" {
+		t.Fatalf("current output = %+v, want concrete validation expansion limit marker", stored.Output)
 	}
 }
 

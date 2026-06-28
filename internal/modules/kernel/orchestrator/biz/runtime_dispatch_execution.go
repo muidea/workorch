@@ -181,6 +181,13 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		Input:                         runtimeInput,
 		RecoveryPolicy:                recoveryPolicy,
 	}
+	if attachManagedValidationResourceOwnership(runtimeInput, request, time.Now().UTC()) {
+		request.Input = runtimeInput
+		step.Input = cloneStepPayload(runtimeInput)
+		if err := o.steps.Update(ctx, step); err != nil {
+			return err
+		}
+	}
 	if requester, ok := o.runtime.(RuntimeExecutionRequester); ok {
 		accepted, err := requester.RequestRuntimeStepExecution(ctx, request)
 		if err == nil {
@@ -909,13 +916,20 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 	}
 	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
 		if !stepRequiresConcreteFailureEvidenceAcquisition(step) && graphIsConcreteValidationEvidenceGraph(graph) {
-			return false, nil
-		}
-		if inputRequiresStateChangingOutput(step.Input) && graphIsConcreteStateChangingContinuation(graph) {
+			count := o.graphManager().graphFollowUpConcreteValidationExpansionCount(ctx, run.ID)
+			if count <= maxGraphFollowUpExpansionAttempts {
+				return false, nil
+			}
+			output["graphFollowUpExpansionCount"] = count
+			output["graphFollowUpExpansionKind"] = "concrete_validation_evidence"
+		} else if inputRequiresStateChangingOutput(step.Input) && graphIsConcreteStateChangingContinuation(graph) {
 			return false, nil
 		}
 	}
 	count := o.graphManager().graphFollowUpExpansionCount(ctx, run.ID)
+	if concreteValidationCount := int(int64FromValue(output["graphFollowUpExpansionCount"])); concreteValidationCount > count {
+		count = concreteValidationCount
+	}
 	if count <= maxGraphFollowUpExpansionAttempts {
 		return false, nil
 	}

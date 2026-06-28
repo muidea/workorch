@@ -231,6 +231,8 @@ func TestEnsureGapBaselineHydratesCoverageContextFromOwnerRepository(t *testing.
 			"validationEvidence": map[string]any{
 				"mode":            "runtime_behavior",
 				"observationType": "runtime_observation",
+				"targetRefs":      []string{"hydrate coverage context from owner storage"},
+				"observedClaims":  []string{"owner storage coverage context was hydrated"},
 			},
 		},
 		State: common.StepStateCompleted,
