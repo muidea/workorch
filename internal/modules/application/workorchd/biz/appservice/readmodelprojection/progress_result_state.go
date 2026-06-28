@@ -6,15 +6,26 @@ import (
 )
 
 func PrimaryTaskProgressResult(items []readmodelcore.Result) *readmodelcore.Result {
+	var selected *readmodelcore.Result
 	for idx := range items {
-		if items[idx].State == string(common.ResultStateAccepted) {
-			return &items[idx]
+		if items[idx].State == string(common.ResultStateAccepted) && isFinalOutcomeResult(items[idx]) {
+			if selected == nil || resultTimeValue(items[idx]) >= resultTimeValue(*selected) {
+				selected = &items[idx]
+			}
 		}
 	}
-	if len(items) == 0 {
-		return nil
+	if selected != nil {
+		return selected
 	}
-	return &items[len(items)-1]
+	for idx := range items {
+		if isIntermediateAcceptedEvidence(items[idx]) {
+			continue
+		}
+		if selected == nil || resultTimeValue(items[idx]) >= resultTimeValue(*selected) {
+			selected = &items[idx]
+		}
+	}
+	return selected
 }
 
 func ResultProgressState(snapshot readmodelcore.RunSnapshot) string {
@@ -25,7 +36,7 @@ func ResultProgressState(snapshot readmodelcore.RunSnapshot) string {
 
 func HasAcceptedRunResult(snapshot readmodelcore.RunSnapshot) bool {
 	for _, item := range RunScopedResults(snapshot) {
-		if item.State == string(common.ResultStateAccepted) {
+		if item.State == string(common.ResultStateAccepted) && isTerminalOutcomeEligibleResult(item, snapshot.Run) {
 			return true
 		}
 	}

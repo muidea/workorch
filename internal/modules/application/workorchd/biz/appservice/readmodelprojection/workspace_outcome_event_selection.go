@@ -11,7 +11,7 @@ func latestWorkspaceRunForOutcome(snapshot readmodelcore.WorkspaceSnapshot) *rea
 	runsByID := workspaceOutcomeRunsByID(snapshot.Runs)
 	selectedEvent := latestWorkspaceOutcomeRunEvent(snapshot, runsByID)
 	if selectedEvent != nil {
-		if result := latestTerminalWorkspaceResult(snapshot.Results); result != nil && resultNotBeforeEvent(*result, *selectedEvent) {
+		if result := latestTerminalWorkspaceResult(snapshot.Results, runsByID); result != nil && resultNotBeforeEvent(*result, *selectedEvent) {
 			if run := runsByID[result.RunID]; run != nil {
 				return run
 			}

@@ -19,7 +19,8 @@ func MapRunOutcome(snapshot readmodelcore.RunSnapshot) readmodelcore.RunOutcome 
 		ret.Summary = ret.Reason
 		return ret
 	}
-	if result := latestTerminalWorkspaceResult(runScopedResults(snapshot)); result != nil {
+	runsByID := map[string]*readmodelcore.Run{snapshot.Run.ID: &snapshot.Run}
+	if result := latestTerminalWorkspaceResult(runScopedResults(snapshot), runsByID); result != nil {
 		applyRunOutcomeTerminalResult(&ret, *result)
 		return ret
 	}

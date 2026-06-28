@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -55,6 +56,35 @@ func TestWorkspaceSnapshotFromModelsProjectsBaseWorkspaceView(t *testing.T) {
 	}
 	if got.Acceptance.Summary.AcceptedSlices != 0 || got.Acceptance.Summary.ActiveSlices != 0 || got.Acceptance.CurrentFocus != nil {
 		t.Fatalf("Acceptance = %+v, want empty projection for run without slices", got.Acceptance)
+	}
+}
+
+func TestSelectTerminalResultRunIgnoresAcceptedSlice(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-terminal-result-slice")
+	runID := common.RunID("run-terminal-result-slice")
+	result, run := SelectTerminalResultRun(workspaceID, map[common.RunID]*runmodel.Run{
+		runID: {ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted},
+	}, []*resultmodel.Result{
+		{
+			ID:          "run-terminal-result-slice/result/acceptance-slice/slice-001",
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			State:       common.ResultStateAccepted,
+			SourceType:  resultcommon.SourceTypeAcceptanceSlice,
+			SummaryDetail: resultmodel.ResultSummary{
+				Diagnostics: map[string]any{
+					"resultScope":              resultcommon.SourceTypeAcceptanceSlice,
+					"finalCompletionGateState": "not_final_result",
+				},
+			},
+			CreatedAt: "2026-06-28T05:55:05Z",
+			UpdatedAt: "2026-06-28T05:55:05Z",
+		},
+	})
+	if result != nil || run != nil {
+		t.Fatalf("SelectTerminalResultRun = %+v/%+v, want accepted slice ignored", result, run)
 	}
 }
 

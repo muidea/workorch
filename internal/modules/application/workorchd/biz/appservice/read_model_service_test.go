@@ -4926,6 +4926,176 @@ func TestMapWorkspaceOutcomeDoesNotReuseAcceptedResultAfterDefinitionsReopenWork
 	}
 }
 
+func TestMapWorkspaceOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
+	snapshot := WorkspaceSnapshot{
+		Workspace: Workspace{
+			ID:          "ws-running-slice",
+			State:       string(common.WorkspaceStateActive),
+			ActiveRunID: "run-running-slice",
+		},
+		Run: &Run{
+			ID:          "run-running-slice",
+			WorkspaceID: "ws-running-slice",
+			State:       string(common.RunStateRunning),
+		},
+		Runs: []Run{
+			{ID: "run-running-slice", WorkspaceID: "ws-running-slice", State: string(common.RunStateRunning)},
+		},
+		Results: []Result{
+			{
+				ID:          "run-running-slice/result/acceptance-slice/slice-001",
+				WorkspaceID: "ws-running-slice",
+				RunID:       "run-running-slice",
+				State:       string(common.ResultStateAccepted),
+				SourceType:  resultcommon.SourceTypeAcceptanceSlice,
+				Summary:     "slice accepted",
+				SummaryDetail: &readmodelcore.ResultSummary{
+					Diagnostics: map[string]any{
+						"resultScope":              resultcommon.SourceTypeAcceptanceSlice,
+						"finalCompletionGateState": "not_final_result",
+					},
+				},
+				CreatedAt: "2026-06-28T05:55:05Z",
+				UpdatedAt: "2026-06-28T05:55:05Z",
+			},
+		},
+		CoverageSummary: map[string]any{"open": 1, "failed": 1},
+	}
+
+	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	if outcome.Accepted || outcome.Terminal || outcome.ResultID != "" {
+		t.Fatalf("outcome = %+v, want running non-terminal outcome without accepted slice promotion", outcome)
+	}
+	if outcome.State != string(common.RunStateRunning) || outcome.RawWorkspaceState != string(common.WorkspaceStateActive) {
+		t.Fatalf("outcome = %+v, want running outcome with raw workspace active state retained", outcome)
+	}
+}
+
+func TestMapRunOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
+	snapshot := RunSnapshot{
+		Run: Run{
+			ID:          "run-slice-running",
+			WorkspaceID: "ws-slice-running",
+			State:       string(common.RunStateRunning),
+		},
+		Results: []Result{
+			{
+				ID:          "run-slice-running/result/acceptance-slice/slice-001",
+				WorkspaceID: "ws-slice-running",
+				RunID:       "run-slice-running",
+				State:       string(common.ResultStateAccepted),
+				SourceType:  resultcommon.SourceTypeAcceptanceSlice,
+				SummaryDetail: &readmodelcore.ResultSummary{
+					Diagnostics: map[string]any{
+						"resultScope":              resultcommon.SourceTypeAcceptanceSlice,
+						"finalCompletionGateState": "not_final_result",
+					},
+				},
+				CreatedAt: "2026-06-28T05:55:05Z",
+				UpdatedAt: "2026-06-28T05:55:05Z",
+			},
+		},
+	}
+
+	outcome := readmodelprojection.MapRunOutcome(snapshot)
+	if outcome.Accepted || outcome.Terminal || outcome.ResultID != "" {
+		t.Fatalf("outcome = %+v, want running non-terminal run outcome without accepted slice promotion", outcome)
+	}
+	if outcome.State != string(common.RunStateRunning) || outcome.RawState != string(common.RunStateRunning) {
+		t.Fatalf("outcome = %+v, want running state retained", outcome)
+	}
+}
+
+func TestResultProgressDoesNotCompleteFromAcceptedSlice(t *testing.T) {
+	snapshot := RunSnapshot{
+		Run: Run{
+			ID:          "run-progress-slice",
+			WorkspaceID: "ws-progress-slice",
+			State:       string(common.RunStateRunning),
+		},
+		Results: []Result{
+			{
+				ID:          "run-progress-slice/result/acceptance-slice/slice-001",
+				WorkspaceID: "ws-progress-slice",
+				RunID:       "run-progress-slice",
+				State:       string(common.ResultStateAccepted),
+				SourceType:  resultcommon.SourceTypeAcceptanceSlice,
+				SummaryDetail: &readmodelcore.ResultSummary{
+					Diagnostics: map[string]any{
+						"resultScope":              resultcommon.SourceTypeAcceptanceSlice,
+						"finalCompletionGateState": "not_final_result",
+					},
+				},
+			},
+		},
+	}
+
+	if got := readmodelprojection.ResultProgressState(snapshot); got == "completed" {
+		t.Fatalf("ResultProgressState = %q, want non-completed for accepted slice on running run", got)
+	}
+	if readmodelprojection.HasAcceptedRunResult(snapshot) {
+		t.Fatal("HasAcceptedRunResult = true, want false for accepted slice on running run")
+	}
+}
+
+func TestFinalAcceptedResultStillProducesTerminalOutcome(t *testing.T) {
+	snapshot := WorkspaceSnapshot{
+		Workspace: Workspace{
+			ID:    "ws-final-accepted",
+			State: string(common.WorkspaceStateCompleted),
+		},
+		Runs: []Run{
+			{ID: "run-final-accepted", WorkspaceID: "ws-final-accepted", State: string(common.RunStateCompleted)},
+		},
+		Results: []Result{
+			{
+				ID:          "run-final-accepted/result/dod-assessment",
+				WorkspaceID: "ws-final-accepted",
+				RunID:       "run-final-accepted",
+				State:       string(common.ResultStateAccepted),
+				SourceType:  resultcommon.SourceTypeDoDAssessment,
+				Summary:     "final accepted result",
+				CreatedAt:   "2026-06-28T05:55:05Z",
+				UpdatedAt:   "2026-06-28T05:55:05Z",
+			},
+		},
+	}
+
+	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	if !outcome.Accepted || !outcome.Terminal || outcome.State != "accepted" || outcome.ResultID != "run-final-accepted/result/dod-assessment" {
+		t.Fatalf("outcome = %+v, want final accepted terminal outcome", outcome)
+	}
+}
+
+func TestTerminalRejectedResultStillProducesFailedOutcome(t *testing.T) {
+	snapshot := WorkspaceSnapshot{
+		Workspace: Workspace{
+			ID:    "ws-final-rejected",
+			State: string(common.WorkspaceStateFailed),
+		},
+		Runs: []Run{
+			{ID: "run-final-rejected", WorkspaceID: "ws-final-rejected", State: string(common.RunStateFailed)},
+		},
+		Results: []Result{
+			{
+				ID:          "run-final-rejected/result/dod-assessment",
+				WorkspaceID: "ws-final-rejected",
+				RunID:       "run-final-rejected",
+				State:       string(common.ResultStateRejected),
+				SourceType:  resultcommon.SourceTypeDoDAssessment,
+				Summary:     "final rejected result",
+				CreatedAt:   "2026-06-28T05:55:05Z",
+				UpdatedAt:   "2026-06-28T05:55:05Z",
+			},
+		},
+	}
+
+	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	if outcome.Accepted || !outcome.Terminal || outcome.State != "failed" || outcome.ResultID != "run-final-rejected/result/dod-assessment" {
+		t.Fatalf("outcome = %+v, want final rejected terminal outcome", outcome)
+	}
+}
+
 func TestReadTerminalRunModelsWithBackendRemainStableAcrossReloads(t *testing.T) {
 	dataRoot := t.TempDir()
 	workspaceID := "ws-run-terminal-reload"

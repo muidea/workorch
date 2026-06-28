@@ -5,12 +5,12 @@ import (
 )
 
 func workspaceOutcomeRunFromResultFallback(results []readmodelcore.Result, runsByID map[string]*readmodelcore.Run) *readmodelcore.Run {
-	if result := latestTerminalWorkspaceResult(results); result != nil {
+	if result := latestTerminalWorkspaceResult(results, runsByID); result != nil {
 		if run := runsByID[result.RunID]; run != nil {
 			return run
 		}
 	}
-	if result := primaryAcceptedResult(results); result != nil {
+	if result := primaryAcceptedResult(results, runsByID); result != nil {
 		if run := runsByID[result.RunID]; run != nil {
 			return run
 		}
