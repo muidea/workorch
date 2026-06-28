@@ -872,7 +872,7 @@ func stateChangingRepairHasActionableImplementationSurface(input map[string]any,
 	if stateChangingRepairHasConcreteTargetEvidence(input, pkg) {
 		return true
 	}
-	return boolValue(input["emptyWorkspaceEvidenceEscalatedToImplementation"])
+	return boolValue(input["emptyWorkspaceEvidenceEscalatedToImplementation"]) && !inputHasNonEmptyWorkspaceManifest(input)
 }
 
 func repairHasImplementationTargetEvidence(input map[string]any, pkg map[string]any) bool {

@@ -114,17 +114,32 @@ func applyFirstRunGapBaselineStateChangingContract(input map[string]any) map[str
 	}
 	setRuntimeStage(input, runtimeStageRepair)
 	input[stepInputKeySoulStage] = soulStageExecution
-	input["repairObjective"] = repairObjectiveStateChangingOutput
-	input["stateChangingOutputRequired"] = true
 	input["firstRunGapStateChangingContract"] = true
-	input["emptyWorkspaceEvidenceEscalatedToImplementation"] = true
 	pkg := map[string]any{
 		coverageWorkItemContextKey: context,
 		"coverageRepairRequired":   true,
 		"coverageTargetSet":        targets,
 		"requiredOutput":           stateChangingRepairRequiredOutput(),
 	}
+	if inputHasNonEmptyWorkspaceManifest(input) {
+		input["repairObjective"] = repairObjectiveAcquireFailureEvidence
+		input["concreteFailureEvidenceRequired"] = true
+		input["evidenceAcquisitionReason"] = "state_changing_repair_target_evidence_missing"
+		input["repairGuidance"] = concreteFailureEvidenceAcquisitionGuidance()
+		pkg["evidenceAcquisitionRequired"] = true
+		pkg["evidenceAcquisitionReason"] = "state_changing_repair_target_evidence_missing"
+		pkg["repairObjective"] = repairObjectiveAcquireFailureEvidence
+	} else {
+		input["repairObjective"] = repairObjectiveStateChangingOutput
+		input["stateChangingOutputRequired"] = true
+		input["emptyWorkspaceEvidenceEscalatedToImplementation"] = true
+	}
 	required := mapFromValue(pkg["requiredOutput"])
+	if input["repairObjective"] == repairObjectiveAcquireFailureEvidence {
+		required = evidenceAcquisitionRequiredOutputWithScratch(input, pkg, required)
+	} else if len(required) == 0 {
+		required = stateChangingRepairRequiredOutput()
+	}
 	required["mustDeclareCoverageTargets"] = true
 	required["mustReferenceCoverageWorkItem"] = true
 	required["coverageTargetMatchRule"] = "patch/apply coverageTargets must match one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
@@ -133,6 +148,22 @@ func applyFirstRunGapBaselineStateChangingContract(input map[string]any) map[str
 	input["coverageRepairRequired"] = true
 	input["coverageTargetSet"] = targets
 	return input
+}
+
+func inputHasNonEmptyWorkspaceManifest(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	for _, source := range []any{
+		input[stepInputKeyWorkspaceFileManifest],
+		mapFromValue(input[stepInputKeyExecutionContextPackage])[stepInputKeyWorkspaceFileManifest],
+		mapFromValue(input["repairActionPackage"])[stepInputKeyWorkspaceFileManifest],
+	} {
+		if len(mapSliceFromValue(source)) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func replanRunRequiresStateChangingOutput(run *runModel.Run) bool {

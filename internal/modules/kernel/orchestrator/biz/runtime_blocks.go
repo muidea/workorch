@@ -319,6 +319,9 @@ func decisionBlockDeclaresExternalOrRuntimeDependency(context map[string]any) bo
 }
 
 func knownReadableWorkspaceResourceDecisionContext(context map[string]any) bool {
+	if decisionBlockDeclaresExternalOrRuntimeDependency(context) {
+		return false
+	}
 	resources := knownReadableWorkspaceResourceNames(context)
 	if len(resources) == 0 {
 		return false
@@ -332,6 +335,9 @@ func knownReadableWorkspaceResourceDecisionContext(context map[string]any) bool 
 }
 
 func knownReadableWorkspaceResourceDecisionSpec(spec runtimeDecisionBlockSpec) bool {
+	if decisionBlockDeclaresExternalOrRuntimeDependency(spec.Context) {
+		return false
+	}
 	context := cloneStepPayload(spec.Context)
 	if context == nil {
 		context = map[string]any{}
@@ -372,13 +378,51 @@ func knownReadableWorkspaceResourceNames(context map[string]any) []string {
 		for _, item := range stringListFromValue(source["knownResources"]) {
 			add(item)
 		}
+		for _, item := range stringListFromValue(source["visibleWorkspaceFiles"]) {
+			add(item)
+		}
 		for _, item := range mapSliceFromValue(source[stepInputKeyWorkspaceFileManifest]) {
 			add(stringFromMap(item, "path"))
 		}
+		collectDecisionCandidateReadableResources(source["candidateValues"], add)
 	}
 	collect(context)
 	collect(mapFromValue(context["knownValues"]))
+	collect(mapFromValue(context["candidateValues"]))
 	return ret
+}
+
+func collectDecisionCandidateReadableResources(value any, add func(string)) {
+	candidates := mapFromValue(value)
+	if len(candidates) == 0 {
+		return
+	}
+	for _, key := range []string{
+		"repairTargetSnapshot.path",
+		"targetSnapshot.path",
+		"targetPath",
+		"targetRef",
+		"path",
+	} {
+		for _, item := range stringListFromValue(candidates[key]) {
+			add(item)
+		}
+		if text := strings.TrimSpace(stringFromMap(candidates, key)); text != "" {
+			add(text)
+		}
+	}
+	for _, key := range []string{"repairTargetSnapshot", "targetSnapshot"} {
+		nested := mapFromValue(candidates[key])
+		if len(nested) == 0 {
+			continue
+		}
+		for _, item := range stringListFromValue(nested["path"]) {
+			add(item)
+		}
+		if text := strings.TrimSpace(stringFromMap(nested, "path")); text != "" {
+			add(text)
+		}
+	}
 }
 
 func isDecisionKnownResourceName(value string) bool {
@@ -422,6 +466,15 @@ func readableResourceReferenceTexts(context map[string]any) []string {
 			ret = append(ret, text)
 		}
 	}
+	appendCandidates := func(value any) {
+		collectDecisionCandidateReadableResources(value, func(item string) {
+			if strings.TrimSpace(item) != "" {
+				ret = append(ret, item)
+			}
+		})
+	}
+	appendCandidates(context["candidateValues"])
+	appendCandidates(mapFromValue(context["knownValues"])["candidateValues"])
 	return ret
 }
 
