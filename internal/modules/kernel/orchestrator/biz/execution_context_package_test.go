@@ -298,6 +298,90 @@ func TestRunExecutionContextPackageIncludesProcessEvidenceTimeline(t *testing.T)
 	}
 }
 
+func TestRunExecutionContextPackageIncludesCompactEvidenceLedger(t *testing.T) {
+	ctx := context.Background()
+	evidenceRepo := memrepo.NewEvidenceRecordRepository()
+	run := &runmodel.Run{
+		ID:                 "run-evidence-ledger-context",
+		WorkspaceID:        "ws-evidence-ledger-context",
+		DefinitionRevision: "rev-evidence-ledger",
+	}
+	largePayload := strings.Repeat("raw validation payload ", 2000)
+	if err := evidenceRepo.Create(ctx, &runtimemodel.EvidenceRecord{
+		ID:                 "evidence-validation-primary",
+		WorkspaceID:        run.WorkspaceID,
+		RunID:              run.ID,
+		StepID:             "run-evidence-ledger-context/graph-001/002-validate",
+		DefinitionRevision: "rev-evidence-ledger",
+		Kind:               runtimemodel.EvidenceKindValidation,
+		Status:             runtimemodel.EvidenceStatusAccepted,
+		SourceType:         "validation_result",
+		SourceRef:          "validation://primary",
+		SubjectType:        "runtime_step",
+		SubjectID:          "target-primary",
+		CoverageItemRefs:   []string{"cwi-primary"},
+		CreatedAt:          "2026-06-28T10:00:00Z",
+		Metadata: map[string]any{
+			"evidenceQuality": "valid",
+			"proofKind":       "direct",
+			"targetRefs":      []string{"target-primary"},
+			"observedClaims":  []string{"primary target behavior observed"},
+			"sourceOutputRef": "workorch://workspaces/ws-evidence-ledger-context/runs/run-evidence-ledger-context/steps/run-evidence-ledger-context/graph-001/002-validate/output.json",
+			"rawOutput":       largePayload,
+			"stdout":          largePayload,
+		},
+	}); err != nil {
+		t.Fatalf("create evidence record: %v", err)
+	}
+	current := &runmodel.Step{
+		ID:    "run-evidence-ledger-context/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{stepInputKeyRuntimeStage: runtimeStageExecution},
+	}
+
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
+	}
+	orch.enrichLLMStepInputContext(ctx, run, current, nil)
+
+	pkg := mapFromValue(current.Input[stepInputKeyExecutionContextPackage])
+	ledger := mapFromValue(pkg[stepInputKeyEvidenceLedger])
+	if ledger["schemaVersion"] != "workorch.evidence_ledger_context.v1" {
+		t.Fatalf("evidenceLedger = %+v, want schema version", ledger)
+	}
+	items := mapSliceFromValue(ledger["items"])
+	if len(items) != 1 {
+		t.Fatalf("evidenceLedger.items = %+v, want one item", items)
+	}
+	item := items[0]
+	if item["evidenceRef"] != "evidence://evidence-validation-primary" ||
+		item["kind"] != runtimemodel.EvidenceKindValidation ||
+		item["status"] != runtimemodel.EvidenceStatusAccepted ||
+		item["evidenceQuality"] != "valid" {
+		t.Fatalf("evidence item = %+v, want compact accepted validation metadata", item)
+	}
+	if refs := stringSliceFromValue(item["targetRefs"]); len(refs) != 1 || refs[0] != "target-primary" {
+		t.Fatalf("targetRefs = %+v, want target-primary", item["targetRefs"])
+	}
+	if claims := stringSliceFromValue(item["observedClaims"]); len(claims) != 1 || claims[0] != "primary target behavior observed" {
+		t.Fatalf("observedClaims = %+v, want concise observed claim", item["observedClaims"])
+	}
+	if item["payloadRef"] == "" {
+		t.Fatalf("evidence item = %+v, want payloadRef", item)
+	}
+	encoded, err := json.Marshal(ledger)
+	if err != nil {
+		t.Fatalf("marshal evidence ledger: %v", err)
+	}
+	if strings.Contains(string(encoded), strings.Repeat("raw validation payload ", 20)) {
+		t.Fatalf("evidence ledger leaked raw payload")
+	}
+	if len(mapFromValue(current.Input[stepInputKeyEvidenceLedger])) == 0 {
+		t.Fatalf("top-level evidenceLedger missing from LLM step input: %+v", current.Input)
+	}
+}
+
 func TestProcessEvidenceTimelineUsesRecentCompleteWindowAndCompactHistory(t *testing.T) {
 	run := &runmodel.Run{ID: "run-process-history-compact", WorkspaceID: "ws-process-history-compact"}
 	steps := make([]*runmodel.Step, 0, maxLLMContextSliceItems+5)

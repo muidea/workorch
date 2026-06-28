@@ -40,13 +40,14 @@ type coverageWorkItemSource struct {
 }
 
 type coverageWorkItemUpdate struct {
-	WorkItemIDs    []string
-	TargetTokens   []string
-	EvidenceKinds  []string
-	EvidenceRefs   []string
-	Accepted       bool
-	CloseSatisfied bool
-	Reason         string
+	WorkItemIDs       []string
+	TargetTokens      []string
+	EvidenceKinds     []string
+	EvidenceRefs      []string
+	Accepted          bool
+	CloseSatisfied    bool
+	Reason            string
+	AcceptanceOptions coverageEvidenceAcceptanceOptions
 }
 
 type coverageSubsystem struct {
@@ -173,7 +174,7 @@ func (c *coverageSubsystem) updateFromCompletedStep(run *runModel.Run, step *run
 		if !coverageWorkItemMatchesUpdate(item, update) {
 			continue
 		}
-		if coverageApplyWorkItemEvidence(item, update.EvidenceKinds, update.EvidenceRefs, true, false, string(step.ID), "") {
+		if coverageApplyWorkItemEvidenceWithOptions(item, update.EvidenceKinds, update.EvidenceRefs, true, false, string(step.ID), "", update.AcceptanceOptions) {
 			changed = true
 		}
 	}
@@ -210,7 +211,7 @@ func (c *coverageSubsystem) updateFromFailedStep(run *runModel.Run, step *runMod
 		if !coverageWorkItemMatchesUpdate(item, update) {
 			continue
 		}
-		if coverageApplyWorkItemEvidence(item, update.EvidenceKinds, update.EvidenceRefs, false, false, string(step.ID), update.Reason) {
+		if coverageApplyWorkItemEvidenceWithOptions(item, update.EvidenceKinds, update.EvidenceRefs, false, false, string(step.ID), update.Reason, update.AcceptanceOptions) {
 			changed = true
 		}
 	}
@@ -251,7 +252,7 @@ func (c *coverageSubsystem) updateFromAssessment(run *runModel.Run, step *runMod
 			}
 			matched = true
 			matchedAny = true
-			if coverageApplyWorkItemEvidence(item, update.EvidenceKinds, update.EvidenceRefs, update.Accepted, update.CloseSatisfied, string(step.ID), update.Reason) {
+			if coverageApplyWorkItemEvidenceWithOptions(item, update.EvidenceKinds, update.EvidenceRefs, update.Accepted, update.CloseSatisfied, string(step.ID), update.Reason, update.AcceptanceOptions) {
 				changed = true
 			}
 		}

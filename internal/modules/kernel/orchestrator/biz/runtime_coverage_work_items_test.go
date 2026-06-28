@@ -153,6 +153,8 @@ func TestCoverageWorkItemsSyncProjectionToRepository(t *testing.T) {
 			"validationEvidence": map[string]any{
 				"mode":            "runtime_behavior",
 				"observationType": "runtime_observation",
+				"targetRefs":      []string{targetContextID},
+				"observedClaims":  []string{"repository coverage work item validation observed"},
 			},
 		},
 		State: common.StepStateCompleted,
@@ -1894,6 +1896,8 @@ func TestCoverageWorkItemsAcceptDeclaredStateChangingRuntimeStep(t *testing.T) {
 			"validationEvidence": map[string]any{
 				"mode":            "runtime_behavior",
 				"observationType": "runtime_observation",
+				"targetRefs":      []string{stringFromMap(items[0], "id")},
+				"observedClaims":  []string{"stateful outcome observed at runtime"},
 			},
 		},
 		Output: map[string]any{"exitCode": 0},
@@ -1936,6 +1940,8 @@ func TestCoverageWorkItemsDoNotAcceptValidationOnlyRuntimeStepAsStateChange(t *t
 			"validationEvidence": map[string]any{
 				"mode":            "runtime_behavior",
 				"observationType": "runtime_observation",
+				"targetRefs":      []string{"goal-leaf-001"},
+				"observedClaims":  []string{"goal leaf evidence aligned"},
 			},
 		},
 		Output: map[string]any{"exitCode": 0},
@@ -2048,6 +2054,7 @@ func TestCoverageWorkItemsMatchStructuredSourceRequirementID(t *testing.T) {
 	if !newCoverageSubsystem().ensure(run) {
 		t.Fatalf("coverage.ensure changed = false, want baseline")
 	}
+	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
 	step := &runmodel.Step{
 		ID:    "run-cwi-source-requirement-id/001-verify",
 		RunID: run.ID,
@@ -2062,6 +2069,8 @@ func TestCoverageWorkItemsMatchStructuredSourceRequirementID(t *testing.T) {
 			"validationEvidence": map[string]any{
 				"mode":            "runtime_behavior",
 				"observationType": "runtime_observation",
+				"targetRefs":      []string{firstNonEmptyString(stringFromMap(item, "sourceRequirementId"), stringFromMap(item, "id"))},
+				"observedClaims":  []string{"goal leaf evidence aligned"},
 			},
 		},
 		Output: map[string]any{"stage": "mcp_tool_call_completed"},
@@ -2070,7 +2079,7 @@ func TestCoverageWorkItemsMatchStructuredSourceRequirementID(t *testing.T) {
 	if !newCoverageSubsystem().updateFromCompletedStep(run, step) {
 		t.Fatalf("coverage.updateFromCompletedStep changed = false, want sourceRequirementId-linked evidence")
 	}
-	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	item = mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
 	if got := stringFromMap(item, "status"); got != "evidence_ready" {
 		t.Fatalf("status = %q, want evidence_ready", got)
 	}
@@ -2204,6 +2213,14 @@ func TestCoverageWorkItemsRejectionDoesNotDemoteCwiWithAcceptedEvidence(t *testi
 		RunID: run.ID,
 		Kind:  "shell/command",
 		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+				"targetRefs":      []string{"go-build-verify"},
+				"observedClaims":  []string{"go-build-verify passed"},
+			},
+		},
 		Output: map[string]any{
 			"exitCode":        0,
 			"command":         "go",
@@ -2866,6 +2883,12 @@ func TestCoverageWorkItemsAssessmentClosesEvidenceReadyItemWithoutNewRefs(t *tes
 		State: common.StepStateCompleted,
 		Input: map[string]any{
 			"coverageTargets": []string{"closure trace is exposed"},
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+				"targetRefs":      []string{"closure trace is exposed"},
+				"observedClaims":  []string{"closure trace is exposed"},
+			},
 		},
 	}
 	if !newCoverageSubsystem().updateFromCompletedStep(run, verify) {

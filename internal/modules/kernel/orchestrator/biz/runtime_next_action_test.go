@@ -1184,7 +1184,7 @@ func TestNextActionForRunAllSatisfiedPreemptsRecoverableDiagnostic(t *testing.T)
 	}
 }
 
-func TestNextActionForRunEvidenceReadyAcceptedItemsRequestComplete(t *testing.T) {
+func TestNextActionForRunEvidenceReadyAcceptedItemsRequestAssessment(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -1200,8 +1200,8 @@ func TestNextActionForRunEvidenceReadyAcceptedItemsRequestComplete(t *testing.T)
 		events.NewMemoryHub(),
 	)
 
-	workspaceID := common.WorkspaceID("ws-next-action-evidence-ready-complete")
-	runID := common.RunID("run-next-action-evidence-ready-complete")
+	workspaceID := common.WorkspaceID("ws-next-action-evidence-ready-assessment")
+	runID := common.RunID("run-next-action-evidence-ready-assessment")
 	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
@@ -1210,7 +1210,7 @@ func TestNextActionForRunEvidenceReadyAcceptedItemsRequestComplete(t *testing.T)
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
-				"id":                    "cwi-evidence-ready-complete",
+				"id":                    "cwi-evidence-ready-assessment",
 				"status":                "evidence_ready",
 				"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindValidation},
 				"missingEvidenceKinds":  []string{},
@@ -1228,8 +1228,8 @@ func TestNextActionForRunEvidenceReadyAcceptedItemsRequestComplete(t *testing.T)
 	if err != nil {
 		t.Fatalf("NextActionForRun: %v", err)
 	}
-	if action.Type != runtimemodel.NextActionTypeComplete || action.Stage != "complete" {
-		t.Fatalf("next action = %+v, want deterministic complete from accepted evidence-ready ledger", action)
+	if action.Type != runtimemodel.NextActionTypeAssessment || action.Stage != "assessment" {
+		t.Fatalf("next action = %+v, want deterministic assessment from accepted evidence-ready ledger", action)
 	}
 }
 
@@ -1249,8 +1249,8 @@ func TestDeriveAllSatisfiedCompleteNextActionRequiresSatisfiedAcceptedEvidence(t
 		"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindValidation},
 		"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindValidation: {"validation-001"}},
 	}}
-	if action, ok := deriveAllSatisfiedCompleteNextAction(run, items); !ok || action.Type != runtimemodel.NextActionTypeComplete {
-		t.Fatalf("derive evidence_ready item = %+v/%v, want complete when accepted evidence is sufficient", action, ok)
+	if action, ok := deriveAllSatisfiedCompleteNextAction(run, items); ok || action.Type != "" {
+		t.Fatalf("derive evidence_ready item = %+v/%v, want assessment before complete", action, ok)
 	}
 
 	items[0]["status"] = "satisfied"

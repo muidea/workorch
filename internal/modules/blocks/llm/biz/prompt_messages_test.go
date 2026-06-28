@@ -140,6 +140,21 @@ func TestBuildPromptContextUsesCacheAwareSectionMetadata(t *testing.T) {
 				map[string]any{"order": 1, "sourceRef": "run-003/steps/step-001", "eventType": "tool_result"},
 				map[string]any{"order": 2, "sourceRef": "run-003/steps/step-002", "eventType": "validation_result"},
 			},
+			"evidenceLedger": map[string]any{
+				"schemaVersion": "workorch.evidence_ledger_context.v1",
+				"items": []any{
+					map[string]any{
+						"evidenceRef":     "evidence://validation-001",
+						"kind":            "validation",
+						"status":          "accepted",
+						"sourceRef":       "validation://001",
+						"targetRefs":      []any{"target://primary"},
+						"observedClaims":  []any{"primary behavior observed"},
+						"evidenceQuality": "valid",
+						"payloadRef":      "workorch://workspaces/ws-cache/runs/run-003/steps/step-002/output.json",
+					},
+				},
+			},
 		},
 	}
 
@@ -171,6 +186,7 @@ func TestBuildPromptContextUsesCacheAwareSectionMetadata(t *testing.T) {
 		"C4.current-failure":           "volatile_tail",
 		"C4.current-progress":          "volatile_tail",
 		"C4.process-evidence-timeline": "volatile_tail",
+		"C4.evidence-ledger":           "volatile_tail",
 		"C4.definition-change-impact":  "volatile_tail",
 		"C4.current-action":            "volatile_tail",
 	}
@@ -200,6 +216,17 @@ func TestBuildPromptContextUsesCacheAwareSectionMetadata(t *testing.T) {
 	impactSection, _ := promptContextSectionByID(context, "C4.definition-change-impact")
 	if !strings.Contains(impactSection.Content, "workspace_goal_dod_cumulative_latest_refines_previous") {
 		t.Fatalf("definition impact section missing policy: %s", impactSection.Content)
+	}
+	ledgerSection, _ := promptContextSectionByID(context, "C4.evidence-ledger")
+	if !strings.Contains(ledgerSection.Content, "evidence://validation-001") ||
+		!strings.Contains(ledgerSection.Content, "target://primary") ||
+		!strings.Contains(ledgerSection.Content, "primary behavior observed") {
+		t.Fatalf("evidence ledger section missing refs/claims: %s", ledgerSection.Content)
+	}
+	c0Section, _ := promptContextSectionByID(context, "C0.system")
+	if strings.Contains(c0Section.Content, "evidence://validation-001") ||
+		strings.Contains(c0Section.Content, "primary behavior observed") {
+		t.Fatalf("C0 leaked dynamic evidence ledger: %s", c0Section.Content)
 	}
 }
 

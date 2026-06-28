@@ -18,6 +18,19 @@ import (
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func concreteValidationEvidenceFixture(mode, observationType string, extra map[string]any) map[string]any {
+	ret := map[string]any{
+		"mode":            mode,
+		"observationType": observationType,
+		"targetRefs":      []string{"current_coverage_focus"},
+		"observedClaims":  []string{"current coverage focus behavior was observed"},
+	}
+	for key, value := range extra {
+		ret[key] = value
+	}
+	return ret
+}
+
 func TestLLMExecutionGraphNodeReturnedOnlyGraphViolatesContract(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-execution-contract",
@@ -2217,11 +2230,9 @@ func TestValidateLLMExecutionOutputContractAllowsConcreteValidationGraphWithEvid
 				"input": map[string]any{
 					"command": "sh",
 					"args":    []string{"-c", "printf ok && printf done"},
-					"validationEvidence": map[string]any{
-						"mode":            "controlled_substitute",
-						"observationType": "controlled_substitute_observation",
-						"substituteFor":   "unavailable runtime prerequisite",
-					},
+					"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+						"substituteFor": "unavailable runtime prerequisite",
+					}),
 				},
 			}},
 		},
@@ -2229,6 +2240,106 @@ func TestValidateLLMExecutionOutputContractAllowsConcreteValidationGraphWithEvid
 
 	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want declared concrete evidence mode allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithoutTargetRefs(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-missing-target-refs",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-missing-target-refs/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "printf ok"},
+					"validationEvidence": map[string]any{
+						"mode":            "runtime_behavior",
+						"observationType": "runtime_observation",
+						"observedClaims":  []string{"runtime behavior was observed"},
+					},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "targetRefs") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want targetRefs rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithoutObservedClaims(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-missing-observed-claims",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-missing-observed-claims/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "printf ok"},
+					"validationEvidence": map[string]any{
+						"mode":            "runtime_behavior",
+						"observationType": "runtime_observation",
+						"targetRefs":      []string{"current_coverage_focus"},
+					},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "observedClaims") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want observedClaims rejection", err)
 	}
 }
 
@@ -2273,11 +2384,9 @@ func TestValidateLLMExecutionOutputContractNormalizesManagedValidationSession(t 
 						"command":       "sh",
 						"args":          []string{"-c", "printf managed-validation-ok:{{managedValidation.port}}"},
 						"timeoutMillis": int64(5000),
-						"validationEvidence": map[string]any{
-							"mode":            "runtime_behavior",
-							"observationType": "runtime_observation",
-							"targetRefs":      []string{"managed-runtime-behavior"},
-						},
+						"validationEvidence": concreteValidationEvidenceFixture("runtime_behavior", "runtime_observation", map[string]any{
+							"targetRefs": []string{"managed-runtime-behavior"},
+						}),
 					},
 				},
 			}},
@@ -2387,6 +2496,7 @@ func TestValidateLLMExecutionOutputContractRejectsManagedValidationWithoutTarget
 						"validationEvidence": map[string]any{
 							"mode":            "runtime_behavior",
 							"observationType": "runtime_observation",
+							"observedClaims":  []string{"managed validation behavior was observed"},
 						},
 					},
 				},
@@ -2432,12 +2542,9 @@ func TestValidateLLMExecutionOutputContractManagedRouteRejectsPlainShellGraph(t 
 				"id":   "plain-shell",
 				"kind": shellcommon.StepKindCommand,
 				"input": map[string]any{
-					"command": "sh",
-					"args":    []string{"-c", "printf ok"},
-					"validationEvidence": map[string]any{
-						"mode":            "runtime_behavior",
-						"observationType": "runtime_observation",
-					},
+					"command":            "sh",
+					"args":               []string{"-c", "printf ok"},
+					"validationEvidence": concreteValidationEvidenceFixture("runtime_behavior", "runtime_observation", nil),
 				},
 			}},
 		},
@@ -2483,12 +2590,9 @@ func TestValidateLLMExecutionOutputContractRejectsMixedValidationGraphMissingEvi
 				"id":   "declared-validation",
 				"kind": shellcommon.StepKindCommand,
 				"input": map[string]any{
-					"command": "sh",
-					"args":    []string{"-c", "printf ok"},
-					"validationEvidence": map[string]any{
-						"mode":            "runtime_behavior",
-						"observationType": "runtime_observation",
-					},
+					"command":            "sh",
+					"args":               []string{"-c", "printf ok"},
+					"validationEvidence": concreteValidationEvidenceFixture("runtime_behavior", "runtime_observation", nil),
 				},
 			}, {
 				"id":   "missing-validation-metadata",
@@ -2542,12 +2646,9 @@ func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithPro
 				"id":   "verify-service",
 				"kind": shellcommon.StepKindCommand,
 				"input": map[string]any{
-					"command": "sh",
-					"args":    []string{"-c", "timeout 3 ./service & sleep 1; curl -fsS http://127.0.0.1:8080/readyz; kill %1"},
-					"validationEvidence": map[string]any{
-						"mode":            "runtime_behavior",
-						"observationType": "runtime_observation",
-					},
+					"command":            "sh",
+					"args":               []string{"-c", "timeout 3 ./service & sleep 1; curl -fsS http://127.0.0.1:8080/readyz; kill %1"},
+					"validationEvidence": concreteValidationEvidenceFixture("runtime_behavior", "runtime_observation", nil),
 				},
 			}},
 		},
@@ -2591,12 +2692,9 @@ func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithDet
 				"id":   "verify-service",
 				"kind": shellcommon.StepKindCommand,
 				"input": map[string]any{
-					"command": "sh",
-					"args":    []string{"-c", "nohup ./service >/tmp/service.log 2>&1 & curl -fsS http://127.0.0.1:8080/readyz"},
-					"validationEvidence": map[string]any{
-						"mode":            "runtime_behavior",
-						"observationType": "runtime_observation",
-					},
+					"command":            "sh",
+					"args":               []string{"-c", "nohup ./service >/tmp/service.log 2>&1 & curl -fsS http://127.0.0.1:8080/readyz"},
+					"validationEvidence": concreteValidationEvidenceFixture("runtime_behavior", "runtime_observation", nil),
 				},
 			}},
 		},
@@ -2643,12 +2741,9 @@ func TestValidateLLMExecutionOutputContractRejectsFileMutatingConcreteValidation
 				"id":   "verify",
 				"kind": shellcommon.StepKindCommand,
 				"input": map[string]any{
-					"command": "sh",
-					"args":    []string{"-c", "set -e; sed -i '33d' target.txt; ./verify-target"},
-					"validationEvidence": map[string]any{
-						"mode":            "runtime_behavior",
-						"observationType": "runtime_observation",
-					},
+					"command":            "sh",
+					"args":               []string{"-c", "set -e; sed -i '33d' target.txt; ./verify-target"},
+					"validationEvidence": concreteValidationEvidenceFixture("runtime_behavior", "runtime_observation", nil),
 				},
 			}},
 		},
@@ -2695,12 +2790,9 @@ func TestValidateLLMExecutionOutputContractRejectsConcreteValidationShellFileRed
 				"id":   "verify",
 				"kind": shellcommon.StepKindCommand,
 				"input": map[string]any{
-					"command": "sh",
-					"args":    []string{"-c", "printf ok > validation.log"},
-					"validationEvidence": map[string]any{
-						"mode":            "runtime_behavior",
-						"observationType": "runtime_observation",
-					},
+					"command":            "sh",
+					"args":               []string{"-c", "printf ok > validation.log"},
+					"validationEvidence": concreteValidationEvidenceFixture("runtime_behavior", "runtime_observation", nil),
 				},
 			}},
 		},
@@ -2749,23 +2841,18 @@ func TestValidateLLMExecutionOutputContractNormalizesConcreteValidationScratchSe
 				"input": map[string]any{
 					"command": "sh",
 					"args":    []string{"-c", "mkdir -p .workorch-data/validation-scratch"},
-					"validationEvidence": map[string]any{
-						"mode":            "controlled_substitute",
-						"observationType": "controlled_substitute_observation",
-						"substituteFor":   "validation scratch directory",
-					},
+					"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+						"substituteFor": "validation scratch directory",
+					}),
 				},
 			}, {
 				"id":        "verify",
 				"kind":      shellcommon.StepKindCommand,
 				"dependsOn": []string{"setup-validation-scratch"},
 				"input": map[string]any{
-					"command": "sh",
-					"args":    []string{"-c", "printf ok"},
-					"validationEvidence": map[string]any{
-						"mode":            "runtime_behavior",
-						"observationType": "runtime_observation",
-					},
+					"command":            "sh",
+					"args":               []string{"-c", "printf ok"},
+					"validationEvidence": concreteValidationEvidenceFixture("runtime_behavior", "runtime_observation", nil),
 				},
 			}},
 		},
@@ -2818,12 +2905,9 @@ func TestValidateLLMExecutionOutputContractAllowsConcreteValidationShellDevNullR
 				"id":   "verify",
 				"kind": shellcommon.StepKindCommand,
 				"input": map[string]any{
-					"command": "sh",
-					"args":    []string{"-c", "if verify >/dev/null 2>&1; then printf ok; fi"},
-					"validationEvidence": map[string]any{
-						"mode":            "runtime_behavior",
-						"observationType": "runtime_observation",
-					},
+					"command":            "sh",
+					"args":               []string{"-c", "if verify >/dev/null 2>&1; then printf ok; fi"},
+					"validationEvidence": concreteValidationEvidenceFixture("runtime_behavior", "runtime_observation", nil),
 				},
 			}},
 		},
@@ -2879,12 +2963,10 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteScratchFile
 						`fi`,
 						`cat "$LOG"`,
 					}, "\n")},
-					"validationEvidence": map[string]any{
-						"mode":            "controlled_substitute",
-						"observationType": "controlled_substitute_observation",
-						"substituteFor":   "validation command output capture",
-						"substitute":      "temporary log file created under validationScratchDir",
-					},
+					"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+						"substituteFor": "validation command output capture",
+						"substitute":    "temporary log file created under validationScratchDir",
+					}),
 				},
 			}},
 		},
@@ -2932,11 +3014,9 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteScratchSetu
 					"input": map[string]any{
 						"command": "sh",
 						"args":    []string{"-c", `mkdir -p /tmp/workorch-validation-test/controlled-substitute-heredoc`},
-						"validationEvidence": map[string]any{
-							"mode":            "controlled_substitute",
-							"observationType": "controlled_substitute_observation",
-							"substituteFor":   "validation scratch setup",
-						},
+						"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+							"substituteFor": "validation scratch setup",
+						}),
 					},
 				},
 				{
@@ -2955,11 +3035,9 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteScratchSetu
 							`grep -n temporary /tmp/workorch-validation-test/controlled-substitute-heredoc/probe.txt >> /tmp/workorch-validation-test/controlled-substitute-heredoc/validation.log 2>&1`,
 							`cat /tmp/workorch-validation-test/controlled-substitute-heredoc/validation.log`,
 						}, "\n")},
-						"validationEvidence": map[string]any{
-							"mode":            "controlled_substitute",
-							"observationType": "controlled_substitute_observation",
-							"substituteFor":   "temporary validation fixture under validationScratchDir",
-						},
+						"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+							"substituteFor": "temporary validation fixture under validationScratchDir",
+						}),
 					},
 				},
 			},
@@ -3018,11 +3096,9 @@ func TestValidateLLMExecutionOutputContractAllowsScratchBoundHereDocBodyOperator
 						`EOF`,
 						`cat "$probe" >/dev/null`,
 					}, "\n")},
-					"validationEvidence": map[string]any{
-						"mode":            "controlled_substitute",
-						"observationType": "controlled_substitute_observation",
-						"substituteFor":   "temporary validation probe under validationScratchDir",
-					},
+					"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+						"substituteFor": "temporary validation probe under validationScratchDir",
+					}),
 				},
 			}},
 		},
@@ -3073,11 +3149,9 @@ func TestValidateLLMExecutionOutputContractRejectsHereDocTargetOutsideScratch(t 
 						`idx > 0`,
 						`EOF`,
 					}, "\n")},
-					"validationEvidence": map[string]any{
-						"mode":            "controlled_substitute",
-						"observationType": "controlled_substitute_observation",
-						"substituteFor":   "temporary validation probe under validationScratchDir",
-					},
+					"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+						"substituteFor": "temporary validation probe under validationScratchDir",
+					}),
 				},
 			}},
 		},
@@ -3126,11 +3200,9 @@ func TestValidateLLMExecutionOutputContractRejectsControlledSubstituteWriteWitho
 				"input": map[string]any{
 					"command": "sh",
 					"args":    []string{"-c", `printf ok > /tmp/workorch-validation-test/missing-scratch/validation.log`},
-					"validationEvidence": map[string]any{
-						"mode":            "controlled_substitute",
-						"observationType": "controlled_substitute_observation",
-						"substituteFor":   "validation command output capture",
-					},
+					"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+						"substituteFor": "validation command output capture",
+					}),
 				},
 			}},
 		},
@@ -3178,11 +3250,9 @@ func TestValidateLLMExecutionOutputContractRejectsRelativeControlledSubstituteSc
 				"input": map[string]any{
 					"command": "sh",
 					"args":    []string{"-c", `mkdir -p relative-validation-scratch; printf ok > relative-validation-scratch/validation.log`},
-					"validationEvidence": map[string]any{
-						"mode":            "controlled_substitute",
-						"observationType": "controlled_substitute_observation",
-						"substituteFor":   "validation command output capture",
-					},
+					"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+						"substituteFor": "validation command output capture",
+					}),
 				},
 			}},
 		},
@@ -3231,11 +3301,9 @@ func TestValidateLLMExecutionOutputContractRejectsControlledSubstituteScratchPre
 				"input": map[string]any{
 					"command": "sh",
 					"args":    []string{"-c", `mkdir -p /tmp/workorch-validation-test/prefix-other; printf ok > /tmp/workorch-validation-test/prefix-other/validation.log`},
-					"validationEvidence": map[string]any{
-						"mode":            "controlled_substitute",
-						"observationType": "controlled_substitute_observation",
-						"substituteFor":   "validation command output capture",
-					},
+					"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+						"substituteFor": "validation command output capture",
+					}),
 				},
 			}},
 		},
@@ -3297,11 +3365,9 @@ func TestValidateLLMExecutionOutputContractAllowsDynamicExecutionTempCacheWrites
 						`printf ok > "$tmpdir/validation.out"`,
 						`cat "$tmpdir/validation.out"`,
 					}, "\n")},
-					"validationEvidence": map[string]any{
-						"mode":            "dynamic_execution",
-						"observationType": "dynamic_execution_observation",
-						"substitute":      "tool caches and captured output are isolated under validationScratchDir",
-					},
+					"validationEvidence": concreteValidationEvidenceFixture("dynamic_execution", "dynamic_execution_observation", map[string]any{
+						"substitute": "tool caches and captured output are isolated under validationScratchDir",
+					}),
 				},
 			}},
 		},
@@ -3360,11 +3426,9 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteTempWorkspa
 						`EOF`,
 						`sh -c 'test -f "$1"' _ "$TMP_REPO/validation.txt"`,
 					}, "\n")},
-					"validationEvidence": map[string]any{
-						"mode":            "controlled_substitute",
-						"observationType": "controlled_substitute_observation",
-						"substituteFor":   "workspace mutation is isolated in a temporary copy",
-					},
+					"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+						"substituteFor": "workspace mutation is isolated in a temporary copy",
+					}),
 				},
 			}},
 		},
@@ -3447,11 +3511,9 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteCopiedWorks
 				"input": map[string]any{
 					"command": "sh",
 					"args":    []string{"-c", command},
-					"validationEvidence": map[string]any{
-						"mode":            "controlled_substitute",
-						"observationType": "controlled_substitute_observation",
-						"substituteFor":   "workspace validation in an isolated temporary copy",
-					},
+					"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+						"substituteFor": "workspace validation in an isolated temporary copy",
+					}),
 				},
 			}},
 		},
@@ -3511,11 +3573,9 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteTarCopiedWo
 				"input": map[string]any{
 					"command": "sh",
 					"args":    []string{"-c", command},
-					"validationEvidence": map[string]any{
-						"mode":            "controlled_substitute",
-						"observationType": "controlled_substitute_observation",
-						"substituteFor":   "workspace validation in an isolated temporary copy",
-					},
+					"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+						"substituteFor": "workspace validation in an isolated temporary copy",
+					}),
 				},
 			}},
 		},
@@ -3562,11 +3622,9 @@ func TestValidateLLMExecutionOutputContractRejectsControlledSubstituteWorkspaceW
 				"input": map[string]any{
 					"command": "sh",
 					"args":    []string{"-c", `scratch="/tmp/workorch-validation-test/controlled-substitute-workspace-write"; mkdir -p "$scratch"; printf ok > validation.log`},
-					"validationEvidence": map[string]any{
-						"mode":            "controlled_substitute",
-						"observationType": "controlled_substitute_observation",
-						"substituteFor":   "workspace mutation is not isolated",
-					},
+					"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+						"substituteFor": "workspace mutation is not isolated",
+					}),
 				},
 			}},
 		},
@@ -3651,11 +3709,8 @@ func TestValidateLLMExecutionOutputContractAllowsObservationModeAlias(t *testing
 				"id":   "verify",
 				"kind": shellcommon.StepKindCommand,
 				"input": map[string]any{
-					"command": "verify-contract",
-					"validationEvidence": map[string]any{
-						"mode":            "runtime_observation",
-						"observationType": "runtime_observation",
-					},
+					"command":            "verify-contract",
+					"validationEvidence": concreteValidationEvidenceFixture("runtime_observation", "runtime_observation", nil),
 				},
 			}},
 		},

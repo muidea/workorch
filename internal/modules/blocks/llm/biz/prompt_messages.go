@@ -835,6 +835,9 @@ func executionSignalPromptEvents(request llmmodels.ProviderRequest) []executionS
 	if timeline := processEvidenceTimelineSignalPayload(request.Input); len(timeline) > 0 {
 		appendEvent("C4.process-evidence-timeline", "Process Evidence Timeline", timeline)
 	}
+	if ledger := evidenceLedgerSignalPayload(request.Input); len(ledger) > 0 {
+		appendEvent("C4.evidence-ledger", "Evidence Ledger Proof Summary", ledger)
+	}
 	if impact := definitionChangeImpactSignalPayload(request.Input); len(impact) > 0 {
 		appendEvent("C4.definition-change-impact", "Definition Change Impact Signal", impact)
 	}
@@ -1256,6 +1259,22 @@ func coverageWorkItemSignalPayload(input map[string]any) map[string]any {
 	}
 	payload["projectionPolicy"] = "dynamic C4 context; use currentFocus and unresolvedItems as convergence targets, do not rewrite formal Goal or DoD; missing evidence binding means the runtime ledger still needs accepted evidence refs, not that matching evidence is absent from history or memory"
 	payload["ledgerAuthorityPolicy"] = "coverage_ledger_authoritative_for_current_gap_status_evidence_refs_and_completion"
+	return payload
+}
+
+func evidenceLedgerSignalPayload(input map[string]any) map[string]any {
+	ledger := recordFromAny(input["evidenceLedger"])
+	if len(ledger) == 0 {
+		ledger = recordFromAny(recordFromAny(input["executionContextPackage"])["evidenceLedger"])
+	}
+	if len(ledger) == 0 {
+		return nil
+	}
+	payload, _ := budgetProviderValue(ledger, 0, 1024, 12, 18, 4).(map[string]any)
+	if len(payload) == 0 {
+		return nil
+	}
+	payload["evidenceAuthorityPolicy"] = "accepted_or_rejected_status_and_target_aligned_observed_claims_are_runtime_authoritative; raw payloads require explicit payloadRef/sourceRef reads"
 	return payload
 }
 

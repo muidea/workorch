@@ -86,6 +86,62 @@ func TestEnforceProviderRequestBudgetCompactsLargeExecutionContext(t *testing.T)
 	}
 }
 
+func TestEnforceProviderRequestBudgetPreservesEvidenceLedgerRefs(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-evidence-budget",
+		RunID:       "run-evidence-budget",
+		StepID:      "run-evidence-budget/step-1",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"goal": map[string]any{"text": "finish goal"},
+			"dod":  map[string]any{"items": []any{"validated evidence"}},
+			"evidenceLedger": map[string]any{
+				"schemaVersion": "workorch.evidence_ledger_context.v1",
+				"items": []any{
+					map[string]any{
+						"evidenceRef":     "evidence://validation-001",
+						"kind":            "validation",
+						"status":          "accepted",
+						"targetRefs":      []any{"target://primary"},
+						"observedClaims":  []any{"primary behavior observed"},
+						"evidenceQuality": "valid",
+						"payloadRef":      "workorch://payload/validation-001",
+					},
+				},
+			},
+			"graphEvidence": repeatedBudgetItems(400),
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    8192,
+				MaxInputTokens:         128,
+				ReservedOutputTokens:   1024,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         4 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudgetLimit(req, 4*1024)
+
+	ledger := recordFromAny(got.Input["evidenceLedger"])
+	if len(ledger) == 0 {
+		t.Fatalf("input = %+v, want evidenceLedger preserved under budget", got.Input)
+	}
+	encoded := userPrompt(got)
+	if !strings.Contains(encoded, "evidence://validation-001") ||
+		!strings.Contains(encoded, "target://primary") ||
+		!strings.Contains(encoded, "primary behavior observed") {
+		t.Fatalf("prompt missing compact evidence ledger refs: %s", encoded)
+	}
+	if got.ContextBudget == nil || !stringSliceContains(got.ContextBudget.ProtectedFields, "input.evidenceLedger") {
+		t.Fatalf("contextBudget = %+v, want evidenceLedger protected field", got.ContextBudget)
+	}
+}
+
 func TestEnforceProviderRequestBudgetFailsWhenCoverageWorkItemFocusMissing(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-cwi-budget",

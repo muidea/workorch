@@ -357,7 +357,7 @@ func validateManagedValidationNodeContract(step *runModel.Step, node runtimemode
 		return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleManagedValidationRequired, "managed validation session must normalize to a bounded shell/command runtime node")
 	}
 	if !nodeValidationEvidenceContractIsConcrete(node) {
-		return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationEvidenceMetadataMissing, "managed validation session requires concrete validationEvidence.mode and validationEvidence.observationType")
+		return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationEvidenceMetadataMissing, "managed validation session requires concrete validationEvidence.mode, validationEvidence.observationType, validationEvidence.targetRefs, and validationEvidence.observedClaims")
 	}
 	if len(managedValidationTargetRefs(node)) == 0 {
 		return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationEvidenceMetadataMissing, "managed validation session requires validationEvidence.targetRefs or input.targetRefs to bind evidence to current coverage")
@@ -558,12 +558,12 @@ func validateConcreteValidationGraphEvidenceMetadata(graph runtimemodel.BlockExe
 		case "shell/command", "mcp/tool_call":
 			hasEvidenceProducer = true
 			if !nodeValidationEvidenceContractIsConcrete(node) {
-				return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationEvidenceMetadataMissing, "concrete validation evidence repair returned executionGraph with a validation node missing declared non-static validationEvidence contract; every shell/command or mcp/tool_call producer must declare validationEvidence.mode and validationEvidence.observationType, and controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute")
+				return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationEvidenceMetadataMissing, "concrete validation evidence repair returned executionGraph with a validation node missing declared non-static validationEvidence contract; every shell/command or mcp/tool_call producer must declare validationEvidence.mode, validationEvidence.observationType, validationEvidence.targetRefs, and validationEvidence.observedClaims; controlled_substitute must also declare validationEvidence.substituteFor or validationEvidence.substitute")
 			}
 		}
 	}
 	if !hasEvidenceProducer {
-		return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationEvidenceMetadataMissing, "concrete validation evidence repair returned executionGraph without a declared non-static validationEvidence contract; shell/command or mcp/tool_call nodes must declare validationEvidence.mode and validationEvidence.observationType, and controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute")
+		return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationEvidenceMetadataMissing, "concrete validation evidence repair returned executionGraph without a declared non-static validationEvidence contract; shell/command or mcp/tool_call nodes must declare validationEvidence.mode, validationEvidence.observationType, validationEvidence.targetRefs, and validationEvidence.observedClaims; controlled_substitute must also declare validationEvidence.substituteFor or validationEvidence.substitute")
 	}
 	return nil
 }
@@ -1031,7 +1031,51 @@ func nodeValidationEvidenceContractIsConcrete(node runtimemodel.BlockExecutionNo
 		strings.TrimSpace(stringFromMap(evidence, "substituteFor")) == "" {
 		return false
 	}
+	if len(nodeValidationEvidenceTargetRefs(node)) == 0 {
+		return false
+	}
+	if len(nodeValidationEvidenceObservedClaims(node)) == 0 {
+		return false
+	}
 	return true
+}
+
+func nodeValidationEvidenceTargetRefs(node runtimemodel.BlockExecutionNode) []string {
+	evidence := mapFromValue(node.Input["validationEvidence"])
+	refs := stringSliceFromValue(evidence["targetRefs"])
+	refs = append(refs, stringSliceFromValue(evidence["coverageTargetRefs"])...)
+	refs = append(refs, stringSliceFromValue(node.Input["targetRefs"])...)
+	if ref := strings.TrimSpace(stringFromMap(evidence, "targetRef")); ref != "" {
+		refs = append(refs, ref)
+	}
+	if ref := strings.TrimSpace(stringFromMap(evidence, "coverageTargetRef")); ref != "" {
+		refs = append(refs, ref)
+	}
+	if ref := strings.TrimSpace(stringFromMap(node.Input, "targetRef")); ref != "" {
+		refs = append(refs, ref)
+	}
+	return compactUniqueStrings(refs)
+}
+
+func nodeValidationEvidenceObservedClaims(node runtimemodel.BlockExecutionNode) []string {
+	evidence := mapFromValue(node.Input["validationEvidence"])
+	claims := stringSliceFromValue(evidence["observedClaims"])
+	claims = append(claims, stringSliceFromValue(evidence["claims"])...)
+	for _, item := range mapSliceFromValue(evidence["observedClaims"]) {
+		for _, key := range []string{"claim", "summary", "description", "observed", "observation"} {
+			if value := strings.TrimSpace(stringFromMap(item, key)); value != "" {
+				claims = append(claims, value)
+				break
+			}
+		}
+	}
+	if claim := strings.TrimSpace(stringFromMap(evidence, "observedClaim")); claim != "" {
+		claims = append(claims, claim)
+	}
+	if claim := strings.TrimSpace(stringFromMap(node.Input, "observedClaim")); claim != "" {
+		claims = append(claims, claim)
+	}
+	return compactUniqueStrings(claims)
 }
 
 func validationEvidenceModeIsConcrete(mode string) bool {

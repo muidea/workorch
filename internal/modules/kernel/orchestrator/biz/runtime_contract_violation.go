@@ -277,7 +277,7 @@ func contractViolationRetryHintFromAuthority(input map[string]any, violation map
 		parts = append(parts, "Required fields: "+strings.Join(requiredFields, ", ")+".")
 	}
 	if boolValue(required["mustProduceConcreteValidationEvidence"]) {
-		parts = append(parts, "If returning executionGraph validation, each validation node must declare input.validationEvidence.mode and input.validationEvidence.observationType.")
+		parts = append(parts, "If returning executionGraph validation, each validation node must declare input.validationEvidence.mode, input.validationEvidence.observationType, input.validationEvidence.targetRefs, and input.validationEvidence.observedClaims.")
 	}
 	if !requiredOutputAllowsTopLevelShape(required, "shellCommands") && !requiredOutputAllowsTopLevelShape(contract, "shellCommands") {
 		forbidden = append(forbidden, "top_level_shellCommands")
@@ -848,9 +848,9 @@ func contractViolationRetryHint(rule string) string {
 	case contractViolationRuleStateChangingRequiredMissing:
 		return "return output that satisfies stateChangingOutputRequired and requiredOutput without repeating a read-only graph"
 	case contractViolationRuleConcreteValidationMissing:
-		return "return bounded concrete validation evidence with validationEvidence mode and observation metadata"
+		return "return bounded concrete validation evidence with validationEvidence mode, observation, target refs, and observed claims metadata"
 	case contractViolationRuleValidationEvidenceMetadataMissing:
-		return "return concrete validation evidence with validationEvidence.mode and validationEvidence.observationType on every validation node"
+		return "return concrete validation evidence with validationEvidence.mode, validationEvidence.observationType, validationEvidence.targetRefs, and validationEvidence.observedClaims on every validation node"
 	case contractViolationRuleValidationScratchRequired:
 		return "return scratch-bounded validation evidence using the runtime validationScratchDir contract"
 	case contractViolationRuleValidationScratchEscape:
@@ -883,7 +883,7 @@ func contractViolationForbiddenRepeat(rule string) []string {
 	case contractViolationRuleConcreteValidationMissing:
 		return []string{"validation graph without validationEvidence contract", "detached or unbounded validation command"}
 	case contractViolationRuleValidationEvidenceMetadataMissing:
-		return []string{"validation node without validationEvidence.mode or validationEvidence.observationType"}
+		return []string{"validation node without validationEvidence.mode, validationEvidence.observationType, validationEvidence.targetRefs, or validationEvidence.observedClaims"}
 	case contractViolationRuleValidationScratchRequired:
 		return []string{"controlled substitute write without runtime validationScratchDir"}
 	case contractViolationRuleValidationScratchEscape:
@@ -944,7 +944,7 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 		profileID = "concrete_validation_evidence"
 		contract["requiredOutputShape"] = "bounded_validation_evidence"
 		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_declared_validationEvidence", "executionGraph_with_managed_validation_session", "satisfied_dodAssessment_with_concrete_evidenceRefs")
-		contract["requiredFields"] = []string{"validationEvidence.mode", "validationEvidence.observationType"}
+		contract["requiredFields"] = []string{"validationEvidence.mode", "validationEvidence.observationType", "validationEvidence.targetRefs", "validationEvidence.observedClaims"}
 		contract["forbiddenOutputs"] = append([]string{"static_inspection_only", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}, contractViolationForbiddenContinuableBlockers()...)
 		if scratch := validationScratchDirFromStep(step); scratch != "" {
 			contract[validationScratchDirKey] = scratch
@@ -1031,7 +1031,7 @@ func applyManagedValidationCorrectionContract(contract map[string]any) {
 	}
 	contract["requiredOutputShape"] = "managed_validation_evidence"
 	contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_managed_validation_session")
-	contract["requiredFields"] = []string{"validation/managed_session", "validationEvidence.mode", "validationEvidence.observationType"}
+	contract["requiredFields"] = []string{"validation/managed_session", "validationEvidence.mode", "validationEvidence.observationType", "validationEvidence.targetRefs", "validationEvidence.observedClaims"}
 	contract["forbiddenOutputs"] = append([]string{"plain_shell_validation", "top_level_shellCommands", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}, contractViolationForbiddenContinuableBlockers()...)
 	contract["validationRoute"] = runtimemodel.ValidationRouteManagedHarness
 	contract["mustUseManagedHarness"] = true
@@ -1062,7 +1062,7 @@ func contractViolationRequiredOutputCorrectionProfile(step *runModel.Step, contr
 	if boolValue(required["mustProduceConcreteValidationEvidence"]) {
 		contract["requiredOutputShape"] = "bounded_validation_evidence"
 		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_declared_validationEvidence", "executionGraph_with_managed_validation_session", "satisfied_dodAssessment_with_concrete_evidenceRefs")
-		contract["requiredFields"] = []string{"validationEvidence.mode", "validationEvidence.observationType"}
+		contract["requiredFields"] = []string{"validationEvidence.mode", "validationEvidence.observationType", "validationEvidence.targetRefs", "validationEvidence.observedClaims"}
 		contract["forbiddenOutputs"] = append([]string{"failed_dodAssessment_only", "static_inspection_only", "detached_or_background_shell", "workspace_mutating_validation_shell", "write_outside_validationScratchDir"}, contractViolationForbiddenContinuableBlockers()...)
 		if scratch := validationScratchDirFromStep(step); scratch != "" {
 			contract[validationScratchDirKey] = scratch

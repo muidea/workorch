@@ -38,6 +38,97 @@ func TestCoverageApplyWorkItemEvidence_AcceptedEvidenceSatisfiesRequiredKind(t *
 	}
 }
 
+func TestCoverageApplyWorkItemEvidence_TargetUnalignedValidationIsSupportingOnly(t *testing.T) {
+	item := map[string]any{
+		"id":                    "cwi-target-proof",
+		"status":                "open",
+		"sourceRequirementId":   "requirement-alpha",
+		"targetText":            "requirement alpha must be proven",
+		"requiredEvidenceKinds": []string{"validation"},
+		"requiredEvidenceCounts": map[string]any{
+			"validation": 1,
+		},
+		"missingEvidenceKinds": []string{"validation"},
+	}
+
+	changed := coverageApplyWorkItemEvidenceWithOptions(
+		item,
+		[]string{"validation"},
+		[]string{"run-1/validation-generic"},
+		true,
+		false,
+		"run-1/step-001",
+		"",
+		coverageEvidenceAcceptanceOptions{
+			EnforceProofStrength: true,
+			Quality:              runtimeEvidenceQuality{Quality: "valid"},
+			TargetRefs:           []string{"unrelated"},
+			ObservedClaims:       []string{"generic command passed"},
+			Tags:                 []string{"generic_test_fallback"},
+		},
+	)
+	if !changed {
+		t.Fatalf("changed = false, want supporting evidence recorded")
+	}
+	if got := stringFromMap(item, "status"); got != "open" {
+		t.Fatalf("status = %q, want open", got)
+	}
+	if missing := stringSliceFromValue(item["missingEvidenceKinds"]); len(missing) != 1 || missing[0] != "validation" {
+		t.Fatalf("missingEvidenceKinds = %+v, want [validation]", missing)
+	}
+	if accepted := mapStringSliceValue(item["acceptedEvidenceByKind"]); len(accepted["validation"]) != 0 {
+		t.Fatalf("acceptedEvidenceByKind = %+v, want no accepted validation", accepted)
+	}
+	supporting := mapStringSliceValue(item["supportingEvidenceByKind"])
+	if got := supporting["validation"]; len(got) != 1 || got[0] != "run-1/validation-generic" {
+		t.Fatalf("supportingEvidenceByKind = %+v, want supporting validation ref", supporting)
+	}
+}
+
+func TestCoverageApplyWorkItemEvidence_TargetAlignedValidationCanSatisfyRequiredKind(t *testing.T) {
+	item := map[string]any{
+		"id":                    "cwi-target-proof",
+		"status":                "open",
+		"sourceRequirementId":   "requirement-alpha",
+		"targetText":            "requirement alpha must be proven",
+		"requiredEvidenceKinds": []string{"validation"},
+		"requiredEvidenceCounts": map[string]any{
+			"validation": 1,
+		},
+		"missingEvidenceKinds": []string{"validation"},
+	}
+
+	changed := coverageApplyWorkItemEvidenceWithOptions(
+		item,
+		[]string{"validation"},
+		[]string{"run-1/validation-targeted"},
+		true,
+		false,
+		"run-1/step-001",
+		"",
+		coverageEvidenceAcceptanceOptions{
+			EnforceProofStrength: true,
+			Quality:              runtimeEvidenceQuality{Quality: "valid"},
+			TargetRefs:           []string{"requirement-alpha"},
+			ObservedClaims:       []string{"requirement alpha observed at runtime"},
+			ProofKind:            "runtime_behavior",
+		},
+	)
+	if !changed {
+		t.Fatalf("changed = false, want accepted validation")
+	}
+	if got := stringFromMap(item, "status"); got != "evidence_ready" {
+		t.Fatalf("status = %q, want evidence_ready", got)
+	}
+	if missing := stringSliceFromValue(item["missingEvidenceKinds"]); len(missing) != 0 {
+		t.Fatalf("missingEvidenceKinds = %+v, want none", missing)
+	}
+	accepted := mapStringSliceValue(item["acceptedEvidenceByKind"])
+	if got := accepted["validation"]; len(got) != 1 || got[0] != "run-1/validation-targeted" {
+		t.Fatalf("acceptedEvidenceByKind = %+v, want accepted validation ref", accepted)
+	}
+}
+
 func TestEvidenceKindRequirementEvidenceKindsMixedAcceptedKindsDoNotRequireStateChange(t *testing.T) {
 	requirement := profileEvidenceKindRequirement{
 		Scope:         "dod_item",

@@ -55,12 +55,12 @@ func (o *RuntimeOrchestrator) NextActionForRun(ctx context.Context, runID common
 	} else if ok {
 		return action, nil
 	}
-	if action, ok, err := o.allSatisfiedCompleteNextAction(ctx, run); err != nil {
+	if action, ok, err := o.missingAssessmentNextAction(ctx, run); err != nil {
 		return runtimemodel.NextAction{}, err
 	} else if ok {
 		return action, nil
 	}
-	if action, ok, err := o.missingAssessmentNextAction(ctx, run); err != nil {
+	if action, ok, err := o.allSatisfiedCompleteNextAction(ctx, run); err != nil {
 		return runtimemodel.NextAction{}, err
 	} else if ok {
 		return action, nil
@@ -1333,10 +1333,7 @@ func coverageWorkItemCompletionReady(item map[string]any) bool {
 	if len(item) == 0 || !coverageWorkItemHasAcceptedEvidence(item) {
 		return false
 	}
-	if coverageWorkItemCompletionStatusSatisfied(item) {
-		return true
-	}
-	if strings.TrimSpace(stringFromMap(item, "status")) != "evidence_ready" {
+	if !coverageWorkItemCompletionStatusSatisfied(item) {
 		return false
 	}
 	state := deriveCoverageWorkItemState(item)

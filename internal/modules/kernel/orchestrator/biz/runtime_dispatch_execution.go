@@ -790,7 +790,7 @@ func runtimeRepairDispatchScope(input map[string]any) string {
 	return "repairOfStepId:" + repairOf
 }
 
-var runtimeStepProgressMinInterval = 5 * time.Second
+var runtimeStepProgressMinInterval = 30 * time.Second
 
 func (o *RuntimeOrchestrator) runtimeStepProgressRecorder(ctx context.Context, run *runModel.Run, step *runModel.Step) runtimemodel.StepExecutionProgressFunc {
 	if o == nil || run == nil || step == nil || o.checkpointManager() == nil {

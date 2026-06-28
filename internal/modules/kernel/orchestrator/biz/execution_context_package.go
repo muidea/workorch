@@ -17,10 +17,12 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (
 	stepInputKeyExecutionContextPackage = "executionContextPackage"
+	stepInputKeyEvidenceLedger          = "evidenceLedger"
 	executionContextPackageVersion      = "workorch.execution_context.v1"
 	executionContextPackageHistoryKey   = "workspaceHistoryChecked"
 	stepInputMemorySelectionPolicy      = "step_input_dynamic_workspace_memory"
@@ -46,6 +48,9 @@ func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run
 	if timeline := mapSliceFromValue(pkg[stepInputKeyProcessEvidenceTimeline]); len(timeline) > 0 {
 		step.Input[stepInputKeyProcessEvidenceTimeline] = timeline
 	}
+	if ledger := mapFromValue(pkg[stepInputKeyEvidenceLedger]); len(ledger) > 0 {
+		step.Input[stepInputKeyEvidenceLedger] = ledger
+	}
 	if digest := mapFromValue(pkg[stepInputKeyCurrentProgressDigest]); len(digest) > 0 {
 		step.Input[stepInputKeyCurrentProgressDigest] = digest
 	}
@@ -61,6 +66,7 @@ type executionContextPackageDeps struct {
 	tickets     repository.DecisionTicketRepository
 	resolutions repository.DecisionResolutionRepository
 	approvals   repository.ApprovalRepository
+	evidence    repository.EvidenceRecordRepository
 	memoryItems repository.MemoryItemRepository
 	graph       *graphSubsystem
 	results     *resultSubsystem
@@ -78,6 +84,7 @@ func runtimeExecutionContextPackageDeps(o *RuntimeOrchestrator) executionContext
 		tickets:     o.tickets,
 		resolutions: o.resolutions,
 		approvals:   o.approvals,
+		evidence:    o.evidence.EvidenceRecords,
 		memoryItems: o.evidence.MemoryItems,
 		graph:       o.graphManager(),
 		results:     o.resultManager(),
@@ -253,6 +260,7 @@ func runExecutionContextPackage(ctx context.Context, deps executionContextPackag
 		deliverables       []map[string]any
 		failures           []map[string]any
 		processTimeline    []map[string]any
+		evidenceLedger     map[string]any
 		progressDigest     map[string]any
 		currentGovernance  []map[string]any
 		refreshedMemories  []map[string]any
@@ -261,7 +269,7 @@ func runExecutionContextPackage(ctx context.Context, deps executionContextPackag
 		deliverablesRead   bool
 		wg                 sync.WaitGroup
 	)
-	wg.Add(7)
+	wg.Add(8)
 	go func() {
 		defer wg.Done()
 		manifest = executionContextWorkspaceFileManifest(ctx, deps.workspaces, run, step, workspace)
@@ -304,6 +312,10 @@ func runExecutionContextPackage(ctx context.Context, deps executionContextPackag
 	}()
 	go func() {
 		defer wg.Done()
+		evidenceLedger = runEvidenceLedgerContext(ctx, deps.evidence, run)
+	}()
+	go func() {
+		defer wg.Done()
 		currentGovernance = currentRunGovernanceHistory(ctx, deps.tickets, deps.resolutions, deps.approvals, run)
 	}()
 	go func() {
@@ -337,6 +349,9 @@ func runExecutionContextPackage(ctx context.Context, deps executionContextPackag
 			}
 		}
 		ret[stepInputKeyProcessEvidenceTimeline] = processTimeline
+	}
+	if len(evidenceLedger) > 0 {
+		ret[stepInputKeyEvidenceLedger] = evidenceLedger
 	}
 	if len(progressDigest) > 0 {
 		ret[stepInputKeyCurrentProgressDigest] = progressDigest
@@ -541,6 +556,250 @@ func removeExcludedSelectedContextMemories(selected map[string]any, retrieval ma
 	}
 	selected["memories"] = filtered
 	return selected
+}
+
+func runEvidenceLedgerContext(ctx context.Context, records repository.EvidenceRecordRepository, run *runModel.Run) map[string]any {
+	if records == nil || run == nil || run.ID == "" {
+		return nil
+	}
+	items, err := records.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID), run.ID)
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+	return compactEvidenceLedgerForLLMContext(run, items)
+}
+
+func compactEvidenceLedgerForLLMContext(run *runModel.Run, records []*orchestratormodel.EvidenceRecord) map[string]any {
+	if len(records) == 0 {
+		return nil
+	}
+	selected := records
+	var historical map[string]any
+	if len(records) > maxLLMContextSliceItems {
+		recentLimit := maxLLMContextSliceItems - 1
+		historical = compactHistoricalEvidenceRecordSummary(run, records[:len(records)-recentLimit])
+		selected = records[len(records)-recentLimit:]
+	}
+	items := make([]map[string]any, 0, min(len(selected)+1, maxLLMContextSliceItems))
+	if len(historical) > 0 {
+		historical["order"] = 1
+		items = append(items, historical)
+	}
+	statusCounts := map[string]int{}
+	kindCounts := map[string]int{}
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		if status := strings.TrimSpace(record.Status); status != "" {
+			statusCounts[status]++
+		}
+		if kind := strings.TrimSpace(record.Kind); kind != "" {
+			kindCounts[kind]++
+		}
+	}
+	offset := len(items)
+	for idx, record := range selected {
+		item := compactEvidenceRecordForLLMContext(record, idx+1+offset)
+		if len(item) > 0 {
+			items = append(items, item)
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	ledger := map[string]any{
+		"schemaVersion": "workorch.evidence_ledger_context.v1",
+		"summary": map[string]any{
+			"totalCount":   len(records),
+			"statusCounts": statusCounts,
+			"kindCounts":   kindCounts,
+		},
+		"items":            items,
+		"compactionPolicy": "recent_complete_evidence_with_historical_summary_refs; raw payloads omitted and addressable through payloadRef/sourceRef",
+	}
+	if run != nil {
+		if run.ID != "" {
+			ledger["runId"] = string(run.ID)
+		}
+		if run.WorkspaceID != "" {
+			ledger["workspaceId"] = string(run.WorkspaceID)
+		}
+		if revision := strings.TrimSpace(run.DefinitionRevision); revision != "" {
+			ledger["definitionRevision"] = revision
+		}
+	}
+	return ledger
+}
+
+func compactHistoricalEvidenceRecordSummary(run *runModel.Run, records []*orchestratormodel.EvidenceRecord) map[string]any {
+	if len(records) == 0 {
+		return nil
+	}
+	summary := map[string]any{
+		"sourceRef":      evidenceLedgerHistorySourceRef(run),
+		"summaryKind":    "compact_history",
+		"historicalOnly": true,
+		"itemCount":      len(records),
+	}
+	statusCounts := map[string]int{}
+	kindCounts := map[string]int{}
+	sourceRefs := []string{}
+	evidenceRefs := []string{}
+	var firstRef, lastRef string
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		ref := evidenceRecordPromptRef(record)
+		if ref != "" {
+			if firstRef == "" {
+				firstRef = ref
+			}
+			lastRef = ref
+			evidenceRefs = append(evidenceRefs, ref)
+		}
+		if source := strings.TrimSpace(record.SourceRef); source != "" {
+			sourceRefs = append(sourceRefs, source)
+		}
+		if status := strings.TrimSpace(record.Status); status != "" {
+			statusCounts[status]++
+		}
+		if kind := strings.TrimSpace(record.Kind); kind != "" {
+			kindCounts[kind]++
+		}
+	}
+	if firstRef != "" {
+		summary["firstEvidenceRef"] = firstRef
+	}
+	if lastRef != "" {
+		summary["lastEvidenceRef"] = lastRef
+	}
+	if refs := limitedStrings(compactUniqueStrings(evidenceRefs), maxLLMContextSliceItems); len(refs) > 0 {
+		summary["evidenceRefs"] = refs
+	}
+	if refs := limitedStrings(compactUniqueStrings(sourceRefs), maxLLMContextSliceItems); len(refs) > 0 {
+		summary["sourceRefs"] = refs
+	}
+	if len(statusCounts) > 0 {
+		summary["statusCounts"] = statusCounts
+	}
+	if len(kindCounts) > 0 {
+		summary["kindCounts"] = kindCounts
+	}
+	summary["summary"] = "Older evidence records are compacted; use evidenceRefs/sourceRefs for lineage and recent items for proof strength details."
+	return summary
+}
+
+func evidenceLedgerHistorySourceRef(run *runModel.Run) string {
+	if run == nil || run.ID == "" {
+		return "history://run/evidence-ledger"
+	}
+	return "history://runs/" + string(run.ID) + "/evidence-ledger"
+}
+
+func compactEvidenceRecordForLLMContext(record *orchestratormodel.EvidenceRecord, order int) map[string]any {
+	if record == nil || record.ID == "" {
+		return nil
+	}
+	item := map[string]any{
+		"order":       order,
+		"evidenceRef": evidenceRecordPromptRef(record),
+		"kind":        strings.TrimSpace(record.Kind),
+		"status":      strings.TrimSpace(record.Status),
+		"sourceRef":   strings.TrimSpace(record.SourceRef),
+	}
+	if record.StepID != "" {
+		item["stepId"] = string(record.StepID)
+	}
+	if revision := strings.TrimSpace(record.DefinitionRevision); revision != "" {
+		item["definitionRevision"] = revision
+	}
+	if sourceType := strings.TrimSpace(record.SourceType); sourceType != "" {
+		item["sourceType"] = sourceType
+	}
+	if subjectID := strings.TrimSpace(record.SubjectID); subjectID != "" {
+		item["subjectId"] = subjectID
+	}
+	if refs := compactUniqueStrings(record.CoverageItemRefs); len(refs) > 0 {
+		item["coverageItemRefs"] = refs
+	}
+	if len(record.Supersedes) > 0 {
+		refs := make([]string, 0, len(record.Supersedes))
+		for _, ref := range record.Supersedes {
+			if strings.TrimSpace(string(ref)) != "" {
+				refs = append(refs, string(ref))
+			}
+		}
+		if refs := compactUniqueStrings(refs); len(refs) > 0 {
+			item["supersedes"] = refs
+		}
+	}
+	if record.CreatedAt != "" {
+		item["createdAt"] = record.CreatedAt
+	}
+	if record.UpdatedAt != "" && record.UpdatedAt != record.CreatedAt {
+		item["updatedAt"] = record.UpdatedAt
+	}
+	mergeEvidenceRecordPromptMetadata(item, record.Metadata)
+	return item
+}
+
+func evidenceRecordPromptRef(record *orchestratormodel.EvidenceRecord) string {
+	if record == nil || record.ID == "" {
+		return ""
+	}
+	return "evidence://" + string(record.ID)
+}
+
+func mergeEvidenceRecordPromptMetadata(item map[string]any, metadata map[string]any) {
+	if len(item) == 0 || len(metadata) == 0 {
+		return
+	}
+	for _, key := range []string{
+		"evidenceRef",
+		"evidenceQuality",
+		"evidenceReason",
+		"validationKind",
+		"validationState",
+		"proofKind",
+		"coverageAlignment",
+		"targetRef",
+		"targetRefs",
+		"coverageTargets",
+		"coverageWorkItemIds",
+		"observedClaims",
+		"limitations",
+		"evidenceTags",
+		"zeroWork",
+		"summary",
+		"reason",
+		"failureClass",
+		"failureSignature",
+		"violatedRule",
+		"violationType",
+		"recoverability",
+		"retryHint",
+		"targetScope",
+		"graphRootStepId",
+		"graphNodeId",
+		"patchType",
+		"beforeHash",
+		"afterHash",
+		"contentHash",
+		"snapshotIntegrity",
+		"snapshotValidity",
+	} {
+		if value, ok := metadata[key]; ok && value != nil {
+			item[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	for _, key := range []string{"sourceOutputRef", "rejectedOutputRef"} {
+		if ref := strings.TrimSpace(stringFromMap(metadata, key)); ref != "" {
+			item["payloadRef"] = ref
+			break
+		}
+	}
 }
 
 func shouldCompactExecutionContextPackageForRepair(step *runModel.Step) bool {

@@ -44,6 +44,7 @@ var providerP0InputKeys = []string{
 	"decisionResolution", "approvalResolution",
 	"contractViolationRecovery",
 	"coverageWorkItemContext",
+	"evidenceLedger",
 	"stagePacket",
 }
 
@@ -643,7 +644,7 @@ func prioritizedProviderInput(input map[string]any, includeP2 bool) map[string]a
 	for _, key := range providerP0InputKeys {
 		if value, ok := input[key]; ok {
 			maxDepth := 2
-			if key == "coverageWorkItemContext" || key == "stagePacket" {
+			if key == "coverageWorkItemContext" || key == "stagePacket" || key == "evidenceLedger" {
 				maxDepth = 4
 			}
 			out[key] = budgetProviderValue(value, 0, providerBudgetAggressiveBytes, providerBudgetAggressiveItems, providerBudgetAggressiveEntries, maxDepth)
@@ -757,7 +758,7 @@ func providerInputSourceRefs(input map[string]any) []string {
 		switch strings.TrimSpace(key) {
 		case "executionContext", "executionContextPackage", "workspaceFileManifest", "workspaceManifest",
 			"graphEvidence", "runEvidenceSummary", "processEvidenceTimeline", "currentProgressDigest", "failedExecutionGraph", "failedStepInput", "failedStepOutput",
-			"decisionResolution", "approvalResolution", "memoryRetrieval", "skillSelection", "coverageWorkItemContext":
+			"decisionResolution", "approvalResolution", "memoryRetrieval", "skillSelection", "coverageWorkItemContext", "evidenceLedger":
 			refs = append(refs, "input."+key)
 		}
 	}
@@ -772,7 +773,7 @@ func providerInputSourceRefs(input map[string]any) []string {
 	if executionContextPackage := recordFromAny(input["executionContextPackage"]); len(executionContextPackage) > 0 {
 		for key := range executionContextPackage {
 			switch strings.TrimSpace(key) {
-			case "processEvidenceTimeline", "currentProgressDigest", "recentFailureSummary", "selectedContext", "coverageWorkItemContext":
+			case "processEvidenceTimeline", "currentProgressDigest", "recentFailureSummary", "selectedContext", "coverageWorkItemContext", "evidenceLedger":
 				refs = append(refs, "input.executionContextPackage."+key)
 			}
 		}
@@ -818,6 +819,7 @@ func providerProtectedContextFields(input map[string]any) []string {
 		"providerRetryAssessmentOnly",
 		"runtimeStage", "runtimeStageMode", "currentRuntimeStage", "currentRuntimeStageMode", "currentSoulStage",
 		"coverageWorkItemContext",
+		"evidenceLedger",
 	} {
 		if _, ok := input[key]; ok {
 			fields = append(fields, "input."+key)

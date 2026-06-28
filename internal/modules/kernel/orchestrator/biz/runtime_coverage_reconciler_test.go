@@ -103,6 +103,8 @@ func TestReconcile_BindsValidShellToOpenCwiWithValidationKind(t *testing.T) {
 
 	step := reconcileStepShell("run-recon-1/graph-007/002-go-build-verify", "go")
 	validation := reconcileValidValidation("val-001", step.ID)
+	validation.TargetRef = "go-build-verify"
+	validation.Summary = "go-build-verify validation observed"
 
 	changed, bound := c.reconcileValidationEvidence(run, []*runmodel.ValidationResult{validation}, []*runmodel.Step{step})
 	if !changed || bound != 1 {

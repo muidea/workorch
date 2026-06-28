@@ -161,10 +161,11 @@ func coverageWorkItemStepUpdate(step *runModel.Step) coverageWorkItemUpdate {
 		return coverageWorkItemUpdate{}
 	}
 	update := coverageWorkItemUpdate{
-		WorkItemIDs:  coverageWorkItemIDsFromStep(step),
-		TargetTokens: coverageTargetTokensFromStep(step),
-		EvidenceRefs: coverageStepEvidenceRefs(step),
-		Accepted:     step.State == common.StepStateCompleted,
+		WorkItemIDs:       coverageWorkItemIDsFromStep(step),
+		TargetTokens:      coverageTargetTokensFromStep(step),
+		EvidenceRefs:      coverageStepEvidenceRefs(step),
+		Accepted:          step.State == common.StepStateCompleted,
+		AcceptanceOptions: coverageEvidenceAcceptanceOptionsFromStep(step),
 	}
 	if stepKindCanProduceStateChangingEvidence(step.Kind) || runtimeStepDeclaresStateChangingEvidence(step) {
 		update.EvidenceKinds = append(update.EvidenceKinds, "state_change")
@@ -190,6 +191,106 @@ func coverageStepCanProduceValidationEvidence(step *runModel.Step) bool {
 	return len(mapFromValue(step.Input["validationEvidence"])) > 0 ||
 		len(mapFromValue(step.Output["validationEvidence"])) > 0 ||
 		len(stringSliceFromValue(step.Output["evidenceRefs"])) > 0
+}
+
+type coverageEvidenceAcceptanceOptions struct {
+	EnforceProofStrength bool
+	Quality              runtimeEvidenceQuality
+	TargetRefs           []string
+	ObservedClaims       []string
+	ProofKind            string
+	CoverageAlignment    string
+	Tags                 []string
+	Reason               string
+}
+
+func coverageEvidenceAcceptanceOptionsFromStep(step *runModel.Step) coverageEvidenceAcceptanceOptions {
+	if step == nil {
+		return coverageEvidenceAcceptanceOptions{}
+	}
+	evidence := coverageValidationEvidenceMetadataFromStep(step)
+	quality := evidenceQualityFromRuntimeStep(step)
+	tags := append([]string{}, quality.Tags...)
+	tags = append(tags, stringSliceFromValue(evidence["tags"])...)
+	tags = append(tags, stringSliceFromValue(evidence["evidenceTags"])...)
+	targetRefs := append([]string{}, coverageValidationTargetRefsFromEvidence(evidence)...)
+	targetRefs = append(targetRefs, stringSliceFromValue(step.Input["targetRefs"])...)
+	targetRefs = append(targetRefs, stringSliceFromValue(step.Output["targetRefs"])...)
+	claims := coverageObservedClaimsFromEvidence(evidence)
+	ret := coverageEvidenceAcceptanceOptions{
+		EnforceProofStrength: coverageStepRequiresValidationProofStrength(step, evidence, targetRefs, claims),
+		Quality:              quality,
+		TargetRefs:           compactUniqueStrings(targetRefs),
+		ObservedClaims:       compactUniqueStrings(claims),
+		ProofKind:            firstNonEmptyString(stringFromMap(evidence, "proofKind"), stringFromMap(evidence, "mode")),
+		CoverageAlignment:    stringFromMap(evidence, "coverageAlignment"),
+		Tags:                 compactUniqueStrings(tags),
+		Reason:               firstNonEmptyString(quality.Reason, stringFromMap(evidence, "reason"), stringFromMap(evidence, "evidenceReason")),
+	}
+	if coverageEvidenceTagsRequireProofStrength(ret.Tags) {
+		ret.EnforceProofStrength = true
+	}
+	return ret
+}
+
+func coverageStepRequiresValidationProofStrength(step *runModel.Step, evidence map[string]any, targetRefs []string, claims []string) bool {
+	if len(evidence) > 0 || len(targetRefs) > 0 || len(claims) > 0 {
+		return true
+	}
+	if step == nil {
+		return false
+	}
+	switch strings.TrimSpace(step.Kind) {
+	case "shell/command", "mcp/tool_call":
+		return true
+	default:
+		return false
+	}
+}
+
+func coverageValidationEvidenceMetadataFromStep(step *runModel.Step) map[string]any {
+	if step == nil {
+		return nil
+	}
+	if evidence := mapFromValue(step.Output["validationEvidence"]); len(evidence) > 0 {
+		return evidence
+	}
+	return mapFromValue(step.Input["validationEvidence"])
+}
+
+func coverageValidationTargetRefsFromEvidence(evidence map[string]any) []string {
+	if len(evidence) == 0 {
+		return nil
+	}
+	refs := stringSliceFromValue(evidence["targetRefs"])
+	refs = append(refs, stringSliceFromValue(evidence["coverageTargetRefs"])...)
+	if ref := strings.TrimSpace(stringFromMap(evidence, "targetRef")); ref != "" {
+		refs = append(refs, ref)
+	}
+	if ref := strings.TrimSpace(stringFromMap(evidence, "coverageTargetRef")); ref != "" {
+		refs = append(refs, ref)
+	}
+	return compactUniqueStrings(refs)
+}
+
+func coverageObservedClaimsFromEvidence(evidence map[string]any) []string {
+	if len(evidence) == 0 {
+		return nil
+	}
+	claims := stringSliceFromValue(evidence["observedClaims"])
+	claims = append(claims, stringSliceFromValue(evidence["claims"])...)
+	for _, item := range mapSliceFromValue(evidence["observedClaims"]) {
+		for _, key := range []string{"claim", "summary", "description", "observed", "observation"} {
+			if value := strings.TrimSpace(stringFromMap(item, key)); value != "" {
+				claims = append(claims, value)
+				break
+			}
+		}
+	}
+	if claim := strings.TrimSpace(stringFromMap(evidence, "observedClaim")); claim != "" {
+		claims = append(claims, claim)
+	}
+	return compactUniqueStrings(claims)
 }
 
 func coverageStepEvidenceRefs(step *runModel.Step) []string {
@@ -362,6 +463,10 @@ func coverageWorkItemMatchesUpdate(item map[string]any, update coverageWorkItemU
 }
 
 func coverageApplyWorkItemEvidence(item map[string]any, kinds []string, refs []string, accepted bool, closeSatisfied bool, stepID string, reason string) bool {
+	return coverageApplyWorkItemEvidenceWithOptions(item, kinds, refs, accepted, closeSatisfied, stepID, reason, coverageEvidenceAcceptanceOptions{})
+}
+
+func coverageApplyWorkItemEvidenceWithOptions(item map[string]any, kinds []string, refs []string, accepted bool, closeSatisfied bool, stepID string, reason string, options coverageEvidenceAcceptanceOptions) bool {
 	if len(item) == 0 || len(kinds) == 0 || len(refs) == 0 {
 		return false
 	}
@@ -380,6 +485,11 @@ func coverageApplyWorkItemEvidence(item map[string]any, kinds []string, refs []s
 		if kind == "" || !required[kind] {
 			continue
 		}
+		if accepted && !coverageEvidenceSufficientForKind(item, kind, options) {
+			recordCoverageInsufficientEvidence(item, kind, refs, stepID, firstNonEmptyString(reason, options.Reason, coverageEvidenceInsufficientReason(item, kind, options)))
+			changed = true
+			continue
+		}
 		filteredRefs := coverageEvidenceRefsForKind(kind, refs)
 		if len(filteredRefs) == 0 {
 			continue
@@ -392,7 +502,7 @@ func coverageApplyWorkItemEvidence(item map[string]any, kinds []string, refs []s
 		}
 	}
 	if !hasApplicableEvidence {
-		return false
+		return changed
 	}
 	item[key] = byKind
 	item[flatKey] = coverageFlattenEvidenceRefs(byKind, stringSliceFromValue(item[flatKey]))
@@ -498,6 +608,125 @@ func coverageApplyWorkItemEvidence(item map[string]any, kinds []string, refs []s
 		return false
 	}
 	return true
+}
+
+func coverageEvidenceSufficientForKind(item map[string]any, kind string, options coverageEvidenceAcceptanceOptions) bool {
+	if !options.EnforceProofStrength || strings.TrimSpace(kind) != "validation" {
+		return true
+	}
+	if !validationEvidenceCanSatisfyDoD(options.Quality) {
+		return false
+	}
+	if coverageEvidenceTagsAreDiagnosticOnly(options.Tags) {
+		return false
+	}
+	if !coverageEvidenceTargetAligned(item, options.TargetRefs) {
+		return false
+	}
+	if len(options.ObservedClaims) == 0 {
+		return false
+	}
+	return true
+}
+
+func coverageEvidenceTargetAligned(item map[string]any, targetRefs []string) bool {
+	if len(item) == 0 || len(targetRefs) == 0 {
+		return false
+	}
+	candidates := []string{
+		stringFromMap(item, "id"),
+		stringFromMap(item, "repositoryId"),
+		stringFromMap(item, "normalizedSourceKey"),
+		stringFromMap(item, "sourceRequirementId"),
+		stringFromMap(item, "sourcePath"),
+		stringFromMap(item, "targetText"),
+	}
+	candidates = append(candidates, stringSliceFromValue(item["targetRefs"])...)
+	candidates = append(candidates, stringSliceFromValue(item["sourceRequirementAliases"])...)
+	for _, targetRef := range targetRefs {
+		for _, candidate := range candidates {
+			if coverageRepairTokenMatches(targetRef, candidate) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func coverageEvidenceTagsRequireProofStrength(tags []string) bool {
+	return coverageEvidenceTagsContain(tags,
+		"generic_test_fallback",
+		"all_tests_fallback",
+		"target_unaligned",
+		"controlled_substitute_unproven",
+		"discovery_only",
+		"missing_observed_claims",
+		"missing_target_refs",
+		"diagnostic_only",
+	)
+}
+
+func coverageEvidenceTagsAreDiagnosticOnly(tags []string) bool {
+	return coverageEvidenceTagsContain(tags,
+		"target_unaligned",
+		"controlled_substitute_unproven",
+		"discovery_only",
+		"missing_observed_claims",
+		"missing_target_refs",
+		"diagnostic_only",
+	)
+}
+
+func coverageEvidenceTagsContain(tags []string, markers ...string) bool {
+	if len(tags) == 0 || len(markers) == 0 {
+		return false
+	}
+	markerSet := stringSet(markers)
+	for _, tag := range tags {
+		normalized := strings.ToLower(strings.TrimSpace(tag))
+		normalized = strings.ReplaceAll(normalized, "-", "_")
+		normalized = strings.ReplaceAll(normalized, " ", "_")
+		if markerSet[normalized] {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageEvidenceInsufficientReason(item map[string]any, kind string, options coverageEvidenceAcceptanceOptions) string {
+	if strings.TrimSpace(kind) != "validation" {
+		return "evidence is not sufficient for coverage"
+	}
+	switch {
+	case !validationEvidenceCanSatisfyDoD(options.Quality):
+		return firstNonEmptyString(options.Quality.Reason, "validation evidence quality is not sufficient for coverage")
+	case coverageEvidenceTagsAreDiagnosticOnly(options.Tags):
+		return "validation evidence is diagnostic or target-unaligned"
+	case !coverageEvidenceTargetAligned(item, options.TargetRefs):
+		return "validation evidence is missing target-aligned refs"
+	case len(options.ObservedClaims) == 0:
+		return "validation evidence is missing observed claims"
+	default:
+		return "validation evidence is not sufficient for coverage"
+	}
+}
+
+func recordCoverageInsufficientEvidence(item map[string]any, kind string, refs []string, stepID string, reason string) {
+	if len(item) == 0 || strings.TrimSpace(kind) == "" || len(refs) == 0 {
+		return
+	}
+	byKind := mapStringSliceValue(item["supportingEvidenceByKind"])
+	byKind[kind] = compactUniqueStrings(append(byKind[kind], coverageEvidenceRefsForKind(kind, refs)...))
+	item["supportingEvidenceByKind"] = byKind
+	item["supportingEvidenceRefs"] = coverageFlattenEvidenceRefs(byKind, stringSliceFromValue(item["supportingEvidenceRefs"]))
+	if stepID != "" {
+		item["updatedByStepId"] = stepID
+	}
+	item["updatedAt"] = runtimeEvidenceTimestamp()
+	if strings.TrimSpace(reason) != "" {
+		item["evidenceQualityReason"] = reason
+		item["currentGap"] = reason
+	}
 }
 
 func coverageEvidenceRefsForKind(kind string, refs []string) []string {

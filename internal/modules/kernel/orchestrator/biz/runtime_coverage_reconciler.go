@@ -100,7 +100,7 @@ func (c *coverageSubsystem) reconcileValidationEvidence(
 				continue
 			}
 			seenPairs[pairKey] = true
-			if coverageApplyWorkItemEvidence(
+			if coverageApplyWorkItemEvidenceWithOptions(
 				item,
 				[]string{"validation"},
 				[]string{string(validation.EvidenceRef)},
@@ -108,6 +108,7 @@ func (c *coverageSubsystem) reconcileValidationEvidence(
 				false,
 				string(validation.StepID),
 				"reconciled from runtime_step validation",
+				coverageEvidenceAcceptanceOptionsFromValidationResult(validation),
 			) {
 				bound++
 				changed = true
@@ -144,6 +145,33 @@ func reconcileValidationAcceptable(v *runModel.ValidationResult) bool {
 		return false
 	}
 	return true
+}
+
+func coverageEvidenceAcceptanceOptionsFromValidationResult(validation *runModel.ValidationResult) coverageEvidenceAcceptanceOptions {
+	if validation == nil {
+		return coverageEvidenceAcceptanceOptions{}
+	}
+	quality := qualityFromValidationResult(validation)
+	targetRefs := []string{}
+	if targetRef := strings.TrimSpace(validation.TargetRef); targetRef != "" {
+		targetRefs = append(targetRefs, targetRef)
+	}
+	claims := []string{}
+	if summary := strings.TrimSpace(validation.Summary); summary != "" {
+		claims = append(claims, summary)
+	}
+	ret := coverageEvidenceAcceptanceOptions{
+		EnforceProofStrength: true,
+		Quality:              quality,
+		TargetRefs:           compactUniqueStrings(targetRefs),
+		ObservedClaims:       compactUniqueStrings(claims),
+		Tags:                 compactUniqueStrings(append([]string{}, validation.EvidenceTags...)),
+		Reason:               firstNonEmptyString(quality.Reason, strings.TrimSpace(validation.EvidenceReason)),
+	}
+	if coverageEvidenceTagsRequireProofStrength(ret.Tags) {
+		ret.EnforceProofStrength = true
+	}
+	return ret
 }
 
 func reconcileStepIsBindable(step *runModel.Step) bool {
