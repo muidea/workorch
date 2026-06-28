@@ -30,7 +30,11 @@ func TestAcceptedEvidenceRecordReusesAcrossMatchingCoverageItems(t *testing.T) {
 		Status:           runtimemodel.EvidenceStatusAccepted,
 		SourceRef:        "step-validation-001/validation/runtime-step",
 		CoverageItemRefs: []string{"cwi-001", "cwi-002", "cwi-003"},
-		Metadata:         map[string]any{"evidenceQuality": string(common.EvidenceQualityValid)},
+		Metadata: map[string]any{
+			"evidenceQuality": string(common.EvidenceQualityValid),
+			"targetRefs":      []string{"req-001", "req-002", "req-003"},
+			"observedClaims":  []string{"all scoped requirements were validated"},
+		},
 	}}
 
 	changed, bound := newCoverageSubsystem().reconcileAcceptedEvidenceRecords(run, records)
@@ -60,7 +64,121 @@ func TestAcceptedEvidenceRecordReusesAcrossMatchingCoverageItems(t *testing.T) {
 	}
 }
 
-func TestAcceptedStateChangeEvidenceRecordReusesByCoverageTargets(t *testing.T) {
+func TestAcceptedValidationEvidenceRecordWithoutProofIsSupportingOnly(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-evidence-reuse-missing-proof",
+		WorkspaceID: "ws-evidence-reuse-missing-proof",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			coverageWorkItemsKey: []map[string]any{
+				coverageReuseTestItem("cwi-001", "req-001"),
+			},
+		},
+	}
+	records := []*runtimemodel.EvidenceRecord{{
+		ID:               "evidence-validation-weak",
+		WorkspaceID:      run.WorkspaceID,
+		RunID:            run.ID,
+		StepID:           "step-validation-weak",
+		Kind:             runtimemodel.EvidenceKindValidation,
+		Status:           runtimemodel.EvidenceStatusAccepted,
+		SourceRef:        "step-validation-weak/validation/runtime-step",
+		CoverageItemRefs: []string{"cwi-001"},
+		Metadata:         map[string]any{"evidenceQuality": string(common.EvidenceQualityValid)},
+	}}
+
+	changed, bound := newCoverageSubsystem().reconcileAcceptedEvidenceRecords(run, records)
+	if !changed || bound != 0 {
+		t.Fatalf("reconcile changed/bound = %v/%d, want supporting-only mutation true/0", changed, bound)
+	}
+	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	if got := stringFromMap(item, "status"); got != "open" {
+		t.Fatalf("status = %q, want open", got)
+	}
+	if accepted := mapStringSliceValue(item["acceptedEvidenceByKind"]); len(accepted[runtimemodel.EvidenceKindValidation]) != 0 {
+		t.Fatalf("accepted validation = %+v, want none", accepted[runtimemodel.EvidenceKindValidation])
+	}
+	if supporting := mapStringSliceValue(item["supportingEvidenceByKind"]); len(supporting[runtimemodel.EvidenceKindValidation]) != 2 {
+		t.Fatalf("supporting validation = %+v, want source ref and record id", supporting[runtimemodel.EvidenceKindValidation])
+	}
+}
+
+func TestAcceptedValidationEvidenceRecordTextOnlyTargetRefsAreSupportingOnly(t *testing.T) {
+	textTarget := "deliverable must expose runtime health behavior"
+	run := &runmodel.Run{
+		ID:          "run-evidence-reuse-text-only",
+		WorkspaceID: "ws-evidence-reuse-text-only",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                    "cwi-structured",
+				"status":                "open",
+				"sourceRequirementId":   "req-structured",
+				"targetText":            textTarget,
+				"targetRefs":            []string{textTarget},
+				"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindValidation},
+				"missingEvidenceKinds":  []string{runtimemodel.EvidenceKindValidation},
+			}},
+		},
+	}
+	records := []*runtimemodel.EvidenceRecord{{
+		ID:          "evidence-validation-text-only",
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		StepID:      "step-validation-text-only",
+		Kind:        runtimemodel.EvidenceKindValidation,
+		Status:      runtimemodel.EvidenceStatusAccepted,
+		SourceRef:   "step-validation-text-only/validation/runtime-step",
+		Metadata: map[string]any{
+			"evidenceQuality": string(common.EvidenceQualityValid),
+			"targetRefs":      []string{textTarget},
+			"observedClaims":  []string{"health behavior was observed"},
+		},
+	}}
+
+	changed, bound := newCoverageSubsystem().reconcileAcceptedEvidenceRecords(run, records)
+	if changed || bound != 0 {
+		t.Fatalf("reconcile changed/bound = %v/%d, want false/0 for text-only target refs", changed, bound)
+	}
+	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	if got := stringFromMap(item, "status"); got != "open" {
+		t.Fatalf("status = %q, want open", got)
+	}
+	if accepted := mapStringSliceValue(item["acceptedEvidenceByKind"]); len(accepted[runtimemodel.EvidenceKindValidation]) != 0 {
+		t.Fatalf("accepted validation refs = %+v, want none", accepted[runtimemodel.EvidenceKindValidation])
+	}
+}
+
+func TestRuntimeStepCoverageScopeMetadataSeparatesStructuredTargetRefs(t *testing.T) {
+	step := &runmodel.Step{
+		ID: "run-1/graph-1/001-validate-target",
+		Input: map[string]any{
+			"targetRefs": []string{"free text target with spaces", "cwi-001"},
+		},
+		Output: map[string]any{
+			"validationEvidence": map[string]any{
+				"targetRefs":     []string{"another text target with spaces", "req-001"},
+				"observedClaims": []string{"runtime behavior observed"},
+			},
+		},
+	}
+
+	scope := runtimeStepCoverageScopeMetadata(step)
+	if refs := stringSliceFromValue(scope["targetRefs"]); !stringSliceContains(refs, "cwi-001") || !stringSliceContains(refs, "req-001") {
+		t.Fatalf("targetRefs = %+v, want structured refs", refs)
+	}
+	if refs := stringSliceFromValue(scope["targetRefs"]); stringSliceContains(refs, "free text target with spaces") || stringSliceContains(refs, "another text target with spaces") {
+		t.Fatalf("targetRefs = %+v, want text refs excluded from binding refs", refs)
+	}
+	if refs := stringSliceFromValue(scope["structuredTargetRefs"]); !stringSliceContains(refs, "req-001") {
+		t.Fatalf("structuredTargetRefs = %+v, want validation evidence structured ref", refs)
+	}
+	if claims := stringSliceFromValue(scope["observedClaims"]); !stringSliceContains(claims, "runtime behavior observed") {
+		t.Fatalf("observedClaims = %+v, want validation evidence claim", claims)
+	}
+}
+
+func TestAcceptedStateChangeEvidenceRecordDoesNotReuseByBroadCoverageTargets(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-evidence-reuse-coverage-target",
 		WorkspaceID: "ws-evidence-reuse-coverage-target",
@@ -92,6 +210,55 @@ func TestAcceptedStateChangeEvidenceRecordReusesByCoverageTargets(t *testing.T) 
 	}}
 
 	changed, bound := newCoverageSubsystem().reconcileAcceptedEvidenceRecords(run, records)
+	if changed || bound != 0 {
+		t.Fatalf("reconcile changed/bound = %v/%d, want false/0", changed, bound)
+	}
+	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	if missing := coverageMissingEvidenceKinds(item); len(missing) != 1 || missing[0] != runtimemodel.EvidenceKindStateChange {
+		t.Fatalf("missingEvidenceKinds = %+v, want state_change still missing", missing)
+	}
+	accepted := mapStringSliceValue(item["acceptedEvidenceByKind"])
+	if refs := accepted[runtimemodel.EvidenceKindStateChange]; len(refs) != 0 {
+		t.Fatalf("accepted state_change refs = %+v, want none", refs)
+	}
+	if edges := mapSliceFromValue(item["evidenceReuseRefs"]); len(edges) != 0 {
+		t.Fatalf("evidenceReuseRefs = %+v, want none", edges)
+	}
+}
+
+func TestAcceptedStateChangeEvidenceRecordReusesByExplicitSourceRequirement(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-evidence-reuse-source-requirement",
+		WorkspaceID: "ws-evidence-reuse-source-requirement",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                    "cwi-target",
+				"status":                "open",
+				"sourceRequirementId":   "target-001",
+				"coverageTargetToken":   "target-001",
+				"normalizedSourceKey":   "source:target-001",
+				"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindStateChange},
+				"missingEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange},
+			}},
+		},
+	}
+	records := []*runtimemodel.EvidenceRecord{{
+		ID:          "evidence-state-change-target-001",
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		StepID:      "step-state-change-001",
+		Kind:        runtimemodel.EvidenceKindStateChange,
+		Status:      runtimemodel.EvidenceStatusAccepted,
+		SourceRef:   "step-state-change-001/output.json",
+		Metadata: map[string]any{
+			"sourceRequirementIds": []string{"target-001"},
+			"coverageTargets":      []string{"target-001"},
+			"stateChanging":        true,
+		},
+	}}
+
+	changed, bound := newCoverageSubsystem().reconcileAcceptedEvidenceRecords(run, records)
 	if !changed || bound != 1 {
 		t.Fatalf("reconcile changed/bound = %v/%d, want true/1", changed, bound)
 	}
@@ -103,8 +270,8 @@ func TestAcceptedStateChangeEvidenceRecordReusesByCoverageTargets(t *testing.T) 
 	if refs := accepted[runtimemodel.EvidenceKindStateChange]; !stringSliceContains(refs, "step-state-change-001/output.json") {
 		t.Fatalf("accepted state_change refs = %+v, want source ref", refs)
 	}
-	if edges := mapSliceFromValue(item["evidenceReuseRefs"]); len(edges) != 1 || edges[0]["matchedBy"] != "coverage_target_id" {
-		t.Fatalf("evidenceReuseRefs = %+v, want coverage_target_id edge", edges)
+	if edges := mapSliceFromValue(item["evidenceReuseRefs"]); len(edges) != 1 || edges[0]["matchedBy"] != "source_requirement_id" {
+		t.Fatalf("evidenceReuseRefs = %+v, want source_requirement_id edge", edges)
 	}
 }
 

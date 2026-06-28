@@ -136,6 +136,8 @@ func coverageWorkItemFocus(item map[string]any) map[string]any {
 	focus["rejectedEvidenceRefs"] = stringSliceFromValue(item["rejectedEvidenceRefs"])
 	focus["acceptedEvidenceByKind"] = mapStringSliceValue(item["acceptedEvidenceByKind"])
 	focus["rejectedEvidenceByKind"] = mapStringSliceValue(item["rejectedEvidenceByKind"])
+	focus["acceptedEvidenceBindingByKind"] = mapStringSliceValue(item["acceptedEvidenceBindingByKind"])
+	focus["supportingEvidenceByKind"] = mapStringSliceValue(item["supportingEvidenceByKind"])
 	focus["coverageBoundary"] = stringFromMap(item, "coverageBoundary")
 	focus["nextAllowedConvergenceStates"] = coverageWorkItemNextStates(item)
 	return focus
@@ -146,6 +148,9 @@ func coverageWorkItemSummary(item map[string]any) map[string]any {
 		return nil
 	}
 	state := deriveCoverageWorkItemState(item)
+	id := stringFromMap(item, "id")
+	workItemIDs := compactUniqueStrings(append(stringSliceFromValue(item["coverageWorkItemIds"]), id))
+	structuredRefs := coverageWorkItemStructuredTargetRefs(item)
 	return map[string]any{
 		"id":                       stringFromMap(item, "id"),
 		"source":                   stringFromMap(item, "source"),
@@ -157,11 +162,21 @@ func coverageWorkItemSummary(item map[string]any) map[string]any {
 		"sourcePath":               stringFromMap(item, "sourcePath"),
 		"targetText":               stringFromMap(item, "targetText"),
 		"normalizedSourceKey":      stringFromMap(item, "normalizedSourceKey"),
+		"coverageWorkItemIds":      workItemIDs,
+		"structuredTargetRefs":     structuredRefs,
+		"targetRefs":               structuredRefs,
 		"requiredEvidenceKinds":    state.RequiredEvidenceKinds,
 		"missingEvidenceKinds":     state.MissingEvidenceKinds,
 		"status":                   firstNonEmptyString(stringFromMap(item, "status"), "open"),
 		"currentGap":               stringFromMap(item, "currentGap"),
 	}
+}
+
+func coverageWorkItemStructuredTargetRefs(item map[string]any) []string {
+	if len(item) == 0 {
+		return nil
+	}
+	return coverageAcceptedBindingRefsForItem(item)
 }
 
 func coverageWorkItemNextStates(item map[string]any) []string {
@@ -204,6 +219,8 @@ func coverageWorkItemLedgerSummary(item map[string]any, inFocus bool) map[string
 		"missingEvidenceKinds":     state.MissingEvidenceKinds,
 		"acceptedEvidenceRefs":     latestCoverageEvidenceRefs(stringSliceFromValue(item["acceptedEvidenceRefs"]), 2),
 		"rejectedEvidenceRefs":     latestCoverageEvidenceRefs(stringSliceFromValue(item["rejectedEvidenceRefs"]), 2),
+		"coverageWorkItemIds":      compactUniqueStrings([]string{stringFromMap(item, "id")}),
+		"structuredTargetRefs":     coverageWorkItemStructuredTargetRefs(item),
 		"omittedFromCurrentFocus":  !inFocus,
 	}
 	if !inFocus {
@@ -407,15 +424,18 @@ func coverageTargetSetFromWorkItemContext(context map[string]any) []map[string]a
 		}
 		seen[key] = true
 		target := map[string]any{
-			"kind":                coverageWorkItemTargetKind(item),
-			"targetText":          targetText,
-			"state":               firstNonEmptyString(stringFromMap(item, "status"), "open"),
-			"source":              stringFromMap(item, "source"),
-			"sourceScope":         stringFromMap(item, "sourceScope"),
-			"sourceRequirementId": sourceRequirementID,
-			"sourcePath":          stringFromMap(item, "sourcePath"),
-			"coverageWorkItemId":  stringFromMap(item, "id"),
-			"coverageTargetToken": firstNonEmptyString(sourceRequirementID, targetText),
+			"kind":                 coverageWorkItemTargetKind(item),
+			"targetText":           targetText,
+			"state":                firstNonEmptyString(stringFromMap(item, "status"), "open"),
+			"source":               stringFromMap(item, "source"),
+			"sourceScope":          stringFromMap(item, "sourceScope"),
+			"sourceRequirementId":  sourceRequirementID,
+			"sourcePath":           stringFromMap(item, "sourcePath"),
+			"coverageWorkItemId":   stringFromMap(item, "id"),
+			"coverageWorkItemIds":  compactUniqueStrings([]string{stringFromMap(item, "id")}),
+			"coverageTargetToken":  firstNonEmptyString(sourceRequirementID, targetText),
+			"structuredTargetRefs": coverageWorkItemStructuredTargetRefs(item),
+			"targetRefs":           coverageWorkItemStructuredTargetRefs(item),
 		}
 		for _, key := range []string{
 			"evidenceRole",

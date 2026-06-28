@@ -2513,6 +2513,9 @@ func TestInitialStepInputAuthorityAssessmentPreemptsStaleReplanStateChange(t *te
 				"acceptedEvidenceByKind": map[string][]string{
 					"validation": {"evidence-validation-ready"},
 				},
+				"acceptedEvidenceBindingByKind": map[string][]string{
+					"validation": {"evidence-validation-ready"},
+				},
 			}},
 			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
 			"replanContinuation": map[string]any{

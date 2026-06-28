@@ -289,7 +289,19 @@ func runtimeStepCoverageScopeMetadata(step *runModel.Step) map[string]any {
 	addStrings("coverageWorkItemIds", append(stringSliceFromValue(input["coverageWorkItemIds"]), stringSliceFromValue(output["coverageWorkItemIds"])...))
 	addStrings("coverageTargets", runtimeStepCoverageTargetRefs(step))
 	addString("targetRef", firstNonEmptyString(stringFromMap(input, "targetRef"), stringFromMap(output, "targetRef")))
-	addStrings("targetRefs", append(stringSliceFromValue(input["targetRefs"]), stringSliceFromValue(output["targetRefs"])...))
+	evidence := coverageValidationEvidenceMetadataFromStep(step)
+	rawTargetRefs := append(stringSliceFromValue(input["targetRefs"]), stringSliceFromValue(output["targetRefs"])...)
+	rawTargetRefs = append(rawTargetRefs, coverageValidationTargetRefsFromEvidence(evidence)...)
+	addStrings("targetRefs", coverageStructuredBindingRefsFromValue(rawTargetRefs))
+	addStrings("structuredTargetRefs", compactUniqueStrings(append(
+		append(coverageStructuredBindingRefsFromValue(input["structuredTargetRefs"]), coverageStructuredBindingRefsFromValue(output["structuredTargetRefs"])...),
+		coverageValidationStructuredTargetRefsFromEvidence(evidence)...,
+	)))
+	addStrings("observedClaims", coverageObservedClaimsFromEvidence(evidence))
+	addString("mode", stringFromMap(evidence, "mode"))
+	addString("observationType", stringFromMap(evidence, "observationType"))
+	addString("proofKind", firstNonEmptyString(stringFromMap(evidence, "proofKind"), stringFromMap(evidence, "mode")))
+	addString("coverageAlignment", stringFromMap(evidence, "coverageAlignment"))
 	if runtimeStepDeclaresStateChangingEvidence(step) {
 		ret["stateChanging"] = true
 	}

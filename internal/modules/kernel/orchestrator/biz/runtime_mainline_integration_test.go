@@ -522,6 +522,73 @@ func TestRuntimeOrchestrator_DispatchPersistsManagedValidationResourceOwnershipB
 	}
 }
 
+func TestRuntimeOrchestrator_DispatchPersistsOrdinaryValidationScratchOwnershipBeforeRuntimeRequest(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	runtime := &requestOnlyRuntimeAdapter{}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository()},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-ordinary-validation-scratch-owner")
+	runID := common.RunID("run-ordinary-validation-scratch-owner")
+	stepID := common.StepID("run-ordinary-validation-scratch-owner/validate")
+	scratch := filepath.Join(os.TempDir(), "workorch-validation-scratch", string(workspaceID), string(runID), "validate")
+	t.Cleanup(func() {
+		_ = os.RemoveAll(filepath.Join(os.TempDir(), "workorch-validation-scratch", string(workspaceID)))
+	})
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	input := map[string]any{
+		"command":               "sh",
+		"args":                  []any{"-c", "true"},
+		validationScratchDirKey: scratch,
+	}
+
+	if err := orch.dispatchStepWithWorkspace(ctx, run, stepID, "shell/command", input, workspace); err != nil {
+		t.Fatalf("dispatch step: %v", err)
+	}
+	if len(runtime.requests) != 1 {
+		t.Fatalf("runtime requests = %d, want 1", len(runtime.requests))
+	}
+	step, err := stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	resources := mapSliceFromValue(step.Input["validationResources"])
+	if len(resources) != 1 || stringFromMap(resources[0], "kind") != "scratch_dir" {
+		t.Fatalf("validationResources = %+v, want one scratch_dir resource", resources)
+	}
+	if resources[0]["path"] != scratch ||
+		resources[0]["cleanupPolicy"] != "remove_step_scoped_scratch_on_completion" ||
+		resources[0]["status"] != "pending" {
+		t.Fatalf("scratch resource = %+v, want pending step-scoped cleanup metadata", resources[0])
+	}
+	if managed := mapFromValue(step.Input["managedValidation"]); len(managed) != 0 {
+		t.Fatalf("managedValidation = %+v, want ordinary scratch ownership without managed validation", managed)
+	}
+	ownership := mapFromValue(step.Input["validationResourceOwnership"])
+	if ownership["persisted"] != true || len(stringSliceFromValue(ownership["ownedResourceRefs"])) != 1 {
+		t.Fatalf("validationResourceOwnership = %+v, want one owned scratch ref", ownership)
+	}
+}
+
 func TestRuntimeOrchestrator_FinalizeRuntimeStepResultClosesLateResultAfterRunBlocks(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

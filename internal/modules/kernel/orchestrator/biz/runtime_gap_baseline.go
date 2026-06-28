@@ -471,6 +471,7 @@ func dispatchCoverageFocusFromAuthority(input map[string]any, authorityFocus map
 	if len(authorityFocus) == 0 {
 		return nil
 	}
+	authoritySliceID := dispatchAuthoritySliceIDForFocus(input, authorityFocus)
 	for _, existing := range []map[string]any{
 		mapFromValue(input[coverageFocusKey]),
 		mapFromValue(mapFromValue(input["acceptance"])["currentFocus"]),
@@ -483,12 +484,16 @@ func dispatchCoverageFocusFromAuthority(input map[string]any, authorityFocus map
 					next[key] = cloneStepInputValue(value)
 				}
 			}
+			if authoritySliceID != "" {
+				next["sliceId"] = authoritySliceID
+			} else if strings.TrimSpace(stringFromMap(authorityFocus, "sliceId")) == "" {
+				delete(next, "sliceId")
+			}
 			return next
 		}
 	}
 	sliceID := firstNonEmptyString(
-		stringFromMap(mapFromValue(input[coverageFocusKey]), "sliceId"),
-		stringFromMap(mapFromValue(mapFromValue(input["executionContext"])[coverageFocusKey]), "sliceId"),
+		authoritySliceID,
 		stringFromMap(authorityFocus, "sliceId"),
 	)
 	if len(stringSliceFromValue(authorityFocus["coverageWorkItemIds"])) > 0 ||
@@ -503,6 +508,34 @@ func dispatchCoverageFocusFromAuthority(input map[string]any, authorityFocus map
 		return focus
 	}
 	return cloneStepPayload(authorityFocus)
+}
+
+func dispatchAuthoritySliceIDForFocus(input map[string]any, authorityFocus map[string]any) string {
+	if len(input) == 0 || len(authorityFocus) == 0 {
+		return strings.TrimSpace(stringFromMap(authorityFocus, "sliceId"))
+	}
+	focusIDs := stringSet(dispatchFocusWorkItemIDs(authorityFocus))
+	if len(focusIDs) == 0 {
+		return strings.TrimSpace(stringFromMap(authorityFocus, "sliceId"))
+	}
+	for _, slices := range [][]map[string]any{
+		mapSliceFromValue(input[acceptanceSlicesKey]),
+		mapSliceFromValue(mapFromValue(input["executionContext"])[acceptanceSlicesKey]),
+		mapSliceFromValue(mapFromValue(input["acceptance"])["slices"]),
+	} {
+		for _, slice := range slices {
+			sliceID := strings.TrimSpace(stringFromMap(slice, "id"))
+			if sliceID == "" {
+				continue
+			}
+			for _, id := range stringSliceFromValue(slice["coverageWorkItemIds"]) {
+				if focusIDs[id] {
+					return sliceID
+				}
+			}
+		}
+	}
+	return strings.TrimSpace(stringFromMap(authorityFocus, "sliceId"))
 }
 
 func acceptanceSignalAlignedToAuthorityFocus(acceptance map[string]any, coverageFocus map[string]any) map[string]any {

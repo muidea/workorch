@@ -919,12 +919,16 @@ func compactCoverageWorkItemForRepairFocus(item map[string]any, focus map[string
 		"sourceRequirementId",
 		"sourcePath",
 		"normalizedSourceKey",
+		"coverageWorkItemIds",
+		"structuredTargetRefs",
+		"targetRefs",
 		"targetText",
 		"status",
 		"currentGap",
 		"requiredEvidenceKinds",
 		"missingEvidenceKinds",
 		"evidenceRole",
+		"legacyEvidenceDemotions",
 	} {
 		if value, ok := item[key]; ok && value != nil {
 			ret[key] = compactLLMContextValue(value, 1)
@@ -938,6 +942,12 @@ func compactCoverageWorkItemForRepairFocus(item map[string]any, focus map[string
 	}
 	if byKind := mapStringSliceValue(item["acceptedEvidenceByKind"]); len(byKind) > 0 {
 		ret["acceptedEvidenceByKindCount"] = mapStringSliceCounts(byKind)
+	}
+	if byKind := mapStringSliceValue(item["acceptedEvidenceBindingByKind"]); len(byKind) > 0 {
+		ret["acceptedEvidenceBindingByKindCount"] = mapStringSliceCounts(byKind)
+	}
+	if byKind := mapStringSliceValue(item["supportingEvidenceByKind"]); len(byKind) > 0 {
+		ret["supportingEvidenceByKindCount"] = mapStringSliceCounts(byKind)
 	}
 	if byKind := mapStringSliceValue(item["rejectedEvidenceByKind"]); len(byKind) > 0 {
 		ret["rejectedEvidenceByKindCount"] = mapStringSliceCounts(byKind)

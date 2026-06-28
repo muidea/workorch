@@ -85,6 +85,49 @@ func TestCoverageApplyWorkItemEvidence_TargetUnalignedValidationIsSupportingOnly
 	}
 }
 
+func TestCoverageApplyWorkItemEvidence_TextOnlyTargetRefIsSupportingOnly(t *testing.T) {
+	textTarget := "deliverable must expose runtime health behavior"
+	item := map[string]any{
+		"id":                    "cwi-text-only",
+		"status":                "open",
+		"targetText":            textTarget,
+		"requiredEvidenceKinds": []string{"validation"},
+		"requiredEvidenceCounts": map[string]any{
+			"validation": 1,
+		},
+		"missingEvidenceKinds": []string{"validation"},
+	}
+
+	changed := coverageApplyWorkItemEvidenceWithOptions(
+		item,
+		[]string{"validation"},
+		[]string{"run-1/validation-text-only"},
+		true,
+		false,
+		"run-1/step-001",
+		"",
+		coverageEvidenceAcceptanceOptions{
+			EnforceProofStrength: true,
+			Quality:              runtimeEvidenceQuality{Quality: "valid"},
+			TargetRefs:           []string{textTarget},
+			ObservedClaims:       []string{"behavior was observed"},
+			ProofKind:            "runtime_behavior",
+		},
+	)
+	if !changed {
+		t.Fatalf("changed = false, want supporting evidence recorded")
+	}
+	if got := stringFromMap(item, "status"); got != "open" {
+		t.Fatalf("status = %q, want open", got)
+	}
+	if accepted := mapStringSliceValue(item["acceptedEvidenceByKind"]); len(accepted["validation"]) != 0 {
+		t.Fatalf("accepted validation refs = %+v, want none for text-only targetRef", accepted["validation"])
+	}
+	if supporting := mapStringSliceValue(item["supportingEvidenceByKind"]); !stringSliceContains(supporting["validation"], "run-1/validation-text-only") {
+		t.Fatalf("supporting validation refs = %+v, want text-only evidence demoted to supporting", supporting["validation"])
+	}
+}
+
 func TestCoverageApplyWorkItemEvidence_TargetAlignedValidationCanSatisfyRequiredKind(t *testing.T) {
 	item := map[string]any{
 		"id":                    "cwi-target-proof",

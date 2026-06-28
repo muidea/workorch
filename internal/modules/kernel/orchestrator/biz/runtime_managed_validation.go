@@ -191,7 +191,7 @@ func replaceManagedValidationPortPlaceholders(value string, portText string) str
 }
 
 func attachManagedValidationResourceOwnership(input map[string]any, request runtimemodel.StepExecutionRequest, now time.Time) bool {
-	if len(input) == 0 || !inputHasManagedValidation(input) {
+	if len(input) == 0 {
 		return false
 	}
 	if now.IsZero() {
@@ -199,17 +199,20 @@ func attachManagedValidationResourceOwnership(input map[string]any, request runt
 	}
 	createdAt := now.UTC().Format(time.RFC3339Nano)
 	resources := make([]map[string]any, 0, 2)
-	resources = append(resources, map[string]any{
-		"id":            managedValidationResourceID(request.WorkspaceID, request.RunID, request.StepID, "process_group"),
-		"workspaceId":   string(request.WorkspaceID),
-		"runId":         string(request.RunID),
-		"stepId":        string(request.StepID),
-		"kind":          "process_group",
-		"status":        "pending",
-		"cleanupPolicy": "process_group_on_timeout_or_completion",
-		"createdAt":     createdAt,
-		"source":        "runtime_dispatch",
-	})
+	managedInput := inputHasManagedValidation(input)
+	if managedInput {
+		resources = append(resources, map[string]any{
+			"id":            managedValidationResourceID(request.WorkspaceID, request.RunID, request.StepID, "process_group"),
+			"workspaceId":   string(request.WorkspaceID),
+			"runId":         string(request.RunID),
+			"stepId":        string(request.StepID),
+			"kind":          "process_group",
+			"status":        "pending",
+			"cleanupPolicy": "process_group_on_timeout_or_completion",
+			"createdAt":     createdAt,
+			"source":        "runtime_dispatch",
+		})
+	}
 	if scratch := strings.TrimSpace(stringFromMap(input, validationScratchDirKey)); scratch != "" {
 		resources = append(resources, map[string]any{
 			"id":            managedValidationResourceID(request.WorkspaceID, request.RunID, request.StepID, "scratch_dir"),
@@ -228,19 +231,26 @@ func attachManagedValidationResourceOwnership(input map[string]any, request runt
 		return false
 	}
 	input["validationResources"] = resources
-	managed := mapFromValue(input["managedValidation"])
-	if managed == nil {
-		managed = map[string]any{}
-	}
 	refs := make([]string, 0, len(resources))
 	for _, resource := range resources {
 		if id := strings.TrimSpace(stringFromMap(resource, "id")); id != "" {
 			refs = append(refs, id)
 		}
 	}
-	managed["resourceOwnershipPersisted"] = true
-	managed["ownedResourceRefs"] = refs
-	input["managedValidation"] = managed
+	input["validationResourceOwnership"] = map[string]any{
+		"persisted":         true,
+		"ownedResourceRefs": refs,
+		"cleanupPolicy":     "runtime_lifecycle",
+	}
+	if managedInput {
+		managed := mapFromValue(input["managedValidation"])
+		if managed == nil {
+			managed = map[string]any{}
+		}
+		managed["resourceOwnershipPersisted"] = true
+		managed["ownedResourceRefs"] = refs
+		input["managedValidation"] = managed
+	}
 	return true
 }
 

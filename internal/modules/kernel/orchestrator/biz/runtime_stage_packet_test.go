@@ -86,6 +86,45 @@ func TestInitialStepInputAttachesMinimalStagePacket(t *testing.T) {
 	}
 }
 
+func TestStagePacketActiveFocusExposesStructuredCoverageRefs(t *testing.T) {
+	run := &runModel.Run{
+		ID:              common.RunID("run-stage-packet-structured-focus"),
+		WorkspaceID:     common.WorkspaceID("ws-stage-packet-structured-focus"),
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		State:           common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-stage-packet-structured-focus",
+			"dod": map[string]any{
+				"id":    "dod-stage-packet-structured-focus",
+				"items": []string{"natural language validation target must stay out of binding refs"},
+			},
+		},
+	}
+
+	input := initialStepInput(run)
+	packet := mapFromValue(input[stepInputKeyStagePacket])
+	focus := mapFromValue(packet["activeFocus"])
+	if len(focus) == 0 {
+		t.Fatalf("stagePacket.activeFocus missing: %+v", packet)
+	}
+	if refs := stringSliceFromValue(focus["coverageWorkItemIds"]); len(refs) != 1 || refs[0] != "cwi-001" {
+		t.Fatalf("activeFocus.coverageWorkItemIds = %+v, want cwi-001", focus["coverageWorkItemIds"])
+	}
+	structured := stringSliceFromValue(focus["structuredTargetRefs"])
+	if !stringSliceContains(structured, "cwi-001") ||
+		!stringSliceContains(structured, "dod-stage-packet-structured-focus-dod-item-001") ||
+		!stringSliceContains(structured, "dod:dod_item:dod-stage-packet-structured-focus-dod-item-001") {
+		t.Fatalf("activeFocus.structuredTargetRefs = %+v, want cwi/source/normalized refs", structured)
+	}
+	targetRefs := stringSliceFromValue(focus["targetRefs"])
+	if !stringSliceContains(targetRefs, "cwi-001") {
+		t.Fatalf("activeFocus.targetRefs = %+v, want structured cwi ref", targetRefs)
+	}
+	if stringSliceContains(targetRefs, "natural language validation target must stay out of binding refs") {
+		t.Fatalf("activeFocus.targetRefs = %+v, want natural language targetText excluded", targetRefs)
+	}
+}
+
 func TestStagePacketUsesOnlyAuthorityCurrentFocusWhenStaleFocusExists(t *testing.T) {
 	run := &runModel.Run{
 		ID:                 common.RunID("run-stage-packet-authority"),

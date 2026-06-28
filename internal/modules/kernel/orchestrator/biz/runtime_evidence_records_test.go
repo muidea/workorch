@@ -140,6 +140,8 @@ func TestRecordCompletedRuntimeStepEvidenceWritesScopedStateChangeForDeclaredSta
 			"validationEvidence": map[string]any{
 				"mode":            "runtime_behavior",
 				"observationType": "runtime_observation",
+				"targetRefs":      []string{"workspace://neutral-deliverable"},
+				"observedClaims":  []string{"neutral deliverable behavior was observed"},
 			},
 		},
 		Output: map[string]any{"exitCode": 0},
@@ -188,11 +190,19 @@ func TestRecordCompletedRuntimeStepEvidenceWritesScopedStateChangeForDeclaredSta
 	}
 	validation := validations[0]
 	if validation.Status != orchestratormodel.EvidenceStatusAccepted ||
-		validation.Metadata["coverageFocusId"] != "focus-cwi-001" {
+		validation.Metadata["coverageFocusId"] != "focus-cwi-001" ||
+		validation.Metadata["mode"] != "runtime_behavior" ||
+		validation.Metadata["observationType"] != "runtime_observation" {
 		t.Fatalf("validation record = %+v, want accepted validation with coverage scope", validation)
 	}
 	if got := validation.CoverageItemRefs; len(got) != 1 || got[0] != "cwi-001" {
 		t.Fatalf("validation CoverageItemRefs = %+v, want cwi-001", got)
+	}
+	if got := stringSliceFromValue(validation.Metadata["targetRefs"]); !stringSliceContains(got, "workspace://neutral-deliverable") {
+		t.Fatalf("validation targetRefs = %+v, want proof target ref", got)
+	}
+	if got := stringSliceFromValue(validation.Metadata["observedClaims"]); !stringSliceContains(got, "neutral deliverable behavior was observed") {
+		t.Fatalf("validation observedClaims = %+v, want proof claim", got)
 	}
 }
 

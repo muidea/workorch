@@ -231,7 +231,7 @@ func TestEnsureGapBaselineHydratesCoverageContextFromOwnerRepository(t *testing.
 			"validationEvidence": map[string]any{
 				"mode":            "runtime_behavior",
 				"observationType": "runtime_observation",
-				"targetRefs":      []string{"hydrate coverage context from owner storage"},
+				"targetRefs":      []string{targetContextID},
 				"observedClaims":  []string{"owner storage coverage context was hydrated"},
 			},
 		},
@@ -1063,6 +1063,9 @@ func TestCoverageWorkItemsTrackEvidenceByKind(t *testing.T) {
 		"status":                 "satisfied",
 		"acceptedEvidenceRefs":   []string{"legacy-step-ref"},
 		"acceptedEvidenceByKind": map[string]any{"state_change": []string{"run-001/001-change"}},
+		"acceptedEvidenceBindingByKind": map[string]any{
+			"state_change": []string{"run-001/001-change"},
+		},
 	}}
 
 	if !newCoverageSubsystem().ensure(run) {
@@ -1146,6 +1149,9 @@ func TestCoverageWorkItemsReplanSuccessorPreservesCurrentRevisionLineage(t *test
 				"status":                 "in_progress",
 				"acceptedEvidenceRefs":   []string{"run-prev/001-change"},
 				"acceptedEvidenceByKind": map[string]any{"state_change": []string{"run-prev/001-change"}},
+				"acceptedEvidenceBindingByKind": map[string]any{
+					"state_change": []string{"run-prev/001-change"},
+				},
 				"rejectedEvidenceRefs":   []string{"run-prev/002-verify"},
 				"rejectedEvidenceByKind": map[string]any{"validation": []string{"run-prev/002-verify"}},
 			}},
@@ -1182,7 +1188,7 @@ func TestCoverageWorkItemsReplanSuccessorPreservesCurrentRevisionLineage(t *test
 	}
 }
 
-func TestCoverageWorkItemsRebuildInheritsLineageByNormalizedSourceText(t *testing.T) {
+func TestCoverageWorkItemsRebuildDemotesTextMatchedAcceptedLineage(t *testing.T) {
 	goalText := strings.Join([]string{
 		"| Capability | Parameters | Purpose |",
 		"| --- | --- | --- |",
@@ -1220,8 +1226,11 @@ func TestCoverageWorkItemsRebuildInheritsLineageByNormalizedSourceText(t *testin
 	if got := stringFromMap(item, "sourceRequirementId"); got == "goal-req-002-legacy" || !strings.HasPrefix(got, "goal-req-001-") {
 		t.Fatalf("sourceRequirementId = %q, want rebuilt canonical first data row id", got)
 	}
-	if refs := stringSliceFromValue(item["acceptedEvidenceRefs"]); len(refs) != 1 || refs[0] != "run-prev/graph/001-alpha" {
-		t.Fatalf("acceptedEvidenceRefs = %+v, want inherited lineage by normalized text", refs)
+	if refs := stringSliceFromValue(item["acceptedEvidenceRefs"]); len(refs) != 0 {
+		t.Fatalf("acceptedEvidenceRefs = %+v, want text-matched legacy lineage demoted", refs)
+	}
+	if supporting := mapStringSliceValue(item["supportingEvidenceByKind"]); !stringSliceContains(supporting["validation"], "run-prev/graph/001-alpha") {
+		t.Fatalf("supportingEvidenceByKind = %+v, want text-matched legacy lineage as supporting evidence", supporting)
 	}
 }
 
@@ -2216,10 +2225,11 @@ func TestCoverageWorkItemsRejectionDoesNotDemoteCwiWithAcceptedEvidence(t *testi
 		Kind:  "shell/command",
 		State: common.StepStateCompleted,
 		Input: map[string]any{
+			"coverageWorkItemIds": []string{stringFromMap(items[0], "id")},
 			"validationEvidence": map[string]any{
 				"mode":            "runtime_behavior",
 				"observationType": "runtime_observation",
-				"targetRefs":      []string{"go-build-verify"},
+				"targetRefs":      []string{firstNonEmptyString(stringFromMap(items[0], "sourceRequirementId"), stringFromMap(items[0], "id"))},
 				"observedClaims":  []string{"go-build-verify passed"},
 			},
 		},
@@ -2544,7 +2554,7 @@ func TestCoverageWorkItemsDoNotInferGovernanceEvidenceFromBusinessText(t *testin
 	}
 }
 
-func TestCoverageWorkItemsRebuildNormalizesLegacyInferredGovernanceEvidence(t *testing.T) {
+func TestCoverageWorkItemsRebuildDemotesLegacyAcceptedEvidenceWithoutStructuredBinding(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-legacy-inferred-governance",
 		ExecutionContext: map[string]any{
@@ -2583,11 +2593,68 @@ func TestCoverageWorkItemsRebuildNormalizesLegacyInferredGovernanceEvidence(t *t
 	if got := stringSliceFromValue(item["requiredEvidenceKinds"]); len(got) != 1 || got[0] != "validation" {
 		t.Fatalf("requiredEvidenceKinds = %+v, want validation only", got)
 	}
-	if got := stringSliceFromValue(item["missingEvidenceKinds"]); len(got) != 0 {
-		t.Fatalf("missingEvidenceKinds = %+v, want no missing legacy decision requirement", got)
+	if got := stringSliceFromValue(item["missingEvidenceKinds"]); len(got) != 1 || got[0] != "validation" {
+		t.Fatalf("missingEvidenceKinds = %+v, want validation after weak legacy evidence demotion", got)
 	}
+	if got := stringFromMap(item, "status"); got != "in_progress" {
+		t.Fatalf("status = %q, want in_progress after weak legacy evidence demotion", got)
+	}
+	if accepted := mapStringSliceValue(item["acceptedEvidenceByKind"]); len(accepted["validation"]) != 0 {
+		t.Fatalf("acceptedEvidenceByKind = %+v, want weak legacy validation demoted", accepted)
+	}
+	if supporting := mapStringSliceValue(item["supportingEvidenceByKind"]); !stringSliceContains(supporting["validation"], "run-prev/graph/001-validate") {
+		t.Fatalf("supportingEvidenceByKind = %+v, want demoted legacy validation ref", supporting)
+	}
+	if demotions := mapSliceFromValue(item["legacyEvidenceDemotions"]); len(demotions) != 1 || demotions[0]["reason"] != "legacy_evidence_not_structurally_bound" {
+		t.Fatalf("legacyEvidenceDemotions = %+v, want weak accepted evidence demotion", demotions)
+	}
+}
+
+func TestCoverageWorkItemsRebuildPreservesStructurallyBoundInheritedEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-structured-inherited-evidence",
+		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-current",
+			"goal": map[string]any{
+				"id":   "goal-cwi-structured",
+				"text": "- structured inherited evidence target",
+			},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                     "cwi-001",
+				"definitionRevision":     "rev-current",
+				"normalizedSourceKey":    "goal:goal_leaf:goal-cwi-structured-goal-leaf-001",
+				"source":                 "goal",
+				"sourceScope":            "goal_leaf",
+				"sourceGoalId":           "goal-cwi-structured",
+				"sourceRequirementId":    "goal-cwi-structured-goal-leaf-001",
+				"sourcePath":             "goal.leaves[0]",
+				"targetText":             "structured inherited evidence target",
+				"status":                 "evidence_ready",
+				"requiredEvidenceKinds":  []string{"validation"},
+				"missingEvidenceKinds":   []string{},
+				"acceptedEvidenceRefs":   []string{"run-prev/graph/001-validate"},
+				"acceptedEvidenceByKind": map[string]any{"validation": []string{"run-prev/graph/001-validate"}},
+				"acceptedEvidenceBindingByKind": map[string]any{
+					"validation": []string{"run-prev/graph/001-validate"},
+				},
+			}},
+		},
+	}
+
+	newCoverageSubsystem().ensure(run)
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) != 1 {
+		t.Fatalf("coverageWorkItems = %+v, want one item", items)
+	}
+	item := items[0]
 	if got := stringFromMap(item, "status"); got != "evidence_ready" {
-		t.Fatalf("status = %q, want evidence_ready after accepted validation evidence", got)
+		t.Fatalf("status = %q, want structurally bound inherited evidence preserved", got)
+	}
+	if accepted := mapStringSliceValue(item["acceptedEvidenceByKind"]); !stringSliceContains(accepted["validation"], "run-prev/graph/001-validate") {
+		t.Fatalf("acceptedEvidenceByKind = %+v, want structured inherited validation preserved", accepted)
+	}
+	if supporting := mapStringSliceValue(item["supportingEvidenceByKind"]); len(supporting["validation"]) != 0 {
+		t.Fatalf("supportingEvidenceByKind = %+v, want no demotion", supporting)
 	}
 }
 
@@ -2650,11 +2717,17 @@ func TestCoverageWorkItemsRepositoryHydrationNormalizesLegacyInferredGovernanceE
 	if len(gotKinds) != 1 || gotKinds[0] != "validation" {
 		t.Fatalf("stored RequiredEvidenceKinds = %+v, want validation only", gotKinds)
 	}
-	if got := stored[0].Status; got != "evidence_ready" {
-		t.Fatalf("stored status = %q, want evidence_ready", got)
+	if got := stored[0].Status; got != "in_progress" {
+		t.Fatalf("stored status = %q, want in_progress after weak legacy evidence demotion", got)
 	}
-	if missing := stringSliceFromValue(stored[0].Metadata["missingEvidenceKinds"]); len(missing) != 0 {
-		t.Fatalf("stored missingEvidenceKinds = %+v, want no missing legacy decision requirement", missing)
+	if missing := stringSliceFromValue(stored[0].Metadata["missingEvidenceKinds"]); len(missing) != 1 || missing[0] != "validation" {
+		t.Fatalf("stored missingEvidenceKinds = %+v, want validation after weak legacy evidence demotion", missing)
+	}
+	if accepted := mapStringSliceValue(stored[0].Metadata["acceptedEvidenceByKind"]); len(accepted["validation"]) != 0 {
+		t.Fatalf("stored acceptedEvidenceByKind = %+v, want weak legacy validation demoted", accepted)
+	}
+	if supporting := mapStringSliceValue(stored[0].Metadata["supportingEvidenceByKind"]); !stringSliceContains(supporting["validation"], "run-prev/graph/001-validate") {
+		t.Fatalf("stored supportingEvidenceByKind = %+v, want demoted legacy validation ref", supporting)
 	}
 }
 
@@ -2878,17 +2951,22 @@ func TestCoverageWorkItemsAssessmentClosesEvidenceReadyItemWithoutNewRefs(t *tes
 		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"closure trace is exposed"}}},
 	}
 	newCoverageSubsystem().ensure(run)
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) != 1 {
+		t.Fatalf("coverageWorkItems = %+v, want one item", run.ExecutionContext[coverageWorkItemsKey])
+	}
+	targetRef := firstNonEmptyString(stringFromMap(items[0], "sourceRequirementId"), stringFromMap(items[0], "id"))
 	verify := &runmodel.Step{
 		ID:    "run-cwi-evidence-ready-close/001-verify",
 		RunID: run.ID,
 		Kind:  "shell/command",
 		State: common.StepStateCompleted,
 		Input: map[string]any{
-			"coverageTargets": []string{"closure trace is exposed"},
+			"coverageWorkItemIds": []string{stringFromMap(items[0], "id")},
 			"validationEvidence": map[string]any{
 				"mode":            "runtime_behavior",
 				"observationType": "runtime_observation",
-				"targetRefs":      []string{"closure trace is exposed"},
+				"targetRefs":      []string{targetRef},
 				"observedClaims":  []string{"closure trace is exposed"},
 			},
 		},

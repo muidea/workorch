@@ -109,7 +109,7 @@ func (c *coverageSubsystem) reconcileValidationEvidence(
 				false,
 				string(validation.StepID),
 				"reconciled from runtime_step validation",
-				coverageEvidenceAcceptanceOptionsFromValidationResult(validation),
+				coverageEvidenceAcceptanceOptionsFromValidationStep(validation, step),
 			) {
 				afterAccepted := coverageEvidenceCountForKind("validation", mapStringSliceValue(item["acceptedEvidenceByKind"])["validation"])
 				if afterAccepted > beforeAccepted {
@@ -152,25 +152,29 @@ func reconcileValidationAcceptable(v *runModel.ValidationResult) bool {
 }
 
 func coverageEvidenceAcceptanceOptionsFromValidationResult(validation *runModel.ValidationResult) coverageEvidenceAcceptanceOptions {
+	return coverageEvidenceAcceptanceOptionsFromValidationStep(validation, nil)
+}
+
+func coverageEvidenceAcceptanceOptionsFromValidationStep(validation *runModel.ValidationResult, step *runModel.Step) coverageEvidenceAcceptanceOptions {
 	if validation == nil {
 		return coverageEvidenceAcceptanceOptions{}
 	}
+	stepOptions := coverageEvidenceAcceptanceOptionsFromStep(step)
 	quality := qualityFromValidationResult(validation)
-	targetRefs := []string{}
+	targetRefs := append([]string{}, stepOptions.TargetRefs...)
 	if targetRef := strings.TrimSpace(validation.TargetRef); targetRef != "" {
 		targetRefs = append(targetRefs, targetRef)
 	}
-	claims := []string{}
-	if summary := strings.TrimSpace(validation.Summary); summary != "" {
-		claims = append(claims, summary)
-	}
+	claims := append([]string{}, stepOptions.ObservedClaims...)
 	ret := coverageEvidenceAcceptanceOptions{
 		EnforceProofStrength: true,
 		Quality:              quality,
 		TargetRefs:           compactUniqueStrings(targetRefs),
 		ObservedClaims:       compactUniqueStrings(claims),
-		Tags:                 compactUniqueStrings(append([]string{}, validation.EvidenceTags...)),
-		Reason:               firstNonEmptyString(quality.Reason, strings.TrimSpace(validation.EvidenceReason)),
+		ProofKind:            stepOptions.ProofKind,
+		CoverageAlignment:    stepOptions.CoverageAlignment,
+		Tags:                 compactUniqueStrings(append(append([]string{}, stepOptions.Tags...), validation.EvidenceTags...)),
+		Reason:               firstNonEmptyString(quality.Reason, strings.TrimSpace(validation.EvidenceReason), stepOptions.Reason),
 	}
 	if coverageEvidenceTagsRequireProofStrength(ret.Tags) {
 		ret.EnforceProofStrength = true

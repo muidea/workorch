@@ -64,6 +64,28 @@ func reconcileValidValidation(id string, stepID common.StepID) *runmodel.Validat
 	}
 }
 
+func attachReconcileValidationProof(t *testing.T, run *runmodel.Run, step *runmodel.Step, leafToken string) {
+	t.Helper()
+	item := findOriginalCwiByLeafSubstring(run, leafToken)
+	if item == nil {
+		t.Fatalf("cwi with targetText containing %s not found", leafToken)
+	}
+	targetRef := firstNonEmptyString(stringFromMap(item, "sourceRequirementId"), stringFromMap(item, "id"))
+	if targetRef == "" {
+		t.Fatalf("cwi %+v has no structured target ref", item)
+	}
+	if step.Input == nil {
+		step.Input = map[string]any{}
+	}
+	step.Input["targetRef"] = targetRef
+	step.Input["validationEvidence"] = map[string]any{
+		"mode":            "runtime_behavior",
+		"observationType": "runtime_observation",
+		"targetRefs":      []string{targetRef},
+		"observedClaims":  []string{"structured target evidence was observed"},
+	}
+}
+
 // findOriginalCwiByLeafSubstring locates the cwi map in run.ExecutionContext[coverageWorkItemsKey]
 // (not a clone) whose targetText contains leafToken. Modifications to the returned map
 // persist across the next ensure/rebuild call.
@@ -102,9 +124,8 @@ func TestReconcile_BindsValidShellToOpenCwiWithValidationKind(t *testing.T) {
 	}
 
 	step := reconcileStepShell("run-recon-1/graph-007/002-go-build-verify", "go")
+	attachReconcileValidationProof(t, run, step, "go-build-verify")
 	validation := reconcileValidValidation("val-001", step.ID)
-	validation.TargetRef = "go-build-verify"
-	validation.Summary = "go-build-verify validation observed"
 
 	changed, bound := c.reconcileValidationEvidence(run, []*runmodel.ValidationResult{validation}, []*runmodel.Step{step})
 	if !changed || bound != 1 {
@@ -145,9 +166,8 @@ func TestReconcile_Idempotent(t *testing.T) {
 	c.ensure(run)
 
 	step := reconcileStepShell("run-recon-1/graph-007/002-go-build-verify", "go")
+	attachReconcileValidationProof(t, run, step, "go-build-verify")
 	validation := reconcileValidValidation("val-003", step.ID)
-	validation.TargetRef = "go-build-verify"
-	validation.Summary = "go-build-verify validation observed"
 
 	if changed, bound := c.reconcileValidationEvidence(run, []*runmodel.ValidationResult{validation}, []*runmodel.Step{step}); !changed || bound != 1 {
 		t.Fatalf("first reconcile = (%v,%d), want (true,1)", changed, bound)
@@ -221,6 +241,36 @@ func TestReconcile_DoesNotBindAcrossUnrelatedGraph(t *testing.T) {
 	}
 }
 
+func TestReconcile_PassedValidationWithoutStructuredProofIsSupportingOnly(t *testing.T) {
+	run := makeReconcileRun("- go-build-verify 通过 编译 验证", nil)
+	c := newCoverageSubsystem()
+	c.ensure(run)
+
+	step := reconcileStepShell("run-recon-1/graph-007/002-go-build-verify", "go")
+	validation := reconcileValidValidation("val-007-weak", step.ID)
+	validation.TargetRef = "go-build-verify"
+	validation.Summary = "go-build-verify validation observed"
+
+	changed, bound := c.reconcileValidationEvidence(run, []*runmodel.ValidationResult{validation}, []*runmodel.Step{step})
+	if !changed || bound != 0 {
+		t.Fatalf("reconcile = (changed=%v, bound=%d), want supporting-only change with bound 0", changed, bound)
+	}
+	matched := findOriginalCwiByLeafSubstring(run, "go-build-verify")
+	if matched == nil {
+		t.Fatalf("cwi with targetText containing go-build-verify not found")
+	}
+	if status := strings.TrimSpace(stringFromMap(matched, "status")); status != "open" {
+		t.Fatalf("cwi status = %q, want open", status)
+	}
+	if accepted := mapStringSliceValue(matched["acceptedEvidenceByKind"]); len(accepted["validation"]) != 0 {
+		t.Fatalf("accepted.validation = %v, want none", accepted["validation"])
+	}
+	supporting := mapStringSliceValue(matched["supportingEvidenceByKind"])
+	if len(supporting["validation"]) != 1 {
+		t.Fatalf("supporting.validation = %v, want one weak validation ref", supporting["validation"])
+	}
+}
+
 func TestReconcile_DoesNotDemoteSatisfiedCwi(t *testing.T) {
 	run := makeReconcileRun("- go-build-verify 通过 编译 验证", nil)
 	c := newCoverageSubsystem()
@@ -232,6 +282,7 @@ func TestReconcile_DoesNotDemoteSatisfiedCwi(t *testing.T) {
 	}
 	priorCwi["status"] = "satisfied"
 	priorCwi["acceptedEvidenceByKind"] = map[string]any{"validation": []string{"prior-evidence-ref"}}
+	priorCwi["acceptedEvidenceBindingByKind"] = map[string]any{"validation": []string{"prior-evidence-ref"}}
 	priorCwi["acceptedEvidenceRefs"] = []string{"prior-evidence-ref"}
 	priorCwi["missingEvidenceKinds"] = []string{}
 	priorCwi["currentGap"] = ""
@@ -272,6 +323,7 @@ func TestReconcile_DoesNotBindCwiAlreadyWithValidation(t *testing.T) {
 		t.Fatalf("cwi with targetText containing go-build-verify not found")
 	}
 	priorCwi["acceptedEvidenceByKind"] = map[string]any{"validation": []string{"existing-ref"}}
+	priorCwi["acceptedEvidenceBindingByKind"] = map[string]any{"validation": []string{"existing-ref"}}
 	priorCwi["acceptedEvidenceRefs"] = []string{"existing-ref"}
 	priorCwi["missingEvidenceKinds"] = []string{}
 
@@ -284,7 +336,7 @@ func TestReconcile_DoesNotBindCwiAlreadyWithValidation(t *testing.T) {
 	}
 }
 
-func TestReconcile_GraphLeafFuzzyMatchBinds(t *testing.T) {
+func TestReconcile_GraphLeafFuzzyMatchRequiresStructuredProof(t *testing.T) {
 	run := makeReconcileRun("- 基础 转发 通过 go-build-verify 完成 预期 回复", nil)
 	c := newCoverageSubsystem()
 	c.ensure(run)
@@ -294,8 +346,8 @@ func TestReconcile_GraphLeafFuzzyMatchBinds(t *testing.T) {
 	validation.TargetRef = "go-build-verify"
 
 	changed, bound := c.reconcileValidationEvidence(run, []*runmodel.ValidationResult{validation}, []*runmodel.Step{step})
-	if !changed || bound != 1 {
-		t.Fatalf("reconcile = (%v,%d), want (true,1) — go-build-verify graph leaf should fuzzy-match cwi targetText", changed, bound)
+	if !changed || bound != 0 {
+		t.Fatalf("reconcile = (%v,%d), want supporting-only change with bound 0", changed, bound)
 	}
 }
 

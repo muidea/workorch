@@ -52,7 +52,8 @@ func (c *coverageSubsystem) reconcileAcceptedEvidenceRecords(run *runModel.Run, 
 			if matchedBy == "" {
 				continue
 			}
-			applied := coverageApplyWorkItemEvidence(
+			beforeAccepted := coverageEvidenceCountForKind(record.Kind, mapStringSliceValue(item["acceptedEvidenceByKind"])[record.Kind])
+			applied := coverageApplyWorkItemEvidenceWithOptions(
 				item,
 				[]string{record.Kind},
 				refs,
@@ -60,11 +61,19 @@ func (c *coverageSubsystem) reconcileAcceptedEvidenceRecords(run *runModel.Run, 
 				false,
 				string(record.StepID),
 				"reused accepted evidence record by structured coverage scope",
+				coverageEvidenceAcceptanceOptionsFromEvidenceRecord(record),
 			)
-			edgeChanged := coverageAppendEvidenceReuseEdge(item, record, matchedBy)
+			afterAccepted := coverageEvidenceCountForKind(record.Kind, mapStringSliceValue(item["acceptedEvidenceByKind"])[record.Kind])
+			acceptedBound := afterAccepted > beforeAccepted
+			edgeChanged := false
+			if acceptedBound {
+				edgeChanged = coverageAppendEvidenceReuseEdge(item, record, matchedBy)
+			}
 			if applied || edgeChanged {
 				changed = true
-				bound++
+				if acceptedBound {
+					bound++
+				}
 			}
 		}
 	}
@@ -160,7 +169,7 @@ func coverageEvidenceRecordItemMatchReason(record *runtimecontract.EvidenceRecor
 	if coverageStructuredIDsIntersect(coverageEvidenceRecordCoverageTargetRefs(record), coverageWorkItemCoverageTargetIDs(item)) {
 		return "coverage_target_id"
 	}
-	if coverageTargetRefsIntersect(coverageEvidenceRecordTargetRefs(record), coverageWorkItemTargetRefs(item)) {
+	if coverageStrictTargetRefsIntersect(coverageEvidenceRecordTargetRefs(record), coverageWorkItemTargetRefs(item)) {
 		return "target_ref"
 	}
 	return ""
@@ -193,19 +202,72 @@ func coverageEvidenceRecordCoverageTargetRefs(record *runtimecontract.EvidenceRe
 		return nil
 	}
 	refs := make([]string, 0)
-	for _, key := range []string{"coverageTargetIds", "coverageTargets", "coverageTargetTokens"} {
+	for _, key := range []string{"coverageTargetIds"} {
 		refs = append(refs, stringSliceFromValue(record.Metadata[key])...)
 	}
 	return compactUniqueStrings(refs)
+}
+
+func coverageEvidenceAcceptanceOptionsFromEvidenceRecord(record *runtimecontract.EvidenceRecord) coverageEvidenceAcceptanceOptions {
+	if record == nil {
+		return coverageEvidenceAcceptanceOptions{}
+	}
+	metadata := record.Metadata
+	quality := coverageEvidenceRecordQuality(record)
+	tags := stringSliceFromValue(metadata["evidenceTags"])
+	tags = append(tags, stringSliceFromValue(metadata["tags"])...)
+	ret := coverageEvidenceAcceptanceOptions{
+		EnforceProofStrength: strings.TrimSpace(record.Kind) == runtimecontract.EvidenceKindValidation,
+		Quality:              quality,
+		TargetRefs:           compactUniqueStrings(coverageEvidenceRecordTargetRefs(record)),
+		ObservedClaims:       coverageEvidenceRecordObservedClaims(record),
+		ProofKind:            firstNonEmptyString(stringFromMap(metadata, "proofKind"), stringFromMap(metadata, "mode")),
+		CoverageAlignment:    stringFromMap(metadata, "coverageAlignment"),
+		Tags:                 compactUniqueStrings(tags),
+		Reason:               firstNonEmptyString(quality.Reason, stringFromMap(metadata, "evidenceReason"), stringFromMap(metadata, "reason")),
+	}
+	if coverageEvidenceTagsRequireProofStrength(ret.Tags) {
+		ret.EnforceProofStrength = true
+	}
+	return ret
+}
+
+func coverageEvidenceRecordObservedClaims(record *runtimecontract.EvidenceRecord) []string {
+	if record == nil {
+		return nil
+	}
+	metadata := record.Metadata
+	claims := stringSliceFromValue(metadata["observedClaims"])
+	claims = append(claims, stringSliceFromValue(metadata["claims"])...)
+	for _, item := range mapSliceFromValue(metadata["observedClaims"]) {
+		for _, key := range []string{"claim", "observed", "observation", "description"} {
+			if value := strings.TrimSpace(stringFromMap(item, key)); value != "" {
+				claims = append(claims, value)
+				break
+			}
+		}
+	}
+	if claim := strings.TrimSpace(stringFromMap(metadata, "observedClaim")); claim != "" {
+		claims = append(claims, claim)
+	}
+	return compactUniqueStrings(claims)
 }
 
 func coverageEvidenceRecordTargetRefs(record *runtimecontract.EvidenceRecord) []string {
 	if record == nil {
 		return nil
 	}
-	refs := append([]string{}, stringSliceFromValue(record.Metadata["targetRefs"])...)
+	refs := append([]string{}, coverageStructuredBindingRefsFromValue(record.Metadata["structuredTargetRefs"])...)
+	refs = append(refs, coverageStructuredBindingRefsFromValue(record.Metadata["targetRefs"])...)
+	if ref := strings.TrimSpace(stringFromMap(record.Metadata, "targetRef")); ref != "" {
+		if coverageBindingRefLooksStructured(ref) {
+			refs = append(refs, ref)
+		}
+	}
 	if strings.TrimSpace(record.SubjectType) == "target" || strings.TrimSpace(record.SubjectType) == "resource" {
-		refs = append(refs, record.SubjectID)
+		if coverageBindingRefLooksStructured(record.SubjectID) {
+			refs = append(refs, record.SubjectID)
+		}
 	}
 	return compactUniqueStrings(refs)
 }
@@ -241,7 +303,6 @@ func coverageWorkItemCoverageTargetIDs(item map[string]any) []string {
 	ids := []string{
 		stringFromMap(item, "id"),
 		stringFromMap(item, "coverageTargetId"),
-		stringFromMap(item, "coverageTargetToken"),
 		stringFromMap(item, "sourceRequirementId"),
 		stringFromMap(item, "normalizedSourceKey"),
 	}
@@ -255,9 +316,9 @@ func coverageWorkItemTargetRefs(item map[string]any) []string {
 	}
 	refs := []string{
 		stringFromMap(item, "targetRef"),
-		stringFromMap(item, "sourcePath"),
 	}
-	refs = append(refs, stringSliceFromValue(item["targetRefs"])...)
+	refs = append(refs, coverageStructuredBindingRefsFromValue(item["structuredTargetRefs"])...)
+	refs = append(refs, coverageStructuredBindingRefsFromValue(item["targetRefs"])...)
 	return compactUniqueStrings(refs)
 }
 
@@ -297,6 +358,28 @@ func coverageTargetRefsIntersect(left []string, right []string) bool {
 	}
 	for _, value := range left {
 		normalized := normalizeRepairPatchTargetRef(value)
+		if normalized != "" && normalizedRight[normalized] {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageStrictTargetRefsIntersect(left []string, right []string) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return false
+	}
+	normalizedRight := map[string]bool{}
+	for _, value := range right {
+		if normalized := normalizeCoverageStructuredID(value); normalized != "" {
+			normalizedRight[normalized] = true
+		}
+	}
+	if len(normalizedRight) == 0 {
+		return false
+	}
+	for _, value := range left {
+		normalized := normalizeCoverageStructuredID(value)
 		if normalized != "" && normalizedRight[normalized] {
 			return true
 		}

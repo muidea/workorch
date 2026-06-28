@@ -213,9 +213,11 @@ func coverageEvidenceAcceptanceOptionsFromStep(step *runModel.Step) coverageEvid
 	tags := append([]string{}, quality.Tags...)
 	tags = append(tags, stringSliceFromValue(evidence["tags"])...)
 	tags = append(tags, stringSliceFromValue(evidence["evidenceTags"])...)
-	targetRefs := append([]string{}, coverageValidationTargetRefsFromEvidence(evidence)...)
-	targetRefs = append(targetRefs, stringSliceFromValue(step.Input["targetRefs"])...)
-	targetRefs = append(targetRefs, stringSliceFromValue(step.Output["targetRefs"])...)
+	targetRefs := append([]string{}, coverageValidationStructuredTargetRefsFromEvidence(evidence)...)
+	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(step.Input["structuredTargetRefs"])...)
+	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(step.Output["structuredTargetRefs"])...)
+	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(step.Input["targetRefs"])...)
+	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(step.Output["targetRefs"])...)
 	claims := coverageObservedClaimsFromEvidence(evidence)
 	ret := coverageEvidenceAcceptanceOptions{
 		EnforceProofStrength: coverageStepRequiresValidationProofStrength(step, evidence, targetRefs, claims),
@@ -268,6 +270,26 @@ func coverageValidationTargetRefsFromEvidence(evidence map[string]any) []string 
 		refs = append(refs, ref)
 	}
 	if ref := strings.TrimSpace(stringFromMap(evidence, "coverageTargetRef")); ref != "" {
+		refs = append(refs, ref)
+	}
+	return compactUniqueStrings(refs)
+}
+
+func coverageValidationStructuredTargetRefsFromEvidence(evidence map[string]any) []string {
+	if len(evidence) == 0 {
+		return nil
+	}
+	refs := stringSliceFromValue(evidence["structuredTargetRefs"])
+	refs = append(refs, stringSliceFromValue(evidence["structuredCoverageTargetRefs"])...)
+	refs = append(refs, coverageStructuredBindingRefsFromValue(evidence["targetRefs"])...)
+	refs = append(refs, coverageStructuredBindingRefsFromValue(evidence["coverageTargetRefs"])...)
+	if ref := strings.TrimSpace(stringFromMap(evidence, "structuredTargetRef")); ref != "" {
+		refs = append(refs, ref)
+	}
+	if ref := strings.TrimSpace(stringFromMap(evidence, "targetRef")); coverageBindingRefLooksStructured(ref) {
+		refs = append(refs, ref)
+	}
+	if ref := strings.TrimSpace(stringFromMap(evidence, "coverageTargetRef")); coverageBindingRefLooksStructured(ref) {
 		refs = append(refs, ref)
 	}
 	return compactUniqueStrings(refs)
@@ -495,10 +517,17 @@ func coverageApplyWorkItemEvidenceWithOptions(item map[string]any, kinds []strin
 			continue
 		}
 		hasApplicableEvidence = true
+		var bindingChanged bool
 		before := stableCoverageJSON(byKind[kind])
 		byKind[kind] = compactUniqueStrings(append(byKind[kind], filteredRefs...))
 		if before != stableCoverageJSON(byKind[kind]) {
 			changed = true
+		}
+		if accepted {
+			bindingChanged = recordCoverageAcceptedEvidenceBinding(item, kind, filteredRefs, stepID)
+			if bindingChanged {
+				changed = true
+			}
 		}
 	}
 	if !hasApplicableEvidence {
@@ -610,6 +639,24 @@ func coverageApplyWorkItemEvidenceWithOptions(item map[string]any, kinds []strin
 	return true
 }
 
+func recordCoverageAcceptedEvidenceBinding(item map[string]any, kind string, refs []string, stepID string) bool {
+	if len(item) == 0 || strings.TrimSpace(kind) == "" || len(refs) == 0 {
+		return false
+	}
+	byKind := mapStringSliceValue(item["acceptedEvidenceBindingByKind"])
+	before := stableCoverageJSON(byKind[kind])
+	byKind[kind] = compactUniqueStrings(append(byKind[kind], refs...))
+	if before == stableCoverageJSON(byKind[kind]) {
+		return false
+	}
+	item["acceptedEvidenceBindingByKind"] = byKind
+	item["acceptedEvidenceBindingRefs"] = coverageFlattenEvidenceRefs(byKind, stringSliceFromValue(item["acceptedEvidenceBindingRefs"]))
+	if stepID != "" {
+		item["acceptedEvidenceBindingStepId"] = stepID
+	}
+	return true
+}
+
 func coverageEvidenceSufficientForKind(item map[string]any, kind string, options coverageEvidenceAcceptanceOptions) bool {
 	if !options.EnforceProofStrength || strings.TrimSpace(kind) != "validation" {
 		return true
@@ -633,24 +680,46 @@ func coverageEvidenceTargetAligned(item map[string]any, targetRefs []string) boo
 	if len(item) == 0 || len(targetRefs) == 0 {
 		return false
 	}
-	candidates := []string{
+	return coverageStrictTargetRefsIntersect(coverageStructuredBindingRefsFromValue(targetRefs), coverageAcceptedBindingRefsForItem(item))
+}
+
+func coverageAcceptedBindingRefsForItem(item map[string]any) []string {
+	if len(item) == 0 {
+		return nil
+	}
+	refs := []string{
 		stringFromMap(item, "id"),
 		stringFromMap(item, "repositoryId"),
+		stringFromMap(item, "coverageWorkItemId"),
+		stringFromMap(item, "coverageTargetId"),
 		stringFromMap(item, "normalizedSourceKey"),
 		stringFromMap(item, "sourceRequirementId"),
-		stringFromMap(item, "sourcePath"),
-		stringFromMap(item, "targetText"),
+		stringFromMap(item, "targetRef"),
 	}
-	candidates = append(candidates, stringSliceFromValue(item["targetRefs"])...)
-	candidates = append(candidates, stringSliceFromValue(item["sourceRequirementAliases"])...)
-	for _, targetRef := range targetRefs {
-		for _, candidate := range candidates {
-			if coverageRepairTokenMatches(targetRef, candidate) {
-				return true
-			}
+	refs = append(refs, stringSliceFromValue(item["coverageWorkItemIds"])...)
+	refs = append(refs, stringSliceFromValue(item["coverageTargetIds"])...)
+	refs = append(refs, coverageStructuredBindingRefsFromValue(item["structuredTargetRefs"])...)
+	refs = append(refs, coverageStructuredBindingRefsFromValue(item["targetRefs"])...)
+	refs = append(refs, coverageStructuredBindingRefsFromValue(item["sourceRequirementAliases"])...)
+	return compactUniqueStrings(refs)
+}
+
+func coverageStructuredBindingRefsFromValue(value any) []string {
+	refs := make([]string, 0)
+	for _, ref := range stringSliceFromValue(value) {
+		if coverageBindingRefLooksStructured(ref) {
+			refs = append(refs, ref)
 		}
 	}
-	return false
+	return compactUniqueStrings(refs)
+}
+
+func coverageBindingRefLooksStructured(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 160 {
+		return false
+	}
+	return len(strings.Fields(value)) <= 1
 }
 
 func coverageEvidenceTagsRequireProofStrength(tags []string) bool {

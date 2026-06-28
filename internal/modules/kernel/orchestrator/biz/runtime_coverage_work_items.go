@@ -748,9 +748,10 @@ func coverageWorkItemFromSource(order int, revision, key string, source coverage
 	}
 	requiredKinds := coverageRequiredEvidenceKindsForSource(run, source)
 	requiredCounts := coverageRequiredEvidenceCountsForSource(source, requiredKinds)
-	acceptedByKind := coverageEvidenceRefsByKind(existing, "acceptedEvidenceByKind", requiredKinds)
+	rawAcceptedByKind := coverageEvidenceRefsByKind(existing, "acceptedEvidenceByKind", requiredKinds)
 	rejectedByKind := coverageEvidenceRefsByKind(existing, "rejectedEvidenceByKind", requiredKinds)
-	acceptedRefs := coverageFlattenEvidenceRefs(acceptedByKind, stringSliceFromValue(existing["acceptedEvidenceRefs"]))
+	acceptedByKind, supportingByKind, demotions := coverageAuditInheritedAcceptedEvidence(existing, rawAcceptedByKind)
+	acceptedRefs := coverageFlattenEvidenceRefs(acceptedByKind, nil)
 	rejectedRefs := coverageFlattenEvidenceRefs(rejectedByKind, stringSliceFromValue(existing["rejectedEvidenceRefs"]))
 	missingKinds := coverageMissingEvidenceKindsFromDetails(requiredKinds, acceptedByKind, requiredCounts)
 	if len(missingKinds) > 0 && (status == "satisfied" || status == "evidence_ready") {
@@ -784,6 +785,18 @@ func coverageWorkItemFromSource(order int, revision, key string, source coverage
 	if source.EvidenceRole != "" {
 		item["evidenceRole"] = source.EvidenceRole
 	}
+	if len(supportingByKind) > 0 {
+		item["supportingEvidenceByKind"] = supportingByKind
+		item["supportingEvidenceRefs"] = coverageFlattenEvidenceRefs(supportingByKind, stringSliceFromValue(existing["supportingEvidenceRefs"]))
+	}
+	if binding := mapStringSliceValue(existing["acceptedEvidenceBindingByKind"]); len(binding) > 0 {
+		item["acceptedEvidenceBindingByKind"] = binding
+		item["acceptedEvidenceBindingRefs"] = coverageFlattenEvidenceRefs(binding, stringSliceFromValue(existing["acceptedEvidenceBindingRefs"]))
+	}
+	if len(demotions) > 0 {
+		item["legacyEvidenceDemotions"] = demotions
+		item["evidenceQualityReason"] = "legacy accepted evidence was demoted because it is not structurally bound"
+	}
 	if source.SourceGoalID != "" {
 		item["sourceGoalId"] = source.SourceGoalID
 	}
@@ -802,6 +815,82 @@ func coverageWorkItemFromSource(order int, revision, key string, source coverage
 		item["currentGap"] = "required evidence kinds present; coverage assessment required"
 	}
 	return item
+}
+
+func coverageAuditInheritedAcceptedEvidence(existing map[string]any, acceptedByKind map[string][]string) (map[string][]string, map[string][]string, []map[string]any) {
+	if len(acceptedByKind) == 0 {
+		return acceptedByKind, mapStringSliceValue(existing["supportingEvidenceByKind"]), nil
+	}
+	bindingByKind := mapStringSliceValue(existing["acceptedEvidenceBindingByKind"])
+	supportingByKind := mapStringSliceValue(existing["supportingEvidenceByKind"])
+	structuredReuseRefs := coverageStructuredReuseRefsByKind(existing)
+	audited := map[string][]string{}
+	var demotions []map[string]any
+	for kind, refs := range acceptedByKind {
+		kind = strings.TrimSpace(kind)
+		if kind == "" {
+			continue
+		}
+		for _, ref := range compactUniqueStrings(refs) {
+			if !coverageEvidenceKindRequiresInheritedBinding(kind) ||
+				stringSliceContains(bindingByKind[kind], ref) ||
+				stringSliceContains(structuredReuseRefs[kind], ref) {
+				audited[kind] = append(audited[kind], ref)
+				continue
+			}
+			supportingByKind[kind] = append(supportingByKind[kind], ref)
+			demotions = append(demotions, map[string]any{
+				"kind":   kind,
+				"ref":    ref,
+				"reason": "legacy_evidence_not_structurally_bound",
+			})
+		}
+		audited[kind] = compactUniqueStrings(audited[kind])
+		supportingByKind[kind] = compactUniqueStrings(supportingByKind[kind])
+	}
+	return audited, supportingByKind, demotions
+}
+
+func coverageEvidenceKindRequiresInheritedBinding(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case runtimecontract.EvidenceKindValidation, runtimecontract.EvidenceKindStateChange:
+		return true
+	default:
+		return false
+	}
+}
+
+func coverageStructuredReuseRefsByKind(item map[string]any) map[string][]string {
+	ret := map[string][]string{}
+	if len(item) == 0 {
+		return ret
+	}
+	for _, edge := range mapSliceFromValue(item["evidenceReuseRefs"]) {
+		if !coverageEvidenceReuseMatchIsStructured(stringFromMap(edge, "matchedBy")) {
+			continue
+		}
+		kind := strings.TrimSpace(stringFromMap(edge, "kind"))
+		if kind == "" {
+			continue
+		}
+		if ref := strings.TrimSpace(stringFromMap(edge, "sourceRef")); ref != "" {
+			ret[kind] = append(ret[kind], ref)
+		}
+		if ref := strings.TrimSpace(stringFromMap(edge, "evidenceRecordId")); ref != "" {
+			ret[kind] = append(ret[kind], ref)
+		}
+		ret[kind] = compactUniqueStrings(ret[kind])
+	}
+	return ret
+}
+
+func coverageEvidenceReuseMatchIsStructured(matchedBy string) bool {
+	switch strings.TrimSpace(matchedBy) {
+	case "coverage_item_ref", "source_requirement_id", "coverage_target_id", "target_ref":
+		return true
+	default:
+		return false
+	}
 }
 
 func coverageHistoricalWorkItemSummary(item map[string]any, reason string) map[string]any {

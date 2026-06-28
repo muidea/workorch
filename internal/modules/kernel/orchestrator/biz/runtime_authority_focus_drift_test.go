@@ -134,6 +134,70 @@ func TestRebuildDispatchInputAlignsStaleFocusFieldsToAuthority(t *testing.T) {
 	}
 }
 
+func TestNormalizeDispatchInputDerivesAuthoritySliceFromAcceptanceSlices(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                  "cwi-003",
+				"coverageWorkItemIds": []string{"cwi-003"},
+				"requiredEvidenceKinds": []string{
+					"validation",
+				},
+			},
+		},
+		coverageFocusKey: map[string]any{
+			"id":                  "focus-cwi-003",
+			"sliceId":             "slice-primary-state-change",
+			"coverageWorkItemIds": []string{"cwi-003"},
+			"requiredEvidenceKinds": []string{
+				"validation",
+			},
+		},
+		"acceptance": map[string]any{
+			"activeSliceId": "slice-primary-state-change",
+			"activeSlice": map[string]any{
+				"id":                  "slice-primary-state-change",
+				"coverageWorkItemIds": []string{"cwi-085"},
+			},
+			"currentFocus": map[string]any{
+				"id":                  "focus-cwi-003",
+				"sliceId":             "slice-primary-state-change",
+				"coverageWorkItemIds": []string{"cwi-003"},
+			},
+		},
+		"executionContext": map[string]any{
+			acceptanceSlicesKey: []map[string]any{
+				{
+					"id":                  "slice-primary-state-change",
+					"coverageWorkItemIds": []string{"cwi-085"},
+				},
+				{
+					"id":                  "slice-direct-validation-001",
+					"coverageWorkItemIds": []string{"cwi-003", "cwi-004", "cwi-005", "cwi-006"},
+				},
+			},
+			coverageFocusKey: map[string]any{
+				"id":                  "focus-cwi-003",
+				"sliceId":             "slice-primary-state-change",
+				"coverageWorkItemIds": []string{"cwi-003"},
+			},
+		},
+	}
+
+	got := normalizeDispatchInputAuthorityFocus(input)
+	focus := mapFromValue(got[coverageFocusKey])
+	if stringFromMap(focus, "sliceId") != "slice-direct-validation-001" {
+		t.Fatalf("coverageFocus = %+v, want slice-direct-validation-001", focus)
+	}
+	acceptance := mapFromValue(got["acceptance"])
+	if stringFromMap(acceptance, "activeSliceId") != "slice-direct-validation-001" {
+		t.Fatalf("acceptance = %+v, want activeSliceId slice-direct-validation-001", acceptance)
+	}
+	if activeSlice := mapFromValue(acceptance["activeSlice"]); len(activeSlice) > 0 {
+		t.Fatalf("acceptance.activeSlice = %+v, want stale primary slice removed", activeSlice)
+	}
+}
+
 func TestDispatchNextStepPreparesInputFromCurrentAuthority(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-dispatch-next-authority")
