@@ -399,6 +399,49 @@ func TestProviderCoverageWorkItemWarningsAcceptCurrentFocusItems(t *testing.T) {
 	}
 }
 
+func TestProtectedCoverageWorkItemContextUsesTopLevelAuthority(t *testing.T) {
+	topLevel := providerBudgetCoverageWorkItemContextForTest("cwi-top", "top-level focus")
+	protected := captureProtectedProviderCoverageWorkItemContext(map[string]any{
+		"coverageWorkItemContext": topLevel,
+		"executionContextPackage": map[string]any{
+			"coverageWorkItemContext": providerBudgetCoverageWorkItemContextForTest("cwi-package", "package mirror"),
+		},
+		"repairActionPackage": map[string]any{
+			"coverageWorkItemContext": providerBudgetCoverageWorkItemContextForTest("cwi-repair", "repair mirror"),
+		},
+	})
+	input := map[string]any{
+		"coverageWorkItemContext": compactProviderCoverageWorkItemContext(topLevel),
+		"executionContextPackage": map[string]any{
+			"coverageWorkItemContext": providerBudgetCoverageWorkItemContextForTest("cwi-package-compacted", "compacted package mirror"),
+		},
+		"repairActionPackage": map[string]any{
+			"coverageWorkItemContext": providerBudgetCoverageWorkItemContextForTest("cwi-repair-compacted", "compacted repair mirror"),
+		},
+	}
+
+	if !isProtectedProviderCoverageWorkItemContextEqual(input, protected) {
+		t.Fatalf("protected coverage context should use preserved top-level authority despite nested mirror drift")
+	}
+}
+
+func TestProtectedCoverageWorkItemContextFallsBackToNestedMirrorsWithoutTopLevel(t *testing.T) {
+	protected := captureProtectedProviderCoverageWorkItemContext(map[string]any{
+		"executionContextPackage": map[string]any{
+			"coverageWorkItemContext": providerBudgetCoverageWorkItemContextForTest("cwi-package", "package mirror"),
+		},
+	})
+	input := map[string]any{
+		"executionContextPackage": map[string]any{
+			"coverageWorkItemContext": providerBudgetCoverageWorkItemContextForTest("cwi-package-drift", "changed package mirror"),
+		},
+	}
+
+	if isProtectedProviderCoverageWorkItemContextEqual(input, protected) {
+		t.Fatalf("protected coverage context should compare nested mirrors when no top-level authority exists")
+	}
+}
+
 func TestProviderContextGateDecisionClassifiesRecoveryActions(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -2188,4 +2231,31 @@ func repeatedBudgetItems(count int) []any {
 		})
 	}
 	return out
+}
+
+func providerBudgetCoverageWorkItemContextForTest(id string, targetText string) map[string]any {
+	return map[string]any{
+		"schemaVersion":        "workorch.coverage_work_item_context.v1",
+		"definitionRevision":   "rev-test",
+		"coverageBaselineHash": "sha256:test",
+		"summary": map[string]any{
+			"total": 1,
+			"open":  1,
+		},
+		"currentFocus": map[string]any{
+			"id":                           id,
+			"definitionRevision":           "rev-test",
+			"sourceScope":                  "goal_leaf",
+			"sourceRequirementId":          id + "-requirement",
+			"normalizedSourceKey":          "goal:goal_leaf:" + id,
+			"targetText":                   targetText,
+			"status":                       "open",
+			"currentGap":                   "missing accepted evidence binding for required evidence kind: validation",
+			"requiredEvidenceKinds":        []string{"validation"},
+			"missingEvidenceKinds":         []string{"validation"},
+			"acceptedEvidenceRefs":         []string{},
+			"rejectedEvidenceRefs":         []string{},
+			"nextAllowedConvergenceStates": []string{"need_validation"},
+		},
+	}
 }

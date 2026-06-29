@@ -1653,6 +1653,9 @@ func isProtectedProviderCoverageWorkItemContextEqual(input map[string]any, prote
 		return true
 	}
 	current := captureProtectedProviderCoverageWorkItemContext(input)
+	if len(protected.TopLevel) > 0 {
+		return valuesEqual(current.TopLevel, protected.TopLevel)
+	}
 	return valuesEqual(current.TopLevel, protected.TopLevel) &&
 		valuesEqual(current.ExecutionContext, protected.ExecutionContext) &&
 		valuesEqual(current.Package, protected.Package) &&
