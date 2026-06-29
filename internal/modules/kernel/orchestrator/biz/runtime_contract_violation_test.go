@@ -922,6 +922,70 @@ func TestContractViolationRetryUsesForcedNarrowAfterRepeatedRule(t *testing.T) {
 	}
 }
 
+func TestNormalizeCurrentActionStateChangingContractClearsStaleEvidenceAcquisition(t *testing.T) {
+	runID := common.RunID("run-contract-violation-forced-narrow-state-change")
+	failed := contractViolationFailedStep(runID, "failed-state-change")
+	input := cloneStepPayload(failed.Input)
+	input[stepInputKeyContractViolationRecovery] = map[string]any{
+		"correctionMode":      contractViolationCorrectionModeForcedNarrow,
+		"correctionProfileId": "state_changing_required_output",
+		"correctionContract": map[string]any{
+			"requiredOutputShape": "state_changing_output",
+			"allowedOutputs": []string{
+				"executionGraph_with_state_changing_node",
+				"patch/apply",
+			},
+			"forbiddenOutputs": []string{
+				"read_only_executionGraph",
+			},
+		},
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	pkg["repairObjective"] = repairObjectiveAcquireFailureEvidence
+	pkg["evidenceAcquisitionRequired"] = true
+	pkg["evidenceAcquisitionReason"] = "stale previous repair action"
+	pkg["outputDecisionContract"] = map[string]any{"requiredMode": repairObjectiveAcquireFailureEvidence}
+	pkg["exitCriteria"] = []string{"concrete_failure_evidence_acquired_then_target_scoped_repair"}
+	input["repairActionPackage"] = pkg
+
+	normalized := normalizeCurrentActionContract(input, failed)
+	step := &runmodel.Step{ID: common.StepID(string(runID) + "/retry"), RunID: runID, Kind: llmWorkspaceExecutionStepKind, Input: normalized}
+	if stepRequiresConcreteFailureEvidenceAcquisition(step) {
+		t.Fatalf("normalized input still requires concrete failure evidence: %+v", normalized["repairActionPackage"])
+	}
+	if got := stringFromMap(normalized, "repairObjective"); got != repairObjectiveStateChangingOutput {
+		t.Fatalf("repairObjective = %q, want %s", got, repairObjectiveStateChangingOutput)
+	}
+	pkg = mapFromValue(normalized["repairActionPackage"])
+	if got := stringFromMap(pkg, "repairObjective"); got != repairObjectiveStateChangingOutput {
+		t.Fatalf("repairActionPackage.repairObjective = %q, want %s; pkg=%+v", got, repairObjectiveStateChangingOutput, pkg)
+	}
+	for _, key := range []string{"evidenceAcquisitionRequired", "concreteFailureEvidenceRequired", "evidenceAcquisitionReason", "outputDecisionContract", "exitCriteria"} {
+		if _, ok := pkg[key]; ok {
+			t.Fatalf("repairActionPackage retained stale %s: %+v", key, pkg)
+		}
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) || !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want state-changing patch contract", required)
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{{
+			ID:   "patch",
+			Kind: "patch/apply",
+			Input: map[string]any{
+				"targetRef":       "target.txt",
+				"operation":       "file_write",
+				"content":         "updated",
+				"coverageTargets": []string{"neutral target"},
+			},
+		}}},
+	}
+	if err := validateLLMFollowUpGraphStateChangingContract(&runmodel.Run{}, step, output); err != nil {
+		t.Fatalf("state-changing graph was validated as stale evidence acquisition: %v", err)
+	}
+}
+
 func TestContractViolationRetryForcedNarrowValidationRequiredOutput(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-contract-violation-forced-narrow-validation")

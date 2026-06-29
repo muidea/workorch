@@ -1851,6 +1851,12 @@ func stepRequiresConcreteFailureEvidenceAcquisition(step *runModel.Step) bool {
 	if step == nil || step.Input == nil {
 		return false
 	}
+	if boolValue(step.Input["stateChangingOutputRequired"]) ||
+		strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) == repairObjectiveStateChangingOutput ||
+		strings.TrimSpace(stringFromMap(mapFromValue(step.Input["convergenceContract"]), "state")) == convergenceStateNeedStateChange ||
+		requiredOutputRequiresStateChanging(mapFromValue(step.Input["requiredOutput"])) {
+		return false
+	}
 	if boolValue(step.Input["concreteFailureEvidenceRequired"]) {
 		return true
 	}

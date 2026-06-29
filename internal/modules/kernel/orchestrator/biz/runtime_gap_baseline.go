@@ -754,11 +754,16 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 	}
 	topStateChanging := requiredOutputRequiresStateChanging(top)
 	topValidationOnly := requiredOutputValidationOnly(top)
+	topFailureEvidence := requiredOutputRequiresConcreteFailureEvidence(top)
 	if state == convergenceStateNeedStateChange && !topStateChanging {
 		return convergenceDispatchMisalignmentError("contractState=%s requires state-changing requiredOutput", state)
 	}
 	if state == convergenceStateNeedValidation && topStateChanging {
 		return convergenceDispatchMisalignmentError("contractState=%s has state-changing requiredOutput", state)
+	}
+	if (state == convergenceStateNeedValidation || nextAction == runtimemodel.NextActionTypeValidate) && topFailureEvidence {
+		appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "validation action requires validation evidence requiredOutput, not concrete failure evidence acquisition")
+		return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: validation has concrete failure evidence requiredOutput")
 	}
 	if (state == convergenceStateNeedStateChange || nextAction == runtimemodel.NextActionTypeStateChange) && !requiredOutputHasAllowedStateChangingKind(top) {
 		appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "state_change requiredOutput lacks an allowed state-changing accepted kind")
@@ -777,6 +782,9 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		}
 		if requiredOutputValidationOnly(required) != topValidationOnly {
 			return convergenceDispatchMisalignmentError("requiredOutput validation-only mismatch: %s", label)
+		}
+		if (state == convergenceStateNeedValidation || nextAction == runtimemodel.NextActionTypeValidate) && requiredOutputRequiresConcreteFailureEvidence(required) {
+			return convergenceDispatchMisalignmentError("validation requiredOutput requires concrete failure evidence: %s", label)
 		}
 		if topValidationOnly && requiredOutputAcceptsKind(required, "patch/apply") {
 			return convergenceDispatchMisalignmentError("validation-only requiredOutput accepts patch/apply: %s", label)
@@ -957,6 +965,15 @@ func requiredOutputValidationOnly(required map[string]any) bool {
 		return true
 	}
 	return boolValue(required["mustProduceConcreteValidationEvidence"]) && !requiredOutputRequiresStateChanging(required)
+}
+
+func requiredOutputRequiresConcreteFailureEvidence(required map[string]any) bool {
+	if len(required) == 0 {
+		return false
+	}
+	return boolValue(required["mustProduceConcreteFailureEvidence"]) ||
+		boolValue(required["mustAcquireConcreteFailureEvidence"]) ||
+		boolValue(required["concreteFailureEvidenceRequired"])
 }
 
 func requiredOutputAcceptsKind(required map[string]any, kind string) bool {

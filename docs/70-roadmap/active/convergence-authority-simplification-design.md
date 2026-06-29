@@ -17,6 +17,7 @@ Related:
 - `convergence-authority-dispatch-closure-checklist.md`
 - `runtime-convergence-authority-final-fix-scope.md`
 - `goal-dod-nextaction-iterative-delivery-plan.md`
+- `runtime-validation-nextaction-convergence-improvement-plan.md`
 
 ## Purpose
 

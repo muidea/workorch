@@ -21,6 +21,7 @@ Related:
 - [Convergence Authority Simplification Design](../70-roadmap/active/convergence-authority-simplification-design.md)
 - [Convergence Authority Dispatch Closure Checklist](../70-roadmap/active/convergence-authority-dispatch-closure-checklist.md)
 - [Convergence Authority Dispatch Live Verification](../60-verification/convergence-authority-dispatch-live-verification.md)
+- [Runtime Validation NextAction Convergence Improvement Plan](../70-roadmap/active/runtime-validation-nextaction-convergence-improvement-plan.md)
 
 ## Purpose
 

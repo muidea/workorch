@@ -375,11 +375,50 @@ func normalizeCurrentActionContract(input map[string]any, failedStep *runModel.S
 	case "bounded_failure_evidence":
 		return normalizeCurrentActionFailureEvidenceContract(input, failedStep, recovery)
 	case "valid_patch_apply", "state_changing_output", "state_changing_output_from_available_snapshot":
-		reapplyForcedNarrowContractViolationRequiredOutput(input, failedStep)
-		return input
+		return normalizeCurrentActionStateChangingContract(input, failedStep, recovery)
 	default:
 		return input
 	}
+}
+
+func normalizeCurrentActionStateChangingContract(input map[string]any, failedStep *runModel.Step, recovery map[string]any) map[string]any {
+	required := forcedNarrowRequiredOutputFromRecovery(input, failedStep, recovery)
+	if len(required) == 0 {
+		return input
+	}
+	setRuntimeStage(input, runtimeStageRepair)
+	input[stepInputKeySoulStage] = soulStageExecution
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	input["stateChangingOutputRequired"] = true
+	delete(input, "concreteFailureEvidenceRequired")
+	delete(input, "boundedValidationRequired")
+	delete(input, "evidenceRepairRequired")
+	delete(input, stepInputKeyAssessmentOnly)
+	delete(input, "assessmentOnlyReason")
+	currentActionSetRequiredOutput(input, required)
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) > 0 {
+		pkg["repairObjective"] = repairObjectiveStateChangingOutput
+		pkg["stateChangingOutputRequired"] = true
+		delete(pkg, "evidenceAcquisitionRequired")
+		delete(pkg, "concreteFailureEvidenceRequired")
+		delete(pkg, "evidenceAcquisitionReason")
+		delete(pkg, "outputDecisionContract")
+		delete(pkg, "exitCriteria")
+		input["repairActionPackage"] = pkg
+	}
+	input["convergenceContract"] = map[string]any{
+		"state":                       convergenceStateNeedStateChange,
+		"runtimeStage":                runtimeStageRepair,
+		"runtimeStageMode":            firstNonEmptyString(stringFromMap(input, stepInputKeyRuntimeStageMode), "strict_convergence"),
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+	}
+	currentActionSetNextAction(input, map[string]any{
+		"kind":   runtimemodel.NextActionTypeStateChange,
+		"reason": "current forced-narrow correction contract requires state-changing output",
+	})
+	return input
 }
 
 func normalizeCurrentActionValidationEvidenceContract(input map[string]any, failedStep *runModel.Step, recovery map[string]any) map[string]any {

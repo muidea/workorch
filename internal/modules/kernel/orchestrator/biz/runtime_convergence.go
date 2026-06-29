@@ -328,6 +328,10 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 		return true
 	case "repair", "acquire_evidence":
 		convergenceContractAttachCoverageContext(input, contract)
+		if convergenceCurrentFocusNeedsValidationWithoutStateChange(input) {
+			populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
+			return true
+		}
 		populateCoverageWorkItemEvidenceConvergenceContract(input, contract)
 		return true
 	default:
@@ -613,10 +617,6 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		populateCoverageWorkItemAssessmentConvergenceContract(contract)
 		return true
 	}
-	if convergenceConcreteValidationCannotAdvanceWithoutTarget(input, failedStep) {
-		populateCoverageWorkItemEvidenceConvergenceContract(input, contract)
-		return true
-	}
 	if coverageWorkItemContextHasMissingEvidenceKind(context, "state_change") {
 		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
 			populateProfileStateChangingEvidenceConvergenceContract(input, contract, pkg)
@@ -662,6 +662,10 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
 		return true
 	}
+	if convergenceConcreteValidationCannotAdvanceWithoutTarget(input, failedStep) {
+		populateCoverageWorkItemEvidenceConvergenceContract(input, contract)
+		return true
+	}
 	if explicitCoverageGapShouldPreemptAssessment(input, failedStep) {
 		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
 			populateProfileStateChangingEvidenceConvergenceContract(input, contract, pkg)
@@ -701,6 +705,7 @@ func populateCoverageWorkItemEvidenceConvergenceContract(input map[string]any, c
 		contract.RepairActionPackage = map[string]any{}
 	}
 	required := evidenceAcquisitionRequiredOutputWithScratch(input, contract.RepairActionPackage, mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+	required["evidenceAcquisitionSubtype"] = "diagnostic_probe"
 	required["mustReferenceCoverageWorkItem"] = true
 	contract.RepairActionPackage["requiredOutput"] = required
 }
@@ -724,6 +729,7 @@ func populateTargetSnapshotAcquisitionConvergenceContract(input map[string]any, 
 		pkg["repairTargetSet"] = targetSet
 	}
 	required := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
+	required["evidenceAcquisitionSubtype"] = "target_snapshot"
 	required["mustAcquireCurrentTargetSnapshot"] = true
 	required["mustUseReadOnlySnapshotAcquisition"] = true
 	required["mustNotMutateWorkspace"] = true
@@ -895,6 +901,52 @@ func coverageWorkItemContextHasMissingEvidenceKind(context map[string]any, evide
 		}
 	}
 	return false
+}
+
+func convergenceCurrentFocusNeedsValidationWithoutStateChange(input map[string]any) bool {
+	for _, item := range convergenceCurrentFocusCandidates(input) {
+		if len(item) == 0 {
+			continue
+		}
+		missing := coverageWorkItemExplicitOrDerivedMissingEvidenceKindSet(item)
+		if missing["validation"] && !missing["state_change"] {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageWorkItemExplicitOrDerivedMissingEvidenceKindSet(item map[string]any) map[string]bool {
+	if len(item) == 0 {
+		return nil
+	}
+	if _, ok := item["missingEvidenceKinds"]; ok {
+		return stringSet(compactUniqueStrings(stringSliceFromValue(item["missingEvidenceKinds"])))
+	}
+	return coverageWorkItemMissingEvidenceKindSet(item)
+}
+
+func convergenceCurrentFocusCandidates(input map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := []map[string]any{}
+	if context := coverageWorkItemContextFromInput(input); len(context) > 0 {
+		if focus := coverageWorkItemPrimaryFocus(context); len(focus) > 0 {
+			ret = append(ret, focus)
+		}
+	}
+	for _, source := range []map[string]any{
+		mapFromValue(input[convergenceAuthorityKey]),
+		mapFromValue(input[gapBaselineKey]),
+		mapFromValue(mapFromValue(input["executionContext"])[convergenceAuthorityKey]),
+		mapFromValue(mapFromValue(input["executionContext"])[gapBaselineKey]),
+	} {
+		if focus := mapFromValue(source["currentFocus"]); len(focus) > 0 {
+			ret = append(ret, focus)
+		}
+	}
+	return ret
 }
 
 func convergenceFailedAcceptedStateChangingEvidenceStep(input map[string]any, failedStep *runModel.Step, pkg map[string]any) bool {
