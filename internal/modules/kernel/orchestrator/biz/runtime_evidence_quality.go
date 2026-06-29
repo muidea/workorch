@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -144,7 +145,7 @@ func runtimeStepEvidenceQuality(run *runModel.Run, step *runModel.Step, state co
 	if state == common.ValidationResultStateFailed {
 		return runtimeEvidenceQuality{Quality: common.EvidenceQualityInvalid, Reason: "runtime step failed"}
 	}
-	return evidenceQualityFromRuntimeOutput(output)
+	return evidenceQualityFromRuntimeStepOutput(step, output)
 }
 
 func validateDoDAssessmentEvidenceQuality(
@@ -1171,13 +1172,457 @@ func evidenceQualityFromRuntimeStep(step *runModel.Step) runtimeEvidenceQuality 
 	if step == nil {
 		return runtimeEvidenceQuality{Quality: common.EvidenceQualityInvalid, Reason: "runtime step is missing"}
 	}
-	quality := evidenceQualityFromRuntimeOutput(step.Output)
+	return evidenceQualityFromRuntimeStepOutput(step, step.Output)
+}
+
+func evidenceQualityFromRuntimeStepOutput(step *runModel.Step, output map[string]any) runtimeEvidenceQuality {
+	quality := evidenceQualityFromRuntimeOutput(output)
+	quality = applyRuntimeEvidenceVerdictFromOutput(quality, output)
+	if step != nil && output == nil {
+		output = step.Output
+	}
+	if validationEvidenceCanSatisfyDoD(quality) {
+		if criteria := runtimeValidationCriteriaEvaluation(step, output); criteria.HasCriteria && len(criteria.Failed) > 0 {
+			quality.Quality = common.EvidenceQualityInconclusive
+			quality.Reason = "validation evidence criteria failed: " + strings.Join(criteria.Failed, "; ")
+			quality.Tags = compactUniqueStrings(append(quality.Tags, "validation_criteria_failed"))
+		}
+	}
 	if validationEvidenceCanSatisfyDoD(quality) && runtimeStepHasNegativeScalarValidationOutput(step) {
 		quality.Quality = common.EvidenceQualityInconclusive
 		quality.Reason = "validation step produced a negative scalar output"
 		quality.Tags = compactUniqueStrings(append(quality.Tags, "negative_scalar_validation_output"))
 	}
 	return quality
+}
+
+type runtimeValidationCriteriaResult struct {
+	HasCriteria bool
+	Failed      []string
+}
+
+type runtimeValidationMetricSourceSet struct {
+	All               map[string]any
+	StdoutKeyValue    map[string]any
+	OutputMetrics     map[string]any
+	ValidationMetrics map[string]any
+	VerdictMetrics    map[string]any
+	AdapterMetrics    map[string]any
+}
+
+func applyRuntimeEvidenceVerdictFromOutput(quality runtimeEvidenceQuality, output map[string]any) runtimeEvidenceQuality {
+	if output == nil || !validationEvidenceCanSatisfyDoD(quality) {
+		return quality
+	}
+	verdict := firstEvidenceVerdictMap(output)
+	if len(verdict) == 0 {
+		return quality
+	}
+	quality.Tags = compactUniqueStrings(append(quality.Tags, stringSliceFromValue(verdict["tags"])...))
+	quality.Tags = compactUniqueStrings(append(quality.Tags, stringSliceFromValue(verdict["evidenceTags"])...))
+	if reason := firstNonEmptyString(stringFromMap(verdict, "reason"), stringFromMap(verdict, "message")); reason != "" {
+		quality.Reason = reason
+	}
+	if verdictQuality := common.EvidenceQuality(strings.TrimSpace(firstNonEmptyString(stringFromMap(verdict, "quality"), stringFromMap(verdict, "evidenceQuality")))); verdictQuality != "" {
+		quality.Quality = verdictQuality
+	}
+	state := strings.ToLower(strings.TrimSpace(firstNonEmptyString(stringFromMap(verdict, "state"), stringFromMap(verdict, "status"))))
+	failedCriteria := stringSliceFromValue(verdict["failedCriteria"])
+	for _, item := range mapSliceFromValue(verdict["failedCriteria"]) {
+		failedCriteria = append(failedCriteria, runtimeValidationCriteriaLabel(item))
+	}
+	failedCriteria = compactUniqueStrings(failedCriteria)
+	switch {
+	case len(failedCriteria) > 0:
+		quality.Quality = common.EvidenceQualityInconclusive
+		quality.Reason = firstNonEmptyString(quality.Reason, "validation evidence verdict reported failed criteria: "+strings.Join(failedCriteria, "; "))
+		quality.Tags = compactUniqueStrings(append(quality.Tags, "validation_criteria_failed"))
+	case state == "failed" || state == "failure" || state == "invalid":
+		quality.Quality = common.EvidenceQualityInvalid
+		quality.Reason = firstNonEmptyString(quality.Reason, "validation evidence verdict failed")
+	case state == "inconclusive" || state == "unknown" || state == "skipped":
+		quality.Quality = common.EvidenceQualityInconclusive
+		quality.Reason = firstNonEmptyString(quality.Reason, "validation evidence verdict is inconclusive")
+	}
+	return quality
+}
+
+func firstEvidenceVerdictMap(output map[string]any) map[string]any {
+	for _, key := range []string{"validationEvidenceVerdict", "evidenceVerdict", "verdict"} {
+		if verdict := mapFromValue(output[key]); len(verdict) > 0 {
+			return verdict
+		}
+	}
+	return nil
+}
+
+func runtimeValidationCriteriaEvaluation(step *runModel.Step, output map[string]any) runtimeValidationCriteriaResult {
+	evidence := runtimeValidationEvidenceForCriteria(step, output)
+	requiredMetrics := criteriaMapSliceFromValue(firstNonNil(evidence["requiredMetrics"], outputValue(output, "requiredMetrics")))
+	requiredAssertions := criteriaMapSliceFromValue(firstNonNil(evidence["requiredAssertions"], outputValue(output, "requiredAssertions")))
+	successCriteria := criteriaMapSliceFromValue(firstNonNil(evidence["successCriteria"], outputValue(output, "successCriteria")))
+	for _, policy := range runtimeValidationEvidencePoliciesForCriteria(step, output) {
+		requiredMetrics = append(requiredMetrics, criteriaMapSliceFromValue(policy["requiredMetrics"])...)
+		requiredAssertions = append(requiredAssertions, criteriaMapSliceFromValue(policy["requiredAssertions"])...)
+		successCriteria = append(successCriteria, criteriaMapSliceFromValue(policy["successCriteria"])...)
+	}
+	result := runtimeValidationCriteriaResult{
+		HasCriteria: len(requiredMetrics) > 0 || len(requiredAssertions) > 0 || len(successCriteria) > 0,
+	}
+	if !result.HasCriteria {
+		return result
+	}
+	metrics := collectRuntimeValidationMetricSources(step, output, evidence)
+	for _, metric := range requiredMetrics {
+		if reason := evaluateRuntimeValidationMetricCriterion(metric, metrics); reason != "" {
+			result.Failed = append(result.Failed, reason)
+		}
+	}
+	for _, assertion := range requiredAssertions {
+		if reason := evaluateRuntimeValidationAssertionCriterion(assertion); reason != "" {
+			result.Failed = append(result.Failed, reason)
+		}
+	}
+	for _, criterion := range successCriteria {
+		if reason := evaluateRuntimeValidationSuccessCriterion(criterion, metrics); reason != "" {
+			result.Failed = append(result.Failed, reason)
+		}
+	}
+	result.Failed = compactUniqueStrings(result.Failed)
+	return result
+}
+
+func runtimeValidationEvidenceForCriteria(step *runModel.Step, output map[string]any) map[string]any {
+	if output != nil {
+		if evidence := mapFromValue(output["validationEvidence"]); len(evidence) > 0 {
+			return evidence
+		}
+	}
+	if step == nil {
+		return nil
+	}
+	if evidence := mapFromValue(step.Output["validationEvidence"]); len(evidence) > 0 {
+		return evidence
+	}
+	return mapFromValue(step.Input["validationEvidence"])
+}
+
+func runtimeValidationEvidencePoliciesForCriteria(step *runModel.Step, output map[string]any) []map[string]any {
+	policies := make([]map[string]any, 0)
+	if output != nil {
+		policies = append(policies, mapSliceFromValue(output["evidencePolicies"])...)
+	}
+	if step != nil {
+		policies = append(policies, mapSliceFromValue(step.Output["evidencePolicies"])...)
+		policies = append(policies, mapSliceFromValue(step.Input["evidencePolicies"])...)
+	}
+	if len(policies) == 0 {
+		return nil
+	}
+	stepKind := ""
+	if step != nil {
+		stepKind = strings.TrimSpace(step.Kind)
+	}
+	ret := make([]map[string]any, 0, len(policies))
+	for _, policy := range policies {
+		if !runtimeValidationEvidencePolicyAppliesToStep(policy, stepKind) {
+			continue
+		}
+		if len(criteriaMapSliceFromValue(policy["requiredMetrics"])) == 0 &&
+			len(criteriaMapSliceFromValue(policy["requiredAssertions"])) == 0 &&
+			len(criteriaMapSliceFromValue(policy["successCriteria"])) == 0 {
+			continue
+		}
+		ret = append(ret, policy)
+	}
+	return ret
+}
+
+func runtimeValidationEvidencePolicyAppliesToStep(policy map[string]any, stepKind string) bool {
+	if len(policy) == 0 {
+		return false
+	}
+	appliesTo := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(policy, "appliesTo"),
+		stringFromMap(policy, "stepKind"),
+		stringFromMap(policy, "kind"),
+	))
+	if appliesTo == "" || appliesTo == "*" || strings.EqualFold(appliesTo, "all") {
+		return true
+	}
+	if appliesTo == stepKind {
+		return true
+	}
+	for _, value := range stringSliceFromValue(policy["appliesTo"]) {
+		if strings.TrimSpace(value) == stepKind || strings.TrimSpace(value) == "*" {
+			return true
+		}
+	}
+	for _, value := range stringSliceFromValue(policy["acceptedStepKinds"]) {
+		if strings.TrimSpace(value) == stepKind || strings.TrimSpace(value) == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+func outputValue(output map[string]any, key string) any {
+	if output == nil {
+		return nil
+	}
+	return output[key]
+}
+
+func criteriaMapSliceFromValue(value any) []map[string]any {
+	if single := mapFromValue(value); len(single) > 0 {
+		return []map[string]any{single}
+	}
+	return mapSliceFromValue(value)
+}
+
+func collectRuntimeValidationMetricSources(step *runModel.Step, output map[string]any, evidence map[string]any) runtimeValidationMetricSourceSet {
+	stdout := ""
+	if output != nil {
+		stdout = stringFromMap(output, "stdout")
+	}
+	if stdout == "" && step != nil {
+		stdout = stringFromMap(step.Output, "stdout")
+	}
+	sources := runtimeValidationMetricSourceSet{
+		All:               map[string]any{},
+		StdoutKeyValue:    parseRuntimeValidationStdoutMetrics(stdout),
+		OutputMetrics:     mapFromValue(outputValue(output, "metrics")),
+		ValidationMetrics: mapFromValue(evidence["metrics"]),
+		VerdictMetrics:    mapFromValue(firstEvidenceVerdictMap(output)["metrics"]),
+		AdapterMetrics:    mapFromValue(outputValue(output, "adapterMetrics")),
+	}
+	for _, metrics := range []map[string]any{
+		sources.ValidationMetrics,
+		sources.OutputMetrics,
+		sources.VerdictMetrics,
+		sources.AdapterMetrics,
+		sources.StdoutKeyValue,
+	} {
+		for key, value := range metrics {
+			if strings.TrimSpace(key) != "" {
+				sources.All[key] = value
+			}
+		}
+	}
+	return sources
+}
+
+func parseRuntimeValidationStdoutMetrics(stdout string) map[string]any {
+	ret := map[string]any{}
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.Count(line, "=") != 1 {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		key := strings.TrimSpace(parts[0])
+		if !runtimeValidationMetricNameIsSafe(key) {
+			continue
+		}
+		ret[key] = strings.TrimSpace(parts[1])
+	}
+	return ret
+}
+
+func runtimeValidationMetricNameIsSafe(name string) bool {
+	if name == "" || len(name) > 120 {
+		return false
+	}
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func evaluateRuntimeValidationMetricCriterion(criterion map[string]any, sources runtimeValidationMetricSourceSet) string {
+	name := strings.TrimSpace(firstNonEmptyString(stringFromMap(criterion, "name"), stringFromMap(criterion, "key"), stringFromMap(criterion, "metric")))
+	if name == "" {
+		return "metric criterion is missing name"
+	}
+	actual, ok := runtimeValidationMetricValue(name, stringFromMap(criterion, "source"), sources)
+	if !ok {
+		return fmt.Sprintf("metric %q is missing", name)
+	}
+	op := strings.ToLower(strings.TrimSpace(firstNonEmptyString(stringFromMap(criterion, "op"), stringFromMap(criterion, "operator"))))
+	if op == "" {
+		op = "exists"
+	}
+	if runtimeValidationCriterionMatches(op, actual, criterion["value"]) {
+		return ""
+	}
+	return fmt.Sprintf("metric %q did not satisfy %s", name, op)
+}
+
+func runtimeValidationMetricValue(name string, source string, sources runtimeValidationMetricSourceSet) (any, bool) {
+	source = strings.ToLower(strings.TrimSpace(source))
+	source = strings.ReplaceAll(source, "-", "_")
+	source = strings.ReplaceAll(source, ".", "_")
+	candidates := []map[string]any{sources.All}
+	switch source {
+	case "stdout", "stdout_key_value", "stdout_key_values", "stdout_metrics":
+		candidates = []map[string]any{sources.StdoutKeyValue}
+	case "output_metrics", "metrics", "output":
+		candidates = []map[string]any{sources.OutputMetrics}
+	case "validation_evidence_metrics", "validation_metrics", "validationevidence_metrics":
+		candidates = []map[string]any{sources.ValidationMetrics}
+	case "verdict", "verdict_metrics":
+		candidates = []map[string]any{sources.VerdictMetrics}
+	case "adapter", "adapter_metrics":
+		candidates = []map[string]any{sources.AdapterMetrics}
+	}
+	for _, candidate := range candidates {
+		if candidate == nil {
+			continue
+		}
+		value, ok := candidate[name]
+		if ok {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func evaluateRuntimeValidationAssertionCriterion(criterion map[string]any) string {
+	label := runtimeValidationCriteriaLabel(criterion)
+	if expected, ok := criterion["expected"].(bool); ok {
+		actual, actualOK := runtimeValidationAssertionBoolValue(criterion)
+		if !actualOK {
+			return fmt.Sprintf("assertion %q is missing actual result", label)
+		}
+		if actual != expected {
+			return fmt.Sprintf("assertion %q did not satisfy expected result", label)
+		}
+		return ""
+	}
+	if passed, ok := criterion["passed"].(bool); ok && !passed {
+		return fmt.Sprintf("assertion %q failed", label)
+	}
+	if state := strings.ToLower(strings.TrimSpace(firstNonEmptyString(stringFromMap(criterion, "state"), stringFromMap(criterion, "status")))); state == "failed" || state == "invalid" || state == "inconclusive" {
+		return fmt.Sprintf("assertion %q is %s", label, state)
+	}
+	return ""
+}
+
+func runtimeValidationAssertionBoolValue(criterion map[string]any) (bool, bool) {
+	for _, key := range []string{"actual", "value", "observed", "passed", "result"} {
+		if value, ok := criterion[key].(bool); ok {
+			return value, true
+		}
+	}
+	return false, false
+}
+
+func evaluateRuntimeValidationSuccessCriterion(criterion map[string]any, sources runtimeValidationMetricSourceSet) string {
+	if strings.TrimSpace(firstNonEmptyString(stringFromMap(criterion, "name"), stringFromMap(criterion, "key"), stringFromMap(criterion, "metric"))) != "" {
+		return evaluateRuntimeValidationMetricCriterion(criterion, sources)
+	}
+	return evaluateRuntimeValidationAssertionCriterion(criterion)
+}
+
+func runtimeValidationCriteriaLabel(criterion map[string]any) string {
+	label := strings.TrimSpace(firstNonEmptyString(stringFromMap(criterion, "id"), stringFromMap(criterion, "name"), stringFromMap(criterion, "key"), stringFromMap(criterion, "description")))
+	if label == "" {
+		return "unnamed"
+	}
+	return label
+}
+
+func runtimeValidationCriterionMatches(op string, actual any, expected any) bool {
+	switch op {
+	case "exists":
+		return true
+	case "eq", "equals", "==":
+		return runtimeValidationCompareEqual(actual, expected)
+	case "ne", "not_equals", "!=":
+		return !runtimeValidationCompareEqual(actual, expected)
+	case "gt", ">":
+		return runtimeValidationCompareNumeric(actual, expected, func(a, b float64) bool { return a > b })
+	case "gte", ">=", "ge":
+		return runtimeValidationCompareNumeric(actual, expected, func(a, b float64) bool { return a >= b })
+	case "lt", "<":
+		return runtimeValidationCompareNumeric(actual, expected, func(a, b float64) bool { return a < b })
+	case "lte", "<=", "le":
+		return runtimeValidationCompareNumeric(actual, expected, func(a, b float64) bool { return a <= b })
+	case "nonzero", "not_zero":
+		return runtimeValidationValueIsNonZero(actual)
+	case "true":
+		return runtimeValidationValueIsBool(actual, true)
+	case "false":
+		return runtimeValidationValueIsBool(actual, false)
+	default:
+		return false
+	}
+}
+
+func runtimeValidationCompareEqual(actual any, expected any) bool {
+	if actualNumber, ok := runtimeValidationFloatValue(actual); ok {
+		if expectedNumber, expectedOK := runtimeValidationFloatValue(expected); expectedOK {
+			return actualNumber == expectedNumber
+		}
+	}
+	return strings.TrimSpace(fmt.Sprint(actual)) == strings.TrimSpace(fmt.Sprint(expected))
+}
+
+func runtimeValidationCompareNumeric(actual any, expected any, compare func(float64, float64) bool) bool {
+	actualNumber, ok := runtimeValidationFloatValue(actual)
+	if !ok {
+		return false
+	}
+	expectedNumber, ok := runtimeValidationFloatValue(expected)
+	if !ok {
+		return false
+	}
+	return compare(actualNumber, expectedNumber)
+}
+
+func runtimeValidationFloatValue(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case int32:
+		return float64(typed), true
+	case json.Number:
+		ret, err := typed.Float64()
+		return ret, err == nil
+	case string:
+		ret, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		return ret, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func runtimeValidationValueIsNonZero(value any) bool {
+	if number, ok := runtimeValidationFloatValue(value); ok {
+		return number != 0
+	}
+	text := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+	return text != "" && text != "false" && text != "null" && text != "[]" && text != "{}" && text != "0"
+}
+
+func runtimeValidationValueIsBool(value any, expected bool) bool {
+	if typed, ok := value.(bool); ok {
+		return typed == expected
+	}
+	text := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+	if expected {
+		return text == "true" || text == "1" || text == "yes" || text == "pass" || text == "passed"
+	}
+	return text == "false" || text == "0" || text == "no" || text == "fail" || text == "failed"
 }
 
 func qualityFromValidationResult(item *runModel.ValidationResult) runtimeEvidenceQuality {

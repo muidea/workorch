@@ -144,6 +144,68 @@ func TestReconcile_BindsValidShellToOpenCwiWithValidationKind(t *testing.T) {
 	}
 }
 
+func TestReconcile_PassedValidationWithFailedDeclaredMetricIsSupportingOnly(t *testing.T) {
+	run := makeReconcileRun("- neutral-contract-verify produces target evidence", nil)
+	c := newCoverageSubsystem()
+	c.ensure(run)
+
+	step := reconcileStepShell("run-recon-1/graph-007/002-neutral-contract-verify", "verify")
+	attachReconcileValidationProof(t, run, step, "neutral-contract-verify")
+	step.Input["validationEvidence"].(map[string]any)["requiredMetrics"] = []map[string]any{{
+		"name":   "observed_count",
+		"source": "stdout_key_value",
+		"op":     "nonzero",
+	}}
+	step.Output["stdout"] = "observed_count=0\n"
+	validation := reconcileValidValidation("val-001-failed-metric", step.ID)
+
+	changed, bound := c.reconcileValidationEvidence(run, []*runmodel.ValidationResult{validation}, []*runmodel.Step{step})
+	if !changed || bound != 0 {
+		t.Fatalf("reconcile = (changed=%v, bound=%d), want supporting-only change with bound 0", changed, bound)
+	}
+	matched := findOriginalCwiByLeafSubstring(run, "neutral-contract-verify")
+	if matched == nil {
+		t.Fatalf("cwi with targetText containing neutral-contract-verify not found")
+	}
+	if accepted := mapStringSliceValue(matched["acceptedEvidenceByKind"]); len(accepted["validation"]) != 0 {
+		t.Fatalf("accepted.validation = %v, want none", accepted["validation"])
+	}
+	supporting := mapStringSliceValue(matched["supportingEvidenceByKind"])
+	if len(supporting["validation"]) != 1 {
+		t.Fatalf("supporting.validation = %v, want one insufficient validation ref", supporting["validation"])
+	}
+	if reason := strings.TrimSpace(stringFromMap(matched, "evidenceQualityReason")); !strings.Contains(reason, "observed_count") {
+		t.Fatalf("evidenceQualityReason = %q, want failed metric reason", reason)
+	}
+}
+
+func TestReconcile_PassedValidationWithSatisfiedDeclaredMetricBinds(t *testing.T) {
+	run := makeReconcileRun("- neutral-contract-verify produces target evidence", nil)
+	c := newCoverageSubsystem()
+	c.ensure(run)
+
+	step := reconcileStepShell("run-recon-1/graph-007/002-neutral-contract-verify", "verify")
+	attachReconcileValidationProof(t, run, step, "neutral-contract-verify")
+	step.Input["validationEvidence"].(map[string]any)["requiredMetrics"] = []map[string]any{{
+		"name":   "observed_count",
+		"source": "stdout_key_value",
+		"op":     "gte",
+		"value":  1,
+	}}
+	step.Output["stdout"] = "observed_count=1\n"
+	validation := reconcileValidValidation("val-001-satisfied-metric", step.ID)
+
+	changed, bound := c.reconcileValidationEvidence(run, []*runmodel.ValidationResult{validation}, []*runmodel.Step{step})
+	if !changed || bound != 1 {
+		t.Fatalf("reconcile = (changed=%v, bound=%d), want accepted binding", changed, bound)
+	}
+	matched := findOriginalCwiByLeafSubstring(run, "neutral-contract-verify")
+	accepted := mapStringSliceValue(matched["acceptedEvidenceByKind"])
+	if len(accepted["validation"]) != 1 {
+		t.Fatalf("accepted.validation = %v, want one accepted validation ref", accepted["validation"])
+	}
+}
+
 func TestReconcile_SkipsFailedShell(t *testing.T) {
 	run := makeReconcileRun("- go-build-verify 通过 编译 验证", nil)
 	c := newCoverageSubsystem()

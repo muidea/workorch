@@ -508,7 +508,7 @@ func coverageApplyWorkItemEvidenceWithOptions(item map[string]any, kinds []strin
 			continue
 		}
 		if accepted && !coverageEvidenceSufficientForKind(item, kind, options) {
-			recordCoverageInsufficientEvidence(item, kind, refs, stepID, firstNonEmptyString(reason, options.Reason, coverageEvidenceInsufficientReason(item, kind, options)))
+			recordCoverageInsufficientEvidence(item, kind, refs, stepID, firstNonEmptyString(options.Reason, coverageEvidenceInsufficientReason(item, kind, options), reason))
 			changed = true
 			continue
 		}

@@ -29,6 +29,87 @@ func TestRuntimeStepEvidenceQualityUsesRuntimeOutputMetadata(t *testing.T) {
 	}
 }
 
+func TestRuntimeStepEvidenceQualityRejectsFailedDeclaredMetric(t *testing.T) {
+	run := &runmodel.Run{ID: "run-required-metric", WorkspaceID: "ws-required-metric"}
+	step := &runmodel.Step{
+		ID:    "run-required-metric/block/verify",
+		RunID: run.ID,
+		Kind:  shellcommon.StepKindCommand,
+		Input: map[string]any{
+			"validationEvidence": map[string]any{
+				"requiredMetrics": []map[string]any{{
+					"name":   "required_count",
+					"source": "stdout_key_value",
+					"op":     "nonzero",
+				}},
+			},
+		},
+		Output: map[string]any{
+			"stdout": "required_count=0\n",
+		},
+	}
+	quality := runtimeStepEvidenceQuality(run, step, common.ValidationResultStatePassed, step.Output)
+	if quality.Quality != common.EvidenceQualityInconclusive ||
+		!strings.Contains(quality.Reason, "required_count") ||
+		!stringSliceContains(quality.Tags, "validation_criteria_failed") {
+		t.Fatalf("quality = %+v, want inconclusive failed metric verdict", quality)
+	}
+}
+
+func TestRuntimeStepEvidenceQualityAcceptsSatisfiedDeclaredMetric(t *testing.T) {
+	run := &runmodel.Run{ID: "run-required-metric-pass", WorkspaceID: "ws-required-metric"}
+	step := &runmodel.Step{
+		ID:    "run-required-metric-pass/block/verify",
+		RunID: run.ID,
+		Kind:  shellcommon.StepKindCommand,
+		Input: map[string]any{
+			"validationEvidence": map[string]any{
+				"requiredMetrics": []map[string]any{{
+					"name":   "required_count",
+					"source": "stdout_key_value",
+					"op":     "gte",
+					"value":  2,
+				}},
+			},
+		},
+		Output: map[string]any{
+			"stdout": "required_count=2\n",
+		},
+	}
+	quality := runtimeStepEvidenceQuality(run, step, common.ValidationResultStatePassed, step.Output)
+	if quality.Quality != common.EvidenceQualityValid {
+		t.Fatalf("quality = %+v, want valid satisfied metric verdict", quality)
+	}
+}
+
+func TestRuntimeStepEvidenceQualityAppliesEvidencePolicyCriteria(t *testing.T) {
+	run := &runmodel.Run{ID: "run-policy-required-metric", WorkspaceID: "ws-policy-required-metric"}
+	step := &runmodel.Step{
+		ID:    "run-policy-required-metric/block/verify",
+		RunID: run.ID,
+		Kind:  shellcommon.StepKindCommand,
+		Input: map[string]any{
+			"evidencePolicies": []map[string]any{{
+				"id":        "policy-required-metric",
+				"appliesTo": shellcommon.StepKindCommand,
+				"requiredMetrics": []map[string]any{{
+					"name":   "policy_observed",
+					"source": "stdout_key_value",
+					"op":     "true",
+				}},
+			}},
+		},
+		Output: map[string]any{
+			"stdout": "policy_observed=false\n",
+		},
+	}
+	quality := runtimeStepEvidenceQuality(run, step, common.ValidationResultStatePassed, step.Output)
+	if quality.Quality != common.EvidenceQualityInconclusive ||
+		!strings.Contains(quality.Reason, "policy_observed") {
+		t.Fatalf("quality = %+v, want policy criteria failure", quality)
+	}
+}
+
 func TestDoDAssessmentEvidenceQualityRejectsInconclusiveStepEvidence(t *testing.T) {
 	ctx := context.Background()
 	validationRepo := memory.NewValidationResultRepository()

@@ -1026,9 +1026,7 @@ func nodeValidationEvidenceContractIsConcrete(node runtimemodel.BlockExecutionNo
 	if !validationEvidenceObservationTypeIsConcrete(observationType) {
 		return false
 	}
-	if mode == "controlled_substitute" &&
-		len(mapFromValue(evidence["substitute"])) == 0 &&
-		strings.TrimSpace(stringFromMap(evidence, "substituteFor")) == "" {
+	if mode == "controlled_substitute" && !validationEvidenceHasControlledSubstitute(evidence) {
 		return false
 	}
 	if len(nodeValidationEvidenceTargetRefs(node)) == 0 {
@@ -1038,6 +1036,16 @@ func nodeValidationEvidenceContractIsConcrete(node runtimemodel.BlockExecutionNo
 		return false
 	}
 	return true
+}
+
+func validationEvidenceHasControlledSubstitute(evidence map[string]any) bool {
+	if strings.TrimSpace(stringFromMap(evidence, "substituteFor")) != "" {
+		return true
+	}
+	if strings.TrimSpace(stringFromMap(evidence, "substitute")) != "" {
+		return true
+	}
+	return len(mapFromValue(evidence["substitute"])) > 0
 }
 
 func nodeValidationEvidenceTargetRefs(node runtimemodel.BlockExecutionNode) []string {

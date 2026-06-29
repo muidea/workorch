@@ -161,6 +161,9 @@ func coverageEvidenceAcceptanceOptionsFromValidationStep(validation *runModel.Va
 	}
 	stepOptions := coverageEvidenceAcceptanceOptionsFromStep(step)
 	quality := qualityFromValidationResult(validation)
+	if step != nil && validationEvidenceCanSatisfyDoD(quality) && !validationEvidenceCanSatisfyDoD(stepOptions.Quality) {
+		quality = stepOptions.Quality
+	}
 	targetRefs := append([]string{}, stepOptions.TargetRefs...)
 	if targetRef := strings.TrimSpace(validation.TargetRef); targetRef != "" {
 		targetRefs = append(targetRefs, targetRef)

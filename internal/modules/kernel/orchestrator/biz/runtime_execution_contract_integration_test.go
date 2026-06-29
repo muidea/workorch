@@ -2243,6 +2243,52 @@ func TestValidateLLMExecutionOutputContractAllowsConcreteValidationGraphWithEvid
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteString(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-substitute-string",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-substitute-string/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "printf ok"},
+					"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+						"substitute": "bounded substitute observation",
+					}),
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want string substitute allowed", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithoutTargetRefs(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-missing-target-refs",
