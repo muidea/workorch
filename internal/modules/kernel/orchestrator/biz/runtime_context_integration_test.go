@@ -846,6 +846,81 @@ func TestRuntimeOrchestrator_ExecutionContextPackageIncludesManifestForReplanSta
 	}
 }
 
+func TestRuntimeOrchestrator_EnrichLLMStepInputRealignsStateChangeWithoutTargetSnapshot(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	workspaceID := common.WorkspaceID("ws-context-package-target-snapshot-authority")
+	workingDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workingDir, "resource.txt"), []byte("current"), 0o644); err != nil {
+		t.Fatalf("seed workspace file: %v", err)
+	}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: workingDir, State: common.WorkspaceStateRunning}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo}
+	runID := common.RunID("run-context-package-target-snapshot-authority")
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/step-1"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:                          runtimeStageRepair,
+			stepInputKeyRuntimeStageMode:                      "strict_convergence",
+			"repairObjective":                                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":                     true,
+			"emptyWorkspaceEvidenceEscalatedToImplementation": true,
+			gapBaselineKey: map[string]any{
+				"nextAction": map[string]any{"kind": "state_change"},
+			},
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": "state_change"},
+			},
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": map[string]any{
+					"id":                    "cwi-primary",
+					"source":                "deliverable",
+					"sourceScope":           "deliverable",
+					"sourceRequirementId":   "source_change",
+					"targetText":            "source_change",
+					"status":                "open",
+					"requiredEvidenceKinds": []string{"state_change", "validation"},
+					"missingEvidenceKinds":  []string{"state_change", "validation"},
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"coverageTargetSet": []map[string]any{{"id": "cwi-primary"}},
+				"requiredOutput":    stateChangingRepairRequiredOutput(),
+			},
+		},
+	}
+
+	orch.enrichLLMStepInputContext(ctx, run, step, workspace)
+
+	contract := mapFromValue(step.Input[currentActionContractKey])
+	nextAction := mapFromValue(contract["nextAction"])
+	if stringFromMap(nextAction, "kind") != runtimemodel.NextActionTypeAcquireTargetSnapshot {
+		t.Fatalf("currentActionContract = %+v, want acquire_target_snapshot after manifest appears", contract)
+	}
+	if step.Input["repairObjective"] != repairObjectiveAcquireFailureEvidence ||
+		boolValue(step.Input["stateChangingOutputRequired"]) {
+		t.Fatalf("step input = %+v, want evidence acquisition objective without direct state-change requirement", step.Input)
+	}
+	required := mapFromValue(mapFromValue(step.Input["repairActionPackage"])["requiredOutput"])
+	if required["mustAcquireCurrentTargetSnapshot"] != true ||
+		required["mustUseReadOnlySnapshotAcquisition"] != true ||
+		required["mustIncludeStateChangingNode"] == true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "file/read") ||
+		stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "file/read") {
+		t.Fatalf("requiredOutput = %+v, want read-only target snapshot acquisition contract", required)
+	}
+	stageRequired := mapFromValue(mapFromValue(step.Input[stepInputKeyStagePacket])["requiredOutput"])
+	if stageRequired["mustAcquireCurrentTargetSnapshot"] != true || stageRequired["mustIncludeStateChangingNode"] == true {
+		t.Fatalf("stagePacket.requiredOutput = %+v, want target snapshot acquisition", stageRequired)
+	}
+}
+
 func TestRuntimeOrchestrator_ResultManifestReusesProvidedWorkspace(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := newCountingWorkspaceRepository()

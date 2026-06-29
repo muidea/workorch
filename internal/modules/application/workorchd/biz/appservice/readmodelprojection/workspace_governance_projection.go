@@ -32,12 +32,24 @@ func NormalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnap
 			openDecisionID = candidate
 		}
 	}
+	if openDecisionID == "" && common.WorkspaceState(snapshot.Workspace.State) == common.WorkspaceStateWaitingDecision {
+		if candidate := firstNonEmptyProjectionString(snapshot.Workspace.BlockingTicketID, runBlockingTicketID(snapshot.Run)); candidate != "" &&
+			!hasNonOpenDecisionBlocker(snapshot.Decisions, snapshot.Workspace.ID, activeRunID, candidate) {
+			openDecisionID = candidate
+		}
+	}
 	openApprovalID := openApprovalBlockerID(snapshot.Approvals, snapshot.Workspace.ID, activeRunID, snapshot.Workspace.BlockingApprovalID)
 	if openApprovalID == "" && snapshot.Run != nil {
 		openApprovalID = openApprovalBlockerID(snapshot.Approvals, snapshot.Workspace.ID, activeRunID, snapshot.Run.BlockingApprovalID)
 	}
 	if openApprovalID == "" && snapshot.Run != nil && strings.TrimSpace(snapshot.Run.State) == string(common.RunStateBlockedOnApproval) {
 		if candidate := firstNonEmptyProjectionString(snapshot.Run.BlockingApprovalID, snapshot.Workspace.BlockingApprovalID); candidate != "" &&
+			!hasNonPendingApprovalBlocker(snapshot.Approvals, snapshot.Workspace.ID, activeRunID, candidate) {
+			openApprovalID = candidate
+		}
+	}
+	if openApprovalID == "" && common.WorkspaceState(snapshot.Workspace.State) == common.WorkspaceStateBlocked {
+		if candidate := firstNonEmptyProjectionString(snapshot.Workspace.BlockingApprovalID, runBlockingApprovalID(snapshot.Run)); candidate != "" &&
 			!hasNonPendingApprovalBlocker(snapshot.Approvals, snapshot.Workspace.ID, activeRunID, candidate) {
 			openApprovalID = candidate
 		}

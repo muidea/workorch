@@ -730,9 +730,7 @@ func populateTargetSnapshotAcquisitionConvergenceContract(input map[string]any, 
 	}
 	required := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
 	required["evidenceAcquisitionSubtype"] = "target_snapshot"
-	required["mustAcquireCurrentTargetSnapshot"] = true
-	required["mustUseReadOnlySnapshotAcquisition"] = true
-	required["mustNotMutateWorkspace"] = true
+	applyTargetSnapshotAcquisitionRequiredOutputContract(required)
 	required["forbiddenKinds"] = appendUniqueStrings(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply", "file/write", "shell/write")
 	if len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
 		required["mustTargetRepairTargetSet"] = true
@@ -770,16 +768,25 @@ func stateChangeRequiresTargetSnapshotAcquisition(input map[string]any, pkg map[
 	if len(input) == 0 && len(pkg) == 0 {
 		return false
 	}
+	if stateChangeHasCurrentTargetSnapshot(input, pkg) {
+		return false
+	}
 	required := mapFromValue(pkg["requiredOutput"])
 	inputRequired := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
 	requiresSnapshot := boolValue(input["requiresCurrentTargetSnapshotForStateChange"]) ||
 		boolValue(pkg["requiresCurrentTargetSnapshotForStateChange"]) ||
 		boolValue(required["mustUseCurrentTargetSnapshot"]) ||
 		boolValue(inputRequired["mustUseCurrentTargetSnapshot"])
-	if !requiresSnapshot {
+	if requiresSnapshot {
+		return true
+	}
+	if !inputHasNonEmptyWorkspaceManifest(input) {
 		return false
 	}
-	return !stateChangeHasCurrentTargetSnapshot(input, pkg)
+	if stateChangingRepairHasActionableImplementationSurface(input, pkg) {
+		return false
+	}
+	return true
 }
 
 func stateChangeHasCurrentTargetSnapshot(input map[string]any, pkg map[string]any) bool {
@@ -1756,6 +1763,11 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 			pkg = map[string]any{}
 		}
 		required := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
+		if contract.RuntimeStageMode == "target_snapshot_acquisition" {
+			required["evidenceAcquisitionSubtype"] = "target_snapshot"
+			applyTargetSnapshotAcquisitionRequiredOutputContract(required)
+			required["forbiddenKinds"] = appendUniqueStrings(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply", "file/write", "shell/write")
+		}
 		pkg["requiredOutput"] = required
 		pkg["evidenceAcquisitionRequired"] = true
 		sanitizeRepairActionPackageTargetEvidence(pkg)

@@ -2760,6 +2760,47 @@ func TestWorkspaceGetEndpointOverlaysProjectedViewModel(t *testing.T) {
 	}
 }
 
+func TestWorkspaceGetEndpointDerivesPromptFromOwnerStateWhenProjectionIsStale(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-get-prompt-owner-state")
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	handler := newMuxWithState(state)
+	state.readWorkspace = func(context.Context, string, string, string) (appservice.Workspace, error) {
+		return appservice.Workspace{
+			ID:               string(workspaceID),
+			State:            string(common.WorkspaceStateWaitingDecision),
+			ActiveRunID:      "run-get-prompt-owner-state",
+			BlockingTicketID: "ticket-get-prompt-owner-state",
+		}, nil
+	}
+	state.workspaceProjection.UpsertSnapshot(appservice.WorkspaceSnapshot{
+		Workspace: appservice.Workspace{
+			ID:          string(workspaceID),
+			State:       string(common.WorkspaceStateActive),
+			ActiveRunID: "run-get-prompt-owner-state",
+		},
+		ViewModel: readmodelcore.WorkspaceViewModel{
+			WorkspaceID: string(workspaceID),
+			PromptMode:  "workspace",
+		},
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+string(workspaceID), nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("workspace get status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var body workspaceResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal workspace get: %v", err)
+	}
+	if body.Workspace.State != string(common.WorkspaceStateWaitingDecision) ||
+		body.Workspace.BlockingTicketID != "ticket-get-prompt-owner-state" ||
+		body.Workspace.ViewModel.PromptMode != "decision" {
+		t.Fatalf("workspace = %+v, want decision prompt derived from owner state", body.Workspace)
+	}
+}
+
 func TestWorkspaceDeleteEndpointDeletesWorkspaceAndSupportsPurge(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})

@@ -326,6 +326,10 @@ func TestNextActionForRunMissingStateChangeAcquiresTargetSnapshotFirst(t *testin
 	if action.RequiredOutput["mustAcquireCurrentTargetSnapshot"] != true || action.RequiredOutput["mustUseReadOnlySnapshotAcquisition"] != true {
 		t.Fatalf("required output = %+v, want read-only target snapshot acquisition", action.RequiredOutput)
 	}
+	if stringSliceContains(stringSliceFromValue(action.RequiredOutput["forbiddenKinds"]), "read_only_graph") ||
+		stringSliceContains(stringSliceFromValue(action.RequiredOutput["forbiddenKinds"]), "same_graph_file_read_before_patch") {
+		t.Fatalf("required output = %+v, want read-only acquisition not forbidden", action.RequiredOutput)
+	}
 	if !stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeStateChange) {
 		t.Fatalf("forbidden actions = %+v, want state_change forbidden before snapshot", action.ForbiddenActions)
 	}

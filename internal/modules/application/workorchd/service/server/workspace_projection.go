@@ -132,6 +132,7 @@ func mergeWorkspaceProjectionOverlay(detail appservice.WorkspaceSnapshot, projec
 
 func mergeWorkspaceProjectionViewModel(detail appservice.WorkspaceSnapshot, projected readmodelcore.WorkspaceViewModel) appservice.WorkspaceSnapshot {
 	normalized := readmodelprojection.NormalizeWorkspaceGovernanceProjection(detail)
+	detail = normalized
 	viewModel := projected
 	if strings.TrimSpace(viewModel.WorkspaceID) == "" {
 		viewModel = detail.ViewModel

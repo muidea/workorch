@@ -54,8 +54,14 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		if projected, _, readErr := state.readProjectedWorkspaceSnapshot(workspaceID); readErr == nil {
-			if projected.ViewModel.WorkspaceID != "" {
-				item.ViewModel = workspaceMetadataViewModelFromProjection(projected.ViewModel)
+			detail := mergeWorkspaceProjectionViewModel(appservice.WorkspaceSnapshot{
+				Workspace: item,
+				Run:       projected.Run,
+				Decisions: projected.Decisions,
+				Approvals: projected.Approvals,
+			}, projected.ViewModel)
+			if detail.ViewModel.WorkspaceID != "" {
+				item.ViewModel = workspaceMetadataViewModelFromProjection(detail.ViewModel)
 			}
 		}
 		writeJSON(w, http.StatusOK, workspaceResponse{

@@ -1237,9 +1237,7 @@ func deriveAcquireTargetSnapshotNextAction(run *runmodel.Run, stateChangeAction 
 	if required == nil {
 		required = map[string]any{}
 	}
-	required["mustAcquireCurrentTargetSnapshot"] = true
-	required["mustUseReadOnlySnapshotAcquisition"] = true
-	required["mustNotMutateWorkspace"] = true
+	applyTargetSnapshotAcquisitionRequiredOutputContract(required)
 	if targetSet := repairActionTargetSet(input, pkg); len(targetSet) > 0 {
 		required["repairTargetSet"] = targetSet
 		required["mustTargetRepairTargetSet"] = true

@@ -55,7 +55,21 @@ func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run
 		step.Input[stepInputKeyCurrentProgressDigest] = digest
 	}
 	promoteRepairActionPackageContext(step.Input)
+	realignLLMStepInputTargetSnapshotAuthority(run, step)
 	_ = o.recordLLMStepInputMemoryRecallTrace(ctx, run, step, pkg)
+}
+
+func realignLLMStepInputTargetSnapshotAuthority(run *runModel.Run, step *runModel.Step) {
+	if run == nil || step == nil || len(step.Input) == 0 {
+		return
+	}
+	contract := BuildConvergenceContract(run, step, nil, map[string]any{"input": step.Input}, nil)
+	if contract.State != convergenceStateNeedEvidence || contract.RuntimeStageMode != "target_snapshot_acquisition" {
+		return
+	}
+	step.Input = ApplyConvergenceContract(step.Input, contract)
+	step.Input = attachStagePacketToStepInput(run, step.ID, step.Input)
+	step.Input = attachCurrentActionContractToInput(run, step.ID, step.Input)
 }
 
 type executionContextPackageDeps struct {

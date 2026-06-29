@@ -619,6 +619,24 @@ func applyCurrentSnapshotDirectPatchContract(requiredOutput map[string]any) {
 	))
 }
 
+func applyTargetSnapshotAcquisitionRequiredOutputContract(requiredOutput map[string]any) {
+	if len(requiredOutput) == 0 {
+		return
+	}
+	requiredOutput["mustAcquireCurrentTargetSnapshot"] = true
+	requiredOutput["mustUseReadOnlySnapshotAcquisition"] = true
+	requiredOutput["mustNotMutateWorkspace"] = true
+	requiredOutput["mustIncludeStateChangingNode"] = false
+	requiredOutput["stateChangingForbidden"] = true
+	requiredOutput["acceptedKinds"] = evidenceAcquisitionAcceptedKinds()
+	requiredOutput["acceptedKindsOnly"] = true
+	requiredOutput["forbiddenKinds"] = removeStringsFromSlice(
+		stringSliceFromValue(requiredOutput["forbiddenKinds"]),
+		"read_only_graph",
+		"same_graph_file_read_before_patch",
+	)
+}
+
 func stateChangingRepairAcceptedKinds() []string {
 	return []string{"patch/apply", "shell/command", "mcp/tool_call"}
 }
