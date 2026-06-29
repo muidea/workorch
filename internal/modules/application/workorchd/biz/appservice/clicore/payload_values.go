@@ -1,14 +1,5 @@
 package clicore
 
-import "encoding/json"
-
-func DecodeOrZero[T any](payload map[string]any) *T {
-	data, _ := json.Marshal(payload)
-	var out T
-	_ = json.Unmarshal(data, &out)
-	return &out
-}
-
 func StringValue(payload map[string]any, key string) string {
 	if payload == nil {
 		return ""

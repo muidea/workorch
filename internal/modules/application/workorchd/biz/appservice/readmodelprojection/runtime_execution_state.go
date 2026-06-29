@@ -1,11 +1,11 @@
 package readmodelprojection
 
 import (
-	"encoding/json"
 	"sort"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -188,16 +188,45 @@ func runtimeExecutionContractViolationFromValue(value any) *runtimemodel.Contrac
 		}
 		ret := *typed
 		return &ret
+	case map[string]any:
+		ret := runtimemodel.ContractViolation{
+			ID:                   readModelStringValue(valueByKey(typed, "id", "ID")),
+			WorkspaceID:          common.WorkspaceID(readModelStringValue(valueByKey(typed, "workspaceId", "WorkspaceID"))),
+			RunID:                common.RunID(readModelStringValue(valueByKey(typed, "runId", "RunID"))),
+			StepID:               common.StepID(readModelStringValue(valueByKey(typed, "stepId", "StepID"))),
+			SourceStepID:         common.StepID(readModelStringValue(valueByKey(typed, "sourceStepId", "SourceStepID"))),
+			ViolationType:        readModelStringValue(valueByKey(typed, "violationType", "ViolationType")),
+			Stage:                readModelStringValue(valueByKey(typed, "stage", "Stage")),
+			RuntimeStage:         readModelStringValue(valueByKey(typed, "runtimeStage", "RuntimeStage")),
+			RuntimeStageMode:     readModelStringValue(valueByKey(typed, "runtimeStageMode", "RuntimeStageMode")),
+			RepairObjective:      readModelStringValue(valueByKey(typed, "repairObjective", "RepairObjective")),
+			ViolatedRule:         readModelStringValue(valueByKey(typed, "violatedRule", "ViolatedRule")),
+			Signature:            readModelStringValue(valueByKey(typed, "signature", "Signature")),
+			ExpectedContract:     readModelMapValue(valueByKey(typed, "expectedContract", "ExpectedContract")),
+			ActualOutputSummary:  readModelMapValue(valueByKey(typed, "actualOutputSummary", "ActualOutputSummary")),
+			RejectedOutputRef:    readModelStringValue(valueByKey(typed, "rejectedOutputRef", "RejectedOutputRef")),
+			FailureClass:         readModelStringValue(valueByKey(typed, "failureClass", "FailureClass")),
+			FailureSignature:     readModelStringValue(valueByKey(typed, "failureSignature", "FailureSignature")),
+			Recoverability:       readModelStringValue(valueByKey(typed, "recoverability", "Recoverability")),
+			RetryHint:            readModelStringValue(valueByKey(typed, "retryHint", "RetryHint")),
+			ForbiddenRepeat:      readModelStringSliceValue(valueByKey(typed, "forbiddenRepeat", "ForbiddenRepeat")),
+			CorrectionProfileID:  readModelStringValue(valueByKey(typed, "correctionProfileId", "CorrectionProfileID")),
+			CorrectionMode:       readModelStringValue(valueByKey(typed, "correctionMode", "CorrectionMode")),
+			CorrectionContract:   readModelMapValue(valueByKey(typed, "correctionContract", "CorrectionContract")),
+			TargetScope:          readModelStringValue(valueByKey(typed, "targetScope", "TargetScope")),
+			BudgetScope:          readModelMapValue(valueByKey(typed, "budgetScope", "BudgetScope")),
+			SourceRefs:           readModelStringSliceValue(valueByKey(typed, "sourceRefs", "SourceRefs")),
+			Attempt:              readModelIntValue(valueByKey(typed, "attempt", "Attempt")),
+			MaxAttempts:          readModelIntValue(valueByKey(typed, "maxAttempts", "MaxAttempts")),
+			SignatureRepeatCount: readModelIntValue(valueByKey(typed, "signatureRepeatCount", "SignatureRepeatCount")),
+			CreatedAt:            readModelStringValue(valueByKey(typed, "createdAt", "CreatedAt")),
+		}.Normalized()
+		if runtimeExecutionContractViolationEmpty(ret) {
+			return nil
+		}
+		return &ret
 	}
-	data, err := json.Marshal(value)
-	if err != nil || len(data) == 0 || string(data) == "null" {
-		return nil
-	}
-	var ret runtimemodel.ContractViolation
-	if err := json.Unmarshal(data, &ret); err != nil || runtimeExecutionContractViolationEmpty(ret) {
-		return nil
-	}
-	return &ret
+	return nil
 }
 
 func runtimeExecutionContractViolationEmpty(item runtimemodel.ContractViolation) bool {

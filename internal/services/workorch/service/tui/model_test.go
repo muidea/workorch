@@ -4881,6 +4881,52 @@ func TestModelWorkspaceListRefreshCoalescesWhileInFlight(t *testing.T) {
 	}
 }
 
+func TestModelWorkspaceListRefreshDoesNotQueueContextWhileContextInFlight(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	entry := m.ensureWorkspaceRuntimeState("ws-a")
+	entry.HasDisplay = true
+	entry.DisplayRevision = 4
+	entry.ContextInFlight = true
+	entry.ContextRequestSeq = 7
+
+	next, cmd := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:         "ws-a",
+		Title:      "A",
+		State:      common.WorkspaceStateRunning,
+		Projection: backend.ProjectionInfo{WorkspaceRevision: 5},
+	}}})
+	m = asModel(next)
+	entry = m.ensureWorkspaceRuntimeState("ws-a")
+	if cmd != nil {
+		t.Fatalf("workspace list refresh returned cmd while context is already in flight")
+	}
+	if entry.ContextPending || entry.ContextRequestSeq != 7 {
+		t.Fatalf("context refresh queued while in flight: pending=%v seq=%d", entry.ContextPending, entry.ContextRequestSeq)
+	}
+}
+
+func TestModelWorkspaceListRefreshRequestsContextWhenOverviewOutrunsDisplay(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	entry := m.ensureWorkspaceRuntimeState("ws-a")
+	entry.HasDisplay = true
+	entry.DisplayRevision = 3
+	entry.ContextRequestSeq = 2
+
+	next, cmd := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:         "ws-a",
+		Title:      "A",
+		State:      common.WorkspaceStateRunning,
+		Projection: backend.ProjectionInfo{WorkspaceRevision: 5},
+	}}})
+	m = asModel(next)
+	entry = m.ensureWorkspaceRuntimeState("ws-a")
+	if cmd == nil || !entry.ContextInFlight || entry.ContextRequestSeq != 3 {
+		t.Fatalf("stale display did not request context refresh: cmd=%v inFlight=%v seq=%d", cmd != nil, entry.ContextInFlight, entry.ContextRequestSeq)
+	}
+}
+
 func TestModelWorkspaceContextRefreshCoalescesWhileInFlight(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{

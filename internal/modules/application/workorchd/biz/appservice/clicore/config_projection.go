@@ -1,6 +1,9 @@
 package clicore
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
+)
 
 func ServiceConfigResourceMap(cfg configcore.ServiceConfiguration) map[string]any {
 	providers := make([]map[string]any, 0, len(cfg.LLM.Providers))
@@ -15,7 +18,7 @@ func ServiceConfigResourceMap(cfg configcore.ServiceConfiguration) map[string]an
 			"Streaming": item.Streaming,
 		})
 	}
-	return map[string]any{
+	return typedResourceMap(map[string]any{
 		"ServerAddr":        cfg.Server.Addr,
 		"Backend":           cfg.Repository.Backend,
 		"DataDir":           cfg.Repository.DataDir,
@@ -33,5 +36,5 @@ func ServiceConfigResourceMap(cfg configcore.ServiceConfiguration) map[string]an
 			"MaxArtifactPlanAttempts":            cfg.Runtime.LLMOutput.MaxArtifactPlanAttempts,
 			"MaxArtifactReplanAttempts":          cfg.Runtime.LLMOutput.MaxArtifactReplanAttempts,
 		},
-	}
+	}, readmodelports.PortServiceConfig(cfg))
 }

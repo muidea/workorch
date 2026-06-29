@@ -10,7 +10,7 @@ import (
 func (d *CLICommandDispatcher) handleContextRegistryCommand(ctx context.Context, cmd events.CLICommandPayload) (map[string]any, []map[string]any, error) {
 	switch cmd.Command {
 	case events.CommandSoulCreate:
-		item, err := CreateSoulWithSession(ctx, d.borrow(), *clicore.DecodeOrZero[CreateSoulCommand](cmd.Payload))
+		item, err := CreateSoulWithSession(ctx, d.borrow(), clicore.SoulCommandFromPayload(cmd.Payload))
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandSoulGet:
 		item, err := ReadSoulWithSession(ctx, d.borrow(), cmd.SubjectID)
@@ -19,13 +19,13 @@ func (d *CLICommandDispatcher) handleContextRegistryCommand(ctx context.Context,
 		items, err := ListSoulsWithSession(ctx, d.borrow())
 		return nil, clicore.ResourceMaps(items), err
 	case events.CommandSoulUpdate:
-		item, err := UpdateSoulWithSession(ctx, d.borrow(), cmd.SubjectID, *clicore.DecodeOrZero[UpdateSoulCommand](cmd.Payload))
+		item, err := UpdateSoulWithSession(ctx, d.borrow(), cmd.SubjectID, clicore.SoulCommandFromPayload(cmd.Payload))
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandSoulDelete:
 		err := DeleteSoulWithSession(ctx, d.borrow(), cmd.SubjectID)
 		return nil, nil, err
 	case events.CommandSkillCreate:
-		item, err := CreateSkillWithSession(ctx, d.borrow(), *clicore.DecodeOrZero[CreateSkillCommand](cmd.Payload))
+		item, err := CreateSkillWithSession(ctx, d.borrow(), clicore.SkillCommandFromPayload(cmd.Payload))
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandSkillGet:
 		item, err := ReadSkillWithSession(ctx, d.borrow(), cmd.SubjectID, SkillQuery{WorkspaceID: string(cmd.WorkspaceID)})
@@ -34,7 +34,7 @@ func (d *CLICommandDispatcher) handleContextRegistryCommand(ctx context.Context,
 		items, err := ListSkillsWithSession(ctx, d.borrow(), SkillQuery{WorkspaceID: string(cmd.WorkspaceID)})
 		return nil, clicore.ResourceMaps(items), err
 	case events.CommandMCPServerCreate:
-		item, err := CreateMCPServerWithSession(ctx, d.borrow(), *clicore.DecodeOrZero[CreateMCPServerCommand](cmd.Payload))
+		item, err := CreateMCPServerWithSession(ctx, d.borrow(), clicore.MCPServerCommandFromPayload(cmd.Payload))
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandMCPServerGet:
 		item, err := ReadMCPServerWithSession(ctx, d.borrow(), cmd.SubjectID)
@@ -43,7 +43,7 @@ func (d *CLICommandDispatcher) handleContextRegistryCommand(ctx context.Context,
 		items, err := ListMCPServersWithSession(ctx, d.borrow())
 		return nil, clicore.ResourceMaps(items), err
 	case events.CommandMCPServerUpdate:
-		item, err := UpdateMCPServerWithSession(ctx, d.borrow(), cmd.SubjectID, *clicore.DecodeOrZero[UpdateMCPServerCommand](cmd.Payload))
+		item, err := UpdateMCPServerWithSession(ctx, d.borrow(), cmd.SubjectID, clicore.MCPServerCommandFromPayload(cmd.Payload))
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandMCPCapabilityList:
 		items, err := ListMCPCapabilitiesWithSession(ctx, d.borrow(), MCPCapabilityQuery{})

@@ -10,7 +10,7 @@ import (
 func (d *CLICommandDispatcher) handleTemplateCommand(ctx context.Context, cmd events.CLICommandPayload) (map[string]any, []map[string]any, error) {
 	switch cmd.Command {
 	case events.CommandTemplateCreate:
-		item, err := CreateWorkspaceTemplateWithSession(ctx, d.borrow(), *clicore.DecodeOrZero[WorkspaceTemplate](cmd.Payload))
+		item, err := CreateWorkspaceTemplateWithSession(ctx, d.borrow(), clicore.WorkspaceTemplateFromPayload(cmd.Payload))
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandTemplateGet:
 		item, err := ReadWorkspaceTemplateWithSession(ctx, d.borrow(), cmd.SubjectID)
@@ -19,7 +19,7 @@ func (d *CLICommandDispatcher) handleTemplateCommand(ctx context.Context, cmd ev
 		items, err := ListWorkspaceTemplatesWithSession(ctx, d.borrow())
 		return nil, clicore.ResourceMaps(items), err
 	case events.CommandTemplateUpdate:
-		item, err := UpdateWorkspaceTemplateWithSession(ctx, d.borrow(), cmd.SubjectID, *clicore.DecodeOrZero[WorkspaceTemplate](cmd.Payload))
+		item, err := UpdateWorkspaceTemplateWithSession(ctx, d.borrow(), cmd.SubjectID, clicore.WorkspaceTemplateFromPayload(cmd.Payload))
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandTemplateDelete:
 		err := DeleteWorkspaceTemplateWithSession(ctx, d.borrow(), cmd.SubjectID)

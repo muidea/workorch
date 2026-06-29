@@ -1,7 +1,6 @@
 package readmodelprojection
 
 import (
-	"encoding/json"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
@@ -499,6 +498,14 @@ func compactTraceValue(value any, depth int) any {
 			ret = append(ret, trimTraceString(item))
 		}
 		return ret
+	case []readmodelcore.Result:
+		return compactResultTraceValues(typed, depth+1)
+	case []readmodelcore.TaskPlan:
+		return compactTaskPlanTraceValues(typed, depth+1)
+	case []readmodelcore.Decision:
+		return compactDecisionTraceValues(typed, depth+1)
+	case []readmodelcore.MemoryRecallTrace:
+		return compactMemoryRecallTraceValues(typed, depth+1)
 	case []any:
 		limit := min(len(typed), workspaceSnapshotTraceSliceLimit)
 		ret := make([]any, 0, limit)
@@ -516,15 +523,107 @@ func compactTraceValue(value any, depth int) any {
 }
 
 func compactJSONCompatibleTraceValue(value any) any {
-	raw, err := json.Marshal(value)
-	if err != nil || len(raw) == 0 || string(raw) == "null" {
-		return nil
+	if projected, ok := projectReadModelScalarMapValue(value); ok {
+		return compactTraceValue(projected, 0)
 	}
-	var decoded any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return trimTraceString(string(raw))
+	return nil
+}
+
+func compactResultTraceValues(items []readmodelcore.Result, depth int) []any {
+	limit := min(len(items), workspaceSnapshotTraceSliceLimit)
+	ret := make([]any, 0, limit)
+	for _, item := range items[:limit] {
+		if value := compactTraceValueMap(map[string]any{
+			"id":           item.ID,
+			"workspaceId":  item.WorkspaceID,
+			"runId":        item.RunID,
+			"state":        item.State,
+			"title":        item.Title,
+			"summary":      item.Summary,
+			"sourceType":   item.SourceType,
+			"sourceRef":    item.SourceRef,
+			"evidenceRefs": item.EvidenceRefs,
+			"artifactRefs": item.ArtifactRefs,
+		}, depth); value != nil {
+			ret = append(ret, value)
+		}
 	}
-	return compactTraceValue(decoded, 0)
+	return ret
+}
+
+func compactTaskPlanTraceValues(items []readmodelcore.TaskPlan, depth int) []any {
+	limit := min(len(items), workspaceSnapshotTraceSliceLimit)
+	ret := make([]any, 0, limit)
+	for _, item := range items[:limit] {
+		if value := compactTraceValueMap(map[string]any{
+			"id":               item.ID,
+			"workspaceId":      item.WorkspaceID,
+			"runId":            item.RunID,
+			"state":            item.State,
+			"stage":            item.Stage,
+			"summary":          item.Summary,
+			"nodeTotal":        item.NodeTotal,
+			"nodeCompleted":    item.NodeCompleted,
+			"nodeFailed":       item.NodeFailed,
+			"nodeRunning":      item.NodeRunning,
+			"retryOf":          item.RetryOf,
+			"retryAttempt":     item.RetryAttempt,
+			"violatedRule":     item.ViolatedRule,
+			"failureClass":     item.FailureClass,
+			"failureSignature": item.FailureSignature,
+			"evidenceRefs":     item.EvidenceRefs,
+		}, depth); value != nil {
+			ret = append(ret, value)
+		}
+	}
+	return ret
+}
+
+func compactDecisionTraceValues(items []readmodelcore.Decision, depth int) []any {
+	limit := min(len(items), workspaceSnapshotTraceSliceLimit)
+	ret := make([]any, 0, limit)
+	for _, item := range items[:limit] {
+		if value := compactTraceValueMap(map[string]any{
+			"id":                 item.ID,
+			"workspaceId":        item.WorkspaceID,
+			"runId":              item.RunID,
+			"reason":             item.Reason,
+			"question":           item.Question,
+			"state":              item.State,
+			"resolutionType":     item.ResolutionType,
+			"continuationAction": item.ContinuationAction,
+			"resumeRunId":        item.ResumeRunID,
+			"successorRunId":     item.SuccessorRunID,
+		}, depth); value != nil {
+			ret = append(ret, value)
+		}
+	}
+	return ret
+}
+
+func compactMemoryRecallTraceValues(items []readmodelcore.MemoryRecallTrace, depth int) []any {
+	limit := min(len(items), workspaceSnapshotTraceSliceLimit)
+	ret := make([]any, 0, limit)
+	for _, item := range items[:limit] {
+		if value := compactTraceValueMap(map[string]any{
+			"id":                 item.ID,
+			"workspaceId":        item.WorkspaceID,
+			"runId":              item.RunID,
+			"stepId":             item.StepID,
+			"stage":              item.Stage,
+			"source":             item.Source,
+			"status":             item.Status,
+			"queryTextPreview":   item.QueryTextPreview,
+			"candidateMemoryIds": item.CandidateMemoryIDs,
+			"retrievedMemoryIds": item.RetrievedMemoryIDs,
+			"reason":             item.Reason,
+			"occurredAt":         item.OccurredAt,
+			"evidenceRef":        item.EvidenceRef,
+		}, depth); value != nil {
+			ret = append(ret, value)
+		}
+	}
+	return ret
 }
 
 func trimTraceString(value string) string {

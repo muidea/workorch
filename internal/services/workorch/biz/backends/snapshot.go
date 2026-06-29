@@ -1,18 +1,20 @@
 package backend
 
-import "encoding/json"
+import (
+	"fmt"
 
-func decodeSnapshotInfo(v any) (*WorkspaceSnapshotInfo, error) {
-	if v == nil {
+	"github.com/muidea/workorch/internal/pkg/common"
+)
+
+func assertTypedSnapshotInfo(v any) (*WorkspaceSnapshotInfo, error) {
+	switch typed := v.(type) {
+	case nil:
 		return nil, nil
+	case WorkspaceSnapshotInfo:
+		return &typed, nil
+	case *WorkspaceSnapshotInfo:
+		return typed, nil
+	default:
+		return nil, fmt.Errorf("%w: workspace snapshot requires typed DTO, got %T", common.ErrInvalidArgument, v)
 	}
-	data, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	var out WorkspaceSnapshotInfo
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
 }

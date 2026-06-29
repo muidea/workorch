@@ -269,7 +269,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.syncActiveWorkspaceOverview(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		if m.activeWorkspaceID != "" && (previousActive != m.activeWorkspaceID || m.activeRunID != "" || len(msg.Workspaces) > 0) {
+		if m.activeWorkspaceNeedsContextRefresh(previousActive) {
 			cmds = append(cmds, m.requestWorkspaceContextRefresh(false))
 		}
 		if pendingRefresh {

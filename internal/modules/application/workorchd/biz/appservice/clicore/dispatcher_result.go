@@ -22,7 +22,33 @@ func (d *Dispatcher) dispatchCommand(ctx context.Context, cmd events.CLICommandP
 		return result
 	}
 	result.OK = true
-	result.Resource = resource
-	result.Resources = resources
+	result.Resource, result.TypedResource = splitTypedResource(resource)
+	result.Resources, result.TypedResources = splitTypedResources(resources)
 	return result
+}
+
+func splitTypedResource(resource map[string]any) (map[string]any, any) {
+	if resource == nil {
+		return nil, nil
+	}
+	typed := resource[events.CLIResultTypedResourceKey]
+	delete(resource, events.CLIResultTypedResourceKey)
+	return resource, typed
+}
+
+func splitTypedResources(resources []map[string]any) ([]map[string]any, []any) {
+	if len(resources) == 0 {
+		return resources, nil
+	}
+	typed := make([]any, 0, len(resources))
+	for _, resource := range resources {
+		_, item := splitTypedResource(resource)
+		if item != nil {
+			typed = append(typed, item)
+		}
+	}
+	if len(typed) == 0 {
+		return resources, nil
+	}
+	return resources, typed
 }

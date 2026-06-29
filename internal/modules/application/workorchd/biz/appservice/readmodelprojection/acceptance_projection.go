@@ -1,7 +1,6 @@
 package readmodelprojection
 
 import (
-	"encoding/json"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
@@ -95,41 +94,128 @@ func summarizeAcceptanceSlices(items []readmodelcore.AcceptanceSlice) readmodelc
 }
 
 func decodeAcceptanceSlices(value any) []readmodelcore.AcceptanceSlice {
-	var ret []readmodelcore.AcceptanceSlice
-	if decodeProjectionValue(value, &ret) != nil || len(ret) == 0 {
+	switch typed := value.(type) {
+	case []readmodelcore.AcceptanceSlice:
+		return append([]readmodelcore.AcceptanceSlice(nil), typed...)
+	case []any:
+		ret := make([]readmodelcore.AcceptanceSlice, 0, len(typed))
+		for _, item := range typed {
+			if mapped := decodeAcceptanceSlice(item); !isEmptyAcceptanceSlice(mapped) {
+				ret = append(ret, mapped)
+			}
+		}
+		return ret
+	case []map[string]any:
+		ret := make([]readmodelcore.AcceptanceSlice, 0, len(typed))
+		for _, item := range typed {
+			if mapped := decodeAcceptanceSlice(item); !isEmptyAcceptanceSlice(mapped) {
+				ret = append(ret, mapped)
+			}
+		}
+		return ret
+	default:
 		return nil
 	}
-	return ret
 }
 
 func decodeCoverageFocusPtr(value any) *readmodelcore.CoverageFocus {
-	var ret readmodelcore.CoverageFocus
-	if decodeProjectionValue(value, &ret) != nil || isEmptyCoverageFocus(ret) {
+	ret := decodeCoverageFocus(value)
+	if isEmptyCoverageFocus(ret) {
 		return nil
 	}
 	return &ret
 }
 
 func decodeConvergenceBudgetPtr(value any) *readmodelcore.ConvergenceBudget {
-	var ret readmodelcore.ConvergenceBudget
-	if decodeProjectionValue(value, &ret) != nil || isEmptyConvergenceBudget(ret) {
+	ret := decodeConvergenceBudget(value)
+	if isEmptyConvergenceBudget(ret) {
 		return nil
 	}
 	return &ret
 }
 
-func decodeProjectionValue(value any, target any) error {
-	if value == nil {
-		return nil
+func decodeAcceptanceSlice(value any) readmodelcore.AcceptanceSlice {
+	switch typed := value.(type) {
+	case readmodelcore.AcceptanceSlice:
+		return typed
+	case map[string]any:
+		return readmodelcore.AcceptanceSlice{
+			ID:                    stringValue(typed, "id", "ID"),
+			Title:                 stringValue(typed, "title", "Title"),
+			State:                 stringValue(typed, "state", "State"),
+			Priority:              readModelIntValue(valueByKey(typed, "priority", "Priority")),
+			Scope:                 stringValue(typed, "scope", "Scope"),
+			CoverageWorkItemIDs:   readModelStringSliceValue(valueByKey(typed, "coverageWorkItemIds", "coverageWorkItemIDs", "CoverageWorkItemIDs")),
+			RequiredEvidenceKinds: readModelStringSliceValue(valueByKey(typed, "requiredEvidenceKinds", "RequiredEvidenceKinds")),
+			CompletionPolicy:      stringValue(typed, "completionPolicy", "CompletionPolicy"),
+			ResultPolicy:          stringValue(typed, "resultPolicy", "ResultPolicy"),
+			CreatedAt:             stringValue(typed, "createdAt", "CreatedAt"),
+			ActivatedAt:           stringValue(typed, "activatedAt", "ActivatedAt"),
+			ClosedAt:              stringValue(typed, "closedAt", "ClosedAt"),
+		}
+	default:
+		return readmodelcore.AcceptanceSlice{}
 	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return err
+}
+
+func decodeCoverageFocus(value any) readmodelcore.CoverageFocus {
+	switch typed := value.(type) {
+	case readmodelcore.CoverageFocus:
+		return typed
+	case map[string]any:
+		return readmodelcore.CoverageFocus{
+			ID:                    stringValue(typed, "id", "ID"),
+			SliceID:               stringValue(typed, "sliceId", "sliceID", "SliceID"),
+			CoverageWorkItemIDs:   readModelStringSliceValue(valueByKey(typed, "coverageWorkItemIds", "coverageWorkItemIDs", "CoverageWorkItemIDs")),
+			FailureClass:          stringValue(typed, "failureClass", "FailureClass"),
+			FailureSignature:      stringValue(typed, "failureSignature", "FailureSignature"),
+			RequiredEvidenceKinds: readModelStringSliceValue(valueByKey(typed, "requiredEvidenceKinds", "RequiredEvidenceKinds")),
+			AcceptedEvidenceRefs:  readModelStringSliceValue(valueByKey(typed, "acceptedEvidenceRefs", "AcceptedEvidenceRefs")),
+			RejectedEvidenceRefs:  readModelStringSliceValue(valueByKey(typed, "rejectedEvidenceRefs", "RejectedEvidenceRefs")),
+			TargetRefs:            readModelStringSliceValue(valueByKey(typed, "targetRefs", "TargetRefs")),
+			State:                 stringValue(typed, "state", "State"),
+			Attempt:               readModelIntValue(valueByKey(typed, "attempt", "Attempt")),
+		}
+	default:
+		return readmodelcore.CoverageFocus{}
 	}
-	if string(data) == "null" || string(data) == "{}" || string(data) == "[]" {
-		return nil
+}
+
+func decodeConvergenceBudget(value any) readmodelcore.ConvergenceBudget {
+	switch typed := value.(type) {
+	case readmodelcore.ConvergenceBudget:
+		return typed
+	case map[string]any:
+		return readmodelcore.ConvergenceBudget{
+			FocusID:                     stringValue(typed, "focusId", "focusID", "FocusID"),
+			SliceID:                     stringValue(typed, "sliceId", "sliceID", "SliceID"),
+			State:                       stringValue(typed, "state", "State"),
+			Decision:                    stringValue(typed, "decision", "Decision"),
+			MaxRepairAttemptsPerFocus:   readModelIntValue(valueByKey(typed, "maxRepairAttemptsPerFocus", "MaxRepairAttemptsPerFocus")),
+			MaxLLMRoundsPerSlice:        readModelIntValue(valueByKey(typed, "maxLLMRoundsPerSlice", "MaxLLMRoundsPerSlice")),
+			MaxRepeatedFailureSignature: readModelIntValue(valueByKey(typed, "maxRepeatedFailureSignature", "MaxRepeatedFailureSignature")),
+			MaxValidationOnlyRetries:    readModelIntValue(valueByKey(typed, "maxValidationOnlyRetries", "MaxValidationOnlyRetries")),
+			MaxNoCoverageDeltaRounds:    readModelIntValue(valueByKey(typed, "maxNoCoverageDeltaRounds", "MaxNoCoverageDeltaRounds")),
+			MaxContextBytesPerRepair:    readModelIntValue(valueByKey(typed, "maxContextBytesPerRepair", "MaxContextBytesPerRepair")),
+			RepairAttempts:              readModelIntValue(valueByKey(typed, "repairAttempts", "RepairAttempts")),
+			LLMRounds:                   readModelIntValue(valueByKey(typed, "llmRounds", "LLMRounds")),
+			RepeatedFailureSignatures:   readModelIntValue(valueByKey(typed, "repeatedFailureSignatures", "RepeatedFailureSignatures")),
+			ValidationOnlyRetries:       readModelIntValue(valueByKey(typed, "validationOnlyRetries", "ValidationOnlyRetries")),
+			NoCoverageDeltaRounds:       readModelIntValue(valueByKey(typed, "noCoverageDeltaRounds", "NoCoverageDeltaRounds")),
+			LastNoDeltaReason:           stringValue(typed, "lastNoDeltaReason", "LastNoDeltaReason"),
+			LastDecisionReason:          stringValue(typed, "lastDecisionReason", "LastDecisionReason"),
+		}
+	default:
+		return readmodelcore.ConvergenceBudget{}
 	}
-	return json.Unmarshal(data, target)
+}
+
+func isEmptyAcceptanceSlice(item readmodelcore.AcceptanceSlice) bool {
+	return strings.TrimSpace(item.ID) == "" &&
+		strings.TrimSpace(item.Title) == "" &&
+		strings.TrimSpace(item.State) == "" &&
+		len(item.CoverageWorkItemIDs) == 0 &&
+		len(item.RequiredEvidenceKinds) == 0
 }
 
 func isEmptyCoverageFocus(item readmodelcore.CoverageFocus) bool {
@@ -195,10 +281,6 @@ func mapValue(values map[string]any, key string) map[string]any {
 	case map[string]any:
 		return typed
 	default:
-		var ret map[string]any
-		if decodeProjectionValue(value, &ret) != nil {
-			return nil
-		}
-		return ret
+		return nil
 	}
 }

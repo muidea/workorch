@@ -54,6 +54,7 @@ type workspaceRuntimeState struct {
 	PromptModeRevision int64
 	Display            workspaceDisplayState
 	HasDisplay         bool
+	DisplayRevision    int64
 	LastRevision       int64
 	RevisionGapCount   int64
 	LastRevisionGap    int64
@@ -242,6 +243,31 @@ func (m *AppModel) workspaceContextOlderThanOverview(msg WorkspaceContextMsg) bo
 	}
 	contextRevision := workspaceContextRevision(msg)
 	return contextRevision > 0 && contextRevision < overviewRevision
+}
+
+func (m *AppModel) activeWorkspaceNeedsContextRefresh(previousActive string) bool {
+	workspaceID := strings.TrimSpace(m.activeWorkspaceID)
+	if workspaceID == "" {
+		return false
+	}
+	entry := m.workspaceRuntimeState(workspaceID)
+	if entry == nil {
+		return true
+	}
+	if entry.ContextInFlight || entry.ContextPending {
+		return false
+	}
+	if previousActive != "" && previousActive != workspaceID {
+		return true
+	}
+	if !entry.HasDisplay {
+		return true
+	}
+	overviewRevision := projectionRevision(entry.Overview.Projection)
+	if overviewRevision == 0 {
+		return false
+	}
+	return entry.DisplayRevision == 0 || entry.DisplayRevision < overviewRevision
 }
 
 func (m *AppModel) mergeWorkspaceOverview(ws backend.WorkspaceInfo) backend.WorkspaceInfo {
@@ -664,6 +690,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if workspaceID == "" || workspaceID != m.activeWorkspaceID {
 		return
 	}
+	defer m.markWorkspaceContextDisplayLoaded(workspaceID, msg)
 	previousTask := m.currentTask
 	previousTranscript := append([]transcriptItem(nil), m.transcript...)
 	previousDoDItems := append([]string(nil), m.dodItems...)
@@ -804,6 +831,21 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	m.syncBlockingApprovalFromList()
 	if strings.TrimSpace(m.result) != "" {
 		m.followMainViewportTail()
+	}
+}
+
+func (m *AppModel) markWorkspaceContextDisplayLoaded(workspaceID string, msg WorkspaceContextMsg) {
+	entry := m.ensureWorkspaceRuntimeState(workspaceID)
+	if entry == nil {
+		return
+	}
+	entry.HasDisplay = true
+	if revision := workspaceContextRevision(msg); revision > 0 {
+		entry.DisplayRevision = revision
+		return
+	}
+	if revision := projectionRevision(entry.Overview.Projection); revision > entry.DisplayRevision {
+		entry.DisplayRevision = revision
 	}
 }
 
@@ -999,6 +1041,9 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 		RepairLoop:            m.repairLoop,
 	}
 	entry.HasDisplay = true
+	if revision := projectionRevision(entry.Overview.Projection); revision > entry.DisplayRevision {
+		entry.DisplayRevision = revision
+	}
 }
 
 func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {

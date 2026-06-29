@@ -1,9 +1,6 @@
 package readmodelprojection
 
-import (
-	"encoding/json"
-	"strings"
-)
+import "strings"
 
 func readModelLimitStrings(values []string, limit int) []string {
 	if limit <= 0 || len(values) <= limit {
@@ -21,14 +18,7 @@ func readModelTruncateString(value string, limit int) string {
 }
 
 func readModelJSONSize(value any) int {
-	if value == nil {
-		return 0
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return 0
-	}
-	return len(encoded)
+	return readModelApproxValueSize(value, 0)
 }
 
 func readModelFirstNonEmptyString(values ...string) string {
@@ -38,4 +28,44 @@ func readModelFirstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func readModelApproxValueSize(value any, depth int) int {
+	if value == nil || depth > 8 {
+		return 0
+	}
+	switch typed := value.(type) {
+	case string:
+		return len(typed)
+	case bool:
+		return 1
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return 8
+	case []string:
+		size := 0
+		for _, item := range typed {
+			size += len(item)
+		}
+		return size
+	case []any:
+		size := 0
+		for _, item := range typed {
+			size += readModelApproxValueSize(item, depth+1)
+		}
+		return size
+	case []map[string]any:
+		size := 0
+		for _, item := range typed {
+			size += readModelApproxValueSize(item, depth+1)
+		}
+		return size
+	case map[string]any:
+		size := 0
+		for key, item := range typed {
+			size += len(key) + readModelApproxValueSize(item, depth+1)
+		}
+		return size
+	default:
+		return 0
+	}
 }

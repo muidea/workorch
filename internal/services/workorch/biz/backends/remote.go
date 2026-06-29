@@ -205,13 +205,724 @@ func (b *remoteWorkspaceBackend) Snapshot(ctx context.Context, id common.Workspa
 	if err != nil {
 		return nil, err
 	}
-	snapshot, err := decodeSnapshotInfo(projection.Snapshot)
-	if err != nil || snapshot == nil {
-		return snapshot, err
-	}
+	snapshot := workspaceSnapshotInfoFromClient(projection.Snapshot)
 	snapshot.Projection = projectionInfoFromClient(projection.Projection)
 	snapshot.Workspace.Projection = snapshot.Projection
-	return snapshot, nil
+	return &snapshot, nil
+}
+
+func workspaceSnapshotInfoFromClient(input client.WorkspaceSnapshot) WorkspaceSnapshotInfo {
+	return WorkspaceSnapshotInfo{
+		Workspace:               workspaceInfoFromClient(&input.Workspace),
+		ViewModel:               workspaceViewModelInfoFromClient(input.ViewModel),
+		Projection:              projectionInfoFromClient(input.Workspace.Projection),
+		Outcome:                 workspaceOutcomeInfoFromClient(input.Outcome),
+		TaskProgress:            taskProgressInfoFromClient(input.TaskProgress),
+		RunHeartbeat:            runHeartbeatInfoFromClient(input.RunHeartbeat),
+		RuntimeExecution:        runtimeExecutionInfoFromClient(input.RuntimeExecution),
+		ConvergenceStatus:       convergenceStatusInfoFromClient(input.ConvergenceStatus),
+		RunCommand:              runCommandStatusInfoFromClient(input.RunCommand),
+		SchedulerDiagnostics:    schedulerDiagnosticsInfoFromClient(input.SchedulerDiagnostics),
+		ContextBundle:           clonePayloadMap(input.ContextBundle),
+		CoverageSummary:         clonePayloadMap(input.CoverageSummary),
+		GapBaseline:             gapBaselineInfoFromClient(input.GapBaseline),
+		Acceptance:              acceptanceProjectionInfoFromClient(input.Acceptance),
+		TaskDecompositions:      taskDecompositionInfosFromClient(input.TaskDecompositions),
+		TaskPlans:               taskPlanInfosFromClient(input.TaskPlans),
+		Goals:                   goalInfosFromClient(input.Goals),
+		DoDs:                    dodInfosFromClient(input.DoDs),
+		Runs:                    runInfosFromClient(input.Runs),
+		Results:                 resultInfosFromClient(input.Results),
+		Artifacts:               artifactInfosFromClient(input.Artifacts),
+		ArtifactContinuations:   artifactContinuationInfosFromClient(input.ArtifactContinuations),
+		Patches:                 patchInfosFromClient(input.Patches),
+		MemoryRecallTraces:      memoryRecallTraceInfosFromClient(input.MemoryRecallTraces),
+		LLMContextBudgets:       llmContextBudgetTraceInfosFromClient(input.LLMContextBudgets),
+		LLMContextBudgetSummary: llmContextBudgetSummaryInfoFromClient(input.LLMContextBudgetSummary),
+		LLMUsageTraces:          llmUsageTraceInfosFromClient(input.LLMUsageTraces),
+		LLMUsageSummary:         llmUsageSummaryInfoFromClient(input.LLMUsageSummary),
+		EventRecords:            eventRecordInfosFromClient(input.EventRecords),
+		Decisions:               decisionInfosFromClient(input.Decisions),
+		Approvals:               approvalInfosFromClient(input.Approvals),
+	}
+}
+
+func goalInfosFromClient(items []client.Goal) []GoalInfo {
+	ret := make([]GoalInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, GoalInfo{ID: common.GoalID(item.ID), WorkspaceID: common.WorkspaceID(item.WorkspaceID), Text: item.Text})
+	}
+	return ret
+}
+
+func dodInfosFromClient(items []client.DoD) []DoDInfo {
+	ret := make([]DoDInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, DoDInfo{ID: common.DoDID(item.ID), WorkspaceID: common.WorkspaceID(item.WorkspaceID), Items: append([]string(nil), item.Items...), State: item.State})
+	}
+	return ret
+}
+
+func runInfosFromClient(items []client.Run) []RunInfo {
+	ret := make([]RunInfo, 0, len(items))
+	for _, item := range items {
+		if mapped := remoteRunInfoFromClientRun(&item); mapped != nil {
+			ret = append(ret, *mapped)
+		}
+	}
+	return ret
+}
+
+func workspaceOutcomeInfoFromClient(input client.RunOutcome) WorkspaceOutcomeInfo {
+	return WorkspaceOutcomeInfo{
+		WorkspaceID:  common.WorkspaceID(input.WorkspaceID),
+		State:        input.State,
+		RunID:        common.RunID(input.RunID),
+		ResultID:     common.ResultID(input.ResultID),
+		Accepted:     input.Accepted,
+		Terminal:     input.Terminal,
+		Summary:      input.Summary,
+		Reason:       input.Reason,
+		EvidenceRefs: append([]string(nil), input.EvidenceRefs...),
+		ArtifactRefs: append([]string(nil), input.ArtifactRefs...),
+	}
+}
+
+func runHeartbeatInfoFromClient(input client.RunHeartbeat) RunHeartbeatInfo {
+	return RunHeartbeatInfo{
+		WorkspaceID:               common.WorkspaceID(input.WorkspaceID),
+		RunID:                     common.RunID(input.RunID),
+		State:                     input.State,
+		ActivityState:             input.ActivityState,
+		LatestStepID:              common.StepID(input.LatestStepID),
+		LatestStepKind:            input.LatestStepKind,
+		LatestStepState:           input.LatestStepState,
+		LatestEvidenceRef:         input.LatestEvidenceRef,
+		LatestEventTopic:          input.LatestEventTopic,
+		LatestEventRevision:       input.LatestEventRevision,
+		LatestEventAt:             input.LatestEventAt,
+		LatestLLMUsageAt:          input.LatestLLMUsageAt,
+		LatestResultAt:            input.LatestResultAt,
+		LatestArtifactAt:          input.LatestArtifactAt,
+		LatestPatchAt:             input.LatestPatchAt,
+		LatestEffectiveProgressAt: input.LatestEffectiveProgressAt,
+		IneffectiveRetry:          input.IneffectiveRetry,
+		Stalled:                   input.Stalled,
+		Summary:                   input.Summary,
+	}
+}
+
+func runCommandStatusInfoFromClient(input *client.RunCommandStatus) *RunCommandStatusInfo {
+	if input == nil {
+		return nil
+	}
+	return &RunCommandStatusInfo{
+		WorkspaceID:        common.WorkspaceID(input.WorkspaceID),
+		RunID:              common.RunID(input.RunID),
+		State:              input.State,
+		Intent:             input.Intent,
+		Reason:             input.Reason,
+		RequestID:          input.RequestID,
+		IdempotencyKey:     input.IdempotencyKey,
+		Source:             input.Source,
+		DefinitionRevision: input.DefinitionRevision,
+		DecisionID:         common.TicketID(input.DecisionID),
+		AcceptedAt:         input.AcceptedAt,
+		RejectedAt:         input.RejectedAt,
+		Error:              input.Error,
+		Revision:           input.Revision,
+	}
+}
+
+func gapBaselineInfoFromClient(input *client.GapBaseline) *GapBaselineInfo {
+	if input == nil {
+		return nil
+	}
+	ret := &GapBaselineInfo{
+		WorkspaceID:           common.WorkspaceID(input.WorkspaceID),
+		RunID:                 common.RunID(input.RunID),
+		DefinitionRevision:    input.DefinitionRevision,
+		BaselineRevision:      input.BaselineRevision,
+		CurrentFocus:          clonePayloadMap(input.CurrentFocus),
+		OpenCoverageWorkItems: clonePayloadMapSlice(input.OpenCoverageWorkItems),
+		AcceptedEvidenceRefs:  append([]string(nil), input.AcceptedEvidenceRefs...),
+		RejectedEvidenceRefs:  append([]string(nil), input.RejectedEvidenceRefs...),
+		NextAction:            GapNextActionInfo{Kind: input.NextAction.Kind, Reason: input.NextAction.Reason},
+	}
+	for _, item := range input.TodoItems {
+		ret.TodoItems = append(ret.TodoItems, GapTodoItemInfo{
+			ID:                    item.ID,
+			Source:                item.Source,
+			SourceRef:             item.SourceRef,
+			CoverageWorkItemIDs:   append([]string(nil), item.CoverageWorkItemIDs...),
+			RequiredEvidenceKinds: append([]string(nil), item.RequiredEvidenceKinds...),
+			Status:                item.Status,
+			Priority:              item.Priority,
+			Reason:                item.Reason,
+			Metadata:              clonePayloadMap(item.Metadata),
+		})
+	}
+	return ret
+}
+
+func acceptanceProjectionInfoFromClient(input client.AcceptanceProjection) AcceptanceProjectionInfo {
+	ret := AcceptanceProjectionInfo{
+		ActiveSliceID: input.ActiveSliceID,
+		Summary: AcceptanceSummaryInfo{
+			AcceptedSlices: input.Summary.AcceptedSlices,
+			ActiveSlices:   input.Summary.ActiveSlices,
+			OpenSlices:     input.Summary.OpenSlices,
+			FailedSlices:   input.Summary.FailedSlices,
+		},
+	}
+	for _, item := range input.Slices {
+		ret.Slices = append(ret.Slices, AcceptanceSliceInfo{
+			ID:                    item.ID,
+			Title:                 item.Title,
+			State:                 item.State,
+			Priority:              item.Priority,
+			Scope:                 item.Scope,
+			CoverageWorkItemIDs:   append([]string(nil), item.CoverageWorkItemIDs...),
+			RequiredEvidenceKinds: append([]string(nil), item.RequiredEvidenceKinds...),
+			CompletionPolicy:      item.CompletionPolicy,
+			ResultPolicy:          item.ResultPolicy,
+			CreatedAt:             item.CreatedAt,
+			ActivatedAt:           item.ActivatedAt,
+			ClosedAt:              item.ClosedAt,
+		})
+	}
+	if input.CurrentFocus != nil {
+		ret.CurrentFocus = &CoverageFocusInfo{
+			ID:                    input.CurrentFocus.ID,
+			SliceID:               input.CurrentFocus.SliceID,
+			CoverageWorkItemIDs:   append([]string(nil), input.CurrentFocus.CoverageWorkItemIDs...),
+			FailureClass:          input.CurrentFocus.FailureClass,
+			FailureSignature:      input.CurrentFocus.FailureSignature,
+			RequiredEvidenceKinds: append([]string(nil), input.CurrentFocus.RequiredEvidenceKinds...),
+			AcceptedEvidenceRefs:  append([]string(nil), input.CurrentFocus.AcceptedEvidenceRefs...),
+			RejectedEvidenceRefs:  append([]string(nil), input.CurrentFocus.RejectedEvidenceRefs...),
+			TargetRefs:            append([]string(nil), input.CurrentFocus.TargetRefs...),
+			State:                 input.CurrentFocus.State,
+			Attempt:               input.CurrentFocus.Attempt,
+		}
+	}
+	if input.Budget != nil {
+		ret.Budget = &ConvergenceBudgetInfo{
+			State:                       input.Budget.State,
+			Decision:                    input.Budget.Decision,
+			MaxRepairAttemptsPerFocus:   input.Budget.MaxRepairAttemptsPerFocus,
+			MaxLLMRoundsPerSlice:        input.Budget.MaxLLMRoundsPerSlice,
+			MaxRepeatedFailureSignature: input.Budget.MaxRepeatedFailureSignature,
+			MaxValidationOnlyRetries:    input.Budget.MaxValidationOnlyRetries,
+			MaxNoCoverageDeltaRounds:    input.Budget.MaxNoCoverageDeltaRounds,
+			MaxContextBytesPerRepair:    input.Budget.MaxContextBytesPerRepair,
+			RepairAttempts:              input.Budget.RepairAttempts,
+			LLMRounds:                   input.Budget.LLMRounds,
+			RepeatedFailureSignatures:   input.Budget.RepeatedFailureSignatures,
+			ValidationOnlyRetries:       input.Budget.ValidationOnlyRetries,
+			NoCoverageDeltaRounds:       input.Budget.NoCoverageDeltaRounds,
+			LastDecisionReason:          input.Budget.LastDecisionReason,
+		}
+	}
+	return ret
+}
+
+func taskProgressInfoFromClient(input client.TaskProgress) TaskProgressInfo {
+	return TaskProgressInfo{
+		WorkspaceID:        common.WorkspaceID(input.WorkspaceID),
+		RunID:              common.RunID(input.RunID),
+		State:              input.State,
+		Summary:            input.Summary,
+		CurrentActionLabel: input.CurrentActionLabel,
+		DiagnosticLineage:  common.StepID(input.DiagnosticLineage),
+		Recovery: RecoveryPlanInfo{
+			Mode:               input.Recovery.Mode,
+			NextAction:         input.Recovery.NextAction,
+			RunID:              common.RunID(input.Recovery.RunID),
+			StepID:             common.StepID(input.Recovery.StepID),
+			BlockingTicketID:   common.TicketID(input.Recovery.BlockingTicketID),
+			BlockingApprovalID: common.ApprovalID(input.Recovery.BlockingApprovalID),
+			CheckpointID:       common.CheckpointID(input.Recovery.CheckpointID),
+			FailureClass:       input.Recovery.FailureClass,
+			FailureSignature:   input.Recovery.FailureSignature,
+			Reason:             input.Recovery.Reason,
+		},
+		RepairLoop: RepairLoopInfo{
+			State:                    input.RepairLoop.State,
+			AttemptCount:             input.RepairLoop.AttemptCount,
+			LastAttempt:              input.RepairLoop.LastAttempt,
+			LastRepairStepID:         common.StepID(input.RepairLoop.LastRepairStepID),
+			LastFailureStepID:        common.StepID(input.RepairLoop.LastFailureStepID),
+			LastFailureClass:         input.RepairLoop.LastFailureClass,
+			LastFailureSignature:     input.RepairLoop.LastFailureSignature,
+			LastFailureTargetScope:   input.RepairLoop.LastFailureTargetScope,
+			LastFailureAt:            input.RepairLoop.LastFailureAt,
+			StructuredFailureSignals: clonePayloadMap(input.RepairLoop.StructuredFailureSignals),
+			RepairInputCompaction:    clonePayloadMap(input.RepairLoop.RepairInputCompaction),
+			LastRepairInputBytes:     input.RepairLoop.LastRepairInputBytes,
+			RepeatedFailureReason:    input.RepairLoop.RepeatedFailureReason,
+			NextAction:               input.RepairLoop.NextAction,
+			Escalated:                input.RepairLoop.Escalated,
+			EscalationReason:         input.RepairLoop.EscalationReason,
+			EscalationTicketID:       common.TicketID(input.RepairLoop.EscalationTicketID),
+			EvidenceRefs:             append([]string(nil), input.RepairLoop.EvidenceRefs...),
+		},
+		AssessmentOutcome: AssessmentOutcomeInfo{
+			State:                       input.AssessmentOutcome.State,
+			AcceptedSlices:              input.AssessmentOutcome.AcceptedSlices,
+			AcceptedResultCount:         input.AssessmentOutcome.AcceptedResultCount,
+			RejectedGlobalAssessments:   input.AssessmentOutcome.RejectedGlobalAssessments,
+			SatisfiedCoverageCount:      input.AssessmentOutcome.SatisfiedCoverageCount,
+			RemainingCoverageCount:      input.AssessmentOutcome.RemainingCoverageCount,
+			NewlySatisfiedCoverageCount: input.AssessmentOutcome.NewlySatisfiedCoverageCount,
+			LatestAcceptedResultID:      common.ResultID(input.AssessmentOutcome.LatestAcceptedResultID),
+			LatestRejectedResultID:      common.ResultID(input.AssessmentOutcome.LatestRejectedResultID),
+			LatestRejectedReason:        input.AssessmentOutcome.LatestRejectedReason,
+		},
+	}
+}
+
+func taskDecompositionInfosFromClient(items []client.TaskDecomposition) []TaskDecompositionInfo {
+	ret := make([]TaskDecompositionInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, TaskDecompositionInfo{
+			ID:            item.ID,
+			WorkspaceID:   common.WorkspaceID(item.WorkspaceID),
+			RunID:         common.RunID(item.RunID),
+			RootStepID:    common.StepID(item.RootStepID),
+			State:         item.State,
+			Summary:       item.Summary,
+			GraphBranch:   item.GraphBranch,
+			NodeTotal:     item.NodeTotal,
+			NodeCompleted: item.NodeCompleted,
+			NodeFailed:    item.NodeFailed,
+			NodeRunning:   item.NodeRunning,
+			Nodes:         taskDecompositionNodeInfosFromClient(item.Nodes),
+			EvidenceRefs:  append([]string(nil), item.EvidenceRefs...),
+		})
+	}
+	return ret
+}
+
+func taskPlanInfosFromClient(items []client.TaskPlan) []TaskPlanInfo {
+	ret := make([]TaskPlanInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, TaskPlanInfo{
+			ID:                item.ID,
+			WorkspaceID:       common.WorkspaceID(item.WorkspaceID),
+			RunID:             common.RunID(item.RunID),
+			AnchorStepID:      common.StepID(item.AnchorStepID),
+			RevisionStepID:    common.StepID(item.RevisionStepID),
+			Revision:          item.Revision,
+			State:             item.State,
+			Stage:             item.Stage,
+			SourceOutputState: item.SourceOutputState,
+			Summary:           item.Summary,
+			GraphBranch:       item.GraphBranch,
+			NodeTotal:         item.NodeTotal,
+			NodeCompleted:     item.NodeCompleted,
+			NodeFailed:        item.NodeFailed,
+			NodeRunning:       item.NodeRunning,
+			Nodes:             taskDecompositionNodeInfosFromClient(item.Nodes),
+			RetryOf:           item.RetryOf,
+			RetryAttempt:      item.RetryAttempt,
+			ViolationType:     item.ViolationType,
+			ViolatedRule:      item.ViolatedRule,
+			FailureClass:      item.FailureClass,
+			FailureSignature:  item.FailureSignature,
+			TargetScope:       item.TargetScope,
+			BlockingTicketID:  common.TicketID(item.BlockingTicketID),
+			EvidenceRefs:      append([]string(nil), item.EvidenceRefs...),
+			OccurredAt:        item.OccurredAt,
+			SourceProjection:  item.SourceProjection,
+		})
+	}
+	return ret
+}
+
+func taskDecompositionNodeInfosFromClient(items []client.TaskDecompositionNode) []TaskDecompositionNodeInfo {
+	ret := make([]TaskDecompositionNodeInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, TaskDecompositionNodeInfo{
+			ID:               item.ID,
+			Kind:             item.Kind,
+			Title:            item.Title,
+			State:            item.State,
+			DependsOn:        append([]string(nil), item.DependsOn...),
+			Branch:           item.Branch,
+			StepID:           common.StepID(item.StepID),
+			StepState:        item.StepState,
+			RetryOf:          item.RetryOf,
+			RetryAttempt:     item.RetryAttempt,
+			ViolationType:    item.ViolationType,
+			ViolatedRule:     item.ViolatedRule,
+			FailureClass:     item.FailureClass,
+			FailureSignature: item.FailureSignature,
+			TargetScope:      item.TargetScope,
+			BlockingTicketID: common.TicketID(item.BlockingTicketID),
+			EvidenceRefs:     append([]string(nil), item.EvidenceRefs...),
+			CoverageTargets:  append([]string(nil), item.CoverageTargets...),
+			Input:            clonePayloadMap(item.Input),
+		})
+	}
+	return ret
+}
+
+func resultInfosFromClient(items []client.Result) []ResultInfo {
+	ret := make([]ResultInfo, 0, len(items))
+	for _, item := range items {
+		summary := item.SummaryDetail
+		ret = append(ret, ResultInfo{
+			ID:           common.ResultID(item.ID),
+			WorkspaceID:  common.WorkspaceID(item.WorkspaceID),
+			RunID:        common.RunID(item.RunID),
+			GoalID:       common.GoalID(item.GoalID),
+			DoDID:        common.DoDID(item.DoDID),
+			State:        common.ResultState(item.State),
+			Title:        item.Title,
+			Summary:      item.Summary,
+			SourceType:   item.SourceType,
+			SourceRef:    item.SourceRef,
+			EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
+			ArtifactRefs: append([]string(nil), item.ArtifactRefs...),
+			SummaryDetail: &ResultSummaryInfo{
+				GoalOutcome:           summary.GoalOutcome,
+				ImplementationSummary: summary.ImplementationSummary,
+				VerificationSummary:   summary.VerificationSummary,
+				EvidenceRefs:          append([]string(nil), summary.EvidenceRefs...),
+				ArtifactRefs:          append([]string(nil), summary.ArtifactRefs...),
+				KnownLimitations:      append([]string(nil), summary.KnownLimitations...),
+				ResidualRisks:         append([]string(nil), summary.ResidualRisks...),
+				NextActions:           append([]string(nil), summary.NextActions...),
+				Diagnostics:           clonePayloadMap(summary.Diagnostics),
+			},
+		})
+	}
+	return ret
+}
+
+func artifactInfosFromClient(items []client.Artifact) []ArtifactInfo {
+	ret := make([]ArtifactInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, ArtifactInfo{
+			ID:           common.ArtifactID(item.ID),
+			WorkspaceID:  common.WorkspaceID(item.WorkspaceID),
+			RunID:        common.RunID(item.RunID),
+			ResultID:     common.ResultID(item.ResultID),
+			ArtifactType: item.ArtifactType,
+			Category:     item.Category,
+			Name:         item.Name,
+			Summary:      item.Summary,
+			URI:          item.URI,
+			ContentType:  item.ContentType,
+			State:        common.ArtifactState(item.State),
+			EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
+		})
+	}
+	return ret
+}
+
+func artifactContinuationInfosFromClient(items []client.ArtifactContinuation) []ArtifactContinuationInfo {
+	ret := make([]ArtifactContinuationInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, ArtifactContinuationInfo{
+			ID:                common.ArtifactContinuationID(item.ID),
+			WorkspaceID:       common.WorkspaceID(item.WorkspaceID),
+			RunID:             common.RunID(item.RunID),
+			RootStepID:        common.StepID(item.RootStepID),
+			ArtifactID:        item.ArtifactID,
+			TargetRef:         item.TargetRef,
+			Operation:         item.Operation,
+			State:             common.ArtifactContinuationState(item.State),
+			ExpectedSequence:  item.ExpectedSequence,
+			ReceivedSequences: append([]int(nil), item.ReceivedSequences...),
+			FinalReceived:     item.FinalReceived,
+			BytesWritten:      item.BytesWritten,
+			RollingHash:       item.RollingHash,
+			LastChunkHash:     item.LastChunkHash,
+			CoverageTargets:   append([]string(nil), item.CoverageTargets...),
+			EvidenceRefs:      append([]string(nil), item.EvidenceRefs...),
+			FailureReason:     item.FailureReason,
+			CreatedAt:         item.CreatedAt,
+			UpdatedAt:         item.UpdatedAt,
+			Progress:          clonePayloadMap(item.Progress),
+		})
+	}
+	return ret
+}
+
+func patchInfosFromClient(items []client.Patch) []PatchInfo {
+	ret := make([]PatchInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, PatchInfo{
+			ID:               common.PatchID(item.ID),
+			WorkspaceID:      common.WorkspaceID(item.WorkspaceID),
+			RunID:            common.RunID(item.RunID),
+			StepID:           common.StepID(item.StepID),
+			ToolCallID:       common.ToolCallID(item.ToolCallID),
+			ApprovalID:       common.ApprovalID(item.ApprovalID),
+			RevertApprovalID: common.ApprovalID(item.RevertApprovalID),
+			PatchType:        item.PatchType,
+			TargetRef:        item.TargetRef,
+			Summary:          item.Summary,
+			State:            common.PatchState(item.State),
+			AddedLines:       item.AddedLines,
+			DeletedLines:     item.DeletedLines,
+			BeforeHash:       item.BeforeHash,
+			AfterHash:        item.AfterHash,
+			CreatedAt:        item.CreatedAt,
+			AppliedAt:        item.AppliedAt,
+			RevertedAt:       item.RevertedAt,
+		})
+	}
+	return ret
+}
+
+func memoryRecallTraceInfosFromClient(items []client.MemoryRecallTrace) []MemoryRecallTraceInfo {
+	ret := make([]MemoryRecallTraceInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, MemoryRecallTraceInfo{
+			ID:                  common.MemoryRecallTraceID(item.ID),
+			WorkspaceID:         common.WorkspaceID(item.WorkspaceID),
+			RunID:               common.RunID(item.RunID),
+			StepID:              common.StepID(item.StepID),
+			GraphNodeID:         item.GraphNodeID,
+			Stage:               item.Stage,
+			Source:              item.Source,
+			Policy:              item.Policy,
+			Status:              item.Status,
+			ProviderID:          item.ProviderID,
+			Operation:           item.Operation,
+			QueryTextPreview:    item.QueryTextPreview,
+			QueryTextSha256:     item.QueryTextSha256,
+			MinScore:            item.MinScore,
+			Limit:               item.Limit,
+			EmbeddingModel:      item.EmbeddingModel,
+			VectorDimension:     item.VectorDimension,
+			RetrievedMemoryIDs:  memoryIDsFromClient(item.RetrievedMemoryIDs),
+			RetrievedMemoryHits: memoryRecallHitInfosFromClient(item.RetrievedMemoryHits),
+			Reason:              item.Reason,
+			OccurredAt:          item.OccurredAt,
+			EvidenceRef:         item.EvidenceRef,
+		})
+	}
+	return ret
+}
+
+func memoryRecallHitInfosFromClient(items []client.MemoryRecallHit) []MemoryRecallHitInfo {
+	ret := make([]MemoryRecallHitInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, MemoryRecallHitInfo{
+			ID:              common.MemoryID(item.ID),
+			Summary:         item.Summary,
+			VectorScore:     item.VectorScore,
+			VectorDimension: item.VectorDimension,
+		})
+	}
+	return ret
+}
+
+func memoryIDsFromClient(values []string) []common.MemoryID {
+	ret := make([]common.MemoryID, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, common.MemoryID(value))
+	}
+	return ret
+}
+
+func llmContextBudgetTraceInfosFromClient(items []client.LLMContextBudgetTrace) []LLMContextBudgetTraceInfo {
+	ret := make([]LLMContextBudgetTraceInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, LLMContextBudgetTraceInfo{
+			StepID:                common.StepID(item.StepID),
+			ProviderID:            item.ProviderID,
+			Model:                 item.Model,
+			MaxBytes:              item.MaxBytes,
+			ActualBytes:           item.ActualBytes,
+			MaxTokens:             item.MaxTokens,
+			EstimatedInputTokens:  item.EstimatedInputTokens,
+			EstimatedOutputTokens: item.EstimatedOutputTokens,
+			ActualTokens:          item.ActualTokens,
+			ShrinkLevel:           item.ShrinkLevel,
+			Truncated:             item.Truncated,
+			Rules:                 append([]string(nil), item.Rules...),
+			SourceRefs:            append([]string(nil), item.SourceRefs...),
+			IncludedSections:      append([]string(nil), item.IncludedSections...),
+			NormalizedSections:    append([]string(nil), item.NormalizedSections...),
+			CompressedSections:    append([]string(nil), item.CompressedSections...),
+			OmittedSections:       append([]string(nil), item.OmittedSections...),
+			GoalDoDCompressed:     item.GoalDoDCompressed,
+			OverBudget:            item.OverBudget,
+			P0Overflow:            item.P0Overflow,
+			ProfileMode:           item.ProfileMode,
+			CapabilitySource:      item.CapabilitySource,
+			ContextUtilization:    item.ContextUtilization,
+			MaxRequestBytes:       item.MaxRequestBytes,
+			StageBudgetRatio:      item.StageBudgetRatio,
+			StageBudgetSource:     item.StageBudgetSource,
+			TracePolicy:           item.TracePolicy,
+			PromptCaptured:        item.PromptCaptured,
+			Estimator:             item.Estimator,
+			Profile:               clonePayloadMap(item.Profile),
+			CachePlan:             clonePayloadMap(item.CachePlan),
+		})
+	}
+	return ret
+}
+
+func llmContextBudgetSummaryInfoFromClient(item client.LLMContextBudgetSummary) LLMContextBudgetSummaryInfo {
+	return LLMContextBudgetSummaryInfo{
+		TraceTotal:             item.TraceTotal,
+		TruncatedCount:         item.TruncatedCount,
+		OverBudgetCount:        item.OverBudgetCount,
+		P0OverflowCount:        item.P0OverflowCount,
+		GoalDoDCompressedCount: item.GoalDoDCompressedCount,
+		PromptCapturedCount:    item.PromptCapturedCount,
+		MaxShrinkLevel:         item.MaxShrinkLevel,
+		MaxContextUtilization:  item.MaxContextUtilization,
+		AvgContextUtilization:  item.AvgContextUtilization,
+		MaxInputTokens:         item.MaxInputTokens,
+		MaxRequestBytes:        item.MaxRequestBytes,
+		RecentWindowSize:       item.RecentWindowSize,
+		RecentTraceTotal:       item.RecentTraceTotal,
+		RecentTruncatedCount:   item.RecentTruncatedCount,
+		RecentOverBudgetCount:  item.RecentOverBudgetCount,
+		RecentMaxUtilization:   item.RecentMaxUtilization,
+		RecentAvgUtilization:   item.RecentAvgUtilization,
+		RecentMaxInputTokens:   item.RecentMaxInputTokens,
+		UtilizationTrend:       item.UtilizationTrend,
+	}
+}
+
+func llmUsageTraceInfosFromClient(items []client.LLMUsageTrace) []LLMUsageTraceInfo {
+	ret := make([]LLMUsageTraceInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, LLMUsageTraceInfo{
+			ID:            item.ID,
+			WorkspaceID:   common.WorkspaceID(item.WorkspaceID),
+			RunID:         common.RunID(item.RunID),
+			StepID:        common.StepID(item.StepID),
+			ProviderID:    item.ProviderID,
+			Provider:      item.Provider,
+			Model:         item.Model,
+			Operation:     item.Operation,
+			InputTokens:   item.InputTokens,
+			OutputTokens:  item.OutputTokens,
+			TotalTokens:   item.TotalTokens,
+			Estimated:     item.Estimated,
+			UsageSource:   item.UsageSource,
+			RequestBytes:  item.RequestBytes,
+			ResponseBytes: item.ResponseBytes,
+			Streaming:     item.Streaming,
+			ContextBudget: clonePayloadMap(item.ContextBudget),
+			CacheUsage:    clonePayloadMap(item.CacheUsage),
+			Status:        item.Status,
+			FailureClass:  item.FailureClass,
+			OccurredAt:    item.OccurredAt,
+			EvidenceRef:   item.EvidenceRef,
+		})
+	}
+	return ret
+}
+
+func llmUsageSummaryInfoFromClient(item client.LLMUsageSummary) LLMUsageSummaryInfo {
+	return LLMUsageSummaryInfo{
+		EntryTotal:              item.EntryTotal,
+		InputTokens:             item.InputTokens,
+		OutputTokens:            item.OutputTokens,
+		TotalTokens:             item.TotalTokens,
+		EstimatedEntries:        item.EstimatedEntries,
+		ProviderNativeEntries:   item.ProviderNativeEntries,
+		FailedEntries:           item.FailedEntries,
+		CacheReadTokens:         item.CacheReadTokens,
+		CacheWriteTokens:        item.CacheWriteTokens,
+		CacheCreationTokens:     item.CacheCreationTokens,
+		CacheableInputTokens:    item.CacheableInputTokens,
+		NonCacheableInputTokens: item.NonCacheableInputTokens,
+		CacheEstimatedEntries:   item.CacheEstimatedEntries,
+		CacheProviderEntries:    item.CacheProviderEntries,
+		ProviderModelBreakdown:  llmUsageProviderModelBreakdownInfosFromClient(item.ProviderModelBreakdown),
+	}
+}
+
+func llmUsageProviderModelBreakdownInfosFromClient(items []client.LLMUsageProviderModelBreakdown) []LLMUsageProviderModelBreakdownInfo {
+	ret := make([]LLMUsageProviderModelBreakdownInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, LLMUsageProviderModelBreakdownInfo{
+			ProviderID:       item.ProviderID,
+			Provider:         item.Provider,
+			Model:            item.Model,
+			EntryTotal:       item.EntryTotal,
+			InputTokens:      item.InputTokens,
+			OutputTokens:     item.OutputTokens,
+			TotalTokens:      item.TotalTokens,
+			CacheReadTokens:  item.CacheReadTokens,
+			CacheWriteTokens: item.CacheWriteTokens,
+			EstimatedEntries: item.EstimatedEntries,
+			FailedEntries:    item.FailedEntries,
+		})
+	}
+	return ret
+}
+
+func eventRecordInfosFromClient(items []client.EventRecord) []EventRecordInfo {
+	ret := make([]EventRecordInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, EventRecordInfo{
+			ID:             common.EventRecordID(item.ID),
+			Version:        item.Version,
+			Topic:          item.Topic,
+			OccurredAt:     item.OccurredAt,
+			SourceModule:   item.SourceModule,
+			SubjectType:    item.SubjectType,
+			SubjectID:      item.SubjectID,
+			WorkspaceID:    common.WorkspaceID(item.WorkspaceID),
+			RunID:          common.RunID(item.RunID),
+			StepID:         common.StepID(item.StepID),
+			Payload:        clonePayloadMap(item.Payload),
+			PayloadSummary: clonePayloadMap(item.PayloadSummary),
+			PayloadRef:     item.PayloadRef,
+		})
+	}
+	return ret
+}
+
+func decisionInfosFromClient(items []client.Decision) []DecisionInfo {
+	ret := make([]DecisionInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, DecisionInfo{
+			ID:                 common.TicketID(item.ID),
+			WorkspaceID:        common.WorkspaceID(item.WorkspaceID),
+			RunID:              common.RunID(item.RunID),
+			Reason:             item.Reason,
+			Question:           item.Question,
+			Context:            clonePayloadMap(item.Context),
+			State:              item.State,
+			ResolutionType:     item.ResolutionType,
+			ContinuationAction: item.ContinuationAction,
+			ResumeRunID:        common.RunID(item.ResumeRunID),
+			SuccessorRunID:     common.RunID(item.SuccessorRunID),
+			AutoGovernance:     mapRemoteAutoGovernanceSummary(item.AutoGovernance),
+		})
+	}
+	return ret
+}
+
+func approvalInfosFromClient(items []client.Approval) []ApprovalInfo {
+	ret := make([]ApprovalInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, ApprovalInfo{
+			ID:             common.ApprovalID(item.ID),
+			WorkspaceID:    common.WorkspaceID(item.WorkspaceID),
+			RunID:          common.RunID(item.RunID),
+			Reason:         item.Reason,
+			Action:         item.Action,
+			Context:        clonePayloadMap(item.Context),
+			State:          item.State,
+			AutoGovernance: mapRemoteAutoGovernanceSummary(item.AutoGovernance),
+		})
+	}
+	return ret
 }
 
 func (b *remoteWorkspaceBackend) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
@@ -731,6 +1442,17 @@ func clonePayloadMap(input map[string]any) map[string]any {
 	ret := make(map[string]any, len(input))
 	for key, value := range input {
 		ret[key] = value
+	}
+	return ret
+}
+
+func clonePayloadMapSlice(input []map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(input))
+	for _, item := range input {
+		ret = append(ret, clonePayloadMap(item))
 	}
 	return ret
 }

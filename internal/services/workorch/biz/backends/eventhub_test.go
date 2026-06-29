@@ -745,11 +745,15 @@ func subscribeRunReadCLIResponses(t *testing.T, hub events.Hub, workspaceID comm
 		run := RunInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
 		switch cmd.Command {
 		case events.CommandRunGet:
+			payload.TypedResource = run
 			payload.Resource = resourceMap(run)
 		case events.CommandRunList:
+			payload.TypedResources = []any{run}
 			payload.Resources = []map[string]any{resourceMap(run)}
 		case events.CommandRunStatus:
-			payload.Resource = resourceMap(RunStatusInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning})
+			status := RunStatusInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+			payload.TypedResource = status
+			payload.Resource = resourceMap(status)
 		default:
 			return nil
 		}

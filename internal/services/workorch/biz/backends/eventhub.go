@@ -2,7 +2,6 @@ package backend
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -628,16 +627,50 @@ func resourceMap(v any) map[string]any {
 			return nil
 		}
 		return workspaceSnapshotResourceMap(*typed)
+	case SoulInfo:
+		return soulInfoResourceMap(typed)
+	case *SoulInfo:
+		if typed == nil {
+			return nil
+		}
+		return soulInfoResourceMap(*typed)
+	case SkillInfo:
+		return skillInfoResourceMap(typed)
+	case *SkillInfo:
+		if typed == nil {
+			return nil
+		}
+		return skillInfoResourceMap(*typed)
+	case MCPServerInfo:
+		return mcpServerInfoResourceMap(typed)
+	case *MCPServerInfo:
+		if typed == nil {
+			return nil
+		}
+		return mcpServerInfoResourceMap(*typed)
+	case MemoryItemInfo:
+		return memoryItemInfoResourceMap(typed)
+	case *MemoryItemInfo:
+		if typed == nil {
+			return nil
+		}
+		return memoryItemInfoResourceMap(*typed)
+	case MemorySearchRequest:
+		return memorySearchRequestResourceMap(typed)
+	case *MemorySearchRequest:
+		if typed == nil {
+			return nil
+		}
+		return memorySearchRequestResourceMap(*typed)
+	case TemplateInfo:
+		return templateInfoResourceMap(typed)
+	case *TemplateInfo:
+		if typed == nil {
+			return nil
+		}
+		return templateInfoResourceMap(*typed)
 	}
-	data, err := json.Marshal(v)
-	if err != nil {
-		return nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil
-	}
-	return out
+	return nil
 }
 
 func runInfoResourceMap(run RunInfo) map[string]any {
@@ -712,16 +745,78 @@ func workspaceSnapshotResourceMap(snapshot WorkspaceSnapshotInfo) map[string]any
 	}
 }
 
-func resourceMapAlias(v any) map[string]any {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return nil
+func soulInfoResourceMap(item SoulInfo) map[string]any {
+	return map[string]any{
+		"id":              string(item.ID),
+		"name":            item.Name,
+		"description":     item.Description,
+		"businessDomains": append([]string(nil), item.BusinessDomains...),
+		"soulMd":          item.SoulMD,
 	}
-	var out map[string]any
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil
+}
+
+func skillInfoResourceMap(item SkillInfo) map[string]any {
+	return map[string]any{
+		"id":          string(item.ID),
+		"name":        item.Name,
+		"version":     item.Version,
+		"description": item.Description,
+		"instruction": item.Instruction,
 	}
-	return out
+}
+
+func mcpServerInfoResourceMap(item MCPServerInfo) map[string]any {
+	return map[string]any{
+		"id":        string(item.ID),
+		"name":      item.Name,
+		"transport": item.Transport,
+		"endpoint":  item.Endpoint,
+		"enabled":   item.Enabled,
+	}
+}
+
+func memoryItemInfoResourceMap(item MemoryItemInfo) map[string]any {
+	return map[string]any{
+		"id":                  string(item.ID),
+		"memoryId":            string(item.ID),
+		"workspaceId":         string(item.WorkspaceID),
+		"runId":               string(item.RunID),
+		"sourceType":          item.SourceType,
+		"sourceRef":           item.SourceRef,
+		"memoryType":          item.MemoryType,
+		"content":             item.Content,
+		"summary":             item.Summary,
+		"tags":                append([]string(nil), item.Tags...),
+		"importance":          item.Importance,
+		"confidence":          item.Confidence,
+		"visibility":          item.Visibility,
+		"embeddingProviderId": item.EmbeddingProviderID,
+		"embeddingModel":      item.EmbeddingModel,
+		"embeddingText":       item.EmbeddingText,
+		"vector":              append([]float64(nil), item.Vector...),
+	}
+}
+
+func memorySearchRequestResourceMap(item MemorySearchRequest) map[string]any {
+	return map[string]any{
+		"query": item.Query,
+		"tags":  append([]string(nil), item.Tags...),
+		"types": append([]string(nil), item.Types...),
+		"limit": item.Limit,
+	}
+}
+
+func templateInfoResourceMap(item TemplateInfo) map[string]any {
+	return map[string]any{
+		"id":               item.ID,
+		"name":             item.Name,
+		"description":      item.Description,
+		"goalText":         item.GoalText,
+		"doDItems":         append([]string(nil), item.DoDItems...),
+		"defaultSoulId":    string(item.DefaultSoulID),
+		"soulBindings":     cloneStringMap(item.SoulBindings),
+		"evidencePolicies": cloneCLIResultValue(item.EvidencePolicies, 0),
+	}
 }
 
 func compactRunExecutionContext(context map[string]any) map[string]any {
@@ -795,15 +890,7 @@ func decodeResultResource[T any](result events.CLIResultPayload, err error) (*T,
 	if result.Resource == nil {
 		return nil, nil
 	}
-	data, err := json.Marshal(result.Resource)
-	if err != nil {
-		return nil, err
-	}
-	var out T
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
+	return nil, typedBoundaryError[T]("resource")
 }
 
 func decodeResultResources[T any](result events.CLIResultPayload, err error) ([]T, error) {
@@ -824,17 +911,10 @@ func decodeResultResources[T any](result events.CLIResultPayload, err error) ([]
 			return out, nil
 		}
 	}
-	out := make([]T, 0, len(result.Resources))
-	for _, resource := range result.Resources {
-		item, err := decodeResultResource[T](events.CLIResultPayload{Resource: resource}, nil)
-		if err != nil {
-			return nil, err
-		}
-		if item != nil {
-			out = append(out, *item)
-		}
+	if len(result.Resources) > 0 {
+		return nil, typedBoundaryError[T]("resources")
 	}
-	return out, nil
+	return nil, nil
 }
 
 func typedResultResource[T any](resource any) (*T, bool) {
@@ -853,11 +933,9 @@ func typedResultResource[T any](resource any) (*T, bool) {
 	}
 }
 
-func decodeOrZero[T any](payload map[string]any) *T {
-	data, _ := json.Marshal(payload)
-	var out T
-	_ = json.Unmarshal(data, &out)
-	return &out
+func typedBoundaryError[T any](field string) error {
+	var zero T
+	return fmt.Errorf("%w: eventhub command result %s missing typed resource for %T", common.ErrInvalidArgument, field, zero)
 }
 
 func stringValue(payload map[string]any, key string) string {
