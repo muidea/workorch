@@ -1722,6 +1722,168 @@ func TestEnforceProviderRequestBudgetPreservesRepairContractWithoutSnapshots(t *
 	}
 }
 
+func TestEnforceProviderRequestBudgetPreservesCurrentActionContract(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-current-action-budget",
+		RunID:       "run-current-action-budget",
+		StepID:      "run-current-action-budget/repair-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"currentSoulStage":            "execution",
+			"runtimeRepairFollowUp":       true,
+			"stateChangingOutputRequired": true,
+			"repairObjective":             "produce_state_changing_output",
+			"currentActionContract": map[string]any{
+				"schemaVersion": "workorch.current_action_contract.v1",
+				"workspaceId":   "ws-current-action-budget",
+				"runId":         "run-current-action-budget",
+				"stepId":        "run-current-action-budget/repair-001",
+				"nextAction": map[string]any{
+					"kind": "state_change",
+				},
+				"currentFocus": map[string]any{
+					"id":                   "cwi-current-action",
+					"sourceRequirementId":  "deliverable-current-action",
+					"targetText":           "deliverable current action must change",
+					"missingEvidenceKinds": []string{"state_change"},
+				},
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply"},
+					"coverageWorkItemIds":          []string{"cwi-current-action"},
+					"structuredTargetRefs":         []string{"deliverable-current-action"},
+				},
+				"latestRejectedDiagnostic": map[string]any{
+					"violationType": "repair_no_state_changing_output",
+					"violatedRule":  "state_changing_required_missing",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply"},
+				},
+				"currentFailure": map[string]any{
+					"failureClass":  "runtime_failed",
+					"failureReason": "previous output returned read-only graph",
+				},
+				"currentExecutionProgress": map[string]any{
+					"currentGap": "needs direct state change",
+				},
+			},
+			"failedExecutionGraph":    repeatedBudgetItems(400),
+			"graphEvidence":           repeatedBudgetItems(400),
+			"processEvidenceTimeline": repeatedBudgetItems(400),
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    4096,
+				MaxInputTokens:         256,
+				ReservedOutputTokens:   128,
+				BytesHardLimit:         8 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil || got.ContextBudget.ShrinkLevel == 0 {
+		t.Fatalf("contextBudget = %+v, want compacted budget", got.ContextBudget)
+	}
+	contract := recordFromAny(got.Input["currentActionContract"])
+	if len(contract) == 0 {
+		t.Fatalf("input = %+v, want currentActionContract preserved", got.Input)
+	}
+	required := recordFromAny(contract["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) || !stringSliceContains(stringSliceValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("currentActionContract.requiredOutput = %+v, want state-changing patch contract", required)
+	}
+	focus := recordFromAny(contract["currentFocus"])
+	if stringValue(focus["id"]) != "cwi-current-action" {
+		t.Fatalf("currentActionContract.currentFocus = %+v, want cwi focus preserved", focus)
+	}
+	if !stringSliceContains(got.ContextBudget.ProtectedFields, "input.currentActionContract") {
+		t.Fatalf("protectedFields = %+v, want currentActionContract protected", got.ContextBudget.ProtectedFields)
+	}
+	if stringSliceContains(got.ContextBudget.IntegrityWarnings, "protected_runtime_contract_changed_after_context_budget") {
+		t.Fatalf("integrityWarnings = %+v, want current action contract preserved without runtime contract warning", got.ContextBudget.IntegrityWarnings)
+	}
+}
+
+func TestEnforceProviderRequestBudgetNarrowsCurrentActionInputBeforeHardLimit(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-current-action-narrow",
+		RunID:       "run-current-action-narrow",
+		StepID:      "run-current-action-narrow/repair-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"currentSoulStage":      "execution",
+			"runtimeRepairFollowUp": true,
+			"currentActionContract": map[string]any{
+				"schemaVersion": "workorch.current_action_contract.v1",
+				"nextAction":    map[string]any{"kind": "state_change"},
+				"currentFocus":  map[string]any{"id": "cwi-current-action-narrow", "targetText": "narrow focus"},
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply"},
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply"},
+				},
+				"currentFailure": map[string]any{
+					"failureClass": "runtime_failed",
+				},
+				"currentExecutionProgress": map[string]any{
+					"currentGap": "needs current action retry",
+				},
+			},
+			"failedExecutionGraph":    repeatedBudgetItems(500),
+			"graphEvidence":           repeatedBudgetItems(500),
+			"runEvidenceSummary":      repeatedBudgetItems(500),
+			"processEvidenceTimeline": repeatedBudgetItems(500),
+			"workspaceFileManifest":   repeatedBudgetItems(500),
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    128000,
+				MaxInputTokens:         64000,
+				ReservedOutputTokens:   1024,
+				BytesHardLimit:         512 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+	before := providerRequestJSONBytes(req)
+
+	got := enforceProviderRequestBudget(req)
+	after := providerRequestJSONBytes(got)
+	if got.ContextBudget == nil || got.ContextBudget.ShrinkLevel == 0 {
+		t.Fatalf("contextBudget = %+v, want current-action narrowing even before hard limit", got.ContextBudget)
+	}
+	if !stringSliceContains(got.ContextBudget.CompressedSections, "current_action") {
+		t.Fatalf("compressedSections = %+v, want current_action", got.ContextBudget.CompressedSections)
+	}
+	if after >= before/2 {
+		t.Fatalf("request bytes before=%d after=%d, want material current-action narrowing", before, after)
+	}
+	if len(recordFromAny(got.Input["currentActionContract"])) == 0 {
+		t.Fatalf("input = %+v, want currentActionContract preserved", got.Input)
+	}
+	if _, ok := got.Input["graphEvidence"]; ok {
+		t.Fatalf("input retained graphEvidence under current-action narrowing: %+v", got.Input["graphEvidence"])
+	}
+	if _, ok := got.Input["processEvidenceTimeline"]; ok {
+		t.Fatalf("input retained processEvidenceTimeline under current-action narrowing: %+v", got.Input["processEvidenceTimeline"])
+	}
+}
+
 func TestEnforceProviderRequestBudgetPreservesStagePacketCriticalFields(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-stage-packet-budget",

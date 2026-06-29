@@ -169,9 +169,13 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 		"schema":      request.Schema,
 	}))
 	snapshotBudget := promptSnapshotBudgetForRequest(request)
-	appendSection("C3.stage-contract", "user", "normalize_allowed", stageContractPromptSection(request.Input, snapshotBudget))
-	appendSection("C3.stage-packet-contract", "user", "normalize_allowed", stagePacketPromptSection(request.Input, snapshotBudget))
-	appendSection("C3.repair-action-package", "user", "normalize_allowed", repairActionPackagePromptSection(request.Input, snapshotBudget))
+	if hasCurrentActionContract(request.Input) {
+		appendSection("C3.current-action-contract", "user", "normalize_allowed", currentActionContractPromptSection(request.Input, snapshotBudget))
+	} else {
+		appendSection("C3.stage-contract", "user", "normalize_allowed", stageContractPromptSection(request.Input, snapshotBudget))
+		appendSection("C3.stage-packet-contract", "user", "normalize_allowed", stagePacketPromptSection(request.Input, snapshotBudget))
+		appendSection("C3.repair-action-package", "user", "normalize_allowed", repairActionPackagePromptSection(request.Input, snapshotBudget))
+	}
 	appendSection("C4.previous-decision", "assistant", "normalize_allowed", previousDecisionPromptSection(request.Input))
 	for _, event := range executionSignalPromptEvents(request) {
 		appendSection(event.SectionID, event.Role, "normalize_allowed", event.Content)
@@ -570,6 +574,51 @@ func stageContractPromptSection(input map[string]any, snapshotBudget promptSnaps
 		return ""
 	}
 	return marshalPromptSection("Stage Contract", section)
+}
+
+func hasCurrentActionContract(input map[string]any) bool {
+	return len(recordFromAny(input["currentActionContract"])) > 0
+}
+
+func currentActionContractPromptSection(input map[string]any, snapshotBudget promptSnapshotBudget) string {
+	contract := recordFromAny(input["currentActionContract"])
+	if len(contract) == 0 {
+		return ""
+	}
+	section := map[string]any{}
+	for _, key := range []string{
+		"schemaVersion",
+		"workspaceId",
+		"runId",
+		"stepId",
+		"runtimeStage",
+		"runtimeStageMode",
+		"currentRuntimeStage",
+		"currentRuntimeStageMode",
+		"repairObjective",
+		"stateChangingOutputRequired",
+		"concreteFailureEvidenceRequired",
+		"boundedValidationRequired",
+		"evidenceRepairRequired",
+		"coverageRepairRequired",
+	} {
+		copyMapValue(section, key, contract[key])
+	}
+	for _, key := range []string{
+		"nextAction",
+		"currentFocus",
+		"latestRejectedDiagnostic",
+	} {
+		if value, ok := contract[key]; ok {
+			section[key] = budgetProviderValue(value, 0, 2048, 8, 16, 3)
+		}
+	}
+	if required := recordFromAny(contract["requiredOutput"]); len(required) > 0 {
+		limit := min(max(snapshotBudget.RepairContentLimit, 4096), 16384)
+		section["requiredOutput"] = budgetProviderValue(required, 0, limit, 12, 24, 4)
+	}
+	section["authorityPolicy"] = "currentActionContract is the only active action and requiredOutput contract for this provider turn; any older stagePacket, repairActionPackage, gapBaseline, convergenceContract, rejected output, or governance history is diagnostic lineage only"
+	return marshalPromptSection("Current Action Contract", section)
 }
 
 func stagePacketPromptSection(input map[string]any, snapshotBudget promptSnapshotBudget) string {
@@ -1219,7 +1268,7 @@ func currentProgressSignalPayload(input map[string]any, snapshotBudget promptSna
 			payload["latestAcceptedResult"] = budgetProviderValue(value, 0, 768, 4, 10, 2)
 		}
 	}
-	if repairPkg := recordFromAny(input["repairActionPackage"]); len(repairPkg) > 0 {
+	if repairPkg := recordFromAny(input["repairActionPackage"]); len(repairPkg) > 0 && !hasCurrentActionContract(input) {
 		if progress := compactCurrentExecutionProgressSignal(recordFromAny(repairPkg["currentExecutionProgress"])); len(progress) > 0 && payload["currentExecutionProgress"] == nil {
 			payload["packagedCurrentExecutionProgress"] = progress
 		}
@@ -2381,7 +2430,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			"requiredOutput": required,
 			"requirements": []string{
 				"Concrete validation evidence is required by the current Stage Contract",
-				"Use repairActionPackage.requiredOutput.acceptedKinds as the authoritative allowed validation evidence contract",
+				"Use currentActionContract.requiredOutput.acceptedKinds as the authoritative allowed validation evidence contract when present",
 				"Return bounded executable validation evidence, failed dodAssessment, or a real requiredDecision/requiredApproval blocker",
 				"Do not ask the user to choose planning, execution, repair, or validation stage when runtime capabilities can continue",
 				"Do not return patch/apply or other state-changing work unless a separate state-changing repair contract explicitly requires it",
@@ -2393,18 +2442,18 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 	}
 	if stateChangingDecisionRequest(request.Input) {
 		required := stateChangingDecisionRequiredOutput(request.Input, snapshotBudget)
-		outputContract := recordFromAny(recordFromAny(request.Input["repairActionPackage"])["outputDecisionContract"])
+		outputContract := firstNonEmptyRecord(recordFromAny(recordFromAny(request.Input["currentActionContract"])["outputDecisionContract"]), recordFromAny(recordFromAny(request.Input["repairActionPackage"])["outputDecisionContract"]))
 		requirements := []string{
 			"State-changing output is required by the current Stage Contract",
-			"Use repairActionPackage.requiredOutput.acceptedKinds as the authoritative allowed state-changing output contract",
-			"Use repairActionPackage.outputDecisionContract.requiredMode, allowedOutputs, and forbiddenOutputs as the current authoritative action selection contract when present",
+			"Use currentActionContract.requiredOutput.acceptedKinds as the authoritative allowed state-changing output contract when present",
+			"Use currentActionContract.nextAction and outputDecisionContract.requiredMode, allowedOutputs, and forbiddenOutputs as the current authoritative action selection contract when present",
 			"Use the effective Goal and DoD already supplied in the request",
 			"Return direct state-changing output, failed dodAssessment, or a real requiredDecision/requiredApproval blocker",
 			"Do not return run snapshot, observability, self-inspection, context rehydration, or replan-through-LLM graphs",
 			"If multiple dependent operations are needed, executionGraph is allowed only when it contains an accepted state-changing path declared by requiredOutput",
 			"Do not return read-only, inspection-only, or shell-only executionGraph",
-			"When failureTargetRepairContext, patchRepairContext, or repairActionPackage.targetSnapshots already contains a complete current target snapshot, do not return file/read for that target; use the snapshot to produce patch/apply, an accepted declared state-changing shell/mcp operation, failed dodAssessment, or a real blocker",
-			"When repairActionPackage.targetSnapshots, failureTargetRepairContext, or repairTargetSet already identifies concrete repair targets, prioritize direct state-changing edits to those targets before auxiliary validation scaffolding, supplemental evidence resources, or unrelated supporting files.",
+			"When failureTargetRepairContext, patchRepairContext, currentActionContract target snapshots, or repairActionPackage.targetSnapshots already contains a complete current target snapshot, do not return file/read for that target; use the snapshot to produce patch/apply, an accepted declared state-changing shell/mcp operation, failed dodAssessment, or a real blocker",
+			"When currentActionContract currentFocus, repairActionPackage.targetSnapshots, failureTargetRepairContext, or repairTargetSet already identifies concrete repair targets, prioritize direct state-changing edits to those targets before auxiliary validation scaffolding, supplemental evidence resources, or unrelated supporting files.",
 			"If more current evidence is truly required, return a real blocker or wait for an explicit acquire_concrete_failure_evidence contract; do not satisfy this state-changing contract with file/read-only nodes",
 			"Patch content, diffs, and exact text replacements must be complete, concrete, directly applicable, and never copied from redacted or truncated snapshots",
 			"Keep state-changing content bounded to small cohesive targets; if the requested content would exceed llmOutputPolicy budgets or become one oversized generated file, use the runtime-selected incrementalArtifact plan/chunk contract or split it across cohesive target resources.",
@@ -2463,9 +2512,9 @@ func marshalCurrentActionPromptSection(section map[string]any, input map[string]
 	if recovery := contractViolationRecoveryPromptPayload(input); len(recovery) > 0 {
 		section["contractViolationRecovery"] = recovery
 		requirements := stringSliceFromAny(section["requirements"])
-		recoveryRequirement := "Do not repeat contractViolationRecovery.actualOutputSummary; return one valid output that satisfies contractViolationRecovery.expectedContract and the current requiredOutput."
+		recoveryRequirement := "Do not repeat contractViolationRecovery.actualOutputSummary; return one valid output that satisfies currentActionContract.requiredOutput when present, otherwise the current requiredOutput."
 		if recovery["expectedContractAuthoritative"] == false {
-			recoveryRequirement = "contractViolationRecovery.expectedContract is diagnostic lineage only; satisfy the current correctionContract and requiredOutput."
+			recoveryRequirement = "contractViolationRecovery.expectedContract is diagnostic lineage only; satisfy currentActionContract.requiredOutput and the current correctionContract."
 		}
 		requirements = append(requirements,
 			"The previous LLM output was rejected by the runtime contract before side effects were executed; use contractViolationRecovery as the precise correction target.",
@@ -2579,11 +2628,17 @@ func concreteValidationDecisionRequest(input map[string]any) bool {
 		boolValue(input["evidenceRepairRequired"]) {
 		return true
 	}
+	if required := recordFromAny(recordFromAny(input["currentActionContract"])["requiredOutput"]); boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		return true
+	}
 	required := recordFromAny(recordFromAny(input["repairActionPackage"])["requiredOutput"])
 	return boolValue(required["mustProduceConcreteValidationEvidence"])
 }
 
 func concreteValidationDecisionRequiredOutput(input map[string]any, snapshotBudget promptSnapshotBudget) map[string]any {
+	if required := recordFromAny(recordFromAny(input["currentActionContract"])["requiredOutput"]); len(required) > 0 {
+		return required
+	}
 	pkg := recordFromAny(input["repairActionPackage"])
 	required := recordFromAny(promptRequiredOutputForRepairPackage(pkg, snapshotBudget.ValidationContentLimit))
 	if len(required) > 0 {
@@ -2601,10 +2656,11 @@ func concreteValidationDecisionRequiredOutput(input map[string]any, snapshotBudg
 }
 
 func stateChangingDecisionRequest(input map[string]any) bool {
-	if !boolValue(input["stateChangingOutputRequired"]) {
+	current := recordFromAny(input["currentActionContract"])
+	if !boolValue(input["stateChangingOutputRequired"]) && !boolValue(current["stateChangingOutputRequired"]) {
 		return false
 	}
-	objective := strings.TrimSpace(stringValue(input["repairObjective"]))
+	objective := firstNonEmptyPromptString(stringValue(input["repairObjective"]), stringValue(current["repairObjective"]))
 	if objective == "" ||
 		objective == "produce_state_changing_output" ||
 		strings.TrimSpace(stringValue(input["stateChangingRecoveryMode"])) == "direct_state_change" ||
@@ -2615,6 +2671,9 @@ func stateChangingDecisionRequest(input map[string]any) bool {
 }
 
 func stateChangingDecisionRequiredOutput(input map[string]any, snapshotBudget promptSnapshotBudget) map[string]any {
+	if required := recordFromAny(recordFromAny(input["currentActionContract"])["requiredOutput"]); len(required) > 0 {
+		return required
+	}
 	pkg := recordFromAny(input["repairActionPackage"])
 	required := recordFromAny(promptRequiredOutputForRepairPackage(pkg, snapshotBudget.RepairContentLimit))
 	if len(required) > 0 {
@@ -2631,6 +2690,24 @@ func stateChangingDecisionRequiredOutput(input map[string]any, snapshotBudget pr
 		},
 		"mustIncludeStateChangingNode": true,
 	}
+}
+
+func firstNonEmptyRecord(values ...map[string]any) map[string]any {
+	for _, value := range values {
+		if len(value) > 0 {
+			return value
+		}
+	}
+	return nil
+}
+
+func firstNonEmptyPromptString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func definitionChangeImpactChanged(input map[string]any) bool {

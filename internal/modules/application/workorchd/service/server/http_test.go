@@ -4154,6 +4154,56 @@ func TestWorkspaceSnapshotEndpointSummaryDoesNotHydrateDetail(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSnapshotEndpointDoesNotOverlayStalePromptMode(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-detail-prompt-same-source")
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	handler := newMuxWithState(state)
+	state.workspaceProjection.UpsertSnapshot(appservice.WorkspaceSnapshot{
+		Workspace: appservice.Workspace{
+			ID:          string(workspaceID),
+			State:       string(common.WorkspaceStateActive),
+			ActiveRunID: "run-detail-prompt-same-source",
+		},
+	})
+	state.readWorkspaceSnapshot = func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error) {
+		return appservice.WorkspaceSnapshot{
+			Workspace: appservice.Workspace{
+				ID:               string(workspaceID),
+				State:            string(common.WorkspaceStateWaitingDecision),
+				ActiveRunID:      "run-detail-prompt-same-source",
+				BlockingTicketID: "ticket-detail-prompt-same-source",
+			},
+			Run: &appservice.Run{
+				ID:               "run-detail-prompt-same-source",
+				WorkspaceID:      string(workspaceID),
+				State:            string(common.RunStateBlockedOnDecision),
+				BlockingTicketID: "ticket-detail-prompt-same-source",
+			},
+		}, nil
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+string(workspaceID)+"/snapshot", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("workspace snapshot status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var body workspaceSnapshotResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal workspace snapshot: %v", err)
+	}
+	if body.Snapshot.Workspace.State != string(common.WorkspaceStateWaitingDecision) ||
+		body.Snapshot.Workspace.BlockingTicketID != "ticket-detail-prompt-same-source" ||
+		body.Snapshot.Run == nil ||
+		body.Snapshot.Run.State != string(common.RunStateBlockedOnDecision) {
+		t.Fatalf("snapshot workspace/run = %+v/%+v, want blocked decision owner state", body.Snapshot.Workspace, body.Snapshot.Run)
+	}
+	if body.Snapshot.ViewModel.PromptMode != "decision" ||
+		body.Snapshot.Workspace.ViewModel.PromptMode != "decision" {
+		t.Fatalf("snapshot viewModel = %+v workspace viewModel = %+v, want decision from detail owner state", body.Snapshot.ViewModel, body.Snapshot.Workspace.ViewModel)
+	}
+}
+
 func TestWorkspaceSnapshotEndpointObservabilityUsesExplicitFullRead(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-observability-full-read")
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)

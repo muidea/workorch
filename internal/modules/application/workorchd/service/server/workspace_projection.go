@@ -3,9 +3,12 @@ package server
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -117,18 +120,28 @@ func (s *HTTPServer) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID 
 }
 
 func mergeWorkspaceProjectionOverlay(detail appservice.WorkspaceSnapshot, projected appservice.WorkspaceSnapshot) appservice.WorkspaceSnapshot {
-	if projected.ViewModel.WorkspaceID != "" {
-		detail.ViewModel = projected.ViewModel
-	}
-	if projected.Workspace.ViewModel.WorkspaceID != "" {
-		detail.Workspace.ViewModel = projected.Workspace.ViewModel
-	}
 	if projected.RunCommand != nil {
 		detail.RunCommand = projected.RunCommand
 	}
 	if projected.SchedulerDiagnostics != nil {
 		detail.SchedulerDiagnostics = projected.SchedulerDiagnostics
 	}
+	detail = mergeWorkspaceProjectionViewModel(detail, projected.ViewModel)
+	return detail
+}
+
+func mergeWorkspaceProjectionViewModel(detail appservice.WorkspaceSnapshot, projected readmodelcore.WorkspaceViewModel) appservice.WorkspaceSnapshot {
+	normalized := readmodelprojection.NormalizeWorkspaceGovernanceProjection(detail)
+	viewModel := projected
+	if strings.TrimSpace(viewModel.WorkspaceID) == "" {
+		viewModel = detail.ViewModel
+	}
+	if strings.TrimSpace(viewModel.WorkspaceID) == "" {
+		viewModel.WorkspaceID = normalized.Workspace.ID
+	}
+	viewModel.PromptMode = readmodelprojection.WorkspacePromptMode(normalized)
+	detail.ViewModel = viewModel
+	detail.Workspace.ViewModel = workspaceMetadataViewModelFromProjection(viewModel)
 	return detail
 }
 

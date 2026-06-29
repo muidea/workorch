@@ -218,6 +218,7 @@ func convergenceDerivedExecutionContextKeys() []string {
 		"acceptance",
 		"repairActionPackage",
 		"requiredOutput",
+		currentActionContractKey,
 		"coverageRepairRequired",
 		"coverageTargetSet",
 		"governanceRequired",
@@ -249,11 +250,13 @@ func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID comm
 		})
 		clearExecutableCoverageContinuationContract(input)
 		input = attachStagePacketToStepInput(run, stepID, input)
+		input = attachCurrentActionContractToInput(run, stepID, input)
 		input = scrubConvergenceDispatchDiagnosticAdvice(input)
 		return input, validateConvergenceDispatchInput(input)
 	}
 	if !dispatchInputHasConvergenceAuthority(run, input) {
 		input = attachStagePacketToStepInput(run, stepID, input)
+		input = attachCurrentActionContractToInput(run, stepID, input)
 		input = scrubConvergenceDispatchDiagnosticAdvice(input)
 		return input, validateConvergenceDispatchInput(input)
 	}
@@ -261,6 +264,7 @@ func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID comm
 	input = ApplyConvergenceContract(input, contract)
 	input = normalizeDispatchInputAuthorityFocus(input)
 	input = attachStagePacketToStepInput(run, stepID, input)
+	input = attachCurrentActionContractToInput(run, stepID, input)
 	input = scrubConvergenceDispatchDiagnosticAdvice(input)
 	if err := validateConvergenceDispatchInput(input); err != nil {
 		return nil, err
@@ -360,10 +364,34 @@ func validateConvergenceDispatchInput(input map[string]any) error {
 	if err := validateConvergenceDispatchRequiredOutputSemantics(input); err != nil {
 		return err
 	}
+	if err := validateCurrentActionContract(input); err != nil {
+		return err
+	}
 	if err := validateConvergenceDispatchOutputShapeAdvice(input); err != nil {
 		return err
 	}
 	return validateConvergenceDispatchFocusAlignment(input)
+}
+
+func validateCurrentActionContract(input map[string]any) error {
+	contract := mapFromValue(input[currentActionContractKey])
+	if len(contract) == 0 {
+		return nil
+	}
+	currentNext := strings.TrimSpace(stringFromMap(mapFromValue(contract["nextAction"]), "kind"))
+	if expected := strings.TrimSpace(convergenceNextActionKind(nil, input)); expected != "" && currentNext != "" && currentNext != expected {
+		return convergenceDispatchMisalignmentError("currentActionContract nextAction=%s expected=%s", currentNext, expected)
+	}
+	currentRequired := mapFromValue(contract["requiredOutput"])
+	if expected := activeRequiredOutputForCurrentAction(input); len(expected) > 0 {
+		if len(currentRequired) == 0 {
+			return convergenceDispatchMisalignmentError("currentActionContract missing requiredOutput")
+		}
+		if stableCoverageJSON(currentRequired) != stableCoverageJSON(expected) {
+			return convergenceDispatchMisalignmentError("currentActionContract requiredOutput does not match active required output")
+		}
+	}
+	return nil
 }
 
 func convergenceDispatchMisalignmentError(format string, args ...any) error {

@@ -624,6 +624,77 @@ func TestStagePacketRendersInDynamicPromptPartitions(t *testing.T) {
 	}
 }
 
+func TestCurrentActionContractSuppressesLegacyActiveContractSections(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-current-action",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"executionContextPackage": map[string]any{
+				"goal":               map[string]any{"text": "stable goal"},
+				"dod":                map[string]any{"items": []any{"stable dod"}},
+				"definitionRevision": "definition-stable",
+			},
+			"currentActionContract": map[string]any{
+				"schemaVersion":               "workorch.current_action_contract.v1",
+				"workspaceId":                 "ws-current-action",
+				"runId":                       "run-001",
+				"stepId":                      "step-001",
+				"repairObjective":             "produce_state_changing_output",
+				"stateChangingOutputRequired": true,
+				"nextAction":                  map[string]any{"kind": "state_change", "reason": "current focus requires state change"},
+				"currentFocus":                map[string]any{"id": "cwi-001", "coverageWorkItemIds": []any{"cwi-001"}},
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []any{"patch/apply"},
+					"coverageWorkItemIds":          []any{"cwi-001"},
+				},
+			},
+			"stagePacket": map[string]any{
+				"requiredOutput": map[string]any{"legacyStagePacketOutput": true},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{"legacyRepairPackageOutput": true},
+			},
+			"convergenceContract": map[string]any{
+				"state": "need_state_change",
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	current, ok := promptContextSectionByID(context, "C3.current-action-contract")
+	if !ok {
+		t.Fatalf("missing C3.current-action-contract; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{"Current Action Contract", "state_change", "mustIncludeStateChangingNode", "cwi-001"} {
+		if !strings.Contains(current.Content, want) {
+			t.Fatalf("current action contract missing %q: %s", want, current.Content)
+		}
+	}
+	for _, forbiddenSection := range []string{"C3.stage-contract", "C3.stage-packet-contract", "C3.repair-action-package"} {
+		if section, ok := promptContextSectionByID(context, forbiddenSection); ok {
+			t.Fatalf("legacy active section %s rendered despite currentActionContract: %s", forbiddenSection, section.Content)
+		}
+	}
+	action, ok := promptContextSectionByID(context, "C4.current-action")
+	if !ok {
+		t.Fatalf("missing C4.current-action; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	if !strings.Contains(action.Content, "currentActionContract.requiredOutput") ||
+		!strings.Contains(action.Content, "patch/apply") {
+		t.Fatalf("current action prompt did not use currentActionContract authority: %s", action.Content)
+	}
+	if strings.Contains(action.Content, "legacyRepairPackageOutput") ||
+		strings.Contains(action.Content, "legacyStagePacketOutput") {
+		t.Fatalf("current action prompt leaked legacy required output: %s", action.Content)
+	}
+}
+
 func TestProviderCachePlanKeepsStablePrefixAcrossStagePacketChanges(t *testing.T) {
 	baseInput := map[string]any{
 		"executionContextPackage": map[string]any{

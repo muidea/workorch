@@ -43,6 +43,7 @@ var providerP0InputKeys = []string{
 	"providerTimeoutStateChangingRetry", "forbiddenRecoveryOutputs", "requiredRecoveryOutputs",
 	"decisionResolution", "approvalResolution",
 	"contractViolationRecovery",
+	"currentActionContract",
 	"coverageWorkItemContext",
 	"evidenceLedger",
 	"stagePacket",
@@ -86,6 +87,18 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	protectedRuntimeContract := captureProtectedProviderRuntimeContract(request.Input)
 	protectedCoverageWorkItemContext := captureProtectedProviderCoverageWorkItemContext(request.Input)
 	protectedStagePacket := captureProtectedProviderStagePacket(request.Input)
+	if providerInputHasCurrentActionContract(request.Input) {
+		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
+		request.Input = narrowProviderInputToCurrentAction(request.Input)
+		request.Input = restoreProtectedGoalDoD(request.Input, protected)
+		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
+		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
+		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
+		request.Input = restoreProtectedProviderStagePacket(request.Input, protectedStagePacket)
+		rules = append(rules, "narrow provider input to current action contract")
+		compressedSections = append(compressedSections, "current_action")
+		shrinkLevel = max(shrinkLevel, 1)
+	}
 	if adaptiveLevel := adaptiveShrinkLevelFromInput(request.Input); adaptiveLevel > 0 {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = applyAdaptiveShrinkLevel(request.Input, adaptiveLevel)
@@ -639,6 +652,17 @@ func minimalProviderInput(input map[string]any) map[string]any {
 	return prioritizedProviderInput(input, false)
 }
 
+func providerInputHasCurrentActionContract(input map[string]any) bool {
+	return len(recordFromAny(input["currentActionContract"])) > 0
+}
+
+func narrowProviderInputToCurrentAction(input map[string]any) map[string]any {
+	if !providerInputHasCurrentActionContract(input) {
+		return input
+	}
+	return prioritizedProviderInput(input, false)
+}
+
 func prioritizedProviderInput(input map[string]any, includeP2 bool) map[string]any {
 	out := map[string]any{}
 	for _, key := range providerP0InputKeys {
@@ -758,7 +782,7 @@ func providerInputSourceRefs(input map[string]any) []string {
 		switch strings.TrimSpace(key) {
 		case "executionContext", "executionContextPackage", "workspaceFileManifest", "workspaceManifest",
 			"graphEvidence", "runEvidenceSummary", "processEvidenceTimeline", "currentProgressDigest", "failedExecutionGraph", "failedStepInput", "failedStepOutput",
-			"decisionResolution", "approvalResolution", "memoryRetrieval", "skillSelection", "coverageWorkItemContext", "evidenceLedger":
+			"decisionResolution", "approvalResolution", "memoryRetrieval", "skillSelection", "coverageWorkItemContext", "evidenceLedger", "currentActionContract":
 			refs = append(refs, "input."+key)
 		}
 	}
@@ -818,6 +842,7 @@ func providerProtectedContextFields(input map[string]any) []string {
 		"graphExpansionLimitFollowUp", "graphFollowUpExpansionCount", "graphFollowUpExpansionLimit",
 		"providerRetryAssessmentOnly",
 		"runtimeStage", "runtimeStageMode", "currentRuntimeStage", "currentRuntimeStageMode", "currentSoulStage",
+		"currentActionContract",
 		"coverageWorkItemContext",
 		"evidenceLedger",
 	} {
@@ -847,6 +872,25 @@ func providerProtectedContextFields(input map[string]any) []string {
 		} {
 			if _, ok := packet[key]; ok {
 				fields = append(fields, "input.stagePacket."+key)
+			}
+		}
+	}
+	if current := recordFromAny(input["currentActionContract"]); len(current) > 0 {
+		fields = append(fields, "input.currentActionContract")
+		for _, key := range []string{
+			"schemaVersion",
+			"workspaceId",
+			"runId",
+			"stepId",
+			"definitionRevision",
+			"nextAction",
+			"currentFocus",
+			"requiredOutput",
+			"outputDecisionContract",
+			"latestRejectedDiagnostic",
+		} {
+			if _, ok := current[key]; ok {
+				fields = append(fields, "input.currentActionContract."+key)
 			}
 		}
 	}
@@ -1420,6 +1464,7 @@ func captureProtectedProviderRuntimeContract(input map[string]any) protectedProv
 		"providerRetryAssessmentOnly",
 		"runtimeStage", "runtimeStageMode", "currentRuntimeStage", "currentRuntimeStageMode", "currentSoulStage",
 		"contractViolationRecovery",
+		"currentActionContract",
 	} {
 		if value, ok := input[key]; ok {
 			if cloned, success := cloneAny(value); success {

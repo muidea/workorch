@@ -85,7 +85,8 @@ func initialStepInput(run *runModel.Run) map[string]any {
 	}
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
 	input = ApplyConvergenceContract(input, contract)
-	return attachStagePacketToStepInput(run, "", input)
+	input = attachStagePacketToStepInput(run, "", input)
+	return attachCurrentActionContractToInput(run, "", input)
 }
 
 func applyFirstRunGapBaselineStateChangingContract(input map[string]any) map[string]any {

@@ -1,6 +1,10 @@
 package orchestrator
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+)
 
 func TestCoverageApplyWorkItemEvidence_AcceptedEvidenceSatisfiesRequiredKind(t *testing.T) {
 	item := map[string]any{
@@ -185,6 +189,96 @@ func TestCoverageApplyWorkItemEvidence_TargetAlignedValidationCanSatisfyRequired
 	accepted := mapStringSliceValue(item["acceptedEvidenceByKind"])
 	if got := accepted["validation"]; len(got) != 1 || got[0] != "run-1/validation-targeted" {
 		t.Fatalf("acceptedEvidenceByKind = %+v, want accepted validation ref", accepted)
+	}
+}
+
+func TestCoverageApplyWorkItemEvidence_ZeroWorkStateChangeIsSupportingOnly(t *testing.T) {
+	item := map[string]any{
+		"id":                    "cwi-state-change-quality",
+		"status":                "open",
+		"sourceRequirementId":   "deliverable-alpha",
+		"targetText":            "deliverable alpha must change",
+		"requiredEvidenceKinds": []string{"state_change"},
+		"requiredEvidenceCounts": map[string]any{
+			"state_change": 1,
+		},
+		"missingEvidenceKinds": []string{"state_change"},
+	}
+
+	changed := coverageApplyWorkItemEvidenceWithOptions(
+		item,
+		[]string{"state_change"},
+		[]string{"run-1/patch-zero-work"},
+		true,
+		false,
+		"run-1/step-001",
+		"",
+		coverageEvidenceAcceptanceOptions{
+			Quality: runtimeEvidenceQuality{
+				Quality:  common.EvidenceQualityInconclusive,
+				Reason:   "candidate declared no material state change",
+				ZeroWork: true,
+			},
+			TargetRefs: []string{"deliverable-alpha"},
+		},
+	)
+	if !changed {
+		t.Fatalf("changed = false, want supporting state-change evidence recorded")
+	}
+	if got := stringFromMap(item, "status"); got != "open" {
+		t.Fatalf("status = %q, want open", got)
+	}
+	if accepted := mapStringSliceValue(item["acceptedEvidenceByKind"]); len(accepted["state_change"]) != 0 {
+		t.Fatalf("acceptedEvidenceByKind.state_change = %+v, want no accepted zero-work evidence", accepted["state_change"])
+	}
+	if supporting := mapStringSliceValue(item["supportingEvidenceByKind"]); !stringSliceContains(supporting["state_change"], "run-1/patch-zero-work") {
+		t.Fatalf("supportingEvidenceByKind.state_change = %+v, want zero-work evidence retained as supporting lineage", supporting["state_change"])
+	}
+	decisions := mapSliceFromValue(item["evidenceBindingDecisions"])
+	if len(decisions) != 1 ||
+		stringFromMap(decisions[0], "evidenceKind") != "state_change" ||
+		stringFromMap(decisions[0], "status") != "supporting_only" {
+		t.Fatalf("evidenceBindingDecisions = %+v, want supporting-only state_change decision", decisions)
+	}
+}
+
+func TestCoverageApplyWorkItemEvidence_TargetUnalignedStateChangeIsSupportingOnly(t *testing.T) {
+	item := map[string]any{
+		"id":                    "cwi-state-change-target",
+		"status":                "open",
+		"sourceRequirementId":   "deliverable-alpha",
+		"targetText":            "deliverable alpha must change",
+		"requiredEvidenceKinds": []string{"state_change"},
+		"requiredEvidenceCounts": map[string]any{
+			"state_change": 1,
+		},
+		"missingEvidenceKinds": []string{"state_change"},
+	}
+
+	changed := coverageApplyWorkItemEvidenceWithOptions(
+		item,
+		[]string{"state_change"},
+		[]string{"run-1/patch-unrelated"},
+		true,
+		false,
+		"run-1/step-001",
+		"",
+		coverageEvidenceAcceptanceOptions{
+			Quality:    runtimeEvidenceQuality{Quality: common.EvidenceQualityValid},
+			TargetRefs: []string{"unrelated-deliverable"},
+		},
+	)
+	if !changed {
+		t.Fatalf("changed = false, want supporting state-change evidence recorded")
+	}
+	if got := stringFromMap(item, "status"); got != "open" {
+		t.Fatalf("status = %q, want open", got)
+	}
+	if accepted := mapStringSliceValue(item["acceptedEvidenceByKind"]); len(accepted["state_change"]) != 0 {
+		t.Fatalf("acceptedEvidenceByKind.state_change = %+v, want no unaligned accepted evidence", accepted["state_change"])
+	}
+	if supporting := mapStringSliceValue(item["supportingEvidenceByKind"]); !stringSliceContains(supporting["state_change"], "run-1/patch-unrelated") {
+		t.Fatalf("supportingEvidenceByKind.state_change = %+v, want unaligned evidence retained as supporting lineage", supporting["state_change"])
 	}
 }
 

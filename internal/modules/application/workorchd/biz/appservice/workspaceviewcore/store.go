@@ -904,32 +904,7 @@ func appWorkspaceViewModelFromReadModel(source readmodelcore.WorkspaceViewModel)
 }
 
 func workspacePromptMode(snapshot readmodelcore.WorkspaceSnapshot) string {
-	workspace := snapshot.Workspace
-	activeRunID := strings.TrimSpace(workspace.ActiveRunID)
-	if activeRunID == "" && snapshot.Run != nil {
-		activeRunID = strings.TrimSpace(snapshot.Run.ID)
-	}
-	if ticketID, ok := snapshotDecisionBlocker(snapshot, activeRunID); ok && strings.TrimSpace(ticketID) != "" {
-		return "decision"
-	}
-	if approvalID, ok := snapshotApprovalBlocker(snapshot, activeRunID); ok && strings.TrimSpace(approvalID) != "" {
-		return "approval"
-	}
-	switch common.WorkspaceState(workspace.State) {
-	case common.WorkspaceStateWaitingDecision:
-		if strings.TrimSpace(workspace.BlockingTicketID) != "" ||
-			readmodelprojection.HasOpenDecisionBlocker(snapshot.Decisions, workspace.ID, activeRunID, workspace.BlockingTicketID) {
-			return "decision"
-		}
-	case common.WorkspaceStateBlocked:
-		if strings.TrimSpace(workspace.BlockingApprovalID) != "" ||
-			readmodelprojection.HasOpenApprovalBlocker(snapshot.Approvals, workspace.ID, activeRunID, workspace.BlockingApprovalID) {
-			return "approval"
-		}
-	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
-		return "running"
-	}
-	return "workspace"
+	return readmodelprojection.WorkspacePromptMode(snapshot)
 }
 
 func (s *Store) RunHeartbeatMetrics(now time.Time) Metrics {

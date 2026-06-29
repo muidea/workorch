@@ -214,10 +214,13 @@ func coverageEvidenceAcceptanceOptionsFromStep(step *runModel.Step) coverageEvid
 	tags = append(tags, stringSliceFromValue(evidence["tags"])...)
 	tags = append(tags, stringSliceFromValue(evidence["evidenceTags"])...)
 	targetRefs := append([]string{}, coverageValidationStructuredTargetRefsFromEvidence(evidence)...)
+	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(runtimeStepCoverageTargetRefs(step))...)
 	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(step.Input["structuredTargetRefs"])...)
 	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(step.Output["structuredTargetRefs"])...)
 	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(step.Input["targetRefs"])...)
 	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(step.Output["targetRefs"])...)
+	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(step.Input["coverageWorkItemIds"])...)
+	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(step.Output["coverageWorkItemIds"])...)
 	claims := coverageObservedClaimsFromEvidence(evidence)
 	ret := coverageEvidenceAcceptanceOptions{
 		EnforceProofStrength: coverageStepRequiresValidationProofStrength(step, evidence, targetRefs, claims),
@@ -659,7 +662,14 @@ func recordCoverageAcceptedEvidenceBinding(item map[string]any, kind string, ref
 }
 
 func coverageEvidenceSufficientForKind(item map[string]any, kind string, options coverageEvidenceAcceptanceOptions) bool {
-	if !options.EnforceProofStrength || strings.TrimSpace(kind) != "validation" {
+	switch strings.TrimSpace(kind) {
+	case "state_change":
+		return stateChangeEvidenceCanSatisfyCoverage(item, options)
+	case "validation":
+	default:
+		return true
+	}
+	if !options.EnforceProofStrength {
 		return true
 	}
 	if !validationEvidenceCanSatisfyDoD(options.Quality) {
@@ -675,6 +685,25 @@ func coverageEvidenceSufficientForKind(item map[string]any, kind string, options
 		return false
 	}
 	return true
+}
+
+func stateChangeEvidenceCanSatisfyCoverage(item map[string]any, options coverageEvidenceAcceptanceOptions) bool {
+	if len(item) == 0 {
+		return false
+	}
+	if !validationEvidenceCanSatisfyDoD(options.Quality) {
+		return false
+	}
+	if options.Quality.ZeroWork {
+		return false
+	}
+	if coverageEvidenceTagsAreDiagnosticOnly(options.Tags) {
+		return false
+	}
+	if len(options.TargetRefs) == 0 {
+		return true
+	}
+	return coverageEvidenceTargetAligned(item, options.TargetRefs)
 }
 
 func coverageEvidenceTargetAligned(item map[string]any, targetRefs []string) bool {
@@ -764,7 +793,22 @@ func coverageEvidenceTagsContain(tags []string, markers ...string) bool {
 }
 
 func coverageEvidenceInsufficientReason(item map[string]any, kind string, options coverageEvidenceAcceptanceOptions) string {
-	if strings.TrimSpace(kind) != "validation" {
+	switch strings.TrimSpace(kind) {
+	case "state_change":
+		switch {
+		case !validationEvidenceCanSatisfyDoD(options.Quality):
+			return firstNonEmptyString(options.Quality.Reason, "state-changing evidence quality is not sufficient for coverage")
+		case options.Quality.ZeroWork:
+			return firstNonEmptyString(options.Quality.Reason, "state-changing evidence reported zero work")
+		case coverageEvidenceTagsAreDiagnosticOnly(options.Tags):
+			return "state-changing evidence is diagnostic or target-unaligned"
+		case len(options.TargetRefs) > 0 && !coverageEvidenceTargetAligned(item, options.TargetRefs):
+			return "state-changing evidence is missing target-aligned refs"
+		default:
+			return "state-changing evidence is not sufficient for coverage"
+		}
+	case "validation":
+	default:
 		return "evidence is not sufficient for coverage"
 	}
 	switch {

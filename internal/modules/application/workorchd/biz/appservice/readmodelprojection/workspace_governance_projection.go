@@ -79,6 +79,59 @@ func NormalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnap
 	return snapshot
 }
 
+func WorkspacePromptMode(snapshot readmodelcore.WorkspaceSnapshot) string {
+	workspace := snapshot.Workspace
+	activeRunID := strings.TrimSpace(workspace.ActiveRunID)
+	if activeRunID == "" && snapshot.Run != nil {
+		activeRunID = strings.TrimSpace(snapshot.Run.ID)
+	}
+	if ticketID := openDecisionBlockerID(snapshot.Decisions, workspace.ID, activeRunID, firstNonEmptyProjectionString(workspace.BlockingTicketID, runBlockingTicketID(snapshot.Run))); ticketID != "" {
+		return "decision"
+	}
+	if snapshot.Run != nil && strings.TrimSpace(snapshot.Run.State) == string(common.RunStateBlockedOnDecision) {
+		if firstNonEmptyProjectionString(snapshot.Run.BlockingTicketID, workspace.BlockingTicketID) != "" {
+			return "decision"
+		}
+	}
+	if approvalID := openApprovalBlockerID(snapshot.Approvals, workspace.ID, activeRunID, firstNonEmptyProjectionString(workspace.BlockingApprovalID, runBlockingApprovalID(snapshot.Run))); approvalID != "" {
+		return "approval"
+	}
+	if snapshot.Run != nil && strings.TrimSpace(snapshot.Run.State) == string(common.RunStateBlockedOnApproval) {
+		if firstNonEmptyProjectionString(snapshot.Run.BlockingApprovalID, workspace.BlockingApprovalID) != "" {
+			return "approval"
+		}
+	}
+	switch common.WorkspaceState(workspace.State) {
+	case common.WorkspaceStateWaitingDecision:
+		if strings.TrimSpace(workspace.BlockingTicketID) != "" ||
+			HasOpenDecisionBlocker(snapshot.Decisions, workspace.ID, activeRunID, workspace.BlockingTicketID) {
+			return "decision"
+		}
+	case common.WorkspaceStateBlocked:
+		if strings.TrimSpace(workspace.BlockingApprovalID) != "" ||
+			HasOpenApprovalBlocker(snapshot.Approvals, workspace.ID, activeRunID, workspace.BlockingApprovalID) {
+			return "approval"
+		}
+	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
+		return "running"
+	}
+	return "workspace"
+}
+
+func runBlockingTicketID(run *readmodelcore.Run) string {
+	if run == nil {
+		return ""
+	}
+	return run.BlockingTicketID
+}
+
+func runBlockingApprovalID(run *readmodelcore.Run) string {
+	if run == nil {
+		return ""
+	}
+	return run.BlockingApprovalID
+}
+
 func hasNonOpenDecisionBlocker(items []readmodelcore.Decision, workspaceID, runID, ticketID string) bool {
 	workspaceID = strings.TrimSpace(workspaceID)
 	runID = strings.TrimSpace(runID)
