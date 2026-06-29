@@ -793,6 +793,7 @@ defaultTimeout = "30s"
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchPreview) ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchApply) ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchRevert) ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindManagedValidationSession) ||
 		!runtimeCapabilitiesContainServiceAPI(provider.request.RuntimeCapabilities, "GET", "/api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/snapshot") {
 		t.Fatalf("runtime capabilities = %+v, want declared block and service API catalog", provider.request.RuntimeCapabilities)
 	}
@@ -819,6 +820,32 @@ defaultTimeout = "30s"
 		result.Output["stage"] != "llm_shell_plan" ||
 		result.Output["nextKind"] != "shell/command" {
 		t.Fatalf("output = %+v, want shell plan", result.Output)
+	}
+}
+
+func TestValidateExecutionGraphAllowsDeclaredManagedValidationSession(t *testing.T) {
+	graph := llmmodels.BlockExecutionGraph{Nodes: []llmmodels.BlockExecutionNode{
+		{
+			ID:   "managed-validation",
+			Kind: llmcommon.RuntimeBlockKindManagedValidationSession,
+			Input: map[string]any{
+				"observation": map[string]any{
+					"command": "sh",
+					"args":    []any{"-c", "printf ok"},
+					"validationEvidence": map[string]any{
+						"mode":                 "runtime_behavior",
+						"observationType":      "runtime_observation",
+						"coverageWorkItemIds":  []any{"cwi-1"},
+						"structuredTargetRefs": []any{"cwi-1"},
+						"targetRefs":           []any{"cwi-1"},
+						"observedClaims":       []any{"managed validation observed behavior"},
+					},
+				},
+			},
+		},
+	}}
+	if err := validateExecutionGraph(graph); err != nil {
+		t.Fatalf("validateExecutionGraph = %v, want managed validation admitted by declared runtime capabilities", err)
 	}
 }
 

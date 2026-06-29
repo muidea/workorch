@@ -9,13 +9,14 @@ import (
 	"strings"
 	"time"
 
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (
-	managedValidationSessionNodeKind = "validation/managed_session"
+	managedValidationSessionNodeKind = llmcommon.RuntimeBlockKindManagedValidationSession
 	managedValidationTimeoutMillis   = 60000
 )
 
@@ -295,9 +296,7 @@ func finalizeManagedValidationResourcesForStep(step *runModel.Step, finalStatus 
 	for idx := range resources {
 		resource := resources[idx]
 		status := strings.TrimSpace(stringFromMap(resource, "status"))
-		switch status {
-		case "", "pending":
-		default:
+		if managedValidationResourceStatusTerminal(status) {
 			continue
 		}
 		resource["status"] = finalStatus
@@ -334,6 +333,15 @@ func finalizeManagedValidationResourcesForStep(step *runModel.Step, finalStatus 
 		step.Input["managedValidation"] = managed
 	}
 	return true
+}
+
+func managedValidationResourceStatusTerminal(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "released", "failed", "skipped", "cleanup_failed", "cleanup_skipped", "removed":
+		return true
+	default:
+		return false
+	}
 }
 
 func (o *RuntimeOrchestrator) finalizeManagedValidationResourcesForRun(ctx context.Context, run *runModel.Run, finalStatus string, finalizedBy string) error {

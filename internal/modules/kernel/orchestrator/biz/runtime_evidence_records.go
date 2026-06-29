@@ -285,19 +285,59 @@ func runtimeStepCoverageScopeMetadata(step *runModel.Step) map[string]any {
 	}
 	input := step.Input
 	output := step.Output
+	requiredOutputs := []map[string]any{
+		mapFromValue(input["requiredOutput"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+	}
+	focusPayloads := []map[string]any{
+		mapFromValue(input["coverageFocus"]),
+		mapFromValue(mapFromValue(input["coverageWorkItemContext"])["currentFocus"]),
+		mapFromValue(mapFromValue(input["acceptance"])["currentFocus"]),
+	}
 	addString("coverageFocusId", firstNonEmptyString(stringFromMap(input, "coverageFocusId"), stringFromMap(output, "coverageFocusId")))
-	addStrings("coverageWorkItemIds", append(stringSliceFromValue(input["coverageWorkItemIds"]), stringSliceFromValue(output["coverageWorkItemIds"])...))
+	coverageWorkItemIDs := append(stringSliceFromValue(input["coverageWorkItemIds"]), stringSliceFromValue(output["coverageWorkItemIds"])...)
 	addStrings("coverageTargets", runtimeStepCoverageTargetRefs(step))
 	addString("targetRef", firstNonEmptyString(stringFromMap(input, "targetRef"), stringFromMap(output, "targetRef")))
 	evidence := coverageValidationEvidenceMetadataFromStep(step)
+	coverageWorkItemIDs = append(coverageWorkItemIDs, stringSliceFromValue(evidence["coverageWorkItemIds"])...)
+	for _, payload := range requiredOutputs {
+		coverageWorkItemIDs = append(coverageWorkItemIDs, stringSliceFromValue(payload["coverageWorkItemIds"])...)
+	}
+	for _, payload := range focusPayloads {
+		coverageWorkItemIDs = append(coverageWorkItemIDs, stringSliceFromValue(payload["coverageWorkItemIds"])...)
+		if id := strings.TrimSpace(stringFromMap(payload, "id")); strings.HasPrefix(id, "cwi-") {
+			coverageWorkItemIDs = append(coverageWorkItemIDs, id)
+		}
+	}
+	addStrings("coverageWorkItemIds", coverageWorkItemIDs)
 	rawTargetRefs := append(stringSliceFromValue(input["targetRefs"]), stringSliceFromValue(output["targetRefs"])...)
 	rawTargetRefs = append(rawTargetRefs, coverageValidationTargetRefsFromEvidence(evidence)...)
+	for _, payload := range requiredOutputs {
+		rawTargetRefs = append(rawTargetRefs, stringSliceFromValue(payload["targetRefs"])...)
+		rawTargetRefs = append(rawTargetRefs, stringSliceFromValue(payload["structuredTargetRefs"])...)
+	}
+	for _, payload := range focusPayloads {
+		rawTargetRefs = append(rawTargetRefs, stringSliceFromValue(payload["targetRefs"])...)
+		rawTargetRefs = append(rawTargetRefs, stringSliceFromValue(payload["structuredTargetRefs"])...)
+	}
 	addStrings("targetRefs", coverageStructuredBindingRefsFromValue(rawTargetRefs))
-	addStrings("structuredTargetRefs", compactUniqueStrings(append(
+	structuredTargetRefs := append(
 		append(coverageStructuredBindingRefsFromValue(input["structuredTargetRefs"]), coverageStructuredBindingRefsFromValue(output["structuredTargetRefs"])...),
 		coverageValidationStructuredTargetRefsFromEvidence(evidence)...,
-	)))
-	addStrings("observedClaims", coverageObservedClaimsFromEvidence(evidence))
+	)
+	for _, payload := range requiredOutputs {
+		structuredTargetRefs = append(structuredTargetRefs, coverageStructuredBindingRefsFromValue(payload["structuredTargetRefs"])...)
+	}
+	for _, payload := range focusPayloads {
+		structuredTargetRefs = append(structuredTargetRefs, coverageStructuredBindingRefsFromValue(payload["structuredTargetRefs"])...)
+	}
+	addStrings("structuredTargetRefs", compactUniqueStrings(structuredTargetRefs))
+	observedClaims := coverageObservedClaimsFromEvidence(evidence)
+	for _, payload := range requiredOutputs {
+		observedClaims = append(observedClaims, stringSliceFromValue(payload["observedClaims"])...)
+	}
+	addStrings("observedClaims", observedClaims)
 	addString("mode", stringFromMap(evidence, "mode"))
 	addString("observationType", stringFromMap(evidence, "observationType"))
 	addString("proofKind", firstNonEmptyString(stringFromMap(evidence, "proofKind"), stringFromMap(evidence, "mode")))

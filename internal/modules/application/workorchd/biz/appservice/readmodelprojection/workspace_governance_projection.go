@@ -26,9 +26,21 @@ func NormalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnap
 	if openDecisionID == "" && snapshot.Run != nil {
 		openDecisionID = openDecisionBlockerID(snapshot.Decisions, snapshot.Workspace.ID, activeRunID, snapshot.Run.BlockingTicketID)
 	}
+	if openDecisionID == "" && snapshot.Run != nil && strings.TrimSpace(snapshot.Run.State) == string(common.RunStateBlockedOnDecision) {
+		if candidate := firstNonEmptyProjectionString(snapshot.Run.BlockingTicketID, snapshot.Workspace.BlockingTicketID); candidate != "" &&
+			!hasNonOpenDecisionBlocker(snapshot.Decisions, snapshot.Workspace.ID, activeRunID, candidate) {
+			openDecisionID = candidate
+		}
+	}
 	openApprovalID := openApprovalBlockerID(snapshot.Approvals, snapshot.Workspace.ID, activeRunID, snapshot.Workspace.BlockingApprovalID)
 	if openApprovalID == "" && snapshot.Run != nil {
 		openApprovalID = openApprovalBlockerID(snapshot.Approvals, snapshot.Workspace.ID, activeRunID, snapshot.Run.BlockingApprovalID)
+	}
+	if openApprovalID == "" && snapshot.Run != nil && strings.TrimSpace(snapshot.Run.State) == string(common.RunStateBlockedOnApproval) {
+		if candidate := firstNonEmptyProjectionString(snapshot.Run.BlockingApprovalID, snapshot.Workspace.BlockingApprovalID); candidate != "" &&
+			!hasNonPendingApprovalBlocker(snapshot.Approvals, snapshot.Workspace.ID, activeRunID, candidate) {
+			openApprovalID = candidate
+		}
 	}
 
 	snapshot.Workspace.BlockingTicketID = openDecisionID
@@ -59,7 +71,42 @@ func NormalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnap
 			snapshot.Workspace.State = string(common.WorkspaceStateActive)
 		}
 	}
+	if openDecisionID != "" {
+		snapshot.Workspace.State = string(common.WorkspaceStateWaitingDecision)
+	} else if openApprovalID != "" {
+		snapshot.Workspace.State = string(common.WorkspaceStateBlocked)
+	}
 	return snapshot
+}
+
+func hasNonOpenDecisionBlocker(items []readmodelcore.Decision, workspaceID, runID, ticketID string) bool {
+	workspaceID = strings.TrimSpace(workspaceID)
+	runID = strings.TrimSpace(runID)
+	ticketID = strings.TrimSpace(ticketID)
+	for _, item := range items {
+		if strings.TrimSpace(item.ID) == ticketID &&
+			strings.TrimSpace(item.WorkspaceID) == workspaceID &&
+			strings.TrimSpace(item.RunID) == runID &&
+			strings.TrimSpace(item.State) != string(common.DecisionTicketStateOpen) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasNonPendingApprovalBlocker(items []readmodelcore.Approval, workspaceID, runID, approvalID string) bool {
+	workspaceID = strings.TrimSpace(workspaceID)
+	runID = strings.TrimSpace(runID)
+	approvalID = strings.TrimSpace(approvalID)
+	for _, item := range items {
+		if strings.TrimSpace(item.ID) == approvalID &&
+			strings.TrimSpace(item.WorkspaceID) == workspaceID &&
+			strings.TrimSpace(item.RunID) == runID &&
+			strings.TrimSpace(item.State) != string(common.ApprovalStatePending) {
+			return true
+		}
+	}
+	return false
 }
 
 func openDecisionBlockerID(items []readmodelcore.Decision, workspaceID, runID, preferredID string) string {

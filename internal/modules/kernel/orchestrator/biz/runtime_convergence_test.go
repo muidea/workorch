@@ -15,6 +15,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestMain(m *testing.M) {
@@ -1923,6 +1924,52 @@ func TestApplyConvergenceContractNeedStateChangeRestoresRequiredOutput(t *testin
 	}
 }
 
+func TestApplyConvergenceContractNeedStateChangeClearsStaleEvidenceAcquisitionPackage(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyStagePacket: map[string]any{
+			"requiredOutput": evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
+		},
+		"repairActionPackage": map[string]any{
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"evidenceAcquisitionRequired":     true,
+			"concreteFailureEvidenceRequired": true,
+			"evidenceAcquisitionReason":       "old diagnostic lineage",
+			"requiredOutput":                  evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
+		},
+	}
+	contract := ConvergenceContract{
+		State:                       convergenceStateNeedStateChange,
+		RuntimeStage:                runtimeStageRepair,
+		RuntimeStageMode:            "strict_convergence",
+		RepairObjective:             repairObjectiveStateChangingOutput,
+		StateChangingOutputRequired: true,
+		RepairActionPackage: map[string]any{
+			"repairObjective":             repairObjectiveAcquireFailureEvidence,
+			"evidenceAcquisitionRequired": true,
+			"requiredOutput":              evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
+		},
+	}
+
+	applied := ApplyConvergenceContract(input, contract)
+
+	pkg := mapFromValue(applied["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	stageRequired := mapFromValue(mapFromValue(applied[stepInputKeyStagePacket])["requiredOutput"])
+	if stringFromMap(pkg, "repairObjective") != repairObjectiveStateChangingOutput ||
+		boolValue(pkg["evidenceAcquisitionRequired"]) ||
+		boolValue(pkg["concreteFailureEvidenceRequired"]) {
+		t.Fatalf("repairActionPackage = %+v, want current state-changing package without stale evidence acquisition fields", pkg)
+	}
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		boolValue(required["mustProduceConcreteFailureEvidence"]) {
+		t.Fatalf("requiredOutput = %+v, want state-changing output only", required)
+	}
+	if !boolValue(mapFromValue(applied["requiredOutput"])["mustIncludeStateChangingNode"]) ||
+		!boolValue(stageRequired["mustIncludeStateChangingNode"]) {
+		t.Fatalf("requiredOutput top=%+v stage=%+v, want synchronized state-changing required output", applied["requiredOutput"], stageRequired)
+	}
+}
+
 func TestBuildConvergenceContractNeedStateChangeRestoresRequiredOutput(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:      runtimeStageRepair,
@@ -2191,6 +2238,54 @@ func TestApplyConvergenceContractNeedEvidenceRemovesStateChangingRequirement(t *
 		!boolValue(required["mustDeclareCoverageTargets"]) ||
 		stringFromMap(required, "coverageTargetMatchRule") == "" {
 		t.Fatalf("requiredOutput = %#v, want coverage focus contract preserved", required)
+	}
+}
+
+func TestApplyConvergenceContractNeedValidationClearsStaleStateChangeAndEvidencePackage(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyStagePacket: map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+		"repairActionPackage": map[string]any{
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"stateChangingOutputRequired":     true,
+			"evidenceAcquisitionRequired":     true,
+			"concreteFailureEvidenceRequired": true,
+			"requiredOutput":                  stateChangingRepairRequiredOutput(),
+		},
+	}
+	contract := ConvergenceContract{
+		State:            convergenceStateNeedValidation,
+		RuntimeStage:     runtimeStageVerification,
+		RuntimeStageMode: "strict_convergence",
+		RepairObjective:  repairObjectiveConcreteValidationEvidence,
+		RepairActionPackage: map[string]any{
+			"repairObjective":             repairObjectiveAcquireFailureEvidence,
+			"stateChangingOutputRequired": true,
+			"evidenceAcquisitionRequired": true,
+			"requiredOutput":              stateChangingRepairRequiredOutput(),
+		},
+	}
+
+	applied := ApplyConvergenceContract(input, contract)
+
+	pkg := mapFromValue(applied["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	stageRequired := mapFromValue(mapFromValue(applied[stepInputKeyStagePacket])["requiredOutput"])
+	if stringFromMap(pkg, "repairObjective") != repairObjectiveConcreteValidationEvidence ||
+		boolValue(pkg["stateChangingOutputRequired"]) ||
+		boolValue(pkg["evidenceAcquisitionRequired"]) ||
+		boolValue(pkg["concreteFailureEvidenceRequired"]) {
+		t.Fatalf("repairActionPackage = %+v, want current validation package without stale state-change/evidence fields", pkg)
+	}
+	if !boolValue(required["mustProduceConcreteValidationEvidence"]) ||
+		boolValue(required["mustProduceConcreteFailureEvidence"]) ||
+		boolValue(required["mustIncludeStateChangingNode"]) {
+		t.Fatalf("requiredOutput = %+v, want concrete validation output only", required)
+	}
+	if !boolValue(mapFromValue(applied["requiredOutput"])["mustProduceConcreteValidationEvidence"]) ||
+		!boolValue(stageRequired["mustProduceConcreteValidationEvidence"]) {
+		t.Fatalf("requiredOutput top=%+v stage=%+v, want synchronized validation required output", applied["requiredOutput"], stageRequired)
 	}
 }
 
@@ -5383,5 +5478,53 @@ func TestBuildConvergenceContractStateChangeUsesExistingTargetSnapshot(t *testin
 	}
 	if !boolValue(required["mustUseCurrentTargetSnapshot"]) {
 		t.Fatalf("requiredOutput = %+v, want direct snapshot patch contract", required)
+	}
+}
+
+func TestValidateConvergenceDispatchRejectsStaleEvidencePackageForStateChange(t *testing.T) {
+	required := map[string]any{
+		"mustIncludeStateChangingNode": true,
+		"acceptedKinds":                []string{"patch/apply"},
+	}
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeStateChange}},
+		"convergenceContract": map[string]any{
+			"state":                       convergenceStateNeedStateChange,
+			"stateChangingOutputRequired": true,
+		},
+		"stateChangingOutputRequired": true,
+		"requiredOutput":              cloneStepPayload(required),
+		stepInputKeyStagePacket:       map[string]any{"requiredOutput": cloneStepPayload(required)},
+		"repairActionPackage": map[string]any{
+			"repairObjective":             repairObjectiveAcquireFailureEvidence,
+			"evidenceAcquisitionRequired": true,
+			"requiredOutput":              cloneStepPayload(required),
+		},
+	}
+
+	if err := validateConvergenceDispatchInput(input); err == nil {
+		t.Fatal("validateConvergenceDispatchInput succeeded, want stale evidence package rejection")
+	}
+}
+
+func TestValidateConvergenceDispatchRejectsStaleStateChangePackageForValidation(t *testing.T) {
+	required := concreteValidationEvidenceRequiredOutput(nil)
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeValidate}},
+		"convergenceContract": map[string]any{
+			"state": convergenceStateNeedValidation,
+		},
+		"boundedValidationRequired": true,
+		"requiredOutput":            cloneStepPayload(required),
+		stepInputKeyStagePacket:     map[string]any{"requiredOutput": cloneStepPayload(required)},
+		"repairActionPackage": map[string]any{
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"requiredOutput":              cloneStepPayload(required),
+		},
+	}
+
+	if err := validateConvergenceDispatchInput(input); err == nil {
+		t.Fatal("validateConvergenceDispatchInput succeeded, want stale state-change package rejection")
 	}
 }

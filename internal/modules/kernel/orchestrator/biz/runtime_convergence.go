@@ -1787,7 +1787,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 			required = enforceStateChangingRequiredOutputForConvergence(pkg, input)
 			addStrategyReassessmentRequiredOutputContract(pkg, required)
 		}
-		input["repairActionPackage"] = pkg
+		normalizeStateChangingCurrentActionPackage(input, pkg, required)
 	case convergenceStateNeedValidation:
 		setRuntimeStage(input, runtimeStageVerification)
 		input[stepInputKeySoulStage] = soulStageValidation
@@ -1830,9 +1830,8 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 			required["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(required["forbiddenKinds"]), "repeat_same_failed_patch"))
 			pkg["forbiddenActions"] = repairActionForbiddenActions(input, pkg)
 		}
-		pkg["requiredOutput"] = required
 		stripRepairActionPackageImplementationTargetEvidence(pkg)
-		input["repairActionPackage"] = pkg
+		normalizeValidationCurrentActionPackage(input, pkg, required)
 	case convergenceStateNeedAssessment:
 		setRuntimeStage(input, runtimeStageVerification)
 		input[stepInputKeySoulStage] = soulStageValidation
@@ -1869,6 +1868,61 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		}
 	}
 	return input
+}
+
+func normalizeStateChangingCurrentActionPackage(input map[string]any, pkg map[string]any, required map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	if pkg == nil {
+		pkg = map[string]any{}
+	}
+	pkg["repairObjective"] = repairObjectiveStateChangingOutput
+	pkg["stateChangingOutputRequired"] = true
+	for _, key := range []string{
+		"evidenceAcquisitionRequired",
+		"concreteFailureEvidenceRequired",
+		"evidenceAcquisitionReason",
+		"boundedValidationRequired",
+		"evidenceRepairRequired",
+		"outputDecisionContract",
+		"exitCriteria",
+	} {
+		delete(pkg, key)
+	}
+	if len(required) == 0 {
+		required = stateChangingRepairRequiredOutput()
+	}
+	pkg["requiredOutput"] = cloneStepPayload(required)
+	input["repairActionPackage"] = pkg
+	currentActionSetRequiredOutput(input, required)
+}
+
+func normalizeValidationCurrentActionPackage(input map[string]any, pkg map[string]any, required map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	if pkg == nil {
+		pkg = map[string]any{}
+	}
+	pkg["repairObjective"] = repairObjectiveConcreteValidationEvidence
+	pkg["boundedValidationRequired"] = true
+	for _, key := range []string{
+		"stateChangingOutputRequired",
+		"evidenceAcquisitionRequired",
+		"concreteFailureEvidenceRequired",
+		"evidenceAcquisitionReason",
+		"outputDecisionContract",
+		"exitCriteria",
+	} {
+		delete(pkg, key)
+	}
+	if len(required) == 0 {
+		required = concreteValidationEvidenceRequiredOutputWithScratch(input, pkg, nil)
+	}
+	pkg["requiredOutput"] = cloneStepPayload(required)
+	input["repairActionPackage"] = pkg
+	currentActionSetRequiredOutput(input, required)
 }
 
 func syncConvergenceNextActionWithContract(input map[string]any, contract ConvergenceContract) {

@@ -4065,6 +4065,20 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 			Description: "Get an explicitly allowed MCP prompt from a configured server.",
 			Input:       map[string]any{"serverId": "string", "prompt": "string", "arguments": "object"},
 		},
+		{
+			Kind:        llmcommon.RuntimeBlockKindManagedValidationSession,
+			Description: "Run one runtime-managed bounded validation session with optional port allocation, validation scratch ownership, timeout enforcement, and process cleanup. The observation must declare validationEvidence metadata for the current coverage focus.",
+			Input: map[string]any{
+				"allocatePort": "boolean",
+				"observation": map[string]any{
+					"command":            "string",
+					"args":               "[]string",
+					"timeoutMillis":      "number",
+					"validationEvidence": "object",
+				},
+				"validationScratchDir": "runtime-owned absolute scratch directory",
+			},
+		},
 	}
 	blockKinds = appendGitRuntimeCapabilities(blockKinds)
 	return llmmodels.RuntimeCapabilities{

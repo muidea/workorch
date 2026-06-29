@@ -247,6 +247,44 @@ func TestStoreReplaceWorkspaceListSynchronizesDetailWorkspaceState(t *testing.T)
 	}
 }
 
+func TestStoreReplaceWorkspaceListPreservesSnapshotGovernanceAuthority(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {
+			Workspace: readmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
+			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision), BlockingTicketID: "ticket-a"},
+			Decisions: []readmodelcore.Decision{{
+				ID:          "ticket-a",
+				WorkspaceID: "ws-a",
+				RunID:       "run-a",
+				State:       string(common.DecisionTicketStateOpen),
+			}},
+		},
+	}, nil)
+
+	store.ReplaceWorkspaceList([]appmodelcore.Workspace{{ID: "ws-a", State: "active", ActiveRunID: "run-a"}}, nil)
+
+	items, _, err := store.List()
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
+	}
+	if len(items) != 1 ||
+		items[0].State != string(common.WorkspaceStateWaitingDecision) ||
+		items[0].BlockingTicketID != "ticket-a" ||
+		items[0].ViewModel.PromptMode != "decision" {
+		t.Fatalf("list workspace = %+v, want decision projection from snapshot governance", items)
+	}
+	snapshot, _, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get snapshot: %v", err)
+	}
+	if snapshot.Workspace.State != string(common.WorkspaceStateWaitingDecision) ||
+		snapshot.Workspace.BlockingTicketID != "ticket-a" ||
+		snapshot.ViewModel.PromptMode != "decision" {
+		t.Fatalf("snapshot workspace = %+v viewModel = %+v, want decision projection", snapshot.Workspace, snapshot.ViewModel)
+	}
+}
+
 func TestStoreMarksStaleWithSourceEventRevision(t *testing.T) {
 	store := NewStore()
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{

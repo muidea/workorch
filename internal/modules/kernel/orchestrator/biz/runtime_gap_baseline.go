@@ -748,6 +748,24 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 	}
 	state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state"))
 	nextAction := strings.TrimSpace(convergenceNextActionKind(nil, input))
+	pkg := mapFromValue(input["repairActionPackage"])
+	pkgObjective := strings.TrimSpace(stringFromMap(pkg, "repairObjective"))
+	if state == convergenceStateNeedStateChange {
+		if pkgObjective == repairObjectiveAcquireFailureEvidence || boolValue(pkg["evidenceAcquisitionRequired"]) {
+			appendAuthorityDiagnostic(input, "repair_action_package_mismatch_next_action", "error", "internal_authority_mismatch", "repairActionPackage", "state_change action cannot expose failure-evidence acquisition as current repairActionPackage")
+			return convergenceDispatchMisalignmentError("repairActionPackage contradicts state_change current action")
+		}
+	}
+	if state == convergenceStateNeedValidation {
+		if pkgObjective == repairObjectiveAcquireFailureEvidence || boolValue(pkg["evidenceAcquisitionRequired"]) {
+			appendAuthorityDiagnostic(input, "repair_action_package_mismatch_next_action", "error", "internal_authority_mismatch", "repairActionPackage", "validation action cannot expose failure-evidence acquisition as current repairActionPackage")
+			return convergenceDispatchMisalignmentError("repairActionPackage contradicts validation current action")
+		}
+		if pkgObjective == repairObjectiveStateChangingOutput || boolValue(pkg["stateChangingOutputRequired"]) {
+			appendAuthorityDiagnostic(input, "repair_action_package_mismatch_next_action", "error", "internal_authority_mismatch", "repairActionPackage", "validation action cannot expose state-changing output as current repairActionPackage")
+			return convergenceDispatchMisalignmentError("repairActionPackage contradicts validation current action")
+		}
+	}
 	top := firstRequiredOutputForSemantics(sources)
 	if len(top) == 0 {
 		return nil

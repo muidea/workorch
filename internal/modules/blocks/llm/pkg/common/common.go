@@ -10,13 +10,14 @@ const ExecutionContextLLMProviderID = "llmProviderId"
 const DefaultProviderID = "default"
 
 const (
-	RuntimeBlockKindPatchApply      = "patch/apply"
-	RuntimeBlockKindPatchPreview    = "patch/preview"
-	RuntimeBlockKindPatchRevert     = "patch/revert"
-	RuntimeBlockKindDecisionRequest = "decision/request"
-	RuntimeBlockKindApprovalRequest = "approval/request"
-	RuntimeBlockKindMemoryWrite     = "memory/write"
-	RuntimeBlockKindDoDAssessment   = "dod/assessment"
+	RuntimeBlockKindPatchApply               = "patch/apply"
+	RuntimeBlockKindPatchPreview             = "patch/preview"
+	RuntimeBlockKindPatchRevert              = "patch/revert"
+	RuntimeBlockKindManagedValidationSession = "validation/managed_session"
+	RuntimeBlockKindDecisionRequest          = "decision/request"
+	RuntimeBlockKindApprovalRequest          = "approval/request"
+	RuntimeBlockKindMemoryWrite              = "memory/write"
+	RuntimeBlockKindDoDAssessment            = "dod/assessment"
 )
 
 const (

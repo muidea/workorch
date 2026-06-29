@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -175,6 +177,89 @@ func TestRuntimeStepCoverageScopeMetadataSeparatesStructuredTargetRefs(t *testin
 	}
 	if claims := stringSliceFromValue(scope["observedClaims"]); !stringSliceContains(claims, "runtime behavior observed") {
 		t.Fatalf("observedClaims = %+v, want validation evidence claim", claims)
+	}
+}
+
+func TestRuntimeStepCoverageScopeMetadataFallsBackToCurrentRequiredOutputFocus(t *testing.T) {
+	step := &runmodel.Step{
+		ID: "run-1/graph-1/001-validate-current-focus",
+		Input: map[string]any{
+			stepInputKeyStagePacket: map[string]any{
+				"requiredOutput": map[string]any{
+					"coverageWorkItemIds":                   []string{"cwi-085"},
+					"structuredTargetRefs":                  []string{"cwi-085", "deliverable:source"},
+					"targetRefs":                            []string{"source_change"},
+					"observedClaims":                        []string{"runtime behavior was observed for the declared coverage focus"},
+					"mustProduceConcreteValidationEvidence": true,
+				},
+			},
+			"coverageFocus": map[string]any{
+				"id":                  "cwi-085",
+				"coverageWorkItemIds": []string{"cwi-085"},
+				"structuredTargetRefs": []string{
+					"cwi-085",
+					"deliverable:source",
+				},
+			},
+		},
+		Output: map[string]any{
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+			},
+		},
+	}
+
+	scope := runtimeStepCoverageScopeMetadata(step)
+	if ids := stringSliceFromValue(scope["coverageWorkItemIds"]); !stringSliceContains(ids, "cwi-085") {
+		t.Fatalf("coverageWorkItemIds = %+v, want current focus id", ids)
+	}
+	if refs := stringSliceFromValue(scope["structuredTargetRefs"]); !stringSliceContains(refs, "deliverable:source") {
+		t.Fatalf("structuredTargetRefs = %+v, want requiredOutput/focus refs", refs)
+	}
+	if claims := stringSliceFromValue(scope["observedClaims"]); !stringSliceContains(claims, "runtime behavior was observed for the declared coverage focus") {
+		t.Fatalf("observedClaims = %+v, want requiredOutput observed claim", claims)
+	}
+}
+
+func TestFinalizeManagedValidationResourcesReleasesActiveScratch(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TMPDIR", root)
+	scratch := filepath.Join(root, "workorch-validation-scratch", "ws-a", "run-a", "step-a")
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
+		t.Fatalf("mkdir scratch: %v", err)
+	}
+	step := &runmodel.Step{
+		ID: "step-a",
+		Input: map[string]any{
+			"validationResources": []map[string]any{{
+				"id":     "ws-a:run-a:step-a:scratch_dir",
+				"kind":   "scratch_dir",
+				"path":   scratch,
+				"status": "active",
+			}},
+			"validationResourceOwnership": map[string]any{
+				"persisted": true,
+			},
+			"managedValidation": map[string]any{
+				"runtimeManaged": true,
+			},
+		},
+	}
+
+	if !finalizeManagedValidationResourcesForStep(step, "failed", "contract_violation") {
+		t.Fatal("finalizeManagedValidationResourcesForStep returned false")
+	}
+	resources := mapSliceFromValue(step.Input["validationResources"])
+	if len(resources) != 1 || stringFromMap(resources[0], "status") != "failed" || stringFromMap(resources[0], "cleanupStatus") != "removed" {
+		t.Fatalf("validationResources = %+v, want failed removed scratch", resources)
+	}
+	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
+		t.Fatalf("scratch stat err = %v, want removed", err)
+	}
+	ownership := mapFromValue(step.Input["validationResourceOwnership"])
+	if ownership["finalized"] != true || stringFromMap(ownership, "finalizedBy") != "contract_violation" {
+		t.Fatalf("ownership = %+v, want finalized metadata", ownership)
 	}
 }
 
