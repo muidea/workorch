@@ -36,7 +36,14 @@ func applyRepairCoverageFocusContract(input map[string]any, pkg map[string]any, 
 	if len(workItemIDs) > 0 {
 		requiredOutput["coverageWorkItemIds"] = workItemIDs
 	}
+	if refs := compactUniqueStrings(append(
+		stringSliceFromValue(focus["structuredTargetRefs"]),
+		stringSliceFromValue(focus["targetRefs"])...,
+	)); len(refs) > 0 {
+		requiredOutput["structuredTargetRefs"] = refs
+	}
 	requiredOutput["coverageFocusBindingRule"] = "state-changing and validation repair outputs must declare coverageFocusId, focusId, coverageWorkItemIds, coverageWorkItemId, or coverageTargets matching repairActionPackage.coverageFocus"
+	applyValidationEvidenceExampleFocus(requiredOutput, focus, workItemIDs)
 }
 
 func reapplyRepairCoverageFocusContract(input map[string]any, pkg map[string]any) {
@@ -340,10 +347,60 @@ func validateRepairCoverageFocusGraphBinding(graph runtimemodel.BlockExecutionGr
 func repairGraphNodeShouldBindCoverageFocus(node runtimemodel.BlockExecutionNode) bool {
 	kind := canonicalRuntimeGraphNodeKind(node.Kind)
 	switch kind {
-	case "shell/command", "mcp/tool_call":
+	case "shell/command", "mcp/tool_call", managedValidationSessionNodeKind:
 		return true
 	default:
 		return stepKindCanProduceStateChangingEvidence(kind)
+	}
+}
+
+func applyValidationEvidenceExampleFocus(requiredOutput map[string]any, focus map[string]any, workItemIDs []string) {
+	if len(requiredOutput) == 0 || len(focus) == 0 {
+		return
+	}
+	targetRefs := compactUniqueStrings(append(
+		append([]string{}, stringSliceFromValue(focus["structuredTargetRefs"])...),
+		append(stringSliceFromValue(focus["targetRefs"]), workItemIDs...)...,
+	))
+	if len(targetRefs) == 0 {
+		return
+	}
+	claims := stringSliceFromValue(focus["observedClaims"])
+	if len(claims) == 0 {
+		claims = []string{"runtime behavior was observed for the declared coverage focus"}
+	}
+	apply := func(evidence map[string]any) {
+		if len(evidence) == 0 {
+			return
+		}
+		evidence["targetRefs"] = append([]string(nil), targetRefs...)
+		evidence["structuredTargetRefs"] = append([]string(nil), targetRefs...)
+		evidence["observedClaims"] = append([]string(nil), claims...)
+		if len(workItemIDs) > 0 {
+			evidence["coverageWorkItemIds"] = append([]string(nil), workItemIDs...)
+		}
+	}
+	if example := mapFromValue(requiredOutput["validationEvidenceNodeExample"]); len(example) > 0 {
+		input := mapFromValue(example["input"])
+		evidence := mapFromValue(input["validationEvidence"])
+		apply(evidence)
+		if len(evidence) > 0 {
+			input["validationEvidence"] = evidence
+			example["input"] = input
+			requiredOutput["validationEvidenceNodeExample"] = example
+		}
+	}
+	if example := mapFromValue(requiredOutput["managedValidationNodeExample"]); len(example) > 0 {
+		input := mapFromValue(example["input"])
+		observation := mapFromValue(input["observation"])
+		evidence := mapFromValue(observation["validationEvidence"])
+		apply(evidence)
+		if len(evidence) > 0 {
+			observation["validationEvidence"] = evidence
+			input["observation"] = observation
+			example["input"] = input
+			requiredOutput["managedValidationNodeExample"] = example
+		}
 	}
 }
 

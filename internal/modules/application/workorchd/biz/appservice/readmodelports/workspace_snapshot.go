@@ -13,7 +13,7 @@ func WorkspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, wo
 }
 
 func WorkspaceProjectionSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
-	return WorkspaceDetailSnapshot(ctx, readers, workspaceID, cachedRunSnapshot)
+	return WorkspaceSummarySnapshot(ctx, readers, workspaceID, cachedRunSnapshot)
 }
 
 func WorkspaceDetailSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -313,15 +312,7 @@ func (o *RuntimeOrchestrator) completeArtifactContinuationLLMStep(ctx context.Co
 	if o == nil || o.steps == nil || step == nil {
 		return nil
 	}
-	step.State = common.StepStateCompleted
-	step.Output = output
-	if err := o.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, output); err != nil {
-		return err
-	}
-	if err := o.persistCompletedStepState(ctx, run, step); err != nil {
-		return err
-	}
-	return o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
+	return o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output)
 }
 
 func assembleArtifactContinuation(ctx context.Context, repo repository.ArtifactContinuationRepository, item *orchestratormodel.ArtifactContinuation) (*orchestratormodel.ArtifactContinuationAssembledMetadata, string, error) {
@@ -858,20 +849,7 @@ func (o *RuntimeOrchestrator) completeInternalArtifactContinuationStep(
 	output map[string]any,
 	workspace *workspaceModel.Workspace,
 ) error {
-	step.State = common.StepStateCompleted
-	step.Output = output
-	if err := o.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, output); err != nil {
-		return err
-	}
-	if o.coverageLedger().updateFromCompletedStep(run, step, ctx) && o.runs != nil {
-		if err := o.persistRunProgressUpdate(ctx, run); err != nil {
-			return err
-		}
-	}
-	if err := o.persistCompletedStepState(ctx, run, step); err != nil {
-		return err
-	}
-	if err := o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged); err != nil {
+	if err := o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}
 	if step.Kind == artifactAssembleStepKind {

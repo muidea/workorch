@@ -47,6 +47,69 @@ func doDAssessmentEvidenceRefs(stepID common.StepID, assessment map[string]any) 
 	return ret
 }
 
+func completionAssessmentWithCurrentStepValidationEvidenceRef(assessment map[string]any, stepID common.StepID) map[string]any {
+	if assessment == nil || stepID == "" {
+		return assessment
+	}
+	stepRef := string(stepID)
+	validationRef := stepRef + "/validation/runtime-step"
+	ret := cloneStepPayload(assessment)
+	replaceRefs := func(item map[string]any) map[string]any {
+		if len(item) == 0 {
+			return item
+		}
+		refs := evidenceRefsFromValue(item["evidenceRefs"])
+		if len(refs) == 0 {
+			return item
+		}
+		nextRefs := make([]string, 0, len(refs)+1)
+		changed := false
+		for _, ref := range refs {
+			if strings.TrimSpace(ref) == stepRef {
+				nextRefs = append(nextRefs, validationRef)
+				changed = true
+				continue
+			}
+			nextRefs = append(nextRefs, ref)
+		}
+		if !changed {
+			return item
+		}
+		next := cloneStepPayload(item)
+		next["evidenceRefs"] = compactUniqueStrings(nextRefs)
+		return next
+	}
+	if items, ok := doDAssessmentItemMaps(ret["items"]); ok {
+		nextItems := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			nextItems = append(nextItems, replaceRefs(item))
+		}
+		ret["items"] = nextItems
+	}
+	for _, key := range []string{"goalCoverage", "goalOutcomeCoverage", "acceptanceDimensions", "dimensionCoverage", "deliverableCoverage", "deliverables", "producedArtifacts"} {
+		if mapped := mapFromValue(ret[key]); len(mapped) > 0 {
+			if items, ok := doDAssessmentItemMaps(mapped["items"]); ok {
+				nextMapped := cloneStepPayload(mapped)
+				nextItems := make([]map[string]any, 0, len(items))
+				for _, item := range items {
+					nextItems = append(nextItems, replaceRefs(item))
+				}
+				nextMapped["items"] = nextItems
+				ret[key] = nextMapped
+			}
+			continue
+		}
+		if items, ok := doDAssessmentItemMaps(ret[key]); ok {
+			nextItems := make([]map[string]any, 0, len(items))
+			for _, item := range items {
+				nextItems = append(nextItems, replaceRefs(item))
+			}
+			ret[key] = nextItems
+		}
+	}
+	return ret
+}
+
 func rejectedDoDAssessmentWithFallbackEvidenceRefs(stepID common.StepID, assessment map[string]any) map[string]any {
 	if assessment == nil {
 		return nil

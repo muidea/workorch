@@ -314,23 +314,7 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 		output[stepOutputKeyMemoryRefs] = memoryRefs
 	}
 
-	step.State = common.StepStateCompleted
 	step.Output = output
-	if err := o.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, output); err != nil {
-		return err
-	}
-	if o.coverageLedger().updateFromCompletedStep(run, step, ctx) && o.runs != nil {
-		if err := o.persistRunProgressUpdate(ctx, run); err != nil {
-			return err
-		}
-	}
-	if err := o.persistCompletedStepState(ctx, run, step); err != nil {
-		return err
-	}
-	if err := o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged); err != nil {
-		return err
-	}
-
 	nextStepID, nextKind := nextStepSpec(output)
 	if decisionSpec := decisionBlockSpec(output); decisionSpec.Reason != "" {
 		decisionSpec.Context = enrichDecisionContextWithReadableWorkspaceResources(ctx, o.workspaces, run, workspace, decisionSpec.Context, decisionSpec.Question, decisionSpec.Reason)
@@ -366,9 +350,6 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 				fmt.Errorf("%w: decision requests a continuable candidate choice", common.ErrInvalidArgument),
 			)
 		}
-		if nextStepID == "" && !o.graphManager().hasGraphContinuation(ctx, run, step) {
-			return o.FailRun(ctx, run.ID, fmt.Sprintf("runtime step %s blocked without next step", step.ID))
-		}
 		ticketID := decisionSpec.TicketID
 		if ticketID == "" {
 			ticketID = common.TicketID(runtimeChildID(step.ID, "decision"))
@@ -380,43 +361,82 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 		if err := o.resultManager().recordRejectedResultForDecisionBlock(ctx, run, step, output, decisionSpec); err != nil {
 			return err
 		}
+		if err := o.finalizeGovernedRuntimeStep(ctx, run, step, toolCall, output); err != nil {
+			return err
+		}
 		return o.blockOnDecisionAtStep(ctx, run, workspace, ticketID, step.ID)
 	}
 	if approvalSpec := approvalBlockSpec(output); approvalSpec.Reason != "" {
-		if nextStepID == "" && !o.graphManager().hasGraphContinuation(ctx, run, step) {
-			return o.FailRun(ctx, run.ID, fmt.Sprintf("runtime step %s blocked without next step", step.ID))
-		}
 		if approvalSpec.ApprovalID == "" {
 			approvalSpec.ApprovalID = common.ApprovalID(runtimeChildID(step.ID, "approval"))
 		}
 		if err := o.createApproval(ctx, run, step, approvalSpec.ApprovalID, approvalSpec.Reason, approvalSpec.Action, approvalSpec.Context); err != nil {
 			return err
 		}
+		if err := o.finalizeGovernedRuntimeStep(ctx, run, step, toolCall, output); err != nil {
+			return err
+		}
 		return o.blockOnApprovalAtStep(ctx, run, workspace, approvalSpec.ApprovalID, step.ID)
 	}
 	if graphBatchStep(step) {
+		if err := o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output); err != nil {
+			return err
+		}
 		return nil
 	}
 	if nextStepID != "" {
+		if err := o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output); err != nil {
+			return err
+		}
 		return o.RequestUniqueDispatchStep(ctx, run, nextStepID, nextKind, nextStepInputFromOutput(run, step), workspaceIDForDispatch(run, workspace))
 	}
 	if handled, err := o.validateGraphExpansionBoundary(ctx, run, step, toolCall, output, workspace); handled || err != nil {
 		return err
 	}
-	graphSpecs, graphSteps := o.graphManager().readyGraphStepSpecsWithSteps(ctx, run, step)
-	if len(graphSpecs) > 0 {
-		if input, ok := o.graphManager().concreteEvidenceAcquisitionFollowUpInputFromSteps(run, step, graphSteps); ok {
-			return o.RequestUniqueDispatchStep(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), input, workspaceIDForDispatch(run, workspace))
+	graphSpecs, graphSteps := []stepDispatchSpec(nil), []*runModel.Step(nil)
+	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok && len(graph.Nodes) > 0 {
+		if err := o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output); err != nil {
+			return err
 		}
-		return o.dispatchGraphStepBatchWithWorkspace(ctx, run, graphSpecs, workspace)
+		graphSpecs, graphSteps = o.graphManager().readyGraphStepSpecsWithSteps(ctx, run, step)
+		if len(graphSpecs) > 0 {
+			if input, ok := o.graphManager().concreteEvidenceAcquisitionFollowUpInputFromSteps(run, step, graphSteps); ok {
+				return o.RequestUniqueDispatchStep(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), input, workspaceIDForDispatch(run, workspace))
+			}
+			return o.dispatchGraphStepBatchWithWorkspace(ctx, run, graphSpecs, workspace)
+		}
+	} else {
+		graphSpecs, graphSteps = o.graphManager().readyGraphStepSpecsWithSteps(ctx, run, step)
+		if len(graphSpecs) > 0 {
+			if err := o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output); err != nil {
+				return err
+			}
+			if input, ok := o.graphManager().concreteEvidenceAcquisitionFollowUpInputFromSteps(run, step, graphSteps); ok {
+				return o.RequestUniqueDispatchStep(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), input, workspaceIDForDispatch(run, workspace))
+			}
+			return o.dispatchGraphStepBatchWithWorkspace(ctx, run, graphSpecs, workspace)
+		}
 	}
 	if o.graphManager().hasActiveGraphWork(ctx, run, step) {
+		if step.State != common.StepStateCompleted {
+			if err := o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	if handled, err := o.resumeArtifactContinuationAfterContextGraph(ctx, run, step, output, workspace); handled || err != nil {
+		if handled && err == nil {
+			if finalizeErr := o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output); finalizeErr != nil {
+				return finalizeErr
+			}
+		}
 		return err
 	}
 	if shouldDispatchGraphFollowUp(run, step, output) {
+		if err := o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output); err != nil {
+			return err
+		}
 		var input map[string]any
 		if len(graphSteps) > 0 {
 			input = o.graphManager().graphFollowUpStepInputFromSteps(run, step, graphSteps)
@@ -426,9 +446,15 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 		return o.RequestUniqueDispatchStep(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), input, workspaceIDForDispatch(run, workspace))
 	}
 	if shouldDispatchLLMCompletionFollowUp(run, step, output) {
+		if err := o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output); err != nil {
+			return err
+		}
 		return o.RequestUniqueDispatchStep(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.graphManager().llmCompletionFollowUpStepInput(ctx, run, step), workspaceIDForDispatch(run, workspace))
 	}
 	if shouldDispatchNoActionableContinuationFollowUp(run, step, output) {
+		if err := o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output); err != nil {
+			return err
+		}
 		return o.RequestUniqueDispatchStep(ctx, run, noActionableContinuationFollowUpStepID(run.ID, step), initialStepKind(run), o.graphManager().noActionableContinuationFollowUpStepInput(ctx, run, step), workspaceIDForDispatch(run, workspace))
 	}
 	if completionState := llmDecisionCompletionStateFromOutput(output); completionStateRequiresActionableContinuation(output, completionState) {
@@ -444,7 +470,7 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 	}
 	output = normalizeCompletionGateDoDAssessmentOutput(run, step, output)
 	var evidenceNormalizeErr error
-	output, evidenceNormalizeErr = normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, o.steps, o.evidence, run, output)
+	output, evidenceNormalizeErr = normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, o.steps, o.evidence, run, output, step)
 	if evidenceNormalizeErr != nil {
 		return evidenceNormalizeErr
 	}
@@ -479,6 +505,10 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 	if err := o.coverageLedger().validateReadyForAcceptance(run, ctx); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
+	if err := o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output); err != nil {
+		return err
+	}
+	assessment = completionAssessmentWithCurrentStepValidationEvidenceRef(assessment, step.ID)
 	if err := o.resultManager().recordCompletionEvidenceFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace); err != nil {
 		return err
 	}
@@ -503,6 +533,7 @@ func (o *RuntimeOrchestrator) persistLateRuntimeStepResultNotAccepted(
 	output := compactLateRuntimeResultNotAcceptedOutput(run, result.Output, execErr)
 	step.State = common.StepStateFailed
 	step.Output = output
+	finalizeManagedValidationResourcesForStep(step, "skipped", "late_result_not_accepted")
 	_ = o.recordToolCallFailed(ctx, toolCall, execErr, output)
 	if err := o.steps.Update(ctx, step); err != nil {
 		return err
@@ -903,9 +934,10 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 			}
 			if !boolValue(step.Input["assessmentOnlyContractCorrection"]) {
 				output["contractCorrectionStepDispatched"] = true
-				step.Output = output
-				_ = o.steps.Update(ctx, step)
 				input := assessmentOnlyContractCorrectionStepInput(step, output, err)
+				if finalizeErr := o.finalizeRejectedRuntimeStepForContinuation(ctx, run, step, toolCall, output, "runtime completion gate failed", err); finalizeErr != nil {
+					return true, finalizeErr
+				}
 				return true, o.RequestUniqueDispatchStep(ctx, run, assessmentOnlyContractCorrectionStepID(run.ID, step), initialStepKind(run), input, workspaceIDForDispatch(run, workspace))
 			}
 			return true, o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
@@ -916,7 +948,7 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 	}
 	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
 		if !stepRequiresConcreteFailureEvidenceAcquisition(step) && graphIsConcreteValidationEvidenceGraph(graph) {
-			count := o.graphManager().graphFollowUpConcreteValidationExpansionCount(ctx, run.ID)
+			count := o.graphManager().graphFollowUpConcreteValidationExpansionCountIncludingCandidate(ctx, run.ID, step, output)
 			if count <= maxGraphFollowUpExpansionAttempts {
 				return false, nil
 			}
@@ -926,7 +958,7 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 			return false, nil
 		}
 	}
-	count := o.graphManager().graphFollowUpExpansionCount(ctx, run.ID)
+	count := o.graphManager().graphFollowUpExpansionCountIncludingCandidate(ctx, run.ID, step, output)
 	if concreteValidationCount := int(int64FromValue(output["graphFollowUpExpansionCount"])); concreteValidationCount > count {
 		count = concreteValidationCount
 	}
@@ -937,12 +969,15 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 	output["graphFollowUpExpansionCount"] = count
 	output["graphFollowUpExpansionLimit"] = maxGraphFollowUpExpansionAttempts
 	output["ignoredExecutionGraph"] = true
-	step.Output = output
-	_ = o.steps.Update(ctx, step)
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {
 		return true, err
 	}
+	step.Output = output
 	input := o.graphManager().graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx, run, step, steps, count)
+	limitErr := fmt.Errorf("%w: graph follow-up expansion limit exceeded", common.ErrInvalidArgument)
+	if finalizeErr := o.finalizeRejectedRuntimeStepForContinuation(ctx, run, step, toolCall, output, "runtime completion gate failed", limitErr); finalizeErr != nil {
+		return true, finalizeErr
+	}
 	return true, o.RequestUniqueDispatchStep(ctx, run, graphExpansionLimitAssessmentFollowUpStepID(run.ID, step), initialStepKind(run), input, workspaceIDForDispatch(run, workspace))
 }

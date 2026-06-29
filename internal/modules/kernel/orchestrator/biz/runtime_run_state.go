@@ -206,6 +206,7 @@ func (o *RuntimeOrchestrator) closeLoadedRun(ctx context.Context, r *runModel.Ru
 	if !canCloseRunAs(r.State, state) {
 		return common.ErrConflict
 	}
+	_ = o.finalizeManagedValidationResourcesForRun(ctx, r, "released", "run_terminal")
 	if err := o.dismissOpenDecisionBlocker(ctx, r); err != nil {
 		return err
 	}

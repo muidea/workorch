@@ -1,7 +1,10 @@
 package orchestrator
 
 import (
+	"context"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -101,7 +104,7 @@ func applyManagedValidationObservationInput(input map[string]any) {
 	if len(observation) == 0 {
 		return
 	}
-	for _, key := range []string{"command", "args", "timeoutMillis", "targetRefs", "validationEvidence"} {
+	for _, key := range []string{"command", "args", "timeoutMillis", "coverageWorkItemIds", "structuredTargetRefs", "targetRefs", "observedClaims", "validationEvidence"} {
 		if input[key] == nil && observation[key] != nil {
 			input[key] = observation[key]
 		}
@@ -269,4 +272,100 @@ func managedValidationResourceID(workspaceID common.WorkspaceID, runID common.Ru
 		strings.TrimSpace(kind),
 	}
 	return strings.Join(parts, ":")
+}
+
+func finalizeManagedValidationResourcesForStep(step *runModel.Step, finalStatus string, finalizedBy string) bool {
+	if step == nil || len(step.Input) == 0 {
+		return false
+	}
+	resources := mapSliceFromValue(step.Input["validationResources"])
+	if len(resources) == 0 {
+		return false
+	}
+	finalStatus = strings.TrimSpace(finalStatus)
+	if finalStatus == "" {
+		finalStatus = "released"
+	}
+	finalizedBy = strings.TrimSpace(finalizedBy)
+	if finalizedBy == "" {
+		finalizedBy = "runtime_orchestrator"
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	changed := false
+	for idx := range resources {
+		resource := resources[idx]
+		status := strings.TrimSpace(stringFromMap(resource, "status"))
+		switch status {
+		case "", "pending":
+		default:
+			continue
+		}
+		resource["status"] = finalStatus
+		resource["finalizedAt"] = now
+		resource["finalizedBy"] = finalizedBy
+		if strings.TrimSpace(stringFromMap(resource, "kind")) == "scratch_dir" {
+			if cleanupStatus, cleanupErr := cleanupOwnedValidationScratch(resource); cleanupStatus != "" {
+				resource["cleanupStatus"] = cleanupStatus
+				if cleanupErr != "" {
+					resource["cleanupError"] = cleanupErr
+					resource["status"] = "cleanup_failed"
+				}
+			}
+		}
+		resources[idx] = resource
+		changed = true
+	}
+	if !changed {
+		return false
+	}
+	step.Input["validationResources"] = resources
+	ownership := mapFromValue(step.Input["validationResourceOwnership"])
+	if len(ownership) > 0 {
+		ownership["finalized"] = true
+		ownership["finalizedAt"] = now
+		ownership["finalizedBy"] = finalizedBy
+		step.Input["validationResourceOwnership"] = ownership
+	}
+	managed := mapFromValue(step.Input["managedValidation"])
+	if len(managed) > 0 {
+		managed["resourcesFinalized"] = true
+		managed["resourcesFinalizedAt"] = now
+		managed["resourcesFinalizedBy"] = finalizedBy
+		step.Input["managedValidation"] = managed
+	}
+	return true
+}
+
+func (o *RuntimeOrchestrator) finalizeManagedValidationResourcesForRun(ctx context.Context, run *runModel.Run, finalStatus string, finalizedBy string) error {
+	if o == nil || o.steps == nil || run == nil || run.ID == "" {
+		return nil
+	}
+	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	for _, step := range steps {
+		if !finalizeManagedValidationResourcesForStep(step, finalStatus, finalizedBy) {
+			continue
+		}
+		if err := o.steps.Update(ctx, step); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func cleanupOwnedValidationScratch(resource map[string]any) (string, string) {
+	path := strings.TrimSpace(stringFromMap(resource, "path"))
+	if path == "" {
+		return "", ""
+	}
+	root := normalizeValidationScratchDir(filepath.Join(os.TempDir(), "workorch-validation-scratch"))
+	if !validationScratchDirUnderRoot(path, root) {
+		return "skipped_outside_runtime_scratch_root", ""
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return "failed", err.Error()
+	}
+	return "removed", ""
 }

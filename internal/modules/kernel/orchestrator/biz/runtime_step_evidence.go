@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -98,6 +99,9 @@ func (o *RuntimeOrchestrator) recordToolCallCompleted(ctx context.Context, toolC
 }
 
 func (o *RuntimeOrchestrator) recordCompletedRuntimeStepEvidence(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any) error {
+	if step == nil || step.State != common.StepStateCompleted {
+		return fmt.Errorf("%w: completed runtime step evidence requires completed step state", common.ErrConflict)
+	}
 	evidenceRef := ""
 	if toolCall != nil {
 		evidenceRef = string(toolCall.ID)
@@ -117,6 +121,85 @@ func (o *RuntimeOrchestrator) recordCompletedRuntimeStepEvidence(ctx context.Con
 			return o.recordAcceptedTargetSnapshotEvidenceForStep(ctx, run, step)
 		},
 	)
+}
+
+func (o *RuntimeOrchestrator) finalizeAcceptedRuntimeStep(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any) error {
+	if run == nil || step == nil {
+		return common.ErrInvalidArgument
+	}
+	if step.State == common.StepStateFailed {
+		return fmt.Errorf("%w: runtime step %s is already failed", common.ErrConflict, step.ID)
+	}
+	step.State = common.StepStateCompleted
+	step.Output = output
+	finalizeManagedValidationResourcesForStep(step, "released", "accepted_step")
+	if err := o.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, output); err != nil {
+		return err
+	}
+	if o.coverageLedger().updateFromCompletedStep(run, step, ctx) && o.runs != nil {
+		if err := o.persistRunProgressUpdate(ctx, run); err != nil {
+			return err
+		}
+	}
+	if err := o.persistCompletedStepState(ctx, run, step); err != nil {
+		return err
+	}
+	return o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
+}
+
+func (o *RuntimeOrchestrator) finalizeGovernedRuntimeStep(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any) error {
+	if run == nil || step == nil {
+		return common.ErrInvalidArgument
+	}
+	if step.State == common.StepStateFailed {
+		return fmt.Errorf("%w: runtime step %s is already failed", common.ErrConflict, step.ID)
+	}
+	step.State = common.StepStateCompleted
+	step.Output = output
+	finalizeManagedValidationResourcesForStep(step, "released", "governed_step")
+	if err := o.recordToolCallCompleted(ctx, toolCall, output, runDialogLanguage(run)); err != nil {
+		return err
+	}
+	if err := o.persistCompletedStepState(ctx, run, step); err != nil {
+		return err
+	}
+	return o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
+}
+
+func (o *RuntimeOrchestrator) finalizeRejectedRuntimeStepForContinuation(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any, summary string, execErr error) error {
+	if run == nil || step == nil {
+		return common.ErrInvalidArgument
+	}
+	step.State = common.StepStateFailed
+	step.Output = runtimeFailureOutput(outputWithDoDAssessmentDiagnostics(output), execErr)
+	finalizeManagedValidationResourcesForStep(step, "failed", "rejected_continuation")
+	attachContractViolationType(step.Output, execErr)
+	attachRuntimeFailureStage(step.Output, summary)
+	classification := classifyRuntimeFailure(step, step.Output, summary, execErr)
+	attachRuntimeFailureClassification(step.Output, classification)
+	attachRuntimeFailureDiagnostics(step, classification, execErr)
+	attachContractViolationDiagnostics(run, step, execErr)
+	errText := errorString(execErr)
+	if err := o.recordRejectedDiagnosticEvidenceForContractViolation(ctx, run, step); err != nil {
+		return err
+	}
+	_ = o.recordToolCallFailed(ctx, toolCall, execErr, step.Output)
+	evidenceRef := ""
+	if toolCall != nil {
+		evidenceRef = string(toolCall.ID)
+	}
+	_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, summary, evidenceRef, errText)
+	if o.coverageLedger().updateFromFailedStep(run, step, errText, ctx) && o.runs != nil {
+		_ = o.persistRunProgressUpdate(ctx, run)
+	}
+	if err := o.steps.Update(ctx, step); err != nil {
+		return err
+	}
+	if err := o.checkpointManager().recordStepCheckpoint(ctx, run, step, "step_failed"); err != nil {
+		return err
+	}
+	_ = o.eventPublisher().publishContractViolationRecorded(ctx, run, step)
+	return o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
 }
 
 func (o *RuntimeOrchestrator) persistCompletedStepState(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
@@ -217,13 +300,21 @@ func (o *RuntimeOrchestrator) recordValidationResult(
 	}
 	now := runtimeEvidenceTimestamp()
 	quality := runtimeStepEvidenceQuality(run, step, state, step.Output)
+	scope := runtimeStepCoverageScopeMetadata(step)
+	targetRef := firstNonEmptyString(
+		stringFromMap(scope, "targetRef"),
+		firstStringFromSlice(stringSliceFromValue(scope["targetRefs"])),
+		firstStringFromSlice(stringSliceFromValue(scope["structuredTargetRefs"])),
+		firstStringFromSlice(stringSliceFromValue(scope["coverageWorkItemIds"])),
+		string(step.ID),
+	)
 	item := &runModel.ValidationResult{
 		ID:              common.ValidationResultID(fmt.Sprintf("%s/validation/runtime-step", step.ID)),
 		WorkspaceID:     run.WorkspaceID,
 		RunID:           run.ID,
 		StepID:          step.ID,
 		ValidationKind:  "runtime_step",
-		TargetRef:       string(step.ID),
+		TargetRef:       targetRef,
 		State:           state,
 		Summary:         summary,
 		EvidenceRef:     evidenceRef,

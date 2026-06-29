@@ -154,6 +154,7 @@ func projectWorkspaceSnapshotCompactFields(ret *readmodelcore.WorkspaceSnapshot)
 	if ret.Run != nil {
 		projected := compactWorkspaceSnapshotRun(*ret.Run)
 		ret.Run = &projected
+		ret.Runs = ensureWorkspaceSnapshotRunsInclude(ret.Runs, projected)
 	}
 	if len(ret.Runs) > 0 {
 		ret.Runs = compactWorkspaceSnapshotRuns(ret.Runs, ret.Workspace.ActiveRunID, workspaceSnapshotDetailRunLimit)
@@ -277,6 +278,19 @@ func projectTaskDecompositionNodeView(item readmodelcore.TaskDecompositionNode) 
 	item.CoverageTargets = compactStringSlice(item.CoverageTargets, workspaceSnapshotTraceSliceLimit)
 	item.Input = compactTraceValueMap(item.Input, 0)
 	return item
+}
+
+func ensureWorkspaceSnapshotRunsInclude(items []readmodelcore.Run, item readmodelcore.Run) []readmodelcore.Run {
+	if item.ID == "" {
+		return items
+	}
+	for idx := range items {
+		if items[idx].ID == item.ID {
+			items[idx] = item
+			return items
+		}
+	}
+	return append([]readmodelcore.Run{item}, items...)
 }
 
 func compactWorkspaceSnapshotRuns(items []readmodelcore.Run, activeRunID string, limit int) []readmodelcore.Run {

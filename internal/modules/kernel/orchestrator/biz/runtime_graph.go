@@ -177,33 +177,43 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		}
 		return nil
 	}
+	var firstErr error
 	if len(specs) == 1 {
-		return o.dispatchStepWithWorkspace(ctx, run, specs[0].ID, specs[0].Kind, specs[0].Input, workspace)
-	}
-
-	errCh := make(chan error, len(specs))
-	var wg sync.WaitGroup
-	for _, spec := range specs {
-		spec := spec
+		spec := specs[0]
 		spec.Input = cloneStepPayload(spec.Input)
 		if spec.Input == nil {
 			spec.Input = map[string]any{}
 		}
 		spec.Input[stepInputKeyGraphBatch] = true
-		runCopy := *run
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errCh <- o.dispatchStepWithWorkspace(ctx, &runCopy, spec.ID, spec.Kind, spec.Input, workspace)
-		}()
-	}
-	wg.Wait()
-	close(errCh)
-	var firstErr error
-	for err := range errCh {
-		if err != nil && !errors.Is(err, common.ErrConflict) {
-			if firstErr == nil {
-				firstErr = err
+		specs[0].Input = spec.Input
+		if err := o.dispatchStepWithWorkspace(ctx, run, spec.ID, spec.Kind, spec.Input, workspace); err != nil && !errors.Is(err, common.ErrConflict) {
+			firstErr = err
+		}
+	} else {
+		errCh := make(chan error, len(specs))
+		var wg sync.WaitGroup
+		for idx, spec := range specs {
+			spec := spec
+			spec.Input = cloneStepPayload(spec.Input)
+			if spec.Input == nil {
+				spec.Input = map[string]any{}
+			}
+			spec.Input[stepInputKeyGraphBatch] = true
+			specs[idx].Input = spec.Input
+			runCopy := *run
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				errCh <- o.dispatchStepWithWorkspace(ctx, &runCopy, spec.ID, spec.Kind, spec.Input, workspace)
+			}()
+		}
+		wg.Wait()
+		close(errCh)
+		for err := range errCh {
+			if err != nil && !errors.Is(err, common.ErrConflict) {
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 	}
@@ -260,7 +270,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		)
 	}
 	last.Output = normalizeCompletionGateDoDAssessmentOutput(currentRun, last, last.Output)
-	normalizedOutput, evidenceNormalizeErr := normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, o.steps, o.evidence, currentRun, last.Output)
+	normalizedOutput, evidenceNormalizeErr := normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, o.steps, o.evidence, currentRun, last.Output, last)
 	if evidenceNormalizeErr != nil {
 		return evidenceNormalizeErr
 	}
@@ -325,6 +335,7 @@ func (o *RuntimeOrchestrator) handleGraphBatchCompletionGateFailure(
 	}
 	step.State = common.StepStateFailed
 	step.Output = runtimeFailureOutput(outputWithDoDAssessmentDiagnostics(output), execErr)
+	finalizeManagedValidationResourcesForStep(step, "failed", "graph_batch_completion_gate_failed")
 	attachContractViolationType(step.Output, execErr)
 	classification := classifyRuntimeFailure(step, step.Output, summary, execErr)
 	attachRuntimeFailureClassification(step.Output, classification)
@@ -1047,10 +1058,14 @@ func graphFollowUpExpansionStep(step *runModel.Step) bool {
 	if step == nil || step.Input == nil || step.Output == nil {
 		return false
 	}
-	if !boolValue(step.Input["graphFollowUp"]) {
+	return graphFollowUpExpansionCandidate(step, step.Output)
+}
+
+func graphFollowUpExpansionCandidate(step *runModel.Step, output map[string]any) bool {
+	if step == nil || step.Input == nil || output == nil || !boolValue(step.Input["graphFollowUp"]) {
 		return false
 	}
-	_, ok := runtimeGraphSpecFromValue(step.Output[stepOutputKeyExecutionGraph])
+	_, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
 	return ok
 }
 
@@ -1059,6 +1074,14 @@ func graphFollowUpConcreteValidationExpansionStep(step *runModel.Step) bool {
 		return false
 	}
 	graph, ok := runtimeGraphSpecFromValue(step.Output[stepOutputKeyExecutionGraph])
+	return ok && graphIsConcreteValidationEvidenceGraph(graph)
+}
+
+func graphFollowUpConcreteValidationExpansionCandidate(step *runModel.Step, output map[string]any) bool {
+	if !graphFollowUpExpansionCandidate(step, output) {
+		return false
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
 	return ok && graphIsConcreteValidationEvidenceGraph(graph)
 }
 
@@ -1079,6 +1102,26 @@ func (g *graphSubsystem) graphFollowUpExpansionCount(ctx context.Context, runID 
 	return count
 }
 
+func (g *graphSubsystem) graphFollowUpExpansionCountIncludingCandidate(ctx context.Context, runID common.RunID, candidate *runModel.Step, output map[string]any) int {
+	count := 0
+	if g != nil && g.steps != nil && runID != "" {
+		if steps, err := g.steps.ListByRun(ctx, runID); err == nil {
+			for _, step := range steps {
+				if candidate != nil && step != nil && step.ID == candidate.ID {
+					continue
+				}
+				if graphFollowUpExpansionStep(step) {
+					count++
+				}
+			}
+		}
+	}
+	if graphFollowUpExpansionCandidate(candidate, output) {
+		count++
+	}
+	return count
+}
+
 func (g *graphSubsystem) graphFollowUpConcreteValidationExpansionCount(ctx context.Context, runID common.RunID) int {
 	if g == nil || g.steps == nil || runID == "" {
 		return 0
@@ -1092,6 +1135,26 @@ func (g *graphSubsystem) graphFollowUpConcreteValidationExpansionCount(ctx conte
 		if graphFollowUpConcreteValidationExpansionStep(step) {
 			count++
 		}
+	}
+	return count
+}
+
+func (g *graphSubsystem) graphFollowUpConcreteValidationExpansionCountIncludingCandidate(ctx context.Context, runID common.RunID, candidate *runModel.Step, output map[string]any) int {
+	count := 0
+	if g != nil && g.steps != nil && runID != "" {
+		if steps, err := g.steps.ListByRun(ctx, runID); err == nil {
+			for _, step := range steps {
+				if candidate != nil && step != nil && step.ID == candidate.ID {
+					continue
+				}
+				if graphFollowUpConcreteValidationExpansionStep(step) {
+					count++
+				}
+			}
+		}
+	}
+	if graphFollowUpConcreteValidationExpansionCandidate(candidate, output) {
+		count++
 	}
 	return count
 }
@@ -1137,6 +1200,10 @@ func llmCompletionFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[
 	inheritRuntimeRepairLineage(input, step)
 	inheritWorkspaceFileManifest(input, step)
 	inheritStableExecutionContextPackage(input, step)
+	delete(input, "graphFollowUp")
+	delete(input, stepInputKeyGraphPreviousNodeID)
+	delete(input, stepInputKeyGraphCompletedNodes)
+	delete(input, stepInputKeyGraphRootStepID)
 	input[stepInputKeyAssessmentOnly] = true
 	input["assessmentOnlyReason"] = "completion_follow_up"
 	delete(input, "stateChangingOutputRequired")

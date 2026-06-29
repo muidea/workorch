@@ -20,9 +20,10 @@ type completionEvidenceRefCatalog struct {
 	latestUsableStepByScope   map[string]string
 	latestUsableOrderByScope  map[string]int
 	supersededFailureStepRefs map[string]string
+	provisionalSteps          map[string]bool
 }
 
-func normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, run *runModel.Run, output map[string]any) (map[string]any, error) {
+func normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, run *runModel.Run, output map[string]any, currentSteps ...*runModel.Step) (map[string]any, error) {
 	if run == nil || output == nil || !requiresDoDAssessmentCompletionGate(run) {
 		return output, nil
 	}
@@ -30,7 +31,7 @@ func normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx context.Context, steps
 	if assessment == nil {
 		return output, nil
 	}
-	catalog, err := completionEvidenceRefCatalogForRun(ctx, steps, evidence, run)
+	catalog, err := completionEvidenceRefCatalogForRun(ctx, steps, evidence, run, currentSteps...)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +53,7 @@ func normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx context.Context, steps
 	return ret, nil
 }
 
-func completionEvidenceRefCatalogForRun(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, run *runModel.Run) (completionEvidenceRefCatalog, error) {
+func completionEvidenceRefCatalogForRun(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, run *runModel.Run, currentSteps ...*runModel.Step) (completionEvidenceRefCatalog, error) {
 	runID := common.RunID("")
 	if run != nil {
 		runID = run.ID
@@ -67,6 +68,7 @@ func completionEvidenceRefCatalogForRun(ctx context.Context, steps repository.St
 		latestUsableStepByScope:   map[string]string{},
 		latestUsableOrderByScope:  map[string]int{},
 		supersededFailureStepRefs: map[string]string{},
+		provisionalSteps:          map[string]bool{},
 	}
 	if steps == nil || run == nil || run.ID == "" {
 		return catalog, nil
@@ -90,6 +92,22 @@ func completionEvidenceRefCatalogForRun(ctx context.Context, steps repository.St
 				catalog.latestUsableOrderByScope[scope] = idx
 			}
 		}
+		catalog.addAlias(canonical, canonical)
+		catalog.addAlias(canonical+"/tool-call/runtime-execute", canonical)
+		for _, rawAlias := range completionEvidenceStepAliases(run.ID, step) {
+			catalog.addAlias(rawAlias, canonical)
+		}
+	}
+	for _, step := range currentSteps {
+		if step == nil || step.ID == "" || step.RunID != run.ID || step.State == common.StepStateFailed {
+			continue
+		}
+		canonical := string(step.ID)
+		catalog.steps[canonical] = step
+		if _, exists := catalog.stepOrder[canonical]; !exists {
+			catalog.stepOrder[canonical] = len(runSteps)
+		}
+		catalog.provisionalSteps[canonical] = true
 		catalog.addAlias(canonical, canonical)
 		catalog.addAlias(canonical+"/tool-call/runtime-execute", canonical)
 		for _, rawAlias := range completionEvidenceStepAliases(run.ID, step) {
@@ -738,6 +756,9 @@ func canonicalCompletionEvidenceRef(ctx context.Context, steps repository.StepRe
 		if catalog.patches[canonical] {
 			return canonical, true
 		}
+		if catalog.provisionalSteps[canonical] && provisionalCompletionEvidenceStepUsable(catalog.steps[canonical]) {
+			return canonical, true
+		}
 		if completionEvidenceStepUsable(catalog.steps[canonical]) {
 			return canonical, true
 		}
@@ -754,6 +775,9 @@ func canonicalCompletionEvidenceRef(ctx context.Context, steps repository.StepRe
 	}
 	if step, ok, err := stepByEvidenceRef(ctx, steps, ref); err == nil && ok {
 		canonical := string(step.ID)
+		if catalog.provisionalSteps[canonical] && provisionalCompletionEvidenceStepUsable(step) {
+			return canonical, true
+		}
 		if completionEvidenceStepUsable(step) {
 			return canonical, true
 		}
@@ -771,6 +795,13 @@ func canonicalCompletionEvidenceRef(ctx context.Context, steps repository.StepRe
 		return canonical, false
 	}
 	return "", false
+}
+
+func provisionalCompletionEvidenceStepUsable(step *runModel.Step) bool {
+	if step == nil || step.State == common.StepStateFailed {
+		return false
+	}
+	return validationEvidenceCanSatisfyDoD(evidenceQualityFromRuntimeStep(step))
 }
 
 func patchEvidenceRefUsable(ctx context.Context, patches repository.PatchRepository, ref string) (bool, error) {

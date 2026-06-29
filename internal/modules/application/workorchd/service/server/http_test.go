@@ -4022,11 +4022,11 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 			t.Fatalf("run %s execution context = %+v, want compact run", item.ID, item.ExecutionContext)
 		}
 	}
-	if len(body.Snapshot.LLMUsageTraces) >= 20 {
-		t.Fatalf("llm usage traces = %d, want bounded projection detail rather than full workspace usage", len(body.Snapshot.LLMUsageTraces))
+	if len(body.Snapshot.LLMUsageTraces) >= 24 {
+		t.Fatalf("llm usage traces = %d, want bounded detail rather than full workspace usage", len(body.Snapshot.LLMUsageTraces))
 	}
-	if body.Snapshot.LLMUsageSummary.EntryTotal >= 24 {
-		t.Fatalf("summary entry total = %d, want projected detail summary rather than full workspace usage", body.Snapshot.LLMUsageSummary.EntryTotal)
+	if body.Snapshot.LLMUsageSummary.EntryTotal != 24 {
+		t.Fatalf("summary entry total = %d, want full total with bounded detail traces", body.Snapshot.LLMUsageSummary.EntryTotal)
 	}
 
 	fullRec := httptest.NewRecorder()
@@ -4050,35 +4050,42 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 	}
 }
 
-func TestWorkspaceSnapshotEndpointDefaultUsesProjectedDetailOnly(t *testing.T) {
-	workspaceID := common.WorkspaceID("ws-projected-detail-only")
+func TestWorkspaceSnapshotEndpointDefaultUsesExplicitCompactDetail(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-explicit-compact-detail")
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	handler := newMuxWithState(state)
 	state.workspaceProjection.UpsertWorkspace(appservice.Workspace{
 		ID:          string(workspaceID),
 		State:       string(common.WorkspaceStateRunning),
-		ActiveRunID: "run-projected-detail-only",
+		ActiveRunID: "run-explicit-compact-detail",
 	})
 	state.workspaceProjection.UpsertSnapshot(appservice.WorkspaceSnapshot{
 		Workspace: appservice.Workspace{
 			ID:                   string(workspaceID),
 			State:                string(common.WorkspaceStateRunning),
-			ActiveRunID:          "run-projected-detail-only",
-			ContextHints:         map[string]any{"large": strings.Repeat("x", 128)},
-			EvidencePolicies:     []map[string]any{{"large": strings.Repeat("x", 128)}},
-			DeliverableDirectory: "workspaces/projected-detail-only",
-		},
-		Run: &appservice.Run{
-			ID:               "run-projected-detail-only",
-			WorkspaceID:      string(workspaceID),
-			State:            string(common.RunStateRunning),
-			ExecutionContext: map[string]any{"large": strings.Repeat("x", 128)},
+			ActiveRunID:          "run-explicit-compact-detail",
+			DeliverableDirectory: "workspaces/explicit-compact-detail",
 		},
 	})
 	var fullReads atomic.Int32
 	state.readWorkspaceSnapshot = func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error) {
 		fullReads.Add(1)
-		return appservice.WorkspaceSnapshot{}, errors.New("full snapshot read should not be used for default detail")
+		return appservice.WorkspaceSnapshot{
+			Workspace: appservice.Workspace{
+				ID:                   string(workspaceID),
+				State:                string(common.WorkspaceStateRunning),
+				ActiveRunID:          "run-explicit-compact-detail",
+				ContextHints:         map[string]any{"large": strings.Repeat("x", 128)},
+				EvidencePolicies:     []map[string]any{{"large": strings.Repeat("x", 128)}},
+				DeliverableDirectory: "workspaces/explicit-compact-detail",
+			},
+			Run: &appservice.Run{
+				ID:               "run-explicit-compact-detail",
+				WorkspaceID:      string(workspaceID),
+				State:            string(common.RunStateRunning),
+				ExecutionContext: map[string]any{"large": strings.Repeat("x", 128)},
+			},
+		}, nil
 	}
 
 	rec := httptest.NewRecorder()
@@ -4087,8 +4094,8 @@ func TestWorkspaceSnapshotEndpointDefaultUsesProjectedDetailOnly(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("workspace snapshot status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
-	if fullReads.Load() != 0 {
-		t.Fatalf("full snapshot reads = %d, want default projection-only detail", fullReads.Load())
+	if fullReads.Load() != 1 {
+		t.Fatalf("full snapshot reads = %d, want explicit detail read", fullReads.Load())
 	}
 	var body workspaceSnapshotResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
@@ -4099,6 +4106,9 @@ func TestWorkspaceSnapshotEndpointDefaultUsesProjectedDetailOnly(t *testing.T) {
 	}
 	if body.Snapshot.Run == nil || body.Snapshot.Run.ExecutionContext != nil {
 		t.Fatalf("run = %+v, want projected compact run", body.Snapshot.Run)
+	}
+	if len(body.Snapshot.Runs) != 1 || body.Snapshot.Runs[0].ID != "run-explicit-compact-detail" {
+		t.Fatalf("runs = %+v, want selected run included in projected detail relations", body.Snapshot.Runs)
 	}
 }
 

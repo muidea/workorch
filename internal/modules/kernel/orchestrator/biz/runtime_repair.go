@@ -141,6 +141,7 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 	}
 	step.State = common.StepStateFailed
 	step.Output = runtimeFailureOutput(outputWithDoDAssessmentDiagnostics(output), execErr)
+	finalizeManagedValidationResourcesForStep(step, "failed", "failed_step")
 	attachContractViolationType(step.Output, execErr)
 	attachRuntimeFailureStage(step.Output, summary)
 	classification := classifyRuntimeFailure(step, step.Output, summary, execErr)
@@ -593,9 +594,6 @@ func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *
 	}
 	if failedStepHasRecoverableContractViolation(failedStep) {
 		if runtimeAvailable && contractViolationRetryWithinBudget(ctx, r, runtimePolicy, run, failedStep) {
-			return runtimeRecoveryActionContractViolationRetry
-		}
-		if runtimeAvailable && contractViolationExhaustionDecisionNotEligible(ctx, r, runtimePolicy, run, failedStep) {
 			return runtimeRecoveryActionContractViolationRetry
 		}
 		if canCreateDecisionTicket {

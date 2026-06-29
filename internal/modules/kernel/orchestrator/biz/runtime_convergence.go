@@ -2599,23 +2599,28 @@ func profileEvidenceRuntimeCapabilityGap(requirements []profileEvidenceKindRequi
 }
 
 func currentRuntimeEvidenceBlockKinds() map[string]bool {
+	return runtimeEvidenceBlockKindCatalog()
+}
+
+func runtimeEvidenceBlockKindCatalog() map[string]bool {
 	return map[string]bool{
-		"llm/workspace_execution": true,
-		"shell/command":           true,
-		"file/list":               true,
-		"file/read":               true,
-		"file/edit":               true,
-		"ssh/command":             true,
-		"web/search":              true,
-		"web/fetch":               true,
-		"patch/apply":             true,
-		"patch/preview":           true,
-		"patch/revert":            true,
-		"mcp/tool_call":           true,
-		"mcp/resource_read":       true,
-		"mcp/prompt_get":          true,
-		"git/read":                true,
-		"git/write":               true,
+		"llm/workspace_execution":        true,
+		"shell/command":                  true,
+		"file/list":                      true,
+		"file/read":                      true,
+		"file/edit":                      true,
+		"ssh/command":                    true,
+		"web/search":                     true,
+		"web/fetch":                      true,
+		"patch/apply":                    true,
+		"patch/preview":                  true,
+		"patch/revert":                   true,
+		"mcp/tool_call":                  true,
+		"mcp/resource_read":              true,
+		"mcp/prompt_get":                 true,
+		managedValidationSessionNodeKind: true,
+		"git/read":                       true,
+		"git/write":                      true,
 	}
 }
 

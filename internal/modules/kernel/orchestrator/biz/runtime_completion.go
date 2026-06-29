@@ -26,6 +26,9 @@ func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunI
 	if err := o.validateRunReadyForCompletion(ctx, r); err != nil {
 		return err
 	}
+	if err := o.finalizeManagedValidationResourcesForRun(ctx, r, "released", "run_completed"); err != nil {
+		return err
+	}
 	r.State = common.RunStateCompleted
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
@@ -84,6 +87,9 @@ func (o *RuntimeOrchestrator) validateAndCompleteRunWithWorkspace(ctx context.Co
 	}
 
 	if err := o.validateRunReadyForCompletion(ctx, run); err != nil {
+		return err
+	}
+	if err := o.finalizeManagedValidationResourcesForRun(ctx, run, "released", "run_completed"); err != nil {
 		return err
 	}
 	workspace, err = o.runStateManager().syncRunAndWorkspaceForCompletion(ctx, run, workspace)
