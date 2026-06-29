@@ -646,15 +646,16 @@ func recordCoverageAcceptedEvidenceBinding(item map[string]any, kind string, ref
 	byKind := mapStringSliceValue(item["acceptedEvidenceBindingByKind"])
 	before := stableCoverageJSON(byKind[kind])
 	byKind[kind] = compactUniqueStrings(append(byKind[kind], refs...))
-	if before == stableCoverageJSON(byKind[kind]) {
-		return false
-	}
+	changed := before != stableCoverageJSON(byKind[kind])
 	item["acceptedEvidenceBindingByKind"] = byKind
 	item["acceptedEvidenceBindingRefs"] = coverageFlattenEvidenceRefs(byKind, stringSliceFromValue(item["acceptedEvidenceBindingRefs"]))
 	if stepID != "" {
 		item["acceptedEvidenceBindingStepId"] = stepID
 	}
-	return true
+	if recordCoverageEvidenceBindingDecisions(item, kind, refs, stepID, "accepted_binding", "accepted evidence satisfies required coverage evidence kind") {
+		changed = true
+	}
+	return changed
 }
 
 func coverageEvidenceSufficientForKind(item map[string]any, kind string, options coverageEvidenceAcceptanceOptions) bool {
@@ -784,8 +785,9 @@ func recordCoverageInsufficientEvidence(item map[string]any, kind string, refs [
 	if len(item) == 0 || strings.TrimSpace(kind) == "" || len(refs) == 0 {
 		return
 	}
+	filteredRefs := coverageEvidenceRefsForKind(kind, refs)
 	byKind := mapStringSliceValue(item["supportingEvidenceByKind"])
-	byKind[kind] = compactUniqueStrings(append(byKind[kind], coverageEvidenceRefsForKind(kind, refs)...))
+	byKind[kind] = compactUniqueStrings(append(byKind[kind], filteredRefs...))
 	item["supportingEvidenceByKind"] = byKind
 	item["supportingEvidenceRefs"] = coverageFlattenEvidenceRefs(byKind, stringSliceFromValue(item["supportingEvidenceRefs"]))
 	if stepID != "" {
@@ -796,6 +798,63 @@ func recordCoverageInsufficientEvidence(item map[string]any, kind string, refs [
 		item["evidenceQualityReason"] = reason
 		item["currentGap"] = reason
 	}
+	recordCoverageEvidenceBindingDecisions(item, kind, filteredRefs, stepID, "supporting_only", firstNonEmptyString(reason, "evidence did not satisfy required coverage proof strength"))
+}
+
+func recordCoverageEvidenceBindingDecisions(item map[string]any, kind string, refs []string, stepID string, status string, reason string) bool {
+	if len(item) == 0 || strings.TrimSpace(kind) == "" || len(refs) == 0 || strings.TrimSpace(status) == "" {
+		return false
+	}
+	coverageItemID := strings.TrimSpace(stringFromMap(item, "id"))
+	existing := mapSliceFromValue(item["evidenceBindingDecisions"])
+	seen := make(map[string]bool, len(existing))
+	for _, decision := range existing {
+		key := evidenceBindingDecisionKey(
+			stringFromMap(decision, "evidenceRef"),
+			stringFromMap(decision, "coverageItemId"),
+			stringFromMap(decision, "evidenceKind"),
+			stringFromMap(decision, "status"),
+		)
+		if key != "" {
+			seen[key] = true
+		}
+	}
+	changed := false
+	for _, ref := range compactUniqueStrings(refs) {
+		key := evidenceBindingDecisionKey(ref, coverageItemID, kind, status)
+		if key == "" || seen[key] {
+			continue
+		}
+		decision := map[string]any{
+			"evidenceRef":    strings.TrimSpace(ref),
+			"coverageItemId": coverageItemID,
+			"evidenceKind":   strings.TrimSpace(kind),
+			"status":         strings.TrimSpace(status),
+			"reason":         strings.TrimSpace(reason),
+			"recordedAt":     runtimeEvidenceTimestamp(),
+		}
+		if stepID != "" {
+			decision["stepId"] = stepID
+		}
+		existing = append(existing, decision)
+		seen[key] = true
+		changed = true
+	}
+	if changed {
+		item["evidenceBindingDecisions"] = existing
+	}
+	return changed
+}
+
+func evidenceBindingDecisionKey(ref, coverageItemID, kind, status string) string {
+	ref = strings.TrimSpace(ref)
+	coverageItemID = strings.TrimSpace(coverageItemID)
+	kind = strings.TrimSpace(kind)
+	status = strings.TrimSpace(status)
+	if ref == "" || coverageItemID == "" || kind == "" || status == "" {
+		return ""
+	}
+	return ref + "|" + coverageItemID + "|" + kind + "|" + status
 }
 
 func coverageEvidenceRefsForKind(kind string, refs []string) []string {

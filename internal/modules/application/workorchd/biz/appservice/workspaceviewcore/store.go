@@ -57,26 +57,33 @@ func workspaceWithSnapshotGovernance(workspace appmodelcore.Workspace, snapshot 
 		next.ID = snapshot.Workspace.ID
 	}
 	activeRunID := strings.TrimSpace(next.ActiveRunID)
-	if activeRunID == "" {
-		activeRunID = strings.TrimSpace(snapshot.Workspace.ActiveRunID)
-	}
 	if activeRunID == "" && snapshot.Run != nil {
 		activeRunID = strings.TrimSpace(snapshot.Run.ID)
 	}
-	if activeRunID != "" {
-		next.ActiveRunID = activeRunID
+	blockerRunID := activeRunID
+	if blockerRunID == "" {
+		blockerRunID = strings.TrimSpace(snapshot.Workspace.ActiveRunID)
 	}
-	if ticketID, ok := snapshotDecisionBlocker(snapshot, activeRunID); ok {
+	if ticketID, ok := snapshotDecisionBlocker(snapshot, blockerRunID); ok {
 		next.State = string(common.WorkspaceStateWaitingDecision)
+		if blockerRunID != "" {
+			next.ActiveRunID = blockerRunID
+		}
 		next.BlockingTicketID = ticketID
 		next.BlockingApprovalID = ""
 		return next
 	}
-	if approvalID, ok := snapshotApprovalBlocker(snapshot, activeRunID); ok {
+	if approvalID, ok := snapshotApprovalBlocker(snapshot, blockerRunID); ok {
 		next.State = string(common.WorkspaceStateBlocked)
+		if blockerRunID != "" {
+			next.ActiveRunID = blockerRunID
+		}
 		next.BlockingApprovalID = approvalID
 		next.BlockingTicketID = ""
 		return next
+	}
+	if activeRunID != "" {
+		next.ActiveRunID = activeRunID
 	}
 	return next
 }
@@ -709,14 +716,16 @@ func (s *Store) List() ([]appmodelcore.Workspace, Status, error) {
 	for _, id := range s.workspaceOrder {
 		if entry := s.workspaces[id]; entry != nil && entry.HasWorkspace {
 			item := cloneWorkspace(entry.Workspace)
-			item = compactWorkspaceListOverview(item)
 			if entry.HasSnapshot {
-				snapshot := cloneWorkspaceSnapshot(entry.Snapshot)
+				snapshot := normalizedEntrySnapshot(entry)
+				item = cloneWorkspace(snapshot.Workspace)
+				item = compactWorkspaceListOverview(item)
 				item.State = snapshot.Workspace.State
 				item.BlockingTicketID = snapshot.Workspace.BlockingTicketID
 				item.BlockingApprovalID = snapshot.Workspace.BlockingApprovalID
 				item.ViewModel = appWorkspaceViewModelFromSnapshot(snapshot, s.statusForWorkspaceLocked(id))
 			} else {
+				item = compactWorkspaceListOverview(item)
 				item.ViewModel = appWorkspaceViewModelFromStatus(item, s.statusForWorkspaceLocked(id))
 			}
 			ret = append(ret, item)
@@ -751,7 +760,7 @@ func (s *Store) GetSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot
 		}
 		return readmodelcore.WorkspaceSnapshot{}, status, common.ErrNotFound
 	}
-	snapshot := cloneWorkspaceSnapshot(entry.Snapshot)
+	snapshot := normalizedEntrySnapshot(entry)
 	snapshot.ViewModel = workspaceViewModelFromStatus(snapshot, status)
 	return snapshot, status, nil
 }
@@ -775,11 +784,21 @@ func (s *Store) GetSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceS
 	}
 	snapshot := readmodelcore.WorkspaceSnapshot{Workspace: cloneWorkspace(entry.Workspace)}
 	if entry.HasSnapshot {
-		snapshot = cloneWorkspaceSnapshot(entry.Snapshot)
-		snapshot.Workspace = cloneWorkspace(entry.Workspace)
+		snapshot = normalizedEntrySnapshot(entry)
 	}
 	snapshot.ViewModel = workspaceViewModelFromStatus(snapshot, status)
 	return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot), status, nil
+}
+
+func normalizedEntrySnapshot(entry *workspaceProjectionEntry) readmodelcore.WorkspaceSnapshot {
+	if entry == nil || !entry.HasSnapshot {
+		return readmodelcore.WorkspaceSnapshot{}
+	}
+	snapshot := cloneWorkspaceSnapshot(entry.Snapshot)
+	if entry.HasWorkspace {
+		snapshot.Workspace = workspaceWithSnapshotGovernance(entry.Workspace, snapshot)
+	}
+	return readmodelprojection.NormalizeWorkspaceGovernanceProjection(snapshot)
 }
 
 func (s *Store) NeedsSnapshot(workspaceID string) bool {
@@ -889,6 +908,12 @@ func workspacePromptMode(snapshot readmodelcore.WorkspaceSnapshot) string {
 	activeRunID := strings.TrimSpace(workspace.ActiveRunID)
 	if activeRunID == "" && snapshot.Run != nil {
 		activeRunID = strings.TrimSpace(snapshot.Run.ID)
+	}
+	if ticketID, ok := snapshotDecisionBlocker(snapshot, activeRunID); ok && strings.TrimSpace(ticketID) != "" {
+		return "decision"
+	}
+	if approvalID, ok := snapshotApprovalBlocker(snapshot, activeRunID); ok && strings.TrimSpace(approvalID) != "" {
+		return "approval"
 	}
 	switch common.WorkspaceState(workspace.State) {
 	case common.WorkspaceStateWaitingDecision:
@@ -1056,7 +1081,12 @@ func formatProjectionTime(value time.Time) string {
 
 func activeRunHeartbeatState(state string) bool {
 	switch common.RunState(strings.TrimSpace(state)) {
-	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+	case common.RunStateCompleted,
+		common.RunStateFailed,
+		common.RunStateCancelled,
+		common.RunStateSuperseded,
+		common.RunStateBlockedOnDecision,
+		common.RunStateBlockedOnApproval:
 		return false
 	default:
 		return true

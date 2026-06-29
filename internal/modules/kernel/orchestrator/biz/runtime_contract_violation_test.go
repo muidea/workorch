@@ -1118,6 +1118,53 @@ func TestConvergenceDispatchRejectsSplitCurrentActionRequiredOutput(t *testing.T
 	}
 }
 
+func TestConvergenceDispatchRejectsUnsatisfiableRequiredOutput(t *testing.T) {
+	input := map[string]any{
+		"convergenceContract": map[string]any{
+			"state":                       convergenceStateNeedStateChange,
+			"stateChangingOutputRequired": true,
+		},
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		gapBaselineKey: map[string]any{
+			"nextAction": map[string]any{"kind": "state_change"},
+		},
+		"requiredOutput": map[string]any{
+			"mustIncludeStateChangingNode": true,
+			"stateChangingForbidden":       true,
+			"acceptedKinds":                []string{"patch/apply"},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode": true,
+				"stateChangingForbidden":       true,
+				"acceptedKinds":                []string{"patch/apply"},
+			},
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode": true,
+				"stateChangingForbidden":       true,
+				"acceptedKinds":                []string{"patch/apply"},
+			},
+		},
+	}
+
+	err := validateConvergenceDispatchInput(input)
+	if err == nil {
+		t.Fatal("validateConvergenceDispatchInput returned nil, want unsatisfiable contract conflict")
+	}
+	if !errors.Is(err, common.ErrConflict) ||
+		!strings.Contains(err.Error(), failureClassRuntimeContractMisalign) ||
+		!strings.Contains(err.Error(), "runtime_internal_contract_unsatisfiable") {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want unsatisfiable runtime contract conflict", err)
+	}
+	diagnostics := mapSliceFromValue(input["authorityDiagnostics"])
+	if len(diagnostics) == 0 || stringFromMap(diagnostics[len(diagnostics)-1], "code") != "required_output_unsatisfiable" {
+		t.Fatalf("authorityDiagnostics = %+v, want required_output_unsatisfiable", diagnostics)
+	}
+}
+
 func TestContractViolationRetryPreservesStateChangingExpectedContract(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-contract-violation-state-contract")

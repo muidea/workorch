@@ -110,6 +110,9 @@ func (o *RuntimeOrchestrator) blockOnDecisionAtStep(ctx context.Context, r *runM
 	if r.State != common.RunStateCreated && r.State != common.RunStateRunning {
 		return common.ErrConflict
 	}
+	if err := o.finalizeManagedValidationResourcesForGovernedWait(ctx, r, currentStepID, "released", "run_blocked_on_decision"); err != nil {
+		return err
+	}
 	r.State = common.RunStateBlockedOnDecision
 	r.BlockingTicketID = ticketID
 	r.BlockingApprovalID = ""
@@ -142,6 +145,9 @@ func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runM
 	if r.State != common.RunStateCreated && r.State != common.RunStateRunning {
 		return common.ErrConflict
 	}
+	if err := o.finalizeManagedValidationResourcesForGovernedWait(ctx, r, currentStepID, "released", "run_blocked_on_approval"); err != nil {
+		return err
+	}
 	r.State = common.RunStateBlockedOnApproval
 	r.BlockingApprovalID = approvalID
 	r.BlockingTicketID = ""
@@ -154,6 +160,29 @@ func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runM
 		return err
 	}
 	return o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID)
+}
+
+func (o *RuntimeOrchestrator) finalizeManagedValidationResourcesForGovernedWait(ctx context.Context, r *runModel.Run, currentStepID common.StepID, finalStatus string, finalizedBy string) error {
+	if o == nil || r == nil || r.ID == "" || o.steps == nil {
+		return nil
+	}
+	if currentStepID == "" {
+		return o.finalizeManagedValidationResourcesForRun(ctx, r, finalStatus, finalizedBy)
+	}
+	step, err := o.steps.Get(ctx, currentStepID)
+	if err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if step == nil || step.RunID != r.ID {
+		return nil
+	}
+	if !finalizeManagedValidationResourcesForStep(step, finalStatus, finalizedBy) {
+		return nil
+	}
+	return o.steps.Update(ctx, step)
 }
 
 func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID) error {

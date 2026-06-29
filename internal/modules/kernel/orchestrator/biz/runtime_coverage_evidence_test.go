@@ -36,6 +36,14 @@ func TestCoverageApplyWorkItemEvidence_AcceptedEvidenceSatisfiesRequiredKind(t *
 	if got := accepted["validation"]; len(got) != 1 || got[0] != "run-1/validation-001" {
 		t.Fatalf("acceptedEvidenceByKind = %+v, want accepted validation ref", accepted)
 	}
+	decisions := mapSliceFromValue(item["evidenceBindingDecisions"])
+	if len(decisions) != 1 ||
+		stringFromMap(decisions[0], "evidenceRef") != "run-1/validation-001" ||
+		stringFromMap(decisions[0], "coverageItemId") != "cwi-accepted-evidence" ||
+		stringFromMap(decisions[0], "evidenceKind") != "validation" ||
+		stringFromMap(decisions[0], "status") != "accepted_binding" {
+		t.Fatalf("evidenceBindingDecisions = %+v, want accepted binding decision", decisions)
+	}
 }
 
 func TestCoverageApplyWorkItemEvidence_TargetUnalignedValidationIsSupportingOnly(t *testing.T) {
@@ -82,6 +90,14 @@ func TestCoverageApplyWorkItemEvidence_TargetUnalignedValidationIsSupportingOnly
 	supporting := mapStringSliceValue(item["supportingEvidenceByKind"])
 	if got := supporting["validation"]; len(got) != 1 || got[0] != "run-1/validation-generic" {
 		t.Fatalf("supportingEvidenceByKind = %+v, want supporting validation ref", supporting)
+	}
+	decisions := mapSliceFromValue(item["evidenceBindingDecisions"])
+	if len(decisions) != 1 ||
+		stringFromMap(decisions[0], "evidenceRef") != "run-1/validation-generic" ||
+		stringFromMap(decisions[0], "coverageItemId") != "cwi-target-proof" ||
+		stringFromMap(decisions[0], "evidenceKind") != "validation" ||
+		stringFromMap(decisions[0], "status") != "supporting_only" {
+		t.Fatalf("evidenceBindingDecisions = %+v, want supporting-only decision", decisions)
 	}
 }
 

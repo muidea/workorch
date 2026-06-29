@@ -791,6 +791,9 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "validation requiredOutput accepts workspace-mutating output")
 		return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: validation accepts workspace-mutating output")
 	}
+	if err := validateRequiredOutputSatisfiableRoute(input, "requiredOutput", top, state, nextAction); err != nil {
+		return err
+	}
 	for label, required := range sources {
 		if len(required) == 0 {
 			continue
@@ -811,6 +814,9 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 			appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", label, "state-changing requiredOutput has no allowed accepted kind")
 			return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: state-changing requiredOutput has no allowed accepted kind: %s", label)
 		}
+		if err := validateRequiredOutputSatisfiableRoute(input, label, required, state, nextAction); err != nil {
+			return err
+		}
 	}
 	shape := strings.TrimSpace(stringFromMap(top, "contractViolationRequiredOutputShape"))
 	objective := strings.TrimSpace(stringFromMap(input, "repairObjective"))
@@ -825,6 +831,141 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		}
 	}
 	return nil
+}
+
+func validateRequiredOutputSatisfiableRoute(input map[string]any, label string, required map[string]any, state string, nextAction string) error {
+	if len(required) == 0 {
+		return nil
+	}
+	if requiredOutputRequiresStateChanging(required) && boolValue(required["stateChangingForbidden"]) {
+		appendAuthorityDiagnostic(input, "required_output_unsatisfiable", "error", "internal_authority_mismatch", label, "requiredOutput requires state-changing evidence but also forbids state-changing output")
+		return convergenceDispatchMisalignmentError("runtime_internal_contract_unsatisfiable: %s requires and forbids state-changing output", label)
+	}
+	routes := requiredOutputSatisfiableRouteKinds(required)
+	declaresRouteSet := len(stringSliceFromValue(required["acceptedKinds"])) > 0 || len(stringSliceFromValue(required["allowedOutputShapes"])) > 0
+	if len(stringSliceFromValue(required["acceptedKinds"])) > 0 && len(routes) == 0 {
+		appendAuthorityDiagnostic(input, "required_output_unsatisfiable", "error", "internal_authority_mismatch", label, "requiredOutput acceptedKinds are fully forbidden")
+		return convergenceDispatchMisalignmentError("runtime_internal_contract_unsatisfiable: %s has no accepted output kind route", label)
+	}
+	shapes := requiredOutputSatisfiableShapes(required)
+	if len(stringSliceFromValue(required["allowedOutputShapes"])) > 0 && len(shapes) == 0 {
+		appendAuthorityDiagnostic(input, "required_output_unsatisfiable", "error", "internal_authority_mismatch", label, "requiredOutput allowedOutputShapes are fully forbidden")
+		return convergenceDispatchMisalignmentError("runtime_internal_contract_unsatisfiable: %s has no allowed output shape route", label)
+	}
+	switch {
+	case state == convergenceStateNeedStateChange || nextAction == runtimemodel.NextActionTypeStateChange:
+		if !requiredOutputRouteHasStateChangingKind(routes) {
+			appendAuthorityDiagnostic(input, "required_output_unsatisfiable", "error", "internal_authority_mismatch", label, "state-change next action has no state-changing output route")
+			return convergenceDispatchMisalignmentError("runtime_internal_contract_unsatisfiable: %s has no state-changing output route", label)
+		}
+	case state == convergenceStateNeedValidation || nextAction == runtimemodel.NextActionTypeValidate:
+		if !declaresRouteSet {
+			return nil
+		}
+		if !requiredOutputRouteHasValidationKind(routes) && !requiredOutputShapesAllowAssessment(shapes) {
+			appendAuthorityDiagnostic(input, "required_output_unsatisfiable", "error", "internal_authority_mismatch", label, "validation next action has no validation output route")
+			return convergenceDispatchMisalignmentError("runtime_internal_contract_unsatisfiable: %s has no validation output route", label)
+		}
+	case state == convergenceStateNeedEvidence || nextAction == runtimemodel.NextActionTypeRepair || nextAction == "acquire_evidence":
+		if !declaresRouteSet {
+			return nil
+		}
+		if !requiredOutputRouteHasEvidenceKind(routes) && len(shapes) == 0 {
+			appendAuthorityDiagnostic(input, "required_output_unsatisfiable", "error", "internal_authority_mismatch", label, "evidence next action has no evidence acquisition output route")
+			return convergenceDispatchMisalignmentError("runtime_internal_contract_unsatisfiable: %s has no evidence acquisition output route", label)
+		}
+	}
+	return nil
+}
+
+func requiredOutputSatisfiableRouteKinds(required map[string]any) []string {
+	if len(required) == 0 {
+		return nil
+	}
+	accepted := compactUniqueStrings(stringSliceFromValue(required["acceptedKinds"]))
+	if len(accepted) == 0 {
+		return nil
+	}
+	forbidden := stringSet(stringSliceFromValue(required["forbiddenKinds"]))
+	ret := make([]string, 0, len(accepted))
+	for _, kind := range accepted {
+		kind = strings.TrimSpace(kind)
+		if kind == "" || forbidden[kind] {
+			continue
+		}
+		if boolValue(required["stateChangingForbidden"]) && requiredOutputKindIsStateChanging(kind) {
+			continue
+		}
+		ret = append(ret, kind)
+	}
+	return compactUniqueStrings(ret)
+}
+
+func requiredOutputSatisfiableShapes(required map[string]any) []string {
+	if len(required) == 0 {
+		return nil
+	}
+	allowed := compactUniqueStrings(stringSliceFromValue(required["allowedOutputShapes"]))
+	if len(allowed) == 0 {
+		return nil
+	}
+	forbidden := stringSet(stringSliceFromValue(required["forbiddenOutputShapes"]))
+	ret := make([]string, 0, len(allowed))
+	for _, shape := range allowed {
+		shape = strings.TrimSpace(shape)
+		if shape == "" || forbidden[shape] {
+			continue
+		}
+		ret = append(ret, shape)
+	}
+	return compactUniqueStrings(ret)
+}
+
+func requiredOutputRouteHasStateChangingKind(routes []string) bool {
+	for _, kind := range routes {
+		if requiredOutputKindIsStateChanging(kind) {
+			return true
+		}
+	}
+	return false
+}
+
+func requiredOutputRouteHasValidationKind(routes []string) bool {
+	for _, kind := range routes {
+		switch strings.TrimSpace(kind) {
+		case "shell/command", "mcp/tool_call", managedValidationSessionNodeKind:
+			return true
+		}
+	}
+	return false
+}
+
+func requiredOutputRouteHasEvidenceKind(routes []string) bool {
+	for _, kind := range routes {
+		if strings.TrimSpace(kind) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func requiredOutputKindIsStateChanging(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case "patch/apply", "artifact/write", "file/write", "file/delete", "state_change":
+		return true
+	default:
+		return false
+	}
+}
+
+func requiredOutputShapesAllowAssessment(shapes []string) bool {
+	for _, shape := range shapes {
+		normalized := strings.ToLower(strings.TrimSpace(shape))
+		if strings.Contains(normalized, "assessment") {
+			return true
+		}
+	}
+	return false
 }
 
 func scrubConvergenceDispatchDiagnosticAdvice(input map[string]any) map[string]any {
