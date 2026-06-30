@@ -81,6 +81,66 @@ func TestValidateConvergenceDispatchInputRejectsCurrentActionContractDrift(t *te
 	}
 }
 
+func TestSynchronizeCurrentRequiredOutputMirrorsUsesCurrentContractBeforeStaleMirrors(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction":   map[string]any{"kind": "validate"},
+			"currentFocus": map[string]any{"id": "cwi-validate", "coverageWorkItemIds": []any{"cwi-validate"}},
+		},
+		"convergenceContract": map[string]any{
+			"state":        convergenceStateNeedValidation,
+			"runtimeStage": runtimeStageVerification,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"coverageWorkItemIds":                   []any{"cwi-validate"},
+					"mustProduceConcreteValidationEvidence": true,
+					"acceptedKinds":                         []any{"validation/managed_session"},
+				},
+			},
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"schemaVersion": "workorch.stage_packet.v1",
+			"requiredOutput": map[string]any{
+				"coverageWorkItemIds":          []any{"cwi-stale"},
+				"mustIncludeStateChangingNode": true,
+				"acceptedKinds":                []any{"patch/apply"},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"coverageWorkItemIds":          []any{"cwi-stale"},
+				"mustIncludeStateChangingNode": true,
+				"acceptedKinds":                []any{"patch/apply"},
+			},
+		},
+		"requiredOutput": map[string]any{
+			"coverageWorkItemIds":          []any{"cwi-stale"},
+			"mustIncludeStateChangingNode": true,
+			"acceptedKinds":                []any{"patch/apply"},
+		},
+	}
+
+	run := &runModel.Run{ID: "run-required-output-authority", WorkspaceID: "ws-required-output-authority"}
+	got := synchronizeCurrentRequiredOutputMirrors(input)
+	got = attachCurrentActionContractToInput(run, "run-required-output-authority/step-001", got)
+	required := mapFromValue(got["requiredOutput"])
+	if boolValue(required["mustIncludeStateChangingNode"]) ||
+		!boolValue(required["mustProduceConcreteValidationEvidence"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "validation/managed_session") ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want validation contract from convergenceContract before stale mirrors", required)
+	}
+	for label, mirror := range map[string]map[string]any{
+		"repairActionPackage.requiredOutput":   mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":           mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["requiredOutput"]),
+		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(got[currentActionContractKey])["requiredOutput"]),
+	} {
+		if stableCoverageJSON(mirror) != stableCoverageJSON(required) {
+			t.Fatalf("%s = %+v, want synchronized requiredOutput %+v", label, mirror, required)
+		}
+	}
+}
+
 func TestCurrentActionContractDoesNotFallbackToRunAuthority(t *testing.T) {
 	run := &runModel.Run{
 		ID:          "run-current-action-stale",

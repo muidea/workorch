@@ -106,7 +106,7 @@ func (c *coverageSubsystem) reconcileValidationEvidence(
 				[]string{"validation"},
 				[]string{string(validation.EvidenceRef)},
 				true,
-				false,
+				true,
 				string(validation.StepID),
 				"reconciled from runtime_step validation",
 				coverageEvidenceAcceptanceOptionsFromValidationStep(validation, step),

@@ -172,6 +172,127 @@ func TestStoreListUsesCompactWorkspaceOverviewWithoutSnapshot(t *testing.T) {
 	}
 }
 
+func TestStoreListSnapshotOmitsDetailHeavyPayloads(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{
+		ID:    "ws-compact-detail",
+		Title: "Compact Detail",
+		State: "running",
+	}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-compact-detail": {
+			Workspace: readmodelcore.Workspace{ID: "ws-compact-detail", State: "running", ActiveRunID: "run-compact-detail"},
+			Run:       &readmodelcore.Run{ID: "run-compact-detail", WorkspaceID: "ws-compact-detail", State: "running"},
+			RunHeartbeat: readmodelcore.RunHeartbeat{
+				WorkspaceID: "ws-compact-detail",
+				RunID:       "run-compact-detail",
+				State:       "running",
+			},
+			RunCommand: &readmodelcore.RunCommandStatus{
+				WorkspaceID: "ws-compact-detail",
+				RunID:       "run-compact-detail",
+				State:       "accepted",
+				Intent:      "resume",
+				Revision:    9,
+			},
+			TaskProgress: readmodelcore.TaskProgress{
+				WorkspaceID: "ws-compact-detail",
+				RunID:       "run-compact-detail",
+				State:       "running",
+			},
+			CoverageSummary: map[string]any{"open": 1},
+			ContextBundle: &readmodelcore.ContextBundle{
+				WorkspaceID: "ws-compact-detail",
+				RunID:       "run-compact-detail",
+				Mode:        "run",
+				Sections: []readmodelcore.ContextSection{{
+					ID:      "detail-section",
+					Kind:    "detail",
+					Title:   "Detail",
+					Summary: strings.Repeat("x", 4096),
+				}},
+			},
+			Runs:           []readmodelcore.Run{{ID: "run-compact-detail", WorkspaceID: "ws-compact-detail", State: "running", ExecutionContext: map[string]any{"payload": strings.Repeat("x", 4096)}}},
+			Results:        []readmodelcore.Result{{ID: "result-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: "accepted", Summary: strings.Repeat("x", 4096)}},
+			Artifacts:      []readmodelcore.Artifact{{ID: "artifact-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", ArtifactType: "trace", State: "active", Metadata: map[string]any{"payload": strings.Repeat("x", 4096)}}},
+			LLMUsageTraces: []readmodelcore.LLMUsageTrace{{ID: "usage-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", ContextBudget: map[string]any{"payload": strings.Repeat("x", 4096)}}},
+			EventRecords:   []readmodelcore.EventRecord{{ID: "event-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", Payload: map[string]any{"payload": strings.Repeat("x", 4096)}}},
+			Decisions:      []readmodelcore.Decision{{ID: "ticket-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: string(common.DecisionTicketStateOpen)}},
+			Approvals:      []readmodelcore.Approval{{ID: "approval-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: string(common.ApprovalStatePending)}},
+		},
+	}, nil)
+
+	store.mu.RLock()
+	entry := store.workspaces["ws-compact-detail"]
+	listSnapshot := normalizedEntryListSnapshot(entry)
+	detailSnapshot := normalizedEntrySnapshot(entry)
+	store.mu.RUnlock()
+
+	if listSnapshot.Run == nil || listSnapshot.Run.ID != "run-compact-detail" {
+		t.Fatalf("list snapshot run = %+v, want compact active run", listSnapshot.Run)
+	}
+	if listSnapshot.RunHeartbeat.RunID != "run-compact-detail" || listSnapshot.TaskProgress.RunID != "run-compact-detail" {
+		t.Fatalf("list heartbeat/progress = %+v/%+v, want compact run status", listSnapshot.RunHeartbeat, listSnapshot.TaskProgress)
+	}
+	if len(listSnapshot.Decisions) != 1 || len(listSnapshot.Approvals) != 1 {
+		t.Fatalf("list governance = decisions:%d approvals:%d, want compact blockers retained", len(listSnapshot.Decisions), len(listSnapshot.Approvals))
+	}
+	if listSnapshot.ContextBundle != nil ||
+		len(listSnapshot.Runs) != 0 ||
+		len(listSnapshot.Results) != 0 ||
+		len(listSnapshot.Artifacts) != 0 ||
+		len(listSnapshot.LLMUsageTraces) != 0 ||
+		len(listSnapshot.EventRecords) != 0 {
+		t.Fatalf("list snapshot retained detail payloads: context=%v runs=%d results=%d artifacts=%d usage=%d events=%d",
+			listSnapshot.ContextBundle != nil,
+			len(listSnapshot.Runs),
+			len(listSnapshot.Results),
+			len(listSnapshot.Artifacts),
+			len(listSnapshot.LLMUsageTraces),
+			len(listSnapshot.EventRecords))
+	}
+	if detailSnapshot.ContextBundle == nil ||
+		len(detailSnapshot.Runs) == 0 ||
+		len(detailSnapshot.Results) == 0 ||
+		len(detailSnapshot.Artifacts) == 0 ||
+		len(detailSnapshot.LLMUsageTraces) == 0 ||
+		len(detailSnapshot.EventRecords) == 0 {
+		t.Fatalf("detail snapshot lost explicit detail payloads: context=%v runs=%d results=%d artifacts=%d usage=%d events=%d",
+			detailSnapshot.ContextBundle != nil,
+			len(detailSnapshot.Runs),
+			len(detailSnapshot.Results),
+			len(detailSnapshot.Artifacts),
+			len(detailSnapshot.LLMUsageTraces),
+			len(detailSnapshot.EventRecords))
+	}
+
+	summarySnapshot, _, err := store.GetSummarySnapshot("ws-compact-detail")
+	if err != nil {
+		t.Fatalf("get summary snapshot: %v", err)
+	}
+	if summarySnapshot.Run != nil ||
+		summarySnapshot.ContextBundle != nil ||
+		len(summarySnapshot.Runs) != 0 ||
+		len(summarySnapshot.Results) != 0 ||
+		len(summarySnapshot.Artifacts) != 0 ||
+		len(summarySnapshot.LLMUsageTraces) != 0 ||
+		len(summarySnapshot.EventRecords) != 0 {
+		t.Fatalf("summary snapshot retained detail payloads: run=%v context=%v runs=%d results=%d artifacts=%d usage=%d events=%d",
+			summarySnapshot.Run != nil,
+			summarySnapshot.ContextBundle != nil,
+			len(summarySnapshot.Runs),
+			len(summarySnapshot.Results),
+			len(summarySnapshot.Artifacts),
+			len(summarySnapshot.LLMUsageTraces),
+			len(summarySnapshot.EventRecords))
+	}
+	if summarySnapshot.RunCommand == nil || summarySnapshot.RunCommand.Revision != 9 {
+		t.Fatalf("summary run command = %+v, want lightweight command projection", summarySnapshot.RunCommand)
+	}
+	if summarySnapshot.CoverageSummary["open"] != 1 {
+		t.Fatalf("summary coverage = %+v, want lightweight coverage summary", summarySnapshot.CoverageSummary)
+	}
+}
+
 func TestStoreUpsertWorkspaceSynchronizesDetailWorkspaceState(t *testing.T) {
 	store := NewStore()
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{

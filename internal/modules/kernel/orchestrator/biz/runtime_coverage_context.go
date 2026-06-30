@@ -180,6 +180,9 @@ func coverageWorkItemStructuredTargetRefs(item map[string]any) []string {
 }
 
 func coverageWorkItemNextStates(item map[string]any) []string {
+	if coverageWorkItemCanCloseDeterministically(item) {
+		return nil
+	}
 	state := deriveCoverageWorkItemState(item)
 	missing := stringSet(state.MissingEvidenceKinds)
 	if strings.TrimSpace(stringFromMap(item, "status")) == "failed" {

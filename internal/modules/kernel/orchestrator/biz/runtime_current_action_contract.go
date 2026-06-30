@@ -5,6 +5,7 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (
@@ -162,6 +163,8 @@ func activeRequiredOutputForCurrentAction(input map[string]any) map[string]any {
 		return nil
 	case convergenceStateNeedAssessment:
 		return assessmentRequiredOutputForAuthorityFocus(dispatchCoverageFocusFromAuthority(input, dispatchAuthorityCurrentFocus(input)))
+	case convergenceStateNeedEvidence, convergenceStateNeedStateChange, convergenceStateNeedValidation:
+		return currentActionRequiredOutputForState(input, state)
 	}
 	if required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]); len(required) > 0 {
 		return normalizeCurrentAuthorityRequiredOutput(input, required)
@@ -182,6 +185,83 @@ func activeRequiredOutputForCurrentAction(input map[string]any) map[string]any {
 		return normalizeCurrentAuthorityRequiredOutput(input, required)
 	}
 	return nil
+}
+
+func currentActionRequiredOutputForState(input map[string]any, state string) map[string]any {
+	pkg := cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+	if pkg == nil {
+		pkg = map[string]any{}
+	}
+	required := currentActionRequiredOutputSeed(input, state)
+	if len(required) > 0 {
+		pkg["requiredOutput"] = cloneStepPayload(required)
+	}
+	nextAction := strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind"))
+	if nextAction == runtimemodel.NextActionTypeAcquireTargetSnapshot {
+		next := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, required)
+		applyTargetSnapshotAcquisitionRequiredOutputContract(next)
+		return normalizeCurrentAuthorityRequiredOutput(input, next)
+	}
+	switch state {
+	case convergenceStateNeedEvidence:
+		next := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, required)
+		if boolValue(required["mustAcquireCurrentTargetSnapshot"]) {
+			applyTargetSnapshotAcquisitionRequiredOutputContract(next)
+		}
+		return normalizeCurrentAuthorityRequiredOutput(input, next)
+	case convergenceStateNeedStateChange:
+		if targetSnapshotPrerequisiteActive(input) && boolValue(required["mustAcquireCurrentTargetSnapshot"]) {
+			next := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, required)
+			applyTargetSnapshotAcquisitionRequiredOutputContract(next)
+			return normalizeCurrentAuthorityRequiredOutput(input, next)
+		}
+		return normalizeCurrentAuthorityRequiredOutput(input, enforceStateChangingRequiredOutputForConvergence(pkg, input))
+	case convergenceStateNeedValidation:
+		return normalizeCurrentAuthorityRequiredOutput(input, concreteValidationEvidenceRequiredOutputWithScratch(input, pkg, validationRequiredOutputSeed(required)))
+	default:
+		return nil
+	}
+}
+
+func currentActionRequiredOutputSeed(input map[string]any, state string) map[string]any {
+	for _, required := range []map[string]any{
+		mapFromValue(mapFromValue(mapFromValue(input["convergenceContract"])["repairActionPackage"])["requiredOutput"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		mapFromValue(input["requiredOutput"]),
+		mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+	} {
+		if currentActionRequiredOutputSeedMatchesState(required, state) {
+			return cloneStepPayload(required)
+		}
+	}
+	return nil
+}
+
+func currentActionRequiredOutputSeedMatchesState(required map[string]any, state string) bool {
+	if len(required) == 0 {
+		return false
+	}
+	switch state {
+	case convergenceStateNeedValidation:
+		return len(validationRequiredOutputSeed(required)) > 0
+	case convergenceStateNeedStateChange:
+		return requiredOutputRequiresStateChanging(required) || boolValue(required["mustAcquireCurrentTargetSnapshot"])
+	case convergenceStateNeedEvidence:
+		return !requiredOutputRequiresStateChanging(required)
+	default:
+		return true
+	}
+}
+
+func validationRequiredOutputSeed(required map[string]any) map[string]any {
+	if len(required) == 0 {
+		return nil
+	}
+	if requiredOutputRequiresStateChanging(required) || requiredOutputRequiresConcreteFailureEvidence(required) {
+		return nil
+	}
+	return required
 }
 
 func normalizeCurrentAuthorityRequiredOutput(input map[string]any, required map[string]any) map[string]any {

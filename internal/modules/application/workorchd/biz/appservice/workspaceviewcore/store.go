@@ -717,7 +717,7 @@ func (s *Store) List() ([]appmodelcore.Workspace, Status, error) {
 		if entry := s.workspaces[id]; entry != nil && entry.HasWorkspace {
 			item := cloneWorkspace(entry.Workspace)
 			if entry.HasSnapshot {
-				snapshot := normalizedEntrySnapshot(entry)
+				snapshot := normalizedEntryListSnapshot(entry)
 				item = cloneWorkspace(snapshot.Workspace)
 				item = compactWorkspaceListOverview(item)
 				item.State = snapshot.Workspace.State
@@ -784,10 +784,49 @@ func (s *Store) GetSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceS
 	}
 	snapshot := readmodelcore.WorkspaceSnapshot{Workspace: cloneWorkspace(entry.Workspace)}
 	if entry.HasSnapshot {
-		snapshot = normalizedEntrySnapshot(entry)
+		snapshot = normalizedEntrySummarySnapshot(entry)
 	}
 	snapshot.ViewModel = workspaceViewModelFromStatus(snapshot, status)
-	return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot), status, nil
+	return snapshot, status, nil
+}
+
+func normalizedEntryListSnapshot(entry *workspaceProjectionEntry) readmodelcore.WorkspaceSnapshot {
+	if entry == nil {
+		return readmodelcore.WorkspaceSnapshot{}
+	}
+	snapshot := readmodelcore.WorkspaceSnapshot{Workspace: cloneWorkspace(entry.Workspace)}
+	if !entry.HasSnapshot {
+		return snapshot
+	}
+	source := entry.Snapshot
+	snapshot.Workspace = cloneWorkspace(source.Workspace)
+	snapshot.Run = source.Run
+	snapshot.RunHeartbeat = source.RunHeartbeat
+	snapshot.TaskProgress = source.TaskProgress
+	snapshot.Decisions = append([]readmodelcore.Decision(nil), source.Decisions...)
+	snapshot.Approvals = append([]readmodelcore.Approval(nil), source.Approvals...)
+	if entry.HasWorkspace {
+		snapshot.Workspace = workspaceWithSnapshotGovernance(entry.Workspace, snapshot)
+	}
+	return readmodelprojection.NormalizeWorkspaceGovernanceProjection(snapshot)
+}
+
+func normalizedEntrySummarySnapshot(entry *workspaceProjectionEntry) readmodelcore.WorkspaceSnapshot {
+	snapshot := normalizedEntryListSnapshot(entry)
+	if entry == nil || !entry.HasSnapshot {
+		return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot)
+	}
+	source := entry.Snapshot
+	snapshot.Outcome = source.Outcome
+	snapshot.CoverageSummary = cloneStringAnyMap(source.CoverageSummary)
+	snapshot.ConvergenceStatus = source.ConvergenceStatus
+	if source.RunCommand != nil {
+		status := *source.RunCommand
+		snapshot.RunCommand = &status
+	}
+	snapshot.SchedulerDiagnostics = source.SchedulerDiagnostics
+	snapshot.LLMUsageSummary = source.LLMUsageSummary
+	return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot)
 }
 
 func normalizedEntrySnapshot(entry *workspaceProjectionEntry) readmodelcore.WorkspaceSnapshot {

@@ -146,6 +146,14 @@ func (o *RuntimeOrchestrator) missingAssessmentNextAction(ctx context.Context, r
 	if err != nil {
 		return runtimemodel.NextAction{}, false, err
 	}
+	if changed, _ := o.coverageLedger().closeDeterministicallySatisfiedReadyItems(run, ctx); changed {
+		if o.runs != nil {
+			if err := o.persistRunProgressUpdate(ctx, run); err != nil {
+				return runtimemodel.NextAction{}, false, err
+			}
+		}
+		items = mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	}
 	action, ok := deriveMissingAssessmentNextAction(run, items)
 	return action, ok, nil
 }
@@ -540,6 +548,7 @@ func deriveMissingCoverageEvidenceNextAction(run *runmodel.Run, items []map[stri
 			if diagnosticRoute := validationNextActionRouteForRejectedDiagnostics(run, item, spec.RejectedDiagnostics); diagnosticRoute.Route != "" {
 				route = diagnosticRoute
 			}
+			route = validationRouteWithoutDirectDecisionNextAction(route)
 			requiredOutput = applyValidationRouteToRequiredOutput(requiredOutput, route)
 			stageMode = firstNonEmptyString(route.StageMode, stageMode)
 			if route.ActionType != "" && route.ActionType != spec.ActionType {
@@ -1066,6 +1075,14 @@ func validationRouteFromPolicy(policy map[string]any, fallback validationNextAct
 		route.Route = runtimemodel.ValidationRouteLLMGraph
 		route.StageMode = "evidence"
 	}
+	return route
+}
+
+func validationRouteWithoutDirectDecisionNextAction(route validationNextActionRoute) validationNextActionRoute {
+	if route.ActionType != runtimemodel.NextActionTypeRequestDecision {
+		return route
+	}
+	route.ActionType = ""
 	return route
 }
 

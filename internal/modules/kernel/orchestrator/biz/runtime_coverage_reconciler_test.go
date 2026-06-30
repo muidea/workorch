@@ -135,8 +135,8 @@ func TestReconcile_BindsValidShellToOpenCwiWithValidationKind(t *testing.T) {
 	if matched == nil {
 		t.Fatalf("cwi with targetText containing go-build-verify not found")
 	}
-	if status := strings.TrimSpace(stringFromMap(matched, "status")); status != "evidence_ready" {
-		t.Fatalf("cwi status = %q, want evidence_ready (closeSatisfied=false; final satisfaction comes from LLM dodAssessment)", status)
+	if status := strings.TrimSpace(stringFromMap(matched, "status")); status != "satisfied" {
+		t.Fatalf("cwi status = %q, want satisfied by deterministic validation ledger", status)
 	}
 	accepted := mapStringSliceValue(matched["acceptedEvidenceByKind"])
 	if len(accepted["validation"]) != 1 {

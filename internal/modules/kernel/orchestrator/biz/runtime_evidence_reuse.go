@@ -58,7 +58,7 @@ func (c *coverageSubsystem) reconcileAcceptedEvidenceRecords(run *runModel.Run, 
 				[]string{record.Kind},
 				refs,
 				true,
-				false,
+				record.Kind == runtimecontract.EvidenceKindValidation,
 				string(record.StepID),
 				"reused accepted evidence record by structured coverage scope",
 				coverageEvidenceAcceptanceOptionsFromEvidenceRecord(record),
@@ -259,6 +259,10 @@ func coverageEvidenceRecordTargetRefs(record *runtimecontract.EvidenceRecord) []
 	}
 	refs := append([]string{}, coverageStructuredBindingRefsFromValue(record.Metadata["structuredTargetRefs"])...)
 	refs = append(refs, coverageStructuredBindingRefsFromValue(record.Metadata["targetRefs"])...)
+	refs = append(refs, coverageStructuredBindingRefsFromValue(record.Metadata["sourceRequirementIds"])...)
+	refs = append(refs, coverageStructuredBindingRefsFromValue(record.Metadata["coverageTargetIds"])...)
+	refs = append(refs, coverageStructuredBindingRefsFromValue(record.Metadata["coverageTargets"])...)
+	refs = append(refs, coverageStructuredBindingRefsFromValue(record.Metadata["coverageWorkItemIds"])...)
 	if ref := strings.TrimSpace(stringFromMap(record.Metadata, "targetRef")); ref != "" {
 		if coverageBindingRefLooksStructured(ref) {
 			refs = append(refs, ref)

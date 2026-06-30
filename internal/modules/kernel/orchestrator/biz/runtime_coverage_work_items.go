@@ -821,6 +821,96 @@ func coverageWorkItemFromSource(order int, revision, key string, source coverage
 	return item
 }
 
+func (c *coverageSubsystem) closeDeterministicallySatisfiedReadyItems(run *runModel.Run, contexts ...context.Context) (bool, int) {
+	if run == nil || len(run.ExecutionContext) == 0 {
+		return false, 0
+	}
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) == 0 {
+		return false, 0
+	}
+	changed := false
+	closed := 0
+	for _, item := range items {
+		if !coverageWorkItemCanCloseDeterministically(item) {
+			continue
+		}
+		item["status"] = "satisfied"
+		item["missingEvidenceKinds"] = []string{}
+		item["currentGap"] = ""
+		item["satisfiedByEvidenceRefs"] = coverageDeterministicSatisfiedEvidenceRefs(item)
+		item["reason"] = "deterministically satisfied by accepted evidence binding"
+		item["updatedAt"] = runtimeEvidenceTimestamp()
+		changed = true
+		closed++
+	}
+	if !changed {
+		return false, 0
+	}
+	revision := coverageDefinitionRevision(run.ExecutionContext)
+	run.ExecutionContext[coverageWorkItemsKey] = items
+	run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(
+		revision,
+		items,
+		coverageExcludedSourcesFromContext(run.ExecutionContext),
+		coverageHistoricalItemsFromContext(run.ExecutionContext),
+	)
+	synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
+	c.syncRepositoryProjection(coverageRepositoryContext(run, contexts...), run, items)
+	return true, closed
+}
+
+func coverageWorkItemCanCloseDeterministically(item map[string]any) bool {
+	if len(item) == 0 || strings.ToLower(strings.TrimSpace(stringFromMap(item, "status"))) != "evidence_ready" {
+		return false
+	}
+	if missing := coverageMissingEvidenceKinds(item); len(missing) > 0 {
+		return false
+	}
+	requiredKinds := coverageWorkItemEffectiveRequiredEvidenceKinds(item)
+	if len(requiredKinds) == 0 || !coverageWorkItemRequiredEvidenceComplete(item) {
+		return false
+	}
+	bindingByKind := mapStringSliceValue(item["acceptedEvidenceBindingByKind"])
+	if len(bindingByKind) == 0 {
+		return false
+	}
+	requiredCounts := mapIntValue(item["requiredEvidenceCounts"])
+	for _, kind := range requiredKinds {
+		kind = strings.TrimSpace(kind)
+		if kind == "" {
+			continue
+		}
+		requiredCount := requiredCounts[kind]
+		if requiredCount <= 0 {
+			requiredCount = 1
+		}
+		if coverageEvidenceCountForKind(kind, bindingByKind[kind]) < requiredCount {
+			return false
+		}
+	}
+	return !coverageWorkItemHasRejectedOverrideForAcceptedBinding(item)
+}
+
+func coverageWorkItemHasRejectedOverrideForAcceptedBinding(item map[string]any) bool {
+	bindingRefs := stringSet(coverageDeterministicSatisfiedEvidenceRefs(item))
+	if len(bindingRefs) == 0 {
+		return false
+	}
+	for _, refs := range mapStringSliceValue(item["rejectedEvidenceByKind"]) {
+		for _, ref := range refs {
+			if bindingRefs[strings.TrimSpace(ref)] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func coverageDeterministicSatisfiedEvidenceRefs(item map[string]any) []string {
+	return coverageFlattenEvidenceRefs(mapStringSliceValue(item["acceptedEvidenceBindingByKind"]), stringSliceFromValue(item["acceptedEvidenceBindingRefs"]))
+}
+
 func coverageAuditInheritedAcceptedEvidence(existing map[string]any, acceptedByKind map[string][]string) (map[string][]string, map[string][]string, []map[string]any) {
 	if len(acceptedByKind) == 0 {
 		return acceptedByKind, mapStringSliceValue(existing["supportingEvidenceByKind"]), nil

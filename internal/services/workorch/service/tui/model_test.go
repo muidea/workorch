@@ -67,6 +67,36 @@ func TestSchedulerDiagnosticsStatusShowsReadback(t *testing.T) {
 	}
 }
 
+func TestFetchAllUsesWorkspaceListWithoutSnapshot(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateRunning)
+	be.listWorkspaces = []backend.WorkspaceInfo{{
+		ID:    "ws-list-only",
+		Title: "List Only",
+		State: common.WorkspaceStateActive,
+		Projection: backend.ProjectionInfo{
+			GlobalRevision: 7,
+		},
+	}}
+
+	msg := FetchAll(be)()
+	got, ok := msg.(WorkspaceListMsg)
+	if !ok {
+		t.Fatalf("message = %T, want WorkspaceListMsg", msg)
+	}
+	if got.Error != nil {
+		t.Fatalf("FetchAll error = %v", got.Error)
+	}
+	if be.listCalls != 1 {
+		t.Fatalf("list calls = %d, want 1", be.listCalls)
+	}
+	if be.snapshotCalls != 0 || be.lastSnapshotWorkspace != "" {
+		t.Fatalf("snapshot calls = %d workspace=%q, want none for main view fetch", be.snapshotCalls, be.lastSnapshotWorkspace)
+	}
+	if len(got.Workspaces) != 1 || got.Workspaces[0].ID != "ws-list-only" || got.Projection.GlobalRevision != 7 {
+		t.Fatalf("workspace list msg = %+v, want compact projection from list", got)
+	}
+}
+
 func TestLatestLLMContextBudgetPrefersProjectedBudgetTrace(t *testing.T) {
 	got := latestLLMContextBudget([]backend.LLMContextBudgetTraceInfo{
 		{
@@ -5615,6 +5645,9 @@ type recordingBE struct {
 	*fakeBE
 	runState              common.RunState
 	snapshot              *backend.WorkspaceSnapshotInfo
+	listWorkspaces        []backend.WorkspaceInfo
+	listCalls             int
+	snapshotCalls         int
 	goals                 []string
 	activations           []backend.ActivateRunRequest
 	restarts              []backend.ActivateRunRequest
@@ -5673,9 +5706,14 @@ func (f *recordingWorkspace) Get(ctx context.Context, id common.WorkspaceID) (*b
 	return &backend.WorkspaceInfo{ID: id, ActiveRunID: "run-resume"}, nil
 }
 func (f *recordingWorkspace) List(ctx context.Context) ([]backend.WorkspaceInfo, error) {
+	f.parent.listCalls++
+	if len(f.parent.listWorkspaces) > 0 {
+		return append([]backend.WorkspaceInfo(nil), f.parent.listWorkspaces...), nil
+	}
 	return nil, nil
 }
 func (f *recordingWorkspace) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+	f.parent.snapshotCalls++
 	f.parent.lastSnapshotWorkspace = id
 	if f.parent.snapshot != nil {
 		return f.parent.snapshot, nil

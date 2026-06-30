@@ -1,11 +1,12 @@
 package readmodelcore
 
 type StepView struct {
-	ID     string         `json:"id"`
-	Kind   string         `json:"kind"`
-	State  string         `json:"state"`
-	Input  map[string]any `json:"input,omitempty"`
-	Output map[string]any `json:"output,omitempty"`
+	ID            string         `json:"id"`
+	Kind          string         `json:"kind"`
+	State         string         `json:"state"`
+	Input         map[string]any `json:"input,omitempty"`
+	Output        map[string]any `json:"output,omitempty"`
+	ContractAudit map[string]any `json:"contractAudit,omitempty"`
 }
 
 type ObservedView struct {

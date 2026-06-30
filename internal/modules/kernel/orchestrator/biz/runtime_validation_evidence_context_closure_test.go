@@ -44,8 +44,8 @@ func TestAcceptedEvidenceRecordReusesAcrossMatchingCoverageItems(t *testing.T) {
 		t.Fatalf("reconcile changed/bound = %v/%d, want true/3", changed, bound)
 	}
 	for _, item := range mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey]) {
-		if got := stringFromMap(item, "status"); got != "evidence_ready" {
-			t.Fatalf("%s status = %q, want evidence_ready", stringFromMap(item, "id"), got)
+		if got := stringFromMap(item, "status"); got != "satisfied" {
+			t.Fatalf("%s status = %q, want deterministic satisfied", stringFromMap(item, "id"), got)
 		}
 		accepted := mapStringSliceValue(item["acceptedEvidenceByKind"])
 		if refs := accepted[runtimemodel.EvidenceKindValidation]; !stringSliceContains(refs, "step-validation-001/validation/runtime-step") {
@@ -58,11 +58,13 @@ func TestAcceptedEvidenceRecordReusesAcrossMatchingCoverageItems(t *testing.T) {
 	if action, ok := deriveMissingValidationNextAction(run, mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])); ok || action.Type != "" {
 		t.Fatalf("derive missing validation after reuse = %+v/%v, want no validation action", action, ok)
 	}
-	if action, ok := deriveMissingAssessmentNextAction(run, mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])); !ok ||
-		action.Type != runtimemodel.NextActionTypeAssessment ||
-		action.SubjectID != "cwi-001" ||
-		action.RequiredOutput["mustAssessAcceptedEvidence"] != true {
-		t.Fatalf("derive assessment after reuse = %+v/%v, want assessment for first evidence-ready item", action, ok)
+	if action, ok := deriveMissingAssessmentNextAction(run, mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])); ok || action.Type != "" {
+		t.Fatalf("derive assessment after deterministic satisfaction = %+v/%v, want no assessment", action, ok)
+	}
+	if action, ok := deriveAllSatisfiedCompleteNextAction(run, mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])); !ok ||
+		action.Type != runtimemodel.NextActionTypeComplete ||
+		action.SubjectID != string(run.ID) {
+		t.Fatalf("derive complete after deterministic satisfaction = %+v/%v, want complete", action, ok)
 	}
 }
 

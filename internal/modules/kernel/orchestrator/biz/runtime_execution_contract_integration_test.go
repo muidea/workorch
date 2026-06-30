@@ -545,6 +545,113 @@ func TestValidateLLMExecutionOutputContractRejectsIncompleteStateChangingBlocker
 	}
 }
 
+func TestValidateLLMExecutionOutputContractRejectsCurrentActionStateChangeWrongShapes(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-current-action-state-change-shape",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-current-action-state-change-shape/step-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			currentActionContractKey: map[string]any{
+				"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply"},
+				},
+			},
+			"convergenceContract": map[string]any{
+				"state": convergenceStateNeedStateChange,
+			},
+		},
+	}
+	cases := []struct {
+		name   string
+		output map[string]any
+	}{
+		{
+			name: "decision assessment",
+			output: map[string]any{
+				"status": "blocked",
+				"stage":  "llm_decision_required",
+				stepOutputKeyLLMDecision: map[string]any{
+					"completionState": "blocked_on_decision",
+				},
+				stepOutputKeyDoDAssessment: map[string]any{
+					"satisfied": false,
+					"summary":   "state change not produced",
+				},
+			},
+		},
+		{
+			name: "empty graph",
+			output: map[string]any{
+				"status": "completed",
+				stepOutputKeyExecutionGraph: map[string]any{
+					"nodes": []map[string]any{},
+				},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateLLMExecutionOutputContract(run, step, tc.output)
+			if !errors.Is(err, common.ErrInvalidArgument) ||
+				!strings.Contains(err.Error(), "current action state_change requires a state-changing output") {
+				t.Fatalf("validateLLMExecutionOutputContract err = %v, want current action state_change shape rejection", err)
+			}
+			var structured runtimeContractViolationError
+			if !errors.As(err, &structured) ||
+				structured.violationType != contractViolationRepairNoStateChangingOutput ||
+				structured.rule != contractViolationRuleStateChangingRequiredMissing {
+				t.Fatalf("structured violation = %#v, want state-changing required rejected diagnostic", structured)
+			}
+		})
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsCurrentActionEvidencePureDecisionOrAssessment(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-current-action-evidence-shape",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-current-action-evidence-shape/step-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			currentActionContractKey: map[string]any{
+				"nextAction": map[string]any{"kind": "acquire_evidence"},
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteFailureEvidence": true,
+					"acceptedKinds":                      []string{"file/read", "shell/command"},
+				},
+			},
+			"convergenceContract": map[string]any{
+				"state": convergenceStateNeedEvidence,
+			},
+		},
+	}
+
+	output := map[string]any{
+		"status":                           "blocked",
+		"stage":                            "llm_decision_required",
+		stepOutputKeyBlockDecisionReason:   "cannot choose between candidates",
+		stepOutputKeyBlockDecisionQuestion: "Which candidate should be used?",
+	}
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "current action evidence acquisition requires an evidence-producing executionGraph") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want evidence output shape rejection", err)
+	}
+	var structured runtimeContractViolationError
+	if !errors.As(err, &structured) ||
+		structured.violationType != contractViolationValidationEvidenceRequired ||
+		structured.rule != contractViolationRuleWrongOutputShape {
+		t.Fatalf("structured violation = %#v, want wrong-output-shape rejected diagnostic", structured)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsDeclaredStateChangingShellGraph(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-repair-shell-graph",

@@ -30,6 +30,9 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 		return err
 	}
 	normalizeManagedValidationOutput(step, output)
+	if err := validateCurrentActionOutputShapeContract(step, output); err != nil {
+		return err
+	}
 	if err := validateLLMExecutionGraphOutputContract(step, output); err != nil {
 		return err
 	}
@@ -144,6 +147,148 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 		return nil
 	}
 	return newRuntimeContractViolationError(contractViolationExecutionNoStateChangingOutput, "state-changing execution-stage llm graph node returned no state-changing output")
+}
+
+func validateCurrentActionOutputShapeContract(step *runModel.Step, output map[string]any) error {
+	if step == nil || step.Input == nil || output == nil {
+		return nil
+	}
+	currentContract := mapFromValue(step.Input[currentActionContractKey])
+	if len(currentContract) == 0 {
+		return nil
+	}
+	if boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) ||
+		boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) {
+		return nil
+	}
+	if currentActionShapeGateSkipReplanContinuation(step.Input) {
+		return nil
+	}
+	action := strings.TrimSpace(stringFromMap(mapFromValue(currentContract["nextAction"]), "kind"))
+	state := strings.TrimSpace(stringFromMap(mapFromValue(step.Input["convergenceContract"]), "state"))
+	required := mapFromValue(currentContract["requiredOutput"])
+	if len(required) == 0 {
+		required = activeRequiredOutputForCurrentAction(step.Input)
+	}
+	if currentActionRequiresStateChangingOutput(action, state, required) {
+		if currentActionOutputHasStateChangingCandidate(step, output) {
+			return nil
+		}
+		if doDAssessmentFromOutput(output) != nil ||
+			currentActionOutputIsDecisionShape(output) ||
+			currentActionOutputHasEmptyGraph(output) {
+			return newRuntimeContractViolationRuleError(
+				contractViolationRepairNoStateChangingOutput,
+				contractViolationRuleStateChangingRequiredMissing,
+				"current action state_change requires a state-changing output; dodAssessment, llm decision blocker, or empty graph cannot satisfy currentActionContract.requiredOutput",
+			)
+		}
+	}
+	if currentActionRequiresEvidenceOutput(action, state, required) &&
+		currentActionOutputIsPureAssessmentOrDecision(output) {
+		return newRuntimeContractViolationRuleError(
+			contractViolationValidationEvidenceRequired,
+			contractViolationRuleWrongOutputShape,
+			"current action evidence acquisition requires an evidence-producing executionGraph; pure dodAssessment or decision output cannot satisfy currentActionContract.requiredOutput",
+		)
+	}
+	return nil
+}
+
+func currentActionShapeGateSkipReplanContinuation(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	for _, source := range []map[string]any{
+		input,
+		mapFromValue(input["executionContext"]),
+		mapFromValue(input["executionContextPackage"]),
+	} {
+		if len(mapFromValue(source["replanContinuation"])) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func currentActionRequiresStateChangingOutput(action string, state string, required map[string]any) bool {
+	return action == runtimemodel.NextActionTypeStateChange ||
+		state == convergenceStateNeedStateChange ||
+		boolValue(required["mustIncludeStateChangingNode"])
+}
+
+func currentActionRequiresEvidenceOutput(action string, state string, required map[string]any) bool {
+	if state == convergenceStateNeedEvidence ||
+		action == runtimemodel.NextActionTypeAcquireTargetSnapshot ||
+		action == runtimemodel.NextActionTypeRepair ||
+		action == "acquire_evidence" {
+		return true
+	}
+	return boolValue(required["mustProduceConcreteFailureEvidence"]) ||
+		boolValue(required["mustAcquireCurrentTargetSnapshot"])
+}
+
+func currentActionOutputHasStateChangingCandidate(step *runModel.Step, output map[string]any) bool {
+	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
+		return len(graph.Nodes) > 0
+	}
+	if hasStateChangingLLMExecutionOutput(output) {
+		return true
+	}
+	if step != nil && outputModeIsIncrementalArtifact(step.Input) &&
+		(artifactOutputFieldPresent(output, "artifactPlan") ||
+			artifactOutputFieldPresent(output, "artifactChunk") ||
+			artifactOutputFieldPresent(output, "artifactChunkRepair")) {
+		return true
+	}
+	return false
+}
+
+func currentActionOutputHasEmptyGraph(output map[string]any) bool {
+	value, ok := output[stepOutputKeyExecutionGraph]
+	if !ok || value == nil {
+		return false
+	}
+	if graph, ok := value.(runtimemodel.BlockExecutionGraph); ok {
+		return len(graph.Nodes) == 0
+	}
+	graph := mapFromValue(value)
+	if len(graph) == 0 {
+		return false
+	}
+	switch nodes := graph["nodes"].(type) {
+	case []runtimemodel.BlockExecutionNode:
+		return len(nodes) == 0
+	case []map[string]any:
+		return len(nodes) == 0
+	case []any:
+		return len(nodes) == 0
+	default:
+		return false
+	}
+}
+
+func currentActionOutputIsPureAssessmentOrDecision(output map[string]any) bool {
+	if output == nil {
+		return false
+	}
+	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok && len(graph.Nodes) > 0 {
+		return false
+	}
+	return doDAssessmentFromOutput(output) != nil || currentActionOutputIsDecisionShape(output)
+}
+
+func currentActionOutputIsDecisionShape(output map[string]any) bool {
+	if output == nil {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(output, "stage")) == "llm_decision_required" {
+		return true
+	}
+	if strings.TrimSpace(llmDecisionCompletionStateFromOutput(output)) == "blocked_on_decision" {
+		return true
+	}
+	return false
 }
 
 func runtimeDecisionBlockSpecIsStructurallyValid(spec runtimeDecisionBlockSpec) bool {

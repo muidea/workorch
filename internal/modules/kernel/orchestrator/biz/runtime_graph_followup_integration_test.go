@@ -1318,6 +1318,9 @@ func TestCompletionFollowUpPreservesAssessmentOnlyAfterAcceptedStateChangeEviden
 			"acceptedEvidenceByKind": map[string]any{
 				"state_change": []string{"run-completion-cwi-assessment-after-state-change/artifact-apply"},
 			},
+			"acceptedEvidenceBindingByKind": map[string]any{
+				"state_change": []string{"run-completion-cwi-assessment-after-state-change/artifact-apply"},
+			},
 		},
 	}
 	input = restoreCoverageWorkItemContinuationConvergenceContract(run, input)

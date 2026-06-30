@@ -5,9 +5,10 @@ import llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/com
 func ProjectStepView(item StepView) StepView {
 	kind := llmcommon.CanonicalRuntimeBlockKind(item.Kind)
 	return StepView{
-		ID:     item.ID,
-		Kind:   kind,
-		State:  item.State,
-		Output: ProjectStepOutput(kind, item.Output),
+		ID:            item.ID,
+		Kind:          kind,
+		State:         item.State,
+		Output:        ProjectStepOutput(kind, item.Output),
+		ContractAudit: cloneStepViewMap(projectStepContractAudit(item.Input, item.Output, item.ContractAudit)),
 	}
 }

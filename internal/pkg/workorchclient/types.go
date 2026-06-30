@@ -133,12 +133,13 @@ type AcceptanceProjection struct {
 }
 
 type Step struct {
-	ID     string         `json:"id"`
-	RunID  string         `json:"runId"`
-	Kind   string         `json:"kind"`
-	State  string         `json:"state"`
-	Input  map[string]any `json:"input,omitempty"`
-	Output map[string]any `json:"output,omitempty"`
+	ID            string         `json:"id"`
+	RunID         string         `json:"runId"`
+	Kind          string         `json:"kind"`
+	State         string         `json:"state"`
+	Input         map[string]any `json:"input,omitempty"`
+	Output        map[string]any `json:"output,omitempty"`
+	ContractAudit map[string]any `json:"contractAudit,omitempty"`
 }
 
 type ToolCall struct {

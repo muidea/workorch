@@ -10,6 +10,7 @@ func TestCoverageApplyWorkItemEvidence_AcceptedEvidenceSatisfiesRequiredKind(t *
 	item := map[string]any{
 		"id":                    "cwi-accepted-evidence",
 		"status":                "open",
+		"sourceRequirementId":   "req-accepted-evidence",
 		"requiredEvidenceKinds": []string{"validation"},
 		"requiredEvidenceCounts": map[string]any{
 			"validation": 1,
@@ -18,7 +19,7 @@ func TestCoverageApplyWorkItemEvidence_AcceptedEvidenceSatisfiesRequiredKind(t *
 		"currentGap":           "missing validation evidence",
 	}
 
-	changed := coverageApplyWorkItemEvidence(
+	changed := coverageApplyWorkItemEvidenceWithOptions(
 		item,
 		[]string{"validation"},
 		[]string{"run-1/validation-001"},
@@ -26,6 +27,12 @@ func TestCoverageApplyWorkItemEvidence_AcceptedEvidenceSatisfiesRequiredKind(t *
 		false,
 		"run-1/step-001",
 		"",
+		coverageEvidenceAcceptanceOptions{
+			Quality:        runtimeEvidenceQuality{Quality: common.EvidenceQualityValid},
+			TargetRefs:     []string{"req-accepted-evidence"},
+			ObservedClaims: []string{"accepted evidence behavior was observed"},
+			ProofKind:      "runtime_behavior",
+		},
 	)
 	if !changed {
 		t.Fatalf("changed = false, want true")
@@ -351,6 +358,7 @@ func TestCoverageMissingEvidenceKindsAreIndependentByEvidenceKind(t *testing.T) 
 	item := map[string]any{
 		"id":                    "cwi-independent-kinds",
 		"status":                "open",
+		"sourceRequirementId":   "req-independent-kinds",
 		"requiredEvidenceKinds": []string{"state_change", "validation", "assessment"},
 		"requiredEvidenceCounts": map[string]any{
 			"state_change": 1,
@@ -360,14 +368,40 @@ func TestCoverageMissingEvidenceKindsAreIndependentByEvidenceKind(t *testing.T) 
 		"missingEvidenceKinds": []string{"state_change", "validation", "assessment"},
 	}
 
-	if !coverageApplyWorkItemEvidence(item, []string{"state_change"}, []string{"run-1/state-change-001"}, true, false, "run-1/step-001", "") {
+	if !coverageApplyWorkItemEvidenceWithOptions(
+		item,
+		[]string{"state_change"},
+		[]string{"run-1/state-change-001"},
+		true,
+		false,
+		"run-1/step-001",
+		"",
+		coverageEvidenceAcceptanceOptions{
+			Quality:    runtimeEvidenceQuality{Quality: common.EvidenceQualityValid},
+			TargetRefs: []string{"req-independent-kinds"},
+		},
+	) {
 		t.Fatalf("state_change update changed = false, want true")
 	}
 	if missing := stringSet(stringSliceFromValue(item["missingEvidenceKinds"])); missing["state_change"] || !missing["validation"] || !missing["assessment"] {
 		t.Fatalf("missing after state_change = %+v, want validation and assessment only", item["missingEvidenceKinds"])
 	}
 
-	if !coverageApplyWorkItemEvidence(item, []string{"validation"}, []string{"run-1/validation-001"}, true, false, "run-1/step-002", "") {
+	if !coverageApplyWorkItemEvidenceWithOptions(
+		item,
+		[]string{"validation"},
+		[]string{"run-1/validation-001"},
+		true,
+		false,
+		"run-1/step-002",
+		"",
+		coverageEvidenceAcceptanceOptions{
+			Quality:        runtimeEvidenceQuality{Quality: common.EvidenceQualityValid},
+			TargetRefs:     []string{"req-independent-kinds"},
+			ObservedClaims: []string{"independent validation behavior was observed"},
+			ProofKind:      "runtime_behavior",
+		},
+	) {
 		t.Fatalf("validation update changed = false, want true")
 	}
 	if missing := stringSet(stringSliceFromValue(item["missingEvidenceKinds"])); missing["state_change"] || missing["validation"] || !missing["assessment"] {

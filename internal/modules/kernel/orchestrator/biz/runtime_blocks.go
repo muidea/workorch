@@ -311,6 +311,18 @@ func decisionBlockDeclaresRequiredRealExternalDependency(context map[string]any)
 			"equivalentEvidenceNotApplicable",
 			"equivalentEvidenceRejected",
 			"mustUseDeclaredExternalEvidence",
+			"requiresExternalInput",
+			"requiresExternalDependency",
+			"requiresUserChoice",
+			"userChoiceRequired",
+			"requiresCredential",
+			"credentialRequired",
+			"requiresPermission",
+			"permissionRequired",
+			"requiresApproval",
+			"approvalRequired",
+			"requiresConfiguration",
+			"configurationRequired",
 		} {
 			if boolValue(source[key]) {
 				return true

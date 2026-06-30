@@ -51,6 +51,10 @@ func TestDeriveCoverageWorkItemState(t *testing.T) {
 					"state_change": {"run/graph/patch"},
 					"validation":   {"run/graph/validate"},
 				},
+				"acceptedEvidenceBindingByKind": map[string][]string{
+					"state_change": {"run/graph/patch"},
+					"validation":   {"run/graph/validate"},
+				},
 				"currentGap": "required evidence kinds present; coverage assessment required",
 			},
 			wantAction:     coverageWorkItemActionNeedAssessment,
@@ -63,6 +67,9 @@ func TestDeriveCoverageWorkItemState(t *testing.T) {
 				"status":                "open",
 				"requiredEvidenceKinds": []string{"validation"},
 				"acceptedEvidenceByKind": map[string][]string{
+					"validation": {"run/graph/validate"},
+				},
+				"acceptedEvidenceBindingByKind": map[string][]string{
 					"validation": {"run/graph/validate"},
 				},
 				"currentGap": "required evidence kinds present; coverage assessment required",
@@ -120,6 +127,9 @@ func TestDeriveCoverageWorkItemState(t *testing.T) {
 				"acceptedEvidenceByKind": map[string][]string{
 					"validation": {"run/graph/validate"},
 				},
+				"acceptedEvidenceBindingByKind": map[string][]string{
+					"validation": {"run/graph/validate"},
+				},
 				"acceptedEvidenceRefs": []string{"run/graph/validate"},
 			},
 			wantAction: coverageWorkItemActionNone,
@@ -163,6 +173,10 @@ func TestCoverageWorkItemRequiresEvidenceKindUsesDerivedActionableGap(t *testing
 		"requiredEvidenceKinds": []string{"state_change", "validation"},
 		"missingEvidenceKinds":  []string{},
 		"acceptedEvidenceByKind": map[string][]string{
+			"state_change": {"run/graph/patch"},
+			"validation":   {"run/graph/validate"},
+		},
+		"acceptedEvidenceBindingByKind": map[string][]string{
 			"state_change": {"run/graph/patch"},
 			"validation":   {"run/graph/validate"},
 		},
@@ -217,6 +231,9 @@ func TestDerivedMissingEvidenceDoesNotReopenAcceptedByKind(t *testing.T) {
 		"acceptedEvidenceByKind": map[string][]string{
 			"state_change": {"run/graph/patch"},
 		},
+		"acceptedEvidenceBindingByKind": map[string][]string{
+			"state_change": {"run/graph/patch"},
+		},
 		"acceptedEvidenceRefs": []string{"run/graph/patch"},
 	}
 
@@ -268,7 +285,7 @@ func TestCoverageMissingEvidenceKindsDelegatesToDerivedState(t *testing.T) {
 	}
 }
 
-func TestDerivedMissingEvidenceAllowsFlatRefsForSingleRequiredKind(t *testing.T) {
+func TestDerivedMissingEvidenceRequiresBindingForSingleRequiredKind(t *testing.T) {
 	item := map[string]any{
 		"id":                    "cwi-flat-ref-single-kind",
 		"status":                "evidence_ready",
@@ -278,11 +295,11 @@ func TestDerivedMissingEvidenceAllowsFlatRefsForSingleRequiredKind(t *testing.T)
 	}
 
 	state := deriveCoverageWorkItemState(item)
-	if state.NextAction != coverageWorkItemActionNeedAssessment {
-		t.Fatalf("NextAction = %q, want %q; state=%+v", state.NextAction, coverageWorkItemActionNeedAssessment, state)
+	if state.NextAction != coverageWorkItemActionNeedEvidence {
+		t.Fatalf("NextAction = %q, want %q; state=%+v", state.NextAction, coverageWorkItemActionNeedEvidence, state)
 	}
-	if len(state.MissingEvidenceKinds) != 0 {
-		t.Fatalf("derived missingEvidenceKinds = %+v, want none for single-kind flat legacy refs", state.MissingEvidenceKinds)
+	if !stringSliceContains(state.MissingEvidenceKinds, "validation") {
+		t.Fatalf("derived missingEvidenceKinds = %+v, want validation missing without binding", state.MissingEvidenceKinds)
 	}
 }
 
@@ -338,6 +355,9 @@ func TestGapTodoItemsUseDerivedMissingEvidence(t *testing.T) {
 			"acceptedEvidenceByKind": map[string][]string{
 				"validation": {"run/graph/validate"},
 			},
+			"acceptedEvidenceBindingByKind": map[string][]string{
+				"validation": {"run/graph/validate"},
+			},
 			"currentGap": "required evidence kinds present; coverage assessment required",
 		},
 	}
@@ -367,12 +387,15 @@ func TestCoverageWorkItemsHaveAcceptedPrimaryDeliverableEvidenceUsesDerivedState
 				"requiredEvidenceKinds": []string{"state_change"},
 				"missingEvidenceKinds":  []string{},
 				"acceptedEvidenceRefs":  []string{"run/graph/patch"},
+				"acceptedEvidenceBindingByKind": map[string][]string{
+					"state_change": {"run/graph/patch"},
+				},
 			}},
 		},
 	}
 
 	if !coverageWorkItemsHaveAcceptedPrimaryDeliverableEvidence(run, "deliverable-001") {
-		t.Fatalf("coverageWorkItemsHaveAcceptedPrimaryDeliverableEvidence = false, want true from derived legacy accepted refs")
+		t.Fatalf("coverageWorkItemsHaveAcceptedPrimaryDeliverableEvidence = false, want true from accepted binding refs")
 	}
 }
 
@@ -397,6 +420,7 @@ func TestCoverageTargetPredicatesUseDerivedState(t *testing.T) {
 	ready := cloneStepPayload(staleReady)
 	ready["acceptedEvidenceRefs"] = []string{"run/graph/patch"}
 	ready["acceptedEvidenceByKind"] = map[string][]string{"state_change": {"run/graph/patch"}}
+	ready["acceptedEvidenceBindingByKind"] = map[string][]string{"state_change": {"run/graph/patch"}}
 	if coverageTargetSetHasMissingEvidence([]map[string]any{ready}) {
 		t.Fatalf("coverageTargetSetHasMissingEvidence = true, want false for accepted state_change evidence")
 	}

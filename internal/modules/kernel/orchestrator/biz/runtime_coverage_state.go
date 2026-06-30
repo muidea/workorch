@@ -129,6 +129,10 @@ func coverageWorkItemAcceptedEvidenceCountForKind(item map[string]any, kind stri
 	if kind == "" {
 		return 0
 	}
+	if coverageEvidenceKindRequiresInheritedBinding(kind) {
+		bindingByKind := mapStringSliceValue(item["acceptedEvidenceBindingByKind"])
+		return coverageEvidenceCountForKind(kind, bindingByKind[kind])
+	}
 	acceptedByKind := mapStringSliceValue(item["acceptedEvidenceByKind"])
 	if refs := acceptedByKind[kind]; len(refs) > 0 {
 		return coverageEvidenceCountForKind(kind, refs)
@@ -155,6 +159,11 @@ func coverageWorkItemFlatAcceptedRefsSatisfyRequiredKinds(item map[string]any, r
 		return false
 	}
 	requiredKinds = compactUniqueStrings(requiredKinds)
+	for _, kind := range requiredKinds {
+		if coverageEvidenceKindRequiresInheritedBinding(kind) {
+			return false
+		}
+	}
 	requiredTotal := 0
 	for _, kind := range requiredKinds {
 		kind = strings.TrimSpace(kind)

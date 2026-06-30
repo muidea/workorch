@@ -240,7 +240,6 @@ func TestNextActionForRunMissingStateChangeRequestsStateChange(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create coverage item: %v", err)
 	}
-
 	action, err := orch.NextActionForRun(ctx, runID)
 	if err != nil {
 		t.Fatalf("NextActionForRun: %v", err)
@@ -751,6 +750,65 @@ func TestNextActionForRunMissingValidationRequestsValidation(t *testing.T) {
 	}
 	if !stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeStateChange) {
 		t.Fatalf("forbidden actions = %+v, want state_change forbidden", action.ForbiddenActions)
+	}
+}
+
+func TestNextActionForRunValidationPolicyDecisionDoesNotOverrideLedgerActionWithoutOpenTicket(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-validation-policy-decision")
+	runID := common.RunID("run-next-action-validation-policy-decision")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			"validationPolicies": []map[string]any{{
+				"id":                    "manual-validation-policy",
+				"allowedExecutionModes": []string{"decision"},
+				"governanceReason":      "manual validation required by policy",
+			}},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                     "cwi-validation-policy-decision",
+				"status":                 "open",
+				"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+				"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindStateChange: {"step-state-change"}},
+				"missingEvidenceKinds":   []string{runtimemodel.EvidenceKindValidation},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeValidate || action.Stage != runtimemodel.NextActionTypeValidate {
+		t.Fatalf("next action = %+v, want ledger validation action, not request_decision", action)
+	}
+	if stringSliceContains(action.AllowedActions, runtimemodel.NextActionTypeRequestDecision) ||
+		stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeValidate) {
+		t.Fatalf("next action actions = allowed:%+v forbidden:%+v, want validation authority without decision override", action.AllowedActions, action.ForbiddenActions)
+	}
+	if action.RequiredOutput["validationRoute"] != runtimemodel.ValidationRouteRequestDecision ||
+		action.RequiredOutput["mustRequestGovernance"] != true {
+		t.Fatalf("required output = %+v, want policy governance requirement preserved as validation contract metadata", action.RequiredOutput)
 	}
 }
 
@@ -1329,6 +1387,10 @@ func TestNextActionForRunAllSatisfiedRequestsComplete(t *testing.T) {
 				"status":                 "satisfied",
 				"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
 				"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindStateChange: {"patch-001"}, runtimemodel.EvidenceKindValidation: {"validation-001"}},
+				"acceptedEvidenceBindingByKind": map[string][]string{
+					runtimemodel.EvidenceKindStateChange: {"patch-001"},
+					runtimemodel.EvidenceKindValidation:  {"validation-001"},
+				},
 			}},
 		},
 	}); err != nil {
@@ -1387,6 +1449,9 @@ func TestNextActionForRunAllSatisfiedPreemptsRecoverableDiagnostic(t *testing.T)
 				"status":                 "satisfied",
 				"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindValidation},
 				"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindValidation: {"validation-001"}},
+				"acceptedEvidenceBindingByKind": map[string][]string{
+					runtimemodel.EvidenceKindValidation: {"validation-001"},
+				},
 			}},
 		},
 	}); err != nil {
@@ -1413,7 +1478,7 @@ func TestNextActionForRunAllSatisfiedPreemptsRecoverableDiagnostic(t *testing.T)
 	}
 }
 
-func TestNextActionForRunEvidenceReadyAcceptedItemsRequestAssessment(t *testing.T) {
+func TestNextActionForRunSatisfiedAcceptedItemSkipsAssessmentAndSelectsNextFocus(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -1429,8 +1494,8 @@ func TestNextActionForRunEvidenceReadyAcceptedItemsRequestAssessment(t *testing.
 		events.NewMemoryHub(),
 	)
 
-	workspaceID := common.WorkspaceID("ws-next-action-evidence-ready-assessment")
-	runID := common.RunID("run-next-action-evidence-ready-assessment")
+	workspaceID := common.WorkspaceID("ws-next-action-satisfied-next-focus")
+	runID := common.RunID("run-next-action-satisfied-next-focus")
 	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
@@ -1439,14 +1504,22 @@ func TestNextActionForRunEvidenceReadyAcceptedItemsRequestAssessment(t *testing.
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
-				"id":                    "cwi-evidence-ready-assessment",
-				"status":                "evidence_ready",
+				"id":                    "cwi-satisfied",
+				"status":                "satisfied",
 				"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindValidation},
 				"missingEvidenceKinds":  []string{},
 				"acceptedEvidenceByKind": map[string][]string{
 					runtimemodel.EvidenceKindValidation: {"validation-001"},
 				},
+				"acceptedEvidenceBindingByKind": map[string][]string{
+					runtimemodel.EvidenceKindValidation: {"validation-001"},
+				},
 				"acceptedEvidenceRefs": []string{"validation-001"},
+			}, {
+				"id":                    "cwi-next-validation",
+				"status":                "open",
+				"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindValidation},
+				"missingEvidenceKinds":  []string{runtimemodel.EvidenceKindValidation},
 			}},
 		},
 	}); err != nil {
@@ -1457,8 +1530,149 @@ func TestNextActionForRunEvidenceReadyAcceptedItemsRequestAssessment(t *testing.
 	if err != nil {
 		t.Fatalf("NextActionForRun: %v", err)
 	}
-	if action.Type != runtimemodel.NextActionTypeAssessment || action.Stage != "assessment" {
-		t.Fatalf("next action = %+v, want deterministic assessment from accepted evidence-ready ledger", action)
+	if action.Type != runtimemodel.NextActionTypeValidate || action.SubjectID != "cwi-next-validation" {
+		t.Fatalf("next action = %+v, want validation for next unresolved focus", action)
+	}
+	if len(action.FocusCoverageItemIDs) != 1 || action.FocusCoverageItemIDs[0] != "cwi-next-validation" {
+		t.Fatalf("focus ids = %+v, want only next unresolved item", action.FocusCoverageItemIDs)
+	}
+}
+
+func TestNextActionForRunEvidenceReadyAcceptedBindingClosesDeterministically(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	coverageRepo := memory.NewCoverageWorkItemRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-ready-binding")
+	runID := common.RunID("run-next-action-ready-binding")
+	coverageItemID := coverageWorkItemRepositoryID(runID, "cwi-ready-binding")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := coverageRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.CoverageWorkItem{
+		ID:                    coverageItemID,
+		WorkspaceID:           workspaceID,
+		RunID:                 runID,
+		DefinitionRevision:    "rev-ready-binding",
+		NormalizedSourceKey:   "source-ready-binding",
+		RequiredEvidenceKinds: []string{runtimemodel.EvidenceKindValidation},
+		Status:                "evidence_ready",
+		AcceptedEvidenceRefs:  []string{"validation-001"},
+		CurrentGap:            "required evidence kinds present; coverage assessment required",
+		Metadata: map[string]any{
+			"id":                   "cwi-ready-binding",
+			"missingEvidenceKinds": []string{},
+			"acceptedEvidenceByKind": map[string][]string{
+				runtimemodel.EvidenceKindValidation: {"validation-001"},
+			},
+			"acceptedEvidenceBindingByKind": map[string][]string{
+				runtimemodel.EvidenceKindValidation: {"validation-001"},
+			},
+			"acceptedEvidenceBindingRefs": []string{"validation-001"},
+		},
+	}); err != nil {
+		t.Fatalf("create coverage item: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeComplete || action.SubjectID != string(runID) {
+		updated, getErr := runRepo.Get(ctx, runID)
+		if getErr != nil {
+			t.Fatalf("next action = %+v, want complete after deterministic ledger close; get updated run: %v", action, getErr)
+		}
+		t.Fatalf("next action = %+v, want complete after deterministic ledger close; coverageItems=%+v", action, mapSliceFromValue(updated.ExecutionContext[coverageWorkItemsKey]))
+	}
+	repoItem, err := coverageRepo.Get(ctx, coverageItemID)
+	if err != nil {
+		t.Fatalf("get coverage item: %v", err)
+	}
+	if repoItem.Status != "satisfied" {
+		t.Fatalf("repo coverage status = %q, want satisfied", repoItem.Status)
+	}
+	if refs := stringSliceFromValue(repoItem.Metadata["satisfiedByEvidenceRefs"]); !stringSliceContains(refs, "validation-001") {
+		t.Fatalf("repo satisfiedByEvidenceRefs = %+v, want validation-001", refs)
+	}
+}
+
+func TestNextActionForRunEvidenceReadyWithoutBindingStillRequiresValidation(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	coverageRepo := memory.NewCoverageWorkItemRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-ready-no-binding")
+	runID := common.RunID("run-next-action-ready-no-binding")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := coverageRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.CoverageWorkItem{
+		ID:                    "cwi-ready-no-binding-repo",
+		WorkspaceID:           workspaceID,
+		RunID:                 runID,
+		DefinitionRevision:    "rev-ready-no-binding",
+		NormalizedSourceKey:   "source-ready-no-binding",
+		RequiredEvidenceKinds: []string{runtimemodel.EvidenceKindValidation},
+		Status:                "evidence_ready",
+		AcceptedEvidenceRefs:  []string{"validation-001"},
+		Metadata: map[string]any{
+			"id":                   "cwi-ready-no-binding",
+			"missingEvidenceKinds": []string{},
+			"acceptedEvidenceByKind": map[string][]string{
+				runtimemodel.EvidenceKindValidation: {"validation-001"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("create coverage item: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeValidate || action.SubjectID != "cwi-ready-no-binding" {
+		t.Fatalf("next action = %+v, want validation for evidence_ready without accepted binding", action)
 	}
 }
 
@@ -1489,6 +1703,7 @@ func TestDeriveAllSatisfiedCompleteNextActionRequiresSatisfiedAcceptedEvidence(t
 	}
 
 	items[0]["acceptedEvidenceByKind"] = map[string][]string{runtimemodel.EvidenceKindValidation: {"validation-001"}}
+	items[0]["acceptedEvidenceBindingByKind"] = map[string][]string{runtimemodel.EvidenceKindValidation: {"validation-001"}}
 	action, ok := deriveAllSatisfiedCompleteNextAction(run, items)
 	if !ok || action.Type != runtimemodel.NextActionTypeComplete || action.SubjectID != string(run.ID) {
 		t.Fatalf("derive complete = %+v/%v, want complete", action, ok)

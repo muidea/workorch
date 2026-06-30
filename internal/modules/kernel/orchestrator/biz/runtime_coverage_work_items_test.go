@@ -341,7 +341,7 @@ func TestNextDispatchSpecsPersistsGapBaselineBeforeInitialStep(t *testing.T) {
 	}
 }
 
-func TestGapBaselineNextActionUsesEvidenceReadyAssessment(t *testing.T) {
+func TestGapBaselineNextActionUsesDeterministicCompleteForAcceptedBinding(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-gap-baseline-assessment",
 		WorkspaceID: "ws-gap-baseline-assessment",
@@ -355,22 +355,83 @@ func TestGapBaselineNextActionUsesEvidenceReadyAssessment(t *testing.T) {
 					"status":                "evidence_ready",
 					"requiredEvidenceKinds": []string{"validation"},
 					"acceptedEvidenceRefs":  []string{"step-validation"},
-					"currentGap":            "required evidence kinds present; coverage assessment required",
+					"acceptedEvidenceByKind": map[string]any{
+						"validation": []string{"step-validation"},
+					},
+					"acceptedEvidenceBindingByKind": map[string]any{
+						"validation": []string{"step-validation"},
+					},
+					"currentGap": "required evidence kinds present; coverage assessment required",
 				},
 				"unresolvedItems": []map[string]any{{
 					"id":                    "cwi-ready",
 					"status":                "evidence_ready",
 					"requiredEvidenceKinds": []string{"validation"},
 					"acceptedEvidenceRefs":  []string{"step-validation"},
-					"currentGap":            "required evidence kinds present; coverage assessment required",
+					"acceptedEvidenceByKind": map[string]any{
+						"validation": []string{"step-validation"},
+					},
+					"acceptedEvidenceBindingByKind": map[string]any{
+						"validation": []string{"step-validation"},
+					},
+					"currentGap": "required evidence kinds present; coverage assessment required",
 				}},
 			},
 		},
 	}
 
 	baseline := gapBaselineFromRun(run)
-	if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got != "assessment" {
-		t.Fatalf("gapBaseline.nextAction = %+v, want assessment", baseline["nextAction"])
+	if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got != "complete" {
+		t.Fatalf("gapBaseline.nextAction = %+v, want deterministic complete", baseline["nextAction"])
+	}
+}
+
+func TestGapBaselineNextActionSkipsAssessmentForDeterministicAcceptedBinding(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-gap-baseline-deterministic",
+		WorkspaceID: "ws-gap-baseline-deterministic",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			coverageWorkItemContextKey: map[string]any{
+				"definitionRevision":   "rev-deterministic",
+				"coverageBaselineHash": "sha256:deterministic",
+				"currentFocus": map[string]any{
+					"id":                    "cwi-ready",
+					"status":                "evidence_ready",
+					"requiredEvidenceKinds": []string{"validation"},
+					"missingEvidenceKinds":  []string{},
+					"acceptedEvidenceByKind": map[string][]string{
+						"validation": {"step-validation"},
+					},
+					"acceptedEvidenceBindingByKind": map[string][]string{
+						"validation": {"step-validation"},
+					},
+					"acceptedEvidenceBindingRefs": []string{"step-validation"},
+					"acceptedEvidenceRefs":        []string{"step-validation"},
+					"currentGap":                  "required evidence kinds present; coverage assessment required",
+				},
+				"unresolvedItems": []map[string]any{{
+					"id":                    "cwi-ready",
+					"status":                "evidence_ready",
+					"requiredEvidenceKinds": []string{"validation"},
+					"missingEvidenceKinds":  []string{},
+					"acceptedEvidenceByKind": map[string][]string{
+						"validation": {"step-validation"},
+					},
+					"acceptedEvidenceBindingByKind": map[string][]string{
+						"validation": {"step-validation"},
+					},
+					"acceptedEvidenceBindingRefs": []string{"step-validation"},
+					"acceptedEvidenceRefs":        []string{"step-validation"},
+					"currentGap":                  "required evidence kinds present; coverage assessment required",
+				}},
+			},
+		},
+	}
+
+	baseline := gapBaselineFromRun(run)
+	if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got != "complete" {
+		t.Fatalf("gapBaseline.nextAction = %+v, want complete for deterministic accepted binding", baseline["nextAction"])
 	}
 }
 
@@ -406,14 +467,26 @@ func TestRefreshRunConvergenceAuthorityAlignsFocusAndBudgetToCurrentCoverage(t *
 					"status":                "evidence_ready",
 					"requiredEvidenceKinds": []string{"validation"},
 					"acceptedEvidenceRefs":  []string{"step-validation"},
-					"currentGap":            "required evidence kinds present; coverage assessment required",
+					"acceptedEvidenceByKind": map[string]any{
+						"validation": []string{"step-validation"},
+					},
+					"acceptedEvidenceBindingByKind": map[string]any{
+						"validation": []string{"step-validation"},
+					},
+					"currentGap": "required evidence kinds present; coverage assessment required",
 				},
 				"unresolvedItems": []map[string]any{{
 					"id":                    "cwi-ready",
 					"status":                "evidence_ready",
 					"requiredEvidenceKinds": []string{"validation"},
 					"acceptedEvidenceRefs":  []string{"step-validation"},
-					"currentGap":            "required evidence kinds present; coverage assessment required",
+					"acceptedEvidenceByKind": map[string]any{
+						"validation": []string{"step-validation"},
+					},
+					"acceptedEvidenceBindingByKind": map[string]any{
+						"validation": []string{"step-validation"},
+					},
+					"currentGap": "required evidence kinds present; coverage assessment required",
 				}},
 			},
 		},
@@ -472,12 +545,24 @@ func TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket(t *tes
 					"status":                "evidence_ready",
 					"requiredEvidenceKinds": []string{"validation"},
 					"acceptedEvidenceRefs":  []string{"step-validation"},
+					"acceptedEvidenceByKind": map[string]any{
+						"validation": []string{"step-validation"},
+					},
+					"acceptedEvidenceBindingByKind": map[string]any{
+						"validation": []string{"step-validation"},
+					},
 				},
 				"unresolvedItems": []map[string]any{{
 					"id":                    "cwi-ready",
 					"status":                "evidence_ready",
 					"requiredEvidenceKinds": []string{"validation"},
 					"acceptedEvidenceRefs":  []string{"step-validation"},
+					"acceptedEvidenceByKind": map[string]any{
+						"validation": []string{"step-validation"},
+					},
+					"acceptedEvidenceBindingByKind": map[string]any{
+						"validation": []string{"step-validation"},
+					},
 				}},
 			},
 			"repairActionPackage": map[string]any{
@@ -500,16 +585,16 @@ func TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket(t *tes
 		t.Fatal("refreshRunConvergenceAuthority changed = false, want authority snapshot")
 	}
 	authority := mapFromValue(run.ExecutionContext[convergenceAuthorityKey])
-	if got := stringFromMap(mapFromValue(authority["nextAction"]), "kind"); got != "assessment" {
-		t.Fatalf("convergenceAuthority.nextAction = %+v, want assessment", authority["nextAction"])
+	if got := stringFromMap(mapFromValue(authority["nextAction"]), "kind"); got != "complete" {
+		t.Fatalf("convergenceAuthority.nextAction = %+v, want deterministic complete", authority["nextAction"])
 	}
 	if got := stringFromMap(mapFromValue(authority["currentFocus"]), "id"); got != "cwi-ready" {
 		t.Fatalf("convergenceAuthority.currentFocus = %+v, want raw current coverage work item", authority["currentFocus"])
 	}
 
 	baseline := gapBaselineFromRun(run)
-	if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got != "assessment" {
-		t.Fatalf("gapBaseline.nextAction = %+v, want assessment", baseline["nextAction"])
+	if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got != "complete" {
+		t.Fatalf("gapBaseline.nextAction = %+v, want deterministic complete", baseline["nextAction"])
 	}
 
 	input := runExecutionInput(run, "")
@@ -519,8 +604,8 @@ func TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket(t *tes
 		}
 	}
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
-	if contract.State != convergenceStateNeedAssessment {
-		t.Fatalf("convergenceContract = %+v, want need_assessment from authority next action", contract)
+	if contract.State != convergenceStateComplete || contract.RuntimeStageMode != "deterministic_ledger" {
+		t.Fatalf("convergenceContract = %+v, want deterministic complete from authority next action", contract)
 	}
 	applied := ApplyConvergenceContract(input, contract)
 	if boolValue(applied["concreteFailureEvidenceRequired"]) || boolValue(mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])["mustProduceConcreteFailureEvidence"]) {
@@ -1449,6 +1534,10 @@ func TestCoverageWorkItemContextAlignsCurrentFocusToActiveCoverageFocus(t *testi
 				"state_change": []string{"run/graph/001-patch"},
 				"validation":   []string{"run/graph/002-verify"},
 			},
+			"acceptedEvidenceBindingByKind": map[string]any{
+				"state_change": []string{"run/graph/001-patch"},
+				"validation":   []string{"run/graph/002-verify"},
+			},
 			"acceptedEvidenceRefs": []string{"run/graph/001-patch"},
 			"status":               "evidence_ready",
 		},
@@ -1495,13 +1584,21 @@ func TestCoverageWorkItemContextAlignsCurrentFocusToActiveCoverageFocus(t *testi
 func TestCoverageWorkItemContextAlignedEvidenceReadyLedgerItemDoesNotReopenMissingEvidence(t *testing.T) {
 	context := map[string]any{
 		"ledgerSummary": []map[string]any{{
-			"id":                      "cwi-ready",
-			"source":                  "deliverable",
-			"sourceScope":             "deliverable",
-			"sourceRequirementId":     "deliverable-ready",
-			"targetText":              "deliverable-ready",
-			"normalizedSourceKey":     "deliverable:deliverable:deliverable-ready",
-			"requiredEvidenceKinds":   []string{"validation", "state_change"},
+			"id":                    "cwi-ready",
+			"source":                "deliverable",
+			"sourceScope":           "deliverable",
+			"sourceRequirementId":   "deliverable-ready",
+			"targetText":            "deliverable-ready",
+			"normalizedSourceKey":   "deliverable:deliverable:deliverable-ready",
+			"requiredEvidenceKinds": []string{"validation", "state_change"},
+			"acceptedEvidenceByKind": map[string]any{
+				"state_change": []string{"run/graph/001-patch"},
+				"validation":   []string{"run/graph/002-verify"},
+			},
+			"acceptedEvidenceBindingByKind": map[string]any{
+				"state_change": []string{"run/graph/001-patch"},
+				"validation":   []string{"run/graph/002-verify"},
+			},
 			"acceptedEvidenceRefs":    []string{"run/graph/001-patch", "run/graph/002-verify"},
 			"rejectedEvidenceRefs":    []string{"run/graph/003-rejected-verify"},
 			"status":                  "evidence_ready",
@@ -1532,8 +1629,8 @@ func TestCoverageWorkItemContextAlignedEvidenceReadyLedgerItemDoesNotReopenMissi
 		t.Fatalf("aligned currentFocus missingEvidenceKinds = %+v, want empty for evidence_ready ledger item", missing)
 	}
 	nextStates := stringSliceFromValue(current["nextAllowedConvergenceStates"])
-	if len(nextStates) != 1 || nextStates[0] != convergenceStateNeedAssessment {
-		t.Fatalf("aligned currentFocus nextAllowedConvergenceStates = %+v, want [%s]", nextStates, convergenceStateNeedAssessment)
+	if len(nextStates) != 0 {
+		t.Fatalf("aligned currentFocus nextAllowedConvergenceStates = %+v, want none after accepted binding", nextStates)
 	}
 	if got := stringFromMap(current, "activeCoverageFocusId"); got != "focus-cwi-ready" {
 		t.Fatalf("activeCoverageFocusId = %q, want focus-cwi-ready", got)
@@ -1754,6 +1851,9 @@ func TestCoverageWorkItemsPrioritizeMissingEvidenceBeforeAssessmentPendingWithRe
 			"requiredEvidenceKinds":  []string{"validation"},
 			"status":                 "evidence_ready",
 			"acceptedEvidenceByKind": map[string]any{"validation": []string{"run/graph/001-ok"}},
+			"acceptedEvidenceBindingByKind": map[string]any{
+				"validation": []string{"run/graph/001-ok"},
+			},
 			"acceptedEvidenceRefs":   []string{"run/graph/001-ok"},
 			"rejectedEvidenceByKind": map[string]any{"validation": []string{"run/graph/000-old-fail"}},
 			"rejectedEvidenceRefs":   []string{"run/graph/000-old-fail"},
@@ -1826,6 +1926,9 @@ func TestCoverageWorkItemsAdvanceFromStepAndAssessmentEvidence(t *testing.T) {
 		RunID: run.ID,
 		Kind:  "artifact/write",
 		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"targetRefs": []string{"goal-leaf-001"},
+		},
 		Output: map[string]any{
 			"coverageTargets": []string{"stateful outcome"},
 		},
@@ -1855,6 +1958,7 @@ func TestCoverageWorkItemsAdvanceFromStepAndAssessmentEvidence(t *testing.T) {
 				"goal":              "stateful outcome",
 				"state":             "satisfied",
 				"evidenceRefs":      []string{"run-cwi-advance/002-assess/validation/runtime-step"},
+				"observedClaims":    []string{"stateful outcome was observed for the target coverage item"},
 			}},
 		},
 	}
@@ -1933,6 +2037,7 @@ func TestCoverageWorkItemsAcceptDeclaredStateChangingRuntimeStep(t *testing.T) {
 func TestCoverageWorkItemsDoNotAcceptValidationOnlyRuntimeStepAsStateChange(t *testing.T) {
 	item := map[string]any{
 		"id":                    "cwi-validation-only",
+		"sourceRequirementId":   "goal-leaf-001",
 		"status":                "open",
 		"requiredEvidenceKinds": []string{"state_change", "validation"},
 		"requiredEvidenceCounts": map[string]any{
@@ -1959,7 +2064,7 @@ func TestCoverageWorkItemsDoNotAcceptValidationOnlyRuntimeStepAsStateChange(t *t
 	}
 	update := coverageWorkItemStepUpdate(step)
 
-	if !coverageApplyWorkItemEvidence(item, update.EvidenceKinds, update.EvidenceRefs, update.Accepted, false, string(step.ID), "") {
+	if !coverageApplyWorkItemEvidenceWithOptions(item, update.EvidenceKinds, update.EvidenceRefs, update.Accepted, false, string(step.ID), "", update.AcceptanceOptions) {
 		t.Fatalf("coverageApplyWorkItemEvidence changed = false, want validation evidence update")
 	}
 	accepted := mapStringSliceValue(item["acceptedEvidenceByKind"])

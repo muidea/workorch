@@ -558,6 +558,59 @@ func TestTaskProgressSeparatesCurrentActionLabelFromDiagnosticLineage(t *testing
 	}
 }
 
+func TestProjectStepViewIncludesCompactContractAuditWithoutFullInput(t *testing.T) {
+	t.Parallel()
+
+	projected := ProjectStepView(StepView{
+		ID:    "run-a/step-current-contract",
+		Kind:  "llm/workspace_execution",
+		State: "completed",
+		Input: map[string]any{
+			"runtimeStage": "repair",
+			"currentActionContract": map[string]any{
+				"nextAction": map[string]any{"kind": "state_change"},
+				"currentFocus": map[string]any{
+					"id":                    "cwi-101",
+					"coverageWorkItemIds":   []any{"cwi-101"},
+					"missingEvidenceKinds":  []any{"validation", "state_change"},
+					"requiredEvidenceKinds": []any{"validation", "state_change"},
+				},
+				"requiredOutput": map[string]any{
+					"coverageFocusId":                       "cwi-101",
+					"coverageWorkItemIds":                   []any{"cwi-101"},
+					"missingEvidenceKinds":                  []any{"validation", "state_change"},
+					"mustReturnExecutionGraph":              true,
+					"mustProduceConcreteValidationEvidence": true,
+					"largePayloadNotForProjection":          "must not be projected",
+				},
+			},
+		},
+		Output: map[string]any{"stage": "llm_decision_required", "status": "failed"},
+	})
+
+	if projected.Input != nil {
+		t.Fatalf("projected Input = %+v, want omitted full input", projected.Input)
+	}
+	audit := projected.ContractAudit
+	if audit["schemaVersion"] != "workorch.step_contract_audit.v1" ||
+		audit["runtimeStage"] != "repair" ||
+		audit["currentActionKind"] != "state_change" ||
+		audit["currentFocusId"] != "cwi-101" ||
+		audit["requiredOutputSource"] != "currentActionContract.requiredOutput" {
+		t.Fatalf("ContractAudit = %+v, want compact current contract fields", audit)
+	}
+	if got := readModelStringSliceValue(audit["missingEvidenceKinds"]); len(got) != 2 || got[0] != "validation" || got[1] != "state_change" {
+		t.Fatalf("missingEvidenceKinds = %+v, want validation/state_change", got)
+	}
+	required := readModelMapValue(audit["requiredOutput"])
+	if required["largePayloadNotForProjection"] != nil {
+		t.Fatalf("requiredOutput = %+v, want compact output without unrelated payload", required)
+	}
+	if required["mustReturnExecutionGraph"] != true || required["mustProduceConcreteValidationEvidence"] != true {
+		t.Fatalf("requiredOutput = %+v, want compact boolean contract flags", required)
+	}
+}
+
 func TestAuthorityDiagnosticsFromRunSnapshotIncludesRuntimeDiagnostics(t *testing.T) {
 	t.Parallel()
 
