@@ -84,16 +84,39 @@ func currentActionContractFromInput(run *runModel.Run, stepID common.StepID, inp
 }
 
 func activeRequiredOutputForCurrentAction(input map[string]any) map[string]any {
-	if required := mapFromValue(input["requiredOutput"]); len(required) > 0 {
-		return required
+	switch state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state")); state {
+	case convergenceStateNeedGovernance:
+		return nil
+	case convergenceStateNeedAssessment:
+		return assessmentRequiredOutputForAuthorityFocus(dispatchCoverageFocusFromAuthority(input, dispatchAuthorityCurrentFocus(input)))
 	}
 	if required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]); len(required) > 0 {
-		return required
+		return normalizeCurrentAuthorityRequiredOutput(input, required)
 	}
 	if required := mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]); len(required) > 0 {
-		return required
+		return normalizeCurrentAuthorityRequiredOutput(input, required)
+	}
+	if required := mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"])["requiredOutput"]); len(required) > 0 {
+		return normalizeCurrentAuthorityRequiredOutput(input, required)
+	}
+	if required := mapFromValue(mapFromValue(mapFromValue(input["executionContext"])[stepInputKeyStagePacket])["requiredOutput"]); len(required) > 0 {
+		return normalizeCurrentAuthorityRequiredOutput(input, required)
+	}
+	if required := mapFromValue(input["requiredOutput"]); len(required) > 0 {
+		return normalizeCurrentAuthorityRequiredOutput(input, required)
 	}
 	return nil
+}
+
+func normalizeCurrentAuthorityRequiredOutput(input map[string]any, required map[string]any) map[string]any {
+	if len(required) == 0 {
+		return nil
+	}
+	authorityFocus := dispatchAuthorityCurrentFocus(input)
+	if len(authorityFocus) == 0 {
+		return cloneStepPayload(required)
+	}
+	return normalizeRequiredOutputFocusBinding(required, dispatchCoverageFocusFromAuthority(input, authorityFocus))
 }
 
 func compactCurrentActionDiagnostic(input map[string]any) map[string]any {

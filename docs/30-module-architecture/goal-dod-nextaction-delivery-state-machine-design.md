@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-06-26
+Last Updated: 2026-06-29
 
 Related:
 
@@ -22,6 +22,7 @@ Related:
 - [Convergence Authority Dispatch Closure Checklist](../70-roadmap/active/convergence-authority-dispatch-closure-checklist.md)
 - [Convergence Authority Dispatch Live Verification](../60-verification/convergence-authority-dispatch-live-verification.md)
 - [Runtime Validation NextAction Convergence Improvement Plan](../70-roadmap/active/runtime-validation-nextaction-convergence-improvement-plan.md)
+- [Runtime RequiredOutput Authority And Target Snapshot Closure Plan](../70-roadmap/active/runtime-required-output-authority-and-target-snapshot-closure-plan.md)
 
 ## Purpose
 
@@ -382,6 +383,55 @@ convergenceContract 和 gapBaseline 必须来自同一次 convergence authority
 snapshot。若 dispatch 前发现这些派生字段不一致，runtime 必须刷新 authority
 并重建派生字段；若刷新后仍不一致，应按 runtime internal contract
 misalignment fail-fast，不得把互相矛盾的合同发送给 LLM。
+
+### RequiredOutput Authority
+
+`requiredOutput` 是当前 action 的派生合同，不是独立权威。任何 runtime step
+在 provider/block dispatch 前，必须从当前 convergence authority snapshot
+一次性渲染下列字段：
+
+- `repairActionPackage.requiredOutput`
+- `stagePacket.requiredOutput`
+- `currentActionContract.requiredOutput`
+- top-level `requiredOutput`
+
+其中 `currentActionContract.requiredOutput` 是对当前 action 合同的只读封装，
+不得从旧 top-level `requiredOutput`、旧 failed-step input、旧
+`repairActionPackage`、旧 follow-up input 或旧 contract retry input 中选择
+权威值。top-level `requiredOutput` 如果继续保留，只能是当前 authority
+渲染结果的镜像，或被明确标记为 diagnostic lineage；它不能作为
+`currentActionContract`、`convergenceContract`、Stage Packet 或 dispatch gate
+的优先来源。
+
+dispatch 完整性门禁应先尝试用当前 authority snapshot 重新渲染所有
+requiredOutput 镜像。只有在同一次渲染后仍不一致时，才按 runtime internal
+contract misalignment fail-fast。不能把可重建的 requiredOutput 漂移发送给
+LLM，也不能把这种内部合同漂移当作普通 LLM 违例处理。
+
+### Deterministic Evidence Acquisition
+
+当 NextAction 是可由 runtime 中立能力确定执行的 evidence acquisition，例如
+获取当前目标快照、读取当前 workspace manifest、读取只读 target snapshot
+或刷新 projection 所需的结构化证据时，runtime 应优先使用 deterministic
+runtime-managed action 或受限 block adapter 完成，LLM 只可补充候选定位、
+解释或后续 narrow action。此类 action 的合同必须显式 forbid
+state-changing output，并且 accepted evidence 必须带 sourceRef、targetRef、
+coverage binding 和完整性状态。
+
+`acquire_target_snapshot` 的最低合同是 read-only acquisition：
+
+- 允许只读 `file/list`、`file/read`、`git/read`、只读 tool call 或等价中立能力。
+- 禁止 workspace deliverable 写入、patch/apply、file/write、shell/write 以及
+  任何未声明为 scratch-only 的副作用。
+- 若需要 shell/tool 作为受控替代，只能写入 validation scratch scope，并必须
+  声明 scratch scope 与 non-deliverable side effect。
+- snapshot evidence 必须绑定当前 coverage focus、structured target refs、
+  sourceRef、completeness 和 observed claims。
+
+LLM 在 read-only acquisition 合同下返回 state-changing graph 时，该输出只能
+作为 rejected diagnostic evidence。若 runtime 仍能确定下一步 read-only
+acquisition，应 bounded retry 或直接改用 runtime-managed action；只有缺少外部
+信息、权限、凭证或用户选择时，才进入 decision。
 
 ```text
 StagePacket

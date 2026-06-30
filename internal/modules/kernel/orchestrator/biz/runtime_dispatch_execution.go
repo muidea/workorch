@@ -152,6 +152,9 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if handled, err := o.dispatchInternalArtifactContinuationStep(ctx, run, step, toolCall, workspace); handled || err != nil {
 		return err
 	}
+	if handled, err := o.dispatchRuntimeManagedTargetSnapshotAcquisition(ctx, run, step, toolCall, workspace); handled || err != nil {
+		return err
+	}
 
 	runtimeInput := cloneStepPayload(step.Input)
 	if err := validatePatchStepInputBeforeRuntime(step.Kind, runtimeInput); err != nil {

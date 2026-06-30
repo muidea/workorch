@@ -1772,6 +1772,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		pkg["evidenceAcquisitionRequired"] = true
 		sanitizeRepairActionPackageTargetEvidence(pkg)
 		input["repairActionPackage"] = pkg
+		currentActionSetRequiredOutput(input, required)
 		if boolValue(pkg["capabilityInputLocatorInvalid"]) {
 			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 				"The current failure is an invalid capability input locator. Acquire valid input evidence before retrying the capability or producing state-changing output.",

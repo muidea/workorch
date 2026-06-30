@@ -4,7 +4,7 @@ Status: closed
 
 Type: closure-design
 
-Last Updated: 2026-06-26
+Last Updated: 2026-06-29
 
 Closed At: 2026-06-26
 
@@ -95,6 +95,8 @@ Goal/DoD Definition
 | `convergenceContract` | NextAction + current focus + accepted/rejected evidence + policy | 不能读取旧 repair 包决定当前 state |
 | `stagePacket` | NextAction + convergenceContract + scope + capability refs | 每个 step input 前重建 |
 | `repairActionPackage.requiredOutput` | convergenceContract | 只表达当前 narrow action |
+| top-level `requiredOutput` | current authority requiredOutput renderer | 只能作为当前渲染镜像或 diagnostic lineage，不能作为独立 authority source |
+| `currentActionContract.requiredOutput` | current authority requiredOutput renderer | 只读 current action 合同，不能优先读取旧 top-level `requiredOutput` |
 | LLM C3/C4/C5 input | Stage Packet + current progress + diagnostics | 不能让旧动态字段污染 C0/C1/C2 |
 | Projection/ViewModel | owner state snapshot + derived display fields | 只读派生，不修 owner state |
 
@@ -112,6 +114,8 @@ Goal/DoD Definition
 - compacted historical summaries
 - memory recall
 - provider retry diagnostics
+- old top-level `requiredOutput`
+- old `currentActionContract`
 
 ## Unified Runtime Flow
 
@@ -176,12 +180,39 @@ dispatch 前必须执行最终完整性门禁：
   `stagePacket.requiredOutput` are focus-bearing derived fields. They must be
   rebound from the current authority focus before provider dispatch, or marked
   diagnostic-only if retained as historical lineage.
+- `currentActionContract.requiredOutput` must be rendered from the same current
+  authority requiredOutput as `repairActionPackage.requiredOutput` and
+  `stagePacket.requiredOutput`. It must not prefer old top-level
+  `requiredOutput`, old failed-step input, follow-up input, retry input or
+  replan continuation.
+- dispatch rebuild must be a pure current-authority rendering pass. It may read
+  old input only as diagnostic lineage and must not let old input choose the
+  current contract shape.
 - replan、resume、provider retry、contract retry、follow-up 和 event-driven dispatch
   都不能绕过该门禁。
 - 若发现派生字段不一致，先刷新 authority 并重建 dispatch input；若仍不一致，
   按 runtime internal contract misalignment fail-fast，不作为普通 LLM 违例处理。
 - 旧 failed-step input、旧 repairActionPackage、旧 replanContinuation、旧 violation
   recovery 和旧 budget scope 只能保留为诊断 lineage，不能覆盖当前 dispatch authority。
+
+### 3.1 Target Snapshot Acquisition Ownership
+
+`acquire_target_snapshot` is a deterministic evidence acquisition action. The
+runtime should prefer a runtime-managed read-only acquisition path, or a strictly
+bounded read-only block adapter path, before asking LLM to invent a graph.
+
+Rules:
+
+- The requiredOutput for target snapshot acquisition must be read-only and
+  current-authority rendered.
+- LLM output that writes deliverables under this contract is rejected diagnostic
+  evidence, not accepted evidence and not a reason to mutate workspace state.
+- If runtime can still acquire the snapshot with read-only capabilities, it
+  should retry or execute the deterministic acquisition path. It should request
+  decision only when external information, permission, credential, approval or
+  user choice is missing.
+- Accepted snapshot evidence must bind sourceRef, targetRef, coverage focus,
+  structured target refs, observed claims and completeness.
 
 ### 4. Candidate Gate
 
@@ -281,6 +312,9 @@ projection health 只表达显示链路健康：
 | `runtime_repair*.go` | repair/replan 可能把 lineage 当 authority | lineage 只进 diagnostics |
 | `runtime_contract_violation*.go` | 违例恢复可能生成新 authority | rejected diagnostic + bounded retry |
 | `runtime_run_state.go` / dispatch code | 多入口调度语义不统一 | 全部入口先 refresh 再 dispatch |
+| `runtime_current_action_contract.go` | currentActionContract 可能优先读取旧 top-level requiredOutput | 只从当前 authority renderer 读取 requiredOutput |
+| graph follow-up / retry input builders | follow-up 可能继承旧 requiredOutput 形状 | 旧 input 只作为 diagnostic lineage，dispatch 前统一重建 |
+| target snapshot acquisition path | 可确定的只读证据获取仍可能让 LLM 任意生成 graph | 优先 runtime-managed read-only acquisition |
 | `readmodelprojection/coverage_summary.go` | projection 可能二次推导 next action | 只展示 owner NextAction，冲突只诊断 |
 | `workspaceviewcore/store.go` | ViewModel 聚合可能读取不一致快照 | 基于 owner projection revision 输出 |
 | `internal/pkg/workorchport/workspace.go` | DTO 需暴露 structured NextAction/diagnostics | 端侧不本地推断 |
@@ -289,6 +323,8 @@ projection health 只表达显示链路健康：
 
 - 将历史占位 next action 作为 runtime 权威 next action 的逻辑。
 - 从旧 `repairActionPackage`、`replanContinuation`、旧 graph、旧 decision text 反推当前 requiredOutput 的逻辑。
+- 从旧 top-level `requiredOutput`、旧 `currentActionContract`、旧 follow-up input
+  或旧 retry input 反推当前 requiredOutput 的逻辑。
 - projection 对 owner state 进行“修复式归一化”的逻辑；可保留为 diagnostic，但最终应由 owner refresh 消除冲突。
 - TUI/Web 端对 decision/approval/run/coverage 状态的本地推断。
 - 非 EventHub/owner command 主路径上的直接 runtime 状态变更。
@@ -375,6 +411,36 @@ P0/P1/P2 收口清单。该 checklist 没有改变本文的权威模型，但补
 These rules remain business neutral. They must not introduce branches based on
 template ID、Soul ID、language、command、provider、workspace title or live
 workspace ID.
+
+## Post-Closure Implementation Gap
+
+The design remains closed, but live verification after the previous closure
+exposed two implementation gaps that must be tracked as follow-up closure work:
+
+1. RequiredOutput authority drift:
+   - Observed: a follow-up dispatch can have `NextAction=acquire_target_snapshot`
+     with read-only `repairActionPackage.requiredOutput` and
+     `stagePacket.requiredOutput`, while old top-level `requiredOutput` and
+     `currentActionContract.requiredOutput` still expose a state-changing
+     contract.
+   - Expected: all current requiredOutput mirrors are rendered from the current
+     authority snapshot before dispatch.
+   - Gap: top-level `requiredOutput` and `currentActionContract.requiredOutput`
+     are still treated as selectable current sources in some paths.
+
+2. Target snapshot ownership drift:
+   - Observed: `acquire_target_snapshot` can still depend on an LLM-generated
+     graph. If the LLM emits a deliverable-writing shell node, the runtime opens
+     a violation/decision path instead of first exhausting deterministic
+     read-only acquisition.
+   - Expected: deterministic read-only evidence acquisition should be
+     runtime-managed or adapter-managed when the required information is
+     available through neutral capabilities.
+   - Gap: the action contract is correct, but the execution ownership still
+     leaves too much room for LLM graph drift.
+
+Follow-up code closure is tracked in
+`runtime-required-output-authority-and-target-snapshot-closure-plan.md`.
 
 ## Verification Plan
 

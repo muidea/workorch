@@ -198,6 +198,69 @@ func TestNormalizeDispatchInputDerivesAuthoritySliceFromAcceptanceSlices(t *test
 	}
 }
 
+func TestRebuildDispatchInputRebindsStaleTopRequiredOutputToCurrentAuthority(t *testing.T) {
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeAcquireTargetSnapshot)
+	input := map[string]any{
+		convergenceAuthorityKey: cloneStepPayload(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])),
+		gapBaselineKey:          cloneStepPayload(mapFromValue(run.ExecutionContext[gapBaselineKey])),
+		"repairActionPackage": map[string]any{
+			"requiresCurrentTargetSnapshotForStateChange": true,
+			"repairTargetSet": []string{"target.txt"},
+			"requiredOutput": map[string]any{
+				"mustAcquireCurrentTargetSnapshot":   true,
+				"mustUseReadOnlySnapshotAcquisition": true,
+				"mustIncludeStateChangingNode":       false,
+				"acceptedKinds":                      []string{"file/list", "file/read", "git/read"},
+				"forbiddenKinds":                     []string{"patch/apply", "file/write", "shell/write"},
+				"coverageWorkItemIds":                []string{"cwi-current"},
+				"coverageFocusId":                    "focus-cwi-current",
+			},
+		},
+		"requiredOutput": map[string]any{
+			"mustIncludeStateChangingNode": true,
+			"acceptedKinds":                []string{"patch/apply", "shell/command"},
+			"coverageWorkItemIds":          []string{"cwi-current"},
+			"coverageFocusId":              "focus-cwi-current",
+		},
+		currentActionContractKey: map[string]any{
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeAcquireTargetSnapshot},
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode": true,
+				"acceptedKinds":                []string{"patch/apply"},
+			},
+		},
+	}
+
+	got, err := rebuildDispatchInputFromConvergenceAuthority(run, "step-acquire-target-snapshot", input)
+	if err != nil {
+		t.Fatalf("rebuildDispatchInputFromConvergenceAuthority: %v", err)
+	}
+
+	for label, required := range map[string]map[string]any{
+		"requiredOutput":                       mapFromValue(got["requiredOutput"]),
+		"repairActionPackage.requiredOutput":   mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":           mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["requiredOutput"]),
+		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(got[currentActionContractKey])["requiredOutput"]),
+	} {
+		if len(required) == 0 {
+			t.Fatalf("%s = nil, want current read-only acquisition requiredOutput; input=%+v", label, got)
+		}
+		if boolValue(required["mustIncludeStateChangingNode"]) {
+			t.Fatalf("%s = %+v, want read-only acquisition contract", label, required)
+		}
+		if !boolValue(required["mustAcquireCurrentTargetSnapshot"]) ||
+			!boolValue(required["mustUseReadOnlySnapshotAcquisition"]) {
+			t.Fatalf("%s = %+v, want target snapshot acquisition contract", label, required)
+		}
+		if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+			t.Fatalf("%s = %+v, want patch/apply removed from read-only acquisition", label, required)
+		}
+	}
+	if err := validateConvergenceDispatchInput(got); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v", err)
+	}
+}
+
 func TestDispatchNextStepPreparesInputFromCurrentAuthority(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-dispatch-next-authority")

@@ -250,12 +250,14 @@ func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID comm
 		})
 		clearExecutableCoverageContinuationContract(input)
 		input = attachStagePacketToStepInput(run, stepID, input)
+		input = synchronizeCurrentRequiredOutputMirrors(input)
 		input = attachCurrentActionContractToInput(run, stepID, input)
 		input = scrubConvergenceDispatchDiagnosticAdvice(input)
 		return input, validateConvergenceDispatchInput(input)
 	}
 	if !dispatchInputHasConvergenceAuthority(run, input) {
 		input = attachStagePacketToStepInput(run, stepID, input)
+		input = synchronizeCurrentRequiredOutputMirrors(input)
 		input = attachCurrentActionContractToInput(run, stepID, input)
 		input = scrubConvergenceDispatchDiagnosticAdvice(input)
 		return input, validateConvergenceDispatchInput(input)
@@ -264,6 +266,7 @@ func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID comm
 	input = ApplyConvergenceContract(input, contract)
 	input = normalizeDispatchInputAuthorityFocus(input)
 	input = attachStagePacketToStepInput(run, stepID, input)
+	input = synchronizeCurrentRequiredOutputMirrors(input)
 	input = attachCurrentActionContractToInput(run, stepID, input)
 	input = scrubConvergenceDispatchDiagnosticAdvice(input)
 	if err := validateConvergenceDispatchInput(input); err != nil {
@@ -293,6 +296,91 @@ func stripDispatchInputOwnerAuthority(input map[string]any) map[string]any {
 		input["executionContext"] = executionContext
 	}
 	return input
+}
+
+func synchronizeCurrentRequiredOutputMirrors(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	required := activeRequiredOutputForCurrentAction(input)
+	if len(required) == 0 {
+		delete(input, "requiredOutput")
+		if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
+			delete(pkg, "requiredOutput")
+			input["repairActionPackage"] = pkg
+		}
+		if packet := mapFromValue(input[stepInputKeyStagePacket]); len(packet) > 0 {
+			delete(packet, "requiredOutput")
+			input[stepInputKeyStagePacket] = packet
+		}
+		if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
+			delete(executionContext, "requiredOutput")
+			if pkg := mapFromValue(executionContext["repairActionPackage"]); len(pkg) > 0 {
+				delete(pkg, "requiredOutput")
+				executionContext["repairActionPackage"] = pkg
+			}
+			if packet := mapFromValue(executionContext[stepInputKeyStagePacket]); len(packet) > 0 {
+				delete(packet, "requiredOutput")
+				executionContext[stepInputKeyStagePacket] = packet
+			}
+			input["executionContext"] = executionContext
+		}
+		return input
+	}
+	required = cloneStepPayload(required)
+	appendRequiredOutputMirrorReboundDiagnostics(input, required)
+	input["requiredOutput"] = cloneStepPayload(required)
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	pkg["requiredOutput"] = cloneStepPayload(required)
+	input["repairActionPackage"] = pkg
+	if packet := mapFromValue(input[stepInputKeyStagePacket]); len(packet) > 0 {
+		packet["requiredOutput"] = cloneStepPayload(required)
+		input[stepInputKeyStagePacket] = packet
+	}
+	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
+		executionContext["requiredOutput"] = cloneStepPayload(required)
+		if contextPkg := mapFromValue(executionContext["repairActionPackage"]); len(contextPkg) > 0 {
+			contextPkg["requiredOutput"] = cloneStepPayload(required)
+			executionContext["repairActionPackage"] = contextPkg
+		}
+		if contextPacket := mapFromValue(executionContext[stepInputKeyStagePacket]); len(contextPacket) > 0 {
+			contextPacket["requiredOutput"] = cloneStepPayload(required)
+			executionContext[stepInputKeyStagePacket] = contextPacket
+		}
+		input["executionContext"] = executionContext
+	}
+	return input
+}
+
+func appendRequiredOutputMirrorReboundDiagnostics(input map[string]any, required map[string]any) {
+	if len(input) == 0 || len(required) == 0 {
+		return
+	}
+	expected := stableCoverageJSON(required)
+	for label, existing := range map[string]map[string]any{
+		"requiredOutput":                       mapFromValue(input["requiredOutput"]),
+		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+		"stagePacket.requiredOutput":           mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+	} {
+		if len(existing) == 0 || stableCoverageJSON(existing) == expected {
+			continue
+		}
+		appendAuthorityDiagnostic(input, "stale_required_output_mirror_rebound", "warning", "diagnostic_lineage", label, "stale requiredOutput mirror was rebound from current convergence authority before dispatch")
+	}
+	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
+		for label, existing := range map[string]map[string]any{
+			"executionContext.requiredOutput":             mapFromValue(executionContext["requiredOutput"]),
+			"executionContext.stagePacket.requiredOutput": mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["requiredOutput"]),
+		} {
+			if len(existing) == 0 || stableCoverageJSON(existing) == expected {
+				continue
+			}
+			appendAuthorityDiagnostic(input, "stale_required_output_mirror_rebound", "warning", "diagnostic_lineage", label, "stale requiredOutput mirror was rebound from current convergence authority before dispatch")
+		}
+	}
 }
 
 func dispatchInputHasConvergenceAuthority(run *runModel.Run, input map[string]any) bool {
@@ -1129,7 +1217,7 @@ func appendAuthorityDiagnostic(input map[string]any, code string, severity strin
 }
 
 func firstRequiredOutputForSemantics(sources map[string]map[string]any) map[string]any {
-	for _, label := range []string{"requiredOutput", "repairActionPackage.requiredOutput", "stagePacket.requiredOutput"} {
+	for _, label := range []string{"repairActionPackage.requiredOutput", "stagePacket.requiredOutput", "requiredOutput"} {
 		if required := sources[label]; len(required) > 0 {
 			return required
 		}
