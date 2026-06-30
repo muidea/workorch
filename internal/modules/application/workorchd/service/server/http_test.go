@@ -2778,6 +2778,12 @@ func TestWorkspaceGetEndpointDerivesPromptFromOwnerStateWhenProjectionIsStale(t 
 			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: "run-get-prompt-owner-state",
 		},
+		Decisions: []appservice.Decision{{
+			ID:          "ticket-get-prompt-owner-state",
+			WorkspaceID: string(workspaceID),
+			RunID:       "run-get-prompt-owner-state",
+			State:       string(common.DecisionTicketStateOpen),
+		}},
 		ViewModel: readmodelcore.WorkspaceViewModel{
 			WorkspaceID: string(workspaceID),
 			PromptMode:  "workspace",
@@ -4220,6 +4226,12 @@ func TestWorkspaceSnapshotEndpointDoesNotOverlayStalePromptMode(t *testing.T) {
 				State:            string(common.RunStateBlockedOnDecision),
 				BlockingTicketID: "ticket-detail-prompt-same-source",
 			},
+			Decisions: []appservice.Decision{{
+				ID:          "ticket-detail-prompt-same-source",
+				WorkspaceID: string(workspaceID),
+				RunID:       "run-detail-prompt-same-source",
+				State:       string(common.DecisionTicketStateOpen),
+			}},
 		}, nil
 	}
 

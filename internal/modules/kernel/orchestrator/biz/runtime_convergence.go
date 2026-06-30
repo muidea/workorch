@@ -2184,8 +2184,12 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 	if spec.Reason == "" {
 		return true
 	}
-	if decisionBlockDeclaresExternalOrRuntimeDependency(spec.Context) {
+	if decisionBlockDeclaresRequiredRealExternalDependency(spec.Context) ||
+		decisionBlockDeclaresNonContractRuntimeDependency(spec.Context) {
 		return true
+	}
+	if decisionBlockDeclaresRuntimeContractDependency(spec.Context) && continuableDecisionContract(input, spec.Context, contract) {
+		return false
 	}
 	switch contract.State {
 	case convergenceStateNeedEvidence:
@@ -2197,6 +2201,56 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 	default:
 		return true
 	}
+}
+
+func continuableDecisionContract(input map[string]any, context map[string]any, contract ConvergenceContract) bool {
+	if continuableNextActionKind(convergenceNextActionKind(nil, input)) {
+		return true
+	}
+	if continuableContractViolationRule(contractViolationRuleFromDecisionContext(context)) {
+		return true
+	}
+	switch contract.State {
+	case convergenceStateNeedEvidence:
+		return mechanicalEvidenceAcquisitionContractCanContinue(input, contract)
+	case convergenceStateNeedStateChange:
+		return mechanicalStateChangingContractCanContinue(contract)
+	case convergenceStateNeedValidation:
+		return mechanicalConcreteValidationContractCanContinue(input, contract)
+	default:
+		return false
+	}
+}
+
+func continuableNextActionKind(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case "assess_gap", "repair", "acquire_target_snapshot", "state_change", "produce_state_change",
+		"validate", "validation", "produce_validation_evidence",
+		"assessment", "complete_coverage_assessment",
+		"artifact", "produce_artifact_evidence":
+		return true
+	default:
+		return false
+	}
+}
+
+func contractViolationRuleFromDecisionContext(context map[string]any) string {
+	for _, source := range []map[string]any{
+		context,
+		mapFromValue(context["contractViolation"]),
+		mapFromValue(context["correctionContract"]),
+		mapFromValue(context["knownValues"]),
+	} {
+		if len(source) == 0 {
+			continue
+		}
+		for _, key := range []string{"violatedRule", "rule", "contractViolationRule"} {
+			if value := strings.TrimSpace(stringFromMap(source, key)); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
 }
 
 func mechanicalStateChangingContractCanContinue(contract ConvergenceContract) bool {

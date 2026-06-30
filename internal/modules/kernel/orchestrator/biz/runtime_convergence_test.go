@@ -3728,6 +3728,48 @@ func TestShouldCreateDecisionTicketKeepsConcreteValidationRuntimeDependency(t *t
 	}
 }
 
+func TestShouldCreateDecisionTicketBlocksContinuableRuntimeContractViolationDecision(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:    runtimeStageVerification,
+		"repairObjective":           repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired": true,
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []string{"shell/command", "mcp/tool_call"},
+			},
+		},
+	}
+	output := decisionOutputFromSpec(runtimeDecisionBlockSpec{
+		Reason:       "contract violation recovery exhausted",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Choose a recovery action.",
+		Context: map[string]any{
+			decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
+			decisionContextKeyDependency:     decisionContextDependencyRuntimeContract,
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+			"contractViolation": map[string]any{
+				"violatedRule": contractViolationRuleValidationEvidenceMetadataMissing,
+			},
+		},
+	})
+	contract := ConvergenceContract{
+		State:           convergenceStateNeedValidation,
+		RuntimeStage:    runtimeStageVerification,
+		RepairObjective: repairObjectiveConcreteValidationEvidence,
+		RepairActionPackage: map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []string{"shell/command", "mcp/tool_call"},
+			},
+		},
+	}
+
+	if ShouldCreateDecisionTicket(input, output, contract) {
+		t.Fatalf("ShouldCreateDecisionTicket = true, want false for continuable runtime contract violation")
+	}
+}
+
 func TestShouldCreateDecisionTicketBlocksMechanicalEvidenceAcquisitionDecision(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:          runtimeStageRepair,

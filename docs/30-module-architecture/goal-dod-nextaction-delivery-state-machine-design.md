@@ -322,6 +322,82 @@ NextAction
 - NextAction 必须可以从 ledger 重建，不能只保存在 prompt 或日志里。
 - 多 workspace 下 NextAction 必须带 workspace/run scope 与 idempotency key。
 
+### Anti-Loop Closure Gate
+
+为避免继续围绕单个 live workspace、某次 LLM 输出或某个投影现象反复局部
+补丁，所有 runtime 收敛改动必须先通过反循环门禁。
+
+反循环门禁的核心原则是：只能修正权威链路，不能新增并行判断路径。
+
+```text
+LLM/runtime output
+  -> contract gate
+  -> accepted evidence or rejected diagnostic evidence
+  -> deterministic NextAction recompute
+  -> run owner state
+  -> projection/ViewModel
+```
+
+必须满足：
+
+- 每个改动都绑定上述固定链路中的一个 owner，不允许同时在 runtime、
+  projection、TUI/Web 和 prompt 中各自补一套判断。
+- 每个阻塞条件只能有一个权威分类入口。例如 decision 是否可创建，只能由
+  decision eligibility gate 判定；其他路径不得绕过该 gate 直接创建 ticket。
+- 每个 `waiting_decision` owner/projection 状态必须能解析到同 scope 的 open
+  decision ticket；如果没有 open ticket，则不能投影为 `waiting_decision`。
+- 每个可恢复 LLM 合同违例只能成为 `diagnostic/rejected` evidence；后续动作
+  必须由 NextAction 重新推导，不能把违例文本本身变成新的状态权威。
+- 同一 workspace 或同一 failure signature 连续两次收口后仍未改善，必须停止
+  局部补丁，回到完整合同审计，重新冻结 owner state、event path、ledger、
+  Stage Packet、projection 和验证证据。
+
+禁止：
+
+- 看到新违例就新增一个孤立 rule。
+- 看到 workspace 卡住就新增 watchdog、resume、replan 或 projection 兜底。
+- 让 repair exhaustion、contract violation escalation、completion gate、
+  projection 或 TUI/Web 各自决定是否需要 decision。
+- 用业务文本、模板名、文件名、命令输出或 provider 行为推断下一步状态。
+
+### Decision Eligibility Authority
+
+`request_decision` 是治理动作，不是 LLM 违例或 repair exhaustion 的默认出口。
+Runtime 只有在结构化 blocker 证明缺少 runtime 无法自行获得的信息、权限、
+凭证、用户选择或治理确认时，才能创建 decision ticket。
+
+有效 decision 条件：
+
+- 存在 pending user choice，且候选选择会改变 Goal/DoD、scope、风险接受或
+  destructive action。
+- 缺少外部信息、凭证、权限、环境配置或第三方确认，runtime 不能通过已有
+  read-only capability、managed validation 或 bounded retry 获取。
+- governance policy 明确要求人工确认，例如 approval/decision gate。
+- 不可恢复失败需要用户选择 fail、waive、change definition 或 restart。
+
+无效 decision 条件：
+
+- LLM 返回 `blocked_on_decision`，但当前 NextAction 仍可由 runtime 推导为
+  `repair`、`validate`、`assessment`、`acquire_target_snapshot` 或 bounded retry。
+- 合同违例属于可恢复类别，例如缺少 validation evidence metadata、缺少
+  focus binding、read-only acquisition 被误写成 state-changing output、coverage
+  assessment incomplete 或 continuable candidate choice。
+- repair/contract retry 预算耗尽，但没有外部依赖；此时应进入 deterministic
+  fail、blocked diagnostic 或下一步 runtime-managed action，而不是伪装成人工
+  decision。
+
+创建 decision ticket 前必须检查：
+
+- `workspaceId`、`runId`、`stepId`、`ticketId` scope 完整。
+- `decisionEligibility.reason` 为结构化字段，不依赖自然语言 contains 判断。
+- `blockingTicketId` 与 ticket repository / governance owner 中的 open ticket
+  一致。
+- projection 能从同一 owner snapshot 渲染 `waiting_decision`、
+  `blockingTicketId`、`promptMode=decision` 和 decision 列表。
+
+若上述检查失败，应按 runtime internal contract misalignment fail-fast 或重新
+推导 NextAction，不得创建半可见 decision blocker。
+
 ## Stage Model
 
 Core 只定义通用 stage 类型，模板/profile 可以定义具体 stage catalog 和优先级。
@@ -521,7 +597,32 @@ LLM candidate
 - 可恢复违例必须记录 `ContractViolation`，包含 violatedRule、expectedContract、actualOutputSummary、rejectedOutputRef、recoverability、retryHint。
 - retry 必须继承原 runtimeStage、requiredOutput、repairObjective、Goal/DoD definition 和 evidence timeline。
 - retry 只在 C4 增加违例诊断，不改变 C0/C1/C2。
-- 相同 signature 超预算、不可解析输出持续出现、重复不产生 delta 时，升级 decision 或 failed。
+- 相同 signature 超预算、不可解析输出持续出现、重复不产生 delta 时，必须先
+  通过 Decision Eligibility Authority。只有存在结构化外部依赖或治理要求时
+  才升级 decision；否则进入 deterministic fail、blocked diagnostic 或
+  runtime-managed next action。
+
+### Rejected Diagnostic To NextAction
+
+被拒绝的 LLM/runtime 输出进入 evidence ledger 后，必须触发一次以 ledger 为
+权威的 NextAction recompute。
+
+要求：
+
+- `diagnostic/rejected` evidence 必须包含 violatedRule、failureSignature、
+  expectedContract、actualOutputSummary、sourceRef、targetRefs、coverage focus
+  和 retry budget key。
+- NextAction recompute 使用 accepted/rejected evidence、coverage gap、当前
+  requiredEvidenceKinds 和 policy，而不是使用旧 failed-step input、旧 graph、
+  旧 decision question 或旧 repairActionPackage 作为权威。
+- 如果 recompute 得到 `repair` 或 retry same contract，新的 LLM input 只能把
+  rejected diagnostic 放在 C4 current-action，不能污染 C0/C1/C2。
+- 如果 recompute 得到 `validate`、`assessment`、`acquire_target_snapshot` 或
+  `state_change`，runtime 必须渲染对应 narrow requiredOutput，不能沿用旧
+  requiredOutput。
+- 如果 recompute 得到 `fail` 或 governed blocked，必须记录 terminal/blocker
+  evidence 和 projection，不得保留 `run=running + currentStep=failed + no
+  blocker` 的撕裂状态。
 
 ## Resume / Replan / Restart Semantics
 
@@ -730,12 +831,19 @@ Workspace 不能仅因 LLM 声称完成而 complete。Completion gate 必须检�
 - 将 resume/replan/restart/provider retry/contract retry/repair/follow-up 统一映射到 NextAction。
 - 保证每个 NextAction 可从 ledger 重建并具备 idempotency key。
 - 避免 finalize/projection/TUI 同步递归触发 runtime step。
+- 统一 decision eligibility gate，删除或收敛 repair exhaustion、contract
+  violation escalation、completion gate、projection 中并行创建 decision 的路径。
+- 将可恢复 LLM 违例固定为 rejected diagnostic evidence -> NextAction
+  recompute，不允许直接落入 waiting_decision。
 
 ### Phase 4: Stage Packet And LLM Context
 
 - 每个 LLM step input 使用 Stage Packet 渲染。
 - 修正 C0/C1/C2/C3/C4/C5 分区，避免动态字段污染稳定前缀。
 - 针对快照截断、历史 compact、memory recall 建立准入和引用规则。
+- 确保 rejected diagnostic、decision eligibility denied reason、retry budget
+  和 current requiredOutput 都在 C4/C3 表达，且不产生多个 active action
+  contract。
 
 ### Phase 5: EventHub Command Main Path
 
@@ -749,6 +857,9 @@ Workspace 不能仅因 LLM 声称完成而 complete。Completion gate 必须检�
 - workorchd 输出统一 WorkspaceViewModel revision。
 - TUI prompt、主视图、workspace 列表、状态栏来自同一 projection。
 - SSE 断线恢复、last event id、白屏错误和 incomplete chunked encoding 进入 projection/transport 测试。
+- `waiting_decision`、`blocked_on_decision`、`blockingTicketId`、decision 列表和
+  `promptMode=decision` 必须来自同一 owner snapshot；没有 open ticket 时不得
+  投影成等待决策。
 
 ### Phase 7: Watchdog And IO Budget
 
@@ -789,9 +900,13 @@ Workspace 不能仅因 LLM 声称完成而 complete。Completion gate 必须检�
 - 每个 LLM step input 都包含当前 Stage Packet，且不依赖旧历史自然语言来恢复关键状态。
 - 每个 LLM/runtime dispatch 前都有 provider-before-dispatch integrity gate，证明
   current focus、NextAction、Stage Packet、requiredOutput 和 convergenceContract 对齐。
-- LLM 违例输出只成为 rejected diagnostic evidence，可恢复时 bounded retry，不可恢复时治理升级。
+- LLM 违例输出只成为 rejected diagnostic evidence；可恢复时 bounded retry 或
+  runtime-managed next action，不可恢复时只有通过 decision eligibility gate
+  才能治理升级，否则 deterministic fail/block。
 - accepted evidence 是 coverage satisfied 的唯一依据。
 - TUI/Web 不再出现本地状态和 workorchd 投影不一致的 prompt/main view/workspace list。
+- 任意 `waiting_decision` 都能在同 scope 查询到 open decision ticket；任意
+  open decision ticket 都能在 projection/ViewModel 中稳定显示。
 - 多 workspace 并发不会因同 lane 同步等待、全局锁、全量扫描或无 scope command 互相阻塞。
 - Core 目录中没有新增模板、业务、语言、命令、provider 或 live workspace 特判。
 - 软件开发相关推进策略能追溯到 workspaceTemplate/profile/Soul/policy/skill 绑定。
@@ -809,6 +924,9 @@ Workspace 不能仅因 LLM 声称完成而 complete。Completion gate 必须检�
 - 每轮 LLM 请求全量读取所有历史事件、文件和 artifact。
 - 使用被截断快照要求生成完整文件或精确 patch。
 - 对同一阻塞条件连续局部打补丁，而不回到完整合同审计。
+- 绕过 decision eligibility gate 直接从 LLM decision output、repair exhaustion、
+  contract violation exhaustion 或 projection 生成 decision blocker。
+- 投影 `waiting_decision` 但不投影 open decision ticket。
 
 ## Open Items
 

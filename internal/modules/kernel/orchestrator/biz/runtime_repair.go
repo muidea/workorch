@@ -920,6 +920,9 @@ func (o *RuntimeOrchestrator) blockOnContractViolationRecoveryExhaustion(
 		Question:     localizedContractViolationRecoveryExhaustedQuestion(language),
 		Context:      context,
 	}
+	if !o.decisionTicketEligible(run, failedStep, spec) {
+		return o.failRunWithRejectedCompletionResult(ctx, run, failedStep, localizedContractViolationRecoveryExhaustedReason(language, violation))
+	}
 	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
 		return err
 	}
@@ -1229,6 +1232,9 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
 		Question:     localizedRuntimeRepairExhaustionQuestion(language),
 		Context:      decisionContext,
+	}
+	if !o.decisionTicketEligible(run, failedStep, spec) {
+		return o.failRunWithRejectedCompletionResult(ctx, run, failedStep, reason)
 	}
 	if err := o.resultManager().recordRejectedResultForDecisionBlock(ctx, run, failedStep, failedStep.Output, spec); err != nil {
 		return err

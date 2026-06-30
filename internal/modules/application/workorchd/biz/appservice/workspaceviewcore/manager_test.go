@@ -291,6 +291,12 @@ func TestStoreProjectionDerivesDecisionPromptFromBlockedRun(t *testing.T) {
 		"ws-a": {
 			Workspace: readmodelcore.Workspace{ID: "ws-a", Title: "Workspace A", State: "active", ActiveRunID: "run-a"},
 			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision), BlockingTicketID: "ticket-a"},
+			Decisions: []readmodelcore.Decision{{
+				ID:          "ticket-a",
+				WorkspaceID: "ws-a",
+				RunID:       "run-a",
+				State:       string(common.DecisionTicketStateOpen),
+			}},
 		},
 	}, nil)
 

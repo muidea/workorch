@@ -275,6 +275,28 @@ func decisionBlockDeclaresWorkorchRuntimeDependency(context map[string]any) bool
 	return false
 }
 
+func decisionBlockDeclaresNonContractRuntimeDependency(context map[string]any) bool {
+	switch strings.TrimSpace(stringFromMap(context, decisionContextKeyDependency)) {
+	case decisionContextDependencyLLMProvider, decisionContextDependencyContextGate:
+		return true
+	}
+	switch strings.TrimSpace(stringFromMap(context, decisionContextKeyRecoveryPolicy)) {
+	case decisionContextRecoveryPolicyConfigOnly, decisionContextRecoveryPolicyContext:
+		return true
+	}
+	return false
+}
+
+func decisionBlockDeclaresRuntimeContractDependency(context map[string]any) bool {
+	if strings.TrimSpace(stringFromMap(context, decisionContextKeyDependency)) == decisionContextDependencyRuntimeContract {
+		return true
+	}
+	if strings.TrimSpace(stringFromMap(context, decisionContextKeyRecoveryPolicy)) == decisionContextRecoveryPolicyRepairPlan {
+		return true
+	}
+	return false
+}
+
 func decisionBlockDeclaresRequiredRealExternalDependency(context map[string]any) bool {
 	if strings.TrimSpace(stringFromMap(context, decisionContextKeyScope)) == decisionContextScopeExternalDependency {
 		return true
@@ -615,9 +637,7 @@ func (o *RuntimeOrchestrator) createDecisionTicket(
 	if o.tickets == nil {
 		return common.ErrInvalidArgument
 	}
-	output := decisionOutputFromSpec(spec)
-	contract := o.convergenceManager().build(run, step, step, map[string]any{"input": step.Input}, map[string]any{"llmOutput": output})
-	if !o.convergenceManager().shouldCreateDecisionTicket(step.Input, output, contract) {
+	if !o.decisionTicketEligible(run, step, spec) {
 		return common.ErrInvalidArgument
 	}
 
@@ -636,6 +656,15 @@ func (o *RuntimeOrchestrator) createDecisionTicket(
 		return err
 	}
 	return nil
+}
+
+func (o *RuntimeOrchestrator) decisionTicketEligible(run *runModel.Run, step *runModel.Step, spec runtimeDecisionBlockSpec) bool {
+	if o == nil || run == nil || step == nil || spec.Reason == "" {
+		return false
+	}
+	output := decisionOutputFromSpec(spec)
+	contract := o.convergenceManager().build(run, step, step, map[string]any{"input": step.Input}, map[string]any{"llmOutput": output})
+	return o.convergenceManager().shouldCreateDecisionTicket(step.Input, output, contract)
 }
 
 func (o *RuntimeOrchestrator) createApproval(

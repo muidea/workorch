@@ -30,7 +30,5 @@ func ProjectWorkspaceSnapshotSummary(snapshot readmodelcore.WorkspaceSnapshot) r
 	ret.LLMContextBudgets = nil
 	ret.LLMUsageTraces = nil
 	ret.EventRecords = nil
-	ret.Decisions = nil
-	ret.Approvals = nil
 	return ret
 }
