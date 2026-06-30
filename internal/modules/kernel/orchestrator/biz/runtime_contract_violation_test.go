@@ -114,6 +114,56 @@ func TestContractViolationRecoveryActionExhaustsIndependentBudget(t *testing.T) 
 	}
 }
 
+func TestCoverageAssessmentIncompleteContractViolationExhaustsBudget(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-coverage-assessment-contract-exhausted")
+	repo := memory.NewStepRepository()
+	failed := coverageAssessmentIncompleteFailedStep(runID, "assessment-failed")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-coverage-assessment-contract-exhausted", InitialStepKind: llmWorkspaceExecutionStepKind}
+	attachContractViolationDiagnostics(run, failed, errors.New("invalid argument: dodAssessment is not satisfied"))
+	for attempt := 1; attempt <= 2; attempt++ {
+		step := &runmodel.Step{
+			ID:    common.StepID(string(runID) + "/contract-retry-coverage-" + string(rune('0'+attempt))),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyContractViolationRecovery: map[string]any{
+					"sourceStepId": string(failed.ID),
+				},
+			},
+			Output: map[string]any{
+				failureOutputKeyClass:     failureClassDoDCoverageMissing,
+				failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+			},
+		}
+		if err := repo.Create(ctx, step); err != nil {
+			t.Fatalf("seed coverage assessment retry step %d: %v", attempt, err)
+		}
+	}
+
+	action := runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{MaxContractViolationRetriesPerStep: 2}), true, true, run, failed)
+
+	if action != runtimeRecoveryActionContractViolationExhausted {
+		t.Fatalf("recovery action = %s, want contract violation exhausted for repeated coverage assessment violation", action)
+	}
+}
+
+func TestCoverageAssessmentIncompleteContractViolationRetriesWithinBudget(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-coverage-assessment-contract-retry")
+	repo := memory.NewStepRepository()
+	failed := coverageAssessmentIncompleteFailedStep(runID, "assessment-failed")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-coverage-assessment-contract-retry", InitialStepKind: llmWorkspaceExecutionStepKind}
+	attachContractViolationDiagnostics(run, failed, errors.New("invalid argument: dodAssessment is not satisfied"))
+
+	action := runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{MaxContractViolationRetriesPerStep: 2}), true, true, run, failed)
+
+	if action != runtimeRecoveryActionContractViolationRetry {
+		t.Fatalf("recovery action = %s, want contract violation retry for first coverage assessment violation", action)
+	}
+}
+
 func TestContractViolationRecoveryActionExhaustsRunBudget(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-contract-violation-run-budget")
@@ -257,7 +307,7 @@ func TestContractViolationClassifiesStructuredCoverageGapsAsCoverageIncomplete(t
 	}
 }
 
-func TestCoverageAssessmentIncompleteSkipsContractRetryForRuntimeRepair(t *testing.T) {
+func TestCoverageAssessmentIncompleteUsesContractRetryBudgetBeforeRuntimeRepair(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-coverage-incomplete-runtime-repair")
 	repo := memory.NewStepRepository()
@@ -308,8 +358,8 @@ func TestCoverageAssessmentIncompleteSkipsContractRetryForRuntimeRepair(t *testi
 
 	action := runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{}), true, true, run, failed)
 
-	if action != runtimeRecoveryActionRuntimeRepair {
-		t.Fatalf("recovery action = %s, want runtime repair authority recompute path", action)
+	if action != runtimeRecoveryActionContractViolationRetry {
+		t.Fatalf("recovery action = %s, want bounded contract violation retry before runtime repair", action)
 	}
 }
 
@@ -1662,6 +1712,30 @@ func contractViolationFailedStep(runID common.RunID, label string) *runmodel.Ste
 		},
 	}
 	return step
+}
+
+func coverageAssessmentIncompleteFailedStep(runID common.RunID, label string) *runmodel.Step {
+	return &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/" + label),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyAssessmentOnly: true,
+			stepInputKeyRuntimeStage:   runtimeStageVerification,
+			"runtimeStageMode":         "strict_convergence",
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": "assessment"},
+			},
+		},
+		Output: map[string]any{
+			"stage":                    "llm_dod_assessment",
+			"error":                    "invalid argument: dodAssessment is not satisfied",
+			failureOutputKeyClass:      failureClassDoDCoverageMissing,
+			failureOutputKeySignature:  "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{"satisfied": false},
+		},
+	}
 }
 
 type recordingOrchestratorAsyncHub struct {

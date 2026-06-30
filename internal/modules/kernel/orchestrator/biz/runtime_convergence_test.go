@@ -5762,6 +5762,49 @@ func TestBuildConvergenceContractStateChangeRequiresTargetSnapshotAcquisition(t 
 	}
 }
 
+func TestBuildConvergenceContractStateChangeDoesNotAcquireSnapshotForAbstractCoverageRefs(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": "state_change"},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                   "cwi-085",
+				"coverageWorkItemIds":  []string{"cwi-085"},
+				"missingEvidenceKinds": []string{"validation", "state_change"},
+				"targetRefs":           []string{"cwi-085", "deliverable:deliverable:source_change", "source_change"},
+				"structuredTargetRefs": []string{"cwi-085", "deliverable:deliverable:source_change", "source_change"},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiresCurrentTargetSnapshotForStateChange": true,
+			"repairTargetSet": []string{
+				"cwi-085",
+				"deliverable:deliverable:source_change",
+				"source_change",
+				"goal.leaves[4]",
+			},
+			"requiredOutput": map[string]any{
+				"mustUseCurrentTargetSnapshot": true,
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange ||
+		contract.RuntimeStageMode == "target_snapshot_acquisition" ||
+		stringFromMap(contract.Prerequisite, "kind") == "acquire_target_snapshot" {
+		t.Fatalf("convergenceContract = %+v, want direct state_change without abstract target snapshot prerequisite", contract)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		boolValue(required["stateChangingForbidden"]) ||
+		boolValue(required["mustAcquireCurrentTargetSnapshot"]) {
+		t.Fatalf("requiredOutput = %+v, want state-changing output allowed without abstract snapshot acquisition", required)
+	}
+}
+
 func TestBuildConvergenceContractStateChangeUsesExistingTargetSnapshot(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{

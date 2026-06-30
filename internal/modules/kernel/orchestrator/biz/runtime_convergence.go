@@ -823,6 +823,7 @@ func stateChangeRequiresTargetSnapshotAcquisition(input map[string]any, pkg map[
 	if stateChangeHasCurrentTargetSnapshot(input, pkg) {
 		return false
 	}
+	hasReadableTarget := stateChangeHasReadableTargetSnapshotRef(input, pkg)
 	required := mapFromValue(pkg["requiredOutput"])
 	inputRequired := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
 	requiresSnapshot := boolValue(input["requiresCurrentTargetSnapshotForStateChange"]) ||
@@ -830,18 +831,30 @@ func stateChangeRequiresTargetSnapshotAcquisition(input map[string]any, pkg map[
 		boolValue(required["mustUseCurrentTargetSnapshot"]) ||
 		boolValue(inputRequired["mustUseCurrentTargetSnapshot"])
 	if requiresSnapshot {
-		return true
+		return hasReadableTarget
 	}
 	if len(convergenceConcreteFailureTargetRefs(input, pkg)) > 0 {
-		return true
-	}
-	if !inputHasNonEmptyWorkspaceManifest(input) {
-		return false
+		return hasReadableTarget
 	}
 	if stateChangingRepairHasActionableImplementationSurface(input, pkg) {
 		return false
 	}
-	return true
+	return false
+}
+
+func stateChangeHasReadableTargetSnapshotRef(input map[string]any, pkg map[string]any) bool {
+	if len(runtimeManagedTargetSnapshotRefs(input)) > 0 {
+		return true
+	}
+	if len(pkg) > 0 && len(runtimeManagedTargetSnapshotRefs(map[string]any{"repairActionPackage": pkg})) > 0 {
+		return true
+	}
+	for _, targetRef := range convergenceConcreteFailureTargetRefs(input, pkg) {
+		if runtimeManagedTargetSnapshotRefReadable(targetRef) {
+			return true
+		}
+	}
+	return false
 }
 
 func stateChangeHasCurrentTargetSnapshot(input map[string]any, pkg map[string]any) bool {

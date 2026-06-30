@@ -639,10 +639,13 @@ func failedStepHasRecoverableContractViolation(step *runModel.Step) bool {
 	if len(violation) == 0 {
 		return false
 	}
-	if strings.TrimSpace(stringFromMap(violation, "violatedRule")) == contractViolationRuleCoverageAssessmentIncomplete {
-		return false
+	rule := strings.TrimSpace(stringFromMap(violation, "violatedRule"))
+	recoverability := strings.TrimSpace(stringFromMap(violation, "recoverability"))
+	if rule == contractViolationRuleCoverageAssessmentIncomplete &&
+		recoverability == runtimemodel.ContractViolationRecoverabilityRecomputeAuthority {
+		return true
 	}
-	switch strings.TrimSpace(stringFromMap(violation, "recoverability")) {
+	switch recoverability {
 	case runtimemodel.ContractViolationRecoverabilityRetrySameContract,
 		runtimemodel.ContractViolationRecoverabilityNarrowContract,
 		runtimemodel.ContractViolationRecoverabilityNormalizeThenRetry:

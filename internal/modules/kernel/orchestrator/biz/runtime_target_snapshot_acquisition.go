@@ -208,7 +208,13 @@ func runtimeManagedTargetSnapshotRefReadable(ref string) bool {
 	lower := strings.ToLower(ref)
 	if strings.HasPrefix(lower, "cwi-") || strings.HasPrefix(lower, "goal:") ||
 		strings.HasPrefix(lower, "dod:") || strings.HasPrefix(lower, "deliverable:") ||
-		lower == "source_change" || lower == "version_control_snapshot" {
+		strings.HasPrefix(lower, "goal-") || strings.HasPrefix(lower, "dod-") ||
+		strings.HasPrefix(lower, "goal.") || strings.HasPrefix(lower, "dod.") ||
+		lower == "source_change" || lower == "version_control_snapshot" ||
+		lower == "coverage_map" || lower == "user_deliverable" || lower == "validation_report" {
+		return false
+	}
+	if strings.ContainsAny(ref, "[]") {
 		return false
 	}
 	if strings.Contains(ref, "://") {

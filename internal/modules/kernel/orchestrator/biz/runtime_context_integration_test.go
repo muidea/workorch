@@ -899,26 +899,23 @@ func TestRuntimeOrchestrator_EnrichLLMStepInputRealignsStateChangeWithoutTargetS
 	orch.enrichLLMStepInputContext(ctx, run, step, workspace)
 
 	contract := mapFromValue(step.Input[currentActionContractKey])
-	nextAction := mapFromValue(contract["nextAction"])
-	if stringFromMap(nextAction, "kind") != runtimemodel.NextActionTypeStateChange ||
-		stringFromMap(mapFromValue(contract["prerequisite"]), "kind") != runtimemodel.NextActionTypeAcquireTargetSnapshot {
-		t.Fatalf("currentActionContract = %+v, want state_change parent with target snapshot prerequisite after manifest appears", contract)
+	if len(contract) != 0 {
+		t.Fatalf("currentActionContract = %+v, want no target snapshot realignment for abstract coverage target", contract)
 	}
 	if step.Input["repairObjective"] != repairObjectiveStateChangingOutput ||
 		!boolValue(step.Input["stateChangingOutputRequired"]) {
-		t.Fatalf("step input = %+v, want parent state-change objective with prerequisite", step.Input)
+		t.Fatalf("step input = %+v, want parent state-change objective", step.Input)
 	}
 	required := mapFromValue(mapFromValue(step.Input["repairActionPackage"])["requiredOutput"])
-	if required["mustAcquireCurrentTargetSnapshot"] != true ||
-		required["mustUseReadOnlySnapshotAcquisition"] != true ||
-		required["mustIncludeStateChangingNode"] == true ||
-		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "file/read") ||
-		stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "file/read") {
-		t.Fatalf("requiredOutput = %+v, want read-only target snapshot acquisition contract", required)
+	if required["mustAcquireCurrentTargetSnapshot"] == true ||
+		required["mustUseReadOnlySnapshotAcquisition"] == true ||
+		required["mustIncludeStateChangingNode"] != true ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "file/read") ||
+		stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "file/write") {
+		t.Fatalf("requiredOutput = %+v, want state-changing contract without abstract target snapshot acquisition", required)
 	}
-	stageRequired := mapFromValue(mapFromValue(step.Input[stepInputKeyStagePacket])["requiredOutput"])
-	if stageRequired["mustAcquireCurrentTargetSnapshot"] != true || stageRequired["mustIncludeStateChangingNode"] == true {
-		t.Fatalf("stagePacket.requiredOutput = %+v, want target snapshot acquisition", stageRequired)
+	if stagePacket := mapFromValue(step.Input[stepInputKeyStagePacket]); len(stagePacket) != 0 {
+		t.Fatalf("stagePacket = %+v, want no target snapshot acquisition stage packet", stagePacket)
 	}
 }
 

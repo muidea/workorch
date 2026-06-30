@@ -134,6 +134,42 @@ func TestRuntimeManagedTargetSnapshotAcquisitionFailsFastForCurrentActionAbstrac
 	}
 }
 
+func TestRuntimeManagedTargetSnapshotAcquisitionRejectsAbstractCoveragePaths(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeAcquireTargetSnapshot},
+		},
+		"repairActionPackage": map[string]any{
+			"repairTargetSet": []string{
+				"coverage_map",
+				"dod-d6f553ebf8b83f1a-dod-item-001",
+				"goal-req-005-dcbcff0f",
+				"goal.leaves[4]",
+				"user_deliverable",
+				"validation_report",
+			},
+			"requiredOutput": map[string]any{
+				"mustAcquireCurrentTargetSnapshot":   true,
+				"mustUseReadOnlySnapshotAcquisition": true,
+				"mustIncludeStateChangingNode":       false,
+			},
+		},
+	}
+
+	output, ok := runtimeManagedTargetSnapshotAcquisitionOutput(input)
+	if !ok {
+		t.Fatal("runtimeManagedTargetSnapshotAcquisitionOutput ok = false, want fail-fast for abstract coverage refs")
+	}
+	if output["status"] != "failed" ||
+		output[failureOutputKeyClass] != failureClassRuntimeContractMisalign ||
+		output["deterministicOutcome"] != "fail_fast_internal_contract_gap" {
+		t.Fatalf("runtimeManagedTargetSnapshotAcquisitionOutput = %+v, want deterministic fail-fast output", output)
+	}
+	if graph := output[stepOutputKeyExecutionGraph]; graph != nil {
+		t.Fatalf("executionGraph = %+v, want no file/read graph for abstract coverage refs", graph)
+	}
+}
+
 func TestRuntimeManagedTargetSnapshotAcquisitionDispatchesReadOnlyGraphWithoutRootLLM(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
