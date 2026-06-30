@@ -339,6 +339,74 @@ func TestNextActionForRunMissingStateChangeAcquiresTargetSnapshotFirst(t *testin
 	}
 }
 
+func TestNextActionForRunStateChangeWithCurrentFailureTargetAcquiresSnapshotFirst(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	coverageRepo := memory.NewCoverageWorkItemRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-current-failure-target")
+	runID := common.RunID("run-next-action-current-failure-target")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			"repairActionPackage": map[string]any{
+				"currentFailure": map[string]any{
+					"failureClass":     failureClassShellCommand,
+					"failureSignature": "class=shell_command_failed|kind=shell/command|failureTargets=target.txt|exitCode=1",
+				},
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := coverageRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.CoverageWorkItem{
+		ID:                    "cwi-repo-current-failure-target",
+		WorkspaceID:           workspaceID,
+		RunID:                 runID,
+		DefinitionRevision:    "rev-current-failure-target",
+		NormalizedSourceKey:   "source-current-failure-target",
+		RequiredEvidenceKinds: []string{runtimemodel.EvidenceKindStateChange},
+		Status:                "open",
+		Metadata: map[string]any{
+			"id": "cwi-current-failure-target",
+		},
+	}); err != nil {
+		t.Fatalf("create coverage item: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeStateChange || action.StageMode != "target_snapshot_acquisition" {
+		t.Fatalf("next action = %+v, want state_change target snapshot acquisition prerequisite", action)
+	}
+	if action.RequiredOutput["mustAcquireCurrentTargetSnapshot"] != true ||
+		action.RequiredOutput["mustUseReadOnlySnapshotAcquisition"] != true ||
+		action.RequiredOutput["mustIncludeStateChangingNode"] == true {
+		t.Fatalf("required output = %+v, want read-only target snapshot acquisition", action.RequiredOutput)
+	}
+}
+
 func TestNextActionForRunHydratesAcceptedTargetSnapshotEvidenceBeforeStateChange(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

@@ -799,6 +799,9 @@ func stateChangeRequiresTargetSnapshotAcquisition(input map[string]any, pkg map[
 	if requiresSnapshot {
 		return true
 	}
+	if len(convergenceConcreteFailureTargetRefs(input, pkg)) > 0 {
+		return true
+	}
 	if !inputHasNonEmptyWorkspaceManifest(input) {
 		return false
 	}
@@ -1102,6 +1105,8 @@ func convergenceConcreteFailureTargetRefs(input map[string]any, pkg map[string]a
 	}
 	addFailureMap(mapFromValue(input["lastFailureDiagnostics"]))
 	addFailureMap(mapFromValue(pkg["lastFailureDiagnostics"]))
+	addFailureMap(mapFromValue(input["currentFailure"]))
+	addFailureMap(mapFromValue(pkg["currentFailure"]))
 	addFailureMap(mapFromValue(input["structuredFailureSignals"]))
 	addFailureMap(mapFromValue(pkg["structuredFailureSignals"]))
 	for _, progress := range []map[string]any{
