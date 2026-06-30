@@ -12,6 +12,7 @@ const (
 	convergenceStateNeedValidation  = "need_validation"
 	convergenceStateNeedAssessment  = "need_assessment"
 	convergenceStateNeedGovernance  = "need_governance"
+	convergenceStateComplete        = "complete"
 	convergenceStateBlocked         = "blocked"
 )
 
@@ -226,6 +227,10 @@ func BuildConvergenceContract(
 		return contract
 	}
 	if convergenceAssessmentOnly(input, failedStep) {
+		if convergenceCurrentFocusCanCloseDeterministically(input) {
+			populateCompleteConvergenceContract(&contract, "current coverage focus is deterministically satisfied")
+			return contract
+		}
 		contract.State = convergenceStateNeedAssessment
 		contract.RuntimeStage = runtimeStageVerification
 		contract.RuntimeStageMode = "strict_convergence"
@@ -302,8 +307,15 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 		contract.GovernanceReason = "current next action requires approval"
 		return true
 	case "assessment", "complete_coverage_assessment":
+		if convergenceCurrentFocusCanCloseDeterministically(input) {
+			populateCompleteConvergenceContract(contract, "current coverage focus is deterministically satisfied")
+			return true
+		}
 		convergenceContractAttachCoverageContext(input, contract)
 		populateCoverageWorkItemAssessmentConvergenceContract(contract)
+		return true
+	case "complete":
+		populateCompleteConvergenceContract(contract, "current next action is complete")
 		return true
 	case "state_change", "produce_state_change":
 		if contract.RepairActionPackage == nil {
@@ -588,6 +600,10 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 	if status == "satisfied" {
 		return false
 	}
+	if coverageWorkItemCanCloseDeterministically(focus) {
+		populateCompleteConvergenceContract(contract, "current coverage focus is deterministically satisfied")
+		return true
+	}
 	missing := coverageWorkItemMissingEvidenceKindSet(focus)
 	contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
 	if len(contract.RepairActionPackage) == 0 {
@@ -679,6 +695,10 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
 		return true
 	}
+	if coverageWorkItemCanCloseDeterministically(focus) {
+		populateCompleteConvergenceContract(contract, "current coverage focus is deterministically satisfied")
+		return true
+	}
 	populateCoverageWorkItemAssessmentConvergenceContract(contract)
 	return true
 }
@@ -709,6 +729,19 @@ func populateCoverageWorkItemEvidenceConvergenceContract(input map[string]any, c
 	required["evidenceAcquisitionSubtype"] = "diagnostic_probe"
 	required["mustReferenceCoverageWorkItem"] = true
 	contract.RepairActionPackage["requiredOutput"] = required
+}
+
+func populateCompleteConvergenceContract(contract *ConvergenceContract, reason string) {
+	if contract == nil {
+		return
+	}
+	contract.State = convergenceStateComplete
+	contract.RuntimeStage = runtimeStageVerification
+	contract.RuntimeStageMode = "deterministic_ledger"
+	if contract.RepairActionPackage == nil {
+		contract.RepairActionPackage = map[string]any{}
+	}
+	contract.RepairActionPackage["completionReason"] = strings.TrimSpace(reason)
 }
 
 func populateTargetSnapshotAcquisitionConvergenceContract(input map[string]any, contract *ConvergenceContract) {
@@ -871,6 +904,9 @@ func coverageWorkItemFocusReadyForAssessment(focus map[string]any) bool {
 	if len(focus) == 0 {
 		return false
 	}
+	if coverageWorkItemCanCloseDeterministically(focus) {
+		return false
+	}
 	missing := coverageWorkItemMissingEvidenceKindSet(focus)
 	if len(missing) > 0 {
 		return false
@@ -892,6 +928,22 @@ func coverageWorkItemFocusReadyForAssessment(focus map[string]any) bool {
 		}
 	}
 	return true
+}
+
+func convergenceCurrentFocusCanCloseDeterministically(input map[string]any) bool {
+	context := coverageWorkItemContextFromInput(input)
+	if len(context) == 0 {
+		return false
+	}
+	if coverageWorkItemCanCloseDeterministically(coverageWorkItemPrimaryFocus(context)) {
+		return true
+	}
+	for _, item := range mapSliceFromValue(context["currentFocusItems"]) {
+		if coverageWorkItemCanCloseDeterministically(item) {
+			return true
+		}
+	}
+	return false
 }
 
 func coverageWorkItemContextHasActionableFailure(context map[string]any) bool {
@@ -1658,6 +1710,7 @@ func syncRepairActionPackageTargetSnapshots(input map[string]any, pkg map[string
 }
 
 func enforceStateChangingRequiredOutputForConvergence(pkg map[string]any, inputs ...map[string]any) map[string]any {
+	clearEvidenceAcquisitionStateForStateChange(pkg)
 	required := stateChangingRepairRequiredOutput()
 	preserveStateChangingRequiredOutputSignals(required, mapFromValue(pkg["requiredOutput"]))
 	if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 || len(mapSliceFromValue(pkg["currentTargetSnapshots"])) > 0 {
@@ -1678,6 +1731,24 @@ func enforceStateChangingRequiredOutputForConvergence(pkg map[string]any, inputs
 		required = mapFromValue(pkg["requiredOutput"])
 	}
 	return required
+}
+
+func clearEvidenceAcquisitionStateForStateChange(pkg map[string]any) {
+	if len(pkg) == 0 {
+		return
+	}
+	for _, key := range []string{
+		"evidenceAcquisitionRequired",
+		"concreteFailureEvidenceRequired",
+		"patchForbiddenUntilConcreteTargetEvidence",
+		"deliverableWriteForbidden",
+		"stateChangingForbidden",
+	} {
+		delete(pkg, key)
+	}
+	if strings.TrimSpace(stringFromMap(pkg, "repairObjective")) == repairObjectiveAcquireFailureEvidence {
+		delete(pkg, "repairObjective")
+	}
 }
 
 func preserveStateChangingRequiredOutputSignals(required map[string]any, existing map[string]any) {
@@ -1905,6 +1976,23 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		delete(input, "boundedValidationRequired")
 		delete(input, "evidenceRepairRequired")
 		stripRepairActionPackageExecutableOutputContract(input)
+	case convergenceStateComplete:
+		setRuntimeStage(input, runtimeStageVerification)
+		input[stepInputKeySoulStage] = soulStageValidation
+		delete(input, "replanStateChangingContinuation")
+		delete(input, stepInputKeyAssessmentOnly)
+		delete(input, "assessmentOnlyReason")
+		delete(input, "assessmentOnlyContractCorrection")
+		delete(input, "runtimeRepairFollowUp")
+		delete(input, stepInputKeyProviderRetryFollowUp)
+		delete(input, "repairObjective")
+		delete(input, "stateChangingOutputRequired")
+		delete(input, "concreteFailureEvidenceRequired")
+		delete(input, "boundedValidationRequired")
+		delete(input, "evidenceRepairRequired")
+		delete(input, "repairGuidance")
+		delete(input, "repairActionPackage")
+		delete(input, "requiredOutput")
 	case convergenceStateNeedGovernance:
 		setRuntimeStage(input, runtimeStageDecision)
 		input[stepInputKeySoulStage] = soulStageDecision
@@ -2034,6 +2122,8 @@ func convergenceNextActionForContract(contract ConvergenceContract) map[string]a
 		return map[string]any{"kind": "validate", "reason": "current convergence contract requires bounded validation evidence"}
 	case convergenceStateNeedAssessment:
 		return map[string]any{"kind": "assessment", "reason": "current convergence contract requires bounded coverage assessment"}
+	case convergenceStateComplete:
+		return map[string]any{"kind": "complete", "reason": "current convergence contract is deterministically satisfied"}
 	case convergenceStateNeedGovernance:
 		return map[string]any{"kind": "request_governance", "reason": firstNonEmptyString(contract.GovernanceReason, "current convergence contract requires governance")}
 	default:
@@ -2183,6 +2273,9 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 	spec := decisionBlockSpec(llmOutput)
 	if spec.Reason == "" {
 		return true
+	}
+	if continuableNextActionKind(convergenceNextActionKind(nil, input)) {
+		return false
 	}
 	if decisionBlockDeclaresRequiredRealExternalDependency(spec.Context) ||
 		decisionBlockDeclaresNonContractRuntimeDependency(spec.Context) {
@@ -2592,6 +2685,7 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	if len(pkg) == 0 {
 		pkg = map[string]any{}
 	}
+	clearEvidenceAcquisitionStateForStateChange(pkg)
 	pkg["coverageRepairRequired"] = true
 	pkg["coverageTargetSet"] = targets
 	pkg["evidenceKindRequirements"] = requirementSummaries

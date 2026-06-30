@@ -1128,7 +1128,7 @@ func requiredOutputRouteHasEvidenceKind(routes []string) bool {
 
 func requiredOutputKindIsStateChanging(kind string) bool {
 	switch strings.TrimSpace(kind) {
-	case "patch/apply", "artifact/write", "file/write", "file/delete", "state_change":
+	case "patch/apply", "artifact/write", "file/write", "file/delete", "git/write", "state_change":
 		return true
 	default:
 		return false
@@ -1326,7 +1326,8 @@ func requiredOutputHasAllowedStateChangingKind(required map[string]any) bool {
 	}
 	forbidden := stringSet(stringSliceFromValue(required["forbiddenKinds"]))
 	for _, kind := range accepted {
-		if strings.TrimSpace(kind) != "" && !forbidden[kind] {
+		kind = strings.TrimSpace(kind)
+		if kind != "" && !forbidden[kind] && requiredOutputKindIsStateChanging(kind) {
 			return true
 		}
 	}
@@ -1613,6 +1614,18 @@ func gapNextActionForRun(run *runModel.Run, unresolved []map[string]any) map[str
 	default:
 		item := gapNextActionFocusItem(run, unresolved)
 		if len(item) > 0 {
+			if coverageWorkItemCanCloseDeterministically(item) {
+				for _, candidate := range unresolved {
+					if stringFromMap(candidate, "id") == stringFromMap(item, "id") {
+						continue
+					}
+					if coverageWorkItemCanCloseDeterministically(candidate) {
+						continue
+					}
+					return gapNextActionForCoverageItem(candidate)
+				}
+				return map[string]any{"kind": "complete", "reason": "current coverage work item is deterministically satisfied"}
+			}
 			return gapNextActionForCoverageItem(item)
 		}
 		return map[string]any{"kind": "complete", "reason": "no open coverage work items"}
@@ -1640,6 +1653,9 @@ func gapNextActionFocusItem(run *runModel.Run, unresolved []map[string]any) map[
 
 func gapNextActionForCoverageItem(item map[string]any) map[string]any {
 	status := strings.ToLower(strings.TrimSpace(stringFromMap(item, "status")))
+	if coverageWorkItemCanCloseDeterministically(item) {
+		return map[string]any{"kind": "complete", "reason": "coverage work item is deterministically satisfied"}
+	}
 	if status == "blocked" {
 		return map[string]any{"kind": "request_decision", "reason": "coverage work item is blocked"}
 	}
