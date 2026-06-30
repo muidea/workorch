@@ -104,6 +104,22 @@ func TestValidateLLMRepairCoverageFocusRejectsUnboundPatchGraph(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "repair_focus_mismatch") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want repair_focus_mismatch", err)
 	}
+	classification := classifyRuntimeFailure(step, output, "runtime contract failed", err)
+	if classification.Class != failureClassFocusBindingMismatch {
+		t.Fatalf("classification = %+v, want focus_binding_mismatch", classification)
+	}
+	attachContractViolationType(output, err)
+	if output[outputKeyContractViolationType] != contractViolationFocusBindingMismatch ||
+		output["contractViolationRule"] != contractViolationRuleFocusBindingMismatch {
+		t.Fatalf("contract violation = %+v, want focus binding mismatch", output)
+	}
+	profile := contractViolationCorrectionProfileForStep(step, contractViolationRuleFocusBindingMismatch, 1, 0)
+	contract := mapFromValue(profile["contract"])
+	if profile["profileId"] != "focus_binding_contract" ||
+		stringFromMap(contract, "requiredOutputShape") != "same_action_focus_bound_output" ||
+		len(mapFromValue(contract["expectedFocus"])) == 0 {
+		t.Fatalf("correction profile = %+v, want focus-bound retry contract", profile)
+	}
 }
 
 func TestValidateLLMRepairCoverageFocusAllowsCurrentCoverageTargetBinding(t *testing.T) {

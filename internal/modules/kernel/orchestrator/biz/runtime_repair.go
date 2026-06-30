@@ -71,6 +71,7 @@ const (
 	contractViolationAssessmentOnlyExecutableOutput = "assessment_only_executable_output"
 	contractViolationAvailableSnapshotIgnored       = "available_snapshot_ignored"
 	contractViolationLLMSchemaInvalid               = "llm_schema_invalid"
+	contractViolationFocusBindingMismatch           = "focus_binding_mismatch"
 )
 
 func runtimeFailureOutput(output map[string]any, execErr error) map[string]any {
@@ -279,6 +280,9 @@ func attachContractViolationType(output map[string]any, execErr error) {
 	}
 	if violationType := contractViolationTypeFromFailure(output, execErr); violationType != "" {
 		output[outputKeyContractViolationType] = violationType
+		rule := contractViolationRuleFromType(violationType)
+		output["contractViolationRule"] = rule
+		output["contractViolationRecoverability"] = contractViolationRecoverabilityForRule(rule)
 	}
 }
 
@@ -312,6 +316,8 @@ func contractViolationTypeFromFailure(output map[string]any, execErr error) stri
 	case strings.Contains(text, "state-changing patch/apply must declare coveragetargets") ||
 		strings.Contains(text, "patch/apply must declare coveragetargets matching"):
 		return contractViolationCoverageTargetsRequired
+	case strings.Contains(text, "repair_focus_mismatch"):
+		return contractViolationFocusBindingMismatch
 	case strings.Contains(text, "validation follow-up llm step returned read-only executiongraph without concrete validation evidence") ||
 		strings.Contains(text, "concrete validation evidence repair must return bounded") ||
 		strings.Contains(text, "concrete validation evidence graph must use non-destructive bounded validation") ||
@@ -665,6 +671,7 @@ func continuableContractViolationRule(rule string) bool {
 		contractViolationRuleManagedValidationRequired,
 		contractViolationRuleCoverageAssessmentIncomplete,
 		contractViolationRuleStateChangingRequiredMissing,
+		contractViolationRuleFocusBindingMismatch,
 		contractViolationRulePatchApplyContractFailed,
 		contractViolationRuleAvailableSnapshotIgnored,
 		contractViolationRuleCoverageMapIncomplete,

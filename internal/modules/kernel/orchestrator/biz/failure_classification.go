@@ -32,6 +32,7 @@ const (
 	failureClassMCPRuntime               = "mcp_runtime_failed"
 	failureClassRuntime                  = "runtime_failed"
 	failureClassRuntimeContractMisalign  = "runtime_internal_contract_misalignment"
+	failureClassFocusBindingMismatch     = "focus_binding_mismatch"
 
 	failureOutputKeyClass     = "failureClass"
 	failureOutputKeySignature = "failureSignature"
@@ -65,6 +66,8 @@ func classifyRuntimeFailure(step *runModel.Step, output map[string]any, summary 
 		class = failureClassProviderStreamIncomplete
 	} else if isDoDCoverageMissingFailure(lowerStage, execErr, output) {
 		class = failureClassDoDCoverageMissing
+	} else if isFocusBindingMismatchFailure(execErr, output) {
+		class = failureClassFocusBindingMismatch
 	} else if isRuntimeInternalContractMisalignment(lowerStage, execErr, output) {
 		class = failureClassRuntimeContractMisalign
 	} else if isRuntimeContractFailure(lowerStage, execErr, output) {
@@ -92,6 +95,14 @@ func classifyRuntimeFailure(step *runModel.Step, output map[string]any, summary 
 	classification := runtimeFailureClassification{Class: class, Stage: stage}
 	classification.Signature = runtimeFailureSignature(classification.Class, step, output, execErr)
 	return classification
+}
+
+func isFocusBindingMismatchFailure(execErr error, output map[string]any) bool {
+	if strings.TrimSpace(stringFromMap(output, failureOutputKeyClass)) == failureClassFocusBindingMismatch {
+		return true
+	}
+	errText := providerFailureErrorText(execErr, output)
+	return strings.Contains(errText, "repair_focus_mismatch")
 }
 
 func isRuntimeInternalContractMisalignment(lowerStage string, execErr error, output map[string]any) bool {

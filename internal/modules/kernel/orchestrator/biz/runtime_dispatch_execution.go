@@ -122,18 +122,20 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	}
 	o.enrichLLMStepInputContext(ctx, run, step, workspace)
 	if kind == llmWorkspaceExecutionStepKind {
-		if err := validateConvergenceDispatchInput(step.Input); err != nil {
+		var finalizeErr error
+		step.Input, finalizeErr = finalizeLLMDispatchAuthorityInput(run, step.ID, step.Input)
+		if finalizeErr != nil {
 			output := map[string]any{
 				"status":              "failed",
 				"stage":               failureClassRuntimeContractMisalign,
-				"error":               err.Error(),
+				"error":               finalizeErr.Error(),
 				failureOutputKeyClass: failureClassRuntimeContractMisalign,
 				failureOutputKeySignature: runtimeFailureSignature(failureClassRuntimeContractMisalign, step, map[string]any{
 					"stage": failureClassRuntimeContractMisalign,
-					"error": err.Error(),
-				}, err),
+					"error": finalizeErr.Error(),
+				}, finalizeErr),
 			}
-			return o.handleRuntimeStepFailure(ctx, run, step, nil, output, "runtime convergence authority dispatch gate failed", err)
+			return o.handleRuntimeStepFailure(ctx, run, step, nil, output, "runtime convergence authority dispatch gate failed", finalizeErr)
 		}
 	}
 	if err := o.steps.Update(ctx, step); err != nil {
@@ -735,7 +737,7 @@ func (o *RuntimeOrchestrator) hasInFlightRuntimeRepairForSameScope(ctx context.C
 	if scope == "" {
 		return false, nil
 	}
-	steps, err := o.steps.ListByRun(ctx, runID)
+	steps, err := o.steps.ListByRunSummary(ctx, runID)
 	if err != nil {
 		return false, err
 	}
@@ -758,7 +760,7 @@ func (o *RuntimeOrchestrator) hasOtherActiveLLMWorkspaceExecution(ctx context.Co
 	if o == nil || o.steps == nil || runID == "" || stepID == "" {
 		return false, common.ErrInvalidArgument
 	}
-	steps, err := o.steps.ListByRun(ctx, runID)
+	steps, err := o.steps.ListByRunSummary(ctx, runID)
 	if err != nil {
 		return false, err
 	}
@@ -787,7 +789,7 @@ func (o *RuntimeOrchestrator) hasInFlightLLMGraphDispatchForSameScope(ctx contex
 	if scope == "" {
 		return false, nil
 	}
-	steps, err := o.steps.ListByRun(ctx, runID)
+	steps, err := o.steps.ListByRunSummary(ctx, runID)
 	if err != nil {
 		return false, err
 	}

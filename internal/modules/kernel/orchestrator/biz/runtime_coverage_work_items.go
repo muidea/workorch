@@ -215,7 +215,7 @@ func (c *coverageSubsystem) updateFromFailedStep(run *runModel.Run, step *runMod
 			changed = true
 		}
 	}
-	budgetChanged := updateConvergenceBudgetFromStep(run, step, changed)
+	budgetChanged := updateConvergenceBudgetFromStep(run, step, false)
 	if changed {
 		revision := coverageDefinitionRevision(run.ExecutionContext)
 		run.ExecutionContext[coverageWorkItemsKey] = items
@@ -242,6 +242,7 @@ func (c *coverageSubsystem) updateFromAssessment(run *runModel.Run, step *runMod
 		return changed
 	}
 	changed := false
+	positiveDelta := false
 	matchedAny := false
 	var unmatchedAccepted []coverageWorkItemUpdate
 	for _, update := range updates {
@@ -254,6 +255,9 @@ func (c *coverageSubsystem) updateFromAssessment(run *runModel.Run, step *runMod
 			matchedAny = true
 			if coverageApplyWorkItemEvidenceWithOptions(item, update.EvidenceKinds, update.EvidenceRefs, update.Accepted, update.CloseSatisfied, string(step.ID), update.Reason, update.AcceptanceOptions) {
 				changed = true
+				if update.Accepted {
+					positiveDelta = true
+				}
 			}
 		}
 		if !matched && update.Accepted {
@@ -265,7 +269,7 @@ func (c *coverageSubsystem) updateFromAssessment(run *runModel.Run, step *runMod
 			changed = true
 		}
 	}
-	budgetChanged := updateConvergenceBudgetFromStep(run, step, changed)
+	budgetChanged := updateConvergenceBudgetFromStep(run, step, positiveDelta)
 	if changed {
 		revision := coverageDefinitionRevision(run.ExecutionContext)
 		run.ExecutionContext[coverageWorkItemsKey] = items

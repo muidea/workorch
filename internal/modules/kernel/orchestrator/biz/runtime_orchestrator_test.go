@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"testing"
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
@@ -90,6 +91,7 @@ type countingStepRepository struct {
 	inner                  *memory.StepRepository
 	getCount               atomic.Int64
 	listCount              atomic.Int64
+	summaryListCount       atomic.Int64
 	graphEvidenceListCount atomic.Int64
 	updateCount            atomic.Int64
 }
@@ -124,6 +126,7 @@ func (r *countingStepRepository) ListByRun(ctx context.Context, runID common.Run
 }
 
 func (r *countingStepRepository) ListByRunSummary(ctx context.Context, runID common.RunID) ([]*runmodel.Step, error) {
+	r.summaryListCount.Add(1)
 	return r.inner.ListByRunSummary(ctx, runID)
 }
 
@@ -134,6 +137,107 @@ func (r *countingStepRepository) Update(ctx context.Context, item *runmodel.Step
 
 func (r *countingStepRepository) Delete(ctx context.Context, id common.StepID) error {
 	return r.inner.Delete(ctx, id)
+}
+
+func TestRuntimeInFlightChecksUseStepSummaries(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-summary-inflight")
+	stepRepo := newCountingStepRepository()
+	steps := []*runmodel.Step{
+		{
+			ID:    common.StepID(runID + "/repair-existing"),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateDispatched,
+			Input: map[string]any{stepInputKeyRepairOfStepID: string(runID) + "/failed"},
+		},
+		{
+			ID:    common.StepID(runID + "/workspace-existing"),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateDispatched,
+			Input: map[string]any{},
+		},
+		{
+			ID:    common.StepID(runID + "/graph-existing"),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateDispatched,
+			Input: map[string]any{stepInputKeyGraphRootStepID: string(runID) + "/root"},
+		},
+	}
+	for _, step := range steps {
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("create step %s: %v", step.ID, err)
+		}
+	}
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+
+	ok, err := orch.hasInFlightRuntimeRepairForSameScope(ctx, runID, common.StepID(runID+"/repair-new"), map[string]any{stepInputKeyRepairOfStepID: string(runID) + "/failed"})
+	if err != nil || !ok {
+		t.Fatalf("hasInFlightRuntimeRepairForSameScope = %v, %v; want true, nil", ok, err)
+	}
+	ok, err = orch.hasOtherActiveLLMWorkspaceExecution(ctx, runID, common.StepID(runID+"/workspace-new"))
+	if err != nil || !ok {
+		t.Fatalf("hasOtherActiveLLMWorkspaceExecution = %v, %v; want true, nil", ok, err)
+	}
+	ok, err = orch.hasInFlightLLMGraphDispatchForSameScope(ctx, runID, common.StepID(runID+"/graph-new"), llmWorkspaceExecutionStepKind, map[string]any{stepInputKeyGraphRootStepID: string(runID) + "/root"})
+	if err != nil || !ok {
+		t.Fatalf("hasInFlightLLMGraphDispatchForSameScope = %v, %v; want true, nil", ok, err)
+	}
+	if full := stepRepo.listCount.Load(); full != 0 {
+		t.Fatalf("full ListByRun count = %d, want 0 for in-flight checks", full)
+	}
+	if summaries := stepRepo.summaryListCount.Load(); summaries != 3 {
+		t.Fatalf("ListByRunSummary count = %d, want 3", summaries)
+	}
+}
+
+func TestNextDispatchSpecsUsesStepSummariesBeforeLoadingTerminalStep(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-summary-next-dispatch")
+	stepRepo := newCountingStepRepository()
+	completed := &runmodel.Step{
+		ID:    common.StepID(runID + "/step-1"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			stepOutputKeyNextStep: "follow-up",
+			stepOutputKeyNextKind: llmWorkspaceExecutionStepKind,
+			stepOutputKeyNextInput: map[string]any{
+				"from": "terminal-output",
+			},
+		},
+	}
+	if err := stepRepo.Create(ctx, completed); err != nil {
+		t.Fatalf("create completed step: %v", err)
+	}
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	run := &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      "ws-summary-next-dispatch",
+		State:            common.RunStateRunning,
+		InitialStepKind:  llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{},
+	}
+
+	specs, err := orch.nextDispatchSpecs(ctx, run)
+	if err != nil {
+		t.Fatalf("nextDispatchSpecs: %v", err)
+	}
+	if len(specs) != 1 || specs[0].Input["from"] != "terminal-output" {
+		t.Fatalf("next dispatch specs = %+v, want follow-up from terminal output", specs)
+	}
+	if full := stepRepo.listCount.Load(); full != 0 {
+		t.Fatalf("full ListByRun count = %d, want 0", full)
+	}
+	if summaries := stepRepo.summaryListCount.Load(); summaries != 1 {
+		t.Fatalf("ListByRunSummary count = %d, want 1", summaries)
+	}
+	if gets := stepRepo.getCount.Load(); gets == 0 {
+		t.Fatalf("Get count = %d, want at least one bounded step body load", gets)
+	}
 }
 
 type blockingCompletedStepRepository struct {

@@ -102,6 +102,9 @@ func resetConvergenceBudgetForReplanSuccessor(executionContext map[string]any) b
 	if sliceID := strings.TrimSpace(stringFromMap(existing, "sliceId")); sliceID != "" {
 		reset["sliceId"] = sliceID
 	}
+	if ids := compactUniqueStrings(stringSliceFromValue(existing["coverageWorkItemIds"])); len(ids) > 0 {
+		reset["coverageWorkItemIds"] = ids
+	}
 	reset["state"] = "tracking"
 	reset["decision"] = "continue"
 	if stableCoverageJSON(existing) == stableCoverageJSON(reset) {
@@ -117,8 +120,10 @@ func ensureConvergenceBudgetFocusScope(budget map[string]any, focus map[string]a
 	}
 	focusID := strings.TrimSpace(stringFromMap(focus, "id"))
 	sliceID := strings.TrimSpace(stringFromMap(focus, "sliceId"))
+	workItemIDs := compactUniqueStrings(stringSliceFromValue(focus["coverageWorkItemIds"]))
 	if strings.TrimSpace(stringFromMap(budget, "focusId")) == focusID &&
-		strings.TrimSpace(stringFromMap(budget, "sliceId")) == sliceID {
+		strings.TrimSpace(stringFromMap(budget, "sliceId")) == sliceID &&
+		stableCoverageJSON(map[string]any{"coverageWorkItemIds": stringSliceFromValue(budget["coverageWorkItemIds"])}) == stableCoverageJSON(map[string]any{"coverageWorkItemIds": workItemIDs}) {
 		return
 	}
 	for _, key := range []string{
@@ -136,6 +141,11 @@ func ensureConvergenceBudgetFocusScope(budget map[string]any, focus map[string]a
 	}
 	budget["focusId"] = focusID
 	budget["sliceId"] = sliceID
+	if len(workItemIDs) > 0 {
+		budget["coverageWorkItemIds"] = workItemIDs
+	} else {
+		delete(budget, "coverageWorkItemIds")
+	}
 	budget["state"] = "tracking"
 	budget["decision"] = "continue"
 	stripCoverageFocusRuntimeDiagnostics(focus)

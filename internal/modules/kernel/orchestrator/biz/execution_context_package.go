@@ -63,12 +63,16 @@ func realignLLMStepInputTargetSnapshotAuthority(run *runModel.Run, step *runMode
 	if run == nil || step == nil || len(step.Input) == 0 {
 		return
 	}
+	if dispatchInputUsesLocalAssessmentContract(step.Input) {
+		return
+	}
 	contract := BuildConvergenceContract(run, step, nil, map[string]any{"input": step.Input}, nil)
-	if contract.State != convergenceStateNeedEvidence || contract.RuntimeStageMode != "target_snapshot_acquisition" {
+	if contract.State != convergenceStateNeedStateChange || contract.RuntimeStageMode != "target_snapshot_acquisition" {
 		return
 	}
 	step.Input = ApplyConvergenceContract(step.Input, contract)
 	step.Input = attachStagePacketToStepInput(run, step.ID, step.Input)
+	step.Input = synchronizeCurrentRequiredOutputMirrors(step.Input)
 	step.Input = attachCurrentActionContractToInput(run, step.ID, step.Input)
 }
 

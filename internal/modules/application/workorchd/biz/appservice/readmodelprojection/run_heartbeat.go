@@ -46,7 +46,7 @@ func mapRunHeartbeatAt(snapshot readmodelcore.WorkspaceSnapshot, now time.Time) 
 		ret.LatestPatchAt,
 		latestMemoryRecallProgress(snapshot.MemoryRecallTraces, runID),
 	)
-	ret.IneffectiveRetry = strings.TrimSpace(snapshot.TaskProgress.RepairLoop.RepeatedFailureReason) != "" || snapshot.TaskProgress.RepairLoop.Escalated
+	ret.IneffectiveRetry = heartbeatIneffectiveRetry(snapshot)
 	ret.ActivityState = heartbeatActivityState(*run, snapshot.TaskProgress, ret)
 	if runStateIsLiveForHeartbeat(run.State) {
 		ret.Stalled = ret.ActivityState == "no_activity"
@@ -58,6 +58,30 @@ func mapRunHeartbeatAt(snapshot readmodelcore.WorkspaceSnapshot, now time.Time) 
 	}
 	ret.Summary = heartbeatSummary(ret)
 	return ret
+}
+
+func heartbeatIneffectiveRetry(snapshot readmodelcore.WorkspaceSnapshot) bool {
+	if strings.TrimSpace(snapshot.TaskProgress.RepairLoop.RepeatedFailureReason) != "" || snapshot.TaskProgress.RepairLoop.Escalated {
+		return true
+	}
+	if budget := snapshot.Acceptance.Budget; budget != nil && heartbeatConvergenceBudgetEscalated(budget.Decision) {
+		return true
+	}
+	if status := snapshot.ConvergenceStatus; status != nil {
+		if status.IneffectiveRetry || strings.TrimSpace(status.DecisionCause) == "retry_exhaustion" {
+			return true
+		}
+	}
+	return false
+}
+
+func heartbeatConvergenceBudgetEscalated(decision string) bool {
+	switch strings.TrimSpace(decision) {
+	case "", "continue":
+		return false
+	default:
+		return true
+	}
 }
 
 func heartbeatRun(snapshot readmodelcore.WorkspaceSnapshot) *readmodelcore.Run {

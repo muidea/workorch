@@ -1242,24 +1242,27 @@ func deriveAcquireTargetSnapshotNextAction(run *runmodel.Run, stateChangeAction 
 		required["repairTargetSet"] = targetSet
 		required["mustTargetRepairTargetSet"] = true
 	}
+	required["parentNextActionKind"] = runtimemodel.NextActionTypeStateChange
+	required["prerequisiteForNextAction"] = runtimemodel.NextActionTypeStateChange
+	required["finiteExitRule"] = "accepted_target_snapshot_evidence_or_scoped_blocker_or_internal_fail_fast"
 	return runtimemodel.NextAction{
 		WorkspaceID:          run.WorkspaceID,
 		RunID:                run.ID,
-		Type:                 runtimemodel.NextActionTypeAcquireTargetSnapshot,
+		Type:                 runtimemodel.NextActionTypeStateChange,
 		SubjectType:          stateChangeAction.SubjectType,
 		SubjectID:            stateChangeAction.SubjectID,
 		FocusCoverageItemIDs: append([]common.CoverageWorkItemID(nil), stateChangeAction.FocusCoverageItemIDs...),
 		RequiredOutput:       required,
-		AllowedActions:       []string{runtimemodel.NextActionTypeAcquireTargetSnapshot},
+		AllowedActions:       []string{runtimemodel.NextActionTypeStateChange},
 		ForbiddenActions: []string{
-			runtimemodel.NextActionTypeStateChange,
+			runtimemodel.NextActionTypeAcquireTargetSnapshot,
 			runtimemodel.NextActionTypeComplete,
 			runtimemodel.NextActionTypeRequestDecision,
 		},
 		RequiredEvidenceKinds: []string{runtimemodel.EvidenceKindDiagnostic},
-		Stage:                 runtimemodel.NextActionTypeAcquireTargetSnapshot,
+		Stage:                 runtimemodel.NextActionTypeStateChange,
 		StageMode:             "target_snapshot_acquisition",
-		Reason:                "state_change requires current target snapshot",
+		Reason:                "state_change requires current target snapshot prerequisite",
 	}.Normalized(), true
 }
 

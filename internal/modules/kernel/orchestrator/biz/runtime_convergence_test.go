@@ -5429,10 +5429,12 @@ func TestBuildConvergenceContractStateChangeRequiresTargetSnapshotAcquisition(t 
 
 	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
 
-	if contract.State != convergenceStateNeedEvidence ||
+	if contract.State != convergenceStateNeedStateChange ||
 		contract.RuntimeStageMode != "target_snapshot_acquisition" ||
-		contract.RepairObjective != repairObjectiveAcquireFailureEvidence {
-		t.Fatalf("convergenceContract = %+v, want target snapshot acquisition", contract)
+		contract.RepairObjective != repairObjectiveStateChangingOutput ||
+		!contract.StateChangingOutputRequired ||
+		stringFromMap(contract.Prerequisite, "kind") != "acquire_target_snapshot" {
+		t.Fatalf("convergenceContract = %+v, want state_change with target snapshot prerequisite", contract)
 	}
 	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
 	if required["mustAcquireCurrentTargetSnapshot"] != true ||

@@ -18,6 +18,11 @@ func validateLLMFollowUpGraphStateChangingContract(run *runModel.Run, step *runM
 	if boolValue(step.Input[stepInputKeyAssessmentOnly]) || boolValue(step.Input["providerRetryAssessmentOnly"]) {
 		return nil
 	}
+	if targetSnapshotPrerequisiteActive(step.Input) &&
+		boolValue(output["runtimeManagedTargetSnapshotAcquisition"]) &&
+		graphIsConcreteFailureEvidenceAcquisitionGraph(step, graph) {
+		return nil
+	}
 	if stepRequiresConcreteFailureEvidenceAcquisition(step) {
 		if graphIsConcreteFailureEvidenceAcquisitionGraph(step, graph) {
 			return nil

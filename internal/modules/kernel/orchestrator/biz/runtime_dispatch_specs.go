@@ -37,18 +37,22 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 	if gated, err := gapBaselineDispatchGate(run); gated || err != nil {
 		return nil, err
 	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
+	stepSummaries, err := o.steps.ListByRunSummary(ctx, run.ID)
 	if err != nil {
 		return nil, err
 	}
-	if active := activeLLMWorkspaceExecutionStep(steps); active != nil {
+	if active := activeLLMWorkspaceExecutionStep(stepSummaries); active != nil {
+		fullActive, err := o.steps.Get(ctx, active.ID)
+		if err != nil {
+			return nil, err
+		}
 		return []stepDispatchSpec{{
-			ID:    active.ID,
-			Kind:  active.Kind,
-			Input: cloneStepPayload(active.Input),
+			ID:    fullActive.ID,
+			Kind:  fullActive.Kind,
+			Input: cloneStepPayload(fullActive.Input),
 		}}, nil
 	}
-	if len(steps) == 0 {
+	if len(stepSummaries) == 0 {
 		input := initialStepInput(run)
 		input = hydrateInitialRepairTargetSnapshots(ctx, o.workspaces, o.convergenceManager(), run, input)
 		if providerID := common.RuntimeLLMProviderIDFromContext(ctx); providerID != "" {
@@ -61,9 +65,13 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 		}}, nil
 	}
 
-	last := terminalExecutionStep(steps)
-	if last == nil {
+	lastSummary := terminalExecutionStep(stepSummaries)
+	if lastSummary == nil {
 		return nil, common.ErrConflict
+	}
+	last, err := o.steps.Get(ctx, lastSummary.ID)
+	if err != nil {
+		return nil, err
 	}
 	return o.nextDispatchSpecsFromStep(ctx, run, last)
 }

@@ -2177,14 +2177,34 @@ func TestCoverageWorkItemsRecordFailedStepRejectedEvidence(t *testing.T) {
 		},
 	}
 	newCoverageSubsystem().ensure(run)
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) == 0 {
+		t.Fatalf("coverageWorkItems = empty, want generated coverage item")
+	}
+	workItemID := stringFromMap(items[0], "id")
+	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
+	if len(focus) == 0 {
+		t.Fatalf("coverageFocus = empty, want generated active focus")
+	}
+	run.ExecutionContext[convergenceBudgetKey] = map[string]any{
+		"focusId":                  stringFromMap(focus, "id"),
+		"sliceId":                  stringFromMap(focus, "sliceId"),
+		"coverageWorkItemIds":      []string{workItemID},
+		"state":                    "tracking",
+		"decision":                 "continue",
+		"noCoverageDeltaRounds":    int64(1),
+		"maxNoCoverageDeltaRounds": int64(5),
+	}
 	step := &runmodel.Step{
 		ID:    "run-cwi-failed-step/001-change",
 		RunID: run.ID,
 		Kind:  "artifact/write",
 		State: common.StepStateFailed,
 		Output: map[string]any{
-			"coverageTargets": []string{"stateful outcome"},
-			"error":           "state-changing evidence failed",
+			"coverageTargets":         []string{"stateful outcome"},
+			"error":                   "state-changing evidence failed",
+			failureOutputKeyClass:     failureClassRuntimeContractMisalign,
+			failureOutputKeySignature: "class=runtime_internal_contract_misalignment|target=stateful outcome",
 		},
 	}
 
@@ -2201,6 +2221,10 @@ func TestCoverageWorkItemsRecordFailedStepRejectedEvidence(t *testing.T) {
 	}
 	if got := stringFromMap(item, "currentGap"); got != "state-changing evidence failed" {
 		t.Fatalf("currentGap = %q, want failure reason", got)
+	}
+	budget := mapFromValue(run.ExecutionContext[convergenceBudgetKey])
+	if int64FromValue(budget["noCoverageDeltaRounds"]) != 2 || budget["lastNoDeltaReason"] == nil {
+		t.Fatalf("convergenceBudget = %+v, want failed rejected evidence to count as no positive coverage delta", budget)
 	}
 }
 

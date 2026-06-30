@@ -80,3 +80,163 @@ func TestValidateConvergenceDispatchInputRejectsCurrentActionContractDrift(t *te
 		t.Fatalf("validateConvergenceDispatchInput error = %v, want currentActionContract drift", err)
 	}
 }
+
+func TestCurrentActionContractDoesNotFallbackToRunAuthority(t *testing.T) {
+	run := &runModel.Run{
+		ID:          "run-current-action-stale",
+		WorkspaceID: "ws-current-action-stale",
+		ExecutionContext: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": "state_change"},
+			},
+		},
+	}
+	input := map[string]any{
+		"convergenceContract": map[string]any{
+			"state":                       convergenceStateNeedStateChange,
+			"runtimeStageMode":            "target_snapshot_acquisition",
+			"stateChangingOutputRequired": true,
+			"prerequisite":                targetSnapshotAcquisitionPrerequisite(),
+		},
+		stepInputKeyStagePacket: map[string]any{"schemaVersion": "workorch.stage_packet.v1"},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustAcquireCurrentTargetSnapshot":   true,
+				"mustUseReadOnlySnapshotAcquisition": true,
+				"acceptedKinds":                      []any{"target_snapshot"},
+				"forbiddenKinds":                     []any{"patch/apply"},
+			},
+		},
+	}
+
+	got := attachCurrentActionContractToInput(run, common.StepID("run-current-action-stale/step-001"), input)
+	contract := mapFromValue(got[currentActionContractKey])
+	next := mapFromValue(contract["nextAction"])
+	if next["kind"] != "state_change" {
+		t.Fatalf("currentActionContract.nextAction = %+v, want state_change parent action", next)
+	}
+	if prerequisite := mapFromValue(contract["prerequisite"]); prerequisite["kind"] != "acquire_target_snapshot" {
+		t.Fatalf("currentActionContract.prerequisite = %+v, want target snapshot prerequisite", prerequisite)
+	}
+}
+
+func TestValidateConvergenceDispatchInputRejectsReadOnlyStateChangeWithoutPrerequisite(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": "state_change"},
+		},
+		"convergenceContract": map[string]any{
+			"state":            convergenceStateNeedStateChange,
+			"runtimeStageMode": "target_snapshot_acquisition",
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"schemaVersion": "workorch.stage_packet.v1",
+			"requiredOutput": map[string]any{
+				"mustAcquireCurrentTargetSnapshot":   true,
+				"mustUseReadOnlySnapshotAcquisition": true,
+				"acceptedKinds":                      []any{"target_snapshot"},
+				"forbiddenKinds":                     []any{"patch/apply"},
+			},
+		},
+		"requiredOutput": map[string]any{
+			"mustAcquireCurrentTargetSnapshot":   true,
+			"mustUseReadOnlySnapshotAcquisition": true,
+			"acceptedKinds":                      []any{"target_snapshot"},
+			"forbiddenKinds":                     []any{"patch/apply"},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustAcquireCurrentTargetSnapshot":   true,
+				"mustUseReadOnlySnapshotAcquisition": true,
+				"acceptedKinds":                      []any{"target_snapshot"},
+				"forbiddenKinds":                     []any{"patch/apply"},
+			},
+		},
+		currentActionContractKey: map[string]any{
+			"nextAction": map[string]any{"kind": "state_change"},
+			"requiredOutput": map[string]any{
+				"mustAcquireCurrentTargetSnapshot":   true,
+				"mustUseReadOnlySnapshotAcquisition": true,
+				"acceptedKinds":                      []any{"target_snapshot"},
+				"forbiddenKinds":                     []any{"patch/apply"},
+			},
+		},
+	}
+
+	err := validateConvergenceDispatchInput(input)
+	if err == nil || !strings.Contains(err.Error(), "state_change action lacks state-changing output contract") {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want read-only state_change without prerequisite rejection", err)
+	}
+}
+
+func TestGraphLimitAssessmentOnlySkipsTargetSnapshotRealignment(t *testing.T) {
+	run := &runModel.Run{
+		ID:          "run-graph-limit-local-assessment",
+		WorkspaceID: "ws-graph-limit-local-assessment",
+		ExecutionContext: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": "state_change"},
+			},
+		},
+	}
+	step := &runModel.Step{
+		ID:    "run-graph-limit-local-assessment/step-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyAssessmentOnly:     true,
+			stepInputKeyGraphLimitFollowUp: true,
+			stepInputKeyRuntimeStage:       runtimeStageVerification,
+			stepInputKeyRuntimeStageMode:   "strict_convergence",
+			"assessmentOnlyReason":         "graph_follow_up_expansion_limit_exceeded",
+			"convergenceContract":          map[string]any{"state": convergenceStateNeedAssessment, "runtimeStageMode": "strict_convergence"},
+			stepInputKeyStagePacket:        map[string]any{"schemaVersion": "workorch.stage_packet.v1"},
+			"repairActionPackage":          map[string]any{"requiredOutput": assessmentRequiredOutputForAuthorityFocus(nil)},
+			currentActionContractKey:       map[string]any{"nextAction": map[string]any{"kind": "assessment"}},
+		},
+	}
+
+	realignLLMStepInputTargetSnapshotAuthority(run, step)
+
+	contract := mapFromValue(step.Input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedAssessment {
+		t.Fatalf("convergenceContract = %+v, want assessment-only preserved", contract)
+	}
+	required := activeRequiredOutputForCurrentAction(step.Input)
+	if boolValue(required["mustAcquireCurrentTargetSnapshot"]) {
+		t.Fatalf("requiredOutput = %+v, want no target snapshot acquisition", required)
+	}
+}
+
+func TestRuntimeManagedTargetSnapshotAbstractRefsFailFast(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": "acquire_target_snapshot"},
+		},
+		"convergenceContract": map[string]any{
+			"state":            convergenceStateNeedEvidence,
+			"runtimeStageMode": "target_snapshot_acquisition",
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustAcquireCurrentTargetSnapshot":   true,
+				"mustUseReadOnlySnapshotAcquisition": true,
+				"targetRefs":                         []any{"cwi-001", "source_change"},
+				"acceptedKinds":                      []any{"target_snapshot"},
+			},
+		},
+	}
+
+	output, ok := runtimeManagedTargetSnapshotAcquisitionOutput(input)
+	if !ok {
+		t.Fatalf("runtimeManagedTargetSnapshotAcquisitionOutput ok = false, want fail-fast output")
+	}
+	if output["status"] != "failed" ||
+		output[failureOutputKeyClass] != failureClassRuntimeContractMisalign ||
+		output["deterministicOutcome"] != "fail_fast_internal_contract_gap" {
+		t.Fatalf("output = %+v, want deterministic runtime contract failure", output)
+	}
+	if graph := output[stepOutputKeyExecutionGraph]; graph != nil {
+		t.Fatalf("executionGraph = %+v, want no read-only graph for abstract refs", graph)
+	}
+}

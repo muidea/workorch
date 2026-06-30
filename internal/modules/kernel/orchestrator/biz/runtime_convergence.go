@@ -22,6 +22,7 @@ type ConvergenceContract struct {
 	RepairObjective                 string
 	StateChangingOutputRequired     bool
 	ConcreteFailureEvidenceRequired bool
+	Prerequisite                    map[string]any
 	RepairActionPackage             map[string]any
 	GovernanceReason                string
 	SourceRefs                      []map[string]any
@@ -714,15 +715,19 @@ func populateTargetSnapshotAcquisitionConvergenceContract(input map[string]any, 
 	if contract == nil {
 		return
 	}
-	contract.State = convergenceStateNeedEvidence
+	contract.State = convergenceStateNeedStateChange
 	contract.RuntimeStage = runtimeStageRepair
 	contract.RuntimeStageMode = "target_snapshot_acquisition"
-	contract.RepairObjective = repairObjectiveAcquireFailureEvidence
+	contract.RepairObjective = repairObjectiveStateChangingOutput
+	contract.StateChangingOutputRequired = true
 	contract.ConcreteFailureEvidenceRequired = true
+	contract.Prerequisite = targetSnapshotAcquisitionPrerequisite()
 	if contract.RepairActionPackage == nil {
 		contract.RepairActionPackage = map[string]any{}
 	}
 	pkg := contract.RepairActionPackage
+	pkg["parentNextAction"] = map[string]any{"kind": "state_change", "reason": "state_change requires current target snapshot"}
+	pkg["prerequisite"] = cloneStepPayload(contract.Prerequisite)
 	pkg["requiresCurrentTargetSnapshotForStateChange"] = true
 	pkg["targetSnapshotAcquisitionRequired"] = true
 	if targetSet := repairActionTargetSet(input, pkg); len(targetSet) > 0 {
@@ -730,6 +735,9 @@ func populateTargetSnapshotAcquisitionConvergenceContract(input map[string]any, 
 	}
 	required := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
 	required["evidenceAcquisitionSubtype"] = "target_snapshot"
+	required["parentNextActionKind"] = "state_change"
+	required["prerequisiteForNextAction"] = "state_change"
+	required["finiteExitRule"] = "accepted_target_snapshot_evidence_or_scoped_blocker_or_internal_fail_fast"
 	applyTargetSnapshotAcquisitionRequiredOutputContract(required)
 	required["forbiddenKinds"] = appendUniqueStrings(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply", "file/write", "shell/write")
 	if len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
@@ -738,6 +746,17 @@ func populateTargetSnapshotAcquisitionConvergenceContract(input map[string]any, 
 	pkg["requiredOutput"] = required
 	contract.RepairActionPackage = pkg
 	contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+}
+
+func targetSnapshotAcquisitionPrerequisite() map[string]any {
+	return map[string]any{
+		"kind":             "acquire_target_snapshot",
+		"state":            convergenceStateNeedEvidence,
+		"runtimeStage":     runtimeStageRepair,
+		"runtimeStageMode": "target_snapshot_acquisition",
+		"finiteExitRule":   "accepted_target_snapshot_evidence_or_scoped_blocker_or_internal_fail_fast",
+		"reason":           "state_change requires current target snapshot",
+	}
 }
 
 func populateCoverageWorkItemStateChangeConvergenceContract(input map[string]any, contract *ConvergenceContract) {
@@ -1795,6 +1814,27 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		if len(pkg) == 0 {
 			pkg = map[string]any{}
 		}
+		if convergenceContractHasTargetSnapshotPrerequisite(contract) {
+			input["concreteFailureEvidenceRequired"] = true
+			pkg["parentNextAction"] = map[string]any{"kind": "state_change", "reason": "state_change requires current target snapshot"}
+			pkg["prerequisite"] = cloneStepPayload(contract.Prerequisite)
+			pkg["repairObjective"] = repairObjectiveStateChangingOutput
+			pkg["stateChangingOutputRequired"] = true
+			pkg["requiresCurrentTargetSnapshotForStateChange"] = true
+			pkg["targetSnapshotAcquisitionRequired"] = true
+			required := evidenceAcquisitionRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
+			required["evidenceAcquisitionSubtype"] = "target_snapshot"
+			required["parentNextActionKind"] = "state_change"
+			required["prerequisiteForNextAction"] = "state_change"
+			required["finiteExitRule"] = "accepted_target_snapshot_evidence_or_scoped_blocker_or_internal_fail_fast"
+			applyTargetSnapshotAcquisitionRequiredOutputContract(required)
+			required["forbiddenKinds"] = appendUniqueStrings(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply", "file/write", "shell/write")
+			pkg["requiredOutput"] = required
+			sanitizeRepairActionPackageTargetEvidence(pkg)
+			input["repairActionPackage"] = pkg
+			currentActionSetRequiredOutput(input, required)
+			break
+		}
 		required := mapFromValue(pkg["requiredOutput"])
 		if !boolValue(required["mustIncludeStateChangingNode"]) {
 			required = enforceStateChangingRequiredOutputForConvergence(pkg, input)
@@ -1979,7 +2019,12 @@ func convergenceNextActionForContract(contract ConvergenceContract) map[string]a
 		}
 		return map[string]any{"kind": kind, "reason": reason}
 	case convergenceStateNeedStateChange:
-		return map[string]any{"kind": "state_change", "reason": "current convergence contract requires state-changing output"}
+		action := map[string]any{"kind": "state_change", "reason": "current convergence contract requires state-changing output"}
+		if convergenceContractHasTargetSnapshotPrerequisite(contract) {
+			action["reason"] = "state_change requires current target snapshot prerequisite"
+			action["prerequisite"] = cloneStepPayload(contract.Prerequisite)
+		}
+		return action
 	case convergenceStateNeedValidation:
 		return map[string]any{"kind": "validate", "reason": "current convergence contract requires bounded validation evidence"}
 	case convergenceStateNeedAssessment:
@@ -1989,6 +2034,13 @@ func convergenceNextActionForContract(contract ConvergenceContract) map[string]a
 	default:
 		return nil
 	}
+}
+
+func convergenceContractHasTargetSnapshotPrerequisite(contract ConvergenceContract) bool {
+	if strings.TrimSpace(stringFromMap(contract.Prerequisite, "kind")) == "acquire_target_snapshot" {
+		return true
+	}
+	return contract.RuntimeStageMode == "target_snapshot_acquisition"
 }
 
 func stripRepairActionPackageImplementationTargetEvidence(pkg map[string]any) {
@@ -3198,6 +3250,9 @@ func compactConvergenceContract(contract ConvergenceContract) map[string]any {
 	}
 	if contract.ConcreteFailureEvidenceRequired {
 		ret["concreteFailureEvidenceRequired"] = true
+	}
+	if len(contract.Prerequisite) > 0 {
+		ret["prerequisite"] = cloneStepPayload(contract.Prerequisite)
 	}
 	if len(contract.TargetEvidence) > 0 {
 		ret["targetEvidence"] = contract.TargetEvidence

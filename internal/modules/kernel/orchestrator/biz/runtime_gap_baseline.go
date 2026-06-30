@@ -275,6 +275,19 @@ func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID comm
 	return input, nil
 }
 
+func finalizeLLMDispatchAuthorityInput(run *runModel.Run, stepID common.StepID, input map[string]any) (map[string]any, error) {
+	if input == nil {
+		input = map[string]any{}
+	}
+	input = synchronizeCurrentRequiredOutputMirrors(input)
+	input = attachCurrentActionContractToInput(run, stepID, input)
+	input = scrubConvergenceDispatchDiagnosticAdvice(input)
+	if err := validateConvergenceDispatchInput(input); err != nil {
+		return nil, err
+	}
+	return input, nil
+}
+
 func dispatchInputUsesLocalAssessmentContract(input map[string]any) bool {
 	if len(input) == 0 || !boolValue(input[stepInputKeyAssessmentOnly]) {
 		return false
@@ -402,7 +415,10 @@ func validateConvergenceDispatchInput(input map[string]any) error {
 	if len(input) == 0 {
 		return nil
 	}
-	nextAction := strings.TrimSpace(convergenceNextActionKind(nil, input))
+	nextAction := strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind"))
+	if nextAction == "" {
+		nextAction = strings.TrimSpace(convergenceNextActionKind(nil, input))
+	}
 	if nextAction == "" {
 		return nil
 	}
@@ -428,7 +444,7 @@ func validateConvergenceDispatchInput(input map[string]any) error {
 		if state != convergenceStateNeedStateChange {
 			return convergenceDispatchMisalignmentError("nextAction=%s contractState=%s", nextAction, state)
 		}
-		if !stateChanging {
+		if !stateChanging && !targetSnapshotPrerequisiteActive(input) {
 			return convergenceDispatchMisalignmentError("state_change action lacks state-changing output contract")
 		}
 	case "repair", "acquire_evidence", "acquire_target_snapshot":
@@ -467,7 +483,7 @@ func validateCurrentActionContract(input map[string]any) error {
 		return nil
 	}
 	currentNext := strings.TrimSpace(stringFromMap(mapFromValue(contract["nextAction"]), "kind"))
-	if expected := strings.TrimSpace(convergenceNextActionKind(nil, input)); expected != "" && currentNext != "" && currentNext != expected {
+	if expected := strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind")); expected != "" && currentNext != "" && currentNext != expected {
 		return convergenceDispatchMisalignmentError("currentActionContract nextAction=%s expected=%s", currentNext, expected)
 	}
 	currentRequired := mapFromValue(contract["requiredOutput"])
@@ -824,6 +840,7 @@ func validateConvergenceDispatchFocusAlignment(input map[string]any) error {
 	for label, required := range map[string]map[string]any{
 		"repairActionPackage.requiredOutput":                  mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
 		"stagePacket.requiredOutput":                          mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"currentActionContract.requiredOutput":                mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
 		"requiredOutput":                                      mapFromValue(input["requiredOutput"]),
 		"executionContext.requiredOutput":                     mapFromValue(executionContext["requiredOutput"]),
 		"executionContext.repairActionPackage.requiredOutput": mapFromValue(mapFromValue(executionContext["repairActionPackage"])["requiredOutput"]),
@@ -858,18 +875,25 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		return nil
 	}
 	sources := map[string]map[string]any{
-		"requiredOutput":                     mapFromValue(input["requiredOutput"]),
-		"repairActionPackage.requiredOutput": mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
-		"stagePacket.requiredOutput":         mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"requiredOutput":                       mapFromValue(input["requiredOutput"]),
+		"repairActionPackage.requiredOutput":   mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":           mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
 	}
 	state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state"))
-	nextAction := strings.TrimSpace(convergenceNextActionKind(nil, input))
+	nextAction := strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind"))
+	if nextAction == "" {
+		nextAction = strings.TrimSpace(convergenceNextActionKind(nil, input))
+	}
 	pkg := mapFromValue(input["repairActionPackage"])
 	pkgObjective := strings.TrimSpace(stringFromMap(pkg, "repairObjective"))
+	prerequisiteActive := targetSnapshotPrerequisiteActive(input)
 	if state == convergenceStateNeedStateChange {
 		if pkgObjective == repairObjectiveAcquireFailureEvidence || boolValue(pkg["evidenceAcquisitionRequired"]) {
-			appendAuthorityDiagnostic(input, "repair_action_package_mismatch_next_action", "error", "internal_authority_mismatch", "repairActionPackage", "state_change action cannot expose failure-evidence acquisition as current repairActionPackage")
-			return convergenceDispatchMisalignmentError("repairActionPackage contradicts state_change current action")
+			if !prerequisiteActive {
+				appendAuthorityDiagnostic(input, "repair_action_package_mismatch_next_action", "error", "internal_authority_mismatch", "repairActionPackage", "state_change action cannot expose failure-evidence acquisition as current repairActionPackage")
+				return convergenceDispatchMisalignmentError("repairActionPackage contradicts state_change current action")
+			}
 		}
 	}
 	if state == convergenceStateNeedValidation {
@@ -889,7 +913,7 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 	topStateChanging := requiredOutputRequiresStateChanging(top)
 	topValidationOnly := requiredOutputValidationOnly(top)
 	topFailureEvidence := requiredOutputRequiresConcreteFailureEvidence(top)
-	if state == convergenceStateNeedStateChange && !topStateChanging {
+	if state == convergenceStateNeedStateChange && !topStateChanging && !prerequisiteActive {
 		return convergenceDispatchMisalignmentError("contractState=%s requires state-changing requiredOutput", state)
 	}
 	if state == convergenceStateNeedValidation && topStateChanging {
@@ -899,7 +923,7 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "validation action requires validation evidence requiredOutput, not concrete failure evidence acquisition")
 		return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: validation has concrete failure evidence requiredOutput")
 	}
-	if (state == convergenceStateNeedStateChange || nextAction == runtimemodel.NextActionTypeStateChange) && !requiredOutputHasAllowedStateChangingKind(top) {
+	if (state == convergenceStateNeedStateChange || nextAction == runtimemodel.NextActionTypeStateChange) && !requiredOutputHasAllowedStateChangingKind(top) && !prerequisiteActive {
 		appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "state_change requiredOutput lacks an allowed state-changing accepted kind")
 		return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: state_change lacks allowed state-changing accepted kind")
 	}
@@ -926,7 +950,7 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		if topValidationOnly && requiredOutputAcceptsKind(required, "patch/apply") {
 			return convergenceDispatchMisalignmentError("validation-only requiredOutput accepts patch/apply: %s", label)
 		}
-		if topStateChanging && !requiredOutputHasAllowedStateChangingKind(required) {
+		if topStateChanging && !requiredOutputHasAllowedStateChangingKind(required) && !prerequisiteActive {
 			appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", label, "state-changing requiredOutput has no allowed accepted kind")
 			return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: state-changing requiredOutput has no allowed accepted kind: %s", label)
 		}
@@ -970,6 +994,9 @@ func validateRequiredOutputSatisfiableRoute(input map[string]any, label string, 
 	}
 	switch {
 	case state == convergenceStateNeedStateChange || nextAction == runtimemodel.NextActionTypeStateChange:
+		if targetSnapshotPrerequisiteActive(input) && requiredOutputIsReadOnlyTargetSnapshotPrerequisite(required) {
+			return nil
+		}
 		if !requiredOutputRouteHasStateChangingKind(routes) {
 			appendAuthorityDiagnostic(input, "required_output_unsatisfiable", "error", "internal_authority_mismatch", label, "state-change next action has no state-changing output route")
 			return convergenceDispatchMisalignmentError("runtime_internal_contract_unsatisfiable: %s has no state-changing output route", label)
@@ -992,6 +1019,40 @@ func validateRequiredOutputSatisfiableRoute(input map[string]any, label string, 
 		}
 	}
 	return nil
+}
+
+func targetSnapshotPrerequisiteActive(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	nextAction := strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind"))
+	if nextAction != runtimemodel.NextActionTypeStateChange {
+		return false
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if strings.TrimSpace(stringFromMap(contract, "state")) != convergenceStateNeedStateChange {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(mapFromValue(contract["prerequisite"]), "kind")) == runtimemodel.NextActionTypeAcquireTargetSnapshot {
+		return true
+	}
+	if strings.TrimSpace(stringFromMap(mapFromValue(mapFromValue(input[currentActionContractKey])["prerequisite"]), "kind")) == runtimemodel.NextActionTypeAcquireTargetSnapshot {
+		return true
+	}
+	return false
+}
+
+func requiredOutputIsReadOnlyTargetSnapshotPrerequisite(required map[string]any) bool {
+	if len(required) == 0 {
+		return false
+	}
+	if !boolValue(required["mustAcquireCurrentTargetSnapshot"]) || !boolValue(required["mustUseReadOnlySnapshotAcquisition"]) {
+		return false
+	}
+	if boolValue(required["mustIncludeStateChangingNode"]) || requiredOutputRequiresStateChanging(required) {
+		return false
+	}
+	return true
 }
 
 func requiredOutputSatisfiableRouteKinds(required map[string]any) []string {
@@ -1217,7 +1278,7 @@ func appendAuthorityDiagnostic(input map[string]any, code string, severity strin
 }
 
 func firstRequiredOutputForSemantics(sources map[string]map[string]any) map[string]any {
-	for _, label := range []string{"repairActionPackage.requiredOutput", "stagePacket.requiredOutput", "requiredOutput"} {
+	for _, label := range []string{"repairActionPackage.requiredOutput", "stagePacket.requiredOutput", "currentActionContract.requiredOutput", "requiredOutput"} {
 		if required := sources[label]; len(required) > 0 {
 			return required
 		}
@@ -1438,6 +1499,9 @@ func limitedCoverageMapSlice(items []map[string]any, limit int) []map[string]any
 func gapBaselineDispatchGate(run *runModel.Run) (bool, error) {
 	if run == nil {
 		return false, common.ErrInvalidArgument
+	}
+	if convergenceBudgetRequiresEscalation(run) {
+		return true, common.ErrBlocked
 	}
 	baseline := mapFromValue(run.ExecutionContext[gapBaselineKey])
 	if len(baseline) == 0 {
@@ -1701,6 +1765,11 @@ func convergenceAuthorityBudgetScope(run *runModel.Run) map[string]any {
 			ret["sliceId"] = value
 		}
 	}
+	if ids := compactUniqueStrings(stringSliceFromValue(budget["coverageWorkItemIds"])); len(ids) > 0 {
+		ret["coverageWorkItemIds"] = ids
+	} else if ids := compactUniqueStrings(stringSliceFromValue(focus["coverageWorkItemIds"])); len(ids) > 0 {
+		ret["coverageWorkItemIds"] = ids
+	}
 	if len(ret) == 0 {
 		return nil
 	}
@@ -1747,6 +1816,9 @@ func resetConvergenceBudgetScopeForFocus(executionContext map[string]any, focus 
 	}
 	if sliceID := strings.TrimSpace(stringFromMap(focus, "sliceId")); sliceID != "" {
 		reset["sliceId"] = sliceID
+	}
+	if ids := compactUniqueStrings(stringSliceFromValue(focus["coverageWorkItemIds"])); len(ids) > 0 {
+		reset["coverageWorkItemIds"] = ids
 	}
 	reset["state"] = "tracking"
 	reset["decision"] = "continue"

@@ -71,6 +71,11 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 			if outputModeIsIncrementalArtifact(step.Input) && artifactOutputPhaseFromInput(step.Input) == artifactOutputPhaseContext {
 				return nil
 			}
+			if targetSnapshotPrerequisiteActive(step.Input) &&
+				boolValue(output["runtimeManagedTargetSnapshotAcquisition"]) &&
+				graphIsConcreteFailureEvidenceAcquisitionGraph(step, graph) {
+				return nil
+			}
 			if err := validateExecutionGraphShellSafety(graph, "state-changing execution graph"); err != nil {
 				return err
 			}

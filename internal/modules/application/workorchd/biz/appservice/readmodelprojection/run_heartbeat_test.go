@@ -75,6 +75,43 @@ func TestMapRunHeartbeatMarksLiveRunWithNoActivity(t *testing.T) {
 	}
 }
 
+func TestMapRunHeartbeatMarksConvergenceBudgetEscalationIneffectiveRetry(t *testing.T) {
+	t.Parallel()
+
+	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
+		Runs: []readmodelcore.Run{
+			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateRunning)},
+		},
+		Acceptance: readmodelcore.AcceptanceProjection{
+			Budget: &readmodelcore.ConvergenceBudget{
+				State:    "escalated",
+				Decision: "escalate_decision",
+			},
+		},
+	})
+	if got.ActivityState != "ineffective_retry" || !got.IneffectiveRetry {
+		t.Fatalf("heartbeat = %+v, want budget escalation ineffective retry", got)
+	}
+}
+
+func TestMapRunHeartbeatMarksWaitingDecisionRetryExhaustionIneffectiveRetry(t *testing.T) {
+	t.Parallel()
+
+	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
+		Runs: []readmodelcore.Run{
+			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision)},
+		},
+		ConvergenceStatus: &readmodelcore.ConvergenceStatus{
+			DecisionCause: "retry_exhaustion",
+		},
+	})
+	if got.ActivityState != "waiting_decision" || !got.IneffectiveRetry {
+		t.Fatalf("heartbeat = %+v, want waiting decision with ineffective retry signal", got)
+	}
+}
+
 func TestMapRunHeartbeatMarksLiveRunStalledAfterProgressThreshold(t *testing.T) {
 	t.Parallel()
 

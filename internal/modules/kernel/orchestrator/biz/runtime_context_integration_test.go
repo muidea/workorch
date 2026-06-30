@@ -900,12 +900,13 @@ func TestRuntimeOrchestrator_EnrichLLMStepInputRealignsStateChangeWithoutTargetS
 
 	contract := mapFromValue(step.Input[currentActionContractKey])
 	nextAction := mapFromValue(contract["nextAction"])
-	if stringFromMap(nextAction, "kind") != runtimemodel.NextActionTypeAcquireTargetSnapshot {
-		t.Fatalf("currentActionContract = %+v, want acquire_target_snapshot after manifest appears", contract)
+	if stringFromMap(nextAction, "kind") != runtimemodel.NextActionTypeStateChange ||
+		stringFromMap(mapFromValue(contract["prerequisite"]), "kind") != runtimemodel.NextActionTypeAcquireTargetSnapshot {
+		t.Fatalf("currentActionContract = %+v, want state_change parent with target snapshot prerequisite after manifest appears", contract)
 	}
-	if step.Input["repairObjective"] != repairObjectiveAcquireFailureEvidence ||
-		boolValue(step.Input["stateChangingOutputRequired"]) {
-		t.Fatalf("step input = %+v, want evidence acquisition objective without direct state-change requirement", step.Input)
+	if step.Input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		!boolValue(step.Input["stateChangingOutputRequired"]) {
+		t.Fatalf("step input = %+v, want parent state-change objective with prerequisite", step.Input)
 	}
 	required := mapFromValue(mapFromValue(step.Input["repairActionPackage"])["requiredOutput"])
 	if required["mustAcquireCurrentTargetSnapshot"] != true ||

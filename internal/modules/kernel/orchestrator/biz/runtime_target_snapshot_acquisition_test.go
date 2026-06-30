@@ -54,7 +54,7 @@ func TestRuntimeManagedTargetSnapshotAcquisitionBuildsReadOnlyGraph(t *testing.T
 	}
 }
 
-func TestRuntimeManagedTargetSnapshotAcquisitionRequiresReadableTargetRef(t *testing.T) {
+func TestRuntimeManagedTargetSnapshotAcquisitionFailsFastForUnreadableTargetRefs(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{
 			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeAcquireTargetSnapshot},
@@ -72,8 +72,65 @@ func TestRuntimeManagedTargetSnapshotAcquisitionRequiresReadableTargetRef(t *tes
 		},
 	}
 
-	if output, ok := runtimeManagedTargetSnapshotAcquisitionOutput(input); ok || len(output) > 0 {
-		t.Fatalf("runtimeManagedTargetSnapshotAcquisitionOutput = %+v/%v, want no takeover", output, ok)
+	output, ok := runtimeManagedTargetSnapshotAcquisitionOutput(input)
+	if !ok {
+		t.Fatal("runtimeManagedTargetSnapshotAcquisitionOutput ok = false, want deterministic fail-fast takeover")
+	}
+	if output["status"] != "failed" ||
+		output[failureOutputKeyClass] != failureClassRuntimeContractMisalign ||
+		output["deterministicOutcome"] != "fail_fast_internal_contract_gap" {
+		t.Fatalf("runtimeManagedTargetSnapshotAcquisitionOutput = %+v, want deterministic fail-fast output", output)
+	}
+	if graph := output[stepOutputKeyExecutionGraph]; graph != nil {
+		t.Fatalf("executionGraph = %+v, want no read graph for unreadable target refs", graph)
+	}
+}
+
+func TestRuntimeManagedTargetSnapshotAcquisitionFailsFastForCurrentActionAbstractFocusRefs(t *testing.T) {
+	required := map[string]any{
+		"mustAcquireCurrentTargetSnapshot":   true,
+		"mustUseReadOnlySnapshotAcquisition": true,
+		"mustIncludeStateChangingNode":       false,
+	}
+	focus := map[string]any{
+		"id":                  "focus-cwi-039",
+		"coverageWorkItemIds": []string{"cwi-039"},
+		"targetRefs":          []string{"cwi-039", "version_control_snapshot"},
+		"structuredTargetRefs": []map[string]any{
+			{"targetRef": "deliverable:source_change"},
+			{"targetRef": "source_change"},
+		},
+	}
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeAcquireTargetSnapshot},
+		},
+		"convergenceContract": map[string]any{
+			"state": convergenceStateNeedEvidence,
+		},
+		currentActionContractKey: map[string]any{
+			"currentFocus":   focus,
+			"requiredOutput": required,
+		},
+	}
+
+	output, ok := runtimeManagedTargetSnapshotAcquisitionOutput(input)
+	if !ok {
+		t.Fatal("runtimeManagedTargetSnapshotAcquisitionOutput ok = false, want deterministic fail-fast for abstract focus refs")
+	}
+	if output["status"] != "failed" ||
+		output[failureOutputKeyClass] != failureClassRuntimeContractMisalign ||
+		output["deterministicOutcome"] != "fail_fast_internal_contract_gap" {
+		t.Fatalf("runtimeManagedTargetSnapshotAcquisitionOutput = %+v, want deterministic fail-fast output", output)
+	}
+	refs := stringSliceFromValue(output["abstractTargetRefs"])
+	for _, want := range []string{"cwi-039", "deliverable:source_change", "source_change", "version_control_snapshot"} {
+		if !stringSliceContains(refs, want) {
+			t.Fatalf("abstractTargetRefs = %+v, want %q", refs, want)
+		}
+	}
+	if graph := output[stepOutputKeyExecutionGraph]; graph != nil {
+		t.Fatalf("executionGraph = %+v, want no read graph for abstract focus refs", graph)
 	}
 }
 
@@ -214,13 +271,19 @@ func runtimeManagedTargetSnapshotDispatchInput(workspaceID common.WorkspaceID, r
 				"coverageWorkItemIds":  []string{"cwi-target-snapshot"},
 				"structuredTargetRefs": []map[string]any{{"targetRef": "target.txt"}},
 			},
-			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeAcquireTargetSnapshot},
+			"nextAction": map[string]any{
+				"kind":         runtimemodel.NextActionTypeStateChange,
+				"prerequisite": targetSnapshotAcquisitionPrerequisite(),
+			},
 		},
 		"convergenceContract": map[string]any{
-			"state":                       convergenceStateNeedEvidence,
-			"stateChangingOutputRequired": false,
+			"state":                       convergenceStateNeedStateChange,
+			"runtimeStageMode":            "target_snapshot_acquisition",
+			"stateChangingOutputRequired": true,
+			"prerequisite":                targetSnapshotAcquisitionPrerequisite(),
 		},
 		"repairActionPackage": map[string]any{
+			"requiresCurrentTargetSnapshotForStateChange": true,
 			"repairTargetSet": []string{"target.txt"},
 			"requiredOutput":  cloneStepPayload(required),
 		},

@@ -14,9 +14,10 @@ func TestUpdateConvergenceBudgetEscalatesNoDeltaRepeatedFailure(t *testing.T) {
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{
 			coverageFocusKey: map[string]any{
-				"id":      "focus-item-1",
-				"sliceId": "slice-1",
-				"state":   "active",
+				"id":                  "focus-item-1",
+				"sliceId":             "slice-1",
+				"state":               "active",
+				"coverageWorkItemIds": []string{"cwi-001", "cwi-002"},
 			},
 			convergenceBudgetKey: map[string]any{
 				"state":                       "tracking",
@@ -68,6 +69,14 @@ func TestUpdateConvergenceBudgetEscalatesNoDeltaRepeatedFailure(t *testing.T) {
 	if budget["lastFailureClass"] != failureClassShellCommand ||
 		budget["lastFailureSignature"] != "class=shell_command_failed|kind=shell/command|target=one" {
 		t.Fatalf("budget = %+v, want failure diagnostics retained in budget scope", budget)
+	}
+	if ids := stringSliceFromValue(budget["coverageWorkItemIds"]); len(ids) != 2 ||
+		!stringSliceContains(ids, "cwi-001") ||
+		!stringSliceContains(ids, "cwi-002") {
+		t.Fatalf("budget coverageWorkItemIds = %+v, want focus-scoped work items", budget["coverageWorkItemIds"])
+	}
+	if gated, err := gapBaselineDispatchGate(run); !gated || err != common.ErrBlocked {
+		t.Fatalf("gapBaselineDispatchGate = %v/%v, want blocked by escalated convergence budget", gated, err)
 	}
 }
 
@@ -211,8 +220,8 @@ func TestUpdateConvergenceBudgetDoesNotResetRepairAttemptsForRejectedCoverageDel
 		},
 	}
 
-	if !updateConvergenceBudgetFromStep(run, step, true) {
-		t.Fatal("updateConvergenceBudgetFromStep changed = false, want rejected coverage delta update")
+	if !updateConvergenceBudgetFromStep(run, step, false) {
+		t.Fatal("updateConvergenceBudgetFromStep changed = false, want rejected failure budget update")
 	}
 	budget := mapFromValue(run.ExecutionContext[convergenceBudgetKey])
 	if int64FromValue(budget["repairAttempts"]) != 3 ||
@@ -220,8 +229,8 @@ func TestUpdateConvergenceBudgetDoesNotResetRepairAttemptsForRejectedCoverageDel
 		int64FromValue(budget["repeatedFailureSignatures"]) != 2 {
 		t.Fatalf("budget = %+v, want repair/retry/signature counters retained and failed validation counted", budget)
 	}
-	if int64FromValue(budget["noCoverageDeltaRounds"]) != 0 || budget["lastNoDeltaReason"] != nil {
-		t.Fatalf("budget = %+v, want no-delta reset for recorded rejected evidence", budget)
+	if int64FromValue(budget["noCoverageDeltaRounds"]) != 3 || budget["lastNoDeltaReason"] == nil {
+		t.Fatalf("budget = %+v, want rejected evidence to count as no positive coverage delta", budget)
 	}
 	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
 	if focus["attempt"] != nil || focus["failureClass"] != nil || focus["failureSignature"] != nil {

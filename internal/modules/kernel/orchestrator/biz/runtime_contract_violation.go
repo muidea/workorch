@@ -27,6 +27,7 @@ const (
 	contractViolationRuleCoverageAssessmentIncomplete       = "coverage_assessment_incomplete"
 	contractViolationRuleCoverageMapIncomplete              = "coverage_map_incomplete"
 	contractViolationRuleTraceabilityRefMismatch            = "traceability_ref_mismatch"
+	contractViolationRuleFocusBindingMismatch               = "focus_binding_mismatch"
 	contractViolationRuleDecisionBlockedWhenActionable      = "decision_blocked_when_actionable"
 	contractViolationRuleUnsafeOutput                       = "unsafe_output"
 	contractViolationRuleUnparseableOutput                  = runtimemodel.ContractViolationRuleUnparseableOutput
@@ -91,6 +92,8 @@ func contractViolationRuleFromType(violationType string) string {
 		return contractViolationRuleWrongOutputShape
 	case contractViolationLLMSchemaInvalid:
 		return contractViolationRuleUnparseableOutput
+	case contractViolationFocusBindingMismatch:
+		return contractViolationRuleFocusBindingMismatch
 	case contractViolationCoverageTargetsRequired:
 		return contractViolationRuleCoverageMapIncomplete
 	case contractViolationDoDAssessmentEvidenceMissing:
@@ -818,6 +821,8 @@ func contractViolationRuleFromStep(step *runModel.Step) string {
 	case contractViolationGraphNodeReturnedGraph,
 		contractViolationRepairReturnedGraph:
 		return contractViolationRuleWrongOutputShape
+	case contractViolationFocusBindingMismatch:
+		return contractViolationRuleFocusBindingMismatch
 	case contractViolationCoverageTargetsRequired:
 		return contractViolationRuleCoverageMapIncomplete
 	case contractViolationDoDAssessmentEvidenceMissing:
@@ -875,6 +880,8 @@ func contractViolationRecoverabilityForRule(rule string) string {
 		return runtimemodel.ContractViolationRecoverabilityNarrowContract
 	case contractViolationRuleTraceabilityRefMismatch:
 		return runtimemodel.ContractViolationRecoverabilityNormalizeThenRetry
+	case contractViolationRuleFocusBindingMismatch:
+		return runtimemodel.ContractViolationRecoverabilityNarrowContract
 	case contractViolationRuleCoverageAssessmentIncomplete:
 		return runtimemodel.ContractViolationRecoverabilityRecomputeAuthority
 	default:
@@ -910,6 +917,8 @@ func contractViolationRetryHint(rule string) string {
 		return "return a valid patch/apply output that satisfies targetRef, patchType, content/diff, baseHash/snapshot, and current requiredOutput"
 	case contractViolationRuleAvailableSnapshotIgnored:
 		return "use the available complete target snapshots already supplied in the current action instead of claiming they are missing or returning another read-only acquisition graph"
+	case contractViolationRuleFocusBindingMismatch:
+		return "retry the same current action and bind every state-changing or validation output to the current coverage focus"
 	default:
 		return "return a valid output that satisfies the current correction contract and does not repeat actualOutputSummary"
 	}
@@ -921,6 +930,8 @@ func contractViolationForbiddenRepeat(rule string) []string {
 		return []string{"read-only graph without accepted state-changing evidence", "dodAssessment without required executable output"}
 	case contractViolationRuleConcreteValidationMissing:
 		return []string{"validation graph without validationEvidence contract", "detached or unbounded validation command"}
+	case contractViolationRuleFocusBindingMismatch:
+		return []string{"output bound to unrelated focus", "state-changing or validation output without current coverage focus binding"}
 	case contractViolationRuleValidationEvidenceMetadataMissing:
 		return []string{"validation node without validationEvidence.mode, validationEvidence.observationType, validationEvidence.targetRefs, or validationEvidence.observedClaims"}
 	case contractViolationRuleValidationScratchRequired:
@@ -966,6 +977,16 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 	}
 	profileID := "contract_correction_generic"
 	switch rule {
+	case contractViolationRuleFocusBindingMismatch:
+		profileID = "focus_binding_contract"
+		contract["requiredOutputShape"] = "same_action_focus_bound_output"
+		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("same_current_action_with_current_focus_binding")
+		contract["requiredFields"] = []string{"coverageFocusId_or_coverageWorkItemIds", "stateChangingOrValidationActionBinding"}
+		contract["forbiddenOutputs"] = append([]string{"unbound_state_change", "unbound_validation", "different_focus", "generic_repair_without_focus"}, contractViolationForbiddenContinuableBlockers()...)
+		contract["mustSatisfy"] = []string{"currentActionContract.currentFocus", "repairActionPackage.requiredOutput.coverageWorkItemIds"}
+		if focus := contractViolationCurrentFocusScope(step); len(focus) > 0 {
+			contract["expectedFocus"] = focus
+		}
 	case contractViolationRuleStateChangingRequiredMissing:
 		profileID = "state_changing_required_output"
 		contract["requiredOutputShape"] = "state_changing_output"
@@ -1077,6 +1098,36 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 		"targetScope": targetScope,
 		"contract":    contract,
 	}
+}
+
+func contractViolationCurrentFocusScope(step *runModel.Step) map[string]any {
+	if step == nil || len(step.Input) == 0 {
+		return nil
+	}
+	focus := dispatchAuthorityCurrentFocus(step.Input)
+	if len(focus) == 0 {
+		focus = mapFromValue(step.Input[coverageFocusKey])
+	}
+	if len(focus) == 0 {
+		focus = mapFromValue(mapFromValue(step.Input[coverageWorkItemContextKey])["currentFocus"])
+	}
+	if len(focus) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	if id := strings.TrimSpace(stringFromMap(focus, "id")); id != "" {
+		ret["id"] = id
+	}
+	if ids := dispatchFocusWorkItemIDs(focus); len(ids) > 0 {
+		ret["coverageWorkItemIds"] = ids
+	}
+	if refs := compactUniqueStrings(stringSliceFromValue(focus["targetRefs"])); len(refs) > 0 {
+		ret["targetRefs"] = refs
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func contractViolationRuleRequiresManagedValidationNarrow(rule string) bool {

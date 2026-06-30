@@ -2,12 +2,14 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -26,7 +28,11 @@ func (o *RuntimeOrchestrator) dispatchRuntimeManagedTargetSnapshotAcquisition(
 		return false, nil
 	}
 	result := runtimemodel.StepExecutionResult{Output: output}
-	return true, o.finalizeRuntimeStepResultWithWorkspace(ctx, run, step, toolCall, workspace, result, nil)
+	var execErr error
+	if stringFromMap(output, failureOutputKeyClass) == failureClassRuntimeContractMisalign {
+		execErr = fmt.Errorf("%w: target snapshot acquisition cannot bind abstract target refs", common.ErrConflict)
+	}
+	return true, o.finalizeRuntimeStepResultWithWorkspace(ctx, run, step, toolCall, workspace, result, execErr)
 }
 
 func runtimeManagedTargetSnapshotAcquisitionOutput(input map[string]any) (map[string]any, bool) {
@@ -35,7 +41,11 @@ func runtimeManagedTargetSnapshotAcquisitionOutput(input map[string]any) (map[st
 	}
 	targetRefs := runtimeManagedTargetSnapshotRefs(input)
 	if len(targetRefs) == 0 {
-		return nil, false
+		allRefs := runtimeManagedTargetSnapshotCandidateRefs(input)
+		if len(allRefs) == 0 {
+			return nil, false
+		}
+		return runtimeManagedTargetSnapshotAbstractRefFailureOutput(allRefs), true
 	}
 	nodes := make([]runtimemodel.BlockExecutionNode, 0, len(targetRefs))
 	for idx, targetRef := range targetRefs {
@@ -66,12 +76,27 @@ func runtimeManagedTargetSnapshotAcquisitionOutput(input map[string]any) (map[st
 	}, true
 }
 
+func runtimeManagedTargetSnapshotAbstractRefFailureOutput(refs []string) map[string]any {
+	refs = compactUniqueStrings(refs)
+	sort.Strings(refs)
+	return map[string]any{
+		"status":                  "failed",
+		"stage":                   "runtime_managed_target_snapshot_acquisition",
+		"error":                   "target snapshot acquisition cannot be satisfied from abstract target refs without a readable runtime resource",
+		failureOutputKeyClass:     failureClassRuntimeContractMisalign,
+		failureOutputKeySignature: failureClassRuntimeContractMisalign + ":target_snapshot_abstract_refs:" + strings.Join(refs, ","),
+		"runtimeManagedTargetSnapshotAcquisition": true,
+		"abstractTargetRefs":                      refs,
+		"deterministicOutcome":                    "fail_fast_internal_contract_gap",
+	}
+}
+
 func inputRequiresRuntimeManagedTargetSnapshotAcquisition(input map[string]any) bool {
 	if len(input) == 0 {
 		return false
 	}
 	nextAction := strings.TrimSpace(convergenceNextActionKind(nil, input))
-	if nextAction != runtimemodel.NextActionTypeAcquireTargetSnapshot {
+	if nextAction != runtimemodel.NextActionTypeAcquireTargetSnapshot && !targetSnapshotPrerequisiteActive(input) {
 		return false
 	}
 	required := activeRequiredOutputForCurrentAction(input)
@@ -94,14 +119,31 @@ func runtimeManagedTargetSnapshotRefs(input map[string]any) []string {
 		seen[value] = true
 		ret = append(ret, value)
 	}
-	for _, source := range []map[string]any{
-		mapFromValue(input["repairActionPackage"]),
-		mapFromValue(input["requiredOutput"]),
-		mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
-		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
-		mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"]),
-		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"])["requiredOutput"]),
-	} {
+	for _, value := range runtimeManagedTargetSnapshotCandidateRefs(input) {
+		add(value)
+	}
+	sort.Strings(ret)
+	return ret
+}
+
+func runtimeManagedTargetSnapshotCandidateRefs(input map[string]any) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := []string{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	addFromSource := func(source map[string]any) {
+		if len(source) == 0 {
+			return
+		}
 		for _, key := range []string{"repairTargetSet", "targetRefs", "failureTargets", "relatedFailureTargets"} {
 			for _, value := range stringSliceFromValue(source[key]) {
 				add(value)
@@ -121,6 +163,39 @@ func runtimeManagedTargetSnapshotRefs(input map[string]any) []string {
 			add(stringFromMap(source, key))
 		}
 	}
+	for _, source := range []map[string]any{
+		mapFromValue(input["repairActionPackage"]),
+		mapFromValue(input["requiredOutput"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"])["requiredOutput"]),
+		dispatchAuthorityCurrentFocus(input),
+		mapFromValue(input[coverageFocusKey]),
+		mapFromValue(mapFromValue(input["executionContext"])[coverageFocusKey]),
+		mapFromValue(mapFromValue(input[convergenceAuthorityKey])["currentFocus"]),
+		mapFromValue(mapFromValue(input[gapBaselineKey])["currentFocus"]),
+		mapFromValue(mapFromValue(input["acceptance"])["currentFocus"]),
+		mapFromValue(mapFromValue(input[currentActionContractKey])["currentFocus"]),
+		mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+		mapFromValue(mapFromValue(input[coverageWorkItemContextKey])["currentFocus"]),
+		mapFromValue(mapFromValue(mapFromValue(input["repairActionPackage"])[coverageWorkItemContextKey])["currentFocus"]),
+	} {
+		addFromSource(source)
+	}
+	for _, source := range []map[string]any{
+		mapFromValue(input[coverageWorkItemContextKey]),
+		mapFromValue(input[convergenceAuthorityKey]),
+		mapFromValue(input[gapBaselineKey]),
+		mapFromValue(input["acceptance"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])[coverageWorkItemContextKey]),
+	} {
+		for _, key := range []string{"currentFocusItems", "ledgerSummary", "unresolvedItems", "coverageTargetSet", "repairTargetSet"} {
+			for _, item := range mapSliceFromValue(source[key]) {
+				addFromSource(item)
+			}
+		}
+	}
 	sort.Strings(ret)
 	return ret
 }
@@ -132,7 +207,8 @@ func runtimeManagedTargetSnapshotRefReadable(ref string) bool {
 	}
 	lower := strings.ToLower(ref)
 	if strings.HasPrefix(lower, "cwi-") || strings.HasPrefix(lower, "goal:") ||
-		strings.HasPrefix(lower, "dod:") || strings.HasPrefix(lower, "deliverable:") {
+		strings.HasPrefix(lower, "dod:") || strings.HasPrefix(lower, "deliverable:") ||
+		lower == "source_change" || lower == "version_control_snapshot" {
 		return false
 	}
 	if strings.Contains(ref, "://") {
