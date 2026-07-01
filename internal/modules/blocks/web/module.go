@@ -4,7 +4,7 @@ import (
 	"context"
 
 	magictask "github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent"
+	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	webbiz "github.com/muidea/workorch/internal/modules/blocks/web/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"

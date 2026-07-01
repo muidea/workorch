@@ -11,18 +11,21 @@ func MapDecision(item *decisionmodel.Ticket, resolution *decisionmodel.Resolutio
 		return readmodelcore.Decision{}
 	}
 	ret := readmodelcore.Decision{
-		ID:             string(item.ID),
-		WorkspaceID:    string(item.WorkspaceID),
-		RunID:          string(item.RunID),
-		StepID:         string(item.StepID),
-		Reason:         item.Reason,
-		DecisionKind:   item.DecisionKind,
-		Question:       item.Question,
-		Context:        governancecore.CloneDecisionPayload(item.Context),
-		State:          string(item.State),
-		AutoGovernance: autoGovernance,
-		CreatedAt:      item.CreatedAt,
-		UpdatedAt:      item.UpdatedAt,
+		ID:                     string(item.ID),
+		WorkspaceID:            string(item.WorkspaceID),
+		RunID:                  string(item.RunID),
+		StepID:                 string(item.StepID),
+		Reason:                 item.Reason,
+		DecisionKind:           item.DecisionKind,
+		Question:               item.Question,
+		Context:                governancecore.CloneDecisionPayload(item.Context),
+		FailureClass:           governancecore.StringFromDecisionPayload(item.Context, "failureClass"),
+		FailureSignature:       governancecore.StringFromDecisionPayload(item.Context, "failureSignature"),
+		AllowedRecoveryActions: governancecore.RuntimeRepairAllowedRecoveryActions(item.Context),
+		State:                  string(item.State),
+		AutoGovernance:         autoGovernance,
+		CreatedAt:              item.CreatedAt,
+		UpdatedAt:              item.UpdatedAt,
 	}
 	if resolution != nil {
 		ret.ResolutionID = string(resolution.ID)

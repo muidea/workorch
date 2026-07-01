@@ -6,7 +6,7 @@ import (
 	magictask "github.com/muidea/magicCommon/task"
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
-	"github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent"
+	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )

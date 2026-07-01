@@ -6,14 +6,13 @@ import (
 	"sort"
 	"strings"
 
-	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
-	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type resultEventPublisher interface {
@@ -569,9 +568,9 @@ func (r *resultSubsystem) resultWebSourceDetails(ctx context.Context, runID comm
 			continue
 		}
 		switch step.Kind {
-		case webcommon.StepKindSearch:
+		case runtimemodel.StepKindWebSearch:
 			ret = append(ret, resultWebSearchDetails(step)...)
-		case webcommon.StepKindFetch:
+		case runtimemodel.StepKindWebFetch:
 			if detail, ok := resultWebFetchDetail(step); ok {
 				ret = append(ret, detail)
 			}
@@ -631,7 +630,7 @@ func (r *resultSubsystem) resultGitOperationDetails(ctx context.Context, runID c
 		if step == nil || len(step.Output) == 0 {
 			continue
 		}
-		if step.Kind != gitcommon.StepKindRead && step.Kind != gitcommon.StepKindWrite {
+		if step.Kind != runtimemodel.StepKindGitRead && step.Kind != runtimemodel.StepKindGitWrite {
 			continue
 		}
 		commit := mapFromValue(step.Output["commit"])

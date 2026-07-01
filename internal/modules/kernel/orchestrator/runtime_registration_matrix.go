@@ -3,15 +3,9 @@ package orchestrator
 import (
 	"strings"
 
-	filecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
-	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
-	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	mcpcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
-	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
-	sshcommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
-	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type runtimeStepKindRegistration struct {
@@ -23,22 +17,22 @@ type runtimeStepKindRegistration struct {
 
 func runtimeStepKindRegistrations() []runtimeStepKindRegistration {
 	return []runtimeStepKindRegistration{
-		{StepKind: llmcommon.StepKindWorkspaceExecution, RuntimeOwner: llmcommon.ModuleID, ExecutorModule: llmcommon.ModuleID, Responsibility: "LLM workspace execution, assessment-only mode, repair and replan output normalization"},
-		{StepKind: mcpcommon.StepKindToolCall, RuntimeOwner: mcpcommon.ModuleID, ExecutorModule: mcpcommon.ModuleID, Responsibility: "MCP tool invocation"},
-		{StepKind: mcpcommon.StepKindResourceRead, RuntimeOwner: mcpcommon.ModuleID, ExecutorModule: mcpcommon.ModuleID, Responsibility: "MCP resource read"},
-		{StepKind: mcpcommon.StepKindPromptGet, RuntimeOwner: mcpcommon.ModuleID, ExecutorModule: mcpcommon.ModuleID, Responsibility: "MCP prompt read"},
-		{StepKind: shellcommon.StepKindCommand, RuntimeOwner: shellcommon.ModuleID, ExecutorModule: shellcommon.ModuleID, Responsibility: "bounded shell command execution"},
-		{StepKind: filecommon.StepKindList, RuntimeOwner: filecommon.ModuleID, ExecutorModule: filecommon.ModuleID, Responsibility: "workspace file listing"},
-		{StepKind: filecommon.StepKindRead, RuntimeOwner: filecommon.ModuleID, ExecutorModule: filecommon.ModuleID, Responsibility: "workspace file read"},
-		{StepKind: filecommon.StepKindEdit, RuntimeOwner: filecommon.ModuleID, ExecutorModule: filecommon.ModuleID, Responsibility: "workspace file edit preview"},
-		{StepKind: llmcommon.RuntimeBlockKindPatchPreview, RuntimeOwner: ModuleID, ExecutorModule: ModuleID, Responsibility: "controlled workspace patch preview and governance-linked patch evidence"},
-		{StepKind: llmcommon.RuntimeBlockKindPatchApply, RuntimeOwner: ModuleID, ExecutorModule: ModuleID, Responsibility: "controlled workspace patch application and governance-linked patch evidence"},
-		{StepKind: llmcommon.RuntimeBlockKindPatchRevert, RuntimeOwner: ModuleID, ExecutorModule: ModuleID, Responsibility: "controlled workspace patch revert metadata"},
-		{StepKind: gitcommon.StepKindRead, RuntimeOwner: gitcommon.ModuleID, ExecutorModule: gitcommon.ModuleID, Responsibility: "repository state, diff, log and object read"},
-		{StepKind: gitcommon.StepKindWrite, RuntimeOwner: gitcommon.ModuleID, ExecutorModule: gitcommon.ModuleID, Responsibility: "repository write operation"},
-		{StepKind: webcommon.StepKindSearch, RuntimeOwner: webcommon.ModuleID, ExecutorModule: webcommon.ModuleID, Responsibility: "web search"},
-		{StepKind: webcommon.StepKindFetch, RuntimeOwner: webcommon.ModuleID, ExecutorModule: webcommon.ModuleID, Responsibility: "web fetch"},
-		{StepKind: sshcommon.StepKindCommand, RuntimeOwner: sshcommon.ModuleID, ExecutorModule: sshcommon.ModuleID, Responsibility: "bounded remote command execution"},
+		{StepKind: runtimemodel.StepKindLLMWorkspaceExecution, RuntimeOwner: runtimemodel.RuntimeModuleLLM, ExecutorModule: runtimemodel.RuntimeModuleLLM, Responsibility: "LLM workspace execution, assessment-only mode, repair and replan output normalization"},
+		{StepKind: runtimemodel.StepKindMCPToolCall, RuntimeOwner: runtimemodel.RuntimeModuleMCP, ExecutorModule: runtimemodel.RuntimeModuleMCP, Responsibility: "MCP tool invocation"},
+		{StepKind: runtimemodel.StepKindMCPResourceRead, RuntimeOwner: runtimemodel.RuntimeModuleMCP, ExecutorModule: runtimemodel.RuntimeModuleMCP, Responsibility: "MCP resource read"},
+		{StepKind: runtimemodel.StepKindMCPPromptGet, RuntimeOwner: runtimemodel.RuntimeModuleMCP, ExecutorModule: runtimemodel.RuntimeModuleMCP, Responsibility: "MCP prompt read"},
+		{StepKind: runtimemodel.StepKindShellCommand, RuntimeOwner: runtimemodel.RuntimeModuleShell, ExecutorModule: runtimemodel.RuntimeModuleShell, Responsibility: "bounded shell command execution"},
+		{StepKind: runtimemodel.StepKindFileList, RuntimeOwner: runtimemodel.RuntimeModuleFile, ExecutorModule: runtimemodel.RuntimeModuleFile, Responsibility: "workspace file listing"},
+		{StepKind: runtimemodel.StepKindFileRead, RuntimeOwner: runtimemodel.RuntimeModuleFile, ExecutorModule: runtimemodel.RuntimeModuleFile, Responsibility: "workspace file read"},
+		{StepKind: runtimemodel.StepKindFileEdit, RuntimeOwner: runtimemodel.RuntimeModuleFile, ExecutorModule: runtimemodel.RuntimeModuleFile, Responsibility: "workspace file edit preview"},
+		{StepKind: runtimemodel.RuntimeBlockKindPatchPreview, RuntimeOwner: ModuleID, ExecutorModule: ModuleID, Responsibility: "controlled workspace patch preview and governance-linked patch evidence"},
+		{StepKind: runtimemodel.RuntimeBlockKindPatchApply, RuntimeOwner: ModuleID, ExecutorModule: ModuleID, Responsibility: "controlled workspace patch application and governance-linked patch evidence"},
+		{StepKind: runtimemodel.RuntimeBlockKindPatchRevert, RuntimeOwner: ModuleID, ExecutorModule: ModuleID, Responsibility: "controlled workspace patch revert metadata"},
+		{StepKind: runtimemodel.StepKindGitRead, RuntimeOwner: runtimemodel.RuntimeModuleGit, ExecutorModule: runtimemodel.RuntimeModuleGit, Responsibility: "repository state, diff, log and object read"},
+		{StepKind: runtimemodel.StepKindGitWrite, RuntimeOwner: runtimemodel.RuntimeModuleGit, ExecutorModule: runtimemodel.RuntimeModuleGit, Responsibility: "repository write operation"},
+		{StepKind: runtimemodel.StepKindWebSearch, RuntimeOwner: runtimemodel.RuntimeModuleWeb, ExecutorModule: runtimemodel.RuntimeModuleWeb, Responsibility: "web search"},
+		{StepKind: runtimemodel.StepKindWebFetch, RuntimeOwner: runtimemodel.RuntimeModuleWeb, ExecutorModule: runtimemodel.RuntimeModuleWeb, Responsibility: "web fetch"},
+		{StepKind: runtimemodel.StepKindSSHCommand, RuntimeOwner: runtimemodel.RuntimeModuleSSH, ExecutorModule: runtimemodel.RuntimeModuleSSH, Responsibility: "bounded remote command execution"},
 	}
 }
 

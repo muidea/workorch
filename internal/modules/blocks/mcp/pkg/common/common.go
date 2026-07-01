@@ -1,7 +1,9 @@
 package common
 
-const ModuleID = "blocks/mcp"
+import runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
-const StepKindToolCall = "mcp/tool_call"
-const StepKindResourceRead = "mcp/resource_read"
-const StepKindPromptGet = "mcp/prompt_get"
+const ModuleID = runtimemodel.RuntimeModuleMCP
+
+const StepKindToolCall = runtimemodel.StepKindMCPToolCall
+const StepKindResourceRead = runtimemodel.StepKindMCPResourceRead
+const StepKindPromptGet = runtimemodel.StepKindMCPPromptGet

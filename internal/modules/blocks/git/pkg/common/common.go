@@ -1,9 +1,11 @@
 package common
 
-const ModuleID = "blocks/git"
+import runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
-const StepKindRead = "git/read"
-const StepKindWrite = "git/write"
+const ModuleID = runtimemodel.RuntimeModuleGit
+
+const StepKindRead = runtimemodel.StepKindGitRead
+const StepKindWrite = runtimemodel.StepKindGitWrite
 
 const (
 	OperationStatus = "status"

@@ -60,3 +60,37 @@ func TestWorkspaceConsolidationPlanRejectsMissingCanonical(t *testing.T) {
 		t.Fatalf("dod error = %v, want ErrInvalidArgument", err)
 	}
 }
+
+func TestMapDefinitionsPreservesLineageFields(t *testing.T) {
+	goal := MapGoal(&workspacemodel.Goal{
+		ID:                     "goal-next",
+		WorkspaceID:            "ws-definition-lineage",
+		Text:                   "next goal",
+		DefinitionRevision:     "goal:next",
+		PreviousDefinitionHash: "sha256:goal-prev",
+		PreviousGoalID:         "goal-prev",
+		LineageState:           "active",
+	})
+	if goal.DefinitionRevision != "goal:next" ||
+		goal.PreviousDefinitionHash != "sha256:goal-prev" ||
+		goal.PreviousGoalID != "goal-prev" ||
+		goal.LineageState != "active" {
+		t.Fatalf("goal lineage = %+v", goal)
+	}
+	dod := MapDoD(&workspacemodel.DoD{
+		ID:                     "dod-next",
+		WorkspaceID:            "ws-definition-lineage",
+		Items:                  []string{"ship it"},
+		State:                  common.DoDStateReady,
+		DefinitionRevision:     "dod:next",
+		PreviousDefinitionHash: "sha256:dod-prev",
+		PreviousDoDID:          "dod-prev",
+		LineageState:           "active",
+	})
+	if dod.DefinitionRevision != "dod:next" ||
+		dod.PreviousDefinitionHash != "sha256:dod-prev" ||
+		dod.PreviousDoDID != "dod-prev" ||
+		dod.LineageState != "active" {
+		t.Fatalf("dod lineage = %+v", dod)
+	}
+}

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	magictask "github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent"
+	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	"github.com/muidea/workorch/internal/pkg/events"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )

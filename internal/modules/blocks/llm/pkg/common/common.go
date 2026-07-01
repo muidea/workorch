@@ -1,23 +1,27 @@
 package common
 
-import "strings"
+import (
+	"strings"
 
-const ModuleID = "blocks/llm"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+)
 
-const StepKindWorkspaceExecution = "llm/workspace_execution"
-const StepKindWorkspacePlan = "llm/workspace-plan"
+const ModuleID = runtimemodel.RuntimeModuleLLM
+
+const StepKindWorkspaceExecution = runtimemodel.StepKindLLMWorkspaceExecution
+const StepKindWorkspacePlan = runtimemodel.StepKindLLMWorkspacePlan
 const ExecutionContextLLMProviderID = "llmProviderId"
 const DefaultProviderID = "default"
 
 const (
-	RuntimeBlockKindPatchApply               = "patch/apply"
-	RuntimeBlockKindPatchPreview             = "patch/preview"
-	RuntimeBlockKindPatchRevert              = "patch/revert"
-	RuntimeBlockKindManagedValidationSession = "validation/managed_session"
-	RuntimeBlockKindDecisionRequest          = "decision/request"
-	RuntimeBlockKindApprovalRequest          = "approval/request"
-	RuntimeBlockKindMemoryWrite              = "memory/write"
-	RuntimeBlockKindDoDAssessment            = "dod/assessment"
+	RuntimeBlockKindPatchApply               = runtimemodel.RuntimeBlockKindPatchApply
+	RuntimeBlockKindPatchPreview             = runtimemodel.RuntimeBlockKindPatchPreview
+	RuntimeBlockKindPatchRevert              = runtimemodel.RuntimeBlockKindPatchRevert
+	RuntimeBlockKindManagedValidationSession = runtimemodel.RuntimeBlockKindManagedValidationSession
+	RuntimeBlockKindDecisionRequest          = runtimemodel.RuntimeBlockKindDecisionRequest
+	RuntimeBlockKindApprovalRequest          = runtimemodel.RuntimeBlockKindApprovalRequest
+	RuntimeBlockKindMemoryWrite              = runtimemodel.RuntimeBlockKindMemoryWrite
+	RuntimeBlockKindDoDAssessment            = runtimemodel.RuntimeBlockKindDoDAssessment
 )
 
 const (
@@ -85,12 +89,5 @@ const (
 )
 
 func CanonicalRuntimeBlockKind(kind string) string {
-	switch strings.TrimSpace(kind) {
-	case StepKindWorkspaceExecution, StepKindWorkspacePlan:
-		return StepKindWorkspaceExecution
-	case "patchRequests", "patch/request":
-		return RuntimeBlockKindPatchApply
-	default:
-		return strings.TrimSpace(kind)
-	}
+	return runtimemodel.CanonicalRuntimeBlockKind(strings.TrimSpace(kind))
 }

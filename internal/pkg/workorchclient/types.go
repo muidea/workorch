@@ -40,16 +40,24 @@ type WorkspaceListProjection struct {
 }
 
 type Goal struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspaceId"`
-	Text        string `json:"text"`
+	ID                     string `json:"id"`
+	WorkspaceID            string `json:"workspaceId"`
+	Text                   string `json:"text"`
+	DefinitionRevision     string `json:"definitionRevision,omitempty"`
+	PreviousDefinitionHash string `json:"previousDefinitionHash,omitempty"`
+	PreviousGoalID         string `json:"previousGoalId,omitempty"`
+	LineageState           string `json:"lineageState,omitempty"`
 }
 
 type DoD struct {
-	ID          string   `json:"id"`
-	WorkspaceID string   `json:"workspaceId"`
-	Items       []string `json:"items"`
-	State       string   `json:"state"`
+	ID                     string   `json:"id"`
+	WorkspaceID            string   `json:"workspaceId"`
+	Items                  []string `json:"items"`
+	State                  string   `json:"state"`
+	DefinitionRevision     string   `json:"definitionRevision,omitempty"`
+	PreviousDefinitionHash string   `json:"previousDefinitionHash,omitempty"`
+	PreviousDoDID          string   `json:"previousDoDId,omitempty"`
+	LineageState           string   `json:"lineageState,omitempty"`
 }
 
 // Run resource types.
@@ -201,21 +209,24 @@ type ValidationResult struct {
 
 // Decision & Approval types.
 type Decision struct {
-	ID                 string                 `json:"id"`
-	WorkspaceID        string                 `json:"workspaceId"`
-	RunID              string                 `json:"runId"`
-	StepID             string                 `json:"stepId,omitempty"`
-	Reason             string                 `json:"reason"`
-	DecisionKind       string                 `json:"decisionKind,omitempty"`
-	Question           string                 `json:"question,omitempty"`
-	Context            map[string]any         `json:"context,omitempty"`
-	State              string                 `json:"state"`
-	ResolutionID       string                 `json:"resolutionId,omitempty"`
-	ResolutionType     string                 `json:"resolutionType,omitempty"`
-	ContinuationAction string                 `json:"continuationAction,omitempty"`
-	ResumeRunID        string                 `json:"resumeRunId,omitempty"`
-	SuccessorRunID     string                 `json:"successorRunId,omitempty"`
-	AutoGovernance     *AutoGovernanceSummary `json:"autoGovernance,omitempty"`
+	ID                     string                 `json:"id"`
+	WorkspaceID            string                 `json:"workspaceId"`
+	RunID                  string                 `json:"runId"`
+	StepID                 string                 `json:"stepId,omitempty"`
+	Reason                 string                 `json:"reason"`
+	DecisionKind           string                 `json:"decisionKind,omitempty"`
+	Question               string                 `json:"question,omitempty"`
+	Context                map[string]any         `json:"context,omitempty"`
+	FailureClass           string                 `json:"failureClass,omitempty"`
+	FailureSignature       string                 `json:"failureSignature,omitempty"`
+	AllowedRecoveryActions []string               `json:"allowedRecoveryActions,omitempty"`
+	State                  string                 `json:"state"`
+	ResolutionID           string                 `json:"resolutionId,omitempty"`
+	ResolutionType         string                 `json:"resolutionType,omitempty"`
+	ContinuationAction     string                 `json:"continuationAction,omitempty"`
+	ResumeRunID            string                 `json:"resumeRunId,omitempty"`
+	SuccessorRunID         string                 `json:"successorRunId,omitempty"`
+	AutoGovernance         *AutoGovernanceSummary `json:"autoGovernance,omitempty"`
 }
 
 type Approval struct {

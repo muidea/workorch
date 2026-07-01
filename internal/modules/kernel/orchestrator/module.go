@@ -9,8 +9,6 @@ import (
 	"sync"
 
 	"github.com/muidea/magicCommon/task"
-	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	"github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
@@ -20,6 +18,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/runtimeevent"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -128,9 +128,9 @@ func (m *Module) Configure(deps Dependencies) error {
 			deps.EventHub,
 			deps.BackgroundRoutine,
 			orchestratorbiz.NewPatchRuntimeAdapter(),
-			llmcommon.RuntimeBlockKindPatchApply,
-			llmcommon.RuntimeBlockKindPatchPreview,
-			llmcommon.RuntimeBlockKindPatchRevert,
+			runtimemodel.RuntimeBlockKindPatchApply,
+			runtimemodel.RuntimeBlockKindPatchPreview,
+			runtimemodel.RuntimeBlockKindPatchRevert,
 		)
 	}
 	return nil

@@ -1,7 +1,9 @@
 package common
 
-const ModuleID = "blocks/file"
+import runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
-const StepKindList = "file/list"
-const StepKindRead = "file/read"
-const StepKindEdit = "file/edit"
+const ModuleID = runtimemodel.RuntimeModuleFile
+
+const StepKindList = runtimemodel.StepKindFileList
+const StepKindRead = runtimemodel.StepKindFileRead
+const StepKindEdit = runtimemodel.StepKindFileEdit

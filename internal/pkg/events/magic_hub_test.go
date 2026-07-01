@@ -8,7 +8,7 @@ import (
 	"time"
 
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	runtimeeventdefs "github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent/eventdefs"
+	runtimeeventdefs "github.com/muidea/workorch/internal/pkg/runtimeevent/eventdefs"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"

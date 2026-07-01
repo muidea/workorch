@@ -4,7 +4,7 @@ import (
 	"context"
 
 	magictask "github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent"
+	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	sshbiz "github.com/muidea/workorch/internal/modules/blocks/ssh/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"

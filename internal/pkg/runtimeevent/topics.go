@@ -1,6 +1,6 @@
 package runtimeevent
 
-import "github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent/eventdefs"
+import "github.com/muidea/workorch/internal/pkg/runtimeevent/eventdefs"
 
 const TopicRuntimeBlockCommandExecutePrefix = eventdefs.TopicRuntimeBlockCommandExecutePrefix
 

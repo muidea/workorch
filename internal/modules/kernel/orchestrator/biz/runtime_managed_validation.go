@@ -9,14 +9,13 @@ import (
 	"strings"
 	"time"
 
-	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (
-	managedValidationSessionNodeKind = llmcommon.RuntimeBlockKindManagedValidationSession
+	managedValidationSessionNodeKind = runtimemodel.RuntimeBlockKindManagedValidationSession
 	managedValidationTimeoutMillis   = 60000
 )
 

@@ -10,9 +10,13 @@ func MapGoal(item *workspacemodel.Goal) appmodelcore.Goal {
 		return appmodelcore.Goal{}
 	}
 	return appmodelcore.Goal{
-		ID:          string(item.ID),
-		WorkspaceID: string(item.WorkspaceID),
-		Text:        item.Text,
+		ID:                     string(item.ID),
+		WorkspaceID:            string(item.WorkspaceID),
+		Text:                   item.Text,
+		DefinitionRevision:     item.DefinitionRevision,
+		PreviousDefinitionHash: item.PreviousDefinitionHash,
+		PreviousGoalID:         string(item.PreviousGoalID),
+		LineageState:           item.LineageState,
 	}
 }
 
@@ -32,10 +36,14 @@ func MapDoD(item *workspacemodel.DoD) appmodelcore.DoD {
 		return appmodelcore.DoD{}
 	}
 	return appmodelcore.DoD{
-		ID:          string(item.ID),
-		WorkspaceID: string(item.WorkspaceID),
-		Items:       append([]string(nil), item.Items...),
-		State:       string(item.State),
+		ID:                     string(item.ID),
+		WorkspaceID:            string(item.WorkspaceID),
+		Items:                  append([]string(nil), item.Items...),
+		State:                  string(item.State),
+		DefinitionRevision:     item.DefinitionRevision,
+		PreviousDefinitionHash: item.PreviousDefinitionHash,
+		PreviousDoDID:          string(item.PreviousDoDID),
+		LineageState:           item.LineageState,
 	}
 }
 

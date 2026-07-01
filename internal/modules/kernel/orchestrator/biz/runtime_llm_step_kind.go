@@ -1,9 +1,9 @@
 package orchestrator
 
-import llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+import runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
 func canonicalLLMWorkspaceStepKind(kind string) string {
-	return llmcommon.CanonicalRuntimeBlockKind(kind)
+	return runtimemodel.CanonicalRuntimeBlockKind(kind)
 }
 
 func isLLMWorkspaceStepKind(kind string) bool {
@@ -11,5 +11,5 @@ func isLLMWorkspaceStepKind(kind string) bool {
 }
 
 func canonicalRuntimeGraphNodeKind(kind string) string {
-	return llmcommon.CanonicalRuntimeBlockKind(kind)
+	return runtimemodel.CanonicalRuntimeBlockKind(kind)
 }

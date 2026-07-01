@@ -1,5 +1,7 @@
 package common
 
-const ModuleID = "blocks/ssh"
+import runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
-const StepKindCommand = "ssh/command"
+const ModuleID = runtimemodel.RuntimeModuleSSH
+
+const StepKindCommand = runtimemodel.StepKindSSHCommand

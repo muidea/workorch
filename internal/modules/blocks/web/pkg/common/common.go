@@ -1,9 +1,11 @@
 package common
 
-const ModuleID = "blocks/web"
+import runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
-const StepKindSearch = "web/search"
-const StepKindFetch = "web/fetch"
+const ModuleID = runtimemodel.RuntimeModuleWeb
+
+const StepKindSearch = runtimemodel.StepKindWebSearch
+const StepKindFetch = runtimemodel.StepKindWebFetch
 
 const ProviderHTTP = "http"
 

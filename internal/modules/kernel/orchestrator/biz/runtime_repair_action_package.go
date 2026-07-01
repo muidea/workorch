@@ -3,8 +3,8 @@ package orchestrator
 import (
 	"strings"
 
-	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
@@ -753,7 +753,13 @@ func evidenceAcquisitionRequiredOutputWithScratch(input map[string]any, pkg map[
 }
 
 func evidenceAcquisitionAcceptedKinds() []string {
-	return []string{"file/list", "file/read", "shell/command", "mcp/tool_call", gitcommon.StepKindRead}
+	return []string{
+		runtimemodel.StepKindFileList,
+		runtimemodel.StepKindFileRead,
+		runtimemodel.StepKindShellCommand,
+		runtimemodel.StepKindMCPToolCall,
+		runtimemodel.StepKindGitRead,
+	}
 }
 
 func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[string]any {
