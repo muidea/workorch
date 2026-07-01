@@ -244,6 +244,80 @@ func TestStagePacketCarriesCurrentNextActionAuthority(t *testing.T) {
 	}
 }
 
+func TestStagePacketCarriesCurrentFailureDiagnostic(t *testing.T) {
+	run := &runModel.Run{
+		ID:          common.RunID("run-stage-packet-current-failure"),
+		WorkspaceID: common.WorkspaceID("ws-stage-packet-current-failure"),
+		State:       common.RunStateRunning,
+	}
+	input := map[string]any{
+		"currentFailure": map[string]any{
+			"failedStepId":     "run-stage-packet-current-failure/step-1",
+			"failureClass":     failureClassRuntime,
+			"failureSignature": "class=runtime_failed|stage=contract",
+			"reason":           "structured runtime diagnostic",
+		},
+		stepInputKeyContractViolationRecovery: map[string]any{
+			"violatedRule":   "wrong_shape",
+			"recoverability": "retry_same_contract",
+		},
+	}
+
+	packet := buildStagePacketFromStepInput(run, "step-stage-packet-current-failure", input).ToMap()
+
+	failure := mapFromValue(packet["currentFailure"])
+	if failure["failedStepId"] != "run-stage-packet-current-failure/step-1" ||
+		failure["failureClass"] != failureClassRuntime ||
+		failure["failureSignature"] != "class=runtime_failed|stage=contract" ||
+		failure["reason"] != "structured runtime diagnostic" {
+		t.Fatalf("stagePacket.currentFailure = %+v, want explicit current failure", failure)
+	}
+	if _, ok := failure["violatedRule"]; ok {
+		t.Fatalf("stagePacket.currentFailure = %+v, want explicit failure to preempt contract violation recovery", failure)
+	}
+}
+
+func TestStagePacketDerivesCurrentFailureFromContractViolationRecovery(t *testing.T) {
+	run := &runModel.Run{
+		ID:          common.RunID("run-stage-packet-contract-violation"),
+		WorkspaceID: common.WorkspaceID("ws-stage-packet-contract-violation"),
+		State:       common.RunStateRunning,
+	}
+	input := map[string]any{
+		stepInputKeyContractViolationRecovery: map[string]any{
+			"violatedRule":        "output_shape_mismatch",
+			"violationType":       "runtime_contract_violation",
+			"recoverability":      "retry_same_contract",
+			"retryHint":           "return validation evidence only",
+			"failureClass":        failureClassRuntime,
+			"failureSignature":    "class=runtime_failed|rule=output_shape_mismatch",
+			"rejectedOutputRef":   "evidence/rejected/001",
+			"expectedContract":    map[string]any{"nextAction": "validate"},
+			"actualOutputSummary": map[string]any{"shape": "decision"},
+		},
+	}
+
+	packet := buildStagePacketFromStepInput(run, "step-stage-packet-contract-violation", input).ToMap()
+
+	failure := mapFromValue(packet["currentFailure"])
+	if failure["source"] != "contractViolationRecovery" ||
+		failure["violatedRule"] != "output_shape_mismatch" ||
+		failure["recoverability"] != "retry_same_contract" ||
+		failure["rejectedOutputRef"] != "evidence/rejected/001" {
+		t.Fatalf("stagePacket.currentFailure = %+v, want diagnostic-only contract violation", failure)
+	}
+	if expected := mapFromValue(failure["expectedContract"]); expected["nextAction"] != "validate" {
+		t.Fatalf("stagePacket.currentFailure.expectedContract = %+v, want compact expected contract", expected)
+	}
+	if summary := mapFromValue(failure["actualOutputSummary"]); summary["shape"] != "decision" {
+		t.Fatalf("stagePacket.currentFailure.actualOutputSummary = %+v, want compact output summary", summary)
+	}
+	withoutFailure := buildStagePacketFromStepInput(run, "step-stage-packet-contract-violation", map[string]any{}).ToMap()
+	if packet["idempotencyKey"] == withoutFailure["idempotencyKey"] {
+		t.Fatalf("idempotencyKey = %v, want currentFailure to affect stage packet identity", packet["idempotencyKey"])
+	}
+}
+
 func TestFollowUpStepInputRebuildsStagePacketAfterNextInputMutation(t *testing.T) {
 	run := &runModel.Run{
 		ID:                 common.RunID("run-follow-up-stage-packet"),

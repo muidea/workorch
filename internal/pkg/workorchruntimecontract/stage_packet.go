@@ -33,6 +33,7 @@ type StagePacket struct {
 	RequiredEvidenceKinds []string              `json:"requiredEvidenceKinds,omitempty"`
 	AcceptedEvidenceRefs  []string              `json:"acceptedEvidenceRefs,omitempty"`
 	RejectedEvidenceRefs  []string              `json:"rejectedEvidenceRefs,omitempty"`
+	CurrentFailure        map[string]any        `json:"currentFailure,omitempty"`
 	TargetSnapshots       []map[string]any      `json:"targetSnapshots,omitempty"`
 	IdempotencyKey        string                `json:"idempotencyKey"`
 }
@@ -50,6 +51,7 @@ func (p StagePacket) Normalized() StagePacket {
 	p.RequiredEvidenceKinds = compactNextActionStrings(p.RequiredEvidenceKinds)
 	p.AcceptedEvidenceRefs = compactNextActionStrings(p.AcceptedEvidenceRefs)
 	p.RejectedEvidenceRefs = compactNextActionStrings(p.RejectedEvidenceRefs)
+	p.CurrentFailure = cloneStagePacketMap(p.CurrentFailure)
 	p.TargetSnapshots = NormalizeStagePacketTargetSnapshots(p.TargetSnapshots)
 	if p.NextAction != nil {
 		next := p.NextAction.Normalized()
@@ -136,6 +138,9 @@ func (p StagePacket) ToMap() map[string]any {
 	if len(p.RejectedEvidenceRefs) > 0 {
 		ret["rejectedEvidenceRefs"] = append([]string(nil), p.RejectedEvidenceRefs...)
 	}
+	if len(p.CurrentFailure) > 0 {
+		ret["currentFailure"] = cloneStagePacketMap(p.CurrentFailure)
+	}
 	if len(p.TargetSnapshots) > 0 {
 		ret["targetSnapshots"] = cloneStagePacketMapSlice(p.TargetSnapshots)
 	}
@@ -215,6 +220,7 @@ func StableStagePacketIdempotencyKey(packet StagePacket) string {
 		strings.Join(compactNextActionStrings(packet.RequiredEvidenceKinds), ","),
 		strings.Join(compactNextActionStrings(packet.AcceptedEvidenceRefs), ","),
 		strings.Join(compactNextActionStrings(packet.RejectedEvidenceRefs), ","),
+		shortStagePacketDigest(packet.CurrentFailure),
 		shortStagePacketDigest(NormalizeStagePacketTargetSnapshots(packet.TargetSnapshots)),
 	}
 	return strings.Join(parts, "|")

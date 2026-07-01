@@ -44,6 +44,7 @@ func buildStagePacketFromStepInput(run *runModel.Run, stepID common.StepID, inpu
 		RequiredEvidenceKinds: stringSliceFromValue(input["requiredEvidenceKinds"]),
 		AcceptedEvidenceRefs:  stagePacketEvidenceRefs(input, "acceptedEvidenceRefs"),
 		RejectedEvidenceRefs:  stagePacketEvidenceRefs(input, "rejectedEvidenceRefs"),
+		CurrentFailure:        stagePacketCurrentFailure(input),
 		TargetSnapshots:       stagePacketTargetSnapshots(input),
 	}
 	return packet.Normalized()
@@ -250,6 +251,60 @@ func stagePacketEvidenceSources(input map[string]any) []map[string]any {
 		mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"]),
 		mapFromValue(input["acceptance"]),
 	}
+}
+
+func stagePacketCurrentFailure(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	for _, source := range []map[string]any{
+		input,
+		mapFromValue(input["repairActionPackage"]),
+		mapFromValue(input["executionContext"]),
+		mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"]),
+	} {
+		if failure := mapFromValue(source["currentFailure"]); len(failure) > 0 {
+			return compactLLMContextMap(failure, 1)
+		}
+	}
+	for _, source := range []map[string]any{
+		input,
+		mapFromValue(input["executionContext"]),
+	} {
+		if recovery := mapFromValue(source[stepInputKeyContractViolationRecovery]); len(recovery) > 0 {
+			return stagePacketCurrentFailureFromContractViolationRecovery(recovery)
+		}
+		if digestFailure := currentFailureFromProgressDigest(mapFromValue(source[stepInputKeyCurrentProgressDigest])); len(digestFailure) > 0 {
+			return compactLLMContextMap(digestFailure, 1)
+		}
+	}
+	return nil
+}
+
+func stagePacketCurrentFailureFromContractViolationRecovery(recovery map[string]any) map[string]any {
+	if len(recovery) == 0 {
+		return nil
+	}
+	ret := map[string]any{"source": "contractViolationRecovery"}
+	for _, key := range []string{
+		"violatedRule",
+		"violationType",
+		"recoverability",
+		"retryHint",
+		"failureClass",
+		"failureSignature",
+		"rejectedOutputRef",
+		"expectedContract",
+		"actualOutputSummary",
+	} {
+		if value, ok := recovery[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	if len(ret) == 1 {
+		return nil
+	}
+	return ret
 }
 
 func stagePacketTargetSnapshots(input map[string]any) []map[string]any {

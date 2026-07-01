@@ -403,6 +403,42 @@ deterministic NextAction，不能让 LLM 只能从 requiredOutput 或历史上�
   `focusCoverageItemIds` 和当前 requiredOutput。
 - nextAction 的 focus 与 `stagePacket.activeFocus` / requiredOutput focus 同源。
 
+### S14 StagePacket CurrentFailure Diagnostic
+
+Status: completed
+
+目标：StagePacket 必须显式携带当前失败或合同违例诊断，避免 repair、
+retry、validation 阶段只能从散落的历史字段、旧 graph 或自然语言摘要中恢复
+失败面。
+
+合同：
+
+- `stagePacket.currentFailure` 只能从结构化 `currentFailure`、
+  `contractViolationRecovery` 或 `currentProgressDigest.lastObservedFailure`
+  派生。
+- 若存在显式 `currentFailure`，它优先于 contract violation recovery 和
+  progress digest。
+- contract violation recovery 进入 StagePacket 时必须保持 diagnostic-only
+  语义，只携带 violatedRule、violationType、recoverability、retryHint、
+  failureClass、failureSignature、rejectedOutputRef、expectedContract 和
+  actualOutputSummary 等中立诊断字段。
+- StagePacket 不从自然语言历史、旧 decision、旧 graph 或 template 文本推断
+  当前失败。
+
+不处理：
+
+- 不改变 contract violation retry 预算。
+- 不改变 repair action package 生成。
+- 不改变 evidence ledger 或 memory 写入。
+- 不改变 LLM provider request 分区、projection 或 TUI。
+
+验收：
+
+- StagePacket 能保留显式 currentFailure。
+- StagePacket 能从 contractViolationRecovery 派生 diagnostic-only
+  currentFailure。
+- currentFailure 变化会影响 StagePacket idempotency key。
+
 ## Progress Log
 
 - 2026-06-30: created plan from live verification. Active slice is S1 only.
@@ -519,3 +555,10 @@ deterministic NextAction，不能让 LLM 只能从 requiredOutput 或历史上�
   selection, scheduler payloads, requiredOutput derivation, validator,
   evidence ledger, decision gate, projection and TUI were intentionally not
   changed in this slice.
+- 2026-07-01: completed S14 by adding `stagePacket.currentFailure` to the
+  StagePacket DTO and deriving it from structured currentFailure,
+  contractViolationRecovery or currentProgressDigest diagnostics. The
+  diagnostic is carried as compact current stage context and participates in
+  StagePacket idempotency. Contract violation retry budgets, repair package
+  generation, evidence ledger, memory writes, provider request partition,
+  projection and TUI were intentionally not changed in this slice.
