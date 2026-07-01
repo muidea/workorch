@@ -6,11 +6,10 @@ import (
 
 	magictask "github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchownercontract"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -20,12 +19,12 @@ func TestWebApprovalGetterPublishesScopedOwnerCommand(t *testing.T) {
 	approvalID := common.ApprovalID("approval-web-scope")
 	runID := common.RunID("run-web-scope")
 	var captured events.Envelope
-	hub.Subscribe(approvalevents.TopicApprovalCommandGet, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(workorchownercontract.TopicApprovalCommandGet, func(_ context.Context, envelope events.Envelope) error {
 		captured = envelope
 		return events.Response(events.Envelope{
 			Topic: envelope.Topic + "/response",
 			Payload: map[string]any{
-				events.PayloadKeyApproval: &approvalmodel.Approval{
+				events.PayloadKeyApproval: &workorchownercontract.Approval{
 					ID:    approvalID,
 					RunID: runID,
 					State: common.ApprovalStateApproved,
@@ -41,8 +40,8 @@ func TestWebApprovalGetterPublishesScopedOwnerCommand(t *testing.T) {
 	if item == nil || item.ID != approvalID {
 		t.Fatalf("approval = %+v, want %s", item, approvalID)
 	}
-	if captured.Topic != approvalevents.TopicApprovalCommandGet {
-		t.Fatalf("topic = %q, want %q", captured.Topic, approvalevents.TopicApprovalCommandGet)
+	if captured.Topic != workorchownercontract.TopicApprovalCommandGet {
+		t.Fatalf("topic = %q, want %q", captured.Topic, workorchownercontract.TopicApprovalCommandGet)
 	}
 	if captured.SourceModule != ModuleID || captured.SubjectType != "approval" || captured.SubjectID != string(approvalID) {
 		t.Fatalf("envelope source/subject = %q %q/%q", captured.SourceModule, captured.SubjectType, captured.SubjectID)

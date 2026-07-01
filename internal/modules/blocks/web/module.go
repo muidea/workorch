@@ -4,16 +4,15 @@ import (
 	"context"
 
 	magictask "github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	webbiz "github.com/muidea/workorch/internal/modules/blocks/web/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
 	webproviderconfig "github.com/muidea/workorch/internal/modules/blocks/web/pkg/providerconfig"
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchownercontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -78,16 +77,16 @@ type webApprovalGetter struct {
 	hub events.Hub
 }
 
-func (g webApprovalGetter) Get(ctx context.Context, id common.ApprovalID) (*approvalmodel.Approval, error) {
+func (g webApprovalGetter) Get(ctx context.Context, id common.ApprovalID) (*workorchownercontract.Approval, error) {
 	return g.GetForRun(ctx, id, "")
 }
 
-func (g webApprovalGetter) GetForRun(ctx context.Context, id common.ApprovalID, runID common.RunID) (*approvalmodel.Approval, error) {
+func (g webApprovalGetter) GetForRun(ctx context.Context, id common.ApprovalID, runID common.RunID) (*workorchownercontract.Approval, error) {
 	if g.hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	err := g.hub.Publish(ctx, events.Envelope{
-		Topic:        approvalevents.TopicApprovalCommandGet,
+		Topic:        workorchownercontract.TopicApprovalCommandGet,
 		SourceModule: ModuleID,
 		SubjectType:  "approval",
 		SubjectID:    string(id),
@@ -98,7 +97,7 @@ func (g webApprovalGetter) GetForRun(ctx context.Context, id common.ApprovalID, 
 		},
 	})
 	if response, ok := events.ResponseEnvelope(err); ok {
-		item, ok := response.Payload[events.PayloadKeyApproval].(*approvalmodel.Approval)
+		item, ok := response.Payload[events.PayloadKeyApproval].(*workorchownercontract.Approval)
 		if !ok || item == nil {
 			return nil, common.ErrNotFound
 		}

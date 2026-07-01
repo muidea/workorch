@@ -1,8 +1,10 @@
 package events
 
+import "github.com/muidea/workorch/internal/pkg/workorchownercontract"
+
 const (
 	TopicMCPCommandCreateServer     = "/mcp/command/create-server"
-	TopicMCPCommandGetServer        = "/mcp/command/get-server"
+	TopicMCPCommandGetServer        = workorchownercontract.TopicMCPCommandGetServer
 	TopicMCPCommandListServers      = "/mcp/command/list-servers"
 	TopicMCPCommandUpdateServer     = "/mcp/command/update-server"
 	TopicMCPCommandCreateCapability = "/mcp/command/create-capability"

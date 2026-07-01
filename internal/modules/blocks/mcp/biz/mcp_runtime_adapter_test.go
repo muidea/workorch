@@ -13,10 +13,8 @@ import (
 	"testing"
 	"time"
 
-	kernelmcp "github.com/muidea/workorch/internal/modules/kernel/mcp"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorchownercontract"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -37,8 +35,8 @@ func TestRuntimeAdapterExecutesAllowedHTTPToolCall(t *testing.T) {
 	}))
 	defer server.Close()
 
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-local-context"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-local-context"),
 		Name:          "local context",
 		Transport:     "http",
 		Endpoint:      server.URL,
@@ -91,8 +89,8 @@ func TestRuntimeAdapterExecutesHTTPResourceReadAndPromptGet(t *testing.T) {
 	}))
 	defer server.Close()
 
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:         common.MCPServerID("mcp-http-context"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:               common.MCPServerID("mcp-http-context"),
 		Name:             "http context",
 		Transport:        "http",
 		Endpoint:         server.URL,
@@ -145,8 +143,8 @@ func TestRuntimeAdapterCollectsHTTPStreamEvents(t *testing.T) {
 	}))
 	defer server.Close()
 
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-http-stream"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-http-stream"),
 		Name:          "http stream",
 		Transport:     "http",
 		Endpoint:      server.URL,
@@ -184,8 +182,8 @@ func TestRuntimeAdapterFailsHTTPToolResultError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-http-tool-error"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-http-tool-error"),
 		Name:          "http tool error",
 		Transport:     "http",
 		Endpoint:      server.URL,
@@ -223,8 +221,8 @@ func TestRuntimeAdapterFailureDiagnosticsIncludeToolInputTarget(t *testing.T) {
 	}))
 	defer server.Close()
 
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-http-tool-target"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-http-tool-target"),
 		Name:          "http tool target",
 		Transport:     "http",
 		Endpoint:      server.URL,
@@ -260,8 +258,8 @@ func TestRuntimeAdapterFailureDiagnosticsIncludeToolInputTarget(t *testing.T) {
 
 func TestRuntimeAdapterRejectsDisallowedTool(t *testing.T) {
 	ctx := context.Background()
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:     common.MCPServerID("mcp-policy"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:           common.MCPServerID("mcp-policy"),
 		Name:         "policy",
 		Transport:    "http",
 		Endpoint:     "http://127.0.0.1:1",
@@ -286,8 +284,8 @@ func TestRuntimeAdapterRejectsDisallowedTool(t *testing.T) {
 
 func TestRuntimeAdapterExecutesAllowedStdioToolCall(t *testing.T) {
 	ctx := context.Background()
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-stdio"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-stdio"),
 		Name:          "stdio",
 		Transport:     "stdio",
 		Endpoint:      "env WORKORCH_MCP_STDIO_HELPER=1 " + os.Args[0] + " -test.run=TestMCPStdioHelperProcess",
@@ -335,8 +333,8 @@ func TestRuntimeAdapterExecutesAllowedStdioToolCall(t *testing.T) {
 func TestRuntimeAdapterStdioToolCallHonorsCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-stdio-canceled"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-stdio-canceled"),
 		Name:          "stdio canceled",
 		Transport:     "stdio",
 		Endpoint:      "env WORKORCH_MCP_STDIO_HELPER=1 " + os.Args[0] + " -test.run=TestMCPStdioHelperProcess",
@@ -365,8 +363,8 @@ func TestRuntimeAdapterStdioToolCallHonorsCanceledContext(t *testing.T) {
 func TestRuntimeAdapterExecutesStdioCommandArgsEnvWhenEndpointMissing(t *testing.T) {
 	ctx := context.Background()
 	internalDir := filepath.Join(t.TempDir(), "internal")
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-stdio-command"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-stdio-command"),
 		Name:          "stdio command",
 		Transport:     "stdio",
 		Command:       os.Args[0],
@@ -413,8 +411,8 @@ func TestRuntimeAdapterExpandsManagedConfigPlaceholderWithWorkspaceOverride(t *t
 	if err := os.WriteFile(workspaceConfigPath, []byte("{}\n"), 0o644); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-managed-config"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-managed-config"),
 		Name:          "managed config",
 		Transport:     "stdio",
 		Command:       os.Args[0],
@@ -461,8 +459,8 @@ func TestRuntimeAdapterExpandsManagedConfigPlaceholderWithSystemDefault(t *testi
 	if err := os.WriteFile(systemConfigPath, []byte("{}\n"), 0o644); err != nil {
 		t.Fatalf("write system config: %v", err)
 	}
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-system-config"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-system-config"),
 		Name:          "system config",
 		Transport:     "stdio",
 		Command:       os.Args[0],
@@ -501,8 +499,8 @@ func TestRuntimeAdapterExpandsManagedConfigPlaceholderWithSystemDefault(t *testi
 func TestRuntimeAdapterStartsStdioInWorkspaceDeliverableDirectory(t *testing.T) {
 	ctx := context.Background()
 	deliverableDir := t.TempDir()
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-stdio-workdir"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-stdio-workdir"),
 		Name:          "stdio workdir",
 		Transport:     "stdio",
 		Command:       os.Args[0],
@@ -564,8 +562,8 @@ func TestRuntimeAdapterResolvesRelativeStdioEndpointBeforeWorkspaceCWD(t *testin
 			t.Fatalf("restore cwd: %v", err)
 		}
 	}()
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-stdio-relative-endpoint"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-stdio-relative-endpoint"),
 		Name:          "stdio relative endpoint",
 		Transport:     "stdio",
 		Endpoint:      "." + string(os.PathSeparator) + helperName,
@@ -594,8 +592,8 @@ func TestRuntimeAdapterResolvesRelativeStdioEndpointBeforeWorkspaceCWD(t *testin
 
 func TestRuntimeAdapterPrefersEndpointOverStdioCommandArgsEnv(t *testing.T) {
 	ctx := context.Background()
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-stdio-endpoint-priority"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-stdio-endpoint-priority"),
 		Name:          "stdio endpoint priority",
 		Transport:     "stdio",
 		Endpoint:      "env WORKORCH_MCP_STDIO_HELPER=1 WORKORCH_MCP_STDIO_ENV_ECHO=from-endpoint " + os.Args[0] + " -test.run=TestMCPStdioHelperProcess",
@@ -627,8 +625,8 @@ func TestRuntimeAdapterPrefersEndpointOverStdioCommandArgsEnv(t *testing.T) {
 
 func TestRuntimeAdapterFailsStdioToolResultError(t *testing.T) {
 	ctx := context.Background()
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-stdio-tool-error"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-stdio-tool-error"),
 		Name:          "stdio tool error",
 		Transport:     "stdio",
 		Command:       os.Args[0],
@@ -657,8 +655,8 @@ func TestRuntimeAdapterFailsStdioToolResultError(t *testing.T) {
 
 func TestRuntimeAdapterRejectsStdioWithoutEndpointOrCommand(t *testing.T) {
 	ctx := context.Background()
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-stdio-missing-command"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-stdio-missing-command"),
 		Name:          "stdio missing command",
 		Transport:     "stdio",
 		Enabled:       true,
@@ -684,8 +682,8 @@ func TestRuntimeAdapterRejectsStdioWithoutEndpointOrCommand(t *testing.T) {
 
 func TestRuntimeAdapterExecutesAllowedStdioResourceRead(t *testing.T) {
 	ctx := context.Background()
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:         common.MCPServerID("mcp-stdio-resource"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:               common.MCPServerID("mcp-stdio-resource"),
 		Name:             "stdio resource",
 		Transport:        "stdio",
 		Endpoint:         "env WORKORCH_MCP_STDIO_HELPER=1 " + os.Args[0] + " -test.run=TestMCPStdioHelperProcess",
@@ -713,8 +711,8 @@ func TestRuntimeAdapterExecutesAllowedStdioResourceRead(t *testing.T) {
 func TestRuntimeAdapterReusesLongLivedStdioSession(t *testing.T) {
 	ctx := context.Background()
 	initFile := filepath.Join(t.TempDir(), "mcp-init-count.txt")
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-stdio-session"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-stdio-session"),
 		Name:          "stdio session",
 		Transport:     "stdio",
 		Endpoint:      "env WORKORCH_MCP_STDIO_HELPER=1 WORKORCH_MCP_STDIO_INIT_FILE=" + initFile + " " + os.Args[0] + " -test.run=TestMCPStdioHelperProcess",
@@ -754,8 +752,8 @@ func TestRuntimeAdapterEvictsIdleLongLivedStdioSession(t *testing.T) {
 
 	ctx := context.Background()
 	initFile := filepath.Join(t.TempDir(), "mcp-init-count.txt")
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-stdio-idle-session"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-stdio-idle-session"),
 		Name:          "stdio idle session",
 		Transport:     "stdio",
 		Endpoint:      "env WORKORCH_MCP_STDIO_HELPER=1 WORKORCH_MCP_STDIO_INIT_FILE=" + initFile + " " + os.Args[0] + " -test.run=TestMCPStdioHelperProcess",
@@ -813,8 +811,8 @@ func waitForNoStdioSessions(t *testing.T, adapter *RuntimeAdapter, timeout time.
 func TestRuntimeAdapterLongLivedStdioSessionIsWorkspaceScoped(t *testing.T) {
 	ctx := context.Background()
 	initFile := filepath.Join(t.TempDir(), "mcp-init-count.txt")
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-stdio-workspace-session"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:            common.MCPServerID("mcp-stdio-workspace-session"),
 		Name:          "stdio workspace session",
 		Transport:     "stdio",
 		Command:       os.Args[0],
@@ -852,8 +850,8 @@ func TestRuntimeAdapterLongLivedStdioSessionIsWorkspaceScoped(t *testing.T) {
 
 func TestRuntimeAdapterFailsUnsupportedTransport(t *testing.T) {
 	ctx := context.Background()
-	service := newMCPService(t, kernelmcp.CreateServerCommand{
-		ServerID:     common.MCPServerID("mcp-websocket"),
+	service := newMCPService(t, workorchownercontract.MCPServer{
+		ID:           common.MCPServerID("mcp-websocket"),
 		Name:         "websocket",
 		Transport:    "websocket",
 		Endpoint:     "tool-server",
@@ -1012,18 +1010,21 @@ func TestMCPStdioHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-func newMCPService(t *testing.T, cmd kernelmcp.CreateServerCommand) kernelmcp.Service {
+type staticMCPServerGetter struct {
+	server *workorchownercontract.MCPServer
+}
+
+func (g staticMCPServerGetter) GetServer(_ context.Context, id common.MCPServerID) (*workorchownercontract.MCPServer, error) {
+	if g.server == nil || g.server.ID != id {
+		return nil, common.ErrNotFound
+	}
+	return g.server, nil
+}
+
+func newMCPService(t *testing.T, server workorchownercontract.MCPServer) serverGetter {
 	t.Helper()
-	module := kernelmcp.New()
-	if err := module.Configure(kernelmcp.Dependencies{
-		Servers:      memory.NewMCPServerRepository(),
-		Capabilities: memory.NewMCPCapabilityRepository(),
-		EventHub:     events.NewMemoryHub(),
-	}); err != nil {
-		t.Fatalf("setup mcp module: %v", err)
+	if server.ID == "" {
+		t.Fatal("mcp server id is required")
 	}
-	if err := module.Service().CreateServer(context.Background(), cmd); err != nil {
-		t.Fatalf("create mcp server: %v", err)
-	}
-	return module.Service()
+	return staticMCPServerGetter{server: &server}
 }

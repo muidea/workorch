@@ -6,11 +6,10 @@ import (
 	magictask "github.com/muidea/magicCommon/task"
 	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
-	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/runtimeevent"
+	"github.com/muidea/workorch/internal/pkg/workorchownercontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -74,12 +73,12 @@ type mcpEventServerGetter struct {
 	hub events.Hub
 }
 
-func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServerID) (*mcpmodel.Server, error) {
+func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServerID) (*workorchownercontract.MCPServer, error) {
 	if g.hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	err := g.hub.Publish(ctx, events.Envelope{
-		Topic:        mcpevents.TopicMCPCommandGetServer,
+		Topic:        workorchownercontract.TopicMCPCommandGetServer,
 		SourceModule: ModuleID,
 		SubjectType:  "mcp_server",
 		SubjectID:    string(id),
@@ -88,7 +87,7 @@ func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServer
 		},
 	})
 	if response, ok := events.ResponseEnvelope(err); ok {
-		server, ok := response.Payload[events.PayloadKeyServer].(*mcpmodel.Server)
+		server, ok := response.Payload[events.PayloadKeyServer].(*workorchownercontract.MCPServer)
 		if !ok || server == nil {
 			return nil, common.ErrNotFound
 		}

@@ -21,8 +21,8 @@ import (
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
 	webproviderconfig "github.com/muidea/workorch/internal/modules/blocks/web/pkg/providerconfig"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchownercontract"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -48,11 +48,11 @@ type ProviderConfigLoader func() (string, map[string]ProviderConfig, error)
 type ProviderConfigRevision func() uint64
 
 type ApprovalGetter interface {
-	Get(context.Context, common.ApprovalID) (*approvalmodel.Approval, error)
+	Get(context.Context, common.ApprovalID) (*workorchownercontract.Approval, error)
 }
 
 type ScopedApprovalGetter interface {
-	GetForRun(context.Context, common.ApprovalID, common.RunID) (*approvalmodel.Approval, error)
+	GetForRun(context.Context, common.ApprovalID, common.RunID) (*workorchownercontract.Approval, error)
 }
 
 type providerRuntimeCache struct {
@@ -637,7 +637,7 @@ func (a *RuntimeAdapter) validateApproval(ctx context.Context, approvalID common
 	return nil
 }
 
-func (a *RuntimeAdapter) getApproval(ctx context.Context, approvalID common.ApprovalID, runID common.RunID) (*approvalmodel.Approval, error) {
+func (a *RuntimeAdapter) getApproval(ctx context.Context, approvalID common.ApprovalID, runID common.RunID) (*workorchownercontract.Approval, error) {
 	if a == nil || a.approvals == nil {
 		return nil, fmt.Errorf("approval repository is not configured")
 	}
@@ -647,7 +647,7 @@ func (a *RuntimeAdapter) getApproval(ctx context.Context, approvalID common.Appr
 	return a.approvals.Get(ctx, approvalID)
 }
 
-func approvalContextMatches(item *approvalmodel.Approval, providerID string, contextKey string, contextValue string, policy policyDecision) bool {
+func approvalContextMatches(item *workorchownercontract.Approval, providerID string, contextKey string, contextValue string, policy policyDecision) bool {
 	if item == nil {
 		return false
 	}

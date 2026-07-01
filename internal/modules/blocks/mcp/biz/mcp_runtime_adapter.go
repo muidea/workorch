@@ -19,9 +19,9 @@ import (
 	"time"
 
 	blockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagedconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchownercontract"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -34,7 +34,7 @@ type RuntimeAdapter struct {
 }
 
 type serverGetter interface {
-	GetServer(context.Context, common.MCPServerID) (*mcpmodel.Server, error)
+	GetServer(context.Context, common.MCPServerID) (*workorchownercontract.MCPServer, error)
 }
 
 const (
@@ -143,7 +143,7 @@ func (a *RuntimeAdapter) Close() {
 	}
 }
 
-func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, spec operationSpec) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request runtimemodel.StepExecutionRequest, server *workorchownercontract.MCPServer, spec operationSpec) (runtimemodel.StepExecutionResult, error) {
 	endpoint := strings.TrimSpace(server.Endpoint)
 	if endpoint == "" {
 		err := fmt.Errorf("%w: mcp endpoint is required", common.ErrInvalidArgument)
@@ -236,7 +236,7 @@ func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request runti
 	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
 
-func (a *RuntimeAdapter) executeStdioOperation(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, spec operationSpec) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) executeStdioOperation(ctx context.Context, request runtimemodel.StepExecutionRequest, server *workorchownercontract.MCPServer, spec operationSpec) (runtimemodel.StepExecutionResult, error) {
 	callCtx, cancel := context.WithTimeout(ctx, timeoutFromServer(server))
 	defer cancel()
 	if strings.EqualFold(strings.TrimSpace(server.SessionPolicy), sessionPolicyLongLived) {
@@ -277,7 +277,7 @@ func (a *RuntimeAdapter) executeStdioOperation(ctx context.Context, request runt
 	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
 
-func (a *RuntimeAdapter) executeLongLivedStdioOperation(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, spec operationSpec) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) executeLongLivedStdioOperation(ctx context.Context, request runtimemodel.StepExecutionRequest, server *workorchownercontract.MCPServer, spec operationSpec) (runtimemodel.StepExecutionResult, error) {
 	startedAt := time.Now().UTC()
 	sessionKey := stdioSessionKey(request.WorkspaceID, spec.ServerID)
 	session, err := a.getOrCreateStdioSession(ctx, request, server, sessionKey)
@@ -315,7 +315,7 @@ func (a *RuntimeAdapter) executeLongLivedStdioOperation(ctx context.Context, req
 	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
 
-func (a *RuntimeAdapter) getOrCreateStdioSession(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, serverID string) (*stdioSession, error) {
+func (a *RuntimeAdapter) getOrCreateStdioSession(ctx context.Context, request runtimemodel.StepExecutionRequest, server *workorchownercontract.MCPServer, serverID string) (*stdioSession, error) {
 	a.sessionMu.Lock()
 	if session := a.sessions[serverID]; session != nil {
 		a.sessionMu.Unlock()
@@ -383,7 +383,7 @@ func (a *RuntimeAdapter) evictIdleStdioSession(serverID string, session *stdioSe
 	}
 }
 
-func newInitializedStdioSession(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, serverID string) (*stdioSession, error) {
+func newInitializedStdioSession(ctx context.Context, request runtimemodel.StepExecutionRequest, server *workorchownercontract.MCPServer, serverID string) (*stdioSession, error) {
 	command, args, env, err := stdioLaunchConfig(server, request)
 	if err != nil {
 		return nil, err
@@ -601,7 +601,7 @@ func parseOperationSpec(kind string, input map[string]any) (operationSpec, error
 	return spec, nil
 }
 
-func validateServerPolicy(server *mcpmodel.Server, spec operationSpec) error {
+func validateServerPolicy(server *workorchownercontract.MCPServer, spec operationSpec) error {
 	if server == nil || server.ID == "" {
 		return common.ErrNotFound
 	}
@@ -655,7 +655,7 @@ func failureOutput(spec operationSpec, stage string, err error) map[string]any {
 	return output
 }
 
-func successOutput(spec operationSpec, server *mcpmodel.Server, duration time.Duration, result any) map[string]any {
+func successOutput(spec operationSpec, server *workorchownercontract.MCPServer, duration time.Duration, result any) map[string]any {
 	output := baseOutput(spec)
 	output["status"] = "completed"
 	output["stage"] = completedStage(spec)
@@ -849,7 +849,7 @@ func parseStdioEndpoint(endpoint string) (string, []string, error) {
 	return command, fields[1:], nil
 }
 
-func stdioLaunchConfig(server *mcpmodel.Server, request runtimemodel.StepExecutionRequest) (string, []string, map[string]string, error) {
+func stdioLaunchConfig(server *workorchownercontract.MCPServer, request runtimemodel.StepExecutionRequest) (string, []string, map[string]string, error) {
 	if server == nil {
 		return "", nil, nil, common.ErrInvalidArgument
 	}
@@ -1056,7 +1056,7 @@ func failedStdioResult(spec operationSpec, stage string, err error, duration tim
 	return runtimemodel.StepExecutionResult{Output: output}, err
 }
 
-func timeoutFromServer(server *mcpmodel.Server) time.Duration {
+func timeoutFromServer(server *workorchownercontract.MCPServer) time.Duration {
 	timeout := time.Duration(server.TimeoutMillis) * time.Millisecond
 	if timeout <= 0 {
 		timeout = 30 * time.Second
