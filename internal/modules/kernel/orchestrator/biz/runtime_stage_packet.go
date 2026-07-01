@@ -37,6 +37,7 @@ func buildStagePacketFromStepInput(run *runModel.Run, stepID common.StepID, inpu
 		},
 		ActiveStage:           stagePacketActiveStage(input),
 		ActiveFocus:           stagePacketActiveFocus(input),
+		NextAction:            stagePacketNextAction(run, input),
 		RequiredOutput:        stagePacketRequiredOutput(input),
 		AllowedActions:        stringSliceFromValue(input["allowedActions"]),
 		ForbiddenActions:      stringSliceFromValue(input["forbiddenActions"]),
@@ -72,6 +73,81 @@ func stagePacketDefinitionRevision(run *runModel.Run, input map[string]any) stri
 		}
 	}
 	return ""
+}
+
+func stagePacketNextAction(run *runModel.Run, input map[string]any) *runtimemodel.NextAction {
+	action := currentActionNextActionFromInput(input)
+	actionType := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(action, "type"),
+		stringFromMap(action, "kind"),
+	))
+	if actionType == "" || run == nil {
+		return nil
+	}
+	authorityFocus := dispatchAuthorityCurrentFocus(input)
+	coverageFocus := dispatchCoverageFocusFromAuthority(input, authorityFocus)
+	if len(coverageFocus) == 0 {
+		coverageFocus = stagePacketActiveFocus(input)
+	}
+	next := runtimemodel.NextAction{
+		WorkspaceID:           run.WorkspaceID,
+		RunID:                 run.ID,
+		Type:                  actionType,
+		SubjectType:           strings.TrimSpace(stringFromMap(action, "subjectType")),
+		SubjectID:             strings.TrimSpace(stringFromMap(action, "subjectId")),
+		FocusCoverageItemIDs:  stagePacketNextActionCoverageIDs(action, coverageFocus),
+		RequiredOutput:        stagePacketRequiredOutput(input),
+		AllowedActions:        firstNonEmptyStringSlice(stringSliceFromValue(action["allowedActions"]), stringSliceFromValue(input["allowedActions"])),
+		ForbiddenActions:      firstNonEmptyStringSlice(stringSliceFromValue(action["forbiddenActions"]), stringSliceFromValue(input["forbiddenActions"])),
+		RequiredEvidenceKinds: firstNonEmptyStringSlice(stringSliceFromValue(action["requiredEvidenceKinds"]), stringSliceFromValue(input["requiredEvidenceKinds"])),
+		Stage:                 firstNonEmptyString(stringFromMap(action, "stage"), stagePacketActiveStage(input)),
+		StageMode:             firstNonEmptyString(stringFromMap(action, "stageMode"), stringFromMap(input, stepInputKeyRuntimeStageMode)),
+		Reason:                strings.TrimSpace(stringFromMap(action, "reason")),
+	}
+	if next.SubjectID == "" {
+		next.SubjectID = strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(coverageFocus, "id"),
+			stringFromMap(action, "subjectId"),
+		))
+	}
+	if next.SubjectType == "" && next.SubjectID != "" {
+		next.SubjectType = "coverage_focus"
+	}
+	normalized := next.Normalized()
+	if normalized.Type == "" {
+		return nil
+	}
+	return &normalized
+}
+
+func stagePacketNextActionCoverageIDs(action map[string]any, coverageFocus map[string]any) []common.CoverageWorkItemID {
+	values := stringSliceFromValue(action["focusCoverageItemIds"])
+	if len(values) == 0 {
+		values = stringSliceFromValue(action["coverageWorkItemIds"])
+	}
+	if len(values) == 0 {
+		values = dispatchFocusWorkItemIDs(coverageFocus)
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]common.CoverageWorkItemID, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			ret = append(ret, common.CoverageWorkItemID(value))
+		}
+	}
+	return ret
+}
+
+func firstNonEmptyStringSlice(values ...[]string) []string {
+	for _, value := range values {
+		if len(value) > 0 {
+			return value
+		}
+	}
+	return nil
 }
 
 func stagePacketActiveStage(input map[string]any) string {

@@ -371,6 +371,38 @@ snapshot 重建的 StagePacket，不能因为中途 enrichment 或旧 input 带�
 - final gate 能修正 stale `stagePacket.activeFocus` 并通过验证。
 - final gate 仍会拒绝重建后无法对齐的 dispatch input。
 
+### S13 StagePacket Carries NextAction Authority
+
+Status: completed
+
+目标：StagePacket 必须显式携带从当前 convergence authority 派生的
+deterministic NextAction，不能让 LLM 只能从 requiredOutput 或历史上下文间接
+推断当前 narrow action。
+
+合同：
+
+- `stagePacket.nextAction` 必须从结构化 `convergenceAuthority`、
+  `gapBaseline` 或当前 `convergenceContract` 派生。
+- `stagePacket.nextAction.type`、focus coverage item、requiredOutput、
+  allowed/forbidden actions、requiredEvidenceKinds 必须与同一个 StagePacket
+  authority 输入对齐。
+- StagePacket 只承载当前 action；旧 failed-step input、旧 decision、旧 graph
+  只能作为 diagnostic lineage，不得生成 `nextAction`。
+- 若没有结构化 current action，则不伪造 `nextAction`。
+
+不处理：
+
+- 不改变 NextAction 选择或排序。
+- 不改变 scheduler command payload。
+- 不改变 requiredOutput 派生规则。
+- 不改变 validator、evidence ledger、decision gate、projection 或 TUI。
+
+验收：
+
+- StagePacket 中可见 `nextAction.type`、scoped identity、
+  `focusCoverageItemIds` 和当前 requiredOutput。
+- nextAction 的 focus 与 `stagePacket.activeFocus` / requiredOutput focus 同源。
+
 ## Progress Log
 
 - 2026-06-30: created plan from live verification. Active slice is S1 only.
@@ -479,3 +511,11 @@ snapshot 重建的 StagePacket，不能因为中途 enrichment 或旧 input 带�
   misalignment. NextAction selection, requiredOutput derivation, validator
   shape rules, evidence ledger, decision gate, projection and TUI were
   intentionally not changed in this slice.
+- 2026-07-01: completed S13 by deriving `stagePacket.nextAction` from the
+  current convergence authority / gap baseline / convergence contract during
+  StagePacket construction. The packet now exposes scoped current action
+  identity, focus coverage items, requiredOutput and action constraints from
+  the same authority input used for activeFocus and requiredOutput. NextAction
+  selection, scheduler payloads, requiredOutput derivation, validator,
+  evidence ledger, decision gate, projection and TUI were intentionally not
+  changed in this slice.

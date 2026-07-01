@@ -7,6 +7,7 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestInitialStepInputAttachesMinimalStagePacket(t *testing.T) {
@@ -180,6 +181,66 @@ func TestStagePacketUsesOnlyAuthorityCurrentFocusWhenStaleFocusExists(t *testing
 	}
 	if strings.Contains(string(encoded), "cwi-stale") {
 		t.Fatalf("stagePacket leaked stale focus: %s", encoded)
+	}
+}
+
+func TestStagePacketCarriesCurrentNextActionAuthority(t *testing.T) {
+	run := &runModel.Run{
+		ID:          common.RunID("run-stage-packet-next-action"),
+		WorkspaceID: common.WorkspaceID("ws-stage-packet-next-action"),
+		State:       common.RunStateRunning,
+	}
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus": map[string]any{
+				"id":                  "focus-cwi-current",
+				"coverageWorkItemIds": []string{"cwi-current"},
+			},
+			"nextAction": map[string]any{
+				"kind":                  runtimemodel.NextActionTypeValidate,
+				"stage":                 runtimemodel.NextActionTypeValidate,
+				"stageMode":             "evidence",
+				"allowedActions":        []string{runtimemodel.NextActionTypeValidate},
+				"forbiddenActions":      []string{runtimemodel.NextActionTypeStateChange},
+				"requiredEvidenceKinds": []string{"validation"},
+				"reason":                "validation evidence is missing",
+			},
+		},
+		"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"coverageFocusId":                       "focus-cwi-stale",
+				"coverageWorkItemIds":                   []string{"cwi-stale"},
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []string{"validation/managed_session"},
+			},
+		},
+	}
+
+	packet := buildStagePacketFromStepInput(run, "step-stage-packet-next-action", input).ToMap()
+
+	nextAction := mapFromValue(packet["nextAction"])
+	if nextAction["type"] != runtimemodel.NextActionTypeValidate ||
+		nextAction["workspaceId"] != string(run.WorkspaceID) ||
+		nextAction["runId"] != string(run.ID) {
+		t.Fatalf("stagePacket.nextAction identity = %+v, want scoped validate action", nextAction)
+	}
+	if ids := stringSliceFromValue(nextAction["focusCoverageItemIds"]); len(ids) != 1 || ids[0] != "cwi-current" {
+		t.Fatalf("stagePacket.nextAction.focusCoverageItemIds = %+v, want [cwi-current]", nextAction["focusCoverageItemIds"])
+	}
+	required := mapFromValue(nextAction["requiredOutput"])
+	if stringFromMap(required, "coverageFocusId") != "focus-cwi-current" {
+		t.Fatalf("stagePacket.nextAction.requiredOutput = %+v, want current focus", required)
+	}
+	if allowed := stringSliceFromValue(nextAction["allowedActions"]); len(allowed) != 1 || allowed[0] != runtimemodel.NextActionTypeValidate {
+		t.Fatalf("stagePacket.nextAction.allowedActions = %+v, want validate", allowed)
+	}
+	if forbidden := stringSliceFromValue(nextAction["forbiddenActions"]); len(forbidden) != 1 || forbidden[0] != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("stagePacket.nextAction.forbiddenActions = %+v, want state_change", forbidden)
+	}
+	if evidence := stringSliceFromValue(nextAction["requiredEvidenceKinds"]); len(evidence) != 1 || evidence[0] != "validation" {
+		t.Fatalf("stagePacket.nextAction.requiredEvidenceKinds = %+v, want validation", evidence)
 	}
 }
 
