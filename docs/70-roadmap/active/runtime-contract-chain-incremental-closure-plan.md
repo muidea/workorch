@@ -311,6 +311,36 @@ EventHub scheduler 或 projection 可见的 run command intent。
 - scheduler command 单测证明直接投递 `recover` 不入队。
 - 边界搜索确认主 run command intent 不再暴露 `RunCommandIntentRecover`。
 
+### S11 TUI Decision Prompt Requires Blocking Ticket
+
+Status: completed
+
+目标：TUI 只能展示 workorchd 投影中可解析的 decision/approval blocker，不得
+仅凭 workspace state 本地推断 `waiting_decision` 或 approval prompt。
+
+合同：
+
+- `waiting_decision` prompt/progress 必须同时具备 projected authority 与
+  non-empty `blockingTicketId`。
+- approval prompt/progress 必须同时具备 projected authority 与 non-empty
+  `blockingApprovalId`。
+- 缺少 blocker id 时，TUI 不创建本地 blocker、不切换 decision/approval
+  prompt、不显示 waiting decision/approval progress。
+- TUI 只能把缺 blocker 的异常作为普通 workspace overview 显示，等待下一次
+  server-projected ViewModel 修正。
+
+不处理：
+
+- 不改变 workorchd projection builder。
+- 不改变 decision/approval owner state 或 eligibility。
+- 不改变 runtime ledger、required output、validator、repair 或 scheduler。
+
+验收：
+
+- TUI overview 单测证明 projected `waiting_decision` 但无 `blockingTicketId`
+  不会进入 decision prompt/progress。
+- 既有有 ticket 的 projected waiting decision 仍进入 decision prompt。
+
 ## Progress Log
 
 - 2026-06-30: created plan from live verification. Active slice is S1 only.
@@ -401,5 +431,13 @@ EventHub scheduler 或 projection 可见的 run command intent。
   remains a separate owner command for watchdog/external timeout paths; it is
   no longer exposed as a user-visible run command intent. Run continuation
   queue behavior, restart/replan semantics, runtime state machine, ledger,
+  required output, validator, repair and decision gates were intentionally not
+  changed in this slice.
+- 2026-07-01: completed S11 by tightening TUI blocker progress and overview
+  synchronization so projected `waiting_decision` requires a non-empty
+  `blockingTicketId`, and projected approval wait requires a non-empty
+  `blockingApprovalId`. This keeps TUI as a projection consumer and prevents a
+  local decision/approval prompt from being inferred from state alone. workorchd
+  projection, governance owner state, scheduler, runtime state machine, ledger,
   required output, validator, repair and decision gates were intentionally not
   changed in this slice.

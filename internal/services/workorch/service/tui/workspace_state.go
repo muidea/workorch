@@ -563,11 +563,11 @@ func (m *AppModel) activeWorkspaceBlockerProgress() (progressState, bool) {
 	}
 	switch ws.State {
 	case common.WorkspaceStateWaitingDecision:
-		if workspaceOverviewHasProjectionAuthority(ws) {
+		if ws.BlockingTicketID != "" && workspaceOverviewHasProjectionAuthority(ws) {
 			return progressWaitingDecision, true
 		}
 	case common.WorkspaceStateBlocked:
-		if workspaceOverviewHasProjectionAuthority(ws) {
+		if ws.BlockingApprovalID != "" && workspaceOverviewHasProjectionAuthority(ws) {
 			return progressWaitingApproval, true
 		}
 	}
@@ -1366,33 +1366,27 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 	m.applyWorkspaceProgress(ws.State)
 	switch ws.State {
 	case common.WorkspaceStateWaitingDecision:
-		if !workspaceOverviewHasProjectionAuthority(ws) {
+		if ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
+			m.clearBlockingInputState()
 			return nil
 		}
 		m.running = false
-		if ws.BlockingTicketID != "" {
-			m.progress = progressWaitingDecision
-			m.setBlockingDecision(ws.BlockingTicketID, ws.ID, ws.ActiveRunID, "", "")
-			m.progressText = nonEmpty(blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
-			m.followBlockerTailUnlessUserScrolled()
-			return m.fetchActiveBlockerDetails()
-		}
 		m.progress = progressWaitingDecision
-		m.progressText = "Waiting for decision"
+		m.setBlockingDecision(ws.BlockingTicketID, ws.ID, ws.ActiveRunID, "", "")
+		m.progressText = nonEmpty(blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
+		m.followBlockerTailUnlessUserScrolled()
+		return m.fetchActiveBlockerDetails()
 	case common.WorkspaceStateBlocked:
-		if !workspaceOverviewHasProjectionAuthority(ws) {
+		if ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
+			m.clearBlockingInputState()
 			return nil
 		}
 		m.running = false
-		if ws.BlockingApprovalID != "" {
-			m.progress = progressWaitingApproval
-			m.setBlockingApproval(ws.BlockingApprovalID, ws.ID, ws.ActiveRunID, "", "", nil)
-			m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
-			m.followBlockerTailUnlessUserScrolled()
-			return m.fetchActiveBlockerDetails()
-		}
 		m.progress = progressWaitingApproval
-		m.progressText = "Waiting for approval"
+		m.setBlockingApproval(ws.BlockingApprovalID, ws.ID, ws.ActiveRunID, "", "", nil)
+		m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
+		m.followBlockerTailUnlessUserScrolled()
+		return m.fetchActiveBlockerDetails()
 	default:
 		m.blockingDecision = nil
 		m.blockingApproval = nil

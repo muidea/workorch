@@ -1084,10 +1084,11 @@ func TestModelBlockedWorkspaceInputRefreshesBlockerInsteadOfContinuing(t *testin
 	m := NewAppModel(be, "ws-1", "")
 	m.activeWorkspaceID = "ws-1"
 	m.workspaces = []backend.WorkspaceInfo{{
-		ID:          "ws-1",
-		State:       common.WorkspaceStateWaitingDecision,
-		ActiveRunID: "run-1",
-		Projection:  backend.ProjectionInfo{WorkspaceRevision: 7},
+		ID:               "ws-1",
+		State:            common.WorkspaceStateWaitingDecision,
+		ActiveRunID:      "run-1",
+		BlockingTicketID: "ticket-1",
+		Projection:       backend.ProjectionInfo{WorkspaceRevision: 7},
 	}}
 	m.activeRunID = "run-1"
 	m.input = "resume"
@@ -1100,11 +1101,8 @@ func TestModelBlockedWorkspaceInputRefreshesBlockerInsteadOfContinuing(t *testin
 	if len(be.resumes) != 0 || len(be.goals) != 0 {
 		t.Fatalf("unexpected backend calls: resumes=%v goals=%v", be.resumes, be.goals)
 	}
-	if m.progress != progressWaitingDecision || !strings.Contains(m.progressText, "Waiting for") {
-		t.Fatalf("progress = %s %q, want waiting decision", m.progress, m.progressText)
-	}
-	if m.input != "resume" {
-		t.Fatalf("input = %q, want preserved answer text", m.input)
+	if m.progress != progressWaitingDecision || m.blockingDecision == nil || m.blockingDecision.ID != "ticket-1" {
+		t.Fatalf("progress/blocker = %s/%+v, want waiting decision ticket-1", m.progress, m.blockingDecision)
 	}
 }
 
@@ -4274,6 +4272,60 @@ func TestModelWorkspaceListSynchronizesWaitingDecisionPrompt(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "Waiting for decision") || !strings.Contains(view, "ws-a decision >") {
 		t.Fatalf("view did not reflect waiting decision overview:\n%s", view)
+	}
+}
+
+func TestModelProjectedWaitingDecisionWithoutTicketDoesNotOwnPrompt(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.progress = progressSubmitting
+	m.progressText = "Checking workspace run state"
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{
+			ID:          "ws-a",
+			Title:       "A",
+			State:       common.WorkspaceStateWaitingDecision,
+			ActiveRunID: "run-a",
+			Projection:  backend.ProjectionInfo{WorkspaceRevision: 31},
+			ViewModel:   backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", WorkspaceRevision: 31},
+		},
+	}})
+	m = asModel(next)
+	if m.blockingDecision != nil || m.progress == progressWaitingDecision {
+		t.Fatalf("model inferred decision blocker without ticket: progress=%s blocker=%+v", m.progress, m.blockingDecision)
+	}
+	if mode := m.activeWorkspacePromptMode(); mode == workspacePromptModeDecision {
+		t.Fatalf("prompt mode = %q, want non-decision without blocking ticket", mode)
+	}
+	input := stripANSI(m.renderInput(120))
+	if strings.Contains(input, "decision >") {
+		t.Fatalf("input prompt = %q, want no decision prompt without blocking ticket", input)
+	}
+}
+
+func TestModelProjectedBlockedWithoutApprovalIDDoesNotOwnPrompt(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.progress = progressSubmitting
+	m.progressText = "Checking workspace run state"
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{
+			ID:          "ws-a",
+			Title:       "A",
+			State:       common.WorkspaceStateBlocked,
+			ActiveRunID: "run-a",
+			Projection:  backend.ProjectionInfo{WorkspaceRevision: 31},
+			ViewModel:   backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", WorkspaceRevision: 31},
+		},
+	}})
+	m = asModel(next)
+	if m.blockingApproval != nil || m.progress == progressWaitingApproval {
+		t.Fatalf("model inferred approval blocker without approval id: progress=%s blocker=%+v", m.progress, m.blockingApproval)
+	}
+	if mode := m.activeWorkspacePromptMode(); mode == workspacePromptModeApproval {
+		t.Fatalf("prompt mode = %q, want non-approval without blocking approval id", mode)
+	}
+	input := stripANSI(m.renderInput(120))
+	if strings.Contains(input, "approval >") {
+		t.Fatalf("input prompt = %q, want no approval prompt without blocking approval id", input)
 	}
 }
 
