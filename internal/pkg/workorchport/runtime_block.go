@@ -1,29 +1,22 @@
 package workorchport
 
-import "strings"
+import runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
 const (
-	StepKindWorkspaceExecution = "llm/workspace_execution"
-	StepKindWorkspacePlan      = "llm/workspace-plan"
+	StepKindWorkspaceExecution = runtimemodel.StepKindLLMWorkspaceExecution
+	StepKindWorkspacePlan      = runtimemodel.StepKindLLMWorkspacePlan
 )
 
 const (
-	RuntimeBlockKindPatchApply      = "patch/apply"
-	RuntimeBlockKindPatchPreview    = "patch/preview"
-	RuntimeBlockKindPatchRevert     = "patch/revert"
-	RuntimeBlockKindDecisionRequest = "decision/request"
-	RuntimeBlockKindApprovalRequest = "approval/request"
-	RuntimeBlockKindMemoryWrite     = "memory/write"
-	RuntimeBlockKindDoDAssessment   = "dod/assessment"
+	RuntimeBlockKindPatchApply      = runtimemodel.RuntimeBlockKindPatchApply
+	RuntimeBlockKindPatchPreview    = runtimemodel.RuntimeBlockKindPatchPreview
+	RuntimeBlockKindPatchRevert     = runtimemodel.RuntimeBlockKindPatchRevert
+	RuntimeBlockKindDecisionRequest = runtimemodel.RuntimeBlockKindDecisionRequest
+	RuntimeBlockKindApprovalRequest = runtimemodel.RuntimeBlockKindApprovalRequest
+	RuntimeBlockKindMemoryWrite     = runtimemodel.RuntimeBlockKindMemoryWrite
+	RuntimeBlockKindDoDAssessment   = runtimemodel.RuntimeBlockKindDoDAssessment
 )
 
 func CanonicalRuntimeBlockKind(kind string) string {
-	switch strings.TrimSpace(kind) {
-	case StepKindWorkspaceExecution, StepKindWorkspacePlan:
-		return StepKindWorkspaceExecution
-	case "patchRequests", "patch/request":
-		return RuntimeBlockKindPatchApply
-	default:
-		return strings.TrimSpace(kind)
-	}
+	return runtimemodel.CanonicalRuntimeBlockKind(kind)
 }
