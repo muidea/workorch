@@ -224,6 +224,34 @@ Status: completed
 - queue=0、in-flight=0 时 metadata scan 不持续快速增长。
 - projection list/summary 路径不克隆 detail-heavy payload；显式 detail/snapshot 路径仍保留完整 detail 投影。
 
+### S8 Observability Full Payload Read Boundary
+
+Status: completed
+
+目标：显式 observability/debug 读取必须保持完整事件时间线和 payload hydrate，
+不能被普通 projection/detail snapshot 的轻量缓存降级。
+
+合同：
+
+- 普通 run/workspace snapshot 默认可使用 compact metadata-only event timeline。
+- terminal run snapshot warm cache 只能服务普通 snapshot/status/detail 投影路径。
+- run observability 必须走 observability read model 路径，保留 stream progress
+  timeline 和 payload hydrate。
+- observability 不能从 compact run snapshot cache 或 warmup inflight 中派生。
+
+不处理：
+
+- 不改变 projection list/summary 行为。
+- 不改变 runtime 状态机、ledger、required output、validator、repair 或 decision gate。
+- 不新增 watchdog 或补偿恢复。
+
+验收：
+
+- snapshot/status 仍可复用 terminal run snapshot cache。
+- observability 即使存在 terminal snapshot cache 或 warmup inflight，也会触发独立
+  observability read。
+- observability 入口不被 compact snapshot 的 payload/timeline 策略影响。
+
 ## Progress Log
 
 - 2026-06-30: created plan from live verification. Active slice is S1 only.
@@ -293,3 +321,10 @@ Status: completed
   workspace list without hydrating snapshots. Runtime S1-S6 semantics,
   coverage ledger, required output rendering, validator, repair and decision
   gates were intentionally not changed in this slice.
+- 2026-07-01: completed S8 by isolating run observability from compact terminal
+  run snapshot cache and snapshot warmup inflight. The `/observability` route
+  now always uses the explicit observability read path so debug reads preserve
+  full timeline/payload semantics, while ordinary snapshot/status reads keep
+  their compact cache behavior. Runtime state machine, ledger, required output,
+  validator, repair, decision and template policy were intentionally not
+  changed in this slice.

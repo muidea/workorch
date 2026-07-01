@@ -215,15 +215,6 @@ func (s *serverState) attachSchedulerDiagnosticsToWorkspaceSnapshot(item appserv
 }
 
 func (s *serverState) readRunObservabilityCached(ctx context.Context, runID string) (appservice.RunObservability, error) {
-	if cached, ok := s.cachedRunSnapshot(ctx, runID); ok {
-		return appservice.RunObservabilityFromSnapshot(cached), nil
-	}
-	if item, err, ok := s.waitRunSnapshotInflight(ctx, runID); ok {
-		if err != nil {
-			return appservice.RunObservability{}, err
-		}
-		return appservice.RunObservabilityFromSnapshot(item), nil
-	}
 	item, err := s.readRunObservability(ctx, s.config.Backend, s.config.DataRoot, runID)
 	if err != nil {
 		return appservice.RunObservability{}, err

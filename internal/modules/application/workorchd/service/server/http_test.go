@@ -3621,7 +3621,7 @@ func TestRunStatusWaitUsesStatusChangeNotification(t *testing.T) {
 	}
 }
 
-func TestTerminalRunSnapshotCacheReusesSnapshotForReadViews(t *testing.T) {
+func TestTerminalRunSnapshotCacheReusesSnapshotForSnapshotAndStatusOnly(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	var snapshotReads atomic.Int32
 	var observabilityReads atomic.Int32
@@ -3653,8 +3653,8 @@ func TestTerminalRunSnapshotCacheReusesSnapshotForReadViews(t *testing.T) {
 	if snapshotReads.Load() != 1 {
 		t.Fatalf("snapshot reads = %d, want cached single read", snapshotReads.Load())
 	}
-	if observabilityReads.Load() != 0 {
-		t.Fatalf("observability reads = %d, want cached snapshot projection", observabilityReads.Load())
+	if observabilityReads.Load() != 1 {
+		t.Fatalf("observability reads = %d, want independent full observability read", observabilityReads.Load())
 	}
 
 	state.notifyRunStatusChanged()
@@ -3908,20 +3908,17 @@ func TestRunObservabilityReadWaitsForTerminalStatusWarmupInflight(t *testing.T) 
 	if snapshotReads.Load() != 1 {
 		t.Fatalf("snapshot reads before warmup release = %d, want only background read in flight", snapshotReads.Load())
 	}
-	if observabilityReads.Load() != 0 {
-		t.Fatalf("observability reads before warmup release = %d, want snapshot inflight reuse", observabilityReads.Load())
-	}
-	close(releaseRead)
 	select {
 	case <-observabilityDone:
 	case <-time.After(time.Second):
-		t.Fatal("observability endpoint did not complete from warmup in-flight read")
+		t.Fatal("observability endpoint did not complete from independent observability read")
 	}
+	if observabilityReads.Load() != 1 {
+		t.Fatalf("observability reads = %d, want independent full observability read", observabilityReads.Load())
+	}
+	close(releaseRead)
 	if snapshotReads.Load() != 1 {
-		t.Fatalf("snapshot reads = %d, want in-flight warm read reused by observability endpoint", snapshotReads.Load())
-	}
-	if observabilityReads.Load() != 0 {
-		t.Fatalf("observability reads = %d, want cached snapshot projection", observabilityReads.Load())
+		t.Fatalf("snapshot reads = %d, want warmup read not reused by observability endpoint", snapshotReads.Load())
 	}
 }
 
