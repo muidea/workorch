@@ -6264,6 +6264,27 @@ func TestWorkorchDRunResumeHTTPRejectsRestartIntent(t *testing.T) {
 	}
 }
 
+func TestWorkorchDRunResumeHTTPRejectsRecoverIntent(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	handler := newMuxWithState(state)
+	workspace := createWorkspaceForHTTP(t, handler, "run resume rejects recover intent", "workspaces/run-resume-rejects-recover")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-http-recover/resume", strings.NewReader(`{"intent":"recover","requestId":"request-http-recover"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("run resume recover status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
+	if err != nil {
+		t.Fatalf("read projected workspace snapshot: %v", err)
+	}
+	if snapshot.RunCommand != nil {
+		t.Fatalf("projected run command = %+v, want no recover command projection", snapshot.RunCommand)
+	}
+}
+
 func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	handler := newMuxWithState(state)
@@ -6484,6 +6505,43 @@ func TestWorkorchDSchedulerCommandRejectsRunScopeMismatch(t *testing.T) {
 	state.runContinuations.runMu.Unlock()
 	if pendingCount != 0 {
 		t.Fatalf("run pending count = %d, want no queued command after scope mismatch", pendingCount)
+	}
+}
+
+func TestWorkorchDSchedulerCommandRejectsRecoverIntent(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	hub := events.NewMemoryHub()
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	const workspaceID = "ws-scheduler-reject-recover"
+	const runID = "run-scheduler-reject-recover"
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"},
+	})
+
+	err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workspaceID, runID, map[string]any{
+		events.PayloadKeyWorkspaceID: workspaceID,
+		events.PayloadKeyRunID:       runID,
+		events.PayloadKeyIntent:      "recover",
+		events.PayloadKeyRequestID:   "request-recover-rejected",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("publish recover scheduler command error = %v, want invalid argument", err)
+	}
+	state.runContinuations.runMu.Lock()
+	runPendingCount := len(state.runContinuations.runPending)
+	state.runContinuations.runMu.Unlock()
+	if runPendingCount != 0 {
+		t.Fatalf("run pending count = %d, want no queued recover command", runPendingCount)
+	}
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspaceID)
+	if err != nil {
+		t.Fatalf("read projected workspace snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.State != "rejected" ||
+		snapshot.RunCommand.Intent != "recover" ||
+		snapshot.RunCommand.RequestID != "request-recover-rejected" {
+		t.Fatalf("projected run command = %+v, want rejected recover command", snapshot.RunCommand)
 	}
 }
 

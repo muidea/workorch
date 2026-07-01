@@ -331,7 +331,7 @@ func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *htt
 			intent = "resume"
 		}
 		switch intent {
-		case "resume", "replan", "recover":
+		case "resume", "replan":
 		default:
 			writeBusinessError(w, common.ErrInvalidArgument)
 			return

@@ -56,7 +56,6 @@ const (
 	RunCommandIntentResume  = port.RunCommandIntentResume
 	RunCommandIntentRestart = port.RunCommandIntentRestart
 	RunCommandIntentReplan  = port.RunCommandIntentReplan
-	RunCommandIntentRecover = port.RunCommandIntentRecover
 )
 
 func NormalizeRunCommandIntent(intent RunCommandIntent) (RunCommandIntent, error) {

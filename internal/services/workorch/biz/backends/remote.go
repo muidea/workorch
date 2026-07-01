@@ -1023,7 +1023,7 @@ func (b *remoteRunBackend) Command(ctx context.Context, req WorkspaceRunCommand)
 		return b.runCommandViaResume(ctx, req, RunCommandIntentResume)
 	case RunCommandIntentRestart:
 		return b.restart(ctx, req.WorkspaceID, mergeActivationRequest(req.Activation, req))
-	case RunCommandIntentReplan, RunCommandIntentRecover:
+	case RunCommandIntentReplan:
 		if req.ExpectedRunID == "" {
 			return nil, fmt.Errorf("%w: expectedRunId is required for %s", common.ErrInvalidArgument, intent)
 		}

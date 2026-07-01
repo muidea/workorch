@@ -371,7 +371,7 @@ func schedulerCommandIdempotencyKey(envelope events.Envelope) string {
 			Intent:      "replan",
 			DecisionID:  req.DecisionID,
 		})
-	case "resume", "recover":
+	case "resume":
 		return governanceRunResumeKey(governanceRunResumeRef{
 			WorkspaceID: req.WorkspaceID,
 			RunID:       req.RunID,
@@ -449,20 +449,6 @@ func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, envel
 				RequestID:   req.RequestID,
 				DecisionID:  req.DecisionID,
 			}}, req.Priority) {
-				return schedulerCommandQueueError(envelope.Topic)
-			}
-			return nil
-		case "recover":
-			if strings.TrimSpace(req.RunID) == "" {
-				return common.ErrInvalidArgument
-			}
-			if !s.runContinuations.scheduleRunContinuation(runContinuationRequest{
-				WorkspaceID:           req.WorkspaceID,
-				RunID:                 req.RunID,
-				Action:                "resume",
-				Priority:              req.Priority,
-				ExecutionContextPatch: req.ExecutionContextPatch,
-			}) {
 				return schedulerCommandQueueError(envelope.Topic)
 			}
 			return nil

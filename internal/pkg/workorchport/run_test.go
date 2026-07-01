@@ -18,7 +18,7 @@ func TestNormalizeRunCommandIntent(t *testing.T) {
 		{name: "resume", input: RunCommandIntentResume, want: RunCommandIntentResume},
 		{name: "restart", input: RunCommandIntentRestart, want: RunCommandIntentRestart},
 		{name: "replan", input: RunCommandIntentReplan, want: RunCommandIntentReplan},
-		{name: "recover", input: RunCommandIntentRecover, want: RunCommandIntentRecover},
+		{name: "recover is not canonical", input: RunCommandIntent("recover"), wantErr: true},
 		{name: "unsupported intent", input: RunCommandIntent("unsupported"), wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

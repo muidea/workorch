@@ -45,14 +45,13 @@ const (
 	RunCommandIntentResume  RunCommandIntent = "resume"
 	RunCommandIntentRestart RunCommandIntent = "restart"
 	RunCommandIntentReplan  RunCommandIntent = "replan"
-	RunCommandIntentRecover RunCommandIntent = "recover"
 )
 
 func NormalizeRunCommandIntent(intent RunCommandIntent) (RunCommandIntent, error) {
 	switch intent {
 	case "":
 		return RunCommandIntentResume, nil
-	case RunCommandIntentResume, RunCommandIntentRestart, RunCommandIntentReplan, RunCommandIntentRecover:
+	case RunCommandIntentResume, RunCommandIntentRestart, RunCommandIntentReplan:
 		return intent, nil
 	default:
 		return "", fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, intent)

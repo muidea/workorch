@@ -280,6 +280,37 @@ Status: completed
 - 显式 `view=full` 仍能流式和 replay raw owner event。
 - 默认和 projection view 都只暴露 server-projected ViewModel event。
 
+### S10 Canonical Run Command Intent Boundary
+
+Status: completed
+
+目标：`resume` 是唯一常规推进语义，`recover` 不再作为 port、REST、
+EventHub scheduler 或 projection 可见的 run command intent。
+
+合同：
+
+- `workorchport.NormalizeRunCommandIntent` 只接受 `resume`、`restart`、
+  `replan`，空 intent 归一化为 `resume`。
+- REST run resume body 的 `intent` 只接受 `resume` 或 `replan`；`recover`
+  必须被拒绝，不能进入 scheduler command。
+- workorchd scheduler command 只接受 `resume`、`restart`、`replan`。
+- run command projection/idempotency key 不再生成 `recover/...`。
+
+不处理：
+
+- 不改变 watchdog 的 runtime gap recovery owner command。
+- 不改变 startup inactive running reconciliation。
+- 不改变 run continuation queue、workspace restart queue 或 decision replan
+  continuation 语义。
+- 不改变 runtime ledger、required output、validator、repair 或 decision gate。
+
+验收：
+
+- port normalize 单测证明 `recover` 被拒绝。
+- HTTP run resume 单测证明 `intent=recover` 不被 scheduler 接受。
+- scheduler command 单测证明直接投递 `recover` 不入队。
+- 边界搜索确认主 run command intent 不再暴露 `RunCommandIntentRecover`。
+
 ## Progress Log
 
 - 2026-06-30: created plan from live verification. Active slice is S1 only.
@@ -363,4 +394,12 @@ Status: completed
   records the full stream explicitly, so observability/debug replay remains
   available. Runtime state machine, ledger, projection builder, required output,
   validator, repair, decision and template policy were intentionally not
+  changed in this slice.
+- 2026-07-01: completed S10 by removing the non-canonical `recover` run command
+  intent from workorchport, remote backend dispatch, REST resume payload
+  validation and workorchd scheduler command handling. Runtime gap recovery
+  remains a separate owner command for watchdog/external timeout paths; it is
+  no longer exposed as a user-visible run command intent. Run continuation
+  queue behavior, restart/replan semantics, runtime state machine, ledger,
+  required output, validator, repair and decision gates were intentionally not
   changed in this slice.
