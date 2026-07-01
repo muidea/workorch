@@ -13,6 +13,18 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
+func TestNormalizeEventStreamViewDefaultsToProjection(t *testing.T) {
+	if got := normalizeEventStreamView(""); got != eventStreamViewProjection {
+		t.Fatalf("default stream view = %q, want projection", got)
+	}
+	if got := normalizeEventStreamView("full"); got != eventStreamViewFull {
+		t.Fatalf("full stream view = %q, want full", got)
+	}
+	if got := normalizeEventStreamView("unknown"); got != eventStreamViewProjection {
+		t.Fatalf("unknown stream view = %q, want projection", got)
+	}
+}
+
 func TestSubscribeServerStreamEventsReceivesProjectionAcrossHubWrappers(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(32)

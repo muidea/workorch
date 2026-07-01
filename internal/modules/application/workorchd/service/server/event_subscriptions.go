@@ -14,10 +14,12 @@ const (
 
 func normalizeEventStreamView(view string) string {
 	switch strings.ToLower(strings.TrimSpace(view)) {
-	case eventStreamViewProjection:
+	case "", eventStreamViewProjection:
 		return eventStreamViewProjection
-	default:
+	case eventStreamViewFull:
 		return eventStreamViewFull
+	default:
+		return eventStreamViewProjection
 	}
 }
 

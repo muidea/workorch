@@ -1198,7 +1198,7 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream&view=full", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -1263,7 +1263,7 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 	}
 }
 
-func TestEventStreamProjectionViewPublishesOnlyProjectionEvents(t *testing.T) {
+func TestEventStreamDefaultProjectionViewPublishesOnlyProjectionEvents(t *testing.T) {
 	hub := events.NewMemoryHub()
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
 	server := httptest.NewServer(newMuxWithState(state))
@@ -1271,7 +1271,7 @@ func TestEventStreamProjectionViewPublishesOnlyProjectionEvents(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-projection&view=projection", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-projection", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -1336,7 +1336,7 @@ func TestEventStreamWritesIDRevisionAndStateSummary(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream-summary", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream-summary&view=full", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -1379,7 +1379,7 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream-replay", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream-replay&view=full", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -1412,7 +1412,7 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 
-	replayReq, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream-replay", nil)
+	replayReq, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream-replay&view=full", nil)
 	if err != nil {
 		t.Fatalf("new replay request: %v", err)
 	}
@@ -1439,7 +1439,7 @@ func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream-query-replay", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream-query-replay&view=full", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -1472,7 +1472,7 @@ func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 
-	replayURL := server.URL + "/api/v1/workorch/events/stream?workspaceId=ws-stream-query-replay&lastEventId=" + url.QueryEscape(firstID)
+	replayURL := server.URL + "/api/v1/workorch/events/stream?workspaceId=ws-stream-query-replay&view=full&lastEventId=" + url.QueryEscape(firstID)
 	replayReq, err := http.NewRequestWithContext(ctx, http.MethodGet, replayURL, nil)
 	if err != nil {
 		t.Fatalf("new replay request: %v", err)
@@ -1516,7 +1516,7 @@ func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-persist&runId=run-persist", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-persist&runId=run-persist&view=full", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -1548,7 +1548,7 @@ func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEvent(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?view=full", nil)
 	if err != nil {
 		t.Fatalf("new stream request: %v", err)
 	}
@@ -1610,7 +1610,7 @@ func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEventToMultipleClients(t 
 
 	openStream := func(name string) (<-chan string, <-chan error, func()) {
 		t.Helper()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream", nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?view=full", nil)
 		if err != nil {
 			t.Fatalf("%s new stream request: %v", name, err)
 		}

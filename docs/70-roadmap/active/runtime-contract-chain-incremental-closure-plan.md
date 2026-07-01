@@ -252,6 +252,34 @@ Status: completed
   observability read。
 - observability 入口不被 compact snapshot 的 payload/timeline 策略影响。
 
+### S9 SSE Projection-First Default View
+
+Status: completed
+
+目标：TUI/Web 默认事件流必须是 projection-first，full owner event stream 只能
+通过显式 debug/full view 使用。
+
+合同：
+
+- `/api/v1/workorch/events/stream` 默认 view 是 `projection`。
+- `?view=projection` 与默认行为一致，只订阅 `workspace_projection_changed`。
+- `?view=full` 保留原 full owner event stream，用于调试、观测和 raw event
+  replay。
+- 未识别 view 必须降级为 projection，而不是 full。
+
+不处理：
+
+- 不改变 EventHub owner event 发布。
+- 不改变 event replay recorder 的内部 full 记录能力。
+- 不改变 projection builder、runtime 状态机、ledger、required output、
+  validator、repair 或 decision gate。
+
+验收：
+
+- 默认 stream 不转发 raw step/workspace owner event payload。
+- 显式 `view=full` 仍能流式和 replay raw owner event。
+- 默认和 projection view 都只暴露 server-projected ViewModel event。
+
 ## Progress Log
 
 - 2026-06-30: created plan from live verification. Active slice is S1 only.
@@ -326,5 +354,13 @@ Status: completed
   now always uses the explicit observability read path so debug reads preserve
   full timeline/payload semantics, while ordinary snapshot/status reads keep
   their compact cache behavior. Runtime state machine, ledger, required output,
+  validator, repair, decision and template policy were intentionally not
+  changed in this slice.
+- 2026-07-01: completed S9 by changing public SSE stream view normalization to
+  projection-first. Unqualified `/events/stream` requests now subscribe only to
+  `workspace_projection_changed`, while existing raw owner event stream tests
+  and clients must opt in with `view=full`. The internal replay recorder still
+  records the full stream explicitly, so observability/debug replay remains
+  available. Runtime state machine, ledger, projection builder, required output,
   validator, repair, decision and template policy were intentionally not
   changed in this slice.
