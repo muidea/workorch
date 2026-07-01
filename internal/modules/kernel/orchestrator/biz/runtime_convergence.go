@@ -12,7 +12,6 @@ const (
 	convergenceStateNeedValidation  = "need_validation"
 	convergenceStateNeedAssessment  = "need_assessment"
 	convergenceStateNeedGovernance  = "need_governance"
-	convergenceStateComplete        = "complete"
 	convergenceStateBlocked         = "blocked"
 )
 
@@ -29,6 +28,8 @@ type ConvergenceContract struct {
 	SourceRefs                      []map[string]any
 	TargetEvidence                  map[string]any
 	HistoricalSignals               map[string]any
+	DeterministicComplete           bool
+	CompletionReason                string
 }
 
 type convergenceSubsystem struct{}
@@ -735,13 +736,15 @@ func populateCompleteConvergenceContract(contract *ConvergenceContract, reason s
 	if contract == nil {
 		return
 	}
-	contract.State = convergenceStateComplete
+	contract.State = ""
 	contract.RuntimeStage = runtimeStageVerification
 	contract.RuntimeStageMode = "deterministic_ledger"
+	contract.DeterministicComplete = true
+	contract.CompletionReason = strings.TrimSpace(reason)
 	if contract.RepairActionPackage == nil {
 		contract.RepairActionPackage = map[string]any{}
 	}
-	contract.RepairActionPackage["completionReason"] = strings.TrimSpace(reason)
+	contract.RepairActionPackage["completionReason"] = contract.CompletionReason
 }
 
 func populateTargetSnapshotAcquisitionConvergenceContract(input map[string]any, contract *ConvergenceContract) {
@@ -1849,12 +1852,32 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 	if input == nil {
 		input = map[string]any{}
 	}
-	if contract.State == "" || contract.State == convergenceStateBlocked {
+	if !contract.DeterministicComplete && (contract.State == "" || contract.State == convergenceStateBlocked) {
 		return input
 	}
 	clearConvergenceDerivedOutputModeFields(input)
-	input["convergenceContract"] = compactConvergenceContract(contract)
 	syncConvergenceNextActionWithContract(input, contract)
+	if contract.DeterministicComplete {
+		delete(input, "convergenceContract")
+		setRuntimeStage(input, runtimeStageVerification)
+		input[stepInputKeySoulStage] = soulStageValidation
+		delete(input, "replanStateChangingContinuation")
+		delete(input, stepInputKeyAssessmentOnly)
+		delete(input, "assessmentOnlyReason")
+		delete(input, "assessmentOnlyContractCorrection")
+		delete(input, "runtimeRepairFollowUp")
+		delete(input, stepInputKeyProviderRetryFollowUp)
+		delete(input, "repairObjective")
+		delete(input, "stateChangingOutputRequired")
+		delete(input, "concreteFailureEvidenceRequired")
+		delete(input, "boundedValidationRequired")
+		delete(input, "evidenceRepairRequired")
+		delete(input, "repairGuidance")
+		delete(input, "repairActionPackage")
+		delete(input, "requiredOutput")
+		return input
+	}
+	input["convergenceContract"] = compactConvergenceContract(contract)
 	switch contract.State {
 	case convergenceStateNeedEvidence:
 		setRuntimeStage(input, runtimeStageRepair)
@@ -1989,23 +2012,6 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		delete(input, "boundedValidationRequired")
 		delete(input, "evidenceRepairRequired")
 		stripRepairActionPackageExecutableOutputContract(input)
-	case convergenceStateComplete:
-		setRuntimeStage(input, runtimeStageVerification)
-		input[stepInputKeySoulStage] = soulStageValidation
-		delete(input, "replanStateChangingContinuation")
-		delete(input, stepInputKeyAssessmentOnly)
-		delete(input, "assessmentOnlyReason")
-		delete(input, "assessmentOnlyContractCorrection")
-		delete(input, "runtimeRepairFollowUp")
-		delete(input, stepInputKeyProviderRetryFollowUp)
-		delete(input, "repairObjective")
-		delete(input, "stateChangingOutputRequired")
-		delete(input, "concreteFailureEvidenceRequired")
-		delete(input, "boundedValidationRequired")
-		delete(input, "evidenceRepairRequired")
-		delete(input, "repairGuidance")
-		delete(input, "repairActionPackage")
-		delete(input, "requiredOutput")
 	case convergenceStateNeedGovernance:
 		setRuntimeStage(input, runtimeStageDecision)
 		input[stepInputKeySoulStage] = soulStageDecision
@@ -2115,6 +2121,9 @@ func syncConvergenceNextActionMap(input map[string]any, key string, action map[s
 }
 
 func convergenceNextActionForContract(contract ConvergenceContract) map[string]any {
+	if contract.DeterministicComplete {
+		return map[string]any{"kind": "complete", "reason": firstNonEmptyString(contract.CompletionReason, "current convergence contract is deterministically satisfied")}
+	}
 	switch contract.State {
 	case convergenceStateNeedEvidence:
 		kind := "acquire_evidence"
@@ -2135,8 +2144,6 @@ func convergenceNextActionForContract(contract ConvergenceContract) map[string]a
 		return map[string]any{"kind": "validate", "reason": "current convergence contract requires bounded validation evidence"}
 	case convergenceStateNeedAssessment:
 		return map[string]any{"kind": "assessment", "reason": "current convergence contract requires bounded coverage assessment"}
-	case convergenceStateComplete:
-		return map[string]any{"kind": "complete", "reason": "current convergence contract is deterministically satisfied"}
 	case convergenceStateNeedGovernance:
 		return map[string]any{"kind": "request_governance", "reason": firstNonEmptyString(contract.GovernanceReason, "current convergence contract requires governance")}
 	default:
@@ -3401,12 +3408,21 @@ func convergenceSourceRefs(currentStep *runModel.Step, failedStep *runModel.Step
 }
 
 func compactConvergenceContract(contract ConvergenceContract) map[string]any {
-	ret := map[string]any{
-		"state":        contract.State,
-		"runtimeStage": contract.RuntimeStage,
+	ret := map[string]any{}
+	if contract.State != "" {
+		ret["state"] = contract.State
+	}
+	if contract.RuntimeStage != "" {
+		ret["runtimeStage"] = contract.RuntimeStage
 	}
 	if contract.RuntimeStageMode != "" {
 		ret["runtimeStageMode"] = contract.RuntimeStageMode
+	}
+	if contract.DeterministicComplete {
+		ret["deterministicComplete"] = true
+		if contract.CompletionReason != "" {
+			ret["completionReason"] = contract.CompletionReason
+		}
 	}
 	if contract.RepairObjective != "" {
 		ret["repairObjective"] = contract.RepairObjective

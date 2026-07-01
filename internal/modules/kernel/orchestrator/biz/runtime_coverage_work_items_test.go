@@ -604,8 +604,8 @@ func TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket(t *tes
 		}
 	}
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
-	if contract.State != convergenceStateComplete || contract.RuntimeStageMode != "deterministic_ledger" {
-		t.Fatalf("convergenceContract = %+v, want deterministic complete from authority next action", contract)
+	if contract.State != "" || !contract.DeterministicComplete || contract.RuntimeStageMode != "deterministic_ledger" {
+		t.Fatalf("convergenceContract = %+v, want deterministic completion without convergence state from authority next action", contract)
 	}
 	applied := ApplyConvergenceContract(input, contract)
 	if boolValue(applied["concreteFailureEvidenceRequired"]) || boolValue(mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])["mustProduceConcreteFailureEvidence"]) {

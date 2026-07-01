@@ -2834,8 +2834,8 @@ func TestInitialStepInputAuthorityDeterministicCompletePreemptsStaleReplanStateC
 		t.Fatalf("convergenceAuthority.nextAction = %q, want complete; input=%+v", got, input)
 	}
 	contract := mapFromValue(input["convergenceContract"])
-	if stringFromMap(contract, "state") != convergenceStateComplete {
-		t.Fatalf("convergenceContract = %+v, want complete", contract)
+	if state := stringFromMap(contract, "state"); state != "" {
+		t.Fatalf("convergenceContract.state = %q, want no completion state", state)
 	}
 	if input[stepInputKeyRuntimeStage] != runtimeStageVerification {
 		t.Fatalf("input = %+v, want verification runtime stage", input)
@@ -3188,10 +3188,11 @@ func TestCoverageConvergenceFullChainActionMatrix(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		input     map[string]any
-		wantState string
-		check     func(t *testing.T, input map[string]any, contract ConvergenceContract, applied map[string]any)
+		name         string
+		input        map[string]any
+		wantState    string
+		wantComplete bool
+		check        func(t *testing.T, input map[string]any, contract ConvergenceContract, applied map[string]any)
 	}{
 		{
 			name: "missing validation requires validation graph",
@@ -3256,11 +3257,14 @@ func TestCoverageConvergenceFullChainActionMatrix(t *testing.T) {
 			}), map[string]any{
 				"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
 			}),
-			wantState: convergenceStateComplete,
+			wantComplete: true,
 			check: func(t *testing.T, input map[string]any, contract ConvergenceContract, applied map[string]any) {
 				t.Helper()
-				if contract.RuntimeStageMode != "deterministic_ledger" {
-					t.Fatalf("contract = %+v, want deterministic complete", contract)
+				if !contract.DeterministicComplete || contract.State != "" || contract.RuntimeStageMode != "deterministic_ledger" {
+					t.Fatalf("contract = %+v, want deterministic completion without convergence state", contract)
+				}
+				if state := stringFromMap(mapFromValue(applied["convergenceContract"]), "state"); state != "" {
+					t.Fatalf("applied convergenceContract.state = %q, want no completion state", state)
 				}
 			},
 		},
@@ -3341,7 +3345,7 @@ func TestCoverageConvergenceFullChainActionMatrix(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			input := cloneStepPayload(tt.input)
 			contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
-			if contract.State != tt.wantState {
+			if contract.State != tt.wantState || contract.DeterministicComplete != tt.wantComplete {
 				t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, tt.wantState, contract)
 			}
 			applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
@@ -3454,8 +3458,8 @@ func TestBuildConvergenceContractCurrentFocusAssessmentPreemptsHistoricalCoverag
 	}
 
 	contract := BuildConvergenceContract(nil, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
-	if contract.State != convergenceStateComplete || contract.RuntimeStageMode != "deterministic_ledger" {
-		t.Fatalf("contract = %+v, want deterministic complete for current focus accepted binding", contract)
+	if contract.State != "" || !contract.DeterministicComplete || contract.RuntimeStageMode != "deterministic_ledger" {
+		t.Fatalf("contract = %+v, want deterministic completion without convergence state for current focus accepted binding", contract)
 	}
 }
 
@@ -3619,8 +3623,8 @@ func TestBuildConvergenceContractIgnoresExplicitDeliverableGapClosedByCoverageWo
 	}
 
 	contract := BuildConvergenceContract(nil, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
-	if contract.State != convergenceStateComplete || contract.RuntimeStageMode != "deterministic_ledger" {
-		t.Fatalf("contract = %+v, want deterministic complete when CWI already closed the explicit gap", contract)
+	if contract.State != "" || !contract.DeterministicComplete || contract.RuntimeStageMode != "deterministic_ledger" {
+		t.Fatalf("contract = %+v, want deterministic completion without convergence state when CWI already closed the explicit gap", contract)
 	}
 	if explicitCoverageGapShouldPreemptAssessment(input, failed) {
 		t.Fatalf("explicit coverage gap should not preempt assessment when CWI already closed it")

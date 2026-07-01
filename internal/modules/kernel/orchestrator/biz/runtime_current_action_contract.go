@@ -101,6 +101,9 @@ func currentActionNextActionFromConvergenceContract(contract map[string]any) map
 	if len(contract) == 0 {
 		return nil
 	}
+	if boolValue(contract["deterministicComplete"]) {
+		return map[string]any{"kind": "complete", "reason": firstNonEmptyString(stringFromMap(contract, "completionReason"), "current convergence contract is deterministically satisfied")}
+	}
 	state := strings.TrimSpace(stringFromMap(contract, "state"))
 	switch state {
 	case convergenceStateNeedEvidence:
