@@ -1845,7 +1845,7 @@ func (m *AppModel) activeBlockingDecision() *backend.DecisionInfo {
 			return nil
 		}
 		if ws.State == common.WorkspaceStateWaitingDecision {
-			if ws.BlockingTicketID == "" {
+			if ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 				return nil
 			}
 			if m.blockingDecision != nil && m.blockingDecision.ID == ws.BlockingTicketID && m.decisionMatchesActiveScope(*m.blockingDecision) {
@@ -1870,7 +1870,7 @@ func (m *AppModel) activeBlockingApproval() *backend.ApprovalInfo {
 			return nil
 		}
 		if ws.State == common.WorkspaceStateBlocked {
-			if ws.BlockingApprovalID == "" {
+			if ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 				return nil
 			}
 			if m.blockingApproval != nil && m.blockingApproval.ID == ws.BlockingApprovalID && m.approvalMatchesActiveScope(*m.blockingApproval) {
@@ -1896,7 +1896,7 @@ func (m *AppModel) decisionMatchesActiveScope(item backend.DecisionInfo) bool {
 		return item.RunID == common.RunID(m.activeRunID)
 	}
 	ws := m.activeWorkspaceOverview()
-	if ws == nil || ws.State != common.WorkspaceStateWaitingDecision || ws.BlockingTicketID == "" {
+	if ws == nil || ws.State != common.WorkspaceStateWaitingDecision || ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 		return false
 	}
 	if item.ID != ws.BlockingTicketID {
@@ -1916,7 +1916,7 @@ func (m *AppModel) approvalMatchesActiveScope(item backend.ApprovalInfo) bool {
 		return item.RunID == common.RunID(m.activeRunID)
 	}
 	ws := m.activeWorkspaceOverview()
-	if ws == nil || ws.State != common.WorkspaceStateBlocked || ws.BlockingApprovalID == "" {
+	if ws == nil || ws.State != common.WorkspaceStateBlocked || ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 		return false
 	}
 	if item.ID != ws.BlockingApprovalID {
@@ -2031,6 +2031,12 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		return m.requestWorkspaceListRefresh()
 	}
 	knownWorkspace := evt.WorkspaceID == "" || workspaceIndex(m.workspaces, string(evt.WorkspaceID)) >= 0
+	if m.backendEventYieldsToPromptModeProjection(evt) {
+		if !knownWorkspace {
+			return m.requestWorkspaceListRefresh()
+		}
+		return nil
+	}
 	if evt.WorkspaceID != "" {
 		m.upsertWorkspaceFromEvent(evt)
 	}
@@ -2239,6 +2245,89 @@ func (m *AppModel) recordWorkspaceEventRevision(evt backend.Event) tea.Cmd {
 		entry.LastRevision = evt.Revision
 	}
 	return nil
+}
+
+func (m *AppModel) backendEventYieldsToPromptModeProjection(evt backend.Event) bool {
+	if evt.Revision <= 0 || evt.WorkspaceID == "" {
+		return false
+	}
+	eventMode := backendEventPromptMode(evt)
+	if eventMode == "" {
+		return false
+	}
+	entry := m.workspaceRuntimeState(string(evt.WorkspaceID))
+	if entry == nil || entry.PromptMode == "" || entry.PromptModeRevision == 0 || evt.Revision > entry.PromptModeRevision {
+		return false
+	}
+	projectedMode := normalizePromptMode(entry.PromptMode)
+	if projectedMode != eventMode {
+		return true
+	}
+	expectedBlockerID := projectedPromptBlockerID(entry, projectedMode)
+	eventBlockerID := backendEventPromptBlockerID(evt, eventMode)
+	return expectedBlockerID != "" && eventBlockerID != expectedBlockerID
+}
+
+func backendEventPromptMode(evt backend.Event) string {
+	switch evt.Type {
+	case backend.EventWorkspaceStateChanged:
+		switch common.WorkspaceState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)) {
+		case common.WorkspaceStateWaitingDecision:
+			return workspacePromptModeDecision
+		case common.WorkspaceStateBlocked:
+			return workspacePromptModeApproval
+		case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
+			return workspacePromptModeRunning
+		case common.WorkspaceStateActive, common.WorkspaceStateDraft, common.WorkspaceStateReady, common.WorkspaceStateArchived:
+			return workspacePromptModeWorkspace
+		default:
+			return ""
+		}
+	case backend.EventRunStateChanged:
+		switch common.RunState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)) {
+		case common.RunStateBlockedOnDecision:
+			return workspacePromptModeDecision
+		case common.RunStateBlockedOnApproval:
+			return workspacePromptModeApproval
+		case common.RunStateRunning, common.RunStateValidating:
+			return workspacePromptModeRunning
+		case common.RunStateCreated:
+			return workspacePromptModeWorkspace
+		default:
+			return ""
+		}
+	case backend.EventDecisionCreated:
+		return workspacePromptModeDecision
+	case backend.EventApprovalCreated:
+		return workspacePromptModeApproval
+	default:
+		return ""
+	}
+}
+
+func projectedPromptBlockerID(entry *workspaceRuntimeState, mode string) string {
+	if entry == nil || !entry.HasOverview {
+		return ""
+	}
+	switch mode {
+	case workspacePromptModeDecision:
+		return strings.TrimSpace(string(entry.Overview.BlockingTicketID))
+	case workspacePromptModeApproval:
+		return strings.TrimSpace(string(entry.Overview.BlockingApprovalID))
+	default:
+		return ""
+	}
+}
+
+func backendEventPromptBlockerID(evt backend.Event, mode string) string {
+	switch mode {
+	case workspacePromptModeDecision:
+		return strings.TrimSpace(firstPayloadString(evt.Payload, "ticketId", "ID", "id", backend.PayloadKeyBlockingTicketID))
+	case workspacePromptModeApproval:
+		return strings.TrimSpace(firstPayloadString(evt.Payload, "approvalId", "ID", "id", backend.PayloadKeyBlockingApprovalID))
+	default:
+		return ""
+	}
 }
 
 func (m *AppModel) requestWorkspaceListRefresh() tea.Cmd {

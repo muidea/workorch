@@ -133,6 +133,9 @@ func projectWorkspace(m *AppModel, ws backend.WorkspaceInfo) {
 	if m == nil {
 		return
 	}
+	if viewModelRevision(ws.ViewModel) == 0 && projectionRevision(ws.Projection) == 0 {
+		ws.Projection.WorkspaceRevision = 1
+	}
 	m.upsertWorkspace(ws)
 	if m.activeWorkspaceID == "" {
 		m.activeWorkspaceID = string(ws.ID)
@@ -1084,6 +1087,7 @@ func TestModelBlockedWorkspaceInputRefreshesBlockerInsteadOfContinuing(t *testin
 		ID:          "ws-1",
 		State:       common.WorkspaceStateWaitingDecision,
 		ActiveRunID: "run-1",
+		Projection:  backend.ProjectionInfo{WorkspaceRevision: 7},
 	}}
 	m.activeRunID = "run-1"
 	m.input = "resume"
@@ -1113,6 +1117,7 @@ func TestModelRunResumeDoesNotBypassBlockingDecision(t *testing.T) {
 		State:            common.WorkspaceStateWaitingDecision,
 		ActiveRunID:      "run-1",
 		BlockingTicketID: "ticket-1",
+		Projection:       backend.ProjectionInfo{WorkspaceRevision: 7},
 	}}
 	m.activeRunID = "run-1"
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", WorkspaceID: "ws-1", RunID: "run-1", State: "open"}
@@ -1857,8 +1862,8 @@ func TestModelDecisionReplanAfterWorkspaceSwitchUsesOverviewBlocker(t *testing.T
 	be := &decisionRecordingBE{fakeBE: newFake(t)}
 	m := NewAppModel(be, "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
-		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b"},
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-a", BlockingTicketID: "ticket-a", Projection: backend.ProjectionInfo{WorkspaceRevision: 11}},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 12}},
 	}})
 	m = asModel(next)
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-a", WorkspaceID: "ws-a", RunID: "run-a", State: "open"}
@@ -1895,8 +1900,8 @@ func TestModelDecisionReplanAfterWorkspaceSwitchReplacesStaleBlocker(t *testing.
 	be := &decisionRecordingBE{fakeBE: newFake(t)}
 	m := NewAppModel(be, "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
-		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b"},
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-a", BlockingTicketID: "ticket-a", Projection: backend.ProjectionInfo{WorkspaceRevision: 11}},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 12}},
 	}})
 	m = asModel(next)
 
@@ -1935,6 +1940,7 @@ func TestModelDecisionReplanUsesCurrentOverviewTicketOverStaleLocalBlocker(t *te
 		State:            common.WorkspaceStateWaitingDecision,
 		ActiveRunID:      "run-current",
 		BlockingTicketID: "ticket-current",
+		Projection:       backend.ProjectionInfo{WorkspaceRevision: 21},
 	}}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-1"
@@ -1968,6 +1974,7 @@ func TestModelDecisionReplanUsesServerProjectionEvenAfterOptimisticResolvedMark(
 		State:            common.WorkspaceStateWaitingDecision,
 		ActiveRunID:      "run-1",
 		BlockingTicketID: "ticket-1",
+		Projection:       backend.ProjectionInfo{WorkspaceRevision: 21},
 	}}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-1"
@@ -2680,6 +2687,7 @@ func TestModelDecisionResolvedRefreshesWorkspaceState(t *testing.T) {
 		State:            common.WorkspaceStateWaitingDecision,
 		ActiveRunID:      "run-1",
 		BlockingTicketID: "ticket-1",
+		Projection:       backend.ProjectionInfo{WorkspaceRevision: 7},
 	}}
 	m.decisions = []backend.DecisionInfo{{ID: "ticket-1", WorkspaceID: "ws-1", RunID: "run-1", State: "open"}}
 	m.blockingDecision = &m.decisions[0]
@@ -4251,6 +4259,7 @@ func TestModelWorkspaceListSynchronizesWaitingDecisionPrompt(t *testing.T) {
 			State:            common.WorkspaceStateWaitingDecision,
 			ActiveRunID:      "run-a",
 			BlockingTicketID: "ticket-a",
+			Projection:       backend.ProjectionInfo{WorkspaceRevision: 31},
 		},
 	}})
 	m = asModel(next)
@@ -4265,6 +4274,50 @@ func TestModelWorkspaceListSynchronizesWaitingDecisionPrompt(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "Waiting for decision") || !strings.Contains(view, "ws-a decision >") {
 		t.Fatalf("view did not reflect waiting decision overview:\n%s", view)
+	}
+}
+
+func TestModelWorkspaceOverviewWithoutProjectionDoesNotOwnDecisionPrompt(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.workspaces = []backend.WorkspaceInfo{{
+		ID:               "ws-a",
+		Title:            "A",
+		State:            common.WorkspaceStateWaitingDecision,
+		ActiveRunID:      "run-a",
+		BlockingTicketID: "ticket-a",
+	}}
+	m.activeWorkspaceID = "ws-a"
+	m.activeRunID = "run-a"
+	m.progress = progressIdle
+
+	if m.ensureActiveBlockingDecisionFromOverview() {
+		t.Fatal("unprojected overview should not create local decision blocker authority")
+	}
+	if mode := m.activeWorkspacePromptMode(); mode == workspacePromptModeDecision {
+		t.Fatalf("prompt mode = %q, want non-decision without projected authority", mode)
+	}
+	if progress, ok := m.activeWorkspaceBlockerProgress(); ok || progress != "" {
+		t.Fatalf("blocker progress = %s/%v, want no blocker from unprojected overview", progress, ok)
+	}
+	if input := stripANSI(m.renderInput(120)); strings.Contains(input, "decision >") {
+		t.Fatalf("input prompt = %q, want no decision prompt from unprojected overview", input)
+	}
+}
+
+func TestModelWorkspaceViewModelWithoutRevisionDoesNotOwnPromptMode(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:        "ws-a",
+		State:     common.WorkspaceStateRunning,
+		ViewModel: backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision},
+	}}})
+	m = asModel(next)
+
+	if mode := m.activeWorkspacePromptMode(); mode == workspacePromptModeDecision {
+		t.Fatalf("prompt mode = %q, want no ViewModel authority without revision", mode)
+	}
+	if input := stripANSI(m.renderInput(120)); strings.Contains(input, "decision >") {
+		t.Fatalf("input prompt = %q, want no decision prompt from revisionless ViewModel", input)
 	}
 }
 
@@ -4358,7 +4411,7 @@ func TestModelWorkspaceSwitchToDecisionWorkspaceShowsDecisionTail(t *testing.T) 
 	m.height = 16
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
 		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
-		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b"},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 41}},
 	}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-a"
@@ -4377,7 +4430,7 @@ func TestModelWorkspaceSwitchToDecisionWorkspaceShowsDecisionTail(t *testing.T) 
 
 	next, _ = m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
 		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
-		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b"},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 42}},
 	}})
 	m = asModel(next)
 	next, _ = m.Update(DecisionDetailMsg{
@@ -4406,7 +4459,7 @@ func TestModelWorkspaceSwitchToDecisionWorkspaceSuggestsDecisionCommandsBeforeDe
 	m.height = 18
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
 		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
-		{ID: "ws-b460b00b639f57e4", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b"},
+		{ID: "ws-b460b00b639f57e4", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 41}},
 	}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-a"
@@ -4812,6 +4865,7 @@ func TestModelTransientProjectionErrorKeepsOverviewDecisionState(t *testing.T) {
 		State:            common.WorkspaceStateWaitingDecision,
 		ActiveRunID:      "run-a",
 		BlockingTicketID: "ticket-a",
+		Projection:       backend.ProjectionInfo{WorkspaceRevision: 51},
 	}}
 	m.ensureWorkspaceRuntimeState("ws-a").ContextRequestSeq = 1
 
@@ -5130,6 +5184,7 @@ func TestModelDecisionResolvedDoesNotHideServerOpenProjection(t *testing.T) {
 		State:            common.WorkspaceStateWaitingDecision,
 		ActiveRunID:      "run-1",
 		BlockingTicketID: "ticket-1",
+		Projection:       backend.ProjectionInfo{WorkspaceRevision: 61},
 	}}})
 	m = asModel(next)
 	m.width = 120
@@ -5154,6 +5209,7 @@ func TestModelDecisionResolvedDoesNotHideServerOpenProjection(t *testing.T) {
 		State:            common.WorkspaceStateWaitingDecision,
 		ActiveRunID:      "run-1",
 		BlockingTicketID: "ticket-1",
+		Projection:       backend.ProjectionInfo{WorkspaceRevision: 62},
 	}}})
 	m = asModel(next)
 	if !strings.Contains(stripANSI(m.renderInput(120)), "ws-a decision >") {
@@ -5272,6 +5328,95 @@ func TestModelWorkspaceListViewModelDrivesPromptMode(t *testing.T) {
 	}
 	if matches := m.slashCommandSuggestions("/"); len(matches) == 0 || matches[0].Command != "/run resume" {
 		t.Fatalf("slash suggestions = %+v, want running contextual commands from list ViewModel", matches)
+	}
+}
+
+func TestModelPromptModeProjectionRejectsOlderDecisionEvent(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:          "ws-a",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: "run-1",
+		Projection:  backend.ProjectionInfo{WorkspaceRevision: 20},
+		ViewModel:   backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", PromptMode: workspacePromptModeRunning, WorkspaceRevision: 20},
+	}}})
+	m = asModel(next)
+
+	m.applyBackendEvent(backend.Event{
+		Type:        backend.EventRunStateChanged,
+		WorkspaceID: "ws-a",
+		RunID:       "run-1",
+		Revision:    19,
+		Payload: map[string]any{
+			"state":            string(common.RunStateBlockedOnDecision),
+			"blockingTicketId": "ticket-old",
+		},
+	})
+
+	input := stripANSI(m.renderInput(120))
+	if m.blockingDecision != nil || m.progress == progressWaitingDecision ||
+		strings.Contains(input, "decision >") || !strings.Contains(input, "ws-a running >") {
+		t.Fatalf("older decision event overrode projected running prompt: input=%q blocker=%+v progress=%s", input, m.blockingDecision, m.progress)
+	}
+}
+
+func TestModelPromptModeProjectionAcceptsSameModeOlderDecisionEvent(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:               "ws-a",
+		State:            common.WorkspaceStateWaitingDecision,
+		ActiveRunID:      "run-1",
+		BlockingTicketID: "ticket-current",
+		Projection:       backend.ProjectionInfo{WorkspaceRevision: 20},
+		ViewModel:        backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 20},
+	}}})
+	m = asModel(next)
+
+	m.applyBackendEvent(backend.Event{
+		Type:        backend.EventDecisionCreated,
+		WorkspaceID: "ws-a",
+		RunID:       "run-1",
+		Revision:    19,
+		Payload: map[string]any{
+			"ticketId": "ticket-current",
+			"question": "current decision",
+		},
+	})
+
+	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-current" ||
+		m.progress != progressWaitingDecision {
+		t.Fatalf("same-mode decision event was not accepted for details: blocker=%+v progress=%s", m.blockingDecision, m.progress)
+	}
+}
+
+func TestModelPromptModeProjectionRejectsOlderMismatchedDecisionEvent(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:               "ws-a",
+		State:            common.WorkspaceStateWaitingDecision,
+		ActiveRunID:      "run-1",
+		BlockingTicketID: "ticket-current",
+		Projection:       backend.ProjectionInfo{WorkspaceRevision: 20},
+		ViewModel:        backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision, WorkspaceRevision: 20},
+	}}})
+	m = asModel(next)
+
+	m.applyBackendEvent(backend.Event{
+		Type:        backend.EventDecisionCreated,
+		WorkspaceID: "ws-a",
+		RunID:       "run-1",
+		Revision:    19,
+		Payload: map[string]any{
+			"ticketId": "ticket-old",
+			"question": "stale decision",
+		},
+	})
+
+	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-current" {
+		t.Fatalf("older mismatched decision event overrode projected blocker: %+v", m.blockingDecision)
+	}
+	if input := stripANSI(m.renderInput(120)); !strings.Contains(input, "ws-a decision >") {
+		t.Fatalf("projected decision prompt was lost: %q", input)
 	}
 }
 
