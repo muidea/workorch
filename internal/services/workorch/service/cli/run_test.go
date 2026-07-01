@@ -54,6 +54,23 @@ func TestEventRecordCompactSummaryPrefersPayloadDetail(t *testing.T) {
 	}
 }
 
+func TestMemoryCommandIsReadOnly(t *testing.T) {
+	got := map[string]bool{}
+	for _, cmd := range memoryCmd.Commands() {
+		got[cmd.Name()] = true
+	}
+	for _, name := range []string{"list", "search", "get"} {
+		if !got[name] {
+			t.Fatalf("memory command missing read subcommand %q; got %v", name, got)
+		}
+	}
+	for _, name := range []string{"create", "update", "delete"} {
+		if got[name] {
+			t.Fatalf("memory command exposes write subcommand %q; got %v", name, got)
+		}
+	}
+}
+
 func TestRunResumeUsesUnifiedWorkspaceRunCommand(t *testing.T) {
 	previousBackend := cliBackend
 	t.Cleanup(func() {

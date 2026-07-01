@@ -161,7 +161,7 @@ var mcpToolsCmd = &cobra.Command{
 
 var memoryCmd = &cobra.Command{
 	Use:   "memory",
-	Short: "Manage workspace memory",
+	Short: "Inspect workspace memory",
 }
 
 var memoryListCmd = &cobra.Command{
@@ -219,99 +219,6 @@ var memoryGetCmd = &cobra.Command{
 	},
 }
 
-var memoryCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a workspace memory item",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		wsID, _ := cmd.Flags().GetString("workspace")
-		if wsID == "" {
-			return fmt.Errorf("--workspace is required")
-		}
-		item := memoryItemFromFlags(cmd)
-		created, err := mustBackend().Memory().Create(ctx(), common.WorkspaceID(wsID), item)
-		if err != nil {
-			return err
-		}
-		if jsonOutput {
-			printJSON(created)
-			return nil
-		}
-		fmt.Printf("Memory created: %s\n", styleTitle.Render(string(created.ID)))
-		return nil
-	},
-}
-
-var memoryUpdateCmd = &cobra.Command{
-	Use:   "update <memory-id>",
-	Short: "Update a memory item",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		wsID, _ := cmd.Flags().GetString("workspace")
-		if wsID == "" {
-			return fmt.Errorf("--workspace is required")
-		}
-		item := memoryItemFromFlags(cmd)
-		updated, err := mustBackend().Memory().Update(ctx(), common.WorkspaceID(wsID), common.MemoryID(args[0]), item)
-		if err != nil {
-			return err
-		}
-		if jsonOutput {
-			printJSON(updated)
-			return nil
-		}
-		fmt.Printf("Memory updated: %s\n", styleTitle.Render(string(updated.ID)))
-		return nil
-	},
-}
-
-var memoryDeleteCmd = &cobra.Command{
-	Use:   "delete <memory-id>",
-	Short: "Delete a memory item",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		wsID, _ := cmd.Flags().GetString("workspace")
-		if wsID == "" {
-			return fmt.Errorf("--workspace is required")
-		}
-		if err := mustBackend().Memory().Delete(ctx(), common.WorkspaceID(wsID), common.MemoryID(args[0])); err != nil {
-			return err
-		}
-		if jsonOutput {
-			printJSON(map[string]any{"deleted": true, "id": args[0]})
-			return nil
-		}
-		fmt.Printf("Memory deleted: %s\n", styleTitle.Render(args[0]))
-		return nil
-	},
-}
-
-func memoryItemFromFlags(cmd *cobra.Command) *backend.MemoryItemInfo {
-	id, _ := cmd.Flags().GetString("id")
-	runID, _ := cmd.Flags().GetString("run")
-	sourceType, _ := cmd.Flags().GetString("source-type")
-	sourceRef, _ := cmd.Flags().GetString("source-ref")
-	memoryType, _ := cmd.Flags().GetString("type")
-	content, _ := cmd.Flags().GetString("content")
-	summary, _ := cmd.Flags().GetString("summary")
-	tags, _ := cmd.Flags().GetStringArray("tag")
-	importance, _ := cmd.Flags().GetInt("importance")
-	confidence, _ := cmd.Flags().GetInt("confidence")
-	visibility, _ := cmd.Flags().GetString("visibility")
-	return &backend.MemoryItemInfo{
-		ID:         common.MemoryID(id),
-		RunID:      common.RunID(runID),
-		SourceType: sourceType,
-		SourceRef:  sourceRef,
-		MemoryType: memoryType,
-		Content:    content,
-		Summary:    summary,
-		Tags:       tags,
-		Importance: importance,
-		Confidence: confidence,
-		Visibility: visibility,
-	}
-}
-
 func printMemoryItems(items []backend.MemoryItemInfo) error {
 	if jsonOutput {
 		printJSON(items)
@@ -354,31 +261,6 @@ func registerMemoryQueryFlags(cmd *cobra.Command) {
 	cmd.Flags().StringArray("tag", nil, "Filter by tag (repeatable)")
 	cmd.Flags().StringArray("type", nil, "Filter by memory type (repeatable)")
 	cmd.Flags().Int("limit", 0, "Maximum number of memory items")
-}
-
-func registerMemoryEditFlags(cmd *cobra.Command, withDefaults bool) {
-	sourceType := ""
-	memoryType := ""
-	visibility := ""
-	importance := 0
-	confidence := 0
-	if withDefaults {
-		sourceType = "user"
-		memoryType = "project_context"
-		visibility = "workspace"
-		importance = 50
-		confidence = 50
-	}
-	cmd.Flags().String("run", "", "Source run ID")
-	cmd.Flags().String("source-type", sourceType, "Memory source type")
-	cmd.Flags().String("source-ref", "", "Memory source reference")
-	cmd.Flags().String("type", memoryType, "Memory type")
-	cmd.Flags().String("summary", "", "Memory summary")
-	cmd.Flags().String("content", "", "Memory content")
-	cmd.Flags().StringArray("tag", nil, "Memory tag (repeatable)")
-	cmd.Flags().Int("importance", importance, "Importance score")
-	cmd.Flags().Int("confidence", confidence, "Confidence score")
-	cmd.Flags().String("visibility", visibility, "Memory visibility")
 }
 
 // ── Events command ──
@@ -460,25 +342,12 @@ func init() {
 	memoryCmd.AddCommand(memoryListCmd)
 	memoryCmd.AddCommand(memorySearchCmd)
 	memoryCmd.AddCommand(memoryGetCmd)
-	memoryCmd.AddCommand(memoryCreateCmd)
-	memoryCmd.AddCommand(memoryUpdateCmd)
-	memoryCmd.AddCommand(memoryDeleteCmd)
 	memoryListCmd.Flags().String("workspace", "", "Workspace ID (required)")
 	registerMemoryQueryFlags(memoryListCmd)
 	memorySearchCmd.Flags().String("workspace", "", "Workspace ID (required)")
 	registerMemoryQueryFlags(memorySearchCmd)
 	memoryGetCmd.Flags().String("workspace", "", "Workspace ID (required)")
-	memoryCreateCmd.Flags().String("workspace", "", "Workspace ID (required)")
-	memoryCreateCmd.Flags().String("id", "", "Memory ID (optional)")
-	registerMemoryEditFlags(memoryCreateCmd, true)
-	memoryUpdateCmd.Flags().String("workspace", "", "Workspace ID (required)")
-	registerMemoryEditFlags(memoryUpdateCmd, false)
-	memoryDeleteCmd.Flags().String("workspace", "", "Workspace ID (required)")
-	memoryCreateCmd.MarkFlagRequired("workspace")
-	memoryCreateCmd.MarkFlagRequired("summary")
 	memoryGetCmd.MarkFlagRequired("workspace")
-	memoryUpdateCmd.MarkFlagRequired("workspace")
-	memoryDeleteCmd.MarkFlagRequired("workspace")
 
 	// Events
 	rootCmd.AddCommand(eventsCmd)

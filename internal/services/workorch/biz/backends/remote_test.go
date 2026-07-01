@@ -440,7 +440,7 @@ func TestRemoteRunCommandFirstResumeSendsWorkspaceCommandMetadata(t *testing.T) 
 func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 	requestBody := make(chan map[string]any, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/runs/run-001/resume" {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/execution-activations" {
 			http.NotFound(w, r)
 			return
 		}
@@ -478,7 +478,9 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 	}
 	select {
 	case body := <-requestBody:
-		if body["requestId"] != "request-remote-resume" ||
+		if body["runId"] != "run-001" ||
+			body["intent"] != string(RunCommandIntentResume) ||
+			body["requestId"] != "request-remote-resume" ||
 			body["reason"] != "test_remote_resume" ||
 			body["source"] != "test" ||
 			body["definitionRevision"] != "rev-remote-resume" ||
@@ -496,7 +498,7 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 func TestRemoteRunCommandReplanSendsUnifiedIntent(t *testing.T) {
 	requestBody := make(chan map[string]any, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/runs/run-001/resume" {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/execution-activations" {
 			http.NotFound(w, r)
 			return
 		}
@@ -531,7 +533,8 @@ func TestRemoteRunCommandReplanSendsUnifiedIntent(t *testing.T) {
 	}
 	select {
 	case body := <-requestBody:
-		if body["intent"] != string(RunCommandIntentReplan) ||
+		if body["runId"] != "run-001" ||
+			body["intent"] != string(RunCommandIntentReplan) ||
 			body["requestId"] != "request-remote-replan" ||
 			body["reason"] != "decision_replan_resolved" ||
 			body["source"] != "tui" ||

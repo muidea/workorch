@@ -401,6 +401,7 @@ type createRunRequest struct {
 }
 
 type workspaceExecutionCommandRequest struct {
+	RunID                 string            `json:"runId,omitempty"`
 	GoalID                string            `json:"goalId,omitempty"`
 	DoDID                 string            `json:"doDId,omitempty"`
 	LLMProviderID         string            `json:"llmProviderId,omitempty"`

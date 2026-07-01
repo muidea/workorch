@@ -6250,6 +6250,42 @@ func TestWorkorchDActivationHTTPRejectsRunScopedIntent(t *testing.T) {
 	}
 }
 
+func TestWorkorchDActivationHTTPAcceptsScopedReplan(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	handler := newMuxWithState(state)
+	workspace := createWorkspaceForHTTP(t, handler, "activation accepts scoped replan", "workspaces/activation-accepts-scoped-replan")
+	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
+		"runId":"run-http-replan",
+		"goalId":"`+goalID+`",
+		"doDId":"`+dodID+`",
+		"intent":"replan",
+		"requestId":"request-http-scoped-replan",
+		"reason":"decision_replan_resolved",
+		"source":"tui",
+		"definitionRevision":"rev-http-scoped-replan",
+		"decisionId":"ticket-http-scoped-replan"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("activation scoped replan status = %d, want 202, body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode scoped replan response: %v", err)
+	}
+	if body["accepted"] != true ||
+		body["runId"] != "run-http-replan" ||
+		body["intent"] != "replan" ||
+		body["requestId"] != "request-http-scoped-replan" ||
+		body["source"] != "tui" {
+		t.Fatalf("activation scoped replan response = %+v, want accepted scoped replan metadata", body)
+	}
+}
+
 func TestWorkorchDRunResumeHTTPRejectsRestartIntent(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	handler := newMuxWithState(state)

@@ -207,9 +207,11 @@ func (c *Client) RestartWorkspaceExecution(ctx context.Context, workspaceID stri
 	return nil
 }
 
-// ActivationRequest is the request body for workspace execution resume/restart
-// commands that may carry the execution activation contract inputs.
+// ActivationRequest is the request body for workspace execution
+// resume/restart/replan commands that may carry the execution activation
+// contract inputs.
 type ActivationRequest struct {
+	RunID                 string            `json:"runId,omitempty"`
 	GoalID                string            `json:"goalId,omitempty"`
 	DoDID                 string            `json:"doDId,omitempty"`
 	LLMProviderID         string            `json:"llmProviderId,omitempty"`

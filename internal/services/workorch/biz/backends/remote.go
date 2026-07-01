@@ -1034,7 +1034,8 @@ func (b *remoteRunBackend) Command(ctx context.Context, req WorkspaceRunCommand)
 }
 
 func (b *remoteRunBackend) runCommandViaResume(ctx context.Context, req WorkspaceRunCommand, intent RunCommandIntent) (*RunInfo, error) {
-	r, err := b.cl.ResumeRunWithRequest(ctx, string(req.WorkspaceID), string(req.ExpectedRunID), &client.RunResumeRequest{
+	act, err := b.cl.ResumeWorkspaceExecution(ctx, string(req.WorkspaceID), &client.ActivationRequest{
+		RunID:                 string(req.ExpectedRunID),
 		ExecutionContextPatch: req.ExecutionContextPatch,
 		Intent:                string(intent),
 		RequestID:             req.RequestID,
@@ -1046,7 +1047,10 @@ func (b *remoteRunBackend) runCommandViaResume(ctx context.Context, req Workspac
 	if err != nil {
 		return nil, err
 	}
-	return remoteRunInfoFromClientRun(r), nil
+	if act == nil {
+		return nil, nil
+	}
+	return remoteRunInfoFromClientRun(&act.Run), nil
 }
 
 func (b *remoteRunBackend) resumeWorkspaceExecution(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
