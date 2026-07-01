@@ -454,6 +454,42 @@ func TestStoreProjectionDerivesDecisionPromptFromBlockedRun(t *testing.T) {
 	}
 }
 
+func TestStoreProjectionRequiresSameScopeOpenDecisionForPrompt(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: string(common.WorkspaceStateWaitingDecision), ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {
+			Workspace: readmodelcore.Workspace{ID: "ws-a", State: string(common.WorkspaceStateWaitingDecision), ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
+			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision), BlockingTicketID: "ticket-a"},
+			Decisions: []readmodelcore.Decision{{
+				ID:          "ticket-a",
+				WorkspaceID: "ws-other",
+				RunID:       "run-a",
+				State:       string(common.DecisionTicketStateOpen),
+			}},
+		},
+	}, nil)
+
+	items, _, err := store.List()
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
+	}
+	if len(items) != 1 ||
+		items[0].State == string(common.WorkspaceStateWaitingDecision) ||
+		items[0].BlockingTicketID != "" ||
+		items[0].ViewModel.PromptMode == "decision" {
+		t.Fatalf("list workspace = %+v, want no decision prompt without same-scope open ticket", items)
+	}
+	snapshot, _, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get snapshot: %v", err)
+	}
+	if snapshot.Workspace.State == string(common.WorkspaceStateWaitingDecision) ||
+		snapshot.Workspace.BlockingTicketID != "" ||
+		snapshot.ViewModel.PromptMode == "decision" {
+		t.Fatalf("snapshot workspace = %+v viewModel = %+v, want no decision prompt without same-scope open ticket", snapshot.Workspace, snapshot.ViewModel)
+	}
+}
+
 func TestStoreMarksStaleWithSourceEventRevision(t *testing.T) {
 	store := NewStore()
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{

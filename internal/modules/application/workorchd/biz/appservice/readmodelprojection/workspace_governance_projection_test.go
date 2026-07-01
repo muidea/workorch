@@ -34,6 +34,33 @@ func TestNormalizeWorkspaceGovernanceRequiresOpenDecisionTicket(t *testing.T) {
 	}
 }
 
+func TestNormalizeWorkspaceGovernanceRequiresPendingApproval(t *testing.T) {
+	t.Parallel()
+
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{
+			ID:                 "ws-approval-normalize",
+			State:              string(common.WorkspaceStateBlocked),
+			ActiveRunID:        "run-approval-normalize",
+			BlockingApprovalID: "approval-missing",
+		},
+		Run: &readmodelcore.Run{
+			ID:                 "run-approval-normalize",
+			WorkspaceID:        "ws-approval-normalize",
+			State:              string(common.RunStateBlockedOnApproval),
+			BlockingApprovalID: "approval-missing",
+		},
+	}
+
+	got := NormalizeWorkspaceGovernanceProjection(snapshot)
+	if got.Workspace.State == string(common.WorkspaceStateBlocked) ||
+		got.Workspace.BlockingApprovalID != "" ||
+		got.TaskProgress.BlockingApprovalID != "" ||
+		WorkspacePromptMode(got) == "approval" {
+		t.Fatalf("normalized snapshot = %+v, want no blocked approval without pending approval", got)
+	}
+}
+
 func TestProjectWorkspaceSnapshotSummaryKeepsBlockingDecision(t *testing.T) {
 	t.Parallel()
 

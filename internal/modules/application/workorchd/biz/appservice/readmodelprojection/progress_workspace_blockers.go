@@ -4,18 +4,20 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func applyWorkspaceProgressBlockers(progress *readmodelcore.TaskProgress, snapshot readmodelcore.WorkspaceSnapshot) {
+	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
-	if activeRunID == "" {
+	if workspaceID == "" || activeRunID == "" {
 		return
 	}
 	for _, item := range snapshot.Decisions {
-		if strings.TrimSpace(item.RunID) != activeRunID {
+		if strings.TrimSpace(item.WorkspaceID) != workspaceID || strings.TrimSpace(item.RunID) != activeRunID {
 			continue
 		}
-		if IsResolvedDecisionState(item.State) {
+		if strings.TrimSpace(item.State) != string(common.DecisionTicketStateOpen) {
 			continue
 		}
 		progress.Blockers = append(progress.Blockers, readmodelcore.ProgressBlocker{

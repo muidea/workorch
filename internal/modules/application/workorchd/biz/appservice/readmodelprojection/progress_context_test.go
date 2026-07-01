@@ -98,6 +98,52 @@ func TestWorkspaceTaskProgressOnlyUsesActiveRunBlockers(t *testing.T) {
 	}
 }
 
+func TestWorkspaceTaskProgressRequiresSameScopeOpenGovernanceBlockers(t *testing.T) {
+	t.Parallel()
+
+	got := MapLocalizedWorkspaceTaskProgress(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{
+			ID:          "ws-current",
+			State:       string(common.WorkspaceStateWaitingDecision),
+			ActiveRunID: "run-shared",
+		},
+		Decisions: []readmodelcore.Decision{
+			{
+				ID:          "ticket-other-workspace",
+				WorkspaceID: "ws-other",
+				RunID:       "run-shared",
+				State:       string(common.DecisionTicketStateOpen),
+			},
+			{
+				ID:          "ticket-not-open",
+				WorkspaceID: "ws-current",
+				RunID:       "run-shared",
+				State:       string(common.DecisionTicketStateResolved),
+			},
+		},
+		Approvals: []readmodelcore.Approval{
+			{
+				ID:          "approval-other-workspace",
+				WorkspaceID: "ws-other",
+				RunID:       "run-shared",
+				State:       string(common.ApprovalStatePending),
+			},
+			{
+				ID:          "approval-not-pending",
+				WorkspaceID: "ws-current",
+				RunID:       "run-shared",
+				State:       string(common.ApprovalStateApproved),
+			},
+		},
+	})
+
+	if got.Recovery.Mode == "wait_decision" || got.Recovery.Mode == "wait_approval" ||
+		got.Recovery.BlockingTicketID != "" || got.Recovery.BlockingApprovalID != "" ||
+		len(got.Blockers) != 0 {
+		t.Fatalf("progress = %+v, want no governance blockers without same-scope open ticket or pending approval", got)
+	}
+}
+
 func TestWorkspaceGovernanceProjectionClearsResolvedDecisionBlocker(t *testing.T) {
 	t.Parallel()
 

@@ -30,18 +30,6 @@ func NormalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnap
 	if openApprovalID == "" && snapshot.Run != nil {
 		openApprovalID = openApprovalBlockerID(snapshot.Approvals, snapshot.Workspace.ID, activeRunID, snapshot.Run.BlockingApprovalID)
 	}
-	if openApprovalID == "" && snapshot.Run != nil && strings.TrimSpace(snapshot.Run.State) == string(common.RunStateBlockedOnApproval) {
-		if candidate := firstNonEmptyProjectionString(snapshot.Run.BlockingApprovalID, snapshot.Workspace.BlockingApprovalID); candidate != "" &&
-			!hasNonPendingApprovalBlocker(snapshot.Approvals, snapshot.Workspace.ID, activeRunID, candidate) {
-			openApprovalID = candidate
-		}
-	}
-	if openApprovalID == "" && common.WorkspaceState(snapshot.Workspace.State) == common.WorkspaceStateBlocked {
-		if candidate := firstNonEmptyProjectionString(snapshot.Workspace.BlockingApprovalID, runBlockingApprovalID(snapshot.Run)); candidate != "" &&
-			!hasNonPendingApprovalBlocker(snapshot.Approvals, snapshot.Workspace.ID, activeRunID, candidate) {
-			openApprovalID = candidate
-		}
-	}
 
 	snapshot.Workspace.BlockingTicketID = openDecisionID
 	snapshot.Workspace.BlockingApprovalID = openApprovalID
@@ -91,19 +79,13 @@ func WorkspacePromptMode(snapshot readmodelcore.WorkspaceSnapshot) string {
 	if approvalID := openApprovalBlockerID(snapshot.Approvals, workspace.ID, activeRunID, firstNonEmptyProjectionString(workspace.BlockingApprovalID, runBlockingApprovalID(snapshot.Run))); approvalID != "" {
 		return "approval"
 	}
-	if snapshot.Run != nil && strings.TrimSpace(snapshot.Run.State) == string(common.RunStateBlockedOnApproval) {
-		if firstNonEmptyProjectionString(snapshot.Run.BlockingApprovalID, workspace.BlockingApprovalID) != "" {
-			return "approval"
-		}
-	}
 	switch common.WorkspaceState(workspace.State) {
 	case common.WorkspaceStateWaitingDecision:
 		if HasOpenDecisionBlocker(snapshot.Decisions, workspace.ID, activeRunID, workspace.BlockingTicketID) {
 			return "decision"
 		}
 	case common.WorkspaceStateBlocked:
-		if strings.TrimSpace(workspace.BlockingApprovalID) != "" ||
-			HasOpenApprovalBlocker(snapshot.Approvals, workspace.ID, activeRunID, workspace.BlockingApprovalID) {
+		if HasOpenApprovalBlocker(snapshot.Approvals, workspace.ID, activeRunID, workspace.BlockingApprovalID) {
 			return "approval"
 		}
 	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
@@ -124,21 +106,6 @@ func runBlockingApprovalID(run *readmodelcore.Run) string {
 		return ""
 	}
 	return run.BlockingApprovalID
-}
-
-func hasNonPendingApprovalBlocker(items []readmodelcore.Approval, workspaceID, runID, approvalID string) bool {
-	workspaceID = strings.TrimSpace(workspaceID)
-	runID = strings.TrimSpace(runID)
-	approvalID = strings.TrimSpace(approvalID)
-	for _, item := range items {
-		if strings.TrimSpace(item.ID) == approvalID &&
-			strings.TrimSpace(item.WorkspaceID) == workspaceID &&
-			strings.TrimSpace(item.RunID) == runID &&
-			strings.TrimSpace(item.State) != string(common.ApprovalStatePending) {
-			return true
-		}
-	}
-	return false
 }
 
 func openDecisionBlockerID(items []readmodelcore.Decision, workspaceID, runID, preferredID string) string {

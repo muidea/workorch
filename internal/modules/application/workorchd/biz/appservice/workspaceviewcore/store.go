@@ -101,11 +101,6 @@ func snapshotDecisionBlocker(snapshot readmodelcore.WorkspaceSnapshot, activeRun
 	if readmodelprojection.HasOpenDecisionBlocker(snapshot.Decisions, workspaceID, activeRunID, preferredID) {
 		return preferredID, true
 	}
-	if snapshot.Run != nil && strings.TrimSpace(snapshot.Run.State) == string(common.RunStateBlockedOnDecision) {
-		if preferredID != "" && !snapshotHasNonOpenDecisionBlocker(snapshot.Decisions, workspaceID, activeRunID, preferredID) {
-			return preferredID, true
-		}
-	}
 	for _, item := range snapshot.Decisions {
 		if strings.TrimSpace(item.WorkspaceID) == workspaceID &&
 			strings.TrimSpace(item.RunID) == activeRunID &&
@@ -130,11 +125,6 @@ func snapshotApprovalBlocker(snapshot readmodelcore.WorkspaceSnapshot, activeRun
 	if readmodelprojection.HasOpenApprovalBlocker(snapshot.Approvals, workspaceID, activeRunID, preferredID) {
 		return preferredID, true
 	}
-	if snapshot.Run != nil && strings.TrimSpace(snapshot.Run.State) == string(common.RunStateBlockedOnApproval) {
-		if preferredID != "" && !snapshotHasNonPendingApprovalBlocker(snapshot.Approvals, workspaceID, activeRunID, preferredID) {
-			return preferredID, true
-		}
-	}
 	for _, item := range snapshot.Approvals {
 		if strings.TrimSpace(item.WorkspaceID) == workspaceID &&
 			strings.TrimSpace(item.RunID) == activeRunID &&
@@ -144,36 +134,6 @@ func snapshotApprovalBlocker(snapshot readmodelcore.WorkspaceSnapshot, activeRun
 		}
 	}
 	return "", false
-}
-
-func snapshotHasNonOpenDecisionBlocker(items []readmodelcore.Decision, workspaceID, runID, ticketID string) bool {
-	workspaceID = strings.TrimSpace(workspaceID)
-	runID = strings.TrimSpace(runID)
-	ticketID = strings.TrimSpace(ticketID)
-	for _, item := range items {
-		if strings.TrimSpace(item.ID) == ticketID &&
-			strings.TrimSpace(item.WorkspaceID) == workspaceID &&
-			strings.TrimSpace(item.RunID) == runID &&
-			strings.TrimSpace(item.State) != string(common.DecisionTicketStateOpen) {
-			return true
-		}
-	}
-	return false
-}
-
-func snapshotHasNonPendingApprovalBlocker(items []readmodelcore.Approval, workspaceID, runID, approvalID string) bool {
-	workspaceID = strings.TrimSpace(workspaceID)
-	runID = strings.TrimSpace(runID)
-	approvalID = strings.TrimSpace(approvalID)
-	for _, item := range items {
-		if strings.TrimSpace(item.ID) == approvalID &&
-			strings.TrimSpace(item.WorkspaceID) == workspaceID &&
-			strings.TrimSpace(item.RunID) == runID &&
-			strings.TrimSpace(item.State) != string(common.ApprovalStatePending) {
-			return true
-		}
-	}
-	return false
 }
 
 func firstNonEmptyViewString(values ...string) string {
