@@ -37,7 +37,7 @@ Coverage/Evidence Ledger
 ## Contract Audit
 
 - Scope: runtime convergence authority、dispatch input、Stage Packet、requiredOutput、
-  contract violation retry、decision replan、projection diagnostics、TUI/Web 只读展示链路。
+  contract violation retry、decision replan、projection diagnostics、TUI/Web projection 展示链路。
 - Observed state:
   - 服务进程 ready，projection ready，EventHub publish failure delta 为 0，projection schedule drop delta 为 0。
   - 两个 live workspace 均稳定停在 `waiting_decision` / `blocked_on_decision`，不是 running 正向推进。

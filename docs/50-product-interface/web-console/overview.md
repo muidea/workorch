@@ -426,7 +426,7 @@ Web Console 必须保持以下边界：
 ## Relationship To TUI
 
 - TUI 偏本地 agent-first 体验
-- Web Console 偏远程控制与只读/治理/配置聚合面
+- Web Console 偏远程控制、projection 观察、治理处理与配置聚合面
 - 两者都必须复用同一组 read model、API 和治理对象
 
 ## Source Documents

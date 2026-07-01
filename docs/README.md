@@ -2,20 +2,21 @@
 
 ## Purpose
 
-本文件是当前 `docs/` 的正式阅读导航入口，用于帮助按“核心合约 -> 对象 -> 运行链路 -> 模块实现 -> 特化能力 -> 产品接口 -> 验证 -> roadmap/archive”顺序阅读。
+本文件是当前 `docs/` 的正式阅读导航入口，用于帮助按“核心合约 -> 产品设计 -> 对象 -> 运行链路 -> 模块实现 -> 特化能力 -> 产品接口 -> 验证 -> roadmap/archive”顺序阅读。
 
 ## Recommended Reading Order
 
 1. [00-core/runtime-stage-contract.md](00-core/runtime-stage-contract.md)
 2. [01-overview/current-state.md](01-overview/current-state.md)
-3. [10-domain-model/overview.md](10-domain-model/overview.md)
-4. [20-runtime-flow/overview.md](20-runtime-flow/overview.md)
-5. [30-module-architecture/overview.md](30-module-architecture/overview.md)
-6. [40-profiles-capabilities/overview.md](40-profiles-capabilities/overview.md)
-7. [50-product-interface/overview.md](50-product-interface/overview.md)
-8. [60-verification/overview.md](60-verification/overview.md)
-9. [70-roadmap/active/overview.md](70-roadmap/active/overview.md)
-10. [90-archive/completed/overview.md](90-archive/completed/overview.md)
+3. [05-product/overview.md](05-product/overview.md)
+4. [10-domain-model/overview.md](10-domain-model/overview.md)
+5. [20-runtime-flow/overview.md](20-runtime-flow/overview.md)
+6. [30-module-architecture/overview.md](30-module-architecture/overview.md)
+7. [40-profiles-capabilities/overview.md](40-profiles-capabilities/overview.md)
+8. [50-product-interface/overview.md](50-product-interface/overview.md)
+9. [60-verification/overview.md](60-verification/overview.md)
+10. [70-roadmap/active/overview.md](70-roadmap/active/overview.md)
+11. [90-archive/completed/overview.md](90-archive/completed/overview.md)
 
 ## Read By Task
 
@@ -23,6 +24,10 @@
 
 - Runtime 核心规则：
   [runtime-stage-contract.md](00-core/runtime-stage-contract.md)
+- 产品需求 / 产品架构 / 业务流程合同：
+  [prd.md](05-product/prd.md),
+  [product-architecture.md](05-product/product-architecture.md),
+  [business-model-flow-contracts.md](05-product/business-model-flow-contracts.md)
 - 上下文组织 / request cache：
   [runtime-request-cache-note.md](00-core/runtime-request-cache-note.md),
   [context-assembly-flow.md](20-runtime-flow/context-assembly-flow.md),
@@ -54,9 +59,12 @@
 
 - 架构/框架设计
   - [00-core/runtime-stage-contract.md](00-core/runtime-stage-contract.md)
+  - [05-product/product-architecture.md](05-product/product-architecture.md)
   - [20-runtime-flow/overview.md](20-runtime-flow/overview.md)
   - [30-module-architecture/overview.md](30-module-architecture/overview.md)
 - 业务功能/对象建模
+  - [05-product/prd.md](05-product/prd.md)
+  - [05-product/business-model-flow-contracts.md](05-product/business-model-flow-contracts.md)
   - [10-domain-model/overview.md](10-domain-model/overview.md)
   - [40-profiles-capabilities/overview.md](40-profiles-capabilities/overview.md)
 - 产品/API/交互设计
@@ -92,6 +100,8 @@
   - 唯一核心 runtime 合约与其从属 request/cache note
 - `01-overview/`
   - 当前仓库事实、迁移状态、缺口追踪
+- `05-product/`
+  - 产品 PRD、产品架构、业务模型/流程/交互合同的统一整理层
 - `10-domain-model/`
   - 业务对象、关系、边界和不变量
 - `20-runtime-flow/`
@@ -123,11 +133,12 @@ WorkOrch runtime 的唯一核心设计合约是：
 
 ## Current Documentation Status
 
-当前文档迁移按 [docs-domain-module-flow-reorganization-plan.md](docs-domain-module-flow-reorganization-plan.md:1) 执行。
+当前文档迁移按 [docs-domain-module-flow-reorganization-plan.md](docs-domain-module-flow-reorganization-plan.md) 执行。
 
 当前已完成：
 
 - 固化唯一 core 文档入口
+- 新增产品 PRD、产品架构、业务模型/流程/交互合同统一整理入口
 - 从状态文档中抽出当前事实入口
 - 记录迁移过程中的冲突、不完整项和衔接断点
 - 第一轮目录骨架与主要阅读入口已经建立完成

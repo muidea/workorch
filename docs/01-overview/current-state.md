@@ -107,6 +107,7 @@ Last Updated: 2026-05-30
   - local-first CLI/TUI：`workorch`
 - 当前设计权威已经从旧根目录综合文档分离到：
   - `00-core/`
+  - `05-product/`
   - `10-domain-model/`
   - `20-runtime-flow/`
   - `30-module-architecture/`
@@ -134,6 +135,8 @@ Last Updated: 2026-05-30
 
 - 对象边界
   - `10-domain-model/`
+- 产品需求、产品架构、业务模型/流程/交互合同
+  - `05-product/`
 - 运行链路
   - `20-runtime-flow/`
 - 代码职责落点
@@ -161,6 +164,7 @@ Last Updated: 2026-05-30
 ## Current Stable Structure Snapshot
 
 - `00-core/`：唯一 runtime contract 与 request/cache 从属说明
+- `05-product/`：产品 PRD、产品架构、业务模型/流程/交互合同
 - `10-domain-model/`：Goal / DoD、Run / Step / Result / Artifact、Context / Capability / Memory、Event / Observability 对象边界
 - `20-runtime-flow/`：activation、planning/execution、verification/acceptance、repair/replan、context assembly 链路
 - `30-module-architecture/`：application、kernel、blocks、storage/read-model、provider assembly 等模块边界
