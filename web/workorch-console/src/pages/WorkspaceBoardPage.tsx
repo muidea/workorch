@@ -133,7 +133,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                 <Space className="workorch-section" wrap>
                   <Button type="primary" onClick={() => onOpenWorkspace(workspace.id)}>进入工作空间</Button>
                   {canStartRun ? <Button onClick={() => void resumeWorkspaceExecution(workspace).catch((error: unknown) => message.error(errorMessage(error)))}>提交执行</Button> : null}
-                  {workspace.activeRunId ? <Button onClick={() => void workorchApi.resumeRun(workspace.activeRunId || '', undefined, workspace.id).then(() => loadBoard()).catch((error: unknown) => message.error(errorMessage(error)))}>恢复运行</Button> : null}
+                  {workspace.activeRunId ? <Button onClick={() => void resumeWorkspaceExecution(workspace).catch((error: unknown) => message.error(errorMessage(error)))}>恢复运行</Button> : null}
                 </Space>
               </ProCard>
             );

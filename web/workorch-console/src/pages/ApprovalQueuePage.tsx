@@ -115,7 +115,10 @@ export function ApprovalQueuePage() {
       const selected = approvalRecords.filter((item) => approvalIds.includes(item.id));
       const byWorkspace = new Map<string, string[]>();
       for (const item of selected) {
-        const workspaceId = item.workspaceId || '';
+        const workspaceId = item.workspaceId;
+        if (!workspaceId) {
+          continue;
+        }
         const items = byWorkspace.get(workspaceId) ?? [];
         items.push(item.id);
         byWorkspace.set(workspaceId, items);

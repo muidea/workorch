@@ -651,23 +651,6 @@ export type MemoryItem = {
   vectorScore?: number;
 };
 
-export type MemoryItemWriteRequest = {
-  memoryId?: string;
-  runId?: string;
-  sourceType: string;
-  sourceRef?: string;
-  memoryType: string;
-  content?: string;
-  summary: string;
-  tags?: string[];
-  importance?: number;
-  confidence?: number;
-  visibility?: string;
-  embeddingProviderId?: string;
-  embeddingModel?: string;
-  embeddingText?: string;
-};
-
 export type MemoryRecallHit = {
   id: string;
   summary?: string;

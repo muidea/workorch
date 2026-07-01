@@ -2271,11 +2271,6 @@ export function runPriority(item: Run) {
   return typeof contextPriority === 'number' ? contextPriority : '-';
 }
 
-export function numericRunPriority(item: Run) {
-  const priority = runPriority(item);
-  return typeof priority === 'number' ? priority : undefined;
-}
-
 export function llmConfigurationFormValues(configuration: ServiceConfiguration): UpdateLLMConfigurationRequest {
   return {
     defaultProviderId: configuration.llm.defaultProviderId,

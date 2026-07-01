@@ -1,4 +1,4 @@
-import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryItemWriteRequest, MemoryRecallTrace, PatchPage, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -127,16 +127,6 @@ type WorkspaceSetupDraftMessageRequest = WorkspaceSetupDraftGenerationRequest & 
 function runCommandRequestId(intent: string, workspaceId: string, runId: string) {
   const suffix = Math.random().toString(36).slice(2, 10);
   return `web-${intent}-${workspaceId || 'workspace'}-${runId || 'run'}-${Date.now()}-${suffix}`;
-}
-
-function runCommandBody(intent: string, workspaceId: string, runId: string, executionContextPatch?: Record<string, unknown>) {
-  return JSON.stringify({
-    intent,
-    requestId: runCommandRequestId(intent, workspaceId, runId),
-    reason: 'user_requested',
-    source: 'web',
-    executionContextPatch
-  });
 }
 
 export const workorchApi = {
@@ -376,25 +366,6 @@ export const workorchApi = {
     const body = await request<{ eventRecords: EventRecord[] }>(`${apiBase}/events${suffix}`);
     return body.eventRecords ?? [];
   },
-  createRun: async (workspaceId: string, runId: string, goalId: string, doDId: string) => {
-    const body = await request<{ run: Run }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/runs`, {
-      method: 'POST',
-      body: JSON.stringify({ runId, goalId, doDId })
-    });
-    return body.run;
-  },
-  startRun: async (runId: string, priority: number | undefined, workspaceId: string) => {
-    return request<RunCommandAcceptedResponse>(`${runPath(workspaceId, runId, 'start')}${querySuffix({ priority })}`, {
-      method: 'POST',
-      body: runCommandBody('start', workspaceId, runId)
-    });
-  },
-  resumeRun: async (runId: string, priority: number | undefined, workspaceId: string, executionContextPatch?: Record<string, unknown>) => {
-    return request<RunCommandAcceptedResponse>(`${runPath(workspaceId, runId, 'resume')}${querySuffix({ priority })}`, {
-      method: 'POST',
-      body: runCommandBody('resume', workspaceId, runId, executionContextPatch)
-    });
-  },
   resumeWorkspaceExecution: async (workspaceId: string, goalIdOrRequest?: string | WorkspaceExecutionActivationRequest, doDId?: string) => {
     const requestBody: WorkspaceExecutionActivationRequest = typeof goalIdOrRequest === 'object'
       ? goalIdOrRequest
@@ -533,25 +504,6 @@ export const workorchApi = {
     const body = await request<{ memory: MemoryItem[] }>(`${apiBase}/memory?${search.toString()}`);
     return body.memory ?? [];
   },
-  createMemory: async (workspaceId: string, requestBody: MemoryItemWriteRequest) => {
-    const body = await request<{ memory: MemoryItem }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/memory`, {
-      method: 'POST',
-      body: JSON.stringify(requestBody)
-    });
-    return body.memory;
-  },
-  updateMemory: async (workspaceId: string, memoryId: string, requestBody: MemoryItemWriteRequest) => {
-    const body = await request<{ memory: MemoryItem }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/memory/${encodeURIComponent(memoryId)}`, {
-      method: 'PUT',
-      body: JSON.stringify(requestBody)
-    });
-    return body.memory;
-  },
-  deleteMemory: async (workspaceId: string, memoryId: string) => {
-    await request<Record<string, never>>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/memory/${encodeURIComponent(memoryId)}`, {
-      method: 'DELETE'
-    });
-  },
   listDecisionPage: async (query?: { workspaceId?: string; runId?: string; cursorAfterId?: string; limit?: number }) => {
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries(query ?? {})) {
@@ -598,7 +550,7 @@ export const workorchApi = {
     const body = await request<{ approval: Approval }>(`${apiBase}/approvals/${encodeURIComponent(approvalId)}${suffix}`);
     return body.approval;
   },
-  resolveDecision: async (workspaceId: string | undefined, ticketId: string, resolutionType = 'provide_missing_info', resolutionPayload?: Record<string, unknown>) => {
+  resolveDecision: async (workspaceId: string, ticketId: string, resolutionType = 'provide_missing_info', resolutionPayload?: Record<string, unknown>) => {
     const suffix = querySuffix({ workspaceId });
     const body = await request<{ decision: Decision }>(`${apiBase}/decisions/${encodeURIComponent(ticketId)}/resolve${suffix}`, {
       method: 'POST',
@@ -606,7 +558,7 @@ export const workorchApi = {
     });
     return body.decision;
   },
-  batchResolveDecisions: async (workspaceId: string | undefined, ticketIds: string[], resolutionType = 'provide_missing_info', resolutionPayload?: Record<string, unknown>) => {
+  batchResolveDecisions: async (workspaceId: string, ticketIds: string[], resolutionType = 'provide_missing_info', resolutionPayload?: Record<string, unknown>) => {
     const suffix = querySuffix({ workspaceId });
     const body = await request<{ decisions: Decision[] }>(`${apiBase}/decisions/resolve-batch${suffix}`, {
       method: 'POST',
@@ -614,20 +566,20 @@ export const workorchApi = {
     });
     return body.decisions ?? [];
   },
-  rejectDecision: async (workspaceId: string | undefined, ticketId: string) => {
+  rejectDecision: async (workspaceId: string, ticketId: string) => {
     return workorchApi.resolveDecision(workspaceId, ticketId, 'reject_current_path', { operator: 'console' });
   },
-  approveApproval: async (workspaceId: string | undefined, approvalId: string) => {
+  approveApproval: async (workspaceId: string, approvalId: string) => {
     const suffix = querySuffix({ workspaceId });
     const body = await request<{ approval: Approval }>(`${apiBase}/approvals/${encodeURIComponent(approvalId)}/approve${suffix}`, { method: 'POST' });
     return body.approval;
   },
-  rejectApproval: async (workspaceId: string | undefined, approvalId: string) => {
+  rejectApproval: async (workspaceId: string, approvalId: string) => {
     const suffix = querySuffix({ workspaceId });
     const body = await request<{ approval: Approval }>(`${apiBase}/approvals/${encodeURIComponent(approvalId)}/reject${suffix}`, { method: 'POST' });
     return body.approval;
   },
-  batchResolveApprovals: async (workspaceId: string | undefined, approvalIds: string[], action: 'approve' | 'reject') => {
+  batchResolveApprovals: async (workspaceId: string, approvalIds: string[], action: 'approve' | 'reject') => {
     const suffix = querySuffix({ workspaceId });
     const body = await request<{ approvals: Approval[] }>(`${apiBase}/approvals/resolve-batch${suffix}`, {
       method: 'POST',
