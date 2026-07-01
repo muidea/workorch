@@ -341,6 +341,36 @@ Status: completed
   不会进入 decision prompt/progress。
 - 既有有 ticket 的 projected waiting decision 仍进入 decision prompt。
 
+### S12 Final Dispatch StagePacket Rebuild
+
+Status: completed
+
+目标：provider/block dispatch 前的最终 LLM input 必须拥有从当前 authority
+snapshot 重建的 StagePacket，不能因为中途 enrichment 或旧 input 带入的
+`stagePacket` 漂移而把可修复派生字段误判为不可恢复合同错位。
+
+合同：
+
+- final dispatch gate 必须在验证前重新构建 `stagePacket`。
+- 重建顺序必须是：rebuild StagePacket -> synchronize requiredOutput mirrors
+  -> attach currentActionContract -> validate dispatch input。
+- `stagePacket.activeFocus`、`stagePacket.requiredOutput`、
+  `currentActionContract.requiredOutput` 和 top-level `requiredOutput` 必须来自
+  同一当前 convergence authority。
+- 若重建后仍不一致，才按 `runtime_internal_contract_misalignment` fail-fast。
+
+不处理：
+
+- 不改变 NextAction 选择。
+- 不改变 requiredOutput 派生规则。
+- 不改变 validator 输出形态拒绝策略。
+- 不改变 evidence ledger、decision gate、projection 或 TUI。
+
+验收：
+
+- final gate 能修正 stale `stagePacket.activeFocus` 并通过验证。
+- final gate 仍会拒绝重建后无法对齐的 dispatch input。
+
 ## Progress Log
 
 - 2026-06-30: created plan from live verification. Active slice is S1 only.
@@ -441,3 +471,11 @@ Status: completed
   projection, governance owner state, scheduler, runtime state machine, ledger,
   required output, validator, repair and decision gates were intentionally not
   changed in this slice.
+- 2026-07-01: completed S12 by rebuilding StagePacket in the final LLM dispatch
+  authority gate before synchronizing requiredOutput mirrors and attaching
+  currentActionContract. Stale derived `stagePacket.activeFocus` can now be
+  repaired from current convergence authority before provider/block dispatch;
+  unresolved mismatch still fails fast as runtime internal contract
+  misalignment. NextAction selection, requiredOutput derivation, validator
+  shape rules, evidence ledger, decision gate, projection and TUI were
+  intentionally not changed in this slice.

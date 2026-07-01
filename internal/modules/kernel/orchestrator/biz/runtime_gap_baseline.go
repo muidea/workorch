@@ -279,6 +279,7 @@ func finalizeLLMDispatchAuthorityInput(run *runModel.Run, stepID common.StepID, 
 	if input == nil {
 		input = map[string]any{}
 	}
+	input = attachStagePacketToStepInput(run, stepID, input)
 	input = synchronizeCurrentRequiredOutputMirrors(input)
 	input = attachCurrentActionContractToInput(run, stepID, input)
 	input = scrubConvergenceDispatchDiagnosticAdvice(input)

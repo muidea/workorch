@@ -734,6 +734,60 @@ func TestValidateConvergenceDispatchInputRejectsAcceptanceActiveSliceFocusDrift(
 	}
 }
 
+func TestFinalizeLLMDispatchAuthorityInputRebuildsStaleStagePacket(t *testing.T) {
+	run := &runModel.Run{ID: "run-final-stage-packet", WorkspaceID: "ws-final-stage-packet"}
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus": map[string]any{
+				"id":                  "focus-cwi-current",
+				"coverageWorkItemIds": []string{"cwi-current"},
+			},
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		},
+		"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"coverageFocusId":                       "focus-cwi-stale",
+				"coverageWorkItemIds":                   []string{"cwi-stale"},
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []string{"validation/managed_session"},
+			},
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"schemaVersion": "workorch.stage_packet.v1",
+			"activeFocus": map[string]any{
+				"id":                  "focus-cwi-stale",
+				"coverageWorkItemIds": []string{"cwi-stale"},
+			},
+			"requiredOutput": map[string]any{
+				"coverageFocusId":     "focus-cwi-stale",
+				"coverageWorkItemIds": []string{"cwi-stale"},
+			},
+		},
+	}
+
+	got, err := finalizeLLMDispatchAuthorityInput(run, "run-final-stage-packet/step-001", input)
+	if err != nil {
+		t.Fatalf("finalizeLLMDispatchAuthorityInput returned error = %v", err)
+	}
+	packet := mapFromValue(got[stepInputKeyStagePacket])
+	assertFocusIDForTest(t, mapFromValue(packet["activeFocus"]), "focus-cwi-current")
+	for label, required := range map[string]map[string]any{
+		"requiredOutput":                       mapFromValue(got["requiredOutput"]),
+		"repairActionPackage.requiredOutput":   mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":           mapFromValue(packet["requiredOutput"]),
+		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(got[currentActionContractKey])["requiredOutput"]),
+	} {
+		if stringFromMap(required, "coverageFocusId") != "focus-cwi-current" {
+			t.Fatalf("%s = %+v, want current focus", label, required)
+		}
+		if ids := stringSliceFromValue(required["coverageWorkItemIds"]); len(ids) != 1 || ids[0] != "cwi-current" {
+			t.Fatalf("%s.coverageWorkItemIds = %+v, want [cwi-current]", label, ids)
+		}
+	}
+}
+
 func TestDispatchPreCreateHardGateRejectsUnrebuildableFocusDriftBeforeRuntime(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-authority-hard-gate")
