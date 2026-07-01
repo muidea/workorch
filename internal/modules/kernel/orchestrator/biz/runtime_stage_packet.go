@@ -35,18 +35,22 @@ func buildStagePacketFromStepInput(run *runModel.Run, stepID common.StepID, inpu
 			GoalID:   run.GoalID,
 			DoDID:    run.DoDID,
 		},
-		ActiveStage:           stagePacketActiveStage(input),
-		ActiveFocus:           stagePacketActiveFocus(input),
-		NextAction:            stagePacketNextAction(run, input),
-		RequiredOutput:        stagePacketRequiredOutput(input),
-		AllowedActions:        stringSliceFromValue(input["allowedActions"]),
-		ForbiddenActions:      stringSliceFromValue(input["forbiddenActions"]),
-		RequiredEvidenceKinds: stringSliceFromValue(input["requiredEvidenceKinds"]),
-		AcceptedEvidenceRefs:  stagePacketEvidenceRefs(input, "acceptedEvidenceRefs"),
-		RejectedEvidenceRefs:  stagePacketEvidenceRefs(input, "rejectedEvidenceRefs"),
-		CurrentFailure:        stagePacketCurrentFailure(input),
-		CurrentGap:            stagePacketCurrentGap(input),
-		TargetSnapshots:       stagePacketTargetSnapshots(input),
+		TemplatePolicyRefs:      stagePacketTemplatePolicyRefs(run, input),
+		ActiveStage:             stagePacketActiveStage(input),
+		ActiveFocus:             stagePacketActiveFocus(input),
+		NextAction:              stagePacketNextAction(run, input),
+		RequiredOutput:          stagePacketRequiredOutput(input),
+		AllowedActions:          stringSliceFromValue(input["allowedActions"]),
+		ForbiddenActions:        stringSliceFromValue(input["forbiddenActions"]),
+		RequiredEvidenceKinds:   stringSliceFromValue(input["requiredEvidenceKinds"]),
+		AcceptedEvidenceRefs:    stagePacketEvidenceRefs(input, "acceptedEvidenceRefs"),
+		RejectedEvidenceRefs:    stagePacketEvidenceRefs(input, "rejectedEvidenceRefs"),
+		CurrentFailure:          stagePacketCurrentFailure(input),
+		CurrentGap:              stagePacketCurrentGap(input),
+		ProcessEvidenceTimeline: stagePacketProcessEvidenceTimeline(input),
+		CompactSummaryRef:       stagePacketCompactSummaryRef(input),
+		MemoryRefs:              stagePacketMemoryRefs(input),
+		TargetSnapshots:         stagePacketTargetSnapshots(input),
 	}
 	return packet.Normalized()
 }
@@ -163,6 +167,28 @@ func stagePacketActiveStage(input map[string]any) string {
 		}
 	}
 	return ""
+}
+
+func stagePacketTemplatePolicyRefs(run *runModel.Run, input map[string]any) []string {
+	var refs []string
+	for _, source := range []map[string]any{
+		input,
+		mapFromValue(input["executionContext"]),
+		mapFromValue(input[stepInputKeyExecutionContextPackage]),
+		mapFromValue(mapFromValue(input[stepInputKeyExecutionContextPackage])["selectedContext"]),
+	} {
+		refs = append(refs, stagePacketRefsFromKeys(source, "templatePolicyRefs", "policyRefs")...)
+	}
+	if run != nil {
+		for _, source := range []map[string]any{
+			run.ExecutionContext,
+			mapFromValue(run.ExecutionContext[stepInputKeyExecutionContextPackage]),
+			mapFromValue(mapFromValue(run.ExecutionContext[stepInputKeyExecutionContextPackage])["selectedContext"]),
+		} {
+			refs = append(refs, stagePacketRefsFromKeys(source, "templatePolicyRefs", "policyRefs")...)
+		}
+	}
+	return compactUniqueStrings(refs)
 }
 
 func stagePacketActiveFocus(input map[string]any) map[string]any {
@@ -448,6 +474,129 @@ func stagePacketCurrentGapText(value string) string {
 		return ""
 	}
 	return truncateLLMContextString(value)
+}
+
+func stagePacketProcessEvidenceTimeline(input map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	for _, value := range []any{
+		input[stepInputKeyProcessEvidenceTimeline],
+		mapFromValue(input["executionContext"])[stepInputKeyProcessEvidenceTimeline],
+	} {
+		if timeline := mapSliceFromValue(value); len(timeline) > 0 {
+			return compactProcessEvidenceTimelineForRuntimeContext(timeline)
+		}
+	}
+	return nil
+}
+
+func stagePacketCompactSummaryRef(input map[string]any) string {
+	if len(input) == 0 {
+		return ""
+	}
+	for _, source := range []map[string]any{
+		input,
+		mapFromValue(input["executionContext"]),
+		mapFromValue(input[stepInputKeyExecutionContextPackage]),
+	} {
+		for _, key := range []string{"compactSummaryRef", "historicalSummaryRef", "summaryRef"} {
+			if value := strings.TrimSpace(stringFromMap(source, key)); value != "" {
+				return value
+			}
+		}
+	}
+	for _, item := range stagePacketProcessEvidenceTimeline(input) {
+		if strings.TrimSpace(stringFromMap(item, "summaryKind")) != "compact_history" {
+			continue
+		}
+		if value := strings.TrimSpace(stringFromMap(item, "sourceRef")); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func stagePacketMemoryRefs(input map[string]any) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	var refs []string
+	for _, source := range []map[string]any{
+		input,
+		mapFromValue(input["executionContext"]),
+		mapFromValue(input[stepInputKeyExecutionContextPackage]),
+		mapFromValue(mapFromValue(input[stepInputKeyExecutionContextPackage])["memoryRetrieval"]),
+		mapFromValue(mapFromValue(input[stepInputKeyExecutionContextPackage])["selectedContext"]),
+		mapFromValue(input["memoryRetrieval"]),
+		mapFromValue(input["selectedContext"]),
+	} {
+		refs = append(refs, stagePacketRefsFromKeys(source, "memoryRefs", "selectedMemoryIds", "retrievedMemoryIds")...)
+		refs = append(refs, stagePacketRefsFromItems(source["memories"], "id", "memoryId", "ref", "sourceRef")...)
+	}
+	return compactUniqueStrings(refs)
+}
+
+func stagePacketRefsFromKeys(source map[string]any, keys ...string) []string {
+	if len(source) == 0 {
+		return nil
+	}
+	var refs []string
+	for _, key := range keys {
+		refs = append(refs, stagePacketRefsFromValue(source[key])...)
+	}
+	return refs
+}
+
+func stagePacketRefsFromValue(value any) []string {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case string:
+		if strings.TrimSpace(typed) == "" {
+			return nil
+		}
+		return []string{strings.TrimSpace(typed)}
+	case []string:
+		return compactUniqueStrings(typed)
+	case []any:
+		var refs []string
+		for _, item := range typed {
+			refs = append(refs, stagePacketRefsFromValue(item)...)
+		}
+		return compactUniqueStrings(refs)
+	case map[string]any:
+		var refs []string
+		for _, value := range typed {
+			refs = append(refs, stagePacketRefsFromValue(value)...)
+		}
+		return compactUniqueStrings(refs)
+	case []map[string]any:
+		var refs []string
+		for _, item := range typed {
+			refs = append(refs, stagePacketRefsFromItems([]map[string]any{item}, "id", "ref", "policyRef", "sourceRef")...)
+		}
+		return compactUniqueStrings(refs)
+	default:
+		return nil
+	}
+}
+
+func stagePacketRefsFromItems(value any, keys ...string) []string {
+	items := mapSliceFromValue(value)
+	if len(items) == 0 {
+		return nil
+	}
+	var refs []string
+	for _, item := range items {
+		for _, key := range keys {
+			if value := strings.TrimSpace(stringFromMap(item, key)); value != "" {
+				refs = append(refs, value)
+				break
+			}
+		}
+	}
+	return compactUniqueStrings(refs)
 }
 
 func stagePacketTargetSnapshots(input map[string]any) []map[string]any {

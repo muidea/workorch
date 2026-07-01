@@ -477,6 +477,121 @@ Status: completed
   currentGap。
 - currentGap 变化会影响 StagePacket idempotency key。
 
+### S16 StagePacket ProcessEvidenceTimeline Authority
+
+Status: completed
+
+目标：StagePacket 必须显式携带 compact process evidence timeline，让长会话阶段
+衔接依赖结构化近期证据和历史摘要引用，而不是旧 execution graph、旧 memory 或
+自然语言历史。
+
+合同：
+
+- `stagePacket.processEvidenceTimeline` 只能从结构化
+  `processEvidenceTimeline` 或 `executionContext.processEvidenceTimeline`
+  派生。
+- timeline 必须复用 runtime 已有 compact 规则，保留 order、sourceRef、stepId、
+  kind/actionKind、state、stage、failure diagnostic、payloadRef、evidenceRefs
+  等可追溯字段。
+- timeline 必须保持输入顺序；已有 compact history summary 必须保留
+  `summaryKind=compact_history`、`sourceRefs`、`firstSourceRef`、`lastSourceRef`
+  等 lineage 字段。
+- StagePacket 不从旧 graph、旧 decision、旧 memory、workspace title、模板文本或
+  业务自然语言生成 timeline。
+
+不处理：
+
+- 不改变 processEvidenceTimeline 的生成逻辑。
+- 不改变 currentProgressDigest 派生。
+- 不改变 NextAction、requiredOutput、validator、repair/decision、projection 或 TUI。
+- 不改变 compactSummaryRef、memoryRefs 或 templatePolicyRefs。
+
+验收：
+
+- StagePacket 能保留 compact processEvidenceTimeline。
+- timeline 顺序和 sourceRef / evidenceRefs lineage 保持稳定。
+- processEvidenceTimeline 变化会影响 StagePacket idempotency key。
+
+### S17 StagePacket TemplatePolicyRefs Authority
+
+Status: completed
+
+目标：StagePacket 必须显式携带 template/profile/Soul 绑定后的 policy refs，
+让 LLM 可见当前策略引用边界，同时避免把模板策略正文或业务判断写入 core。
+
+合同：
+
+- `stagePacket.templatePolicyRefs` 只能从结构化 `templatePolicyRefs` 或
+  `policyRefs` 派生。
+- StagePacket 只携带 policy refs，不携带策略正文、不根据模板名、Soul 名或
+  业务文本推断策略。
+- run executionContext 中已绑定的 policy refs 可以进入 StagePacket，作为
+  workspace 创建期/运行期绑定结果的引用。
+
+不处理：
+
+- 不改变 template/profile/Soul 的绑定逻辑。
+- 不改变 policy 解释器、evidence policy 或能力目录。
+- 不改变 NextAction、requiredOutput、validator、projection 或 TUI。
+
+验收：
+
+- StagePacket 能保留并去重 templatePolicyRefs。
+- templatePolicyRefs 变化会影响 StagePacket idempotency key。
+
+### S18 StagePacket CompactSummaryRef Authority
+
+Status: completed
+
+目标：StagePacket 必须显式携带历史 compact summary 的引用，确保历史摘要只作为
+可追溯背景引用，不替代 ledger、current gap 或 process evidence timeline。
+
+合同：
+
+- `stagePacket.compactSummaryRef` 只能从结构化 `compactSummaryRef`、
+  `historicalSummaryRef`、`summaryRef` 或 compact history timeline 的
+  `sourceRef` 派生。
+- 显式 compact summary ref 优先于 timeline fallback。
+- StagePacket 不携带 summary 正文，不从自然语言历史生成 summary ref。
+
+不处理：
+
+- 不改变 compact summary 生成逻辑。
+- 不改变 history 裁剪、processEvidenceTimeline 或 memory recall。
+- 不改变 NextAction、requiredOutput、validator、projection 或 TUI。
+
+验收：
+
+- StagePacket 能保留显式 compactSummaryRef。
+- 缺显式 ref 时能从 compact history timeline sourceRef 派生。
+- compactSummaryRef 变化会影响 StagePacket idempotency key。
+
+### S19 StagePacket MemoryRefs Authority
+
+Status: completed
+
+目标：StagePacket 必须显式携带当前选中 memory 的引用，让 memory 作为参考资产
+可追溯，而不是把 memory 正文变成 StagePacket 权威。
+
+合同：
+
+- `stagePacket.memoryRefs` 只能从结构化 `memoryRefs`、memory retrieval
+  selected ids 或 selectedContext memory item ids 派生。
+- StagePacket 只携带 memory ids/refs，不携带 memory summary/content。
+- excluded、stale、low-value 等 memory 是否进入 selectedContext 仍由现有
+  memory recall 逻辑决定，StagePacket 不重新选择 memory。
+
+不处理：
+
+- 不改变 memory recall、memory 写入、memory quality 过滤或 recall trace。
+- 不改变 NextAction、requiredOutput、validator、projection 或 TUI。
+
+验收：
+
+- StagePacket 能保留显式和 selectedContext 派生的 memoryRefs。
+- memoryRefs 去重且不泄漏 memory 正文。
+- memoryRefs 变化会影响 StagePacket idempotency key。
+
 ## Progress Log
 
 - 2026-06-30: created plan from live verification. Active slice is S1 only.
@@ -607,3 +722,19 @@ Status: completed
   StagePacket idempotency. Gap ledger calculation, NextAction selection,
   requiredOutput rendering, validator, repair/decision handling, projection
   and TUI were intentionally not changed in this slice.
+- 2026-07-01: completed S16 by adding
+  `stagePacket.processEvidenceTimeline` to the StagePacket DTO and deriving it
+  from structured processEvidenceTimeline inputs with the existing compact
+  runtime timeline rules. The packet now carries ordered recent evidence and
+  compact history lineage, and the timeline participates in StagePacket
+  idempotency. Timeline generation, currentProgressDigest derivation,
+  NextAction selection, requiredOutput rendering, validator, repair/decision
+  handling, projection and TUI were intentionally not changed in this slice.
+- 2026-07-01: completed S17-S19 by adding
+  `stagePacket.templatePolicyRefs`, `stagePacket.compactSummaryRef` and
+  `stagePacket.memoryRefs` to the StagePacket DTO. The fields are derived only
+  from structured refs, selected memory ids or compact history source refs,
+  and participate in StagePacket idempotency. Template policy binding, compact
+  summary generation, memory recall, NextAction selection, requiredOutput
+  rendering, validator, repair/decision handling, projection and TUI were
+  intentionally not changed in this slice.

@@ -19,24 +19,28 @@ type StagePacketDefinition struct {
 }
 
 type StagePacket struct {
-	SchemaVersion         string                `json:"schemaVersion"`
-	WorkspaceID           common.WorkspaceID    `json:"workspaceId"`
-	RunID                 common.RunID          `json:"runId"`
-	StepID                common.StepID         `json:"stepId,omitempty"`
-	Definition            StagePacketDefinition `json:"definition,omitempty"`
-	ActiveStage           string                `json:"activeStage,omitempty"`
-	ActiveFocus           map[string]any        `json:"activeFocus,omitempty"`
-	NextAction            *NextAction           `json:"nextAction,omitempty"`
-	RequiredOutput        map[string]any        `json:"requiredOutput,omitempty"`
-	AllowedActions        []string              `json:"allowedActions,omitempty"`
-	ForbiddenActions      []string              `json:"forbiddenActions,omitempty"`
-	RequiredEvidenceKinds []string              `json:"requiredEvidenceKinds,omitempty"`
-	AcceptedEvidenceRefs  []string              `json:"acceptedEvidenceRefs,omitempty"`
-	RejectedEvidenceRefs  []string              `json:"rejectedEvidenceRefs,omitempty"`
-	CurrentFailure        map[string]any        `json:"currentFailure,omitempty"`
-	CurrentGap            map[string]any        `json:"currentGap,omitempty"`
-	TargetSnapshots       []map[string]any      `json:"targetSnapshots,omitempty"`
-	IdempotencyKey        string                `json:"idempotencyKey"`
+	SchemaVersion           string                `json:"schemaVersion"`
+	WorkspaceID             common.WorkspaceID    `json:"workspaceId"`
+	RunID                   common.RunID          `json:"runId"`
+	StepID                  common.StepID         `json:"stepId,omitempty"`
+	Definition              StagePacketDefinition `json:"definition,omitempty"`
+	TemplatePolicyRefs      []string              `json:"templatePolicyRefs,omitempty"`
+	ActiveStage             string                `json:"activeStage,omitempty"`
+	ActiveFocus             map[string]any        `json:"activeFocus,omitempty"`
+	NextAction              *NextAction           `json:"nextAction,omitempty"`
+	RequiredOutput          map[string]any        `json:"requiredOutput,omitempty"`
+	AllowedActions          []string              `json:"allowedActions,omitempty"`
+	ForbiddenActions        []string              `json:"forbiddenActions,omitempty"`
+	RequiredEvidenceKinds   []string              `json:"requiredEvidenceKinds,omitempty"`
+	AcceptedEvidenceRefs    []string              `json:"acceptedEvidenceRefs,omitempty"`
+	RejectedEvidenceRefs    []string              `json:"rejectedEvidenceRefs,omitempty"`
+	CurrentFailure          map[string]any        `json:"currentFailure,omitempty"`
+	CurrentGap              map[string]any        `json:"currentGap,omitempty"`
+	ProcessEvidenceTimeline []map[string]any      `json:"processEvidenceTimeline,omitempty"`
+	CompactSummaryRef       string                `json:"compactSummaryRef,omitempty"`
+	MemoryRefs              []string              `json:"memoryRefs,omitempty"`
+	TargetSnapshots         []map[string]any      `json:"targetSnapshots,omitempty"`
+	IdempotencyKey          string                `json:"idempotencyKey"`
 }
 
 func (p StagePacket) Normalized() StagePacket {
@@ -44,6 +48,7 @@ func (p StagePacket) Normalized() StagePacket {
 		p.SchemaVersion = StagePacketSchema
 	}
 	p.Definition.Revision = strings.TrimSpace(p.Definition.Revision)
+	p.TemplatePolicyRefs = compactNextActionStrings(p.TemplatePolicyRefs)
 	p.ActiveStage = strings.TrimSpace(p.ActiveStage)
 	p.ActiveFocus = cloneStagePacketMap(p.ActiveFocus)
 	p.RequiredOutput = cloneStagePacketMap(p.RequiredOutput)
@@ -54,6 +59,9 @@ func (p StagePacket) Normalized() StagePacket {
 	p.RejectedEvidenceRefs = compactNextActionStrings(p.RejectedEvidenceRefs)
 	p.CurrentFailure = cloneStagePacketMap(p.CurrentFailure)
 	p.CurrentGap = cloneStagePacketMap(p.CurrentGap)
+	p.ProcessEvidenceTimeline = cloneStagePacketMapSlice(p.ProcessEvidenceTimeline)
+	p.CompactSummaryRef = strings.TrimSpace(p.CompactSummaryRef)
+	p.MemoryRefs = compactNextActionStrings(p.MemoryRefs)
 	p.TargetSnapshots = NormalizeStagePacketTargetSnapshots(p.TargetSnapshots)
 	if p.NextAction != nil {
 		next := p.NextAction.Normalized()
@@ -113,6 +121,9 @@ func (p StagePacket) ToMap() map[string]any {
 	if len(definition) > 0 {
 		ret["definition"] = definition
 	}
+	if len(p.TemplatePolicyRefs) > 0 {
+		ret["templatePolicyRefs"] = append([]string(nil), p.TemplatePolicyRefs...)
+	}
 	if p.ActiveStage != "" {
 		ret["activeStage"] = p.ActiveStage
 	}
@@ -145,6 +156,15 @@ func (p StagePacket) ToMap() map[string]any {
 	}
 	if len(p.CurrentGap) > 0 {
 		ret["currentGap"] = cloneStagePacketMap(p.CurrentGap)
+	}
+	if len(p.ProcessEvidenceTimeline) > 0 {
+		ret["processEvidenceTimeline"] = cloneStagePacketMapSlice(p.ProcessEvidenceTimeline)
+	}
+	if p.CompactSummaryRef != "" {
+		ret["compactSummaryRef"] = p.CompactSummaryRef
+	}
+	if len(p.MemoryRefs) > 0 {
+		ret["memoryRefs"] = append([]string(nil), p.MemoryRefs...)
 	}
 	if len(p.TargetSnapshots) > 0 {
 		ret["targetSnapshots"] = cloneStagePacketMapSlice(p.TargetSnapshots)
@@ -218,6 +238,7 @@ func StableStagePacketIdempotencyKey(packet StagePacket) string {
 		strings.TrimSpace(packet.Definition.Revision),
 		string(packet.Definition.GoalID),
 		string(packet.Definition.DoDID),
+		strings.Join(compactNextActionStrings(packet.TemplatePolicyRefs), ","),
 		strings.TrimSpace(packet.ActiveStage),
 		nextActionKey,
 		shortStagePacketDigest(packet.ActiveFocus),
@@ -227,6 +248,9 @@ func StableStagePacketIdempotencyKey(packet StagePacket) string {
 		strings.Join(compactNextActionStrings(packet.RejectedEvidenceRefs), ","),
 		shortStagePacketDigest(packet.CurrentFailure),
 		shortStagePacketDigest(packet.CurrentGap),
+		shortStagePacketDigest(packet.ProcessEvidenceTimeline),
+		strings.TrimSpace(packet.CompactSummaryRef),
+		strings.Join(compactNextActionStrings(packet.MemoryRefs), ","),
 		shortStagePacketDigest(NormalizeStagePacketTargetSnapshots(packet.TargetSnapshots)),
 	}
 	return strings.Join(parts, "|")

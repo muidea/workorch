@@ -419,6 +419,198 @@ func TestStagePacketDerivesCurrentGapFromProgressDigest(t *testing.T) {
 	}
 }
 
+func TestStagePacketCarriesProcessEvidenceTimeline(t *testing.T) {
+	run := &runModel.Run{
+		ID:          common.RunID("run-stage-packet-timeline"),
+		WorkspaceID: common.WorkspaceID("ws-stage-packet-timeline"),
+		State:       common.RunStateRunning,
+	}
+	input := map[string]any{
+		stepInputKeyProcessEvidenceTimeline: []map[string]any{{
+			"order":          1,
+			"sourceRef":      "history://runs/run-stage-packet-timeline/process-evidence",
+			"summaryKind":    "compact_history",
+			"actionKind":     "history_summary",
+			"historicalOnly": true,
+			"itemCount":      3,
+			"firstSourceRef": "step://older-001",
+			"lastSourceRef":  "step://older-003",
+			"sourceRefs":     []string{"step://older-001", "step://older-002", "step://older-003"},
+		}, {
+			"order":        2,
+			"sourceRef":    "step://recent-001",
+			"stepId":       "recent-001",
+			"kind":         llmWorkspaceExecutionStepKind,
+			"actionKind":   "llm_candidate",
+			"state":        string(common.StepStateFailed),
+			"stage":        runtimeStageRepair,
+			"failureClass": failureClassRuntime,
+			"evidenceRefs": []string{"evidence://rejected/recent-001"},
+			"payloadRef":   "payload://recent-001",
+			"ignored":      "non-contract timeline field",
+		}},
+		"executionContext": map[string]any{
+			stepInputKeyProcessEvidenceTimeline: []map[string]any{{
+				"sourceRef": "step://stale-context",
+			}},
+		},
+	}
+
+	packet := buildStagePacketFromStepInput(run, "step-stage-packet-timeline", input).ToMap()
+
+	timeline := mapSliceFromValue(packet["processEvidenceTimeline"])
+	if len(timeline) != 2 {
+		t.Fatalf("stagePacket.processEvidenceTimeline = %+v, want two compact items", timeline)
+	}
+	if timeline[0]["summaryKind"] != "compact_history" ||
+		timeline[0]["sourceRef"] != "history://runs/run-stage-packet-timeline/process-evidence" ||
+		timeline[0]["firstSourceRef"] != "step://older-001" ||
+		timeline[0]["lastSourceRef"] != "step://older-003" {
+		t.Fatalf("stagePacket.processEvidenceTimeline[0] = %+v, want compact history lineage", timeline[0])
+	}
+	if refs := stringSliceFromValue(timeline[0]["sourceRefs"]); len(refs) != 3 || refs[0] != "step://older-001" || refs[2] != "step://older-003" {
+		t.Fatalf("stagePacket.processEvidenceTimeline[0].sourceRefs = %+v, want ordered refs", timeline[0]["sourceRefs"])
+	}
+	if timeline[1]["sourceRef"] != "step://recent-001" ||
+		timeline[1]["stepId"] != "recent-001" ||
+		timeline[1]["state"] != string(common.StepStateFailed) ||
+		timeline[1]["stage"] != runtimeStageRepair ||
+		timeline[1]["payloadRef"] != "payload://recent-001" {
+		t.Fatalf("stagePacket.processEvidenceTimeline[1] = %+v, want recent evidence item", timeline[1])
+	}
+	if refs := stringSliceFromValue(timeline[1]["evidenceRefs"]); len(refs) != 1 || refs[0] != "evidence://rejected/recent-001" {
+		t.Fatalf("stagePacket.processEvidenceTimeline[1].evidenceRefs = %+v, want rejected evidence ref", timeline[1]["evidenceRefs"])
+	}
+	if _, ok := timeline[1]["ignored"]; ok {
+		t.Fatalf("stagePacket.processEvidenceTimeline[1] = %+v, want compact contract fields only", timeline[1])
+	}
+	withoutTimeline := buildStagePacketFromStepInput(run, "step-stage-packet-timeline", map[string]any{}).ToMap()
+	if packet["idempotencyKey"] == withoutTimeline["idempotencyKey"] {
+		t.Fatalf("idempotencyKey = %v, want processEvidenceTimeline to affect stage packet identity", packet["idempotencyKey"])
+	}
+}
+
+func TestStagePacketCarriesTemplatePolicyRefs(t *testing.T) {
+	run := &runModel.Run{
+		ID:          common.RunID("run-stage-packet-policy-refs"),
+		WorkspaceID: common.WorkspaceID("ws-stage-packet-policy-refs"),
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			"templatePolicyRefs": []string{"policy://run-bound"},
+		},
+	}
+	input := map[string]any{
+		"policyRefs": map[string]any{
+			"evidence": []any{"policy://evidence", "policy://quality"},
+		},
+		"executionContext": map[string]any{
+			"templatePolicyRefs": []any{"policy://context-bound", "policy://evidence"},
+		},
+	}
+
+	packet := buildStagePacketFromStepInput(run, "step-stage-packet-policy-refs", input).ToMap()
+
+	refs := stringSliceFromValue(packet["templatePolicyRefs"])
+	for _, expected := range []string{"policy://evidence", "policy://quality", "policy://context-bound", "policy://run-bound"} {
+		if !stringSliceContains(refs, expected) {
+			t.Fatalf("stagePacket.templatePolicyRefs = %+v, want %s", refs, expected)
+		}
+	}
+	if len(refs) != 4 {
+		t.Fatalf("stagePacket.templatePolicyRefs = %+v, want deduplicated refs", refs)
+	}
+	withoutRefs := buildStagePacketFromStepInput(&runModel.Run{
+		ID:          run.ID,
+		WorkspaceID: run.WorkspaceID,
+		State:       common.RunStateRunning,
+	}, "step-stage-packet-policy-refs", map[string]any{}).ToMap()
+	if packet["idempotencyKey"] == withoutRefs["idempotencyKey"] {
+		t.Fatalf("idempotencyKey = %v, want templatePolicyRefs to affect stage packet identity", packet["idempotencyKey"])
+	}
+}
+
+func TestStagePacketCarriesCompactSummaryRef(t *testing.T) {
+	run := &runModel.Run{
+		ID:          common.RunID("run-stage-packet-summary-ref"),
+		WorkspaceID: common.WorkspaceID("ws-stage-packet-summary-ref"),
+		State:       common.RunStateRunning,
+	}
+	input := map[string]any{
+		"executionContext": map[string]any{
+			"summaryRef": "summary://stale-context",
+		},
+		"compactSummaryRef": "summary://current-compact",
+		stepInputKeyProcessEvidenceTimeline: []map[string]any{{
+			"summaryKind": "compact_history",
+			"sourceRef":   "history://runs/run-stage-packet-summary-ref/process-evidence",
+		}},
+	}
+
+	packet := buildStagePacketFromStepInput(run, "step-stage-packet-summary-ref", input).ToMap()
+
+	if packet["compactSummaryRef"] != "summary://current-compact" {
+		t.Fatalf("stagePacket.compactSummaryRef = %v, want explicit compact summary ref", packet["compactSummaryRef"])
+	}
+	fallback := buildStagePacketFromStepInput(run, "step-stage-packet-summary-ref", map[string]any{
+		stepInputKeyProcessEvidenceTimeline: []map[string]any{{
+			"summaryKind": "compact_history",
+			"sourceRef":   "history://runs/run-stage-packet-summary-ref/process-evidence",
+		}},
+	}).ToMap()
+	if fallback["compactSummaryRef"] != "history://runs/run-stage-packet-summary-ref/process-evidence" {
+		t.Fatalf("stagePacket.compactSummaryRef fallback = %v, want compact history sourceRef", fallback["compactSummaryRef"])
+	}
+	withoutRef := buildStagePacketFromStepInput(run, "step-stage-packet-summary-ref", map[string]any{}).ToMap()
+	if packet["idempotencyKey"] == withoutRef["idempotencyKey"] {
+		t.Fatalf("idempotencyKey = %v, want compactSummaryRef to affect stage packet identity", packet["idempotencyKey"])
+	}
+}
+
+func TestStagePacketCarriesMemoryRefs(t *testing.T) {
+	run := &runModel.Run{
+		ID:          common.RunID("run-stage-packet-memory-refs"),
+		WorkspaceID: common.WorkspaceID("ws-stage-packet-memory-refs"),
+		State:       common.RunStateRunning,
+	}
+	input := map[string]any{
+		"memoryRefs": []string{"memory://explicit"},
+		stepInputKeyExecutionContextPackage: map[string]any{
+			"memoryRetrieval": map[string]any{
+				"selectedMemoryIds": []any{"memory://selected", "memory://explicit"},
+			},
+			"selectedContext": map[string]any{
+				"memories": []map[string]any{{
+					"id":      "memory://context",
+					"summary": "selected memory summary must not become a ref",
+				}},
+			},
+		},
+	}
+
+	packet := buildStagePacketFromStepInput(run, "step-stage-packet-memory-refs", input).ToMap()
+
+	refs := stringSliceFromValue(packet["memoryRefs"])
+	for _, expected := range []string{"memory://explicit", "memory://selected", "memory://context"} {
+		if !stringSliceContains(refs, expected) {
+			t.Fatalf("stagePacket.memoryRefs = %+v, want %s", refs, expected)
+		}
+	}
+	if len(refs) != 3 {
+		t.Fatalf("stagePacket.memoryRefs = %+v, want deduplicated refs only", refs)
+	}
+	encoded, err := json.Marshal(packet)
+	if err != nil {
+		t.Fatalf("marshal stage packet: %v", err)
+	}
+	if strings.Contains(string(encoded), "selected memory summary") {
+		t.Fatalf("stagePacket leaked memory body: %s", encoded)
+	}
+	withoutRefs := buildStagePacketFromStepInput(run, "step-stage-packet-memory-refs", map[string]any{}).ToMap()
+	if packet["idempotencyKey"] == withoutRefs["idempotencyKey"] {
+		t.Fatalf("idempotencyKey = %v, want memoryRefs to affect stage packet identity", packet["idempotencyKey"])
+	}
+}
+
 func TestFollowUpStepInputRebuildsStagePacketAfterNextInputMutation(t *testing.T) {
 	run := &runModel.Run{
 		ID:                 common.RunID("run-follow-up-stage-packet"),
