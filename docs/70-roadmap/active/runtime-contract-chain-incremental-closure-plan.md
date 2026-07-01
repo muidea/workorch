@@ -439,6 +439,44 @@ retry、validation 阶段只能从散落的历史字段、旧 graph 或自然语
   currentFailure。
 - currentFailure 变化会影响 StagePacket idempotency key。
 
+### S15 StagePacket CurrentGap Authority
+
+Status: completed
+
+目标：StagePacket 必须显式携带当前 ledger/focus gap，避免 LLM 从旧 graph、
+旧历史摘要或自然语言上下文中猜测下一步到底缺什么。
+
+合同：
+
+- `stagePacket.currentGap` 只能从结构化 `currentGap`、当前 authority focus
+  或 `currentProgressDigest` 派生。
+- 显式 `currentGap` 优先于 authority focus 和 progress digest。
+- authority focus gap 优先于 progress digest，确保当前 ledger/open coverage
+  是下一步缺口的主来源。
+- `currentGap` 必须保留 compact summary、missingEvidenceKinds、
+  coverageWorkItemIds、structuredTargetRefs / targetRefs 等中立绑定字段。
+- 无有效 gap 时不伪造；`none_observed_in_recent_process_evidence` 不进入
+  StagePacket。
+- StagePacket 不从旧 decision、旧 execution graph、模板文本或业务自然语言
+  推断 gap。
+
+不处理：
+
+- 不改变 gap/coverage ledger 计算。
+- 不改变 NextAction 或 requiredOutput 选择。
+- 不改变 contract validator、repair retry、decision gate、projection 或 TUI。
+- 不改变 processEvidenceTimeline、memoryRefs、compactSummaryRef 或
+  templatePolicyRefs。
+
+验收：
+
+- StagePacket 能保留显式 currentGap。
+- StagePacket 能从 authority current focus 派生 currentGap，并保留 missing
+  evidence 与 target binding。
+- StagePacket 能在缺少 authority focus gap 时从 currentProgressDigest 派生
+  currentGap。
+- currentGap 变化会影响 StagePacket idempotency key。
+
 ## Progress Log
 
 - 2026-06-30: created plan from live verification. Active slice is S1 only.
@@ -562,3 +600,10 @@ retry、validation 阶段只能从散落的历史字段、旧 graph 或自然语
   StagePacket idempotency. Contract violation retry budgets, repair package
   generation, evidence ledger, memory writes, provider request partition,
   projection and TUI were intentionally not changed in this slice.
+- 2026-07-01: completed S15 by adding `stagePacket.currentGap` to the
+  StagePacket DTO and deriving it from explicit currentGap, current authority
+  focus or currentProgressDigest. The gap is carried as compact structured
+  context with missing evidence and target bindings, and participates in
+  StagePacket idempotency. Gap ledger calculation, NextAction selection,
+  requiredOutput rendering, validator, repair/decision handling, projection
+  and TUI were intentionally not changed in this slice.

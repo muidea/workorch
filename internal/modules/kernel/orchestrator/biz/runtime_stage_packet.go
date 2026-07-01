@@ -45,6 +45,7 @@ func buildStagePacketFromStepInput(run *runModel.Run, stepID common.StepID, inpu
 		AcceptedEvidenceRefs:  stagePacketEvidenceRefs(input, "acceptedEvidenceRefs"),
 		RejectedEvidenceRefs:  stagePacketEvidenceRefs(input, "rejectedEvidenceRefs"),
 		CurrentFailure:        stagePacketCurrentFailure(input),
+		CurrentGap:            stagePacketCurrentGap(input),
 		TargetSnapshots:       stagePacketTargetSnapshots(input),
 	}
 	return packet.Normalized()
@@ -305,6 +306,148 @@ func stagePacketCurrentFailureFromContractViolationRecovery(recovery map[string]
 		return nil
 	}
 	return ret
+}
+
+func stagePacketCurrentGap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	for _, source := range []struct {
+		name  string
+		value any
+	}{
+		{name: "input.currentGap", value: input["currentGap"]},
+		{name: "repairActionPackage.currentGap", value: mapFromValue(input["repairActionPackage"])["currentGap"]},
+		{name: "executionContext.currentGap", value: mapFromValue(input["executionContext"])["currentGap"]},
+		{name: "executionContext.repairActionPackage.currentGap", value: mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"])["currentGap"]},
+	} {
+		if gap := stagePacketCurrentGapFromValue(source.value, source.name); len(gap) > 0 {
+			return gap
+		}
+	}
+	authorityFocus := dispatchAuthorityCurrentFocus(input)
+	for _, source := range []struct {
+		name  string
+		focus map[string]any
+	}{
+		{name: "authority.currentFocus", focus: authorityFocus},
+		{name: "coverage.currentFocus", focus: dispatchCoverageFocusFromAuthority(input, authorityFocus)},
+		{name: "stagePacket.activeFocus", focus: stagePacketActiveFocus(input)},
+	} {
+		if gap := stagePacketCurrentGapFromFocus(source.focus, source.name); len(gap) > 0 {
+			return gap
+		}
+	}
+	for _, source := range []struct {
+		name   string
+		digest map[string]any
+	}{
+		{name: "currentProgressDigest", digest: mapFromValue(input[stepInputKeyCurrentProgressDigest])},
+		{name: "executionContext.currentProgressDigest", digest: mapFromValue(mapFromValue(input["executionContext"])[stepInputKeyCurrentProgressDigest])},
+	} {
+		if gap := stagePacketCurrentGapFromProgressDigest(source.digest, source.name); len(gap) > 0 {
+			return gap
+		}
+	}
+	return nil
+}
+
+func stagePacketCurrentGapFromValue(value any, source string) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		if len(typed) == 0 {
+			return nil
+		}
+		ret := compactLLMContextMap(typed, 1)
+		if len(ret) == 0 {
+			return nil
+		}
+		if strings.TrimSpace(stringFromMap(ret, "source")) == "" {
+			ret["source"] = source
+		}
+		if len(ret) == 1 {
+			return nil
+		}
+		return ret
+	case string:
+		return stagePacketCurrentGapFromText(typed, source)
+	default:
+		return nil
+	}
+}
+
+func stagePacketCurrentGapFromFocus(focus map[string]any, source string) map[string]any {
+	if len(focus) == 0 {
+		return nil
+	}
+	ret := map[string]any{"source": source}
+	if id := strings.TrimSpace(stringFromMap(focus, "id")); id != "" {
+		ret["focusId"] = id
+	}
+	if summary := stagePacketCurrentGapText(stringFromMap(focus, "currentGap")); summary != "" {
+		ret["summary"] = summary
+	}
+	if missing := compactUniqueStrings(stringSliceFromValue(focus["missingEvidenceKinds"])); len(missing) > 0 {
+		ret["missingEvidenceKinds"] = missing
+	}
+	if ids := compactUniqueStrings(dispatchFocusWorkItemIDs(focus)); len(ids) > 0 {
+		ret["coverageWorkItemIds"] = ids
+	}
+	if refs := compactUniqueStrings(stringSliceFromValue(focus["structuredTargetRefs"])); len(refs) > 0 {
+		ret["structuredTargetRefs"] = refs
+	}
+	if refs := compactUniqueStrings(stringSliceFromValue(focus["targetRefs"])); len(refs) > 0 {
+		ret["targetRefs"] = refs
+	}
+	if len(ret) == 1 {
+		return nil
+	}
+	return compactLLMContextMap(ret, 1)
+}
+
+func stagePacketCurrentGapFromProgressDigest(digest map[string]any, source string) map[string]any {
+	if len(digest) == 0 {
+		return nil
+	}
+	ret := map[string]any{"source": source}
+	if summary := stagePacketCurrentGapText(stringFromMap(digest, "currentGap")); summary != "" {
+		ret["summary"] = summary
+	}
+	if missing := compactUniqueStrings(stringSliceFromValue(digest["missingEvidenceKinds"])); len(missing) > 0 {
+		ret["missingEvidenceKinds"] = missing
+	}
+	if ids := compactUniqueStrings(stringSliceFromValue(digest["coverageWorkItemIds"])); len(ids) > 0 {
+		ret["coverageWorkItemIds"] = ids
+	}
+	if refs := compactUniqueStrings(stringSliceFromValue(digest["structuredTargetRefs"])); len(refs) > 0 {
+		ret["structuredTargetRefs"] = refs
+	}
+	if refs := compactUniqueStrings(stringSliceFromValue(digest["targetRefs"])); len(refs) > 0 {
+		ret["targetRefs"] = refs
+	}
+	if len(ret) == 1 {
+		return nil
+	}
+	return compactLLMContextMap(ret, 1)
+}
+
+func stagePacketCurrentGapFromText(value string, source string) map[string]any {
+	summary := stagePacketCurrentGapText(value)
+	if summary == "" {
+		return nil
+	}
+	return map[string]any{
+		"source":  source,
+		"summary": summary,
+	}
+}
+
+func stagePacketCurrentGapText(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "none_observed_in_recent_process_evidence" {
+		return ""
+	}
+	return truncateLLMContextString(value)
 }
 
 func stagePacketTargetSnapshots(input map[string]any) []map[string]any {

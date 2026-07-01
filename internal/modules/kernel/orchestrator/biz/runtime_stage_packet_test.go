@@ -318,6 +318,107 @@ func TestStagePacketDerivesCurrentFailureFromContractViolationRecovery(t *testin
 	}
 }
 
+func TestStagePacketCarriesCurrentGapFromAuthorityFocus(t *testing.T) {
+	run := &runModel.Run{
+		ID:          common.RunID("run-stage-packet-current-gap"),
+		WorkspaceID: common.WorkspaceID("ws-stage-packet-current-gap"),
+		State:       common.RunStateRunning,
+	}
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus": map[string]any{
+				"id":                   "cwi-current-gap",
+				"currentGap":           "validation evidence remains missing",
+				"missingEvidenceKinds": []string{"validation"},
+				"coverageWorkItemIds":  []string{"cwi-current-gap"},
+				"structuredTargetRefs": []string{"dod:item:current-gap"},
+				"targetRefs":           []string{"target:current-gap"},
+			},
+		},
+		"currentProgressDigest": map[string]any{
+			"currentGap": "stale diagnostic must not preempt authority gap",
+		},
+	}
+
+	packet := buildStagePacketFromStepInput(run, "step-stage-packet-current-gap", input).ToMap()
+
+	gap := mapFromValue(packet["currentGap"])
+	if gap["source"] != "authority.currentFocus" ||
+		gap["focusId"] != "cwi-current-gap" ||
+		gap["summary"] != "validation evidence remains missing" {
+		t.Fatalf("stagePacket.currentGap = %+v, want authority focus gap", gap)
+	}
+	if missing := stringSliceFromValue(gap["missingEvidenceKinds"]); len(missing) != 1 || missing[0] != "validation" {
+		t.Fatalf("stagePacket.currentGap.missingEvidenceKinds = %+v, want validation", gap["missingEvidenceKinds"])
+	}
+	if ids := stringSliceFromValue(gap["coverageWorkItemIds"]); len(ids) != 1 || ids[0] != "cwi-current-gap" {
+		t.Fatalf("stagePacket.currentGap.coverageWorkItemIds = %+v, want current coverage id", gap["coverageWorkItemIds"])
+	}
+	if refs := stringSliceFromValue(gap["structuredTargetRefs"]); len(refs) != 1 || refs[0] != "dod:item:current-gap" {
+		t.Fatalf("stagePacket.currentGap.structuredTargetRefs = %+v, want structured target ref", gap["structuredTargetRefs"])
+	}
+	withoutGap := buildStagePacketFromStepInput(run, "step-stage-packet-current-gap", map[string]any{}).ToMap()
+	if packet["idempotencyKey"] == withoutGap["idempotencyKey"] {
+		t.Fatalf("idempotencyKey = %v, want currentGap to affect stage packet identity", packet["idempotencyKey"])
+	}
+}
+
+func TestStagePacketExplicitCurrentGapPreemptsProgressDigest(t *testing.T) {
+	run := &runModel.Run{
+		ID:          common.RunID("run-stage-packet-explicit-gap"),
+		WorkspaceID: common.WorkspaceID("ws-stage-packet-explicit-gap"),
+		State:       common.RunStateRunning,
+	}
+	input := map[string]any{
+		"currentGap": map[string]any{
+			"summary":              "explicit structured gap",
+			"missingEvidenceKinds": []string{"state_change"},
+		},
+		stepInputKeyCurrentProgressDigest: map[string]any{
+			"currentGap":           "progress digest gap must not preempt explicit gap",
+			"missingEvidenceKinds": []string{"validation"},
+		},
+	}
+
+	packet := buildStagePacketFromStepInput(run, "step-stage-packet-explicit-gap", input).ToMap()
+
+	gap := mapFromValue(packet["currentGap"])
+	if gap["source"] != "input.currentGap" || gap["summary"] != "explicit structured gap" {
+		t.Fatalf("stagePacket.currentGap = %+v, want explicit currentGap", gap)
+	}
+	if missing := stringSliceFromValue(gap["missingEvidenceKinds"]); len(missing) != 1 || missing[0] != "state_change" {
+		t.Fatalf("stagePacket.currentGap.missingEvidenceKinds = %+v, want state_change", gap["missingEvidenceKinds"])
+	}
+}
+
+func TestStagePacketDerivesCurrentGapFromProgressDigest(t *testing.T) {
+	run := &runModel.Run{
+		ID:          common.RunID("run-stage-packet-progress-gap"),
+		WorkspaceID: common.WorkspaceID("ws-stage-packet-progress-gap"),
+		State:       common.RunStateRunning,
+	}
+	input := map[string]any{
+		stepInputKeyCurrentProgressDigest: map[string]any{
+			"currentGap":           "latest accepted evidence does not bind target",
+			"missingEvidenceKinds": []string{"validation"},
+			"coverageWorkItemIds":  []string{"cwi-progress-gap"},
+			"targetRefs":           []string{"target:progress-gap"},
+		},
+	}
+
+	packet := buildStagePacketFromStepInput(run, "step-stage-packet-progress-gap", input).ToMap()
+
+	gap := mapFromValue(packet["currentGap"])
+	if gap["source"] != "currentProgressDigest" ||
+		gap["summary"] != "latest accepted evidence does not bind target" {
+		t.Fatalf("stagePacket.currentGap = %+v, want progress digest gap", gap)
+	}
+	if ids := stringSliceFromValue(gap["coverageWorkItemIds"]); len(ids) != 1 || ids[0] != "cwi-progress-gap" {
+		t.Fatalf("stagePacket.currentGap.coverageWorkItemIds = %+v, want progress coverage id", gap["coverageWorkItemIds"])
+	}
+}
+
 func TestFollowUpStepInputRebuildsStagePacketAfterNextInputMutation(t *testing.T) {
 	run := &runModel.Run{
 		ID:                 common.RunID("run-follow-up-stage-packet"),
