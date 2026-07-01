@@ -127,7 +127,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			})
 			return
 		}
-		item, err := state.readWorkspaceSnapshotCached(r.Context(), workspaceID)
+		item, err := state.readWorkspaceDetailSnapshotCached(r.Context(), workspaceID)
 		if err != nil {
 			writeJSON(w, projectionHTTPStatus(err), workspaceSnapshotResponse{
 				Service:    "workorch",

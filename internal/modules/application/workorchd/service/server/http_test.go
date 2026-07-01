@@ -1860,7 +1860,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return appservice.Workspace{ID: workspaceID, Title: "native read", State: "active"}, nil
 	}
-	state.readWorkspaceSnapshot = func(ctx context.Context, _, _, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+	state.readWorkspaceDetailSnapshot = func(ctx context.Context, _, _, workspaceID string) (appservice.WorkspaceSnapshot, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("workspace snapshot event hub = %#v, want injected hub", got)
 		}
@@ -4072,8 +4072,8 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 	if len(body.Snapshot.LLMUsageTraces) >= 24 {
 		t.Fatalf("llm usage traces = %d, want bounded detail rather than full workspace usage", len(body.Snapshot.LLMUsageTraces))
 	}
-	if body.Snapshot.LLMUsageSummary.EntryTotal != 24 {
-		t.Fatalf("summary entry total = %d, want full total with bounded detail traces", body.Snapshot.LLMUsageSummary.EntryTotal)
+	if body.Snapshot.LLMUsageSummary.EntryTotal >= 24 {
+		t.Fatalf("summary entry total = %d, want default detail to avoid full workspace usage", body.Snapshot.LLMUsageSummary.EntryTotal)
 	}
 
 	fullRec := httptest.NewRecorder()
@@ -4114,7 +4114,24 @@ func TestWorkspaceSnapshotEndpointDefaultUsesExplicitCompactDetail(t *testing.T)
 			DeliverableDirectory: "workspaces/explicit-compact-detail",
 		},
 	})
+	var detailReads atomic.Int32
 	var fullReads atomic.Int32
+	state.readWorkspaceDetailSnapshot = func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error) {
+		detailReads.Add(1)
+		return appservice.WorkspaceSnapshot{
+			Workspace: appservice.Workspace{
+				ID:                   string(workspaceID),
+				State:                string(common.WorkspaceStateRunning),
+				ActiveRunID:          "run-explicit-compact-detail",
+				DeliverableDirectory: "workspaces/explicit-compact-detail",
+			},
+			Run: &appservice.Run{
+				ID:          "run-explicit-compact-detail",
+				WorkspaceID: string(workspaceID),
+				State:       string(common.RunStateRunning),
+			},
+		}, nil
+	}
 	state.readWorkspaceSnapshot = func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error) {
 		fullReads.Add(1)
 		return appservice.WorkspaceSnapshot{
@@ -4141,8 +4158,11 @@ func TestWorkspaceSnapshotEndpointDefaultUsesExplicitCompactDetail(t *testing.T)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("workspace snapshot status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
-	if fullReads.Load() != 1 {
-		t.Fatalf("full snapshot reads = %d, want explicit detail read", fullReads.Load())
+	if detailReads.Load() != 1 {
+		t.Fatalf("detail snapshot reads = %d, want explicit compact detail read", detailReads.Load())
+	}
+	if fullReads.Load() != 0 {
+		t.Fatalf("full snapshot reads = %d, want default detail to avoid full read", fullReads.Load())
 	}
 	var body workspaceSnapshotResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
@@ -4175,6 +4195,9 @@ func TestWorkspaceSnapshotEndpointSummaryDoesNotHydrateDetail(t *testing.T) {
 	}
 	state.readWorkspaceSnapshot = func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error) {
 		return appservice.WorkspaceSnapshot{}, errors.New("full snapshot read should not be used for summary")
+	}
+	state.readWorkspaceDetailSnapshot = func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error) {
+		return appservice.WorkspaceSnapshot{}, errors.New("detail snapshot read should not be used for summary")
 	}
 
 	rec := httptest.NewRecorder()
@@ -4212,7 +4235,7 @@ func TestWorkspaceSnapshotEndpointDoesNotOverlayStalePromptMode(t *testing.T) {
 			ActiveRunID: "run-detail-prompt-same-source",
 		},
 	})
-	state.readWorkspaceSnapshot = func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error) {
+	state.readWorkspaceDetailSnapshot = func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error) {
 		return appservice.WorkspaceSnapshot{
 			Workspace: appservice.Workspace{
 				ID:               string(workspaceID),

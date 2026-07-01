@@ -74,6 +74,10 @@ func defaultReadWorkspaceSnapshot(ctx context.Context, backend string, dataRoot 
 	return appservice.ReadWorkspaceSnapshotWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
+func defaultReadWorkspaceDetailSnapshot(ctx context.Context, backend string, dataRoot string, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+	return appservice.ReadWorkspaceDetailSnapshotWithBackend(ctx, backend, dataRoot, workspaceID)
+}
+
 func defaultReadWorkspaceProjectionSnapshot(ctx context.Context, backend string, dataRoot string, workspaceID string) (appservice.WorkspaceSnapshot, error) {
 	return appservice.ReadWorkspaceProjectionSnapshotWithBackend(ctx, backend, dataRoot, workspaceID)
 }

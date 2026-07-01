@@ -589,6 +589,7 @@ type serverState struct {
 	refreshWorkspaceTemplate     refreshWorkspaceTemplateBindingFunc
 	readWorkspace                readWorkspaceFunc
 	readWorkspaceSnapshot        readWorkspaceSnapshotFunc
+	readWorkspaceDetailSnapshot  readWorkspaceSnapshotFunc
 	readProjectionSnapshot       readProjectionSnapshotFunc
 	readWorkspaceSoulBindings    readWorkspaceSoulBindingsFunc
 	updateWorkspaceSoulBindings  updateWorkspaceSoulBindingsFunc
@@ -1044,6 +1045,7 @@ func newServerStateWithBackground(config Config, eventHub events.Hub, background
 		refreshWorkspaceTemplate:     defaultRefreshWorkspaceTemplateBinding,
 		readWorkspace:                defaultReadWorkspace,
 		readWorkspaceSnapshot:        defaultReadWorkspaceSnapshot,
+		readWorkspaceDetailSnapshot:  defaultReadWorkspaceDetailSnapshot,
 		readProjectionSnapshot:       defaultReadWorkspaceProjectionSnapshot,
 		readWorkspaceSoulBindings:    defaultReadWorkspaceSoulBindings,
 		updateWorkspaceSoulBindings:  defaultUpdateWorkspaceSoulBindings,
@@ -1214,6 +1216,15 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceSnapshotWithSession(ctx, session, workspaceID)
+			return err
+		})
+		return ret, err
+	}
+	s.readWorkspaceDetailSnapshot = func(ctx context.Context, _, _, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+		var ret appservice.WorkspaceSnapshot
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadWorkspaceDetailSnapshotWithSession(ctx, session, workspaceID)
 			return err
 		})
 		return ret, err

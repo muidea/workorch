@@ -149,6 +149,20 @@ func (s *serverState) readWorkspaceSnapshotCached(ctx context.Context, workspace
 	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(ret), err
 }
 
+func (s *serverState) readWorkspaceDetailSnapshotCached(ctx context.Context, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+	if cached, ok := s.cachedRunSnapshotByWorkspace(workspaceID); ok && s.hasSharedSession() {
+		var ret appservice.WorkspaceSnapshot
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.ReadWorkspaceDetailSnapshotWithRunSnapshotWithSession(ctx, session, workspaceID, cached)
+			return err
+		})
+		return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(ret), err
+	}
+	ret, err := s.readWorkspaceDetailSnapshot(ctx, s.config.Backend, s.config.DataRoot, workspaceID)
+	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(ret), err
+}
+
 func (s *serverState) readArtifactContentCached(ctx context.Context, artifactURI string) (appservice.ArtifactContent, error) {
 	if cached, ok := s.cachedRunSnapshotByArtifactURI(artifactURI); ok && s.hasSharedSession() {
 		var ret appservice.ArtifactContent
