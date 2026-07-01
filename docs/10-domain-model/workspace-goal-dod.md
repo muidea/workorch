@@ -32,7 +32,6 @@ Workspace 是 WorkOrch 的顶层业务容器。它承载：
 - `state`
 - `activeRunId`
 - `defaultSoulId`
-- `dataPolicy`
 
 ### Goal
 
