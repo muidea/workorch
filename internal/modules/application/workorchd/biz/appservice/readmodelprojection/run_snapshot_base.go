@@ -25,10 +25,20 @@ func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []StepView
 		Decisions:             input.Decisions,
 		Approvals:             input.Approvals,
 	}
+	applyRunSnapshotCurrentStepToRun(&ret, currentStep)
 	ret.RuntimeExecution = MapRuntimeExecutionState(ret.Steps, ret.RuntimeCheckpoints, ret.Step)
 	ret.LLMContextBudgetSummary = SummarizeLLMContextBudgets(ret.LLMContextBudgets)
 	ret.LLMUsageSummary = SummarizeLLMUsage(ret.LLMUsageTraces)
 	ret.Acceptance = MapAcceptanceProjection(ret.Run)
 	ret.Outcome = MapRunOutcome(ret)
 	return ret
+}
+
+func applyRunSnapshotCurrentStepToRun(snapshot *readmodelcore.RunSnapshot, currentStep *StepView) {
+	if snapshot == nil || currentStep == nil {
+		return
+	}
+	snapshot.Run.CurrentStepID = currentStep.ID
+	snapshot.Run.CurrentStepKind = CanonicalStepKind(currentStep.Kind)
+	snapshot.Run.CurrentStepState = currentStep.State
 }

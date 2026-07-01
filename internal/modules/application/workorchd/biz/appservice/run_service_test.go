@@ -1626,3 +1626,52 @@ func TestReadRunWithSessionReturnsFailureReason(t *testing.T) {
 		t.Fatalf("run = %+v, want failed/manual fail", item)
 	}
 }
+
+func TestListRunsWithSessionHydratesActiveCurrentStepOnly(t *testing.T) {
+	session, ctx := newTestRuntimeSession(t, "memory", "")
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-run-list-current-step")
+	activeRunID := common.RunID("run-list-active-current-step")
+	completedRunID := common.RunID("run-list-completed-current-step")
+	activeStepID := common.StepID("run-list-active-current-step/step-1")
+	completedStepID := common.StepID("run-list-completed-current-step/step-1")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: activeRunID}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	for _, item := range []*runmodel.Run{
+		{ID: completedRunID, WorkspaceID: workspaceID, State: common.RunStateCompleted},
+		{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+	} {
+		if err := exports.Repositories.Runs.Create(ctx, item); err != nil {
+			t.Fatalf("create run %s: %v", item.ID, err)
+		}
+	}
+	for _, item := range []*runmodel.Step{
+		{ID: completedStepID, RunID: completedRunID, Kind: "llm/workspace_execution", State: common.StepStateCompleted},
+		{ID: activeStepID, RunID: activeRunID, Kind: "llm/workspace_execution", State: common.StepStateDispatched},
+	} {
+		if err := exports.Repositories.Steps.Create(ctx, item); err != nil {
+			t.Fatalf("create step %s: %v", item.ID, err)
+		}
+	}
+
+	items, err := ListRunsWithSession(ctx, session, string(workspaceID))
+	if err != nil {
+		t.Fatalf("ListRunsWithSession: %v", err)
+	}
+	byID := map[string]Run{}
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	if got := byID[string(activeRunID)]; got.CurrentStepID != string(activeStepID) ||
+		got.CurrentStepKind != "llm/workspace_execution" ||
+		got.CurrentStepState != string(common.StepStateDispatched) {
+		t.Fatalf("active run current step = %+v, want %s/llm/workspace_execution/dispatched", got, activeStepID)
+	}
+	if got := byID[string(completedRunID)]; got.CurrentStepID != "" {
+		t.Fatalf("completed run current step = %+v, want list hydration skipped for terminal run", got)
+	}
+}

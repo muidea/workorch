@@ -53,6 +53,20 @@ func TestRunSnapshotBuildsSnapshotFromReaders(t *testing.T) {
 	if len(got.Steps) != 1 || got.Steps[0].ID != string(steps[0].ID) {
 		t.Fatalf("steps = %+v, want seeded step", got.Steps)
 	}
+	if got.Step == nil || got.Step.ID != string(steps[0].ID) {
+		t.Fatalf("current step = %+v, want seeded step %s", got.Step, steps[0].ID)
+	}
+	if got.Run.CurrentStepID != string(steps[0].ID) ||
+		got.Run.CurrentStepKind != "llm/workspace_execution" ||
+		got.Run.CurrentStepState != string(common.StepStateDispatched) {
+		t.Fatalf("snapshot run current step = %+v, want %s/llm/workspace_execution/dispatched", got.Run, steps[0].ID)
+	}
+	if got.TaskProgress.CurrentStepID != got.Run.CurrentStepID {
+		t.Fatalf("task progress current step = %q, want snapshot run current step %q", got.TaskProgress.CurrentStepID, got.Run.CurrentStepID)
+	}
+	if status := RunStatusFromSnapshot(got); status.CurrentStepID != got.Run.CurrentStepID {
+		t.Fatalf("status current step = %q, want snapshot run current step %q", status.CurrentStepID, got.Run.CurrentStepID)
+	}
 	if events.calls != 1 {
 		t.Fatalf("event reader calls = %d, want compact run event metadata query", events.calls)
 	}

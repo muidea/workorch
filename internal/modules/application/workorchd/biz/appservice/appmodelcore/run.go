@@ -9,6 +9,9 @@ type Run struct {
 	InitialStepKind    string         `json:"initialStepKind,omitempty"`
 	ExecutionContext   map[string]any `json:"executionContext,omitempty"`
 	State              string         `json:"state"`
+	CurrentStepID      string         `json:"currentStepId,omitempty"`
+	CurrentStepKind    string         `json:"currentStepKind,omitempty"`
+	CurrentStepState   string         `json:"currentStepState,omitempty"`
 	Priority           int            `json:"priority,omitempty"`
 	BlockingTicketID   string         `json:"blockingTicketId,omitempty"`
 	BlockingApprovalID string         `json:"blockingApprovalId,omitempty"`

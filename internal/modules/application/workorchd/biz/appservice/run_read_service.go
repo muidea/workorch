@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -28,8 +30,8 @@ func ReadRunFromEnv(ctx context.Context, runID string) (Run, error) {
 }
 
 func ListRunsWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret []Run, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]Run, error) {
-		return runports.ListRunViewsByWorkspace(ctx, hub, common.WorkspaceID(strings.TrimSpace(workspaceID)))
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) ([]Run, error) {
+		return listRunViews(ctx, deps, common.WorkspaceID(strings.TrimSpace(workspaceID)))
 	})
 }
 
@@ -43,4 +45,51 @@ func ListRunsFromEnv(ctx context.Context, workspaceID string) ([]Run, error) {
 	return withEnvSession(ctx, func(ctx context.Context, session *RuntimeSession) ([]Run, error) {
 		return ListRunsWithSession(ctx, session, workspaceID)
 	})
+}
+
+func listRunViews(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID) ([]Run, error) {
+	var items []*runmodel.Run
+	var err error
+	if workspaceID == "" {
+		items, err = deps.runs.List(ctx)
+	} else {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+		items, err = deps.runs.ListByWorkspaceID(ctx, workspaceID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]Run, 0, len(items))
+	for _, item := range items {
+		view := runtimecore.MapRun(item)
+		hydrated, err := hydrateRunCurrentStep(ctx, deps, view)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, hydrated)
+	}
+	return ret, nil
+}
+
+func hydrateRunCurrentStep(ctx context.Context, deps readModelDependencies, item Run) (Run, error) {
+	if item.ID == "" || !runListCurrentStepHydrationRequired(item.State) {
+		return item, nil
+	}
+	status, err := readRunStatus(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(item.WorkspaceID)), deps, common.RunID(item.ID))
+	if err != nil {
+		return Run{}, err
+	}
+	item.CurrentStepID = status.CurrentStepID
+	item.CurrentStepKind = status.CurrentStepKind
+	item.CurrentStepState = status.CurrentStepState
+	return item, nil
+}
+
+func runListCurrentStepHydrationRequired(state string) bool {
+	switch common.RunState(strings.TrimSpace(state)) {
+	case common.RunStateRunning, common.RunStateValidating, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
+		return true
+	default:
+		return false
+	}
 }
