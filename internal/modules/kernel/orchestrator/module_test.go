@@ -185,7 +185,12 @@ func TestModuleRecoverRuntimeGapCommandSchedulesBackgroundDispatch(t *testing.T)
 				RequestID:      "request-runtime-gap",
 				QueueKey:       "queue-runtime-gap",
 				LatestStepTime: "2026-06-17T14:00:00Z",
-				Reason:         "stale dispatched runtime gap: worker_lost",
+				RecoveryPolicy: runtimemodel.RuntimeRecoveryPolicy{
+					SideEffectPolicy:  runtimemodel.SideEffectPolicyExternalRead,
+					IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
+					WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
+				},
+				Reason: "stale dispatched runtime gap: worker_lost",
 			},
 		},
 	})
@@ -245,7 +250,12 @@ func TestModuleRecoverRuntimeGapCommandDeduplicatesInFlightIdempotencyKey(t *tes
 				RequestID:      "request-runtime-gap",
 				QueueKey:       "queue-runtime-gap",
 				LatestStepTime: "2026-06-17T14:00:00Z",
-				Reason:         "stale dispatched runtime gap: worker_lost",
+				RecoveryPolicy: runtimemodel.RuntimeRecoveryPolicy{
+					SideEffectPolicy:  runtimemodel.SideEffectPolicyExternalRead,
+					IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
+					WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
+				},
+				Reason: "stale dispatched runtime gap: worker_lost",
 			},
 		},
 	}
@@ -262,6 +272,69 @@ func TestModuleRecoverRuntimeGapCommandDeduplicatesInFlightIdempotencyKey(t *tes
 	}
 	if bg.asyncFunctionCalls != 1 {
 		t.Fatalf("background calls = %d, want duplicate in-flight key to schedule once", bg.asyncFunctionCalls)
+	}
+}
+
+func TestModuleRecoverRuntimeGapCommandRejectsUnsafeDirectCommand(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-module-runtime-gap-recovery-unsafe")
+	stepID := common.StepID("run-module-runtime-gap-recovery-unsafe/step-001")
+	workspaceID := common.WorkspaceID("ws-module-runtime-gap-recovery-unsafe")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := orchestratorbiz.NewRuntimeOrchestrator(
+		moduleNoopRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+	bg := &recordingBackgroundRoutine{}
+	module := &Module{
+		bizPtr:            orch,
+		servicePtr:        orchestratorservice.New(orchestratorServiceDependencies(orch)),
+		backgroundRoutine: bg,
+	}
+
+	err := module.handleCommand(ctx, events.Envelope{
+		Topic:       orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap,
+		SubjectType: "run",
+		SubjectID:   string(runID),
+		WorkspaceID: string(workspaceID),
+		RunID:       string(runID),
+		Payload: map[string]any{
+			events.PayloadKeyCommand: runcontracts.RecoverRuntimeGapCommand{
+				WorkspaceID:    workspaceID,
+				RunID:          runID,
+				StepID:         stepID,
+				StepKind:       "llm/workspace_execution",
+				Gap:            "worker_lost",
+				IdempotencyKey: "runtime-gap-recovery|unsafe",
+				RequestID:      "request-runtime-gap",
+				QueueKey:       "queue-runtime-gap",
+				RecoveryPolicy: runtimemodel.RuntimeRecoveryPolicy{
+					SideEffectPolicy:  runtimemodel.SideEffectPolicyWorkspaceRead,
+					IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
+					WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
+				},
+				Reason: "stale dispatched runtime gap: worker_lost",
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("recover unsafe runtime gap err = %v, want ErrInvalidArgument", err)
+	}
+	if bg.asyncFunctionCalls != 0 || bg.lastAsyncFunction != nil {
+		t.Fatalf("background calls = %d fn=%v, want unsafe command rejected before scheduling", bg.asyncFunctionCalls, bg.lastAsyncFunction != nil)
 	}
 }
 

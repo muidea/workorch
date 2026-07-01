@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/muidea/magicCommon/task"
@@ -381,6 +382,9 @@ func (m *Module) handleRecoverRuntimeGapCommand(ctx context.Context, envelope ev
 	if cmd.IdempotencyKey == "" {
 		cmd.IdempotencyKey = runtimeGapRecoveryCommandIdempotencyKey(cmd)
 	}
+	if !recoverRuntimeGapCommandAllowed(cmd) {
+		return common.ErrInvalidArgument
+	}
 	patch := runtimeGapRecoveryPatch(cmd)
 	if m.backgroundRoutine == nil {
 		return m.servicePtr.ResumeRunWithExecutionContextPatch(ctx, runID, patch)
@@ -404,6 +408,17 @@ func (m *Module) handleRecoverRuntimeGapCommand(ctx context.Context, envelope ev
 		return err
 	}
 	return nil
+}
+
+func recoverRuntimeGapCommandAllowed(cmd runcontracts.RecoverRuntimeGapCommand) bool {
+	switch strings.TrimSpace(cmd.Gap) {
+	case "runtime_terminal_not_finalized":
+		return strings.TrimSpace(cmd.RecoverySafety) == "terminal_result_evidence"
+	case "worker_lost", "accepted_no_progress", "accepted_in_progress":
+		return cmd.RecoveryPolicy.Normalized().AllowsWatchdogExternalRetry()
+	default:
+		return false
+	}
 }
 
 func runtimeGapRecoveryPatch(cmd runcontracts.RecoverRuntimeGapCommand) map[string]any {
