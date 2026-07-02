@@ -897,6 +897,14 @@ func TestManagerPublishesProjectionChangedThroughAsyncHub(t *testing.T) {
 	if hub.last.Topic != workorchdevents.TopicWorkspaceProjectionChanged || hub.last.WorkspaceID != "ws-a" || hub.last.Payload["changeKind"] != "detail" {
 		t.Fatalf("projection event = %+v, want workspace projection changed detail", hub.last)
 	}
+	status := manager.store.StatusForWorkspace("ws-a")
+	if hub.last.Payload["workspaceRevision"] != status.WorkspaceRevision ||
+		hub.last.Payload["globalRevision"] != status.GlobalRevision ||
+		hub.last.Payload["sourceEventRevision"] != status.SourceEventRevision ||
+		hub.last.Payload["projectedSourceRevision"] != status.ProjectedSourceRevision ||
+		hub.last.Payload["projectionState"] != status.State {
+		t.Fatalf("projection event payload = %+v, want owner projection status %+v", hub.last.Payload, status)
+	}
 }
 
 func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuildOrProjectionFanout(t *testing.T) {

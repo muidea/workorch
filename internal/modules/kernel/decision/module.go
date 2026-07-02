@@ -344,7 +344,11 @@ func (m *Module) handleResolutionCommand(ctx context.Context, envelope events.En
 		if err != nil {
 			return err
 		}
-		if err := m.resolutions.Create(ctx, item); err != nil {
+		resolutionCtx, err := m.resolveResolutionTicketContext(ctx, item.TicketID, envelope)
+		if err != nil {
+			return err
+		}
+		if err := m.resolutions.Create(resolutionCtx, item); err != nil {
 			return err
 		}
 		return decisionCommandResponse(envelope, nil)
@@ -547,6 +551,9 @@ func resolutionFromPayload(payload map[string]any) (*decisionmodel.Resolution, e
 		if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
 			return nil, common.ErrInvalidArgument
 		}
+		if !modulecommon.IsSupportedResolutionType(cmd.Type) {
+			return nil, common.ErrInvalidArgument
+		}
 		return &decisionmodel.Resolution{
 			ID:                 cmd.ResolutionID,
 			TicketID:           cmd.TicketID,
@@ -559,6 +566,9 @@ func resolutionFromPayload(payload map[string]any) (*decisionmodel.Resolution, e
 	}
 	item, ok := payload[events.PayloadKeyResolution].(*decisionmodel.Resolution)
 	if !ok || item == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	if !modulecommon.IsSupportedResolutionType(item.Type) {
 		return nil, common.ErrInvalidArgument
 	}
 	return item, nil

@@ -516,6 +516,115 @@ func TestProviderCachePlanKeepsStablePrefixAcrossCoverageFocusChanges(t *testing
 	}
 }
 
+func TestProviderCachePlanKeepsStablePrefixUnderEvidenceBudgetStress(t *testing.T) {
+	baseInput := map[string]any{
+		"executionContextPackage": map[string]any{
+			"goal":               map[string]any{"text": "stable goal"},
+			"dod":                map[string]any{"items": []any{"stable dod"}},
+			"definitionRevision": "definition-stable",
+		},
+		"currentRuntimeStage":     "repair",
+		"currentRuntimeStageMode": "strict_convergence",
+		"stagePacket": map[string]any{
+			"schemaVersion": "workorch.stage_packet.v1",
+			"workspaceId":   "ws-cache-budget",
+			"runId":         "run-001",
+			"stepId":        "step-001",
+			"definition":    map[string]any{"revision": "definition-stable", "doDId": "dod-001"},
+			"activeStage":   "state_change",
+			"requiredOutput": map[string]any{
+				"mustUseCurrentTargetSnapshot": true,
+				"coverageItemId":               "coverage-budget-001",
+			},
+			"acceptedEvidenceRefs": []string{"accepted-evidence-stress"},
+			"rejectedEvidenceRefs": []string{"rejected-evidence-stress"},
+			"targetSnapshots": []map[string]any{{
+				"targetRef":             "target-budget-stress",
+				"contentHash":           "sha256-target-budget-stress",
+				"contentComplete":       false,
+				"safeForExactFileWrite": false,
+				"truncated":             true,
+			}},
+		},
+	}
+	stressedInput := cloneMap(baseInput)
+	timeline := make([]map[string]any, 0, 24)
+	for idx := 0; idx < 24; idx++ {
+		timeline = append(timeline, map[string]any{
+			"stepId":        fmt.Sprintf("run-001/stress-%03d", idx),
+			"sourceRef":     fmt.Sprintf("step://run-001/stress-%03d", idx),
+			"failureReason": strings.Repeat("timeline-noise ", 320),
+			"output": map[string]any{
+				"raw": strings.Repeat("output-noise ", 320),
+			},
+		})
+	}
+	stressedInput["processEvidenceTimeline"] = timeline
+	stressedInput["currentProgressDigest"] = map[string]any{
+		"summary": strings.Repeat("progress-noise ", 320),
+	}
+
+	base := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-cache-budget",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		RuntimeCapabilities: llmmodels.RuntimeCapabilities{
+			BlockKinds: []llmmodels.RuntimeBlockCapability{{Kind: llmcommon.RuntimeBlockKindPatchApply, Description: "apply patch"}},
+		},
+		Input: baseInput,
+	}
+	stressed := base
+	stressed.Input = stressedInput
+	base.PromptContext = buildPromptContextFromRequest(base)
+	stressed.PromptContext = buildPromptContextFromRequest(stressed)
+	attachProviderCachePlan(&base)
+	attachProviderCachePlan(&stressed)
+
+	basePlan := base.ContextBudget.CachePlan
+	stressedPlan := stressed.ContextBudget.CachePlan
+	if basePlan == nil || stressedPlan == nil {
+		t.Fatalf("cache plan missing: base=%+v stressed=%+v", base.ContextBudget, stressed.ContextBudget)
+	}
+	if basePlan.StablePrefixHash != stressedPlan.StablePrefixHash ||
+		basePlan.RenderedStablePrefixHash != stressedPlan.RenderedStablePrefixHash ||
+		basePlan.WorkspaceDefinitionHash != stressedPlan.WorkspaceDefinitionHash ||
+		basePlan.CapabilityContractHash != stressedPlan.CapabilityContractHash ||
+		basePlan.CacheKey != stressedPlan.CacheKey {
+		t.Fatalf("cacheable prefix changed under dynamic evidence stress: base=%+v stressed=%+v", basePlan, stressedPlan)
+	}
+	if basePlan.VolatileTailHash == stressedPlan.VolatileTailHash {
+		t.Fatalf("volatile tail hash unchanged under evidence stress: %q", basePlan.VolatileTailHash)
+	}
+
+	prompt := buildProviderFacingPrompt(stressed)
+	dynamic := ""
+	for _, message := range prompt.DynamicMessages {
+		dynamic += "\n" + message.SectionID + "\n" + message.Content
+	}
+	for _, want := range []string{
+		"mustUseCurrentTargetSnapshot",
+		"coverage-budget-001",
+		"accepted-evidence-stress",
+		"rejected-evidence-stress",
+		"target-budget-stress",
+	} {
+		if !strings.Contains(dynamic, want) {
+			t.Fatalf("dynamic prompt missing protected contract field %q: %s", want, dynamic)
+		}
+		if strings.Contains(prompt.StablePrefix, want) {
+			t.Fatalf("stable prefix leaked dynamic contract field %q: %s", want, prompt.StablePrefix)
+		}
+	}
+	if strings.Contains(dynamic, strings.Repeat("timeline-noise ", 80)) ||
+		strings.Contains(dynamic, strings.Repeat("output-noise ", 80)) {
+		t.Fatalf("dynamic prompt leaked unbounded evidence stress payload: %s", dynamic)
+	}
+}
+
 func TestStagePacketRendersInDynamicPromptPartitions(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-stage-packet",

@@ -774,10 +774,11 @@ func TestFinalizeLLMDispatchAuthorityInputRebuildsStaleStagePacket(t *testing.T)
 	packet := mapFromValue(got[stepInputKeyStagePacket])
 	assertFocusIDForTest(t, mapFromValue(packet["activeFocus"]), "focus-cwi-current")
 	for label, required := range map[string]map[string]any{
-		"requiredOutput":                       mapFromValue(got["requiredOutput"]),
-		"repairActionPackage.requiredOutput":   mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]),
-		"stagePacket.requiredOutput":           mapFromValue(packet["requiredOutput"]),
-		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(got[currentActionContractKey])["requiredOutput"]),
+		"requiredOutput":                        mapFromValue(got["requiredOutput"]),
+		"repairActionPackage.requiredOutput":    mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":            mapFromValue(packet["requiredOutput"]),
+		"stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(packet["nextAction"])["requiredOutput"]),
+		"currentActionContract.requiredOutput":  mapFromValue(mapFromValue(got[currentActionContractKey])["requiredOutput"]),
 	} {
 		if stringFromMap(required, "coverageFocusId") != "focus-cwi-current" {
 			t.Fatalf("%s = %+v, want current focus", label, required)

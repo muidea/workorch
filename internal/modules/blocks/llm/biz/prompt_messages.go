@@ -1869,7 +1869,7 @@ func copyCompactTimelineValue(target map[string]any, key string, value any) {
 	}
 	switch typed := value.(type) {
 	case string:
-		if text := strings.TrimSpace(truncateProviderBudgetString(typed, 2048)); text != "" {
+		if text := strings.TrimSpace(truncateProviderBudgetString(typed, compactTimelineStringLimit(key))); text != "" {
 			target[key] = text
 		}
 	case []string:
@@ -1880,6 +1880,17 @@ func copyCompactTimelineValue(target map[string]any, key string, value any) {
 		if cloned, ok := cloneAny(value); ok {
 			target[key] = cloned
 		}
+	}
+}
+
+func compactTimelineStringLimit(key string) int {
+	switch strings.TrimSpace(key) {
+	case "failureReason", "failureSignature", "inputSummary", "outputSummary", "summary":
+		return 512
+	case "error", "reason":
+		return 768
+	default:
+		return 2048
 	}
 }
 

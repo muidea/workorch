@@ -80,7 +80,9 @@ func (c *Client) GetWorkspaceSnapshot(ctx context.Context, id string) (*Workspac
 
 // GetWorkspaceSnapshotProjection returns workspace detail with server projection metadata.
 func (c *Client) GetWorkspaceSnapshotProjection(ctx context.Context, id string) (*WorkspaceSnapshotProjection, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/snapshot", escapePath(id)), nil)
+	values := url.Values{}
+	values.Set("view", "detail")
+	resp, err := c.do(ctx, "GET", joinQuery(fmt.Sprintf("/api/v1/workorch/workspaces/%s/snapshot", escapePath(id)), values), nil)
 	if err != nil {
 		return nil, err
 	}

@@ -113,7 +113,14 @@ func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 				RunID:              "run-trace-contract",
 				Stage:              "activation",
 				CandidateMemoryIDs: []common.MemoryID{"mem-candidate"},
+				SelectedMemoryIDs:  []common.MemoryID{"mem-selected"},
+				ExcludedMemoryIDs:  []common.MemoryID{"mem-excluded"},
 				TypeQuota:          map[string]int{"episodic": 1},
+				SelectionScores: []memorycontracts.MemoryRecallSelectionScoreCommand{{
+					ID:     "mem-excluded",
+					Score:  10,
+					Reason: "excluded_low_value_process_memory",
+				}},
 				RetrievedMemoryHits: []memorycontracts.MemoryRecallHitCommand{{
 					ID:              "mem-hit",
 					Summary:         "hit",
@@ -132,6 +139,12 @@ func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 	}
 	if stored.Stage != "activation" || stored.TypeQuota["episodic"] != 1 || len(stored.RetrievedMemoryHits) != 1 || stored.RetrievedMemoryHits[0].ID != "mem-hit" {
 		t.Fatalf("stored trace = %+v, want command fields", stored)
+	}
+	if len(stored.SelectedMemoryIDs) != 1 || stored.SelectedMemoryIDs[0] != "mem-selected" ||
+		len(stored.ExcludedMemoryIDs) != 1 || stored.ExcludedMemoryIDs[0] != "mem-excluded" ||
+		len(stored.SelectionScores) != 1 || stored.SelectionScores[0].ID != "mem-excluded" ||
+		stored.SelectionScores[0].Reason != "excluded_low_value_process_memory" {
+		t.Fatalf("stored trace = %+v, want selected/excluded recall audit fields", stored)
 	}
 
 	err = hub.Publish(ctx, events.Envelope{

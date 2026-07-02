@@ -9,16 +9,7 @@ import (
 )
 
 func TestWebConsoleMutatingEndpointsStayWithinProductSurfaceContract(t *testing.T) {
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "../../.."))
-	apiPath := filepath.Join(repoRoot, "web/workorch-console/src/api.ts")
-	data, err := os.ReadFile(apiPath)
-	if err != nil {
-		t.Fatalf("read web console api: %v", err)
-	}
+	data := readWebConsoleFile(t, "src/api.ts")
 	lines := strings.Split(string(data), "\n")
 	allowed := []string{
 		`${apiBase}/configuration/llm`,
@@ -74,6 +65,48 @@ func TestWebConsoleMutatingEndpointsStayWithinProductSurfaceContract(t *testing.
 	if mutatingCalls < 20 {
 		t.Fatalf("mutatingCalls = %d, want a non-vacuous web API contract scan", mutatingCalls)
 	}
+}
+
+func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.T) {
+	typesData := string(readWebConsoleFile(t, "src/types.ts"))
+	for _, want := range []string{
+		"runId?: string;",
+		"intent?: 'resume' | 'restart' | 'replan';",
+		"restart?: boolean;",
+		"executionContextPatch?: Record<string, unknown>;",
+	} {
+		if !strings.Contains(typesData, want) {
+			t.Fatalf("WorkspaceExecutionActivationRequest missing %q", want)
+		}
+	}
+
+	apiData := string(readWebConsoleFile(t, "src/api.ts"))
+	if !strings.Contains(apiData, "/snapshot?view=detail") {
+		t.Fatal("readWorkspaceSnapshotProjection must request explicit detail view")
+	}
+	for _, want := range []string{
+		"const commandIntent = activationRequest.restart ? 'restart' : activationRequest.intent || 'resume';",
+		"intent: commandIntent,",
+		"runCommandRequestId(commandIntent, workspaceId, activationRequest.runId || 'workspace')",
+	} {
+		if !strings.Contains(apiData, want) {
+			t.Fatalf("resumeWorkspaceExecution command surface missing %q", want)
+		}
+	}
+}
+
+func readWebConsoleFile(t *testing.T, relPath string) []byte {
+	t.Helper()
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "../../.."))
+	data, err := os.ReadFile(filepath.Join(repoRoot, "web/workorch-console", filepath.FromSlash(relPath)))
+	if err != nil {
+		t.Fatalf("read web console file %s: %v", relPath, err)
+	}
+	return data
 }
 
 func mutatingMethod(line string) string {

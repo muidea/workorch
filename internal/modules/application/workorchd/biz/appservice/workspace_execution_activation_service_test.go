@@ -2193,6 +2193,9 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 	if createdRun.GoalID != goal.ID || createdRun.DoDID != dod.ID {
 		t.Fatalf("created run goal/dod = %s/%s, want activation definitions", createdRun.GoalID, createdRun.DoDID)
 	}
+	if createdRun.DefinitionRevision != "goal:"+string(goal.ID)+"|dod:"+string(dod.ID) {
+		t.Fatalf("created run definitionRevision = %q, want activation definition revision", createdRun.DefinitionRevision)
+	}
 	if createdRun.Priority != 7 {
 		t.Fatalf("create priority = %d, want activation priority", createdRun.Priority)
 	}

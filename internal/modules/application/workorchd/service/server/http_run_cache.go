@@ -600,6 +600,12 @@ func runIDsFromApprovals(items []appservice.Approval) []string {
 func runResumeRefsFromDecisions(items []appservice.Decision) []governanceRunResumeRef {
 	ret := make([]governanceRunResumeRef, 0, len(items))
 	for _, item := range items {
+		workspaceID := strings.TrimSpace(item.WorkspaceID)
+		runID := strings.TrimSpace(item.RunID)
+		decisionID := strings.TrimSpace(item.ID)
+		if workspaceID == "" || runID == "" || decisionID == "" {
+			continue
+		}
 		intent := "resume"
 		reason := "decision_resolved"
 		if strings.TrimSpace(item.ResolutionType) == decisioncommon.ResolutionTypeReplan {
@@ -607,12 +613,12 @@ func runResumeRefsFromDecisions(items []appservice.Decision) []governanceRunResu
 			reason = "decision_replan_resolved"
 		}
 		ret = append(ret, governanceRunResumeRef{
-			WorkspaceID: item.WorkspaceID,
-			RunID:       item.RunID,
+			WorkspaceID: workspaceID,
+			RunID:       runID,
 			Intent:      intent,
 			Reason:      reason,
-			RequestID:   governanceRunResumeRequestID("decision", item.ID, intent),
-			DecisionID:  item.ID,
+			RequestID:   governanceRunResumeRequestID("decision", decisionID, intent),
+			DecisionID:  decisionID,
 		})
 	}
 	return ret

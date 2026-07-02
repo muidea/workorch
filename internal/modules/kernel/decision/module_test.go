@@ -452,10 +452,22 @@ func TestDecisionDeleteCommandWithoutScopeDeletesUniqueOpenTicket(t *testing.T) 
 func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
+	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
+	ticketID := common.TicketID("ticket-resolution-contract")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: "ws-resolution-contract",
+		RunID:       "run-resolution-contract",
+		StepID:      "step-resolution-contract",
+		State:       common.DecisionTicketStateOpen,
+		Reason:      "resolution contract",
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
 	module := New()
 	if err := module.Configure(Dependencies{
-		Tickets:     memory.NewDecisionTicketRepository(),
+		Tickets:     tickets,
 		Resolutions: resolutions,
 		EventHub:    hub,
 	}); err != nil {
@@ -470,11 +482,13 @@ func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
 		}
 	})
 
-	ticketID := common.TicketID("ticket-resolution-contract")
 	err := hub.Publish(ctx, events.Envelope{
 		Topic:       decisionevents.TopicDecisionCommandCreateResolution,
 		SubjectType: "decision_resolution",
 		SubjectID:   "resolution-contract",
+		WorkspaceID: "ws-resolution-contract",
+		RunID:       "run-resolution-contract",
+		StepID:      "step-resolution-contract",
 		Payload: map[string]any{
 			events.PayloadKeyCommand: decisioncontracts.CreateResolutionCommand{
 				ResolutionID:       "resolution-contract",
@@ -499,6 +513,108 @@ func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
 	}
 	if item.ContinuationAction != "resume" || item.ResumeRunID != "run-current" || item.SuccessorRunID != "run-next" {
 		t.Fatalf("resolution refs = %+v, want command recovery refs", item)
+	}
+}
+
+func TestDecisionCreateResolutionCommandRequiresTicketScope(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	ticketID := common.TicketID("ticket-resolution-scope-create")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: "ws-resolution-create-owner",
+		RunID:       "run-resolution-create-owner",
+		StepID:      "step-resolution-create-owner",
+		State:       common.DecisionTicketStateOpen,
+		Reason:      "resolution create scope",
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	module := New()
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(ctx); err != nil {
+			t.Errorf("Stop: %v", err)
+		}
+	})
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic:       decisionevents.TopicDecisionCommandCreateResolution,
+		WorkspaceID: "ws-resolution-create-other",
+		RunID:       "run-resolution-create-other",
+		StepID:      "step-resolution-create-other",
+		Payload: map[string]any{
+			events.PayloadKeyCommand: decisioncontracts.CreateResolutionCommand{
+				ResolutionID: "resolution-scope-create",
+				TicketID:     ticketID,
+				Type:         "provide_missing_info",
+				Payload:      map[string]any{"answer": "wrong scope"},
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("create resolution with mismatched scope err = %v, want not found", err)
+	}
+	if _, err := resolutions.GetByTicketID(common.ContextWithRuntimeWorkspaceID(ctx, "ws-resolution-create-owner"), ticketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("owner resolution lookup err = %v, want not found after rejected create", err)
+	}
+}
+
+func TestDecisionCreateResolutionCommandRejectsUnsupportedType(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	ticketID := common.TicketID("ticket-resolution-unsupported")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: "ws-resolution-unsupported",
+		RunID:       "run-resolution-unsupported",
+		StepID:      "step-resolution-unsupported",
+		State:       common.DecisionTicketStateOpen,
+		Reason:      "resolution type contract",
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	module := New()
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(ctx); err != nil {
+			t.Errorf("Stop: %v", err)
+		}
+	})
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic:       decisionevents.TopicDecisionCommandCreateResolution,
+		WorkspaceID: "ws-resolution-unsupported",
+		RunID:       "run-resolution-unsupported",
+		StepID:      "step-resolution-unsupported",
+		Payload: map[string]any{
+			events.PayloadKeyCommand: decisioncontracts.CreateResolutionCommand{
+				ResolutionID: "resolution-unsupported",
+				TicketID:     ticketID,
+				Type:         "unsupported_resolution",
+				Payload:      map[string]any{"answer": "nope"},
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("create resolution unsupported type err = %v, want invalid argument", err)
+	}
+	if _, err := resolutions.GetByTicketID(common.ContextWithRuntimeWorkspaceID(ctx, "ws-resolution-unsupported"), ticketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("resolution lookup err = %v, want not found after rejected type", err)
 	}
 }
 

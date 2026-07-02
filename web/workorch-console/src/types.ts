@@ -462,6 +462,7 @@ export type WorkspaceOutcome = {
 };
 
 export type WorkspaceExecutionActivationRequest = {
+  runId?: string;
   goalId?: string;
   doDId?: string;
   llmProviderId?: string;
@@ -473,12 +474,14 @@ export type WorkspaceExecutionActivationRequest = {
   memoryIds?: string[];
   dialogLanguage?: string;
   priority?: number;
-  intent?: 'resume' | 'restart' | string;
+  intent?: 'resume' | 'restart' | 'replan';
   requestId?: string;
   reason?: string;
   source?: string;
   definitionRevision?: string;
   decisionId?: string;
+  restart?: boolean;
+  executionContextPatch?: Record<string, unknown>;
 };
 
 export type Soul = {

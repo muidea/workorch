@@ -1618,6 +1618,13 @@ func TestEventStreamProjectionReplayUsesMetadataOnlyRecords(t *testing.T) {
 	if replayed.Payload["large"] != nil {
 		t.Fatalf("payload = %+v, want no hydrated large payload", replayed.Payload)
 	}
+	if replayed.Payload["payloadRef"] != "payloads/large-projection.json" {
+		t.Fatalf("payload = %+v, want payloadRef retained for on-demand detail", replayed.Payload)
+	}
+	summary, _ := replayed.Payload["stateSummary"].(map[string]any)
+	if summary["revision"] != float64(21) && summary["revision"] != 21 {
+		t.Fatalf("payload = %+v, want bounded stateSummary retained for metadata-only replay", replayed.Payload)
+	}
 }
 
 func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEvent(t *testing.T) {
@@ -2714,6 +2721,43 @@ func TestRuntimePayloadEndpointReturnsLLMRawRefContent(t *testing.T) {
 	}
 	if rec.Body.String() != `{"model":"test"}` {
 		t.Fatalf("body = %q, want raw request payload", rec.Body.String())
+	}
+}
+
+func TestDetailContentEndpointsRequireExplicitRefsBeforeReading(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	var artifactReads atomic.Int32
+	var rawReads atomic.Int32
+	state.readArtifactContent = func(context.Context, string, string, string) (appservice.ArtifactContent, error) {
+		artifactReads.Add(1)
+		return appservice.ArtifactContent{}, errors.New("artifact reader should not be called without uri")
+	}
+	state.readRuntimeRawContent = func(context.Context, string, string, string) (appservice.RuntimeRawContent, error) {
+		rawReads.Add(1)
+		return appservice.RuntimeRawContent{}, errors.New("runtime raw reader should not be called without ref")
+	}
+	handler := newMuxWithState(state)
+
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "artifact missing uri", path: "/api/v1/workorch/artifacts/content"},
+		{name: "artifact blank uri", path: "/api/v1/workorch/artifacts/content?uri=%20%20"},
+		{name: "runtime missing ref", path: "/api/v1/workorch/runtime/payloads"},
+		{name: "runtime blank ref", path: "/api/v1/workorch/runtime/payloads?ref=%20%20"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+	if artifactReads.Load() != 0 || rawReads.Load() != 0 {
+		t.Fatalf("reader calls artifact=%d raw=%d, want missing refs rejected before reader", artifactReads.Load(), rawReads.Load())
 	}
 }
 
@@ -4923,6 +4967,88 @@ func TestDecisionBatchResolveEndpointResolvesOpenTickets(t *testing.T) {
 	waitRunStateForHTTP(t, dataRoot, secondRunID, string(common.RunStateSuperseded))
 }
 
+func TestDecisionResolveEndpointScopesDuplicateTicketIDsByWorkspace(t *testing.T) {
+	dataRoot := t.TempDir()
+	handler := newFileMuxWithCleanup(t, dataRoot)
+	ticketID := "ticket-shared-http"
+	workspaceA, startedA := seedBlockedDecisionRunWithTicketForHTTP(t, dataRoot, "decision shared http workspace a", "run-decision-shared-a", ticketID)
+	workspaceB, startedB := seedBlockedDecisionRunWithTicketForHTTP(t, dataRoot, "decision shared http workspace b", "run-decision-shared-b", ticketID)
+
+	body := strings.NewReader(`{"resolutionType":"replan","resolutionPayload":{"operator":"http-scoped"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+ticketID+"/resolve?workspaceId="+url.QueryEscape(workspaceB.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("decision resolve status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var resolved decisionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resolved); err != nil {
+		t.Fatalf("unmarshal resolved decision: %v", err)
+	}
+	if resolved.Decision.ID != ticketID || resolved.Decision.WorkspaceID != workspaceB.ID || resolved.Decision.RunID != startedB.ID || resolved.Decision.State != "resolved" || resolved.Decision.ResolutionType != decisioncommon.ResolutionTypeReplan {
+		t.Fatalf("resolved decision = %+v, want only workspace B ticket resolved", resolved.Decision)
+	}
+
+	ctx := context.Background()
+	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	ticketA, err := repos.Tickets.Get(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceA.ID)), common.TicketID(startedA.BlockingTicketID))
+	if err != nil {
+		t.Fatalf("get workspace A ticket: %v", err)
+	}
+	if ticketA.State != common.DecisionTicketStateOpen {
+		t.Fatalf("workspace A ticket = %+v, want still open", ticketA)
+	}
+	ticketB, err := repos.Tickets.Get(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceB.ID)), common.TicketID(startedB.BlockingTicketID))
+	if err != nil {
+		t.Fatalf("get workspace B ticket: %v", err)
+	}
+	if ticketB.State != common.DecisionTicketStateResolved {
+		t.Fatalf("workspace B ticket = %+v, want resolved", ticketB)
+	}
+}
+
+func TestDecisionBatchResolveEndpointScopesDuplicateTicketIDsByWorkspace(t *testing.T) {
+	dataRoot := t.TempDir()
+	handler := newFileMuxWithCleanup(t, dataRoot)
+	ticketID := "ticket-shared-batch-http"
+	workspaceA, startedA := seedBlockedDecisionRunWithTicketForHTTP(t, dataRoot, "decision shared batch http workspace a", "run-decision-shared-batch-a", ticketID)
+	workspaceB, startedB := seedBlockedDecisionRunWithTicketForHTTP(t, dataRoot, "decision shared batch http workspace b", "run-decision-shared-batch-b", ticketID)
+
+	body := strings.NewReader(`{"ticketIds":["` + ticketID + `"],"resolutionType":"replan","resolutionPayload":{"operator":"http-batch-scoped"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/resolve-batch?workspaceId="+url.QueryEscape(workspaceB.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("batch resolve status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var resolved decisionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resolved); err != nil {
+		t.Fatalf("unmarshal batch resolved decisions: %v", err)
+	}
+	if len(resolved.Decisions) != 1 || resolved.Decisions[0].ID != ticketID || resolved.Decisions[0].WorkspaceID != workspaceB.ID || resolved.Decisions[0].RunID != startedB.ID || resolved.Decisions[0].State != "resolved" {
+		t.Fatalf("resolved decisions = %+v, want only workspace B ticket resolved", resolved.Decisions)
+	}
+
+	ctx := context.Background()
+	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	ticketA, err := repos.Tickets.Get(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceA.ID)), common.TicketID(startedA.BlockingTicketID))
+	if err != nil {
+		t.Fatalf("get workspace A ticket: %v", err)
+	}
+	if ticketA.State != common.DecisionTicketStateOpen {
+		t.Fatalf("workspace A ticket = %+v, want still open", ticketA)
+	}
+	ticketB, err := repos.Tickets.Get(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceB.ID)), common.TicketID(startedB.BlockingTicketID))
+	if err != nil {
+		t.Fatalf("get workspace B ticket: %v", err)
+	}
+	if ticketB.State != common.DecisionTicketStateResolved {
+		t.Fatalf("workspace B ticket = %+v, want resolved", ticketB)
+	}
+}
+
 func TestServerStateSchedulesReplanContinuationForSupersededReplanRun(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
@@ -5556,6 +5682,27 @@ func TestServerStateGovernanceRunResumeRejectsMissingWorkspaceScope(t *testing.T
 	}
 }
 
+func TestRunResumeRefsFromDecisionsRequiresScopedDecision(t *testing.T) {
+	refs := runResumeRefsFromDecisions([]appservice.Decision{
+		{ID: "ticket-missing-workspace", RunID: "run-001", ResolutionType: decisioncommon.ResolutionTypeReplan},
+		{ID: "ticket-missing-run", WorkspaceID: "ws-001", ResolutionType: decisioncommon.ResolutionTypeReplan},
+		{WorkspaceID: "ws-001", RunID: "run-001", ResolutionType: decisioncommon.ResolutionTypeReplan},
+		{ID: "ticket-replan", WorkspaceID: " ws-001 ", RunID: " run-001 ", ResolutionType: decisioncommon.ResolutionTypeReplan},
+	})
+	if len(refs) != 1 {
+		t.Fatalf("refs = %+v, want only one scoped decision continuation", refs)
+	}
+	ref := refs[0]
+	if ref.WorkspaceID != "ws-001" ||
+		ref.RunID != "run-001" ||
+		ref.DecisionID != "ticket-replan" ||
+		ref.Intent != "replan" ||
+		ref.Reason != "decision_replan_resolved" ||
+		ref.RequestID != governanceRunResumeRequestID("decision", "ticket-replan", "replan") {
+		t.Fatalf("ref = %+v, want scoped decision replan continuation", ref)
+	}
+}
+
 func TestServerStateRecoversResolvedDecisionBlockedRun(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
@@ -6081,6 +6228,67 @@ func TestWorkorchDWorkspaceRunCommandResumeEnqueuesRunContinuation(t *testing.T)
 		snapshot.RunCommand.Source != "tui" ||
 		snapshot.RunCommand.Revision <= 0 {
 		t.Fatalf("projected run command = %+v, want accepted resume command", snapshot.RunCommand)
+	}
+}
+
+func TestWorkorchDWorkspaceRunCommandResumeCoalescesDuplicateContinuation(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	hub := events.NewMemoryHub()
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	const workspaceID = "ws-scheduler-resume-idempotency"
+	const runID = "run-scheduler-resume-idempotency"
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"},
+	})
+
+	envelope := events.Envelope{
+		Topic:       workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		Revision:    18,
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID: workspaceID,
+			events.PayloadKeyRunID:       runID,
+			events.PayloadKeyIntent:      "resume",
+			events.PayloadKeyRequestID:   "request-resume-1",
+			events.PayloadKeySource:      "tui",
+			events.PayloadKeyPriority:    7,
+		},
+	}
+	if err := publishHTTPTestCommand(context.Background(), hub, envelope); err != nil {
+		t.Fatalf("publish first resume command: %v", err)
+	}
+	envelope.Revision = 19
+	envelope.Payload[events.PayloadKeyRequestID] = "request-resume-2"
+	if err := publishHTTPTestCommand(context.Background(), hub, envelope); err != nil {
+		t.Fatalf("publish duplicate resume command: %v", err)
+	}
+
+	expectedQueueKey := workspaceID + "/" + runID + "/resume"
+	expectedIdempotencyKey := "resume/" + workspaceID + "/" + runID
+	state.runContinuations.runMu.Lock()
+	req, pending := state.runContinuations.runPending[expectedQueueKey]
+	pendingCount := len(state.runContinuations.runPending)
+	startedCount := len(state.runContinuations.runStarted)
+	state.runContinuations.runMu.Unlock()
+	if pendingCount != 1 || startedCount != 1 || !pending || routine.asyncFunctionCalls != 1 {
+		t.Fatalf("resume pending=%d started=%d keyPending=%v background submissions=%d, want duplicate resume coalesced", pendingCount, startedCount, pending, routine.asyncFunctionCalls)
+	}
+	if req.WorkspaceID != workspaceID || req.RunID != runID || req.Action != "resume" || req.Priority != 7 {
+		t.Fatalf("resume pending request = %+v, want scoped resume priority 7", req)
+	}
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspaceID)
+	if err != nil {
+		t.Fatalf("read projected workspace snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.State != "accepted" ||
+		snapshot.RunCommand.Intent != "resume" ||
+		snapshot.RunCommand.RunID != runID ||
+		snapshot.RunCommand.RequestID != "request-resume-2" ||
+		snapshot.RunCommand.IdempotencyKey != expectedIdempotencyKey ||
+		snapshot.RunCommand.Source != "tui" {
+		t.Fatalf("projected run command = %+v, want scoped resume idempotency key", snapshot.RunCommand)
 	}
 }
 

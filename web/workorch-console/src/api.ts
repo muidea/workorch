@@ -170,7 +170,7 @@ export const workorchApi = {
     return body.workspaces;
   },
   readWorkspaceSnapshotProjection: async (workspaceId: string) => {
-    return request<WorkspaceSnapshotProjection>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/snapshot`);
+    return request<WorkspaceSnapshotProjection>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/snapshot?view=detail`);
   },
   readWorkspaceSnapshot: async (workspaceId: string) => {
     const body = await workorchApi.readWorkspaceSnapshotProjection(workspaceId);
@@ -373,10 +373,11 @@ export const workorchApi = {
     const activationRequest: WorkspaceExecutionActivationRequest = !requestBody.dialogLanguage && typeof navigator !== 'undefined'
       ? { ...requestBody, dialogLanguage: navigator.language }
       : requestBody;
+    const commandIntent = activationRequest.restart ? 'restart' : activationRequest.intent || 'resume';
     const commandRequest: WorkspaceExecutionActivationRequest = {
       ...activationRequest,
-      intent: activationRequest.intent || 'resume',
-      requestId: activationRequest.requestId || runCommandRequestId('resume', workspaceId, 'workspace'),
+      intent: commandIntent,
+      requestId: activationRequest.requestId || runCommandRequestId(commandIntent, workspaceId, activationRequest.runId || 'workspace'),
       reason: activationRequest.reason || 'user_requested',
       source: activationRequest.source || 'web'
     };

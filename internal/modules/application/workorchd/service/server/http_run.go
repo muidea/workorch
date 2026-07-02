@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -32,7 +33,12 @@ func registerRunReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/artifacts/content", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		state.metrics.artifactContentRequests.Add(1)
-		item, err := state.readArtifactContentCached(r.Context(), r.URL.Query().Get("uri"))
+		artifactURI := strings.TrimSpace(r.URL.Query().Get("uri"))
+		if artifactURI == "" {
+			writeBusinessError(w, fmt.Errorf("%w: artifact uri is required", common.ErrInvalidArgument))
+			return
+		}
+		item, err := state.readArtifactContentCached(r.Context(), artifactURI)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -41,7 +47,12 @@ func registerRunReadRoutes(router engine.RouteRegistry, state *serverState) {
 	})
 	router.AddHandler("/api/v1/workorch/runtime/payloads", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		item, err := state.readRuntimeRawContent(r.Context(), state.config.Backend, state.config.DataRoot, r.URL.Query().Get("ref"))
+		ref := strings.TrimSpace(r.URL.Query().Get("ref"))
+		if ref == "" {
+			writeBusinessError(w, fmt.Errorf("%w: runtime payload ref is required", common.ErrInvalidArgument))
+			return
+		}
+		item, err := state.readRuntimeRawContent(r.Context(), state.config.Backend, state.config.DataRoot, ref)
 		if err != nil {
 			writeBusinessError(w, err)
 			return

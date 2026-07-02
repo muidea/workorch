@@ -19,6 +19,9 @@ func TestClientDecodesWorkspaceProjectionMetadata(t *testing.T) {
 				"workspaces":[{"id":"ws-1","title":"A","state":"active"}]
 			}`))
 		case "/api/v1/workorch/workspaces/ws-1/snapshot":
+			if r.URL.Query().Get("view") != "detail" {
+				t.Fatalf("workspace snapshot query = %q, want explicit detail view", r.URL.RawQuery)
+			}
 			_, _ = w.Write([]byte(`{
 				"service":"workorch",
 				"projection":{"state":"ready","globalRevision":12,"workspaceRevision":7,"sourceEventRevision":91,"projectedSourceRevision":91,"degraded":false},
