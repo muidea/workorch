@@ -765,13 +765,109 @@ func normalizeRequiredOutputFocusBinding(required map[string]any, coverageFocus 
 	next := cloneStepPayload(required)
 	focusID := strings.TrimSpace(stringFromMap(coverageFocus, "id"))
 	workItemIDs := dispatchFocusWorkItemIDs(coverageFocus)
+	targetRefs := coverageFocusTargetRefsForRequiredOutput(coverageFocus)
+	structuredTargetRefs := coverageFocusStructuredTargetRefsForRequiredOutput(coverageFocus)
 	if focusID != "" {
 		next["coverageFocusId"] = focusID
 	}
 	if len(workItemIDs) > 0 {
 		next["coverageWorkItemIds"] = workItemIDs
 	}
+	if len(targetRefs) > 0 {
+		next["targetRefs"] = targetRefs
+		if _, ok := next["allowedTargetRefs"]; ok {
+			next["allowedTargetRefs"] = targetRefs
+		}
+	} else {
+		delete(next, "targetRefs")
+	}
+	if len(structuredTargetRefs) > 0 {
+		next["structuredTargetRefs"] = structuredTargetRefs
+	} else {
+		delete(next, "structuredTargetRefs")
+	}
+	normalizeRequiredOutputNestedFocusBindings(next, coverageFocus)
 	return next
+}
+
+func normalizeRequiredOutputNestedFocusBindings(value any, coverageFocus map[string]any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		if evidence := mapFromValue(typed["validationEvidence"]); len(evidence) > 0 {
+			typed["validationEvidence"] = normalizeValidationEvidenceFocusBinding(evidence, coverageFocus)
+		}
+		if looksLikeValidationEvidenceBinding(typed) {
+			normalized := normalizeValidationEvidenceFocusBinding(typed, coverageFocus)
+			for key, normalizedValue := range normalized {
+				typed[key] = normalizedValue
+			}
+		}
+		for _, child := range typed {
+			normalizeRequiredOutputNestedFocusBindings(child, coverageFocus)
+		}
+	case []any:
+		for _, child := range typed {
+			normalizeRequiredOutputNestedFocusBindings(child, coverageFocus)
+		}
+	case []map[string]any:
+		for _, child := range typed {
+			normalizeRequiredOutputNestedFocusBindings(child, coverageFocus)
+		}
+	}
+}
+
+func looksLikeValidationEvidenceBinding(value map[string]any) bool {
+	if len(value) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(value, "mode")) == "" &&
+		strings.TrimSpace(stringFromMap(value, "observationType")) == "" {
+		return false
+	}
+	return len(stringSliceFromValue(value["targetRefs"])) > 0 ||
+		len(stringSliceFromValue(value["structuredTargetRefs"])) > 0 ||
+		len(stringSliceFromValue(value["coverageWorkItemIds"])) > 0 ||
+		len(stringSliceFromValue(value["coverageWorkItemIDs"])) > 0
+}
+
+func normalizeValidationEvidenceFocusBinding(evidence map[string]any, coverageFocus map[string]any) map[string]any {
+	if len(evidence) == 0 || len(coverageFocus) == 0 {
+		return evidence
+	}
+	next := cloneStepPayload(evidence)
+	if ids := dispatchFocusWorkItemIDs(coverageFocus); len(ids) > 0 {
+		next["coverageWorkItemIds"] = ids
+	}
+	if refs := coverageFocusTargetRefsForRequiredOutput(coverageFocus); len(refs) > 0 {
+		next["targetRefs"] = refs
+	} else {
+		delete(next, "targetRefs")
+	}
+	if refs := coverageFocusStructuredTargetRefsForRequiredOutput(coverageFocus); len(refs) > 0 {
+		next["structuredTargetRefs"] = refs
+	} else {
+		delete(next, "structuredTargetRefs")
+	}
+	return next
+}
+
+func coverageFocusTargetRefsForRequiredOutput(coverageFocus map[string]any) []string {
+	refs := compactUniqueStrings(append(
+		stringSliceFromValue(coverageFocus["targetRefs"]),
+		stringSliceFromValue(coverageFocus["allowedTargetRefs"])...,
+	))
+	if len(refs) > 0 {
+		return refs
+	}
+	return nil
+}
+
+func coverageFocusStructuredTargetRefsForRequiredOutput(coverageFocus map[string]any) []string {
+	refs := compactUniqueStrings(append(
+		stringSliceFromValue(coverageFocus["structuredTargetRefs"]),
+		stringSliceFromValue(coverageFocus["targetRefs"])...,
+	))
+	return refs
 }
 
 func normalizeConvergenceBudgetFocusBinding(budget map[string]any, coverageFocus map[string]any) map[string]any {
@@ -1359,9 +1455,24 @@ func validateRequiredOutputFocusAlignment(authorityFocus map[string]any, label s
 	if len(authorityFocus) == 0 || len(required) == 0 {
 		return nil
 	}
+	if err := validateRequiredOutputBindingMapFocusAlignment(authorityFocus, label, required, false); err != nil {
+		return err
+	}
+	for _, binding := range requiredOutputNestedValidationEvidenceBindings(required) {
+		if err := validateRequiredOutputBindingMapFocusAlignment(authorityFocus, label+".validationEvidence", binding, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRequiredOutputBindingMapFocusAlignment(authorityFocus map[string]any, label string, binding map[string]any, validateTargetRefs bool) error {
+	if len(authorityFocus) == 0 || len(binding) == 0 {
+		return nil
+	}
 	for _, value := range []string{
-		strings.TrimSpace(stringFromMap(required, "coverageFocusId")),
-		strings.TrimSpace(stringFromMap(required, "focusId")),
+		strings.TrimSpace(stringFromMap(binding, "coverageFocusId")),
+		strings.TrimSpace(stringFromMap(binding, "focusId")),
 	} {
 		if value == "" {
 			continue
@@ -1371,13 +1482,89 @@ func validateRequiredOutputFocusAlignment(authorityFocus map[string]any, label s
 		}
 		return convergenceDispatchMisalignmentError("focus mismatch: %s coverageFocusId=%s authority=%s", label, value, dispatchFocusDebugToken(authorityFocus))
 	}
-	if ids := stringSliceFromValue(required["coverageWorkItemIds"]); len(ids) > 0 {
-		if dispatchFocusAligned(authorityFocus, map[string]any{"coverageWorkItemIds": ids}) {
-			return nil
+	for _, key := range []string{"coverageWorkItemIds", "coverageWorkItemIDs"} {
+		if ids := stringSliceFromValue(binding[key]); len(ids) > 0 && !dispatchFocusAligned(authorityFocus, map[string]any{"coverageWorkItemIds": ids}) {
+			return convergenceDispatchMisalignmentError("focus mismatch: %s %s=%s authority=%s", label, key, strings.Join(ids, ","), dispatchFocusDebugToken(authorityFocus))
 		}
-		return convergenceDispatchMisalignmentError("focus mismatch: %s coverageWorkItemIds=%s authority=%s", label, strings.Join(ids, ","), dispatchFocusDebugToken(authorityFocus))
+	}
+	if refs := stringSliceFromValue(binding["structuredTargetRefs"]); len(refs) > 0 && !dispatchFocusRefsAligned(authorityFocus, refs) {
+		return convergenceDispatchMisalignmentError("focus mismatch: %s structuredTargetRefs=%s authority=%s", label, strings.Join(refs, ","), dispatchFocusDebugToken(authorityFocus))
+	}
+	if refs := stringSliceFromValue(binding["allowedTargetRefs"]); len(refs) > 0 && !dispatchFocusRefsAligned(authorityFocus, refs) {
+		return convergenceDispatchMisalignmentError("focus mismatch: %s allowedTargetRefs=%s authority=%s", label, strings.Join(refs, ","), dispatchFocusDebugToken(authorityFocus))
+	}
+	if validateTargetRefs {
+		if refs := stringSliceFromValue(binding["targetRefs"]); len(refs) > 0 && !dispatchFocusRefsAligned(authorityFocus, refs) {
+			return convergenceDispatchMisalignmentError("focus mismatch: %s targetRefs=%s authority=%s", label, strings.Join(refs, ","), dispatchFocusDebugToken(authorityFocus))
+		}
 	}
 	return nil
+}
+
+func requiredOutputNestedValidationEvidenceBindings(value any) []map[string]any {
+	var ret []map[string]any
+	var walk func(any)
+	walk = func(current any) {
+		switch typed := current.(type) {
+		case map[string]any:
+			if evidence := mapFromValue(typed["validationEvidence"]); len(evidence) > 0 {
+				ret = append(ret, evidence)
+			}
+			if looksLikeValidationEvidenceBinding(typed) {
+				ret = append(ret, cloneStepPayload(typed))
+			}
+			for _, child := range typed {
+				walk(child)
+			}
+		case []any:
+			for _, child := range typed {
+				walk(child)
+			}
+		case []map[string]any:
+			for _, child := range typed {
+				walk(child)
+			}
+		}
+	}
+	walk(value)
+	return ret
+}
+
+func dispatchFocusRefsAligned(authorityFocus map[string]any, refs []string) bool {
+	refs = compactUniqueStrings(refs)
+	if len(authorityFocus) == 0 || len(refs) == 0 {
+		return true
+	}
+	authorityRefs := stringSet(dispatchFocusBindingRefs(authorityFocus))
+	if len(authorityRefs) == 0 {
+		return true
+	}
+	for _, ref := range refs {
+		if authorityRefs[ref] {
+			return true
+		}
+	}
+	return false
+}
+
+func dispatchFocusBindingRefs(focus map[string]any) []string {
+	if len(focus) == 0 {
+		return nil
+	}
+	var refs []string
+	refs = append(refs, dispatchFocusWorkItemIDs(focus)...)
+	refs = append(refs, stringSliceFromValue(focus["targetRefs"])...)
+	refs = append(refs, stringSliceFromValue(focus["allowedTargetRefs"])...)
+	refs = append(refs, stringSliceFromValue(focus["structuredTargetRefs"])...)
+	for _, key := range []string{"id", "normalizedSourceKey", "sourceRequirementId", "sourcePath"} {
+		if value := strings.TrimSpace(stringFromMap(focus, key)); value != "" {
+			refs = append(refs, value)
+		}
+	}
+	if aliases := stringSliceFromValue(focus["sourceRequirementAliases"]); len(aliases) > 0 {
+		refs = append(refs, aliases...)
+	}
+	return compactUniqueStrings(refs)
 }
 
 func dispatchFocusAligned(authorityFocus map[string]any, candidate map[string]any) bool {

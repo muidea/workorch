@@ -2631,6 +2631,60 @@ func TestCoverageWorkItemsAcceptanceGateAllowsEvidenceReadyAcceptedEvidence(t *t
 	}
 }
 
+func TestCoverageWorkItemsAcceptanceGateDeterministicallyClosesHydratedReadyBinding(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewCoverageWorkItemRepository()
+	workspaceID := common.WorkspaceID("ws-cwi-ready-binding-gate")
+	runID := common.RunID("run-cwi-ready-binding-gate")
+	coverageID := coverageWorkItemRepositoryID(runID, "cwi-ready-binding")
+	if err := repo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimecontract.CoverageWorkItem{
+		ID:                    coverageID,
+		WorkspaceID:           workspaceID,
+		RunID:                 runID,
+		DefinitionRevision:    "rev-ready-binding-gate",
+		NormalizedSourceKey:   "source-ready-binding-gate",
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		Status:                "evidence_ready",
+		AcceptedEvidenceRefs:  []string{"validation-001"},
+		CurrentGap:            "required evidence kinds present; coverage assessment required",
+		Metadata: map[string]any{
+			"id":                   "cwi-ready-binding",
+			"status":               "evidence_ready",
+			"missingEvidenceKinds": []string{},
+			"acceptedEvidenceByKind": map[string][]string{
+				runtimecontract.EvidenceKindValidation: {"validation-001"},
+			},
+			"acceptedEvidenceBindingByKind": map[string][]string{
+				runtimecontract.EvidenceKindValidation: {"validation-001"},
+			},
+			"acceptedEvidenceBindingRefs": []string{"validation-001"},
+		},
+	}); err != nil {
+		t.Fatalf("create coverage item: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+		},
+	}
+
+	if err := newCoverageSubsystem(repo).validateReadyForAcceptance(run, ctx); err != nil {
+		t.Fatalf("coverage.validateReadyForAcceptance: %v, want deterministic close before gate", err)
+	}
+	item, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), coverageID)
+	if err != nil {
+		t.Fatalf("get coverage item: %v", err)
+	}
+	if item.Status != "satisfied" {
+		t.Fatalf("repo coverage status = %q, want satisfied", item.Status)
+	}
+	if refs := stringSliceFromValue(item.Metadata["satisfiedByEvidenceRefs"]); !stringSliceContains(refs, "validation-001") {
+		t.Fatalf("satisfiedByEvidenceRefs = %+v, want validation-001", refs)
+	}
+}
+
 func TestCoverageWorkItemsGovernanceItemsRequireOwnerEvidence(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-governance-kinds",

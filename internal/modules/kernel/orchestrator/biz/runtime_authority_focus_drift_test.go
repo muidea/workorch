@@ -134,6 +134,121 @@ func TestRebuildDispatchInputAlignsStaleFocusFieldsToAuthority(t *testing.T) {
 	}
 }
 
+func TestRequiredOutputFocusNormalizationRewritesTargetRefsAndExamples(t *testing.T) {
+	coverageFocus := map[string]any{
+		"id":                  "focus-cwi-current",
+		"coverageWorkItemIds": []string{"cwi-current"},
+		"targetRefs":          []string{"goal.leaves[4]", "goal-req-current"},
+		"structuredTargetRefs": []string{
+			"cwi-current",
+			"goal:goal_leaf:goal-req-current",
+		},
+	}
+	required := map[string]any{
+		"coverageFocusId":     "focus-cwi-stale",
+		"coverageWorkItemIds": []string{"cwi-stale"},
+		"targetRefs":          []string{"dod.items[19]"},
+		"structuredTargetRefs": []string{
+			"cwi-stale",
+			"dod:dod_item:dod-stale",
+		},
+		"validationEvidenceNodeExample": map[string]any{
+			"id":   "verify_behavior",
+			"kind": "shell/command",
+			"input": map[string]any{
+				"validationEvidence": map[string]any{
+					"mode":                 "runtime_behavior",
+					"observationType":      "runtime_observation",
+					"coverageWorkItemIds":  []string{"cwi-stale"},
+					"targetRefs":           []string{"dod.items[19]"},
+					"structuredTargetRefs": []string{"cwi-stale", "dod:dod_item:dod-stale"},
+				},
+			},
+		},
+		"managedValidationNodeExample": map[string]any{
+			"id":   "verify_managed_behavior",
+			"kind": managedValidationSessionNodeKind,
+			"input": map[string]any{
+				"observation": map[string]any{
+					"validationEvidence": map[string]any{
+						"mode":                 "runtime_behavior",
+						"observationType":      "runtime_observation",
+						"coverageWorkItemIds":  []string{"cwi-stale"},
+						"targetRefs":           []string{"dod.items[19]"},
+						"structuredTargetRefs": []string{"cwi-stale", "dod:dod_item:dod-stale"},
+					},
+				},
+			},
+		},
+	}
+
+	got := normalizeRequiredOutputFocusBinding(required, coverageFocus)
+	if gotID := stringFromMap(got, "coverageFocusId"); gotID != "focus-cwi-current" {
+		t.Fatalf("coverageFocusId = %q, want focus-cwi-current", gotID)
+	}
+	if ids := stringSliceFromValue(got["coverageWorkItemIds"]); len(ids) != 1 || ids[0] != "cwi-current" {
+		t.Fatalf("coverageWorkItemIds = %+v, want [cwi-current]", ids)
+	}
+	if refs := stringSliceFromValue(got["structuredTargetRefs"]); !stringSliceContains(refs, "cwi-current") || stringSliceContains(refs, "cwi-stale") {
+		t.Fatalf("structuredTargetRefs = %+v, want current refs only", refs)
+	}
+	validationEvidence := mapFromValue(mapFromValue(mapFromValue(got["validationEvidenceNodeExample"])["input"])["validationEvidence"])
+	assertValidationEvidenceFocusForTest(t, validationEvidence, "cwi-current", "goal:goal_leaf:goal-req-current")
+	managedEvidence := mapFromValue(mapFromValue(mapFromValue(mapFromValue(got["managedValidationNodeExample"])["input"])["observation"])["validationEvidence"])
+	assertValidationEvidenceFocusForTest(t, managedEvidence, "cwi-current", "goal:goal_leaf:goal-req-current")
+}
+
+func TestValidateConvergenceDispatchInputRejectsNestedRequiredOutputFocusDrift(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                  "focus-cwi-current",
+				"coverageWorkItemIds": []string{"cwi-current"},
+				"structuredTargetRefs": []string{
+					"cwi-current",
+					"goal:goal_leaf:goal-req-current",
+				},
+			},
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		},
+		"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
+		"requiredOutput": map[string]any{
+			"coverageFocusId":     "focus-cwi-current",
+			"coverageWorkItemIds": []string{"cwi-current"},
+			"structuredTargetRefs": []string{
+				"cwi-current",
+			},
+			"validationEvidenceNodeExample": map[string]any{
+				"id":   "verify_behavior",
+				"kind": "shell/command",
+				"input": map[string]any{
+					"validationEvidence": map[string]any{
+						"mode":                 "runtime_behavior",
+						"observationType":      "runtime_observation",
+						"coverageWorkItemIds":  []string{"cwi-stale"},
+						"targetRefs":           []string{"dod.items[19]"},
+						"structuredTargetRefs": []string{"cwi-stale", "dod:dod_item:dod-stale"},
+					},
+				},
+			},
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"activeFocus": map[string]any{"id": "focus-cwi-current", "coverageWorkItemIds": []string{"cwi-current"}},
+		},
+	}
+
+	err := validateConvergenceDispatchInput(input)
+	if err == nil {
+		t.Fatal("validateConvergenceDispatchInput returned nil, want nested validation evidence focus mismatch")
+	}
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want ErrConflict", err)
+	}
+	if !strings.Contains(err.Error(), failureClassRuntimeContractMisalign) {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want %s marker", err, failureClassRuntimeContractMisalign)
+	}
+}
+
 func TestNormalizeDispatchInputDerivesAuthoritySliceFromAcceptanceSlices(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{
@@ -917,5 +1032,18 @@ func assertFocusIDForTest(t *testing.T, focus map[string]any, want string) {
 	t.Helper()
 	if got := stringFromMap(focus, "id"); got != want {
 		t.Fatalf("focus = %+v, want id %q", focus, want)
+	}
+}
+
+func assertValidationEvidenceFocusForTest(t *testing.T, evidence map[string]any, wantWorkItemID string, wantStructuredRef string) {
+	t.Helper()
+	if ids := stringSliceFromValue(evidence["coverageWorkItemIds"]); len(ids) != 1 || ids[0] != wantWorkItemID {
+		t.Fatalf("validationEvidence.coverageWorkItemIds = %+v, want [%s]", ids, wantWorkItemID)
+	}
+	if refs := stringSliceFromValue(evidence["structuredTargetRefs"]); !stringSliceContains(refs, wantStructuredRef) || stringSliceContains(refs, "cwi-stale") {
+		t.Fatalf("validationEvidence.structuredTargetRefs = %+v, want current structured refs", refs)
+	}
+	if refs := stringSliceFromValue(evidence["targetRefs"]); !stringSliceContains(refs, "goal.leaves[4]") || stringSliceContains(refs, "dod.items[19]") {
+		t.Fatalf("validationEvidence.targetRefs = %+v, want current target refs", refs)
 	}
 }

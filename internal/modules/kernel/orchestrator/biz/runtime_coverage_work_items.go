@@ -386,6 +386,7 @@ func (c *coverageSubsystem) validateReadyForAcceptance(run *runModel.Run, contex
 	if !hydrated {
 		c.ensure(run, contexts...)
 	}
+	c.closeDeterministicallySatisfiedReadyItems(run, contexts...)
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) == 0 {
 		if coverageAcceptanceRequiresLedger(run) {
