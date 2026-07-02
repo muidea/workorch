@@ -93,14 +93,37 @@ var runActivateCmd = &cobra.Command{
 		req.GoalID = common.GoalID(goalID)
 		req.DoDID = common.DoDID(dodID)
 		req.SoulID = common.SoulID(soulID)
+		req.LLMProviderID, _ = cmd.Flags().GetString("llm-provider")
 		req.DialogLanguage, _ = cmd.Flags().GetString("lang")
 		skillIDs, _ := cmd.Flags().GetStringArray("skill")
 		mcpIDs, _ := cmd.Flags().GetStringArray("mcp-server")
+		capabilityIDs, _ := cmd.Flags().GetStringArray("capability")
+		memoryIDs, _ := cmd.Flags().GetStringArray("memory")
+		soulBindings, _ := cmd.Flags().GetStringArray("soul-binding")
+		parsedSoulBindings, err := parseRunActivateSoulBindings(soulBindings)
+		if err != nil {
+			return err
+		}
+		req.SoulBindings = parsedSoulBindings
 		for _, id := range skillIDs {
-			req.SkillIDs = append(req.SkillIDs, common.SkillID(id))
+			if id = strings.TrimSpace(id); id != "" {
+				req.SkillIDs = append(req.SkillIDs, common.SkillID(id))
+			}
 		}
 		for _, id := range mcpIDs {
-			req.MCPServerIDs = append(req.MCPServerIDs, common.MCPServerID(id))
+			if id = strings.TrimSpace(id); id != "" {
+				req.MCPServerIDs = append(req.MCPServerIDs, common.MCPServerID(id))
+			}
+		}
+		for _, id := range capabilityIDs {
+			if id = strings.TrimSpace(id); id != "" {
+				req.CapabilityIDs = append(req.CapabilityIDs, common.MCPCapabilityID(id))
+			}
+		}
+		for _, id := range memoryIDs {
+			if id = strings.TrimSpace(id); id != "" {
+				req.MemoryIDs = append(req.MemoryIDs, common.MemoryID(id))
+			}
 		}
 		req.Priority, _ = cmd.Flags().GetInt("priority")
 
@@ -275,8 +298,12 @@ func init() {
 	runActivateCmd.Flags().String("goal", "", "Goal ID")
 	runActivateCmd.Flags().String("dod", "", "DoD ID")
 	runActivateCmd.Flags().String("soul", "", "Soul ID")
+	runActivateCmd.Flags().String("llm-provider", "", "LLM provider ID")
+	runActivateCmd.Flags().StringArray("soul-binding", nil, "Stage soul binding as stage=soul-id (can repeat)")
 	runActivateCmd.Flags().StringArray("skill", nil, "Skill IDs (can repeat)")
 	runActivateCmd.Flags().StringArray("mcp-server", nil, "MCP server IDs (can repeat)")
+	runActivateCmd.Flags().StringArray("capability", nil, "MCP capability IDs (can repeat)")
+	runActivateCmd.Flags().StringArray("memory", nil, "Memory IDs (can repeat)")
 	runActivateCmd.Flags().String("lang", "", "Dialog language")
 	runActivateCmd.Flags().Int("priority", 0, "Run priority")
 
@@ -309,6 +336,30 @@ func runCommandWorkspaceID(cmd *cobra.Command) common.WorkspaceID {
 		return ""
 	}
 	return common.WorkspaceID(workspaceID)
+}
+
+func parseRunActivateSoulBindings(items []string) (map[string]common.SoulID, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	bindings := map[string]common.SoulID{}
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		stage, soulID, ok := strings.Cut(item, "=")
+		stage = strings.TrimSpace(stage)
+		soulID = strings.TrimSpace(soulID)
+		if !ok || stage == "" || soulID == "" {
+			return nil, fmt.Errorf("%w: soul-binding must be stage=soul-id", common.ErrInvalidArgument)
+		}
+		bindings[stage] = common.SoulID(soulID)
+	}
+	if len(bindings) == 0 {
+		return nil, nil
+	}
+	return bindings, nil
 }
 
 func patchesForRun(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.PatchInfo {

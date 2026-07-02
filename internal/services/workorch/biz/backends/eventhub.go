@@ -346,10 +346,10 @@ func (b *eventHubDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID
 type eventHubRunBackend struct{ parent *eventHubBackend }
 
 func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunCommand) (*RunInfo, error) {
-	if b == nil || b.parent == nil || b.parent.eventHub == nil || req.WorkspaceID == "" {
+	if b == nil || b.parent == nil || b.parent.eventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	intent, err := NormalizeRunCommandIntent(req.Intent)
+	intent, err := ValidateWorkspaceRunCommand(req)
 	if err != nil {
 		return nil, err
 	}
@@ -370,6 +370,11 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 	payload[events.PayloadKeyDoDID] = string(activation.DoDID)
 	payload[events.PayloadKeyLLMProviderID] = activation.LLMProviderID
 	payload[events.PayloadKeySoulID] = string(activation.SoulID)
+	payload["soulBindings"] = commonSoulBindingStrings(activation.SoulBindings)
+	payload["skillIds"] = skillIDStrings(activation.SkillIDs)
+	payload["mcpServerIds"] = mcpServerIDStrings(activation.MCPServerIDs)
+	payload["capabilityIds"] = capabilityIDStrings(activation.CapabilityIDs)
+	payload["memoryIds"] = memoryIDStrings(activation.MemoryIDs)
 	payload["dialogLanguage"] = activation.DialogLanguage
 	payload[events.PayloadKeyExecutionContextPatch] = activation.ExecutionContextPatch
 	envelope := events.Envelope{
@@ -437,10 +442,16 @@ func (b *eventHubRunBackend) Status(ctx context.Context, wsID common.WorkspaceID
 type eventHubDecisionBackend struct{ parent *eventHubBackend }
 
 func (b *eventHubDecisionBackend) Resolve(ctx context.Context, req ResolveDecisionRequest) (*DecisionInfo, error) {
+	if err := requireEventHubWorkspaceScope(req.WorkspaceID, events.CommandDecisionResolve); err != nil {
+		return nil, err
+	}
 	result, err := b.parent.sendCommand(ctx, events.CommandDecisionResolve, req.WorkspaceID, "", "decision", string(req.TicketID), map[string]any{"resolutionType": req.ResolutionType, "payload": req.Payload})
 	return decodeResultResource[DecisionInfo](result, err)
 }
 func (b *eventHubDecisionBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload map[string]any) ([]DecisionInfo, error) {
+	if err := requireEventHubWorkspaceScope(wsID, events.CommandDecisionBatch); err != nil {
+		return nil, err
+	}
 	result, err := b.parent.sendCommand(ctx, events.CommandDecisionBatch, wsID, "", "decision", "", map[string]any{"ticketIds": ticketIDStrings(ticketIDs), "resolutionType": resolutionType, "payload": payload})
 	return decodeResultResources[DecisionInfo](result, err)
 }
@@ -449,6 +460,9 @@ func (b *eventHubDecisionBackend) List(ctx context.Context, wsID common.Workspac
 	return decodeResultResources[DecisionInfo](result, err)
 }
 func (b *eventHubDecisionBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*DecisionInfo, error) {
+	if err := requireEventHubWorkspaceScope(wsID, events.CommandDecisionGet); err != nil {
+		return nil, err
+	}
 	result, err := b.parent.sendCommand(ctx, events.CommandDecisionGet, wsID, "", "decision", string(id), nil)
 	return decodeResultResource[DecisionInfo](result, err)
 }
@@ -456,14 +470,23 @@ func (b *eventHubDecisionBackend) Get(ctx context.Context, wsID common.Workspace
 type eventHubApprovalBackend struct{ parent *eventHubBackend }
 
 func (b *eventHubApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*ApprovalInfo, error) {
+	if err := requireEventHubWorkspaceScope(wsID, events.CommandApprovalApprove); err != nil {
+		return nil, err
+	}
 	result, err := b.parent.sendCommand(ctx, events.CommandApprovalApprove, wsID, "", "approval", string(id), approvalCommandPayload("approve", nil, payload...))
 	return decodeResultResource[ApprovalInfo](result, err)
 }
 func (b *eventHubApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...map[string]any) (*ApprovalInfo, error) {
+	if err := requireEventHubWorkspaceScope(wsID, events.CommandApprovalReject); err != nil {
+		return nil, err
+	}
 	result, err := b.parent.sendCommand(ctx, events.CommandApprovalReject, wsID, "", "approval", string(id), approvalCommandPayload("reject", nil, payload...))
 	return decodeResultResource[ApprovalInfo](result, err)
 }
 func (b *eventHubApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...map[string]any) ([]ApprovalInfo, error) {
+	if err := requireEventHubWorkspaceScope(wsID, events.CommandApprovalBatch); err != nil {
+		return nil, err
+	}
 	result, err := b.parent.sendCommand(ctx, events.CommandApprovalBatch, wsID, "", "approval", "", approvalCommandPayload(action, approvalIDStrings(ids), payload...))
 	return decodeResultResources[ApprovalInfo](result, err)
 }
@@ -472,8 +495,18 @@ func (b *eventHubApprovalBackend) List(ctx context.Context, wsID common.Workspac
 	return decodeResultResources[ApprovalInfo](result, err)
 }
 func (b *eventHubApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error) {
+	if err := requireEventHubWorkspaceScope(wsID, events.CommandApprovalGet); err != nil {
+		return nil, err
+	}
 	result, err := b.parent.sendCommand(ctx, events.CommandApprovalGet, wsID, "", "approval", string(id), nil)
 	return decodeResultResource[ApprovalInfo](result, err)
+}
+
+func requireEventHubWorkspaceScope(wsID common.WorkspaceID, command string) error {
+	if strings.TrimSpace(string(wsID)) == "" {
+		return fmt.Errorf("%w: command %s requires workspace scope", common.ErrInvalidArgument, command)
+	}
+	return nil
 }
 
 func approvalCommandPayload(action string, ids []string, payload ...map[string]any) map[string]any {

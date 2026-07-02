@@ -388,7 +388,22 @@ func isLLMProviderRuntimeFailure(run *runModel.Run, step *runModel.Step) bool {
 	if run == nil || step == nil || step.Kind != initialStepKind(run) {
 		return false
 	}
-	return isLLMProviderFailureStage(stringFromMap(step.Output, "stage"))
+	if isLLMProviderFailureStage(stringFromMap(step.Output, "stage")) {
+		return true
+	}
+	switch stringFromMap(step.Output, failureOutputKeyClass) {
+	case failureClassProviderUnavailable,
+		failureClassProviderSchemaDrift,
+		failureClassProviderProtocolInvalid,
+		failureClassProviderTimeout,
+		failureClassContextTooLarge,
+		failureClassRateLimited,
+		failureClassAuthOrConfigError,
+		failureClassProviderStreamIncomplete:
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *repairSubsystem) runtimeRepairAttemptCount(ctx context.Context, runID common.RunID) int {

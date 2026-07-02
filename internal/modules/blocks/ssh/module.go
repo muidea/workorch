@@ -4,11 +4,11 @@ import (
 	"context"
 
 	magictask "github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	sshbiz "github.com/muidea/workorch/internal/modules/blocks/ssh/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 )
 
 const ModuleID = modulecommon.ModuleID

@@ -241,9 +241,10 @@ func (a *Agent) ResolveDecision(ctx context.Context, workspaceID string, ticketI
 		return fmt.Errorf("agent backend is required")
 	}
 	wsID := common.WorkspaceID(strings.TrimSpace(workspaceID))
-	if wsID != "" {
-		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
+	if wsID == "" {
+		return fmt.Errorf("workspace is required")
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
 	_, err := a.be.Decision().Resolve(ctx, backend.ResolveDecisionRequest{
 		WorkspaceID:    wsID,
 		TicketID:       common.TicketID(ticketID),
@@ -258,9 +259,10 @@ func (a *Agent) ResolveApproval(ctx context.Context, workspaceID string, approva
 		return fmt.Errorf("agent backend is required")
 	}
 	wsID := common.WorkspaceID(strings.TrimSpace(workspaceID))
-	if wsID != "" {
-		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
+	if wsID == "" {
+		return fmt.Errorf("workspace is required")
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
 	if approved {
 		_, err := a.be.Approval().Approve(ctx, wsID, common.ApprovalID(approvalID))
 		return err

@@ -410,8 +410,15 @@ func TestRemoteRunCommandFirstResumeSendsWorkspaceCommandMetadata(t *testing.T) 
 		Source:             "test",
 		DefinitionRevision: "rev-first-resume",
 		Activation: ActivateRunRequest{
-			GoalID: "goal-remote",
-			DoDID:  "dod-remote",
+			GoalID:        "goal-remote",
+			DoDID:         "dod-remote",
+			LLMProviderID: "provider-remote",
+			SoulID:        "soul-remote",
+			SoulBindings:  map[string]common.SoulID{"validation": "soul-remote-validation"},
+			SkillIDs:      []common.SkillID{"skill-remote"},
+			MCPServerIDs:  []common.MCPServerID{"mcp-remote"},
+			CapabilityIDs: []common.MCPCapabilityID{"mcp-remote:tool:validate"},
+			MemoryIDs:     []common.MemoryID{"memory-remote"},
 		},
 	})
 	if err != nil {
@@ -429,9 +436,17 @@ func TestRemoteRunCommandFirstResumeSendsWorkspaceCommandMetadata(t *testing.T) 
 			body["definitionRevision"] != "rev-first-resume" {
 			t.Fatalf("request body = %+v, want resume command metadata", body)
 		}
-		if body["goalId"] != "goal-remote" || body["doDId"] != "dod-remote" {
+		if body["goalId"] != "goal-remote" ||
+			body["doDId"] != "dod-remote" ||
+			body["llmProviderId"] != "provider-remote" ||
+			body["soulId"] != "soul-remote" {
 			t.Fatalf("request body = %+v, want activation goal/dod payload preserved", body)
 		}
+		assertRemoteBodyStringMapValue(t, body, "soulBindings", "validation", "soul-remote-validation")
+		assertRemoteBodyStringSlice(t, body, "skillIds", "skill-remote")
+		assertRemoteBodyStringSlice(t, body, "mcpServerIds", "mcp-remote")
+		assertRemoteBodyStringSlice(t, body, "capabilityIds", "mcp-remote:tool:validate")
+		assertRemoteBodyStringSlice(t, body, "memoryIds", "memory-remote")
 	case <-time.After(time.Second):
 		t.Fatal("remote server did not receive first resume request")
 	}
@@ -524,6 +539,12 @@ func TestRemoteRunCommandReplanSendsUnifiedIntent(t *testing.T) {
 		Source:             "tui",
 		DefinitionRevision: "rev-remote-replan",
 		DecisionID:         "ticket-remote-replan",
+		Activation: ActivateRunRequest{
+			SkillIDs:      []common.SkillID{"skill-remote-replan"},
+			MCPServerIDs:  []common.MCPServerID{"mcp-remote-replan"},
+			CapabilityIDs: []common.MCPCapabilityID{"mcp-remote-replan:tool:validate"},
+			MemoryIDs:     []common.MemoryID{"memory-remote-replan"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("remote run command replan: %v", err)
@@ -542,6 +563,10 @@ func TestRemoteRunCommandReplanSendsUnifiedIntent(t *testing.T) {
 			body["decisionId"] != "ticket-remote-replan" {
 			t.Fatalf("request body = %+v, want unified replan intent and command metadata", body)
 		}
+		assertRemoteBodyStringSlice(t, body, "skillIds", "skill-remote-replan")
+		assertRemoteBodyStringSlice(t, body, "mcpServerIds", "mcp-remote-replan")
+		assertRemoteBodyStringSlice(t, body, "capabilityIds", "mcp-remote-replan:tool:validate")
+		assertRemoteBodyStringSlice(t, body, "memoryIds", "memory-remote-replan")
 	case <-time.After(time.Second):
 		t.Fatal("remote server did not receive replan request")
 	}
@@ -550,7 +575,7 @@ func TestRemoteRunCommandReplanSendsUnifiedIntent(t *testing.T) {
 func TestRemoteRunCommandRestartSendsWorkspaceRestartCommandMetadata(t *testing.T) {
 	requestBody := make(chan map[string]any, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/execution-restarts" {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/execution-activations" {
 			http.NotFound(w, r)
 			return
 		}
@@ -584,6 +609,11 @@ func TestRemoteRunCommandRestartSendsWorkspaceRestartCommandMetadata(t *testing.
 			DoDID:         "dod-remote-restart",
 			LLMProviderID: "provider-remote-restart",
 			SoulID:        "soul-remote-restart",
+			SoulBindings:  map[string]common.SoulID{"validation": "soul-remote-restart-validation"},
+			SkillIDs:      []common.SkillID{"skill-remote-restart"},
+			MCPServerIDs:  []common.MCPServerID{"mcp-remote-restart"},
+			CapabilityIDs: []common.MCPCapabilityID{"mcp-remote-restart:tool:validate"},
+			MemoryIDs:     []common.MemoryID{"memory-remote-restart"},
 		},
 	})
 	if err != nil {
@@ -610,6 +640,11 @@ func TestRemoteRunCommandRestartSendsWorkspaceRestartCommandMetadata(t *testing.
 			body["soulId"] != "soul-remote-restart" {
 			t.Fatalf("request body = %+v, want restart activation payload preserved", body)
 		}
+		assertRemoteBodyStringMapValue(t, body, "soulBindings", "validation", "soul-remote-restart-validation")
+		assertRemoteBodyStringSlice(t, body, "skillIds", "skill-remote-restart")
+		assertRemoteBodyStringSlice(t, body, "mcpServerIds", "mcp-remote-restart")
+		assertRemoteBodyStringSlice(t, body, "capabilityIds", "mcp-remote-restart:tool:validate")
+		assertRemoteBodyStringSlice(t, body, "memoryIds", "memory-remote-restart")
 		if patch, _ := body["executionContextPatch"].(map[string]any); len(patch) == 0 {
 			t.Fatalf("request body = %+v, want execution context patch", body)
 		}
@@ -637,6 +672,72 @@ func TestRemoteRunCommandRejectsUnsupportedIntent(t *testing.T) {
 	}
 	if requests.Load() != 0 {
 		t.Fatalf("requests = %d, want no remote request for unsupported intent", requests.Load())
+	}
+}
+
+func TestRemoteRunCommandRejectsInvalidIntentScopeBeforeRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		req  WorkspaceRunCommand
+	}{
+		{
+			name: "restart with run scope",
+			req: WorkspaceRunCommand{
+				WorkspaceID:   "ws-remote",
+				ExpectedRunID: "run-remote",
+				Intent:        RunCommandIntentRestart,
+			},
+		},
+		{
+			name: "replan without run scope",
+			req: WorkspaceRunCommand{
+				WorkspaceID: "ws-remote",
+				Intent:      RunCommandIntentReplan,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := atomic.Int64{}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				http.Error(w, "unexpected request", http.StatusInternalServerError)
+			}))
+			defer server.Close()
+
+			be := NewRemote(server.URL)
+			_, err := be.Run().Command(context.Background(), tc.req)
+			if !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("err = %v, want invalid argument", err)
+			}
+			if requests.Load() != 0 {
+				t.Fatalf("requests = %d, want no remote request for invalid intent scope", requests.Load())
+			}
+		})
+	}
+}
+
+func assertRemoteBodyStringSlice(t *testing.T, body map[string]any, key string, want string) {
+	t.Helper()
+	values, ok := body[key].([]any)
+	if !ok {
+		t.Fatalf("request body %s = %+v, want string slice containing %q", key, body[key], want)
+	}
+	for _, value := range values {
+		if value == want {
+			return
+		}
+	}
+	t.Fatalf("request body %s = %+v, want %q", key, body[key], want)
+}
+
+func assertRemoteBodyStringMapValue(t *testing.T, body map[string]any, key string, mapKey string, want string) {
+	t.Helper()
+	values, ok := body[key].(map[string]any)
+	if !ok {
+		t.Fatalf("request body %s = %+v, want object with %s=%q", key, body[key], mapKey, want)
+	}
+	if values[mapKey] != want {
+		t.Fatalf("request body %s = %+v, want %s=%q", key, values, mapKey, want)
 	}
 }
 

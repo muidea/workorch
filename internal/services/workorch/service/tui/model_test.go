@@ -712,6 +712,14 @@ func TestModelRunResumeWithoutLiveRunDoesNotPredeclareContinuation(t *testing.T)
 	if len(be.resumes) != 1 || be.resumes[0] != "run-failed" {
 		t.Fatalf("resumes = %v, want terminal run resume through backend", be.resumes)
 	}
+	if len(be.runCommands) != 1 ||
+		be.runCommands[0].WorkspaceID != "ws-1" ||
+		be.runCommands[0].ExpectedRunID != "run-failed" ||
+		be.runCommands[0].Intent != backend.RunCommandIntentResume ||
+		be.runCommands[0].Reason != "user_requested" ||
+		be.runCommands[0].Source != "tui" {
+		t.Fatalf("runCommands = %+v, want scoped TUI resume command", be.runCommands)
+	}
 	if len(be.activations) != 0 {
 		t.Fatalf("activations = %d, want no implicit activation for /run resume", len(be.activations))
 	}
@@ -785,6 +793,14 @@ func TestModelRunRestartCommandRestartsWorkspaceWithOperatorInput(t *testing.T) 
 	}
 	if len(be.restarts) != 1 {
 		t.Fatalf("restarts = %d, want one restart", len(be.restarts))
+	}
+	if len(be.runCommands) != 1 ||
+		be.runCommands[0].WorkspaceID != "ws-1" ||
+		be.runCommands[0].ExpectedRunID != "" ||
+		be.runCommands[0].Intent != backend.RunCommandIntentRestart ||
+		be.runCommands[0].Reason != "user_requested" ||
+		be.runCommands[0].Source != "tui" {
+		t.Fatalf("runCommands = %+v, want scoped TUI restart command", be.runCommands)
 	}
 	queue, ok := be.restarts[0].ExecutionContextPatch["operatorInputQueue"].([]map[string]any)
 	if !ok || len(queue) != 1 || queue[0]["content"] != "补充信息：继续基于现有目标修复" {
@@ -2102,7 +2118,7 @@ func TestModelEmptyWorkspaceGuidance(t *testing.T) {
 	m.width = 90
 	m.height = 18
 	view := stripANSI(m.View())
-	for _, want := range []string{"No workspaces found", "/workspace create <title> --dir <path>", "--template generic-governed", "--template software-dev", "/dod"} {
+	for _, want := range []string{"No workspaces found", "/workspace create <title> --dir <path>", "--template <template-id>", "/dod"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("empty workspace guidance missing %q:\n%s", want, view)
 		}
@@ -2655,6 +2671,65 @@ func TestResolveApprovalSkipsResumeWhenRunAlreadyRunning(t *testing.T) {
 	}
 	if be.resumed {
 		t.Fatal("TUI must not resume running run after approval conflict")
+	}
+}
+
+func TestResolveDecisionAndApprovalRequireWorkspaceScope(t *testing.T) {
+	decision := &recordingTUIDecisionBackend{}
+	approval := &recordingTUIApprovalBackend{}
+	be := tuiResolutionBackend{fakeBE: newFake(t), decision: decision, approval: approval}
+
+	decisionMsg := ResolveDecisionWithType(be, "", "ticket-tui", backend.DecisionResolutionTypeProvideMissingInfo, "answer")()
+	resolvedDecision, ok := decisionMsg.(DecisionResolvedMsg)
+	if !ok || resolvedDecision.Error == nil {
+		t.Fatalf("decision msg = %#v, want workspace required error", decisionMsg)
+	}
+	approvalMsg := ResolveApproval(be, "", "approval-tui", true)()
+	resolvedApproval, ok := approvalMsg.(ApprovalResolvedMsg)
+	if !ok || resolvedApproval.Error == nil {
+		t.Fatalf("approval msg = %#v, want workspace required error", approvalMsg)
+	}
+	if len(decision.requests) != 0 {
+		t.Fatalf("decision requests = %+v, want no unscoped request", decision.requests)
+	}
+	if len(approval.approvals) != 0 || len(approval.rejections) != 0 {
+		t.Fatalf("approval calls = %+v/%+v, want no unscoped request", approval.approvals, approval.rejections)
+	}
+}
+
+func TestResolveDecisionAndApprovalUseScopedCommands(t *testing.T) {
+	decision := &recordingTUIDecisionBackend{}
+	approval := &recordingTUIApprovalBackend{}
+	be := tuiResolutionBackend{fakeBE: newFake(t), decision: decision, approval: approval}
+
+	decisionMsg := ResolveDecisionWithType(be, "ws-tui", "ticket-tui", backend.DecisionResolutionTypeProvideMissingInfo, "answer")()
+	if resolved, ok := decisionMsg.(DecisionResolvedMsg); !ok || resolved.Error != nil {
+		t.Fatalf("decision msg = %#v, want resolved decision", decisionMsg)
+	}
+	approvalMsg := ResolveApproval(be, "ws-tui", "approval-tui", true)()
+	if resolved, ok := approvalMsg.(ApprovalResolvedMsg); !ok || resolved.Error != nil {
+		t.Fatalf("approval msg = %#v, want approved", approvalMsg)
+	}
+	rejectionMsg := ResolveApproval(be, "ws-tui", "approval-reject-tui", false)()
+	if resolved, ok := rejectionMsg.(ApprovalResolvedMsg); !ok || resolved.Error != nil {
+		t.Fatalf("rejection msg = %#v, want rejected", rejectionMsg)
+	}
+
+	if len(decision.requests) != 1 ||
+		decision.requests[0].WorkspaceID != "ws-tui" ||
+		decision.requests[0].TicketID != "ticket-tui" ||
+		decision.requests[0].ResolutionType != backend.DecisionResolutionTypeProvideMissingInfo {
+		t.Fatalf("decision requests = %+v, want scoped resolution", decision.requests)
+	}
+	if len(approval.approvals) != 1 ||
+		approval.approvals[0].WorkspaceID != "ws-tui" ||
+		approval.approvals[0].ApprovalID != "approval-tui" {
+		t.Fatalf("approval calls = %+v, want scoped approve", approval.approvals)
+	}
+	if len(approval.rejections) != 1 ||
+		approval.rejections[0].WorkspaceID != "ws-tui" ||
+		approval.rejections[0].ApprovalID != "approval-reject-tui" {
+		t.Fatalf("rejection calls = %+v, want scoped reject", approval.rejections)
 	}
 }
 
@@ -5692,7 +5767,7 @@ func TestModelWorkspaceCreateCommandUsesTemplateAndActivatesWorkspace(t *testing
 	model := NewAppModel(be, "", "")
 	model.width = 120
 	model.height = 24
-	model.setInput("/workspace create code agent --template software-dev --dir /tmp/code-agent")
+	model.setInput("/workspace create code agent --template template-a --dir /tmp/code-agent")
 
 	updated, cmd := model.submitInput()
 	if cmd == nil {
@@ -5702,7 +5777,7 @@ func TestModelWorkspaceCreateCommandUsesTemplateAndActivatesWorkspace(t *testing
 	if !ok || msg.Error != nil || msg.Workspace == nil {
 		t.Fatalf("workspace create msg = %#v, want created workspace", msg)
 	}
-	if be.createReq.Title != "code agent" || be.createReq.TemplateID != "software-dev" || be.createReq.DeliverableDirectory != "/tmp/code-agent" {
+	if be.createReq.Title != "code agent" || be.createReq.TemplateID != "template-a" || be.createReq.DeliverableDirectory != "/tmp/code-agent" {
 		t.Fatalf("create request = %+v, want title/template/dir", be.createReq)
 	}
 
@@ -5849,6 +5924,7 @@ type recordingBE struct {
 	activations           []backend.ActivateRunRequest
 	restarts              []backend.ActivateRunRequest
 	resumes               []common.RunID
+	runCommands           []backend.WorkspaceRunCommand
 	resumePatches         []map[string]any
 	lastGetWorkspace      common.WorkspaceID
 	lastListWorkspace     common.WorkspaceID
@@ -5947,6 +6023,7 @@ func (f *recordingGoal) Update(ctx context.Context, wsID common.WorkspaceID, id 
 type recordingRun struct{ parent *recordingBE }
 
 func (f *recordingRun) Command(ctx context.Context, req backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
+	f.parent.runCommands = append(f.parent.runCommands, req)
 	switch req.Intent {
 	case "", backend.RunCommandIntentResume:
 		if req.ExpectedRunID == "" {
@@ -6102,6 +6179,61 @@ func (f *conflictRunBackend) List(ctx context.Context, wsID common.WorkspaceID) 
 }
 func (f *conflictRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunStatusInfo, error) {
 	return &backend.RunStatusInfo{ID: id, WorkspaceID: wsID, State: f.parent.runState}, nil
+}
+
+type tuiResolutionBackend struct {
+	*fakeBE
+	decision backend.DecisionBackend
+	approval backend.ApprovalBackend
+}
+
+func (b tuiResolutionBackend) Decision() backend.DecisionBackend { return b.decision }
+func (b tuiResolutionBackend) Approval() backend.ApprovalBackend { return b.approval }
+
+type recordingTUIDecisionBackend struct {
+	requests []backend.ResolveDecisionRequest
+}
+
+func (b *recordingTUIDecisionBackend) Resolve(_ context.Context, req backend.ResolveDecisionRequest) (*backend.DecisionInfo, error) {
+	b.requests = append(b.requests, req)
+	return &backend.DecisionInfo{ID: req.TicketID, WorkspaceID: req.WorkspaceID, State: "resolved"}, nil
+}
+func (b *recordingTUIDecisionBackend) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, map[string]any) ([]backend.DecisionInfo, error) {
+	return nil, nil
+}
+func (b *recordingTUIDecisionBackend) List(context.Context, common.WorkspaceID) ([]backend.DecisionInfo, error) {
+	return nil, nil
+}
+func (b *recordingTUIDecisionBackend) Get(context.Context, common.WorkspaceID, common.TicketID) (*backend.DecisionInfo, error) {
+	return nil, common.ErrNotFound
+}
+
+type recordingTUIApprovalCall struct {
+	WorkspaceID common.WorkspaceID
+	ApprovalID  common.ApprovalID
+}
+
+type recordingTUIApprovalBackend struct {
+	approvals  []recordingTUIApprovalCall
+	rejections []recordingTUIApprovalCall
+}
+
+func (b *recordingTUIApprovalBackend) Approve(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...map[string]any) (*backend.ApprovalInfo, error) {
+	b.approvals = append(b.approvals, recordingTUIApprovalCall{WorkspaceID: wsID, ApprovalID: id})
+	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: string(common.ApprovalStateApproved)}, nil
+}
+func (b *recordingTUIApprovalBackend) Reject(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...map[string]any) (*backend.ApprovalInfo, error) {
+	b.rejections = append(b.rejections, recordingTUIApprovalCall{WorkspaceID: wsID, ApprovalID: id})
+	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: string(common.ApprovalStateRejected)}, nil
+}
+func (b *recordingTUIApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...map[string]any) ([]backend.ApprovalInfo, error) {
+	return nil, nil
+}
+func (b *recordingTUIApprovalBackend) List(context.Context, common.WorkspaceID) ([]backend.ApprovalInfo, error) {
+	return nil, nil
+}
+func (b *recordingTUIApprovalBackend) Get(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
+	return nil, common.ErrNotFound
 }
 
 type fakeWS struct{}

@@ -21,6 +21,32 @@ import (
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
+func TestRuntimeProviderFailureContractUsesStructuredClassWithoutStage(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-provider-class-only",
+		WorkspaceID:     "ws-provider-class-only",
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}
+	step := &runmodel.Step{
+		ID:    "run-provider-class-only/step-001",
+		RunID: "run-provider-class-only",
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Output: map[string]any{
+			"stage":                   "runtime_step_failed",
+			"error":                   "invalid argument: llm provider is not configured",
+			failureOutputKeyClass:     failureClassProviderUnavailable,
+			failureOutputKeySignature: "class=provider_unavailable|stage=llm_provider_unavailable|error=invalid argument: llm provider is not configured",
+		},
+	}
+
+	if !isLLMProviderRuntimeFailure(run, step) {
+		t.Fatal("isLLMProviderRuntimeFailure = false, want provider failure from structured class")
+	}
+	if !providerUnavailableFailureRequiresConfigBlock(step) {
+		t.Fatal("providerUnavailableFailureRequiresConfigBlock = false, want config blocker from structured provider failure")
+	}
+}
+
 func TestRuntimeOrchestrator_ResumeDispatchForProviderFailureUsesProviderRetryWithinBudget(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-resume-provider-retry")

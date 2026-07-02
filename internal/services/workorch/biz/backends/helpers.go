@@ -32,6 +32,49 @@ func commonSoulBindings(input map[string]string) map[string]common.SoulID {
 	return ret
 }
 
+func commonSoulBindingStrings(input map[string]common.SoulID) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make(map[string]string, len(input))
+	for key, value := range input {
+		if key == "" || value == "" {
+			continue
+		}
+		ret[key] = string(value)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func capabilityIDStrings(ids []common.MCPCapabilityID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			out = append(out, string(id))
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func memoryIDStrings(ids []common.MemoryID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			out = append(out, string(id))
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func cloneTemplateEvidencePolicies(input []map[string]any) []map[string]any {
 	if input == nil {
 		return nil

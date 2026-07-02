@@ -2,6 +2,7 @@ package eventstream
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
@@ -27,6 +28,72 @@ func (h *countingSubscribeHub) Subscribe(string, events.Handler) func() {
 	h.subscribeCount++
 	return func() {
 		h.unsubscribeCount++
+	}
+}
+
+func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
+	module := New()
+	if module.ID() != ModuleID {
+		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
+	}
+	if module.Service() != nil {
+		t.Fatal("new module service is non-nil before Configure")
+	}
+	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("Start before Configure err = %v, want invalid argument", err)
+	}
+	if err := module.Configure(eventstreamModuleContractDependencies()); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if module.Service() == nil {
+		t.Fatal("service is nil after Configure")
+	}
+	if module.bizPtr == nil || module.servicePtr == nil || module.eventHub == nil {
+		t.Fatalf("module not fully configured: %+v", module)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	firstSubscriptionCount := len(module.unsub)
+	if firstSubscriptionCount == 0 {
+		t.Fatal("Start did not subscribe eventstream commands")
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	if len(module.unsub) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if module.Service() != nil ||
+		module.bizPtr != nil ||
+		module.servicePtr != nil ||
+		module.eventHub != nil ||
+		len(module.unsub) != 0 {
+		t.Fatalf("module was not cleared after Stop: %+v", module)
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("second Stop: %v", err)
+	}
+}
+
+func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
+	base := eventstreamModuleContractDependencies()
+	tests := []struct {
+		name string
+		deps Dependencies
+	}{
+		{name: "missing event records", deps: func() Dependencies { d := base; d.EventRecords = nil; return d }()},
+		{name: "missing event hub", deps: func() Dependencies { d := base; d.EventHub = nil; return d }()},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := New().Configure(tc.deps); !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("Configure err = %v, want invalid argument", err)
+			}
+		})
 	}
 }
 
@@ -58,6 +125,13 @@ func TestModuleRunIsIdempotentAndTeardownUnsubscribes(t *testing.T) {
 	}
 	if hub.unsubscribeCount != firstSubscribeCount {
 		t.Fatalf("unsubscribe count = %d, want %d", hub.unsubscribeCount, firstSubscribeCount)
+	}
+}
+
+func eventstreamModuleContractDependencies() Dependencies {
+	return Dependencies{
+		EventRecords: memory.NewEventRecordRepository(),
+		EventHub:     events.NewMemoryHub(),
 	}
 }
 

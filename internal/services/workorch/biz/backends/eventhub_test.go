@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -233,6 +234,13 @@ func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 			DoDID:         "dod-restart-unified",
 			LLMProviderID: "provider-restart-unified",
 			SoulID:        "soul-restart-unified",
+			SoulBindings: map[string]common.SoulID{
+				"validation": "soul-validation-restart-unified",
+			},
+			SkillIDs:      []common.SkillID{"skill-restart-unified"},
+			MCPServerIDs:  []common.MCPServerID{"mcp-restart-unified"},
+			CapabilityIDs: []common.MCPCapabilityID{"mcp-restart-unified:tool:validate"},
+			MemoryIDs:     []common.MemoryID{"memory-restart-unified"},
 		},
 	}); err != nil {
 		t.Fatalf("restart: %v", err)
@@ -261,8 +269,25 @@ func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 			envelope.Payload[events.PayloadKeyDecisionID] != "ticket-restart-unified" ||
 			envelope.Payload[events.PayloadKeyPriority] != 7 ||
 			envelope.Payload[events.PayloadKeyGoalID] != "goal-restart-unified" ||
-			envelope.Payload[events.PayloadKeyDoDID] != "dod-restart-unified" {
+			envelope.Payload[events.PayloadKeyDoDID] != "dod-restart-unified" ||
+			envelope.Payload[events.PayloadKeyLLMProviderID] != "provider-restart-unified" ||
+			envelope.Payload[events.PayloadKeySoulID] != "soul-restart-unified" {
 			t.Fatalf("workspace run restart envelope = %+v", envelope)
+		}
+		if bindings, _ := envelope.Payload["soulBindings"].(map[string]string); bindings["validation"] != "soul-validation-restart-unified" {
+			t.Fatalf("restart envelope soulBindings = %+v, want validation binding", envelope.Payload["soulBindings"])
+		}
+		if got := stringSliceValue(envelope.Payload, "skillIds"); len(got) != 1 || got[0] != "skill-restart-unified" {
+			t.Fatalf("restart envelope skillIds = %+v", envelope.Payload["skillIds"])
+		}
+		if got := stringSliceValue(envelope.Payload, "mcpServerIds"); len(got) != 1 || got[0] != "mcp-restart-unified" {
+			t.Fatalf("restart envelope mcpServerIds = %+v", envelope.Payload["mcpServerIds"])
+		}
+		if got := stringSliceValue(envelope.Payload, "capabilityIds"); len(got) != 1 || got[0] != "mcp-restart-unified:tool:validate" {
+			t.Fatalf("restart envelope capabilityIds = %+v", envelope.Payload["capabilityIds"])
+		}
+		if got := stringSliceValue(envelope.Payload, "memoryIds"); len(got) != 1 || got[0] != "memory-restart-unified" {
+			t.Fatalf("restart envelope memoryIds = %+v", envelope.Payload["memoryIds"])
 		}
 		if patch, _ := envelope.Payload[events.PayloadKeyExecutionContextPatch].(map[string]any); patch == nil {
 			t.Fatalf("restart envelope missing execution context patch: %+v", envelope.Payload)
@@ -407,6 +432,111 @@ func TestEventHubRunCommandRejectsUnsupportedIntent(t *testing.T) {
 	}
 	if len(hub.Published()) != 0 {
 		t.Fatalf("published = %+v, want no scheduler command for unsupported intent", hub.Published())
+	}
+}
+
+func TestEventHubRunCommandRejectsInvalidIntentScopeBeforePublish(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		req  WorkspaceRunCommand
+	}{
+		{
+			name: "restart with run scope",
+			req: WorkspaceRunCommand{
+				WorkspaceID:   "ws-eventhub",
+				ExpectedRunID: "run-eventhub",
+				Intent:        RunCommandIntentRestart,
+			},
+		},
+		{
+			name: "replan without run scope",
+			req: WorkspaceRunCommand{
+				WorkspaceID: "ws-eventhub",
+				Intent:      RunCommandIntentReplan,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := events.NewMemoryHub()
+			be := NewEventHub(hub)
+			_, err := be.Run().Command(context.Background(), tc.req)
+			if !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("err = %v, want invalid argument", err)
+			}
+			if len(hub.Published()) != 0 {
+				t.Fatalf("published = %+v, want no scheduler command for invalid intent scope", hub.Published())
+			}
+		})
+	}
+}
+
+func TestEventHubGovernanceObjectCommandsRequireWorkspaceScopeBeforePublish(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		call func(Backend) error
+	}{
+		{
+			name: "get decision",
+			call: func(be Backend) error {
+				_, err := be.Decision().Get(ctx, "", "ticket-eventhub")
+				return err
+			},
+		},
+		{
+			name: "resolve decision",
+			call: func(be Backend) error {
+				_, err := be.Decision().Resolve(ctx, ResolveDecisionRequest{TicketID: "ticket-eventhub", ResolutionType: "accept"})
+				return err
+			},
+		},
+		{
+			name: "batch resolve decisions",
+			call: func(be Backend) error {
+				_, err := be.Decision().BatchResolve(ctx, "", []common.TicketID{"ticket-eventhub"}, "accept", nil)
+				return err
+			},
+		},
+		{
+			name: "get approval",
+			call: func(be Backend) error {
+				_, err := be.Approval().Get(ctx, "", "approval-eventhub")
+				return err
+			},
+		},
+		{
+			name: "approve approval",
+			call: func(be Backend) error {
+				_, err := be.Approval().Approve(ctx, "", "approval-eventhub")
+				return err
+			},
+		},
+		{
+			name: "reject approval",
+			call: func(be Backend) error {
+				_, err := be.Approval().Reject(ctx, "", "approval-eventhub")
+				return err
+			},
+		},
+		{
+			name: "batch resolve approvals",
+			call: func(be Backend) error {
+				_, err := be.Approval().BatchResolve(ctx, "", []common.ApprovalID{"approval-eventhub"}, "approve")
+				return err
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := events.NewMemoryHub()
+			be := NewEventHub(hub)
+			err := tc.call(be)
+			if !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("err = %v, want invalid argument", err)
+			}
+			if len(hub.Published()) != 0 {
+				t.Fatalf("published = %+v, want no CLI command for invalid governance scope", hub.Published())
+			}
+		})
 	}
 }
 
@@ -841,7 +971,7 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 		SubjectID:   "ticket-1",
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
-		Payload:     events.DecisionTicketPayload("missing city", "open"),
+		Payload:     events.DecisionTicketPayload("missing operator input", "open"),
 	})
 	if decision.Type != EventDecisionCreated || decision.Payload["ticketId"] != "ticket-1" {
 		t.Fatalf("decision event = %+v, want ticketId from subject", decision)

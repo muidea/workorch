@@ -1221,7 +1221,6 @@ func portEventRecordInfos(items []readmodelcore.EventRecord) []port.EventRecordI
 			WorkspaceID:    common.WorkspaceID(item.WorkspaceID),
 			RunID:          common.RunID(item.RunID),
 			StepID:         common.StepID(item.StepID),
-			Payload:        cloneDTOMap(item.Payload),
 			PayloadSummary: cloneDTOMap(item.PayloadSummary),
 			PayloadRef:     item.PayloadRef,
 		})

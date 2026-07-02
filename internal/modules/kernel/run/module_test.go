@@ -14,6 +14,76 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
+func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
+	module := New()
+	if module.ID() != ModuleID {
+		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
+	}
+	if module.servicePtr != nil {
+		t.Fatal("new module service pointer is non-nil before Configure")
+	}
+	hub := events.NewMemoryHub()
+	if err := module.Configure(Dependencies{
+		Runs:        memory.NewRunRepository(),
+		Steps:       memory.NewStepRepository(),
+		Checkpoints: memory.NewRuntimeCheckpointRepository(),
+		EventHub:    hub,
+	}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if module.servicePtr == nil {
+		t.Fatal("service pointer is nil after Configure")
+	}
+	if module.eventHub == nil {
+		t.Fatal("event hub is nil after Configure")
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	firstSubscriptionCount := len(module.unsub)
+	if firstSubscriptionCount == 0 {
+		t.Fatal("Start did not subscribe run commands")
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	if len(module.unsub) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if module.servicePtr != nil ||
+		module.bizPtr != nil ||
+		module.eventHub != nil ||
+		module.runs != nil ||
+		module.steps != nil ||
+		module.checkpoints != nil ||
+		len(module.unsub) != 0 {
+		t.Fatalf("module was not cleared after Stop: %+v", module)
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("second Stop: %v", err)
+	}
+}
+
+func TestModuleConfigureRequiresRunRepositoryAndEventHub(t *testing.T) {
+	tests := []struct {
+		name string
+		deps Dependencies
+	}{
+		{name: "missing runs", deps: Dependencies{EventHub: events.NewMemoryHub()}},
+		{name: "missing event hub", deps: Dependencies{Runs: memory.NewRunRepository()}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := New().Configure(tc.deps); !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("Configure err = %v, want invalid argument", err)
+			}
+		})
+	}
+}
+
 func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()

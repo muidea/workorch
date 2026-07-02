@@ -1026,7 +1026,8 @@ func providerUnavailableFailureRequiresConfigBlock(failedStep *runModel.Step) bo
 		"llm_provider_request_failed":
 		return providerUnavailableFailureTextRequiresConfigBlock(failedStep)
 	default:
-		return false
+		return stringFromMap(failedStep.Output, failureOutputKeyClass) == failureClassProviderUnavailable &&
+			providerUnavailableFailureTextRequiresConfigBlock(failedStep)
 	}
 }
 

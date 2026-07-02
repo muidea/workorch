@@ -14,6 +14,80 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
+func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
+	module := New()
+	if module.ID() != ModuleID {
+		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
+	}
+	if module.Service() != nil {
+		t.Fatal("new module service is non-nil before Configure")
+	}
+	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("Start before Configure err = %v, want invalid argument", err)
+	}
+
+	if err := module.Configure(decisionModuleContractDependencies()); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if module.Service() == nil {
+		t.Fatal("service is nil after Configure")
+	}
+	if module.bizPtr == nil ||
+		module.servicePtr == nil ||
+		module.eventHub == nil ||
+		module.tickets == nil ||
+		module.resolutions == nil {
+		t.Fatalf("module not fully configured: %+v", module)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	firstSubscriptionCount := len(module.unsub)
+	if firstSubscriptionCount == 0 {
+		t.Fatal("Start did not subscribe decision commands")
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	if len(module.unsub) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if module.Service() != nil ||
+		module.bizPtr != nil ||
+		module.servicePtr != nil ||
+		module.eventHub != nil ||
+		module.tickets != nil ||
+		module.resolutions != nil ||
+		len(module.unsub) != 0 {
+		t.Fatalf("module was not cleared after Stop: %+v", module)
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("second Stop: %v", err)
+	}
+}
+
+func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
+	base := decisionModuleContractDependencies()
+	tests := []struct {
+		name string
+		deps Dependencies
+	}{
+		{name: "missing tickets", deps: func() Dependencies { d := base; d.Tickets = nil; return d }()},
+		{name: "missing resolutions", deps: func() Dependencies { d := base; d.Resolutions = nil; return d }()},
+		{name: "missing event hub", deps: func() Dependencies { d := base; d.EventHub = nil; return d }()},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := New().Configure(tc.deps); !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("Configure err = %v, want invalid argument", err)
+			}
+		})
+	}
+}
+
 func TestDecisionTicketCommandGetHonorsScope(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
@@ -613,6 +687,14 @@ func TestDecisionResolutionDeleteWithoutScopeDeletesUniqueTicketResolution(t *te
 	}
 	if _, err := resolutions.GetByTicketID(common.ContextWithRuntimeWorkspaceID(ctx, "ws-resolution-delete-unique"), ticketID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("get deleted resolution err = %v, want not found", err)
+	}
+}
+
+func decisionModuleContractDependencies() Dependencies {
+	return Dependencies{
+		Tickets:     memory.NewDecisionTicketRepository(),
+		Resolutions: memory.NewDecisionResolutionRepository(),
+		EventHub:    events.NewMemoryHub(),
 	}
 }
 

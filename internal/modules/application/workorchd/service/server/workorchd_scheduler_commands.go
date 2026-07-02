@@ -428,6 +428,9 @@ func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, envel
 			}
 			return nil
 		case "restart":
+			if strings.TrimSpace(req.RunID) != "" {
+				return common.ErrInvalidArgument
+			}
 			req.Command.Restart = true
 			if !s.runContinuations.scheduleWorkspaceRestart(workspaceRestartRequest{
 				WorkspaceID: req.WorkspaceID,

@@ -12,9 +12,9 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	llmproviderconfig "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/providerconfig"
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 

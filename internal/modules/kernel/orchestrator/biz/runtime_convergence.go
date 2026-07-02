@@ -2294,11 +2294,13 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 	if spec.Reason == "" {
 		return true
 	}
+	if decisionBlockDeclaresNonContractRuntimeDependency(spec.Context) {
+		return true
+	}
 	if continuableNextActionKind(convergenceNextActionKind(nil, input)) {
 		return false
 	}
-	if decisionBlockDeclaresRequiredRealExternalDependency(spec.Context) ||
-		decisionBlockDeclaresNonContractRuntimeDependency(spec.Context) {
+	if decisionBlockDeclaresRequiredRealExternalDependency(spec.Context) {
 		return true
 	}
 	if decisionBlockDeclaresRuntimeContractDependency(spec.Context) && continuableDecisionContract(input, spec.Context, contract) {

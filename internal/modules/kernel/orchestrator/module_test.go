@@ -7,7 +7,6 @@ import (
 	"time"
 
 	magictask "github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -18,8 +17,86 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
+	module := New()
+	if module.ID() != ModuleID {
+		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
+	}
+	if module.servicePtr != nil {
+		t.Fatal("new module service pointer is non-nil before Configure")
+	}
+
+	if err := module.Configure(moduleContractDependencies()); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if module.servicePtr == nil {
+		t.Fatal("service pointer is nil after Configure")
+	}
+	if module.bizPtr == nil {
+		t.Fatal("biz pointer is nil after Configure")
+	}
+	if module.eventHub == nil {
+		t.Fatal("event hub is nil after Configure")
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	firstSubscriptionCount := len(module.unsub)
+	if firstSubscriptionCount == 0 {
+		t.Fatal("Start did not subscribe orchestrator commands")
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	if len(module.unsub) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if module.servicePtr != nil ||
+		module.bizPtr != nil ||
+		module.eventHub != nil ||
+		module.steps != nil ||
+		module.backgroundRoutine != nil ||
+		module.patchExecutor != nil ||
+		len(module.unsub) != 0 {
+		t.Fatalf("module was not cleared after Stop: %+v", module)
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("second Stop: %v", err)
+	}
+}
+
+func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
+	base := moduleContractDependencies()
+	tests := []struct {
+		name string
+		deps Dependencies
+	}{
+		{name: "missing runtime", deps: func() Dependencies { d := base; d.Runtime = nil; return d }()},
+		{name: "missing steps", deps: func() Dependencies { d := base; d.Steps = nil; return d }()},
+		{name: "missing tool calls", deps: func() Dependencies { d := base; d.ToolCalls = nil; return d }()},
+		{name: "missing patches", deps: func() Dependencies { d := base; d.Patches = nil; return d }()},
+		{name: "missing validation results", deps: func() Dependencies { d := base; d.ValidationResults = nil; return d }()},
+		{name: "missing checkpoints", deps: func() Dependencies { d := base; d.RuntimeCheckpoints = nil; return d }()},
+		{name: "missing evidence", deps: func() Dependencies { d := base; d.EvidenceRecords = nil; return d }()},
+		{name: "missing coverage", deps: func() Dependencies { d := base; d.CoverageWorkItems = nil; return d }()},
+		{name: "missing artifact continuations", deps: func() Dependencies { d := base; d.ArtifactContinuations = nil; return d }()},
+		{name: "missing event hub", deps: func() Dependencies { d := base; d.EventHub = nil; return d }()},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := New().Configure(tc.deps); !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("Configure err = %v, want invalid argument", err)
+			}
+		})
+	}
+}
 
 func TestModuleStartRunCommandAcceptsStateAndSchedulesBackgroundDispatch(t *testing.T) {
 	ctx := context.Background()
@@ -811,6 +888,21 @@ func TestModuleRuntimeProgressEventSchedulesCheckpoint(t *testing.T) {
 		items[0].Data["requestId"] != "request-progress" ||
 		items[0].Data["tokens"] != 3 {
 		t.Fatalf("checkpoints = %+v, want provider_stream progress checkpoint", items)
+	}
+}
+
+func moduleContractDependencies() Dependencies {
+	return Dependencies{
+		Runtime:               moduleNoopRuntimeAdapter{},
+		Steps:                 memoryrepo.NewStepRepository(),
+		ToolCalls:             memoryrepo.NewToolCallRepository(),
+		Patches:               memoryrepo.NewPatchRepository(),
+		ValidationResults:     memoryrepo.NewValidationResultRepository(),
+		RuntimeCheckpoints:    memoryrepo.NewRuntimeCheckpointRepository(),
+		EvidenceRecords:       memoryrepo.NewEvidenceRecordRepository(),
+		CoverageWorkItems:     memoryrepo.NewCoverageWorkItemRepository(),
+		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),
+		EventHub:              events.NewMemoryHub(),
 	}
 }
 

@@ -1443,6 +1443,8 @@ export type EventRecord = {
   runId?: string;
   stepId?: string;
   payload?: Record<string, unknown>;
+  payloadSummary?: Record<string, unknown>;
+  payloadRef?: string;
   revision?: number;
   stateSummary?: WorkorchEventStateSummary;
 };

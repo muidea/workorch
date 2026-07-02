@@ -256,14 +256,32 @@ func (c *Client) GetConfiguration(ctx context.Context) (*ServiceConfiguration, e
 	return decodeEnvelope[ServiceConfiguration](resp, "configuration")
 }
 
-func (c *Client) ListEvents(ctx context.Context, workspaceID, runID string) ([]EventRecord, error) {
+func (c *Client) ListEvents(ctx context.Context, query EventRecordQuery) ([]EventRecord, error) {
 	path := "/api/v1/workorch/events"
 	values := url.Values{}
-	if workspaceID != "" {
-		values.Set("workspaceId", workspaceID)
+	if query.WorkspaceID != "" {
+		values.Set("workspaceId", query.WorkspaceID)
 	}
-	if runID != "" {
-		values.Set("runId", runID)
+	if query.RunID != "" {
+		values.Set("runId", query.RunID)
+	}
+	if query.Topic != "" {
+		values.Set("topic", query.Topic)
+	}
+	if query.SubjectType != "" {
+		values.Set("subjectType", query.SubjectType)
+	}
+	if query.SubjectID != "" {
+		values.Set("subjectId", query.SubjectID)
+	}
+	if query.CursorAfterID != "" {
+		values.Set("cursorAfterId", query.CursorAfterID)
+	}
+	if query.Limit > 0 {
+		values.Set("limit", fmt.Sprintf("%d", query.Limit))
+	}
+	if query.IncludePayload {
+		values.Set("includePayload", "true")
 	}
 	path = joinQuery(path, values)
 	resp, err := c.do(ctx, "GET", path, nil)

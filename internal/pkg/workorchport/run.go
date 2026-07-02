@@ -28,8 +28,11 @@ type ActivateRunRequest struct {
 	LLMProviderID         string
 	DialogLanguage        string
 	SoulID                common.SoulID
+	SoulBindings          map[string]common.SoulID
 	SkillIDs              []common.SkillID
 	MCPServerIDs          []common.MCPServerID
+	CapabilityIDs         []common.MCPCapabilityID
+	MemoryIDs             []common.MemoryID
 	Priority              int
 	RequestID             string
 	Reason                string
@@ -56,6 +59,27 @@ func NormalizeRunCommandIntent(intent RunCommandIntent) (RunCommandIntent, error
 	default:
 		return "", fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, intent)
 	}
+}
+
+func ValidateWorkspaceRunCommand(req WorkspaceRunCommand) (RunCommandIntent, error) {
+	if req.WorkspaceID == "" {
+		return "", fmt.Errorf("%w: workspaceId is required", common.ErrInvalidArgument)
+	}
+	intent, err := NormalizeRunCommandIntent(req.Intent)
+	if err != nil {
+		return "", err
+	}
+	switch intent {
+	case RunCommandIntentRestart:
+		if req.ExpectedRunID != "" {
+			return "", fmt.Errorf("%w: workspace restart must not target runId", common.ErrInvalidArgument)
+		}
+	case RunCommandIntentReplan:
+		if req.ExpectedRunID == "" {
+			return "", fmt.Errorf("%w: expectedRunId is required for %s", common.ErrInvalidArgument, intent)
+		}
+	}
+	return intent, nil
 }
 
 type WorkspaceRunCommand struct {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
 )
 
@@ -193,18 +192,6 @@ func (c *Client) ResumeWorkspaceExecution(ctx context.Context, workspaceID strin
 		return nil, err
 	}
 	return decodeEnvelope[Activation](resp, "activation")
-}
-
-// RestartWorkspaceExecution requests a replacement execution for a workspace.
-func (c *Client) RestartWorkspaceExecution(ctx context.Context, workspaceID string, req *ActivationRequest) error {
-	path := fmt.Sprintf("/api/v1/workorch/workspaces/%s/execution-restarts", escapePath(workspaceID))
-	resp, err := c.do(ctx, "POST", path, req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return nil
 }
 
 // ActivationRequest is the request body for workspace execution

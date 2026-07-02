@@ -355,7 +355,7 @@ export const workorchApi = {
     const body = await request<{ contextBundle: ContextBundle }>(runPath(workspaceId, runId, 'context-bundle'));
     return body.contextBundle;
   },
-  listEventRecords: async (query?: { workspaceId?: string; runId?: string; topic?: string; subjectType?: string; subjectId?: string; cursorAfterId?: string; limit?: number }) => {
+  listEventRecords: async (query?: { workspaceId?: string; runId?: string; topic?: string; subjectType?: string; subjectId?: string; cursorAfterId?: string; limit?: number; includePayload?: boolean }) => {
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries(query ?? {})) {
       if (value !== undefined && value !== null && value !== '') {

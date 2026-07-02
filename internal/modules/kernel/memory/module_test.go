@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
@@ -11,6 +12,71 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
+
+func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
+	module := New()
+	if module.ID() != ModuleID {
+		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
+	}
+	if module.Service() != nil {
+		t.Fatal("new module service is non-nil before Configure")
+	}
+
+	if err := module.Configure(memoryModuleContractDependencies()); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if module.Service() == nil {
+		t.Fatal("service is nil after Configure")
+	}
+	if module.bizPtr == nil || module.servicePtr == nil || module.eventHub == nil {
+		t.Fatalf("module not fully configured: %+v", module)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	firstSubscriptionCount := len(module.unsub)
+	if firstSubscriptionCount == 0 {
+		t.Fatal("Start did not subscribe memory commands")
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	if len(module.unsub) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if module.Service() != nil ||
+		module.bizPtr != nil ||
+		module.servicePtr != nil ||
+		module.eventHub != nil ||
+		len(module.unsub) != 0 {
+		t.Fatalf("module was not cleared after Stop: %+v", module)
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("second Stop: %v", err)
+	}
+}
+
+func TestModuleConfigureRequiresMemoryItems(t *testing.T) {
+	if err := New().Configure(Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("Configure err = %v, want invalid argument", err)
+	}
+	module := New()
+	if err := module.Configure(Dependencies{MemoryItems: memoryrepo.NewMemoryItemRepository()}); err != nil {
+		t.Fatalf("Configure without EventHub: %v", err)
+	}
+	if module.Service() == nil {
+		t.Fatal("service is nil after Configure without EventHub")
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start without EventHub should remain no-op: %v", err)
+	}
+	if len(module.unsub) != 0 {
+		t.Fatalf("subscriptions without EventHub = %d, want 0", len(module.unsub))
+	}
+}
 
 func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 	ctx := context.Background()
@@ -81,5 +147,13 @@ func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 	}
 	if _, err := traces.Get(ctx, traceID); err == nil {
 		t.Fatalf("trace still exists after delete")
+	}
+}
+
+func memoryModuleContractDependencies() Dependencies {
+	return Dependencies{
+		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
+		MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(),
+		EventHub:           events.NewMemoryHub(),
 	}
 }

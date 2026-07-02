@@ -12,6 +12,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	port "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 func TestCLICommandDispatcherRunIsIdempotent(t *testing.T) {
@@ -285,14 +286,72 @@ func TestCLIWorkspaceListCommandUsesWorkspaceViewReader(t *testing.T) {
 	}
 }
 
+func TestCLIWorkspaceSnapshotCommandUsesProjectionViewReaderAndOmitsEventPayload(t *testing.T) {
+	reader := &staticCLIWorkspaceViewReader{
+		snapshot: WorkspaceSnapshot{
+			Workspace: Workspace{ID: "ws-projection-snapshot"},
+			EventRecords: []EventRecord{{
+				ID:             "event-large-payload",
+				Topic:          "runtime.event",
+				WorkspaceID:    "ws-projection-snapshot",
+				Payload:        map[string]any{"large": strings.Repeat("x", 4096)},
+				PayloadSummary: map[string]any{"state": "running"},
+				PayloadRef:     "event://payload/event-large-payload",
+			}},
+		},
+	}
+	dispatcher := &CLICommandDispatcher{viewReader: reader}
+
+	resource, _, err := dispatcher.handleWorkspaceCommand(context.Background(), events.CLICommandPayload{
+		Command:     events.CommandWorkspaceSnapshot,
+		WorkspaceID: "ws-projection-snapshot",
+		SubjectID:   "ws-projection-snapshot",
+	})
+	if err != nil {
+		t.Fatalf("handle workspace snapshot: %v", err)
+	}
+	if reader.snapshotCalls != 1 || reader.lastSnapshotWorkspaceID != "ws-projection-snapshot" {
+		t.Fatalf("snapshot calls = %d workspace = %q, want projection reader called once for workspace", reader.snapshotCalls, reader.lastSnapshotWorkspaceID)
+	}
+	eventRecords := resource["eventRecords"].([]map[string]any)
+	if len(eventRecords) != 1 {
+		t.Fatalf("eventRecords = %+v, want one projected record", eventRecords)
+	}
+	if _, ok := eventRecords[0]["payload"]; ok {
+		t.Fatalf("event record resource includes raw payload: %+v", eventRecords[0])
+	}
+	if eventRecords[0]["payloadRef"] != "event://payload/event-large-payload" {
+		t.Fatalf("event record payloadRef = %v, want raw ref retained", eventRecords[0]["payloadRef"])
+	}
+	if summary, _ := eventRecords[0]["payloadSummary"].(map[string]any); summary["state"] != "running" {
+		t.Fatalf("event record payloadSummary = %+v, want summary retained", eventRecords[0]["payloadSummary"])
+	}
+	typed, ok := resource[events.CLIResultTypedResourceKey].(port.WorkspaceSnapshotInfo)
+	if !ok {
+		t.Fatalf("typed resource = %T, want WorkspaceSnapshotInfo", resource[events.CLIResultTypedResourceKey])
+	}
+	if len(typed.EventRecords) != 1 {
+		t.Fatalf("typed event records = %+v, want one projected event", typed.EventRecords)
+	}
+	if typed.EventRecords[0].Payload != nil {
+		t.Fatalf("typed event record payload = %+v, want snapshot DTO without raw payload", typed.EventRecords[0].Payload)
+	}
+	if typed.EventRecords[0].PayloadRef != "event://payload/event-large-payload" ||
+		typed.EventRecords[0].PayloadSummary["state"] != "running" {
+		t.Fatalf("typed event record = %+v, want summary/ref retained", typed.EventRecords[0])
+	}
+}
+
 func workspaceSnapshotTraceProjectionStringLimitForTest() int {
 	return 1024 + len("...[truncated]")
 }
 
 type staticCLIWorkspaceViewReader struct {
-	workspaces []Workspace
-	snapshot   WorkspaceSnapshot
-	listCalls  int
+	workspaces              []Workspace
+	snapshot                WorkspaceSnapshot
+	listCalls               int
+	snapshotCalls           int
+	lastSnapshotWorkspaceID string
 }
 
 func (r *staticCLIWorkspaceViewReader) ListWorkspaceView(context.Context) ([]Workspace, error) {
@@ -300,7 +359,9 @@ func (r *staticCLIWorkspaceViewReader) ListWorkspaceView(context.Context) ([]Wor
 	return r.workspaces, nil
 }
 
-func (r *staticCLIWorkspaceViewReader) ReadWorkspaceViewSnapshot(context.Context, string) (WorkspaceSnapshot, error) {
+func (r *staticCLIWorkspaceViewReader) ReadWorkspaceViewSnapshot(_ context.Context, workspaceID string) (WorkspaceSnapshot, error) {
+	r.snapshotCalls++
+	r.lastSnapshotWorkspaceID = workspaceID
 	return r.snapshot, nil
 }
 

@@ -22,10 +22,6 @@ func defaultDeleteWorkspace(ctx context.Context, backend string, dataRoot string
 	return appservice.DeleteWorkspaceWithBackend(ctx, backend, dataRoot, workspaceID, cmd)
 }
 
-func defaultRefreshWorkspaceTemplateBinding(ctx context.Context, backend string, dataRoot string, workspaceID string) (appservice.Workspace, error) {
-	return appservice.RefreshWorkspaceTemplateBindingWithBackend(ctx, backend, dataRoot, workspaceID)
-}
-
 func defaultDefineGoal(ctx context.Context, backend string, dataRoot string, workspaceID string, text string) (appservice.Goal, error) {
 	return appservice.DefineGoalWithBackend(ctx, backend, dataRoot, workspaceID, text)
 }

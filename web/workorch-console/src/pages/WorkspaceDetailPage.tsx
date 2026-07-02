@@ -1860,7 +1860,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                             ]}
                             expandable={{
                               expandedRowRender: (item) => (
-                                <pre className="json-panel json-panel-large">{compactJSON(item.payload)}</pre>
+                                <pre className="json-panel json-panel-large">{compactJSON(item.payload ?? item.payloadSummary ?? { payloadRef: item.payloadRef })}</pre>
                               )
                             }}
                             dataSource={runEventRecords}

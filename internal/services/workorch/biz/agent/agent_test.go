@@ -134,6 +134,70 @@ func TestAgentResumeRunRequiresWorkspaceScope(t *testing.T) {
 	}
 }
 
+func TestAgentDecisionAndApprovalResolutionRequireWorkspaceScope(t *testing.T) {
+	decisionBackend := &recordingAgentDecisionBackend{}
+	approvalBackend := &recordingAgentApprovalBackend{}
+	a := NewWithBackend(agentResolutionBackend{
+		fakeBackend: newFakeBackend(),
+		decision:    decisionBackend,
+		approval:    approvalBackend,
+	})
+
+	if err := a.ResolveDecision(context.Background(), "", "ticket-agent", "provide_missing_info", "answer"); err == nil {
+		t.Fatal("ResolveDecision error = nil, want workspace required")
+	}
+	if err := a.ResolveApproval(context.Background(), "", "approval-agent", true); err == nil {
+		t.Fatal("ResolveApproval error = nil, want workspace required")
+	}
+	if len(decisionBackend.requests) != 0 {
+		t.Fatalf("decision requests = %+v, want no unscoped request", decisionBackend.requests)
+	}
+	if len(approvalBackend.approvals) != 0 || len(approvalBackend.rejections) != 0 {
+		t.Fatalf("approval calls = %+v/%+v, want no unscoped request", approvalBackend.approvals, approvalBackend.rejections)
+	}
+}
+
+func TestAgentDecisionAndApprovalResolutionUseScopedCommands(t *testing.T) {
+	decisionBackend := &recordingAgentDecisionBackend{}
+	approvalBackend := &recordingAgentApprovalBackend{}
+	a := NewWithBackend(agentResolutionBackend{
+		fakeBackend: newFakeBackend(),
+		decision:    decisionBackend,
+		approval:    approvalBackend,
+	})
+
+	if err := a.ResolveDecision(context.Background(), "ws-agent", "ticket-agent", "provide_missing_info", "answer"); err != nil {
+		t.Fatalf("ResolveDecision: %v", err)
+	}
+	if err := a.ResolveApproval(context.Background(), "ws-agent", "approval-agent", true); err != nil {
+		t.Fatalf("ResolveApproval approve: %v", err)
+	}
+	if err := a.ResolveApproval(context.Background(), "ws-agent", "approval-reject-agent", false); err != nil {
+		t.Fatalf("ResolveApproval reject: %v", err)
+	}
+
+	if len(decisionBackend.requests) != 1 {
+		t.Fatalf("decision requests = %+v, want one request", decisionBackend.requests)
+	}
+	gotDecision := decisionBackend.requests[0]
+	if gotDecision.WorkspaceID != "ws-agent" ||
+		gotDecision.TicketID != "ticket-agent" ||
+		gotDecision.ResolutionType != "provide_missing_info" ||
+		gotDecision.Payload["note"] != "answer" {
+		t.Fatalf("decision request = %+v, want scoped resolution", gotDecision)
+	}
+	if len(approvalBackend.approvals) != 1 ||
+		approvalBackend.approvals[0].WorkspaceID != "ws-agent" ||
+		approvalBackend.approvals[0].ApprovalID != "approval-agent" {
+		t.Fatalf("approval calls = %+v, want scoped approve", approvalBackend.approvals)
+	}
+	if len(approvalBackend.rejections) != 1 ||
+		approvalBackend.rejections[0].WorkspaceID != "ws-agent" ||
+		approvalBackend.rejections[0].ApprovalID != "approval-reject-agent" {
+		t.Fatalf("rejection calls = %+v, want scoped reject", approvalBackend.rejections)
+	}
+}
+
 type fakeBackend struct {
 	handlers       []backend.EventHandler
 	runCommand     backend.WorkspaceRunCommand
@@ -239,6 +303,15 @@ type agentResumeBackend struct {
 
 func (b agentResumeBackend) Run() backend.RunBackend { return b.run }
 
+type agentResolutionBackend struct {
+	*fakeBackend
+	decision backend.DecisionBackend
+	approval backend.ApprovalBackend
+}
+
+func (b agentResolutionBackend) Decision() backend.DecisionBackend { return b.decision }
+func (b agentResolutionBackend) Approval() backend.ApprovalBackend { return b.approval }
+
 type recordingAgentRunBackend struct {
 	command      backend.WorkspaceRunCommand
 	resumeCalled bool
@@ -271,6 +344,52 @@ func (b *recordingAgentRunBackend) List(context.Context, common.WorkspaceID) ([]
 }
 
 func (b *recordingAgentRunBackend) Status(context.Context, common.WorkspaceID, common.RunID) (*backend.RunStatusInfo, error) {
+	return nil, common.ErrNotFound
+}
+
+type recordingAgentDecisionBackend struct {
+	requests []backend.ResolveDecisionRequest
+}
+
+func (b *recordingAgentDecisionBackend) Resolve(_ context.Context, req backend.ResolveDecisionRequest) (*backend.DecisionInfo, error) {
+	b.requests = append(b.requests, req)
+	return &backend.DecisionInfo{ID: req.TicketID, WorkspaceID: req.WorkspaceID, State: "resolved"}, nil
+}
+func (b *recordingAgentDecisionBackend) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, map[string]any) ([]backend.DecisionInfo, error) {
+	return nil, nil
+}
+func (b *recordingAgentDecisionBackend) List(context.Context, common.WorkspaceID) ([]backend.DecisionInfo, error) {
+	return nil, nil
+}
+func (b *recordingAgentDecisionBackend) Get(context.Context, common.WorkspaceID, common.TicketID) (*backend.DecisionInfo, error) {
+	return nil, common.ErrNotFound
+}
+
+type recordingAgentApprovalCall struct {
+	WorkspaceID common.WorkspaceID
+	ApprovalID  common.ApprovalID
+}
+
+type recordingAgentApprovalBackend struct {
+	approvals  []recordingAgentApprovalCall
+	rejections []recordingAgentApprovalCall
+}
+
+func (b *recordingAgentApprovalBackend) Approve(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...map[string]any) (*backend.ApprovalInfo, error) {
+	b.approvals = append(b.approvals, recordingAgentApprovalCall{WorkspaceID: wsID, ApprovalID: id})
+	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: string(common.ApprovalStateApproved)}, nil
+}
+func (b *recordingAgentApprovalBackend) Reject(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...map[string]any) (*backend.ApprovalInfo, error) {
+	b.rejections = append(b.rejections, recordingAgentApprovalCall{WorkspaceID: wsID, ApprovalID: id})
+	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: string(common.ApprovalStateRejected)}, nil
+}
+func (b *recordingAgentApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...map[string]any) ([]backend.ApprovalInfo, error) {
+	return nil, nil
+}
+func (b *recordingAgentApprovalBackend) List(context.Context, common.WorkspaceID) ([]backend.ApprovalInfo, error) {
+	return nil, nil
+}
+func (b *recordingAgentApprovalBackend) Get(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
 	return nil, common.ErrNotFound
 }
 

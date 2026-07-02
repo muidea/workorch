@@ -57,7 +57,7 @@ func (s *serverState) persistedReplayEnvelopes(ctx context.Context, lastEventID 
 		Topic:          strings.TrimSpace(topic),
 		CursorAfterID:  strings.TrimSpace(lastEventID),
 		Limit:          maxEventRecordPageLimit,
-		IncludePayload: true,
+		IncludePayload: eventStreamReplayIncludePayload(topic),
 	})
 	if err != nil || len(items) == 0 {
 		return nil
@@ -69,6 +69,10 @@ func (s *serverState) persistedReplayEnvelopes(ctx context.Context, lastEventID 
 		}
 	}
 	return ret
+}
+
+func eventStreamReplayIncludePayload(topic string) bool {
+	return strings.TrimSpace(topic) == ""
 }
 
 func eventRecordSSEEnvelope(item appservice.EventRecord) events.Envelope {

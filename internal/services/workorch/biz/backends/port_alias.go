@@ -62,6 +62,14 @@ func NormalizeRunCommandIntent(intent RunCommandIntent) (RunCommandIntent, error
 	return port.NormalizeRunCommandIntent(intent)
 }
 
+func ValidateWorkspaceRunCommand(req WorkspaceRunCommand) (RunCommandIntent, error) {
+	return port.ValidateWorkspaceRunCommand(req)
+}
+
+func CanonicalRuntimeBlockKind(kind string) string {
+	return port.CanonicalRuntimeBlockKind(kind)
+}
+
 type RunStatusInfo = port.RunStatusInfo
 type RuntimeExecutionInfo = port.RuntimeExecutionInfo
 type ConvergenceStatusInfo = port.ConvergenceStatusInfo

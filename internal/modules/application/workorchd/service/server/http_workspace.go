@@ -459,50 +459,6 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
 		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(state.config, workspaceID, runID, "execution-activation", payload))
 	})
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/execution-restarts", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
-		if !ok || action != "execution-restarts" {
-			http.NotFound(w, r)
-			return
-		}
-		var req workspaceExecutionCommandRequest
-		if err := decodeOptionalJSON(r, &req); err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		priority := runPriorityFromRequest(r, req.Priority)
-		req.Restart = true
-		payload := workspaceExecutionCommandSchedulerPayload(workspaceID, req, priority)
-		payload[events.PayloadKeyIntent] = "restart"
-		payload = prepareHTTPSchedulerCommandPayload(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workspaceID, "", payload)
-		if err := state.publishWorkorchDSchedulerCommand(r.Context(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workspaceID, "", payload); err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
-		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(state.config, workspaceID, "", "execution-restart", payload))
-	})
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/template-binding-refresh", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
-		if !ok || action != "template-binding-refresh" {
-			http.NotFound(w, r)
-			return
-		}
-		item, err := state.refreshWorkspaceTemplate(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
-		writeJSON(w, http.StatusOK, workspaceResponse{
-			Service:   "workorch",
-			Backend:   state.config.Backend,
-			DataRoot:  state.config.DataRoot,
-			Workspace: item,
-		})
-	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/soul-bindings", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)

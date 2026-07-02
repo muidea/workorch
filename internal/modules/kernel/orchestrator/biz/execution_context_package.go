@@ -2323,15 +2323,22 @@ func (o *RuntimeOrchestrator) recordLLMStepInputMemoryRecallTrace(ctx context.Co
 		OccurredAt:             time.Now().UTC().Format(time.RFC3339Nano),
 		EvidenceRef:            string(traceID),
 	}
+	selectedIDsDeclared := memoryRecallTraceMapHasKey(retrieval, "selectedMemoryIds")
+	selectedIDs := memoryRecallTraceIDSet(trace.SelectedMemoryIDs)
+	excludedIDs := memoryRecallTraceIDSet(trace.ExcludedMemoryIDs)
 	if len(trace.RetrievedMemoryIDs) == 0 {
 		trace.RetrievedMemoryIDs = memoryRecallTraceMemoryIDsFromContexts(memories)
 	}
+	trace.RetrievedMemoryIDs = filterMemoryRecallTraceIDs(trace.RetrievedMemoryIDs, selectedIDs, excludedIDs, selectedIDsDeclared)
 	if len(trace.SelectedMemoryIDs) == 0 {
 		trace.SelectedMemoryIDs = append([]common.MemoryID(nil), trace.RetrievedMemoryIDs...)
+	} else {
+		trace.SelectedMemoryIDs = filterMemoryRecallTraceIDs(trace.SelectedMemoryIDs, nil, excludedIDs, false)
 	}
 	if len(trace.RetrievedMemoryHits) == 0 {
 		trace.RetrievedMemoryHits = memoryRecallTraceHitsFromContexts(memories)
 	}
+	trace.RetrievedMemoryHits = filterMemoryRecallTraceHits(trace.RetrievedMemoryHits, selectedIDs, excludedIDs, selectedIDsDeclared)
 	if err := o.evidence.MemoryRecallTraces.Upsert(ctx, trace); err != nil {
 		return err
 	}
@@ -2360,6 +2367,97 @@ func (o *RuntimeOrchestrator) recordLLMStepInputMemoryRecallTrace(ctx context.Co
 			trace.Reason,
 		),
 	})
+}
+
+func memoryRecallTraceMapHasKey(input map[string]any, key string) bool {
+	if len(input) == 0 {
+		return false
+	}
+	_, ok := input[key]
+	return ok
+}
+
+func memoryRecallTraceIDSet(ids []common.MemoryID) map[common.MemoryID]struct{} {
+	if len(ids) == 0 {
+		return nil
+	}
+	ret := make(map[common.MemoryID]struct{}, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		ret[id] = struct{}{}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func filterMemoryRecallTraceIDs(ids []common.MemoryID, selected map[common.MemoryID]struct{}, excluded map[common.MemoryID]struct{}, requireSelected bool) []common.MemoryID {
+	if len(ids) == 0 {
+		return nil
+	}
+	if requireSelected && len(selected) == 0 {
+		return nil
+	}
+	ret := make([]common.MemoryID, 0, len(ids))
+	seen := map[common.MemoryID]struct{}{}
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, ok := excluded[id]; ok {
+			continue
+		}
+		if len(selected) > 0 {
+			if _, ok := selected[id]; !ok {
+				continue
+			}
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ret = append(ret, id)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func filterMemoryRecallTraceHits(hits []memorymodel.MemoryRecallHit, selected map[common.MemoryID]struct{}, excluded map[common.MemoryID]struct{}, requireSelected bool) []memorymodel.MemoryRecallHit {
+	if len(hits) == 0 {
+		return nil
+	}
+	if requireSelected && len(selected) == 0 {
+		return nil
+	}
+	ret := make([]memorymodel.MemoryRecallHit, 0, len(hits))
+	seen := map[common.MemoryID]struct{}{}
+	for _, hit := range hits {
+		if hit.ID == "" {
+			continue
+		}
+		if _, ok := excluded[hit.ID]; ok {
+			continue
+		}
+		if len(selected) > 0 {
+			if _, ok := selected[hit.ID]; !ok {
+				continue
+			}
+		}
+		if _, ok := seen[hit.ID]; ok {
+			continue
+		}
+		seen[hit.ID] = struct{}{}
+		ret = append(ret, hit)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func memoryRecallTraceIDs(value any) []common.MemoryID {

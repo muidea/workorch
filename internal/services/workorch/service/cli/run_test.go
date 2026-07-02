@@ -104,18 +104,22 @@ func TestRunActivateUsesUnifiedWorkspaceRunCommand(t *testing.T) {
 	previousBackend := cliBackend
 	t.Cleanup(func() {
 		cliBackend = previousBackend
-		_ = runActivateCmd.Flags().Set("goal", "")
-		_ = runActivateCmd.Flags().Set("dod", "")
-		_ = runActivateCmd.Flags().Set("soul", "")
-		_ = runActivateCmd.Flags().Set("lang", "")
-		_ = runActivateCmd.Flags().Set("priority", "0")
+		resetRunActivateFlagsForTest(t)
 	})
+	resetRunActivateFlagsForTest(t)
 
 	runBackend := &recordingRunResumeBackend{}
 	cliBackend = cliRunResumeBackend{run: runBackend}
 	_ = runActivateCmd.Flags().Set("goal", "goal-cli-activate")
 	_ = runActivateCmd.Flags().Set("dod", "dod-cli-activate")
 	_ = runActivateCmd.Flags().Set("soul", "soul-cli-activate")
+	_ = runActivateCmd.Flags().Set("llm-provider", "provider-cli-activate")
+	_ = runActivateCmd.Flags().Set("soul-binding", "planning=soul-planning")
+	_ = runActivateCmd.Flags().Set("soul-binding", "validation=soul-validation")
+	_ = runActivateCmd.Flags().Set("skill", "skill-cli-activate")
+	_ = runActivateCmd.Flags().Set("mcp-server", "mcp-cli-activate")
+	_ = runActivateCmd.Flags().Set("capability", "mcp-cli-activate:tool:validate")
+	_ = runActivateCmd.Flags().Set("memory", "memory-cli-activate")
 	_ = runActivateCmd.Flags().Set("lang", "zh-CN")
 	_ = runActivateCmd.Flags().Set("priority", "3")
 
@@ -134,9 +138,47 @@ func TestRunActivateUsesUnifiedWorkspaceRunCommand(t *testing.T) {
 		got.Activation.GoalID != "goal-cli-activate" ||
 		got.Activation.DoDID != "dod-cli-activate" ||
 		got.Activation.SoulID != "soul-cli-activate" ||
+		got.Activation.LLMProviderID != "provider-cli-activate" ||
 		got.Activation.DialogLanguage != "zh-CN" ||
 		got.Activation.Priority != 3 {
 		t.Fatalf("command = %+v, want scoped activation resume command from cli", got)
+	}
+	if got.Activation.SoulBindings["planning"] != "soul-planning" ||
+		got.Activation.SoulBindings["validation"] != "soul-validation" {
+		t.Fatalf("soulBindings = %+v, want parsed stage soul bindings", got.Activation.SoulBindings)
+	}
+	if len(got.Activation.SkillIDs) != 1 || got.Activation.SkillIDs[0] != "skill-cli-activate" {
+		t.Fatalf("skillIds = %+v, want forwarded skill ref", got.Activation.SkillIDs)
+	}
+	if len(got.Activation.MCPServerIDs) != 1 || got.Activation.MCPServerIDs[0] != "mcp-cli-activate" {
+		t.Fatalf("mcpServerIds = %+v, want forwarded MCP server ref", got.Activation.MCPServerIDs)
+	}
+	if len(got.Activation.CapabilityIDs) != 1 || got.Activation.CapabilityIDs[0] != "mcp-cli-activate:tool:validate" {
+		t.Fatalf("capabilityIds = %+v, want forwarded capability ref", got.Activation.CapabilityIDs)
+	}
+	if len(got.Activation.MemoryIDs) != 1 || got.Activation.MemoryIDs[0] != "memory-cli-activate" {
+		t.Fatalf("memoryIds = %+v, want forwarded memory ref", got.Activation.MemoryIDs)
+	}
+}
+
+func TestRunActivateRejectsInvalidSoulBindingFlag(t *testing.T) {
+	previousBackend := cliBackend
+	t.Cleanup(func() {
+		cliBackend = previousBackend
+		resetRunActivateFlagsForTest(t)
+	})
+	resetRunActivateFlagsForTest(t)
+
+	runBackend := &recordingRunResumeBackend{}
+	cliBackend = cliRunResumeBackend{run: runBackend}
+	_ = runActivateCmd.Flags().Set("soul-binding", "planning")
+
+	err := runActivateCmd.RunE(runActivateCmd, []string{"ws-cli-activate"})
+	if err == nil || !strings.Contains(err.Error(), "soul-binding must be stage=soul-id") {
+		t.Fatalf("run activate error = %v, want invalid soul-binding error", err)
+	}
+	if runBackend.command.WorkspaceID != "" {
+		t.Fatalf("command = %+v, want no backend command after invalid soul binding", runBackend.command)
 	}
 }
 
@@ -198,4 +240,37 @@ func (b *recordingRunResumeBackend) List(context.Context, common.WorkspaceID) ([
 
 func (b *recordingRunResumeBackend) Status(context.Context, common.WorkspaceID, common.RunID) (*backend.RunStatusInfo, error) {
 	return nil, common.ErrNotFound
+}
+
+func resetRunActivateFlagsForTest(t *testing.T) {
+	t.Helper()
+	stringFlags := map[string]string{
+		"goal":         "",
+		"dod":          "",
+		"soul":         "",
+		"llm-provider": "",
+		"lang":         "",
+	}
+	for name, value := range stringFlags {
+		if err := runActivateCmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("reset %s flag: %v", name, err)
+		}
+	}
+	if err := runActivateCmd.Flags().Set("priority", "0"); err != nil {
+		t.Fatalf("reset priority flag: %v", err)
+	}
+	for _, name := range []string{"soul-binding", "skill", "mcp-server", "capability", "memory"} {
+		flag := runActivateCmd.Flags().Lookup(name)
+		if flag == nil {
+			t.Fatalf("missing %s flag", name)
+		}
+		replacer, ok := flag.Value.(interface{ Replace([]string) error })
+		if !ok {
+			t.Fatalf("%s flag does not support test reset", name)
+		}
+		if err := replacer.Replace(nil); err != nil {
+			t.Fatalf("reset %s flag: %v", name, err)
+		}
+		flag.Changed = false
+	}
 }

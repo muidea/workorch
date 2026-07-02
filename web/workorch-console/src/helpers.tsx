@@ -1587,22 +1587,26 @@ export function outputText(output: Record<string, unknown> | undefined, key: str
 }
 
 export function eventRecordSummary(item: EventRecord) {
-  const payload = item.payload;
+  const payload = item.payload ?? item.payloadSummary;
   for (const key of ['summary', 'reason', 'error', 'action', 'status', 'state']) {
     const value = outputText(payload, key);
     if (value !== '-') {
       return value;
     }
   }
+  if (item.payloadRef) {
+    return item.payloadRef;
+  }
   return item.subjectId || item.subjectType || '-';
 }
 
 export function eventRecordState(item: EventRecord) {
-  const state = outputText(item.payload, 'state');
+  const payload = item.payload ?? item.payloadSummary;
+  const state = outputText(payload, 'state');
   if (state !== '-') {
     return stateLabel(state);
   }
-  const status = outputText(item.payload, 'status');
+  const status = outputText(payload, 'status');
   return status !== '-' ? status : '-';
 }
 

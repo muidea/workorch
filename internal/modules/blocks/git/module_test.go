@@ -2,13 +2,72 @@ package git
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	magictask "github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestGitModuleIdentityConfigureStartStopContract(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMagicHub()
+	defer hub.Terminate(ctx)
+	background := magictask.NewBackgroundRoutine(1)
+	defer background.Shutdown(ctx)
+
+	module := New()
+	if module.ID() != ModuleID {
+		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
+	}
+	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("Start before Configure err = %v, want invalid argument", err)
+	}
+	if err := module.Configure(Dependencies{EventHub: hub, Background: background}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if module.runtimeAdapter == nil || module.eventHub == nil || module.background == nil {
+		t.Fatalf("module not fully configured: %+v", module)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	firstExecutor := module.executor
+	if firstExecutor == nil {
+		t.Fatal("executor is nil after Start")
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	if module.executor != firstExecutor {
+		t.Fatal("second Start replaced executor")
+	}
+	if err := module.Stop(ctx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if module.executor != nil ||
+		module.runtimeAdapter != nil ||
+		module.eventHub != nil ||
+		module.background != nil {
+		t.Fatalf("module was not cleared after Stop: %+v", module)
+	}
+	if err := module.Stop(ctx); err != nil {
+		t.Fatalf("second Stop: %v", err)
+	}
+}
+
+func TestGitModuleStartRequiresRuntimeDependencies(t *testing.T) {
+	module := New()
+	if err := module.Configure(Dependencies{}); err != nil {
+		t.Fatalf("Configure with empty dependencies: %v", err)
+	}
+	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("Start without EventHub/Background err = %v, want invalid argument", err)
+	}
+}
 
 func TestGitModuleQueuesRuntimeExecution(t *testing.T) {
 	ctx := context.Background()

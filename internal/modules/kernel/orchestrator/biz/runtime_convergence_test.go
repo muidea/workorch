@@ -3996,6 +3996,39 @@ func TestShouldCreateDecisionTicketKeepsConcreteValidationRuntimeDependency(t *t
 	}
 }
 
+func TestShouldCreateDecisionTicketKeepsRuntimeDependencyWhenNextActionContinuable(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:    runtimeStageVerification,
+		"repairObjective":           repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired": true,
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": "validate"},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []string{"shell/command"},
+			},
+		},
+	}
+	step := &runmodel.Step{ID: "run-convergence/validation-runtime-dependency", Input: input}
+	spec := runtimeDecisionBlockSpec{
+		Reason:       "runtime provider config required",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Please configure the provider.",
+		Context: map[string]any{
+			decisionContextKeyScope:      decisionContextScopeWorkorchRuntime,
+			decisionContextKeyDependency: decisionContextDependencyLLMProvider,
+		},
+	}
+	output := decisionOutputFromSpec(spec)
+	contract := BuildConvergenceContract(nil, step, step, map[string]any{"input": input}, map[string]any{"llmOutput": output})
+
+	if !ShouldCreateDecisionTicket(input, output, contract) {
+		t.Fatalf("ShouldCreateDecisionTicket = false, want true for runtime dependency despite continuable next action")
+	}
+}
+
 func TestShouldCreateDecisionTicketBlocksContinuableRuntimeContractViolationDecision(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:    runtimeStageVerification,

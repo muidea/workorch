@@ -15,6 +15,9 @@ import (
 )
 
 func TestModuleSetupRequiresRepositories(t *testing.T) {
+	if New().ID() != ModuleID {
+		t.Fatalf("ID = %q, want %q", New().ID(), ModuleID)
+	}
 	if err := New().Configure(Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Setup err = %v, want invalid argument", err)
 	}
@@ -26,6 +29,52 @@ func TestModuleSetupRequiresRepositories(t *testing.T) {
 		Artifacts: memory.NewArtifactRepository(),
 	}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Setup with missing EventHub err = %v, want invalid argument", err)
+	}
+}
+
+func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
+	module := New()
+	if module.ID() != ModuleID {
+		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
+	}
+	if module.Service() != nil {
+		t.Fatal("new module service is non-nil before Configure")
+	}
+
+	if err := module.Configure(resultModuleContractDependencies()); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if module.Service() == nil {
+		t.Fatal("service is nil after Configure")
+	}
+	if module.bizPtr == nil || module.servicePtr == nil || module.eventHub == nil {
+		t.Fatalf("module not fully configured: %+v", module)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	firstSubscriptionCount := len(module.unsub)
+	if firstSubscriptionCount == 0 {
+		t.Fatal("Start did not subscribe result commands")
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	if len(module.unsub) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if module.Service() != nil ||
+		module.bizPtr != nil ||
+		module.servicePtr != nil ||
+		module.eventHub != nil ||
+		len(module.unsub) != 0 {
+		t.Fatalf("module was not cleared after Stop: %+v", module)
+	}
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatalf("second Stop: %v", err)
 	}
 }
 
@@ -117,6 +166,42 @@ func TestModuleRunIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestModuleRejectsInvalidResultCommandWithoutSideEffect(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	resultRepo := memory.NewResultRepository()
+	module := New()
+	if err := module.Configure(Dependencies{
+		Results:   resultRepo,
+		Artifacts: memory.NewArtifactRepository(),
+		EventHub:  hub,
+	}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic:       resultevents.TopicResultCommandCreate,
+		WorkspaceID: "ws-result-invalid",
+		RunID:       "run-result-invalid",
+		Payload: map[string]any{
+			events.PayloadKeyCommand: resultcontracts.CreateResultCommand{},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("invalid create err = %v, want invalid argument", err)
+	}
+	items, err := resultRepo.ListByRun(ctx, "run-result-invalid")
+	if err != nil {
+		t.Fatalf("ListByRun after invalid command: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("items = %+v, want no side effects from invalid command", items)
+	}
+}
+
 func TestModuleHandlesResultCommandsOverEventHub(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
@@ -156,6 +241,14 @@ func TestModuleHandlesResultCommandsOverEventHub(t *testing.T) {
 	items, ok := response.Payload[events.PayloadKeyItems].([]*resultmodel.Result)
 	if !ok || len(items) != 1 || items[0].ID != result.ID {
 		t.Fatalf("items = %+v, want created result", response.Payload[events.PayloadKeyItems])
+	}
+}
+
+func resultModuleContractDependencies() Dependencies {
+	return Dependencies{
+		Results:   memory.NewResultRepository(),
+		Artifacts: memory.NewArtifactRepository(),
+		EventHub:  events.NewMemoryHub(),
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 )
 
 // ListApprovals returns all approvals, optionally filtered.
@@ -26,6 +27,9 @@ func (c *Client) ListApprovals(ctx context.Context, workspaceID, runID string) (
 
 // GetApproval returns a single approval.
 func (c *Client) GetApproval(ctx context.Context, workspaceID string, approvalID string) (*Approval, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, fmt.Errorf("workspaceId is required")
+	}
 	path := fmt.Sprintf("/api/v1/workorch/approvals/%s", escapePath(approvalID))
 	values := url.Values{}
 	if workspaceID != "" {
@@ -40,6 +44,9 @@ func (c *Client) GetApproval(ctx context.Context, workspaceID string, approvalID
 
 // Approve approves an approval gate.
 func (c *Client) Approve(ctx context.Context, workspaceID string, approvalID string, payload ...map[string]any) (*Approval, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, fmt.Errorf("workspaceId is required")
+	}
 	path := fmt.Sprintf("/api/v1/workorch/approvals/%s/approve", escapePath(approvalID))
 	values := url.Values{}
 	if workspaceID != "" {
@@ -54,6 +61,9 @@ func (c *Client) Approve(ctx context.Context, workspaceID string, approvalID str
 
 // Reject rejects an approval gate.
 func (c *Client) Reject(ctx context.Context, workspaceID string, approvalID string, payload ...map[string]any) (*Approval, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, fmt.Errorf("workspaceId is required")
+	}
 	path := fmt.Sprintf("/api/v1/workorch/approvals/%s/reject", escapePath(approvalID))
 	values := url.Values{}
 	if workspaceID != "" {
@@ -68,6 +78,9 @@ func (c *Client) Reject(ctx context.Context, workspaceID string, approvalID stri
 
 // BatchResolveApprovals resolves multiple approvals at once.
 func (c *Client) BatchResolveApprovals(ctx context.Context, workspaceID string, approvalIDs []string, action string, payload ...map[string]any) ([]Approval, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, fmt.Errorf("workspaceId is required")
+	}
 	req := struct {
 		ApprovalIDs []string       `json:"approvalIds"`
 		Action      string         `json:"action"`

@@ -46,6 +46,8 @@ Last Updated: 2026-05-29
 - [run-closure-quality-improvement-plan.md](run-closure-quality-improvement-plan.md)
 - [workorchd-state-loop-and-projection-closure-plan.md](workorchd-state-loop-and-projection-closure-plan.md)
 - [convergence-authority-dispatch-closure-checklist.md](convergence-authority-dispatch-closure-checklist.md)
+- [product-design-to-runtime-convergence-closure-plan.md](product-design-to-runtime-convergence-closure-plan.md)
+- [module-block-contract-closure-validation-plan.md](module-block-contract-closure-validation-plan.md)
 
 ## Layering
 

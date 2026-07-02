@@ -1060,6 +1060,22 @@ func TestAcceptedAPIRoutesAreRegisteredNatively(t *testing.T) {
 	}
 }
 
+func TestUnsupportedMutatingAPIRoutesAreNotRegisteredNatively(t *testing.T) {
+	router := engine.NewRouteRegistry()
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	registerSystemRoutes(router, state)
+	registerConfigurationRoutes(router, state)
+	registerReadRoutes(router, state)
+	registerBusinessWriteRoutes(router, state)
+	registerConsoleRoutes(router)
+
+	for _, route := range unsupportedMutatingAPINativeRouteSpecs() {
+		if router.ExistHandler(route.pattern, route.method) {
+			t.Fatalf("unsupported native mutating route %s %s must not be registered", route.method, route.pattern)
+		}
+	}
+}
+
 type routeSpec struct {
 	method  string
 	pattern string
@@ -1095,7 +1111,6 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-activations"},
-		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/template-binding-refresh"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runtime/payloads"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/events/stream"},
@@ -1140,6 +1155,13 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/console"},
 		{method: http.MethodGet, pattern: "/console/"},
 		{method: http.MethodGet, pattern: "/console/**"},
+	}
+}
+
+func unsupportedMutatingAPINativeRouteSpecs() []routeSpec {
+	return []routeSpec{
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-restarts"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/template-binding-refresh"},
 	}
 }
 
@@ -1498,6 +1520,9 @@ func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
 		if query.WorkspaceID != "ws-persist" || query.RunID != "run-persist" || query.CursorAfterID != "evt-old" {
 			t.Fatalf("query = %+v, want workspace/run cursor replay query", query)
 		}
+		if !query.IncludePayload {
+			t.Fatalf("query IncludePayload = false, want true for full stream replay")
+		}
 		return []appservice.EventRecord{{
 			ID:          "evt-persisted-step",
 			Version:     "workorch.event.v1",
@@ -1536,6 +1561,62 @@ func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
 	}
 	if replayed.Payload[events.PayloadKeyState] != string(common.StepStateCompleted) {
 		t.Fatalf("payload = %+v, want completed state", replayed.Payload)
+	}
+}
+
+func TestEventStreamProjectionReplayUsesMetadataOnlyRecords(t *testing.T) {
+	hub := events.NewMemoryHub()
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
+	state.listEventRecords = func(_ context.Context, _, _ string, query appservice.EventRecordQuery) ([]appservice.EventRecord, error) {
+		if query.WorkspaceID != "ws-projection-persist" || query.RunID != "" || query.CursorAfterID != "evt-old-projection" {
+			t.Fatalf("query = %+v, want workspace-scoped projection replay query", query)
+		}
+		if query.Topic != workorchdevents.TopicWorkspaceProjectionChanged {
+			t.Fatalf("query topic = %q, want projection changed topic", query.Topic)
+		}
+		if query.IncludePayload {
+			t.Fatalf("query IncludePayload = true, want metadata-only projection replay")
+		}
+		return []appservice.EventRecord{{
+			ID:          "evt-persisted-projection",
+			Version:     events.WorkorchEventVersion,
+			Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
+			WorkspaceID: "ws-projection-persist",
+			Revision:    21,
+			Payload: map[string]any{
+				"payloadRef": "payloads/large-projection.json",
+			},
+			PayloadRef: "payloads/large-projection.json",
+			PayloadSummary: map[string]any{
+				"fieldCount": 32,
+			},
+		}}, nil
+	}
+	server := httptest.NewServer(newMuxWithState(state))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-projection-persist", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Last-Event-ID", "evt-old-projection")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	lines, readErr := readSSELines(resp.Body)
+	waitSSEConnected(t, lines, readErr)
+
+	id, replayed := readSSEEnvelope(t, lines, readErr)
+	if id != "evt-persisted-projection" || replayed.Topic != workorchdevents.TopicWorkspaceProjectionChanged || replayed.WorkspaceID != "ws-projection-persist" {
+		t.Fatalf("replayed id=%q envelope=%+v, want persisted projection event", id, replayed)
+	}
+	if replayed.Payload["large"] != nil {
+		t.Fatalf("payload = %+v, want no hydrated large payload", replayed.Payload)
 	}
 }
 
@@ -2161,8 +2242,8 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("workspace create event hub = %#v, want injected hub", got)
 		}
-		if cmd.Title != "native write" || cmd.Description != "native description" || cmd.DeliverableDirectory != "workspaces/native-write" || cmd.TemplateID != "software-dev" {
-			t.Fatalf("workspace create input = %q/%q/%q/%q, want native write/native description/workspaces/native-write/software-dev", cmd.Title, cmd.Description, cmd.DeliverableDirectory, cmd.TemplateID)
+		if cmd.Title != "native write" || cmd.Description != "native description" || cmd.DeliverableDirectory != "workspaces/native-write" || cmd.TemplateID != "template-native" {
+			t.Fatalf("workspace create input = %q/%q/%q/%q, want native write/native description/workspaces/native-write/template-native", cmd.Title, cmd.Description, cmd.DeliverableDirectory, cmd.TemplateID)
 		}
 		return appservice.Workspace{ID: "ws-native-write", Title: cmd.Title, Description: cmd.Description, DeliverableDirectory: cmd.DeliverableDirectory, State: "active"}, nil
 	}
@@ -2174,15 +2255,6 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 			t.Fatalf("workspace delete input = %q/%+v, want ws-native-read purge", workspaceID, cmd)
 		}
 		return nil
-	}
-	state.refreshWorkspaceTemplate = func(ctx context.Context, _, _, workspaceID string) (appservice.Workspace, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
-			t.Fatalf("workspace template refresh event hub = %#v, want injected hub", got)
-		}
-		if workspaceID != "ws-native-read" {
-			t.Fatalf("workspace template refresh id = %q, want ws-native-read", workspaceID)
-		}
-		return appservice.Workspace{ID: workspaceID, Title: "native refreshed", TemplateID: "template-native", State: "active"}, nil
 	}
 	state.createRun = func(ctx context.Context, _, _, workspaceID, runID, goalID, dodID string) (appservice.Run, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
@@ -2295,7 +2367,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		status int
 	}{
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces", status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"title":"native write","description":"native description","deliverableDirectory":"workspaces/native-write","templateId":"software-dev"}`, status: http.StatusCreated},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"title":"native write","description":"native description","deliverableDirectory":"workspaces/native-write","templateId":"template-native"}`, status: http.StatusCreated},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/snapshot", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/soul-bindings", status: http.StatusOK},
@@ -2320,7 +2392,6 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/start", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/resume", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native","llmProviderId":"deepseek","soulId":"soul-native","soulBindings":{"validation":"soul-native-validation"},"skillIds":["skill-native"],"mcpServerIds":["mcp-native"],"memoryIds":["memory-native"],"dialogLanguage":"zh-CN","priority":9,"executionContextPatch":{"latestOperatorInput":{"source":"tui","content":"restart from tui"}}}`, status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/template-binding-refresh", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions?workspaceId=ws-native-read&runId=run-native-read&cursorAfterId=ticket-native-cursor&limit=2", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions/ticket-native-read", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/decisions/ticket-native-read/resolve", status: http.StatusOK},
@@ -6327,7 +6398,8 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
 	workspace := createWorkspaceForHTTP(t, handler, "workspace restart intent", "workspaces/workspace-restart-intent")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-restarts", strings.NewReader(`{
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
+		"intent":"restart",
 		"goalId":"`+goalID+`",
 		"doDId":"`+dodID+`",
 		"requestId":"request-http-restart",
@@ -6516,6 +6588,39 @@ func TestWorkorchDSchedulerCommandRejectsWorkspaceScopeMismatch(t *testing.T) {
 	}
 }
 
+func TestWorkorchDSchedulerCommandRejectsRestartRunScope(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	hub := events.NewMemoryHub()
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+
+	err := publishHTTPTestCommand(context.Background(), hub, events.Envelope{
+		Topic:       workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
+		WorkspaceID: "ws-scheduler-restart-run-scope",
+		RunID:       "run-scheduler-restart-run-scope",
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID: "ws-scheduler-restart-run-scope",
+			events.PayloadKeyRunID:       "run-scheduler-restart-run-scope",
+			events.PayloadKeyIntent:      "restart",
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("restart run scope err = %v, want invalid argument", err)
+	}
+
+	state.runContinuations.restartMu.Lock()
+	restartPendingCount := len(state.runContinuations.restartPending)
+	state.runContinuations.restartMu.Unlock()
+	state.runContinuations.runMu.Lock()
+	runPendingCount := len(state.runContinuations.runPending)
+	state.runContinuations.runMu.Unlock()
+	state.runContinuations.governanceMu.Lock()
+	governancePendingCount := len(state.runContinuations.governancePending)
+	state.runContinuations.governanceMu.Unlock()
+	if restartPendingCount != 0 || runPendingCount != 0 || governancePendingCount != 0 {
+		t.Fatalf("pending restart=%d run=%d governance=%d, want no queued command after invalid restart scope", restartPendingCount, runPendingCount, governancePendingCount)
+	}
+}
+
 func TestWorkorchDSchedulerCommandRejectsRunScopeMismatch(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMemoryHub()
@@ -6666,7 +6771,7 @@ func TestWorkorchDRESTCommandsReturnConflictWhenSchedulerQueueFails(t *testing.T
 		body   string
 	}{
 		{name: "workspace activation", method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-rest-scheduler-fail/execution-activations"},
-		{name: "workspace restart", method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-rest-scheduler-fail/execution-restarts"},
+		{name: "workspace restart", method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-rest-scheduler-fail/execution-activations", body: `{"intent":"restart"}`},
 		{name: "run start", method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-rest-scheduler-fail/runs/run-rest-scheduler-fail/start"},
 		{name: "run resume", method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-rest-scheduler-fail/runs/run-rest-scheduler-fail/resume"},
 	} {

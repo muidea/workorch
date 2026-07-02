@@ -1224,6 +1224,60 @@ func TestRemoveExcludedSelectedContextMemoriesDropsStaleStableMemories(t *testin
 	}
 }
 
+func TestRecordMemoryRecallTraceFallbackRespectsSelectedAndExcludedContract(t *testing.T) {
+	ctx := context.Background()
+	traceRepo := memrepo.NewMemoryRecallTraceRepository()
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{MemoryRecallTraces: traceRepo},
+	}
+	run := &runmodel.Run{
+		ID:          "run-memory-trace-contract",
+		WorkspaceID: "ws-memory-trace-contract",
+	}
+	step := &runmodel.Step{
+		ID:    "step-memory-trace-contract",
+		RunID: run.ID,
+		Input: map[string]any{
+			stepInputKeySoulStage: soulStageExecution,
+		},
+	}
+	pkg := map[string]any{
+		"selectedContext": map[string]any{
+			"memoryRetrieval": map[string]any{
+				"policy":            "test_policy",
+				"status":            "selected",
+				"selectedMemoryIds": []string{"memory-selected"},
+				"excludedMemoryIds": []string{"memory-excluded"},
+			},
+			"memories": []map[string]any{
+				{"id": "memory-selected", "summary": "selected reference"},
+				{"id": "memory-excluded", "summary": "excluded diagnostic"},
+				{"id": "memory-unselected", "summary": "not selected"},
+			},
+		},
+	}
+
+	if err := orch.recordLLMStepInputMemoryRecallTrace(ctx, run, step, pkg); err != nil {
+		t.Fatalf("record trace: %v", err)
+	}
+	trace, err := traceRepo.Get(ctx, "step-memory-trace-contract/memory-recall/step-input")
+	if err != nil {
+		t.Fatalf("get trace: %v", err)
+	}
+	if len(trace.SelectedMemoryIDs) != 1 || trace.SelectedMemoryIDs[0] != "memory-selected" {
+		t.Fatalf("selected ids = %+v, want only selected non-excluded memory", trace.SelectedMemoryIDs)
+	}
+	if len(trace.RetrievedMemoryIDs) != 1 || trace.RetrievedMemoryIDs[0] != "memory-selected" {
+		t.Fatalf("retrieved ids = %+v, want fallback filtered by selected/excluded contract", trace.RetrievedMemoryIDs)
+	}
+	if len(trace.RetrievedMemoryHits) != 1 || trace.RetrievedMemoryHits[0].ID != "memory-selected" {
+		t.Fatalf("retrieved hits = %+v, want only selected non-excluded hit", trace.RetrievedMemoryHits)
+	}
+	if len(trace.ExcludedMemoryIDs) != 1 || trace.ExcludedMemoryIDs[0] != "memory-excluded" {
+		t.Fatalf("excluded ids = %+v, want preserved exclusion audit", trace.ExcludedMemoryIDs)
+	}
+}
+
 func TestCompactCoverageWorkItemContextForRepairFocusKeepsOnlyFocusRejectedEvidenceDetails(t *testing.T) {
 	focus := map[string]any{
 		"id":                  "focus-cwi-primary",

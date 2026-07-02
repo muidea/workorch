@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -664,9 +665,10 @@ func ResolveDecisionWithType(be backend.Backend, workspaceID string, ticketID st
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		wsID := common.WorkspaceID(workspaceID)
-		if wsID != "" {
-			ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
+		if wsID == "" {
+			return DecisionResolvedMsg{Error: fmt.Errorf("%w: workspace is required", common.ErrInvalidArgument)}
 		}
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
 		if !backend.IsSupportedDecisionResolutionType(resolutionType) {
 			resolutionType = inferDecisionResolutionType(answer)
 		}
@@ -696,9 +698,10 @@ func ResolveApproval(be backend.Backend, workspaceID string, approvalID string, 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		wsID := common.WorkspaceID(workspaceID)
-		if wsID != "" {
-			ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
+		if wsID == "" {
+			return ApprovalResolvedMsg{Error: fmt.Errorf("%w: workspace is required", common.ErrInvalidArgument)}
 		}
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
 		var approval *backend.ApprovalInfo
 		var err error
 		if approve {

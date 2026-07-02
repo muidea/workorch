@@ -399,6 +399,17 @@ type EventRecord struct {
 	PayloadRef     string         `json:"payloadRef,omitempty"`
 }
 
+type EventRecordQuery struct {
+	WorkspaceID    string
+	RunID          string
+	Topic          string
+	SubjectType    string
+	SubjectID      string
+	CursorAfterID  string
+	Limit          int
+	IncludePayload bool
+}
+
 // Snapshot / Status / Observability types.
 type RunStatus struct {
 	ID                   string                `json:"id"`

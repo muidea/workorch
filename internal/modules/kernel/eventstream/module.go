@@ -81,6 +81,9 @@ func (m *Module) Stop(ctx context.Context) error {
 }
 
 func (m *Module) Service() Service {
+	if m == nil || m.servicePtr == nil {
+		return nil
+	}
 	return m.servicePtr
 }
 

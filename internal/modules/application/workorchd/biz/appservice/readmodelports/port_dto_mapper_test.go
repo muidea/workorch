@@ -76,7 +76,9 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 			ID:             "event-map",
 			WorkspaceID:    "ws-map",
 			RunID:          "run-map",
+			Payload:        map[string]any{"raw": "large event payload"},
 			PayloadSummary: map[string]any{"state": "running"},
+			PayloadRef:     "event://payload/event-map",
 		}},
 	}
 
@@ -107,6 +109,9 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 	}
 	if got.Decisions[0].ID != "ticket-map" || got.EventRecords[0].PayloadSummary["state"] != "running" {
 		t.Fatalf("governance/event = %+v/%+v, want mapped values", got.Decisions, got.EventRecords)
+	}
+	if got.EventRecords[0].Payload != nil || got.EventRecords[0].PayloadRef != "event://payload/event-map" {
+		t.Fatalf("event record = %+v, want snapshot projection with payload ref and no raw payload", got.EventRecords[0])
 	}
 
 	snapshot.Runs[0].ExecutionContext["goal"].(map[string]any)["text"] = "mutated"
