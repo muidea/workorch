@@ -6,10 +6,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 

@@ -21,7 +21,6 @@ import (
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	webmodule "github.com/muidea/workorch/internal/modules/blocks/web"
@@ -40,6 +39,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 

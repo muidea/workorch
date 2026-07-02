@@ -7,8 +7,8 @@ import (
 	"time"
 
 	magictask "github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
