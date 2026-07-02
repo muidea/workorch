@@ -17,6 +17,26 @@ const (
 	convergenceAuthoritySchema = "workorch.convergence_authority.v1"
 )
 
+func gapBaselineMapFromValue(value any) map[string]any {
+	return schemaBoundRuntimeAuthorityMap(value, gapBaselineSchema)
+}
+
+func convergenceAuthorityMapFromValue(value any) map[string]any {
+	return schemaBoundRuntimeAuthorityMap(value, convergenceAuthoritySchema)
+}
+
+func schemaBoundRuntimeAuthorityMap(value any, expectedSchema string) map[string]any {
+	ret := mapFromValue(value)
+	if len(ret) == 0 {
+		return nil
+	}
+	schema := strings.TrimSpace(stringFromMap(ret, "schemaVersion"))
+	if schema != "" && schema != expectedSchema {
+		return nil
+	}
+	return ret
+}
+
 type ConvergenceAuthoritySnapshot struct {
 	SchemaVersion           string
 	WorkspaceID             string
@@ -113,8 +133,8 @@ func (o *RuntimeOrchestrator) prepareGapBaselineDispatchSpecs(ctx context.Contex
 		return nil, err
 	}
 	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
-	baseline := mapFromValue(run.ExecutionContext[gapBaselineKey])
-	authority := mapFromValue(run.ExecutionContext[convergenceAuthorityKey])
+	baseline := gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey])
+	authority := convergenceAuthorityMapFromValue(run.ExecutionContext[convergenceAuthorityKey])
 	if len(context) == 0 && len(baseline) == 0 && len(authority) == 0 {
 		return specs, nil
 	}
@@ -155,8 +175,8 @@ func syncRunConvergenceDerivedFields(run *runModel.Run) bool {
 	if run == nil || run.ExecutionContext == nil {
 		return false
 	}
-	if len(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])) == 0 &&
-		len(mapFromValue(run.ExecutionContext[gapBaselineKey])) == 0 {
+	if len(convergenceAuthorityMapFromValue(run.ExecutionContext[convergenceAuthorityKey])) == 0 &&
+		len(gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey])) == 0 {
 		return false
 	}
 	input := runExecutionInput(run, "")
@@ -398,18 +418,18 @@ func appendRequiredOutputMirrorReboundDiagnostics(input map[string]any, required
 }
 
 func dispatchInputHasConvergenceAuthority(run *runModel.Run, input map[string]any) bool {
-	if len(mapFromValue(input[convergenceAuthorityKey])) > 0 || len(mapFromValue(input[gapBaselineKey])) > 0 {
+	if len(convergenceAuthorityMapFromValue(input[convergenceAuthorityKey])) > 0 || len(gapBaselineMapFromValue(input[gapBaselineKey])) > 0 {
 		return true
 	}
 	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
-		if len(mapFromValue(executionContext[convergenceAuthorityKey])) > 0 || len(mapFromValue(executionContext[gapBaselineKey])) > 0 {
+		if len(convergenceAuthorityMapFromValue(executionContext[convergenceAuthorityKey])) > 0 || len(gapBaselineMapFromValue(executionContext[gapBaselineKey])) > 0 {
 			return true
 		}
 	}
 	if run == nil || run.ExecutionContext == nil {
 		return false
 	}
-	return len(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])) > 0 || len(mapFromValue(run.ExecutionContext[gapBaselineKey])) > 0
+	return len(convergenceAuthorityMapFromValue(run.ExecutionContext[convergenceAuthorityKey])) > 0 || len(gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey])) > 0
 }
 
 func validateConvergenceDispatchInput(input map[string]any) error {
@@ -1505,7 +1525,7 @@ func gapBaselineDispatchGate(run *runModel.Run) (bool, error) {
 	if convergenceBudgetRequiresEscalation(run) {
 		return true, common.ErrBlocked
 	}
-	baseline := mapFromValue(run.ExecutionContext[gapBaselineKey])
+	baseline := gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey])
 	if len(baseline) == 0 {
 		return false, nil
 	}

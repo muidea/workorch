@@ -1205,12 +1205,20 @@ func TestCoverageWorkItemsKeepOldRevisionHistorical(t *testing.T) {
 	}
 }
 
-func TestCoverageWorkItemsReplanSuccessorPreservesCurrentRevisionLineage(t *testing.T) {
+func TestCoverageWorkItemsReplanSuccessorResetsActiveLedgerAndKeepsHistory(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-replan-lineage",
 		ExecutionContext: map[string]any{
 			"definitionRevision": "rev-current",
 			"goal":               map[string]any{"text": "stateful outcome"},
+			gapBaselineKey: map[string]any{
+				"schemaVersion": gapBaselineSchema,
+				"nextAction":    map[string]any{"kind": runtimecontract.NextActionTypeComplete},
+			},
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"nextAction":    map[string]any{"kind": runtimecontract.NextActionTypeComplete},
+			},
 			"executionContract": map[string]any{
 				"profileContracts": map[string]any{
 					"neutral": map[string]any{
@@ -1248,28 +1256,43 @@ func TestCoverageWorkItemsReplanSuccessorPreservesCurrentRevisionLineage(t *test
 	}
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) != 1 {
-		t.Fatalf("coverageWorkItems = %+v, want one inherited current item", items)
+		t.Fatalf("coverageWorkItems = %+v, want one successor-local current item", items)
 	}
 	item := items[0]
 	if got := stringFromMap(item, "id"); got != "cwi-001" {
 		t.Fatalf("id = %q, want successor-local stable order id", got)
 	}
-	if got := stringFromMap(item, "status"); got != "in_progress" {
-		t.Fatalf("status = %q, want inherited in_progress", got)
+	if got := stringFromMap(item, "status"); got == "satisfied" || got == "evidence_ready" || got == "in_progress" {
+		t.Fatalf("status = %q, want reset active successor status", got)
 	}
-	accepted := mapStringSliceValue(item["acceptedEvidenceByKind"])
-	if len(accepted["state_change"]) != 1 || accepted["state_change"][0] != "run-prev/001-change" {
-		t.Fatalf("acceptedEvidenceByKind = %+v, want state_change lineage", accepted)
+	if refs := stringSliceFromValue(item["acceptedEvidenceRefs"]); len(refs) != 0 {
+		t.Fatalf("acceptedEvidenceRefs = %+v, want active successor ledger reset", refs)
 	}
-	rejected := mapStringSliceValue(item["rejectedEvidenceByKind"])
-	if len(rejected["validation"]) != 1 || rejected["validation"][0] != "run-prev/002-verify" {
-		t.Fatalf("rejectedEvidenceByKind = %+v, want validation rejection lineage", rejected)
+	if accepted := mapStringSliceValue(item["acceptedEvidenceByKind"]); len(accepted) != 0 {
+		t.Fatalf("acceptedEvidenceByKind = %+v, want active successor ledger reset", accepted)
 	}
-	focus := mapFromValue(mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])["currentFocus"])
+	if rejected := mapStringSliceValue(item["rejectedEvidenceByKind"]); len(rejected) != 0 {
+		t.Fatalf("rejectedEvidenceByKind = %+v, want active successor ledger reset", rejected)
+	}
+	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
+	focus := mapFromValue(context["currentFocus"])
 	if stringFromMap(focus, "targetText") != "stateful outcome" ||
-		!stringSet(stringSliceFromValue(focus["acceptedEvidenceRefs"]))["run-prev/001-change"] ||
-		!stringSet(stringSliceFromValue(focus["rejectedEvidenceRefs"]))["run-prev/002-verify"] {
-		t.Fatalf("currentFocus = %+v, want inherited evidence lineage on current focus", focus)
+		len(stringSliceFromValue(focus["acceptedEvidenceRefs"])) != 0 ||
+		len(stringSliceFromValue(focus["rejectedEvidenceRefs"])) != 0 {
+		t.Fatalf("currentFocus = %+v, want reset active successor focus", focus)
+	}
+	historical := mapSliceFromValue(context["historicalItems"])
+	if len(historical) != 1 ||
+		stringFromMap(historical[0], "historicalReason") != "replan_successor_reset" ||
+		!stringSet(stringSliceFromValue(historical[0]["acceptedEvidenceRefs"]))["run-prev/001-change"] ||
+		!stringSet(stringSliceFromValue(historical[0]["rejectedEvidenceRefs"]))["run-prev/002-verify"] {
+		t.Fatalf("historicalItems = %+v, want predecessor evidence preserved only as history", historical)
+	}
+	if baseline := mapFromValue(run.ExecutionContext[gapBaselineKey]); len(baseline) != 0 {
+		t.Fatalf("gapBaseline = %+v, want stale predecessor baseline removed", baseline)
+	}
+	if authority := mapFromValue(run.ExecutionContext[convergenceAuthorityKey]); len(authority) != 0 {
+		t.Fatalf("convergenceAuthority = %+v, want stale predecessor authority removed", authority)
 	}
 }
 
@@ -1364,7 +1387,7 @@ func TestCoverageWorkItemsReplanSuccessorMovesStaleSourcesToHistory(t *testing.T
 	}
 	var foundStale bool
 	for _, item := range historical {
-		if stringFromMap(item, "historicalReason") == "superseded_coverage_source" &&
+		if stringFromMap(item, "historicalReason") == "replan_successor_reset" &&
 			stringFromMap(item, "definitionRevision") == "rev-current" {
 			foundStale = true
 		}
@@ -2513,6 +2536,53 @@ func TestCoverageWorkItemsAcceptanceGateRequiresSatisfiedItems(t *testing.T) {
 
 	if err == nil || !strings.Contains(err.Error(), "coverageWorkItems not ready") {
 		t.Fatalf("coverage.validateReadyForAcceptance err = %v, want unresolved work item failure", err)
+	}
+}
+
+func TestCoverageWorkItemsAcceptanceGateRejectsEmptyLedgerWithBaseline(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-empty-ledger-gate",
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+		},
+	}
+
+	err := newCoverageSubsystem().validateReadyForAcceptance(run)
+
+	if err == nil || !strings.Contains(err.Error(), "coverage ledger empty") {
+		t.Fatalf("coverage.validateReadyForAcceptance err = %v, want empty ledger failure", err)
+	}
+}
+
+func TestCoverageWorkItemsAcceptanceGateRejectsBlockedItems(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewCoverageWorkItemRepository()
+	workspaceID := common.WorkspaceID("ws-cwi-blocked-gate")
+	runID := common.RunID("run-cwi-blocked-gate")
+	itemID := coverageWorkItemRepositoryID(runID, "cwi-blocked")
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+	}
+	if err := repo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimecontract.CoverageWorkItem{
+		ID:                  itemID,
+		WorkspaceID:         workspaceID,
+		RunID:               runID,
+		DefinitionRevision:  "rev-blocked-gate",
+		NormalizedSourceKey: "blocked-gate",
+		Status:              "blocked",
+		Metadata: map[string]any{
+			"id":     "cwi-blocked",
+			"status": "blocked",
+		},
+	}); err != nil {
+		t.Fatalf("create coverage item: %v", err)
+	}
+
+	err := newCoverageSubsystem(repo).validateReadyForAcceptance(run, ctx)
+
+	if err == nil || !strings.Contains(err.Error(), "cwi-blocked:blocked") {
+		t.Fatalf("coverage.validateReadyForAcceptance err = %v, want blocked item failure", err)
 	}
 }
 

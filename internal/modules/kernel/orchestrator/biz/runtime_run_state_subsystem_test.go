@@ -72,6 +72,9 @@ func TestRuntimeOrchestratorPersistRunProgressUpdatePreservesBlockedDecisionLife
 		WorkspaceID:      workspaceID,
 		State:            common.RunStateBlockedOnDecision,
 		BlockingTicketID: ticketID,
+		ExecutionContext: map[string]any{
+			"ownerContinuation": map[string]any{"kind": "decision"},
+		},
 	}); err != nil {
 		t.Fatalf("block run: %v", err)
 	}
@@ -98,11 +101,75 @@ func TestRuntimeOrchestratorPersistRunProgressUpdatePreservesBlockedDecisionLife
 	if got.ExecutionContext["coverageProgress"] != "updated" {
 		t.Fatalf("execution context = %+v, want progress update preserved", got.ExecutionContext)
 	}
+	if owner := mapFromValue(got.ExecutionContext["ownerContinuation"]); stringFromMap(owner, "kind") != "decision" {
+		t.Fatalf("execution context = %+v, want current owner continuation preserved", got.ExecutionContext)
+	}
 	if runRepo.getCalls.Load() != 1 {
 		t.Fatalf("global Get calls = %d, want only final assertion read", runRepo.getCalls.Load())
 	}
 	if runRepo.getByWorkspaceIDCalls.Load() != 1 {
 		t.Fatalf("GetByWorkspaceID calls = %d, want scoped owner read", runRepo.getByWorkspaceIDCalls.Load())
+	}
+}
+
+func TestRuntimeOrchestratorPersistRunProgressUpdateAppliesManagedProgressDeletion(t *testing.T) {
+	ctx := context.Background()
+	runRepo := newRunStateCountingRunRepository()
+	orch := &RuntimeOrchestrator{runs: runRepo}
+	runID := common.RunID("run-progress-delete-managed")
+	workspaceID := common.WorkspaceID("ws-progress-delete-managed")
+
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey:      map[string]any{"schemaVersion": "old"},
+			"ownerContinuation": map[string]any{"kind": "dispatch"},
+		},
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	progress := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			"coverageProgress": "updated",
+		},
+	}
+	if err := orch.persistRunProgressUpdate(ctx, progress); err != nil {
+		t.Fatalf("persist progress: %v", err)
+	}
+
+	got, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if _, ok := got.ExecutionContext[gapBaselineKey]; ok {
+		t.Fatalf("execution context = %+v, want managed gap baseline deletion applied", got.ExecutionContext)
+	}
+	if got.ExecutionContext["coverageProgress"] != "updated" {
+		t.Fatalf("execution context = %+v, want progress update preserved", got.ExecutionContext)
+	}
+	if owner := mapFromValue(got.ExecutionContext["ownerContinuation"]); stringFromMap(owner, "kind") != "dispatch" {
+		t.Fatalf("execution context = %+v, want unmanaged owner continuation preserved", got.ExecutionContext)
+	}
+}
+
+func TestCanCloseRunAsUnsuccessfulTerminalDoesNotOwnCompletion(t *testing.T) {
+	for _, target := range []common.RunState{
+		common.RunStateFailed,
+		common.RunStateCancelled,
+		common.RunStateSuperseded,
+	} {
+		if !canCloseRunAsUnsuccessfulTerminal(common.RunStateRunning, target) {
+			t.Fatalf("canCloseRunAsUnsuccessfulTerminal(running, %s) = false, want true", target)
+		}
+	}
+	if canCloseRunAsUnsuccessfulTerminal(common.RunStateRunning, common.RunStateCompleted) {
+		t.Fatal("canCloseRunAsUnsuccessfulTerminal(running, completed) = true, want completion to stay on CompleteRun path")
 	}
 }
 

@@ -70,6 +70,11 @@ func (o *RuntimeOrchestrator) NextActionForRun(ctx context.Context, runID common
 	} else if ok {
 		return action, nil
 	}
+	if action, ok, err := o.missingCoverageLedgerNextAction(ctx, run); err != nil {
+		return runtimemodel.NextAction{}, err
+	} else if ok {
+		return action, nil
+	}
 	return runtimemodel.NextAction{}, nil
 }
 
@@ -80,7 +85,7 @@ func deriveMissingGapBaselineNextAction(run *runmodel.Run) (runtimemodel.NextAct
 	if !runStateAllowsGapAssessment(run.State) {
 		return runtimemodel.NextAction{}, false
 	}
-	if len(mapFromValue(run.ExecutionContext[gapBaselineKey])) > 0 {
+	if len(gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey])) > 0 {
 		return runtimemodel.NextAction{}, false
 	}
 	return runtimemodel.NextAction{
@@ -107,6 +112,48 @@ func runStateAllowsGapAssessment(state common.RunState) bool {
 	default:
 		return false
 	}
+}
+
+func runStateAllowsCompletionAction(state common.RunState) bool {
+	switch state {
+	case common.RunStateRunning, common.RunStateValidating:
+		return true
+	default:
+		return false
+	}
+}
+
+func (o *RuntimeOrchestrator) missingCoverageLedgerNextAction(ctx context.Context, run *runmodel.Run) (runtimemodel.NextAction, bool, error) {
+	if run == nil || run.ID == "" || run.WorkspaceID == "" || !runStateAllowsGapAssessment(run.State) {
+		return runtimemodel.NextAction{}, false, nil
+	}
+	if len(gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey])) == 0 {
+		return runtimemodel.NextAction{}, false, nil
+	}
+	items, err := o.coverageItemsForNextAction(ctx, run)
+	if err != nil {
+		return runtimemodel.NextAction{}, false, err
+	}
+	if len(items) > 0 {
+		return runtimemodel.NextAction{}, false, nil
+	}
+	return runtimemodel.NextAction{
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		Type:        runtimemodel.NextActionTypeAssessGap,
+		SubjectType: "run",
+		SubjectID:   string(run.ID),
+		Stage:       "gap_analysis",
+		StageMode:   "ledger_rebuild",
+		RequiredOutput: map[string]any{
+			"gapBaselineRequired":       true,
+			"coverageWorkItemsRequired": true,
+			"mustRebuildCoverageLedger": true,
+		},
+		AllowedActions:   []string{runtimemodel.NextActionTypeAssessGap},
+		ForbiddenActions: []string{runtimemodel.NextActionTypeStateChange, runtimemodel.NextActionTypeComplete},
+		Reason:           "coverage ledger empty after baseline",
+	}.Normalized(), true, nil
 }
 
 func (o *RuntimeOrchestrator) missingStateChangeNextAction(ctx context.Context, run *runmodel.Run) (runtimemodel.NextAction, bool, error) {
@@ -139,7 +186,7 @@ func (o *RuntimeOrchestrator) missingAssessmentNextAction(ctx context.Context, r
 	if run == nil || !runStateAllowsGapAssessment(run.State) {
 		return runtimemodel.NextAction{}, false, nil
 	}
-	if len(mapFromValue(run.ExecutionContext[gapBaselineKey])) == 0 {
+	if len(gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey])) == 0 {
 		return runtimemodel.NextAction{}, false, nil
 	}
 	items, err := o.coverageItemsForNextAction(ctx, run)
@@ -170,7 +217,7 @@ func (o *RuntimeOrchestrator) missingCoverageEvidenceNextAction(ctx context.Cont
 	if run == nil || !runStateAllowsGapAssessment(run.State) {
 		return runtimemodel.NextAction{}, false, nil
 	}
-	if len(mapFromValue(run.ExecutionContext[gapBaselineKey])) == 0 {
+	if len(gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey])) == 0 {
 		return runtimemodel.NextAction{}, false, nil
 	}
 	if spec.ActionType == runtimemodel.NextActionTypeStateChange {
@@ -1297,15 +1344,23 @@ func (o *RuntimeOrchestrator) recoverableDiagnosticNextAction(ctx context.Contex
 		}
 		return runtimemodel.NextAction{}, false, err
 	}
-	action, ok := deriveRecoverableDiagnosticNextAction(run, records)
+	var steps []*runmodel.Step
+	if o.steps != nil {
+		steps, err = o.steps.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID), run.ID)
+		if err != nil && !errors.Is(err, common.ErrNotFound) {
+			return runtimemodel.NextAction{}, false, err
+		}
+	}
+	action, ok := deriveRecoverableDiagnosticNextAction(run, records, steps...)
 	return action, ok, nil
 }
 
-func deriveRecoverableDiagnosticNextAction(run *runmodel.Run, records []*runtimemodel.EvidenceRecord) (runtimemodel.NextAction, bool) {
+func deriveRecoverableDiagnosticNextAction(run *runmodel.Run, records []*runtimemodel.EvidenceRecord, steps ...*runmodel.Step) (runtimemodel.NextAction, bool) {
 	if run == nil || run.ID == "" || run.WorkspaceID == "" || !runStateAllowsGapAssessment(run.State) {
 		return runtimemodel.NextAction{}, false
 	}
 	superseded := supersededEvidenceRecordSet(records)
+	consumed := consumedDiagnosticEvidenceRecordSet(steps)
 	for idx := len(records) - 1; idx >= 0; idx-- {
 		record := records[idx]
 		if record == nil ||
@@ -1313,7 +1368,8 @@ func deriveRecoverableDiagnosticNextAction(run *runmodel.Run, records []*runtime
 			record.RunID != run.ID ||
 			record.Kind != runtimemodel.EvidenceKindDiagnostic ||
 			record.Status != runtimemodel.EvidenceStatusRejected ||
-			superseded[record.ID] {
+			superseded[record.ID] ||
+			consumed[record.ID] {
 			continue
 		}
 		recoverability := recoverabilityFromDiagnosticEvidence(record)
@@ -1352,6 +1408,63 @@ func deriveRecoverableDiagnosticNextAction(run *runmodel.Run, records []*runtime
 		}.Normalized(), true
 	}
 	return runtimemodel.NextAction{}, false
+}
+
+func consumedDiagnosticEvidenceRecordSet(steps []*runmodel.Step) map[common.EvidenceRecordID]bool {
+	ret := map[common.EvidenceRecordID]bool{}
+	for _, step := range steps {
+		if step == nil || len(step.Input) == 0 {
+			continue
+		}
+		for _, id := range diagnosticEvidenceIDsReferencedByInput(step.Input) {
+			ret[common.EvidenceRecordID(id)] = true
+		}
+	}
+	return ret
+}
+
+func diagnosticEvidenceIDsReferencedByInput(value any) []string {
+	seen := map[string]bool{}
+	var ret []string
+	var walk func(any)
+	add := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" || seen[raw] {
+			return
+		}
+		seen[raw] = true
+		ret = append(ret, raw)
+	}
+	walk = func(current any) {
+		switch typed := current.(type) {
+		case map[string]any:
+			for key, value := range typed {
+				switch strings.TrimSpace(key) {
+				case "diagnosticEvidenceId":
+					if id := strings.TrimSpace(stringFromAny(value)); id != "" {
+						add(id)
+					}
+					continue
+				case "diagnosticEvidenceIds":
+					for _, id := range stringSliceFromValue(value) {
+						add(id)
+					}
+					continue
+				}
+				walk(value)
+			}
+		case []any:
+			for _, item := range typed {
+				walk(item)
+			}
+		case []map[string]any:
+			for _, item := range typed {
+				walk(item)
+			}
+		}
+	}
+	walk(value)
+	return ret
 }
 
 func supersededEvidenceRecordSet(records []*runtimemodel.EvidenceRecord) map[common.EvidenceRecordID]bool {
@@ -1394,7 +1507,7 @@ func (o *RuntimeOrchestrator) allSatisfiedCompleteNextAction(ctx context.Context
 	if run == nil || !runStateAllowsGapAssessment(run.State) {
 		return runtimemodel.NextAction{}, false, nil
 	}
-	if len(mapFromValue(run.ExecutionContext[gapBaselineKey])) == 0 {
+	if len(gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey])) == 0 {
 		return runtimemodel.NextAction{}, false, nil
 	}
 	items, err := o.coverageItemsForNextAction(ctx, run)
@@ -1406,7 +1519,7 @@ func (o *RuntimeOrchestrator) allSatisfiedCompleteNextAction(ctx context.Context
 }
 
 func deriveAllSatisfiedCompleteNextAction(run *runmodel.Run, items []map[string]any) (runtimemodel.NextAction, bool) {
-	if run == nil || run.ID == "" || run.WorkspaceID == "" || !runStateAllowsGapAssessment(run.State) || len(items) == 0 {
+	if run == nil || run.ID == "" || run.WorkspaceID == "" || !runStateAllowsCompletionAction(run.State) || len(items) == 0 {
 		return runtimemodel.NextAction{}, false
 	}
 	coverageIDs := make([]common.CoverageWorkItemID, 0, len(items))
@@ -1484,17 +1597,33 @@ func deriveOpenDecisionNextAction(run *runmodel.Run, ticket *decisionmodel.Ticke
 	if ticket.ID != run.BlockingTicketID || ticket.WorkspaceID != run.WorkspaceID || ticket.RunID != run.ID || ticket.State != common.DecisionTicketStateOpen {
 		return runtimemodel.NextAction{}, false
 	}
+	required := map[string]any{
+		"ticketId": string(ticket.ID),
+	}
+	if ticket.DecisionKind != "" {
+		required["decisionKind"] = ticket.DecisionKind
+	}
+	if ticket.Question != "" {
+		required["question"] = ticket.Question
+	}
+	if ticket.Reason != "" {
+		required["reason"] = ticket.Reason
+	}
+	if context := cloneStepPayload(ticket.Context); len(context) > 0 {
+		required["ticketContext"] = context
+		if missingInputs := cloneStepInputValue(context["missingInputs"]); missingInputs != nil {
+			required["missingInputs"] = missingInputs
+		}
+	}
 	return runtimemodel.NextAction{
-		WorkspaceID: run.WorkspaceID,
-		RunID:       run.ID,
-		Type:        runtimemodel.NextActionTypeRequestDecision,
-		SubjectType: "decision",
-		SubjectID:   string(ticket.ID),
-		Stage:       "decision",
-		StageMode:   "governance",
-		RequiredOutput: map[string]any{
-			"ticketId": string(ticket.ID),
-		},
+		WorkspaceID:      run.WorkspaceID,
+		RunID:            run.ID,
+		Type:             runtimemodel.NextActionTypeRequestDecision,
+		SubjectType:      "decision",
+		SubjectID:        string(ticket.ID),
+		Stage:            "decision",
+		StageMode:        "governance",
+		RequiredOutput:   required,
 		AllowedActions:   []string{"resolve_decision"},
 		ForbiddenActions: []string{runtimemodel.NextActionTypeStateChange},
 		Reason:           "open decision blocks run",

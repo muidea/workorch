@@ -2100,6 +2100,35 @@ func TestBuildConvergenceContractKeepsConvertedReadableDecisionAssessmentOnlyWit
 	}
 }
 
+func TestConvertedReadableDecisionSyntheticFallbackRequiresKnownEmptyDefinition(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-readable-decision-missing-definition",
+		DoDID:           "dod-readable-decision-missing-definition",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID: "run-readable-decision-missing-definition/repair-001",
+		Output: map[string]any{
+			"continuableDecisionConvertedToRepair": true,
+			"convertedDecisionGate":                "convergence_contract",
+		},
+	}
+	input := map[string]any{
+		"missingDoDItems": []map[string]any{{
+			"item": "effective DoD",
+			"kind": "dod",
+		}},
+		"readableResourceRepairContext": []map[string]any{{
+			"targetRef": "current.txt",
+			"content":   "current content",
+		}},
+	}
+
+	if convertedReadableDecisionRepairRequiresAssessmentOnly(run, input, step) {
+		t.Fatalf("synthetic fallback was accepted with DoDID but missing definition context")
+	}
+}
+
 func TestBuildConvergenceContractKeepsGoalCoverageGapAsValidationWhenDirectEvidenceCanBeCommand(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-goal-coverage-validation",
@@ -3710,6 +3739,51 @@ func TestBuildConvergenceContractBlockedByDefault(t *testing.T) {
 	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": map[string]any{}}, nil)
 	if contract.State != convergenceStateBlocked {
 		t.Fatalf("contract state = %q, want %q", contract.State, convergenceStateBlocked)
+	}
+}
+
+func TestBuildConvergenceContractIgnoresInvalidAuthoritySchema(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": "workorch.convergence_authority.v0",
+			"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeComplete},
+		},
+		gapBaselineKey: map[string]any{
+			"schemaVersion": "workorch.gap_baseline.v0",
+			"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeComplete},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.DeterministicComplete || contract.State != convergenceStateBlocked {
+		t.Fatalf("contract = %+v, want invalid schema authority ignored", contract)
+	}
+	if kind := convergenceNextActionKind(nil, input); kind != "" {
+		t.Fatalf("convergenceNextActionKind = %q, want empty for invalid schema authority", kind)
+	}
+}
+
+func TestBuildConvergenceContractUnsupportedNextActionRequiresGovernance(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": "unsupported_action_kind"},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedGovernance ||
+		contract.RuntimeStage != runtimeStageDecision ||
+		contract.RuntimeStageMode != "contract_violation" {
+		t.Fatalf("contract = %+v, want explicit governance contract for unsupported next action", contract)
+	}
+	if contract.GovernanceReason != "unsupported next action kind: unsupported_action_kind" {
+		t.Fatalf("governance reason = %q, want unsupported next action reason", contract.GovernanceReason)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if got := stringFromMap(mapFromValue(mapFromValue(applied[convergenceAuthorityKey])["nextAction"]), "kind"); got != "request_governance" {
+		t.Fatalf("applied convergenceAuthority.nextAction.kind = %q, want request_governance; applied=%+v", got, applied)
 	}
 }
 
@@ -5875,6 +5949,53 @@ func TestBuildConvergenceContractStateChangeUsesExistingTargetSnapshot(t *testin
 	}
 	if !boolValue(required["mustUseCurrentTargetSnapshot"]) {
 		t.Fatalf("requiredOutput = %+v, want direct snapshot patch contract", required)
+	}
+}
+
+func TestHydrateConvergenceTargetEvidenceOverwritesStalePackageSnapshots(t *testing.T) {
+	input := map[string]any{
+		"convergenceContract": map[string]any{
+			"targetEvidence": map[string]any{
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "fresh.txt",
+					"contentHash":      "hash-fresh",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+				"coverageTargetSet": []map[string]any{{"targetRef": "fresh.txt"}},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"targetSnapshots": []map[string]any{{
+				"targetRef":   "stale.txt",
+				"contentHash": "hash-stale",
+			}},
+			"currentTargetSnapshots": []map[string]any{{
+				"targetRef":   "stale.txt",
+				"contentHash": "hash-stale",
+			}},
+			"coverageTargetSet": []map[string]any{{"targetRef": "stale.txt"}},
+		},
+	}
+
+	hydrateConvergenceTargetEvidence(input)
+
+	pkg := mapFromValue(input["repairActionPackage"])
+	snapshots := mapSliceFromValue(pkg["targetSnapshots"])
+	if len(snapshots) != 1 || snapshots[0]["targetRef"] != "fresh.txt" || snapshots[0]["contentHash"] != "hash-fresh" {
+		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want fresh authoritative snapshot", snapshots)
+	}
+	targets := mapSliceFromValue(pkg["coverageTargetSet"])
+	if len(targets) != 1 || targets[0]["targetRef"] != "fresh.txt" {
+		t.Fatalf("repairActionPackage.coverageTargetSet = %+v, want fresh target set", targets)
+	}
+	current := mapSliceFromValue(pkg["currentTargetSnapshots"])
+	if len(current) != 1 || current[0]["targetRef"] != "fresh.txt" || current[0]["contentHash"] != "hash-fresh" {
+		t.Fatalf("repairActionPackage.currentTargetSnapshots = %+v, want fresh snapshot metadata", current)
+	}
+	inputSnapshots := mapSliceFromValue(input["targetSnapshots"])
+	if len(inputSnapshots) != 1 || inputSnapshots[0]["targetRef"] != "fresh.txt" {
+		t.Fatalf("input.targetSnapshots = %+v, want fresh authoritative snapshot", inputSnapshots)
 	}
 }
 

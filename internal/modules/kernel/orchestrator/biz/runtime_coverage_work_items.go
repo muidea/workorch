@@ -151,7 +151,36 @@ func (c *coverageSubsystem) prepareReplanSuccessor(run *runModel.Run, contexts .
 	if run.ExecutionContext == nil {
 		run.ExecutionContext = map[string]any{}
 	}
+	resetCoverageProjectionForReplanSuccessor(run.ExecutionContext)
 	return c.ensure(run, contexts...)
+}
+
+func resetCoverageProjectionForReplanSuccessor(executionContext map[string]any) {
+	if len(executionContext) == 0 {
+		return
+	}
+	historicalItems := coverageHistoricalItemsFromContext(executionContext)
+	for _, item := range mapSliceFromValue(executionContext[coverageWorkItemsKey]) {
+		historicalItems = append(historicalItems, coverageHistoricalWorkItemSummary(item, "replan_successor_reset"))
+	}
+	excludedSources := coverageExcludedSourcesFromContext(executionContext)
+	delete(executionContext, coverageWorkItemsKey)
+	delete(executionContext, coverageWorkItemContextKey)
+	delete(executionContext, gapBaselineKey)
+	delete(executionContext, convergenceAuthorityKey)
+	if len(historicalItems) == 0 && len(excludedSources) == 0 {
+		return
+	}
+	context := map[string]any{
+		"schemaVersion": coverageWorkItemContextSchema,
+	}
+	if len(historicalItems) > 0 {
+		context["historicalItems"] = historicalItems
+	}
+	if len(excludedSources) > 0 {
+		context["excludedSources"] = excludedSources
+	}
+	executionContext[coverageWorkItemContextKey] = context
 }
 
 func (c *coverageSubsystem) updateFromCompletedStep(run *runModel.Run, step *runModel.Step, contexts ...context.Context) bool {
@@ -359,6 +388,9 @@ func (c *coverageSubsystem) validateReadyForAcceptance(run *runModel.Run, contex
 	}
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) == 0 {
+		if coverageAcceptanceRequiresLedger(run) {
+			return fmt.Errorf("%w: coverageWorkItems not ready for accepted result; unresolved: coverage ledger empty", common.ErrInvalidArgument)
+		}
 		return nil
 	}
 	var open []string
@@ -366,7 +398,11 @@ func (c *coverageSubsystem) validateReadyForAcceptance(run *runModel.Run, contex
 	for _, item := range items {
 		status := strings.TrimSpace(stringFromMap(item, "status"))
 		switch status {
-		case "satisfied", "blocked", "skipped":
+		case "satisfied", "skipped":
+			continue
+		}
+		if status == "blocked" {
+			open = append(open, fmt.Sprintf("%s:blocked", stringFromMap(item, "id")))
 			continue
 		}
 		if coverageWorkItemCompletionReady(item) {
@@ -400,6 +436,22 @@ func (c *coverageSubsystem) validateReadyForAcceptance(run *runModel.Run, contex
 		return fmt.Errorf("%w: coverageWorkItems satisfied without accepted evidence refs: %s", common.ErrInvalidArgument, strings.Join(limitedStrings(unlinked, 8), ", "))
 	}
 	return nil
+}
+
+func coverageAcceptanceRequiresLedger(run *runModel.Run) bool {
+	if run == nil || len(run.ExecutionContext) == 0 {
+		return false
+	}
+	if _, ok := run.ExecutionContext[coverageWorkItemsKey]; ok {
+		return true
+	}
+	if len(mapFromValue(run.ExecutionContext[gapBaselineKey])) > 0 {
+		return true
+	}
+	if len(mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])) > 0 {
+		return true
+	}
+	return false
 }
 
 func (c *coverageSubsystem) syncRepositoryProjection(ctx context.Context, run *runModel.Run, items []map[string]any) bool {

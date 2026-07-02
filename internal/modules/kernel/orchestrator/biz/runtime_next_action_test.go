@@ -101,10 +101,16 @@ func TestNextActionForRunOpenDecisionRequestsDecision(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
-		ID:          ticketID,
-		WorkspaceID: workspaceID,
-		RunID:       runID,
-		State:       common.DecisionTicketStateOpen,
+		ID:           ticketID,
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
+		Reason:       "operator input required",
+		DecisionKind: "external_dependency",
+		Question:     "Which external dependency should be used?",
+		Context: map[string]any{
+			"missingInputs": []string{"dependencyName", "approvalScope"},
+		},
+		State: common.DecisionTicketStateOpen,
 	}); err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
@@ -121,6 +127,14 @@ func TestNextActionForRunOpenDecisionRequestsDecision(t *testing.T) {
 	}
 	if action.RequiredOutput["ticketId"] != string(ticketID) {
 		t.Fatalf("required output = %+v, want ticket id", action.RequiredOutput)
+	}
+	if action.RequiredOutput["question"] != "Which external dependency should be used?" ||
+		action.RequiredOutput["decisionKind"] != "external_dependency" {
+		t.Fatalf("required output = %+v, want decision question/kind", action.RequiredOutput)
+	}
+	missing := stringSliceFromValue(action.RequiredOutput["missingInputs"])
+	if len(missing) != 2 || missing[0] != "dependencyName" || missing[1] != "approvalScope" {
+		t.Fatalf("required output missingInputs = %+v, want ticket context inputs", action.RequiredOutput["missingInputs"])
 	}
 	if !stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeStateChange) {
 		t.Fatalf("forbidden actions = %+v, want state_change forbidden", action.ForbiddenActions)
@@ -172,6 +186,52 @@ func TestNextActionForRunMissingGapBaselineRequestsAssessment(t *testing.T) {
 	}
 }
 
+func TestNextActionForRunEmptyCoverageLedgerRequestsGapRebuild(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-empty-ledger")
+	runID := common.RunID("run-next-action-empty-ledger")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeAssessGap || action.StageMode != "ledger_rebuild" {
+		t.Fatalf("next action = %+v, want assess_gap ledger rebuild", action)
+	}
+	if action.RequiredOutput["coverageWorkItemsRequired"] != true ||
+		action.RequiredOutput["mustRebuildCoverageLedger"] != true {
+		t.Fatalf("required output = %+v, want coverage ledger rebuild contract", action.RequiredOutput)
+	}
+	if !stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeComplete) {
+		t.Fatalf("forbidden actions = %+v, want complete forbidden", action.ForbiddenActions)
+	}
+}
+
 func TestDeriveMissingGapBaselineNextActionSkipsExistingBaselineAndTerminalRuns(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-gap-rule",
@@ -187,6 +247,13 @@ func TestDeriveMissingGapBaselineNextActionSkipsExistingBaselineAndTerminalRuns(
 	}
 	if action, ok := deriveMissingGapBaselineNextAction(run); ok || action.Type != "" {
 		t.Fatalf("derive with existing baseline = %+v/%v, want no assess_gap", action, ok)
+	}
+
+	run.ExecutionContext = map[string]any{
+		gapBaselineKey: map[string]any{"schemaVersion": "workorch.gap_baseline.v0", "baselineRevision": "stale-gap"},
+	}
+	if action, ok := deriveMissingGapBaselineNextAction(run); !ok || action.Type != runtimemodel.NextActionTypeAssessGap {
+		t.Fatalf("derive invalid schema baseline = %+v/%v, want assess_gap rebuild", action, ok)
 	}
 
 	run.State = common.RunStateCompleted
@@ -1357,6 +1424,53 @@ func TestDeriveRecoverableDiagnosticNextActionSkipsDecisionRequiredAndSuperseded
 	}
 }
 
+func TestDeriveRecoverableDiagnosticNextActionSkipsConsumedDiagnostic(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-diagnostic-consumed",
+		WorkspaceID: "ws-diagnostic-consumed",
+		State:       common.RunStateRunning,
+	}
+	records := []*runtimemodel.EvidenceRecord{
+		{
+			ID:          "diagnostic-old",
+			WorkspaceID: run.WorkspaceID,
+			RunID:       run.ID,
+			Kind:        runtimemodel.EvidenceKindDiagnostic,
+			Status:      runtimemodel.EvidenceStatusRejected,
+			SourceRef:   "diagnostic-old-source",
+			Metadata:    map[string]any{"recoverability": runtimemodel.ContractViolationRecoverabilityRetrySameContract},
+		},
+	}
+	steps := []*runmodel.Step{{
+		ID:    "run-diagnostic-consumed/repair-001",
+		RunID: run.ID,
+		Input: map[string]any{
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"diagnosticEvidenceId": "diagnostic-old",
+				},
+			},
+		},
+	}}
+	if action, ok := deriveRecoverableDiagnosticNextAction(run, records, steps...); ok || action.Type != "" {
+		t.Fatalf("derive consumed diagnostic = %+v/%v, want no repeat repair", action, ok)
+	}
+
+	records = append(records, &runtimemodel.EvidenceRecord{
+		ID:          "diagnostic-new",
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		Kind:        runtimemodel.EvidenceKindDiagnostic,
+		Status:      runtimemodel.EvidenceStatusRejected,
+		SourceRef:   "diagnostic-new-source",
+		Metadata:    map[string]any{"recoverability": runtimemodel.ContractViolationRecoverabilityNarrowContract},
+	})
+	action, ok := deriveRecoverableDiagnosticNextAction(run, records, steps...)
+	if !ok || action.SubjectID != "diagnostic-new" {
+		t.Fatalf("derive diagnostic = %+v/%v, want latest unconsumed diagnostic-new", action, ok)
+	}
+}
+
 func TestNextActionForRunAllSatisfiedRequestsComplete(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -1707,6 +1821,11 @@ func TestDeriveAllSatisfiedCompleteNextActionRequiresSatisfiedAcceptedEvidence(t
 	action, ok := deriveAllSatisfiedCompleteNextAction(run, items)
 	if !ok || action.Type != runtimemodel.NextActionTypeComplete || action.SubjectID != string(run.ID) {
 		t.Fatalf("derive complete = %+v/%v, want complete", action, ok)
+	}
+
+	run.State = common.RunStateCreated
+	if action, ok := deriveAllSatisfiedCompleteNextAction(run, items); ok || action.Type != "" {
+		t.Fatalf("derive created run = %+v/%v, want no complete before running/validating", action, ok)
 	}
 
 	run.State = common.RunStateCompleted

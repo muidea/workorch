@@ -203,7 +203,7 @@ func (o *RuntimeOrchestrator) closeLoadedRun(ctx context.Context, r *runModel.Ru
 	if r == nil || r.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	if !canCloseRunAs(r.State, state) {
+	if !canCloseRunAsUnsuccessfulTerminal(r.State, state) {
 		return common.ErrConflict
 	}
 	_ = o.finalizeManagedValidationResourcesForRun(ctx, r, "released", "run_terminal")
@@ -311,31 +311,68 @@ func (o *RuntimeOrchestrator) persistRunProgressUpdate(ctx context.Context, run 
 	if o == nil || o.runs == nil || run == nil {
 		return common.ErrInvalidArgument
 	}
-	normalizeRunConvergenceOwnerState(run)
+	next := run
 	readCtx := ctx
 	if run.WorkspaceID != "" {
 		readCtx = common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID)
 	}
 	current, err := o.runtimeEventRun(readCtx, run.ID)
 	if err == nil && current != nil {
-		preserveRunLifecycleForProgressUpdate(run, current)
+		next = mergeRunProgressUpdate(current, run)
 	} else if err != nil && !errors.Is(err, common.ErrNotFound) {
 		return err
 	}
-	return o.runs.Update(ctx, run)
+	normalizeRunConvergenceOwnerState(next)
+	return o.runs.Update(ctx, next)
 }
 
-func preserveRunLifecycleForProgressUpdate(next *runModel.Run, current *runModel.Run) {
-	if next == nil || current == nil {
-		return
+func mergeRunProgressUpdate(current *runModel.Run, progress *runModel.Run) *runModel.Run {
+	if current == nil {
+		return progress
 	}
-	if current.BlockingTicketID == "" && current.BlockingApprovalID == "" && isActiveRunProgressState(current.State) {
-		return
+	if progress == nil {
+		return current
 	}
-	next.State = current.State
-	next.BlockingTicketID = current.BlockingTicketID
-	next.BlockingApprovalID = current.BlockingApprovalID
-	next.FailureReason = current.FailureReason
+	next := *current
+	if progress.ExecutionContext != nil {
+		next.ExecutionContext = cloneStepPayload(current.ExecutionContext)
+		if next.ExecutionContext == nil {
+			next.ExecutionContext = map[string]any{}
+		}
+		for _, key := range managedRunProgressExecutionContextKeys() {
+			if _, ok := progress.ExecutionContext[key]; !ok {
+				delete(next.ExecutionContext, key)
+			}
+		}
+		for key, value := range progress.ExecutionContext {
+			if key == "" {
+				continue
+			}
+			next.ExecutionContext[key] = cloneStepInputValue(value)
+		}
+	}
+	return &next
+}
+
+func managedRunProgressExecutionContextKeys() []string {
+	return []string{
+		coverageWorkItemsKey,
+		coverageWorkItemContextKey,
+		gapBaselineKey,
+		convergenceAuthorityKey,
+		coverageFocusKey,
+		convergenceBudgetKey,
+		acceptanceSlicesKey,
+		activeSliceIDKey,
+		"acceptance",
+		"currentActionContract",
+		"currentTargetSnapshots",
+		"replanBudgetResetPending",
+		"repairActionPackage",
+		"requiredOutput",
+		"targetEvidence",
+		"targetSnapshots",
+	}
 }
 
 func runParallel(tasks ...func() error) error {
@@ -366,7 +403,7 @@ func runParallel(tasks ...func() error) error {
 	return ret
 }
 
-func canCloseRunAs(current common.RunState, target common.RunState) bool {
+func canCloseRunAsUnsuccessfulTerminal(current common.RunState, target common.RunState) bool {
 	switch target {
 	case common.RunStateFailed:
 		switch current {

@@ -349,6 +349,21 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 		populateCoverageWorkItemEvidenceConvergenceContract(input, contract)
 		return true
 	default:
+		if kind := convergenceNextActionKind(run, input); kind != "" {
+			contract.State = convergenceStateNeedGovernance
+			contract.RuntimeStage = runtimeStageDecision
+			contract.RuntimeStageMode = "contract_violation"
+			contract.GovernanceReason = "unsupported next action kind: " + kind
+			if contract.RepairActionPackage == nil {
+				contract.RepairActionPackage = map[string]any{}
+			}
+			contract.RepairActionPackage["unsupportedNextActionKind"] = kind
+			contract.RepairActionPackage["requiredOutput"] = map[string]any{
+				"mustResolveUnsupportedNextActionKind": true,
+				"unsupportedNextActionKind":            kind,
+			}
+			return true
+		}
 		return false
 	}
 }
@@ -415,20 +430,20 @@ func convergenceInputHasActionableReplanContinuation(input map[string]any) bool 
 
 func convergenceNextActionKind(run *runModel.Run, input map[string]any) string {
 	for _, source := range []map[string]any{
-		mapFromValue(input[convergenceAuthorityKey]),
-		mapFromValue(mapFromValue(input["executionContext"])[convergenceAuthorityKey]),
-		mapFromValue(input[gapBaselineKey]),
-		mapFromValue(mapFromValue(input["executionContext"])[gapBaselineKey]),
+		convergenceAuthorityMapFromValue(input[convergenceAuthorityKey]),
+		convergenceAuthorityMapFromValue(mapFromValue(input["executionContext"])[convergenceAuthorityKey]),
+		gapBaselineMapFromValue(input[gapBaselineKey]),
+		gapBaselineMapFromValue(mapFromValue(input["executionContext"])[gapBaselineKey]),
 	} {
 		if kind := strings.TrimSpace(stringFromMap(mapFromValue(source["nextAction"]), "kind")); kind != "" {
 			return kind
 		}
 	}
 	if run != nil {
-		if kind := strings.TrimSpace(stringFromMap(mapFromValue(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])["nextAction"]), "kind")); kind != "" {
+		if kind := strings.TrimSpace(stringFromMap(mapFromValue(convergenceAuthorityMapFromValue(run.ExecutionContext[convergenceAuthorityKey])["nextAction"]), "kind")); kind != "" {
 			return kind
 		}
-		if kind := strings.TrimSpace(stringFromMap(mapFromValue(mapFromValue(run.ExecutionContext[gapBaselineKey])["nextAction"]), "kind")); kind != "" {
+		if kind := strings.TrimSpace(stringFromMap(mapFromValue(gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey])["nextAction"]), "kind")); kind != "" {
 			return kind
 		}
 	}
@@ -1432,17 +1447,17 @@ func hydrateConvergenceTargetEvidence(input map[string]any) {
 		pkg = map[string]any{}
 	}
 	pkgChanged := false
+	targetSnapshotsChanged := false
 	inherit := func(key string) {
 		value, ok := targetEvidence[key]
 		if !ok || value == nil {
 			return
 		}
-		if input[key] == nil {
-			input[key] = cloneStepInputValue(value)
-		}
-		if pkg[key] == nil {
-			pkg[key] = cloneStepInputValue(value)
-			pkgChanged = true
+		input[key] = cloneStepInputValue(value)
+		pkg[key] = cloneStepInputValue(value)
+		pkgChanged = true
+		if key == "targetSnapshots" {
+			targetSnapshotsChanged = true
 		}
 	}
 	for _, key := range []string{
@@ -1456,7 +1471,7 @@ func hydrateConvergenceTargetEvidence(input map[string]any) {
 	} {
 		inherit(key)
 	}
-	if len(mapSliceFromValue(pkg["currentTargetSnapshots"])) == 0 {
+	if targetSnapshotsChanged || len(mapSliceFromValue(pkg["currentTargetSnapshots"])) == 0 {
 		if snapshots := mapSliceFromValue(pkg["targetSnapshots"]); len(snapshots) > 0 {
 			pkg["currentTargetSnapshots"] = repairActionTargetSnapshotMetadata(snapshots)
 			pkgChanged = true
@@ -1606,9 +1621,7 @@ func convertedReadableDecisionHasOnlySyntheticFallbackCoverage(run *runModel.Run
 	if len(input) == 0 {
 		return false
 	}
-	if len(effectiveDoDItemTexts(run)) > 0 ||
-		len(normalizedRunGoalCoverageItems(run)) > 0 ||
-		len(requiredProfileDeliverableExpectations(run)) > 0 {
+	if convertedReadableDecisionHasActiveCoverageDefinition(run) {
 		return false
 	}
 	for _, item := range mapSliceFromValue(input["missingDoDItems"]) {
@@ -1623,6 +1636,56 @@ func convertedReadableDecisionHasOnlySyntheticFallbackCoverage(run *runModel.Run
 	}
 	return len(mapSliceFromValue(input["missingDoDItems"])) > 0 ||
 		len(mapSliceFromValue(input["coverageTargetSet"])) > 0
+}
+
+func convertedReadableDecisionHasActiveCoverageDefinition(run *runModel.Run) bool {
+	if run == nil {
+		return false
+	}
+	if len(effectiveDoDItemTexts(run)) > 0 ||
+		len(normalizedRunGoalCoverageItems(run)) > 0 ||
+		len(requiredProfileDeliverableExpectations(run)) > 0 {
+		return true
+	}
+	if run.DoDID != "" {
+		return true
+	}
+	if len(run.ExecutionContext) == 0 {
+		return false
+	}
+	for _, key := range []string{
+		"goal",
+		"goals",
+		"goalText",
+		"effectiveGoalView",
+		"dod",
+		"dods",
+		"executionContract",
+	} {
+		if convergenceDefinitionValueHasContent(run.ExecutionContext[key]) {
+			return true
+		}
+	}
+	return false
+}
+
+func convergenceDefinitionValueHasContent(value any) bool {
+	switch typed := value.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(typed) != ""
+	case []string:
+		return len(typed) > 0
+	case []any:
+		return len(typed) > 0
+	case []map[string]any:
+		return len(typed) > 0
+	case map[string]any:
+		return len(typed) > 0
+	default:
+		return true
+	}
 }
 
 func syntheticFallbackDoDCoverageItem(item map[string]any) bool {
