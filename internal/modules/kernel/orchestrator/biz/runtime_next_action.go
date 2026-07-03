@@ -1026,7 +1026,36 @@ func acceptedEvidenceDeltaMatchesCoverageItem(run *runmodel.Run, item map[string
 	default:
 		return false
 	}
-	return validationDiagnosticEvidenceMatchesCoverageItem(record, item)
+	if !validationDiagnosticEvidenceMatchesCoverageItem(record, item) {
+		return false
+	}
+	return coverageWorkItemAcceptsEvidenceRecord(item, record)
+}
+
+func coverageWorkItemAcceptsEvidenceRecord(item map[string]any, record *runtimemodel.EvidenceRecord) bool {
+	if len(item) == 0 || record == nil {
+		return false
+	}
+	candidates := compactUniqueStrings([]string{
+		string(record.ID),
+		strings.TrimSpace(record.SourceRef),
+	})
+	acceptedRefs := stringSliceFromValue(item["acceptedEvidenceRefs"])
+	for _, candidate := range candidates {
+		if candidate != "" && stringSliceContains(acceptedRefs, candidate) {
+			return true
+		}
+	}
+	acceptedByKind := mapStringSliceValue(item["acceptedEvidenceByKind"])
+	for _, kind := range []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation} {
+		refs := acceptedByKind[kind]
+		for _, candidate := range candidates {
+			if candidate != "" && stringSliceContains(refs, candidate) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func evidenceRecordTimestamp(record *runtimemodel.EvidenceRecord) string {

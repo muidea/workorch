@@ -1183,6 +1183,105 @@ func TestNextActionForRunNoDeltaValidationLoopResetsAfterAcceptedStateChange(t *
 	}
 }
 
+func TestNextActionForRunNoDeltaValidationLoopIgnoresUnboundAcceptedRuntimeEvidence(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-validation-unbound-accepted")
+	runID := common.RunID("run-next-action-validation-unbound-accepted")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                     "cwi-validation-unbound-accepted",
+				"status":                 "open",
+				"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+				"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindStateChange: {"state-change-before-validation-loop"}},
+				"missingEvidenceKinds":   []string{runtimemodel.EvidenceKindValidation},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for idx, id := range []string{"diagnostic-unbound-1", "diagnostic-unbound-2"} {
+		timestamp := "2026-06-28T04:0" + string(rune('1'+idx)) + ":00Z"
+		if err := evidenceRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.EvidenceRecord{
+			ID:               common.EvidenceRecordID(id),
+			WorkspaceID:      workspaceID,
+			RunID:            runID,
+			Kind:             runtimemodel.EvidenceKindValidation,
+			Status:           runtimemodel.EvidenceStatusRejected,
+			SourceType:       evidenceRecordSourceTypeValidationResult,
+			SourceRef:        id + "-source",
+			CoverageItemRefs: []string{"cwi-validation-unbound-accepted"},
+			CreatedAt:        timestamp,
+			UpdatedAt:        timestamp,
+			Metadata: map[string]any{
+				"validationFailureDiagnostic": map[string]any{"class": runtimemodel.ValidationDiagnosticBuildFailed},
+				"failureSignature":            "same-unbound-validation-loop",
+			},
+		}); err != nil {
+			t.Fatalf("create rejected validation evidence %s: %v", id, err)
+		}
+	}
+	if err := evidenceRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.EvidenceRecord{
+		ID:               "accepted-runtime-validation-not-bound",
+		WorkspaceID:      workspaceID,
+		RunID:            runID,
+		Kind:             runtimemodel.EvidenceKindValidation,
+		Status:           runtimemodel.EvidenceStatusAccepted,
+		SourceRef:        "accepted-runtime-validation-not-bound-source",
+		CoverageItemRefs: []string{"cwi-validation-unbound-accepted"},
+		CreatedAt:        "2026-06-28T04:03:00Z",
+		UpdatedAt:        "2026-06-28T04:03:00Z",
+	}); err != nil {
+		t.Fatalf("create unbound accepted validation evidence: %v", err)
+	}
+	if err := evidenceRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.EvidenceRecord{
+		ID:               "diagnostic-unbound-3",
+		WorkspaceID:      workspaceID,
+		RunID:            runID,
+		Kind:             runtimemodel.EvidenceKindValidation,
+		Status:           runtimemodel.EvidenceStatusRejected,
+		SourceType:       evidenceRecordSourceTypeValidationResult,
+		SourceRef:        "diagnostic-unbound-3-source",
+		CoverageItemRefs: []string{"cwi-validation-unbound-accepted"},
+		CreatedAt:        "2026-06-28T04:04:00Z",
+		UpdatedAt:        "2026-06-28T04:04:00Z",
+		Metadata: map[string]any{
+			"validationFailureDiagnostic": map[string]any{"class": runtimemodel.ValidationDiagnosticBuildFailed},
+			"failureSignature":            "same-unbound-validation-loop",
+		},
+	}); err != nil {
+		t.Fatalf("create rejected validation evidence after unbound accepted evidence: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeStateChange || action.StageMode != "validation_no_delta" {
+		t.Fatalf("next action = %+v, want state_change because unbound accepted runtime evidence must not reset no-delta loop", action)
+	}
+}
+
 func TestNextActionForRunValidationContractRetryExhaustedFailsFast(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
