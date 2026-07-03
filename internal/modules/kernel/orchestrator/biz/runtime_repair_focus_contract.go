@@ -208,7 +208,104 @@ func repairGraphNodeAllowsCoverageFocusNormalization(step *runModel.Step, node r
 	if !inputRequiresStateChangingOutput(step.Input) {
 		return true
 	}
-	return canonicalRuntimeGraphNodeKind(node.Kind) != "patch/apply"
+	if canonicalRuntimeGraphNodeKind(node.Kind) != "patch/apply" {
+		return true
+	}
+	return repairPatchGraphNodeAllowsCoverageFocusNormalization(step, node)
+}
+
+func repairPatchGraphNodeAllowsCoverageFocusNormalization(step *runModel.Step, node runtimemodel.BlockExecutionNode) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	if repairPayloadDeclaresCoverageBinding(node.Input) {
+		return false
+	}
+	targetRef := strings.TrimSpace(stringFromMap(node.Input, "targetRef"))
+	if targetRef == "" {
+		return false
+	}
+	allowedTargets := repairFocusNormalizationPatchTargets(step.Input)
+	if len(allowedTargets) == 0 {
+		return false
+	}
+	return allowedTargets[targetRef]
+}
+
+func repairPayloadDeclaresCoverageBinding(payload map[string]any) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	for _, key := range []string{
+		"coverageFocusId",
+		"focusId",
+		"coverageWorkItemId",
+		"workItemId",
+		"coverageTargetToken",
+		"goalRequirementId",
+		"sourceRequirementId",
+		"targetText",
+	} {
+		if strings.TrimSpace(stringFromMap(payload, key)) != "" {
+			return true
+		}
+	}
+	for _, key := range []string{"coverageWorkItemIds", "workItemIds", "coverageTargets"} {
+		if len(stringSliceFromValue(payload[key])) > 0 || len(mapSliceFromValue(payload[key])) > 0 {
+			return true
+		}
+	}
+	for _, key := range []string{"validationEvidence", "evidenceBinding", "coverageBinding", "focusBinding"} {
+		if repairPayloadDeclaresCoverageBinding(mapFromValue(payload[key])) {
+			return true
+		}
+	}
+	return false
+}
+
+func repairFocusNormalizationPatchTargets(input map[string]any) map[string]bool {
+	if len(input) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			seen[value] = true
+		}
+	}
+	addAll := func(values []string) {
+		for _, value := range values {
+			add(value)
+		}
+	}
+	var addTargetsFromMap func(map[string]any)
+	addTargetsFromMap = func(source map[string]any) {
+		if len(source) == 0 {
+			return
+		}
+		addAll(stringSliceFromValue(source["repairTargetSet"]))
+		addAll(stringSliceFromValue(source["failureTargets"]))
+		addAll(stringSliceFromValue(source["targetRefs"]))
+		for _, item := range mapSliceFromValue(source["targetSnapshots"]) {
+			add(stringFromMap(item, "targetRef"))
+		}
+		for _, item := range mapSliceFromValue(source["currentTargetSnapshots"]) {
+			add(stringFromMap(item, "targetRef"))
+		}
+		required := mapFromValue(source["requiredOutput"])
+		if len(required) > 0 {
+			addTargetsFromMap(required)
+		}
+	}
+	addTargetsFromMap(input)
+	addTargetsFromMap(mapFromValue(input["repairActionPackage"]))
+	addTargetsFromMap(mapFromValue(input[currentActionContractKey]))
+	addTargetsFromMap(mapFromValue(input[stepInputKeyStagePacket]))
+	if len(seen) == 0 {
+		return nil
+	}
+	return seen
 }
 
 type repairCoverageFocusBindingContract struct {

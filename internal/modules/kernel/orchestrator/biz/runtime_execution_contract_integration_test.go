@@ -2355,6 +2355,84 @@ func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithout
 	}
 }
 
+func TestValidateLLMExecutionOutputContractNormalizesSingleFocusValidationEvidenceEnvelope(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-focus-envelope",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-focus-envelope/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			coverageFocusKey: map[string]any{
+				"id":                  "focus-cwi-020",
+				"coverageWorkItemIds": []string{"cwi-020"},
+				"targetText":          "safe recovery behavior",
+				"targetRefs":          []string{"dod.items[8]"},
+			},
+			"repairActionPackage": map[string]any{
+				coverageFocusKey: map[string]any{
+					"id":                  "focus-cwi-020",
+					"coverageWorkItemIds": []string{"cwi-020"},
+					"targetText":          "safe recovery behavior",
+					"targetRefs":          []string{"dod.items[8]"},
+				},
+				"coverageFocusBindingRequired": true,
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"mustBindCoverageFocus":                    true,
+					"coverageFocusId":                          "focus-cwi-020",
+					"coverageWorkItemIds":                      []string{"cwi-020"},
+					"structuredTargetRefs":                     []string{"dod:dod_item:dod-item-008"},
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify-runtime",
+				"kind": "mcp/tool_call",
+				"input": map[string]any{
+					"serverId": "neutral-mcp",
+					"tool":     "verify_runtime",
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want normalized single-focus validation envelope", err)
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok || len(graph.Nodes) != 1 {
+		t.Fatalf("executionGraph = %+v, want normalized graph", output[stepOutputKeyExecutionGraph])
+	}
+	evidence := mapFromValue(graph.Nodes[0].Input["validationEvidence"])
+	if stringFromMap(evidence, "mode") != "runtime_behavior" ||
+		stringFromMap(evidence, "observationType") != "runtime_observation" {
+		t.Fatalf("validationEvidence = %+v, want runtime behavior envelope", evidence)
+	}
+	if ids := stringSliceFromValue(evidence["coverageWorkItemIds"]); len(ids) != 1 || ids[0] != "cwi-020" {
+		t.Fatalf("coverageWorkItemIds = %+v, want cwi-020", ids)
+	}
+	if refs := stringSliceFromValue(evidence["targetRefs"]); !stringSliceContains(refs, "dod:dod_item:dod-item-008") {
+		t.Fatalf("targetRefs = %+v, want structured current focus ref", refs)
+	}
+	if claims := stringSliceFromValue(evidence["observedClaims"]); len(claims) == 0 {
+		t.Fatalf("observedClaims = %+v, want generated current focus claim", claims)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsConcreteValidationGraphWithEvidenceMode(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-mode-graph",

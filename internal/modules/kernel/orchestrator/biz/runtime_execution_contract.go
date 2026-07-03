@@ -400,6 +400,7 @@ func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, outpu
 	}
 	normalizeManagedValidationOutput(step, output)
 	normalizeConcreteValidationScratchSetupOutput(step, output)
+	normalizeConcreteValidationEvidenceFocusEnvelope(step, output)
 	if err := validateManagedValidationGraphContract(step, output); err != nil {
 		return err
 	}
@@ -428,6 +429,172 @@ func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, outpu
 		return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph; plain failed dodAssessment does not satisfy repairActionPackage.requiredOutput")
 	}
 	return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph or a satisfied dodAssessment with concrete evidenceRefs")
+}
+
+func normalizeConcreteValidationEvidenceFocusEnvelope(step *runModel.Step, output map[string]any) {
+	if step == nil || step.Input == nil || output == nil {
+		return
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok || len(graph.Nodes) == 0 {
+		return
+	}
+	envelope := concreteValidationEvidenceFocusEnvelopeForStep(step)
+	if len(envelope.TargetRefs) == 0 || len(envelope.ObservedClaims) == 0 {
+		return
+	}
+	changed := false
+	nodes := append([]runtimemodel.BlockExecutionNode(nil), graph.Nodes...)
+	for idx, node := range nodes {
+		if !concreteValidationNodeCanReceiveEvidenceEnvelope(node) {
+			continue
+		}
+		next, ok := normalizeConcreteValidationEvidenceNodeEnvelope(node, envelope)
+		if !ok {
+			continue
+		}
+		nodes[idx] = next
+		changed = true
+	}
+	if changed {
+		output[stepOutputKeyExecutionGraph] = runtimemodel.BlockExecutionGraph{Nodes: nodes}
+	}
+}
+
+type concreteValidationEvidenceEnvelope struct {
+	FocusID        string
+	WorkItemIDs    []string
+	TargetRefs     []string
+	ObservedClaims []string
+}
+
+func concreteValidationEvidenceFocusEnvelopeForStep(step *runModel.Step) concreteValidationEvidenceEnvelope {
+	if step == nil || step.Input == nil {
+		return concreteValidationEvidenceEnvelope{}
+	}
+	pkg := mapFromValue(step.Input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	if len(required) == 0 {
+		required = activeRequiredOutputForCurrentAction(step.Input)
+	}
+	if !boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		return concreteValidationEvidenceEnvelope{}
+	}
+	focus := repairCoverageFocusFromInput(step.Input)
+	if len(focus) == 0 {
+		focus = mapFromValue(pkg[coverageFocusKey])
+	}
+	focusID := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(focus, "id"),
+		stringFromMap(required, "coverageFocusId"),
+	))
+	workItemIDs := compactUniqueStrings(append(
+		append([]string{}, stringSliceFromValue(focus["coverageWorkItemIds"])...),
+		stringSliceFromValue(required["coverageWorkItemIds"])...,
+	))
+	if id := strings.TrimSpace(stringFromMap(focus, "coverageWorkItemId")); id != "" {
+		workItemIDs = compactUniqueStrings(append(workItemIDs, id))
+	}
+	if focusID == "" && len(workItemIDs) != 1 {
+		return concreteValidationEvidenceEnvelope{}
+	}
+	targetRefs := compactUniqueStrings(append(
+		append(append([]string{}, stringSliceFromValue(required["structuredTargetRefs"])...), stringSliceFromValue(required["targetRefs"])...),
+		append(append(stringSliceFromValue(focus["structuredTargetRefs"]), stringSliceFromValue(focus["targetRefs"])...), workItemIDs...)...,
+	))
+	if len(targetRefs) == 0 && focusID != "" {
+		targetRefs = []string{focusID}
+	}
+	claims := compactUniqueStrings(append(
+		stringSliceFromValue(focus["observedClaims"]),
+		stringSliceFromValue(required["observedClaims"])...,
+	))
+	if len(claims) == 0 {
+		targetText := firstNonEmptyString(
+			stringFromMap(focus, "targetText"),
+			stringFromMap(focus, "coverageTargetToken"),
+			strings.Join(targetRefs, ", "),
+		)
+		claims = []string{"runtime behavior was observed for current coverage focus: " + targetText}
+	}
+	return concreteValidationEvidenceEnvelope{
+		FocusID:        focusID,
+		WorkItemIDs:    workItemIDs,
+		TargetRefs:     targetRefs,
+		ObservedClaims: claims,
+	}
+}
+
+func concreteValidationNodeCanReceiveEvidenceEnvelope(node runtimemodel.BlockExecutionNode) bool {
+	switch canonicalRuntimeGraphNodeKind(node.Kind) {
+	case "shell/command", "mcp/tool_call":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeConcreteValidationEvidenceNodeEnvelope(node runtimemodel.BlockExecutionNode, envelope concreteValidationEvidenceEnvelope) (runtimemodel.BlockExecutionNode, bool) {
+	if len(envelope.TargetRefs) == 0 || len(envelope.ObservedClaims) == 0 {
+		return node, false
+	}
+	next := node
+	nextInput := cloneStepPayload(node.Input)
+	if nextInput == nil {
+		nextInput = map[string]any{}
+	}
+	evidence := cloneStepPayload(mapFromValue(nextInput["validationEvidence"]))
+	if evidence == nil {
+		evidence = map[string]any{}
+	}
+	changed := false
+	if strings.TrimSpace(stringFromMap(evidence, "mode")) == "" &&
+		strings.TrimSpace(stringFromMap(nextInput, "validationEvidenceMode")) == "" &&
+		strings.TrimSpace(stringFromMap(nextInput, "evidenceMode")) == "" {
+		evidence["mode"] = "runtime_behavior"
+		changed = true
+	}
+	if strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(evidence, "observationType"),
+		stringFromMap(evidence, "observation"),
+		stringFromMap(nextInput, "validationObservationType"),
+	)) == "" {
+		evidence["observationType"] = "runtime_observation"
+		changed = true
+	}
+	if len(stringSliceFromValue(evidence["targetRefs"])) == 0 &&
+		len(stringSliceFromValue(evidence["coverageTargetRefs"])) == 0 &&
+		strings.TrimSpace(stringFromMap(evidence, "targetRef")) == "" &&
+		strings.TrimSpace(stringFromMap(evidence, "coverageTargetRef")) == "" {
+		evidence["targetRefs"] = append([]string(nil), envelope.TargetRefs...)
+		evidence["structuredTargetRefs"] = append([]string(nil), envelope.TargetRefs...)
+		changed = true
+	}
+	if len(stringSliceFromValue(nextInput["targetRefs"])) == 0 {
+		nextInput["targetRefs"] = append([]string(nil), envelope.TargetRefs...)
+		changed = true
+	}
+	if len(nodeValidationEvidenceObservedClaims(runtimemodel.BlockExecutionNode{Input: map[string]any{"validationEvidence": evidence}})) == 0 {
+		evidence["observedClaims"] = append([]string(nil), envelope.ObservedClaims...)
+		changed = true
+	}
+	if len(envelope.WorkItemIDs) > 0 && len(stringSliceFromValue(evidence["coverageWorkItemIds"])) == 0 {
+		evidence["coverageWorkItemIds"] = append([]string(nil), envelope.WorkItemIDs...)
+		if len(stringSliceFromValue(nextInput["coverageWorkItemIds"])) == 0 {
+			nextInput["coverageWorkItemIds"] = append([]string(nil), envelope.WorkItemIDs...)
+		}
+		changed = true
+	}
+	if envelope.FocusID != "" && strings.TrimSpace(stringFromMap(nextInput, "coverageFocusId")) == "" {
+		nextInput["coverageFocusId"] = envelope.FocusID
+		changed = true
+	}
+	if !changed {
+		return node, false
+	}
+	nextInput["validationEvidence"] = evidence
+	next.Input = nextInput
+	return next, true
 }
 
 func validateConcreteValidationRouteOutputContract(step *runModel.Step, output map[string]any) error {

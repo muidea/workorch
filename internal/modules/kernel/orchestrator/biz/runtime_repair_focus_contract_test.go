@@ -482,6 +482,67 @@ func TestValidateLLMRepairCoverageFocusNormalizesStrictNonPatchGraphBinding(t *t
 	}
 }
 
+func TestValidateLLMRepairCoverageFocusNormalizesSingleFocusPatchTarget(t *testing.T) {
+	input := repairFocusContractInput()
+	input[coverageFocusKey] = map[string]any{
+		"id":                  "focus-cwi-version",
+		"coverageWorkItemIds": []string{"cwi-version"},
+		"targetRefs":          []string{"version_control_snapshot"},
+	}
+	input[coverageWorkItemContextKey] = map[string]any{
+		"currentFocus": map[string]any{
+			"id":         "cwi-version",
+			"targetText": "version_control_snapshot",
+			"targetRefs": []string{"version_control_snapshot"},
+		},
+	}
+	input["targetSnapshots"] = []map[string]any{{
+		"targetRef":        "go.mod",
+		"exists":           true,
+		"contentComplete":  true,
+		"safeForFileWrite": true,
+		"contentHash":      "hash-go-mod",
+		"content":          "module example",
+	}}
+	input["repairActionPackage"] = repairActionPackageFromRepairInput(input)
+	step := &runmodel.Step{
+		ID:    "run-repair-focus-contract/repair-version-001",
+		RunID: "run-repair-focus-contract",
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateDispatched,
+		Input: input,
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{
+			Nodes: []runtimemodel.BlockExecutionNode{{
+				ID:   "change-primary",
+				Kind: "patch/apply",
+				Input: map[string]any{
+					"targetRef": "go.mod",
+					"patchType": "text_replace",
+					"oldText":   "module example",
+					"newText":   "module example\n",
+					"baseHash":  "hash-go-mod",
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMRepairCoverageFocusBindingContract(step, output); err != nil {
+		t.Fatalf("validateLLMRepairCoverageFocusBindingContract err = %v, want current-focus patch normalized", err)
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok || len(graph.Nodes) != 1 {
+		t.Fatalf("normalized executionGraph = %+v, want one node", output[stepOutputKeyExecutionGraph])
+	}
+	if got := stringFromMap(graph.Nodes[0].Input, "coverageFocusId"); got != "focus-cwi-version" {
+		t.Fatalf("coverageFocusId = %q, want focus-cwi-version", got)
+	}
+	if got := stringSliceFromValue(graph.Nodes[0].Input["coverageWorkItemIds"]); len(got) != 1 || got[0] != "cwi-version" {
+		t.Fatalf("coverageWorkItemIds = %+v, want cwi-version", got)
+	}
+}
+
 func TestValidateLLMRepairCoverageFocusAllowsStructuredBlocker(t *testing.T) {
 	run := repairFocusContractRun()
 	step := repairFocusContractStep()
