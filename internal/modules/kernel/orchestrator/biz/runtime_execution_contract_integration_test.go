@@ -2710,6 +2710,164 @@ func TestValidateLLMExecutionOutputContractNormalizesManagedValidationSession(t 
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsManagedValidationProcessLifecycle(t *testing.T) {
+	scratch := "/tmp/workorch-validation-test/managed-validation-process"
+	run := &runmodel.Run{
+		ID:              "run-managed-validation-process",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	requiredOutput := concreteValidationEvidenceRequiredOutputWithScratch(
+		map[string]any{validationScratchDirKey: scratch},
+		map[string]any{},
+		nil,
+	)
+	step := &runmodel.Step{
+		ID:   "run-managed-validation-process/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			validationScratchDirKey:     scratch,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": requiredOutput,
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "managed-process",
+				"kind": managedValidationSessionNodeKind,
+				"input": map[string]any{
+					"allocatePort": true,
+					"observation": map[string]any{
+						"command":       "sh",
+						"args":          []string{"-c", "sleep 10 & pid=$!; sleep 0.1; kill $pid; wait $pid 2>/dev/null || true; printf ok"},
+						"timeoutMillis": int64(5000),
+						"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+							"targetRefs":    []string{"managed-process"},
+							"substituteFor": "runtime-managed process lifecycle",
+						}),
+					},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want managed validation process lifecycle allowed", err)
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok || len(graph.Nodes) != 1 {
+		t.Fatalf("executionGraph = %+v, want normalized graph", output[stepOutputKeyExecutionGraph])
+	}
+	if !runtimeGraphNodeIsManagedValidation(graph.Nodes[0]) {
+		t.Fatalf("node = %+v, want managed validation metadata preserved", graph.Nodes[0])
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsManagedValidationGlobalProcessTermination(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-managed-validation-global-termination",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-managed-validation-global-termination/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": concreteValidationEvidenceRequiredOutputWithScratch(
+					map[string]any{validationScratchDirKey: "/tmp/workorch-validation-test/managed-global-termination"},
+					map[string]any{},
+					nil,
+				),
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "managed-process",
+				"kind": managedValidationSessionNodeKind,
+				"input": map[string]any{
+					"observation": map[string]any{
+						"command": "sh",
+						"args":    []string{"-c", "pkill -f workorch || true"},
+						"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+							"substituteFor": "runtime-managed process lifecycle",
+						}),
+					},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "global process termination") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want global process termination rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsManagedValidationBackgroundWithoutWait(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-managed-validation-background-without-wait",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-managed-validation-background-without-wait/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": concreteValidationEvidenceRequiredOutputWithScratch(
+					map[string]any{validationScratchDirKey: "/tmp/workorch-validation-test/managed-background-without-wait"},
+					map[string]any{},
+					nil,
+				),
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "managed-process",
+				"kind": managedValidationSessionNodeKind,
+				"input": map[string]any{
+					"observation": map[string]any{
+						"command": "sh",
+						"args":    []string{"-c", "sleep 10 & printf started"},
+						"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+							"substituteFor": "runtime-managed process lifecycle",
+						}),
+					},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "must wait for all background work") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want background without wait rejection", err)
+	}
+}
+
 func TestConcreteValidationRequiredOutputIncludesManagedSessionExample(t *testing.T) {
 	requiredOutput := concreteValidationEvidenceRequiredOutput(nil)
 	if !stringSliceContains(stringSliceFromValue(requiredOutput["acceptedKinds"]), managedValidationSessionNodeKind) {

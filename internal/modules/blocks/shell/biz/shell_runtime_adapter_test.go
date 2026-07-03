@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -423,6 +424,81 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReleasesManagedValidationScratchOnPoli
 	}
 	if _, statErr := os.Stat(scratchDirectory); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("scratchDirectory stat = %v, want removed by policy rejection cleanup", statErr)
+	}
+}
+
+func TestRuntimeAdapter_ExecuteRuntimeStepAllowsManagedValidationProcessLifecycle(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+	scratchDirectory := filepath.Join(os.TempDir(), "workorch-shell-managed-validation-test", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
+	if err := os.MkdirAll(scratchDirectory, 0o755); err != nil {
+		t.Fatalf("mkdir scratch: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(scratchDirectory)
+	})
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceID:                   "ws-managed-validation-process",
+		RunID:                         "run-managed-validation-process",
+		StepID:                        "run-managed-validation-process/verify",
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command":              "sh",
+			"args":                 []any{"-c", "sleep 10 & pid=$!; sleep 0.1; kill $pid; wait $pid 2>/dev/null || true; printf managed-ok"},
+			"validationScratchDir": scratchDirectory,
+			"managedValidation": map[string]any{
+				"runtimeManaged": true,
+				"autoCleanup":    true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep err = %v, want managed validation process lifecycle allowed", err)
+	}
+	if result.Output["status"] != "completed" || !strings.Contains(fmt.Sprint(result.Output["stdout"]), "managed-ok") {
+		t.Fatalf("output = %+v, want completed managed validation shell", result.Output)
+	}
+	managed, _ := result.Output["managedValidation"].(map[string]any)
+	if managed["resourcesReleased"] != true {
+		t.Fatalf("managedValidation = %+v, want resources released", managed)
+	}
+}
+
+func TestRuntimeAdapter_ExecuteRuntimeStepRejectsManagedValidationGlobalProcessTermination(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: t.TempDir(),
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command": "sh",
+			"args":    []any{"-c", "pkill -f workorch || true"},
+			"managedValidation": map[string]any{
+				"runtimeManaged": true,
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("ExecuteRuntimeStep err = nil, want managed validation to reject global process termination")
+	}
+}
+
+func TestRuntimeAdapter_ExecuteRuntimeStepRejectsManagedValidationBackgroundWithoutWait(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: t.TempDir(),
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command": "sh",
+			"args":    []any{"-c", "sleep 10 & printf started"},
+			"managedValidation": map[string]any{
+				"runtimeManaged": true,
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("ExecuteRuntimeStep err = nil, want managed validation to reject background process without wait")
 	}
 }
 

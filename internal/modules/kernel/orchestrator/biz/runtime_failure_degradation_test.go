@@ -76,6 +76,22 @@ func TestDegradedRuntimeFailureOutputUsesPolicyCategoryWithoutBusinessSpecialCas
 	}
 }
 
+func TestDegradedRuntimeFailureOutputDoesNotSkipRequiredValidationMCP(t *testing.T) {
+	run := auxiliaryMCPFallbackRun()
+	step := auxiliaryMCPFallbackStep()
+	step.Input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+	step.Input["boundedValidationRequired"] = true
+
+	if output, ok := degradedRuntimeFailureOutput(run, step, map[string]any{
+		"status":   "failed",
+		"stage":    "mcp_tool_call_failed",
+		"serverId": "mcp-lsp-bridge",
+		"tool":     "lsp_initialize",
+	}, errors.New("mcp tool failed")); ok {
+		t.Fatalf("degradedRuntimeFailureOutput output=%+v ok=true, want required validation MCP to stay recoverable", output)
+	}
+}
+
 func auxiliaryMCPFallbackRun() *runmodel.Run {
 	return &runmodel.Run{
 		ID:          "run-auxiliary-mcp-fallback",

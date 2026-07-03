@@ -896,11 +896,20 @@ func validateConcreteValidationGraphShellSafety(step *runModel.Step, graph runti
 			continue
 		}
 		executableCommandLine := shellCommandLineMaskHereDocBodies(commandLine)
-		if shellCommandLineContainsProcessTermination(executableCommandLine) {
-			return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationProcessControlForbidden, "concrete validation evidence graph must use non-destructive bounded validation; shell process termination is not allowed")
-		}
-		if shellCommandLineStartsDetachedProcess(executableCommandLine) {
-			return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationDetachedProcessForbidden, "concrete validation evidence graph must not start detached or background processes; use a bounded foreground command, timeout-controlled harness, or controlled substitute")
+		if runtimeGraphNodeIsManagedValidation(node) {
+			if shellCommandLineContainsForbiddenManagedProcessTermination(executableCommandLine) {
+				return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationProcessControlForbidden, "managed validation shell may only control its own bounded lifecycle; global process termination commands are not allowed")
+			}
+			if shellCommandLineStartsDetachedProcess(executableCommandLine) {
+				return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationDetachedProcessForbidden, "managed validation shell must wait for all background work and must not use detached process launchers")
+			}
+		} else {
+			if shellCommandLineContainsProcessTermination(executableCommandLine) {
+				return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationProcessControlForbidden, "concrete validation evidence graph must use non-destructive bounded validation; shell process termination is not allowed")
+			}
+			if shellCommandLineStartsDetachedProcess(executableCommandLine) {
+				return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationDetachedProcessForbidden, "concrete validation evidence graph must not start detached or background processes; use a bounded foreground command, timeout-controlled harness, or controlled substitute")
+			}
 		}
 		allowScratchWrites := validationEvidenceModeAllowsScratchWrites(nodeValidationEvidenceMode(node))
 		if shellCommandLineContainsWorkspaceFileMutation(executableCommandLine, allowScratchWrites, validationScratchDir) {
@@ -971,6 +980,22 @@ func shellCommandLineContainsProcessTermination(commandLine string) bool {
 	return false
 }
 
+func shellCommandLineContainsForbiddenManagedProcessTermination(commandLine string) bool {
+	padded := " " + strings.ToLower(strings.TrimSpace(commandLine)) + " "
+	for _, marker := range []string{
+		" pkill ",
+		" killall ",
+		" xargs kill",
+		" fuser -k",
+		" kill -",
+	} {
+		if strings.Contains(padded, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func shellCommandLineStartsDetachedProcess(commandLine string) bool {
 	lower := strings.ToLower(strings.TrimSpace(commandLine))
 	if lower == "" {
@@ -980,7 +1005,18 @@ func shellCommandLineStartsDetachedProcess(commandLine string) bool {
 	if strings.Contains(padded, " nohup ") || strings.Contains(padded, " setsid ") {
 		return true
 	}
-	return shellCommandLineContainsStandaloneAmpersand(lower)
+	return shellCommandLineContainsStandaloneAmpersand(lower) && !shellCommandLineWaitsForBackgroundWork(lower)
+}
+
+func shellCommandLineWaitsForBackgroundWork(commandLine string) bool {
+	padded := " " + strings.ToLower(strings.TrimSpace(commandLine)) + " "
+	trimmed := strings.TrimSpace(padded)
+	return strings.Contains(padded, " wait ") ||
+		strings.Contains(padded, ";wait ") ||
+		strings.Contains(padded, "&&wait ") ||
+		strings.HasPrefix(trimmed, "wait ") ||
+		strings.HasSuffix(trimmed, " wait") ||
+		trimmed == "wait"
 }
 
 func shellCommandLineContainsWorkspaceFileMutation(commandLine string, allowScratchWrites bool, validationScratchDir string) bool {

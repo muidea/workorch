@@ -63,6 +63,9 @@ func runtimeFailureCanDegrade(run *runModel.Run, step *runModel.Step, output map
 	if run == nil || step == nil || strings.TrimSpace(step.Kind) != "mcp/tool_call" {
 		return false
 	}
+	if inputRequiresConcreteValidationEvidence(step.Input) {
+		return false
+	}
 	if graphNodeID(step) == "" {
 		return false
 	}

@@ -1043,14 +1043,16 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 	output["graphFollowUpExpansionCount"] = count
 	output["graphFollowUpExpansionLimit"] = maxGraphFollowUpExpansionAttempts
 	output["ignoredExecutionGraph"] = true
+	output["status"] = "completed"
+	output["stage"] = "graph_follow_up_expansion_limit"
+	output["summary"] = "graph follow-up expansion limit reached; transitioned to assessment-only next-focus evaluation"
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {
 		return true, err
 	}
 	step.Output = output
 	input := o.graphManager().graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx, run, step, steps, count)
-	limitErr := fmt.Errorf("%w: graph follow-up expansion limit exceeded", common.ErrInvalidArgument)
-	if finalizeErr := o.finalizeRejectedRuntimeStepForContinuation(ctx, run, step, toolCall, output, "runtime completion gate failed", limitErr); finalizeErr != nil {
+	if finalizeErr := o.finalizeGovernedRuntimeStep(ctx, run, step, toolCall, output); finalizeErr != nil {
 		return true, finalizeErr
 	}
 	return true, o.RequestUniqueDispatchStep(ctx, run, graphExpansionLimitAssessmentFollowUpStepID(run.ID, step), initialStepKind(run), input, workspaceIDForDispatch(run, workspace))

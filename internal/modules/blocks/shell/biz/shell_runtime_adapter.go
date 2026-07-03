@@ -77,7 +77,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		return runtimemodel.StepExecutionResult{}, err
 	}
 	execCommand, execArgs, commandNormalization := normalizeShellExecutionCommand(command, args)
-	if err := validateShellCommandPolicy(execCommand, execArgs, deliverableDirectory); err != nil {
+	if err := validateShellCommandPolicy(execCommand, execArgs, deliverableDirectory, shellInputHasManagedValidation(request.Input)); err != nil {
 		now := time.Now().UTC()
 		output := shellBaseOutput(request.Input, command, args, deliverableDirectory, commandNormalization, execCommand)
 		output["status"] = "failed"
@@ -844,7 +844,7 @@ func shellCommandArgs(input any) ([]string, error) {
 	}
 }
 
-func validateShellCommandPolicy(command string, args []string, deliverableDirectory string) error {
+func validateShellCommandPolicy(command string, args []string, deliverableDirectory string, allowManagedProcessControl bool) error {
 	base := filepath.Base(strings.TrimSpace(command))
 	if base == "" {
 		return common.ErrInvalidArgument
@@ -871,7 +871,7 @@ func validateShellCommandPolicy(command string, args []string, deliverableDirect
 			return fmt.Errorf("%w: git force push is not allowed", common.ErrInvalidArgument)
 		}
 	case "sh", "bash", "zsh":
-		if shellScriptIsDangerous(args) {
+		if shellScriptIsDangerous(args, allowManagedProcessControl) {
 			return fmt.Errorf("%w: destructive shell script is not allowed", common.ErrInvalidArgument)
 		}
 		if shellScriptStartsDetachedProcess(args) {
@@ -945,7 +945,7 @@ func gitCommandIsDangerous(args []string) bool {
 	return false
 }
 
-func shellScriptIsDangerous(args []string) bool {
+func shellScriptIsDangerous(args []string, allowManagedProcessControl bool) bool {
 	for idx, arg := range args {
 		if arg != "-c" || idx+1 >= len(args) {
 			continue
@@ -956,13 +956,6 @@ func shellScriptIsDangerous(args []string) bool {
 			"rm -fr /",
 			"rm -rf .git",
 			"rm -fr .git",
-			" fuser -k ",
-			" fuser -k",
-			" xargs kill",
-			" pkill ",
-			" killall ",
-			" kill ",
-			" kill -",
 			"sudo ",
 			" shutdown",
 			" reboot",
@@ -978,8 +971,27 @@ func shellScriptIsDangerous(args []string) bool {
 				return true
 			}
 		}
+		if shellScriptHasForbiddenProcessTermination(padded, allowManagedProcessControl) {
+			return true
+		}
 	}
 	return false
+}
+
+func shellScriptHasForbiddenProcessTermination(paddedScript string, allowManagedProcessControl bool) bool {
+	for _, marker := range []string{
+		" fuser -k ",
+		" fuser -k",
+		" xargs kill",
+		" pkill ",
+		" killall ",
+		" kill -",
+	} {
+		if strings.Contains(paddedScript, marker) {
+			return true
+		}
+	}
+	return !allowManagedProcessControl && strings.Contains(paddedScript, " kill ")
 }
 
 func shellScriptStartsDetachedProcess(args []string) bool {

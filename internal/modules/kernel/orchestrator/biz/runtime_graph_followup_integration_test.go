@@ -1918,7 +1918,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToRepeatedConcret
 		ID:    common.StepID(string(runID) + "/follow-up-current"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateDispatched,
 		Input: map[string]any{
 			"graphFollowUp":              true,
 			stepInputKeyRuntimeStage:     runtimeStageVerification,
@@ -1948,6 +1948,11 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToRepeatedConcret
 	if !boolValue(stored.Output["ignoredExecutionGraph"]) ||
 		stored.Output["graphFollowUpExpansionKind"] != "concrete_validation_evidence" {
 		t.Fatalf("current output = %+v, want concrete validation expansion limit marker", stored.Output)
+	}
+	if stored.State != common.StepStateCompleted ||
+		stringFromMap(stored.Output, failureOutputKeyClass) != "" ||
+		stringFromMap(stored.Output, "contractViolationType") != "" {
+		t.Fatalf("stored step state=%s output=%+v, want completed transition without failure diagnostics", stored.State, stored.Output)
 	}
 }
 
@@ -2023,7 +2028,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToConcreteFailure
 		ID:    common.StepID(string(runID) + "/follow-up-current"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateDispatched,
 		Input: map[string]any{
 			"graphFollowUp":                   true,
 			"concreteFailureEvidenceRequired": true,
@@ -2052,6 +2057,11 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToConcreteFailure
 	}
 	if !boolValue(stored.Output["ignoredExecutionGraph"]) {
 		t.Fatalf("ignoredExecutionGraph = %v, want true", stored.Output["ignoredExecutionGraph"])
+	}
+	if stored.State != common.StepStateCompleted ||
+		stringFromMap(stored.Output, failureOutputKeyClass) != "" ||
+		stringFromMap(stored.Output, "contractViolationType") != "" {
+		t.Fatalf("stored step state=%s output=%+v, want completed transition without failure diagnostics", stored.State, stored.Output)
 	}
 }
 
