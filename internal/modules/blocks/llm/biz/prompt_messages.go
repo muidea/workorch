@@ -2521,10 +2521,13 @@ func marshalCurrentActionPromptSection(section map[string]any, input map[string]
 	if section == nil {
 		section = map[string]any{}
 	}
+	var availableSnapshots []map[string]any
 	if snapshots := availableTargetSnapshotsPromptSummary(input, defaultPromptSnapshotBudget()); len(snapshots) > 0 {
+		availableSnapshots = snapshots
 		section["availableTargetSnapshots"] = snapshots
 	}
 	if recovery := contractViolationRecoveryPromptPayload(input); len(recovery) > 0 {
+		recovery = alignContractViolationRecoveryToCurrentAction(recovery, availableSnapshots)
 		section["contractViolationRecovery"] = recovery
 		requirements := stringSliceFromAny(section["requirements"])
 		recoveryRequirement := "Do not repeat contractViolationRecovery.actualOutputSummary; return one valid output that satisfies currentActionContract.requiredOutput when present, otherwise the current requiredOutput."
@@ -2537,7 +2540,75 @@ func marshalCurrentActionPromptSection(section map[string]any, input map[string]
 		)
 		section["requirements"] = requirements
 	}
+	if len(availableSnapshots) > 0 {
+		requirements := stringSliceFromAny(section["requirements"])
+		requirements = append(requirements,
+			"Use availableTargetSnapshots as the active patch target set for this turn; older diagnostic target scopes must not add extra targets.",
+			"Before returning patch/apply, compare the exact current snapshot content with the proposed oldText/newText and omit any target that would be a no-op.",
+		)
+		section["requirements"] = uniqueStrings(requirements)
+	}
 	return marshalPromptSection("Current Requested Action", section)
+}
+
+func alignContractViolationRecoveryToCurrentAction(recovery map[string]any, availableSnapshots []map[string]any) map[string]any {
+	if len(recovery) == 0 || len(availableSnapshots) == 0 {
+		return recovery
+	}
+	activeRefs := make([]string, 0, len(availableSnapshots))
+	activeSet := map[string]bool{}
+	for _, snapshot := range availableSnapshots {
+		targetRef := strings.TrimSpace(stringValue(snapshot["targetRef"]))
+		if targetRef == "" || activeSet[targetRef] {
+			continue
+		}
+		activeSet[targetRef] = true
+		activeRefs = append(activeRefs, targetRef)
+	}
+	if len(activeRefs) == 0 {
+		return recovery
+	}
+	aligned, ok := cloneAny(recovery)
+	if !ok {
+		return recovery
+	}
+	ret := recordFromAny(aligned)
+	if len(ret) == 0 {
+		return recovery
+	}
+	ret["activeTargetRefs"] = activeRefs
+	ret["targetScopePolicy"] = "currentAction.availableTargetSnapshots is the active target set; diagnostic targetScope must not expand this retry"
+	if correction := recordFromAny(ret["correctionContract"]); len(correction) > 0 {
+		if scope := strings.TrimSpace(stringValue(correction["targetScope"])); scope != "" {
+			correction["diagnosticTargetScope"] = scope
+		}
+		correction["targetScope"] = strings.Join(activeRefs, ",")
+		correction["activeTargetRefs"] = activeRefs
+		if snapshots := filterPromptSnapshotsByTargetRefs(mapSliceFromAny(correction["targetSnapshots"]), activeSet); len(snapshots) > 0 {
+			correction["targetSnapshots"] = snapshots
+		} else {
+			delete(correction, "targetSnapshots")
+		}
+		ret["correctionContract"] = correction
+	}
+	return ret
+}
+
+func filterPromptSnapshotsByTargetRefs(items []map[string]any, activeSet map[string]bool) []map[string]any {
+	if len(items) == 0 || len(activeSet) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(items))
+	seen := map[string]bool{}
+	for _, item := range items {
+		targetRef := strings.TrimSpace(stringValue(item["targetRef"]))
+		if targetRef == "" || !activeSet[targetRef] || seen[targetRef] {
+			continue
+		}
+		seen[targetRef] = true
+		ret = append(ret, item)
+	}
+	return ret
 }
 
 func availableTargetSnapshotsPromptSummary(input map[string]any, snapshotBudget promptSnapshotBudget) []map[string]any {
@@ -2564,7 +2635,7 @@ func availableTargetSnapshotsPromptSummary(input map[string]any, snapshotBudget 
 			return
 		}
 		seen[key] = true
-		_, contentVisible := promptVisibleSnapshotContent(raw, snapshotBudget.RepairContentLimit)
+		content, contentVisible := promptVisibleSnapshotContent(raw, snapshotBudget.RepairContentLimit)
 		promptContentComplete := contentVisible
 		promptSafeForFileWrite := contentVisible
 		promptExtractionRequired := !contentVisible
@@ -2587,6 +2658,9 @@ func availableTargetSnapshotsPromptSummary(input map[string]any, snapshotBudget 
 		if promptExtractionRequired {
 			item["promptSafetyNote"] = "prompt snapshot is not safe for complete file_write; use exact targeted replacement, unified_diff with visible context, or acquire exact current content first"
 		} else {
+			item["content"] = content
+			item["contentBytes"] = len([]byte(content))
+			item["contentView"] = "complete"
 			item["promptSafetyNote"] = "prompt snapshot is complete and safe for exact patch/apply with matching baseHash"
 		}
 		for key, value := range item {

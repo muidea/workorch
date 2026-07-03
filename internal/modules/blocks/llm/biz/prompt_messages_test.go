@@ -1170,6 +1170,8 @@ func TestCurrentActionIncludesAvailableTargetSnapshots(t *testing.T) {
 		"target.txt",
 		"sha256-current-target",
 		".workorch-workspaces/ws/target.txt",
+		"current target content",
+		"contentView",
 		"allowedPatchModes",
 		"promptSafeForFileWrite",
 	} {
@@ -1179,7 +1181,8 @@ func TestCurrentActionIncludesAvailableTargetSnapshots(t *testing.T) {
 	}
 	prompt := buildProviderFacingPrompt(req)
 	if strings.Contains(prompt.StablePrefix, "availableTargetSnapshots") ||
-		strings.Contains(prompt.StablePrefix, "sha256-current-target") {
+		strings.Contains(prompt.StablePrefix, "sha256-current-target") ||
+		strings.Contains(prompt.StablePrefix, "current target content") {
 		t.Fatalf("stable prefix leaked available snapshot summary: %s", prompt.StablePrefix)
 	}
 }
@@ -1222,6 +1225,95 @@ func TestCurrentActionMarksTruncatedAvailableSnapshotUnsafe(t *testing.T) {
 		if !strings.Contains(current.Content, want) {
 			t.Fatalf("C4.current-action missing %q: %s", want, current.Content)
 		}
+	}
+}
+
+func TestCurrentActionForcedNarrowPatchRetryHighlightsActiveSnapshotContent(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-forced-narrow-snapshot",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             "produce_state_changing_output",
+			"currentActionContract": map[string]any{
+				"schemaVersion":               "workorch.current_action_contract.v1",
+				"workspaceId":                 "ws-forced-narrow-snapshot",
+				"runId":                       "run-001",
+				"stepId":                      "step-001",
+				"repairObjective":             "produce_state_changing_output",
+				"stateChangingOutputRequired": true,
+				"nextAction":                  map[string]any{"kind": "state_change"},
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                []string{"patch/apply"},
+					"mustIncludeStateChangingNode": true,
+					"forbiddenKinds":               []string{"no_op_patch"},
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                []string{"patch/apply"},
+					"mustIncludeStateChangingNode": true,
+				},
+				"targetSnapshots": []map[string]any{
+					{
+						"targetRef":        "active-target.txt",
+						"content":          "current active value\n",
+						"contentHash":      "sha256-active",
+						"contentComplete":  true,
+						"safeForFileWrite": true,
+					},
+					{
+						"targetRef":        "already-current.txt",
+						"content":          "already desired value\n",
+						"contentHash":      "sha256-current",
+						"contentComplete":  true,
+						"safeForFileWrite": true,
+					},
+				},
+			},
+			"contractViolationRecovery": map[string]any{
+				"expectedContractAuthoritative": false,
+				"actualOutputSummary": map[string]any{
+					"error": "patch text_replace oldText/newText must describe a substantive change",
+				},
+				"correctionContract": map[string]any{
+					"mode":                "forced_narrow",
+					"requiredOutputShape": "valid_patch_apply",
+					"targetScope":         "failureTargets=stale-target.txt,active-target.txt,already-current.txt",
+					"targetSnapshots": []map[string]any{
+						{"targetRef": "stale-target.txt", "contentHash": "sha256-stale"},
+						{"targetRef": "active-target.txt", "contentHash": "sha256-active"},
+						{"targetRef": "already-current.txt", "contentHash": "sha256-current"},
+					},
+				},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	current, ok := promptContextSectionByID(context, "C4.current-action")
+	if !ok {
+		t.Fatalf("missing C4.current-action; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{
+		"current active value",
+		"already desired value",
+		"activeTargetRefs",
+		"diagnosticTargetScope",
+		"currentAction.availableTargetSnapshots is the active target set",
+		"omit any target that would be a no-op",
+	} {
+		if !strings.Contains(current.Content, want) {
+			t.Fatalf("C4.current-action missing %q: %s", want, current.Content)
+		}
+	}
+	if strings.Contains(current.Content, `"targetRef":"stale-target.txt"`) {
+		t.Fatalf("C4.current-action retained stale diagnostic target snapshot: %s", current.Content)
 	}
 }
 
