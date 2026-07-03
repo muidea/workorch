@@ -1108,6 +1108,14 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 	if nextAction == "" {
 		nextAction = strings.TrimSpace(convergenceNextActionKind(nil, input))
 	}
+	authorityFocus := dispatchAuthorityCurrentFocus(input)
+	authorityMissing := coverageWorkItemMissingEvidenceKindSet(authorityFocus)
+	if authorityMissing["state_change"] && !authorityMissing["validation"] && !authorityMissing["artifact"] &&
+		(state == convergenceStateNeedEvidence || nextAction == "repair" || nextAction == "acquire_evidence") &&
+		!targetSnapshotPrerequisiteActive(input) {
+		appendAuthorityDiagnostic(input, "next_action_mismatch_missing_state_change", "error", "internal_authority_mismatch", "nextAction", "coverage focus missing state_change cannot use evidence acquisition contract")
+		return convergenceDispatchMisalignmentError("next_action_mismatch_missing_state_change: missing state_change requires state_change next action")
+	}
 	pkg := mapFromValue(input["repairActionPackage"])
 	pkgObjective := strings.TrimSpace(stringFromMap(pkg, "repairObjective"))
 	prerequisiteActive := targetSnapshotPrerequisiteActive(input)

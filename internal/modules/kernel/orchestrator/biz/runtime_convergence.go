@@ -353,6 +353,18 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 		return true
 	case "repair", "acquire_evidence":
 		convergenceContractAttachCoverageContext(input, contract)
+		if convergenceCurrentFocusNeedsStateChange(input) {
+			if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
+				populateProfileStateChangingEvidenceConvergenceContract(input, contract, pkg)
+				return true
+			}
+			if stateChangeRequiresTargetSnapshotAcquisition(input, contract.RepairActionPackage) {
+				populateTargetSnapshotAcquisitionConvergenceContract(input, contract)
+				return true
+			}
+			populateCoverageWorkItemStateChangeConvergenceContract(input, contract)
+			return true
+		}
 		if convergenceCurrentFocusNeedsValidationWithoutStateChange(input) {
 			populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
 			return true
@@ -775,6 +787,16 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 
 func coverageWorkItemStateChangeAuthorityNextActionKind(run *runModel.Run, input map[string]any, focus map[string]any, recomputeAuthority bool) string {
 	kind := strings.TrimSpace(convergenceNextActionKind(run, input))
+	missing := coverageWorkItemMissingEvidenceKindSet(focus)
+	if missing["state_change"] && !missing["validation"] && !missing["artifact"] {
+		switch kind {
+		case "", "repair", "acquire_evidence", "validate", "validation", "produce_validation_evidence", "artifact", "produce_artifact_evidence", "assessment", "complete_coverage_assessment":
+			if derived := strings.TrimSpace(stringFromMap(gapNextActionForCoverageItem(focus), "kind")); derived != "" {
+				return derived
+			}
+			return "state_change"
+		}
+	}
 	if recomputeAuthority {
 		switch kind {
 		case "state_change", "produce_state_change", "acquire_target_snapshot":
@@ -1090,6 +1112,19 @@ func convergenceCurrentFocusNeedsValidationWithoutStateChange(input map[string]a
 		}
 		missing := coverageWorkItemExplicitOrDerivedMissingEvidenceKindSet(item)
 		if missing["validation"] && !missing["state_change"] {
+			return true
+		}
+	}
+	return false
+}
+
+func convergenceCurrentFocusNeedsStateChange(input map[string]any) bool {
+	for _, item := range convergenceCurrentFocusCandidates(input) {
+		if len(item) == 0 {
+			continue
+		}
+		missing := coverageWorkItemExplicitOrDerivedMissingEvidenceKindSet(item)
+		if missing["state_change"] && !missing["validation"] && !missing["artifact"] {
 			return true
 		}
 	}

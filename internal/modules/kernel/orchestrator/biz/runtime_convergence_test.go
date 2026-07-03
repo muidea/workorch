@@ -316,6 +316,76 @@ func TestBuildConvergenceContractClearsStaleEvidenceAcquisitionForProfileStateCh
 	}
 }
 
+func TestBuildConvergenceContractForcesStateChangeWhenFocusStillMissingStateChange(t *testing.T) {
+	focus := map[string]any{
+		"id":                    "cwi-snapshot",
+		"status":                "in_progress",
+		"source":                "deliverable",
+		"sourceScope":           "deliverable",
+		"sourceRequirementId":   "version_control_snapshot",
+		"targetText":            "version_control_snapshot",
+		"coverageWorkItemIds":   []string{"cwi-snapshot"},
+		"requiredEvidenceKinds": []string{"validation", "state_change"},
+		"missingEvidenceKinds":  []string{"state_change"},
+		"acceptedEvidenceByKind": map[string]any{
+			"validation": []string{"run/graph/verify", "run/graph/verify/validation/runtime-step"},
+		},
+		"structuredTargetRefs": []string{"cwi-snapshot", "deliverable:deliverable:version_control_snapshot", "version_control_snapshot"},
+	}
+	run := &runmodel.Run{
+		ID:          "run-stale-acquire-evidence-state-change",
+		WorkspaceID: "ws-stale-acquire-evidence-state-change",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"currentFocus":  cloneStepPayload(focus),
+				"nextAction":    map[string]any{"kind": "acquire_evidence"},
+			},
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus":      cloneStepPayload(focus),
+				"currentFocusItems": []map[string]any{cloneStepPayload(focus)},
+			},
+		},
+	}
+	input := map[string]any{
+		convergenceAuthorityKey: cloneStepPayload(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])),
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus":      cloneStepPayload(focus),
+			"currentFocusItems": []map[string]any{cloneStepPayload(focus)},
+		},
+		"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+		"concreteFailureEvidenceRequired": true,
+		"repairActionPackage": map[string]any{
+			"evidenceAcquisitionRequired": true,
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteFailureEvidence": true,
+				"stateChangingForbidden":             true,
+				"acceptedKinds":                      []string{"file/read", "git/read", "shell/command"},
+				"forbiddenKinds":                     []string{"patch/apply", "patch/preview"},
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	}
+	if !contract.StateChangingOutputRequired || contract.RepairObjective != repairObjectiveStateChangingOutput {
+		t.Fatalf("contract = %+v, want state-changing objective", contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if boolValue(contract.RepairActionPackage["evidenceAcquisitionRequired"]) ||
+		boolValue(required["mustProduceConcreteFailureEvidence"]) ||
+		boolValue(required["stateChangingForbidden"]) {
+		t.Fatalf("repairActionPackage = %+v requiredOutput = %+v, want stale evidence acquisition cleared", contract.RepairActionPackage, required)
+	}
+	if !requiredOutputHasAllowedStateChangingKind(required) {
+		t.Fatalf("requiredOutput = %+v, want allowed state-changing kind", required)
+	}
+}
+
 func TestBuildConvergenceContractDoesNotReopenPrimaryStateChangeWhenOnlyValidationMissing(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-profile-evidence-mixed-targets",
