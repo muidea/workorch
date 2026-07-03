@@ -3183,15 +3183,15 @@ func TestCoverageAssessmentIncompleteStateChangeRecomputeSyncsEvidenceNextAction
 	}
 
 	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
-	if contract.State != convergenceStateNeedEvidence {
-		t.Fatalf("contract state = %q, want %q before state-changing dispatch is actionable; contract=%+v", contract.State, convergenceStateNeedEvidence, contract)
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q from recomputed state_change authority; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
 	}
 	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
-	if got := stringFromMap(mapFromValue(mapFromValue(applied[convergenceAuthorityKey])["nextAction"]), "kind"); got != "acquire_evidence" {
-		t.Fatalf("convergenceAuthority.nextAction = %q, want acquire_evidence; applied=%+v", got, applied)
+	if got := stringFromMap(mapFromValue(mapFromValue(applied[convergenceAuthorityKey])["nextAction"]), "kind"); got != "state_change" {
+		t.Fatalf("convergenceAuthority.nextAction = %q, want state_change; applied=%+v", got, applied)
 	}
-	if got := stringFromMap(mapFromValue(mapFromValue(applied[gapBaselineKey])["nextAction"]), "kind"); got != "acquire_evidence" {
-		t.Fatalf("gapBaseline.nextAction = %q, want acquire_evidence; applied=%+v", got, applied)
+	if got := stringFromMap(mapFromValue(mapFromValue(applied[gapBaselineKey])["nextAction"]), "kind"); got != "state_change" {
+		t.Fatalf("gapBaseline.nextAction = %q, want state_change; applied=%+v", got, applied)
 	}
 	applied[stepInputKeyStagePacket] = map[string]any{"schemaVersion": "workorch.stage_packet.v1"}
 	if err := validateConvergenceDispatchInput(applied); err != nil {

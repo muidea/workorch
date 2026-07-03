@@ -115,13 +115,19 @@ func contractViolationRuleFromType(violationType string) string {
 }
 
 func contractViolationFromFailedStep(run *runModel.Run, step *runModel.Step, execErr error, attempt int, maxAttempts int, signatureRepeatCount int) (runtimemodel.ContractViolation, bool) {
-	if run == nil || step == nil || strings.TrimSpace(step.Kind) != llmWorkspaceExecutionStepKind {
+	if run == nil || step == nil {
 		return runtimemodel.ContractViolation{}, false
 	}
 	output := step.Output
 	violationType := strings.TrimSpace(stringFromMap(output, outputKeyContractViolationType))
 	class := strings.TrimSpace(stringFromMap(output, failureOutputKeyClass))
-	if violationType == "" && class != failureClassDoDCoverageMissing && !runtimeFailureIsLLMContractLoop(step) {
+	if strings.TrimSpace(step.Kind) != llmWorkspaceExecutionStepKind && violationType == "" {
+		return runtimemodel.ContractViolation{}, false
+	}
+	if strings.TrimSpace(step.Kind) == llmWorkspaceExecutionStepKind &&
+		violationType == "" &&
+		class != failureClassDoDCoverageMissing &&
+		!runtimeFailureIsLLMContractLoop(step) {
 		return runtimemodel.ContractViolation{}, false
 	}
 	rule := contractViolationRuleFromStep(step)

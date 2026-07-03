@@ -119,6 +119,75 @@ func TestAttachContractViolationTypeClassifiesCoverageTargetsRequired(t *testing
 	}
 }
 
+func TestCoverageBoundPatchAcceptsAuthorityCoverageWorkItemID(t *testing.T) {
+	run := &runModel.Run{ID: "run-coverage-target", WorkspaceID: "ws-coverage-target"}
+	step := &runModel.Step{
+		ID:    "run-coverage-target/graph-001/001-patch",
+		RunID: run.ID,
+		Kind:  "patch/apply",
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"runtimeStage":                runtimeStageRepair,
+			"repairObjective":             "produce_state_changing_output",
+			"repairActionPackage": map[string]any{
+				"coverageTargetSet": []map[string]any{{
+					"coverageTargetToken": "source_change",
+					"sourceRequirementId": "source_change",
+				}},
+				"coverageFocus": map[string]any{
+					"id":                  "focus-cwi-036",
+					"coverageWorkItemIds": []string{"cwi-036"},
+					"targetRefs":          []string{"cwi-036", "deliverable:deliverable:source_change", "source_change"},
+				},
+				"requiredOutput": map[string]any{
+					"coverageFocusId":     "focus-cwi-036",
+					"coverageWorkItemIds": []string{"cwi-036"},
+					"structuredTargetRefs": []string{
+						"cwi-036",
+						"deliverable:deliverable:source_change",
+						"source_change",
+					},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"patches": []map[string]any{{
+			"targetRef":       "main_test.go",
+			"patchType":       "text_replace",
+			"coverageTargets": []string{"cwi-036"},
+		}},
+	}
+
+	if err := validatePatchStepCoverageTargetsBeforeRuntime(run, step, output); err != nil {
+		t.Fatalf("validatePatchStepCoverageTargetsBeforeRuntime err = %v, want nil", err)
+	}
+}
+
+func TestPatchStepContractViolationDiagnosticsAreRecoverable(t *testing.T) {
+	run := &runModel.Run{ID: "run-patch-contract", WorkspaceID: "ws-patch-contract"}
+	step := &runModel.Step{
+		ID:     "run-patch-contract/graph-001/001-patch",
+		RunID:  run.ID,
+		Kind:   "patch/apply",
+		State:  common.StepStateFailed,
+		Input:  map[string]any{"runtimeStage": runtimeStageRepair},
+		Output: map[string]any{},
+	}
+	err := errors.New("invalid argument: coverage-bound state-changing patch/apply must declare coverageTargets matching current Goal, DoD, or deliverable coverage targets")
+
+	attachContractViolationType(step.Output, err)
+	attachRuntimeFailureClassification(step.Output, classifyRuntimeFailure(step, step.Output, "runtime state-changing contract gate failed", err))
+	attachContractViolationDiagnostics(run, step, err)
+
+	if got := mapFromValue(step.Output[stepOutputKeyContractViolation]); len(got) == 0 {
+		t.Fatalf("contractViolation = %+v, want nested recoverable violation", step.Output[stepOutputKeyContractViolation])
+	}
+	if !failedStepHasRecoverableContractViolation(step) {
+		t.Fatalf("failedStepHasRecoverableContractViolation = false, want true")
+	}
+}
+
 func TestRuntimeContextIntegrityGateCoverageTargetFailureCanRecover(t *testing.T) {
 	step := &runModel.Step{
 		ID:    common.StepID("run-ctx-coverage/repair-001"),

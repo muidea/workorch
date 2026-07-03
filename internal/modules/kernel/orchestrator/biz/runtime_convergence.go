@@ -669,6 +669,28 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 			populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
 			return true
 		}
+		switch coverageWorkItemStateChangeAuthorityNextActionKind(run, input, focus, recomputeAuthority) {
+		case "state_change", "produce_state_change":
+			if stateChangeRequiresTargetSnapshotAcquisition(input, contract.RepairActionPackage) {
+				populateTargetSnapshotAcquisitionConvergenceContract(input, contract)
+				return true
+			}
+			populateCoverageWorkItemStateChangeConvergenceContract(input, contract)
+			return true
+		case "acquire_target_snapshot":
+			populateTargetSnapshotAcquisitionConvergenceContract(input, contract)
+			return true
+		case "validate", "validation", "produce_validation_evidence", "artifact", "produce_artifact_evidence":
+			populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
+			return true
+		case "repair", "acquire_evidence":
+			if (missing["validation"] || missing["artifact"]) && rejectedContinuationSchemaInvalidValidationFirst(run, input, failedStep) {
+				populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
+				return true
+			}
+			populateCoverageWorkItemEvidenceConvergenceContract(input, contract)
+			return true
+		}
 		if stateChangingRepairHasActionableImplementationSurface(input, contract.RepairActionPackage) ||
 			len(mapSliceFromValue(contract.RepairActionPackage["targetSnapshots"])) > 0 ||
 			len(filterAdmissibleRuntimeRepairTargetRefs(stringSliceFromValue(contract.RepairActionPackage["repairTargetSet"]))) > 0 {
@@ -721,6 +743,20 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 	}
 	populateCoverageWorkItemAssessmentConvergenceContract(contract)
 	return true
+}
+
+func coverageWorkItemStateChangeAuthorityNextActionKind(run *runModel.Run, input map[string]any, focus map[string]any, recomputeAuthority bool) string {
+	kind := strings.TrimSpace(convergenceNextActionKind(run, input))
+	if recomputeAuthority {
+		switch kind {
+		case "state_change", "produce_state_change", "acquire_target_snapshot":
+			return kind
+		}
+		if derived := strings.TrimSpace(stringFromMap(gapNextActionForCoverageItem(focus), "kind")); derived != "" {
+			return derived
+		}
+	}
+	return kind
 }
 
 func populateCoverageWorkItemAssessmentConvergenceContract(contract *ConvergenceContract) {

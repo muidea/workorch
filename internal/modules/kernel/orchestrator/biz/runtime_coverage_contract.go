@@ -157,6 +157,33 @@ func coverageBoundTargetTokens(step *runModel.Step) []string {
 			add(stringFromMap(item, key))
 		}
 	}
+	addAuthorityTargetRefs := func(source map[string]any) {
+		if len(source) == 0 {
+			return
+		}
+		for _, key := range []string{
+			"id",
+			"coverageFocusId",
+			"focusId",
+			"coverageWorkItemId",
+			"coverageTargetToken",
+			"sourceRequirementId",
+			"goalRequirementId",
+			"targetText",
+		} {
+			add(stringFromMap(source, key))
+		}
+		for _, key := range []string{
+			"coverageWorkItemIds",
+			"targetRefs",
+			"structuredTargetRefs",
+			"sourceRequirementAliases",
+		} {
+			for _, value := range stringSliceFromValue(source[key]) {
+				add(value)
+			}
+		}
+	}
 	for _, item := range mapSliceFromValue(step.Input["missingDoDItems"]) {
 		add(stringFromMap(item, "item"))
 	}
@@ -183,6 +210,25 @@ func coverageBoundTargetTokens(step *runModel.Step) []string {
 		for _, item := range mapSliceFromValue(pkg["coverageTargetSet"]) {
 			addCoverageTargetMap(item)
 		}
+		addAuthorityTargetRefs(mapFromValue(pkg["coverageFocus"]))
+		addAuthorityTargetRefs(mapFromValue(pkg["requiredOutput"]))
+		addAuthorityTargetRefs(mapFromValue(mapFromValue(pkg["coverageWorkItemContext"])["currentFocus"]))
+	}
+	if currentAction := mapFromValue(step.Input["currentActionContract"]); len(currentAction) > 0 {
+		addAuthorityTargetRefs(currentAction)
+		addAuthorityTargetRefs(mapFromValue(currentAction["currentFocus"]))
+		addAuthorityTargetRefs(mapFromValue(currentAction["requiredOutput"]))
+	}
+	addAuthorityTargetRefs(mapFromValue(step.Input["requiredOutput"]))
+	addAuthorityTargetRefs(mapFromValue(step.Input["coverageFocus"]))
+	if packet := mapFromValue(step.Input[stepInputKeyStagePacket]); len(packet) > 0 {
+		addAuthorityTargetRefs(mapFromValue(packet["activeFocus"]))
+		addAuthorityTargetRefs(mapFromValue(packet["currentFocus"]))
+		addAuthorityTargetRefs(mapFromValue(packet["requiredOutput"]))
+	}
+	if authority := mapFromValue(step.Input["convergenceAuthority"]); len(authority) > 0 {
+		addAuthorityTargetRefs(mapFromValue(authority["coverageFocus"]))
+		addAuthorityTargetRefs(mapFromValue(mapFromValue(authority["coverageWorkItemContext"])["currentFocus"]))
 	}
 	for _, item := range coverageTargetsFromExecutionContextPackage(mapFromValue(step.Input[stepInputKeyExecutionContextPackage])) {
 		addCoverageTargetMap(item)
@@ -330,6 +376,22 @@ func patchNodeCoverageTargetTokens(input map[string]any) []string {
 	}
 	addValue(input["coverageTargets"])
 	addValue(input["coverageTargetSet"])
+	for _, key := range []string{
+		"coverageWorkItemId",
+		"coverageFocusId",
+		"focusId",
+	} {
+		add(stringFromMap(input, key))
+	}
+	for _, key := range []string{
+		"coverageWorkItemIds",
+		"targetRefs",
+		"structuredTargetRefs",
+	} {
+		for _, text := range stringSliceFromValue(input[key]) {
+			add(text)
+		}
+	}
 	return ret
 }
 
