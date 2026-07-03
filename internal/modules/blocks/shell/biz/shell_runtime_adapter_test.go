@@ -191,6 +191,41 @@ func TestRuntimeAdapter_ExecuteRuntimeStepAddsValidationFailureDiagnostic(t *tes
 	}
 }
 
+func TestRuntimeAdapter_ExecuteRuntimeStepRejectsValidationShellMaskedExitStatus(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command": "sh",
+			"args":    []any{"-c", "false; echo EXIT_CODE=$?"},
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+				"targetRefs":      []any{"feature-contract"},
+				"observedClaims":  []any{"feature contract was validated"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("ExecuteRuntimeStep err = nil, want masked validation exit status rejection")
+	}
+	if result.Output["status"] != "failed" ||
+		result.Output["stage"] != "shell_validation_contract_rejected" ||
+		result.Output["failureReason"] != "validation_shell_masks_failure" {
+		t.Fatalf("output = %+v, want validation shell contract rejection", result.Output)
+	}
+	diagnostic, ok := result.Output["validationFailureDiagnostic"].(map[string]any)
+	if !ok {
+		t.Fatalf("validationFailureDiagnostic = %T, want map", result.Output["validationFailureDiagnostic"])
+	}
+	if diagnostic["class"] != runtimemodel.ValidationDiagnosticCommandInvalid {
+		t.Fatalf("validationFailureDiagnostic = %+v, want command invalid", diagnostic)
+	}
+}
+
 func TestRuntimeAdapter_ExecuteRuntimeStepCarriesManagedValidationMetadata(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()

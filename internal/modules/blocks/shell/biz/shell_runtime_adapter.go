@@ -87,6 +87,17 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		attachShellValidationFailureDiagnostic(output, request.Input, execCommand, 0, false, true, err)
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
+	if err := validateValidationShellEvidencePolicy(request.Input, execCommand, execArgs); err != nil {
+		now := time.Now().UTC()
+		output := shellBaseOutput(request.Input, command, args, deliverableDirectory, commandNormalization, execCommand)
+		output["status"] = "failed"
+		output["stage"] = "shell_validation_contract_rejected"
+		output["reason"] = err.Error()
+		output["failureReason"] = "validation_shell_masks_failure"
+		attachManagedValidationResources(output, request, 0, now, now, "released")
+		attachShellValidationFailureDiagnostic(output, request.Input, execCommand, 0, false, true, err)
+		return runtimemodel.StepExecutionResult{Output: output}, err
+	}
 
 	timeout, err := shellCommandTimeout(request.Input, a.timeout)
 	if err != nil {
@@ -879,6 +890,62 @@ func validateShellCommandPolicy(command string, args []string, deliverableDirect
 		}
 	}
 	return nil
+}
+
+func validateValidationShellEvidencePolicy(input map[string]any, command string, args []string) error {
+	if len(mapFromShellInput(input, "validationEvidence")) == 0 {
+		return nil
+	}
+	base := filepath.Base(strings.TrimSpace(command))
+	if base != "sh" && base != "bash" && base != "zsh" {
+		return nil
+	}
+	script, ok := shellScriptArg(args)
+	if !ok {
+		return nil
+	}
+	if !shellScriptCapturesExitStatus(script) {
+		return nil
+	}
+	if shellScriptReturnsCapturedExitStatus(script) {
+		return nil
+	}
+	return fmt.Errorf("%w: validation shell command captures exit status without returning it; use fail-fast shell or exit with the captured status", common.ErrInvalidArgument)
+}
+
+func shellScriptArg(args []string) (string, bool) {
+	for idx, arg := range args {
+		if strings.TrimSpace(arg) == "-c" && idx+1 < len(args) {
+			return args[idx+1], true
+		}
+	}
+	return "", false
+}
+
+func shellScriptCapturesExitStatus(script string) bool {
+	lower := strings.ToLower(strings.TrimSpace(script))
+	return strings.Contains(lower, "$?") ||
+		strings.Contains(lower, "exit_code=") ||
+		strings.Contains(lower, "exitcode=")
+}
+
+func shellScriptReturnsCapturedExitStatus(script string) bool {
+	lower := strings.ToLower(strings.TrimSpace(script))
+	for _, marker := range []string{
+		"exit $?",
+		"exit ${?}",
+		"exit $status",
+		"exit ${status}",
+		"exit $exit_code",
+		"exit ${exit_code}",
+		"exit $exitcode",
+		"exit ${exitcode}",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func rmCommandIsDangerous(args []string, deliverableDirectory string) bool {

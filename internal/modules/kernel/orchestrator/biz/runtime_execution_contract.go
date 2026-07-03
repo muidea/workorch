@@ -585,6 +585,11 @@ func normalizeConcreteValidationEvidenceNodeEnvelope(node runtimemodel.BlockExec
 		}
 		changed = true
 	}
+	if strings.TrimSpace(stringFromMap(evidence, "mode")) == "controlled_substitute" &&
+		!validationEvidenceHasControlledSubstitute(evidence) {
+		evidence["substituteFor"] = concreteValidationSubstituteForFromEnvelope(envelope)
+		changed = true
+	}
 	if envelope.FocusID != "" && strings.TrimSpace(stringFromMap(nextInput, "coverageFocusId")) == "" {
 		nextInput["coverageFocusId"] = envelope.FocusID
 		changed = true
@@ -595,6 +600,19 @@ func normalizeConcreteValidationEvidenceNodeEnvelope(node runtimemodel.BlockExec
 	nextInput["validationEvidence"] = evidence
 	next.Input = nextInput
 	return next, true
+}
+
+func concreteValidationSubstituteForFromEnvelope(envelope concreteValidationEvidenceEnvelope) string {
+	refs := append([]string{}, envelope.WorkItemIDs...)
+	refs = append(refs, envelope.TargetRefs...)
+	refs = compactUniqueStrings(refs)
+	if len(refs) == 0 && envelope.FocusID != "" {
+		refs = []string{envelope.FocusID}
+	}
+	if len(refs) == 0 {
+		return "current coverage focus"
+	}
+	return "current coverage focus: " + strings.Join(refs, ", ")
 }
 
 func validateConcreteValidationRouteOutputContract(step *runModel.Step, output map[string]any) error {
