@@ -86,6 +86,8 @@ func currentActionNextActionFromInput(input map[string]any) map[string]any {
 	for _, source := range []map[string]any{
 		mapFromValue(input[convergenceAuthorityKey]),
 		mapFromValue(input[gapBaselineKey]),
+		mapFromValue(mapFromValue(input["executionContext"])[convergenceAuthorityKey]),
+		mapFromValue(mapFromValue(input["executionContext"])[gapBaselineKey]),
 	} {
 		if nextAction := mapFromValue(source["nextAction"]); len(nextAction) > 0 {
 			return cloneStepPayload(nextAction)

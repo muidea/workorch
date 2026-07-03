@@ -904,6 +904,98 @@ func TestFinalizeLLMDispatchAuthorityInputRebuildsStaleStagePacket(t *testing.T)
 	}
 }
 
+func TestFinalizeLLMDispatchAuthorityInputRebuildsExecutionContextStateChangeAuthority(t *testing.T) {
+	focus := map[string]any{
+		"id":                    "cwi-current",
+		"activeCoverageFocusId": "focus-cwi-current",
+		"coverageWorkItemIds":   []string{"cwi-current"},
+		"missingEvidenceKinds":  []string{"validation", "state_change"},
+		"requiredEvidenceKinds": []string{"validation", "state_change"},
+		"status":                "open",
+	}
+	run := &runModel.Run{
+		ID:          "run-final-state-change",
+		WorkspaceID: "ws-final-state-change",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"currentFocus":  cloneStepPayload(focus),
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+			},
+			gapBaselineKey: map[string]any{
+				"schemaVersion": gapBaselineSchema,
+				"currentFocus":  cloneStepPayload(focus),
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+			},
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus":    cloneStepPayload(focus),
+				"unresolvedItems": []map[string]any{cloneStepPayload(focus)},
+			},
+		},
+	}
+	input := map[string]any{
+		"executionContext": cloneStepPayload(run.ExecutionContext),
+		"convergenceContract": map[string]any{
+			"state":                           convergenceStateNeedEvidence,
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"concreteFailureEvidenceRequired": true,
+			"runtimeStage":                    runtimeStageRepair,
+			"runtimeStageMode":                "strict_convergence",
+		},
+		"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+		"concreteFailureEvidenceRequired": true,
+		"repairActionPackage": map[string]any{
+			"evidenceAcquisitionRequired": true,
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteFailureEvidence": true,
+				"acceptedKinds":                      []string{"file/read", "file/list", "shell/command"},
+				"forbiddenKinds":                     []string{"patch/apply", "patch/preview"},
+			},
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"schemaVersion": "workorch.stage_packet.v1",
+			"nextAction": map[string]any{
+				"kind": "acquire_evidence",
+			},
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteFailureEvidence": true,
+				"acceptedKinds":                      []string{"file/read", "file/list", "shell/command"},
+				"forbiddenKinds":                     []string{"patch/apply", "patch/preview"},
+			},
+		},
+	}
+
+	got, err := finalizeLLMDispatchAuthorityInput(run, "run-final-state-change/step-001", input)
+	if err != nil {
+		t.Fatalf("finalizeLLMDispatchAuthorityInput returned error = %v; input=%+v", err, got)
+	}
+	if state := stringFromMap(mapFromValue(got["convergenceContract"]), "state"); state != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract.state = %q, want %s; input=%+v", state, convergenceStateNeedStateChange, got)
+	}
+	packetNext := mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["nextAction"])
+	if kind := firstNonEmptyString(stringFromMap(packetNext, "type"), stringFromMap(packetNext, "kind")); kind != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("stagePacket.nextAction = %+v, want state_change", packetNext)
+	}
+	currentNext := mapFromValue(mapFromValue(got[currentActionContractKey])["nextAction"])
+	if kind := stringFromMap(currentNext, "kind"); kind != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("currentActionContract.nextAction = %+v, want state_change", currentNext)
+	}
+	for label, required := range map[string]map[string]any{
+		"requiredOutput":                       mapFromValue(got["requiredOutput"]),
+		"repairActionPackage.requiredOutput":   mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":           mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["requiredOutput"]),
+		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(got[currentActionContractKey])["requiredOutput"]),
+	} {
+		if !requiredOutputHasAllowedStateChangingKind(required) {
+			t.Fatalf("%s = %+v, want state-changing accepted kind", label, required)
+		}
+		if stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") {
+			t.Fatalf("%s.forbiddenKinds = %+v, want patch/apply not forbidden", label, required["forbiddenKinds"])
+		}
+	}
+}
+
 func TestDispatchPreCreateHardGateRejectsUnrebuildableFocusDriftBeforeRuntime(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-authority-hard-gate")

@@ -299,6 +299,9 @@ func finalizeLLMDispatchAuthorityInput(run *runModel.Run, stepID common.StepID, 
 	if input == nil {
 		input = map[string]any{}
 	}
+	if dispatchInputHasConvergenceAuthority(run, input) {
+		return rebuildDispatchInputFromConvergenceAuthority(run, stepID, input)
+	}
 	input = attachStagePacketToStepInput(run, stepID, input)
 	input = synchronizeCurrentRequiredOutputMirrors(input)
 	input = attachCurrentActionContractToInput(run, stepID, input)
