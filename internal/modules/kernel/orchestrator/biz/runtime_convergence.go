@@ -2013,6 +2013,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		delete(input, "repairGuidance")
 		delete(input, "repairActionPackage")
 		delete(input, "requiredOutput")
+		delete(input, stepInputKeyStagePacket)
 		return input
 	}
 	input["convergenceContract"] = compactConvergenceContract(contract)

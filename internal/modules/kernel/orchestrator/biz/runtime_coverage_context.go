@@ -105,16 +105,18 @@ func coverageWorkItemFocusPriority(item map[string]any) int {
 	switch {
 	case status == "failed" && missing["state_change"]:
 		return 0
-	case missing["state_change"]:
-		return 1
 	case status == "failed" || (len(stringSliceFromValue(item["rejectedEvidenceRefs"])) > 0 && state.HasActionableEvidenceGap()):
+		return 1
+	case status == "in_progress" && state.HasActionableEvidenceGap() && coverageWorkItemHasAcceptedEvidence(item):
 		return 2
-	case missing["validation"] || missing["artifact"]:
+	case missing["state_change"]:
 		return 3
+	case missing["validation"] || missing["artifact"]:
+		return 4
 	case state.NeedsAssessment():
-		return 4
+		return 5
 	default:
-		return 4
+		return 5
 	}
 }
 

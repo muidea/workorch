@@ -1846,6 +1846,58 @@ func TestCoverageWorkItemContextPrioritizesFailedItemsOverEvidenceReadyTopK(t *t
 	}
 }
 
+func TestCoverageWorkItemContextKeepsPartialProgressFocusBeforeNextStateChange(t *testing.T) {
+	revision := "rev-partial-progress"
+	items := []map[string]any{
+		{
+			"id":                     "cwi-085",
+			"definitionRevision":     revision,
+			"source":                 "deliverable",
+			"sourceScope":            "deliverable",
+			"sourceRequirementId":    "source_change",
+			"sourcePath":             "deliverables[0]",
+			"targetText":             "primary source change",
+			"normalizedSourceKey":    "deliverable:deliverable:source_change",
+			"requiredEvidenceKinds":  []string{"state_change", "validation"},
+			"status":                 "in_progress",
+			"acceptedEvidenceByKind": map[string]any{"state_change": []string{"run-032/graph-002/001-patch-config-go"}},
+			"acceptedEvidenceBindingByKind": map[string]any{
+				"state_change": []string{"run-032/graph-002/001-patch-config-go"},
+			},
+			"acceptedEvidenceRefs": []string{"run-032/graph-002/001-patch-config-go"},
+		},
+		{
+			"id":                    "cwi-088",
+			"definitionRevision":    revision,
+			"source":                "deliverable",
+			"sourceScope":           "deliverable",
+			"sourceRequirementId":   "version_control_snapshot",
+			"sourcePath":            "deliverables[1]",
+			"targetText":            "version control snapshot",
+			"normalizedSourceKey":   "deliverable:deliverable:version_control_snapshot",
+			"requiredEvidenceKinds": []string{"state_change", "validation"},
+			"status":                "open",
+		},
+	}
+
+	context := coverageWorkItemContextFromItems(revision, items, nil, nil)
+
+	focus := mapFromValue(context["currentFocus"])
+	if stringFromMap(focus, "id") != "cwi-085" {
+		t.Fatalf("currentFocus = %+v, want partial progress item cwi-085 before next untouched state_change item", focus)
+	}
+	if missing := stringSliceFromValue(focus["missingEvidenceKinds"]); len(missing) != 1 || missing[0] != "validation" {
+		t.Fatalf("currentFocus.missingEvidenceKinds = %+v, want validation only", missing)
+	}
+	if states := stringSliceFromValue(focus["nextAllowedConvergenceStates"]); !stringSliceContains(states, convergenceStateNeedValidation) {
+		t.Fatalf("currentFocus.nextAllowedConvergenceStates = %+v, want need_validation", states)
+	}
+	targets := coverageTargetSetFromWorkItemContext(context)
+	if len(targets) == 0 || stringFromMap(targets[0], "coverageWorkItemId") != "cwi-085" {
+		t.Fatalf("coverageTargetSet = %+v, want cwi-085 first", targets)
+	}
+}
+
 func TestCoverageWorkItemsPrioritizeMissingEvidenceBeforeAssessmentPendingWithRejectedHistory(t *testing.T) {
 	revision := "rev-focus-missing"
 	items := []map[string]any{

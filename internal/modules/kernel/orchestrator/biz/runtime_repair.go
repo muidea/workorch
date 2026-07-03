@@ -174,7 +174,7 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 	_ = o.steps.Update(ctx, step)
 	_ = o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
 	if graphBatchStep(step) {
-		if failedStepHasRecoverableContractViolation(step) && o.runtime != nil {
+		if o.runtime != nil {
 			return o.dispatchRuntimeRepairFollowUp(ctx, run, step, execErr)
 		}
 		if execErr != nil {

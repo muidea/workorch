@@ -2996,6 +2996,44 @@ func TestInitialStepInputAuthorityDeterministicCompletePreemptsStaleReplanStateC
 	}
 }
 
+func TestApplyConvergenceContractDeterministicCompleteClearsStaleStagePacket(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyStagePacket: map[string]any{
+			"schemaVersion": "workorch.stage_packet.v1",
+			"workspaceId":   "ws-stale-stage-packet",
+			"runId":         "run-stale-stage-packet",
+			"nextAction": map[string]any{
+				"type":      "acquire_evidence",
+				"subjectId": "cwi-stale",
+				"requiredOutput": map[string]any{
+					"acceptedKinds":  []string{"file/read"},
+					"forbiddenKinds": []string{"patch/apply"},
+				},
+			},
+		},
+		"convergenceContract": map[string]any{"state": convergenceStateNeedEvidence},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{"acceptedKinds": []string{"file/read"}},
+		},
+		"requiredOutput": map[string]any{"acceptedKinds": []string{"file/read"}},
+	}
+
+	applied := ApplyConvergenceContract(input, ConvergenceContract{
+		DeterministicComplete: true,
+		CompletionReason:      "coverage ledger is already satisfied",
+	})
+
+	if _, ok := applied[stepInputKeyStagePacket]; ok {
+		t.Fatalf("stagePacket = %+v, want stale packet cleared on deterministic complete", applied[stepInputKeyStagePacket])
+	}
+	if _, ok := applied["requiredOutput"]; ok {
+		t.Fatalf("requiredOutput = %+v, want cleared on deterministic complete", applied["requiredOutput"])
+	}
+	if _, ok := applied["repairActionPackage"]; ok {
+		t.Fatalf("repairActionPackage = %+v, want cleared on deterministic complete", applied["repairActionPackage"])
+	}
+}
+
 func TestCoverageAssessmentIncompleteRecomputePreemptsStaleAssessmentAuthorityWithEvidenceGap(t *testing.T) {
 	focus := map[string]any{
 		"id":                   "cwi-state-change",

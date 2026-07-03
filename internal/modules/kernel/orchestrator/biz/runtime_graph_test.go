@@ -168,6 +168,88 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchStepCompletionDispatchesNextNo
 	}
 }
 
+func TestRuntimeOrchestrator_GraphBatchPatchApplyFailureDispatchesRuntimeRepair(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-event-driven-graph-patch-repair")
+	workspaceID := common.WorkspaceID("ws-event-driven-graph-patch-repair")
+	stepID := common.StepID(runID + "/graph-001/002-patch-target")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	hub := events.NewMemoryHub()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: common.DoDID("dod-graph-patch-repair"), State: common.RunStateRunning, InitialStepKind: llmWorkspaceExecutionStepKind}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	step := &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  llmcommon.RuntimeBlockKindPatchApply,
+		State: common.StepStateDispatched,
+		Input: map[string]any{
+			stepInputKeyGraphBatch:      true,
+			stepInputKeyGraphRootStepID: string(runID + "/step-1"),
+			stepInputKeyGraphNodeID:     "patch-target",
+			"graphSeq":                  1,
+			"graphNodeSeq":              2,
+		},
+		Output: map[string]any{
+			"status": "failed",
+			"error":  "conflict: patch baseHash mismatch",
+		},
+	}
+	if err := stepRepo.Create(ctx, step); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{output: map[string]any{"completionState": "continue"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		hub,
+	)
+	orch.EnableEventDrivenDispatch()
+
+	if err := orch.handleRuntimeStepFailure(ctx, run, step, nil, step.Output, "runtime patch application failed", errors.New("conflict: patch baseHash mismatch")); err != nil {
+		t.Fatalf("handleRuntimeStepFailure: %v", err)
+	}
+
+	var repairDispatch *orchestratorcontracts.DispatchStepCommand
+	for _, envelope := range hub.Published() {
+		if envelope.Topic != orchestratorevents.TopicOrchestratorDispatchStepRequested {
+			continue
+		}
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
+		if !ok {
+			t.Fatalf("dispatch command = %#v, want DispatchStepCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		repairDispatch = &cmd
+		break
+	}
+	if repairDispatch == nil {
+		t.Fatalf("repair dispatch not published after graph batch patch failure; events=%+v", hub.Published())
+	}
+	if repairDispatch.Kind != llmWorkspaceExecutionStepKind || !boolValue(repairDispatch.Input[stepInputKeyRuntimeRepairFollowUp]) {
+		t.Fatalf("repair dispatch = %+v, want llm runtime repair follow-up", repairDispatch)
+	}
+	if got := stringFromMap(repairDispatch.Input, "failedStepId"); got != string(stepID) {
+		t.Fatalf("repair failedStepId = %q, want %s", got, stepID)
+	}
+	stored, err := stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get failed step: %v", err)
+	}
+	last := mapFromValue(stored.Output["lastFailureDiagnostics"])
+	if stringFromMap(last, "stepId") != string(stepID) {
+		t.Fatalf("lastFailureDiagnostics = %+v, want failed step context", last)
+	}
+}
+
 func TestRuntimeOrchestrator_EventDrivenDispatchPublishesAuthorityAlignedInput(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-event-driven-authority")
