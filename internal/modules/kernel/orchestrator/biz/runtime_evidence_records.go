@@ -98,6 +98,7 @@ func (o *RuntimeOrchestrator) recordValidationEvidenceRecordForStep(ctx context.
 		return common.ErrInvalidArgument
 	}
 	enrichEvidenceRecordWithRuntimeStepCoverageScope(record, step)
+	enrichEvidenceRecordWithValidationFailureDiagnostic(record, step)
 	if err := o.evidence.EvidenceRecords.Create(ctx, record); err != nil {
 		if err != common.ErrConflict {
 			return err
@@ -130,6 +131,29 @@ func enrichEvidenceRecordWithRuntimeStepCoverageScope(record *orchestratormodel.
 	}
 	if refs := stringSliceFromValue(scope["coverageWorkItemIds"]); len(refs) > 0 {
 		record.CoverageItemRefs = compactUniqueStrings(append(record.CoverageItemRefs, refs...))
+	}
+}
+
+func enrichEvidenceRecordWithValidationFailureDiagnostic(record *orchestratormodel.EvidenceRecord, step *runModel.Step) {
+	if record == nil ||
+		step == nil ||
+		record.Kind != orchestratormodel.EvidenceKindValidation ||
+		record.Status != orchestratormodel.EvidenceStatusRejected {
+		return
+	}
+	diagnostic := validationFailureDiagnosticFromStep(step, nil)
+	if len(diagnostic) == 0 {
+		return
+	}
+	if record.Metadata == nil {
+		record.Metadata = map[string]any{}
+	}
+	record.Metadata["validationFailureDiagnostic"] = diagnostic
+	if signature := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature)); signature != "" {
+		record.Metadata["failureSignature"] = signature
+	}
+	if class := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)); class != "" {
+		record.Metadata["failureClass"] = class
 	}
 }
 

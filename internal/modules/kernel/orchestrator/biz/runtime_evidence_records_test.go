@@ -34,10 +34,17 @@ func TestRecordValidationResultWritesAcceptedAndRejectedEvidenceRecords(t *testi
 		Output: map[string]any{"status": "ok"},
 	}
 	failedStep := &runmodel.Step{
-		ID:     "run-validation-evidence/step-failed",
-		RunID:  run.ID,
-		State:  common.StepStateFailed,
-		Output: map[string]any{"status": "failed", "error": "runtime validation failed"},
+		ID:    "run-validation-evidence/step-failed",
+		RunID: run.ID,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"status": "failed",
+			"error":  "runtime validation failed",
+			"validationFailureDiagnostic": map[string]any{
+				"class": orchestratormodel.ValidationDiagnosticBuildFailed,
+			},
+			failureOutputKeySignature: "validation-failure-signature",
+		},
 	}
 
 	if err := orch.recordValidationResult(ctx, run, passedStep, common.ValidationResultStatePassed, "runtime step completed", "tool-call-passed", ""); err != nil {
@@ -101,6 +108,10 @@ func TestRecordValidationResultWritesAcceptedAndRejectedEvidenceRecords(t *testi
 		failedRecord.Metadata["validationState"] != string(common.ValidationResultStateFailed) ||
 		failedRecord.Metadata["evidenceRef"] != "tool-call-failed" {
 		t.Fatalf("failed record = %+v, want rejected validation evidence", failedRecord)
+	}
+	if diagnostic := mapFromValue(failedRecord.Metadata["validationFailureDiagnostic"]); diagnostic["class"] != orchestratormodel.ValidationDiagnosticBuildFailed ||
+		failedRecord.Metadata["failureSignature"] != "validation-failure-signature" {
+		t.Fatalf("failed record metadata = %+v, want validation failure diagnostic", failedRecord.Metadata)
 	}
 	bySource, err := evidenceRepo.ListBySourceRef(ctx, run.ID, failedID)
 	if err != nil {

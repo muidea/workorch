@@ -798,9 +798,9 @@ func latestRejectedValidationDiagnosticForCoverageItem(run *runmodel.Run, item m
 		if record == nil ||
 			record.WorkspaceID != run.WorkspaceID ||
 			record.RunID != run.ID ||
-			record.Kind != runtimemodel.EvidenceKindDiagnostic ||
 			record.Status != runtimemodel.EvidenceStatusRejected ||
-			superseded[record.ID] {
+			superseded[record.ID] ||
+			!rejectedValidationDiagnosticEvidenceRecord(record) {
 			continue
 		}
 		if validationDiagnosticEvidenceMatchesCoverageItem(record, item) {
@@ -808,6 +808,20 @@ func latestRejectedValidationDiagnosticForCoverageItem(run *runmodel.Run, item m
 		}
 	}
 	return nil
+}
+
+func rejectedValidationDiagnosticEvidenceRecord(record *runtimemodel.EvidenceRecord) bool {
+	if record == nil || record.Status != runtimemodel.EvidenceStatusRejected {
+		return false
+	}
+	switch record.Kind {
+	case runtimemodel.EvidenceKindDiagnostic:
+		return validationDiagnosticClassFromEvidenceRecord(record) != ""
+	case runtimemodel.EvidenceKindValidation:
+		return validationDiagnosticClassFromEvidenceRecord(record) != ""
+	default:
+		return false
+	}
 }
 
 func validationDiagnosticEvidenceMatchesCoverageItem(record *runtimemodel.EvidenceRecord, item map[string]any) bool {
@@ -940,8 +954,8 @@ func repeatedValidationDiagnosticCountForCoverageItem(run *runmodel.Run, item ma
 		if record == nil ||
 			record.WorkspaceID != run.WorkspaceID ||
 			record.RunID != run.ID ||
-			record.Kind != runtimemodel.EvidenceKindDiagnostic ||
 			record.Status != runtimemodel.EvidenceStatusRejected ||
+			!rejectedValidationDiagnosticEvidenceRecord(record) ||
 			!validationDiagnosticEvidenceMatchesCoverageItem(record, item) {
 			continue
 		}
@@ -980,8 +994,8 @@ func validationNoDeltaRejectedDiagnosticCountForCoverageItem(run *runmodel.Run, 
 		if record == nil ||
 			record.WorkspaceID != run.WorkspaceID ||
 			record.RunID != run.ID ||
-			record.Kind != runtimemodel.EvidenceKindDiagnostic ||
 			record.Status != runtimemodel.EvidenceStatusRejected ||
+			!rejectedValidationDiagnosticEvidenceRecord(record) ||
 			!validationDiagnosticEvidenceMatchesCoverageItem(record, item) {
 			continue
 		}

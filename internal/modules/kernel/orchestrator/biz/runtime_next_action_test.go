@@ -1028,6 +1028,81 @@ func TestNextActionForRunNoDeltaValidationLoopRequestsStateChange(t *testing.T) 
 	}
 }
 
+func TestNextActionForRunRejectedValidationEvidenceLoopRequestsStateChange(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-rejected-validation-loop")
+	runID := common.RunID("run-next-action-rejected-validation-loop")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                     "cwi-validation-record-loop",
+				"status":                 "open",
+				"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+				"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindStateChange: {"state-change-before-validation-loop"}},
+				"missingEvidenceKinds":   []string{runtimemodel.EvidenceKindValidation},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for idx, id := range []string{"validation-loop-1", "validation-loop-2", "validation-loop-3"} {
+		timestamp := "2026-06-28T03:0" + string(rune('1'+idx)) + ":00Z"
+		if err := evidenceRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.EvidenceRecord{
+			ID:               common.EvidenceRecordID(id),
+			WorkspaceID:      workspaceID,
+			RunID:            runID,
+			Kind:             runtimemodel.EvidenceKindValidation,
+			Status:           runtimemodel.EvidenceStatusRejected,
+			SourceType:       evidenceRecordSourceTypeValidationResult,
+			SourceRef:        id + "-source",
+			CoverageItemRefs: []string{"cwi-validation-record-loop"},
+			CreatedAt:        timestamp,
+			UpdatedAt:        timestamp,
+			Metadata: map[string]any{
+				"validationFailureDiagnostic": map[string]any{"class": runtimemodel.ValidationDiagnosticBuildFailed},
+				"failureSignature":            "same-validation-record-loop",
+			},
+		}); err != nil {
+			t.Fatalf("create rejected validation evidence %s: %v", id, err)
+		}
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeStateChange || action.StageMode != "validation_no_delta" {
+		t.Fatalf("next action = %+v, want state_change for rejected validation evidence loop", action)
+	}
+	if !stringSliceContains(stringSliceFromValue(action.RequiredOutput["acceptedKinds"]), "patch/apply") ||
+		action.RequiredOutput["mustIncludeStateChangingNode"] != true {
+		t.Fatalf("required output = %+v, want state-changing output after rejected validation loop", action.RequiredOutput)
+	}
+	if stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeStateChange) {
+		t.Fatalf("forbidden actions = %+v, must not forbid state_change", action.ForbiddenActions)
+	}
+}
+
 func TestNextActionForRunNoDeltaValidationLoopResetsAfterAcceptedStateChange(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
