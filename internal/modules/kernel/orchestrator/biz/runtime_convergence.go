@@ -293,6 +293,13 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 			*contract = recomputed
 			return true
 		}
+		switch convergenceNextActionKind(run, input) {
+		case "assessment", "complete_coverage_assessment":
+			populateAuthorityRecomputeBlockedConvergenceContract(contract, recomputed.State)
+			return true
+		case "":
+			return false
+		}
 	}
 	switch convergenceNextActionKind(run, input) {
 	case "request_decision", "wait_decision", "request_governance":
@@ -369,6 +376,27 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 			return true
 		}
 		return false
+	}
+}
+
+func populateAuthorityRecomputeBlockedConvergenceContract(contract *ConvergenceContract, recomputedState string) {
+	if contract == nil {
+		return
+	}
+	contract.State = convergenceStateNeedGovernance
+	contract.RuntimeStage = runtimeStageDecision
+	contract.RuntimeStageMode = "contract_violation"
+	contract.GovernanceReason = "runtime authority recompute did not produce an executable convergence action"
+	if contract.RepairActionPackage == nil {
+		contract.RepairActionPackage = map[string]any{}
+	}
+	contract.RepairActionPackage["authorityRecomputeBlocked"] = true
+	if strings.TrimSpace(recomputedState) != "" {
+		contract.RepairActionPackage["recomputedState"] = strings.TrimSpace(recomputedState)
+	}
+	contract.RepairActionPackage["requiredOutput"] = map[string]any{
+		"mustResolveRuntimeAuthorityRecompute": true,
+		"recomputedState":                      strings.TrimSpace(recomputedState),
 	}
 }
 

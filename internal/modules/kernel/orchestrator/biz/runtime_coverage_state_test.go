@@ -145,6 +145,19 @@ func TestDeriveCoverageWorkItemState(t *testing.T) {
 			wantAction:        coverageWorkItemActionNeedEvidence,
 			wantActionableGap: true,
 		},
+		{
+			name: "failed item with stale empty missing derives validation gap",
+			item: map[string]any{
+				"id":                    "cwi-failed-stale-missing",
+				"status":                "failed",
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{},
+				"rejectedEvidenceRefs":  []string{"run/graph/validate"},
+				"currentGap":            "missing accepted evidence binding for required evidence kind: validation",
+			},
+			wantAction:        coverageWorkItemActionNeedEvidence,
+			wantActionableGap: true,
+		},
 	}
 
 	for _, tt := range tests {

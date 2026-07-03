@@ -3199,6 +3199,73 @@ func TestCoverageAssessmentIncompleteStateChangeRecomputeSyncsEvidenceNextAction
 	}
 }
 
+func TestCoverageAssessmentIncompleteRecomputeCannotFallThroughToAssessment(t *testing.T) {
+	focus := map[string]any{
+		"id":                    "cwi-ready-for-assessment",
+		"status":                "in_progress",
+		"sourceScope":           "dod_item",
+		"sourceRequirementId":   "dod-ready",
+		"targetText":            "neutral validated requirement",
+		"missingEvidenceKinds":  []string{},
+		"requiredEvidenceKinds": []string{"validation"},
+		"acceptedEvidenceByKind": map[string][]string{
+			"validation": {"run/graph/001-validate"},
+		},
+		"acceptedEvidenceBindingByKind": map[string][]string{
+			"validation": {"run/graph/001-validate"},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            "complete_dod_goal_coverage_assessment",
+		stepInputKeyAssessmentOnly:   true,
+		"contractViolationRetry":     true,
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus":  focus,
+			"nextAction":    map[string]any{"kind": "assessment"},
+		},
+		gapBaselineKey: map[string]any{
+			"schemaVersion": gapBaselineSchema,
+			"currentFocus":  focus,
+			"nextAction":    map[string]any{"kind": "assessment"},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": focus,
+			"unresolvedItems": []map[string]any{
+				focus,
+			},
+		},
+		stepInputKeyContractViolationRecovery: map[string]any{
+			"violatedRule":   contractViolationRuleCoverageAssessmentIncomplete,
+			"recoverability": "recompute_authority",
+			"correctionContract": map[string]any{
+				"requiredOutputShape": "traceable_coverage_assessment",
+				"runtimeRecomputedAuthority": map[string]any{
+					"owner":    "runtime",
+					"required": true,
+				},
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+	if contract.State != convergenceStateNeedGovernance {
+		t.Fatalf("contract state = %q, want %q when recompute still selects assessment; contract=%+v", contract.State, convergenceStateNeedGovernance, contract)
+	}
+	if contract.RuntimeStageMode != "contract_violation" {
+		t.Fatalf("runtimeStageMode = %q, want contract_violation", contract.RuntimeStageMode)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if applied[stepInputKeyAssessmentOnly] != nil {
+		t.Fatalf("%s = %v, want removed when recompute cannot produce executable action", stepInputKeyAssessmentOnly, applied[stepInputKeyAssessmentOnly])
+	}
+	if got := stringFromMap(mapFromValue(mapFromValue(applied[convergenceAuthorityKey])["nextAction"]), "kind"); got != "request_governance" {
+		t.Fatalf("convergenceAuthority.nextAction = %q, want request_governance; applied=%+v", got, applied)
+	}
+}
+
 func TestBuildConvergenceContractAuthorityPreemptsReplanWithoutInputPollution(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{
