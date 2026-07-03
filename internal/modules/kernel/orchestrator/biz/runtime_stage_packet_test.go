@@ -277,6 +277,53 @@ func TestStagePacketCarriesCurrentFailureDiagnostic(t *testing.T) {
 	}
 }
 
+func TestStagePacketDerivesCurrentFailureFromCoverageGap(t *testing.T) {
+	run := &runModel.Run{
+		ID:          common.RunID("run-stage-packet-coverage-gap"),
+		WorkspaceID: common.WorkspaceID("ws-stage-packet-coverage-gap"),
+		State:       common.RunStateRunning,
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeRepairFollowUp: true,
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus": map[string]any{
+				"id":                    "cwi-gap",
+				"currentGap":            "missing accepted evidence binding for required evidence kind: validation, state_change",
+				"missingEvidenceKinds":  []string{"validation", "state_change"},
+				"requiredEvidenceKinds": []string{"validation", "state_change"},
+				"coverageWorkItemIds":   []string{"cwi-gap"},
+				"sourceRequirementId":   "source_change",
+				"sourceScope":           "deliverable",
+				"sourcePath":            "executionContract.profileContracts.neutral.deliverableExpectations[0]",
+				"targetText":            "source_change",
+			},
+			"nextAction": map[string]any{
+				"kind": "acquire_evidence",
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteFailureEvidence": true,
+				"acceptedKinds":                      []string{"file/list"},
+			},
+		},
+	}
+
+	input = attachStagePacketToStepInput(run, "step-stage-packet-coverage-gap", input)
+	packet := mapFromValue(input[stepInputKeyStagePacket])
+	failure := mapFromValue(packet["currentFailure"])
+	if failure["failureClass"] != failureClassCoverageActionableGap ||
+		failure["coverageWorkItemId"] != "cwi-gap" ||
+		failure["evidenceValidity"] != "actionable_gap" {
+		t.Fatalf("stagePacket.currentFailure = %+v, want coverage actionable gap", failure)
+	}
+	pkgFailure := mapFromValue(mapFromValue(input["repairActionPackage"])["currentFailure"])
+	if pkgFailure["coverageWorkItemId"] != "cwi-gap" {
+		t.Fatalf("repairActionPackage.currentFailure = %+v, want mirrored coverage gap", pkgFailure)
+	}
+}
+
 func TestStagePacketDerivesCurrentFailureFromContractViolationRecovery(t *testing.T) {
 	run := &runModel.Run{
 		ID:          common.RunID("run-stage-packet-contract-violation"),

@@ -867,6 +867,9 @@ func providerProtectedContextFields(input map[string]any) []string {
 			"requiredEvidenceKinds",
 			"acceptedEvidenceRefs",
 			"rejectedEvidenceRefs",
+			"currentFailure",
+			"currentGap",
+			"processEvidenceTimeline",
 			"targetSnapshots",
 			"idempotencyKey",
 		} {
@@ -1087,6 +1090,13 @@ func providerInputHasProcessEvidence(input map[string]any) bool {
 	if len(mapSliceFromAny(input["processEvidenceTimeline"])) > 0 && len(recordFromAny(input["currentProgressDigest"])) > 0 {
 		return true
 	}
+	if packet := recordFromAny(input["stagePacket"]); len(packet) > 0 &&
+		len(mapSliceFromAny(packet["processEvidenceTimeline"])) > 0 &&
+		(len(recordFromAny(packet["currentFailure"])) > 0 ||
+			len(recordFromAny(packet["currentGap"])) > 0 ||
+			len(recordFromAny(packet["nextAction"])) > 0) {
+		return true
+	}
 	pkg := recordFromAny(input["executionContextPackage"])
 	if len(mapSliceFromAny(pkg["processEvidenceTimeline"])) > 0 && len(recordFromAny(pkg["currentProgressDigest"])) > 0 {
 		return true
@@ -1115,6 +1125,9 @@ func providerInputHasProcessEvidence(input map[string]any) bool {
 func providerInputHasCurrentFailure(input map[string]any) bool {
 	if len(input) == 0 {
 		return false
+	}
+	if len(recordFromAny(input["currentFailure"])) > 0 {
+		return true
 	}
 	if len(recordFromAny(recordFromAny(input["repairActionPackage"])["currentFailure"])) > 0 {
 		return true
@@ -1392,6 +1405,8 @@ func compactProtectedProviderStagePacket(packet map[string]any) map[string]any {
 		"activeFocus",
 		"nextAction",
 		"requiredOutput",
+		"currentFailure",
+		"currentGap",
 	} {
 		copyMapValue(out, key, packet[key])
 	}
@@ -1408,6 +1423,9 @@ func compactProtectedProviderStagePacket(packet map[string]any) map[string]any {
 	}
 	if snapshots := compactProtectedProviderStagePacketSnapshots(mapSliceFromAny(packet["targetSnapshots"])); len(snapshots) > 0 {
 		out["targetSnapshots"] = snapshots
+	}
+	if timeline := mapSliceFromAny(packet["processEvidenceTimeline"]); len(timeline) > 0 {
+		out["processEvidenceTimeline"] = budgetProviderValue(timeline, 0, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 3)
 	}
 	if len(out) == 0 {
 		return nil

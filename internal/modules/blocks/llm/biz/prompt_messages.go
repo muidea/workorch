@@ -1235,6 +1235,10 @@ func executionStageSignalPayload(request llmmodels.ProviderRequest) map[string]a
 func currentFailureSignalPayload(input map[string]any) map[string]any {
 	payload := map[string]any{}
 	copyMapValue(payload, "currentFailure", input["currentFailure"])
+	if packet := recordFromAny(input["stagePacket"]); len(packet) > 0 {
+		copyMapValue(payload, "stagePacketCurrentFailure", packet["currentFailure"])
+		copyMapValue(payload, "stagePacketCurrentGap", packet["currentGap"])
+	}
 	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
 		copyMapValue(payload, "packagedCurrentFailure", pkg["currentFailure"])
 		copyMapValue(payload, "lastFailureDiagnostics", pkg["lastFailureDiagnostics"])

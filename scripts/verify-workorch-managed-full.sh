@@ -5,8 +5,12 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="${WORKORCH_MANAGED_VERIFY_ARTIFACT_DIR:-$(mktemp -d)}"
 KEEP_ARTIFACTS="${WORKORCH_MANAGED_VERIFY_KEEP_ARTIFACTS:-0}"
+VERBOSE_LOGS="${WORKORCH_MANAGED_VERIFY_VERBOSE_LOGS:-0}"
+FAILURE_LOG_TAIL_LINES="${WORKORCH_MANAGED_VERIFY_FAILURE_LOG_TAIL_LINES:-400}"
 SERVER_PID=""
 SERVER_LOG="$TMP_DIR/workorch-server.log"
+STEP_LOG_DIR="$TMP_DIR/step-logs"
+STEP_LOG_INDEX=0
 CONFIG_DIR="$TMP_DIR/config"
 DATA_DIR="$TMP_DIR/.workorch-data"
 BINARY="${WORKORCH_MANAGED_VERIFY_BINARY:-$ROOT_DIR/bin/workorch}"
@@ -85,8 +89,32 @@ cleanup() {
 }
 
 run_step() {
-  echo "==> $*"
-  "$@"
+  local label="$*"
+  local log_name
+  local log_file
+  mkdir -p "$STEP_LOG_DIR"
+  log_name="$(printf '%s' "$label" | tr -cs '[:alnum:]_.=-' '-' | sed 's/^-//;s/-$//' | cut -c1-120)"
+  if [[ -z "$log_name" ]]; then
+    log_name="step"
+  fi
+  STEP_LOG_INDEX=$((STEP_LOG_INDEX + 1))
+  log_file="$STEP_LOG_DIR/$(printf '%03d' "$STEP_LOG_INDEX")-$log_name.log"
+  echo "==> $label"
+  if [[ "$VERBOSE_LOGS" == "1" || "$VERBOSE_LOGS" == "true" ]]; then
+    "$@" 2>&1 | tee "$log_file"
+    return "${PIPESTATUS[0]}"
+  fi
+  if "$@" >"$log_file" 2>&1; then
+    return 0
+  fi
+  local status=$?
+  echo "command failed: $label" >&2
+  echo "command log: $log_file" >&2
+  if [[ -f "$log_file" ]]; then
+    echo "--- command output tail ---" >&2
+    tail -n "$FAILURE_LOG_TAIL_LINES" "$log_file" >&2 || true
+  fi
+  return "$status"
 }
 
 write_runtime_state() {

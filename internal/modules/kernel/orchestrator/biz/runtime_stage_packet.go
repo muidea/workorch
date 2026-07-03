@@ -14,11 +14,32 @@ func attachStagePacketToStepInput(run *runModel.Run, stepID common.StepID, input
 	if input == nil {
 		return nil
 	}
+	input = ensureStagePacketCurrentFailureInput(input)
 	packet := buildStagePacketFromStepInput(run, stepID, input)
 	if !packet.HasScope() {
 		return input
 	}
 	input[stepInputKeyStagePacket] = packet.ToMap()
+	return input
+}
+
+func ensureStagePacketCurrentFailureInput(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	if len(mapFromValue(input["currentFailure"])) > 0 {
+		return input
+	}
+	failure := stagePacketCurrentFailure(input)
+	if len(failure) == 0 {
+		return input
+	}
+	input["currentFailure"] = failure
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) > 0 && len(mapFromValue(pkg["currentFailure"])) == 0 {
+		pkg["currentFailure"] = failure
+		input["repairActionPackage"] = pkg
+	}
 	return input
 }
 
@@ -305,7 +326,44 @@ func stagePacketCurrentFailure(input map[string]any) map[string]any {
 			return compactLLMContextMap(digestFailure, 1)
 		}
 	}
+	if stagePacketShouldDeriveCoverageGapFailure(input) {
+		for _, context := range []map[string]any{
+			coverageWorkItemContextFromInput(input),
+			mapFromValue(mapFromValue(input["repairActionPackage"])[coverageWorkItemContextKey]),
+			mapFromValue(mapFromValue(input["executionContext"])[coverageWorkItemContextKey]),
+			mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"])[coverageWorkItemContextKey]),
+		} {
+			if failure := currentFailureFromCoverageWorkItemContext(context); len(failure) > 0 {
+				return compactLLMContextMap(failure, 1)
+			}
+		}
+		if focus := stagePacketActiveFocus(input); coverageWorkItemHasOpenGap(focus) {
+			if failure := currentFailureFromCoverageWorkItemContext(map[string]any{"currentFocus": focus}); len(failure) > 0 {
+				return compactLLMContextMap(failure, 1)
+			}
+		}
+	}
 	return nil
+}
+
+func stagePacketShouldDeriveCoverageGapFailure(input map[string]any) bool {
+	if boolValue(input[stepInputKeyRuntimeRepairFollowUp]) ||
+		boolValue(input["concreteFailureEvidenceRequired"]) {
+		return true
+	}
+	if strings.TrimSpace(stringFromMap(input, "repairObjective")) != "" {
+		return true
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if boolValue(required["mustProduceConcreteFailureEvidence"]) {
+		return true
+	}
+	switch strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state")) {
+	case convergenceStateNeedEvidence, convergenceStateNeedStateChange:
+		return true
+	default:
+		return false
+	}
 }
 
 func stagePacketCurrentFailureFromContractViolationRecovery(recovery map[string]any) map[string]any {

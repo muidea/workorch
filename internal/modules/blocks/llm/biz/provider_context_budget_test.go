@@ -1487,6 +1487,43 @@ func TestEnforceProviderRequestBudgetAcceptsRepairPackageCurrentFailure(t *testi
 	}
 }
 
+func TestEnforceProviderRequestBudgetAcceptsTopLevelCurrentFailure(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-top-level-current-failure",
+		RunID:       "run-top-level-current-failure",
+		StepID:      "run-top-level-current-failure/repair-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"runtimeRepairFollowUp": true,
+			"currentFailure": map[string]any{
+				"failureClass":       "coverage_actionable_gap",
+				"coverageWorkItemId": "cwi-top-level",
+				"reason":             "coverage work item requires additional evidence",
+			},
+			"currentProgressDigest": map[string]any{
+				"currentGap":         "coverage item still lacks accepted validation evidence",
+				"nextRequiredAction": "continue_current_stage_contract",
+			},
+			"processEvidenceTimeline": []any{
+				map[string]any{"stepId": "run-top-level-current-failure/step-1", "state": "completed"},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{"mustReturnValidJSON": true},
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget = nil, want integrity audit")
+	}
+	if stringSliceContains(got.ContextBudget.IntegrityWarnings, "runtime_repair_current_failure_missing") {
+		t.Fatalf("integrityWarnings = %+v, did not expect missing current failure", got.ContextBudget.IntegrityWarnings)
+	}
+}
+
 func TestEnforceProviderRequestBudgetAcceptsStagePacketCurrentFailure(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-stage-packet-current-failure",
@@ -1529,6 +1566,61 @@ func TestEnforceProviderRequestBudgetAcceptsStagePacketCurrentFailure(t *testing
 	}
 	if stringSliceContains(got.ContextBudget.IntegrityWarnings, "runtime_repair_current_failure_missing") {
 		t.Fatalf("integrityWarnings = %+v, did not expect missing current failure", got.ContextBudget.IntegrityWarnings)
+	}
+	if got.ContextBudget.ContextGateAction == providerContextGateBlockerRequired {
+		t.Fatalf("contextGateAction = %q, did not expect blocker_required", got.ContextBudget.ContextGateAction)
+	}
+}
+
+func TestEnforceProviderRequestBudgetAcceptsProtectedStagePacketRepairContext(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-protected-stage-packet-repair-context",
+		RunID:       "run-protected-stage-packet-repair-context",
+		StepID:      "run-protected-stage-packet-repair-context/follow-up",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"runtimeRepairFollowUp": true,
+			"graphEvidence":         strings.Repeat("large evidence ", 20000),
+			"stagePacket": map[string]any{
+				"schemaVersion": "workorch.stage_packet.v1",
+				"activeStage":   "repair",
+				"nextAction":    map[string]any{"type": "acquire_evidence"},
+				"currentGap": map[string]any{
+					"summary": "missing accepted evidence binding for required evidence kind: validation, state_change",
+				},
+				"currentFailure": map[string]any{
+					"failureClass":       "coverage_actionable_gap",
+					"coverageWorkItemId": "cwi-001",
+					"evidenceValidity":   "actionable_gap",
+					"reason":             "missing accepted evidence binding for required evidence kind: validation, state_change",
+				},
+				"processEvidenceTimeline": []any{
+					map[string]any{"stepId": "run-protected-stage-packet-repair-context/graph-001/001-list", "kind": "file/list", "state": "completed"},
+				},
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteFailureEvidence": true,
+					"acceptedKinds":                      []string{"file/list"},
+				},
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudgetLimit(req, 12*1024)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget = nil, want integrity audit")
+	}
+	if !got.ContextBudget.Truncated {
+		t.Fatalf("contextBudget.Truncated = false, want compaction path")
+	}
+	if stringSliceContains(got.ContextBudget.IntegrityWarnings, "runtime_repair_current_failure_missing") ||
+		stringSliceContains(got.ContextBudget.IntegrityWarnings, "runtime_repair_process_evidence_missing") {
+		t.Fatalf("integrityWarnings = %+v, did not expect stage packet repair context warnings", got.ContextBudget.IntegrityWarnings)
+	}
+	packet := recordFromAny(got.Input["stagePacket"])
+	if len(recordFromAny(packet["currentFailure"])) == 0 || len(mapSliceFromAny(packet["processEvidenceTimeline"])) == 0 {
+		t.Fatalf("stagePacket after budget = %+v, want protected repair context", packet)
 	}
 	if got.ContextBudget.ContextGateAction == providerContextGateBlockerRequired {
 		t.Fatalf("contextGateAction = %q, did not expect blocker_required", got.ContextBudget.ContextGateAction)
