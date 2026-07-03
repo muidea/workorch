@@ -655,6 +655,55 @@ func TestRebuildDispatchInputUsesAuthorityAfterCoverageAssessmentIncomplete(t *t
 	}
 }
 
+func TestRebuildDispatchInputPreemptsLocalAssessmentWhenOwnerNeedsStateChange(t *testing.T) {
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	for _, key := range []string{convergenceAuthorityKey, gapBaselineKey} {
+		authority := mapFromValue(run.ExecutionContext[key])
+		focus := mapFromValue(authority["currentFocus"])
+		focus["missingEvidenceKinds"] = []string{"validation", "state_change"}
+		authority["currentFocus"] = focus
+		run.ExecutionContext[key] = authority
+	}
+	input := map[string]any{
+		stepInputKeyAssessmentOnly:     true,
+		stepInputKeyGraphLimitFollowUp: true,
+		"convergenceContract": map[string]any{
+			"state":           convergenceStateNeedAssessment,
+			"repairObjective": "complete_dod_goal_coverage_assessment",
+		},
+		currentActionContractKey: map[string]any{
+			"nextAction": map[string]any{
+				"kind": "assessment",
+			},
+		},
+	}
+
+	got, err := rebuildDispatchInputFromConvergenceAuthority(run, "step-stale-assessment", input)
+	if err != nil {
+		t.Fatalf("rebuildDispatchInputFromConvergenceAuthority: %v", err)
+	}
+
+	contract := mapFromValue(got["convergenceContract"])
+	if state := stringFromMap(contract, "state"); state != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract.state = %q, want %s; input=%+v", state, convergenceStateNeedStateChange, got)
+	}
+	if got[stepInputKeyAssessmentOnly] != nil {
+		t.Fatalf("%s = %v, want removed after latest owner authority preempts local assessment", stepInputKeyAssessmentOnly, got[stepInputKeyAssessmentOnly])
+	}
+	packet := mapFromValue(got[stepInputKeyStagePacket])
+	nextAction := mapFromValue(packet["nextAction"])
+	if kind := stringFromMap(nextAction, "type"); kind != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("stagePacket.nextAction = %+v, want state_change", nextAction)
+	}
+	required := mapFromValue(packet["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) {
+		t.Fatalf("stagePacket.requiredOutput = %+v, want state-changing contract", required)
+	}
+	if err := validateConvergenceDispatchInput(got); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v", err)
+	}
+}
+
 func TestBlockOnDecisionPersistsAuthorityNormalizedOwnerState(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-block-normalized-authority")

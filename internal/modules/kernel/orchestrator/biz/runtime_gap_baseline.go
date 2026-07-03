@@ -260,7 +260,7 @@ func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID comm
 	if input == nil {
 		input = map[string]any{}
 	}
-	if dispatchInputUsesLocalAssessmentContract(input) {
+	if dispatchInputUsesLocalAssessmentContract(run, input) {
 		input = stripDispatchInputOwnerAuthority(input)
 		input["convergenceContract"] = compactConvergenceContract(ConvergenceContract{
 			State:            convergenceStateNeedAssessment,
@@ -275,6 +275,10 @@ func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID comm
 		input = scrubConvergenceDispatchDiagnosticAdvice(input)
 		return input, validateConvergenceDispatchInput(input)
 	}
+	if dispatchInputHasStaleLocalAssessmentContract(run, input) {
+		input = clearStaleLocalAssessmentContract(input)
+	}
+	input = injectLatestRunAuthorityForDispatch(run, input)
 	if !dispatchInputHasConvergenceAuthority(run, input) {
 		input = attachStagePacketToStepInput(run, stepID, input)
 		input = synchronizeCurrentRequiredOutputMirrors(input)
@@ -312,12 +316,90 @@ func finalizeLLMDispatchAuthorityInput(run *runModel.Run, stepID common.StepID, 
 	return input, nil
 }
 
-func dispatchInputUsesLocalAssessmentContract(input map[string]any) bool {
+func dispatchInputUsesLocalAssessmentContract(run *runModel.Run, input map[string]any) bool {
 	if len(input) == 0 || !boolValue(input[stepInputKeyAssessmentOnly]) {
 		return false
 	}
-	return boolValue(input[stepInputKeyGraphLimitFollowUp]) ||
-		boolValue(input["assessmentOnlyContractCorrection"])
+	if !boolValue(input[stepInputKeyGraphLimitFollowUp]) &&
+		!boolValue(input["assessmentOnlyContractCorrection"]) {
+		return false
+	}
+	switch latestRunAuthorityNextActionKind(run) {
+	case "", "assessment", "complete_coverage_assessment":
+		return true
+	default:
+		appendAuthorityDiagnostic(input, "stale_local_assessment_contract_ignored", "warning", "diagnostic_lineage", "assessmentOnly", "local assessment retry was ignored because latest owner authority requires a different next action")
+		return false
+	}
+}
+
+func dispatchInputHasStaleLocalAssessmentContract(run *runModel.Run, input map[string]any) bool {
+	if len(input) == 0 || !boolValue(input[stepInputKeyAssessmentOnly]) {
+		return false
+	}
+	if !boolValue(input[stepInputKeyGraphLimitFollowUp]) &&
+		!boolValue(input["assessmentOnlyContractCorrection"]) {
+		return false
+	}
+	switch latestRunAuthorityNextActionKind(run) {
+	case "", "assessment", "complete_coverage_assessment":
+		return false
+	default:
+		return true
+	}
+}
+
+func clearStaleLocalAssessmentContract(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	delete(input, stepInputKeyAssessmentOnly)
+	delete(input, "assessmentOnlyReason")
+	delete(input, "assessmentOnlyContractCorrection")
+	delete(input, stepInputKeyGraphLimitFollowUp)
+	if contract := mapFromValue(input["convergenceContract"]); strings.TrimSpace(stringFromMap(contract, "state")) == convergenceStateNeedAssessment {
+		delete(input, "convergenceContract")
+	}
+	if strings.TrimSpace(stringFromMap(input, "repairObjective")) == "complete_dod_goal_coverage_assessment" {
+		delete(input, "repairObjective")
+	}
+	delete(input, currentActionContractKey)
+	delete(input, stepInputKeyStagePacket)
+	return input
+}
+
+func injectLatestRunAuthorityForDispatch(run *runModel.Run, input map[string]any) map[string]any {
+	if input == nil {
+		input = map[string]any{}
+	}
+	if run == nil || run.ExecutionContext == nil {
+		return input
+	}
+	if authority := convergenceAuthorityMapFromValue(run.ExecutionContext[convergenceAuthorityKey]); len(authority) > 0 {
+		input[convergenceAuthorityKey] = cloneStepPayload(authority)
+	}
+	if baseline := gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey]); len(baseline) > 0 {
+		input[gapBaselineKey] = cloneStepPayload(baseline)
+	}
+	if context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]); len(context) > 0 {
+		input[coverageWorkItemContextKey] = cloneStepPayload(context)
+	}
+	return input
+}
+
+func latestRunAuthorityNextActionKind(run *runModel.Run) string {
+	if run == nil || run.ExecutionContext == nil {
+		return ""
+	}
+	for _, source := range []map[string]any{
+		convergenceAuthorityMapFromValue(run.ExecutionContext[convergenceAuthorityKey]),
+		gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey]),
+	} {
+		if kind := strings.TrimSpace(stringFromMap(mapFromValue(source["nextAction"]), "kind")); kind != "" {
+			return kind
+		}
+	}
+	return ""
 }
 
 func stripDispatchInputOwnerAuthority(input map[string]any) map[string]any {
