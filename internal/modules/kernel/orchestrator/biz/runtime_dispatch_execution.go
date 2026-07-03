@@ -387,7 +387,14 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 		if err := o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output); err != nil {
 			return err
 		}
-		return nil
+		if !o.eventDrivenDispatch {
+			return nil
+		}
+		steps, err := o.steps.ListByRun(ctx, run.ID)
+		if err != nil {
+			return err
+		}
+		return o.continueGraphBatchAfterCompletedStep(ctx, run, step, steps, workspace)
 	}
 	if nextStepID != "" {
 		if err := o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output); err != nil {

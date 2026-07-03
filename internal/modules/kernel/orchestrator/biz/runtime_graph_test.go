@@ -74,6 +74,100 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchSerializesLLMDispatchRequests(
 	}
 }
 
+func TestRuntimeOrchestrator_EventDrivenGraphBatchStepCompletionDispatchesNextNode(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-event-driven-graph-continuation")
+	workspaceID := common.WorkspaceID("ws-event-driven-graph-continuation")
+	rootStepID := common.StepID(runID + "/step-1")
+	childStepID := common.StepID(runID + "/graph-001/001-list-root")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	hub := events.NewMemoryHub()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    rootStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			stepOutputKeyExecutionGraph: map[string]any{
+				"nodes": []map[string]any{
+					{
+						"id":    "list-root",
+						"kind":  "file/list",
+						"input": map[string]any{"path": ""},
+					},
+					{
+						"id":        "read-config",
+						"kind":      "file/read",
+						"dependsOn": []string{"list-root"},
+						"input":     map[string]any{"path": "config.yaml"},
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed root step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    childStepID,
+		RunID: runID,
+		Kind:  "file/list",
+		State: common.StepStateDispatched,
+		Input: map[string]any{
+			stepInputKeyGraphBatch:      true,
+			stepInputKeyGraphRootStepID: string(rootStepID),
+			stepInputKeyGraphNodeID:     "list-root",
+			"graphSeq":                  1,
+			"graphNodeSeq":              1,
+		},
+	}); err != nil {
+		t.Fatalf("seed graph child step: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{output: map[string]any{"completionState": "completed"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		hub,
+	)
+	orch.EnableEventDrivenDispatch()
+
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, childStepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "completed"}}, nil); err != nil {
+		t.Fatalf("FinalizeRuntimeStepResult: %v", err)
+	}
+	var dispatches []events.Envelope
+	for _, envelope := range hub.Published() {
+		if envelope.Topic == orchestratorevents.TopicOrchestratorDispatchStepRequested {
+			dispatches = append(dispatches, envelope)
+		}
+	}
+	if len(dispatches) != 1 {
+		t.Fatalf("dispatch events = %d in %+v, want next graph node dispatch", len(dispatches), hub.Published())
+	}
+	cmd, ok := dispatches[0].Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
+	if !ok {
+		t.Fatalf("dispatch command = %#v, want DispatchStepCommand", dispatches[0].Payload[events.PayloadKeyCommand])
+	}
+	if cmd.StepID != common.StepID(runID+"/graph-001/002-read-config") || cmd.Kind != "file/read" {
+		t.Fatalf("dispatch command = %+v, want read-config graph step", cmd)
+	}
+	if nodeID := stringFromMap(cmd.Input, stepInputKeyGraphNodeID); nodeID != "read-config" {
+		t.Fatalf("dispatch input = %+v, want read-config node", cmd.Input)
+	}
+	if completed := stringSliceFromValue(cmd.Input[stepInputKeyGraphCompletedNodes]); len(completed) != 1 || completed[0] != "list-root" {
+		t.Fatalf("dispatch input completed nodes = %+v, want list-root", cmd.Input)
+	}
+}
+
 func TestRuntimeOrchestrator_EventDrivenDispatchPublishesAuthorityAlignedInput(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-event-driven-authority")

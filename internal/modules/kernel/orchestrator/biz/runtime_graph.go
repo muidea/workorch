@@ -241,6 +241,19 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	if last == nil {
 		return common.ErrConflict
 	}
+	return o.continueGraphBatchAfterCompletedStep(ctx, currentRun, last, steps, workspace)
+}
+
+func (o *RuntimeOrchestrator) continueGraphBatchAfterCompletedStep(
+	ctx context.Context,
+	currentRun *runModel.Run,
+	last *runModel.Step,
+	steps []*runModel.Step,
+	workspace *workspaceModel.Workspace,
+) error {
+	if currentRun == nil || last == nil {
+		return common.ErrInvalidArgument
+	}
 	if graph, ok := runtimeGraphSpecForContinuation(steps, last); ok {
 		if nextSpecs := o.graphManager().readyGraphStepSpecsFromSteps(ctx, currentRun, last, graph, steps); len(nextSpecs) > 0 {
 			if input, ok := o.graphManager().concreteEvidenceAcquisitionFollowUpInputFromSteps(currentRun, last, steps); ok {
