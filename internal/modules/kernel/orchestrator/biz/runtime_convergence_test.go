@@ -151,6 +151,102 @@ func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCove
 	}
 }
 
+func TestBuildConvergenceContractNextActionStateChangeUsesProfileEvidenceRequirement(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-convergence-profile-evidence-next-action",
+		WorkspaceID: "ws-convergence-profile-evidence-next-action",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "snapshot_evidence",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+							"evidenceRole":       "supplemental_evidence",
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": "state_change"},
+		},
+		gapBaselineKey: map[string]any{
+			"nextAction": map[string]any{"kind": "state_change"},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-snapshot",
+				"source":                "deliverable",
+				"sourceScope":           "deliverable",
+				"sourceRequirementId":   "snapshot_evidence",
+				"targetText":            "snapshot_evidence",
+				"status":                "open",
+				"evidenceRole":          "supplemental_evidence",
+				"requiredEvidenceKinds": []string{"validation", "state_change"},
+				"missingEvidenceKinds":  []string{"validation", "state_change"},
+				"structuredTargetRefs":  []string{"cwi-snapshot", "deliverable:deliverable:snapshot_evidence", "snapshot_evidence"},
+			},
+		},
+		"coverageTargetSet": []map[string]any{{
+			"kind":                   "deliverable",
+			"coverageWorkItemId":     "cwi-snapshot",
+			"coverageTargetToken":    "snapshot_evidence",
+			"source":                 "deliverable",
+			"sourceScope":            "deliverable",
+			"sourceRequirementId":    "snapshot_evidence",
+			"targetText":             "snapshot_evidence",
+			"state":                  "open",
+			"evidenceRole":           "supplemental_evidence",
+			"requiredEvidenceKinds":  []string{"validation", "state_change"},
+			"missingEvidenceKinds":   []string{"validation", "state_change"},
+			"acceptedEvidenceByKind": map[string]any{},
+			"rejectedEvidenceByKind": map[string]any{},
+			"structuredTargetRefs":   []string{"cwi-snapshot", "deliverable:deliverable:snapshot_evidence", "snapshot_evidence"},
+		}},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+		"convergenceContract": map[string]any{
+			"state":                       convergenceStateNeedStateChange,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+		},
+	}
+
+	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange || contract.RepairObjective != repairObjectiveStateChangingOutput {
+		t.Fatalf("convergenceContract = %+v, want profile evidence state-changing contract", contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedOperations"]), gitcommon.OperationCommit) ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want profile-required git/write commit without generic patch/apply fallback", required)
+	}
+
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	applied = attachStagePacketToStepInput(run, "run-convergence-profile-evidence-next-action/step-001", applied)
+	applied = synchronizeCurrentRequiredOutputMirrors(applied)
+	applied = attachCurrentActionContractToInput(run, "run-convergence-profile-evidence-next-action/step-001", applied)
+	for label, mirror := range map[string]map[string]any{
+		"repairActionPackage.requiredOutput":   mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":           mapFromValue(mapFromValue(applied[stepInputKeyStagePacket])["requiredOutput"]),
+		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(applied[currentActionContractKey])["requiredOutput"]),
+		"requiredOutput":                       mapFromValue(applied["requiredOutput"]),
+	} {
+		if !stringSliceContains(stringSliceFromValue(mirror["acceptedKinds"]), gitcommon.StepKindWrite) ||
+			!stringSliceContains(stringSliceFromValue(mirror["acceptedOperations"]), gitcommon.OperationCommit) {
+			t.Fatalf("%s = %+v, want synchronized profile git/write commit requiredOutput", label, mirror)
+		}
+	}
+}
+
 func TestBuildConvergenceContractClearsStaleEvidenceAcquisitionForProfileStateChange(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-profile-work-item",

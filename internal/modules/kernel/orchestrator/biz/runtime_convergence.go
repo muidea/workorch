@@ -323,6 +323,10 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 			contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
 		}
 		convergenceContractAttachCoverageContext(input, contract)
+		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
+			populateProfileStateChangingEvidenceConvergenceContract(input, contract, pkg)
+			return true
+		}
 		if stateChangeRequiresTargetSnapshotAcquisition(input, contract.RepairActionPackage) {
 			populateTargetSnapshotAcquisitionConvergenceContract(input, contract)
 			return true
