@@ -30,6 +30,21 @@ func TerminalRunStatusStep(steps []*runmodel.Step) *runmodel.Step {
 	if len(terminals) == 0 {
 		return nil
 	}
+	return selectTerminalRunStatusStep(terminals)
+}
+
+func TerminalRunStatusStepWithCheckpoints(steps []*runmodel.Step, checkpoints []*runmodel.RuntimeCheckpoint) *runmodel.Step {
+	terminals := terminalRunStatusStepCandidates(steps)
+	if len(terminals) == 0 {
+		return nil
+	}
+	if step := latestTerminalRunStatusStepFromCheckpoints(terminals, checkpoints); step != nil {
+		return step
+	}
+	return selectTerminalRunStatusStep(terminals)
+}
+
+func selectTerminalRunStatusStep(terminals []*runmodel.Step) *runmodel.Step {
 	for _, step := range terminals {
 		if step.State == common.StepStateDispatched {
 			return step
@@ -41,4 +56,34 @@ func TerminalRunStatusStep(steps []*runmodel.Step) *runmodel.Step {
 		}
 	}
 	return terminals[len(terminals)-1]
+}
+
+func latestTerminalRunStatusStepFromCheckpoints(terminals []*runmodel.Step, checkpoints []*runmodel.RuntimeCheckpoint) *runmodel.Step {
+	if len(terminals) == 0 || len(checkpoints) == 0 {
+		return nil
+	}
+	terminalByID := map[common.StepID]*runmodel.Step{}
+	for _, step := range terminals {
+		if step == nil {
+			continue
+		}
+		terminalByID[step.ID] = step
+	}
+	var selected *runmodel.Step
+	selectedAt := ""
+	for _, checkpoint := range checkpoints {
+		if checkpoint == nil || checkpoint.CurrentStepID == "" {
+			continue
+		}
+		step := terminalByID[checkpoint.CurrentStepID]
+		if step == nil || step.State != common.StepStateFailed {
+			continue
+		}
+		occurredAt := checkpoint.OccurredAt
+		if selected == nil || occurredAt > selectedAt {
+			selected = step
+			selectedAt = occurredAt
+		}
+	}
+	return selected
 }

@@ -9,12 +9,16 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func validateLLMExecutionGraphOutputContract(step *runModel.Step, output map[string]any) error {
 	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
 	if !ok {
 		return nil
+	}
+	if err := validateExecutionGraphPatchApplyTargetUniqueness(graph); err != nil {
+		return err
 	}
 	for _, node := range graph.Nodes {
 		kind := strings.TrimSpace(node.Kind)
@@ -33,6 +37,33 @@ func validateLLMExecutionGraphOutputContract(step *runModel.Step, output map[str
 				}
 			}
 		}
+	}
+	return nil
+}
+
+func validateExecutionGraphPatchApplyTargetUniqueness(graph runtimemodel.BlockExecutionGraph) error {
+	seen := map[string]string{}
+	for _, node := range graph.Nodes {
+		if canonicalRuntimeGraphNodeKind(node.Kind) != "patch/apply" {
+			continue
+		}
+		request, err := runtimePatchRequestFromMap(node.Input)
+		if err != nil {
+			continue
+		}
+		baseHash := strings.TrimSpace(request.BaseHash)
+		if baseHash == "" {
+			continue
+		}
+		target := filepath.Clean(strings.TrimSpace(request.TargetRef))
+		if target == "" || target == "." {
+			continue
+		}
+		key := target + "\x00" + strings.ToLower(baseHash)
+		if previous := seen[key]; previous != "" {
+			return fmt.Errorf("%w: executionGraph patch/apply contains multiple patches for target %q with the same baseHash in one graph (%s and %s); merge them into one cohesive patch or retry after a fresh target snapshot", common.ErrInvalidArgument, request.TargetRef, previous, strings.TrimSpace(node.ID))
+		}
+		seen[key] = strings.TrimSpace(node.ID)
 	}
 	return nil
 }

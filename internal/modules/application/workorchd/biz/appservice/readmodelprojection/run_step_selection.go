@@ -18,7 +18,7 @@ func CurrentRunStatusStep(run *runmodel.Run, steps []*runmodel.Step, checkpoints
 		return step
 	}
 	if run != nil && IsTerminalRunState(string(run.State)) {
-		if step := TerminalRunStatusStep(steps); step != nil {
+		if step := TerminalRunStatusStepWithCheckpoints(steps, checkpoints); step != nil {
 			return step
 		}
 	}

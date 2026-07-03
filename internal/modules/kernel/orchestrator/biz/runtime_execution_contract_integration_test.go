@@ -116,6 +116,57 @@ func TestLLMExecutionGraphNodeReturnedOnlyGraphAllowsConcretePatchGraph(t *testi
 	}
 }
 
+func TestValidateLLMExecutionGraphOutputContractRejectsSameTargetMultiPatch(t *testing.T) {
+	step := &runmodel.Step{
+		ID:   "run-same-target-patch/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-main-a",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef": "main.go",
+						"patchType": "text_replace",
+						"oldText":   "old-a",
+						"newText":   "new-a",
+						"baseHash":  "hash-before",
+					},
+				},
+				{
+					"id":   "patch-main-b",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef": "main.go",
+						"patchType": "text_replace",
+						"oldText":   "old-b",
+						"newText":   "new-b",
+						"baseHash":  "hash-before",
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionGraphOutputContract(step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "multiple patches for target") {
+		t.Fatalf("validateLLMExecutionGraphOutputContract err = %v, want same-target multi-patch rejection", err)
+	}
+}
+
 func TestRuntimeOrchestrator_DispatchesConcreteGraphReturnedByExecutionLLMNode(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

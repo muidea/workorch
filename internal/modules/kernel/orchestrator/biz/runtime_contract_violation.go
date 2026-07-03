@@ -977,6 +977,9 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 	if attempt > 1 || signatureRepeatCount > 0 {
 		mode = contractViolationCorrectionModeForcedNarrow
 	}
+	if contractViolationRuleRequiresManagedValidationNarrow(rule) {
+		mode = contractViolationCorrectionModeForcedNarrow
+	}
 	targetScope := runtimeFailureTargetScopeFromStep(step)
 	contract := map[string]any{
 		"violatedRule":     rule,
@@ -1099,7 +1102,11 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 	}
 	if mode == contractViolationCorrectionModeForcedNarrow {
 		contract["forcedNarrow"] = true
-		contract["forcedNarrowRule"] = "same-rule or same-target violation repeated; return only an allowed output shape from this correctionContract or a real governance blocker"
+		if contractViolationRuleRequiresManagedValidationNarrow(rule) {
+			contract["forcedNarrowRule"] = "validation process control cannot be safely repaired through plain shell retry; return only managed validation or a real governance blocker"
+		} else {
+			contract["forcedNarrowRule"] = "same-rule or same-target violation repeated; return only an allowed output shape from this correctionContract or a real governance blocker"
+		}
 	}
 	return map[string]any{
 		"profileId":   profileID,

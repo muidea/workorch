@@ -1128,6 +1128,62 @@ func TestContractViolationRetryForcedNarrowValidationRequiredOutput(t *testing.T
 	}
 }
 
+func TestContractViolationProcessControlImmediatelyNarrowsToManagedValidation(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-violation-process-control-managed")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-violation-process-control-managed", InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/failed-validation"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence": true,
+					"acceptedKinds": []string{
+						"shell/command",
+						"validation/managed_session",
+					},
+				},
+			},
+		},
+		Output: map[string]any{
+			"stage":                        "llm_execution_graph_plan",
+			"error":                        "concrete validation evidence graph must use non-destructive bounded validation; shell process termination is not allowed",
+			outputKeyContractViolationType: contractViolationValidationEvidenceRequired,
+			"contractViolationRule":        contractViolationRuleValidationProcessControlForbidden,
+			failureOutputKeyClass:          failureClassRuntime,
+			failureOutputKeySignature:      "class=runtime_failed|stage=llm_execution_graph_plan|rule=validation_process_control_forbidden",
+		},
+	}
+	attachContractViolationDiagnostics(run, failed, errors.New("concrete validation evidence graph must use non-destructive bounded validation; shell process termination is not allowed"))
+	orch := &RuntimeOrchestrator{
+		steps:  memory.NewStepRepository(),
+		policy: NormalizeRuntimePolicy(RuntimePolicy{}),
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failed, 1, common.ErrInvalidArgument)
+
+	recovery := mapFromValue(input[stepInputKeyContractViolationRecovery])
+	if got := stringFromMap(recovery, "correctionMode"); got != contractViolationCorrectionModeForcedNarrow {
+		t.Fatalf("correctionMode = %q, want forced_narrow for process-control violation; recovery=%+v", got, recovery)
+	}
+	required := mapFromValue(input["requiredOutput"])
+	if stringFromMap(required, "validationRoute") != runtimemodel.ValidationRouteManagedHarness ||
+		required["mustUseManagedHarness"] != true ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "shell/command") ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), managedValidationSessionNodeKind) {
+		t.Fatalf("requiredOutput = %+v, want managed validation only", required)
+	}
+	if !stringSliceContains(stringSliceFromValue(required["forbiddenOutputShapes"]), "plain_shell_validation") {
+		t.Fatalf("forbiddenOutputShapes = %+v, want plain shell forbidden", required["forbiddenOutputShapes"])
+	}
+}
+
 func TestConvergenceDispatchRejectsSplitCurrentActionRequiredOutput(t *testing.T) {
 	input := map[string]any{
 		"convergenceContract": map[string]any{
