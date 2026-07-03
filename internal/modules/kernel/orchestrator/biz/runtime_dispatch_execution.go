@@ -289,6 +289,9 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 		return err
 	}
 	patches := o.patchManager()
+	if err := patches.preflightApprovalCandidates(output, workspace.DeliverableDirectory); err != nil {
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch preflight failed", err)
+	}
 	if err := patches.publishPreviewFromOutput(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}

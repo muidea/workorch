@@ -307,6 +307,32 @@ func annotateAppliedPatchOutput(output map[string]any, idx int, patch *runModel.
 	}
 }
 
+func (p *patchSubsystem) preflightApprovalCandidates(output map[string]any, deliverableDirectory string) error {
+	requests, err := runtimePatchRequests(output)
+	if err != nil {
+		return err
+	}
+	if len(requests) == 0 {
+		return nil
+	}
+	for _, request := range requests {
+		if request.ApprovalID != "" {
+			continue
+		}
+		reasons := patchApprovalReasons(request)
+		if len(requests) > patchApprovalMaxFiles {
+			reasons = append(reasons, "many_files")
+		}
+		if len(reasons) == 0 {
+			continue
+		}
+		if err := preflightWorkspacePatch(deliverableDirectory, request); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p *patchSubsystem) revert(
 	ctx context.Context,
 	run *runModel.Run,

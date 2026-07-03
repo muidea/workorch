@@ -96,6 +96,36 @@ func TestApplyWorkspacePatchAppliesTextReplaceWithBaseHash(t *testing.T) {
 	}
 }
 
+func TestPatchPreflightRejectsApprovalCandidateTextReplaceOldText(t *testing.T) {
+	deliverableDirectory := t.TempDir()
+	target := filepath.Join(deliverableDirectory, ".env")
+	original := "TOKEN=old\n"
+	if err := os.WriteFile(target, []byte(original), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	output := map[string]any{
+		stepOutputKeyPatches: []map[string]any{{
+			"patchType": "text_replace",
+			"targetRef": ".env",
+			"oldText":   "\t...",
+			"newText":   "TOKEN=new",
+			"baseHash":  sha256HexBytes([]byte(original)),
+		}},
+	}
+
+	err := (&patchSubsystem{}).preflightApprovalCandidates(output, deliverableDirectory)
+	if err == nil || !strings.Contains(err.Error(), "oldText not found") {
+		t.Fatalf("preflightApprovalCandidates err = %v, want oldText not found", err)
+	}
+	content, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("read target: %v", readErr)
+	}
+	if string(content) != original {
+		t.Fatalf("content = %q, want unchanged", string(content))
+	}
+}
+
 func TestApplyWorkspacePatchRejectsRangeLessStandardUnifiedDiff(t *testing.T) {
 	deliverableDirectory := t.TempDir()
 	target := filepath.Join(deliverableDirectory, "docs", "sample.txt")

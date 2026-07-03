@@ -14,6 +14,9 @@ import (
 )
 
 func applyWorkspacePatch(deliverableDirectory string, request runtimePatchRequest) error {
+	if err := preflightWorkspacePatch(deliverableDirectory, request); err != nil {
+		return err
+	}
 	switch request.PatchType {
 	case "file_write":
 		return applyWorkspaceFileWrite(deliverableDirectory, request.TargetRef, request.Content, request.BaseHash)
@@ -24,6 +27,11 @@ func applyWorkspacePatch(deliverableDirectory string, request runtimePatchReques
 	default:
 		return common.ErrInvalidArgument
 	}
+}
+
+func preflightWorkspacePatch(deliverableDirectory string, request runtimePatchRequest) error {
+	_, err := previewWorkspacePatch(deliverableDirectory, request)
+	return err
 }
 
 func workspacePatchBeforeStateForRequest(deliverableDirectory string, request runtimePatchRequest) (workspacePatchBeforeState, error) {
