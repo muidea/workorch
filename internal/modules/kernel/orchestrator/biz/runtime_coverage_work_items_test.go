@@ -2631,6 +2631,36 @@ func TestCoverageWorkItemsAcceptanceGateAllowsEvidenceReadyAcceptedEvidence(t *t
 	}
 }
 
+func TestCoverageWorkItemRejectedOverrideOnlyBlocksSameKindBinding(t *testing.T) {
+	item := map[string]any{
+		"id":                    "cwi-rejected-cross-kind",
+		"status":                "evidence_ready",
+		"requiredEvidenceKinds": []string{runtimecontract.EvidenceKindValidation},
+		"missingEvidenceKinds":  []string{},
+		"acceptedEvidenceByKind": map[string][]string{
+			runtimecontract.EvidenceKindValidation: {"evidence-shared"},
+		},
+		"acceptedEvidenceBindingByKind": map[string][]string{
+			runtimecontract.EvidenceKindValidation: {"evidence-shared"},
+		},
+		"acceptedEvidenceRefs": []string{"evidence-shared"},
+		"rejectedEvidenceByKind": map[string][]string{
+			runtimecontract.EvidenceKindStateChange: {"evidence-shared"},
+		},
+	}
+
+	if !coverageWorkItemCanCloseDeterministically(item) {
+		t.Fatalf("coverageWorkItemCanCloseDeterministically = false, want cross-kind rejection not to override accepted validation binding")
+	}
+
+	item["rejectedEvidenceByKind"] = map[string][]string{
+		runtimecontract.EvidenceKindValidation: {"evidence-shared"},
+	}
+	if coverageWorkItemCanCloseDeterministically(item) {
+		t.Fatalf("coverageWorkItemCanCloseDeterministically = true, want same-kind rejection to override accepted validation binding")
+	}
+}
+
 func TestCoverageWorkItemsAcceptanceGateDeterministicallyClosesHydratedReadyBinding(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewCoverageWorkItemRepository()

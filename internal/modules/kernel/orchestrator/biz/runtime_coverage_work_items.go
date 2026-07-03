@@ -946,13 +946,18 @@ func coverageWorkItemCanCloseDeterministically(item map[string]any) bool {
 }
 
 func coverageWorkItemHasRejectedOverrideForAcceptedBinding(item map[string]any) bool {
-	bindingRefs := stringSet(coverageDeterministicSatisfiedEvidenceRefs(item))
-	if len(bindingRefs) == 0 {
+	bindingByKind := mapStringSliceValue(item["acceptedEvidenceBindingByKind"])
+	if len(bindingByKind) == 0 {
 		return false
 	}
-	for _, refs := range mapStringSliceValue(item["rejectedEvidenceByKind"]) {
-		for _, ref := range refs {
-			if bindingRefs[strings.TrimSpace(ref)] {
+	rejectedByKind := mapStringSliceValue(item["rejectedEvidenceByKind"])
+	for kind, acceptedRefs := range bindingByKind {
+		rejectedRefs := stringSet(rejectedByKind[strings.TrimSpace(kind)])
+		if len(rejectedRefs) == 0 {
+			continue
+		}
+		for _, ref := range acceptedRefs {
+			if rejectedRefs[strings.TrimSpace(ref)] {
 				return true
 			}
 		}

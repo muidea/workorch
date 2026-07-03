@@ -1919,6 +1919,13 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 	if input == nil {
 		input = map[string]any{}
 	}
+	if contract.State == convergenceStateBlocked && strings.TrimSpace(contract.GovernanceReason) != "" {
+		contract.State = convergenceStateNeedGovernance
+		contract.RuntimeStage = runtimeStageDecision
+		if strings.TrimSpace(contract.RuntimeStageMode) == "" {
+			contract.RuntimeStageMode = "structured_governance"
+		}
+	}
 	if !contract.DeterministicComplete && (contract.State == "" || contract.State == convergenceStateBlocked) {
 		return input
 	}

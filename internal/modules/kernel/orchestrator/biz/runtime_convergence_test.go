@@ -1289,6 +1289,27 @@ func TestApplyConvergenceContractNeedGovernanceClearsExecutableRepairFollowUp(t 
 	}
 }
 
+func TestApplyConvergenceContractBlockedWithGovernanceReasonMapsToDecision(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		"runtimeRepairFollowUp":       true,
+		"stateChangingOutputRequired": true,
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), ConvergenceContract{
+		State:            convergenceStateBlocked,
+		GovernanceReason: "external dependency is required",
+	})
+
+	if applied[stepInputKeyRuntimeStage] != runtimeStageDecision ||
+		applied["governanceRequired"] != true ||
+		applied["governanceReason"] != "external dependency is required" {
+		t.Fatalf("applied = %+v, want blocked governance reason to become decision-stage governance", applied)
+	}
+	if applied["runtimeRepairFollowUp"] != nil || applied["stateChangingOutputRequired"] != nil {
+		t.Fatalf("applied = %+v, want executable repair flags cleared", applied)
+	}
+}
+
 func TestRuntimeRepairFollowUpProfileEvidenceKindFailurePreemptsAssessmentOnly(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-profile-evidence-kind-gap",
