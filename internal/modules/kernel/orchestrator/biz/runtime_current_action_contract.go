@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"sort"
 	"strings"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -275,9 +276,52 @@ func normalizeCurrentAuthorityRequiredOutput(input map[string]any, required map[
 	}
 	authorityFocus := dispatchAuthorityCurrentFocus(input)
 	if len(authorityFocus) == 0 {
-		return cloneStepPayload(required)
+		return normalizeRequiredOutputMCPToolContract(input, cloneStepPayload(required))
 	}
-	return normalizeRequiredOutputFocusBinding(required, dispatchCoverageFocusFromAuthority(input, authorityFocus))
+	return normalizeRequiredOutputMCPToolContract(input, normalizeRequiredOutputFocusBinding(required, dispatchCoverageFocusFromAuthority(input, authorityFocus)))
+}
+
+func normalizeRequiredOutputMCPToolContract(input map[string]any, required map[string]any) map[string]any {
+	if len(required) == 0 || !currentActionRequiresConcreteValidation(input) {
+		return required
+	}
+	accepted := stringSliceFromValue(required["acceptedKinds"])
+	if !stringSliceContains(accepted, runtimemodel.StepKindMCPToolCall) {
+		return required
+	}
+	declared, _ := declaredRuntimeMCPServerIDsFromSources(
+		input,
+		mapFromValue(input["executionContext"]),
+		mapFromValue(input[stepInputKeyExecutionContextPackage]),
+		mapFromValue(input["runtimeCapabilities"]),
+		mapFromValue(mapFromValue(input["executionContext"])["runtimeCapabilities"]),
+	)
+	if len(declared) > 0 {
+		required["allowedMCPServerIds"] = sortedMCPServerIDs(declared)
+		return required
+	}
+	required["acceptedKinds"] = removeStringsFromSlice(accepted, runtimemodel.StepKindMCPToolCall)
+	required["mcpToolCallUnavailableReason"] = "mcp/tool_call is not accepted for this validation action because no concrete MCP server is declared in the current runtime capability context"
+	return required
+}
+
+func sortedMCPServerIDs(declared map[string]bool) []string {
+	ret := mapKeys(declared)
+	sort.Strings(ret)
+	return ret
+}
+
+func currentActionRequiresConcreteValidation(input map[string]any) bool {
+	if strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state")) == convergenceStateNeedValidation {
+		return true
+	}
+	nextAction := strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind"))
+	switch nextAction {
+	case runtimemodel.NextActionTypeValidate, "validation", "produce_validation_evidence":
+		return true
+	default:
+		return false
+	}
 }
 
 func compactCurrentActionDiagnostic(input map[string]any) map[string]any {

@@ -17,6 +17,11 @@ func CurrentRunStatusStep(run *runmodel.Run, steps []*runmodel.Step, checkpoints
 	if step := blockingApprovalRunStatusStep(run, approvals, byID); step != nil {
 		return step
 	}
+	if run != nil && IsTerminalRunState(string(run.State)) {
+		if step := TerminalRunStatusStep(steps); step != nil {
+			return step
+		}
+	}
 	if checkpoint := latestRuntimeCheckpointModel(checkpoints); checkpoint != nil && checkpoint.CurrentStepID != "" {
 		if step := byID[checkpoint.CurrentStepID]; step != nil {
 			return step

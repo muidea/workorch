@@ -384,6 +384,27 @@ func injectLatestRunAuthorityForDispatch(run *runModel.Run, input map[string]any
 	if context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]); len(context) > 0 {
 		input[coverageWorkItemContextKey] = cloneStepPayload(context)
 	}
+	if snapshots := mapSliceFromValue(run.ExecutionContext["targetSnapshots"]); len(snapshots) > 0 {
+		input["targetSnapshots"] = cloneStepInputValue(snapshots)
+	}
+	if snapshots := mapSliceFromValue(run.ExecutionContext["currentTargetSnapshots"]); len(snapshots) > 0 {
+		input["currentTargetSnapshots"] = cloneStepInputValue(snapshots)
+	}
+	if runPkg := mapFromValue(run.ExecutionContext["repairActionPackage"]); len(runPkg) > 0 {
+		pkg := mapFromValue(input["repairActionPackage"])
+		if len(pkg) == 0 {
+			pkg = map[string]any{}
+		}
+		if snapshots := mapSliceFromValue(runPkg["targetSnapshots"]); len(snapshots) > 0 {
+			pkg["targetSnapshots"] = cloneStepInputValue(snapshots)
+		}
+		if snapshots := mapSliceFromValue(runPkg["currentTargetSnapshots"]); len(snapshots) > 0 {
+			pkg["currentTargetSnapshots"] = cloneStepInputValue(snapshots)
+		}
+		if len(pkg) > 0 {
+			input["repairActionPackage"] = pkg
+		}
+	}
 	return input
 }
 

@@ -45,6 +45,9 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		if gated, err := gapBaselineDispatchGate(run); gated || err != nil {
 			return err
 		}
+		if err := o.hydrateStateChangeTargetSnapshotsBeforeDispatch(ctx, run, input); err != nil {
+			return err
+		}
 		var rebuildErr error
 		input, rebuildErr = rebuildDispatchInputFromConvergenceAuthority(run, stepID, cloneStepPayload(input))
 		if rebuildErr != nil {
@@ -233,6 +236,62 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	request.Progress = o.runtimeStepProgressRecorder(ctx, run, step)
 	result, err := o.runtime.ExecuteRuntimeStep(ctx, request)
 	return o.finalizeRuntimeStepResultWithWorkspace(ctx, run, step, toolCall, workspace, result, err)
+}
+
+func (o *RuntimeOrchestrator) hydrateStateChangeTargetSnapshotsBeforeDispatch(ctx context.Context, run *runModel.Run, input map[string]any) error {
+	if o == nil || run == nil || !dispatchRequiresStateChangeTargetSnapshotHydration(run, input) {
+		return nil
+	}
+	before := stateChangeTargetSnapshotDispatchFingerprint(run)
+	if err := o.hydrateCurrentTargetSnapshotsFromAcceptedEvidence(ctx, run); err != nil {
+		return err
+	}
+	if after := stateChangeTargetSnapshotDispatchFingerprint(run); after != before && o.runs != nil {
+		return o.persistRunProgressUpdate(ctx, run)
+	}
+	return nil
+}
+
+func dispatchRequiresStateChangeTargetSnapshotHydration(run *runModel.Run, input map[string]any) bool {
+	for _, kind := range []string{
+		latestRunAuthorityNextActionKind(run),
+		strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind")),
+		strings.TrimSpace(convergenceNextActionKind(run, input)),
+	} {
+		switch kind {
+		case runtimemodel.NextActionTypeStateChange, "produce_state_change":
+			return true
+		}
+	}
+	for _, contract := range []map[string]any{
+		mapFromValue(input["convergenceContract"]),
+		runExecutionContextMapValue(run, "convergenceContract"),
+	} {
+		if strings.TrimSpace(stringFromMap(contract, "state")) == convergenceStateNeedStateChange {
+			return true
+		}
+	}
+	return false
+}
+
+func runExecutionContextMapValue(run *runModel.Run, key string) map[string]any {
+	if run == nil || run.ExecutionContext == nil {
+		return nil
+	}
+	return mapFromValue(run.ExecutionContext[key])
+}
+
+func stateChangeTargetSnapshotDispatchFingerprint(run *runModel.Run) string {
+	if run == nil || run.ExecutionContext == nil {
+		return ""
+	}
+	pkg := mapFromValue(run.ExecutionContext["repairActionPackage"])
+	return stableCoverageJSON(map[string]any{
+		"repairActionPackageTargetSnapshots":        mapSliceFromValue(pkg["targetSnapshots"]),
+		"repairActionPackageCurrentTargetSnapshots": mapSliceFromValue(pkg["currentTargetSnapshots"]),
+		"targetSnapshots":                           mapSliceFromValue(run.ExecutionContext["targetSnapshots"]),
+		"currentTargetSnapshots":                    mapSliceFromValue(run.ExecutionContext["currentTargetSnapshots"]),
+	})
 }
 
 func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(

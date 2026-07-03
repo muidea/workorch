@@ -81,6 +81,65 @@ func TestValidateConvergenceDispatchInputRejectsCurrentActionContractDrift(t *te
 	}
 }
 
+func TestCurrentActionValidationRequiredOutputRemovesMCPWhenNoServerDeclared(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction":   map[string]any{"kind": "validate"},
+			"currentFocus": map[string]any{"id": "cwi-validate", "coverageWorkItemIds": []any{"cwi-validate"}},
+		},
+		"convergenceContract": map[string]any{
+			"state": convergenceStateNeedValidation,
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []any{"shell/command", "mcp/tool_call", managedValidationSessionNodeKind},
+			},
+		},
+	}
+
+	required := activeRequiredOutputForCurrentAction(input)
+	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "mcp/tool_call") {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want mcp/tool_call removed without declared server", required["acceptedKinds"])
+	}
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "shell/command") ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), managedValidationSessionNodeKind) {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want shell and managed validation retained", required["acceptedKinds"])
+	}
+	if stringFromMap(required, "mcpToolCallUnavailableReason") == "" {
+		t.Fatalf("requiredOutput = %+v, want unavailable MCP reason", required)
+	}
+}
+
+func TestCurrentActionValidationRequiredOutputKeepsDeclaredMCPServers(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction":   map[string]any{"kind": "validate"},
+			"currentFocus": map[string]any{"id": "cwi-validate", "coverageWorkItemIds": []any{"cwi-validate"}},
+		},
+		"convergenceContract": map[string]any{
+			"state": convergenceStateNeedValidation,
+		},
+		"runtimeCapabilities": map[string]any{
+			"mcpServers": []map[string]any{{"id": "semantic-mcp"}},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []any{"shell/command", "mcp/tool_call"},
+			},
+		},
+	}
+
+	required := activeRequiredOutputForCurrentAction(input)
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "mcp/tool_call") {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want declared mcp/tool_call retained", required["acceptedKinds"])
+	}
+	if ids := stringSliceFromValue(required["allowedMCPServerIds"]); len(ids) != 1 || ids[0] != "semantic-mcp" {
+		t.Fatalf("requiredOutput.allowedMCPServerIds = %+v, want [semantic-mcp]", ids)
+	}
+}
+
 func TestSynchronizeCurrentRequiredOutputMirrorsUsesCurrentContractBeforeStaleMirrors(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{

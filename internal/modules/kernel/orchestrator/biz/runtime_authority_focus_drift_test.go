@@ -445,6 +445,106 @@ func TestDispatchNextStepPreparesInputFromCurrentAuthority(t *testing.T) {
 	}
 }
 
+func TestStateChangeDispatchHydratesAcceptedTargetSnapshotsBeforeRebuild(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-dispatch-state-change-snapshot")
+	workspaceID := common.WorkspaceID("ws-dispatch-state-change-snapshot")
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	patchRepo := memory.NewPatchRepository()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	run.ID = runID
+	run.WorkspaceID = workspaceID
+	run.InitialStepKind = llmWorkspaceExecutionStepKind
+	run.ExecutionContext["stateChangingOutputRequired"] = true
+	run.ExecutionContext["repairActionPackage"] = map[string]any{
+		"requiresCurrentTargetSnapshotForStateChange": true,
+		"repairTargetSet": []string{"target.txt"},
+	}
+	updateAuthorityScopeForTest(run, workspaceID, runID)
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	sourceStep := &runModel.Step{
+		ID:    "run-dispatch-state-change-snapshot/read-target",
+		RunID: runID,
+		Kind:  "file/read",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphRootStepID: "run-dispatch-state-change-snapshot/root",
+			stepInputKeyGraphNodeID:     "read-target",
+		},
+		Output: map[string]any{
+			"stage":            "file_read",
+			"path":             "target.txt",
+			"exists":           true,
+			"content":          "current target content\n",
+			"contentHash":      "hash-dispatch-snapshot",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+			"truncated":        false,
+			"isBinary":         false,
+		},
+	}
+	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	if err := stepRepo.Create(scopedCtx, sourceStep); err != nil {
+		t.Fatalf("seed source step: %v", err)
+	}
+	record := acceptedTargetSnapshotEvidenceRecordForStep(run, sourceStep)
+	if record == nil {
+		t.Fatalf("accepted target snapshot evidence record = nil")
+	}
+	if err := evidenceRepo.Create(scopedCtx, record); err != nil {
+		t.Fatalf("seed evidence record: %v", err)
+	}
+	records, err := evidenceRepo.ListByRun(scopedCtx, runID)
+	if err != nil {
+		t.Fatalf("list evidence records: %v", err)
+	}
+	if snapshots := acceptedTargetSnapshotsFromEvidenceRecords(scopedCtx, run, records, stepRepo, nil); len(snapshots) == 0 {
+		t.Fatalf("acceptedTargetSnapshotsFromEvidenceRecords empty; record=%+v step=%+v", record, sourceStep)
+	}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		nil,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo, Patches: patchRepo},
+		events.NewMemoryHub(),
+	)
+
+	if !dispatchRequiresStateChangeTargetSnapshotHydration(run, nil) {
+		t.Fatalf("dispatchRequiresStateChangeTargetSnapshotHydration = false; authority=%+v", run.ExecutionContext)
+	}
+	if err := orch.hydrateStateChangeTargetSnapshotsBeforeDispatch(ctx, run, nil); err != nil {
+		t.Fatalf("hydrate target snapshots: %v", err)
+	}
+	got, err := rebuildDispatchInputFromConvergenceAuthority(run, "run-dispatch-state-change-snapshot/patch-target", map[string]any{})
+	if err != nil {
+		t.Fatalf("rebuildDispatchInputFromConvergenceAuthority: %v", err)
+	}
+	snapshots := mapSliceFromValue(mapFromValue(got["repairActionPackage"])["targetSnapshots"])
+	if len(snapshots) != 1 || stringFromMap(snapshots[0], "targetRef") != "target.txt" {
+		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want accepted target snapshot for target.txt", snapshots)
+	}
+	reloadedRun, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("reload run: %v", err)
+	}
+	if len(mapSliceFromValue(mapFromValue(reloadedRun.ExecutionContext["repairActionPackage"])["targetSnapshots"])) == 0 &&
+		len(mapSliceFromValue(reloadedRun.ExecutionContext["targetSnapshots"])) == 0 {
+		t.Fatalf("persisted run context = %+v, want dispatch hydration persisted before rebuild", reloadedRun.ExecutionContext)
+	}
+}
+
 func TestRebuildDispatchInputReplacesStaleRequiredOutputForAssessmentAuthority(t *testing.T) {
 	run := runWithAuthorityFocusForTest("assessment")
 	input := map[string]any{

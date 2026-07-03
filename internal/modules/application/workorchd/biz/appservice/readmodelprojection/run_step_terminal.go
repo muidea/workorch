@@ -35,5 +35,10 @@ func TerminalRunStatusStep(steps []*runmodel.Step) *runmodel.Step {
 			return step
 		}
 	}
+	for idx := len(terminals) - 1; idx >= 0; idx-- {
+		if terminals[idx].State == common.StepStateFailed {
+			return terminals[idx]
+		}
+	}
 	return terminals[len(terminals)-1]
 }

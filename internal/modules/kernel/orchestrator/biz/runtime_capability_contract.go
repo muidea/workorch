@@ -391,6 +391,21 @@ func validateGraphDeclaredMCPServers(run *runModel.Run, step *runModel.Step, gra
 }
 
 func declaredRuntimeMCPServerIDs(run *runModel.Run, step *runModel.Step) (map[string]bool, bool) {
+	var sources []map[string]any
+	if run != nil {
+		sources = append(sources, run.ExecutionContext)
+	}
+	if step != nil && step.Input != nil {
+		sources = append(sources,
+			step.Input,
+			mapFromValue(step.Input["executionContext"]),
+			mapFromValue(step.Input[stepInputKeyExecutionContextPackage]),
+		)
+	}
+	return declaredRuntimeMCPServerIDsFromSources(sources...)
+}
+
+func declaredRuntimeMCPServerIDsFromSources(sources ...map[string]any) (map[string]bool, bool) {
 	ret := map[string]bool{}
 	present := false
 	addServer := func(server map[string]any) {
@@ -442,13 +457,8 @@ func declaredRuntimeMCPServerIDs(run *runModel.Run, step *runModel.Step) (map[st
 			visit(runtimeCapabilities)
 		}
 	}
-	if run != nil {
-		visit(run.ExecutionContext)
-	}
-	if step != nil && step.Input != nil {
-		visit(step.Input)
-		visit(mapFromValue(step.Input["executionContext"]))
-		visit(mapFromValue(step.Input[stepInputKeyExecutionContextPackage]))
+	for _, source := range sources {
+		visit(source)
 	}
 	return ret, present
 }
