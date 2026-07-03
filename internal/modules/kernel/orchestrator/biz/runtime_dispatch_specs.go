@@ -453,9 +453,6 @@ func failedAssessmentDecisionShouldRepair(step *runModel.Step, output map[string
 	if step == nil || output == nil {
 		return false
 	}
-	if runtimeStageFromStepInput(step.Input) != runtimeStageVerification {
-		return false
-	}
 	if !failedAssessmentHasActionableCoverageGap(output) {
 		return false
 	}
@@ -748,6 +745,7 @@ func previousExecutionStepID(step *runModel.Step) common.StepID {
 		"previousStepId",
 		stepInputKeyRepairOfStepID,
 		"failedStepId",
+		stepInputKeyGraphBatchRootStepID,
 	} {
 		previousStepID := strings.TrimSpace(stringFromMap(step.Input, key))
 		if previousStepID != "" && common.StepID(previousStepID) != step.ID {

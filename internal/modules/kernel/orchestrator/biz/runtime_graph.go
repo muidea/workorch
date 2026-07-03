@@ -167,10 +167,12 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	if len(specs) == 0 {
 		return common.ErrConflict
 	}
+	batchRootStepID := graphBatchRootStepID(specs)
 	if o.eventDrivenDispatch {
 		workspaceID := workspaceIDForDispatch(run, workspace)
 		for _, spec := range specs {
 			spec.Input = cloneStepPayload(spec.Input)
+			spec.Input = graphBatchInputWithRoot(spec.Input, batchRootStepID)
 			if err := o.requestDispatchStep(ctx, run.ID, workspaceID, spec); err != nil && !errors.Is(err, common.ErrConflict) {
 				return err
 			}
@@ -184,7 +186,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		if spec.Input == nil {
 			spec.Input = map[string]any{}
 		}
-		spec.Input[stepInputKeyGraphBatch] = true
+		spec.Input = graphBatchInputWithRoot(spec.Input, batchRootStepID)
 		specs[0].Input = spec.Input
 		if err := o.dispatchStepWithWorkspace(ctx, run, spec.ID, spec.Kind, spec.Input, workspace); err != nil && !errors.Is(err, common.ErrConflict) {
 			firstErr = err
@@ -198,7 +200,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 			if spec.Input == nil {
 				spec.Input = map[string]any{}
 			}
-			spec.Input[stepInputKeyGraphBatch] = true
+			spec.Input = graphBatchInputWithRoot(spec.Input, batchRootStepID)
 			specs[idx].Input = spec.Input
 			runCopy := *run
 			wg.Add(1)
@@ -301,6 +303,27 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		return err
 	}
 	return o.validateAndCompleteRunWithWorkspace(ctx, currentRun, last.ID, workspace)
+}
+
+func graphBatchRootStepID(specs []stepDispatchSpec) common.StepID {
+	for _, spec := range specs {
+		root := strings.TrimSpace(stringFromMap(spec.Input, stepInputKeyGraphRootStepID))
+		if root != "" {
+			return common.StepID(root)
+		}
+	}
+	return ""
+}
+
+func graphBatchInputWithRoot(input map[string]any, rootStepID common.StepID) map[string]any {
+	if input == nil {
+		input = map[string]any{}
+	}
+	input[stepInputKeyGraphBatch] = true
+	if rootStepID != "" {
+		input[stepInputKeyGraphBatchRootStepID] = string(rootStepID)
+	}
+	return input
 }
 
 func dedupeConcurrentLLMGraphDispatchSpecs(specs []stepDispatchSpec) []stepDispatchSpec {
@@ -1064,6 +1087,9 @@ func graphFollowUpExpansionStep(step *runModel.Step) bool {
 func graphFollowUpExpansionCandidate(step *runModel.Step, output map[string]any) bool {
 	if step == nil || step.Input == nil || output == nil || !boolValue(step.Input["graphFollowUp"]) {
 		return false
+	}
+	if _, exists := output[stepOutputKeyExecutionGraph]; exists {
+		return true
 	}
 	_, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
 	return ok

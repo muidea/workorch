@@ -35,6 +35,7 @@ const (
 	stepInputKeyGraphPreviousNodeID     = "graphPreviousNodeId"
 	stepInputKeyGraphCompletedNodes     = "graphCompletedNodes"
 	stepInputKeyGraphBatch              = "graphBatch"
+	stepInputKeyGraphBatchRootStepID    = "batchRootStepId"
 	stepInputKeyGraphEvidence           = "graphEvidence"
 	stepInputKeyRunEvidenceSummary      = "runEvidenceSummary"
 	stepInputKeyProcessEvidenceTimeline = "processEvidenceTimeline"

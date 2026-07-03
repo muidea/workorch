@@ -1487,6 +1487,54 @@ func TestEnforceProviderRequestBudgetAcceptsRepairPackageCurrentFailure(t *testi
 	}
 }
 
+func TestEnforceProviderRequestBudgetAcceptsStagePacketCurrentFailure(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-stage-packet-current-failure",
+		RunID:       "run-stage-packet-current-failure",
+		StepID:      "run-stage-packet-current-failure/repair-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"runtimeRepairFollowUp": true,
+			"currentProgressDigest": map[string]any{
+				"currentGap":         "coverage item still lacks accepted validation and state_change evidence",
+				"nextRequiredAction": "continue_current_stage_contract",
+			},
+			"processEvidenceTimeline": []any{
+				map[string]any{"stepId": "run-stage-packet-current-failure/step-1", "state": "failed"},
+			},
+			"stagePacket": map[string]any{
+				"currentFailure": map[string]any{
+					"failedStepId":     "run-stage-packet-current-failure/step-1",
+					"failedStepKind":   "llm/workspace_execution",
+					"failureClass":     "runtime_failed",
+					"failureSignature": "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan",
+					"reason":           "previous execution graph output was rejected by contract validation",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"currentExecutionProgress": map[string]any{
+					"currentGap":         "coverage item still lacks accepted validation and state_change evidence",
+					"nextRequiredAction": "continue_current_stage_contract",
+				},
+				"requiredOutput": map[string]any{"mustReturnValidJSON": true},
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget = nil, want integrity audit")
+	}
+	if stringSliceContains(got.ContextBudget.IntegrityWarnings, "runtime_repair_current_failure_missing") {
+		t.Fatalf("integrityWarnings = %+v, did not expect missing current failure", got.ContextBudget.IntegrityWarnings)
+	}
+	if got.ContextBudget.ContextGateAction == providerContextGateBlockerRequired {
+		t.Fatalf("contextGateAction = %q, did not expect blocker_required", got.ContextBudget.ContextGateAction)
+	}
+}
+
 func TestEnforceProviderRequestBudgetAcceptsInitialStateChangingRunWithoutProcessEvidence(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-state-changing-initial",

@@ -74,6 +74,9 @@ func (o *RuntimeOrchestrator) validateAndCompleteRunWithWorkspace(ctx context.Co
 	if run.State != common.RunStateRunning {
 		return common.ErrConflict
 	}
+	if err := o.validateRunReadyForCompletion(ctx, run); err != nil {
+		return err
+	}
 	var err error
 	workspace, err = o.runStateManager().syncRunAndWorkspaceForValidation(ctx, run, workspace)
 	if err != nil {
@@ -86,9 +89,6 @@ func (o *RuntimeOrchestrator) validateAndCompleteRunWithWorkspace(ctx context.Co
 		return err
 	}
 
-	if err := o.validateRunReadyForCompletion(ctx, run); err != nil {
-		return err
-	}
 	if err := o.finalizeManagedValidationResourcesForRun(ctx, run, "released", "run_completed"); err != nil {
 		return err
 	}

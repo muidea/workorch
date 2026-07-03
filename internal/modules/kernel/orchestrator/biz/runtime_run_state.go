@@ -93,7 +93,7 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 		successor.InitialStepKind = initialStepKind(run)
 	}
 	o.coverageLedger().prepareReplanSuccessor(successor, ctx)
-	if contract := o.convergenceManager().build(successor, nil, nil, map[string]any{"input": successor.ExecutionContext}, nil); contract.State != "" {
+	if contract := o.convergenceManager().build(successor, nil, nil, map[string]any{"input": successor.ExecutionContext}, nil); convergenceContractShouldPersist(contract) {
 		successor.ExecutionContext["convergenceContract"] = o.convergenceManager().compact(contract)
 	}
 	successor.ExecutionContext["compressedContext"] = compressedContextForCreatedRuntimeRun(successor)

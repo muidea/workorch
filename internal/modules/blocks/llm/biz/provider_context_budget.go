@@ -1119,6 +1119,15 @@ func providerInputHasCurrentFailure(input map[string]any) bool {
 	if len(recordFromAny(recordFromAny(input["repairActionPackage"])["currentFailure"])) > 0 {
 		return true
 	}
+	for _, container := range []map[string]any{
+		recordFromAny(input["stagePacket"]),
+		recordFromAny(recordFromAny(input["executionContext"])["stagePacket"]),
+		recordFromAny(recordFromAny(input["executionContextPackage"])["stagePacket"]),
+	} {
+		if len(recordFromAny(container["currentFailure"])) > 0 {
+			return true
+		}
+	}
 	for _, key := range []string{"failedStepId", "failureClass", "failureSignature", "failureReason"} {
 		if strings.TrimSpace(stringValue(input[key])) != "" {
 			return true

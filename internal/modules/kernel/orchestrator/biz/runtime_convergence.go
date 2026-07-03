@@ -3523,3 +3523,13 @@ func compactConvergenceContract(contract ConvergenceContract) map[string]any {
 	}
 	return ret
 }
+
+func convergenceContractShouldPersist(contract ConvergenceContract) bool {
+	if contract.State == "" {
+		return false
+	}
+	if contract.State == convergenceStateBlocked && strings.TrimSpace(contract.GovernanceReason) == "" {
+		return false
+	}
+	return true
+}
