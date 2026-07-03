@@ -1103,6 +1103,96 @@ func TestNextActionForRunRejectedValidationEvidenceLoopRequestsStateChange(t *te
 	}
 }
 
+func TestNextActionForRunValidationLoopRoutesStateChangeDespiteLatestContractDiagnostic(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-validation-loop-latest-contract")
+	runID := common.RunID("run-next-action-validation-loop-latest-contract")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                     "cwi-validation-loop-latest-contract",
+				"status":                 "open",
+				"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+				"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindStateChange: {"state-change-before-loop"}},
+				"missingEvidenceKinds":   []string{runtimemodel.EvidenceKindValidation},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for idx, id := range []string{"validation-build-loop-1", "validation-build-loop-2", "validation-build-loop-3"} {
+		timestamp := "2026-06-28T05:0" + string(rune('1'+idx)) + ":00Z"
+		if err := evidenceRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.EvidenceRecord{
+			ID:               common.EvidenceRecordID(id),
+			WorkspaceID:      workspaceID,
+			RunID:            runID,
+			Kind:             runtimemodel.EvidenceKindValidation,
+			Status:           runtimemodel.EvidenceStatusRejected,
+			SourceType:       evidenceRecordSourceTypeValidationResult,
+			SourceRef:        id + "-source",
+			CoverageItemRefs: []string{"cwi-validation-loop-latest-contract"},
+			CreatedAt:        timestamp,
+			UpdatedAt:        timestamp,
+			Metadata: map[string]any{
+				"validationFailureDiagnostic": map[string]any{"class": runtimemodel.ValidationDiagnosticBuildFailed},
+				"failureSignature":            "same-build-validation-loop",
+			},
+		}); err != nil {
+			t.Fatalf("create rejected validation evidence %s: %v", id, err)
+		}
+	}
+	if err := evidenceRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.EvidenceRecord{
+		ID:               "validation-command-invalid-latest",
+		WorkspaceID:      workspaceID,
+		RunID:            runID,
+		Kind:             runtimemodel.EvidenceKindValidation,
+		Status:           runtimemodel.EvidenceStatusRejected,
+		SourceType:       evidenceRecordSourceTypeValidationResult,
+		SourceRef:        "validation-command-invalid-latest-source",
+		CoverageItemRefs: []string{"cwi-validation-loop-latest-contract"},
+		CreatedAt:        "2026-06-28T05:05:00Z",
+		UpdatedAt:        "2026-06-28T05:05:00Z",
+		Metadata: map[string]any{
+			"validationFailureDiagnostic": map[string]any{"class": runtimemodel.ValidationDiagnosticCommandInvalid},
+			"failureSignature":            "command-contract-latest",
+		},
+	}); err != nil {
+		t.Fatalf("create latest command-invalid validation evidence: %v", err)
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeStateChange || action.StageMode != "validation_no_delta" {
+		t.Fatalf("next action = %+v, want state_change from accumulated no-delta validation failures", action)
+	}
+	if stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeStateChange) ||
+		!stringSliceContains(stringSliceFromValue(action.RequiredOutput["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("next action = %+v, want state-changing contract not validation-only", action)
+	}
+}
+
 func TestNextActionForRunNoDeltaValidationLoopResetsAfterAcceptedStateChange(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -1354,6 +1444,78 @@ func TestNextActionForRunValidationContractRetryExhaustedFailsFast(t *testing.T)
 		action.RequiredOutput["retryAttempt"] != 2 ||
 		action.RequiredOutput["retryMaxAttempts"] != 2 {
 		t.Fatalf("required output = %+v, want retry exhaustion details", action.RequiredOutput)
+	}
+}
+
+func TestNextActionForRunValidationCommandContractRetryExhaustsByClass(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		memory.NewStepRepository(),
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-next-action-validation-command-contract-exhausted")
+	runID := common.RunID("run-next-action-validation-command-contract-exhausted")
+	mustCreateWorkspaceForNextAction(t, ctx, workspaceRepo, workspaceID, runID)
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                     "cwi-validation-command-contract",
+				"status":                 "open",
+				"requiredEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+				"acceptedEvidenceByKind": map[string][]string{runtimemodel.EvidenceKindStateChange: {"step-state-change"}},
+				"missingEvidenceKinds":   []string{runtimemodel.EvidenceKindValidation},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for idx, id := range []string{"command-contract-1", "command-contract-2", "command-contract-3"} {
+		if err := evidenceRepo.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runtimemodel.EvidenceRecord{
+			ID:               common.EvidenceRecordID(id),
+			WorkspaceID:      workspaceID,
+			RunID:            runID,
+			Kind:             runtimemodel.EvidenceKindValidation,
+			Status:           runtimemodel.EvidenceStatusRejected,
+			SourceType:       evidenceRecordSourceTypeValidationResult,
+			SourceRef:        id + "-source",
+			CoverageItemRefs: []string{"cwi-validation-command-contract"},
+			CreatedAt:        "2026-06-28T06:0" + string(rune('1'+idx)) + ":00Z",
+			UpdatedAt:        "2026-06-28T06:0" + string(rune('1'+idx)) + ":00Z",
+			Metadata: map[string]any{
+				"validationFailureDiagnostic": map[string]any{"class": runtimemodel.ValidationDiagnosticCommandInvalid},
+				"failureSignature":            "command-contract-different-node-" + id,
+			},
+		}); err != nil {
+			t.Fatalf("create command contract validation evidence %s: %v", id, err)
+		}
+	}
+
+	action, err := orch.NextActionForRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("NextActionForRun: %v", err)
+	}
+	if action.Type != runtimemodel.NextActionTypeFail || action.StageMode != "fail" {
+		t.Fatalf("next action = %+v, want fail after repeated command contract diagnostics", action)
+	}
+	if action.RequiredOutput["validationFailureDiagnosticClass"] != runtimemodel.ValidationDiagnosticCommandInvalid ||
+		action.RequiredOutput["retryAttempt"] != validationNoDeltaLoopRejectedThreshold ||
+		action.RequiredOutput["retryMaxAttempts"] != validationNoDeltaLoopRejectedThreshold {
+		t.Fatalf("required output = %+v, want default class-scoped retry exhaustion", action.RequiredOutput)
 	}
 }
 

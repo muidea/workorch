@@ -720,22 +720,19 @@ func validationNextActionRouteForRejectedDiagnostics(run *runmodel.Run, item map
 			return route
 		}
 	}
-	if validationDiagnosticAllowsNoDeltaStateChange(class) {
-		count := validationNoDeltaRejectedDiagnosticCountForCoverageItem(run, item, records)
-		if count >= validationNoDeltaLoopRejectedThreshold {
-			return validationNextActionRoute{
-				Route:                "validation_loop_without_state_change",
-				ActionType:           runtimemodel.NextActionTypeStateChange,
-				StageMode:            "validation_no_delta",
-				PolicyRef:            strings.TrimSpace(firstNonEmptyString(stringFromMap(policy, "policyRef"), stringFromMap(policy, "id"))),
-				Reason:               "validation loop made no accepted evidence delta",
-				DiagnosticEvidenceID: string(latest.ID),
-				DiagnosticClass:      class,
-				FailureSignature:     validationDiagnosticFailureSignature(latest),
-				RetryAttempt:         count,
-				RetryMaxAttempts:     validationNoDeltaLoopRejectedThreshold,
-				EscalationReason:     "validation_loop_without_state_change",
-			}
+	if count := validationNoDeltaRejectedDiagnosticCountForCoverageItem(run, item, records); count >= validationNoDeltaLoopRejectedThreshold {
+		return validationNextActionRoute{
+			Route:                "validation_loop_without_state_change",
+			ActionType:           runtimemodel.NextActionTypeStateChange,
+			StageMode:            "validation_no_delta",
+			PolicyRef:            strings.TrimSpace(firstNonEmptyString(stringFromMap(policy, "policyRef"), stringFromMap(policy, "id"))),
+			Reason:               "validation loop made no accepted evidence delta",
+			DiagnosticEvidenceID: string(latest.ID),
+			DiagnosticClass:      class,
+			FailureSignature:     validationDiagnosticFailureSignature(latest),
+			RetryAttempt:         count,
+			RetryMaxAttempts:     validationNoDeltaLoopRejectedThreshold,
+			EscalationReason:     "validation_loop_without_state_change",
 		}
 	}
 	return validationNextActionRoute{}
@@ -915,7 +912,17 @@ func validationDiagnosticImpliesStateChange(class string, policy map[string]any)
 }
 
 func validationDiagnosticIsContractViolation(class string, record *runtimemodel.EvidenceRecord) bool {
-	if allowedValidationDiagnosticClass(class) == runtimemodel.ValidationDiagnosticContractViolation {
+	switch allowedValidationDiagnosticClass(class) {
+	case runtimemodel.ValidationDiagnosticContractViolation,
+		runtimemodel.ValidationDiagnosticCommandInvalid,
+		runtimemodel.ValidationDiagnosticEvidenceMetadataMissing,
+		runtimemodel.ValidationDiagnosticScratchRequired,
+		runtimemodel.ValidationDiagnosticScratchEscape,
+		runtimemodel.ValidationDiagnosticProcessControlForbidden,
+		runtimemodel.ValidationDiagnosticDetachedProcessForbidden,
+		runtimemodel.ValidationDiagnosticShellSafetyUnproven,
+		runtimemodel.ValidationDiagnosticManagedValidationRequired,
+		runtimemodel.ValidationDiagnosticRuntimeMisalignment:
 		return true
 	}
 	return validationDiagnosticViolatedRule(record) != ""
@@ -925,6 +932,7 @@ func validationDiagnosticAllowsNoDeltaStateChange(class string) bool {
 	switch allowedValidationDiagnosticClass(class) {
 	case runtimemodel.ValidationDiagnosticBuildFailed,
 		runtimemodel.ValidationDiagnosticTestFailed,
+		runtimemodel.ValidationDiagnosticTimeout,
 		runtimemodel.ValidationDiagnosticOutputInconclusive,
 		runtimemodel.ValidationDiagnosticEvidenceBindingMissing,
 		runtimemodel.ValidationDiagnosticEvidenceMetadataMissing:
@@ -938,6 +946,9 @@ func validationOnlyRetryMaxForPolicy(policy map[string]any) int {
 	maxRetries := int(int64FromValue(policy["maxValidationOnlyRetriesPerFocus"]))
 	if maxRetries < 0 {
 		return 0
+	}
+	if maxRetries == 0 {
+		return validationNoDeltaLoopRejectedThreshold
 	}
 	return maxRetries
 }
@@ -967,7 +978,13 @@ func repeatedValidationDiagnosticCountForCoverageItem(run *runmodel.Run, item ma
 			count++
 			continue
 		}
-		if latestRule == "" && latestSignature == "" && validationDiagnosticClassFromEvidenceRecord(record) == latestClass {
+		if (latestRule == "" && latestSignature == "") || validationDiagnosticIsContractViolation(latestClass, latest) {
+			if validationDiagnosticClassFromEvidenceRecord(record) == latestClass {
+				count++
+			}
+			continue
+		}
+		if validationDiagnosticClassFromEvidenceRecord(record) == latestClass {
 			count++
 		}
 	}
