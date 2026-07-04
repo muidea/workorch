@@ -259,6 +259,34 @@ func coverageValidationEvidenceRepairEligible(failedStep *runModel.Step) bool {
 		strings.Contains(text, "coverage")
 }
 
+func validationFailureWithConcreteTargetRequiresStateChangingRepair(failedStep *runModel.Step) bool {
+	if failedStep == nil || failedStep.State != common.StepStateFailed {
+		return false
+	}
+	switch strings.TrimSpace(failedStep.Kind) {
+	case "shell/command", "mcp/tool_call", "validation/managed_session":
+	default:
+		return false
+	}
+	if len(failureTargetsForSignature(failedStep.Output)) == 0 &&
+		runtimeFailureTargetScopeFromStep(failedStep) == "" {
+		return false
+	}
+	if runtimeRepairFailureIsTransientExecutionTimeout(failedStep, nil) {
+		return false
+	}
+	if boolValue(failedStep.Input["boundedValidationRequired"]) ||
+		strings.TrimSpace(stringFromMap(failedStep.Input, "repairObjective")) == repairObjectiveConcreteValidationEvidence ||
+		len(mapFromValue(failedStep.Input["validationEvidence"])) > 0 {
+		return true
+	}
+	stage := runtimeStageFromStepInput(failedStep.Input)
+	return stage == runtimeStageVerification &&
+		(strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass)) == failureClassShellCommand ||
+			strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass)) == failureClassMCPRuntime ||
+			strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass)) == failureClassRuntime)
+}
+
 func coverageValidationRepairShouldEscalateToStateChanging(
 	ctx context.Context,
 	repair *repairSubsystem,

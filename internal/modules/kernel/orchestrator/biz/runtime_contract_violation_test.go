@@ -666,6 +666,44 @@ func TestContractViolationCorrectionProfilesCoverPrimaryRules(t *testing.T) {
 	}
 }
 
+func TestContractViolationWrongShapePreservesStateChangingRequiredOutput(t *testing.T) {
+	runID := common.RunID("run-contract-wrong-shape-state-changing")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-wrong-shape-state-changing", InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := contractViolationFailedStep(runID, "failed-wrong-shape-state-changing")
+	failed.Input["repairObjective"] = repairObjectiveStateChangingOutput
+	failed.Input["stateChangingOutputRequired"] = true
+	pkg := mapFromValue(failed.Input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	required["mustIncludeStateChangingNode"] = true
+	required["acceptedKinds"] = []string{"patch/apply", "git/write"}
+	required["mustProduceConcreteValidationEvidence"] = true
+	pkg["requiredOutput"] = required
+	failed.Input["repairActionPackage"] = pkg
+	failed.Output[outputKeyContractViolationType] = contractViolationAssessmentOnlyExecutableOutput
+	failed.Output["error"] = "assessment-only step returned executable or state-changing output fields: nextKind, nextStep"
+	failed.Output[failureOutputKeySignature] = "class=runtime_failed|kind=llm/workspace_execution|stage=llm_decision_required|error=wrong output shape"
+
+	attachContractViolationDiagnostics(run, failed, common.ErrInvalidArgument)
+
+	recovery := contractViolationFromFailedOutput(failed)
+	if got := stringFromMap(recovery, "violatedRule"); got != contractViolationRuleWrongOutputShape {
+		t.Fatalf("violatedRule = %q, want %s; recovery=%+v", got, contractViolationRuleWrongOutputShape, recovery)
+	}
+	if got := stringFromMap(recovery, "correctionProfileId"); got != "state_changing_required_output" {
+		t.Fatalf("correctionProfileId = %q, want state_changing_required_output; recovery=%+v", got, recovery)
+	}
+	contract := mapFromValue(recovery["correctionContract"])
+	if got := stringFromMap(contract, "requiredOutputShape"); got != "state_changing_output" {
+		t.Fatalf("requiredOutputShape = %q, want state_changing_output; contract=%+v", got, contract)
+	}
+	if !boolValue(contract["mustReturnValidJSON"]) {
+		t.Fatalf("correctionContract = %+v, want JSON-shape recovery to preserve valid JSON requirement", contract)
+	}
+	if !stringSliceContains(stringSliceFromValue(contract["allowedOutputs"]), "patch/apply") {
+		t.Fatalf("allowedOutputs = %+v, want state-changing outputs preserved", contract["allowedOutputs"])
+	}
+}
+
 func TestContractViolationConcreteValidationForbidsContinuableDecisionBlocker(t *testing.T) {
 	runID := common.RunID("run-contract-continuable-decision-blocker")
 	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-continuable-decision-blocker", InitialStepKind: llmWorkspaceExecutionStepKind}

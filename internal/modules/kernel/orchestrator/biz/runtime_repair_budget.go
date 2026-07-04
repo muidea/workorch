@@ -270,7 +270,7 @@ func providerRetryStepInputWithMaxAttempts(failedStep *runModel.Step, attempt in
 		}
 		narrowStateChangingRecoveryInput(input, failedStep, execErr, "provider_retry")
 	}
-	if completionGateFollowUpStep(failedStep) {
+	if completionGateFollowUpStep(failedStep) && !providerRetryPreservesStateChangingContract(input) {
 		input["providerRetryMode"] = "completion_assessment_only"
 		input["providerRetryAssessmentOnly"] = true
 		input["completionFollowUp"] = true
@@ -279,6 +279,19 @@ func providerRetryStepInputWithMaxAttempts(failedStep *runModel.Step, attempt in
 		delete(input, "previousStepOutput")
 	}
 	return input
+}
+
+func providerRetryPreservesStateChangingContract(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if boolValue(input["stateChangingOutputRequired"]) ||
+		repairObjectiveRequiresStateChange(stringFromMap(input, "repairObjective")) {
+		return true
+	}
+	required := currentRequiredOutputForAuthority(input)
+	return requiredOutputRequiresStateChanging(required) ||
+		requiredOutputHasAllowedStateChangingKind(required)
 }
 
 func sanitizeProviderRetryBaseInput(input map[string]any) {

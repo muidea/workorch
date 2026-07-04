@@ -1090,9 +1090,11 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	coverageValidationEvidenceRepair := coverageGapEligibleForValidationRepair && !coverageValidationHasTargetEvidence
 	emptyWorkspaceStateChangingRepair := emptyWorkspaceEvidenceShouldStartStateChangingRepair(run, failedStep, input)
 	stateChangingEvidenceQualityRepair := doDEvidenceQualityGapRequiresStateChange(failedStep)
-	validationRepairEscalatesToStateChanging := emptyWorkspaceStateChangingRepair || (coverageGapEligibleForValidationRepair &&
-		coverageValidationHasTargetEvidence &&
-		coverageValidationRepairShouldEscalateToStateChanging(ctx, o.repairManager(), run, failedStep, input))
+	validationRepairEscalatesToStateChanging := emptyWorkspaceStateChangingRepair ||
+		validationFailureWithConcreteTargetRequiresStateChangingRepair(failedStep) ||
+		(coverageGapEligibleForValidationRepair &&
+			coverageValidationHasTargetEvidence &&
+			coverageValidationRepairShouldEscalateToStateChanging(ctx, o.repairManager(), run, failedStep, input))
 	applyRuntimeRepairValidationEscalationProjection(input, validationRepairEscalatesToStateChanging)
 	applyRuntimeRepairEmptyWorkspaceStateChangingProjection(input, emptyWorkspaceStateChangingRepair)
 	applyRuntimeRepairStateChangingEvidenceQualityProjection(input, failedStep, stateChangingEvidenceQualityRepair)

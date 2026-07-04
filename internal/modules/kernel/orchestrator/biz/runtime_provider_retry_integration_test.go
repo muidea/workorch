@@ -89,6 +89,54 @@ func TestRuntimeOrchestrator_ResumeDispatchForProviderFailureUsesProviderRetryWi
 	}
 }
 
+func TestProviderRetryPreservesStateChangingContractForCompletionFollowUp(t *testing.T) {
+	failed := &runmodel.Step{
+		ID:    "run-provider-retry-state-change/follow-up-assessment",
+		RunID: "run-provider-retry-state-change",
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"completionFollowUp":          true,
+			"graphFollowUp":               true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"repairObjective":             repairObjectiveStateChangingOutput,
+				"stateChangingOutputRequired": true,
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply", "git/write"},
+				},
+			},
+			currentActionContractKey: map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply", "git/write"},
+				},
+			},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_provider_unavailable",
+			"error":                   "unexpected EOF",
+			failureOutputKeyClass:     failureClassProviderUnavailable,
+			failureOutputKeySignature: "class=provider_unavailable|kind=llm/workspace_execution|stage=llm_provider_unavailable",
+		},
+	}
+
+	input := providerRetryStepInputWithMaxAttempts(failed, 1, errors.New("unexpected EOF"), 2)
+
+	if boolValue(input["providerRetryAssessmentOnly"]) || boolValue(input[stepInputKeyAssessmentOnly]) {
+		t.Fatalf("provider retry input = %+v, must not downgrade state-changing contract to assessment-only", input)
+	}
+	if input["repairObjective"] != repairObjectiveStateChangingOutput || !boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("provider retry input = %+v, want preserved state-changing objective", input)
+	}
+	required := currentRequiredOutputForAuthority(input)
+	if !requiredOutputHasAllowedStateChangingKind(required) {
+		t.Fatalf("requiredOutput = %+v, want state-changing accepted kind preserved", required)
+	}
+}
+
 func TestRuntimeOrchestrator_ResumeDispatchForProviderFailureStopsAfterRetryBudget(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-resume-provider-retry-exhausted")

@@ -843,6 +843,8 @@ func contractViolationRuleFromStep(step *runModel.Step) string {
 	case contractViolationGraphNodeReturnedGraph,
 		contractViolationRepairReturnedGraph:
 		return contractViolationRuleWrongOutputShape
+	case contractViolationAssessmentOnlyExecutableOutput:
+		return contractViolationRuleWrongOutputShape
 	case contractViolationFocusBindingMismatch:
 		return contractViolationRuleFocusBindingMismatch
 	case contractViolationCoverageTargetsRequired:
@@ -1106,9 +1108,26 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 			contract["forbiddenOutputs"] = []string{"satisfied_item_without_evidenceRefs", "coverage_map_missing_current_goal_or_dod", "untraceable_summary_only"}
 		}
 	case contractViolationRuleUnparseableOutput, contractViolationRuleWrongOutputShape:
-		profileID = "json_output_shape"
-		contract["requiredOutputShape"] = "single_valid_json_decision"
-		contract["forbiddenOutputs"] = []string{"markdown_wrapped_json", "partial_json", "multiple_json_objects", "side_effects"}
+		if rule == contractViolationRuleWrongOutputShape {
+			if profile, ok := contractViolationRequiredOutputCorrectionProfile(step, contract); ok {
+				profileID = profile
+				contract["mustReturnValidJSON"] = true
+				contract["forbiddenOutputs"] = compactUniqueStrings(append(
+					stringSliceFromValue(contract["forbiddenOutputs"]),
+					"markdown_wrapped_json",
+					"partial_json",
+					"multiple_json_objects",
+				))
+			} else {
+				profileID = "json_output_shape"
+				contract["requiredOutputShape"] = "single_valid_json_decision"
+				contract["forbiddenOutputs"] = []string{"markdown_wrapped_json", "partial_json", "multiple_json_objects", "side_effects"}
+			}
+		} else {
+			profileID = "json_output_shape"
+			contract["requiredOutputShape"] = "single_valid_json_decision"
+			contract["forbiddenOutputs"] = []string{"markdown_wrapped_json", "partial_json", "multiple_json_objects", "side_effects"}
+		}
 	default:
 		contract["requiredOutputShape"] = "expected_contract_compliant_output"
 		contract["forbiddenOutputs"] = []string{"same_actualOutputSummary"}
@@ -1199,6 +1218,13 @@ func contractViolationRequiredOutputCorrectionProfile(step *runModel.Step, contr
 	if len(required) == 0 {
 		return "", false
 	}
+	if repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective")) {
+		contract["requiredOutputShape"] = "state_changing_output"
+		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_state_changing_node", "patch/apply", "accepted_state_changing_tool_or_shell", "incremental_artifact_state_change")
+		contract["forbiddenOutputs"] = append([]string{"failed_dodAssessment_only", "read_only_executionGraph", "same_actualOutputSummary"}, contractViolationForbiddenContinuableBlockers()...)
+		contract["mustSatisfy"] = []string{"stateChangingOutputRequired", "repairActionPackage.requiredOutput"}
+		return "state_changing_required_output", true
+	}
 	if boolValue(required["mustProduceConcreteValidationEvidence"]) {
 		contract["requiredOutputShape"] = "bounded_validation_evidence"
 		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_declared_validationEvidence", "executionGraph_with_managed_validation_session", "satisfied_dodAssessment_with_concrete_evidenceRefs")
@@ -1227,13 +1253,6 @@ func contractViolationRequiredOutputCorrectionProfile(step *runModel.Step, contr
 			contract[validationScratchDirKey] = scratch
 		}
 		return "concrete_failure_evidence", true
-	}
-	if boolValue(step.Input["stateChangingOutputRequired"]) || boolValue(required["mustIncludeStateChangingNode"]) {
-		contract["requiredOutputShape"] = "state_changing_output"
-		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("executionGraph_with_state_changing_node", "patch/apply", "accepted_state_changing_tool_or_shell", "incremental_artifact_state_change")
-		contract["forbiddenOutputs"] = append([]string{"failed_dodAssessment_only", "read_only_executionGraph", "same_actualOutputSummary"}, contractViolationForbiddenContinuableBlockers()...)
-		contract["mustSatisfy"] = []string{"stateChangingOutputRequired", "repairActionPackage.requiredOutput"}
-		return "state_changing_required_output", true
 	}
 	return "", false
 }

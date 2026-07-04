@@ -1296,6 +1296,61 @@ func TestRuntimeOrchestrator_RuntimeRepairInputResolvesUniqueSuffixFailureTarget
 	}
 }
 
+func TestRuntimeOrchestrator_ValidationFailureWithConcreteTargetEscalatesToStateChangingRepair(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(deliverableDirectory, "internal", "router"), 0o755); err != nil {
+		t.Fatalf("seed router dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "internal", "router", "router.go"), []byte("package router\n"), 0o644); err != nil {
+		t.Fatalf("seed router file: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-validation-target-state-change")
+	runID := common.RunID("run-validation-target-state-change")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-006/001-validate-go-vet"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "command_result",
+				"targetRefs":      []string{"internal/router/router.go"},
+				"observedClaims":  []string{"go vet failed"},
+			},
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"error":                   "exit status 1",
+			"command":                 "go",
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=validate-go-vet|failureTargets=internal/router/router.go|exitCode=1",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 1, errors.New("exit status 1"))
+
+	if input["repairObjective"] != repairObjectiveStateChangingOutput || !boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want validation failure with concrete target to require state-changing repair", input)
+	}
+	if boolValue(input["boundedValidationRequired"]) || boolValue(input["concreteFailureEvidenceRequired"]) {
+		t.Fatalf("repair input = %+v, must not stay validation/failure-evidence only after targeted validation failure", input)
+	}
+	required := currentRequiredOutputForAuthority(input)
+	if !requiredOutputHasAllowedStateChangingKind(required) {
+		t.Fatalf("requiredOutput = %+v, want state-changing accepted kind", required)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputKeepsAmbiguousSuffixFailureTarget(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
