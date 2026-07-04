@@ -22,6 +22,7 @@ const (
 	contractViolationRuleValidationProcessControlForbidden  = "validation_process_control_forbidden"
 	contractViolationRuleValidationDetachedProcessForbidden = "validation_detached_process_forbidden"
 	contractViolationRuleValidationShellSafetyUnproven      = "validation_shell_safety_unproven"
+	contractViolationRuleValidationStaticOnly               = "validation_static_only"
 	contractViolationRuleManagedValidationRequired          = "managed_validation_required"
 	contractViolationRuleDoDAssessmentEvidenceMissing       = "dod_assessment_missing_evidence_refs"
 	contractViolationRuleCoverageAssessmentIncomplete       = "coverage_assessment_incomplete"
@@ -897,6 +898,7 @@ func contractViolationRecoverabilityForRule(rule string) string {
 	case contractViolationRuleAcceptedKindMismatch:
 		return runtimemodel.ContractViolationRecoverabilityNarrowContract
 	case contractViolationRuleManagedValidationRequired,
+		contractViolationRuleValidationStaticOnly,
 		contractViolationRuleValidationScratchEscape,
 		contractViolationRuleValidationProcessControlForbidden,
 		contractViolationRuleValidationDetachedProcessForbidden,
@@ -931,6 +933,8 @@ func contractViolationRetryHint(rule string) string {
 		return "use validation/managed_session or a bounded foreground command instead of nohup, setsid, or background processes"
 	case contractViolationRuleValidationShellSafetyUnproven:
 		return "return validation/managed_session so runtime can provide scratch, timeout, cleanup, and bounded execution"
+	case contractViolationRuleValidationStaticOnly:
+		return "return concrete runtime behavior evidence, dynamic execution, or a controlled substitute with executable observations; do not use static source inspection or grep-style scans to close runtime-behavior coverage"
 	case contractViolationRuleManagedValidationRequired:
 		return "return validation/managed_session only; plain shell/command is not accepted for this validation route"
 	case contractViolationRuleDoDAssessmentEvidenceMissing, contractViolationRuleCoverageMapIncomplete:
@@ -968,6 +972,8 @@ func contractViolationForbiddenRepeat(rule string) []string {
 		return []string{"nohup/setsid/background process in validation shell"}
 	case contractViolationRuleValidationShellSafetyUnproven:
 		return []string{"complex shell validation that cannot be statically proven safe"}
+	case contractViolationRuleValidationStaticOnly:
+		return []string{"static source inspection", "grep-only validation", "controlled substitute without executable behavior observation"}
 	case contractViolationRuleManagedValidationRequired:
 		return []string{"plain shell/command when managed validation route is mandatory"}
 	case contractViolationRuleDoDAssessmentEvidenceMissing:

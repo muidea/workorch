@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,6 +35,86 @@ func TestRuntimeAdapter_ExecuteRuntimeStepRunsCommandInWorkspaceDirectory(t *tes
 	stdout, _ := result.Output["stdout"].(string)
 	if strings.TrimSpace(stdout) != deliverableDirectory {
 		t.Fatalf("stdout = %q, want deliverable directory %q", stdout, deliverableDirectory)
+	}
+}
+
+func TestRuntimeAdapterRejectsStateChangingShellWithoutWorkspaceDelta(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+	initShellTestGitRepo(t, deliverableDirectory)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command":       "sh",
+			"args":          []any{"-c", "printf checked"},
+			"stateChanging": true,
+			"targetRef":     ".",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "no observable workspace delta") {
+		t.Fatalf("ExecuteRuntimeStep err = %v, want no-progress rejection", err)
+	}
+	if result.Output["failureReason"] != "state_changing_no_workspace_delta" ||
+		result.Output["zeroWork"] != true ||
+		result.Output["evidenceQuality"] != string(common.EvidenceQualityInconclusive) {
+		t.Fatalf("output = %+v, want state-changing no-progress diagnostic", result.Output)
+	}
+}
+
+func TestRuntimeAdapterAllowsStateChangingShellWithWorkspaceDelta(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+	initShellTestGitRepo(t, deliverableDirectory)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command":       "sh",
+			"args":          []any{"-c", "printf changed > generated.txt"},
+			"stateChanging": true,
+			"targetRef":     "generated.txt",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v output=%+v", err, result.Output)
+	}
+	if result.Output["failureReason"] == "state_changing_no_workspace_delta" {
+		t.Fatalf("output = %+v, want accepted workspace delta", result.Output)
+	}
+}
+
+func initShellTestGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@example.local"},
+		{"config", "user.name", "WorkOrch Test"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, string(out))
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("initial\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	for _, args := range [][]string{
+		{"add", "README.md"},
+		{"commit", "-m", "initial"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, string(out))
+		}
 	}
 }
 

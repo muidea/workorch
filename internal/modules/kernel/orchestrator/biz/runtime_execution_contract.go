@@ -884,6 +884,9 @@ func validateConcreteValidationBehaviorEvidenceGraph(step *runModel.Step, graph 
 	if err := validateConcreteValidationGraphEvidenceMetadata(graph); err != nil {
 		return err
 	}
+	if err := validateConcreteValidationGraphEvidenceStrength(step, graph, required); err != nil {
+		return err
+	}
 	return validateConcreteValidationGraphShellSafety(step, graph)
 }
 
@@ -906,6 +909,127 @@ func validateConcreteValidationGraphEvidenceMetadata(graph runtimemodel.BlockExe
 		return newRuntimeContractViolationRuleError(contractViolationValidationEvidenceRequired, contractViolationRuleValidationEvidenceMetadataMissing, "concrete validation evidence repair returned executionGraph without a declared non-static validationEvidence contract; shell/command or mcp/tool_call nodes must declare validationEvidence.mode, validationEvidence.observationType, validationEvidence.targetRefs, and validationEvidence.observedClaims; controlled_substitute must also declare validationEvidence.substituteFor or validationEvidence.substitute")
 	}
 	return nil
+}
+
+func validateConcreteValidationGraphEvidenceStrength(step *runModel.Step, graph runtimemodel.BlockExecutionGraph, required map[string]any) error {
+	if step == nil || len(graph.Nodes) == 0 {
+		return nil
+	}
+	if !boolValue(required["staticInspectionOnlyMayNotSatisfyRuntimeBehavior"]) &&
+		!boolValue(required["mustPreferExecutableBehaviorValidation"]) {
+		return nil
+	}
+	for _, node := range graph.Nodes {
+		kind := canonicalRuntimeGraphNodeKind(node.Kind)
+		if kind != "shell/command" && kind != "mcp/tool_call" {
+			continue
+		}
+		if validationEvidenceNodeDeclaresStaticOnly(node) {
+			return newRuntimeContractViolationRuleError(
+				contractViolationValidationEvidenceRequired,
+				contractViolationRuleValidationStaticOnly,
+				"concrete validation evidence cannot use static inspection or source scanning alone to close runtime-behavior coverage",
+			)
+		}
+	}
+	return nil
+}
+
+func validationEvidenceNodeDeclaresStaticOnly(node runtimemodel.BlockExecutionNode) bool {
+	evidence := mapFromValue(node.Input["validationEvidence"])
+	if validationEvidenceDeclaresStaticOnly(evidence) {
+		return true
+	}
+	text := strings.ToLower(strings.Join(validationEvidenceNodeStaticSignalFragments(node, evidence), "\n"))
+	if text == "" {
+		return false
+	}
+	staticSignals := []string{
+		"static inspection",
+		"static source",
+		"static analysis",
+		"source inspection",
+		"source analysis",
+		"code inspection",
+		"code scan",
+		"source scan",
+		"grep",
+		"scan only",
+		"inspection only",
+	}
+	for _, signal := range staticSignals {
+		if strings.Contains(text, signal) {
+			return true
+		}
+	}
+	commandLine := strings.ToLower(runtimeGraphShellCommandLine(node.Input))
+	if commandLine == "" {
+		return false
+	}
+	return shellCommandLineIsStaticInspectionOnly(commandLine)
+}
+
+func validationEvidenceNodeStaticSignalFragments(node runtimemodel.BlockExecutionNode, evidence map[string]any) []string {
+	fragments := []string{
+		stringFromMap(evidence, "mode"),
+		stringFromMap(evidence, "observationType"),
+		stringFromMap(evidence, "observation"),
+		stringFromMap(evidence, "substituteFor"),
+		stringFromMap(evidence, "substitute"),
+		stringFromMap(evidence, "reason"),
+		stringFromMap(evidence, "evidenceReason"),
+		stringFromMap(node.Input, "summary"),
+		stringFromMap(node.Input, "reason"),
+	}
+	fragments = append(fragments, stringSliceFromValue(evidence["observedClaims"])...)
+	fragments = append(fragments, stringSliceFromValue(evidence["claims"])...)
+	return fragments
+}
+
+func shellCommandLineIsStaticInspectionOnly(commandLine string) bool {
+	line := strings.ToLower(strings.TrimSpace(shellCommandLineMaskHereDocBodies(commandLine)))
+	if line == "" {
+		return false
+	}
+	inspectionMarkers := []string{
+		" grep ",
+		"grep -",
+		" rg ",
+		"rg -",
+		" awk ",
+		" sed -n",
+		" cat ",
+		" head ",
+		" tail ",
+		" wc ",
+	}
+	hasInspection := false
+	for _, marker := range inspectionMarkers {
+		if strings.Contains(" "+line+" ", marker) {
+			hasInspection = true
+			break
+		}
+	}
+	if !hasInspection {
+		return false
+	}
+	runtimeMarkers := []string{
+		" curl ",
+		" test ",
+		" build ",
+		" run ",
+		" exec ",
+		" start ",
+		" request ",
+		" http://",
+		" https://",
+	}
+	for _, marker := range runtimeMarkers {
+		if strings.Contains(" "+line+" ", marker) {
+			return false
+		}
+	}
+	return true
 }
 
 func validateConcreteValidationGraphShellSafety(step *runModel.Step, graph runtimemodel.BlockExecutionGraph) error {

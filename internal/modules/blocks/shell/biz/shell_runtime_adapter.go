@@ -110,6 +110,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		attachShellValidationFailureDiagnostic(output, request.Input, execCommand, 0, false, true, err)
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
+	beforeChange := workspaceStateChangeFingerprint(ctx, deliverableDirectory, boolFromShellValue(request.Input["stateChanging"]))
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -174,8 +175,71 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		attachShellValidationFailureDiagnostic(output, request.Input, execCommand, exitCode, false, false, err)
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
+	if beforeChange.Available {
+		afterChange := workspaceStateChangeFingerprint(ctx, deliverableDirectory, true)
+		if afterChange.Available {
+			output["workspaceStateChangeFingerprint"] = map[string]any{
+				"before": beforeChange.Value,
+				"after":  afterChange.Value,
+			}
+			if beforeChange.Value == afterChange.Value {
+				err := fmt.Errorf("%w: state-changing shell command produced no observable workspace delta", common.ErrInvalidArgument)
+				output["status"] = "failed"
+				output["stage"] = "shell_state_changing_no_progress"
+				output["failureReason"] = "state_changing_no_workspace_delta"
+				output["zeroWork"] = true
+				output["evidenceQuality"] = string(common.EvidenceQualityInconclusive)
+				output["evidenceReason"] = "state-changing shell command completed without changing tracked workspace state, untracked files, or HEAD"
+				output["runtimeDiagnostics"] = map[string]any{
+					"kind":          "state_changing_no_progress",
+					"operation":     "shell/command",
+					"failureReason": "state_changing_no_workspace_delta",
+					"targetRef":     stringFromShellValue(request.Input["targetRef"]),
+				}
+				attachManagedValidationResources(output, request, pid, startedAt, time.Now().UTC(), "failed")
+				attachShellValidationFailureDiagnostic(output, request.Input, execCommand, exitCode, false, false, err)
+				return runtimemodel.StepExecutionResult{Output: output}, err
+			}
+		}
+	}
 	attachManagedValidationResources(output, request, pid, startedAt, time.Now().UTC(), "released")
 	return runtimemodel.StepExecutionResult{Output: output}, nil
+}
+
+type shellWorkspaceChangeFingerprint struct {
+	Available bool
+	Value     string
+}
+
+func workspaceStateChangeFingerprint(ctx context.Context, deliverableDirectory string, required bool) shellWorkspaceChangeFingerprint {
+	if !required {
+		return shellWorkspaceChangeFingerprint{}
+	}
+	dir := strings.TrimSpace(deliverableDirectory)
+	if dir == "" {
+		return shellWorkspaceChangeFingerprint{}
+	}
+	gitDir := filepath.Join(dir, ".git")
+	if info, err := os.Stat(gitDir); err != nil || !info.IsDir() {
+		return shellWorkspaceChangeFingerprint{}
+	}
+	snapshotCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	head := strings.TrimSpace(gitCommandOutput(snapshotCtx, dir, "rev-parse", "--verify", "HEAD"))
+	status := strings.TrimSpace(gitCommandOutput(snapshotCtx, dir, "status", "--porcelain=v1", "--untracked-files=all"))
+	return shellWorkspaceChangeFingerprint{
+		Available: true,
+		Value:     "head=" + head + "\nstatus=" + status,
+	}
+}
+
+func gitCommandOutput(ctx context.Context, dir string, args ...string) string {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return string(out)
 }
 
 func shellBaseOutput(input map[string]any, command string, args []string, workingDir string, commandNormalization string, execCommand string) map[string]any {

@@ -2445,6 +2445,57 @@ func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithout
 	}
 }
 
+func TestValidateLLMExecutionOutputContractRejectsStaticOnlyControlledSubstitute(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-static-only-controlled-substitute",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-static-only-controlled-substitute/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":            true,
+					"mustDeclareValidationEvidenceMode":                true,
+					"mustDeclareValidationEvidenceObservation":         true,
+					"mustPreferExecutableBehaviorValidation":           true,
+					"staticInspectionOnlyMayNotSatisfyRuntimeBehavior": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "inspect-static",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "grep -q ready target.txt && echo ready"},
+					"validationEvidence": concreteValidationEvidenceFixture("controlled_substitute", "controlled_substitute_observation", map[string]any{
+						"substituteFor":  "static source inspection",
+						"observedClaims": []string{"source scan found the marker"},
+					}),
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "static inspection") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want static-only validation rejection", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractNormalizesSingleFocusValidationEvidenceEnvelope(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-focus-envelope",
