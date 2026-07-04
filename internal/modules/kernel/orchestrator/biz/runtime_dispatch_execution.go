@@ -170,6 +170,24 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		}
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch dispatch gate failed", err)
 	}
+	if err := validateMCPToolCallStepInputBeforeRuntime(run, step, runtimeInput); err != nil {
+		output := map[string]any{
+			"status":    "failed",
+			"stage":     "mcp_tool_call_rejected",
+			"error":     err.Error(),
+			"operation": step.Kind,
+			"serverId":  stringFromMap(runtimeInput, "serverId"),
+			"tool":      stringFromMap(runtimeInput, "tool"),
+			"input":     cloneStepPayload(mapFromValue(runtimeInput["input"])),
+			"runtimeDiagnostics": map[string]any{
+				"operation": step.Kind,
+				"serverId":  stringFromMap(runtimeInput, "serverId"),
+				"tool":      stringFromMap(runtimeInput, "tool"),
+				"reason":    "mcp_tool_input_schema_invalid",
+			},
+		}
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime mcp dispatch gate failed", err)
+	}
 	injectRuntimeEvidencePolicies(runtimeInput, run.ExecutionContext)
 	recoveryPolicy := runtimemodel.RuntimeRecoveryPolicyFromInput(runtimeInput)
 	if _, err := ensureRuntimeValidationScratchDir(runtimeInput); err != nil {

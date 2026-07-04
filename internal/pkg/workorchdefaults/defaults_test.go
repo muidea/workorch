@@ -555,6 +555,14 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	if capability.Category != "code_semantics" || capability.RiskLevel != "read_only" {
 		t.Fatalf("lsp diagnostics capability = %+v, want code semantics read-only", capability)
 	}
+	if len(capability.Schema) == 0 {
+		t.Fatalf("lsp diagnostics capability schema is empty")
+	}
+	initializeCapability, err := mcpCapabilityRepo.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_initialize"))
+	if err != nil {
+		t.Fatalf("get lsp initialize capability: %v", err)
+	}
+	assertStringListContains(t, initializeCapability.Schema["required"].([]any), "lang_id")
 	statusCapability, err := mcpCapabilityRepo.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_status"))
 	if err != nil {
 		t.Fatalf("get lsp status capability: %v", err)

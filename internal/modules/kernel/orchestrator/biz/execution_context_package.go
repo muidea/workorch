@@ -2622,7 +2622,7 @@ func compactMCPCapabilityContexts(items []map[string]any) []map[string]any {
 	for _, item := range items {
 		ret = append(ret, pickExecutionContextFields(item, []string{
 			"id", "serverId", "kind", "name", "displayName", "description", "category",
-			"tags", "usageHint", "inputSummary", "outputSummary", "stageHints", "riskLevel", "uri", "approvalPolicy", "status",
+			"tags", "usageHint", "inputSummary", "outputSummary", "stageHints", "riskLevel", "schema", "uri", "approvalPolicy", "status",
 		}))
 		if len(ret) >= 16 {
 			break

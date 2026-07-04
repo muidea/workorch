@@ -10,6 +10,20 @@
     "tags": ["lsp", "code", "semantic_navigation"],
     "usageHint": "Use before requesting semantic code information. For workspace-scoped stdio servers, root_path may be \".\" because runtime starts the server in the workspace deliverable directory; lang_id must match the target language.",
     "inputSummary": "root_path, lang_id",
+    "schema": {
+      "type": "object",
+      "required": ["lang_id"],
+      "anyOf": [
+        {"type": "object", "required": ["root_path"]},
+        {"type": "object", "required": ["root_dir"]}
+      ],
+      "properties": {
+        "root_path": {"type": "string"},
+        "root_dir": {"type": "string"},
+        "lang_id": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
     "outputSummary": "initialization status and language server metadata",
     "stageHints": ["planning", "execution", "repair"],
     "riskLevel": "read_only",
@@ -28,6 +42,20 @@
     "tags": ["lsp", "code", "diagnostics"],
     "usageHint": "Use after a file change when the language server needs the full latest file content. Provide a workspace-relative file path or file_path plus complete content; do not send only root_path or partial diffs.",
     "inputSummary": "path, content",
+    "schema": {
+      "type": "object",
+      "required": ["content"],
+      "anyOf": [
+        {"type": "object", "required": ["path"]},
+        {"type": "object", "required": ["file_path"]}
+      ],
+      "properties": {
+        "path": {"type": "string"},
+        "file_path": {"type": "string"},
+        "content": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
     "outputSummary": "sync status",
     "stageHints": ["execution", "repair"],
     "riskLevel": "workspace_state",
@@ -46,6 +74,32 @@
     "tags": ["lsp", "code", "semantic_navigation"],
     "usageHint": "Use with 0-based line and col. Empty results are inconclusive, not proof that the symbol is absent.",
     "inputSummary": "path, line, col",
+    "schema": {
+      "type": "object",
+      "required": ["line"],
+      "allOf": [
+        {
+          "anyOf": [
+            {"type": "object", "required": ["path"]},
+            {"type": "object", "required": ["file_path"]}
+          ]
+        },
+        {
+          "anyOf": [
+            {"type": "object", "required": ["col"]},
+            {"type": "object", "required": ["character"]}
+          ]
+        }
+      ],
+      "properties": {
+        "path": {"type": "string"},
+        "file_path": {"type": "string"},
+        "line": {"type": "integer"},
+        "col": {"type": "integer"},
+        "character": {"type": "integer"}
+      },
+      "additionalProperties": false
+    },
     "outputSummary": "definition locations",
     "stageHints": ["planning", "repair"],
     "riskLevel": "read_only",
@@ -64,6 +118,32 @@
     "tags": ["lsp", "code", "semantic_navigation"],
     "usageHint": "Use with 0-based line and col. Keep hover text concise when using it as context.",
     "inputSummary": "path, line, col",
+    "schema": {
+      "type": "object",
+      "required": ["line"],
+      "allOf": [
+        {
+          "anyOf": [
+            {"type": "object", "required": ["path"]},
+            {"type": "object", "required": ["file_path"]}
+          ]
+        },
+        {
+          "anyOf": [
+            {"type": "object", "required": ["col"]},
+            {"type": "object", "required": ["character"]}
+          ]
+        }
+      ],
+      "properties": {
+        "path": {"type": "string"},
+        "file_path": {"type": "string"},
+        "line": {"type": "integer"},
+        "col": {"type": "integer"},
+        "character": {"type": "integer"}
+      },
+      "additionalProperties": false
+    },
     "outputSummary": "hover summary",
     "stageHints": ["planning", "repair"],
     "riskLevel": "read_only",
@@ -82,6 +162,33 @@
     "tags": ["lsp", "code", "impact_analysis"],
     "usageHint": "Preserve total, limit, and truncated flags. truncated=true is only a partial reference set.",
     "inputSummary": "path, line, col, limit",
+    "schema": {
+      "type": "object",
+      "required": ["line"],
+      "allOf": [
+        {
+          "anyOf": [
+            {"type": "object", "required": ["path"]},
+            {"type": "object", "required": ["file_path"]}
+          ]
+        },
+        {
+          "anyOf": [
+            {"type": "object", "required": ["col"]},
+            {"type": "object", "required": ["character"]}
+          ]
+        }
+      ],
+      "properties": {
+        "path": {"type": "string"},
+        "file_path": {"type": "string"},
+        "line": {"type": "integer"},
+        "col": {"type": "integer"},
+        "character": {"type": "integer"},
+        "limit": {"type": "integer"}
+      },
+      "additionalProperties": false
+    },
     "outputSummary": "reference locations with truncation metadata",
     "stageHints": ["planning", "repair"],
     "riskLevel": "read_only",
@@ -100,6 +207,22 @@
     "tags": ["lsp", "code", "diagnostics"],
     "usageHint": "Diagnostics are auxiliary evidence and cannot replace build/test/lint or direct DoD evidence.",
     "inputSummary": "path or project scope",
+    "schema": {
+      "type": "object",
+      "anyOf": [
+        {"type": "object", "required": ["path"]},
+        {"type": "object", "required": ["file_path"]},
+        {"type": "object", "required": ["root_path"]},
+        {"type": "object", "required": ["all"]}
+      ],
+      "properties": {
+        "path": {"type": "string"},
+        "file_path": {"type": "string"},
+        "root_path": {"type": "string"},
+        "all": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
     "outputSummary": "diagnostics with severity and source",
     "stageHints": ["execution", "repair", "validation"],
     "riskLevel": "read_only",
@@ -118,6 +241,17 @@
     "tags": ["lsp", "code", "status", "diagnostics"],
     "usageHint": "Use as auxiliary runtime evidence when semantic capability health affects diagnosis. Status output cannot replace build/test/lint or direct DoD evidence.",
     "inputSummary": "optional root_path, lang_id, or instance selector",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "root_path": {"type": "string"},
+        "root_dir": {"type": "string"},
+        "lang_id": {"type": "string"},
+        "instance_id": {"type": "string"},
+        "all": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
     "outputSummary": "language server instance status and dependency health",
     "stageHints": ["planning", "execution", "repair", "validation"],
     "riskLevel": "read_only",
@@ -136,6 +270,23 @@
     "tags": ["lsp", "code", "lifecycle"],
     "usageHint": "Use only for bounded workspace-local semantic session cleanup or recovery. It is not deliverable state-change evidence.",
     "inputSummary": "optional root_path, lang_id, instance id, or all flag",
+    "schema": {
+      "type": "object",
+      "anyOf": [
+        {"type": "object", "required": ["root_path"]},
+        {"type": "object", "required": ["root_dir"]},
+        {"type": "object", "required": ["instance_id"]},
+        {"type": "object", "required": ["all"]}
+      ],
+      "properties": {
+        "root_path": {"type": "string"},
+        "root_dir": {"type": "string"},
+        "lang_id": {"type": "string"},
+        "instance_id": {"type": "string"},
+        "all": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
     "outputSummary": "shutdown status for matching instances",
     "stageHints": ["execution", "repair", "validation"],
     "riskLevel": "workspace_state",
@@ -154,6 +305,22 @@
     "tags": ["lsp", "code", "recovery", "diagnostics"],
     "usageHint": "Use for auxiliary semantic capability recovery. apply=true may only perform safe instance-level recovery and cannot modify deliverable files.",
     "inputSummary": "root_path, lang_id, apply",
+    "schema": {
+      "type": "object",
+      "anyOf": [
+        {"type": "object", "required": ["root_path"]},
+        {"type": "object", "required": ["root_dir"]},
+        {"type": "object", "required": ["all"]}
+      ],
+      "properties": {
+        "root_path": {"type": "string"},
+        "root_dir": {"type": "string"},
+        "lang_id": {"type": "string"},
+        "apply": {"type": "boolean"},
+        "all": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
     "outputSummary": "repair recommendation or safe recovery result",
     "stageHints": ["execution", "repair", "validation"],
     "riskLevel": "workspace_state",
