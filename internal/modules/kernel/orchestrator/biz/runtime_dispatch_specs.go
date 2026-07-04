@@ -10,6 +10,7 @@ import (
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func (o *RuntimeOrchestrator) nextDispatchSpecs(
@@ -574,6 +575,12 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 				Input: nextStepInputFromOutput(run, last),
 			}}, nil
 		}
+		if spec, ok, err := o.authorityContinuationSpecAfterCompletedStep(ctx, run, last); ok || err != nil {
+			if err != nil {
+				return nil, err
+			}
+			return []stepDispatchSpec{spec}, nil
+		}
 		if shouldDispatchGraphFollowUp(run, last, last.Output) {
 			var input map[string]any
 			if len(steps) > 0 {
@@ -672,6 +679,56 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 		}
 	}
 	return nil, common.ErrConflict
+}
+
+func (o *RuntimeOrchestrator) authorityContinuationSpecAfterCompletedStep(
+	ctx context.Context,
+	run *runModel.Run,
+	last *runModel.Step,
+) (stepDispatchSpec, bool, error) {
+	if o == nil || run == nil || last == nil || run.State != common.RunStateRunning {
+		return stepDispatchSpec{}, false, nil
+	}
+	input := nextStepInput(run, last.ID)
+	if len(input) == 0 {
+		return stepDispatchSpec{}, false, nil
+	}
+	action := strings.TrimSpace(convergenceNextActionKind(run, input))
+	if !authorityContinuationActionIsDispatchable(action) {
+		return stepDispatchSpec{}, false, nil
+	}
+	stepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, authorityContinuationStepID(run.ID, last))
+	if err != nil {
+		return stepDispatchSpec{}, true, err
+	}
+	return stepDispatchSpec{
+		ID:    stepID,
+		Kind:  initialStepKind(run),
+		Input: input,
+	}, true, nil
+}
+
+func authorityContinuationActionIsDispatchable(action string) bool {
+	switch strings.TrimSpace(action) {
+	case runtimemodel.NextActionTypeStateChange,
+		runtimemodel.NextActionTypeValidate,
+		runtimemodel.NextActionTypeAcquireTargetSnapshot,
+		"repair",
+		"acquire_evidence",
+		"produce_state_change",
+		"produce_validation_evidence":
+		return true
+	default:
+		return false
+	}
+}
+
+func authorityContinuationStepID(runID common.RunID, last *runModel.Step) common.StepID {
+	base := "authority-continuation"
+	if label := runtimeReadableStepLabel(runID, last.ID); label != "" {
+		base = fmt.Sprintf("%s-of-%s", base, label)
+	}
+	return common.StepID(fmt.Sprintf("%s/%s", runID, base))
 }
 
 func uniqueDispatchStepID(ctx context.Context, steps repository.StepRepository, runID common.RunID, base common.StepID) (common.StepID, error) {

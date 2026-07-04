@@ -56,6 +56,39 @@ func TestValidateRuntimeValidationStepInputBeforeRuntimeRejectsStateChangingObje
 	}
 }
 
+func TestValidateRuntimeValidationStepInputBeforeRuntimeSkipsStateChangingShell(t *testing.T) {
+	input := validationDispatchInputFixture()
+	required := stateChangingRepairRequiredOutput()
+	delete(input, "timeoutMillis")
+	input["stateChanging"] = true
+	input["stateChangingOutputRequired"] = true
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	input["convergenceAuthority"] = map[string]any{
+		"currentFocus": mapFromValue(input[coverageFocusKey]),
+		"nextAction":   map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+	}
+	input["convergenceContract"] = map[string]any{
+		"state": convergenceStateNeedStateChange,
+	}
+	input["requiredOutput"] = required
+	input["repairActionPackage"] = map[string]any{
+		"requiredOutput": required,
+	}
+	input[stepInputKeyStagePacket] = map[string]any{
+		"requiredOutput": required,
+	}
+	input[currentActionContractKey] = map[string]any{
+		"currentFocus":   mapFromValue(input[coverageFocusKey]),
+		"requiredOutput": required,
+		"nextAction":     map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+		"schemaVersion":  currentActionContractSchema,
+	}
+
+	if err := validateRuntimeValidationStepInputBeforeRuntime(runtimemodel.StepKindShellCommand, input); err != nil {
+		t.Fatalf("validateRuntimeValidationStepInputBeforeRuntime: %v", err)
+	}
+}
+
 func TestValidateRuntimeValidationStepInputBeforeRuntimeAcceptsBoundedValidation(t *testing.T) {
 	input := validationDispatchInputFixture()
 

@@ -15,6 +15,9 @@ func validateRuntimeValidationStepInputBeforeRuntime(kind string, input map[stri
 	if err := validateConvergenceDispatchFocusAlignment(input); err != nil {
 		return err
 	}
+	if runtimeStepInputRequiresStateChangingDispatch(kind, input) {
+		return nil
+	}
 	if !runtimeStepInputIsValidationContract(kind, input) {
 		return nil
 	}
@@ -54,6 +57,9 @@ func runtimeStepKindCanProduceValidationEvidence(kind string) bool {
 }
 
 func runtimeStepInputIsValidationContract(kind string, input map[string]any) bool {
+	if runtimeStepInputRequiresStateChangingDispatch(kind, input) {
+		return false
+	}
 	if len(mapFromValue(input["validationEvidence"])) > 0 {
 		return true
 	}
@@ -66,6 +72,22 @@ func runtimeStepInputIsValidationContract(kind string, input map[string]any) boo
 		return true
 	}
 	return requiredOutputValidationOnly(activeRequiredOutputForCurrentAction(input))
+}
+
+func runtimeStepInputRequiresStateChangingDispatch(kind string, input map[string]any) bool {
+	switch strings.TrimSpace(kind) {
+	case runtimemodel.StepKindShellCommand, runtimemodel.StepKindMCPToolCall:
+	default:
+		return false
+	}
+	if boolValue(input["stateChanging"]) {
+		return true
+	}
+	nextAction := strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind"))
+	state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state"))
+	return state == convergenceStateNeedStateChange ||
+		nextAction == runtimemodel.NextActionTypeStateChange ||
+		nextAction == "produce_state_change"
 }
 
 func runtimeStepInputCurrentActionIsValidation(nextAction string, state string) bool {
