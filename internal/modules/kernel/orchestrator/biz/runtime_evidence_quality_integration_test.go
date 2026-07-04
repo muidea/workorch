@@ -82,6 +82,64 @@ func TestRuntimeStepEvidenceQualityAcceptsSatisfiedDeclaredMetric(t *testing.T) 
 	}
 }
 
+func TestRuntimeStepEvidenceQualityDemotesControlledSubstituteDeliverablePatch(t *testing.T) {
+	run := &runmodel.Run{ID: "run-controlled-substitute-deliverable", WorkspaceID: "ws-controlled-substitute"}
+	step := &runmodel.Step{
+		ID:    "run-controlled-substitute-deliverable/block/verify",
+		RunID: run.ID,
+		Kind:  shellcommon.StepKindCommand,
+		Input: map[string]any{
+			"command": "sh",
+			"args": []string{
+				"-c",
+				`cp target.go "$SCRATCH/"; sed -i 's/bad/good/' "$SCRATCH/target.go"; go build ./...`,
+			},
+			"validationEvidence": map[string]any{
+				"mode":            "controlled_substitute",
+				"observationType": "controlled_substitute_observation",
+				"substituteFor":   "workspace deliverable target.go",
+				"observedClaims": []string{
+					"project compiles after fixing the copied deliverable",
+				},
+			},
+		},
+		Output: map[string]any{
+			"exitCode": 0,
+			"stdout":   "BUILD_EXIT_CODE=0\n",
+		},
+	}
+
+	quality := runtimeStepEvidenceQuality(run, step, common.ValidationResultStatePassed, step.Output)
+	if quality.Quality != common.EvidenceQualityInconclusive ||
+		!strings.Contains(quality.Reason, "controlled substitute") ||
+		!stringSliceContains(quality.Tags, "controlled_substitute_deliverable_mutation") {
+		t.Fatalf("quality = %+v, want inconclusive controlled substitute deliverable mutation", quality)
+	}
+}
+
+func TestValidationEvidenceRecordRejectsPassedInconclusiveResult(t *testing.T) {
+	run := &runmodel.Run{ID: "run-inconclusive-record", WorkspaceID: "ws-inconclusive-record"}
+	validation := &runmodel.ValidationResult{
+		ID:              "run-inconclusive-record/block/verify/validation/runtime-step",
+		WorkspaceID:     run.WorkspaceID,
+		RunID:           run.ID,
+		StepID:          "run-inconclusive-record/block/verify",
+		ValidationKind:  "runtime_step",
+		TargetRef:       "cwi-001",
+		State:           common.ValidationResultStatePassed,
+		EvidenceQuality: common.EvidenceQualityInconclusive,
+		EvidenceReason:  "controlled substitute did not validate current workspace state",
+	}
+
+	record := evidenceRecordForValidationResult(run, validation)
+	if record == nil {
+		t.Fatal("evidenceRecordForValidationResult returned nil")
+	}
+	if record.Status != "rejected" {
+		t.Fatalf("record status = %q, want rejected", record.Status)
+	}
+}
+
 func TestRuntimeStepEvidenceQualityAppliesEvidencePolicyCriteria(t *testing.T) {
 	run := &runmodel.Run{ID: "run-policy-required-metric", WorkspaceID: "ws-policy-required-metric"}
 	step := &runmodel.Step{

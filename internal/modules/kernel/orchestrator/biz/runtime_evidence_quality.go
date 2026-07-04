@@ -1193,6 +1193,11 @@ func evidenceQualityFromRuntimeStepOutput(step *runModel.Step, output map[string
 		quality.Reason = "validation step produced a negative scalar output"
 		quality.Tags = compactUniqueStrings(append(quality.Tags, "negative_scalar_validation_output"))
 	}
+	if validationEvidenceCanSatisfyDoD(quality) && runtimeStepHasDeliverableMutatingControlledSubstitute(step, output) {
+		quality.Quality = common.EvidenceQualityInconclusive
+		quality.Reason = "controlled substitute mutates a deliverable copy and cannot close current workspace validation"
+		quality.Tags = compactUniqueStrings(append(quality.Tags, "controlled_substitute_deliverable_mutation"))
+	}
 	return quality
 }
 
@@ -1656,6 +1661,108 @@ func runtimeStepHasNegativeScalarValidationOutput(step *runModel.Step) bool {
 	default:
 		return false
 	}
+}
+
+func runtimeStepHasDeliverableMutatingControlledSubstitute(step *runModel.Step, output map[string]any) bool {
+	if step == nil || strings.TrimSpace(step.Kind) != "shell/command" {
+		return false
+	}
+	evidence := runtimeValidationEvidenceForCriteria(step, output)
+	if !validationEvidenceDeclaresControlledSubstitute(evidence) {
+		return false
+	}
+	if !shellCommandTextLooksMutating(step, output) {
+		return false
+	}
+	return controlledSubstituteTextSuggestsDeliverablePatch(evidence)
+}
+
+func validationEvidenceDeclaresControlledSubstitute(evidence map[string]any) bool {
+	mode := strings.ToLower(strings.TrimSpace(stringFromMap(evidence, "mode")))
+	observation := strings.ToLower(strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(evidence, "observationType"),
+		stringFromMap(evidence, "observation"),
+	)))
+	return mode == "controlled_substitute" || observation == "controlled_substitute_observation"
+}
+
+func shellCommandTextLooksMutating(step *runModel.Step, output map[string]any) bool {
+	text := strings.ToLower(strings.Join(runtimeStepCommandTextFragments(step, output), "\n"))
+	if text == "" {
+		return false
+	}
+	markers := []string{
+		"sed -i", "perl -pi", "cat >", "cat <<", "tee ", ">>", " > ",
+		"cp -r", "cp -a", "cp ", "mv ",
+	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeStepCommandTextFragments(step *runModel.Step, output map[string]any) []string {
+	fragments := make([]string, 0, 8)
+	addPayload := func(payload map[string]any) {
+		if len(payload) == 0 {
+			return
+		}
+		if value := strings.TrimSpace(stringFromMap(payload, "command")); value != "" {
+			fragments = append(fragments, value)
+		}
+		for _, arg := range stringSliceFromValue(payload["args"]) {
+			if arg = strings.TrimSpace(arg); arg != "" {
+				fragments = append(fragments, arg)
+			}
+		}
+	}
+	if step != nil {
+		addPayload(step.Input)
+		addPayload(step.Output)
+	}
+	addPayload(output)
+	return fragments
+}
+
+func controlledSubstituteTextSuggestsDeliverablePatch(evidence map[string]any) bool {
+	textParts := []string{
+		stringFromMap(evidence, "substituteFor"),
+		stringFromMap(evidence, "substitute"),
+		stringFromMap(evidence, "reason"),
+		stringFromMap(evidence, "evidenceReason"),
+	}
+	textParts = append(textParts, stringSliceFromValue(evidence["observedClaims"])...)
+	textParts = append(textParts, stringSliceFromValue(evidence["claims"])...)
+	text := strings.ToLower(strings.Join(textParts, "\n"))
+	if text == "" {
+		return false
+	}
+	deliverableTerms := []string{
+		"deliverable", "workspace source", "workspace file", "current workspace",
+		"source file", "project source",
+	}
+	patchTerms := []string{
+		"after fixing", "after patch", "patched copy", "fixing ", "modified copy",
+		"repairing ", "replacing ", "updated copy",
+	}
+	hasDeliverableTerm := false
+	for _, term := range deliverableTerms {
+		if strings.Contains(text, term) {
+			hasDeliverableTerm = true
+			break
+		}
+	}
+	if !hasDeliverableTerm {
+		return false
+	}
+	for _, term := range patchTerms {
+		if strings.Contains(text, term) {
+			return true
+		}
+	}
+	return false
 }
 
 func validationEvidenceCanSatisfyDoD(item runtimeEvidenceQuality) bool {

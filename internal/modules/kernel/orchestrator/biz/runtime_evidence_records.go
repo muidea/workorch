@@ -161,7 +161,7 @@ func evidenceRecordForValidationResult(run *runModel.Run, validation *runModel.V
 	if run == nil || validation == nil || validation.ID == "" {
 		return nil
 	}
-	status := evidenceStatusForValidationResult(validation.State)
+	status := evidenceStatusForValidationResult(validation)
 	if status == "" {
 		return nil
 	}
@@ -407,9 +407,15 @@ func firstStringFromSlice(values []string) string {
 	return ""
 }
 
-func evidenceStatusForValidationResult(state common.ValidationResultState) string {
-	switch state {
+func evidenceStatusForValidationResult(validation *runModel.ValidationResult) string {
+	if validation == nil {
+		return ""
+	}
+	switch validation.State {
 	case common.ValidationResultStatePassed:
+		if !validationEvidenceCanSatisfyDoD(qualityFromValidationResult(validation)) {
+			return orchestratormodel.EvidenceStatusRejected
+		}
 		return orchestratormodel.EvidenceStatusAccepted
 	case common.ValidationResultStateFailed, common.ValidationResultStateWarning:
 		return orchestratormodel.EvidenceStatusRejected
