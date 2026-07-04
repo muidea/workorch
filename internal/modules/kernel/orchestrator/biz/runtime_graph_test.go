@@ -74,6 +74,75 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchSerializesLLMDispatchRequests(
 	}
 }
 
+func TestNormalizeGraphStateChangingDispatchAuthorityRewritesStaleValidationAuthority(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-graph-state-change-authority",
+		WorkspaceID: "ws-graph-state-change-authority",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			},
+			gapBaselineKey: map[string]any{
+				"schemaVersion": gapBaselineSchema,
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			},
+		},
+	}
+	input := map[string]any{
+		"executionContext": cloneStepPayload(run.ExecutionContext),
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		},
+		gapBaselineKey: map[string]any{
+			"schemaVersion": gapBaselineSchema,
+			"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		},
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+	}
+	node := runtimemodel.BlockExecutionNode{
+		ID:   "go-mod-tidy",
+		Kind: runtimemodel.StepKindShellCommand,
+		Input: map[string]any{
+			"command":             "sh",
+			"args":                []string{"-c", "true"},
+			"stateChanging":       true,
+			"targetRef":           "workspace",
+			"stateChangingReason": "update generated dependency metadata",
+		},
+	}
+	for key, value := range node.Input {
+		input[key] = value
+	}
+
+	got := normalizeGraphStateChangingDispatchAuthority(run, "run-graph-state-change-authority/graph-001/001-go-mod-tidy", input, node)
+
+	if kind := stringFromMap(currentActionNextActionFromInput(got), "kind"); kind != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("current nextAction = %+v, want state_change", currentActionNextActionFromInput(got))
+	}
+	if state := stringFromMap(mapFromValue(got["convergenceContract"]), "state"); state != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract.state = %q, want %q", state, convergenceStateNeedStateChange)
+	}
+	if !requiredOutputRequiresStateChanging(activeRequiredOutputForCurrentAction(got)) {
+		t.Fatalf("active requiredOutput = %+v, want state-changing", activeRequiredOutputForCurrentAction(got))
+	}
+	if nextAction := mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["nextAction"]); stringFromMap(nextAction, "type") != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("stagePacket.nextAction = %+v, want state_change", nextAction)
+	}
+	if nextAction := mapFromValue(mapFromValue(got[currentActionContractKey])["nextAction"]); stringFromMap(nextAction, "kind") != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("currentActionContract.nextAction = %+v, want state_change", nextAction)
+	}
+	if err := validateRuntimeValidationStepInputBeforeRuntime(runtimemodel.StepKindShellCommand, got); err != nil {
+		t.Fatalf("validateRuntimeValidationStepInputBeforeRuntime: %v", err)
+	}
+}
+
 func TestRuntimeOrchestrator_EventDrivenGraphBatchStepCompletionDispatchesNextNode(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-event-driven-graph-continuation")

@@ -149,8 +149,10 @@ func (g *graphSubsystem) readyGraphStepSpecsFromSteps(
 		input[stepInputKeyGraphRootStepID] = string(rootStepID)
 		input["graphSeq"] = graphSeq
 		input["graphNodeSeq"] = idx + 1
+		stepID := graphScopedStepID(run.ID, graphSeq, idx+1, node.ID)
+		input = normalizeGraphStateChangingDispatchAuthority(run, stepID, input, node)
 		ret = append(ret, stepDispatchSpec{
-			ID:    graphScopedStepID(run.ID, graphSeq, idx+1, node.ID),
+			ID:    stepID,
 			Kind:  node.Kind,
 			Input: input,
 		})
@@ -669,6 +671,92 @@ func applyGraphScopedValidationScratchLifecycle(input map[string]any) {
 	input["validationScratchAutoCleanup"] = false
 	input["validationScratchScope"] = "execution_graph"
 	input["validationScratchCleanupPolicy"] = "retain_until_run_terminal"
+}
+
+func normalizeGraphStateChangingDispatchAuthority(run *runModel.Run, stepID common.StepID, input map[string]any, node runtimemodel.BlockExecutionNode) map[string]any {
+	if len(input) == 0 || !graphNodeInputRequiresStateChangingAuthority(input, node) {
+		return input
+	}
+	setRuntimeStage(input, runtimeStageRepair)
+	input[stepInputKeySoulStage] = soulStageExecution
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	input["stateChangingOutputRequired"] = true
+	for _, key := range []string{
+		"boundedValidationRequired",
+		"evidenceRepairRequired",
+		"concreteFailureEvidenceRequired",
+		stepInputKeyAssessmentOnly,
+		"assessmentOnlyReason",
+	} {
+		delete(input, key)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if len(required) == 0 {
+		required = stateChangingRepairRequiredOutput()
+	}
+	if !requiredOutputRequiresStateChanging(required) {
+		pkg["requiredOutput"] = required
+		required = enforceStateChangingRequiredOutputForConvergence(pkg, input)
+	}
+	pkg["requiredOutput"] = cloneStepPayload(required)
+	pkg["repairObjective"] = repairObjectiveStateChangingOutput
+	pkg["stateChangingOutputRequired"] = true
+	for _, key := range []string{
+		"evidenceAcquisitionRequired",
+		"concreteFailureEvidenceRequired",
+		"evidenceAcquisitionReason",
+		"boundedValidationRequired",
+		"outputDecisionContract",
+		"exitCriteria",
+	} {
+		delete(pkg, key)
+	}
+	input["repairActionPackage"] = pkg
+	currentActionSetRequiredOutput(input, required)
+	input["convergenceContract"] = map[string]any{
+		"state":                       convergenceStateNeedStateChange,
+		"runtimeStage":                runtimeStageRepair,
+		"runtimeStageMode":            firstNonEmptyString(stringFromMap(input, stepInputKeyRuntimeStageMode), "strict_convergence"),
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+	}
+	currentActionSetNextAction(input, map[string]any{
+		"kind":   runtimemodel.NextActionTypeStateChange,
+		"reason": "current execution graph node requires state-changing output",
+	})
+	input = normalizeDispatchInputAuthorityFocus(input)
+	input = attachStagePacketToStepInput(run, stepID, input)
+	return attachCurrentActionContractToInput(run, stepID, input)
+}
+
+func graphNodeInputRequiresStateChangingAuthority(input map[string]any, node runtimemodel.BlockExecutionNode) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if boolValue(input["stateChanging"]) || boolValue(node.Input["stateChanging"]) {
+		return true
+	}
+	requiresStateChange := strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveStateChangingOutput ||
+		boolValue(input["stateChangingOutputRequired"]) ||
+		requiredOutputRequiresStateChanging(activeRequiredOutputForCurrentAction(input)) ||
+		requiredOutputRequiresStateChanging(mapFromValue(input["requiredOutput"])) ||
+		requiredOutputRequiresStateChanging(mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]))
+	if !requiresStateChange {
+		return false
+	}
+	switch canonicalRuntimeGraphNodeKind(node.Kind) {
+	case llmWorkspaceExecutionStepKind, runtimemodel.RuntimeBlockKindPatchApply:
+		return true
+	case runtimemodel.StepKindShellCommand, runtimemodel.StepKindMCPToolCall:
+		return requiredOutputAcceptsKind(activeRequiredOutputForCurrentAction(input), canonicalRuntimeGraphNodeKind(node.Kind)) &&
+			boolValue(input["stateChanging"])
+	default:
+		return false
+	}
 }
 
 func completedDependencyGraphEvidence(node runtimemodel.BlockExecutionNode, steps []*runModel.Step, rootStepID common.StepID) []map[string]any {
