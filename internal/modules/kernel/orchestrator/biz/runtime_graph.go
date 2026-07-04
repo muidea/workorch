@@ -151,6 +151,7 @@ func (g *graphSubsystem) readyGraphStepSpecsFromSteps(
 		input["graphNodeSeq"] = idx + 1
 		stepID := graphScopedStepID(run.ID, graphSeq, idx+1, node.ID)
 		input = normalizeGraphStateChangingDispatchAuthority(run, stepID, input, node)
+		input = normalizeGraphValidationDispatchAuthority(run, stepID, input, node)
 		ret = append(ret, stepDispatchSpec{
 			ID:    stepID,
 			Kind:  node.Kind,
@@ -677,6 +678,7 @@ func normalizeGraphStateChangingDispatchAuthority(run *runModel.Run, stepID comm
 	if len(input) == 0 || !graphNodeInputRequiresStateChangingAuthority(input, node) {
 		return input
 	}
+	input["graphLocalDispatchAuthority"] = true
 	setRuntimeStage(input, runtimeStageRepair)
 	input[stepInputKeySoulStage] = soulStageExecution
 	input["repairObjective"] = repairObjectiveStateChangingOutput
@@ -733,6 +735,60 @@ func normalizeGraphStateChangingDispatchAuthority(run *runModel.Run, stepID comm
 	return attachCurrentActionContractToInput(run, stepID, input)
 }
 
+func normalizeGraphValidationDispatchAuthority(run *runModel.Run, stepID common.StepID, input map[string]any, node runtimemodel.BlockExecutionNode) map[string]any {
+	if len(input) == 0 || !graphNodeInputRequiresValidationAuthority(input, node) {
+		return input
+	}
+	normalizeGraphValidationEvidenceBinding(input)
+	input["graphLocalDispatchAuthority"] = true
+	setRuntimeStage(input, runtimeStageVerification)
+	input[stepInputKeySoulStage] = soulStageValidation
+	input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+	input["boundedValidationRequired"] = true
+	input["evidenceRepairRequired"] = true
+	for _, key := range []string{
+		"stateChangingOutputRequired",
+		"concreteFailureEvidenceRequired",
+		stepInputKeyAssessmentOnly,
+		"assessmentOnlyReason",
+	} {
+		delete(input, key)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	pkg["repairObjective"] = repairObjectiveConcreteValidationEvidence
+	pkg["boundedValidationRequired"] = true
+	for _, key := range []string{
+		"stateChangingOutputRequired",
+		"evidenceAcquisitionRequired",
+		"concreteFailureEvidenceRequired",
+		"evidenceAcquisitionReason",
+		"outputDecisionContract",
+		"exitCriteria",
+	} {
+		delete(pkg, key)
+	}
+	required := concreteValidationEvidenceRequiredOutputWithScratch(input, pkg, validationRequiredOutputSeed(mapFromValue(pkg["requiredOutput"])))
+	pkg["requiredOutput"] = cloneStepPayload(required)
+	input["repairActionPackage"] = pkg
+	currentActionSetRequiredOutput(input, required)
+	input["convergenceContract"] = map[string]any{
+		"state":            convergenceStateNeedValidation,
+		"runtimeStage":     runtimeStageVerification,
+		"runtimeStageMode": firstNonEmptyString(stringFromMap(input, stepInputKeyRuntimeStageMode), "strict_convergence"),
+		"repairObjective":  repairObjectiveConcreteValidationEvidence,
+	}
+	currentActionSetNextAction(input, map[string]any{
+		"kind":   runtimemodel.NextActionTypeValidate,
+		"reason": "current execution graph node requires concrete validation evidence",
+	})
+	input = normalizeDispatchInputAuthorityFocus(input)
+	input = attachStagePacketToStepInput(run, stepID, input)
+	return attachCurrentActionContractToInput(run, stepID, input)
+}
+
 func graphNodeInputRequiresStateChangingAuthority(input map[string]any, node runtimemodel.BlockExecutionNode) bool {
 	if len(input) == 0 {
 		return false
@@ -757,6 +813,64 @@ func graphNodeInputRequiresStateChangingAuthority(input map[string]any, node run
 	default:
 		return false
 	}
+}
+
+func graphNodeInputRequiresValidationAuthority(input map[string]any, node runtimemodel.BlockExecutionNode) bool {
+	if len(input) == 0 || boolValue(input["stateChanging"]) || boolValue(node.Input["stateChanging"]) {
+		return false
+	}
+	if !runtimeStepKindCanProduceValidationEvidence(node.Kind) {
+		return false
+	}
+	return len(mapFromValue(input["validationEvidence"])) > 0 ||
+		requiredOutputValidationOnly(mapFromValue(input["requiredOutput"])) ||
+		strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind")) == runtimemodel.NextActionTypeValidate ||
+		strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state")) == convergenceStateNeedValidation
+}
+
+func normalizeGraphValidationEvidenceBinding(input map[string]any) {
+	evidence := mapFromValue(input["validationEvidence"])
+	if len(evidence) == 0 {
+		return
+	}
+	focus := dispatchAuthorityCurrentFocus(input)
+	required := activeRequiredOutputForCurrentAction(input)
+	workItemIDs := compactUniqueStrings(append(
+		append(stringSliceFromValue(evidence["coverageWorkItemIds"]), stringSliceFromValue(input["coverageWorkItemIds"])...),
+		append(stringSliceFromValue(required["coverageWorkItemIds"]), stringSliceFromValue(focus["coverageWorkItemIds"])...)...,
+	))
+	if id := strings.TrimSpace(firstNonEmptyString(stringFromMap(evidence, "coverageWorkItemId"), stringFromMap(input, "coverageWorkItemId"))); id != "" {
+		workItemIDs = compactUniqueStrings(append(workItemIDs, id))
+	}
+	targetRefs := compactUniqueStrings(append(
+		append(append(stringSliceFromValue(evidence["targetRefs"]), stringSliceFromValue(evidence["structuredTargetRefs"])...), stringSliceFromValue(input["targetRefs"])...),
+		append(append(stringSliceFromValue(input["coverageTargets"]), stringSliceFromValue(required["targetRefs"])...), append(stringSliceFromValue(focus["targetRefs"]), workItemIDs...)...)...,
+	))
+	if ref := strings.TrimSpace(firstNonEmptyString(stringFromMap(evidence, "targetRef"), stringFromMap(input, "targetRef"))); ref != "" {
+		targetRefs = compactUniqueStrings(append(targetRefs, ref))
+	}
+	if len(workItemIDs) > 0 {
+		evidence["coverageWorkItemIds"] = workItemIDs
+		input["coverageWorkItemIds"] = workItemIDs
+	}
+	if len(targetRefs) > 0 {
+		evidence["targetRefs"] = targetRefs
+		evidence["structuredTargetRefs"] = targetRefs
+		input["targetRefs"] = targetRefs
+	}
+	if len(nodeValidationEvidenceObservedClaims(runtimemodel.BlockExecutionNode{Input: input})) == 0 {
+		claim := firstNonEmptyString(
+			stringFromMap(input, "boundedReason"),
+			stringFromMap(input, "verificationScope"),
+			stringFromMap(evidence, "observationType"),
+			"bounded validation observes the declared coverage focus",
+		)
+		evidence["observedClaims"] = []string{claim}
+	}
+	if strings.TrimSpace(stringFromMap(evidence, "mode")) == "controlled_substitute" && !validationEvidenceHasControlledSubstitute(evidence) {
+		evidence["substituteFor"] = firstNonEmptyString(strings.TrimSpace(strings.Join(targetRefs, ",")), "declared coverage focus")
+	}
+	input["validationEvidence"] = evidence
 }
 
 func completedDependencyGraphEvidence(node runtimemodel.BlockExecutionNode, steps []*runModel.Step, rootStepID common.StepID) []map[string]any {

@@ -178,6 +178,7 @@ func dispatchInputHasRecoveryAuthority(input map[string]any) bool {
 	}
 	return boolValue(input[stepInputKeyRuntimeRepairFollowUp]) ||
 		boolValue(input[stepInputKeyProviderRetryFollowUp]) ||
+		boolValue(input["graphLocalDispatchAuthority"]) ||
 		strings.TrimSpace(stringFromMap(input, stepInputKeyRecoveryAction)) != "" ||
 		strings.TrimSpace(stringFromMap(input, stepInputKeyRepairOfStepID)) != "" ||
 		len(mapFromValue(input[stepInputKeyContractViolationRecovery])) > 0

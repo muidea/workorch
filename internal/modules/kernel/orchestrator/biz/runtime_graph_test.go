@@ -143,6 +143,117 @@ func TestNormalizeGraphStateChangingDispatchAuthorityRewritesStaleValidationAuth
 	}
 }
 
+func TestPrepareGapBaselineDispatchSpecsPreservesGraphLocalStateChangingAuthority(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-graph-local-authority",
+		WorkspaceID: "ws-graph-local-authority",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			},
+			gapBaselineKey: map[string]any{
+				"schemaVersion": gapBaselineSchema,
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			},
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": map[string]any{
+					"id":                  "cwi-run",
+					"coverageWorkItemIds": []string{"cwi-run"},
+				},
+			},
+		},
+	}
+	input := normalizeGraphStateChangingDispatchAuthority(run, "run-graph-local-authority/graph-001/001-tidy", map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		},
+		gapBaselineKey: map[string]any{
+			"schemaVersion": gapBaselineSchema,
+			"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		},
+		stepInputKeyGraphNodeID:     "tidy",
+		stepInputKeyGraphRootStepID: "run-graph-local-authority/step-1",
+		"stateChanging":             true,
+		"targetRef":                 "go.mod",
+		"stateChangingReason":       "update dependency metadata",
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+	}, runtimemodel.BlockExecutionNode{ID: "tidy", Kind: runtimemodel.StepKindShellCommand})
+
+	specs, err := (&RuntimeOrchestrator{}).prepareGapBaselineDispatchSpecs(context.Background(), run, []stepDispatchSpec{{
+		ID:    "run-graph-local-authority/graph-001/001-tidy",
+		Kind:  runtimemodel.StepKindShellCommand,
+		Input: input,
+	}})
+	if err != nil {
+		t.Fatalf("prepareGapBaselineDispatchSpecs: %v", err)
+	}
+	if got := stringFromMap(currentActionNextActionFromInput(specs[0].Input), "kind"); got != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("nextAction = %q, want graph-local state_change", got)
+	}
+	if err := validateRuntimeValidationStepInputBeforeRuntime(runtimemodel.StepKindShellCommand, specs[0].Input); err != nil {
+		t.Fatalf("validateRuntimeValidationStepInputBeforeRuntime: %v", err)
+	}
+}
+
+func TestNormalizeGraphValidationDispatchAuthorityBindsValidationEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-graph-validation-authority",
+		WorkspaceID: "ws-graph-validation-authority",
+		State:       common.RunStateRunning,
+	}
+	input := map[string]any{
+		"command":             "go",
+		"args":                []string{"build", "./..."},
+		"timeoutMillis":       int64(120000),
+		"coverageWorkItemIds": []string{"cwi-001"},
+		"coverageTargets":     []string{"goal-req-001"},
+		"targetRef":           ".",
+		"boundedReason":       "verify the declared coverage focus after state change",
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus": map[string]any{
+				"id":                  "focus-cwi-001",
+				"coverageWorkItemIds": []string{"cwi-001"},
+				"targetRefs":          []string{"goal-req-001"},
+			},
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+		},
+		"validationEvidence": map[string]any{
+			"mode":            "controlled_substitute",
+			"observationType": "controlled_substitute_observation",
+		},
+	}
+	got := normalizeGraphValidationDispatchAuthority(run, "run-graph-validation-authority/graph-001/002-verify", input, runtimemodel.BlockExecutionNode{
+		ID:   "verify",
+		Kind: runtimemodel.StepKindShellCommand,
+	})
+
+	if kind := stringFromMap(currentActionNextActionFromInput(got), "kind"); kind != runtimemodel.NextActionTypeValidate {
+		t.Fatalf("nextAction = %q, want validate", kind)
+	}
+	evidence := mapFromValue(got["validationEvidence"])
+	if ids := stringSliceFromValue(evidence["coverageWorkItemIds"]); !stringSliceContains(ids, "cwi-001") {
+		t.Fatalf("validationEvidence.coverageWorkItemIds = %+v, want cwi-001", ids)
+	}
+	if refs := stringSliceFromValue(evidence["targetRefs"]); !stringSliceContains(refs, "goal-req-001") {
+		t.Fatalf("validationEvidence.targetRefs = %+v, want goal-req-001", refs)
+	}
+	if len(stringSliceFromValue(evidence["observedClaims"])) == 0 {
+		t.Fatalf("validationEvidence.observedClaims missing: %+v", evidence)
+	}
+	if stringFromMap(evidence, "substituteFor") == "" {
+		t.Fatalf("validationEvidence.substituteFor missing for controlled substitute: %+v", evidence)
+	}
+	if err := validateRuntimeValidationStepInputBeforeRuntime(runtimemodel.StepKindShellCommand, got); err != nil {
+		t.Fatalf("validateRuntimeValidationStepInputBeforeRuntime: %v", err)
+	}
+}
+
 func TestRuntimeOrchestrator_EventDrivenGraphBatchStepCompletionDispatchesNextNode(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-event-driven-graph-continuation")
