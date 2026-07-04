@@ -911,6 +911,9 @@ func validateValidationShellEvidencePolicy(input map[string]any, command string,
 	if !ok {
 		return nil
 	}
+	if shellScriptMasksFailureWithFallback(script) {
+		return fmt.Errorf("%w: validation shell command masks command failure with fallback; use fail-fast shell or exit with the failed status", common.ErrInvalidArgument)
+	}
 	if !shellScriptCapturesExitStatus(script) {
 		return nil
 	}
@@ -927,6 +930,74 @@ func shellScriptArg(args []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func shellScriptMasksFailureWithFallback(script string) bool {
+	lower := strings.ToLower(strings.TrimSpace(script))
+	for {
+		idx := strings.Index(lower, "||")
+		if idx < 0 {
+			return false
+		}
+		tail := strings.TrimSpace(lower[idx+2:])
+		if shellFailureFallbackMasksStatus(tail) {
+			return true
+		}
+		lower = tail
+	}
+}
+
+func shellFailureFallbackMasksStatus(tail string) bool {
+	segment := shellFallbackSegment(tail)
+	if shellSegmentReturnsFailure(segment) {
+		return false
+	}
+	switch shellFirstCommandWord(tail) {
+	case ":", "echo", "printf", "true":
+		return true
+	default:
+		return false
+	}
+}
+
+func shellFallbackSegment(tail string) string {
+	segment := strings.TrimSpace(tail)
+	if idx := strings.Index(segment, "||"); idx >= 0 {
+		segment = segment[:idx]
+	}
+	return segment
+}
+
+func shellSegmentReturnsFailure(segment string) bool {
+	for _, marker := range []string{
+		"exit ",
+		"exit\t",
+		"exit\n",
+		"return ",
+		"return\t",
+		"return\n",
+	} {
+		if strings.Contains(segment, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func shellFirstCommandWord(tail string) string {
+	trimmed := strings.TrimSpace(tail)
+	for {
+		next := strings.TrimLeft(trimmed, "{( ")
+		if next == trimmed {
+			break
+		}
+		trimmed = next
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Trim(fields[0], ";")
 }
 
 func shellScriptCapturesExitStatus(script string) bool {

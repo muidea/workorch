@@ -585,6 +585,41 @@ func TestContinuableDecisionShouldRepairKeepsRequiredExternalEvidenceBlocked(t *
 	}
 }
 
+func TestContinuableDecisionShouldRepairKeepsRuntimeCannotContinueHumanDependencyBlocked(t *testing.T) {
+	step := &runmodel.Step{
+		ID:   "run-human-runtime-dependency/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			"repairObjective":            repairObjectiveConcreteValidationEvidence,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                         []string{"shell/command", "mcp/tool_call"},
+					"mustProduceConcreteValidationEvidence": true,
+				},
+			},
+		},
+	}
+	spec := runtimeDecisionBlockSpec{
+		Reason:       "runtime cannot continue without governed input",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "provide missing governed runtime input",
+		Context: map[string]any{
+			"runtimeCanContinue":  false,
+			"missingFields":       []any{"dependency_config"},
+			"requiresHumanFields": []any{"dependency_config"},
+			"knownValues": map[string]any{
+				"failureClass": "external_dependency_unavailable",
+			},
+		},
+	}
+
+	if continuableDecisionShouldRepair(step, spec) {
+		t.Fatalf("expected runtimeCanContinue=false human dependency decision to remain blocked")
+	}
+}
+
 func TestContinuableDecisionShouldRepairIgnoresFreeTextWordsWithoutStructuredBlocker(t *testing.T) {
 	step := &runmodel.Step{
 		ID:   "run-neutrality-text/repair-001",
@@ -616,6 +651,47 @@ func TestContinuableDecisionShouldRepairIgnoresFreeTextWordsWithoutStructuredBlo
 
 	if !continuableDecisionShouldRepair(step, spec) {
 		t.Fatalf("expected free-text words without structured blocker to remain continuable")
+	}
+}
+
+func TestContinuableDecisionShouldRepairRuntimeCannotContinueWithConcreteTargetStaysRepairable(t *testing.T) {
+	step := &runmodel.Step{
+		ID:   "run-runtime-target/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			stepInputKeyRuntimeStageMode:  "strict_convergence",
+			stepInputKeySoulStage:         soulStageExecution,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": stateChangingRepairRequiredOutput(),
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "main.go",
+					"exists":           true,
+					"contentHash":      "hash-main",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+			},
+		},
+	}
+	spec := runtimeDecisionBlockSpec{
+		Reason:       "runtime needs to continue with the concrete target snapshot",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "continue with the visible target",
+		Context: map[string]any{
+			"runtimeCanContinue":  false,
+			"missingFields":       []any{"target confirmation"},
+			"requiresHumanFields": []any{"target confirmation"},
+			"candidateValues": map[string]any{
+				"repairTargetSnapshot.path": "main.go",
+			},
+		},
+	}
+
+	if !continuableDecisionShouldRepair(step, spec) {
+		t.Fatalf("expected runtimeCanContinue=false decision with concrete workspace target to remain repairable")
 	}
 }
 

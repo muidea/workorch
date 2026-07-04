@@ -301,6 +301,9 @@ func decisionBlockDeclaresRequiredRealExternalDependency(context map[string]any)
 	if strings.TrimSpace(stringFromMap(context, decisionContextKeyScope)) == decisionContextScopeExternalDependency {
 		return true
 	}
+	if decisionBlockDeclaresHumanRequiredRuntimeBlockedDependency(context) {
+		return true
+	}
 	for _, source := range []map[string]any{context, mapFromValue(context["knownValues"])} {
 		if len(source) == 0 {
 			continue
@@ -327,6 +330,69 @@ func decisionBlockDeclaresRequiredRealExternalDependency(context map[string]any)
 			if boolValue(source[key]) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func decisionBlockDeclaresHumanRequiredRuntimeBlockedDependency(context map[string]any) bool {
+	if !decisionContextRuntimeCannotContinue(context) {
+		return false
+	}
+	if !decisionContextHasStructuredRuntimeBlockerClass(context) {
+		return false
+	}
+	if len(nonEmptyDecisionHumanFields(context)) == 0 {
+		return false
+	}
+	return !decisionContextHasMechanicallyActionableWorkspaceTarget(context)
+}
+
+func decisionContextHasStructuredRuntimeBlockerClass(context map[string]any) bool {
+	for _, source := range []map[string]any{context, mapFromValue(context["knownValues"])} {
+		if len(source) == 0 {
+			continue
+		}
+		for _, key := range []string{"failureClass", "blockerClass", "blockerType", "dependencyClass", "dependencyType"} {
+			if strings.TrimSpace(stringFromMap(source, key)) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func decisionContextRuntimeCannotContinue(context map[string]any) bool {
+	for _, source := range []map[string]any{context, mapFromValue(context["knownValues"])} {
+		if len(source) == 0 {
+			continue
+		}
+		if value, ok := source["runtimeCanContinue"].(bool); ok {
+			return !value
+		}
+	}
+	return false
+}
+
+func decisionContextHasMechanicallyActionableWorkspaceTarget(context map[string]any) bool {
+	for _, source := range []map[string]any{
+		context,
+		mapFromValue(context["knownValues"]),
+		mapFromValue(context["candidateValues"]),
+		mapFromValue(mapFromValue(context["knownValues"])["candidateValues"]),
+	} {
+		if len(source) == 0 {
+			continue
+		}
+		if contextHasKnownActionableTarget(source) {
+			return true
+		}
+		found := false
+		collectDecisionCandidateReadableResources(source, func(string) {
+			found = true
+		})
+		if found {
+			return true
 		}
 	}
 	return false
