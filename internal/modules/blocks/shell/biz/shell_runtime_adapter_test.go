@@ -348,6 +348,50 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReleasesOrdinaryValidationScratch(t *t
 	}
 }
 
+func TestRuntimeAdapter_ExecuteRuntimeStepRetainsValidationScratchWhenAutoCleanupDisabled(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+	scratchDirectory := filepath.Join(os.TempDir(), "workorch-shell-validation-scratch-test", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
+	t.Cleanup(func() {
+		_ = os.RemoveAll(scratchDirectory)
+	})
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceID:                   "ws-validation-scratch-retain",
+		RunID:                         "run-validation-scratch-retain",
+		StepID:                        "run-validation-scratch-retain/verify",
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command":                      "sh",
+			"args":                         []any{"-c", "mkdir -p \"$1\"; printf retained-ok > \"$1/out.txt\"; printf retained-ok", "sh", scratchDirectory},
+			"validationScratchDir":         scratchDirectory,
+			"validationScratchAutoCleanup": false,
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v", err)
+	}
+	resources, ok := result.Output["validationResources"].([]map[string]any)
+	if !ok || len(resources) != 2 {
+		t.Fatalf("validationResources = %#v, want process and scratch resource records", result.Output["validationResources"])
+	}
+	statuses := map[string]string{}
+	for _, resource := range resources {
+		statuses[stringFromShellValue(resource["kind"])] = stringFromShellValue(resource["status"])
+	}
+	if statuses["scratch_dir"] != "retained" {
+		t.Fatalf("resource statuses = %+v, want retained scratch_dir", statuses)
+	}
+	if _, statErr := os.Stat(filepath.Join(scratchDirectory, "out.txt")); statErr != nil {
+		t.Fatalf("scratch output stat = %v, want retained", statErr)
+	}
+}
+
 func TestRuntimeAdapter_ExecuteRuntimeStepClassifiesUnavailableCommand(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()

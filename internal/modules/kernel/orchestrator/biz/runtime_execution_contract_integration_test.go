@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -29,6 +31,94 @@ func concreteValidationEvidenceFixture(mode, observationType string, extra map[s
 		ret[key] = value
 	}
 	return ret
+}
+
+func TestShellCommandScratchAliasAllowsIndirectScratchWorkdir(t *testing.T) {
+	scratch := "/tmp/workorch-validation-scratch/ws/run/step"
+	command := `set +e; SCRATCH_BASE="/tmp/workorch-validation-scratch/ws/run/step"; mkdir -p "$SCRATCH_BASE"; WORKDIR=$(mktemp -d "$SCRATCH_BASE/verify.XXXXXX"); cp main.go config.go "$WORKDIR/" 2>/dev/null || true; cd "$WORKDIR"; go build -o proxy . 2>&1; echo "EXIT_CODE=$?"`
+	if shellCommandLineContainsWorkspaceFileMutation(command, true, scratch) {
+		t.Fatalf("scratch alias command was rejected as workspace mutation: %s", command)
+	}
+}
+
+func TestGraphScopedValidationScratchRetainedUntilRunTerminal(t *testing.T) {
+	scratch := filepath.Join(os.TempDir(), "workorch-validation-scratch", "ws-graph-scratch-retained", "run", "step")
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
+		t.Fatalf("mkdir scratch: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(filepath.Join(os.TempDir(), "workorch-validation-scratch", "ws-graph-scratch-retained"))
+	})
+	step := &runmodel.Step{
+		Input: map[string]any{
+			"validationResources": []map[string]any{{
+				"kind":          "scratch_dir",
+				"path":          scratch,
+				"status":        "pending",
+				"cleanupPolicy": "retain_graph_scoped_scratch_until_run_terminal",
+			}},
+		},
+	}
+	if !finalizeManagedValidationResourcesForStep(step, "released", "accepted_step") {
+		t.Fatal("finalizeManagedValidationResourcesForStep returned false")
+	}
+	resources := mapSliceFromValue(step.Input["validationResources"])
+	if got := stringFromMap(resources[0], "status"); got != "retained" {
+		t.Fatalf("step finalization status = %q, want retained", got)
+	}
+	if _, err := os.Stat(scratch); err != nil {
+		t.Fatalf("scratch removed before run terminal: %v", err)
+	}
+	if !finalizeManagedValidationResourcesForStep(step, "released", "run_terminal") {
+		t.Fatal("run terminal finalization returned false")
+	}
+	resources = mapSliceFromValue(step.Input["validationResources"])
+	if got := stringFromMap(resources[0], "cleanupStatus"); got != "removed" {
+		t.Fatalf("run terminal cleanupStatus = %q, want removed", got)
+	}
+	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
+		t.Fatalf("scratch stat after run terminal = %v, want removed", err)
+	}
+}
+
+func TestPrepareGapBaselineDispatchSpecsPreservesRecoveryScopedAuthority(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-recovery-authority",
+		ExecutionContext: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": "validate"},
+				"focusId":    "focus-new",
+			},
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": map[string]any{"id": "cwi-new"},
+			},
+		},
+	}
+	specs, err := (&RuntimeOrchestrator{}).prepareGapBaselineDispatchSpecs(context.Background(), run, []stepDispatchSpec{{
+		ID:   "run-recovery-authority/repair",
+		Kind: "shell/command",
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": "validate"},
+				"focusId":    "focus-original-failure",
+			},
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": map[string]any{"id": "cwi-original-failure"},
+			},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("prepareGapBaselineDispatchSpecs: %v", err)
+	}
+	gotAuthority := mapFromValue(specs[0].Input[convergenceAuthorityKey])
+	if got := stringFromMap(gotAuthority, "focusId"); got != "focus-original-failure" {
+		t.Fatalf("focusId = %q, want recovery-scoped authority", got)
+	}
+	gotContext := mapFromValue(mapFromValue(specs[0].Input[coverageWorkItemContextKey])["currentFocus"])
+	if got := stringFromMap(gotContext, "id"); got != "cwi-original-failure" {
+		t.Fatalf("currentFocus = %q, want recovery-scoped context", got)
+	}
 }
 
 func TestLLMExecutionGraphNodeReturnedOnlyGraphViolatesContract(t *testing.T) {

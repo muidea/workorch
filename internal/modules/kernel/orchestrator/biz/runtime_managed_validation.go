@@ -217,6 +217,10 @@ func attachManagedValidationResourceOwnership(input map[string]any, request runt
 		})
 	}
 	if scratch := strings.TrimSpace(stringFromMap(input, validationScratchDirKey)); scratch != "" {
+		cleanupPolicy := "remove_step_scoped_scratch_on_completion"
+		if validationScratchCleanupRetainedUntilRunTerminal(input) {
+			cleanupPolicy = "retain_graph_scoped_scratch_until_run_terminal"
+		}
 		resources = append(resources, map[string]any{
 			"id":            managedValidationResourceID(request.WorkspaceID, request.RunID, request.StepID, "scratch_dir"),
 			"workspaceId":   string(request.WorkspaceID),
@@ -225,7 +229,7 @@ func attachManagedValidationResourceOwnership(input map[string]any, request runt
 			"kind":          "scratch_dir",
 			"path":          scratch,
 			"status":        "pending",
-			"cleanupPolicy": "remove_step_scoped_scratch_on_completion",
+			"cleanupPolicy": cleanupPolicy,
 			"createdAt":     createdAt,
 			"source":        "runtime_dispatch",
 		})
@@ -302,6 +306,14 @@ func finalizeManagedValidationResourcesForStep(step *runModel.Step, finalStatus 
 		resource["finalizedAt"] = now
 		resource["finalizedBy"] = finalizedBy
 		if strings.TrimSpace(stringFromMap(resource, "kind")) == "scratch_dir" {
+			if validationScratchResourceRetainedUntilRunTerminal(resource) && !managedValidationFinalizedByRun(finalizedBy) {
+				resource["status"] = "retained"
+				resource["retainedUntil"] = "run_terminal"
+				resource["cleanupStatus"] = "retained_until_run_terminal"
+				resources[idx] = resource
+				changed = true
+				continue
+			}
 			if cleanupStatus, cleanupErr := cleanupOwnedValidationScratch(resource); cleanupStatus != "" {
 				resource["cleanupStatus"] = cleanupStatus
 				if cleanupErr != "" {
@@ -332,6 +344,36 @@ func finalizeManagedValidationResourcesForStep(step *runModel.Step, finalStatus 
 		step.Input["managedValidation"] = managed
 	}
 	return true
+}
+
+func validationScratchCleanupRetainedUntilRunTerminal(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(input, "validationScratchScope")) == "execution_graph" {
+		return true
+	}
+	if strings.TrimSpace(stringFromMap(input, "validationScratchCleanupPolicy")) == "retain_until_run_terminal" {
+		return true
+	}
+	if value, ok := input["validationScratchAutoCleanup"]; ok && !boolValue(value) && strings.TrimSpace(stringFromMap(input, stepInputKeyGraphRootStepID)) != "" {
+		return true
+	}
+	return false
+}
+
+func validationScratchResourceRetainedUntilRunTerminal(resource map[string]any) bool {
+	switch strings.TrimSpace(stringFromMap(resource, "cleanupPolicy")) {
+	case "retain_graph_scoped_scratch_until_run_terminal", "retain_until_run_terminal":
+		return true
+	default:
+		return false
+	}
+}
+
+func managedValidationFinalizedByRun(finalizedBy string) bool {
+	finalizedBy = strings.TrimSpace(finalizedBy)
+	return finalizedBy == "run_terminal" || strings.HasPrefix(finalizedBy, "run_")
 }
 
 func managedValidationResourceStatusTerminal(status string) bool {

@@ -221,6 +221,13 @@ func attachManagedValidationResources(output map[string]any, request runtimemode
 		})
 	}
 	if scratch := strings.TrimSpace(stringFromShellValue(request.Input["validationScratchDir"])); scratch != "" {
+		autoCleanup := managedValidationScratchAutoCleanupEnabled(request.Input)
+		cleanupPolicy := "remove_step_scoped_validation_scratch_on_completion"
+		status := "released"
+		if !autoCleanup {
+			cleanupPolicy = "retain_validation_scratch_until_run_terminal"
+			status = "retained"
+		}
 		record := map[string]any{
 			"id":            shellManagedValidationResourceID(request, "scratch_dir"),
 			"workspaceId":   string(request.WorkspaceID),
@@ -228,8 +235,8 @@ func attachManagedValidationResources(output map[string]any, request runtimemode
 			"stepId":        string(request.StepID),
 			"kind":          "scratch_dir",
 			"path":          scratch,
-			"status":        "released",
-			"cleanupPolicy": "remove_step_scoped_validation_scratch_on_completion",
+			"status":        status,
+			"cleanupPolicy": cleanupPolicy,
 			"createdAt":     startedAt.Format(time.RFC3339Nano),
 			"releasedAt":    finishedAt.Format(time.RFC3339Nano),
 		}

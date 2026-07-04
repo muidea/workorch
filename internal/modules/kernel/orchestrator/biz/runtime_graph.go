@@ -630,6 +630,7 @@ func nextGraphStepInput(
 	for key, value := range renderedNodeInput {
 		input[key] = value
 	}
+	applyGraphScopedValidationScratchLifecycle(input)
 	input[stepInputKeySoulStage] = soulStageExecution
 	setRuntimeStage(input, runtimeStageExecution)
 	inheritRuntimeRepairGraphContract(input, last, node.Kind)
@@ -656,6 +657,15 @@ func nextGraphStepInput(
 		input[stepOutputKeyGraphBranch] = branch
 	}
 	return input
+}
+
+func applyGraphScopedValidationScratchLifecycle(input map[string]any) {
+	if input == nil || strings.TrimSpace(stringFromMap(input, validationScratchDirKey)) == "" {
+		return
+	}
+	input["validationScratchAutoCleanup"] = false
+	input["validationScratchScope"] = "execution_graph"
+	input["validationScratchCleanupPolicy"] = "retain_until_run_terminal"
 }
 
 func completedDependencyGraphEvidence(node runtimemodel.BlockExecutionNode, steps []*runModel.Step, rootStepID common.StepID) []map[string]any {

@@ -14,6 +14,7 @@ import (
 
 var (
 	shellAssignmentPattern        = regexp.MustCompile(`(?m)([a-z_][a-z0-9_]*)=("[^"]*"|'[^']*'|[^ \t\r\n;]+)`)
+	shellAssignmentSegmentPattern = regexp.MustCompile(`(?m)([a-z_][a-z0-9_]*)=([^;\n]+)`)
 	shellHereDocRedirectPattern   = regexp.MustCompile(`<<-?\s*(?:'([^']+)'|"([^"]+)"|\\?([A-Za-z_][A-Za-z0-9_.-]*))`)
 	shellHereDocMaskedBodyComment = "# workorch heredoc body masked"
 )
@@ -1206,15 +1207,7 @@ func shellCommandLineValidationScratchAliases(commandLine string, validationScra
 	aliases := map[string]struct{}{}
 	for changed := true; changed; {
 		changed = false
-		for _, match := range shellAssignmentPattern.FindAllStringSubmatch(commandLine, -1) {
-			if len(match) < 3 {
-				continue
-			}
-			name := strings.TrimSpace(match[1])
-			value := strings.Trim(strings.TrimSpace(match[2]), `"'`)
-			if name == "" {
-				continue
-			}
+		for name, value := range shellAssignmentCandidates(commandLine) {
 			if _, exists := aliases[name]; exists {
 				continue
 			}
@@ -1225,6 +1218,27 @@ func shellCommandLineValidationScratchAliases(commandLine string, validationScra
 		}
 	}
 	return stringStructKeys(aliases)
+}
+
+func shellAssignmentCandidates(commandLine string) map[string]string {
+	ret := map[string]string{}
+	for _, pattern := range []*regexp.Regexp{shellAssignmentPattern, shellAssignmentSegmentPattern} {
+		for _, match := range pattern.FindAllStringSubmatch(commandLine, -1) {
+			if len(match) < 3 {
+				continue
+			}
+			name := strings.TrimSpace(match[1])
+			value := strings.Trim(strings.TrimSpace(match[2]), `"'`)
+			if name == "" || value == "" {
+				continue
+			}
+			if existing := ret[name]; existing != "" && len(existing) >= len(value) {
+				continue
+			}
+			ret[name] = value
+		}
+	}
+	return ret
 }
 
 func stringStructKeys(values map[string]struct{}) []string {

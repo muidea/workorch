@@ -175,7 +175,7 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 	_ = o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
 	if graphBatchStep(step) {
 		if o.runtime != nil {
-			return o.dispatchRuntimeRepairFollowUp(ctx, run, step, execErr)
+			return o.dispatchRuntimeRepairFollowUpOrBlock(ctx, run, step, execErr)
 		}
 		if execErr != nil {
 			return execErr
@@ -194,7 +194,27 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 		}
 		return o.failRunWithRejectedCompletionResult(ctx, run, step, reason)
 	}
-	return o.dispatchRuntimeRepairFollowUp(ctx, run, step, execErr)
+	return o.dispatchRuntimeRepairFollowUpOrBlock(ctx, run, step, execErr)
+}
+
+func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUpOrBlock(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	execErr error,
+) error {
+	err := o.dispatchRuntimeRepairFollowUp(ctx, run, failedStep, execErr)
+	if err == nil || errors.Is(err, common.ErrBlocked) || failedStep == nil || graphNodeID(failedStep) == "" {
+		return err
+	}
+	if failedStep.Output == nil {
+		failedStep.Output = map[string]any{}
+	}
+	failedStep.Output["repairDispatchError"] = err.Error()
+	if o.steps != nil {
+		_ = o.steps.Update(ctx, failedStep)
+	}
+	return o.blockOnRuntimeRepairExhaustion(ctx, run, failedStep, fmt.Errorf("runtime repair dispatch failed: %w", err))
 }
 
 func attachRuntimeFailureStage(output map[string]any, summary string) {

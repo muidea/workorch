@@ -146,17 +146,18 @@ func (o *RuntimeOrchestrator) prepareGapBaselineDispatchSpecs(ctx context.Contex
 		if input == nil {
 			input = map[string]any{}
 		}
-		if len(context) > 0 {
+		recoveryScoped := dispatchInputHasRecoveryAuthority(input)
+		if len(context) > 0 && !recoveryScoped {
 			if existing := mapFromValue(input[coverageWorkItemContextKey]); len(existing) > 0 {
 				input[coverageWorkItemContextKey] = coverageWorkItemContextAlignedToFocus(existing, focus)
 			} else {
 				input[coverageWorkItemContextKey] = coverageWorkItemContextAlignedToFocus(context, focus)
 			}
 		}
-		if len(baseline) > 0 {
+		if len(baseline) > 0 && !recoveryScoped {
 			input[gapBaselineKey] = cloneStepPayload(baseline)
 		}
-		if len(authority) > 0 {
+		if len(authority) > 0 && !recoveryScoped {
 			input[convergenceAuthorityKey] = cloneStepPayload(authority)
 		}
 		if canonicalLLMWorkspaceStepKind(ret[idx].Kind) == llmWorkspaceExecutionStepKind {
@@ -169,6 +170,17 @@ func (o *RuntimeOrchestrator) prepareGapBaselineDispatchSpecs(ctx context.Contex
 		ret[idx].Input = input
 	}
 	return ret, nil
+}
+
+func dispatchInputHasRecoveryAuthority(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	return boolValue(input[stepInputKeyRuntimeRepairFollowUp]) ||
+		boolValue(input[stepInputKeyProviderRetryFollowUp]) ||
+		strings.TrimSpace(stringFromMap(input, stepInputKeyRecoveryAction)) != "" ||
+		strings.TrimSpace(stringFromMap(input, stepInputKeyRepairOfStepID)) != "" ||
+		len(mapFromValue(input[stepInputKeyContractViolationRecovery])) > 0
 }
 
 func syncRunConvergenceDerivedFields(run *runModel.Run) bool {
