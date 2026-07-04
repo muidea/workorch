@@ -378,7 +378,7 @@ func managedValidationFinalizedByRun(finalizedBy string) bool {
 
 func managedValidationResourceStatusTerminal(status string) bool {
 	switch strings.TrimSpace(status) {
-	case "released", "failed", "skipped", "cleanup_failed", "cleanup_skipped", "removed":
+	case "released", "skipped", "cleanup_failed", "cleanup_skipped", "removed":
 		return true
 	default:
 		return false

@@ -803,8 +803,9 @@ func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[strin
 		"id":   "verify_behavior",
 		"kind": "shell/command",
 		"input": map[string]any{
-			"command": "sh",
-			"args":    []string{"-c", "printf verified"},
+			"command":       "sh",
+			"args":          []string{"-c", "printf verified"},
+			"timeoutMillis": managedValidationTimeoutMillis,
 			"validationEvidence": map[string]any{
 				"mode":            "runtime_behavior",
 				"observationType": "runtime_observation",

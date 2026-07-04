@@ -590,6 +590,10 @@ func (r *resultSubsystem) rejectedRunResultSummary(ctx context.Context, runID co
 		if result == nil || result.State != common.ResultStateRejected {
 			continue
 		}
+		if r.rejectedResultIsDiagnosticOnly(ctx, runID, result) {
+			_ = r.supersedeRejectedResult(ctx, result)
+			continue
+		}
 		if r.rejectedResultSupersededByRecovery(ctx, runID, result) {
 			_ = r.supersedeRejectedResult(ctx, result)
 			continue
@@ -690,6 +694,34 @@ func recoveryStepSupersedesRejectedSource(step *runModel.Step, sourceRef common.
 		}
 	}
 	return false
+}
+
+func (r *resultSubsystem) rejectedResultIsDiagnosticOnly(ctx context.Context, runID common.RunID, result *resultmodel.Result) bool {
+	if r == nil || r.steps == nil || result == nil || runID == "" {
+		return false
+	}
+	sourceRef := common.StepID(strings.TrimSpace(result.SourceRef))
+	if sourceRef == "" {
+		return false
+	}
+	step, err := r.steps.Get(ctx, sourceRef)
+	if err != nil || step == nil || step.RunID != runID {
+		return false
+	}
+	return rejectedResultSourceStepIsDiagnosticOnly(step)
+}
+
+func rejectedResultSourceStepIsDiagnosticOnly(step *runModel.Step) bool {
+	if step == nil || len(step.Output) == 0 {
+		return false
+	}
+	if boolValue(step.Output["assessmentOnlyDecisionConvertedToRepair"]) ||
+		boolValue(step.Output["actionableFailedAssessmentDecisionConvertedToRepair"]) ||
+		boolValue(step.Output["continuableDecisionConvertedToRepair"]) {
+		return true
+	}
+	return strings.TrimSpace(stringFromMap(step.Output, "convertedDecisionGate")) != "" &&
+		strings.TrimSpace(stringFromMap(step.Output, "convertedDecision")) != ""
 }
 
 func (r *resultSubsystem) supersedeRejectedResult(ctx context.Context, result *resultmodel.Result) error {

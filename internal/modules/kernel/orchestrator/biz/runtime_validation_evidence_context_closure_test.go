@@ -265,6 +265,43 @@ func TestFinalizeManagedValidationResourcesReleasesActiveScratch(t *testing.T) {
 	}
 }
 
+func TestFinalizeManagedValidationResourcesReleasesFailedScratchAtRunTerminal(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TMPDIR", root)
+	scratch := filepath.Join(root, "workorch-validation-scratch", "ws-a", "run-a", "step-failed")
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
+		t.Fatalf("mkdir scratch: %v", err)
+	}
+	step := &runmodel.Step{
+		ID: "step-failed",
+		Input: map[string]any{
+			"validationResources": []map[string]any{{
+				"id":     "ws-a:run-a:step-failed:scratch_dir",
+				"kind":   "scratch_dir",
+				"path":   scratch,
+				"status": "failed",
+			}},
+			"validationResourceOwnership": map[string]any{
+				"persisted": true,
+			},
+			"managedValidation": map[string]any{
+				"runtimeManaged": true,
+			},
+		},
+	}
+
+	if !finalizeManagedValidationResourcesForStep(step, "released", "run_terminal") {
+		t.Fatal("finalizeManagedValidationResourcesForStep returned false")
+	}
+	resources := mapSliceFromValue(step.Input["validationResources"])
+	if len(resources) != 1 || stringFromMap(resources[0], "status") != "released" || stringFromMap(resources[0], "cleanupStatus") != "removed" {
+		t.Fatalf("validationResources = %+v, want released removed scratch", resources)
+	}
+	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
+		t.Fatalf("scratch stat err = %v, want removed", err)
+	}
+}
+
 func TestAcceptedStateChangeEvidenceRecordDoesNotReuseByBroadCoverageTargets(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-evidence-reuse-coverage-target",

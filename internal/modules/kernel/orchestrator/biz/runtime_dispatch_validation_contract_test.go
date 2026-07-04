@@ -97,6 +97,45 @@ func TestValidateRuntimeValidationStepInputBeforeRuntimeAcceptsBoundedValidation
 	}
 }
 
+func TestConcreteValidationRequiredOutputShellExampleMatchesDispatchGate(t *testing.T) {
+	focus := map[string]any{
+		"id":                   "focus-cwi-001",
+		"coverageWorkItemIds":  []string{"cwi-001"},
+		"targetRefs":           []string{"cwi-001", "deliverable:source"},
+		"structuredTargetRefs": []string{"cwi-001", "deliverable:source"},
+	}
+	required := concreteValidationEvidenceRequiredOutputWithScratch(
+		map[string]any{validationScratchDirKey: "/tmp/workorch-validation-test/example"},
+		map[string]any{},
+		nil,
+	)
+	applyValidationEvidenceExampleFocus(required, focus, []string{"cwi-001"})
+	example := mapFromValue(required["validationEvidenceNodeExample"])
+	input := mapFromValue(example["input"])
+	input["convergenceAuthority"] = map[string]any{
+		"currentFocus": focus,
+		"nextAction":   map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+	}
+	input["convergenceContract"] = map[string]any{
+		"state": convergenceStateNeedValidation,
+	}
+	input[coverageFocusKey] = focus
+	input["acceptance"] = map[string]any{"currentFocus": focus}
+	input["requiredOutput"] = required
+	input["repairActionPackage"] = map[string]any{"requiredOutput": required}
+	input[stepInputKeyStagePacket] = map[string]any{"requiredOutput": required}
+	input[currentActionContractKey] = map[string]any{
+		"currentFocus":   focus,
+		"requiredOutput": required,
+		"nextAction":     map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		"schemaVersion":  currentActionContractSchema,
+	}
+
+	if err := validateRuntimeValidationStepInputBeforeRuntime(runtimemodel.StepKindShellCommand, input); err != nil {
+		t.Fatalf("validateRuntimeValidationStepInputBeforeRuntime example: %v", err)
+	}
+}
+
 func validationDispatchInputFixture() map[string]any {
 	focus := map[string]any{
 		"id":                  "focus-cwi-001",
