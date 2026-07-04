@@ -162,6 +162,25 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	}
 
 	runtimeInput := cloneStepPayload(step.Input)
+	if err := validateRuntimeValidationStepInputBeforeRuntime(step.Kind, runtimeInput); err != nil {
+		output := map[string]any{
+			"status":              "failed",
+			"stage":               "runtime_validation_dispatch_contract_rejected",
+			"error":               err.Error(),
+			"failureReason":       "validation_dispatch_contract_invalid",
+			failureOutputKeyClass: failureClassRuntimeContractMisalign,
+			failureOutputKeySignature: runtimeFailureSignature(failureClassRuntimeContractMisalign, step, map[string]any{
+				"stage": "runtime_validation_dispatch_contract_rejected",
+				"error": err.Error(),
+			}, err),
+			"runtimeDiagnostics": map[string]any{
+				"kind":      "runtime_validation_dispatch_contract_rejected",
+				"operation": step.Kind,
+				"reason":    "validation_dispatch_contract_invalid",
+			},
+		}
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime validation dispatch contract failed", err)
+	}
 	if err := validatePatchStepInputBeforeRuntime(step.Kind, runtimeInput); err != nil {
 		output := map[string]any{
 			"status": "failed",
