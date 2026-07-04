@@ -94,6 +94,103 @@ func TestNextGraphStepInputRendersDependencyOutputTemplates(t *testing.T) {
 	}
 }
 
+func TestNextGraphStepInputRefreshesStaleRunCoverageFocusBeforeValidationDispatch(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-graph-focus",
+		WorkspaceID: "ws-graph-focus",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-graph-focus",
+			"missingGoalCoverage": []map[string]any{
+				{
+					"id":                    "old",
+					"targetText":            "old validation target",
+					"requiredEvidenceKinds": []string{"validation"},
+				},
+				{
+					"id":                    "current",
+					"targetText":            "current validation target",
+					"requiredEvidenceKinds": []string{"validation"},
+				},
+			},
+		},
+	}
+	newCoverageSubsystem().ensure(run)
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) < 2 {
+		t.Fatalf("coverage items = %+v, want two items", items)
+	}
+	items[0]["status"] = "evidence_ready"
+	items[0]["acceptedEvidenceRefs"] = []string{"run-graph-focus/graph/old-verify"}
+	items[0]["acceptedEvidenceByKind"] = map[string]any{"validation": []string{"run-graph-focus/graph/old-verify"}}
+	items[0]["acceptedEvidenceBindingByKind"] = map[string]any{"validation": []string{"run-graph-focus/graph/old-verify"}}
+	items[0]["missingEvidenceKinds"] = []string{}
+	run.ExecutionContext[coverageWorkItemsKey] = items
+	run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems("rev-graph-focus", items, nil, nil)
+	run.ExecutionContext[coverageFocusKey] = coverageFocusFromWorkItem("", items[0])
+	run.ExecutionContext[convergenceAuthorityKey] = map[string]any{
+		"currentFocus": coverageFocusFromWorkItem("", items[0]),
+		"nextAction":   map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+	}
+
+	required := map[string]any{
+		"acceptedKinds":                            []string{runtimemodel.StepKindShellCommand, runtimemodel.StepKindMCPToolCall, managedValidationSessionNodeKind},
+		"forbiddenKinds":                           []string{runtimemodel.RuntimeBlockKindPatchApply},
+		"mustProduceConcreteValidationEvidence":    true,
+		"mustDeclareValidationEvidenceMode":        true,
+		"mustDeclareValidationEvidenceObservation": true,
+		"coverageWorkItemIds":                      []string{"cwi-002"},
+		"targetRefs":                               []string{"cwi-002", "goal:goal_leaf:current"},
+		"structuredTargetRefs":                     []string{"cwi-002", "goal:goal_leaf:current"},
+	}
+	input := nextGraphStepInput(
+		run,
+		&runmodel.Step{ID: "run-graph-focus/planning-001"},
+		runtimemodel.BlockExecutionGraph{},
+		runtimemodel.BlockExecutionNode{
+			ID:   "verify-current",
+			Kind: shellcommon.StepKindCommand,
+			Input: map[string]any{
+				"command":        "sh",
+				"args":           []string{"-c", "true"},
+				"timeoutMillis":  int64(5000),
+				"requiredOutput": required,
+				"repairActionPackage": map[string]any{
+					"requiredOutput": required,
+				},
+				"convergenceContract": map[string]any{
+					"state": convergenceStateNeedValidation,
+				},
+				"validationEvidence": map[string]any{
+					"coverageWorkItemIds":  []string{"cwi-002"},
+					"mode":                 "runtime_behavior",
+					"observationType":      "runtime_observation",
+					"observedClaims":       []string{"current validation observed"},
+					"targetRefs":           []string{"cwi-002", "goal:goal_leaf:current"},
+					"structuredTargetRefs": []string{"cwi-002", "goal:goal_leaf:current"},
+				},
+			},
+		},
+		nil,
+		"",
+		nil,
+		"run-graph-focus/planning-001",
+	)
+
+	if got := stringSliceFromValue(mapFromValue(input[coverageFocusKey])["coverageWorkItemIds"]); len(got) != 1 || got[0] != "cwi-002" {
+		t.Fatalf("coverageFocus = %+v, want current cwi-002", input[coverageFocusKey])
+	}
+	if got := stringSliceFromValue(mapFromValue(mapFromValue(input["acceptance"])["currentFocus"])["coverageWorkItemIds"]); len(got) != 1 || got[0] != "cwi-002" {
+		t.Fatalf("acceptance.currentFocus = %+v, want current cwi-002", mapFromValue(input["acceptance"])["currentFocus"])
+	}
+	if got := stringFromMap(mapFromValue(mapFromValue(input[convergenceAuthorityKey])["currentFocus"]), "id"); got != "cwi-002" {
+		t.Fatalf("convergenceAuthority.currentFocus = %+v, want cwi-002", mapFromValue(input[convergenceAuthorityKey])["currentFocus"])
+	}
+	if err := validateRuntimeValidationStepInputBeforeRuntime(runtimemodel.StepKindShellCommand, input); err != nil {
+		t.Fatalf("validateRuntimeValidationStepInputBeforeRuntime: %v", err)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchConflictDiagnosticsAndWorkspaceManifest(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

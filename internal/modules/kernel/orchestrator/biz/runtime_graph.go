@@ -624,12 +624,15 @@ func nextGraphStepInput(
 	steps []*runModel.Step,
 	rootStepID common.StepID,
 ) map[string]any {
+	newCoverageSubsystem().ensure(run)
+	refreshRunConvergenceAuthority(run)
 	input := nextStepInput(run, last.ID)
 	inheritRuntimeRepairLineage(input, last)
 	renderedNodeInput, _ := renderRuntimeTemplateValue(node.Input, graphRuntimeTemplateContext(steps, rootStepID)).(map[string]any)
 	for key, value := range renderedNodeInput {
 		input[key] = value
 	}
+	input = normalizeDispatchInputAuthorityFocus(input)
 	applyGraphScopedValidationScratchLifecycle(input)
 	input[stepInputKeySoulStage] = soulStageExecution
 	setRuntimeStage(input, runtimeStageExecution)
