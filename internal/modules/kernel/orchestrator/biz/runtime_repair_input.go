@@ -1181,7 +1181,11 @@ func finalizeRuntimeRepairFollowUpStepInput(run *runModel.Run, failedStep *runMo
 	input = normalizeCurrentActionContract(input, failedStep)
 	input = normalizeDispatchInputAuthorityFocus(input)
 	input = normalizeCurrentActionContract(input, failedStep)
-	return attachStagePacketToStepInput(run, stepID, input)
+	input = attachStagePacketToStepInput(run, stepID, input)
+	if len(mapFromValue(input[stepInputKeyContractViolationRecovery])) == 0 {
+		return input
+	}
+	return attachCurrentActionContractToInput(run, stepID, input)
 }
 
 func refreshRuntimeRepairOutputDecisionContract(input map[string]any, failedStep *runModel.Step) {

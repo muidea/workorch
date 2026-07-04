@@ -7,7 +7,8 @@ import (
 
 func RunSnapshotFromModels(input RunSnapshotModelInput) readmodelcore.RunSnapshot {
 	stepViews := MapSteps(input.Steps)
-	currentStep := CurrentRunSnapshotStep(
+	currentStep := CurrentRunSnapshotStepForRun(
+		input.Run,
 		stepViews,
 		DecisionStepID(input.SelectedTicket),
 		ApprovalStepID(input.SelectedApproval),

@@ -18,6 +18,7 @@ func attachCurrentActionContractToInput(run *runModel.Run, stepID common.StepID,
 	if input == nil {
 		input = map[string]any{}
 	}
+	input = normalizeForcedNarrowManagedValidationInput(input)
 	contract := currentActionContractFromInput(run, stepID, input)
 	if len(contract) == 0 {
 		delete(input, currentActionContractKey)
@@ -164,6 +165,9 @@ func currentActionPrerequisiteFromInput(input map[string]any) map[string]any {
 }
 
 func activeRequiredOutputForCurrentAction(input map[string]any) map[string]any {
+	if required := forcedNarrowManagedValidationRequiredOutput(input); len(required) > 0 {
+		return normalizeCurrentAuthorityRequiredOutput(input, required)
+	}
 	switch state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state")); state {
 	case convergenceStateNeedGovernance:
 		return nil
@@ -191,6 +195,16 @@ func activeRequiredOutputForCurrentAction(input map[string]any) map[string]any {
 		return normalizeCurrentAuthorityRequiredOutput(input, required)
 	}
 	return nil
+}
+
+func forcedNarrowManagedValidationRequiredOutput(input map[string]any) map[string]any {
+	recovery := mapFromValue(input[stepInputKeyContractViolationRecovery])
+	if len(recovery) == 0 ||
+		stringFromMap(recovery, "correctionMode") != contractViolationCorrectionModeForcedNarrow ||
+		stringFromMap(mapFromValue(recovery["correctionContract"]), "requiredOutputShape") != "managed_validation_evidence" {
+		return nil
+	}
+	return forcedNarrowRequiredOutputFromRecovery(input, nil, recovery)
 }
 
 func currentActionRequiredOutputForState(input map[string]any, state string) map[string]any {

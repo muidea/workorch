@@ -1184,6 +1184,68 @@ func TestContractViolationProcessControlImmediatelyNarrowsToManagedValidation(t 
 	}
 }
 
+func TestForcedNarrowManagedValidationRecoveryRewritesAllVisibleContracts(t *testing.T) {
+	runID := common.RunID("run-forced-narrow-managed-visible")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-forced-narrow-managed-visible"}
+	input := map[string]any{
+		stepInputKeyContractViolationRecovery: map[string]any{
+			"correctionMode":      contractViolationCorrectionModeForcedNarrow,
+			"correctionProfileId": "managed_validation_evidence",
+			"correctionContract": map[string]any{
+				"requiredOutputShape":   "managed_validation_evidence",
+				"allowedOutputs":        []any{"executionGraph_with_managed_validation_session"},
+				"forbiddenOutputs":      []any{"plain_shell_validation", "top_level_shellCommands"},
+				"validationRoute":       runtimemodel.ValidationRouteManagedHarness,
+				"mustUseManagedHarness": true,
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []any{"shell/command", "mcp/tool_call", managedValidationSessionNodeKind},
+				"validationEvidenceNodeExample":         map[string]any{"kind": "shell/command"},
+				"coverageWorkItemIds":                   []any{"cwi-005"},
+			},
+		},
+		"requiredOutput": map[string]any{
+			"mustProduceConcreteValidationEvidence": true,
+			"acceptedKinds":                         []any{"shell/command", "mcp/tool_call", managedValidationSessionNodeKind},
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"requiredOutput": map[string]any{
+				"acceptedKinds": []any{"shell/command", managedValidationSessionNodeKind},
+			},
+		},
+		currentActionContractKey: map[string]any{
+			"requiredOutput": map[string]any{
+				"acceptedKinds": []any{"shell/command", managedValidationSessionNodeKind},
+			},
+		},
+	}
+
+	input = attachStagePacketToStepInput(run, common.StepID("run-forced-narrow-managed-visible/step-001"), input)
+	input = attachCurrentActionContractToInput(run, common.StepID("run-forced-narrow-managed-visible/step-001"), input)
+
+	for name, required := range map[string]map[string]any{
+		"top":     mapFromValue(input["requiredOutput"]),
+		"pkg":     mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		"stage":   mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"current": mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+	} {
+		if required["contractViolationRetryNarrowed"] != true ||
+			stringFromMap(required, "validationRoute") != runtimemodel.ValidationRouteManagedHarness ||
+			required["mustUseManagedHarness"] != true {
+			t.Fatalf("%s requiredOutput = %+v, want managed forced-narrow markers", name, required)
+		}
+		if got := stringSliceFromValue(required["acceptedKinds"]); len(got) != 1 || got[0] != managedValidationSessionNodeKind {
+			t.Fatalf("%s acceptedKinds = %+v, want managed session only", name, required["acceptedKinds"])
+		}
+		if _, ok := required["validationEvidenceNodeExample"]; ok {
+			t.Fatalf("%s requiredOutput kept shell validation example: %+v", name, required)
+		}
+	}
+}
+
 func TestConvergenceDispatchRejectsSplitCurrentActionRequiredOutput(t *testing.T) {
 	input := map[string]any{
 		"convergenceContract": map[string]any{

@@ -390,6 +390,19 @@ func normalizeCurrentActionContract(input map[string]any, failedStep *runModel.S
 	}
 }
 
+func normalizeForcedNarrowManagedValidationInput(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	recovery := mapFromValue(input[stepInputKeyContractViolationRecovery])
+	if len(recovery) == 0 ||
+		stringFromMap(recovery, "correctionMode") != contractViolationCorrectionModeForcedNarrow ||
+		stringFromMap(mapFromValue(recovery["correctionContract"]), "requiredOutputShape") != "managed_validation_evidence" {
+		return input
+	}
+	return normalizeCurrentActionValidationEvidenceContract(input, nil, recovery)
+}
+
 func normalizeCurrentActionStateChangingContract(input map[string]any, failedStep *runModel.Step, recovery map[string]any) map[string]any {
 	required := forcedNarrowRequiredOutputFromRecovery(input, failedStep, recovery)
 	if len(required) == 0 {

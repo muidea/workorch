@@ -14,6 +14,7 @@ func attachStagePacketToStepInput(run *runModel.Run, stepID common.StepID, input
 	if input == nil {
 		return nil
 	}
+	input = normalizeForcedNarrowManagedValidationInput(input)
 	input = ensureStagePacketCurrentFailureInput(input)
 	packet := buildStagePacketFromStepInput(run, stepID, input)
 	if !packet.HasScope() {

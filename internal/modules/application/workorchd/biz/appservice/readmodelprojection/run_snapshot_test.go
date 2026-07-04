@@ -136,6 +136,49 @@ func TestRunSnapshotFromModelsProjectsBlockingDecisionStepAndCoverage(t *testing
 	}
 }
 
+func TestRunSnapshotFromModelsTerminalRunPrefersFailedStepOverStaleCheckpoint(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-terminal-snapshot-step")
+	runID := common.RunID("run-terminal-snapshot-step")
+	failedStepID := common.StepID("run-terminal-snapshot-step/contract-retry-final")
+	got := RunSnapshotFromModels(RunSnapshotModelInput{
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateFailed},
+		Run: &runmodel.Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       common.RunStateFailed,
+		},
+		Steps: []*runmodel.Step{
+			{ID: "run-terminal-snapshot-step/graph-018-completed", RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateCompleted},
+			{ID: failedStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateFailed},
+		},
+		Checkpoints: []*runmodel.RuntimeCheckpoint{
+			{
+				ID:            "checkpoint-stale-completed",
+				WorkspaceID:   workspaceID,
+				RunID:         runID,
+				CurrentStepID: "run-terminal-snapshot-step/graph-018-completed",
+				OccurredAt:    "2026-07-04T00:29:35Z",
+			},
+			{
+				ID:            "checkpoint-final-failed",
+				WorkspaceID:   workspaceID,
+				RunID:         runID,
+				CurrentStepID: failedStepID,
+				OccurredAt:    "2026-07-04T00:29:30Z",
+			},
+		},
+	})
+
+	if got.Step == nil || got.Step.ID != string(failedStepID) {
+		t.Fatalf("Step = %+v, want terminal failed step %s", got.Step, failedStepID)
+	}
+	if got.Run.CurrentStepID != string(failedStepID) || got.TaskProgress.CurrentStepID != string(failedStepID) {
+		t.Fatalf("current step run=%q progress=%q, want %s", got.Run.CurrentStepID, got.TaskProgress.CurrentStepID, failedStepID)
+	}
+}
+
 func TestCoverageSummaryFromRunSnapshotDerivesStatusCounts(t *testing.T) {
 	t.Parallel()
 
