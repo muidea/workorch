@@ -17,6 +17,32 @@ func TestValidateRuntimeValidationStepInputBeforeRuntimeRejectsMissingTimeout(t 
 	}
 }
 
+func TestNormalizeConcreteValidationEvidenceNodeEnvelopeAddsShellTimeout(t *testing.T) {
+	input := validationDispatchInputFixture()
+	delete(input, "timeoutMillis")
+	node := runtimemodel.BlockExecutionNode{
+		Kind:  runtimemodel.StepKindShellCommand,
+		Input: input,
+	}
+	envelope := concreteValidationEvidenceEnvelope{
+		FocusID:        "focus-cwi-001",
+		WorkItemIDs:    []string{"cwi-001"},
+		TargetRefs:     []string{"cwi-001", "deliverable:source"},
+		ObservedClaims: []string{"bounded validation observed"},
+	}
+
+	normalized, changed := normalizeConcreteValidationEvidenceNodeEnvelope(node, envelope)
+	if !changed {
+		t.Fatalf("changed = false, want timeout normalization")
+	}
+	if got := intFromAny(normalized.Input["timeoutMillis"]); got != managedValidationTimeoutMillis {
+		t.Fatalf("timeoutMillis = %d, want %d", got, managedValidationTimeoutMillis)
+	}
+	if err := validateRuntimeValidationStepInputBeforeRuntime(runtimemodel.StepKindShellCommand, normalized.Input); err != nil {
+		t.Fatalf("validateRuntimeValidationStepInputBeforeRuntime normalized input: %v", err)
+	}
+}
+
 func TestValidateRuntimeValidationStepInputBeforeRuntimeRejectsMissingRequiredOutput(t *testing.T) {
 	input := validationDispatchInputFixture()
 	delete(input, "requiredOutput")

@@ -544,11 +544,15 @@ func normalizeConcreteValidationEvidenceNodeEnvelope(node runtimemodel.BlockExec
 	if nextInput == nil {
 		nextInput = map[string]any{}
 	}
+	changed := false
+	if canonicalRuntimeGraphNodeKind(node.Kind) == runtimemodel.StepKindShellCommand && nextInput["timeoutMillis"] == nil {
+		nextInput["timeoutMillis"] = managedValidationTimeoutMillis
+		changed = true
+	}
 	evidence := cloneStepPayload(mapFromValue(nextInput["validationEvidence"]))
 	if evidence == nil {
 		evidence = map[string]any{}
 	}
-	changed := false
 	if strings.TrimSpace(stringFromMap(evidence, "mode")) == "" &&
 		strings.TrimSpace(stringFromMap(nextInput, "validationEvidenceMode")) == "" &&
 		strings.TrimSpace(stringFromMap(nextInput, "evidenceMode")) == "" {
