@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
+	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -244,6 +245,71 @@ func TestBuildConvergenceContractNextActionStateChangeUsesProfileEvidenceRequire
 			!stringSliceContains(stringSliceFromValue(mirror["acceptedOperations"]), gitcommon.OperationCommit) {
 			t.Fatalf("%s = %+v, want synchronized profile git/write commit requiredOutput", label, mirror)
 		}
+	}
+}
+
+func TestBuildConvergenceContractValidationEscalationOverridesStaleValidationNextAction(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-convergence-validation-escalation",
+		WorkspaceID: "ws-convergence-validation-escalation",
+	}
+	input := map[string]any{
+		"validationRepairEscalatedToImplementation": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": "validate", "reason": "stale validation authority"},
+		},
+		gapBaselineKey: map[string]any{
+			"nextAction": map[string]any{"kind": "validate", "reason": "stale validation gap"},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                   "cwi-validate-target",
+				"status":               "open",
+				"missingEvidenceKinds": []string{"validation"},
+				"targetText":           "bounded validation failed with a concrete target",
+			},
+		},
+		"coverageTargetSet": []map[string]any{{
+			"coverageWorkItemId":    "cwi-validate-target",
+			"targetText":            "bounded validation failed with a concrete target",
+			"missingEvidenceKinds":  []string{"validation"},
+			"requiredEvidenceKinds": []string{"validation"},
+		}},
+		"failureTargetRepairContext": []map[string]any{{
+			"targetRef":        "target.txt",
+			"exists":           true,
+			"content":          "current target\n",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+		}},
+	}
+	failedStep := &runmodel.Step{
+		ID:    "run-convergence-validation-escalation/graph-001/001-validate",
+		RunID: run.ID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"validationEvidence": map[string]any{
+				"coverageWorkItemIds": []string{"cwi-validate-target"},
+				"targetRefs":          []string{"target.txt"},
+			},
+		},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=target.txt|exitCode=1",
+		},
+	}
+
+	contract := BuildConvergenceContract(run, nil, failedStep, map[string]any{"input": cloneStepPayload(input)}, nil)
+	if contract.State != convergenceStateNeedStateChange || contract.RepairObjective != repairObjectiveStateChangingOutput {
+		t.Fatalf("convergenceContract = %+v, want validation diagnostic to override stale validation nextAction", contract)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	required := mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) || !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want state-changing repair output", required)
 	}
 }
 

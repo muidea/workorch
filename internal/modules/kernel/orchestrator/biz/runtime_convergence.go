@@ -172,30 +172,7 @@ func BuildConvergenceContract(
 		return contract
 	}
 	if boolValue(input["validationRepairEscalatedToImplementation"]) {
-		pkg := repeatedValidationRepairEscalationPackage(run, input, failedStep)
-		if repairActionPackageRequiresEvidenceAcquisition(pkg) {
-			contract.State = convergenceStateNeedEvidence
-			contract.RuntimeStage = runtimeStageRepair
-			contract.RuntimeStageMode = "strict_convergence"
-			contract.RepairObjective = repairObjectiveAcquireFailureEvidence
-			contract.ConcreteFailureEvidenceRequired = true
-			contract.RepairActionPackage = pkg
-			contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
-			return contract
-		}
-		contract.State = convergenceStateNeedStateChange
-		contract.RuntimeStage = runtimeStageRepair
-		contract.RuntimeStageMode = "strict_convergence"
-		contract.RepairObjective = repairObjectiveStateChangingOutput
-		contract.StateChangingOutputRequired = true
-		if len(pkg) == 0 {
-			pkg = convergenceStateChangingRepairActionPackage(input, failedStep)
-		} else if !boolValue(mapFromValue(pkg["requiredOutput"])["mustIncludeStateChangingNode"]) {
-			required := enforceStateChangingRequiredOutputForConvergence(pkg, input)
-			addStrategyReassessmentRequiredOutputContract(pkg, required)
-		}
-		contract.RepairActionPackage = pkg
-		contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+		populateValidationRepairEscalationConvergenceContract(run, input, failedStep, &contract)
 		return contract
 	}
 	if populateCoverageWorkItemConvergenceContract(run, input, failedStep, &contract) {
@@ -279,6 +256,9 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 		return false
 	}
 	if !convergenceNextActionAuthorityAllowed(input) {
+		return false
+	}
+	if convergenceValidationRepairEscalationBlocksStaleNextAction(input, run) {
 		return false
 	}
 	if contractViolationRecoveryRequiresAuthorityRecompute(input) {
@@ -451,6 +431,49 @@ func convergenceNextActionAuthorityAllowed(input map[string]any) bool {
 		}
 	}
 	return false
+}
+
+func convergenceValidationRepairEscalationBlocksStaleNextAction(input map[string]any, run *runModel.Run) bool {
+	if !boolValue(input["validationRepairEscalatedToImplementation"]) {
+		return false
+	}
+	switch convergenceNextActionKind(run, input) {
+	case "validate", "validation", "produce_validation_evidence", "artifact", "produce_artifact_evidence",
+		"assessment", "complete_coverage_assessment":
+		return true
+	default:
+		return false
+	}
+}
+
+func populateValidationRepairEscalationConvergenceContract(run *runModel.Run, input map[string]any, failedStep *runModel.Step, contract *ConvergenceContract) {
+	if contract == nil {
+		return
+	}
+	pkg := repeatedValidationRepairEscalationPackage(run, input, failedStep)
+	if repairActionPackageRequiresEvidenceAcquisition(pkg) {
+		contract.State = convergenceStateNeedEvidence
+		contract.RuntimeStage = runtimeStageRepair
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = repairObjectiveAcquireFailureEvidence
+		contract.ConcreteFailureEvidenceRequired = true
+		contract.RepairActionPackage = pkg
+		contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+		return
+	}
+	contract.State = convergenceStateNeedStateChange
+	contract.RuntimeStage = runtimeStageRepair
+	contract.RuntimeStageMode = "strict_convergence"
+	contract.RepairObjective = repairObjectiveStateChangingOutput
+	contract.StateChangingOutputRequired = true
+	if len(pkg) == 0 {
+		pkg = convergenceStateChangingRepairActionPackage(input, failedStep)
+	} else if !boolValue(mapFromValue(pkg["requiredOutput"])["mustIncludeStateChangingNode"]) {
+		required := enforceStateChangingRequiredOutputForConvergence(pkg, input)
+		addStrategyReassessmentRequiredOutputContract(pkg, required)
+	}
+	contract.RepairActionPackage = pkg
+	contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
 }
 
 func convergenceInputHasActionableReplanContinuation(input map[string]any) bool {
