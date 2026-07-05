@@ -621,6 +621,12 @@ func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *
 	if runtimeContextIntegrityGateFailure(failedStep) && !runtimeContextIntegrityGateCanRecoverWithCoverageTargets(failedStep) {
 		return runtimeRecoveryActionContextIntegrityBlocked
 	}
+	if runtimeAvailable &&
+		failedStepRequestsContinuableDecision(failedStep) &&
+		!failedStepHasExternalDecisionDependency(failedStep) &&
+		failedStepHasConvertedReadableWorkspaceResource(failedStep) {
+		return runtimeRecoveryActionRuntimeRepair
+	}
 	if failedStepHasRecoverableContractViolation(failedStep) {
 		if runtimeAvailable && contractViolationRetryWithinBudget(ctx, r, runtimePolicy, run, failedStep) {
 			return runtimeRecoveryActionContractViolationRetry
@@ -716,6 +722,28 @@ func failedStepRequestsContinuableDecision(step *runModel.Step) bool {
 	}, " ")))
 	return strings.Contains(text, "decision requests a continuable candidate choice") ||
 		boolValue(step.Output["continuableDecisionConvertedToRepair"])
+}
+
+func failedStepHasConvertedReadableWorkspaceResource(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	for _, decision := range []map[string]any{
+		mapFromValue(step.Output["convertedDecision"]),
+		mapFromValue(mapFromValue(step.Output["runtimeDiagnostics"])["convertedDecision"]),
+	} {
+		context := mapFromValue(decision["context"])
+		if len(context) == 0 {
+			continue
+		}
+		if knownReadableWorkspaceResourceDecisionContext(context) {
+			return true
+		}
+		if len(stringListFromValue(context["readableResources"])) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func failedStepHasExternalDecisionDependency(step *runModel.Step) bool {

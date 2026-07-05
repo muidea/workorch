@@ -1672,10 +1672,14 @@ func convertedDecisionReadableResourceContext(ctx context.Context, workspaces re
 		return nil
 	}
 	context = enrichDecisionContextWithReadableWorkspaceResources(ctx, workspaces, run, workspace, context, stringFromMap(decision, "question"), stringFromMap(decision, "reason"))
-	if !knownReadableWorkspaceResourceDecisionContext(context) {
+	readableResources := stringListFromValue(context["readableResources"])
+	if !knownReadableWorkspaceResourceDecisionContext(context) && len(readableResources) == 0 {
 		return nil
 	}
 	resources := referencedReadableWorkspaceResources(context)
+	if len(resources) == 0 {
+		resources = readableResources
+	}
 	if len(resources) == 0 {
 		return nil
 	}

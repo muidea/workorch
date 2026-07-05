@@ -114,6 +114,54 @@ func TestContractViolationRecoveryActionExhaustsIndependentBudget(t *testing.T) 
 	}
 }
 
+func TestContractViolationExhaustedContinuableReadableResourceDecisionRepairs(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-readable-resource-repair")
+	repo := memory.NewStepRepository()
+	failed := contractViolationFailedStep(runID, "failed-readable-resource")
+	failed.Output["error"] = "invalid argument: decision requests a continuable candidate choice"
+	failed.Output["continuableDecisionConvertedToRepair"] = true
+	failed.Output["convertedDecisionGate"] = "convergence_contract"
+	failed.Output["convertedDecision"] = map[string]any{
+		"question": "Please provide pkg/service/recorder.go current content.",
+		"reason":   "pkg/service/recorder.go is needed before producing a precise state-changing repair.",
+		"context": map[string]any{
+			"missingFields": []string{"pkg/service/recorder.go content"},
+			"readableResources": []string{
+				"pkg/service/recorder.go",
+			},
+		},
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-readable-resource-repair", InitialStepKind: llmWorkspaceExecutionStepKind}
+	attachContractViolationDiagnostics(run, failed, errors.New("invalid argument: decision requests a continuable candidate choice"))
+	for attempt := 1; attempt <= 2; attempt++ {
+		step := &runmodel.Step{
+			ID:    contractViolationRetryStepID(runID, failed, attempt),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyContractViolationRecovery: map[string]any{
+					"sourceStepId": string(failed.ID),
+				},
+			},
+			Output: map[string]any{
+				failureOutputKeyClass:     failureClassDoDCoverageMissing,
+				failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_decision_required",
+			},
+		}
+		if err := repo.Create(ctx, step); err != nil {
+			t.Fatalf("seed contract retry step %d: %v", attempt, err)
+		}
+	}
+
+	action := runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{MaxContractViolationRetriesPerStep: 2}), true, true, run, failed)
+
+	if action != runtimeRecoveryActionRuntimeRepair {
+		t.Fatalf("recovery action = %s, want runtime repair for continuable readable resource decision", action)
+	}
+}
+
 func TestCoverageAssessmentIncompleteContractViolationExhaustsBudget(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-coverage-assessment-contract-exhausted")
