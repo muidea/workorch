@@ -188,3 +188,87 @@ func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 		t.Fatalf("steps after purge = %d, want 0", len(items))
 	}
 }
+
+func TestPurgeRunCommandUsesWorkspaceScopeForDuplicateRunIDs(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	steps := memoryrepo.NewStepRepository()
+	runID := common.RunID("run-duplicate-purge")
+	workspaceA := common.WorkspaceID("ws-purge-a")
+	workspaceB := common.WorkspaceID("ws-purge-b")
+	stepA := common.StepID("step-duplicate-purge-a")
+	stepB := common.StepID("step-duplicate-purge-b")
+	if err := steps.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceA), &runmodel.Step{ID: stepA, RunID: runID}); err != nil {
+		t.Fatalf("seed step A: %v", err)
+	}
+	if err := steps.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceB), &runmodel.Step{ID: stepB, RunID: runID}); err != nil {
+		t.Fatalf("seed step B: %v", err)
+	}
+	memoryModule := memorymodule.New()
+	if err := memoryModule.Configure(memorymodule.Dependencies{
+		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
+		MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(),
+		EventHub:           hub,
+	}); err != nil {
+		t.Fatalf("configure memory module: %v", err)
+	}
+	if err := memoryModule.Start(); err != nil {
+		t.Fatalf("start memory module: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := memoryModule.Stop(context.Background()); err != nil {
+			t.Errorf("stop memory module: %v", err)
+		}
+	})
+	module := New()
+	if err := module.Configure(Dependencies{
+		Runtime:               NewRuntimeAdapterRegistry(),
+		Steps:                 steps,
+		ToolCalls:             memoryrepo.NewToolCallRepository(),
+		Patches:               memoryrepo.NewPatchRepository(),
+		ValidationResults:     memoryrepo.NewValidationResultRepository(),
+		RuntimeCheckpoints:    memoryrepo.NewRuntimeCheckpointRepository(),
+		EvidenceRecords:       memoryrepo.NewEvidenceRecordRepository(),
+		CoverageWorkItems:     memoryrepo.NewCoverageWorkItemRepository(),
+		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),
+		EventHub:              hub,
+	}); err != nil {
+		t.Fatalf("configure orchestrator module: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("start orchestrator module: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(context.Background()); err != nil {
+			t.Errorf("stop orchestrator module: %v", err)
+		}
+	})
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic:       orchestratorevents.TopicOrchestratorCommandPurgeRun,
+		SubjectType: "run",
+		SubjectID:   string(runID),
+		WorkspaceID: string(workspaceA),
+		RunID:       string(runID),
+		Payload: map[string]any{
+			events.PayloadKeyCommand: orchestratorcontracts.PurgeRunCommand{RunID: runID},
+		},
+	})
+	if _, ok := events.ResponseEnvelope(err); !ok {
+		t.Fatalf("purge err = %v, want response", err)
+	}
+	itemsA, err := steps.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, workspaceA), runID)
+	if err != nil {
+		t.Fatalf("list steps A: %v", err)
+	}
+	if len(itemsA) != 0 {
+		t.Fatalf("workspace A steps after purge = %d, want 0", len(itemsA))
+	}
+	itemsB, err := steps.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, workspaceB), runID)
+	if err != nil {
+		t.Fatalf("list steps B: %v", err)
+	}
+	if len(itemsB) != 1 || itemsB[0].ID != stepB {
+		t.Fatalf("workspace B steps after purge = %+v, want untouched step %s", itemsB, stepB)
+	}
+}

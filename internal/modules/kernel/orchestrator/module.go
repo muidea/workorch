@@ -658,6 +658,9 @@ func (m *Module) handlePurgeRunCommand(ctx context.Context, envelope events.Enve
 	if m == nil || m.bizPtr == nil {
 		return common.ErrInvalidArgument
 	}
+	if workspaceID := orchestratorScopedWorkspaceID(envelope); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	}
 	runID := purgeRunIDFromPayload(envelope.Payload)
 	if runID == "" {
 		runID = common.RunID(envelope.RunID)
