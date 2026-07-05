@@ -311,6 +311,9 @@ func ensureAvailableTargetSnapshotsForStateChangingRepair(input map[string]any) 
 	if len(targets) == 0 {
 		targets = mapSliceFromValue(pkg["targetSnapshots"])
 	}
+	if candidates := repairActionPromotableRootCauseCandidateTargetSnapshots(referencedWorkspaceResourceRootCauseCandidates(input)); len(candidates) > 0 {
+		targets = mergeRepairTargetSnapshots(targets, candidates)
+	}
 	if len(targets) == 0 {
 		return
 	}
@@ -335,6 +338,23 @@ func ensureAvailableTargetSnapshotsForStateChangingRepair(input map[string]any) 
 	applyCurrentSnapshotDirectPatchContract(required)
 	pkg["requiredOutput"] = required
 	input["repairActionPackage"] = pkg
+}
+
+func referencedWorkspaceResourceRootCauseCandidates(input map[string]any) []map[string]any {
+	candidates := mapSliceFromValue(input["rootCauseCandidateContext"])
+	if len(candidates) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(candidates))
+	for _, candidate := range candidates {
+		if stringFromMap(candidate, "source") == "failure_target_referenced_workspace_resource" {
+			ret = append(ret, candidate)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func inputNeedsAvailableTargetSnapshotContract(input map[string]any, required map[string]any) bool {

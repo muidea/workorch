@@ -506,6 +506,12 @@ func (r *repairSubsystem) runtimeRepairRootCauseCandidateContext(ctx context.Con
 	for _, item := range runtimeRepairContextItemsFromStep(failedStep) {
 		addCandidate(stringFromMap(item, "targetRef"), "patch_repair_context")
 	}
+	for _, item := range runtimeRepairReferencedWorkspaceResourceCandidateContext(workspace.DeliverableDirectory, files, failedTargets, failedSet) {
+		addCandidate(stringFromMap(item, "targetRef"), "failure_target_referenced_workspace_resource")
+		if len(ret) >= 6 {
+			break
+		}
+	}
 	sameDirectoryCandidates := make([]workspaceDeliverableFile, 0)
 	for _, file := range files {
 		path := normalizeRepairPatchTargetRef(file.Path)
@@ -535,6 +541,177 @@ func (r *repairSubsystem) runtimeRepairRootCauseCandidateContext(ctx context.Con
 	}
 	if len(ret) > 6 {
 		return ret[:6]
+	}
+	return ret
+}
+
+func runtimeRepairReferencedWorkspaceResourceCandidateContext(deliverableDirectory string, files []workspaceDeliverableFile, failedTargets []string, failedSet map[string]bool) []map[string]any {
+	if strings.TrimSpace(deliverableDirectory) == "" || len(files) == 0 || len(failedTargets) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var refs []string
+	for _, target := range failedTargets {
+		target = normalizeRepairPatchTargetRef(target)
+		if target == "" {
+			continue
+		}
+		snapshot := patchRepairTargetSnapshot(deliverableDirectory, target)
+		content := stringFromMap(snapshot, "content")
+		if strings.TrimSpace(content) == "" || boolValue(snapshot["isBinary"]) {
+			continue
+		}
+		for _, ref := range quotedLocalResourceRefsFromContent(content) {
+			if seen[ref] {
+				continue
+			}
+			seen[ref] = true
+			refs = append(refs, ref)
+		}
+		if len(refs) >= maxLLMContextSliceItems {
+			break
+		}
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	candidateSeen := map[string]bool{}
+	var candidates []string
+	addCandidate := func(path string) {
+		path = normalizeRepairPatchTargetRef(path)
+		if path == "" || candidateSeen[path] || !runtimeRepairTargetRefAdmissible(path) {
+			return
+		}
+		if failedSet != nil && failedSet[path] {
+			return
+		}
+		candidateSeen[path] = true
+		candidates = append(candidates, path)
+	}
+	for _, ref := range refs {
+		for _, file := range workspaceManifestFilesMatchingLocalResourceRef(files, ref) {
+			addCandidate(file.Path)
+			if len(candidates) >= maxLLMContextSliceItems {
+				break
+			}
+		}
+		if len(candidates) >= maxLLMContextSliceItems {
+			break
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, min(len(candidates), maxLLMContextSliceItems))
+	for _, path := range candidates {
+		item := patchRepairTargetSnapshot(deliverableDirectory, path)
+		if len(item) == 0 || !boolValue(item["exists"]) || boolValue(item["isBinary"]) {
+			continue
+		}
+		item["source"] = "failure_target_referenced_workspace_resource"
+		item["guidance"] = "Use this current workspace resource when the failed target references it; repair may need to align the failed target with this related resource shape before verification."
+		ret = append(ret, item)
+		if len(ret) >= maxLLMContextSliceItems {
+			break
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func quotedLocalResourceRefsFromContent(content string) []string {
+	if strings.TrimSpace(content) == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ret []string
+	for idx := 0; idx < len(content); idx++ {
+		quote := content[idx]
+		if quote != '"' && quote != '\'' && quote != '`' {
+			continue
+		}
+		end := idx + 1
+		escaped := false
+		for end < len(content) {
+			ch := content[end]
+			if quote != '`' && ch == '\\' && !escaped {
+				escaped = true
+				end++
+				continue
+			}
+			if ch == quote && !escaped {
+				break
+			}
+			escaped = false
+			end++
+		}
+		if end >= len(content) {
+			break
+		}
+		token := normalizeQuotedLocalResourceRef(content[idx+1 : end])
+		if token != "" && !seen[token] {
+			seen[token] = true
+			ret = append(ret, token)
+			if len(ret) >= maxLLMContextSliceItems {
+				break
+			}
+		}
+		idx = end
+	}
+	return ret
+}
+
+func normalizeQuotedLocalResourceRef(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	value = strings.Trim(value, "/")
+	for strings.HasPrefix(value, "./") {
+		value = strings.TrimPrefix(value, "./")
+	}
+	if value == "" || !strings.Contains(value, "/") || strings.Contains(value, "://") || strings.ContainsAny(value, " \t\r\n") {
+		return ""
+	}
+	if filepath.IsAbs(value) || strings.HasPrefix(value, "~") || strings.HasPrefix(value, "../") {
+		return ""
+	}
+	return filepath.ToSlash(filepath.Clean(value))
+}
+
+func workspaceManifestFilesMatchingLocalResourceRef(files []workspaceDeliverableFile, ref string) []workspaceDeliverableFile {
+	ref = normalizeQuotedLocalResourceRef(ref)
+	if ref == "" || len(files) == 0 {
+		return nil
+	}
+	var ret []workspaceDeliverableFile
+	seen := map[string]bool{}
+	add := func(file workspaceDeliverableFile) {
+		path := normalizeRepairPatchTargetRef(file.Path)
+		if path == "" || seen[path] || !runtimeRepairTargetRefAdmissible(path) {
+			return
+		}
+		seen[path] = true
+		ret = append(ret, file)
+	}
+	for _, file := range files {
+		path := normalizeRepairPatchTargetRef(file.Path)
+		if path == "" {
+			continue
+		}
+		dir := filepath.ToSlash(filepath.Dir(path))
+		if dir == "." {
+			dir = ""
+		}
+		if path == ref || strings.HasSuffix(ref, "/"+path) || strings.HasPrefix(path, ref+"/") {
+			add(file)
+			continue
+		}
+		if dir != "" && (dir == ref || strings.HasSuffix(ref, "/"+dir)) {
+			add(file)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
 	}
 	return ret
 }

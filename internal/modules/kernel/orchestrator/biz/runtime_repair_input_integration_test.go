@@ -1352,6 +1352,106 @@ func TestRuntimeOrchestrator_RuntimeRepairInputUsesInheritedShapeDiagnosticsForA
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputIncludesReferencedWorkspaceResourceSnapshots(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	files := map[string][]byte{
+		"main.go": []byte(strings.Join([]string{
+			"package main",
+			"",
+			"import (",
+			`	"workorch-proxy/internal/config"`,
+			`	"workorch-proxy/internal/observability"`,
+			`	"workorch-proxy/internal/usage"`,
+			")",
+			"",
+			"func main() {",
+			"	_ = config.LoadConfig",
+			"	_ = usage.NewRecorder",
+			"	_ = observability.New",
+			"}",
+			"",
+		}, "\n")),
+		"internal/config/config.go":               []byte("package config\n\nfunc Load(path string) (Config, error) { return Config{}, nil }\ntype Config struct{}\n"),
+		"internal/usage/recorder.go":              []byte("package usage\n\nfunc NewRecorder(path string) (*Recorder, error) { return &Recorder{}, nil }\ntype Recorder struct{}\n"),
+		"internal/usage/usage.go":                 []byte("package usage\n\ntype Event struct{}\n"),
+		"internal/observability/observability.go": []byte("package observability\n\nfunc Setup() error { return nil }\n"),
+	}
+	for name, content := range files {
+		path := filepath.Join(deliverableDirectory, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", name, err)
+		}
+		if err := os.WriteFile(path, content, 0o644); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	workspaceID := common.WorkspaceID("ws-referenced-resource-snapshots")
+	runID := common.RunID("run-referenced-resource-snapshots")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-008/002-verify-build"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageExecution,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+		},
+		Output: map[string]any{
+			"stderr": strings.Join([]string{
+				"./main.go:15:21: undefined: config.LoadConfig",
+				"./main.go:20:19: assignment mismatch: 1 variable but usage.NewRecorder returns 2 values",
+				"./main.go:21:23: undefined: observability.New",
+			}, "\n"),
+			"exitCode":                1,
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=main.go|exitCode=1",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 1, errors.New("exit status 1"))
+
+	candidates := mapSliceFromValue(input["rootCauseCandidateContext"])
+	for _, want := range []string{
+		"internal/config/config.go",
+		"internal/observability/observability.go",
+		"internal/usage/recorder.go",
+		"internal/usage/usage.go",
+	} {
+		if !mapSliceContainsTargetRef(candidates, want) {
+			t.Fatalf("rootCauseCandidateContext = %#v, want referenced workspace resource %s", candidates, want)
+		}
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
+	for _, want := range []string{"main.go", "internal/config/config.go", "internal/usage/recorder.go", "internal/observability/observability.go"} {
+		if !mapSliceContainsTargetRef(targets, want) {
+			t.Fatalf("repairActionPackage.targetSnapshots = %#v, want %s", targets, want)
+		}
+	}
+	targetSet := stringSliceFromValue(actionPackage["repairTargetSet"])
+	for _, want := range []string{"main.go", "internal/config/config.go", "internal/usage/recorder.go", "internal/observability/observability.go"} {
+		if !stringSliceContains(targetSet, want) {
+			t.Fatalf("repairTargetSet = %#v, want %s", targetSet, want)
+		}
+	}
+}
+
+func mapSliceContainsTargetRef(items []map[string]any, targetRef string) bool {
+	for _, item := range items {
+		if stringFromMap(item, "targetRef") == targetRef {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputResolvesUniqueSuffixFailureTarget(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
