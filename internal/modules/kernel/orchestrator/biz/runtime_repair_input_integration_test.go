@@ -3511,6 +3511,88 @@ func TestRuntimeOrchestrator_RuntimeRepairInputEscalatesValidationGapWithCurrent
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputKeepsValidationOnlyFocusDespiteTargetBackedDiagnostic(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "target.txt"), []byte("current target\n"), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-repair-validation-only-diagnostic")
+	runID := common.RunID("run-repair-validation-only-diagnostic")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "ws",
+		DeliverableDirectory: deliverableDirectory,
+		State:                common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: workspaceRepo,
+	}
+	focus := map[string]any{
+		"id":                    "cwi-validation-only",
+		"status":                "failed",
+		"requiredEvidenceKinds": []string{"validation"},
+		"missingEvidenceKinds":  []string{"validation"},
+		"targetText":            "deliver verified behavior",
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/verify-target"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			"boundedValidationRequired":  true,
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": focus,
+			},
+		},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|stage=runtime_validation_failed|failureTargets=target.txt",
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": focus,
+			},
+			"runtimeDiagnostics": map[string]any{
+				"validationFailureDiagnostic": map[string]any{
+					"class":                         runtimemodel.ValidationDiagnosticBuildFailed,
+					"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetFailureSurface,
+				},
+			},
+		},
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, common.ErrInvalidArgument)
+
+	if input["validationRepairEscalatedToImplementation"] != nil ||
+		boolValue(input["stateChangingOutputRequired"]) ||
+		input["repairObjective"] != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("repair input = %+v, want validation-only repair despite target-backed validation diagnostic", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want need_validation", contract)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustProduceConcreteValidationEvidence"]) ||
+		boolValue(required["mustIncludeStateChangingNode"]) ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want validation-only output contract", required)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputDemotesInheritedCoveragePatchContractToValidation(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{

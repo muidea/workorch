@@ -4580,6 +4580,145 @@ func TestBuildConvergenceContractValidationCommandInvalidPreemptsStaleStateChang
 	}
 }
 
+func TestBuildConvergenceContractValidationOnlyFocusBuildFailurePreemptsTargetBackedStateChange(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:  "strict_convergence",
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{
+				"kind":   "state_change",
+				"reason": "stale state-changing repair target from prior failure surface",
+			},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                           "cwi-validation-build",
+				"status":                       "failed",
+				"sourceScope":                  "dod_item",
+				"sourceRequirementId":          "dod-build-test",
+				"targetText":                   "build and test must pass",
+				"requiredEvidenceKinds":        []string{"validation"},
+				"missingEvidenceKinds":         []string{"validation"},
+				"nextAllowedConvergenceStates": []string{convergenceStateNeedValidation},
+			},
+		},
+		"currentExecutionProgress": map[string]any{
+			"lastObservedFailure": map[string]any{
+				"stage":                   "runtime_validation_failed",
+				"failureReason":           "validation command failed before producing accepted evidence",
+				failureOutputKeySignature: "class=shell_command_failed|stage=runtime_validation_failed",
+				"validationFailureDiagnostic": map[string]any{
+					"class":                         runtimemodel.ValidationDiagnosticBuildFailed,
+					"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetFailureSurface,
+					"stderrPreview":                 "validation command failed before completion",
+				},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "main.go",
+				"exists":           true,
+				"contentHash":      "hash-main",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-validation-build/repair-001",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{"error": "state-changing retry returned no useful output"},
+		State:  common.StepStateFailed,
+	}
+
+	contract := BuildConvergenceContract(nil, failed, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+	if contract.State != convergenceStateNeedValidation || contract.RepairObjective != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("convergenceContract = %+v, want validation retry for validation-only focus", contract)
+	}
+	if contract.StateChangingOutputRequired {
+		t.Fatalf("convergenceContract = %+v, should not require state-changing output", contract)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if !boolValue(required["mustProduceConcreteValidationEvidence"]) ||
+		boolValue(required["mustIncludeStateChangingNode"]) ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) {
+		t.Fatalf("requiredOutput = %+v, want validation-only accepted kinds", required)
+	}
+	for _, forbidden := range []string{"patch/apply", gitcommon.StepKindWrite} {
+		if !stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), forbidden) {
+			t.Fatalf("requiredOutput.forbiddenKinds = %+v, want %s forbidden", required["forbiddenKinds"], forbidden)
+		}
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if applied["stateChangingOutputRequired"] != nil ||
+		applied["repairObjective"] != repairObjectiveConcreteValidationEvidence ||
+		stringFromMap(mapFromValue(mapFromValue(applied[convergenceAuthorityKey])["nextAction"]), "kind") != "validate" {
+		t.Fatalf("applied input = %+v, want validation authority without state-changing output", applied)
+	}
+}
+
+func TestBuildConvergenceContractValidationOnlyFocusAllowsExplicitImplementationGapStateChange(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:  "strict_convergence",
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{
+				"kind":      "state_change",
+				"stageMode": "implementation_gap",
+				"reason":    "validation diagnostic requires implementation closure",
+			},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-implementation-gap",
+				"status":                "failed",
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{"validation"},
+			},
+		},
+		"lastFailureDiagnostics": map[string]any{
+			"validationFailureDiagnostic": map[string]any{
+				"class":                         runtimemodel.ValidationDiagnosticImplementationGap,
+				"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetFailureSurface,
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "target.txt",
+				"exists":           true,
+				"contentHash":      "hash-target",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-implementation-gap/repair-001",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{"error": "implementation gap remains open"},
+		State:  common.StepStateFailed,
+	}
+
+	contract := BuildConvergenceContract(nil, failed, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+	if contract.State != convergenceStateNeedStateChange || !contract.StateChangingOutputRequired {
+		t.Fatalf("convergenceContract = %+v, want explicit implementation gap to remain state-changing", contract)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want state-changing output contract", required)
+	}
+}
+
 func TestShouldCreateDecisionTicketKeepsConcreteValidationRuntimeDependency(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:    runtimeStageVerification,

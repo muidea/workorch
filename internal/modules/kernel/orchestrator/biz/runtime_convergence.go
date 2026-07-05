@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (
@@ -1246,6 +1247,9 @@ func concreteValidationFailureCanDriveStateChange(input map[string]any, pkg map[
 }
 
 func validationContractFailureMustRemainValidation(input map[string]any, pkg map[string]any, failedStep *runModel.Step) bool {
+	if validationOnlyFocusPreemptsStateChangingRepair(input, pkg, failedStep) {
+		return true
+	}
 	for _, diagnostic := range validationFailureDiagnosticCandidates(input, pkg, failedStep) {
 		if validationFailureDiagnosticIsCommandContractFailure(diagnostic) {
 			return true
@@ -1257,6 +1261,26 @@ func validationContractFailureMustRemainValidation(input map[string]any, pkg map
 		strings.Contains(text, "validation shell command masks command failure") ||
 		strings.Contains(text, "validation runtime dispatch requires validationevidence") ||
 		strings.Contains(text, "validation runtime dispatch requires concrete validationevidence")
+}
+
+func validationOnlyFocusPreemptsStateChangingRepair(input map[string]any, pkg map[string]any, failedStep *runModel.Step) bool {
+	if !convergenceCurrentFocusNeedsValidationWithoutStateChange(input) || coverageRepairInputRequiresStateChange(input) {
+		return false
+	}
+	hasValidationDiagnostic := false
+	for _, diagnostic := range validationFailureDiagnosticCandidates(input, pkg, failedStep) {
+		class := allowedValidationDiagnosticClass(stringFromMap(diagnostic, "class"))
+		if class == "" {
+			continue
+		}
+		hasValidationDiagnostic = true
+		if class == runtimemodel.ValidationDiagnosticImplementationGap ||
+			boolValue(diagnostic["stateChangingEvidenceNeeded"]) ||
+			boolValue(diagnostic["implementationGap"]) {
+			return false
+		}
+	}
+	return hasValidationDiagnostic
 }
 
 func validationFailureDiagnosticCandidates(input map[string]any, pkg map[string]any, failedStep *runModel.Step) []map[string]any {

@@ -1095,6 +1095,9 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		(coverageGapEligibleForValidationRepair &&
 			coverageValidationHasTargetEvidence &&
 			coverageValidationRepairShouldEscalateToStateChanging(ctx, o.repairManager(), run, failedStep, input))
+	if validationOnlyFocusPreemptsStateChangingRepair(input, mapFromValue(input["repairActionPackage"]), failedStep) {
+		validationRepairEscalatesToStateChanging = false
+	}
 	applyRuntimeRepairValidationEscalationProjection(input, validationRepairEscalatesToStateChanging)
 	applyRuntimeRepairEmptyWorkspaceStateChangingProjection(input, emptyWorkspaceStateChangingRepair)
 	applyRuntimeRepairStateChangingEvidenceQualityProjection(input, failedStep, stateChangingEvidenceQualityRepair)
