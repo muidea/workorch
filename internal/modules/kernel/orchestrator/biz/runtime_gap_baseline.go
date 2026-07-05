@@ -464,6 +464,10 @@ func synchronizeCurrentRequiredOutputMirrors(input map[string]any) map[string]an
 		}
 		if packet := mapFromValue(input[stepInputKeyStagePacket]); len(packet) > 0 {
 			delete(packet, "requiredOutput")
+			if nextAction := mapFromValue(packet["nextAction"]); len(nextAction) > 0 {
+				delete(nextAction, "requiredOutput")
+				packet["nextAction"] = nextAction
+			}
 			input[stepInputKeyStagePacket] = packet
 		}
 		if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
@@ -474,6 +478,10 @@ func synchronizeCurrentRequiredOutputMirrors(input map[string]any) map[string]an
 			}
 			if packet := mapFromValue(executionContext[stepInputKeyStagePacket]); len(packet) > 0 {
 				delete(packet, "requiredOutput")
+				if nextAction := mapFromValue(packet["nextAction"]); len(nextAction) > 0 {
+					delete(nextAction, "requiredOutput")
+					packet["nextAction"] = nextAction
+				}
 				executionContext[stepInputKeyStagePacket] = packet
 			}
 			input["executionContext"] = executionContext
@@ -491,6 +499,10 @@ func synchronizeCurrentRequiredOutputMirrors(input map[string]any) map[string]an
 	input["repairActionPackage"] = pkg
 	if packet := mapFromValue(input[stepInputKeyStagePacket]); len(packet) > 0 {
 		packet["requiredOutput"] = cloneStepPayload(required)
+		if nextAction := mapFromValue(packet["nextAction"]); len(nextAction) > 0 {
+			nextAction["requiredOutput"] = cloneStepPayload(required)
+			packet["nextAction"] = nextAction
+		}
 		input[stepInputKeyStagePacket] = packet
 	}
 	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
@@ -501,6 +513,10 @@ func synchronizeCurrentRequiredOutputMirrors(input map[string]any) map[string]an
 		}
 		if contextPacket := mapFromValue(executionContext[stepInputKeyStagePacket]); len(contextPacket) > 0 {
 			contextPacket["requiredOutput"] = cloneStepPayload(required)
+			if nextAction := mapFromValue(contextPacket["nextAction"]); len(nextAction) > 0 {
+				nextAction["requiredOutput"] = cloneStepPayload(required)
+				contextPacket["nextAction"] = nextAction
+			}
 			executionContext[stepInputKeyStagePacket] = contextPacket
 		}
 		input["executionContext"] = executionContext
@@ -514,9 +530,10 @@ func appendRequiredOutputMirrorReboundDiagnostics(input map[string]any, required
 	}
 	expected := stableCoverageJSON(required)
 	for label, existing := range map[string]map[string]any{
-		"requiredOutput":                       mapFromValue(input["requiredOutput"]),
-		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
-		"stagePacket.requiredOutput":           mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"requiredOutput":                        mapFromValue(input["requiredOutput"]),
+		"currentActionContract.requiredOutput":  mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+		"stagePacket.requiredOutput":            mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
 	} {
 		if len(existing) == 0 || stableCoverageJSON(existing) == expected {
 			continue
@@ -525,8 +542,9 @@ func appendRequiredOutputMirrorReboundDiagnostics(input map[string]any, required
 	}
 	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
 		for label, existing := range map[string]map[string]any{
-			"executionContext.requiredOutput":             mapFromValue(executionContext["requiredOutput"]),
-			"executionContext.stagePacket.requiredOutput": mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["requiredOutput"]),
+			"executionContext.requiredOutput":                        mapFromValue(executionContext["requiredOutput"]),
+			"executionContext.stagePacket.requiredOutput":            mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["requiredOutput"]),
+			"executionContext.stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
 		} {
 			if len(existing) == 0 || stableCoverageJSON(existing) == expected {
 				continue
@@ -629,6 +647,9 @@ func validateConvergenceDispatchInput(input map[string]any) error {
 	if len(mapFromValue(input[stepInputKeyStagePacket])) == 0 {
 		return convergenceDispatchMisalignmentError("missing stagePacket")
 	}
+	if err := validateStagePacketNextActionAlignment(input, nextAction); err != nil {
+		return err
+	}
 	if err := validateConvergenceDispatchRequiredOutputSemantics(input); err != nil {
 		return err
 	}
@@ -660,6 +681,52 @@ func validateCurrentActionContract(input map[string]any) error {
 		}
 	}
 	return nil
+}
+
+func validateStagePacketNextActionAlignment(input map[string]any, nextAction string) error {
+	expected := canonicalDispatchNextActionKind(nextAction)
+	if expected == "" {
+		return nil
+	}
+	for label, packet := range map[string]map[string]any{
+		"stagePacket.nextAction":                  mapFromValue(input[stepInputKeyStagePacket]),
+		"executionContext.stagePacket.nextAction": mapFromValue(mapFromValue(input["executionContext"])[stepInputKeyStagePacket]),
+	} {
+		action := mapFromValue(packet["nextAction"])
+		actual := canonicalDispatchNextActionKind(firstNonEmptyString(
+			stringFromMap(action, "type"),
+			stringFromMap(action, "kind"),
+		))
+		if actual == "" || actual == expected {
+			continue
+		}
+		appendAuthorityDiagnostic(input, "stage_packet_mismatch_next_action", "error", "internal_authority_mismatch", label, "stagePacket nextAction contradicts current convergence authority")
+		return convergenceDispatchMisalignmentError("stage_packet_mismatch_next_action: %s=%s expected=%s", label, actual, expected)
+	}
+	return nil
+}
+
+func canonicalDispatchNextActionKind(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case "":
+		return ""
+	case runtimemodel.NextActionTypeValidate, "validation", "produce_validation_evidence", "produce_artifact_evidence", "artifact":
+		return runtimemodel.NextActionTypeValidate
+	case runtimemodel.NextActionTypeAssessment, "complete_coverage_assessment":
+		return runtimemodel.NextActionTypeAssessment
+	case runtimemodel.NextActionTypeStateChange, "produce_state_change":
+		return runtimemodel.NextActionTypeStateChange
+	case runtimemodel.NextActionTypeRepair, "acquire_evidence":
+		return runtimemodel.NextActionTypeRepair
+	case runtimemodel.NextActionTypeAcquireTargetSnapshot:
+		return runtimemodel.NextActionTypeAcquireTargetSnapshot
+	case runtimemodel.NextActionTypeRequestDecision, "wait_decision", "request_governance":
+		return runtimemodel.NextActionTypeRequestDecision
+	case runtimemodel.NextActionTypeRequestApproval, "wait_approval":
+		return runtimemodel.NextActionTypeRequestApproval
+	default:
+		return strings.TrimSpace(kind)
+	}
 }
 
 func convergenceDispatchMisalignmentError(format string, args ...any) error {
@@ -1098,13 +1165,15 @@ func validateConvergenceDispatchFocusAlignment(input map[string]any) error {
 		return err
 	}
 	for label, required := range map[string]map[string]any{
-		"repairActionPackage.requiredOutput":                  mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
-		"stagePacket.requiredOutput":                          mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
-		"currentActionContract.requiredOutput":                mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
-		"requiredOutput":                                      mapFromValue(input["requiredOutput"]),
-		"executionContext.requiredOutput":                     mapFromValue(executionContext["requiredOutput"]),
-		"executionContext.repairActionPackage.requiredOutput": mapFromValue(mapFromValue(executionContext["repairActionPackage"])["requiredOutput"]),
-		"executionContext.stagePacket.requiredOutput":         mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["requiredOutput"]),
+		"repairActionPackage.requiredOutput":                     mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":                             mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"stagePacket.nextAction.requiredOutput":                  mapFromValue(mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+		"currentActionContract.requiredOutput":                   mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+		"requiredOutput":                                         mapFromValue(input["requiredOutput"]),
+		"executionContext.requiredOutput":                        mapFromValue(executionContext["requiredOutput"]),
+		"executionContext.repairActionPackage.requiredOutput":    mapFromValue(mapFromValue(executionContext["repairActionPackage"])["requiredOutput"]),
+		"executionContext.stagePacket.requiredOutput":            mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["requiredOutput"]),
+		"executionContext.stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
 	} {
 		if err := validateRequiredOutputFocusAlignment(authorityFocus, label, required); err != nil {
 			return err
@@ -1135,10 +1204,15 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		return nil
 	}
 	sources := map[string]map[string]any{
-		"requiredOutput":                       mapFromValue(input["requiredOutput"]),
-		"repairActionPackage.requiredOutput":   mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
-		"stagePacket.requiredOutput":           mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
-		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+		"requiredOutput":                                         mapFromValue(input["requiredOutput"]),
+		"repairActionPackage.requiredOutput":                     mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":                             mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"stagePacket.nextAction.requiredOutput":                  mapFromValue(mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+		"currentActionContract.requiredOutput":                   mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+		"executionContext.requiredOutput":                        mapFromValue(mapFromValue(input["executionContext"])["requiredOutput"]),
+		"executionContext.repairActionPackage.requiredOutput":    mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"])["requiredOutput"]),
+		"executionContext.stagePacket.requiredOutput":            mapFromValue(mapFromValue(mapFromValue(input["executionContext"])[stepInputKeyStagePacket])["requiredOutput"]),
+		"executionContext.stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(mapFromValue(mapFromValue(input["executionContext"])[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
 	}
 	state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state"))
 	nextAction := strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind"))
@@ -1576,7 +1650,17 @@ func appendAuthorityDiagnostic(input map[string]any, code string, severity strin
 }
 
 func firstRequiredOutputForSemantics(sources map[string]map[string]any) map[string]any {
-	for _, label := range []string{"repairActionPackage.requiredOutput", "stagePacket.requiredOutput", "currentActionContract.requiredOutput", "requiredOutput"} {
+	for _, label := range []string{
+		"repairActionPackage.requiredOutput",
+		"stagePacket.requiredOutput",
+		"stagePacket.nextAction.requiredOutput",
+		"currentActionContract.requiredOutput",
+		"requiredOutput",
+		"executionContext.repairActionPackage.requiredOutput",
+		"executionContext.stagePacket.requiredOutput",
+		"executionContext.stagePacket.nextAction.requiredOutput",
+		"executionContext.requiredOutput",
+	} {
 		if required := sources[label]; len(required) > 0 {
 			return required
 		}

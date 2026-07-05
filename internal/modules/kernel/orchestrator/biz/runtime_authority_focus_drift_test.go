@@ -1046,6 +1046,81 @@ func TestValidateConvergenceDispatchInputRejectsValidationRequiredOutputAcceptsP
 	}
 }
 
+func TestValidateConvergenceDispatchInputRejectsStagePacketNextActionDrift(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"currentFocus": map[string]any{"id": "cwi-current"},
+			"nextAction":   map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		},
+		"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
+		"requiredOutput": map[string]any{
+			"mustProduceConcreteValidationEvidence": true,
+			"mustNotMutateWorkspace":                true,
+			"acceptedKinds":                         []string{"shell/command"},
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"activeFocus": map[string]any{"id": "cwi-current"},
+			"nextAction":  map[string]any{"type": runtimemodel.NextActionTypeStateChange},
+		},
+	}
+
+	err := validateConvergenceDispatchInput(input)
+	if err == nil {
+		t.Fatal("validateConvergenceDispatchInput returned nil, want stagePacket nextAction drift")
+	}
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want ErrConflict", err)
+	}
+	if !strings.Contains(err.Error(), "stage_packet_mismatch_next_action") {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want stage_packet_mismatch_next_action", err)
+	}
+	if diagnostics := mapSliceFromValue(input["authorityDiagnostics"]); len(diagnostics) != 1 || stringFromMap(diagnostics[0], "code") != "stage_packet_mismatch_next_action" {
+		t.Fatalf("authorityDiagnostics = %+v, want stage_packet_mismatch_next_action", input["authorityDiagnostics"])
+	}
+}
+
+func TestValidateConvergenceDispatchInputRejectsExecutionContextRequiredOutputDrift(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"currentFocus": map[string]any{"id": "cwi-current"},
+			"nextAction":   map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		},
+		"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
+		"requiredOutput": map[string]any{
+			"mustProduceConcreteValidationEvidence": true,
+			"mustNotMutateWorkspace":                true,
+			"acceptedKinds":                         []string{"shell/command"},
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"activeFocus": map[string]any{"id": "cwi-current"},
+			"nextAction":  map[string]any{"type": runtimemodel.NextActionTypeValidate},
+		},
+		"executionContext": map[string]any{
+			stepInputKeyStagePacket: map[string]any{
+				"activeFocus": map[string]any{"id": "cwi-current"},
+				"nextAction": map[string]any{
+					"type": runtimemodel.NextActionTypeValidate,
+					"requiredOutput": map[string]any{
+						"mustIncludeStateChangingNode": true,
+						"acceptedKinds":                []string{"patch/apply"},
+					},
+				},
+			},
+		},
+	}
+
+	err := validateConvergenceDispatchInput(input)
+	if err == nil {
+		t.Fatal("validateConvergenceDispatchInput returned nil, want executionContext requiredOutput drift")
+	}
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want ErrConflict", err)
+	}
+	if !strings.Contains(err.Error(), "requiredOutput state-changing mismatch") {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want requiredOutput state-changing mismatch", err)
+	}
+}
+
 func TestValidateConvergenceDispatchInputRejectsAcceptanceActiveSliceFocusDrift(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{

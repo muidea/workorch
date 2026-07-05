@@ -6,6 +6,7 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestAttachCurrentActionContractFromAuthority(t *testing.T) {
@@ -159,6 +160,14 @@ func TestSynchronizeCurrentRequiredOutputMirrorsUsesCurrentContractBeforeStaleMi
 		},
 		stepInputKeyStagePacket: map[string]any{
 			"schemaVersion": "workorch.stage_packet.v1",
+			"nextAction": map[string]any{
+				"type": runtimemodel.NextActionTypeValidate,
+				"requiredOutput": map[string]any{
+					"coverageWorkItemIds":          []any{"cwi-stale"},
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []any{"patch/apply"},
+				},
+			},
 			"requiredOutput": map[string]any{
 				"coverageWorkItemIds":          []any{"cwi-stale"},
 				"mustIncludeStateChangingNode": true,
@@ -190,9 +199,10 @@ func TestSynchronizeCurrentRequiredOutputMirrorsUsesCurrentContractBeforeStaleMi
 		t.Fatalf("requiredOutput = %+v, want validation contract from convergenceContract before stale mirrors", required)
 	}
 	for label, mirror := range map[string]map[string]any{
-		"repairActionPackage.requiredOutput":   mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]),
-		"stagePacket.requiredOutput":           mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["requiredOutput"]),
-		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(got[currentActionContractKey])["requiredOutput"]),
+		"repairActionPackage.requiredOutput":    mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":            mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["requiredOutput"]),
+		"stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+		"currentActionContract.requiredOutput":  mapFromValue(mapFromValue(got[currentActionContractKey])["requiredOutput"]),
 	} {
 		if stableCoverageJSON(mirror) != stableCoverageJSON(required) {
 			t.Fatalf("%s = %+v, want synchronized requiredOutput %+v", label, mirror, required)

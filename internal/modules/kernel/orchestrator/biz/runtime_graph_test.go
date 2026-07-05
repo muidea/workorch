@@ -576,6 +576,139 @@ func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayContinuesNextNode(
 	}
 }
 
+func TestRuntimeOrchestrator_CompletedPatchGraphNodeContinuesDependentValidation(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-event-driven-patch-graph-validation")
+	workspaceID := common.WorkspaceID("ws-event-driven-patch-graph-validation")
+	rootStepID := common.StepID(runID + "/contract-retry-001-of-graph-005-001-fix-dependency")
+	patchStepID := common.StepID(runID + "/graph-006/001-fix-main")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	hub := events.NewMemoryHub()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": map[string]any{
+					"id":                   "cwi-source",
+					"coverageWorkItemIds":  []string{"cwi-source"},
+					"missingEvidenceKinds": []string{"validation"},
+				},
+			},
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"currentFocus":  map[string]any{"id": "cwi-source", "missingEvidenceKinds": []string{"validation"}},
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			},
+			gapBaselineKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"currentFocus":  map[string]any{"id": "cwi-source", "missingEvidenceKinds": []string{"validation"}},
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	graph := map[string]any{
+		"nodes": []map[string]any{
+			{
+				"id":   "fix-main",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType":       "file_write",
+					"targetRef":       "main.go",
+					"content":         "package main\n",
+					"coverageTargets": []string{"source_change"},
+				},
+			},
+			{
+				"id":        "verify-build",
+				"kind":      "shell/command",
+				"dependsOn": []string{"fix-main"},
+				"input": map[string]any{
+					"command": "go",
+					"args":    []string{"build", "./..."},
+					"validationEvidence": map[string]any{
+						"observationType":     "runtime_observation",
+						"coverageWorkItemIds": []string{"cwi-source"},
+						"targetRefs":          []string{"cwi-source"},
+						"observedClaims":      []string{"build verifies the current source tree"},
+					},
+				},
+			},
+		},
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     rootStepID,
+		RunID:  runID,
+		Kind:   llmcommon.StepKindWorkspaceExecution,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"status": "completed", stepOutputKeyExecutionGraph: graph},
+	}); err != nil {
+		t.Fatalf("seed root step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    patchStepID,
+		RunID: runID,
+		Kind:  runtimemodel.RuntimeBlockKindPatchApply,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphBatch:      true,
+			stepInputKeyGraphRootStepID: string(rootStepID),
+			stepInputKeyGraphNodeID:     "fix-main",
+			"graphSeq":                  6,
+			"graphNodeSeq":              1,
+			stepOutputKeyExecutionGraph: graph,
+			currentActionContractKey: map[string]any{
+				"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+			},
+		},
+		Output: map[string]any{"status": "completed", "stage": "patch_apply"},
+	}); err != nil {
+		t.Fatalf("seed completed patch step: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{output: map[string]any{"completionState": "completed"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		hub,
+	)
+	orch.EnableEventDrivenDispatch()
+
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, patchStepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "completed"}}, nil); err != nil {
+		t.Fatalf("FinalizeRuntimeStepResult: %v", err)
+	}
+	var dispatches []events.Envelope
+	for _, envelope := range hub.Published() {
+		if envelope.Topic == orchestratorevents.TopicOrchestratorDispatchStepRequested {
+			dispatches = append(dispatches, envelope)
+		}
+	}
+	if len(dispatches) != 1 {
+		t.Fatalf("dispatch events = %d in %+v, want dependent validation dispatch", len(dispatches), hub.Published())
+	}
+	cmd, ok := dispatches[0].Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
+	if !ok {
+		t.Fatalf("dispatch command = %#v, want DispatchStepCommand", dispatches[0].Payload[events.PayloadKeyCommand])
+	}
+	if cmd.StepID != common.StepID(runID+"/graph-001/002-verify-build") || cmd.Kind != runtimemodel.StepKindShellCommand {
+		t.Fatalf("dispatch command = %+v, want verify-build shell step", cmd)
+	}
+	if nodeID := stringFromMap(cmd.Input, stepInputKeyGraphNodeID); nodeID != "verify-build" {
+		t.Fatalf("dispatch input = %+v, want verify-build node", cmd.Input)
+	}
+}
+
 func TestRuntimeOrchestrator_GraphBatchPatchApplyFailureDispatchesRuntimeRepair(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-event-driven-graph-patch-repair")
