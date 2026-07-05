@@ -2,6 +2,7 @@ package workspaceports
 
 import (
 	"context"
+	"errors"
 
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
@@ -21,6 +22,9 @@ func purgeWorkspaceDecisionTickets(ctx context.Context, hub events.Hub, workspac
 		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	if err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return nil
+		}
 		return err
 	}
 	items, ok := response.Payload[events.PayloadKeyTickets].([]*decisionmodel.Ticket)
@@ -36,7 +40,7 @@ func purgeWorkspaceDecisionTickets(ctx context.Context, hub events.Hub, workspac
 		})
 		if err := ownercommandports.Publish(ctx, hub, decisionevents.TopicDecisionCommandDeleteTicket, "decision_ticket", string(item.ID), workspaceID, item.RunID, map[string]any{
 			events.PayloadKeyCommand: decisioncontracts.DeleteTicketCommand{TicketID: item.ID},
-		}); err != nil {
+		}); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
 	}
@@ -48,6 +52,9 @@ func purgeWorkspaceApprovals(ctx context.Context, hub events.Hub, workspaceID co
 		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	if err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return nil
+		}
 		return err
 	}
 	items, ok := response.Payload[events.PayloadKeyItems].([]*approvalmodel.Approval)
@@ -60,7 +67,7 @@ func purgeWorkspaceApprovals(ctx context.Context, hub events.Hub, workspaceID co
 		}
 		if err := ownercommandports.Publish(ctx, hub, approvalevents.TopicApprovalCommandDelete, "approval", string(item.ID), workspaceID, item.RunID, map[string]any{
 			events.PayloadKeyCommand: approvalcontracts.DeleteApprovalCommand{ApprovalID: item.ID},
-		}); err != nil {
+		}); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
 	}

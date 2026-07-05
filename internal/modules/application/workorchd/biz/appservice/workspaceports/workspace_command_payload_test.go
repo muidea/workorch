@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
@@ -25,6 +27,7 @@ import (
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -229,6 +232,137 @@ func TestPurgeWorkspaceRecordsPublishesDeleteCommandPayloads(t *testing.T) {
 	}
 	if _, ok := runDelete.Payload[events.PayloadKeyRunID]; ok {
 		t.Fatalf("run delete payload contains legacy runId field")
+	}
+}
+
+func TestPurgeWorkspaceRecordsTreatsMissingChildRecordsAsAlreadyPurged(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-purge-missing-children")
+	runID := common.RunID("run-purge-missing-children")
+	resultListCalled := false
+
+	hub.Subscribe(runevents.TopicRunCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+		return events.Response(events.Envelope{Payload: map[string]any{
+			events.PayloadKeyRuns: []*runmodel.Run{{ID: runID, WorkspaceID: workspaceID}},
+		}})
+	})
+	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandPurgeRun, func(_ context.Context, envelope events.Envelope) error {
+		return common.ErrNotFound
+	})
+	hub.Subscribe(memoryevents.TopicMemoryCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+		return common.ErrNotFound
+	})
+	hub.Subscribe(decisionevents.TopicDecisionCommandListTicketsByWS, func(_ context.Context, envelope events.Envelope) error {
+		return common.ErrNotFound
+	})
+	hub.Subscribe(approvalevents.TopicApprovalCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+		return common.ErrNotFound
+	})
+	hub.Subscribe(resultevents.TopicArtifactCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+		return common.ErrNotFound
+	})
+	hub.Subscribe(resultevents.TopicResultCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+		resultListCalled = true
+		return common.ErrNotFound
+	})
+	hub.Subscribe(runevents.TopicRunCommandDelete, func(_ context.Context, envelope events.Envelope) error {
+		return common.ErrNotFound
+	})
+
+	if err := PurgeWorkspaceRecords(ctx, hub, workspaceID); err != nil {
+		t.Fatalf("PurgeWorkspaceRecords err = %v, want nil", err)
+	}
+	if !resultListCalled {
+		t.Fatalf("result purge was skipped after missing artifact records")
+	}
+}
+
+func TestPurgeWorkspaceEventStreamTreatsMissingRecordsAsAlreadyPurged(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "not_found", err: common.ErrNotFound},
+		{name: "conflict", err: common.ErrConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			hub := events.NewMemoryHub()
+			hub.Subscribe(eventstreamevents.TopicEventStreamCommandPurgeWorkspace, func(_ context.Context, envelope events.Envelope) error {
+				return tc.err
+			})
+
+			if err := PurgeWorkspaceEventStream(ctx, hub, "ws-eventstream-already-purged"); err != nil {
+				t.Fatalf("PurgeWorkspaceEventStream err = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestDeleteWorkspaceViewDoesNotFailAfterWorkspaceDeletedWhenPostPurgeCleanupIsAlreadyGone(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "not_found", err: common.ErrNotFound},
+		{name: "conflict", err: common.ErrConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			hub := events.NewMemoryHub()
+			workspaceID := common.WorkspaceID("ws-delete-post-purge-" + tc.name)
+
+			hub.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ context.Context, envelope events.Envelope) error {
+				return events.Response(events.Envelope{Payload: map[string]any{
+					events.PayloadKeyWorkspace: &workspacemodel.Workspace{ID: workspaceID},
+				}})
+			})
+			hub.Subscribe(runevents.TopicRunCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+				return events.Response(events.Envelope{Payload: map[string]any{
+					events.PayloadKeyRuns: []*runmodel.Run{},
+				}})
+			})
+			hub.Subscribe(memoryevents.TopicMemoryCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+				return events.Response(events.Envelope{Payload: map[string]any{
+					events.PayloadKeyMemoryItems: []*memorymodel.MemoryItem{},
+				}})
+			})
+			hub.Subscribe(decisionevents.TopicDecisionCommandListTicketsByWS, func(_ context.Context, envelope events.Envelope) error {
+				return events.Response(events.Envelope{Payload: map[string]any{
+					events.PayloadKeyTickets: []*decisionmodel.Ticket{},
+				}})
+			})
+			hub.Subscribe(approvalevents.TopicApprovalCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+				return events.Response(events.Envelope{Payload: map[string]any{
+					events.PayloadKeyItems: []*approvalmodel.Approval{},
+				}})
+			})
+			hub.Subscribe(resultevents.TopicArtifactCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+				return events.Response(events.Envelope{Payload: map[string]any{
+					events.PayloadKeyItems: []*resultmodel.Artifact{},
+				}})
+			})
+			hub.Subscribe(resultevents.TopicResultCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+				return events.Response(events.Envelope{Payload: map[string]any{
+					events.PayloadKeyItems: []*resultmodel.Result{},
+				}})
+			})
+			hub.Subscribe(workspaceevents.TopicWorkspaceCommandDelete, func(_ context.Context, envelope events.Envelope) error {
+				return events.Response(envelope)
+			})
+			hub.Subscribe(eventstreamevents.TopicEventStreamCommandPurgeWorkspace, func(_ context.Context, envelope events.Envelope) error {
+				return tc.err
+			})
+
+			err := DeleteWorkspaceView(ctx, hub, DeleteWorkspaceViewRequest{
+				WorkspaceID: string(workspaceID),
+				Command:     appmodelcore.DeleteWorkspaceCommand{Purge: true},
+			})
+			if err != nil {
+				t.Fatalf("DeleteWorkspaceView err = %v, want nil", err)
+			}
+		})
 	}
 }
 

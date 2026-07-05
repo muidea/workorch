@@ -2,6 +2,7 @@ package workspaceports
 
 import (
 	"context"
+	"errors"
 
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 
@@ -18,6 +19,9 @@ func purgeWorkspaceMemoryItems(ctx context.Context, hub events.Hub, workspaceID 
 		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	if err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return nil
+		}
 		return err
 	}
 	items, ok := response.Payload[events.PayloadKeyMemoryItems].([]*memorymodel.MemoryItem)
@@ -30,7 +34,7 @@ func purgeWorkspaceMemoryItems(ctx context.Context, hub events.Hub, workspaceID 
 		}
 		if err := ownercommandports.Publish(ctx, hub, memoryevents.TopicMemoryCommandDelete, "memory", string(item.ID), workspaceID, item.RunID, map[string]any{
 			events.PayloadKeyCommand: memorycontracts.DeleteMemoryItemCommand{MemoryID: item.ID},
-		}); err != nil {
+		}); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
 	}

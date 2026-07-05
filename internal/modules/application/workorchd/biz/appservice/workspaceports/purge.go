@@ -2,6 +2,7 @@ package workspaceports
 
 import (
 	"context"
+	"errors"
 
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -23,12 +24,16 @@ func PurgeWorkspaceRecords(ctx context.Context, hub events.Hub, workspaceID comm
 	}
 	runIDs, err := WorkspaceRunIDs(ctx, hub, workspaceID)
 	if err != nil {
-		return err
+		if errors.Is(err, common.ErrNotFound) {
+			runIDs = nil
+		} else {
+			return err
+		}
 	}
 	for _, runID := range runIDs {
 		if err := ownercommandports.Publish(ctx, hub, orchestratorevents.TopicOrchestratorCommandPurgeRun, "run", string(runID), workspaceID, runID, map[string]any{
 			events.PayloadKeyCommand: orchestratorcontracts.PurgeRunCommand{RunID: runID},
-		}); err != nil {
+		}); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
 	}
@@ -47,7 +52,7 @@ func PurgeWorkspaceRecords(ctx context.Context, hub events.Hub, workspaceID comm
 	for _, runID := range runIDs {
 		if err := ownercommandports.Publish(ctx, hub, runevents.TopicRunCommandDelete, "run", string(runID), workspaceID, runID, map[string]any{
 			events.PayloadKeyCommand: runcontracts.DeleteRunCommand{RunID: runID},
-		}); err != nil {
+		}); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
 	}
@@ -76,7 +81,11 @@ func WorkspaceRunIDs(ctx context.Context, hub events.Hub, workspaceID common.Wor
 }
 
 func PurgeWorkspaceEventStream(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
-	return ownercommandports.Publish(ctx, hub, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+	err := ownercommandports.Publish(ctx, hub, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
 		events.PayloadKeyCommand: eventstreamcontracts.PurgeWorkspaceCommand{WorkspaceID: workspaceID},
 	})
+	if errors.Is(err, common.ErrNotFound) || errors.Is(err, common.ErrConflict) {
+		return nil
+	}
+	return err
 }

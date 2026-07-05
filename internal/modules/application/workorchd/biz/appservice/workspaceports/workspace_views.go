@@ -2,6 +2,7 @@ package workspaceports
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
@@ -67,5 +68,11 @@ func DeleteWorkspaceView(ctx context.Context, hub events.Hub, req DeleteWorkspac
 	if !req.Command.Purge {
 		return nil
 	}
-	return purgeDeletedWorkspaceView(ctx, hub, req, id, workspace)
+	if err := purgeDeletedWorkspaceView(ctx, hub, req, id, workspace); err != nil {
+		if errors.Is(err, common.ErrNotFound) || errors.Is(err, common.ErrConflict) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
