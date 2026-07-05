@@ -28,6 +28,9 @@ func CurrentRunSnapshotStep(steps []StepView, decisionStep string, approvalStep 
 	}
 	if checkpoint := latestRuntimeCheckpoint(checkpoints); checkpoint != nil {
 		if step := stepByID(steps, checkpoint.CurrentStepID); step != nil {
+			if runningCompletedSnapshotStepWouldMasqueradeAsActive(step) && LatestNonTerminalSnapshotStep(steps) == nil {
+				return nil
+			}
 			return step
 		}
 	}
@@ -38,9 +41,16 @@ func CurrentRunSnapshotStep(steps []StepView, decisionStep string, approvalStep 
 		return step
 	}
 	if step := TerminalSnapshotStep(steps); step != nil {
+		if runningCompletedSnapshotStepWouldMasqueradeAsActive(step) {
+			return nil
+		}
 		return step
 	}
 	return &steps[len(steps)-1]
+}
+
+func runningCompletedSnapshotStepWouldMasqueradeAsActive(step *StepView) bool {
+	return step != nil && step.State == string(common.StepStateCompleted)
 }
 
 func currentRunSnapshotTerminalStep(steps []StepView, checkpoints []readmodelcore.RuntimeCheckpoint) *StepView {

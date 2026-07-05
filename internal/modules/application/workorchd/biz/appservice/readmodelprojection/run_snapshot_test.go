@@ -179,6 +179,38 @@ func TestRunSnapshotFromModelsTerminalRunPrefersFailedStepOverStaleCheckpoint(t 
 	}
 }
 
+func TestRunSnapshotFromModelsRunningRunDoesNotProjectCompletedStepAsActive(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-running-completed-step")
+	runID := common.RunID("run-running-completed-step")
+	stepID := common.StepID("run-running-completed-step/graph-001/002-build")
+	got := RunSnapshotFromModels(RunSnapshotModelInput{
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning},
+		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		Steps: []*runmodel.Step{
+			{ID: stepID, RunID: runID, Kind: "shell/command", State: common.StepStateCompleted},
+		},
+		Checkpoints: []*runmodel.RuntimeCheckpoint{
+			{
+				ID:            "checkpoint-completed",
+				WorkspaceID:   workspaceID,
+				RunID:         runID,
+				CurrentStepID: stepID,
+				OccurredAt:    "2026-07-04T00:29:30Z",
+			},
+		},
+	})
+
+	if got.Step != nil || got.Run.CurrentStepID != "" || got.TaskProgress.CurrentStepID != "" {
+		t.Fatalf("current step projection = step:%+v run:%q progress:%q, want no active current step for running completed terminal gap", got.Step, got.Run.CurrentStepID, got.TaskProgress.CurrentStepID)
+	}
+	status := MapRunStatus(got)
+	if status.CurrentStepID != "" || status.CurrentStepState != "" {
+		t.Fatalf("status current step = %q/%q, want no active current step", status.CurrentStepID, status.CurrentStepState)
+	}
+}
+
 func TestCoverageSummaryFromRunSnapshotDerivesStatusCounts(t *testing.T) {
 	t.Parallel()
 

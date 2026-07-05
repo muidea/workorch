@@ -699,6 +699,122 @@ func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayContinuesNextNode(
 	}
 }
 
+func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayDispatchesAuthorityFollowUp(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-event-driven-graph-terminal-replay")
+	workspaceID := common.WorkspaceID("ws-event-driven-graph-terminal-replay")
+	rootStepID := common.StepID(runID + "/step-1")
+	firstStepID := common.StepID(runID + "/graph-001/001-read")
+	lastStepID := common.StepID(runID + "/graph-001/002-build")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	hub := events.NewMemoryHub()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	run.ID = runID
+	run.WorkspaceID = workspaceID
+	run.DoDID = common.DoDID("dod-graph-terminal-replay")
+	run.InitialStepKind = llmWorkspaceExecutionStepKind
+	updateAuthorityScopeForTest(run, workspaceID, runID)
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	graph := map[string]any{
+		"nodes": []map[string]any{
+			{"id": "read", "kind": "file/read", "input": map[string]any{"path": "input.txt"}},
+			{"id": "build", "kind": "shell/command", "dependsOn": []string{"read"}, "input": map[string]any{"command": "true"}},
+		},
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     rootStepID,
+		RunID:  runID,
+		Kind:   llmcommon.StepKindWorkspaceExecution,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"status": "completed", stepOutputKeyExecutionGraph: graph},
+	}); err != nil {
+		t.Fatalf("seed root step: %v", err)
+	}
+	staleEvidenceInput := map[string]any{
+		stepInputKeyGraphBatch:      true,
+		stepInputKeyGraphRootStepID: string(rootStepID),
+		"convergenceContract":       map[string]any{"state": convergenceStateNeedEvidence},
+		stepInputKeyStagePacket:     map[string]any{"nextAction": map[string]any{"type": runtimemodel.NextActionTypeAcquireTargetSnapshot}},
+		"requiredOutput":            map[string]any{"acceptedKinds": []string{"file/read"}, "forbiddenKinds": []string{"patch/apply", "git/write"}},
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     firstStepID,
+		RunID:  runID,
+		Kind:   "file/read",
+		State:  common.StepStateCompleted,
+		Input:  withStepInput(staleEvidenceInput, stepInputKeyGraphNodeID, "read"),
+		Output: map[string]any{"status": "completed"},
+	}); err != nil {
+		t.Fatalf("seed first graph step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     lastStepID,
+		RunID:  runID,
+		Kind:   runtimemodel.StepKindShellCommand,
+		State:  common.StepStateCompleted,
+		Input:  withStepInput(staleEvidenceInput, stepInputKeyGraphNodeID, "build"),
+		Output: map[string]any{"status": "completed", "validationEvidence": map[string]any{"mode": "runtime_behavior"}},
+	}); err != nil {
+		t.Fatalf("seed last graph step: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{output: map[string]any{"completionState": "completed"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		hub,
+	)
+	orch.EnableEventDrivenDispatch()
+
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, firstStepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "completed"}}, nil); err != nil {
+		t.Fatalf("FinalizeRuntimeStepResult: %v", err)
+	}
+	var dispatch *orchestratorcontracts.DispatchStepCommand
+	for _, envelope := range hub.Published() {
+		if envelope.Topic != orchestratorevents.TopicOrchestratorDispatchStepRequested {
+			continue
+		}
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
+		if !ok {
+			t.Fatalf("dispatch command = %#v, want DispatchStepCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		dispatch = &cmd
+	}
+	if dispatch == nil {
+		t.Fatalf("published events = %+v, want graph terminal follow-up dispatch", hub.Published())
+	}
+	if !strings.Contains(string(dispatch.StepID), "follow-up-graph") || !strings.Contains(string(dispatch.StepID), "build") {
+		t.Fatalf("dispatch step = %s, want terminal graph follow-up anchored to latest graph node", dispatch.StepID)
+	}
+	if got := stringFromMap(currentActionNextActionFromInput(dispatch.Input), "kind"); got != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("current nextAction = %q input=%+v, want state_change", got, dispatch.Input)
+	}
+	if state := stringFromMap(mapFromValue(dispatch.Input["convergenceContract"]), "state"); state != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract.state = %q input=%+v, want %q", state, dispatch.Input, convergenceStateNeedStateChange)
+	}
+	if packetAction := stringFromMap(mapFromValue(mapFromValue(dispatch.Input[stepInputKeyStagePacket])["nextAction"]), "type"); packetAction != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("stagePacket.nextAction = %q input=%+v, want state_change", packetAction, dispatch.Input)
+	}
+	if required := activeRequiredOutputForCurrentAction(dispatch.Input); !requiredOutputRequiresStateChanging(required) || !requiredOutputHasAllowedStateChangingKind(required) {
+		t.Fatalf("active requiredOutput = %+v, want state-changing output accepted", required)
+	}
+}
+
+func withStepInput(input map[string]any, key string, value any) map[string]any {
+	ret := cloneStepPayload(input)
+	ret[key] = value
+	return ret
+}
+
 func TestRuntimeOrchestrator_CompletedPatchGraphNodeContinuesDependentValidation(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-event-driven-patch-graph-validation")

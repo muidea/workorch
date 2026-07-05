@@ -284,6 +284,9 @@ func (o *RuntimeOrchestrator) continueGraphBatchAfterCompletedStep(
 	if currentRun == nil || last == nil {
 		return common.ErrInvalidArgument
 	}
+	if anchor, terminal := o.graphManager().graphTerminalContinuationAnchor(ctx, currentRun, last, steps); terminal && anchor != nil {
+		last = anchor
+	}
 	if graph, ok := runtimeGraphSpecForContinuation(steps, last); ok {
 		if nextSpecs := o.graphManager().readyGraphStepSpecsFromSteps(ctx, currentRun, last, graph, steps); len(nextSpecs) > 0 {
 			if input, ok := o.graphManager().concreteEvidenceAcquisitionFollowUpInputFromSteps(currentRun, last, steps); ok {
@@ -349,6 +352,34 @@ func (o *RuntimeOrchestrator) continueGraphBatchAfterCompletedStep(
 		return err
 	}
 	return o.validateAndCompleteRunWithWorkspace(ctx, currentRun, last.ID, workspace)
+}
+
+func (g *graphSubsystem) graphTerminalContinuationAnchor(ctx context.Context, run *runModel.Run, last *runModel.Step, steps []*runModel.Step) (*runModel.Step, bool) {
+	if g == nil || run == nil || last == nil || len(steps) == 0 {
+		return nil, false
+	}
+	rootStepID := graphRootStepID(last)
+	if rootStepID == "" {
+		return nil, false
+	}
+	anchor := latestCompletedGraphBatchStepForRoot(steps, rootStepID)
+	if anchor == nil {
+		return nil, false
+	}
+	graph, ok := runtimeGraphSpecForContinuation(steps, anchor)
+	if !ok || len(graph.Nodes) == 0 {
+		return anchor, false
+	}
+	if len(g.readyGraphStepSpecsFromSteps(ctx, run, anchor, graph, steps)) > 0 {
+		return anchor, false
+	}
+	if graphHasActiveWorkFromSteps(steps, anchor) {
+		return anchor, false
+	}
+	if !graphRelevantNodesCompleted(graph, steps, graphRootStepID(anchor)) {
+		return anchor, false
+	}
+	return anchor, true
 }
 
 func graphBatchRootStepID(specs []stepDispatchSpec) common.StepID {
@@ -645,6 +676,82 @@ func graphNodeDependenciesSatisfied(node runtimemodel.BlockExecutionNode, comple
 		}
 	}
 	return true
+}
+
+func latestCompletedGraphBatchStepForRoot(steps []*runModel.Step, rootStepID common.StepID) *runModel.Step {
+	if rootStepID == "" {
+		return nil
+	}
+	for idx := len(steps) - 1; idx >= 0; idx-- {
+		step := steps[idx]
+		if step == nil || step.State != common.StepStateCompleted || !graphBatchStep(step) || graphNodeID(step) == "" {
+			continue
+		}
+		if sameGraphRoot(step, rootStepID) {
+			return step
+		}
+	}
+	return nil
+}
+
+func graphHasActiveWorkFromSteps(steps []*runModel.Step, anchor *runModel.Step) bool {
+	if anchor == nil || graphNodeID(anchor) == "" {
+		return false
+	}
+	rootStepID := graphRootStepID(anchor)
+	if rootStepID == "" {
+		return false
+	}
+	for _, step := range steps {
+		if step == nil || step.ID == anchor.ID || graphNodeID(step) == "" || !sameGraphRoot(step, rootStepID) {
+			continue
+		}
+		switch step.State {
+		case common.StepStatePending, common.StepStateDispatched:
+			return true
+		}
+	}
+	return false
+}
+
+func graphRelevantNodesCompleted(graph runtimemodel.BlockExecutionGraph, steps []*runModel.Step, rootStepID common.StepID) bool {
+	if len(graph.Nodes) == 0 || rootStepID == "" {
+		return false
+	}
+	completed := completedGraphNodes(steps, rootStepID)
+	branch := selectedGraphBranchForRoot(steps, rootStepID)
+	relevant := 0
+	for _, node := range graph.Nodes {
+		nodeID := strings.TrimSpace(node.ID)
+		if nodeID == "" {
+			continue
+		}
+		if node.Branch != "" && node.Branch != branch {
+			continue
+		}
+		relevant++
+		if !completed[nodeID] {
+			return false
+		}
+	}
+	return relevant > 0
+}
+
+func selectedGraphBranchForRoot(steps []*runModel.Step, rootStepID common.StepID) string {
+	branch := ""
+	for _, step := range steps {
+		if step == nil || step.State != common.StepStateCompleted || !sameGraphRoot(step, rootStepID) {
+			continue
+		}
+		if value := strings.TrimSpace(stringFromMap(step.Output, stepOutputKeyGraphBranch)); value != "" {
+			branch = value
+			continue
+		}
+		if value := strings.TrimSpace(stringFromMap(step.Input, stepOutputKeyGraphBranch)); value != "" {
+			branch = value
+		}
+	}
+	return branch
 }
 
 func nextGraphStepInput(

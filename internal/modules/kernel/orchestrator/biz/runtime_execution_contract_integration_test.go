@@ -1517,6 +1517,59 @@ func TestValidateLLMExecutionOutputContractAllowsInitialStateChangingPatchWithCo
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsDispatchStepCoverageTargets(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-dispatch-step-coverage-targets-valid",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-dispatch-step-coverage-targets-valid/graph-001/001-fix-usage",
+		Kind: "patch/apply",
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"coverageTargets": []string{
+				"Token accounting records cache usage totals",
+			},
+			"coverageWorkItemIds": []string{"cwi-085"},
+			"repairActionPackage": map[string]any{
+				"coverageRepairRequired": true,
+				"coverageTargetSet": []map[string]any{{
+					"kind":                  "deliverable",
+					"coverageWorkItemId":    "cwi-085",
+					"sourceRequirementId":   "source_change",
+					"coverageTargetToken":   "source_change",
+					"requiredEvidenceKinds": []string{"state_change", "validation"},
+				}},
+				"requiredOutput": map[string]any{
+					"mustDeclareCoverageTargets": true,
+					"acceptedKinds":              []string{"patch/apply"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "patch_apply",
+		stepOutputKeyPatches: []map[string]any{{
+			"patchType": "text_replace",
+			"targetRef": "internal/usage/usage.go",
+			"oldText":   "old",
+			"newText":   "new",
+			"coverageTargets": []string{
+				"Token accounting records cache usage totals",
+			},
+		}},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want dispatch step coverageTargets allowed", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsCoverageGapPatchWithUnmatchedCoverageTargets(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-repair-coverage-target-mismatch",

@@ -692,7 +692,11 @@ func (o *RuntimeOrchestrator) resumeCompletedGraphBatchStepContinuation(ctx cont
 		return err
 	}
 	if completedGraphBatchStepHasDownstreamStep(steps, step) {
-		return nil
+		anchor, terminal := o.graphManager().graphTerminalContinuationAnchor(ctx, currentRun, step, steps)
+		if !terminal || anchor == nil {
+			return nil
+		}
+		step = anchor
 	}
 	return o.continueGraphBatchAfterCompletedStep(ctx, currentRun, step, steps, workspace)
 }

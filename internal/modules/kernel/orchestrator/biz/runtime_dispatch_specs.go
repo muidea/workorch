@@ -563,6 +563,16 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 		if len(specs) > 0 {
 			return specs, nil
 		}
+		if len(steps) == 0 && o.steps != nil {
+			var err error
+			steps, err = o.steps.ListByRun(ctx, run.ID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if anchor, terminal := o.graphManager().graphTerminalContinuationAnchor(ctx, run, last, steps); terminal && anchor != nil {
+			last = anchor
+		}
 		nextStepID, nextKind := nextStepSpec(last.Output)
 		if nextStepID != "" {
 			uniqueStepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, nextStepID)

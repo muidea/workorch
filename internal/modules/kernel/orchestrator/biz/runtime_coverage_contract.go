@@ -157,6 +157,14 @@ func coverageBoundTargetTokens(step *runModel.Step) []string {
 			add(stringFromMap(item, key))
 		}
 	}
+	addCoverageTargetValue := func(value any) {
+		for _, text := range stringSliceFromValue(value) {
+			add(text)
+		}
+		for _, item := range mapSliceFromValue(value) {
+			addCoverageTargetMap(item)
+		}
+	}
 	addAuthorityTargetRefs := func(source map[string]any) {
 		if len(source) == 0 {
 			return
@@ -178,12 +186,19 @@ func coverageBoundTargetTokens(step *runModel.Step) []string {
 			"targetRefs",
 			"structuredTargetRefs",
 			"sourceRequirementAliases",
+			"coverageTargets",
 		} {
 			for _, value := range stringSliceFromValue(source[key]) {
 				add(value)
 			}
+			for _, item := range mapSliceFromValue(source[key]) {
+				addCoverageTargetMap(item)
+			}
 		}
 	}
+	addAuthorityTargetRefs(step.Input)
+	addCoverageTargetValue(step.Input["coverageTargets"])
+	addCoverageTargetValue(step.Input["coverageTargetSet"])
 	for _, item := range mapSliceFromValue(step.Input["missingDoDItems"]) {
 		add(stringFromMap(item, "item"))
 	}
