@@ -545,6 +545,10 @@ func contractViolationRecoveryStateChangingContract(input map[string]any, failed
 	if len(recovery) == 0 {
 		return ConvergenceContract{}, false
 	}
+	if convergenceCoverageFocusRequiresValidation(input) &&
+		validationContractFailureMustRemainValidation(input, mapFromValue(input["repairActionPackage"]), failedStep) {
+		return ConvergenceContract{}, false
+	}
 	if contractViolationRecoveryCurrentContractPreemptsExpectedStateChange(input, recovery) {
 		return ConvergenceContract{}, false
 	}
@@ -1219,10 +1223,125 @@ func concreteValidationFailureCanDriveStateChange(input map[string]any, pkg map[
 		!convergenceConcreteFailureTargetsOutsideSatisfiedStateChange(input, pkg) {
 		return false
 	}
+	if convergenceCoverageFocusRequiresValidation(input) &&
+		validationContractFailureMustRemainValidation(input, pkg, nil) {
+		return false
+	}
 	if !inputHasConcreteValidationFailureDiagnostic(input, pkg) {
 		return false
 	}
 	return repairHasImplementationTargetEvidence(input, pkg)
+}
+
+func validationContractFailureMustRemainValidation(input map[string]any, pkg map[string]any, failedStep *runModel.Step) bool {
+	for _, diagnostic := range validationFailureDiagnosticCandidates(input, pkg, failedStep) {
+		if validationFailureDiagnosticIsCommandContractFailure(diagnostic) {
+			return true
+		}
+	}
+	text := strings.ToLower(strings.Join(validationFailureDiagnosticTextCandidates(input, pkg, failedStep), "\n"))
+	return strings.Contains(text, "shell_validation_contract_rejected") ||
+		strings.Contains(text, "validation command masks command failure") ||
+		strings.Contains(text, "validation shell command masks command failure") ||
+		strings.Contains(text, "validation runtime dispatch requires validationevidence") ||
+		strings.Contains(text, "validation runtime dispatch requires concrete validationevidence")
+}
+
+func validationFailureDiagnosticCandidates(input map[string]any, pkg map[string]any, failedStep *runModel.Step) []map[string]any {
+	candidates := make([]map[string]any, 0)
+	add := func(source map[string]any) {
+		if len(source) == 0 {
+			return
+		}
+		if diagnostic := mapFromValue(source["validationFailureDiagnostic"]); len(diagnostic) > 0 {
+			candidates = append(candidates, diagnostic)
+		}
+		if diagnostics := mapFromValue(source["runtimeDiagnostics"]); len(diagnostics) > 0 {
+			if diagnostic := mapFromValue(diagnostics["validationFailureDiagnostic"]); len(diagnostic) > 0 {
+				candidates = append(candidates, diagnostic)
+			}
+		}
+	}
+	add(input)
+	add(pkg)
+	for _, key := range []string{
+		"lastFailureDiagnostics",
+		"currentFailure",
+		"failedStepOutput",
+		"currentExecutionProgress",
+	} {
+		add(mapFromValue(input[key]))
+		add(mapFromValue(pkg[key]))
+	}
+	for _, progress := range []map[string]any{
+		mapFromValue(input["currentExecutionProgress"]),
+		mapFromValue(pkg["currentExecutionProgress"]),
+	} {
+		add(mapFromValue(progress["currentFailure"]))
+		add(mapFromValue(progress["lastObservedFailure"]))
+	}
+	if failedStep != nil {
+		add(failedStep.Input)
+		add(failedStep.Output)
+	}
+	return candidates
+}
+
+func validationFailureDiagnosticIsCommandContractFailure(diagnostic map[string]any) bool {
+	if len(diagnostic) == 0 {
+		return false
+	}
+	class := strings.TrimSpace(stringFromMap(diagnostic, "class"))
+	targetType := strings.TrimSpace(stringFromMap(diagnostic, "recommendedEvidenceTargetType"))
+	stage := strings.TrimSpace(stringFromMap(diagnostic, "stage"))
+	return class == "validation_command_invalid" ||
+		targetType == "command_contract" ||
+		stage == "shell_validation_contract_rejected" ||
+		boolValue(diagnostic["commandPolicyViolation"])
+}
+
+func validationFailureDiagnosticTextCandidates(input map[string]any, pkg map[string]any, failedStep *runModel.Step) []string {
+	var texts []string
+	add := func(source map[string]any) {
+		if len(source) == 0 {
+			return
+		}
+		for _, key := range []string{
+			"error",
+			"reason",
+			"stage",
+			"failureReason",
+			failureOutputKeySignature,
+			"failureSignature",
+		} {
+			if value := strings.TrimSpace(stringFromMap(source, key)); value != "" {
+				texts = append(texts, value)
+			}
+		}
+	}
+	add(input)
+	add(pkg)
+	for _, key := range []string{
+		"lastFailureDiagnostics",
+		"currentFailure",
+		"failedStepOutput",
+		"currentExecutionProgress",
+	} {
+		add(mapFromValue(input[key]))
+		add(mapFromValue(pkg[key]))
+	}
+	for _, progress := range []map[string]any{
+		mapFromValue(input["currentExecutionProgress"]),
+		mapFromValue(pkg["currentExecutionProgress"]),
+	} {
+		add(mapFromValue(progress["currentFailure"]))
+		add(mapFromValue(progress["lastObservedFailure"]))
+	}
+	if failedStep != nil {
+		add(failedStep.Input)
+		add(failedStep.Output)
+	}
+	return texts
 }
 
 func convergenceStateChangeAlreadySatisfied(input map[string]any) bool {
