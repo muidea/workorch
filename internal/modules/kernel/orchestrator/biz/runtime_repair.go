@@ -1260,7 +1260,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		allowedRecoveryActions = []string{"replan", "provide_information", "terminate"}
 		preferredRecoveryActions = []string{"replan", "terminate"}
 	}
-	if budgetContext := convergenceBudgetEscalationContext(run); len(budgetContext) > 0 {
+	if budgetContext := convergenceBudgetEscalationContext(run); len(budgetContext) > 0 && !externalDependencyUnavailable {
 		blockerKind = "runtime_convergence_budget_exhausted"
 		allowedRecoveryActions = []string{"replan", "provide_information", "terminate"}
 		preferredRecoveryActions = []string{"replan", "terminate"}

@@ -177,6 +177,10 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		}
 		return o.handleRuntimeStepFailure(ctx, run, step, nil, output, "runtime required output kind contract failed", err)
 	}
+	if normalized, changed := normalizeRuntimeValidationStepInputBeforeRuntime(step.Kind, runtimeInput); changed {
+		runtimeInput = normalized
+		step.Input = cloneStepPayload(normalized)
+	}
 	if err := o.steps.Update(ctx, step); err != nil {
 		return err
 	}

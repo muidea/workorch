@@ -17,6 +17,42 @@ func TestValidateRuntimeValidationStepInputBeforeRuntimeRejectsMissingTimeout(t 
 	}
 }
 
+func TestNormalizeRuntimeValidationStepInputBeforeRuntimeAddsShellTimeout(t *testing.T) {
+	input := validationDispatchInputFixture()
+	delete(input, "timeoutMillis")
+
+	normalized, changed := normalizeRuntimeValidationStepInputBeforeRuntime(runtimemodel.StepKindShellCommand, input)
+	if !changed {
+		t.Fatal("changed = false, want validation shell timeout normalization")
+	}
+	if got := intFromAny(normalized["timeoutMillis"]); got != managedValidationTimeoutMillis {
+		t.Fatalf("timeoutMillis = %d, want %d", got, managedValidationTimeoutMillis)
+	}
+	if _, ok := input["timeoutMillis"]; ok {
+		t.Fatalf("input was mutated: %+v", input)
+	}
+	if err := validateRuntimeValidationStepInputBeforeRuntime(runtimemodel.StepKindShellCommand, normalized); err != nil {
+		t.Fatalf("validateRuntimeValidationStepInputBeforeRuntime normalized input: %v", err)
+	}
+}
+
+func TestNormalizeRuntimeValidationStepInputBeforeRuntimeSkipsStateChangingShell(t *testing.T) {
+	input := validationDispatchInputFixture()
+	delete(input, "timeoutMillis")
+	input["stateChanging"] = true
+	input["stateChangingOutputRequired"] = true
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	input["convergenceContract"] = map[string]any{"state": convergenceStateNeedStateChange}
+
+	normalized, changed := normalizeRuntimeValidationStepInputBeforeRuntime(runtimemodel.StepKindShellCommand, input)
+	if changed {
+		t.Fatalf("changed = true, want state-changing shell unchanged: %+v", normalized)
+	}
+	if _, ok := normalized["timeoutMillis"]; ok {
+		t.Fatalf("timeoutMillis added to state-changing shell: %+v", normalized)
+	}
+}
+
 func TestValidateRuntimeStepKindRequiredOutputBeforeRuntimeRejectsUnacceptedKind(t *testing.T) {
 	input := validationDispatchInputFixture()
 	required := mapFromValue(input["requiredOutput"])

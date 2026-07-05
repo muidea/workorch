@@ -563,7 +563,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 		if len(specs) > 0 {
 			return specs, nil
 		}
-		if len(steps) == 0 && o.steps != nil {
+		if len(steps) == 0 && graphNodeID(last) != "" && o.steps != nil {
 			var err error
 			steps, err = o.steps.ListByRun(ctx, run.ID)
 			if err != nil {

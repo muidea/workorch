@@ -87,16 +87,23 @@ func TestRuntimeResourceHealthFromStepsTreatsClosedTerminalStatusesAsReleased(t 
 			}, {
 				"kind":   "scratch_dir",
 				"status": "cleanup_skipped",
+			}, {
+				"kind":   "process_group",
+				"status": "failed",
+			}, {
+				"kind":   "process_group",
+				"status": "timeout",
 			}},
 		},
 	}}
 
 	health := RuntimeResourceHealthFromSteps(steps)
-	if health["resourceCount"] != 3 || health["stepsWithResources"] != 1 || health["released"] != true {
+	if health["resourceCount"] != 5 || health["stepsWithResources"] != 1 || health["released"] != true {
 		t.Fatalf("health = %+v, want closed resource health", health)
 	}
 	byStatus, _ := health["byStatus"].(map[string]int)
-	if byStatus["skipped"] != 1 || byStatus["removed"] != 1 || byStatus["cleanup_skipped"] != 1 {
+	if byStatus["skipped"] != 1 || byStatus["removed"] != 1 || byStatus["cleanup_skipped"] != 1 ||
+		byStatus["failed"] != 1 || byStatus["timeout"] != 1 {
 		t.Fatalf("byStatus = %+v, want closed terminal status counts", byStatus)
 	}
 	if _, ok := health["latestIssue"]; ok {

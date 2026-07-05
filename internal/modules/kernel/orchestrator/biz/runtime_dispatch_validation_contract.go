@@ -93,6 +93,24 @@ func validateRuntimeValidationStepInputBeforeRuntime(kind string, input map[stri
 	return nil
 }
 
+func normalizeRuntimeValidationStepInputBeforeRuntime(kind string, input map[string]any) (map[string]any, bool) {
+	if !runtimeStepKindCanProduceValidationEvidence(kind) || len(input) == 0 {
+		return input, false
+	}
+	if runtimeStepInputRequiresStateChangingDispatch(kind, input) || !runtimeStepInputIsValidationContract(kind, input) {
+		return input, false
+	}
+	if strings.TrimSpace(kind) != runtimemodel.StepKindShellCommand || input["timeoutMillis"] != nil {
+		return input, false
+	}
+	next := cloneStepPayload(input)
+	if next == nil {
+		next = map[string]any{}
+	}
+	next["timeoutMillis"] = managedValidationTimeoutMillis
+	return next, true
+}
+
 func runtimeStepKindCanProduceValidationEvidence(kind string) bool {
 	switch strings.TrimSpace(kind) {
 	case runtimemodel.StepKindShellCommand, runtimemodel.StepKindMCPToolCall, managedValidationSessionNodeKind:

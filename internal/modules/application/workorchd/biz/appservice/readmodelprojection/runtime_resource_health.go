@@ -76,7 +76,7 @@ func validationResourceRecordsForStep(step StepView) []map[string]any {
 
 func validationResourceStatusClosed(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "released", "skipped", "removed", "cleanup_skipped":
+	case "released", "skipped", "removed", "cleanup_skipped", "failed", "timeout":
 		return true
 	default:
 		return false

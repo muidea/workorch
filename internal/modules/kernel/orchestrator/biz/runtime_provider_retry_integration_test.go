@@ -2078,7 +2078,21 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionKeepsExternalDependencyBlock
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod-external", State: common.RunStateRunning, InitialStepKind: llmcommon.StepKindWorkspaceExecution}); err != nil {
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-external",
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: map[string]any{
+			convergenceBudgetKey: map[string]any{
+				"decision":           "escalate_decision",
+				"lastDecisionReason": "max_repair_attempts_per_focus_exceeded",
+				"state":              "escalated",
+			},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	var failedStep *runmodel.Step
@@ -2108,7 +2122,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionKeepsExternalDependencyBlock
 			t.Fatalf("seed step: %v", err)
 		}
 	}
-	if err := orch.blockOnRuntimeRepairExhaustion(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod-external", State: common.RunStateRunning, InitialStepKind: llmcommon.StepKindWorkspaceExecution}, failedStep, errors.New("dependency unavailable")); err != nil {
+	if err := orch.blockOnRuntimeRepairExhaustion(ctx, run, failedStep, errors.New("dependency unavailable")); err != nil {
 		t.Fatalf("blockOnRuntimeRepairExhaustion: %v", err)
 	}
 	runItem, err := runRepo.Get(ctx, runID)
@@ -2123,6 +2137,9 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionKeepsExternalDependencyBlock
 		ticket.Context[decisionContextKeyScope] != decisionContextScopeExternalDependency ||
 		ticket.Context[decisionContextKeyDependency] != "external_dependency" {
 		t.Fatalf("ticket context = %+v, want external dependency blocker to take precedence", ticket.Context)
+	}
+	if _, ok := ticket.Context["convergenceBudget"]; ok {
+		t.Fatalf("ticket context = %+v, want convergence budget not to override external dependency blocker", ticket.Context)
 	}
 }
 

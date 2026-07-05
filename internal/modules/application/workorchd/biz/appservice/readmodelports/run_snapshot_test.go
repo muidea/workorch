@@ -141,7 +141,7 @@ func TestRunSnapshotViewCompactBoundsStepsAndProjectsStepPayloads(t *testing.T) 
 	t.Parallel()
 
 	workspace := &workspacemodel.Workspace{ID: "ws-run-view-compact", Title: "run view compact", State: common.WorkspaceStateRunning}
-	run := &runmodel.Run{ID: "run-view-compact", WorkspaceID: workspace.ID, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: "run-view-compact", WorkspaceID: workspace.ID, State: common.RunStateFailed}
 	steps := make([]*runmodel.Step, 0, runSnapshotViewCompactStepLimit+5)
 	for idx := 0; idx < runSnapshotViewCompactStepLimit+5; idx++ {
 		steps = append(steps, &runmodel.Step{
@@ -157,6 +157,7 @@ func TestRunSnapshotViewCompactBoundsStepsAndProjectsStepPayloads(t *testing.T) 
 		})
 	}
 	currentStepID := steps[1].ID
+	steps[1].State = common.StepStateFailed
 
 	got, err := runSnapshot(context.Background(), RunSnapshotReaders{
 		Workspaces:            fakeRunSnapshotWorkspaceReader{items: []*workspacemodel.Workspace{workspace}},
