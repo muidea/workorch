@@ -149,6 +149,66 @@ func TestNormalizeGraphStateChangingDispatchAuthorityRewritesStaleValidationAuth
 	}
 }
 
+func TestNormalizeGraphStateChangingDispatchAuthorityAcceptsGitWriteCommit(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-graph-git-write-authority",
+		WorkspaceID: "ws-graph-git-write-authority",
+		State:       common.RunStateRunning,
+	}
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			"currentFocus": map[string]any{
+				"id":                  "cwi-git",
+				"coverageWorkItemIds": []string{"cwi-git"},
+				"targetRefs":          []string{"deliverable:version_snapshot"},
+				"structuredTargetRefs": []string{
+					"cwi-git",
+					"deliverable:version_snapshot",
+				},
+			},
+		},
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"acceptedKinds":                []string{runtimemodel.StepKindGitWrite},
+				"mustIncludeStateChangingNode": true,
+				"coverageWorkItemIds":          []string{"cwi-git"},
+				"structuredTargetRefs":         []string{"cwi-git", "deliverable:version_snapshot"},
+			},
+		},
+	}
+	node := runtimemodel.BlockExecutionNode{
+		ID:   "git-commit",
+		Kind: runtimemodel.StepKindGitWrite,
+		Input: map[string]any{
+			"operation": "commit",
+			"message":   "record version snapshot",
+		},
+	}
+	for key, value := range node.Input {
+		input[key] = value
+	}
+
+	got := normalizeGraphStateChangingDispatchAuthority(run, "run-graph-git-write-authority/graph-001/001-git-commit", input, node)
+
+	if kind := stringFromMap(currentActionNextActionFromInput(got), "kind"); kind != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("current nextAction = %+v, want state_change", currentActionNextActionFromInput(got))
+	}
+	if state := stringFromMap(mapFromValue(got["convergenceContract"]), "state"); state != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract.state = %q, want %q", state, convergenceStateNeedStateChange)
+	}
+	required := activeRequiredOutputForCurrentAction(got)
+	if !requiredOutputAcceptsKind(required, runtimemodel.StepKindGitWrite) || !requiredOutputRequiresStateChanging(required) {
+		t.Fatalf("active requiredOutput = %+v, want git/write state-changing contract", required)
+	}
+	if ids := stringSliceFromValue(required["coverageWorkItemIds"]); len(ids) != 1 || ids[0] != "cwi-git" {
+		t.Fatalf("requiredOutput.coverageWorkItemIds = %+v, want cwi-git", ids)
+	}
+}
+
 func TestPrepareGapBaselineDispatchSpecsPreservesGraphLocalStateChangingAuthority(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-graph-local-authority",

@@ -223,7 +223,7 @@ func acceptedStateChangeEvidenceRecordForRuntimeStep(run *runModel.Run, step *ru
 	if run == nil || step == nil || step.ID == "" || step.State != common.StepStateCompleted {
 		return nil
 	}
-	if !runtimeStepDeclaresStateChangingEvidence(step) || runtimeStepStateChangeEvidenceRecordedByDedicatedApply(step) {
+	if !runtimeStepCanRecordStateChangingEvidence(step) || runtimeStepStateChangeEvidenceRecordedByDedicatedApply(step) {
 		return nil
 	}
 	sourceRef := runtimeRawPayloadRef(run.WorkspaceID, run.ID, "steps", string(step.ID), "output.json")
@@ -277,6 +277,30 @@ func runtimeStepDeclaresStateChangingEvidence(step *runModel.Step) bool {
 		return false
 	}
 	return boolValue(step.Input["stateChanging"]) || boolValue(step.Input["stateChange"])
+}
+
+func runtimeStepCanRecordStateChangingEvidence(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	kind := canonicalRuntimeGraphNodeKind(step.Kind)
+	if runtimeStepDeclaresStateChangingEvidence(step) && kind != orchestratormodel.StepKindGitWrite {
+		return true
+	}
+	if !stepKindCanProduceStateChangingEvidence(kind) {
+		return false
+	}
+	if kind == orchestratormodel.StepKindGitWrite && stepEvidenceOperation(step) != "commit" {
+		return false
+	}
+	if runtimeStepDeclaresStateChangingEvidence(step) {
+		return true
+	}
+	required := activeRequiredOutputForCurrentAction(step.Input)
+	if len(required) == 0 {
+		required = mapFromValue(step.Input["requiredOutput"])
+	}
+	return requiredOutputRequiresStateChanging(required) && requiredOutputAcceptsKind(required, kind)
 }
 
 func runtimeStepStateChangeEvidenceRecordedByDedicatedApply(step *runModel.Step) bool {
@@ -335,6 +359,7 @@ func runtimeStepCoverageScopeMetadata(step *runModel.Step) map[string]any {
 		}
 	}
 	addStrings("coverageWorkItemIds", coverageWorkItemIDs)
+	addString("operation", firstNonEmptyString(stringFromMap(output, "operation"), stringFromMap(input, "operation")))
 	rawTargetRefs := append(stringSliceFromValue(input["targetRefs"]), stringSliceFromValue(output["targetRefs"])...)
 	rawTargetRefs = append(rawTargetRefs, coverageValidationTargetRefsFromEvidence(evidence)...)
 	for _, payload := range requiredOutputs {

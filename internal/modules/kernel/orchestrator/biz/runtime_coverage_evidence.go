@@ -167,7 +167,7 @@ func coverageWorkItemStepUpdate(step *runModel.Step) coverageWorkItemUpdate {
 		Accepted:          step.State == common.StepStateCompleted,
 		AcceptanceOptions: coverageEvidenceAcceptanceOptionsFromStep(step),
 	}
-	if stepKindCanProduceStateChangingEvidence(step.Kind) || runtimeStepDeclaresStateChangingEvidence(step) {
+	if runtimeStepCanRecordStateChangingEvidence(step) || runtimeStepStateChangeCanUpdateCoverage(step) {
 		update.EvidenceKinds = append(update.EvidenceKinds, "state_change")
 	}
 	if coverageStepCanProduceValidationEvidence(step) {
@@ -222,7 +222,12 @@ func coverageEvidenceAcceptanceOptionsFromStep(step *runModel.Step) coverageEvid
 	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(step.Output["targetRefs"])...)
 	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(step.Input["coverageWorkItemIds"])...)
 	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(step.Output["coverageWorkItemIds"])...)
+	scope := runtimeStepCoverageScopeMetadata(step)
+	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(scope["targetRefs"])...)
+	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(scope["structuredTargetRefs"])...)
+	targetRefs = append(targetRefs, coverageStructuredBindingRefsFromValue(scope["coverageWorkItemIds"])...)
 	claims := coverageObservedClaimsFromEvidence(evidence)
+	claims = append(claims, stringSliceFromValue(scope["observedClaims"])...)
 	ret := coverageEvidenceAcceptanceOptions{
 		EnforceProofStrength: coverageStepRequiresValidationProofStrength(step, evidence, targetRefs, claims),
 		Quality:              quality,
@@ -360,6 +365,7 @@ func coverageWorkItemIDsFromStep(step *runModel.Step) []string {
 	}
 	addFromMap(step.Input)
 	addFromMap(step.Output)
+	addFromMap(runtimeStepCoverageScopeMetadata(step))
 	for _, patch := range mapSliceFromValue(step.Output["patches"]) {
 		addFromMap(patch)
 	}
@@ -370,6 +376,20 @@ func coverageWorkItemIDsFromStep(step *runModel.Step) []string {
 		}
 	}
 	return compactUniqueStrings(ids)
+}
+
+func runtimeStepStateChangeCanUpdateCoverage(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	kind := canonicalRuntimeGraphNodeKind(step.Kind)
+	if !stepKindCanProduceStateChangingEvidence(kind) {
+		return false
+	}
+	if kind == "git/write" && stepEvidenceOperation(step) != "commit" {
+		return false
+	}
+	return true
 }
 
 func coverageWorkItemAssessmentUpdates(step *runModel.Step, assessment map[string]any) []coverageWorkItemUpdate {

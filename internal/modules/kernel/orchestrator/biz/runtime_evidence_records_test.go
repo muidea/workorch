@@ -217,6 +217,83 @@ func TestRecordCompletedRuntimeStepEvidenceWritesScopedStateChangeForDeclaredSta
 	}
 }
 
+func TestRecordCompletedRuntimeStepEvidenceBindsGitWriteCommitFromRequiredOutput(t *testing.T) {
+	ctx := context.Background()
+	validationRepo := memory.NewValidationResultRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: validationRepo,
+			EvidenceRecords:   evidenceRepo,
+		},
+	}
+	run := &runmodel.Run{
+		ID:                 "run-git-write-state-change-evidence",
+		WorkspaceID:        "ws-git-write-state-change-evidence",
+		DefinitionRevision: "rev-git-write-state-change-evidence",
+	}
+	step := &runmodel.Step{
+		ID:    "run-git-write-state-change-evidence/graph-001/002-git-commit",
+		RunID: run.ID,
+		Kind:  orchestratormodel.StepKindGitWrite,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"operation": "commit",
+			"message":   "record deliverable snapshot",
+			"coverageFocus": map[string]any{
+				"id":                  "cwi-git-snapshot",
+				"coverageWorkItemIds": []string{"cwi-git-snapshot"},
+				"targetRefs":          []string{"deliverable:version_snapshot"},
+				"structuredTargetRefs": []string{
+					"cwi-git-snapshot",
+					"deliverable:version_snapshot",
+				},
+			},
+			"requiredOutput": map[string]any{
+				"acceptedKinds":                []string{orchestratormodel.StepKindGitWrite},
+				"mustIncludeStateChangingNode": true,
+				"coverageWorkItemIds":          []string{"cwi-git-snapshot"},
+				"targetRefs":                   []string{"cwi-git-snapshot", "deliverable:version_snapshot"},
+				"structuredTargetRefs":         []string{"cwi-git-snapshot", "deliverable:version_snapshot"},
+			},
+		},
+		Output: map[string]any{
+			"operation": "commit",
+			"summary":   "git commit completed",
+		},
+	}
+
+	if err := orch.recordCompletedRuntimeStepEvidence(ctx, run, step, nil, step.Output); err != nil {
+		t.Fatalf("record completed runtime step evidence: %v", err)
+	}
+
+	records, err := evidenceRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list evidence records: %v", err)
+	}
+	var stateChange *orchestratormodel.EvidenceRecord
+	for _, record := range records {
+		if record.Kind == orchestratormodel.EvidenceKindStateChange {
+			stateChange = record
+			break
+		}
+	}
+	if stateChange == nil {
+		t.Fatalf("records = %+v, want git/write commit state_change evidence", records)
+	}
+	if got := stateChange.CoverageItemRefs; len(got) != 1 || got[0] != "cwi-git-snapshot" {
+		t.Fatalf("CoverageItemRefs = %+v, want cwi-git-snapshot", got)
+	}
+	if stateChange.Metadata["operation"] != "commit" ||
+		stateChange.Metadata["stepKind"] != orchestratormodel.StepKindGitWrite ||
+		stateChange.Metadata["stateChanging"] != true {
+		t.Fatalf("state_change metadata = %+v, want git/write commit state-changing metadata", stateChange.Metadata)
+	}
+	if got := stringSliceFromValue(stateChange.Metadata["structuredTargetRefs"]); !stringSliceContains(got, "deliverable:version_snapshot") {
+		t.Fatalf("structuredTargetRefs = %+v, want deliverable snapshot binding", got)
+	}
+}
+
 func TestRecordCompletedRuntimeStepEvidenceDoesNotWriteStateChangeForValidationOnlyStep(t *testing.T) {
 	ctx := context.Background()
 	validationRepo := memory.NewValidationResultRepository()

@@ -866,7 +866,9 @@ func graphNodeInputRequiresStateChangingAuthority(input map[string]any, node run
 		return requiredOutputAcceptsKind(activeRequiredOutputForCurrentAction(input), canonicalRuntimeGraphNodeKind(node.Kind)) &&
 			boolValue(input["stateChanging"])
 	default:
-		return false
+		kind := canonicalRuntimeGraphNodeKind(node.Kind)
+		return stepKindCanProduceStateChangingEvidence(kind) &&
+			requiredOutputAcceptsKind(activeRequiredOutputForCurrentAction(input), kind)
 	}
 }
 

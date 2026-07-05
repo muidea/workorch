@@ -1652,8 +1652,8 @@ func TestCoverageWorkItemContextAlignedEvidenceReadyLedgerItemDoesNotReopenMissi
 		t.Fatalf("aligned currentFocus missingEvidenceKinds = %+v, want empty for evidence_ready ledger item", missing)
 	}
 	nextStates := stringSliceFromValue(current["nextAllowedConvergenceStates"])
-	if len(nextStates) != 0 {
-		t.Fatalf("aligned currentFocus nextAllowedConvergenceStates = %+v, want none after accepted binding", nextStates)
+	if len(nextStates) != 1 || nextStates[0] != convergenceStateNeedAssessment {
+		t.Fatalf("aligned currentFocus nextAllowedConvergenceStates = %+v, want need_assessment after accepted binding", nextStates)
 	}
 	if got := stringFromMap(current, "activeCoverageFocusId"); got != "focus-cwi-ready" {
 		t.Fatalf("activeCoverageFocusId = %q, want focus-cwi-ready", got)
@@ -2149,6 +2149,78 @@ func TestCoverageWorkItemsDoNotAcceptValidationOnlyRuntimeStepAsStateChange(t *t
 	missing := stringSet(coverageMissingEvidenceKinds(item))
 	if !missing["state_change"] || missing["validation"] {
 		t.Fatalf("missingEvidenceKinds = %+v, want state_change only", coverageMissingEvidenceKinds(item))
+	}
+}
+
+func TestCoverageWorkItemsBindGitWriteCommitFromRequiredOutputFocus(t *testing.T) {
+	item := map[string]any{
+		"id":                    "cwi-git-snapshot",
+		"sourceRequirementId":   "version_snapshot",
+		"normalizedSourceKey":   "deliverable:version_snapshot",
+		"status":                "open",
+		"requiredEvidenceKinds": []string{"state_change"},
+		"requiredEvidenceCounts": map[string]any{
+			"state_change": 1,
+		},
+		"missingEvidenceKinds": []string{"state_change"},
+	}
+	commitStep := &runmodel.Step{
+		ID:    "run-cwi-git/001-git-commit",
+		RunID: "run-cwi-git",
+		Kind:  "git/write",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"operation": "commit",
+			"requiredOutput": map[string]any{
+				"acceptedKinds":                []string{"git/write"},
+				"mustIncludeStateChangingNode": true,
+				"coverageWorkItemIds":          []string{"cwi-git-snapshot"},
+				"targetRefs":                   []string{"cwi-git-snapshot", "deliverable:version_snapshot"},
+				"structuredTargetRefs":         []string{"cwi-git-snapshot", "deliverable:version_snapshot"},
+			},
+		},
+		Output: map[string]any{"operation": "commit"},
+	}
+	update := coverageWorkItemStepUpdate(commitStep)
+	if !coverageApplyWorkItemEvidenceWithOptions(item, update.EvidenceKinds, update.EvidenceRefs, update.Accepted, false, string(commitStep.ID), "", update.AcceptanceOptions) {
+		t.Fatalf("coverageApplyWorkItemEvidence changed = false, want git/write commit state_change evidence update")
+	}
+	accepted := mapStringSliceValue(item["acceptedEvidenceByKind"])
+	if !stringSliceContains(accepted["state_change"], string(commitStep.ID)) {
+		t.Fatalf("acceptedEvidenceByKind = %+v, want commit step bound as state_change", accepted)
+	}
+	if missing := coverageMissingEvidenceKinds(item); len(missing) != 0 {
+		t.Fatalf("missingEvidenceKinds = %+v, want none", missing)
+	}
+
+	addItem := map[string]any{
+		"id":                    "cwi-git-add",
+		"requiredEvidenceKinds": []string{"state_change"},
+		"requiredEvidenceCounts": map[string]any{
+			"state_change": 1,
+		},
+		"missingEvidenceKinds": []string{"state_change"},
+	}
+	addStep := &runmodel.Step{
+		ID:    "run-cwi-git/002-git-add",
+		RunID: "run-cwi-git",
+		Kind:  "git/write",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"operation": "add",
+			"requiredOutput": map[string]any{
+				"acceptedKinds":                []string{"git/write"},
+				"mustIncludeStateChangingNode": true,
+				"coverageWorkItemIds":          []string{"cwi-git-add"},
+				"targetRefs":                   []string{"cwi-git-add"},
+				"structuredTargetRefs":         []string{"cwi-git-add"},
+			},
+		},
+		Output: map[string]any{"operation": "add"},
+	}
+	addUpdate := coverageWorkItemStepUpdate(addStep)
+	if coverageApplyWorkItemEvidenceWithOptions(addItem, addUpdate.EvidenceKinds, addUpdate.EvidenceRefs, addUpdate.Accepted, false, string(addStep.ID), "", addUpdate.AcceptanceOptions) {
+		t.Fatalf("git/write add changed coverage state_change, want commit-only binding")
 	}
 }
 

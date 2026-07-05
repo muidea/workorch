@@ -210,14 +210,13 @@ func runtimeManagedTargetSnapshotRefReadable(ref string) bool {
 		strings.HasPrefix(lower, "dod:") || strings.HasPrefix(lower, "deliverable:") ||
 		strings.HasPrefix(lower, "goal-") || strings.HasPrefix(lower, "dod-") ||
 		strings.HasPrefix(lower, "goal.") || strings.HasPrefix(lower, "dod.") ||
-		lower == "source_change" || lower == "version_control_snapshot" ||
-		lower == "coverage_map" || lower == "user_deliverable" || lower == "validation_report" {
+		runtimeManagedTargetSnapshotRefLooksLogicalToken(ref) {
 		return false
 	}
 	if strings.ContainsAny(ref, "[]") {
 		return false
 	}
-	if strings.Contains(ref, "://") {
+	if strings.Contains(ref, ":") {
 		return false
 	}
 	cleaned := filepath.Clean(ref)
@@ -225,4 +224,15 @@ func runtimeManagedTargetSnapshotRefReadable(ref string) bool {
 		return false
 	}
 	return cleaned == ref
+}
+
+func runtimeManagedTargetSnapshotRefLooksLogicalToken(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || strings.ContainsAny(ref, `/\.`) {
+		return false
+	}
+	if strings.Contains(ref, "_") {
+		return true
+	}
+	return strings.ToLower(ref) == ref
 }

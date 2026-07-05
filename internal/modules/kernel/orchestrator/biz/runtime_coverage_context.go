@@ -183,7 +183,7 @@ func coverageWorkItemStructuredTargetRefs(item map[string]any) []string {
 
 func coverageWorkItemNextStates(item map[string]any) []string {
 	if coverageWorkItemCanCloseDeterministically(item) {
-		return nil
+		return []string{convergenceStateNeedAssessment}
 	}
 	state := deriveCoverageWorkItemState(item)
 	missing := stringSet(state.MissingEvidenceKinds)
