@@ -4489,6 +4489,97 @@ func TestBuildConvergenceContractValidationCommandInvalidDoesNotPromoteToStateCh
 	}
 }
 
+func TestBuildConvergenceContractValidationCommandInvalidPreemptsStaleStateChangeAuthority(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:  "strict_convergence",
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{
+				"kind":   "state_change",
+				"reason": "stale authority from prior state-changing retry",
+			},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                           "cwi-validation-command",
+				"status":                       "failed",
+				"sourceScope":                  "dod_item",
+				"sourceRequirementId":          "dod-build-test",
+				"targetText":                   "build and test must pass",
+				"requiredEvidenceKinds":        []string{"validation"},
+				"missingEvidenceKinds":         []string{"validation"},
+				"nextAllowedConvergenceStates": []string{convergenceStateNeedValidation},
+			},
+		},
+		"runtimeDiagnostics": map[string]any{
+			"kind":                   "shell_command_policy_violation",
+			"commandPolicyViolation": true,
+			"validationFailureDiagnostic": map[string]any{
+				"class":                         runtimemodel.ValidationDiagnosticCommandInvalid,
+				"stage":                         "shell_validation_contract_rejected",
+				"recommendedEvidenceTargetType": "command_contract",
+				"commandPolicyViolation":        true,
+			},
+		},
+		"lastFailureDiagnostics": map[string]any{
+			"failureClass":     failureClassShellCommand,
+			"failureSignature": "class=shell_command_failed|kind=shell/command|stage=shell_validation_contract_rejected|node=verify",
+			"stage":            "shell_validation_contract_rejected",
+			"validationFailureDiagnostic": map[string]any{
+				"class":                         runtimemodel.ValidationDiagnosticCommandInvalid,
+				"stage":                         "shell_validation_contract_rejected",
+				"recommendedEvidenceTargetType": "command_contract",
+				"commandPolicyViolation":        true,
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "main.go",
+				"exists":           true,
+				"contentHash":      "hash-main",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-validation-command-invalid/repair-002",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{"error": "state-changing retry returned no useful output"},
+		State:  common.StepStateFailed,
+	}
+
+	contract := BuildConvergenceContract(nil, failed, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+	if contract.State != convergenceStateNeedValidation || contract.RepairObjective != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("convergenceContract = %+v, want validation retry despite stale state-change authority", contract)
+	}
+	if contract.StateChangingOutputRequired {
+		t.Fatalf("convergenceContract = %+v, should not require state-changing output", contract)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if !boolValue(required["mustProduceConcreteValidationEvidence"]) ||
+		boolValue(required["mustIncludeStateChangingNode"]) ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) {
+		t.Fatalf("requiredOutput = %+v, want validation-only accepted kinds", required)
+	}
+	for _, forbidden := range []string{"patch/apply", gitcommon.StepKindWrite} {
+		if !stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), forbidden) {
+			t.Fatalf("requiredOutput.forbiddenKinds = %+v, want %s forbidden", required["forbiddenKinds"], forbidden)
+		}
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if applied["stateChangingOutputRequired"] != nil ||
+		applied["repairObjective"] != repairObjectiveConcreteValidationEvidence ||
+		stringFromMap(mapFromValue(mapFromValue(applied[convergenceAuthorityKey])["nextAction"]), "kind") != "validate" {
+		t.Fatalf("applied input = %+v, want validation authority without state-changing output", applied)
+	}
+}
+
 func TestShouldCreateDecisionTicketKeepsConcreteValidationRuntimeDependency(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:    runtimeStageVerification,

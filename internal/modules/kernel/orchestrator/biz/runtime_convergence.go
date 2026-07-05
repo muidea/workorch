@@ -310,6 +310,10 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 			contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
 		}
 		convergenceContractAttachCoverageContext(input, contract)
+		if validationContractFailureMustRemainValidation(input, contract.RepairActionPackage, failedStep) {
+			populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
+			return true
+		}
 		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
 			populateProfileStateChangingEvidenceConvergenceContract(input, contract, pkg)
 			return true
@@ -334,6 +338,10 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 	case "repair", "acquire_evidence":
 		convergenceContractAttachCoverageContext(input, contract)
 		if convergenceCurrentFocusNeedsStateChange(input) {
+			if validationContractFailureMustRemainValidation(input, contract.RepairActionPackage, failedStep) {
+				populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
+				return true
+			}
 			if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
 				populateProfileStateChangingEvidenceConvergenceContract(input, contract, pkg)
 				return true
@@ -708,6 +716,10 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		contract.RuntimeStage = runtimeStageDecision
 		contract.RuntimeStageMode = "structured_governance"
 		contract.GovernanceReason = firstNonEmptyString(stringFromMap(focus, "currentGap"), "coverage work item requires governance evidence")
+		return true
+	}
+	if validationContractFailureMustRemainValidation(input, contract.RepairActionPackage, failedStep) {
+		populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
 		return true
 	}
 	if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {

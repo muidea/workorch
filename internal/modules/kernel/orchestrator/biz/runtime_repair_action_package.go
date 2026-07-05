@@ -786,6 +786,7 @@ func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[strin
 	out["acceptedKinds"] = []string{"shell/command", "mcp/tool_call", managedValidationSessionNodeKind}
 	out["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(existing["forbiddenKinds"]),
 		"patch/apply",
+		runtimemodel.StepKindGitWrite,
 		"read_only_graph",
 		"llm_gated_graph",
 		"self_inspection_graph",
