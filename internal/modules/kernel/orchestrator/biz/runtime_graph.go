@@ -181,7 +181,10 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 			if err != nil {
 				return err
 			}
-			if err := o.requestDispatchStep(ctx, run.ID, workspaceID, spec); err != nil && !errors.Is(err, common.ErrConflict) {
+			if err := o.requestDispatchStep(ctx, run.ID, workspaceID, spec); err != nil {
+				if errors.Is(err, common.ErrConflict) && graphDispatchConflictHasPersistedStep(ctx, o.steps, run.ID, spec.ID) {
+					continue
+				}
 				return err
 			}
 		}
@@ -263,6 +266,14 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	return o.continueGraphBatchAfterCompletedStep(ctx, currentRun, last, steps, workspace)
 }
 
+func graphDispatchConflictHasPersistedStep(ctx context.Context, steps repository.StepRepository, runID common.RunID, stepID common.StepID) bool {
+	if steps == nil || runID == "" || stepID == "" {
+		return false
+	}
+	step, err := steps.Get(ctx, stepID)
+	return err == nil && step != nil && step.RunID == runID
+}
+
 func (o *RuntimeOrchestrator) continueGraphBatchAfterCompletedStep(
 	ctx context.Context,
 	currentRun *runModel.Run,
@@ -278,7 +289,10 @@ func (o *RuntimeOrchestrator) continueGraphBatchAfterCompletedStep(
 			if input, ok := o.graphManager().concreteEvidenceAcquisitionFollowUpInputFromSteps(currentRun, last, steps); ok {
 				return o.RequestUniqueDispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), input, workspaceIDForDispatch(currentRun, workspace))
 			}
-			return o.dispatchGraphStepBatchWithWorkspace(ctx, currentRun, nextSpecs, workspace)
+			if err := o.dispatchGraphStepBatchWithWorkspace(ctx, currentRun, nextSpecs, workspace); err != nil {
+				return o.handleGraphBatchCompletionGateFailure(ctx, currentRun, last, last.Output, "runtime graph continuation dispatch failed", err)
+			}
+			return nil
 		}
 	}
 	if handled, err := o.resumeArtifactContinuationAfterContextGraph(ctx, currentRun, last, last.Output, workspace); handled || err != nil {

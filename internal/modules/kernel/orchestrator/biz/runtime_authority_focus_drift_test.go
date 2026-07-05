@@ -134,6 +134,57 @@ func TestRebuildDispatchInputAlignsStaleFocusFieldsToAuthority(t *testing.T) {
 	}
 }
 
+func TestRebuildDispatchInputStateChangeAuthorityRebindsEvidenceContract(t *testing.T) {
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	input := map[string]any{
+		convergenceAuthorityKey: cloneStepPayload(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])),
+		gapBaselineKey:          cloneStepPayload(mapFromValue(run.ExecutionContext[gapBaselineKey])),
+		"convergenceContract": map[string]any{
+			"state":           convergenceStateNeedEvidence,
+			"runtimeStage":    runtimeStageRepair,
+			"repairObjective": repairObjectiveAcquireFailureEvidence,
+		},
+		"repairObjective": repairObjectiveAcquireFailureEvidence,
+		"repairActionPackage": map[string]any{
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"evidenceAcquisitionRequired":     true,
+			"concreteFailureEvidenceRequired": true,
+			"requiredOutput": map[string]any{
+				"acceptedKinds":                []string{"file/read", "shell/command"},
+				"stateChangingForbidden":       true,
+				"mustIncludeStateChangingNode": false,
+				"forbiddenKinds":               []string{"patch/apply"},
+			},
+		},
+		"requiredOutput": map[string]any{
+			"acceptedKinds":                []string{"file/read", "shell/command"},
+			"stateChangingForbidden":       true,
+			"mustIncludeStateChangingNode": false,
+			"forbiddenKinds":               []string{"patch/apply"},
+		},
+	}
+	got, err := rebuildDispatchInputFromConvergenceAuthority(run, "step-state-change-rebind", input)
+	if err != nil {
+		t.Fatalf("rebuildDispatchInputFromConvergenceAuthority: %v", err)
+	}
+	if state := stringFromMap(mapFromValue(got["convergenceContract"]), "state"); state != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract.state = %q, want %q", state, convergenceStateNeedStateChange)
+	}
+	if kind := stringFromMap(currentActionNextActionFromInput(got), "kind"); kind != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("current nextAction = %+v, want state_change", currentActionNextActionFromInput(got))
+	}
+	for label, required := range map[string]map[string]any{
+		"requiredOutput":                       mapFromValue(got["requiredOutput"]),
+		"repairActionPackage.requiredOutput":   mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":           mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["requiredOutput"]),
+		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(got[currentActionContractKey])["requiredOutput"]),
+	} {
+		if !requiredOutputHasAllowedStateChangingKind(required) {
+			t.Fatalf("%s = %+v, want state-changing required output", label, required)
+		}
+	}
+}
+
 func TestRequiredOutputFocusNormalizationRewritesTargetRefsAndExamples(t *testing.T) {
 	coverageFocus := map[string]any{
 		"id":                  "focus-cwi-current",

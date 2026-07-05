@@ -1247,14 +1247,15 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 	decisionDependency := decisionContextDependencyRuntimeContract
 	allowedRecoveryActions := []string{"retry_same_step", "replan", "provide_information", "terminate"}
 	preferredRecoveryActions := []string{"retry_same_step", "replan", "terminate"}
-	if boolValue(diagnostics["externalDependencyUnavailable"]) || failedStepHasExternalRuntimeDependency(failedStep) {
+	externalDependencyUnavailable := boolValue(diagnostics["externalDependencyUnavailable"]) || failedStepHasExternalRuntimeDependency(failedStep)
+	if externalDependencyUnavailable {
 		blockerKind = "external_dependency_unavailable"
 		decisionScope = decisionContextScopeExternalDependency
 		decisionDependency = "external_dependency"
 		allowedRecoveryActions = []string{"provide_information", "retry_same_step", "replan", "terminate"}
 		preferredRecoveryActions = []string{"provide_information", "retry_same_step", "replan"}
 	}
-	if runLevelStats.exceeded() {
+	if runLevelStats.exceeded() && !externalDependencyUnavailable {
 		blockerKind = "runtime_ineffective_convergence"
 		allowedRecoveryActions = []string{"replan", "provide_information", "terminate"}
 		preferredRecoveryActions = []string{"replan", "terminate"}

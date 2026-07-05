@@ -74,6 +74,71 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchSerializesLLMDispatchRequests(
 	}
 }
 
+func TestRuntimeOrchestrator_CompletedGraphBatchDispatchesDependentValidation(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-event-driven-graph-continuation")
+	workspaceID := common.WorkspaceID("ws-event-driven-graph-continuation")
+	rootStepID := common.StepID(runID + "/repair-001")
+	patchStepID := common.StepID(runID + "/graph-001/001-fix")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	hub := events.NewMemoryHub()
+	workspace := &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "fix", Kind: "patch/apply", Input: map[string]any{"patchType": "file_write", "targetRef": "a.txt", "content": "a"}},
+		{ID: "verify", Kind: shellcommon.StepKindCommand, DependsOn: []string{"fix"}, Input: map[string]any{
+			"command": "sh",
+			"args":    []string{"-c", "true"},
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+			},
+		}},
+	}}
+	root := &runmodel.Step{ID: rootStepID, RunID: runID, Kind: llmcommon.StepKindWorkspaceExecution, State: common.StepStateCompleted, Output: map[string]any{stepOutputKeyExecutionGraph: graph, "status": "completed"}}
+	patch := &runmodel.Step{
+		ID:    patchStepID,
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphBatch:      true,
+			stepInputKeyGraphNodeID:     "fix",
+			stepInputKeyGraphRootStepID: string(rootStepID),
+		},
+		Output: map[string]any{"status": "completed"},
+	}
+	if err := stepRepo.Create(ctx, root); err != nil {
+		t.Fatalf("seed root step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, patch); err != nil {
+		t.Fatalf("seed patch step: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memoryrepo.NewDecisionTicketRepository(), memoryrepo.NewApprovalRepository(), hub)
+	orch.EnableEventDrivenDispatch()
+	steps, err := stepRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	if err := orch.continueGraphBatchAfterCompletedStep(ctx, run, patch, steps, workspace); err != nil {
+		t.Fatalf("continueGraphBatchAfterCompletedStep: %v", err)
+	}
+	for _, envelope := range hub.Published() {
+		if envelope.Topic == orchestratorevents.TopicOrchestratorDispatchStepRequested && strings.Contains(envelope.StepID, "verify") {
+			return
+		}
+	}
+	t.Fatalf("published events = %+v, want dependent verify dispatch", hub.Published())
+}
+
 func TestRuntimeOrchestrator_RuntimeDispatchRejectsKindOutsideRequiredOutput(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-dispatch-kind-contract")

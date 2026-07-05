@@ -200,6 +200,7 @@ func syncRunConvergenceDerivedFields(run *runModel.Run) bool {
 	input = ApplyConvergenceContract(input, contract)
 	input = normalizeDispatchInputAuthorityFocus(input)
 	input = attachStagePacketToStepInput(run, "", input)
+	input = enforceCurrentAuthorityDerivedConsistency(run, "", input)
 	changed := false
 	for _, key := range convergenceDerivedExecutionContextKeys() {
 		value, ok := input[key]
@@ -305,6 +306,7 @@ func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID comm
 	input = attachStagePacketToStepInput(run, stepID, input)
 	input = synchronizeCurrentRequiredOutputMirrors(input)
 	input = attachCurrentActionContractToInput(run, stepID, input)
+	input = enforceCurrentAuthorityDerivedConsistency(run, stepID, input)
 	input = scrubConvergenceDispatchDiagnosticAdvice(input)
 	if err := validateConvergenceDispatchInput(input); err != nil {
 		return nil, err
@@ -586,11 +588,103 @@ func finalizeCurrentAuthorityDispatchInput(input map[string]any) (map[string]any
 	input = synchronizeCurrentRequiredOutputMirrors(input)
 	input = scrubConvergenceDispatchDiagnosticAdvice(input)
 	if dispatchInputRequiresConvergenceDispatchValidation(input) {
+		input = enforceCurrentAuthorityDerivedConsistency(nil, "", input)
 		if err := validateConvergenceDispatchInput(input); err != nil {
 			return nil, err
 		}
 	}
 	return input, nil
+}
+
+func enforceCurrentAuthorityDerivedConsistency(run *runModel.Run, stepID common.StepID, input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	nextAction := strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind"))
+	if nextAction == "" {
+		nextAction = strings.TrimSpace(convergenceNextActionKind(run, input))
+	}
+	switch nextAction {
+	case runtimemodel.NextActionTypeStateChange, "produce_state_change":
+	default:
+		return input
+	}
+	if targetSnapshotPrerequisiteActive(input) {
+		return input
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	required := activeRequiredOutputForCurrentAction(input)
+	if boolValue(required["mustAcquireCurrentTargetSnapshot"]) || boolValue(required["mustUseReadOnlySnapshotAcquisition"]) {
+		return input
+	}
+	if strings.TrimSpace(stringFromMap(contract, "state")) == convergenceStateNeedStateChange &&
+		boolValue(contract["stateChangingOutputRequired"]) &&
+		requiredOutputHasAllowedStateChangingKind(required) &&
+		len(mapFromValue(input[stepInputKeyStagePacket])) > 0 &&
+		len(mapFromValue(input[currentActionContractKey])) > 0 {
+		return input
+	}
+	for _, key := range []string{
+		"boundedValidationRequired",
+		"evidenceRepairRequired",
+		"concreteFailureEvidenceRequired",
+		stepInputKeyAssessmentOnly,
+		"assessmentOnlyReason",
+	} {
+		delete(input, key)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	clearEvidenceAcquisitionStateForStateChange(pkg)
+	required = mapFromValue(pkg["requiredOutput"])
+	if !requiredOutputHasAllowedStateChangingKind(required) {
+		required = stateChangingRepairRequiredOutput()
+	} else {
+		required = cloneStepPayload(required)
+		required["mustIncludeStateChangingNode"] = true
+		required["forbiddenKinds"] = removeStringsFromSlice(
+			stringSliceFromValue(required["forbiddenKinds"]),
+			"patch/apply",
+			"git/write",
+			"shell/command",
+			"mcp/tool_call",
+		)
+	}
+	pkg["requiredOutput"] = cloneStepPayload(required)
+	pkg["repairObjective"] = repairObjectiveStateChangingOutput
+	pkg["stateChangingOutputRequired"] = true
+	for _, key := range []string{
+		"evidenceAcquisitionRequired",
+		"concreteFailureEvidenceRequired",
+		"evidenceAcquisitionReason",
+		"boundedValidationRequired",
+		"outputDecisionContract",
+		"exitCriteria",
+	} {
+		delete(pkg, key)
+	}
+	input["repairActionPackage"] = pkg
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	input["stateChangingOutputRequired"] = true
+	currentActionSetRequiredOutput(input, required)
+	input["convergenceContract"] = map[string]any{
+		"state":                       convergenceStateNeedStateChange,
+		"runtimeStage":                runtimeStageRepair,
+		"runtimeStageMode":            firstNonEmptyString(stringFromMap(input, stepInputKeyRuntimeStageMode), "strict_convergence"),
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+	}
+	action := map[string]any{
+		"kind":   runtimemodel.NextActionTypeStateChange,
+		"reason": firstNonEmptyString(stringFromMap(currentActionNextActionFromInput(input), "reason"), "current convergence authority requires state-changing output"),
+	}
+	currentActionSetNextAction(input, action)
+	input = normalizeDispatchInputAuthorityFocus(input)
+	input = attachStagePacketToStepInput(run, stepID, input)
+	input = synchronizeCurrentRequiredOutputMirrors(input)
+	return attachCurrentActionContractToInput(run, stepID, input)
 }
 
 func validateConvergenceDispatchInput(input map[string]any) error {

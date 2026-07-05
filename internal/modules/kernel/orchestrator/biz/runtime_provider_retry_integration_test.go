@@ -19,6 +19,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeProviderFailureContractUsesStructuredClassWithoutStage(t *testing.T) {
@@ -2048,6 +2049,80 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionFailsRun(t *testing.T) {
 		ticket.Context["blockerKind"] != "runtime_repair_contract_exhausted" ||
 		ticket.Context["contractViolationType"] != contractViolationCoverageTargetsRequired {
 		t.Fatalf("ticket context = %+v, want runtime contract repair exhaustion metadata", ticket.Context)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairExhaustionKeepsExternalDependencyBlocker(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+	workspaceID := common.WorkspaceID("ws-external-dependency-exhausted")
+	runID := common.RunID("run-external-dependency-exhausted")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod-external", State: common.RunStateRunning, InitialStepKind: llmcommon.StepKindWorkspaceExecution}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	var failedStep *runmodel.Step
+	for idx := 1; idx <= minIneffectiveConvergenceRecoverySteps; idx++ {
+		step := &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/recovery-%03d", runID, idx)),
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+			},
+			Output: map[string]any{
+				failureOutputKeyClass:     failureClassDoDCoverageMissing,
+				failureOutputKeySignature: fmt.Sprintf("coverage-%03d", idx),
+				"stage":                   "llm_execution_graph_plan",
+			},
+		}
+		if idx == minIneffectiveConvergenceRecoverySteps {
+			step.Output["validationFailureDiagnostic"] = map[string]any{
+				"class":                         runtimemodel.ValidationDiagnosticExternalDependency,
+				"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetDependencyContract,
+			}
+			failedStep = step
+		}
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step: %v", err)
+		}
+	}
+	if err := orch.blockOnRuntimeRepairExhaustion(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod-external", State: common.RunStateRunning, InitialStepKind: llmcommon.StepKindWorkspaceExecution}, failedStep, errors.New("dependency unavailable")); err != nil {
+		t.Fatalf("blockOnRuntimeRepairExhaustion: %v", err)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	ticket, err := ticketRepo.Get(ctx, runItem.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("get ticket: %v", err)
+	}
+	if ticket.Context["blockerKind"] != "external_dependency_unavailable" ||
+		ticket.Context[decisionContextKeyScope] != decisionContextScopeExternalDependency ||
+		ticket.Context[decisionContextKeyDependency] != "external_dependency" {
+		t.Fatalf("ticket context = %+v, want external dependency blocker to take precedence", ticket.Context)
 	}
 }
 
