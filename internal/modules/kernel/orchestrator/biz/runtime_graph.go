@@ -1109,6 +1109,30 @@ func graphBatchStep(step *runModel.Step) bool {
 	return value
 }
 
+func completedGraphBatchStepHasDownstreamStep(steps []*runModel.Step, last *runModel.Step) bool {
+	if last == nil || !graphBatchStep(last) {
+		return false
+	}
+	rootStepID := graphRootStepID(last)
+	if rootStepID == "" {
+		return false
+	}
+	lastID := string(last.ID)
+	for _, step := range steps {
+		if step == nil || step.ID == last.ID || !graphBatchStep(step) || graphNodeID(step) == "" || !sameGraphRoot(step, rootStepID) {
+			continue
+		}
+		if string(step.ID) <= lastID {
+			continue
+		}
+		switch step.State {
+		case common.StepStatePending, common.StepStateDispatched, common.StepStateCompleted, common.StepStateFailed:
+			return true
+		}
+	}
+	return false
+}
+
 func latestCompletedGraphStep(steps []*runModel.Step) *runModel.Step {
 	for idx := len(steps) - 1; idx >= 0; idx-- {
 		step := steps[idx]

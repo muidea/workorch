@@ -1121,6 +1121,9 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 	if nextAction == "" {
 		nextAction = strings.TrimSpace(convergenceNextActionKind(nil, input))
 	}
+	if err := validateConvergenceContractStateMatchesNextAction(input, state, nextAction); err != nil {
+		return err
+	}
 	authorityFocus := dispatchAuthorityCurrentFocus(input)
 	authorityMissing := coverageWorkItemMissingEvidenceKindSet(authorityFocus)
 	if authorityMissing["state_change"] && !authorityMissing["validation"] && !authorityMissing["artifact"] &&
@@ -1260,6 +1263,33 @@ func validateRequiredOutputSatisfiableRoute(input map[string]any, label string, 
 		if !requiredOutputRouteHasEvidenceKind(routes) && len(shapes) == 0 {
 			appendAuthorityDiagnostic(input, "required_output_unsatisfiable", "error", "internal_authority_mismatch", label, "evidence next action has no evidence acquisition output route")
 			return convergenceDispatchMisalignmentError("runtime_internal_contract_unsatisfiable: %s has no evidence acquisition output route", label)
+		}
+	}
+	return nil
+}
+
+func validateConvergenceContractStateMatchesNextAction(input map[string]any, state string, nextAction string) error {
+	if state == "" || nextAction == "" {
+		return nil
+	}
+	if targetSnapshotPrerequisiteActive(input) && nextAction == runtimemodel.NextActionTypeStateChange && state == convergenceStateNeedStateChange {
+		return nil
+	}
+	switch nextAction {
+	case runtimemodel.NextActionTypeStateChange, "produce_state_change":
+		if state != convergenceStateNeedStateChange {
+			appendAuthorityDiagnostic(input, "contract_state_mismatch_next_action", "error", "internal_authority_mismatch", "convergenceContract", "state_change nextAction requires need_state_change convergenceContract")
+			return convergenceDispatchMisalignmentError("contract_state_mismatch_next_action: state_change nextAction has contract state %s", state)
+		}
+	case runtimemodel.NextActionTypeValidate, "validation", "produce_validation_evidence":
+		if state != convergenceStateNeedValidation {
+			appendAuthorityDiagnostic(input, "contract_state_mismatch_next_action", "error", "internal_authority_mismatch", "convergenceContract", "validation nextAction requires need_validation convergenceContract")
+			return convergenceDispatchMisalignmentError("contract_state_mismatch_next_action: validation nextAction has contract state %s", state)
+		}
+	case runtimemodel.NextActionTypeRepair, "acquire_evidence":
+		if state != convergenceStateNeedEvidence {
+			appendAuthorityDiagnostic(input, "contract_state_mismatch_next_action", "error", "internal_authority_mismatch", "convergenceContract", "evidence acquisition nextAction requires need_evidence convergenceContract")
+			return convergenceDispatchMisalignmentError("contract_state_mismatch_next_action: evidence nextAction has contract state %s", state)
 		}
 	}
 	return nil

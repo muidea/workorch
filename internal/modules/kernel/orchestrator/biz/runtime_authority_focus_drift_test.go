@@ -249,6 +249,43 @@ func TestValidateConvergenceDispatchInputRejectsNestedRequiredOutputFocusDrift(t
 	}
 }
 
+func TestValidateConvergenceDispatchInputRejectsNextActionContractStateDrift(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus": map[string]any{
+				"id":                   "cwi-current",
+				"coverageWorkItemIds":  []string{"cwi-current"},
+				"missingEvidenceKinds": []string{"validation", "state_change"},
+			},
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+		},
+		"convergenceContract": map[string]any{
+			"state":           convergenceStateNeedValidation,
+			"repairObjective": repairObjectiveConcreteValidationEvidence,
+		},
+		currentActionContractKey: map[string]any{
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+		},
+		"requiredOutput": map[string]any{
+			"mustProduceConcreteValidationEvidence": true,
+			"acceptedKinds":                         []string{"validation/managed_session"},
+			"coverageWorkItemIds":                   []string{"cwi-current"},
+		},
+	}
+
+	err := validateConvergenceDispatchInput(input)
+	if err == nil {
+		t.Fatal("validateConvergenceDispatchInput returned nil, want nextAction/contract state drift")
+	}
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want ErrConflict", err)
+	}
+	if !strings.Contains(err.Error(), "nextAction=state_change contractState=need_validation") {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want nextAction/contractState drift", err)
+	}
+}
+
 func TestNormalizeDispatchInputDerivesAuthoritySliceFromAcceptanceSlices(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{

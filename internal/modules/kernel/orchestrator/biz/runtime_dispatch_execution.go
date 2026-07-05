@@ -347,7 +347,10 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 	defer unlock()
 	if current, err := o.steps.Get(ctx, step.ID); err == nil {
 		step = current
-		if step.State == common.StepStateCompleted || step.State == common.StepStateFailed {
+		if step.State == common.StepStateCompleted {
+			return o.resumeCompletedGraphBatchStepContinuation(ctx, run, step, workspace)
+		}
+		if step.State == common.StepStateFailed {
 			return nil
 		}
 	} else if err != common.ErrNotFound {
@@ -624,6 +627,39 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 		return err
 	}
 	return o.validateAndCompleteRunWithWorkspace(ctx, run, step.ID, workspace)
+}
+
+func (o *RuntimeOrchestrator) resumeCompletedGraphBatchStepContinuation(ctx context.Context, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) error {
+	if o == nil || run == nil || step == nil {
+		return common.ErrInvalidArgument
+	}
+	if !o.eventDrivenDispatch || !graphBatchStep(step) {
+		return nil
+	}
+	currentRun, acceptsResult, err := o.currentRunForRuntimeStepResult(ctx, run, step)
+	if err != nil {
+		return err
+	}
+	if !acceptsResult {
+		return nil
+	}
+	if workspace == nil || workspace.ID != currentRun.WorkspaceID {
+		if o.workspaces == nil {
+			return common.ErrInvalidArgument
+		}
+		workspace, err = o.workspaces.Get(ctx, currentRun.WorkspaceID)
+		if err != nil {
+			return err
+		}
+	}
+	steps, err := o.steps.ListByRun(ctx, currentRun.ID)
+	if err != nil {
+		return err
+	}
+	if completedGraphBatchStepHasDownstreamStep(steps, step) {
+		return nil
+	}
+	return o.continueGraphBatchAfterCompletedStep(ctx, currentRun, step, steps, workspace)
 }
 
 func (o *RuntimeOrchestrator) persistLateRuntimeStepResultNotAccepted(
