@@ -940,6 +940,47 @@ func TestValidateConvergenceDispatchInputRejectsTopLevelRequiredOutputFocusDrift
 	}
 }
 
+func TestValidateConvergenceDispatchInputRejectsGraphLocalMixedAuthority(t *testing.T) {
+	input := map[string]any{
+		"graphLocalDispatchAuthority": true,
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus":  map[string]any{"id": "cwi-current"},
+			"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		},
+		gapBaselineKey: map[string]any{
+			"schemaVersion": gapBaselineSchema,
+			"currentFocus":  map[string]any{"id": "cwi-current"},
+			"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		},
+		"convergenceContract": map[string]any{
+			"state":                       convergenceStateNeedStateChange,
+			"stateChangingOutputRequired": true,
+		},
+		"stateChangingOutputRequired": true,
+		currentActionContractKey: map[string]any{
+			"nextAction":     map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+		"requiredOutput": stateChangingRepairRequiredOutput(),
+		stepInputKeyStagePacket: map[string]any{
+			"activeFocus": map[string]any{"id": "cwi-current"},
+			"nextAction":  map[string]any{"type": runtimemodel.NextActionTypeStateChange},
+		},
+	}
+
+	err := validateConvergenceDispatchInput(input)
+	if err == nil {
+		t.Fatal("validateConvergenceDispatchInput returned nil, want graph-local mixed authority conflict")
+	}
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want ErrConflict", err)
+	}
+	if !strings.Contains(err.Error(), failureClassRuntimeContractMisalign) {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want %s marker", err, failureClassRuntimeContractMisalign)
+	}
+}
+
 func TestValidateConvergenceDispatchInputRejectsStateChangeRequiredOutputForbidsAcceptedKind(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{

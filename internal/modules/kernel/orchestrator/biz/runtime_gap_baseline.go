@@ -551,6 +551,30 @@ func dispatchInputHasConvergenceAuthority(run *runModel.Run, input map[string]an
 	return len(convergenceAuthorityMapFromValue(run.ExecutionContext[convergenceAuthorityKey])) > 0 || len(gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey])) > 0
 }
 
+func dispatchInputRequiresConvergenceDispatchValidation(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	return boolValue(input["graphLocalDispatchAuthority"]) ||
+		len(mapFromValue(input["convergenceContract"])) > 0 ||
+		len(mapFromValue(input[currentActionContractKey])) > 0 ||
+		len(mapFromValue(input[stepInputKeyStagePacket])) > 0
+}
+
+func finalizeCurrentAuthorityDispatchInput(input map[string]any) (map[string]any, error) {
+	if input == nil {
+		input = map[string]any{}
+	}
+	input = synchronizeCurrentRequiredOutputMirrors(input)
+	input = scrubConvergenceDispatchDiagnosticAdvice(input)
+	if dispatchInputRequiresConvergenceDispatchValidation(input) {
+		if err := validateConvergenceDispatchInput(input); err != nil {
+			return nil, err
+		}
+	}
+	return input, nil
+}
+
 func validateConvergenceDispatchInput(input map[string]any) error {
 	if len(input) == 0 {
 		return nil

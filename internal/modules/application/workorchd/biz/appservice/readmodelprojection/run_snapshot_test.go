@@ -785,6 +785,37 @@ func TestAuthorityDiagnosticsFromRunSnapshotReportsTerminalPlannedValidationReso
 	}
 }
 
+func TestAuthorityDiagnosticsFromRunSnapshotIgnoresClosedValidationResources(t *testing.T) {
+	t.Parallel()
+
+	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
+		Run: readmodelcore.Run{
+			ID:    "run-closed-validation-resource",
+			State: string(common.RunStateRunning),
+		},
+		Steps: []readmodelcore.StepView{{
+			ID:    "run-closed-validation-resource/verify",
+			State: string(common.StepStateCompleted),
+			Output: map[string]any{
+				"validationResources": []any{map[string]any{
+					"kind":   "process_group",
+					"status": "skipped",
+				}, map[string]any{
+					"kind":   "scratch_dir",
+					"status": "removed",
+				}, map[string]any{
+					"kind":   "scratch_dir",
+					"status": "cleanup_skipped",
+				}},
+			},
+		}},
+	})
+
+	if len(got) != 0 {
+		t.Fatalf("AuthorityDiagnostics = %+v, want no diagnostics for closed validation resources", got)
+	}
+}
+
 func TestRunRecoverySnapshotFromModelsUsesCheckpointStep(t *testing.T) {
 	t.Parallel()
 

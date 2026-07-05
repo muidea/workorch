@@ -176,6 +176,11 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		for _, spec := range specs {
 			spec.Input = cloneStepPayload(spec.Input)
 			spec.Input = graphBatchInputWithRoot(spec.Input, batchRootStepID)
+			var err error
+			spec.Input, err = finalizeCurrentAuthorityDispatchInput(spec.Input)
+			if err != nil {
+				return err
+			}
 			if err := o.requestDispatchStep(ctx, run.ID, workspaceID, spec); err != nil && !errors.Is(err, common.ErrConflict) {
 				return err
 			}
@@ -190,6 +195,11 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 			spec.Input = map[string]any{}
 		}
 		spec.Input = graphBatchInputWithRoot(spec.Input, batchRootStepID)
+		var err error
+		spec.Input, err = finalizeCurrentAuthorityDispatchInput(spec.Input)
+		if err != nil {
+			return err
+		}
 		specs[0].Input = spec.Input
 		if err := o.dispatchStepWithWorkspace(ctx, run, spec.ID, spec.Kind, spec.Input, workspace); err != nil && !errors.Is(err, common.ErrConflict) {
 			firstErr = err
@@ -204,6 +214,12 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 				spec.Input = map[string]any{}
 			}
 			spec.Input = graphBatchInputWithRoot(spec.Input, batchRootStepID)
+			var err error
+			spec.Input, err = finalizeCurrentAuthorityDispatchInput(spec.Input)
+			if err != nil {
+				errCh <- err
+				continue
+			}
 			specs[idx].Input = spec.Input
 			runCopy := *run
 			wg.Add(1)
@@ -726,10 +742,12 @@ func normalizeGraphStateChangingDispatchAuthority(run *runModel.Run, stepID comm
 		"repairObjective":             repairObjectiveStateChangingOutput,
 		"stateChangingOutputRequired": true,
 	}
-	currentActionSetNextAction(input, map[string]any{
+	action := map[string]any{
 		"kind":   runtimemodel.NextActionTypeStateChange,
 		"reason": "current execution graph node requires state-changing output",
-	})
+	}
+	ensureGraphLocalAuthorityMaps(run, input, action)
+	currentActionSetNextAction(input, action)
 	input = normalizeDispatchInputAuthorityFocus(input)
 	input = attachStagePacketToStepInput(run, stepID, input)
 	return attachCurrentActionContractToInput(run, stepID, input)
@@ -780,13 +798,50 @@ func normalizeGraphValidationDispatchAuthority(run *runModel.Run, stepID common.
 		"runtimeStageMode": firstNonEmptyString(stringFromMap(input, stepInputKeyRuntimeStageMode), "strict_convergence"),
 		"repairObjective":  repairObjectiveConcreteValidationEvidence,
 	}
-	currentActionSetNextAction(input, map[string]any{
+	action := map[string]any{
 		"kind":   runtimemodel.NextActionTypeValidate,
 		"reason": "current execution graph node requires concrete validation evidence",
-	})
+	}
+	ensureGraphLocalAuthorityMaps(run, input, action)
+	currentActionSetNextAction(input, action)
 	input = normalizeDispatchInputAuthorityFocus(input)
 	input = attachStagePacketToStepInput(run, stepID, input)
 	return attachCurrentActionContractToInput(run, stepID, input)
+}
+
+func ensureGraphLocalAuthorityMaps(run *runModel.Run, input map[string]any, action map[string]any) {
+	if len(input) == 0 || len(action) == 0 {
+		return
+	}
+	focus := dispatchAuthorityCurrentFocus(input)
+	if len(focus) == 0 {
+		focus = mapFromValue(input[coverageFocusKey])
+	}
+	ensure := func(container map[string]any, key string, schema string) {
+		if len(container) == 0 {
+			return
+		}
+		source := mapFromValue(container[key])
+		if len(source) == 0 {
+			source = map[string]any{"schemaVersion": schema}
+			if run != nil {
+				source["workspaceId"] = string(run.WorkspaceID)
+				source["runId"] = string(run.ID)
+			}
+			if len(focus) > 0 {
+				source["currentFocus"] = cloneStepPayload(focus)
+			}
+			source["nextAction"] = cloneStepPayload(action)
+			container[key] = source
+		}
+	}
+	ensure(input, convergenceAuthorityKey, convergenceAuthoritySchema)
+	ensure(input, gapBaselineKey, gapBaselineSchema)
+	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
+		ensure(executionContext, convergenceAuthorityKey, convergenceAuthoritySchema)
+		ensure(executionContext, gapBaselineKey, gapBaselineSchema)
+		input["executionContext"] = executionContext
+	}
 }
 
 func graphNodeInputRequiresStateChangingAuthority(input map[string]any, node runtimemodel.BlockExecutionNode) bool {

@@ -489,6 +489,9 @@ func (r *resultSubsystem) recordRunResultFromRejectedDoDAssessment(
 	if err := ensureRunCanRecordFormalResult(run); err != nil {
 		return err
 	}
+	if rejectedResultSourceStepIsDiagnosticOnly(step) {
+		return nil
+	}
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
 		summary = "DoD assessment was not satisfied."
@@ -700,15 +703,37 @@ func (r *resultSubsystem) rejectedResultIsDiagnosticOnly(ctx context.Context, ru
 	if r == nil || r.steps == nil || result == nil || runID == "" {
 		return false
 	}
-	sourceRef := common.StepID(strings.TrimSpace(result.SourceRef))
-	if sourceRef == "" {
-		return false
+	for _, ref := range rejectedResultCandidateStepRefs(result) {
+		step, err := r.steps.Get(ctx, ref)
+		if err != nil || step == nil || step.RunID != runID {
+			continue
+		}
+		if rejectedResultSourceStepIsDiagnosticOnly(step) {
+			return true
+		}
 	}
-	step, err := r.steps.Get(ctx, sourceRef)
-	if err != nil || step == nil || step.RunID != runID {
-		return false
+	return false
+}
+
+func rejectedResultCandidateStepRefs(result *resultmodel.Result) []common.StepID {
+	if result == nil {
+		return nil
 	}
-	return rejectedResultSourceStepIsDiagnosticOnly(step)
+	seen := map[common.StepID]bool{}
+	ret := []common.StepID{}
+	add := func(ref string) {
+		id := common.StepID(strings.TrimSpace(ref))
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		ret = append(ret, id)
+	}
+	add(result.SourceRef)
+	for _, ref := range result.EvidenceRefs {
+		add(ref)
+	}
+	return ret
 }
 
 func rejectedResultSourceStepIsDiagnosticOnly(step *runModel.Step) bool {

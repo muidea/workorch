@@ -67,6 +67,41 @@ func TestRuntimeResourceHealthFromStepsUsesPlannedInputResourcesWhenOutputMissin
 	if byStatus["pending"] != 2 {
 		t.Fatalf("byStatus = %+v, want pending planned resources", byStatus)
 	}
+	if _, ok := health["latestIssue"]; ok {
+		t.Fatalf("latestIssue = %+v, want no issue for non-terminal planned resources", health["latestIssue"])
+	}
+}
+
+func TestRuntimeResourceHealthFromStepsTreatsClosedTerminalStatusesAsReleased(t *testing.T) {
+	steps := []StepView{{
+		ID:    "run-resource-health/verify",
+		Kind:  "shell/command",
+		State: "completed",
+		Output: map[string]any{
+			"validationResources": []map[string]any{{
+				"kind":   "process_group",
+				"status": "skipped",
+			}, {
+				"kind":   "scratch_dir",
+				"status": "removed",
+			}, {
+				"kind":   "scratch_dir",
+				"status": "cleanup_skipped",
+			}},
+		},
+	}}
+
+	health := RuntimeResourceHealthFromSteps(steps)
+	if health["resourceCount"] != 3 || health["stepsWithResources"] != 1 || health["released"] != true {
+		t.Fatalf("health = %+v, want closed resource health", health)
+	}
+	byStatus, _ := health["byStatus"].(map[string]int)
+	if byStatus["skipped"] != 1 || byStatus["removed"] != 1 || byStatus["cleanup_skipped"] != 1 {
+		t.Fatalf("byStatus = %+v, want closed terminal status counts", byStatus)
+	}
+	if _, ok := health["latestIssue"]; ok {
+		t.Fatalf("latestIssue = %+v, want no issue for closed terminal statuses", health["latestIssue"])
+	}
 }
 
 func TestMapRuntimeExecutionStateIncludesResourceHealthWithoutCheckpoints(t *testing.T) {

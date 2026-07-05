@@ -10,6 +10,7 @@ func RuntimeResourceHealthFromSteps(steps []StepView) map[string]any {
 	byKind := map[string]int{}
 	byStatus := map[string]int{}
 	stepsWithResources := map[string]struct{}{}
+	closed := 0
 	var latestIssue map[string]any
 	for _, step := range steps {
 		resources := validationResourceRecordsForStep(step)
@@ -29,9 +30,10 @@ func RuntimeResourceHealthFromSteps(steps []StepView) map[string]any {
 			}
 			byKind[kind]++
 			byStatus[status]++
-			switch status {
-			case "released", "pending":
-			default:
+			if validationResourceStatusClosed(status) {
+				closed++
+			}
+			if validationResourceStatusIssue(status, readModelStepStateTerminal(step.State)) {
 				latestIssue = map[string]any{
 					"stepId": step.ID,
 					"kind":   kind,
@@ -51,7 +53,7 @@ func RuntimeResourceHealthFromSteps(steps []StepView) map[string]any {
 		"stepsWithResources": len(stepsWithResources),
 		"byKind":             byKind,
 		"byStatus":           byStatus,
-		"released":           byStatus["released"] == total,
+		"released":           closed == total,
 	}
 	if byStatus["cleanup_failed"] > 0 {
 		health["cleanupFailures"] = byStatus["cleanup_failed"]
@@ -70,4 +72,29 @@ func validationResourceRecordsForStep(step StepView) []map[string]any {
 		return resources
 	}
 	return MapSliceValue(step.Input["validationResources"])
+}
+
+func validationResourceStatusClosed(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "released", "skipped", "removed", "cleanup_skipped":
+		return true
+	default:
+		return false
+	}
+}
+
+func validationResourceStatusIssue(status string, ownerTerminal bool) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status == "" {
+		status = "unknown"
+	}
+	if validationResourceStatusClosed(status) {
+		return false
+	}
+	switch status {
+	case "pending", "active":
+		return ownerTerminal
+	default:
+		return true
+	}
 }

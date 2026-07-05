@@ -184,7 +184,7 @@ func staleValidationResourceDiagnosticsFromRunSnapshot(snapshot readmodelcore.Ru
 		}
 		for _, resource := range resources {
 			status := strings.ToLower(strings.TrimSpace(readModelStringValue(resource["status"])))
-			if status == "" || status == "released" {
+			if !validationResourceStatusIssue(status, readModelStepStateTerminal(step.State)) {
 				continue
 			}
 			kind := strings.TrimSpace(readModelStringValue(resource["kind"]))

@@ -124,7 +124,8 @@ func (o *RuntimeOrchestrator) DispatchRequestedStep(ctx context.Context, cmd orc
 	if gated, err := gapBaselineDispatchGate(run); gated || err != nil {
 		return err
 	}
-	if context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]); len(context) > 0 {
+	recoveryScoped := dispatchInputHasRecoveryAuthority(cmd.Input)
+	if context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]); len(context) > 0 && !recoveryScoped {
 		if cmd.Input == nil {
 			cmd.Input = map[string]any{}
 		}
@@ -139,24 +140,24 @@ func (o *RuntimeOrchestrator) DispatchRequestedStep(ctx context.Context, cmd orc
 	if len(baseline) == 0 {
 		baseline = mapFromValue(run.ExecutionContext[gapBaselineKey])
 	}
-	if len(baseline) > 0 {
+	if len(baseline) > 0 && !recoveryScoped {
 		if cmd.Input == nil {
 			cmd.Input = map[string]any{}
 		}
 		cmd.Input[gapBaselineKey] = cloneStepPayload(baseline)
-	} else if cmd.Input != nil {
+	} else if cmd.Input != nil && !recoveryScoped {
 		delete(cmd.Input, gapBaselineKey)
 	}
 	authority := map[string]any{}
 	if len(mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])) > 0 {
 		authority = convergenceAuthoritySnapshotForRun(run).ToMap()
 	}
-	if dispatchAuthoritySnapshotMeaningful(authority) {
+	if dispatchAuthoritySnapshotMeaningful(authority) && !recoveryScoped {
 		if cmd.Input == nil {
 			cmd.Input = map[string]any{}
 		}
 		cmd.Input[convergenceAuthorityKey] = cloneStepPayload(authority)
-	} else if cmd.Input != nil {
+	} else if cmd.Input != nil && !recoveryScoped {
 		delete(cmd.Input, convergenceAuthorityKey)
 	}
 	if canonicalLLMWorkspaceStepKind(cmd.Kind) == llmWorkspaceExecutionStepKind {
@@ -164,6 +165,12 @@ func (o *RuntimeOrchestrator) DispatchRequestedStep(ctx context.Context, cmd orc
 		cmd.Input, rebuildErr = rebuildDispatchInputFromConvergenceAuthority(run, cmd.StepID, cloneStepPayload(cmd.Input))
 		if rebuildErr != nil {
 			return rebuildErr
+		}
+	} else if dispatchInputRequiresConvergenceDispatchValidation(cmd.Input) {
+		var finalizeErr error
+		cmd.Input, finalizeErr = finalizeCurrentAuthorityDispatchInput(cloneStepPayload(cmd.Input))
+		if finalizeErr != nil {
+			return finalizeErr
 		}
 	}
 	return o.dispatchStepWithWorkspace(ctx, run, cmd.StepID, cmd.Kind, cloneStepPayload(cmd.Input), workspace)

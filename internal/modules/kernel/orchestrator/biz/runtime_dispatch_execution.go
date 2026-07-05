@@ -140,6 +140,22 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 			}
 			return o.handleRuntimeStepFailure(ctx, run, step, nil, output, "runtime convergence authority dispatch gate failed", finalizeErr)
 		}
+	} else if dispatchInputRequiresConvergenceDispatchValidation(step.Input) {
+		var finalizeErr error
+		step.Input, finalizeErr = finalizeCurrentAuthorityDispatchInput(step.Input)
+		if finalizeErr != nil {
+			output := map[string]any{
+				"status":              "failed",
+				"stage":               failureClassRuntimeContractMisalign,
+				"error":               finalizeErr.Error(),
+				failureOutputKeyClass: failureClassRuntimeContractMisalign,
+				failureOutputKeySignature: runtimeFailureSignature(failureClassRuntimeContractMisalign, step, map[string]any{
+					"stage": failureClassRuntimeContractMisalign,
+					"error": finalizeErr.Error(),
+				}, finalizeErr),
+			}
+			return o.handleRuntimeStepFailure(ctx, run, step, nil, output, "runtime convergence authority dispatch gate failed", finalizeErr)
+		}
 	}
 	if err := o.steps.Update(ctx, step); err != nil {
 		return err

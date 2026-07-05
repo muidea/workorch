@@ -126,6 +126,12 @@ func TestNormalizeGraphStateChangingDispatchAuthorityRewritesStaleValidationAuth
 	if kind := stringFromMap(currentActionNextActionFromInput(got), "kind"); kind != runtimemodel.NextActionTypeStateChange {
 		t.Fatalf("current nextAction = %+v, want state_change", currentActionNextActionFromInput(got))
 	}
+	if kind := stringFromMap(mapFromValue(mapFromValue(got[convergenceAuthorityKey])["nextAction"]), "kind"); kind != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("convergenceAuthority.nextAction = %+v, want state_change", mapFromValue(got[convergenceAuthorityKey])["nextAction"])
+	}
+	if kind := stringFromMap(mapFromValue(mapFromValue(got[gapBaselineKey])["nextAction"]), "kind"); kind != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("gapBaseline.nextAction = %+v, want state_change", mapFromValue(got[gapBaselineKey])["nextAction"])
+	}
 	if state := stringFromMap(mapFromValue(got["convergenceContract"]), "state"); state != convergenceStateNeedStateChange {
 		t.Fatalf("convergenceContract.state = %q, want %q", state, convergenceStateNeedStateChange)
 	}
@@ -195,8 +201,90 @@ func TestPrepareGapBaselineDispatchSpecsPreservesGraphLocalStateChangingAuthorit
 	if got := stringFromMap(currentActionNextActionFromInput(specs[0].Input), "kind"); got != runtimemodel.NextActionTypeStateChange {
 		t.Fatalf("nextAction = %q, want graph-local state_change", got)
 	}
+	if got := stringFromMap(mapFromValue(mapFromValue(specs[0].Input[convergenceAuthorityKey])["nextAction"]), "kind"); got != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("convergenceAuthority.nextAction = %q, want graph-local state_change", got)
+	}
 	if err := validateRuntimeValidationStepInputBeforeRuntime(runtimemodel.StepKindShellCommand, specs[0].Input); err != nil {
 		t.Fatalf("validateRuntimeValidationStepInputBeforeRuntime: %v", err)
+	}
+}
+
+func TestDispatchRequestedStepPreservesGraphLocalAuthority(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-dispatch-graph-local-authority")
+	workspaceID := common.WorkspaceID("ws-dispatch-graph-local-authority")
+	stepID := common.StepID(runID + "/graph-001/001-state-change")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": map[string]any{"id": "cwi-run", "missingEvidenceKinds": []string{"validation"}},
+			},
+			coverageFocusKey: map[string]any{
+				"id":                  "cwi-run",
+				"coverageWorkItemIds": []string{"cwi-run"},
+			},
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"currentFocus":  map[string]any{"id": "cwi-run", "missingEvidenceKinds": []string{"validation"}},
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			},
+			gapBaselineKey: map[string]any{
+				"schemaVersion": gapBaselineSchema,
+				"currentFocus":  map[string]any{"id": "cwi-run", "missingEvidenceKinds": []string{"validation"}},
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	input := normalizeGraphStateChangingDispatchAuthority(run, stepID, map[string]any{
+		stepInputKeyGraphNodeID:     "state-change",
+		stepInputKeyGraphRootStepID: string(runID + "/step-1"),
+		"stateChanging":             true,
+		"targetRef":                 "workspace",
+		"stateChangingReason":       "apply graph-local state change",
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+	}, runtimemodel.BlockExecutionNode{ID: "state-change", Kind: runtimemodel.StepKindShellCommand})
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{output: map[string]any{"status": "completed"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+
+	if err := orch.DispatchRequestedStep(ctx, orchestratorcontracts.DispatchStepCommand{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		Kind:        runtimemodel.StepKindShellCommand,
+		Input:       input,
+	}); err != nil {
+		t.Fatalf("DispatchRequestedStep: %v", err)
+	}
+	created, err := stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if got := stringFromMap(mapFromValue(mapFromValue(created.Input[convergenceAuthorityKey])["nextAction"]), "kind"); got != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("created convergenceAuthority.nextAction = %q, want state_change; input=%+v", got, created.Input)
+	}
+	if got := stringFromMap(mapFromValue(mapFromValue(created.Input[gapBaselineKey])["nextAction"]), "kind"); got != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("created gapBaseline.nextAction = %q, want state_change; input=%+v", got, created.Input)
 	}
 }
 

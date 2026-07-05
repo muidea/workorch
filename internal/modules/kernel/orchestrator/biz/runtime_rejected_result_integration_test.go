@@ -549,6 +549,107 @@ func TestRuntimeOrchestrator_RejectedResultFromConvertedDecisionIsDiagnosticOnly
 	}
 }
 
+func TestRuntimeOrchestrator_RejectedResultEvidenceRefDiagnosticOnly(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-rejected-result-evidence-ref-diagnostic")
+	workspaceID := common.WorkspaceID("ws-rejected-result-evidence-ref-diagnostic")
+	rootStepID := common.StepID(runID + "/step-1")
+	diagnosticStepID := common.StepID(runID + "/contract-retry-001")
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	resultRepo := memory.NewResultRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		memory.NewWorkspaceRepository(),
+		memory.NewDecisionTicketRepository(),
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{Results: resultRepo},
+		events.NewMemoryHub(),
+	)
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod", State: common.RunStateRunning, InitialStepKind: llmWorkspaceExecutionStepKind}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: rootStepID, RunID: runID, Kind: llmWorkspaceExecutionStepKind, State: common.StepStateCompleted}); err != nil {
+		t.Fatalf("seed root step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    diagnosticStepID,
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"status":                               "failed",
+			"continuableDecisionConvertedToRepair": true,
+			"convertedDecisionGate":                "convergence_contract",
+		},
+	}); err != nil {
+		t.Fatalf("seed diagnostic step: %v", err)
+	}
+	resultID := common.ResultID(runID + "/result/dod-assessment")
+	if err := resultRepo.Create(ctx, &resultmodel.Result{
+		ID:           resultID,
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
+		DoDID:        "dod",
+		State:        common.ResultStateRejected,
+		Title:        "Rejected Result",
+		Summary:      "continuable decision converted to repair",
+		SourceType:   resultcommon.SourceTypeDoDAssessment,
+		SourceRef:    string(rootStepID),
+		EvidenceRefs: []string{string(rootStepID), string(diagnosticStepID)},
+	}); err != nil {
+		t.Fatalf("seed rejected result: %v", err)
+	}
+
+	if summary, ok := orch.resultManager().rejectedRunResultSummary(ctx, runID); ok {
+		t.Fatalf("rejectedRunResultSummary = %q, true; want evidence-ref diagnostic ignored", summary)
+	}
+	result, err := resultRepo.Get(ctx, resultID)
+	if err != nil {
+		t.Fatalf("get result: %v", err)
+	}
+	if result.State != common.ResultStateSuperseded {
+		t.Fatalf("result state = %s, want superseded diagnostic result", result.State)
+	}
+}
+
+func TestRuntimeOrchestrator_DoesNotRecordRejectedResultForDiagnosticOnlyStep(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-skip-diagnostic-rejected-result")
+	resultRepo := memory.NewResultRepository()
+	orch := &RuntimeOrchestrator{evidence: RuntimeEvidenceRepositories{Results: resultRepo}}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-skip-diagnostic-rejected-result",
+		GoalID:          "goal-skip-diagnostic-rejected-result",
+		DoDID:           "dod-skip-diagnostic-rejected-result",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/contract-retry-001"),
+		RunID: runID,
+		Output: map[string]any{
+			"continuableDecisionConvertedToRepair": true,
+			"convertedDecisionGate":                "convergence_contract",
+		},
+	}
+
+	if err := orch.resultManager().recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"summary":   "continuable diagnostic should not become formal result",
+		},
+	}); err != nil {
+		t.Fatalf("record rejected result: %v", err)
+	}
+	if _, err := resultRepo.Get(ctx, common.ResultID(string(runID)+"/result/dod-assessment")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("result err = %v, want not found for diagnostic-only rejected result", err)
+	}
+}
+
 func TestRuntimeOrchestrator_DispatchStepRejectsActiveRejectedResult(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-dispatch-rejected-result")
