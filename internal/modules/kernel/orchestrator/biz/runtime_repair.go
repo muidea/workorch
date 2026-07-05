@@ -204,6 +204,9 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUpOrBlock(
 	failedStep *runModel.Step,
 	execErr error,
 ) error {
+	if o != nil && o.tickets != nil && failedStepHasExternalRuntimeDependency(failedStep) {
+		return o.blockOnRuntimeRepairExhaustion(ctx, run, failedStep, execErr)
+	}
 	err := o.dispatchRuntimeRepairFollowUp(ctx, run, failedStep, execErr)
 	if err == nil || errors.Is(err, common.ErrBlocked) || failedStep == nil || graphNodeID(failedStep) == "" {
 		return err

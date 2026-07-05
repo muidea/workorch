@@ -91,6 +91,9 @@ func validateRepairPatchRequestGranularity(step *runModel.Step, request runtimeP
 	if !stateChangingRepairContractActive(step) {
 		return nil
 	}
+	if err := validateRepairPatchRequestSubstance(step, request); err != nil {
+		return err
+	}
 	if strings.TrimSpace(request.PatchType) == "unified_diff" && len(repairPatchContextItems(step)) > 0 {
 		if ok, reason := unifiedDiffHasSubstantiveNonBlankChange(request.Diff); !ok {
 			if reason == "" {
@@ -121,6 +124,37 @@ func validateRepairPatchRequestGranularity(step *runModel.Step, request runtimeP
 			return nil
 		}
 		return fmt.Errorf("%w: runtime repair patch/apply file_write cannot replace existing target %q when current repair context is available; use a minimal unified_diff or exact replacement against the current snapshot", common.ErrInvalidArgument, request.TargetRef)
+	}
+	return nil
+}
+
+func validateRepairPatchRequestSubstance(step *runModel.Step, request runtimePatchRequest) error {
+	switch strings.TrimSpace(request.PatchType) {
+	case "text_replace":
+		if strings.TrimSpace(request.OldText) == strings.TrimSpace(request.NewText) {
+			return fmt.Errorf("%w: runtime repair patch/apply text_replace for target %q is non-substantive; return a substantive state-changing artifact, bounded validation evidence when already satisfied, or a real governance blocker", common.ErrInvalidArgument, request.TargetRef)
+		}
+	case "file_write":
+		target := filepath.Clean(strings.TrimSpace(request.TargetRef))
+		if target == "" || target == "." {
+			return nil
+		}
+		for _, item := range repairPatchContextItems(step) {
+			if item == nil || !boolValue(item["exists"]) {
+				continue
+			}
+			itemTarget := filepath.Clean(strings.TrimSpace(stringFromMap(item, "targetRef")))
+			if itemTarget != target {
+				continue
+			}
+			content := stringFromMap(item, "content")
+			if content == "" || containsRuntimeRedactionMarker(content) || boolValue(item["truncated"]) || boolValue(item["isBinary"]) {
+				continue
+			}
+			if strings.TrimSpace(content) == strings.TrimSpace(request.Content) {
+				return fmt.Errorf("%w: runtime repair patch/apply file_write for target %q is non-substantive; current target content differs only by whitespace", common.ErrInvalidArgument, request.TargetRef)
+			}
+		}
 	}
 	return nil
 }

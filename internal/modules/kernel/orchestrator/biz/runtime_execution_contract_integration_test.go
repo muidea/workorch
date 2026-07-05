@@ -4521,6 +4521,151 @@ func TestValidateLLMExecutionOutputContractRejectsRepairFileWriteForExistingCont
 	}
 }
 
+func TestValidateLLMExecutionOutputContractRejectsRepairFileWriteForCurrentTargetSnapshotWithoutBaseHash(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-repair-file-write-current-target-snapshot",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-repair-file-write-current-target-snapshot/repair-001-of-graph-001-003-patch",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failedStepKind":                  "patch/apply",
+			"repairActionPackage": map[string]any{
+				"currentTargetSnapshots": []map[string]any{
+					{
+						"targetRef":        "main.go",
+						"exists":           true,
+						"contentHash":      "hash-main",
+						"contentComplete":  true,
+						"safeForFileWrite": true,
+					},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":    "rewrite-main",
+					"kind":  "patch/apply",
+					"input": map[string]any{"targetRef": "main.go", "patchType": "file_write", "content": "package main\n"},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "file_write cannot replace existing target") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want currentTargetSnapshots file_write rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsSafeRepairFileWriteForCurrentTargetSnapshot(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-repair-file-write-safe-current-target-snapshot",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-repair-file-write-safe-current-target-snapshot/repair-001-of-graph-001-003-patch",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failedStepKind":                  "patch/apply",
+			"repairActionPackage": map[string]any{
+				"currentTargetSnapshots": []map[string]any{
+					{
+						"targetRef":        "main.go",
+						"exists":           true,
+						"contentHash":      "hash-main",
+						"contentComplete":  true,
+						"safeForFileWrite": true,
+						"redacted":         false,
+						"truncated":        false,
+					},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "rewrite-main",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef": "main.go",
+						"patchType": "file_write",
+						"baseHash":  "hash-main",
+						"content":   "package main\n\nfunc main() {}\n",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want safe currentTargetSnapshots file_write allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsNonSubstantiveRepairTextReplace(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-repair-non-substantive-text-replace",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-repair-non-substantive-text-replace/repair-001-of-graph-001-003-patch",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failedStepKind":                  "patch/apply",
+			"patchRepairContext": []map[string]any{{
+				"targetRef": "main.go",
+				"exists":    true,
+			}},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "newline-only",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef": "main.go",
+						"patchType": "text_replace",
+						"oldText":   ")",
+						"newText":   ")\n",
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "non-substantive") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want non-substantive text_replace rejection", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsUnsafeRepairFileWriteForExistingContextTarget(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-repair-file-write-unsafe-existing-target",

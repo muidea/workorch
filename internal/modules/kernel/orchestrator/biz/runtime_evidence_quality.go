@@ -1193,12 +1193,92 @@ func evidenceQualityFromRuntimeStepOutput(step *runModel.Step, output map[string
 		quality.Reason = "validation step produced a negative scalar output"
 		quality.Tags = compactUniqueStrings(append(quality.Tags, "negative_scalar_validation_output"))
 	}
+	if validationEvidenceCanSatisfyDoD(quality) && runtimeValidationObservedClaimsContradictedByOutput(step, output) {
+		quality.Quality = common.EvidenceQualityInvalid
+		quality.Reason = "validation observedClaims are contradicted by runtime output"
+		quality.Tags = compactUniqueStrings(append(quality.Tags, "validation_observed_claims_contradicted"))
+	}
 	if validationEvidenceCanSatisfyDoD(quality) && runtimeStepHasDeliverableMutatingControlledSubstitute(step, output) {
 		quality.Quality = common.EvidenceQualityInconclusive
 		quality.Reason = "controlled substitute mutates a deliverable copy and cannot close current workspace validation"
 		quality.Tags = compactUniqueStrings(append(quality.Tags, "controlled_substitute_deliverable_mutation"))
 	}
 	return quality
+}
+
+func runtimeValidationObservedClaimsContradictedByOutput(step *runModel.Step, output map[string]any) bool {
+	claims := runtimeValidationObservedClaims(step, output)
+	if len(claims) == 0 {
+		return false
+	}
+	transcript := strings.ToLower(strings.Join([]string{
+		stringFromMap(output, "stdout"),
+		stringFromMap(output, "stderr"),
+		stringFromMap(output, "output"),
+		stringFromMap(output, "stdoutPreview"),
+		stringFromMap(output, "stderrPreview"),
+	}, "\n"))
+	if strings.TrimSpace(transcript) == "" {
+		return false
+	}
+	for _, claim := range claims {
+		if absenceClaimContradictedByPresenceOutput(claim, transcript) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeValidationObservedClaims(step *runModel.Step, output map[string]any) []string {
+	var claims []string
+	for _, source := range []map[string]any{
+		mapFromValue(output["validationEvidence"]),
+		output,
+	} {
+		claims = append(claims, stringSliceFromValue(source["observedClaims"])...)
+		claims = append(claims, stringSliceFromValue(source["claims"])...)
+	}
+	if step != nil {
+		for _, source := range []map[string]any{
+			mapFromValue(step.Input["validationEvidence"]),
+			mapFromValue(step.Output["validationEvidence"]),
+			step.Input,
+			step.Output,
+		} {
+			claims = append(claims, stringSliceFromValue(source["observedClaims"])...)
+			claims = append(claims, stringSliceFromValue(source["claims"])...)
+		}
+	}
+	return compactUniqueStrings(claims)
+}
+
+func absenceClaimContradictedByPresenceOutput(claim string, transcript string) bool {
+	claim = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(claim)), " "))
+	if claim == "" || strings.TrimSpace(transcript) == "" {
+		return false
+	}
+	if !(strings.Contains(claim, "clean") ||
+		strings.Contains(claim, "no change") ||
+		strings.Contains(claim, "no uncommitted") ||
+		strings.Contains(claim, "without uncommitted") ||
+		strings.Contains(claim, "no pending") ||
+		strings.Contains(claim, "nothing to commit")) {
+		return false
+	}
+	for _, indicator := range []string{
+		"modified:",
+		"untracked",
+		"changes not staged",
+		"changes to be committed",
+		"no changes added",
+		"pending changes",
+		"dirty",
+	} {
+		if strings.Contains(transcript, indicator) {
+			return true
+		}
+	}
+	return false
 }
 
 type runtimeValidationCriteriaResult struct {

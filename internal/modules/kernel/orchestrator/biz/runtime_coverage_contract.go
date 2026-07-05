@@ -596,8 +596,11 @@ func repairPatchContextItems(step *runModel.Step) []map[string]any {
 	ret := mapSliceFromValue(step.Input["patchRepairContext"])
 	ret = append(ret, mapSliceFromValue(step.Input["failureTargetRepairContext"])...)
 	ret = append(ret, mapSliceFromValue(step.Input["rootCauseCandidateContext"])...)
+	ret = append(ret, mapSliceFromValue(step.Input["targetSnapshots"])...)
+	ret = append(ret, mapSliceFromValue(step.Input["currentTargetSnapshots"])...)
 	actionPackage := mapFromValue(step.Input["repairActionPackage"])
 	ret = append(ret, mapSliceFromValue(actionPackage["targetSnapshots"])...)
+	ret = append(ret, mapSliceFromValue(actionPackage["currentTargetSnapshots"])...)
 	ret = append(ret, mapSliceFromValue(actionPackage["rootCauseCandidateContext"])...)
 	return ret
 }

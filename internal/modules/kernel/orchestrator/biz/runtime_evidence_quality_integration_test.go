@@ -82,6 +82,34 @@ func TestRuntimeStepEvidenceQualityAcceptsSatisfiedDeclaredMetric(t *testing.T) 
 	}
 }
 
+func TestRuntimeStepEvidenceQualityRejectsContradictedObservedClaims(t *testing.T) {
+	run := &runmodel.Run{ID: "run-contradicted-claims", WorkspaceID: "ws-contradicted-claims"}
+	step := &runmodel.Step{
+		ID:    "run-contradicted-claims/block/verify",
+		RunID: run.ID,
+		Kind:  shellcommon.StepKindCommand,
+		Input: map[string]any{
+			"validationEvidence": map[string]any{
+				"observedClaims": []string{"working tree is clean and has no uncommitted changes"},
+			},
+		},
+		Output: map[string]any{
+			"stdout": strings.Join([]string{
+				"status summary:",
+				"modified: config.example.yaml",
+				"no changes added to commit",
+			}, "\n"),
+		},
+	}
+
+	quality := runtimeStepEvidenceQuality(run, step, common.ValidationResultStatePassed, step.Output)
+	if quality.Quality != common.EvidenceQualityInvalid ||
+		!strings.Contains(quality.Reason, "contradicted") ||
+		!stringSliceContains(quality.Tags, "validation_observed_claims_contradicted") {
+		t.Fatalf("quality = %+v, want invalid contradicted observedClaims", quality)
+	}
+}
+
 func TestRuntimeStepEvidenceQualityDemotesControlledSubstituteDeliverablePatch(t *testing.T) {
 	run := &runmodel.Run{ID: "run-controlled-substitute-deliverable", WorkspaceID: "ws-controlled-substitute"}
 	step := &runmodel.Step{
