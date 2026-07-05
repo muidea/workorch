@@ -162,6 +162,50 @@ func TestContractViolationExhaustedContinuableReadableResourceDecisionRepairs(t 
 	}
 }
 
+func TestContractViolationExhaustedStaticValidationContinuesRuntimeRepair(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-static-validation-repair")
+	repo := memory.NewStepRepository()
+	failed := contractViolationFailedStep(runID, "failed-static-validation")
+	failed.Input[stepInputKeyRuntimeStage] = runtimeStageVerification
+	failed.Input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+	failed.Input["stateChangingOutputRequired"] = false
+	failed.Output["stage"] = "llm_execution_graph_plan"
+	failed.Output["error"] = "concrete validation evidence cannot use static inspection or source scanning alone to close runtime-behavior coverage"
+	failed.Output[outputKeyContractViolationType] = contractViolationValidationEvidenceRequired
+	failed.Output["contractViolationRule"] = contractViolationRuleValidationStaticOnly
+	failed.Output[failureOutputKeyClass] = failureClassRuntime
+	failed.Output[failureOutputKeySignature] = "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|rule=validation_static_only"
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-static-validation-repair", InitialStepKind: llmWorkspaceExecutionStepKind}
+	attachContractViolationDiagnostics(run, failed, common.ErrInvalidArgument)
+	for attempt := 1; attempt <= 2; attempt++ {
+		step := &runmodel.Step{
+			ID:    contractViolationRetryStepID(runID, failed, attempt),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyContractViolationRecovery: map[string]any{
+					"sourceStepId": string(failed.ID),
+				},
+			},
+			Output: map[string]any{
+				failureOutputKeyClass:     failureClassRuntime,
+				failureOutputKeySignature: stringFromMap(failed.Output, failureOutputKeySignature),
+			},
+		}
+		if err := repo.Create(ctx, step); err != nil {
+			t.Fatalf("seed contract retry step %d: %v", attempt, err)
+		}
+	}
+
+	action := runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{MaxContractViolationRetriesPerStep: 2}), true, true, run, failed)
+
+	if action != runtimeRecoveryActionRuntimeRepair {
+		t.Fatalf("recovery action = %s, want runtime repair for exhausted static validation contract violation", action)
+	}
+}
+
 func TestCoverageAssessmentIncompleteContractViolationExhaustsBudget(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-coverage-assessment-contract-exhausted")

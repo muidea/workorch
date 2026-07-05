@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func shouldBlockOnDuplicateRuntimeFailureForTest(ctx context.Context, orch *RuntimeOrchestrator, run *runmodel.Run, failedStep *runmodel.Step) bool {
@@ -20,6 +22,45 @@ func shouldBlockOnDuplicateRuntimeFailureForTest(ctx context.Context, orch *Runt
 
 func runtimeRecoveryActionForFailedStepForTest(ctx context.Context, orch *RuntimeOrchestrator, run *runmodel.Run, failedStep *runmodel.Step) runtimeRecoveryAction {
 	return runtimeRecoveryActionForFailedStep(ctx, orch.repairManager(), orch.policy, orch.runtime != nil, orch.tickets != nil, run, failedStep)
+}
+
+func TestExternalDependencyValidationFailureBlocksInsteadOfRepeatingRepair(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-external-dependency-block")
+	failed := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/verify"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=resolve-dependency|exitCode=1",
+			"stage":                   "shell_command_failed",
+			"validationFailureDiagnostic": map[string]any{
+				"schemaVersion":                 runtimemodel.ValidationFailureDiagnosticSchemaVersion,
+				"class":                         runtimemodel.ValidationDiagnosticExternalDependency,
+				"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetDependencyContract,
+				"stderrPreview":                 `fetch "https://example.invalid/module": dial tcp 203.0.113.10:443: i/o timeout`,
+			},
+		},
+	}
+	orch := &RuntimeOrchestrator{
+		steps:   memory.NewStepRepository(),
+		tickets: memory.NewDecisionTicketRepository(),
+		runtime: &stubRuntimeAdapter{},
+		policy:  NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 10}),
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-external-dependency-block", InitialStepKind: llmWorkspaceExecutionStepKind}
+
+	action := runtimeRecoveryActionForFailedStepForTest(ctx, orch, run, failed)
+
+	if action != runtimeRecoveryActionRuntimeRepairExhausted {
+		t.Fatalf("recovery action = %s, want runtime repair exhausted blocker for external dependency", action)
+	}
+	diagnostics := runtimeFailureDecisionDiagnostics(failed, errors.New("exit status 1"))
+	if diagnostics["externalDependencyUnavailable"] != true || diagnostics["requiresExternalDependency"] != true {
+		t.Fatalf("diagnostics = %+v, want external dependency blocker metadata", diagnostics)
+	}
 }
 
 func TestMaxRuntimeRepairAttemptsUsesConfiguredPolicy(t *testing.T) {

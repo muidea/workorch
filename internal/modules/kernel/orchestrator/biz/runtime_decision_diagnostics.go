@@ -13,12 +13,24 @@ func runtimeFailureDecisionDiagnostics(step *runModel.Step, execErr error) map[s
 	class := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass))
 	signature := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature))
 	signals := structuredFailureSignalsFromFailureOutput(step.Output, execErr, class, signature)
-	if len(signals) == 0 {
+	externalDependency := failedStepHasExternalRuntimeDependency(step)
+	if len(signals) == 0 && !externalDependency {
 		return nil
 	}
 	ret := map[string]any{
-		"structuredFailureSignals": compactStructuredFailureSignalsForRepairActionPackage(signals),
-		"recommendedNextActions":   runtimeFailureRecommendedNextActions(signals),
+		"recommendedNextActions": runtimeFailureRecommendedNextActions(signals),
+	}
+	if len(signals) > 0 {
+		ret["structuredFailureSignals"] = compactStructuredFailureSignalsForRepairActionPackage(signals)
+	}
+	if externalDependency {
+		ret["externalDependencyUnavailable"] = true
+		ret["requiresExternalDependency"] = true
+		ret["recommendedNextActions"] = []string{
+			"Confirm the external dependency, network route, proxy, credential, or local cache required by the failed validation.",
+			"Provide missing runtime configuration or retry after the dependency is reachable.",
+			"Do not repeat the same state-changing or validation command until the external dependency surface changes.",
+		}
 	}
 	if primary := primaryDiagnosticRepairContractFromSignals(signals); len(primary) > 0 {
 		ret["primaryDiagnosticRepair"] = compactLLMContextMap(primary, 1)

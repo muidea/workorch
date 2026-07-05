@@ -46,6 +46,9 @@ func classifyShellValidationFailureDiagnostic(step *runModel.Step, execErr error
 	case strings.TrimSpace(stringFromMap(output, "unavailableCommand")) != "" || boolValue(output["capabilityUnavailable"]):
 		class = runtimemodel.ValidationDiagnosticEnvironmentMissing
 		targetType = runtimemodel.ValidationEvidenceTargetEnvironment
+	case shellValidationFailureLooksExternalDependencyUnavailable(output, execErr):
+		class = runtimemodel.ValidationDiagnosticExternalDependency
+		targetType = runtimemodel.ValidationEvidenceTargetDependencyContract
 	case class != "":
 	case boolValue(output["zeroWork"]) || strings.TrimSpace(stringFromMap(output, "evidenceQuality")) == string(commonEvidenceQualityInconclusive()):
 		class = runtimemodel.ValidationDiagnosticOutputInconclusive
@@ -73,6 +76,11 @@ func enrichValidationFailureDiagnosticFromStep(diagnostic map[string]any, step *
 	ret := cloneStepPayload(diagnostic)
 	if strings.TrimSpace(stringFromMap(ret, "schemaVersion")) == "" {
 		ret["schemaVersion"] = runtimemodel.ValidationFailureDiagnosticSchemaVersion
+	}
+	if shellValidationFailureLooksExternalDependencyUnavailable(step.Output, execErr) &&
+		validationDiagnosticClassAllowsExternalDependencyPromotion(stringFromMap(ret, "class")) {
+		ret["class"] = runtimemodel.ValidationDiagnosticExternalDependency
+		ret["recommendedEvidenceTargetType"] = runtimemodel.ValidationEvidenceTargetDependencyContract
 	}
 	if strings.TrimSpace(stringFromMap(ret, "reason")) == "" {
 		ret["reason"] = firstNonEmptyString(stringFromMap(step.Output, "reason"), stringFromMap(step.Output, "error"), errorString(execErr))
@@ -109,6 +117,81 @@ func enrichValidationFailureDiagnosticFromStep(diagnostic map[string]any, step *
 		ret["stdoutPreview"] = truncateLLMEvidenceText(stdout)
 	}
 	return compactLLMContextMap(ret, 1)
+}
+
+func validationDiagnosticClassAllowsExternalDependencyPromotion(class string) bool {
+	switch strings.TrimSpace(class) {
+	case "",
+		runtimemodel.ValidationDiagnosticBuildFailed,
+		runtimemodel.ValidationDiagnosticTestFailed,
+		runtimemodel.ValidationDiagnosticDependencyMismatch,
+		runtimemodel.ValidationDiagnosticTimeout,
+		runtimemodel.ValidationDiagnosticOutputInconclusive:
+		return true
+	default:
+		return false
+	}
+}
+
+func shellValidationFailureLooksExternalDependencyUnavailable(output map[string]any, execErr error) bool {
+	text := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		stringFromMap(output, "stderr"),
+		stringFromMap(output, "stdout"),
+		stringFromMap(output, "stderrPreview"),
+		stringFromMap(output, "stdoutPreview"),
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+		stringFromMap(mapFromValue(output["validationFailureDiagnostic"]), "stderrPreview"),
+		stringFromMap(mapFromValue(output["validationFailureDiagnostic"]), "stdoutPreview"),
+		stringFromMap(mapFromValue(mapFromValue(output["runtimeDiagnostics"])["validationFailureDiagnostic"]), "stderrPreview"),
+		stringFromMap(mapFromValue(mapFromValue(output["runtimeDiagnostics"])["validationFailureDiagnostic"]), "stdoutPreview"),
+		errorString(execErr),
+	}, "\n")))
+	if text == "" {
+		return false
+	}
+	hasNetworkSurface := false
+	for _, marker := range []string{
+		"i/o timeout",
+		"network is unreachable",
+		"no route to host",
+		"temporary failure in name resolution",
+		"connection timed out",
+		"connection timeout",
+		"tls handshake timeout",
+		"proxyconnect tcp",
+		"dial tcp",
+		"dial udp",
+		"lookup ",
+		"could not resolve host",
+		"unable to resolve host",
+	} {
+		if strings.Contains(text, marker) {
+			hasNetworkSurface = true
+			break
+		}
+	}
+	if !hasNetworkSurface {
+		return false
+	}
+	for _, marker := range []string{
+		"http://",
+		"https://",
+		"fetch",
+		"download",
+		"module",
+		"package",
+		"dependency",
+		"registry",
+		"repository",
+		"remote",
+		"provider",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeValidationFailureDiagnostic(diagnostic map[string]any) map[string]any {

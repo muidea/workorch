@@ -48,6 +48,36 @@ func TestAttachRuntimeFailureDiagnosticsPromotesValidationDiagnostic(t *testing.
 	}
 }
 
+func TestAttachRuntimeFailureDiagnosticsClassifiesNetworkDependencyUnavailable(t *testing.T) {
+	step := &runmodel.Step{
+		ID:    "run-validation-diagnostic/network-dependency",
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"status":   "failed",
+			"command":  "dependency-manager",
+			"exitCode": 1,
+			"stderr":   `fetch "https://example.invalid/module": dial tcp 203.0.113.10:443: i/o timeout`,
+			"validationFailureDiagnostic": map[string]any{
+				"schemaVersion":                 runtimemodel.ValidationFailureDiagnosticSchemaVersion,
+				"class":                         runtimemodel.ValidationDiagnosticBuildFailed,
+				"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetFailureSurface,
+			},
+		},
+	}
+	classification := classifyRuntimeFailure(step, step.Output, "runtime step failed", errors.New("exit status 1"))
+	attachRuntimeFailureClassification(step.Output, classification)
+	attachRuntimeFailureDiagnostics(step, classification, errors.New("exit status 1"))
+
+	diagnostic := mapFromValue(step.Output["validationFailureDiagnostic"])
+	if diagnostic["class"] != runtimemodel.ValidationDiagnosticExternalDependency {
+		t.Fatalf("validationFailureDiagnostic = %+v, want external dependency", diagnostic)
+	}
+	if diagnostic["recommendedEvidenceTargetType"] != runtimemodel.ValidationEvidenceTargetDependencyContract {
+		t.Fatalf("validationFailureDiagnostic = %+v, want dependency target type", diagnostic)
+	}
+}
+
 func TestRepairActionPackageCarriesValidationFailureDiagnostic(t *testing.T) {
 	input := map[string]any{
 		failureOutputKeyClass:     failureClassShellCommand,

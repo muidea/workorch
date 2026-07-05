@@ -11,6 +11,7 @@ import (
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const maxPatchRepairSnapshotBytes = 120 * 1024
@@ -631,9 +632,15 @@ func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *
 		if runtimeAvailable && contractViolationRetryWithinBudget(ctx, r, runtimePolicy, run, failedStep) {
 			return runtimeRecoveryActionContractViolationRetry
 		}
+		if runtimeAvailable && contractViolationExhaustionDecisionNotEligible(ctx, r, runtimePolicy, run, failedStep) {
+			return runtimeRecoveryActionRuntimeRepair
+		}
 		if canCreateDecisionTicket {
 			return runtimeRecoveryActionContractViolationExhausted
 		}
+	}
+	if canCreateDecisionTicket && failedStepHasExternalRuntimeDependency(failedStep) {
+		return runtimeRecoveryActionRuntimeRepairExhausted
 	}
 	if shouldEscalateRuntimeRepairExhaustion(ctx, r, runtimePolicy, canCreateDecisionTicket, run, failedStep) {
 		if runtimeAvailable && runtimeRepairExhaustionDecisionNotEligible(run, failedStep) {
@@ -667,7 +674,7 @@ func contractViolationExhaustionDecisionNotEligible(ctx context.Context, repair 
 	if contractViolationRetryWithinBudget(ctx, repair, policy, run, failedStep) {
 		return false
 	}
-	return continuableContractViolationRule(contractViolationRuleFromStep(failedStep))
+	return contractViolationExhaustionCanContinueRuntimeRepair(failedStep)
 }
 
 func runtimeRepairExhaustionDecisionNotEligible(run *runModel.Run, failedStep *runModel.Step) bool {
@@ -690,25 +697,44 @@ func runtimeRepairExhaustionDecisionNotEligible(run *runModel.Run, failedStep *r
 
 func continuableContractViolationRule(rule string) bool {
 	switch strings.TrimSpace(rule) {
-	case contractViolationRuleConcreteValidationMissing,
-		contractViolationRuleValidationEvidenceMetadataMissing,
-		contractViolationRuleValidationScratchRequired,
-		contractViolationRuleValidationScratchEscape,
-		contractViolationRuleValidationProcessControlForbidden,
-		contractViolationRuleValidationDetachedProcessForbidden,
-		contractViolationRuleValidationShellSafetyUnproven,
-		contractViolationRuleManagedValidationRequired,
-		contractViolationRuleCoverageAssessmentIncomplete,
-		contractViolationRuleStateChangingRequiredMissing,
-		contractViolationRuleFocusBindingMismatch,
-		contractViolationRulePatchApplyContractFailed,
-		contractViolationRuleAvailableSnapshotIgnored,
-		contractViolationRuleCoverageMapIncomplete,
-		contractViolationRuleDoDAssessmentEvidenceMissing:
+	case contractViolationRuleValidationStaticOnly:
 		return true
 	default:
 		return false
 	}
+}
+
+func contractViolationExhaustionCanContinueRuntimeRepair(failedStep *runModel.Step) bool {
+	if failedStep == nil || !continuableContractViolationRule(contractViolationRuleFromStep(failedStep)) {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(failedStep.Input, "repairObjective")) != repairObjectiveConcreteValidationEvidence {
+		return false
+	}
+	switch runtimeStageFromStepInput(failedStep.Input) {
+	case runtimeStageVerification, runtimeStageRepair:
+		return true
+	default:
+		return false
+	}
+}
+
+func failedStepHasExternalRuntimeDependency(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	for _, source := range []map[string]any{
+		mapFromValue(step.Output["validationFailureDiagnostic"]),
+		mapFromValue(mapFromValue(step.Output["runtimeDiagnostics"])["validationFailureDiagnostic"]),
+		mapFromValue(mapFromValue(step.Output["lastFailureDiagnostics"])["validationFailureDiagnostic"]),
+	} {
+		switch strings.TrimSpace(stringFromMap(source, "class")) {
+		case runtimemodel.ValidationDiagnosticExternalDependency,
+			runtimemodel.ValidationDiagnosticProviderTransient:
+			return true
+		}
+	}
+	return shellValidationFailureLooksExternalDependencyUnavailable(step.Output, nil)
 }
 
 func failedStepRequestsContinuableDecision(step *runModel.Step) bool {
@@ -1214,8 +1240,17 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 	}
 	runLevelStats := o.repairManager().runLevelIneffectiveConvergenceStats(ctx, run, failedStep)
 	blockerKind := "runtime_repair_contract_exhausted"
+	decisionScope := decisionContextScopeWorkorchRuntime
+	decisionDependency := decisionContextDependencyRuntimeContract
 	allowedRecoveryActions := []string{"retry_same_step", "replan", "provide_information", "terminate"}
 	preferredRecoveryActions := []string{"retry_same_step", "replan", "terminate"}
+	if boolValue(diagnostics["externalDependencyUnavailable"]) || failedStepHasExternalRuntimeDependency(failedStep) {
+		blockerKind = "external_dependency_unavailable"
+		decisionScope = decisionContextScopeExternalDependency
+		decisionDependency = "external_dependency"
+		allowedRecoveryActions = []string{"provide_information", "retry_same_step", "replan", "terminate"}
+		preferredRecoveryActions = []string{"provide_information", "retry_same_step", "replan"}
+	}
 	if runLevelStats.exceeded() {
 		blockerKind = "runtime_ineffective_convergence"
 		allowedRecoveryActions = []string{"replan", "provide_information", "terminate"}
@@ -1237,8 +1272,8 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		recommendedNextActions = actions
 	}
 	decisionContext := map[string]any{
-		decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
-		decisionContextKeyDependency:     decisionContextDependencyRuntimeContract,
+		decisionContextKeyScope:          decisionScope,
+		decisionContextKeyDependency:     decisionDependency,
 		decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
 		decisionContextKeyResultPolicy:   decisionContextResultPolicyRejected,
 		"allowedRecoveryActions":         allowedRecoveryActions,
