@@ -157,6 +157,26 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 			return o.handleRuntimeStepFailure(ctx, run, step, nil, output, "runtime convergence authority dispatch gate failed", finalizeErr)
 		}
 	}
+	runtimeInput := cloneStepPayload(step.Input)
+	if err := validateRuntimeStepKindRequiredOutputBeforeRuntime(step.Kind, runtimeInput); err != nil {
+		output := map[string]any{
+			"status":              "failed",
+			"stage":               "runtime_required_output_kind_rejected",
+			"error":               err.Error(),
+			"failureReason":       "runtime_required_output_kind_invalid",
+			failureOutputKeyClass: failureClassRuntimeContractMisalign,
+			failureOutputKeySignature: runtimeFailureSignature(failureClassRuntimeContractMisalign, step, map[string]any{
+				"stage": "runtime_required_output_kind_rejected",
+				"error": err.Error(),
+			}, err),
+			"runtimeDiagnostics": map[string]any{
+				"kind":      "runtime_required_output_kind_rejected",
+				"operation": step.Kind,
+				"reason":    "runtime_step_kind_not_accepted_by_required_output",
+			},
+		}
+		return o.handleRuntimeStepFailure(ctx, run, step, nil, output, "runtime required output kind contract failed", err)
+	}
 	if err := o.steps.Update(ctx, step); err != nil {
 		return err
 	}
@@ -177,7 +197,6 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return err
 	}
 
-	runtimeInput := cloneStepPayload(step.Input)
 	if err := validateRuntimeValidationStepInputBeforeRuntime(step.Kind, runtimeInput); err != nil {
 		output := map[string]any{
 			"status":              "failed",

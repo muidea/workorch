@@ -17,6 +17,66 @@ func TestValidateRuntimeValidationStepInputBeforeRuntimeRejectsMissingTimeout(t 
 	}
 }
 
+func TestValidateRuntimeStepKindRequiredOutputBeforeRuntimeRejectsUnacceptedKind(t *testing.T) {
+	input := validationDispatchInputFixture()
+	required := mapFromValue(input["requiredOutput"])
+	required["acceptedKinds"] = []string{runtimemodel.StepKindShellCommand, managedValidationSessionNodeKind}
+	input["requiredOutput"] = required
+	input["repairActionPackage"] = map[string]any{"requiredOutput": required}
+	input[stepInputKeyStagePacket] = map[string]any{"requiredOutput": required}
+	input[currentActionContractKey] = map[string]any{
+		"currentFocus":   mapFromValue(input[coverageFocusKey]),
+		"requiredOutput": required,
+		"nextAction":     map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		"schemaVersion":  currentActionContractSchema,
+	}
+
+	err := validateRuntimeStepKindRequiredOutputBeforeRuntime(runtimemodel.StepKindMCPToolCall, input)
+	if err == nil || !strings.Contains(err.Error(), "not accepted") {
+		t.Fatalf("error = %v, want unaccepted runtime kind rejection", err)
+	}
+}
+
+func TestValidateRuntimeStepKindRequiredOutputBeforeRuntimeRejectsForbiddenKind(t *testing.T) {
+	input := validationDispatchInputFixture()
+	required := mapFromValue(input["requiredOutput"])
+	required["acceptedKinds"] = []string{runtimemodel.StepKindShellCommand, runtimemodel.StepKindMCPToolCall}
+	required["forbiddenKinds"] = []string{runtimemodel.StepKindMCPToolCall}
+	input["requiredOutput"] = required
+	input["repairActionPackage"] = map[string]any{"requiredOutput": required}
+	input[stepInputKeyStagePacket] = map[string]any{"requiredOutput": required}
+	input[currentActionContractKey] = map[string]any{
+		"currentFocus":   mapFromValue(input[coverageFocusKey]),
+		"requiredOutput": required,
+		"nextAction":     map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		"schemaVersion":  currentActionContractSchema,
+	}
+
+	err := validateRuntimeStepKindRequiredOutputBeforeRuntime(runtimemodel.StepKindMCPToolCall, input)
+	if err == nil || !strings.Contains(err.Error(), "forbidden") {
+		t.Fatalf("error = %v, want forbidden runtime kind rejection", err)
+	}
+}
+
+func TestValidateRuntimeStepKindRequiredOutputBeforeRuntimeSkipsLLMCarrierStep(t *testing.T) {
+	input := validationDispatchInputFixture()
+	required := mapFromValue(input["requiredOutput"])
+	required["acceptedKinds"] = []string{runtimemodel.StepKindShellCommand}
+	input["requiredOutput"] = required
+	input["repairActionPackage"] = map[string]any{"requiredOutput": required}
+	input[stepInputKeyStagePacket] = map[string]any{"requiredOutput": required}
+	input[currentActionContractKey] = map[string]any{
+		"currentFocus":   mapFromValue(input[coverageFocusKey]),
+		"requiredOutput": required,
+		"nextAction":     map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		"schemaVersion":  currentActionContractSchema,
+	}
+
+	if err := validateRuntimeStepKindRequiredOutputBeforeRuntime(llmWorkspaceExecutionStepKind, input); err != nil {
+		t.Fatalf("validateRuntimeStepKindRequiredOutputBeforeRuntime llm carrier: %v", err)
+	}
+}
+
 func TestNormalizeConcreteValidationEvidenceNodeEnvelopeAddsShellTimeout(t *testing.T) {
 	input := validationDispatchInputFixture()
 	delete(input, "timeoutMillis")

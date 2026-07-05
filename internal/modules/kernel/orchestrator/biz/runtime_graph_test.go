@@ -74,6 +74,64 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchSerializesLLMDispatchRequests(
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeDispatchRejectsKindOutsideRequiredOutput(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-dispatch-kind-contract")
+	workspaceID := common.WorkspaceID("ws-dispatch-kind-contract")
+	stepID := common.StepID(runID + "/graph-001/001-invalid-mcp")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	workspace := &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	input := validationDispatchInputFixture()
+	required := mapFromValue(input["requiredOutput"])
+	required["acceptedKinds"] = []string{runtimemodel.StepKindShellCommand, managedValidationSessionNodeKind}
+	input["requiredOutput"] = required
+	input["repairActionPackage"] = map[string]any{"requiredOutput": required}
+	delete(input, "convergenceContract")
+	delete(input, stepInputKeyStagePacket)
+	delete(input, currentActionContractKey)
+	input[stepInputKeyGraphBatch] = true
+	input[stepInputKeyGraphNodeID] = "invalid-mcp"
+	input[stepInputKeyGraphRootStepID] = string(runID + "/step-1")
+
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "completed"}}
+	orch := NewRuntimeOrchestrator(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+
+	err := orch.dispatchStepWithWorkspace(ctx, run, stepID, runtimemodel.StepKindMCPToolCall, input, workspace)
+	if err != nil {
+		t.Fatalf("dispatchStepWithWorkspace: %v", err)
+	}
+	if len(runtime.calls) != 0 {
+		t.Fatalf("runtime calls = %+v, want preflight rejection before runtime execution", runtime.calls)
+	}
+	step, err := stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("read step: %v", err)
+	}
+	if step.State != common.StepStateFailed {
+		t.Fatalf("step state = %s, want failed", step.State)
+	}
+	if stage := stringFromMap(step.Output, "stage"); stage != "runtime_required_output_kind_rejected" {
+		t.Fatalf("step output stage = %q, want runtime_required_output_kind_rejected; output=%+v", stage, step.Output)
+	}
+}
+
 func TestNormalizeGraphStateChangingDispatchAuthorityRewritesStaleValidationAuthority(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-graph-state-change-authority",

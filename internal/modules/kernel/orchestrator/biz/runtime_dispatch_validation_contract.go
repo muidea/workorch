@@ -8,6 +8,52 @@ import (
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func validateRuntimeStepKindRequiredOutputBeforeRuntime(kind string, input map[string]any) error {
+	kind = canonicalRuntimeGraphNodeKind(kind)
+	if kind == "" || kind == llmWorkspaceExecutionStepKind || len(input) == 0 {
+		return nil
+	}
+	required := activeRequiredOutputForCurrentAction(input)
+	if len(required) == 0 {
+		return nil
+	}
+	if runtimeRequiredOutputForbidsKind(required, kind) {
+		return fmt.Errorf("%w: runtime step kind %s is forbidden by current requiredOutput", common.ErrInvalidArgument, kind)
+	}
+	accepted := runtimeRequiredOutputAcceptedKinds(required)
+	if len(accepted) == 0 {
+		return nil
+	}
+	if !accepted[kind] {
+		return fmt.Errorf("%w: runtime step kind %s is not accepted by current requiredOutput.acceptedKinds", common.ErrInvalidArgument, kind)
+	}
+	return nil
+}
+
+func runtimeRequiredOutputAcceptedKinds(required map[string]any) map[string]bool {
+	ret := map[string]bool{}
+	for _, item := range stringSliceFromValue(required["acceptedKinds"]) {
+		kind := canonicalRuntimeGraphNodeKind(item)
+		if kind != "" {
+			ret[kind] = true
+		}
+	}
+	return ret
+}
+
+func runtimeRequiredOutputForbidsKind(required map[string]any, kind string) bool {
+	kind = canonicalRuntimeGraphNodeKind(kind)
+	if kind == "" {
+		return false
+	}
+	for _, item := range stringSliceFromValue(required["forbiddenKinds"]) {
+		if canonicalRuntimeGraphNodeKind(item) == kind {
+			return true
+		}
+	}
+	return false
+}
+
 func validateRuntimeValidationStepInputBeforeRuntime(kind string, input map[string]any) error {
 	if !runtimeStepKindCanProduceValidationEvidence(kind) || len(input) == 0 {
 		return nil
