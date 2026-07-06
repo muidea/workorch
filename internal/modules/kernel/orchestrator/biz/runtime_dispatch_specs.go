@@ -20,18 +20,6 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 	if run == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if summary, ok := o.resultManager().rejectedRunResultSummary(ctx, run.ID); ok {
-		reason := strings.TrimSpace(summary)
-		if reason == "" {
-			reason = "run has rejected result"
-		}
-		if !isTerminalRunState(run.State) {
-			if err := o.closeLoadedRun(ctx, run, common.RunStateFailed, reason); err != nil {
-				return nil, err
-			}
-		}
-		return nil, common.ErrConflict
-	}
 	if err := o.ensureGapBaselineBeforeDispatch(ctx, run); err != nil {
 		return nil, err
 	}

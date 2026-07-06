@@ -2420,6 +2420,85 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionWritesRejectedResultBeforeTi
 	}
 }
 
+func TestRuntimeOrchestrator_RejectedResultDoesNotPreemptRepairExhaustionBlocker(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resultRepo := memory.NewResultRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{Results: resultRepo},
+		events.NewMemoryHub(),
+	)
+	workspaceID := common.WorkspaceID("ws-rejected-result-repair-exhaustion")
+	runID := common.RunID("run-rejected-result-repair-exhaustion")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-rejected-result-repair-exhaustion",
+		State:           common.RunStateActive,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	signature := "class=runtime_failed|target=contract"
+	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/repair-%03d-of-planning-001", runID, attempt)),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  attempt,
+				stepInputKeyRepairOfRootStepID:    string(runID) + "/step-1",
+				stepInputKeyRepairOfFailureClass:  failureClassRuntime,
+				stepInputKeyRepairOfFailureSig:    signature,
+			},
+			Output: map[string]any{
+				"error":                   "invalid argument: state-changing llm repair step returned read-only executionGraph without patch/apply",
+				failureOutputKeyClass:     failureClassRuntime,
+				failureOutputKeySignature: signature,
+			},
+		}); err != nil {
+			t.Fatalf("seed repair attempt %d: %v", attempt, err)
+		}
+	}
+	failedStep, err := stepRepo.Get(ctx, common.StepID(fmt.Sprintf("%s/repair-%03d-of-planning-001", runID, defaultMaxRuntimeRepairAttempts)))
+	if err != nil {
+		t.Fatalf("get failed repair: %v", err)
+	}
+	if err := orch.resultManager().recordRejectedCompletionDoDAssessment(ctx, run, failedStep, failedStep.Output); err != nil {
+		t.Fatalf("seed rejected result: %v", err)
+	}
+
+	if err := orch.dispatchRuntimeRepairFollowUp(ctx, run, failedStep, errors.New("invalid argument: state-changing llm repair step returned read-only executionGraph without patch/apply")); err != nil {
+		t.Fatalf("repair exhaustion: %v", err)
+	}
+	blockedRun, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if blockedRun.State != common.RunStateBlockedOnDecision || blockedRun.BlockingTicketID == "" {
+		t.Fatalf("run = %+v, want explicit repair exhaustion decision blocker", blockedRun)
+	}
+	if _, err := ticketRepo.Get(ctx, blockedRun.BlockingTicketID); err != nil {
+		t.Fatalf("get blocker ticket: %v", err)
+	}
+}
+
 type decisionOwnerEventingTicketRepository struct {
 	delegate repository.DecisionTicketRepository
 	hub      events.Hub

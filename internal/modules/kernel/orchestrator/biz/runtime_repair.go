@@ -530,13 +530,6 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 	failedStep *runModel.Step,
 	execErr error,
 ) error {
-	if summary, ok := o.resultManager().rejectedRunResultSummary(ctx, run.ID); ok {
-		reason := strings.TrimSpace(summary)
-		if reason == "" {
-			reason = "run has rejected result"
-		}
-		return o.FailRun(ctx, run.ID, reason)
-	}
 	policy := o.RuntimePolicy()
 	switch runtimeRecoveryActionForFailedStep(ctx, o.repairManager(), policy, o.runtime != nil, o.tickets != nil, run, failedStep) {
 	case runtimeRecoveryActionProviderRetry:
@@ -903,10 +896,12 @@ func (r *repairSubsystem) recoveryDispatchSpec(
 		if err != nil {
 			return stepDispatchSpec{}, true, err
 		}
+		input := providerRetryStepInputWithMaxAttempts(failedStep, attempt, execErr, maxProviderRetryAttempts)
+		input["allowDispatchAfterRejectedResult"] = true
 		return stepDispatchSpec{
 			ID:    stepID,
 			Kind:  failedStep.Kind,
-			Input: providerRetryStepInputWithMaxAttempts(failedStep, attempt, execErr, maxProviderRetryAttempts),
+			Input: input,
 		}, true, nil
 	case runtimeRecoveryActionRuntimeRepair:
 		attempts := r.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep)
@@ -918,10 +913,12 @@ func (r *repairSubsystem) recoveryDispatchSpec(
 		if err != nil {
 			return stepDispatchSpec{}, true, err
 		}
+		input := builder.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr)
+		input["allowDispatchAfterRejectedResult"] = true
 		return stepDispatchSpec{
 			ID:    stepID,
 			Kind:  initialStepKind(run),
-			Input: builder.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr),
+			Input: input,
 		}, true, nil
 	case runtimeRecoveryActionContractViolationRetry:
 		attempt := contractViolationRetryAttemptCount(ctx, r, run.ID, failedStep) + 1
@@ -929,10 +926,12 @@ func (r *repairSubsystem) recoveryDispatchSpec(
 		if err != nil {
 			return stepDispatchSpec{}, true, err
 		}
+		input := builder.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr)
+		input["allowDispatchAfterRejectedResult"] = true
 		return stepDispatchSpec{
 			ID:    stepID,
 			Kind:  initialStepKind(run),
-			Input: builder.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr),
+			Input: input,
 		}, true, nil
 	default:
 		return stepDispatchSpec{}, false, nil

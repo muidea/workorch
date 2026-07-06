@@ -349,7 +349,7 @@ func TestRuntimeOrchestrator_RejectedResultAttributesProviderRetryToTerminalStep
 	}
 }
 
-func TestRuntimeOrchestrator_DispatchNextClosesRunningRunWithRejectedResult(t *testing.T) {
+func TestRuntimeOrchestrator_DispatchNextDoesNotPromoteRejectedResultToTerminalState(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -416,9 +416,8 @@ func TestRuntimeOrchestrator_DispatchNextClosesRunningRunWithRejectedResult(t *t
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if runItem.State != common.RunStateFailed ||
-		runItem.FailureReason != "DoD not satisfied; stop execution." {
-		t.Fatalf("run = %+v, want failed with rejected result summary", runItem)
+	if runItem.State != common.RunStateActive || runItem.FailureReason != "" {
+		t.Fatalf("run = %+v, want rejected result to remain diagnostic and not close run", runItem)
 	}
 }
 
