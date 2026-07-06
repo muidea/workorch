@@ -2052,6 +2052,96 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionFailsRun(t *testing.T) {
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairExhaustionUsesCommandContractBlocker(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-command-contract-exhausted")
+	runID := common.RunID("run-command-contract-exhausted")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-command-contract",
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	diagnostic := map[string]any{
+		"class":                         runtimemodel.ValidationDiagnosticCommandInvalid,
+		"stage":                         "shell_validation_contract_rejected",
+		"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetCommandContract,
+		"commandPolicyViolation":        true,
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/verify"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"repairObjective": repairObjectiveConcreteValidationEvidence,
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": "validate"},
+			},
+			"validationFailureDiagnostic": diagnostic,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": stateChangingRepairRequiredOutput(),
+			},
+		},
+		Output: map[string]any{
+			"status":                      "failed",
+			"stage":                       "shell_validation_contract_rejected",
+			"validationFailureDiagnostic": diagnostic,
+		},
+	}
+
+	if err := orch.blockOnRuntimeRepairExhaustion(ctx, run, failedStep, errors.New("invalid argument")); err != nil {
+		t.Fatalf("blockOnRuntimeRepairExhaustion: %v", err)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	ticket, err := ticketRepo.Get(ctx, runItem.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("get ticket: %v", err)
+	}
+	if runItem.State != common.RunStateBlockedOnDecision || runItem.BlockingTicketID == "" {
+		t.Fatalf("run = %+v, want blocked decision for exhausted command contract retry", runItem)
+	}
+	if ticket.Context["blockerKind"] != "validation_command_contract_retry_exhausted" ||
+		ticket.Context["validationCommandContractRetryExhausted"] != true {
+		t.Fatalf("ticket context = %+v, want command contract exhaustion blocker", ticket.Context)
+	}
+	requiredOutput := mapFromValue(mapFromValue(mapFromValue(ticket.Context["failedStepInput"])["repairActionPackage"])["requiredOutput"])
+	if boolValue(requiredOutput["mustIncludeStateChangingNode"]) ||
+		stringSliceContains(stringSliceFromValue(requiredOutput["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("ticket failedStepInput requiredOutput = %+v, want no stale state-changing output", requiredOutput)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairExhaustionKeepsExternalDependencyBlocker(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

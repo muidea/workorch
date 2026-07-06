@@ -12,6 +12,9 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 	if failedStep == nil {
 		return false
 	}
+	if validationCommandContractFailure(nil, nil, failedStep) {
+		return false
+	}
 	if capabilityInputLocatorInvalidFailure(failedStep) {
 		return false
 	}

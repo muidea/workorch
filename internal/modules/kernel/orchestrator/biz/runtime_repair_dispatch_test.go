@@ -9,6 +9,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type repairDispatchSpecBuilderStub struct{}
@@ -195,6 +196,33 @@ func TestRuntimeRepairExhaustionDecisionGateAllowsExternalDependencyDecision(t *
 
 	if runtimeRepairExhaustionDecisionNotEligible(run, failed) {
 		t.Fatal("runtimeRepairExhaustionDecisionNotEligible = true, want decision eligibility for external dependency")
+	}
+}
+
+func TestRuntimeRepairExhaustionDecisionGateAllowsCommandContractBlocker(t *testing.T) {
+	run := &runmodel.Run{ID: "run-command-contract-gate", WorkspaceID: "ws-command-contract-gate"}
+	failed := &runmodel.Step{
+		ID:    "run-command-contract-gate/failed",
+		RunID: run.ID,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": "validate"},
+			},
+			"validationFailureDiagnostic": map[string]any{
+				"class":                         runtimemodel.ValidationDiagnosticCommandInvalid,
+				"stage":                         "shell_validation_contract_rejected",
+				"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetCommandContract,
+				"commandPolicyViolation":        true,
+			},
+		},
+		Output: map[string]any{
+			"error": "validation command contract retry exhausted",
+		},
+	}
+
+	if runtimeRepairExhaustionDecisionNotEligible(run, failed) {
+		t.Fatal("runtimeRepairExhaustionDecisionNotEligible = true, want blocker for exhausted command contract validation retry")
 	}
 }
 

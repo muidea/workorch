@@ -105,7 +105,27 @@ func projectStepContractAudit(sources ...map[string]any) map[string]any {
 		ret["requiredOutputSource"] = requiredOutputSource
 		ret["requiredOutput"] = compactStepRequiredOutputForAudit(requiredOutput)
 	}
+	if diagnostic := selectStepContractValidationFailureDiagnostic(input, currentActionContract, stagePacket, executionContext); len(diagnostic) > 0 {
+		ret["validationFailureDiagnostic"] = diagnostic
+	}
 	return ret
+}
+
+func selectStepContractValidationFailureDiagnostic(input map[string]any, currentActionContract map[string]any, stagePacket map[string]any, executionContext map[string]any) map[string]any {
+	for _, source := range []map[string]any{
+		input,
+		readModelMapValue(input["runtimeDiagnostics"]),
+		readModelMapValue(input["lastFailureDiagnostics"]),
+		currentActionContract,
+		stagePacket,
+		executionContext,
+		readModelMapValue(executionContext["runtimeDiagnostics"]),
+	} {
+		if diagnostic := readModelMapValue(source["validationFailureDiagnostic"]); len(diagnostic) > 0 {
+			return compactStepValidationFailureDiagnosticForAudit(diagnostic)
+		}
+	}
+	return nil
 }
 
 func selectStepContractRequiredOutput(input map[string]any, currentActionContract map[string]any, stagePacket map[string]any, executionContext map[string]any) (map[string]any, string) {
@@ -126,6 +146,41 @@ func selectStepContractRequiredOutput(input map[string]any, currentActionContrac
 		}
 	}
 	return nil, ""
+}
+
+func compactStepValidationFailureDiagnosticForAudit(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"schemaVersion",
+		"class",
+		"recommendedEvidenceTargetType",
+		"stage",
+		"operation",
+		"commandKind",
+		"reason",
+		"violatedRule",
+		"failureSignature",
+	} {
+		if value := readModelStringValue(input[key]); value != "" {
+			ret[key] = value
+		}
+	}
+	for _, key := range []string{
+		"commandPolicyViolation",
+		"stateChangingEvidenceNeeded",
+		"implementationGap",
+	} {
+		if value, ok := input[key].(bool); ok {
+			ret[key] = value
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func compactStepRequiredOutputForAudit(input map[string]any) map[string]any {

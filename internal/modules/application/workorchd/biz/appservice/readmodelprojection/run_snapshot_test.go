@@ -686,6 +686,66 @@ func TestProjectStepViewIncludesCompactContractAuditWithoutFullInput(t *testing.
 	}
 }
 
+func TestProjectStepViewPrefersValidationCurrentActionOverStaleRepairPackage(t *testing.T) {
+	t.Parallel()
+
+	projected := ProjectStepView(StepView{
+		ID:    "run-a/step-command-contract",
+		Kind:  "llm/workspace_execution",
+		State: "failed",
+		Input: map[string]any{
+			"runtimeStage": "verification",
+			"currentActionContract": map[string]any{
+				"nextAction": map[string]any{"kind": "validate"},
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence": true,
+					"mustIncludeStateChangingNode":          false,
+					"acceptedKinds":                         []any{"shell/command", "mcp/tool_call", "validation/managed_session"},
+					"forbiddenKinds":                        []any{"patch/apply", "git/write"},
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []any{"patch/apply"},
+				},
+			},
+			"validationFailureDiagnostic": map[string]any{
+				"class":                         "validation_command_invalid",
+				"recommendedEvidenceTargetType": "command_contract",
+				"stage":                         "shell_validation_contract_rejected",
+				"commandPolicyViolation":        true,
+			},
+		},
+	})
+
+	audit := projected.ContractAudit
+	if audit["currentActionKind"] != "validate" ||
+		audit["requiredOutputSource"] != "currentActionContract.requiredOutput" {
+		t.Fatalf("ContractAudit = %+v, want current validation action as authority", audit)
+	}
+	required := readModelMapValue(audit["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] == true ||
+		readModelStringSliceContains(readModelStringSliceValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want stale state-changing package ignored", required)
+	}
+	diagnostic := readModelMapValue(audit["validationFailureDiagnostic"])
+	if diagnostic["class"] != "validation_command_invalid" ||
+		diagnostic["recommendedEvidenceTargetType"] != "command_contract" ||
+		diagnostic["commandPolicyViolation"] != true {
+		t.Fatalf("validationFailureDiagnostic = %+v, want command contract diagnostic visible", diagnostic)
+	}
+}
+
+func readModelStringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestAuthorityDiagnosticsFromRunSnapshotIncludesRuntimeDiagnostics(t *testing.T) {
 	t.Parallel()
 

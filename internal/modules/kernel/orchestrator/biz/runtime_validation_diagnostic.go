@@ -29,6 +29,84 @@ func validationFailureDiagnosticFromStep(step *runModel.Step, execErr error) map
 	return enrichValidationFailureDiagnosticFromStep(diagnostic, step, execErr)
 }
 
+func validationCommandContractFailure(input map[string]any, pkg map[string]any, failedStep *runModel.Step) bool {
+	return len(validationCommandContractFailureDiagnostic(input, pkg, failedStep)) > 0
+}
+
+func validationCommandContractFailureDiagnostic(input map[string]any, pkg map[string]any, failedStep *runModel.Step) map[string]any {
+	if diagnostic := validationCommandContractFailureDiagnosticFromSources(input, pkg); len(diagnostic) > 0 {
+		return diagnostic
+	}
+	for _, diagnostic := range validationFailureDiagnosticCandidates(input, pkg, failedStep) {
+		if normalized := normalizeValidationCommandContractDiagnostic(diagnostic); len(normalized) > 0 {
+			return normalized
+		}
+	}
+	if failedStep != nil {
+		if diagnostic := validationFailureDiagnosticFromStep(failedStep, nil); len(diagnostic) > 0 {
+			if normalized := normalizeValidationCommandContractDiagnostic(diagnostic); len(normalized) > 0 {
+				return normalized
+			}
+		}
+		return validationCommandContractFailureDiagnosticFromSources(failedStep.Input, failedStep.Output)
+	}
+	return nil
+}
+
+func validationCommandContractFailureDiagnosticFromSources(sources ...map[string]any) map[string]any {
+	for _, source := range sources {
+		for _, diagnostic := range validationCommandContractDiagnosticSourceCandidates(source) {
+			if normalized := normalizeValidationCommandContractDiagnostic(diagnostic); len(normalized) > 0 {
+				return normalized
+			}
+		}
+	}
+	return nil
+}
+
+func validationCommandContractDiagnosticSourceCandidates(source map[string]any) []map[string]any {
+	if len(source) == 0 {
+		return nil
+	}
+	runtimeDiagnostics := mapFromValue(source["runtimeDiagnostics"])
+	lastFailure := mapFromValue(source["lastFailureDiagnostics"])
+	currentFailure := mapFromValue(source["currentFailure"])
+	progress := mapFromValue(source["currentExecutionProgress"])
+	return []map[string]any{
+		source,
+		mapFromValue(source["validationFailureDiagnostic"]),
+		runtimeDiagnostics,
+		mapFromValue(runtimeDiagnostics["validationFailureDiagnostic"]),
+		lastFailure,
+		mapFromValue(lastFailure["validationFailureDiagnostic"]),
+		currentFailure,
+		mapFromValue(currentFailure["validationFailureDiagnostic"]),
+		mapFromValue(progress["lastObservedFailure"]),
+		mapFromValue(mapFromValue(progress["lastObservedFailure"])["validationFailureDiagnostic"]),
+	}
+}
+
+func normalizeValidationCommandContractDiagnostic(diagnostic map[string]any) map[string]any {
+	if len(diagnostic) == 0 || !validationFailureDiagnosticIsCommandContractFailure(diagnostic) {
+		return nil
+	}
+	ret := cloneStepPayload(diagnostic)
+	if strings.TrimSpace(stringFromMap(ret, "schemaVersion")) == "" {
+		ret["schemaVersion"] = runtimemodel.ValidationFailureDiagnosticSchemaVersion
+	}
+	if strings.TrimSpace(stringFromMap(ret, "class")) == "" {
+		ret["class"] = runtimemodel.ValidationDiagnosticCommandInvalid
+	}
+	if strings.TrimSpace(stringFromMap(ret, "recommendedEvidenceTargetType")) == "" {
+		ret["recommendedEvidenceTargetType"] = runtimemodel.ValidationEvidenceTargetCommandContract
+	}
+	if strings.TrimSpace(stringFromMap(ret, "stage")) == "" {
+		ret["stage"] = "shell_validation_contract_rejected"
+	}
+	ret["commandPolicyViolation"] = true
+	return compactLLMContextMap(ret, 1)
+}
+
 func classifyShellValidationFailureDiagnostic(step *runModel.Step, execErr error) map[string]any {
 	if step == nil || len(step.Output) == 0 {
 		return nil

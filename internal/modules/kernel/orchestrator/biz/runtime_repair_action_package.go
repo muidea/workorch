@@ -15,6 +15,9 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	enrichRepairInputWithProgressFailureSignals(input)
 	refreshRepairStrategyReassessment(input)
 	priorPackage := mapFromValue(input["repairActionPackage"])
+	if pkg := validationCommandContractRepairActionPackage(input, priorPackage, rawFailedOutput...); len(pkg) > 0 {
+		return pkg
+	}
 	requiredOutput := stateChangingRepairRequiredOutput()
 	pkg := map[string]any{
 		"requiredOutput": requiredOutput,
@@ -243,6 +246,50 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	}
 	if len(pkg) <= 1 {
 		return nil
+	}
+	return pkg
+}
+
+func validationCommandContractRepairActionPackage(input map[string]any, priorPackage map[string]any, rawFailedOutput ...map[string]any) map[string]any {
+	diagnostic := validationCommandContractFailureDiagnosticFromSources(append([]map[string]any{input, priorPackage}, rawFailedOutput...)...)
+	if len(diagnostic) == 0 {
+		return nil
+	}
+	pkg := cloneStepPayload(priorPackage)
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	pkg["repairObjective"] = repairObjectiveConcreteValidationEvidence
+	pkg["boundedValidationRequired"] = true
+	pkg["evidenceRepairRequired"] = true
+	pkg["validationCommandContractRetry"] = true
+	pkg["validationFailureDiagnostic"] = diagnostic
+	if currentFailure := repairActionCurrentFailure(input, rawFailedOutput...); len(currentFailure) > 0 {
+		pkg["currentFailure"] = currentFailure
+	}
+	if diagnostics := repairActionLastFailureDiagnostics(input, rawFailedOutput...); len(diagnostics) > 0 {
+		pkg["lastFailureDiagnostics"] = diagnostics
+	}
+	if context := coverageWorkItemContextFromInput(input); len(context) > 0 {
+		context = coverageWorkItemContextAlignedToFocus(context, repairCoverageFocusFromInput(input))
+		input[coverageWorkItemContextKey] = context
+		pkg[coverageWorkItemContextKey] = context
+	}
+	stripRepairActionPackageImplementationTargetEvidence(pkg)
+	requiredOutput := concreteValidationEvidenceRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
+	requiredOutput["mustAddressValidationDiagnostic"] = true
+	requiredOutput["validationCommandContractRetry"] = true
+	if targetType := strings.TrimSpace(stringFromMap(diagnostic, "recommendedEvidenceTargetType")); targetType != "" {
+		requiredOutput["recommendedEvidenceTargetType"] = targetType
+	}
+	pkg["requiredOutput"] = requiredOutput
+	pkg["exitCriteria"] = []string{
+		"bounded_validation_evidence_acquired_then_assess",
+		"validation_contract_retry_exhausted_blocker",
+	}
+	reapplyRepairCoverageFocusContract(input, pkg)
+	if contract := repairActionOutputDecisionContract(input, pkg, requiredOutput, rawFailedOutput...); len(contract) > 0 {
+		pkg["outputDecisionContract"] = contract
 	}
 	return pkg
 }

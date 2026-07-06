@@ -1184,12 +1184,12 @@ func TestNextActionForRunValidationLoopRoutesStateChangeDespiteLatestContractDia
 	if err != nil {
 		t.Fatalf("NextActionForRun: %v", err)
 	}
-	if action.Type != runtimemodel.NextActionTypeStateChange || action.StageMode != "validation_no_delta" {
-		t.Fatalf("next action = %+v, want state_change from accumulated no-delta validation failures", action)
+	if action.Type != runtimemodel.NextActionTypeValidate || action.StageMode != "command_contract_retry" {
+		t.Fatalf("next action = %+v, want validation retry because latest command contract failure is authoritative", action)
 	}
-	if stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeStateChange) ||
-		!stringSliceContains(stringSliceFromValue(action.RequiredOutput["acceptedKinds"]), "patch/apply") {
-		t.Fatalf("next action = %+v, want state-changing contract not validation-only", action)
+	if !stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeStateChange) ||
+		stringSliceContains(stringSliceFromValue(action.RequiredOutput["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("next action = %+v, want validation-only contract with state_change forbidden", action)
 	}
 }
 

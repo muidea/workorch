@@ -259,6 +259,14 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 	if !convergenceNextActionAuthorityAllowed(input) {
 		return false
 	}
+	if validationCommandContractFailure(input, mapFromValue(input["repairActionPackage"]), failedStep) {
+		if contract.RepairActionPackage == nil {
+			contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+		}
+		convergenceContractAttachCoverageContext(input, contract)
+		populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
+		return true
+	}
 	if convergenceValidationRepairEscalationBlocksStaleNextAction(input, run) {
 		return false
 	}
@@ -2017,6 +2025,15 @@ func repairHasDirectImplementationTargetEvidence(input map[string]any, pkg map[s
 
 func stateChangingRepairActionPackageForConvergence(input map[string]any, failedStep *runModel.Step) map[string]any {
 	existing := cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+	var rawFailedOutput []map[string]any
+	if failedStep != nil && len(failedStep.Output) > 0 {
+		rawFailedOutput = append(rawFailedOutput, failedStep.Output)
+	}
+	if validationCommandContractFailure(input, existing, failedStep) {
+		if pkg := validationCommandContractRepairActionPackage(input, existing, rawFailedOutput...); len(pkg) > 0 {
+			return pkg
+		}
+	}
 	if len(existing) > 0 {
 		syncRepairActionPackageTargetSnapshots(input, existing)
 		required := mapFromValue(existing["requiredOutput"])
@@ -2027,10 +2044,6 @@ func stateChangingRepairActionPackageForConvergence(input map[string]any, failed
 			reapplyRepairCoverageFocusContract(input, existing)
 			return existing
 		}
-	}
-	var rawFailedOutput []map[string]any
-	if failedStep != nil && len(failedStep.Output) > 0 {
-		rawFailedOutput = append(rawFailedOutput, failedStep.Output)
 	}
 	pkg := repairActionPackageFromRepairInput(input, rawFailedOutput...)
 	if len(pkg) == 0 {
@@ -2646,6 +2659,9 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 	if spec.Reason == "" {
 		return true
 	}
+	if decisionBlockDeclaresValidationCommandContractRetryExhausted(spec.Context) {
+		return true
+	}
 	if decisionBlockDeclaresNonContractRuntimeDependency(spec.Context) {
 		return true
 	}
@@ -2671,6 +2687,9 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 }
 
 func continuableDecisionContract(input map[string]any, context map[string]any, contract ConvergenceContract) bool {
+	if decisionBlockDeclaresValidationCommandContractRetryExhausted(context) {
+		return false
+	}
 	if continuableNextActionKind(convergenceNextActionKind(nil, input)) {
 		return true
 	}
@@ -2687,6 +2706,30 @@ func continuableDecisionContract(input map[string]any, context map[string]any, c
 	default:
 		return false
 	}
+}
+
+func decisionBlockDeclaresValidationCommandContractRetryExhausted(context map[string]any) bool {
+	if len(context) == 0 {
+		return false
+	}
+	if boolValue(context["validationCommandContractRetryExhausted"]) {
+		return true
+	}
+	if diagnostic := validationCommandContractFailureDiagnosticFromSources(
+		context,
+		mapFromValue(context["validationFailureDiagnostic"]),
+		mapFromValue(context["runtimeDiagnostics"]),
+		mapFromValue(context["failedStepInput"]),
+		mapFromValue(context["failedStepOutput"]),
+	); len(diagnostic) > 0 {
+		switch strings.TrimSpace(stringFromMap(context, "blockerKind")) {
+		case "validation_command_contract_retry_exhausted":
+			return true
+		default:
+			return boolValue(mapFromValue(context["runtimeDiagnostics"])["validationCommandContractRetryExhausted"])
+		}
+	}
+	return false
 }
 
 func continuableNextActionKind(kind string) bool {
@@ -2765,6 +2808,9 @@ func mechanicalEvidenceAcquisitionContractCanContinue(input map[string]any, cont
 }
 
 func mechanicalConcreteValidationContractCanContinue(input map[string]any, contract ConvergenceContract) bool {
+	if boolValue(input["validationCommandContractRetryExhausted"]) {
+		return false
+	}
 	pkg := mapFromValue(contract.RepairActionPackage)
 	if len(pkg) == 0 {
 		pkg = mapFromValue(input["repairActionPackage"])

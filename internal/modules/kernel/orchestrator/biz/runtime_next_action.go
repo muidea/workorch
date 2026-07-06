@@ -681,6 +681,50 @@ func validationNextActionRouteForRejectedDiagnostics(run *runmodel.Run, item map
 		return validationNextActionRoute{}
 	}
 	policy := validationDiagnosticPolicyForCoverageItem(run, item)
+	if validationDiagnosticEvidenceRecordIsCommandContractFailure(latest) {
+		count := repeatedValidationDiagnosticCountForCoverageItem(run, item, records, latest)
+		maxRetries := validationOnlyRetryMaxForPolicy(policy)
+		if maxRetries <= 0 {
+			maxRetries = validationNoDeltaLoopRejectedThreshold
+		}
+		if maxRetries > 0 && count >= maxRetries {
+			route := validationNextActionRoute{
+				Route:                "validation_contract_retry_exhausted",
+				ActionType:           runtimemodel.NextActionTypeFail,
+				StageMode:            "fail",
+				PolicyRef:            strings.TrimSpace(firstNonEmptyString(stringFromMap(policy, "policyRef"), stringFromMap(policy, "id"))),
+				Reason:               "validation command contract retry exhausted",
+				DiagnosticEvidenceID: string(latest.ID),
+				DiagnosticClass:      class,
+				ViolatedRule:         validationDiagnosticViolatedRule(latest),
+				FailureSignature:     validationDiagnosticFailureSignature(latest),
+				RetryAttempt:         count,
+				RetryMaxAttempts:     maxRetries,
+				EscalationReason:     "command_contract_retry_exhausted",
+			}
+			if validationDiagnosticManagedHarnessAvailable(policy) {
+				route.Route = runtimemodel.ValidationRouteManagedHarness
+				route.ActionType = runtimemodel.NextActionTypeValidate
+				route.StageMode = "managed_harness"
+				route.ManagedHarnessRef = strings.TrimSpace(stringFromMap(policy, "managedHarnessRef"))
+				route.Reason = "validation command contract retry exhausted; routing to managed harness"
+			}
+			return route
+		}
+		return validationNextActionRoute{
+			Route:                "validation_command_contract_retry",
+			ActionType:           runtimemodel.NextActionTypeValidate,
+			StageMode:            "command_contract_retry",
+			PolicyRef:            strings.TrimSpace(firstNonEmptyString(stringFromMap(policy, "policyRef"), stringFromMap(policy, "id"))),
+			Reason:               "validation command contract failure requires bounded validation evidence",
+			DiagnosticEvidenceID: string(latest.ID),
+			DiagnosticClass:      class,
+			ViolatedRule:         validationDiagnosticViolatedRule(latest),
+			FailureSignature:     validationDiagnosticFailureSignature(latest),
+			RetryAttempt:         count,
+			RetryMaxAttempts:     maxRetries,
+		}
+	}
 	if validationDiagnosticImpliesStateChange(class, policy) {
 		return validationNextActionRoute{
 			Route:                "validation_failure_state_change",
@@ -736,6 +780,13 @@ func validationNextActionRouteForRejectedDiagnostics(run *runmodel.Run, item map
 		}
 	}
 	return validationNextActionRoute{}
+}
+
+func validationDiagnosticEvidenceRecordIsCommandContractFailure(record *runtimemodel.EvidenceRecord) bool {
+	if record == nil {
+		return false
+	}
+	return len(validationCommandContractFailureDiagnosticFromSources(record.Metadata)) > 0
 }
 
 func validationNextActionRouteForCoverageItem(run *runmodel.Run, item map[string]any, evidenceKind string) validationNextActionRoute {
@@ -1021,6 +1072,9 @@ func validationNoDeltaRejectedDiagnosticCountForCoverageItem(run *runmodel.Run, 
 				continue
 			}
 		} else if idx <= latestAcceptedIndex {
+			continue
+		}
+		if validationDiagnosticEvidenceRecordIsCommandContractFailure(record) {
 			continue
 		}
 		if !validationDiagnosticAllowsNoDeltaStateChange(validationDiagnosticClassFromEvidenceRecord(record)) {

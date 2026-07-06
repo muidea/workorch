@@ -430,6 +430,68 @@ func applyRuntimeRepairValidationEscalationProjection(input map[string]any, vali
 	delete(input, "evidenceRepairSource")
 }
 
+func applyRuntimeRepairCommandContractValidationProjection(input map[string]any, failedStep *runModel.Step) bool {
+	if input == nil {
+		return false
+	}
+	pkg := cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+	diagnostic := validationCommandContractFailureDiagnostic(input, pkg, failedStep)
+	if len(diagnostic) == 0 {
+		return false
+	}
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	setRuntimeStage(input, runtimeStageVerification)
+	input[stepInputKeySoulStage] = soulStageValidation
+	input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+	input["boundedValidationRequired"] = true
+	input["evidenceRepairRequired"] = true
+	input["validationCommandContractRetry"] = true
+	input["validationFailureDiagnostic"] = diagnostic
+	for _, key := range []string{
+		"stateChangingOutputRequired",
+		"stateChangingEvidenceRepairRequired",
+		"validationRepairEscalatedToImplementation",
+		"emptyWorkspaceEvidenceEscalatedToImplementation",
+		"concreteFailureEvidenceRequired",
+		"evidenceAcquisitionReason",
+		"replanStateChangingContinuation",
+	} {
+		delete(input, key)
+		delete(pkg, key)
+	}
+	pkg["repairObjective"] = repairObjectiveConcreteValidationEvidence
+	pkg["boundedValidationRequired"] = true
+	pkg["evidenceRepairRequired"] = true
+	pkg["validationCommandContractRetry"] = true
+	pkg["validationFailureDiagnostic"] = diagnostic
+	stripRepairActionPackageImplementationTargetEvidence(pkg)
+	required := concreteValidationEvidenceRequiredOutputWithScratch(input, pkg, mapFromValue(pkg["requiredOutput"]))
+	required["mustAddressValidationDiagnostic"] = true
+	required["validationCommandContractRetry"] = true
+	if targetType := strings.TrimSpace(stringFromMap(diagnostic, "recommendedEvidenceTargetType")); targetType != "" {
+		required["recommendedEvidenceTargetType"] = targetType
+	}
+	pkg["requiredOutput"] = required
+	if contract := repairActionOutputDecisionContract(input, pkg, required); len(contract) > 0 {
+		pkg["outputDecisionContract"] = contract
+	}
+	input["repairActionPackage"] = pkg
+	currentActionSetRequiredOutput(input, required)
+	input["convergenceContract"] = map[string]any{
+		"state":            convergenceStateNeedValidation,
+		"runtimeStage":     runtimeStageVerification,
+		"runtimeStageMode": firstNonEmptyString(stringFromMap(input, stepInputKeyRuntimeStageMode), "strict_convergence"),
+		"repairObjective":  repairObjectiveConcreteValidationEvidence,
+	}
+	currentActionSetNextAction(input, map[string]any{
+		"kind":   runtimeModel.NextActionTypeValidate,
+		"reason": "validation command contract failure requires bounded validation evidence",
+	})
+	return true
+}
+
 func applyRuntimeRepairEmptyWorkspaceStateChangingProjection(input map[string]any, required bool) {
 	if input == nil || !required {
 		return
@@ -771,6 +833,10 @@ func applyRuntimeRepairStateChangingActionPackageProjection(
 	if input == nil || failedStep == nil || !boolValue(input["stateChangingOutputRequired"]) {
 		return
 	}
+	if validationCommandContractFailure(input, mapFromValue(input["repairActionPackage"]), failedStep) {
+		applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
+		return
+	}
 	if _, ok := input["lastFailureDiagnostics"]; !ok {
 		if fallback := runtimeRepairLastFailureDiagnostics(failedStep); len(fallback) > 0 {
 			input["lastFailureDiagnostics"] = fallback
@@ -1052,6 +1118,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		return finalizeRuntimeRepairFollowUpStepInput(run, failedStep, input)
 	}
 	applyRuntimeRepairFailureProjection(input, failedStep)
+	commandContractValidationRetry := validationCommandContractFailure(input, mapFromValue(input["repairActionPackage"]), failedStep)
 	assessmentOnlyCoverageRepair := doDCoverageContractCorrectionRequired(failedStep)
 	applyRuntimeRepairMissingCoverageProjection(ctx, o.steps, input, run, failedStep, assessmentOnlyCoverageRepair)
 	patchContext := o.repairManager().runtimeRepairPatchContext(ctx, run, failedStep)
@@ -1095,12 +1162,22 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		(coverageGapEligibleForValidationRepair &&
 			coverageValidationHasTargetEvidence &&
 			coverageValidationRepairShouldEscalateToStateChanging(ctx, o.repairManager(), run, failedStep, input))
+	if commandContractValidationRetry || validationCommandContractFailure(input, mapFromValue(input["repairActionPackage"]), failedStep) {
+		commandContractValidationRetry = true
+		validationRepairEscalatesToStateChanging = false
+		emptyWorkspaceStateChangingRepair = false
+		stateChangingEvidenceQualityRepair = false
+		coverageValidationEvidenceRepair = true
+		applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
+	}
 	if validationOnlyFocusPreemptsStateChangingRepair(input, mapFromValue(input["repairActionPackage"]), failedStep) {
 		validationRepairEscalatesToStateChanging = false
 	}
-	applyRuntimeRepairValidationEscalationProjection(input, validationRepairEscalatesToStateChanging)
-	applyRuntimeRepairEmptyWorkspaceStateChangingProjection(input, emptyWorkspaceStateChangingRepair)
-	applyRuntimeRepairStateChangingEvidenceQualityProjection(input, failedStep, stateChangingEvidenceQualityRepair)
+	if !commandContractValidationRetry {
+		applyRuntimeRepairValidationEscalationProjection(input, validationRepairEscalatesToStateChanging)
+		applyRuntimeRepairEmptyWorkspaceStateChangingProjection(input, emptyWorkspaceStateChangingRepair)
+		applyRuntimeRepairStateChangingEvidenceQualityProjection(input, failedStep, stateChangingEvidenceQualityRepair)
+	}
 	coverageValidationEvidenceRepair = coverageValidationEvidenceRepair && !validationRepairEscalatesToStateChanging && !stateChangingEvidenceQualityRepair
 	concreteEvidenceRepair := coverageNeedsConcreteEvidence || coverageValidationEvidenceRepair || (!assessmentOnlyCoverageRepair && !stateChangingEvidenceQualityRepair && doDVerificationEvidenceRepairRequired(failedStep))
 	applyRuntimeRepairConcreteEvidenceProjection(input, failedStep, concreteEvidenceRepair)
@@ -1109,7 +1186,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	applyRuntimeRepairValidationEvidenceProjection(input, coverageValidationEvidenceRepair)
 	ensureCoverageRepairTargetSet(input)
 	applyRuntimeRepairTransientRetryProjection(input, runtimeRepairFailureIsTransientExecutionTimeout(failedStep, execErr))
-	if !assessmentOnlyCoverageRepair && !concreteEvidenceRepair && stateChangingRepairRequired(run, failedStep, execErr) {
+	if !commandContractValidationRetry && !assessmentOnlyCoverageRepair && !concreteEvidenceRepair && stateChangingRepairRequired(run, failedStep, execErr) {
 		input["repairObjective"] = repairObjectiveStateChangingOutput
 		input["stateChangingOutputRequired"] = true
 		guidance := appendRepairGuidance(nil, stateChangingRepairGuidance()...)
@@ -1153,14 +1230,20 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	}
 	inheritPriorRepairContext(input, failedStep)
 	preserveStateChangingSchemaInvalidRepairContract(input, failedStep)
-	applyRuntimeRepairStateChangingActionPackageProjection(input, failedStep, execErr)
-	applyRuntimeRepairRepeatedReadOnlyStateChangingProjection(input, failedStep, attempt)
-	applyRuntimeRepairValidationEscalationFollowUpGuidance(input)
+	if commandContractValidationRetry {
+		applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
+	} else {
+		applyRuntimeRepairStateChangingActionPackageProjection(input, failedStep, execErr)
+		applyRuntimeRepairRepeatedReadOnlyStateChangingProjection(input, failedStep, attempt)
+		applyRuntimeRepairValidationEscalationFollowUpGuidance(input)
+	}
 	assessmentOnlySchemaInvalidRepair := preserveAssessmentOnlySchemaInvalidRepairContract(input, failedStep)
 	if !assessmentOnlySchemaInvalidRepair {
 		preserveConcreteValidationSchemaInvalidRepairContract(input, failedStep)
 	}
-	applyRuntimeRepairStateChangingTargetEvidenceGate(input, failedStep)
+	if !commandContractValidationRetry {
+		applyRuntimeRepairStateChangingTargetEvidenceGate(input, failedStep)
+	}
 	applyContractViolationRecoveryProjection(
 		input,
 		failedStep,
@@ -1171,7 +1254,11 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	applyLLMOutputModeSelection(ctx, policy.LLMOutput, o.evidence.ArtifactContinuations, run, input, failedStep, attempt)
 	contract := o.convergenceManager().build(run, nil, failedStep, map[string]any{"input": input}, nil)
 	input = o.convergenceManager().apply(input, contract)
-	ensureAvailableTargetSnapshotsForStateChangingRepair(input)
+	if commandContractValidationRetry {
+		applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
+	} else {
+		ensureAvailableTargetSnapshotsForStateChangingRepair(input)
+	}
 	applyLLMOutputModeSelection(ctx, policy.LLMOutput, o.evidence.ArtifactContinuations, run, input, failedStep, attempt)
 	refreshRuntimeRepairOutputDecisionContract(input, failedStep)
 	return finalizeRuntimeRepairFollowUpStepInput(run, failedStep, input)
@@ -1183,13 +1270,20 @@ func finalizeRuntimeRepairFollowUpStepInput(run *runModel.Run, failedStep *runMo
 		stepID = failedStep.ID
 	}
 	reapplyForcedNarrowContractViolationRequiredOutput(input, failedStep)
+	applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
 	input = normalizeCurrentActionContract(input, failedStep)
+	applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
 	input = normalizeDispatchInputAuthorityFocus(input)
 	input = normalizeCurrentActionContract(input, failedStep)
+	applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
+	input = attachStagePacketToStepInput(run, stepID, input)
+	applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
 	input = attachStagePacketToStepInput(run, stepID, input)
 	if len(mapFromValue(input[stepInputKeyContractViolationRecovery])) == 0 {
 		return input
 	}
+	input = attachCurrentActionContractToInput(run, stepID, input)
+	applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
 	return attachCurrentActionContractToInput(run, stepID, input)
 }
 

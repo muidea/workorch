@@ -684,6 +684,9 @@ func runtimeRepairExhaustionDecisionNotEligible(run *runModel.Run, failedStep *r
 	if run == nil || failedStep == nil || decisionEligibilityDeniedAlreadyAttempted(failedStep) {
 		return false
 	}
+	if validationCommandContractFailure(failedStep.Input, nil, failedStep) {
+		return false
+	}
 	if failedStepRequestsContinuableDecision(failedStep) && !failedStepHasExternalDecisionDependency(failedStep) {
 		return true
 	}
@@ -1248,6 +1251,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 	allowedRecoveryActions := []string{"retry_same_step", "replan", "provide_information", "terminate"}
 	preferredRecoveryActions := []string{"retry_same_step", "replan", "terminate"}
 	externalDependencyUnavailable := boolValue(diagnostics["externalDependencyUnavailable"]) || failedStepHasExternalRuntimeDependency(failedStep)
+	commandContractRetryExhausted := validationCommandContractFailure(failedStep.Input, nil, failedStep)
 	if externalDependencyUnavailable {
 		blockerKind = "external_dependency_unavailable"
 		decisionScope = decisionContextScopeExternalDependency
@@ -1255,17 +1259,33 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		allowedRecoveryActions = []string{"provide_information", "retry_same_step", "replan", "terminate"}
 		preferredRecoveryActions = []string{"provide_information", "retry_same_step", "replan"}
 	}
-	if runLevelStats.exceeded() && !externalDependencyUnavailable {
+	if commandContractRetryExhausted && !externalDependencyUnavailable {
+		blockerKind = "validation_command_contract_retry_exhausted"
+		decisionScope = decisionContextScopeWorkorchRuntime
+		decisionDependency = decisionContextDependencyRuntimeContract
+		allowedRecoveryActions = []string{"retry_same_step", "replan", "terminate"}
+		preferredRecoveryActions = []string{"retry_same_step", "replan", "terminate"}
+		diagnostics["validationCommandContractRetryExhausted"] = true
+		if diagnostic := validationCommandContractFailureDiagnostic(failedStep.Input, nil, failedStep); len(diagnostic) > 0 {
+			diagnostics["validationFailureDiagnostic"] = diagnostic
+		}
+	}
+	if runLevelStats.exceeded() && !externalDependencyUnavailable && !commandContractRetryExhausted {
 		blockerKind = "runtime_ineffective_convergence"
 		allowedRecoveryActions = []string{"replan", "provide_information", "terminate"}
 		preferredRecoveryActions = []string{"replan", "terminate"}
 	}
-	if budgetContext := convergenceBudgetEscalationContext(run); len(budgetContext) > 0 && !externalDependencyUnavailable {
+	if budgetContext := convergenceBudgetEscalationContext(run); len(budgetContext) > 0 && !externalDependencyUnavailable && !commandContractRetryExhausted {
 		blockerKind = "runtime_convergence_budget_exhausted"
 		allowedRecoveryActions = []string{"replan", "provide_information", "terminate"}
 		preferredRecoveryActions = []string{"replan", "terminate"}
 		reason = localizedRuntimeConvergenceBudgetExhaustionReason(language, budgetContext, execErr)
 		diagnostics["convergenceBudget"] = budgetContext
+	}
+	failedStepInput := failedStep.Input
+	if commandContractRetryExhausted {
+		failedStepInput = cloneStepPayload(failedStep.Input)
+		applyRuntimeRepairCommandContractValidationProjection(failedStepInput, failedStep)
 	}
 	recommendedNextActions := []string{
 		"Map each missing DoD item to concrete affected resources, state-changing operations, and verification actions.",
@@ -1305,7 +1325,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		"failedStepId":           string(failedStep.ID),
 		"repairOfRootStepId":     string(runtimeRepairRootStepID(failedStep)),
 		"failedStepKind":         failedStep.Kind,
-		"failedStepInput":        o.llmContextManager().compactStepInput(failedStep.Input),
+		"failedStepInput":        o.llmContextManager().compactStepInput(failedStepInput),
 		"failedStepOutput":       o.llmContextManager().compactStepOutput(failedStep.Output),
 		"missingDoDItems":        missingDoDItemsFromFailureOutput(failedStep.Output),
 		"recentRepairAttempts":   o.repairManager().recentRuntimeRepairAttemptSummaries(ctx, run.ID, failedStep, maxAttempts),

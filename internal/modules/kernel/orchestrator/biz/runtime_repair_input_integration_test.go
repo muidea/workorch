@@ -3970,3 +3970,131 @@ func TestRuntimeOrchestrator_RuntimeRepairInputCarriesResolvedGovernanceAndFaile
 		t.Fatalf("governanceHistory[0] = %#v, want resolution payload", history[0])
 	}
 }
+
+func TestRuntimeOrchestrator_RuntimeRepairInputCommandContractFailurePreemptsStateChanging(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-validation-command-contract")
+	diagnostic := map[string]any{
+		"class":                         runtimemodel.ValidationDiagnosticCommandInvalid,
+		"stage":                         "shell_validation_contract_rejected",
+		"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetCommandContract,
+		"commandPolicyViolation":        true,
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-012/001-verify"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"stateChangingOutputRequired": true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": map[string]any{
+					"id":                           "cwi-command-contract",
+					"status":                       "failed",
+					"requiredEvidenceKinds":        []string{runtimemodel.EvidenceKindValidation},
+					"missingEvidenceKinds":         []string{runtimemodel.EvidenceKindValidation},
+					"nextAllowedConvergenceStates": []string{convergenceStateNeedValidation},
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": stateChangingRepairRequiredOutput(),
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "main.go",
+					"contentHash":      "hash-main",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+			},
+		},
+		Output: map[string]any{
+			"status":                      "failed",
+			"stage":                       "shell_validation_contract_rejected",
+			"error":                       "invalid argument: validation shell command captures exit status without returning it",
+			"validationFailureDiagnostic": diagnostic,
+			"runtimeDiagnostics": map[string]any{
+				"commandPolicyViolation":      true,
+				"validationFailureDiagnostic": diagnostic,
+			},
+		},
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-validation-command-contract"}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, common.ErrInvalidArgument)
+
+	if input["repairObjective"] != repairObjectiveConcreteValidationEvidence ||
+		!boolValue(input["boundedValidationRequired"]) ||
+		boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want validation-only command contract retry", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustProduceConcreteValidationEvidence"]) ||
+		boolValue(required["mustIncludeStateChangingNode"]) ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), runtimemodel.StepKindGitWrite) {
+		t.Fatalf("requiredOutput = %+v, want validation-only without patch/git", required)
+	}
+	if !stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") ||
+		!stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), runtimemodel.StepKindGitWrite) {
+		t.Fatalf("forbiddenKinds = %+v, want patch/apply and git/write forbidden", required["forbiddenKinds"])
+	}
+	decisionContract := mapFromValue(mapFromValue(input["repairActionPackage"])["outputDecisionContract"])
+	if decisionContract["requiredMode"] != "produce_concrete_validation_evidence" {
+		t.Fatalf("outputDecisionContract = %+v, want concrete validation evidence mode", decisionContract)
+	}
+	packet := mapFromValue(input[stepInputKeyStagePacket])
+	packetRequired := mapFromValue(packet["requiredOutput"])
+	packetNext := mapFromValue(packet["nextAction"])
+	if firstNonEmptyString(stringFromMap(packetNext, "kind"), stringFromMap(packetNext, "type")) != runtimemodel.NextActionTypeValidate ||
+		!boolValue(packetRequired["mustProduceConcreteValidationEvidence"]) ||
+		boolValue(packetRequired["mustIncludeStateChangingNode"]) {
+		t.Fatalf("stagePacket = %+v, want validation-only next action and required output", packet)
+	}
+}
+
+func TestRepairActionPackageFromRepairInputCommandContractFailureIsValidationOnly(t *testing.T) {
+	diagnostic := map[string]any{
+		"class":                         runtimemodel.ValidationDiagnosticCommandInvalid,
+		"stage":                         "shell_validation_contract_rejected",
+		"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetCommandContract,
+		"commandPolicyViolation":        true,
+	}
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"validationFailureDiagnostic": diagnostic,
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "main.go",
+				"contentHash":      "hash-main",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+		},
+	}
+
+	pkg := repairActionPackageFromRepairInput(input, map[string]any{
+		"validationFailureDiagnostic": diagnostic,
+	})
+
+	required := mapFromValue(pkg["requiredOutput"])
+	if pkg["repairObjective"] != repairObjectiveConcreteValidationEvidence ||
+		!boolValue(required["mustProduceConcreteValidationEvidence"]) ||
+		boolValue(required["mustIncludeStateChangingNode"]) ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("repairActionPackage = %+v, want validation-only command contract package", pkg)
+	}
+	if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 || len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
+		t.Fatalf("repairActionPackage = %+v, want implementation target evidence stripped", pkg)
+	}
+	decisionContract := mapFromValue(pkg["outputDecisionContract"])
+	if decisionContract["requiredMode"] != "produce_concrete_validation_evidence" {
+		t.Fatalf("outputDecisionContract = %+v, want concrete validation evidence mode", decisionContract)
+	}
+}
