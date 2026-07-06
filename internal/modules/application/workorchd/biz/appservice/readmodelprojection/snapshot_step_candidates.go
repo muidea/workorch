@@ -6,7 +6,7 @@ import (
 
 func LatestNonTerminalSnapshotStep(steps []StepView) *StepView {
 	for idx := len(steps) - 1; idx >= 0; idx-- {
-		if steps[idx].State == string(common.StepStateDispatched) || steps[idx].State == string(common.StepStatePending) {
+		if steps[idx].State == string(common.StepStateExecuting) || steps[idx].State == string(common.StepStatePending) {
 			return &steps[idx]
 		}
 	}
@@ -19,7 +19,7 @@ func TerminalSnapshotStep(steps []StepView) *StepView {
 		return nil
 	}
 	for _, step := range terminals {
-		if step.State == string(common.StepStateDispatched) {
+		if step.State == string(common.StepStateExecuting) {
 			return step
 		}
 	}

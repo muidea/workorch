@@ -677,7 +677,7 @@ func recoveryStepSupersedesRejectedSource(step *runModel.Step, sourceRef common.
 		return false
 	}
 	switch step.State {
-	case common.StepStateDispatched, common.StepStateCompleted:
+	case common.StepStateExecuting, common.StepStateSucceeded:
 	default:
 		return false
 	}
@@ -796,7 +796,7 @@ func ensureRunCanRecordFormalResult(run *runModel.Run) error {
 	if run == nil {
 		return nil
 	}
-	if run.State == common.RunStateCreated {
+	if run.State == common.RunStatePending {
 		return common.ErrConflict
 	}
 	return nil

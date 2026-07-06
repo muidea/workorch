@@ -17,6 +17,9 @@ type Result struct {
 	ArtifactRefs  []common.ArtifactID
 	DoDAssessment DoDAssessment
 	SummaryDetail ResultSummary
+	AcceptedAt    string
+	RejectedAt    string
+	AcceptedBy    string
 	CreatedAt     string
 	UpdatedAt     string
 }

@@ -24,7 +24,7 @@ func TestNextDispatchSpecsFromCompletedStepContinuesCurrentAuthority(t *testing.
 		ID:              "run-authority-continuation",
 		WorkspaceID:     "ws-authority-continuation",
 		DoDID:           "dod-authority-continuation",
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{
 			coverageFocusKey: focus,
@@ -42,7 +42,7 @@ func TestNextDispatchSpecsFromCompletedStepContinuesCurrentAuthority(t *testing.
 		ID:    "run-authority-continuation/graph-005/001-completed-node",
 		RunID: run.ID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphNodeID: "completed-node",
 		},

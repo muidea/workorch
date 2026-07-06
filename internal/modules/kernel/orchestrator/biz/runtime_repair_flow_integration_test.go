@@ -129,7 +129,7 @@ func TestRuntimeOrchestrator_DispatchesLLMRepairAfterGraphNodeFailure(t *testing
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-runtime-repair"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -328,7 +328,7 @@ func TestRuntimeOrchestrator_SoftwareDevCodeAgentRepairsTestFailureAndDeliversDi
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-software-dev-code-agent"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -440,7 +440,7 @@ func TestRuntimeOrchestrator_RetriesHTTPStatusProviderErrorBeforeBlocking(t *tes
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-llm-provider-error"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -499,7 +499,7 @@ func TestRuntimeOrchestrator_RetriesLLMProviderStreamErrorBeforeConfigBlock(t *t
 		ID:              runID,
 		WorkspaceID:     common.WorkspaceID("ws-provider-stream-error-retry"),
 		DoDID:           common.DoDID("dod-provider-stream-error-retry"),
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}
 	failedStep := &runmodel.Step{
@@ -563,7 +563,7 @@ func TestRuntimeOrchestrator_RetriesTransientProviderUnavailableBeforeConfigBloc
 		ID:              runID,
 		WorkspaceID:     common.WorkspaceID("ws-provider-unavailable-retry"),
 		DoDID:           common.DoDID("dod-provider-unavailable-retry"),
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}
 	failedStep := &runmodel.Step{
@@ -623,7 +623,7 @@ func TestRuntimeOrchestrator_RetriesTransientProviderHTTPStatusBeforeFailingRun(
 				ID:              runID,
 				WorkspaceID:     common.WorkspaceID(fmt.Sprintf("ws-provider-http-%d-retry", statusCode)),
 				DoDID:           common.DoDID(fmt.Sprintf("dod-provider-http-%d-retry", statusCode)),
-				State:           common.RunStateRunning,
+				State:           common.RunStateActive,
 				InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 			}
 			failedStep := &runmodel.Step{
@@ -672,7 +672,7 @@ func TestRuntimeOrchestrator_BlocksProviderHTTPStatusAfterRetryBudget(t *testing
 		ID:              runID,
 		WorkspaceID:     common.WorkspaceID("ws-provider-http-404-retry-exhausted"),
 		DoDID:           common.DoDID("dod-provider-http-404-retry-exhausted"),
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}
 	failedOutput := map[string]any{
@@ -784,7 +784,7 @@ func TestRuntimeOrchestrator_RetriesLLMProviderTimeoutBeforeFailingRun(t *testin
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-llm-provider-timeout-retry"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -846,7 +846,7 @@ func TestRuntimeOrchestrator_BlocksOnDecisionAfterProviderTimeoutRetriesExhauste
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-llm-provider-timeout-block"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{
 			"dialogLanguage": "zh-CN",
@@ -895,7 +895,7 @@ func TestRuntimeOrchestrator_RuntimeRepairScopeUsesCurrentFailureBeforeInherited
 			ID:    common.StepID(fmt.Sprintf("%s/old-repair-%d", runID, attempt)),
 			RunID: runID,
 			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				stepInputKeyRuntimeRepairFollowUp: true,
 				stepInputKeyRuntimeRepairAttempt:  attempt,
@@ -957,7 +957,7 @@ func TestRuntimeOrchestrator_RuntimeRepairScopeUsesCurrentFailureWithoutTargetSc
 		ID:    common.StepID(string(runID) + "/repair-001-of-init"),
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspaceExecution,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyRuntimeRepairFollowUp: true,
 			stepInputKeyRuntimeRepairAttempt:  1,
@@ -1138,7 +1138,7 @@ func TestRuntimeOrchestrator_RuntimeRepairEffectiveScopeCountsFailureTargetAcros
 			ID:    common.StepID(fmt.Sprintf("%s/repair-%d", runID, attempt)),
 			RunID: runID,
 			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				stepInputKeyRuntimeRepairFollowUp: true,
 				stepInputKeyRuntimeRepairAttempt:  attempt,
@@ -1273,7 +1273,7 @@ func TestRuntimeOrchestrator_RuntimeRepairTargetScopeUsesCurrentGraphWindow(t *t
 			ID:    common.StepID(fmt.Sprintf("%s/repair-old-%d", runID, attempt)),
 			RunID: runID,
 			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				stepInputKeyRuntimeRepairFollowUp: true,
 				stepInputKeyRuntimeRepairAttempt:  attempt,
@@ -1313,7 +1313,7 @@ func TestRuntimeOrchestrator_RuntimeRepairTargetScopeUsesCurrentGraphWindow(t *t
 		ID:    common.StepID(runID + "/repair-new-1"),
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspaceExecution,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyRuntimeRepairFollowUp: true,
 			stepInputKeyRuntimeRepairAttempt:  1,
@@ -1344,7 +1344,7 @@ func TestRuntimeOrchestrator_PatchApplyTargetBudgetCrossesGraphWindows(t *testin
 			ID:    common.StepID(fmt.Sprintf("%s/repair-old-%d", runID, attempt)),
 			RunID: runID,
 			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				stepInputKeyRuntimeRepairFollowUp: true,
 				stepInputKeyRuntimeRepairAttempt:  attempt,
@@ -1408,7 +1408,7 @@ func TestRuntimeOrchestrator_ResumeClearsStaleRuntimeRepairExhaustionBlocker(t *
 	runID := common.RunID("run-stale-repair-blocker")
 	ticketID := common.TicketID("ticket-stale-repair-blocker")
 	signature := "class=runtime|target=stale"
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -1439,7 +1439,7 @@ func TestRuntimeOrchestrator_ResumeClearsStaleRuntimeRepairExhaustionBlocker(t *
 		ID:    common.StepID(runID + "/block/repair-success"),
 		RunID: runID,
 		Kind:  shellcommon.StepKindCommand,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"previousStepId":                 string(runID + "/block/original"),
 			stepInputKeyGraphNodeID:          "repair-success",
@@ -1503,7 +1503,7 @@ func TestRuntimeOrchestrator_ResumeClearsRepairExhaustionWhenTargetWindowHasBudg
 	failedStepID := common.StepID(runID + "/graph-009/006-build")
 	ticketID := common.TicketID(string(failedStepID) + "-repair-exhausted-decision")
 	signature := "class=shell_command_failed|kind=shell/command|node=build|failureTargets=main.go|exitCode=1|error=exit status 1"
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -1521,7 +1521,7 @@ func TestRuntimeOrchestrator_ResumeClearsRepairExhaustionWhenTargetWindowHasBudg
 			ID:    common.StepID(fmt.Sprintf("%s/repair-old-%d", runID, attempt)),
 			RunID: runID,
 			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				stepInputKeyRuntimeRepairFollowUp: true,
 				stepInputKeyRuntimeRepairAttempt:  attempt,
@@ -1581,7 +1581,7 @@ func TestRuntimeOrchestrator_ResumeClearsRepairExhaustionWhenTargetWindowHasBudg
 	if err != nil {
 		t.Fatalf("get ticket: %v", err)
 	}
-	if ticket.State != common.DecisionTicketStateDismissed {
+	if ticket.State != common.DecisionTicketStateSuperseded {
 		t.Fatalf("ticket state = %s, want dismissed stale repair exhaustion blocker", ticket.State)
 	}
 	if len(runtime.requests) != 1 || !boolValue(runtime.requests[0].Input[stepInputKeyRuntimeRepairFollowUp]) {
@@ -1606,7 +1606,7 @@ func TestRuntimeRepairMCPFailureTargetUsesCompositeRunBudget(t *testing.T) {
 			ID:    common.StepID(fmt.Sprintf("%s/repair-%03d", runID, idx+1)),
 			RunID: runID,
 			Kind:  llmWorkspaceExecutionStepKind,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				stepInputKeyRuntimeRepairFollowUp: true,
 				stepInputKeyGraphRootStepID:       string(runID) + "/" + root,
@@ -1683,7 +1683,7 @@ func TestRuntimeOrchestrator_ResumeClearsDuplicateFailureBlockerBelowScopedBudge
 	failedStepID := common.StepID(runID + "/block/verify")
 	ticketID := common.TicketID(string(failedStepID) + "-duplicate-failure-decision")
 	signature := "class=shell_command_failed|kind=shell/command|node=verify|failureTargets=config/settings.yaml|exitCode=1"
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -1700,7 +1700,7 @@ func TestRuntimeOrchestrator_ResumeClearsDuplicateFailureBlockerBelowScopedBudge
 		ID:    common.StepID(runID + "/repair-1"),
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspaceExecution,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyRuntimeRepairFollowUp: true,
 			stepInputKeyRuntimeRepairAttempt:  1,

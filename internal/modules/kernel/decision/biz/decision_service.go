@@ -39,17 +39,21 @@ func (s *Service) CreateTicket(ctx context.Context, cmd decisioncontracts.Create
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	item := &decisionModel.Ticket{
-		ID:           cmd.TicketID,
-		WorkspaceID:  cmd.WorkspaceID,
-		RunID:        cmd.RunID,
-		StepID:       cmd.StepID,
-		Reason:       cmd.Reason,
-		DecisionKind: cmd.DecisionKind,
-		Question:     cmd.Question,
-		Context:      clonePayload(cmd.Context),
-		State:        common.DecisionTicketStateOpen,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:                     cmd.TicketID,
+		WorkspaceID:            cmd.WorkspaceID,
+		RunID:                  cmd.RunID,
+		StepID:                 cmd.StepID,
+		Reason:                 cmd.Reason,
+		DecisionKind:           cmd.DecisionKind,
+		Question:               cmd.Question,
+		Context:                clonePayload(cmd.Context),
+		State:                  common.DecisionTicketStateOpen,
+		AutoGovernance:         clonePayload(cmd.AutoGovernance),
+		FailureClass:           nonEmptyString(cmd.FailureClass, stringPayloadValue(cmd.Context, "failureClass")),
+		FailureSignature:       nonEmptyString(cmd.FailureSignature, stringPayloadValue(cmd.Context, "failureSignature")),
+		AllowedRecoveryActions: nonEmptyStringSlice(cmd.AllowedRecoveryActions, stringSlicePayloadValue(cmd.Context, "allowedRecoveryActions")),
+		CreatedAt:              now,
+		UpdatedAt:              now,
 	}
 	if err := s.tickets.Create(ctx, item); err != nil {
 		return err
@@ -126,7 +130,10 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 		return nil, common.ErrConflict
 	}
 
-	ticket.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	ticket.UpdatedAt = now
+	ticket.ResolvedAt = now
+	ticket.ResolvedBy = nonEmptyString(stringPayloadValue(cmd.Payload, "resolvedBy"), stringPayloadValue(cmd.Payload, "actor"))
 	resolution := &decisionModel.Resolution{
 		ID:                 cmd.ResolutionID,
 		TicketID:           cmd.TicketID,
@@ -369,7 +376,33 @@ func nonEmptyRunID(values ...common.RunID) common.RunID {
 	return ""
 }
 
+func nonEmptyStringSlice(values ...[]string) []string {
+	for _, value := range values {
+		if len(value) > 0 {
+			return append([]string(nil), value...)
+		}
+	}
+	return nil
+}
+
 func stringPayloadValue(payload map[string]any, key string) string {
 	value, _ := payload[key].(string)
 	return value
+}
+
+func stringSlicePayloadValue(payload map[string]any, key string) []string {
+	switch typed := payload[key].(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if value, ok := item.(string); ok && strings.TrimSpace(value) != "" {
+				ret = append(ret, strings.TrimSpace(value))
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
 }

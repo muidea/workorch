@@ -488,7 +488,7 @@ func TestDispatchNextStepPreparesInputFromCurrentAuthority(t *testing.T) {
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	var captured map[string]any
@@ -555,14 +555,14 @@ func TestStateChangeDispatchHydratesAcceptedTargetSnapshotsBeforeRebuild(t *test
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	sourceStep := &runModel.Step{
 		ID:    "run-dispatch-state-change-snapshot/read-target",
 		RunID: runID,
 		Kind:  "file/read",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphRootStepID: "run-dispatch-state-change-snapshot/root",
 			stepInputKeyGraphNodeID:     "read-target",
@@ -900,7 +900,7 @@ func TestBlockOnDecisionPersistsAuthorityNormalizedOwnerState(t *testing.T) {
 	run := runWithAuthorityFocusForTest("validate")
 	run.ID = runID
 	run.WorkspaceID = workspaceID
-	run.State = common.RunStateRunning
+	run.State = common.RunStateActive
 	run.ExecutionContext[coverageFocusKey] = map[string]any{
 		"id":                  "focus-cwi-stale",
 		"coverageWorkItemIds": []string{"cwi-stale"},
@@ -918,7 +918,7 @@ func TestBlockOnDecisionPersistsAuthorityNormalizedOwnerState(t *testing.T) {
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := NewRuntimeOrchestrator(nil, runRepo, memory.NewStepRepository(), workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository(), events.NewMemoryHub())
@@ -1269,7 +1269,7 @@ func TestFinalizeLLMDispatchAuthorityInputRebuildsExecutionContextStateChangeAut
 	run := &runModel.Run{
 		ID:          "run-final-state-change",
 		WorkspaceID: "ws-final-state-change",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			convergenceAuthorityKey: map[string]any{
 				"schemaVersion": convergenceAuthoritySchema,
@@ -1357,7 +1357,7 @@ func TestDispatchPreCreateHardGateRejectsUnrebuildableFocusDriftBeforeRuntime(t 
 	run := &runModel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	runtime := &requestCapturingRuntimeAdapter{output: map[string]any{"status": "completed"}}
 	runRepo := memory.NewRunRepository()
@@ -1366,7 +1366,7 @@ func TestDispatchPreCreateHardGateRejectsUnrebuildableFocusDriftBeforeRuntime(t 
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository(), events.NewMemoryHub())
@@ -1438,7 +1438,7 @@ func runWithAuthorityFocusForTest(nextAction string) *runModel.Run {
 	return &runModel.Run{
 		ID:          common.RunID("run-authority-focus"),
 		WorkspaceID: common.WorkspaceID("ws-authority-focus"),
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			convergenceAuthorityKey: map[string]any{
 				"schemaVersion": convergenceAuthoritySchema,

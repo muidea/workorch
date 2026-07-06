@@ -69,7 +69,7 @@ func TestRuntimeOrchestrator_ResumeRunFailsResolvedDecisionWithoutContinuation(t
 		ID:     stepID,
 		RunID:  runID,
 		Kind:   llmWorkspaceExecutionStepKind,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stage": "blocked_on_decision"},
 	}); err != nil {
 		t.Fatalf("seed step: %v", err)
@@ -107,7 +107,7 @@ func TestRuntimeOrchestrator_ResumeRunFailsResolvedDecisionWithoutContinuation(t
 		t.Fatalf("run terminal details = %+v, want cleared blocker and conflict reason", runItem)
 	}
 	for _, state := range runStates {
-		if state == string(common.RunStateRunning) {
+		if state == string(common.RunStateActive) {
 			t.Fatalf("run states = %v, want no intermediate running event for failed resolved-decision resume", runStates)
 		}
 	}
@@ -157,7 +157,7 @@ func TestRuntimeOrchestrator_CreatesDecisionTicketWithStructuredFields(t *testin
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -258,7 +258,7 @@ func TestRuntimeOrchestrator_ConvertsKnownReadableResourceDecisionToRepair(t *te
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-known-resource-decision"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -369,7 +369,7 @@ func TestRuntimeOrchestrator_ConvertsQuestionOnlyReadableResourceDecisionToRepai
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-question-readable-decision"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -426,10 +426,10 @@ func TestRuntimeRepairInputPromotesReadableResourceDecisionIntoStateChangingTarg
 	)
 	workspaceID := common.WorkspaceID("ws-readable-state-changing")
 	runID := common.RunID("run-readable-state-changing")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateRunning}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning, InitialStepKind: llmWorkspaceExecutionStepKind}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive, InitialStepKind: llmWorkspaceExecutionStepKind}
 	failedStep := &runmodel.Step{
 		ID:    "run-readable-state-changing/repair-001",
 		RunID: runID,
@@ -800,7 +800,7 @@ func TestRuntimeOrchestrator_ResumeRunAutoRepairsOpenKnownReadableResourceDecisi
 	runID := common.RunID("run-open-known-resource-decision")
 	stepID := common.StepID("run-open-known-resource-decision/follow-up-graph-001")
 	ticketID := common.TicketID("ticket-open-known-resource-decision")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -817,7 +817,7 @@ func TestRuntimeOrchestrator_ResumeRunAutoRepairsOpenKnownReadableResourceDecisi
 		ID:    stepID,
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspaceExecution,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyRuntimeStage:     runtimeStageVerification,
 			stepInputKeyRuntimeStageMode: "strict_convergence",
@@ -876,7 +876,7 @@ func TestRuntimeOrchestrator_ResumeRunAutoRepairsOpenKnownReadableResourceDecisi
 	if err != nil {
 		t.Fatalf("get ticket: %v", err)
 	}
-	if ticket.State != common.DecisionTicketStateDismissed {
+	if ticket.State != common.DecisionTicketStateSuperseded {
 		t.Fatalf("ticket state = %s, want dismissed auto-repairable decision", ticket.State)
 	}
 	if repairInput == nil || !boolValue(repairInput[stepInputKeyRuntimeRepairFollowUp]) {
@@ -938,7 +938,7 @@ func TestRuntimeOrchestrator_DecisionBlockResultPolicyRejectedWritesResult(t *te
 		WorkspaceID:     workspaceID,
 		GoalID:          common.GoalID("goal-decision-result-policy"),
 		DoDID:           common.DoDID("dod-decision-result-policy"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -982,7 +982,7 @@ func TestRuntimeOrchestrator_FailsLLMRunCompletionWithoutDoDAssessment(t *testin
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-1"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: "llm/workspace_execution",
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1033,7 +1033,7 @@ func TestRuntimeOrchestrator_FailsContinueWithoutActionableContinuationWithoutDo
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: "llm/workspace_execution",
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1103,7 +1103,7 @@ func TestRuntimeOrchestrator_DispatchesValidationFollowUpForContinueWithoutActio
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-1"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: "llm/workspace_execution",
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1137,7 +1137,7 @@ func TestNoActionableContinuationFailedAssessmentBuildsCoverageRepairInput(t *te
 		ID:    common.StepID(runID + "/graph-001/004-assess"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{},
 		Output: map[string]any{
 			"status": "completed",
@@ -1206,7 +1206,7 @@ func TestNoActionableContinuationPreservesConcreteValidationRepairContract(t *te
 		ID:    common.StepID(runID + "/repair-001-of-verify"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyRuntimeStage:    runtimeStageVerification,
 			"repairObjective":           repairObjectiveConcreteValidationEvidence,
@@ -1273,7 +1273,7 @@ func TestNoActionableContinuationPreservesStateChangingRepairContract(t *testing
 		ID:    common.StepID(runID + "/repair-001-of-verify"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyRuntimeStage:      runtimeStageRepair,
 			"repairObjective":             repairObjectiveStateChangingOutput,
@@ -1345,8 +1345,8 @@ func TestRuntimeOrchestrator_DispatchStepDoesNotOverwriteTerminalStep(t *testing
 	workspaceID := common.WorkspaceID("ws-terminal-step-dispatch")
 	runID := common.RunID("run-terminal-step-dispatch")
 	stepID := common.StepID("run-terminal-step-dispatch/step-1")
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning, InitialStepKind: llmWorkspaceExecutionStepKind}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive, InitialStepKind: llmWorkspaceExecutionStepKind}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -1357,7 +1357,7 @@ func TestRuntimeOrchestrator_DispatchStepDoesNotOverwriteTerminalStep(t *testing
 		ID:     stepID,
 		RunID:  runID,
 		Kind:   llmWorkspaceExecutionStepKind,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Input:  map[string]any{"original": true},
 		Output: map[string]any{"status": "completed"},
 	}); err != nil {
@@ -1375,7 +1375,7 @@ func TestRuntimeOrchestrator_DispatchStepDoesNotOverwriteTerminalStep(t *testing
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
-	if step.State != common.StepStateCompleted || step.Input["original"] != true || step.Input["replacement"] == true {
+	if step.State != common.StepStateSucceeded || step.Input["original"] != true || step.Input["replacement"] == true {
 		t.Fatalf("step = %+v, want original completed step preserved", step)
 	}
 }
@@ -1432,7 +1432,7 @@ func TestRuntimeOrchestrator_DirectNextStepUsesUniqueIDWhenTerminalStepExists(t 
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod-next-step-unique", State: common.RunStateRunning, InitialStepKind: llmWorkspaceExecutionStepKind}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod-next-step-unique", State: common.RunStateActive, InitialStepKind: llmWorkspaceExecutionStepKind}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if err := stepRepo.Create(ctx, &runmodel.Step{
@@ -1446,7 +1446,7 @@ func TestRuntimeOrchestrator_DirectNextStepUsesUniqueIDWhenTerminalStepExists(t 
 		t.Fatalf("seed terminal shell step: %v", err)
 	}
 
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod-next-step-unique", State: common.RunStateRunning, InitialStepKind: llmWorkspaceExecutionStepKind}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod-next-step-unique", State: common.RunStateActive, InitialStepKind: llmWorkspaceExecutionStepKind}
 	if err := orch.dispatchStepWithWorkspace(ctx, run, common.StepID(runID+"/step-1"), llmWorkspaceExecutionStepKind, map[string]any{}, nil); err != nil {
 		t.Fatalf("dispatch step: %v; calls=%+v", err, runtime.calls)
 	}
@@ -1493,7 +1493,7 @@ func TestRuntimeOrchestrator_DirectNextLLMAliasCanonicalizesToWorkspaceExecution
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1565,7 +1565,7 @@ func TestRuntimeOrchestrator_RepairsRepeatedContinueWithoutActionableContinuatio
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-1"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: "llm/workspace_execution",
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1654,7 +1654,7 @@ func TestRuntimeOrchestrator_GraphBatchFailedAssessmentRoutesToRuntimeRepair(t *
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-graph-batch-failed-assessment"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1735,7 +1735,7 @@ func TestRuntimeOrchestrator_RepairsInconclusiveSatisfiedDoDAssessmentBeforeEsca
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-weak"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: "llm/workspace_execution",
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)

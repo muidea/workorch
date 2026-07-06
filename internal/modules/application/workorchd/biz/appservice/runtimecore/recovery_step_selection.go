@@ -50,7 +50,7 @@ func TerminalStepModel(items []*runmodel.Step) *runmodel.Step {
 		return terminals[0]
 	}
 	for _, item := range terminals {
-		if item.State == common.StepStateDispatched {
+		if item.State == common.StepStateExecuting {
 			return item
 		}
 	}

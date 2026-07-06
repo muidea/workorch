@@ -71,8 +71,8 @@ func TestCreateRunWithBackendReturnsCreatedRun(t *testing.T) {
 	if item.ID != "run-created" || item.WorkspaceID != "ws-run-created" {
 		t.Fatalf("run = %+v, want created run", item)
 	}
-	if item.State != "created" || item.GoalID != goal.ID || item.DoDID != dod.ID {
-		t.Fatalf("run fields = %+v, want created state with goal/dod", item)
+	if item.State != string(common.RunStatePending) || item.GoalID != goal.ID || item.DoDID != dod.ID {
+		t.Fatalf("run fields = %+v, want pending state with goal/dod", item)
 	}
 	goalContext, _ := item.ExecutionContext["goal"].(map[string]any)
 	dodContext, _ := item.ExecutionContext["dod"].(map[string]any)
@@ -225,7 +225,7 @@ func TestRecoverStuckRunningRunsWithDuplicateRunIDsUsesWorkspaceScope(t *testing
 	if err != nil {
 		t.Fatalf("get new run: %v", err)
 	}
-	newRun.State = common.RunStateRunning
+	newRun.State = common.RunStateActive
 	if err := exports.Repositories.Runs.Update(newCtx, newRun); err != nil {
 		t.Fatalf("update new run: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestRecoverStuckRunningRunsWithDuplicateRunIDsUsesWorkspaceScope(t *testing
 		t.Fatalf("get new workspace: %v", err)
 	}
 	newWorkspace.ActiveRunID = "run-001"
-	newWorkspace.State = common.WorkspaceStateRunning
+	newWorkspace.State = common.WorkspaceStateActive
 	if err := exports.Repositories.Workspaces.Update(sessionCtx, newWorkspace); err != nil {
 		t.Fatalf("update new workspace: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestCompressedContextForRunStartUsesLightweightCreatedRunProjection(t *test
 	compressed := runtimecore.CreatedRunCompressedContext(&runmodel.Run{
 		ID:          "run-lightweight-start",
 		WorkspaceID: "ws-lightweight-start",
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}, localizationcore.DefaultDialogLanguage())
 	if compressed == nil {
 		t.Fatalf("compressedContext nil, want lightweight projection")
@@ -276,7 +276,7 @@ func TestCompressedContextForRunStartUsesLightweightCreatedRunProjection(t *test
 	if runtimecore.CreatedRunCompressedContext(&runmodel.Run{
 		ID:          "run-lightweight-start",
 		WorkspaceID: "ws-lightweight-start",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}, localizationcore.DefaultDialogLanguage()) != nil {
 		t.Fatalf("running run should use full snapshot-based compressed context")
 	}
@@ -360,7 +360,7 @@ func TestCompressedContextForBlockedRunResumeUsesLightweightGovernanceProjection
 	nonBlocked, err := runports.BlockedRunResumeCompressedContext(ctx, deps.tickets, deps.resolutions, deps.approvals, &runmodel.Run{
 		ID:          "run-lightweight-running",
 		WorkspaceID: "ws-lightweight-running",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}, "en-US")
 	if err != nil {
 		t.Fatalf("running compressedContext: %v", err)
@@ -383,13 +383,13 @@ func TestCompressedContextPatchRecordsRecoveryMemoryRecallTrace(t *testing.T) {
 	}
 	workspaceID := common.WorkspaceID("ws-recovery-memory")
 	runID := common.RunID("run-recovery-memory")
-	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "recovery memory", State: common.WorkspaceStateRunning}); err != nil {
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "recovery memory", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -452,7 +452,7 @@ func TestCompressedContextPatchForRunRefreshesCumulativeGoalAndDoD(t *testing.T)
 	}
 	workspaceID := common.WorkspaceID("ws-recovery-definitions")
 	runID := common.RunID("run-recovery-definitions")
-	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "recovery definitions", State: common.WorkspaceStateBlocked}); err != nil {
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "recovery definitions", State: common.WorkspaceStateBlockedOnApproval}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	for _, goal := range []*workspacemodel.Goal{
@@ -542,7 +542,7 @@ func TestReadRunWithBackendReturnsPersistedRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadRunWithBackend: %v", err)
 	}
-	if item.ID != "run-read" || item.WorkspaceID != "ws-run-read" || item.State != "created" {
+	if item.ID != "run-read" || item.WorkspaceID != "ws-run-read" || item.State != string(common.RunStatePending) {
 		t.Fatalf("run = %+v, want persisted run", item)
 	}
 }
@@ -598,8 +598,8 @@ func TestStartRunWithBackendReturnsRunningObservableWhenDispatchContinuesInBackg
 	if err != nil {
 		t.Fatalf("StartRunWithBackend: %v", err)
 	}
-	if item.ID != "run-start" || item.State != "running" || item.BlockingTicketID != "" || item.FailureReason != "" {
-		t.Fatalf("run = %+v, want run-start running without blocking metadata", item)
+	if item.ID != "run-start" || item.State != string(common.RunStateActive) || item.BlockingTicketID != "" || item.FailureReason != "" {
+		t.Fatalf("run = %+v, want run-start active without blocking metadata", item)
 	}
 	compressed := runCompressedContext(t, item)
 	if compressed["version"] != "workorch.compressedContext.v1" || compressed["mode"] != "deterministic_recovery_summary" {
@@ -817,7 +817,7 @@ func TestRecoverStuckRunningRunsWithBackendFailsRunningRunWithoutContinuationChe
 		if err != nil {
 			t.Fatalf("get run %s: %v", runID, err)
 		}
-		item.State = common.RunStateRunning
+		item.State = common.RunStateActive
 		if err := exports.Repositories.Runs.Update(ctx, item); err != nil {
 			t.Fatalf("update run %s: %v", runID, err)
 		}
@@ -827,7 +827,7 @@ func TestRecoverStuckRunningRunsWithBackendFailsRunningRunWithoutContinuationChe
 		WorkspaceID:      "ws-continuation-running",
 		RunID:            "run-continuation-running",
 		CheckpointType:   common.CheckpointTypeRecovery,
-		RunStateSnapshot: common.RunStateRunning,
+		RunStateSnapshot: common.RunStateActive,
 		OccurredAt:       "2026-04-30T13:00:00Z",
 		Data:             map[string]any{"continuationAction": "resume_from_checkpoint"},
 	}); err != nil {
@@ -851,8 +851,8 @@ func TestRecoverStuckRunningRunsWithBackendFailsRunningRunWithoutContinuationChe
 	if err != nil {
 		t.Fatalf("ReadRunWithBackend continuation: %v", err)
 	}
-	if continued.State != "running" {
-		t.Fatalf("continued run = %+v, want running", continued)
+	if continued.State != string(common.RunStateActive) {
+		t.Fatalf("continued run = %+v, want active", continued)
 	}
 }
 
@@ -880,7 +880,7 @@ func TestRecoverStartupInactiveRunningWorkspacesWithBackendResetsWorkspaceToIdle
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.State = common.WorkspaceStateActive
 	workspaceItem.ActiveRunID = runID
 	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace: %v", err)
@@ -889,7 +889,7 @@ func TestRecoverStartupInactiveRunningWorkspacesWithBackendResetsWorkspaceToIdle
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	runItem.State = common.RunStateRunning
+	runItem.State = common.RunStateActive
 	if err := exports.Repositories.Runs.Update(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), runItem); err != nil {
 		t.Fatalf("update run: %v", err)
 	}
@@ -954,7 +954,7 @@ func TestRecoverStartupInactiveRunningWorkspacesPreservesGovernanceBlockedRun(t 
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.State = common.WorkspaceStateActive
 	workspaceItem.ActiveRunID = runID
 	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace: %v", err)
@@ -984,8 +984,8 @@ func TestRecoverStartupInactiveRunningWorkspacesPreservesGovernanceBlockedRun(t 
 	if err != nil {
 		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
 	}
-	if workspace.State != string(common.WorkspaceStateWaitingDecision) || workspace.ActiveRunID != runID {
-		t.Fatalf("workspace = %+v, want waiting_decision with active run", workspace)
+	if workspace.State != string(common.WorkspaceStateActive) || workspace.ActiveRunID != runID {
+		t.Fatalf("workspace = %+v, want active with decision-blocked run", workspace)
 	}
 	run, err := ReadRunWithBackend(runCtx, "file", dataRoot, runID)
 	if err != nil {
@@ -1021,7 +1021,7 @@ func TestRecoverStartupInactiveRunningWorkspacesReconcilesWaitingDecisionRun(t *
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	workspaceItem.State = common.WorkspaceStateWaitingDecision
+	workspaceItem.State = common.WorkspaceStateActive
 	workspaceItem.ActiveRunID = runID
 	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace: %v", err)
@@ -1031,7 +1031,7 @@ func TestRecoverStartupInactiveRunningWorkspacesReconcilesWaitingDecisionRun(t *
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	runItem.State = common.RunStateRunning
+	runItem.State = common.RunStateActive
 	runItem.BlockingTicketID = ""
 	if err := exports.Repositories.Runs.Update(runCtx, runItem); err != nil {
 		t.Fatalf("update run: %v", err)
@@ -1060,8 +1060,8 @@ func TestRecoverStartupInactiveRunningWorkspacesReconcilesWaitingDecisionRun(t *
 	if err != nil {
 		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
 	}
-	if workspace.State != string(common.WorkspaceStateWaitingDecision) || workspace.ActiveRunID != runID {
-		t.Fatalf("workspace = %+v, want waiting_decision with active run", workspace)
+	if workspace.State != string(common.WorkspaceStateActive) || workspace.ActiveRunID != runID {
+		t.Fatalf("workspace = %+v, want active with decision-blocked run", workspace)
 	}
 	run, err := ReadRunWithBackend(runCtx, "file", dataRoot, runID)
 	if err != nil {
@@ -1097,7 +1097,7 @@ func TestRecoverStartupInactiveRunningWorkspacesReconcilesApprovalBlockedRun(t *
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	workspaceItem.State = common.WorkspaceStateBlocked
+	workspaceItem.State = common.WorkspaceStateBlockedOnApproval
 	workspaceItem.ActiveRunID = runID
 	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace: %v", err)
@@ -1107,7 +1107,7 @@ func TestRecoverStartupInactiveRunningWorkspacesReconcilesApprovalBlockedRun(t *
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	runItem.State = common.RunStateRunning
+	runItem.State = common.RunStateActive
 	runItem.BlockingApprovalID = ""
 	if err := exports.Repositories.Runs.Update(runCtx, runItem); err != nil {
 		t.Fatalf("update run: %v", err)
@@ -1136,8 +1136,8 @@ func TestRecoverStartupInactiveRunningWorkspacesReconcilesApprovalBlockedRun(t *
 	if err != nil {
 		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
 	}
-	if workspace.State != string(common.WorkspaceStateBlocked) || workspace.ActiveRunID != runID {
-		t.Fatalf("workspace = %+v, want blocked with active run", workspace)
+	if workspace.State != string(common.WorkspaceStateBlockedOnApproval) || workspace.ActiveRunID != runID {
+		t.Fatalf("workspace = %+v, want blocked_on_approval with active run", workspace)
 	}
 	run, err := ReadRunWithBackend(runCtx, "file", dataRoot, runID)
 	if err != nil {
@@ -1170,7 +1170,7 @@ func TestRecoverStuckRunningRunsWithBackendClearsTerminalActiveWorkspaceRun(t *t
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.State = common.WorkspaceStateActive
 	workspaceItem.ActiveRunID = "run-terminal-active"
 	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace: %v", err)
@@ -1198,8 +1198,8 @@ func TestRecoverStuckRunningRunsWithBackendClearsTerminalActiveWorkspaceRun(t *t
 	if err != nil {
 		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
 	}
-	if workspace.State != string(common.WorkspaceStateFailed) || workspace.ActiveRunID != "" {
-		t.Fatalf("workspace = %+v, want failed with no terminal active run", workspace)
+	if workspace.State != string(common.WorkspaceStateSuperseded) || workspace.ActiveRunID != "" {
+		t.Fatalf("workspace = %+v, want superseded with no terminal active run", workspace)
 	}
 }
 
@@ -1225,7 +1225,7 @@ func TestRecoverStuckRunningRunsWithBackendRedispatchesOrphanDispatchedStep(t *t
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	runItem.State = common.RunStateRunning
+	runItem.State = common.RunStateActive
 	if err := exports.Repositories.Runs.Update(ctx, runItem); err != nil {
 		t.Fatalf("update run: %v", err)
 	}
@@ -1233,7 +1233,7 @@ func TestRecoverStuckRunningRunsWithBackendRedispatchesOrphanDispatchedStep(t *t
 		ID:    "run-orphan-dispatched/follow-up",
 		RunID: "run-orphan-dispatched",
 		Kind:  filecommon.StepKindList,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{"path": ".", "maxEntries": 1, "previousStepId": "run-orphan-dispatched/z-lexically-newer"},
 	}); err != nil {
 		t.Fatalf("create dispatched step: %v", err)
@@ -1242,7 +1242,7 @@ func TestRecoverStuckRunningRunsWithBackendRedispatchesOrphanDispatchedStep(t *t
 		ID:     "run-orphan-dispatched/z-lexically-newer",
 		RunID:  "run-orphan-dispatched",
 		Kind:   filecommon.StepKindList,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Input:  map[string]any{"path": ".", "maxEntries": 1},
 		Output: map[string]any{"status": "completed"},
 	}); err != nil {
@@ -1274,7 +1274,7 @@ func TestRecoverStuckRunningRunsWithBackendRedispatchesOrphanDispatchedStep(t *t
 	if err != nil {
 		t.Fatalf("get redispatched step: %v", err)
 	}
-	if step.State != common.StepStateCompleted || step.Output["status"] != "completed" {
+	if step.State != common.StepStateSucceeded || step.Output["status"] != "completed" {
 		t.Fatalf("step = %+v, want redispatched completed step", step)
 	}
 	runAfter, err := verifyExports.Repositories.Runs.Get(ctx, "run-orphan-dispatched")
@@ -1314,7 +1314,7 @@ func TestRecoverStaleDispatchedRunsWithBackendFinalizesDurableRuntimeResult(t *t
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.State = common.WorkspaceStateActive
 	workspaceItem.ActiveRunID = runID
 	if err := exports.Repositories.Workspaces.Update(scopedCtx, workspaceItem); err != nil {
 		t.Fatalf("update workspace: %v", err)
@@ -1323,7 +1323,7 @@ func TestRecoverStaleDispatchedRunsWithBackendFinalizesDurableRuntimeResult(t *t
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	runItem.State = common.RunStateRunning
+	runItem.State = common.RunStateActive
 	if err := exports.Repositories.Runs.Update(scopedCtx, runItem); err != nil {
 		t.Fatalf("update run: %v", err)
 	}
@@ -1331,7 +1331,7 @@ func TestRecoverStaleDispatchedRunsWithBackendFinalizesDurableRuntimeResult(t *t
 		ID:    stepID,
 		RunID: runID,
 		Kind:  filecommon.StepKindList,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{"path": ".", "maxEntries": 1},
 	}); err != nil {
 		t.Fatalf("create dispatched step: %v", err)
@@ -1390,7 +1390,7 @@ func TestRecoverStaleDispatchedRunsWithBackendFinalizesDurableRuntimeResult(t *t
 	if err != nil {
 		t.Fatalf("get recovered step: %v", err)
 	}
-	if step.State != common.StepStateCompleted {
+	if step.State != common.StepStateSucceeded {
 		t.Fatalf("step state = %s, want completed", step.State)
 	}
 	if step.Output["source"] != "durable-runtime-result" {
@@ -1421,7 +1421,7 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanLLMStepOnProviderMissing(
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.State = common.WorkspaceStateActive
 	workspaceItem.ActiveRunID = "run-orphan-llm"
 	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace: %v", err)
@@ -1430,7 +1430,7 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanLLMStepOnProviderMissing(
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	runItem.State = common.RunStateRunning
+	runItem.State = common.RunStateActive
 	runItem.InitialStepKind = "llm/workspace_execution"
 	runItem.ExecutionContext = map[string]any{
 		"activation": "workspace_execution",
@@ -1444,7 +1444,7 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanLLMStepOnProviderMissing(
 		ID:    "run-orphan-llm/repair-provider",
 		RunID: "run-orphan-llm",
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{"runtimeStage": "repair"},
 	}); err != nil {
 		t.Fatalf("create dispatched llm step: %v", err)
@@ -1503,7 +1503,7 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanProviderRetryOnProviderMi
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.State = common.WorkspaceStateActive
 	workspaceItem.ActiveRunID = "run-orphan-provider-retry"
 	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace: %v", err)
@@ -1512,7 +1512,7 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanProviderRetryOnProviderMi
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	runItem.State = common.RunStateRunning
+	runItem.State = common.RunStateActive
 	runItem.InitialStepKind = "llm/workspace_execution"
 	runItem.ExecutionContext = map[string]any{
 		"activation": "workspace_execution",
@@ -1543,7 +1543,7 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanProviderRetryOnProviderMi
 		ID:    retryStepID,
 		RunID: "run-orphan-provider-retry",
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{
 			"failedStepId":              string(rootStepID),
 			"providerRetryFollowUp":     true,
@@ -1638,20 +1638,20 @@ func TestListRunsWithSessionHydratesActiveCurrentStepOnly(t *testing.T) {
 	completedRunID := common.RunID("run-list-completed-current-step")
 	activeStepID := common.StepID("run-list-active-current-step/step-1")
 	completedStepID := common.StepID("run-list-completed-current-step/step-1")
-	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: activeRunID}); err != nil {
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: activeRunID}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	for _, item := range []*runmodel.Run{
 		{ID: completedRunID, WorkspaceID: workspaceID, State: common.RunStateCompleted},
-		{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateActive},
 	} {
 		if err := exports.Repositories.Runs.Create(ctx, item); err != nil {
 			t.Fatalf("create run %s: %v", item.ID, err)
 		}
 	}
 	for _, item := range []*runmodel.Step{
-		{ID: completedStepID, RunID: completedRunID, Kind: "llm/workspace_execution", State: common.StepStateCompleted},
-		{ID: activeStepID, RunID: activeRunID, Kind: "llm/workspace_execution", State: common.StepStateDispatched},
+		{ID: completedStepID, RunID: completedRunID, Kind: "llm/workspace_execution", State: common.StepStateSucceeded},
+		{ID: activeStepID, RunID: activeRunID, Kind: "llm/workspace_execution", State: common.StepStateExecuting},
 	} {
 		if err := exports.Repositories.Steps.Create(ctx, item); err != nil {
 			t.Fatalf("create step %s: %v", item.ID, err)
@@ -1668,7 +1668,7 @@ func TestListRunsWithSessionHydratesActiveCurrentStepOnly(t *testing.T) {
 	}
 	if got := byID[string(activeRunID)]; got.CurrentStepID != string(activeStepID) ||
 		got.CurrentStepKind != "llm/workspace_execution" ||
-		got.CurrentStepState != string(common.StepStateDispatched) {
+		got.CurrentStepState != string(common.StepStateExecuting) {
 		t.Fatalf("active run current step = %+v, want %s/llm/workspace_execution/dispatched", got, activeStepID)
 	}
 	if got := byID[string(completedRunID)]; got.CurrentStepID != "" {

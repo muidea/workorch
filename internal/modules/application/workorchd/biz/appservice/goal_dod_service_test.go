@@ -163,7 +163,7 @@ func TestDefineGoalWithBackendReopensCompletedWorkspaceAndInvalidatesOldOutcome(
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	ws.State = common.WorkspaceStateCompleted
+	ws.State = common.WorkspaceStateActive
 	if err := exports.Repositories.Workspaces.Update(ctx, ws); err != nil {
 		t.Fatalf("mark workspace completed: %v", err)
 	}

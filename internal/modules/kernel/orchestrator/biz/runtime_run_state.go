@@ -79,15 +79,20 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 	o.runStateManager().hydrateReplanContextWithInheritedPrimaryFailure(ctx, run, replanContext)
 	successorContext["replanContinuation"] = compactReplanContinuationForRuntimeContext(replanContext)
 	successor := &runModel.Run{
-		ID:                 successorID,
-		WorkspaceID:        run.WorkspaceID,
-		GoalID:             run.GoalID,
-		DoDID:              run.DoDID,
+		ID:          successorID,
+		WorkspaceID: run.WorkspaceID,
+		GoalID:      run.GoalID,
+		DoDID:       run.DoDID,
+		Lineage: runModel.RunLineage{
+			PredecessorRunID: run.ID,
+			LineageState:     "active",
+		},
 		DefinitionRevision: run.DefinitionRevision,
 		InitialStepKind:    run.InitialStepKind,
 		ExecutionContext:   successorContext,
-		State:              common.RunStateCreated,
+		State:              common.RunStatePending,
 		Priority:           run.Priority,
+		CreatedAt:          runtimeEvidenceTimestamp(),
 	}
 	if successor.InitialStepKind == "" {
 		successor.InitialStepKind = initialStepKind(run)
@@ -97,6 +102,7 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 		successor.ExecutionContext["convergenceContract"] = o.convergenceManager().compact(contract)
 	}
 	successor.ExecutionContext["compressedContext"] = compressedContextForCreatedRuntimeRun(successor)
+	run.Lineage.SuccessorRunID = successor.ID
 	if err := o.closeLoadedRun(ctx, run, common.RunStateSuperseded, ""); err != nil {
 		return err
 	}
@@ -211,9 +217,15 @@ func (o *RuntimeOrchestrator) closeLoadedRun(ctx context.Context, r *runModel.Ru
 		return err
 	}
 	r.State = state
+	if state == common.RunStateSuperseded && (strings.TrimSpace(r.Lineage.LineageState) == "" || r.Lineage.LineageState == "active") {
+		r.Lineage.LineageState = "superseded"
+	}
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
 	r.FailureReason = reason
+	if strings.TrimSpace(r.EndedAt) == "" {
+		r.EndedAt = runtimeEvidenceTimestamp()
+	}
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
@@ -241,7 +253,7 @@ func (o *RuntimeOrchestrator) dismissOpenDecisionBlocker(ctx context.Context, r 
 	if ticket.RunID != r.ID || ticket.State != common.DecisionTicketStateOpen {
 		return nil
 	}
-	ticket.State = common.DecisionTicketStateDismissed
+	ticket.State = common.DecisionTicketStateSuperseded
 	ticket.UpdatedAt = runtimeEvidenceTimestamp()
 	return o.tickets.Update(ctx, ticket)
 }
@@ -279,14 +291,10 @@ func (o *RuntimeOrchestrator) reconcileWorkspaceActiveRun(ctx context.Context, w
 }
 
 func workspaceStateForTerminalRun(state common.RunState) common.WorkspaceState {
-	switch state {
-	case common.RunStateCompleted:
-		return common.WorkspaceStateCompleted
-	case common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
-		return common.WorkspaceStateFailed
-	default:
-		return common.WorkspaceStateActive
+	if state == common.RunStateSuperseded {
+		return common.WorkspaceStateSuperseded
 	}
+	return common.WorkspaceStateActive
 }
 
 func isTerminalRunState(state common.RunState) bool {
@@ -300,7 +308,7 @@ func isTerminalRunState(state common.RunState) bool {
 
 func isActiveRunProgressState(state common.RunState) bool {
 	switch state {
-	case common.RunStateCreated, common.RunStateRunning, common.RunStateValidating:
+	case common.RunStatePending, common.RunStateActive:
 		return true
 	default:
 		return false
@@ -407,17 +415,17 @@ func canCloseRunAsUnsuccessfulTerminal(current common.RunState, target common.Ru
 	switch target {
 	case common.RunStateFailed:
 		switch current {
-		case common.RunStateCreated, common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStateValidating:
+		case common.RunStatePending, common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
 			return true
 		}
 	case common.RunStateCancelled:
 		switch current {
-		case common.RunStateCreated, common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStateValidating:
+		case common.RunStatePending, common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
 			return true
 		}
 	case common.RunStateSuperseded:
 		switch current {
-		case common.RunStateCreated, common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStateValidating:
+		case common.RunStatePending, common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
 			return true
 		}
 	}
@@ -425,8 +433,8 @@ func canCloseRunAsUnsuccessfulTerminal(current common.RunState, target common.Ru
 }
 
 func isActiveWorkspaceState(state common.WorkspaceState) bool {
-	switch state {
-	case common.WorkspaceStateRunning, common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked, common.WorkspaceStateValidating:
+	switch common.CanonicalWorkspaceOwnerState(state) {
+	case common.WorkspaceStateActive, common.WorkspaceStateBlockedOnApproval:
 		return true
 	default:
 		return false

@@ -592,7 +592,7 @@ func goalCoverageEvidenceCandidatesForRequirementInSteps(runSteps []*runModel.St
 		if strings.HasPrefix(strings.TrimSpace(step.Kind), "llm/") {
 			continue
 		}
-		if step.State != common.StepStateCompleted && step.State != common.StepStateFailed {
+		if step.State != common.StepStateSucceeded && step.State != common.StepStateFailed {
 			continue
 		}
 		if !coverageEvidenceQualityCandidateAllowed(stringFromMap(step.Output, "evidenceQuality")) {

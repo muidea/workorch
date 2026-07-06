@@ -201,19 +201,19 @@ orchestrator.dispatchStepWithWorkspace
 - `dispatchStepWithWorkspace` 在 enrich LLM step input 后、发布 dispatched / runtime execute request 前会立即持久化 step，避免异步 state loop 中 projection 或 snapshot 读到未带 `executionContextPackage` 的半成品 step。
 - read model 已新增 `runtimeExecution` 投影，基于 runtime checkpoints 聚合当前 step 的 `requestId`、`queueKey`、`acceptedAt`、`lastProgressAt`、`doneAt/failedAt`、`finalizedAt` 和 gap 分类；RunSnapshot 与 RunStatus 均可展示 `request_not_accepted`、`accepted_no_progress`、`accepted_in_progress`、`runtime_terminal_not_finalized`。
 - runtime completed/failed event 到达 orchestrator 后，会先写入稳定 ID 的 `runtime_step_result_available` recovery checkpoint，持久化 request id、terminal topic、output/error、failure class/signature 和 evidence refs，再进入 step finalize。
-- `ResumeRun` 的 running recovery 已优先消费 `runtime_step_result_available` checkpoint：当前 terminal step 仍是 `dispatched` 时，直接使用持久化 `StepExecutionResult` 调用 finalize，不重新执行 provider/runtime adapter。
-- stale dispatched recovery 已接入同一类 runtime checkpoint gap 分类；当只有 `runtime_step_done` / `runtime_step_failed` 但没有 durable terminal result 时，watchdog 不会重派 provider；当存在 `runtime_step_result_available` 时，watchdog 允许触发 resume，由 orchestrator owner 完成 finalize recovery。
-- finalize failure path 已补充中立 stage 归一化与主链路测试：output contract invalid、context gate fail-fast、patch apply failure 均会让原 step 进入 failed 并带结构化 stage / failure diagnostics，不再可能保持长期 `dispatched`；OR-06 focused 覆盖已完成，后续只需随新增 failure gate 增量补测。
-- stale dispatched recovery 已进一步收紧 accepted gap 策略：`request_not_accepted` 是主路径 dispatch/subscribe/queue 缺陷诊断，只投影展示，不由 periodic watchdog 自动恢复；`runtime_terminal_not_finalized` 只有存在 durable `runtime_step_result_available` 时才恢复；`worker_lost`、`accepted_no_progress` 和 `accepted_in_progress` 只有在 runtime recovery policy 明确允许 watchdog external retry，且具备 terminal evidence、worker-lost evidence 或 stale heartbeat 这类持久边界证据时才触发结构化 recovery command，避免 provider 仍运行时重复执行。
+- `ResumeRun` 的 active recovery 已优先消费 `runtime_step_result_available` checkpoint：当前 terminal step 仍是 `executing`（由 `step_dispatched` 事件派生）时，直接使用持久化 `StepExecutionResult` 调用 finalize，不重新执行 provider/runtime adapter。
+- stale executing/dispatched-event recovery 已接入同一类 runtime checkpoint gap 分类；当只有 `runtime_step_done` / `runtime_step_failed` 但没有 durable terminal result 时，watchdog 不会重派 provider；当存在 `runtime_step_result_available` 时，watchdog 允许触发 resume，由 orchestrator owner 完成 finalize recovery。
+- finalize failure path 已补充中立 stage 归一化与主链路测试：output contract invalid、context gate fail-fast、patch apply failure 均会让原 step 进入 failed 并带结构化 stage / failure diagnostics，不再可能保持长期 `executing`；OR-06 focused 覆盖已完成，后续只需随新增 failure gate 增量补测。
+- stale executing/dispatched-event recovery 已进一步收紧 accepted gap 策略：`request_not_accepted` 是主路径 dispatch/subscribe/queue 缺陷诊断，只投影展示，不由 periodic watchdog 自动恢复；`runtime_terminal_not_finalized` 只有存在 durable `runtime_step_result_available` 时才恢复；`worker_lost`、`accepted_no_progress` 和 `accepted_in_progress` 只有在 runtime recovery policy 明确允许 watchdog external retry，且具备 terminal evidence、worker-lost evidence 或 stale heartbeat 这类持久边界证据时才触发结构化 recovery command，避免 provider 仍运行时重复执行。
 - `workorchruntimecontract.RuntimeRecoveryPolicy` 已作为中立 runtime contract 字段贯穿 dispatch request、accepted/progress/completed/failed event、runtime checkpoints、read model projection 与 `RecoverRuntimeGapCommand`。默认 `unknown/manual_only` 不允许 watchdog retry；只有显式 idempotent 或带 dedupe key 的 `retry_external` policy 才允许 supported accepted/worker-lost gap 自动恢复。
-- `workorchd/service/server` watchdog 路径已核对：`recoverStaleDispatchedRuns` 只通过 appservice shared session / backend recovery 入口触发 owner recovery command，不直接调用 runtime adapter、runtime block execute topic 或 provider request；appservice recovery 已从统一 resume 收口为 gap-specific recovery command。
+- `workorchd/service/server` watchdog 路径已核对：stale executing/dispatched-event recovery 只通过 appservice shared session / backend recovery 入口触发 owner recovery command，不直接调用 runtime adapter、runtime block execute topic 或 provider request；appservice recovery 已从统一 resume 收口为 gap-specific recovery command。
 - TUI/Web 端侧状态审计已完成：Web `src` 主要展示服务端 recovery/projection 字段并提交用户 command；TUI 未发现端侧自动补发 provider/runtime recovery。
-- TUI UI-01 第一轮已收口：prompt、主视图 tail、状态栏、inspect 和 blocker fetch/submit 均按当前 workspace/run scoped ViewModel 读取 blocker；服务端 workspace overview 为 running/validating/completed/failed 时会压掉旧本地 blocker 缓存，避免 workspace 切换后 `decision >` 或 stale decision command 污染当前 workspace。
-- runtime executor 已通过 runtime progress 通道补充中立 worker lifecycle evidence：`runtime_worker_started`、`runtime_worker_heartbeat`、`runtime_worker_stopped`、`runtime_worker_lost`。`workorchd` read model 会将其投影为 `workerStartedAt`、`workerHeartbeatAt`、`workerStoppedAt`、`workerLostAt` 和 `worker_lost` gap；stale dispatched watchdog 只有看到明确 `runtime_worker_lost` 证据，或已存在 worker heartbeat 且 heartbeat 本身超过 stale minAge 时，才允许恢复 accepted gap，仍不会对无证据的 `accepted_no_progress` / `accepted_in_progress` 盲目重派 provider。
-- stale dispatched watchdog 已从统一 resume 入口收口为 gap-specific recovery command：`workorchd` 通过 `TopicOrchestratorCommandRecoverRuntimeGap` 提交结构化 `RecoverRuntimeGapCommand`，payload 携带 workspace/run/step/gap/request/queue/latestStepTime/reason；orchestrator owner 将其转换为带 `runtimeGapRecovery` 的 background resume patch。watchdog/appservice 不直接调用 runtime adapter，也不再把不同 gap 混成无上下文 resume。
+- TUI UI-01 第一轮已收口：prompt、主视图 tail、状态栏、inspect 和 blocker fetch/submit 均按当前 workspace/run scoped ViewModel 读取 blocker；服务端 workspace overview 依据 active/terminal run 与 blocker projection 压掉旧本地 blocker 缓存，避免 workspace 切换后 `decision >` 或 stale decision command 污染当前 workspace。
+- runtime executor 已通过 runtime progress 通道补充中立 worker lifecycle evidence：`runtime_worker_started`、`runtime_worker_heartbeat`、`runtime_worker_stopped`、`runtime_worker_lost`。`workorchd` read model 会将其投影为 `workerStartedAt`、`workerHeartbeatAt`、`workerStoppedAt`、`workerLostAt` 和 `worker_lost` gap；stale executing/dispatched-event watchdog 只有看到明确 `runtime_worker_lost` 证据，或已存在 worker heartbeat 且 heartbeat 本身超过 stale minAge 时，才允许恢复 accepted gap，仍不会对无证据的 `accepted_no_progress` / `accepted_in_progress` 盲目重派 provider。
+- stale executing/dispatched-event watchdog 已从统一 resume 入口收口为 gap-specific recovery command：`workorchd` 通过 `TopicOrchestratorCommandRecoverRuntimeGap` 提交结构化 `RecoverRuntimeGapCommand`，payload 携带 workspace/run/step/gap/request/queue/latestStepTime/reason；orchestrator owner 将其转换为带 `runtimeGapRecovery` 的 background resume patch。watchdog/appservice 不直接调用 runtime adapter，也不再把不同 gap 混成无上下文 resume。
 - gap-specific recovery command 主路径已补齐订阅：orchestrator module `Start()` 订阅 `TopicOrchestratorCommandRecoverRuntimeGap`，避免 appservice/watchdog 正确发布 recovery command 后因无 owner response 被判定为 `invalid argument`。
-- 服务启动不再自动执行一次性 stale dispatched runtime gap 扫描；重启后历史运行态由用户显式恢复，周期 watchdog 只在服务运行期间基于持久 owner state 发布结构化 stale gap recovery command。
-- 文件后端回归已覆盖 durable terminal result finalize：running run + dispatched step + `runtime_step_result_available` checkpoint 可通过 `RecoverStaleDispatchedRunsWithBackend` 恢复为 terminal，step output 保留 checkpoint marker，证明不重新执行 provider/runtime adapter。
+- 服务启动不再自动执行一次性 stale executing/dispatched-event runtime gap 扫描；重启后历史运行态由用户显式恢复，周期 watchdog 只在服务运行期间基于持久 owner state 发布结构化 stale gap recovery command。
+- 文件后端回归已覆盖 durable terminal result finalize：active run + executing step + `runtime_step_result_available` checkpoint 可通过 recovery 入口恢复为 terminal，step output 保留 checkpoint marker，证明不重新执行 provider/runtime adapter。
 - runtime executor 并发回归已覆盖：两个不同 workspace 的 runtime block request 在第一个 adapter 未释放时，第二个 adapter 也能进入执行，证明不同 workspace runtime blocks 不被全局串行化。
 - graph 依赖与 evidence 顺序回归已复核：独立 graph nodes 可并发执行，依赖节点在前置节点完成后推进，follow-up 输入保持并行节点 evidence 的稳定顺序。
 - TUI/Web runtime gap 展示链路已补齐：`runtimeExecution` 从 RunSnapshot / RunStatus 合并到 WorkspaceSnapshot，经 `workorchclient`、`workorchport`、remote/eventHub backend 透传；TUI 主视图、状态栏、`/status` 和 Web workspace detail 只显示 backend-projected pending/gap/worker/progress 字段，不新增端侧恢复状态机。
@@ -256,7 +256,7 @@ orchestrator.dispatchStepWithWorkspace
 - `internal/modules/blocks/pkg/runtimeevent/runtime_event.go` 中 `Executor.handle` 已收口为 decode、scope 校验、幂等去重、入队并返回 accepted；adapter 执行由 BackgroundRoutine worker 承载。
 - `internal/modules/kernel/orchestrator/biz/runtime_graph.go` 中 graph batch 已改为发布 ready node dispatch request，不再通过 goroutine / `WaitGroup` 等待 batch terminal。
 - `internal/modules/kernel/orchestrator/biz/runtime_repair.go` 中 repair/provider retry 已通过 dispatch requested event 推进，不再在同一 Go 调用栈递归执行 runtime block。
-- `internal/modules/application/workorchd/service/server/http_run_continuation_scheduler.go` 中 stale dispatched watchdog 已按 request/accepted/progress/done/finalize gap 分型，并通过 gap-specific owner recovery command 推进，不直接调用 provider/runtime adapter。
+- `internal/modules/application/workorchd/service/server/http_run_continuation_scheduler.go` 中 stale executing/dispatched-event watchdog 已按 request/accepted/progress/done/finalize gap 分型，并通过 gap-specific owner recovery command 推进，不直接调用 provider/runtime adapter。
 
 Phase 1 已落地的最小 contract/lane 收口：
 
@@ -273,7 +273,7 @@ Phase 1 已落地的最小 contract/lane 收口：
 rg -n "ExecuteRuntimeStep\\(" internal/modules internal/pkg -g "*.go"
 rg -n "TopicRuntimeBlockCommandExecute|runtime/block/execute|NewSimpleObserver|Subscribe" internal/modules/blocks internal/modules/kernel internal/pkg -g "*.go"
 rg -n "dispatchGraphStepBatchWithWorkspace|dispatchRuntimeRepairFollowUp|dispatchStepWithWorkspace|WaitGroup" internal/modules/kernel/orchestrator -g "*.go"
-rg -n "recoverStaleDispatched|stale dispatched|step_dispatched|runtime_step_done|finalize" internal/modules/application internal/modules/kernel -g "*.go"
+rg -n "recoverStaleDispatched|stale executing|step_dispatched|runtime_step_done|finalize" internal/modules/application internal/modules/kernel -g "*.go"
 rg -n "decision >|Submitting|replan|restart|resume current run|workspace projection" internal/services/workorch/service/tui internal/modules/application/workorchd -g "*.go"
 ```
 
@@ -618,13 +618,13 @@ orchestrator result subscriber receives completed step
 
 需要核对：
 
-- run owner 是否能表达 active step / dispatched step / terminal step 的权威状态。
-- stale dispatched step 的 owner state 是否足够让 orchestrator 重建 execution request。
+- run owner 是否能表达 active step / executing step / terminal step 的权威状态。
+- stale executing/dispatched-event step 的 owner state 是否足够让 orchestrator 重建 execution request。
 
 待办：
 
 - [x] 核对 run/step owner write command 是否携带 workspace scope。
-- [x] 增加 stale dispatched step metadata：last request id、last accepted at、last progress at。
+- [x] 增加 stale executing/dispatched-event step metadata：last request id、last accepted at、last progress at。
 - [x] 增加 run snapshot 对 pending runtime execution 的显示字段。
 
 ### `internal/modules/application/workorchd/service/server`
@@ -633,11 +633,11 @@ orchestrator result subscriber receives completed step
 
 - 现有 runContinuationScheduler 继续负责用户 command / governance continuation / restart / activation 的 pending queue。
 - Runtime block execution queue 不应放在 HTTP layer；它属于 runtimeevent executor 或 orchestrator runtime execution subsystem。
-- Watchdog 需要从“重派同一个 step”改为“检查 execution request/result/finalize 缺口”，避免重复触碰同一 dispatched step。
+- Watchdog 需要从“重派同一个 step”改为“检查 execution request/result/finalize 缺口”，避免重复触碰同一 executing step。
 
 待办：
 
-- [x] 将 stale dispatched recovery 分类为：request not accepted、accepted no progress、stream done but not finalized、worker lost。
+- [x] 将 stale executing/dispatched-event recovery 分类为：request not accepted、accepted no progress、stream done but not finalized、worker lost。
 - [x] 对 `stream done but not finalized` 优先发布 finalize recovery command，而不是重复 dispatch step。
 - [x] HTTP handler 不直接驱动 runtime block；只提交 user command。
 - [x] projection 中展示 pending/finalize-missing 状态。
@@ -767,12 +767,12 @@ orchestrator result subscriber receives completed step
 
 - [x] RunSnapshot / RunStatus read model 可展示 request accepted、progress、done、finalize 的不同缺口。
 - [x] Watchdog 识别 request accepted、progress、done、finalize 的不同缺口。
-  - [x] stale dispatched selector 已识别 `runtime_terminal_not_finalized`。
+  - [x] stale executing/dispatched-event selector 已识别 `runtime_terminal_not_finalized`。
   - [x] 有 durable terminal result 时触发 resume finalize recovery；只有 stream done 没有 durable result 时阻止 provider 重派。
   - [x] request not accepted / accepted no progress / accepted in progress / worker lost 已有独立恢复策略和回归：request not accepted 只作为诊断 gap，不由 periodic watchdog 自动恢复；accepted/progress/worker lost 必须同时具备持久边界证据和显式可重试 recovery policy，才允许结构化 recovery command。
 - [x] 对 `stream done but not finalized` 执行 finalize recovery。
   - completed/failed event 会先写 `runtime_step_result_available` durable checkpoint。
-  - `ResumeRun` 在 running recovery 中优先使用 durable terminal result finalize 当前 dispatched terminal step。
+  - `ResumeRun` 在 active recovery 中优先使用 durable terminal result finalize 当前 executing terminal step。
   - 仅有 stream done 但没有 durable result 时仍不能伪造 output，watchdog 只展示 gap，不重派 provider。
 - [x] 对显式 recoverable 的 worker lost 或 accepted gap 执行 retry/requeue；unknown、manual-only 或 non-idempotent policy 不自动重试。
 - [x] 服务启动不自动从 persisted owner state 重建 pending；历史运行态恢复由显式用户命令或诊断/恢复入口触发。
@@ -780,9 +780,9 @@ orchestrator result subscriber receives completed step
 
 验收：
 
-- [x] 服务重启后 dispatched step 可恢复。
+- [x] 服务重启后 executing/dispatched-event step 可恢复。
 - [x] provider response 已落盘但 step 未 terminal 时，不重复调用 provider，优先完成 finalize。
-- [x] stale dispatched 不再无限重复 `step_dispatched`。
+- [x] stale executing/dispatched-event 不再无限重复 `step_dispatched`。
 
 ### Phase 6: E2E And Runtime Observation
 

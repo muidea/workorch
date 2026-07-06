@@ -28,14 +28,14 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 			Workspace: readmodelcore.Workspace{
 				ID:               "ws-a",
 				Title:            "A+",
-				State:            "running",
+				State:            string(common.WorkspaceStateActive),
 				ContextHints:     map[string]any{"large": "profile"},
 				EvidencePolicies: []map[string]any{{"large": "policy"}},
 			},
 			Runs: []readmodelcore.Run{{
 				ID:               "run-a",
 				WorkspaceID:      "ws-a",
-				State:            "running",
+				State:            string(common.RunStateActive),
 				ExecutionContext: map[string]any{"coverageWorkItems": []any{map[string]any{"large": strings.Repeat("x", 2048)}}},
 			}},
 			LLMUsageTraces: []readmodelcore.LLMUsageTrace{{
@@ -59,11 +59,11 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 		t.Fatalf("items = %+v, want sorted snapshot-backed workspaces", items)
 	}
 	if items[0].ViewModel.WorkspaceID != "ws-a" ||
-		items[0].ViewModel.PromptMode != "running" ||
+		items[0].ViewModel.PromptMode != "workspace" ||
 		items[0].ViewModel.GlobalRevision != status.GlobalRevision ||
 		items[0].ViewModel.WorkspaceRevision == 0 ||
 		items[0].ViewModel.Revision != items[0].ViewModel.WorkspaceRevision {
-		t.Fatalf("list viewModel = %+v, status = %+v, want projection-owned running prompt", items[0].ViewModel, status)
+		t.Fatalf("list viewModel = %+v, status = %+v, want projection-owned workspace prompt", items[0].ViewModel, status)
 	}
 	if item, ok := items[0].ViewModel.Sections["promptMode"]; !ok || item.Revision != items[0].ViewModel.Revision {
 		t.Fatalf("list promptMode section = %+v, want section revision from viewModel %+v", item, items[0].ViewModel)
@@ -76,11 +76,11 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get snapshot: %v", err)
 	}
-	if snapshotStatus.GlobalRevision != status.GlobalRevision || snapshot.Workspace.State != "running" {
-		t.Fatalf("snapshot/status = %+v/%+v, want running snapshot at same revision", snapshot, snapshotStatus)
+	if snapshotStatus.GlobalRevision != status.GlobalRevision || snapshot.Workspace.State != string(common.WorkspaceStateActive) {
+		t.Fatalf("snapshot/status = %+v/%+v, want active snapshot at same revision", snapshot, snapshotStatus)
 	}
 	if snapshot.ViewModel.WorkspaceID != "ws-a" ||
-		snapshot.ViewModel.PromptMode != "running" ||
+		snapshot.ViewModel.PromptMode != "workspace" ||
 		snapshot.ViewModel.GlobalRevision != snapshotStatus.GlobalRevision ||
 		snapshot.ViewModel.WorkspaceRevision != snapshotStatus.WorkspaceRevision ||
 		snapshot.ViewModel.Revision != snapshotStatus.WorkspaceRevision {
@@ -313,21 +313,21 @@ func TestStoreUpsertWorkspaceSynchronizesDetailWorkspaceState(t *testing.T) {
 		},
 	}, nil)
 
-	store.UpsertWorkspace(appmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"})
+	store.UpsertWorkspace(appmodelcore.Workspace{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"})
 
 	items, _, err := store.List()
 	if err != nil {
 		t.Fatalf("list workspaces: %v", err)
 	}
-	if len(items) != 1 || items[0].State != "running" || items[0].BlockingTicketID != "" {
-		t.Fatalf("list workspace = %+v, want running without blocker", items)
+	if len(items) != 1 || items[0].State != string(common.WorkspaceStateActive) || items[0].BlockingTicketID != "" {
+		t.Fatalf("list workspace = %+v, want active without blocker", items)
 	}
 	snapshot, _, err := store.GetSnapshot("ws-a")
 	if err != nil {
 		t.Fatalf("get snapshot: %v", err)
 	}
-	if snapshot.Workspace.State != "running" || snapshot.Workspace.BlockingTicketID != "" {
-		t.Fatalf("snapshot workspace = %+v, want synchronized running state", snapshot.Workspace)
+	if snapshot.Workspace.State != string(common.WorkspaceStateActive) || snapshot.Workspace.BlockingTicketID != "" {
+		t.Fatalf("snapshot workspace = %+v, want synchronized active state", snapshot.Workspace)
 	}
 	if snapshot.RunCommand == nil || snapshot.RunCommand.RequestID != "request-a" {
 		t.Fatalf("RunCommand = %+v, want retained command projection", snapshot.RunCommand)
@@ -390,7 +390,7 @@ func TestStoreReplaceWorkspaceListPreservesSnapshotGovernanceAuthority(t *testin
 		t.Fatalf("list workspaces: %v", err)
 	}
 	if len(items) != 1 ||
-		items[0].State != string(common.WorkspaceStateWaitingDecision) ||
+		items[0].State != string(common.WorkspaceStateActive) ||
 		items[0].BlockingTicketID != "ticket-a" ||
 		items[0].ViewModel.PromptMode != "decision" {
 		t.Fatalf("list workspace = %+v, want decision projection from snapshot governance", items)
@@ -399,7 +399,7 @@ func TestStoreReplaceWorkspaceListPreservesSnapshotGovernanceAuthority(t *testin
 	if err != nil {
 		t.Fatalf("get snapshot: %v", err)
 	}
-	if snapshot.Workspace.State != string(common.WorkspaceStateWaitingDecision) ||
+	if snapshot.Workspace.State != string(common.WorkspaceStateActive) ||
 		snapshot.Workspace.BlockingTicketID != "ticket-a" ||
 		snapshot.ViewModel.PromptMode != "decision" {
 		t.Fatalf("snapshot workspace = %+v viewModel = %+v, want decision projection", snapshot.Workspace, snapshot.ViewModel)
@@ -426,7 +426,7 @@ func TestStoreProjectionDerivesDecisionPromptFromBlockedRun(t *testing.T) {
 		t.Fatalf("list workspaces: %v", err)
 	}
 	if len(items) != 1 ||
-		items[0].State != string(common.WorkspaceStateWaitingDecision) ||
+		items[0].State != string(common.WorkspaceStateActive) ||
 		items[0].BlockingTicketID != "ticket-a" ||
 		items[0].ViewModel.PromptMode != "decision" ||
 		items[0].Title != "Workspace A" {
@@ -437,7 +437,7 @@ func TestStoreProjectionDerivesDecisionPromptFromBlockedRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get detail snapshot: %v", err)
 	}
-	if detail.Workspace.State != string(common.WorkspaceStateWaitingDecision) ||
+	if detail.Workspace.State != string(common.WorkspaceStateActive) ||
 		detail.Workspace.BlockingTicketID != "ticket-a" ||
 		detail.ViewModel.PromptMode != "decision" {
 		t.Fatalf("detail snapshot workspace = %+v viewModel = %+v, want decision prompt", detail.Workspace, detail.ViewModel)
@@ -447,7 +447,7 @@ func TestStoreProjectionDerivesDecisionPromptFromBlockedRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get summary snapshot: %v", err)
 	}
-	if summary.Workspace.State != string(common.WorkspaceStateWaitingDecision) ||
+	if summary.Workspace.State != string(common.WorkspaceStateActive) ||
 		summary.Workspace.BlockingTicketID != "ticket-a" ||
 		summary.ViewModel.PromptMode != "decision" {
 		t.Fatalf("summary snapshot workspace = %+v viewModel = %+v, want decision prompt", summary.Workspace, summary.ViewModel)
@@ -456,9 +456,9 @@ func TestStoreProjectionDerivesDecisionPromptFromBlockedRun(t *testing.T) {
 
 func TestStoreProjectionRequiresSameScopeOpenDecisionForPrompt(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: string(common.WorkspaceStateWaitingDecision), ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
 		"ws-a": {
-			Workspace: readmodelcore.Workspace{ID: "ws-a", State: string(common.WorkspaceStateWaitingDecision), ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
+			Workspace: readmodelcore.Workspace{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
 			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision), BlockingTicketID: "ticket-a"},
 			Decisions: []readmodelcore.Decision{{
 				ID:          "ticket-a",
@@ -474,7 +474,7 @@ func TestStoreProjectionRequiresSameScopeOpenDecisionForPrompt(t *testing.T) {
 		t.Fatalf("list workspaces: %v", err)
 	}
 	if len(items) != 1 ||
-		items[0].State == string(common.WorkspaceStateWaitingDecision) ||
+		items[0].State != string(common.WorkspaceStateActive) ||
 		items[0].BlockingTicketID != "" ||
 		items[0].ViewModel.PromptMode == "decision" {
 		t.Fatalf("list workspace = %+v, want no decision prompt without same-scope open ticket", items)
@@ -483,7 +483,7 @@ func TestStoreProjectionRequiresSameScopeOpenDecisionForPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get snapshot: %v", err)
 	}
-	if snapshot.Workspace.State == string(common.WorkspaceStateWaitingDecision) ||
+	if snapshot.Workspace.State != string(common.WorkspaceStateActive) ||
 		snapshot.Workspace.BlockingTicketID != "" ||
 		snapshot.ViewModel.PromptMode == "decision" {
 		t.Fatalf("snapshot workspace = %+v viewModel = %+v, want no decision prompt without same-scope open ticket", snapshot.Workspace, snapshot.ViewModel)
@@ -679,7 +679,7 @@ func TestStoreGlobalStatusSourceRevisionCoversWorkspaceProjectedRevision(t *test
 		},
 		"ws-active": {
 			Workspace: readmodelcore.Workspace{ID: "ws-active", State: "running", ActiveRunID: "run-active"},
-			Run:       &readmodelcore.Run{ID: "run-active", WorkspaceID: "ws-active", State: string(common.RunStateRunning)},
+			Run:       &readmodelcore.Run{ID: "run-active", WorkspaceID: "ws-active", State: string(common.RunStateActive)},
 		},
 	}, nil)
 
@@ -688,7 +688,7 @@ func TestStoreGlobalStatusSourceRevisionCoversWorkspaceProjectedRevision(t *test
 		RunID:       "run-active",
 		StepID:      "step-active",
 		StepKind:    "llm/workspace_execution",
-		StepState:   string(common.StepStateDispatched),
+		StepState:   string(common.StepStateExecuting),
 		Topic:       "run.step.dispatched",
 		Revision:    3193,
 	}) {
@@ -714,7 +714,7 @@ func TestStoreGlobalStatusSourceRevisionCoversWorkspaceProjectedRevision(t *test
 func TestStoreKeepsExistingProjectionReadableWhileRebuilding(t *testing.T) {
 	store := NewStore()
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
-		"ws-a": {Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running"}},
+		"ws-a": {Workspace: readmodelcore.Workspace{ID: "ws-a", State: string(common.WorkspaceStateActive)}},
 	}, nil)
 
 	store.setBuilding()
@@ -730,8 +730,8 @@ func TestStoreKeepsExistingProjectionReadableWhileRebuilding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get stale snapshot during rebuild: %v", err)
 	}
-	if detailStatus.State != StateStale || snapshot.Workspace.State != "running" {
-		t.Fatalf("detail/status = %+v/%+v, want stale running snapshot", snapshot, detailStatus)
+	if detailStatus.State != StateStale || snapshot.Workspace.State != string(common.WorkspaceStateActive) {
+		t.Fatalf("detail/status = %+v/%+v, want stale active snapshot", snapshot, detailStatus)
 	}
 }
 
@@ -748,7 +748,7 @@ func TestStoreRunHeartbeatMetricsCountsActiveProblemSignals(t *testing.T) {
 			RunHeartbeat: readmodelcore.RunHeartbeat{
 				WorkspaceID:               "ws-active",
 				RunID:                     "run-active",
-				State:                     string(common.RunStateRunning),
+				State:                     string(common.RunStateActive),
 				ActivityState:             "stalled",
 				LatestEffectiveProgressAt: now.Add(-12 * time.Minute).Format(time.RFC3339Nano),
 				Stalled:                   true,
@@ -918,7 +918,7 @@ func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuildOrProjectionFanout(
 			snapshots: map[string]readmodelcore.WorkspaceSnapshot{
 				"ws-a": {
 					Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
-					Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateRunning)},
+					Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 				},
 			},
 		},
@@ -953,7 +953,7 @@ func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuildOrProjectionFanout(
 			2,
 			128,
 			250,
-			string(common.StepStateDispatched),
+			string(common.StepStateExecuting),
 			"provider call waiting",
 		),
 	}); err != nil {
@@ -971,7 +971,7 @@ func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuildOrProjectionFanout(
 	}
 	if snapshot.RunHeartbeat.LatestEventTopic != runevents.TopicRunLLMStreamProgress ||
 		snapshot.RunHeartbeat.LatestStepID != "run-a/step-1" ||
-		snapshot.RunHeartbeat.LatestStepState != string(common.StepStateDispatched) ||
+		snapshot.RunHeartbeat.LatestStepState != string(common.StepStateExecuting) ||
 		snapshot.RunHeartbeat.ActivityState != "running" {
 		t.Fatalf("heartbeat after progress = %+v", snapshot.RunHeartbeat)
 	}
@@ -1003,7 +1003,7 @@ func TestManagerAppliesStepEventsWithoutFullWorkspaceRebuild(t *testing.T) {
 			snapshots: map[string]readmodelcore.WorkspaceSnapshot{
 				"ws-a": {
 					Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
-					Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateRunning)},
+					Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 				},
 			},
 		},
@@ -1029,7 +1029,7 @@ func TestManagerAppliesStepEventsWithoutFullWorkspaceRebuild(t *testing.T) {
 		WorkspaceID: "ws-a",
 		RunID:       "run-a",
 		StepID:      "run-a/step-2",
-		Payload:     events.StepPayload("llm/workspace_execution", common.StepStateDispatched, nil, nil),
+		Payload:     events.StepPayload("llm/workspace_execution", common.StepStateExecuting, nil, nil),
 	}); err != nil {
 		t.Fatalf("publish step dispatched event: %v", err)
 	}
@@ -1039,7 +1039,7 @@ func TestManagerAppliesStepEventsWithoutFullWorkspaceRebuild(t *testing.T) {
 		WorkspaceID: "ws-a",
 		RunID:       "run-a",
 		StepID:      "run-a/step-2",
-		Payload:     events.StepPayload("llm/workspace_execution", common.StepStateCompleted, nil, nil),
+		Payload:     events.StepPayload("llm/workspace_execution", common.StepStateSucceeded, nil, nil),
 	}); err != nil {
 		t.Fatalf("publish step state event: %v", err)
 	}
@@ -1055,12 +1055,12 @@ func TestManagerAppliesStepEventsWithoutFullWorkspaceRebuild(t *testing.T) {
 	}
 	if snapshot.RunHeartbeat.LatestEventTopic != runevents.TopicStepStateChanged ||
 		snapshot.RunHeartbeat.LatestStepID != "run-a/step-2" ||
-		snapshot.RunHeartbeat.LatestStepState != string(common.StepStateCompleted) {
+		snapshot.RunHeartbeat.LatestStepState != string(common.StepStateSucceeded) {
 		t.Fatalf("heartbeat after step events = %+v", snapshot.RunHeartbeat)
 	}
 	if snapshot.RuntimeExecution == nil ||
 		snapshot.RuntimeExecution.StepID != "run-a/step-2" ||
-		snapshot.RuntimeExecution.StepState != string(common.StepStateCompleted) ||
+		snapshot.RuntimeExecution.StepState != string(common.StepStateSucceeded) ||
 		snapshot.RuntimeExecution.LastProgressStage != "step_state" {
 		t.Fatalf("runtime execution after step events = %+v", snapshot.RuntimeExecution)
 	}
@@ -1071,7 +1071,7 @@ func TestStoreRejectsRuntimeProgressForDifferentRun(t *testing.T) {
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "running", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
 		"ws-a": {
 			Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
-			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateRunning)},
+			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 		},
 	}, nil)
 
@@ -1079,7 +1079,7 @@ func TestStoreRejectsRuntimeProgressForDifferentRun(t *testing.T) {
 		WorkspaceID: "ws-a",
 		RunID:       "run-b",
 		StepID:      "run-b/step-1",
-		StepState:   string(common.StepStateDispatched),
+		StepState:   string(common.StepStateExecuting),
 		Topic:       runevents.TopicRunLLMStreamProgress,
 		Revision:    10,
 		Summary:     "wrong run progress",
@@ -1103,7 +1103,7 @@ func TestStoreRuntimeProgressResetsExecutionStateForNewStep(t *testing.T) {
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "running", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
 		"ws-a": {
 			Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
-			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateRunning)},
+			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 			RuntimeExecution: &readmodelcore.RuntimeExecutionState{
 				StepID:          "run-a/old-step",
 				RequestID:       "old-request",
@@ -1121,7 +1121,7 @@ func TestStoreRuntimeProgressResetsExecutionStateForNewStep(t *testing.T) {
 		RunID:       "run-a",
 		StepID:      "run-a/new-step",
 		StepKind:    "llm/workspace_execution",
-		StepState:   string(common.StepStateDispatched),
+		StepState:   string(common.StepStateExecuting),
 		Topic:       runevents.TopicRunLLMStreamProgress,
 		Revision:    10,
 		Summary:     "provider call waiting",
@@ -1353,7 +1353,7 @@ func TestStoreRuntimeProgressClearsGapForTerminalStep(t *testing.T) {
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "running", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
 		"ws-a": {
 			Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
-			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateRunning)},
+			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 			RuntimeExecution: &readmodelcore.RuntimeExecutionState{
 				StepID:  "run-a/step-1",
 				Pending: true,
@@ -1366,7 +1366,7 @@ func TestStoreRuntimeProgressClearsGapForTerminalStep(t *testing.T) {
 		WorkspaceID: "ws-a",
 		RunID:       "run-a",
 		StepID:      "run-a/step-1",
-		StepState:   string(common.StepStateCompleted),
+		StepState:   string(common.StepStateSucceeded),
 		Topic:       runevents.TopicRunLLMStreamProgress,
 		Revision:    10,
 		Summary:     "step completed",

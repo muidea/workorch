@@ -1010,7 +1010,7 @@ func TestNormalizeDoDAssessmentEvidenceRefsBackfillsEmptySatisfiedItemsFromConcr
 				ID:    verifyStepID,
 				RunID: runID,
 				Kind:  "shell/command",
-				State: common.StepStateCompleted,
+				State: common.StepStateSucceeded,
 				Output: map[string]any{
 					"command":  "go",
 					"args":     []string{"test", "./..."},
@@ -1022,7 +1022,7 @@ func TestNormalizeDoDAssessmentEvidenceRefsBackfillsEmptySatisfiedItemsFromConcr
 				ID:    zeroWorkStepID,
 				RunID: runID,
 				Kind:  "shell/command",
-				State: common.StepStateCompleted,
+				State: common.StepStateSucceeded,
 				Output: map[string]any{
 					"command":         "go",
 					"args":            []string{"test", "./...", "-run", "NoMatch"},
@@ -1110,7 +1110,7 @@ func TestNormalizeDoDAssessmentEvidenceRefsMovesTraceableArtifactRefsIntoEvidenc
 			ID:    patchStepID,
 			RunID: runID,
 			Kind:  "patch/apply",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				"coverageTargets": []string{"produced_asset"},
 			},
@@ -1122,7 +1122,7 @@ func TestNormalizeDoDAssessmentEvidenceRefsMovesTraceableArtifactRefsIntoEvidenc
 			ID:    verifyStepID,
 			RunID: runID,
 			Kind:  "shell/command",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				"coverageTargets": []string{"produced_asset"},
 			},
@@ -1205,13 +1205,13 @@ func TestNormalizeDoDAssessmentEvidenceRefsInfersKindsFromConcreteRefs(t *testin
 			ID:    changeStepID,
 			RunID: runID,
 			Kind:  "patch/apply",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 		},
 		{
 			ID:    verifyStepID,
 			RunID: runID,
 			Kind:  "shell/command",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Output: map[string]any{
 				"exitCode": 0,
 			},

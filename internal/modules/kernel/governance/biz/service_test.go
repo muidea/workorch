@@ -406,7 +406,7 @@ func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 
 	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "执行配置读取任务"}))
 	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"输出配置结果"}, State: common.DoDStateReady}))
-	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateRunning}))
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateActive}))
 	mustNoErr(t, memoryRepo.Create(ctx, &memorymodel.MemoryItem{
 		ID:          common.MemoryID("memory-target-env"),
 		WorkspaceID: workspaceID,
@@ -514,7 +514,7 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 
 	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "处理用户请求"}))
 	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"确认后执行"}, State: common.DoDStateReady}))
-	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateRunning}))
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateActive}))
 	mustNoErr(t, ticketRepo.Create(ctx, ticket(&ticketFixture{
 		id:          ticketID,
 		workspaceID: workspaceID,
@@ -1056,7 +1056,7 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 
 	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "完成受治理查询"}))
 	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"参数完整后继续执行"}, State: common.DoDStateReady}))
-	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateRunning}))
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateActive}))
 	mustNoErr(t, ticketRepo.Create(ctx, ticket(&ticketFixture{
 		id:          ticketID,
 		workspaceID: workspaceID,
@@ -1207,7 +1207,7 @@ func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T
 
 	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "处理目标"}))
 	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"确认后执行"}, State: common.DoDStateReady}))
-	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateRunning}))
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateActive}))
 	mustNoErr(t, ticketRepo.Create(ctx, ticket(&ticketFixture{
 		id:          ticketID,
 		workspaceID: workspaceID,
@@ -1285,7 +1285,7 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 
 	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "查询配置并返回结果"}))
 	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"完成只读查询"}, State: common.DoDStateReady}))
-	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateRunning}))
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateActive}))
 	mustNoErr(t, approvalRepo.Create(ctx, &approvalmodel.Approval{
 		ID:          approvalID,
 		WorkspaceID: workspaceID,
@@ -1480,7 +1480,7 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 
 	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "produce a buildable workspace deliverable"}))
 	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"workspace deliverable builds"}, State: common.DoDStateReady}))
-	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateRunning}))
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateActive}))
 	mustNoErr(t, approvalRepo.Create(ctx, &approvalmodel.Approval{
 		ID:          approvalID,
 		WorkspaceID: workspaceID,
@@ -1714,7 +1714,7 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 
 	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "查询系统信息"}))
 	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"仅允许只读操作"}, State: common.DoDStateReady}))
-	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateRunning}))
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateActive}))
 	mustNoErr(t, approvalRepo.Create(ctx, &approvalmodel.Approval{
 		ID:          approvalID,
 		WorkspaceID: workspaceID,
@@ -1815,7 +1815,7 @@ func TestServiceEscalatesTicketWhenRepeatedPromptBudgetExhausted(t *testing.T) {
 		WorkspaceID: workspaceID,
 		GoalID:      goalID,
 		DoDID:       dodID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}))
 	mustNoErr(t, ticketRepo.Create(ctx, ticket(&ticketFixture{
 		id:          ticketID,

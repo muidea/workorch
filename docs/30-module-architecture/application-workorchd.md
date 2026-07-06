@@ -144,13 +144,13 @@ server 层可以接线 projection manager lifecycle，但不拥有 projection co
 workorchd 启动恢复属于应用层 use-case 组合，职责是把 repository 中无法由内存 executor
 继续推进的状态重新交回 kernel runtime contract：
 
-- `running + terminal dispatched step` 表示上次进程已派发但未形成 output；启动恢复应调用 run service resume，让 orchestrator 重新派发该 step。
-- `running` 且没有 blocker、没有 continuation checkpoint、也没有可恢复 terminal dispatched/failed step 时，才能标记为 stuck failure。
+- `active + terminal executing step` 表示上次进程已派发但未形成 output；启动恢复应调用 run service resume，让 orchestrator 重新派发该 step。
+- `active` 且没有 blocker、没有 continuation checkpoint、也没有可恢复 terminal executing/failed step 时，才能标记为 stuck failure。
 - 应用层只能识别这些通用状态形态，不得根据 workspace template、具体文件、测试框架或业务目标做分支。
 - 恢复后状态仍由 kernel run/orchestrator 决定，appservice 只返回恢复结果投影。
 
 Run watchdog / continuation recovery 是该边界的运行期扩展：workorchd 可以通过 framework `BackgroundRoutine`
-注册启动恢复任务和周期 timer，扫描 stale dispatched、resolved governance blocker、replan continuation
+注册启动恢复任务和周期 timer，扫描 stale executing/dispatched-event、resolved governance blocker、replan continuation
 等通用运行时形态，但不得直接改写正式状态机。详细触发时机、影响范围和后续特性跟踪见
 `../70-roadmap/active/workorchd-state-loop-and-projection-closure-plan.md#p24-run-watchdog--continuation-recovery`。
 

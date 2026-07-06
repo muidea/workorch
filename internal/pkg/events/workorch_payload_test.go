@@ -31,7 +31,7 @@ func TestStepPayloadClonesMaps(t *testing.T) {
 	input := map[string]any{"workspaceId": "ws-1"}
 	output := map[string]any{"status": "completed"}
 
-	payload := StepPayload("llm/workspace_execution", common.StepStateCompleted, input, output)
+	payload := StepPayload("llm/workspace_execution", common.StepStateSucceeded, input, output)
 	input["workspaceId"] = "ws-mutated"
 	output["status"] = "mutated"
 
@@ -52,7 +52,7 @@ func TestStepPayloadClonesMaps(t *testing.T) {
 }
 
 func TestStepPayloadCanonicalizesWorkspacePlanKind(t *testing.T) {
-	payload := StepPayload(llmcommon.StepKindWorkspacePlan, common.StepStateCompleted, nil, nil)
+	payload := StepPayload(llmcommon.StepKindWorkspacePlan, common.StepStateSucceeded, nil, nil)
 	if payload[PayloadKeyKind] != llmcommon.StepKindWorkspaceExecution {
 		t.Fatalf("kind = %v, want %s", payload[PayloadKeyKind], llmcommon.StepKindWorkspaceExecution)
 	}
@@ -103,7 +103,7 @@ func TestDecisionResolutionPayloadIncludesResolutionFields(t *testing.T) {
 func TestDecodeStepPayloadRejectsInvalidOutputType(t *testing.T) {
 	_, ok := DecodeStepPayload(map[string]any{
 		PayloadKeyKind:   "llm/workspace_execution",
-		PayloadKeyState:  string(common.StepStateCompleted),
+		PayloadKeyState:  string(common.StepStateSucceeded),
 		PayloadKeyOutput: "invalid",
 	})
 	if ok {
@@ -114,7 +114,7 @@ func TestDecodeStepPayloadRejectsInvalidOutputType(t *testing.T) {
 func TestDecodeStepPayloadCanonicalizesWorkspacePlanKind(t *testing.T) {
 	decoded, ok := DecodeStepPayload(map[string]any{
 		PayloadKeyKind:  llmcommon.StepKindWorkspacePlan,
-		PayloadKeyState: string(common.StepStateCompleted),
+		PayloadKeyState: string(common.StepStateSucceeded),
 	})
 	if !ok {
 		t.Fatalf("DecodeStepPayload returned !ok")

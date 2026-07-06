@@ -26,7 +26,7 @@ func TestRunSnapshotFromModelsProjectsBlockingDecisionStepAndCoverage(t *testing
 		State:       common.DecisionTicketStateOpen,
 	}
 	got := RunSnapshotFromModels(RunSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "projection workspace", State: common.WorkspaceStateRunning},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "projection workspace", State: common.WorkspaceStateActive},
 		Run: &runmodel.Run{
 			ID:               runID,
 			WorkspaceID:      workspaceID,
@@ -78,7 +78,7 @@ func TestRunSnapshotFromModelsProjectsBlockingDecisionStepAndCoverage(t *testing
 			},
 		},
 		Steps: []*runmodel.Step{
-			{ID: "step-stale", RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateCompleted},
+			{ID: "step-stale", RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateSucceeded},
 			{ID: blockingStepID, RunID: runID, Kind: "llm/approval", State: common.StepStatePending},
 		},
 		Checkpoints: []*runmodel.RuntimeCheckpoint{
@@ -143,14 +143,14 @@ func TestRunSnapshotFromModelsTerminalRunPrefersFailedStepOverStaleCheckpoint(t 
 	runID := common.RunID("run-terminal-snapshot-step")
 	failedStepID := common.StepID("run-terminal-snapshot-step/contract-retry-final")
 	got := RunSnapshotFromModels(RunSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateFailed},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive},
 		Run: &runmodel.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
 			State:       common.RunStateFailed,
 		},
 		Steps: []*runmodel.Step{
-			{ID: "run-terminal-snapshot-step/graph-018-completed", RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateCompleted},
+			{ID: "run-terminal-snapshot-step/graph-018-completed", RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateSucceeded},
 			{ID: failedStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateFailed},
 		},
 		Checkpoints: []*runmodel.RuntimeCheckpoint{
@@ -186,10 +186,10 @@ func TestRunSnapshotFromModelsRunningRunDoesNotProjectCompletedStepAsActive(t *t
 	runID := common.RunID("run-running-completed-step")
 	stepID := common.StepID("run-running-completed-step/graph-001/002-build")
 	got := RunSnapshotFromModels(RunSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning},
-		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive},
+		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		Steps: []*runmodel.Step{
-			{ID: stepID, RunID: runID, Kind: "shell/command", State: common.StepStateCompleted},
+			{ID: stepID, RunID: runID, Kind: "shell/command", State: common.StepStateSucceeded},
 		},
 		Checkpoints: []*runmodel.RuntimeCheckpoint{
 			{
@@ -289,7 +289,7 @@ func TestTaskProgressAssessmentOutcomeShowsPartialProgressAndRejectedGlobalAsses
 		Run: readmodelcore.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 		},
 		Results: []readmodelcore.Result{{
 			ID:          runID + "/result/acceptance-slice/slice-001",
@@ -401,11 +401,11 @@ func TestRunSnapshotFromModelsNormalizesStalePersistedGapBaselineNextAction(t *t
 	workspaceID := common.WorkspaceID("ws-run-snapshot-persisted-gap")
 	runID := common.RunID("run-snapshot-persisted-gap")
 	got := RunSnapshotFromModels(RunSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "projection workspace", State: common.WorkspaceStateRunning},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "projection workspace", State: common.WorkspaceStateActive},
 		Run: &runmodel.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 			ExecutionContext: map[string]any{
 				"coverageWorkItemContext": map[string]any{
 					"definitionRevision":   "rev-derived",
@@ -470,11 +470,11 @@ func TestRunSnapshotFromModelsUsesConvergenceAuthorityNextAction(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-authority-next-action-projection")
 	runID := common.RunID("run-authority-next-action-projection")
 	got := RunSnapshotFromModels(RunSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "authority projection", State: common.WorkspaceStateRunning},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "authority projection", State: common.WorkspaceStateActive},
 		Run: &runmodel.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 			ExecutionContext: map[string]any{
 				"coverageWorkItemContext": map[string]any{
 					"definitionRevision": "rev-stale-context",
@@ -538,11 +538,11 @@ func TestRunSnapshotFromModelsProjectsAuthorityFocusDriftDiagnostics(t *testing.
 	workspaceID := common.WorkspaceID("ws-authority-focus-drift-projection")
 	runID := common.RunID("run-authority-focus-drift-projection")
 	got := RunSnapshotFromModels(RunSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "authority focus drift", State: common.WorkspaceStateRunning},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "authority focus drift", State: common.WorkspaceStateActive},
 		Run: &runmodel.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 			ExecutionContext: map[string]any{
 				"convergenceAuthority": map[string]any{
 					"currentFocus": map[string]any{"id": "cwi-current"},
@@ -598,11 +598,11 @@ func TestTaskProgressSeparatesCurrentActionLabelFromDiagnosticLineage(t *testing
 	workspaceID := common.WorkspaceID("ws-current-action-label")
 	runID := common.RunID("run-current-action-label")
 	got := RunSnapshotFromModels(RunSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "current action label", State: common.WorkspaceStateRunning},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "current action label", State: common.WorkspaceStateActive},
 		Run: &runmodel.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 			ExecutionContext: map[string]any{
 				"convergenceAuthority": map[string]any{
 					"currentFocus": map[string]any{"id": "cwi-009"},
@@ -618,7 +618,7 @@ func TestTaskProgressSeparatesCurrentActionLabelFromDiagnosticLineage(t *testing
 			ID:    common.StepID(string(runID) + "/verify-focus-cwi-006/retry"),
 			RunID: runID,
 			Kind:  "llm/workspace_execution",
-			State: common.StepStateDispatched,
+			State: common.StepStateExecuting,
 		}},
 	})
 
@@ -817,11 +817,11 @@ func TestAuthorityDiagnosticsFromRunSnapshotReportsStaleValidationResources(t *t
 	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
 		Run: readmodelcore.Run{
 			ID:    "run-stale-validation-resource",
-			State: string(common.RunStateRunning),
+			State: string(common.RunStateActive),
 		},
 		Steps: []readmodelcore.StepView{{
 			ID:    "run-stale-validation-resource/verify",
-			State: string(common.StepStateCompleted),
+			State: string(common.StepStateSucceeded),
 			Output: map[string]any{
 				"validationResources": []any{map[string]any{
 					"kind":   "process",
@@ -853,7 +853,7 @@ func TestAuthorityDiagnosticsFromRunSnapshotReportsTerminalPlannedValidationReso
 	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
 		Run: readmodelcore.Run{
 			ID:    "run-terminal-pending-validation-resource",
-			State: string(common.RunStateRunning),
+			State: string(common.RunStateActive),
 		},
 		Steps: []readmodelcore.StepView{{
 			ID:    "run-terminal-pending-validation-resource/verify",
@@ -883,11 +883,11 @@ func TestAuthorityDiagnosticsFromRunSnapshotIgnoresClosedValidationResources(t *
 	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
 		Run: readmodelcore.Run{
 			ID:    "run-closed-validation-resource",
-			State: string(common.RunStateRunning),
+			State: string(common.RunStateActive),
 		},
 		Steps: []readmodelcore.StepView{{
 			ID:    "run-closed-validation-resource/verify",
-			State: string(common.StepStateCompleted),
+			State: string(common.StepStateSucceeded),
 			Output: map[string]any{
 				"validationResources": []any{map[string]any{
 					"kind":   "process_group",
@@ -915,11 +915,11 @@ func TestRunRecoverySnapshotFromModelsUsesCheckpointStep(t *testing.T) {
 	runID := common.RunID("run-recovery-projection")
 	currentStepID := common.StepID("step-current")
 	got := RunRecoverySnapshotFromModels(RunSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "recovery workspace", State: common.WorkspaceStateRunning},
-		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "recovery workspace", State: common.WorkspaceStateActive},
+		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		Steps: []*runmodel.Step{
-			{ID: "step-old", RunID: runID, Kind: "llm/planning", State: common.StepStateCompleted},
-			{ID: currentStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched},
+			{ID: "step-old", RunID: runID, Kind: "llm/planning", State: common.StepStateSucceeded},
+			{ID: currentStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateExecuting},
 		},
 		Checkpoints: []*runmodel.RuntimeCheckpoint{
 			{ID: "checkpoint-current", WorkspaceID: workspaceID, RunID: runID, CurrentStepID: currentStepID},
@@ -944,10 +944,10 @@ func TestRunSnapshotFromModelsProjectsRuntimeExecutionFinalizeGap(t *testing.T) 
 	runID := common.RunID("run-runtime-exec-gap")
 	stepID := common.StepID("step-runtime-exec-gap")
 	got := RunSnapshotFromModels(RunSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "runtime gap workspace", State: common.WorkspaceStateRunning},
-		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "runtime gap workspace", State: common.WorkspaceStateActive},
+		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		Steps: []*runmodel.Step{
-			{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched},
+			{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateExecuting},
 		},
 		Checkpoints: []*runmodel.RuntimeCheckpoint{
 			{
@@ -998,10 +998,10 @@ func TestRunSnapshotFromModelsProjectsRuntimeExecutionResultAvailableGap(t *test
 	runID := common.RunID("run-runtime-result-gap")
 	stepID := common.StepID("step-runtime-result-gap")
 	got := RunSnapshotFromModels(RunSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "runtime result gap workspace", State: common.WorkspaceStateRunning},
-		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "runtime result gap workspace", State: common.WorkspaceStateActive},
+		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		Steps: []*runmodel.Step{
-			{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched},
+			{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateExecuting},
 		},
 		Checkpoints: []*runmodel.RuntimeCheckpoint{
 			{
@@ -1038,8 +1038,8 @@ func TestRunSnapshotFromModelsProjectsContractViolationWithoutRuntimeProgress(t 
 	runID := common.RunID("run-contract-violation-projection")
 	stepID := common.StepID("step-contract-violation")
 	got := RunSnapshotFromModels(RunSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "contract violation projection", State: common.WorkspaceStateRunning},
-		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "contract violation projection", State: common.WorkspaceStateActive},
+		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		Steps: []*runmodel.Step{{
 			ID:    stepID,
 			RunID: runID,
@@ -1077,8 +1077,8 @@ func TestRunSnapshotProjectsRejectedExecutionGraphAsTaskPlan(t *testing.T) {
 	runID := common.RunID("run-rejected-graph-task-plan")
 	rootStepID := common.StepID("step-rejected-graph")
 	got := RunSnapshotFromModels(RunSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "task plan projection", State: common.WorkspaceStateRunning},
-		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "task plan projection", State: common.WorkspaceStateActive},
+		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		Steps: []*runmodel.Step{{
 			ID:    rootStepID,
 			RunID: runID,
@@ -1136,7 +1136,7 @@ func TestRunSnapshotProjectsContractRetryWithoutNewGraphAsPlanRevision(t *testin
 	retryStepID := common.StepID("step-contract-retry")
 	ticketID := common.TicketID("ticket-retry-exhausted")
 	got := RunSnapshotFromModels(RunSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "task retry projection", State: common.WorkspaceStateRunning},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "task retry projection", State: common.WorkspaceStateActive},
 		Run: &runmodel.Run{
 			ID:               runID,
 			WorkspaceID:      workspaceID,
@@ -1148,7 +1148,7 @@ func TestRunSnapshotProjectsContractRetryWithoutNewGraphAsPlanRevision(t *testin
 				ID:    rootStepID,
 				RunID: runID,
 				Kind:  "llm/workspace_execution",
-				State: common.StepStateCompleted,
+				State: common.StepStateSucceeded,
 				Output: map[string]any{
 					"executionGraph": map[string]any{
 						"nodes": []map[string]any{{
@@ -1218,10 +1218,10 @@ func TestRunSnapshotFromModelsProjectsRuntimeExecutionWorkerLostGap(t *testing.T
 	runID := common.RunID("run-runtime-worker-lost")
 	stepID := common.StepID("step-runtime-worker-lost")
 	got := RunSnapshotFromModels(RunSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "runtime worker lost workspace", State: common.WorkspaceStateRunning},
-		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "runtime worker lost workspace", State: common.WorkspaceStateActive},
+		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		Steps: []*runmodel.Step{
-			{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched},
+			{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateExecuting},
 		},
 		Checkpoints: []*runmodel.RuntimeCheckpoint{
 			{

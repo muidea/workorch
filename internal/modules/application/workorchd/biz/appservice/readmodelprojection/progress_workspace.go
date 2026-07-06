@@ -3,6 +3,24 @@ package readmodelprojection
 import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 
 func MapWorkspaceTaskProgress(snapshot readmodelcore.WorkspaceSnapshot, labels WorkspaceTaskProgressLabels) readmodelcore.TaskProgress {
+	if selectedRun := selectWorkspaceOutcomeRun(snapshot); selectedRun != nil && IsTerminalRunState(selectedRun.State) {
+		runSnapshot := readmodelcore.RunSnapshot{
+			Workspace:             snapshot.Workspace,
+			Run:                   *selectedRun,
+			Results:               snapshot.Results,
+			Artifacts:             snapshot.Artifacts,
+			ArtifactContinuations: snapshot.ArtifactContinuations,
+			Patches:               snapshot.Patches,
+			WebSources:            snapshot.WebSources,
+			Decisions:             snapshot.Decisions,
+			Approvals:             snapshot.Approvals,
+			TaskDecompositions:    snapshot.TaskDecompositions,
+			TaskPlans:             snapshot.TaskPlans,
+			ExecutionSections:     snapshot.ExecutionSections,
+			Acceptance:            snapshot.Acceptance,
+		}
+		return MapLocalizedTaskProgress(runSnapshot)
+	}
 	ret := newWorkspaceTaskProgressBase(snapshot, labels)
 	applyWorkspaceProgressCurrentStep(&ret, snapshot)
 	if ret.CurrentActionLabel == "" {

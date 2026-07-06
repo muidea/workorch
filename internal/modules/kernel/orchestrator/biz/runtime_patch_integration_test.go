@@ -600,7 +600,7 @@ func TestRuntimeOrchestratorBlocksSensitivePatchUntilApproval(t *testing.T) {
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "sensitive patch", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	runtime := &stubRuntimeAdapter{output: map[string]any{
@@ -666,7 +666,7 @@ func TestRuntimeOrchestratorAppliesApprovedPendingPatchOnResume(t *testing.T) {
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "approved pending patch resume", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	callCount := 0

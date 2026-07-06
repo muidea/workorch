@@ -38,16 +38,17 @@ func (s *Service) CreateApproval(ctx context.Context, cmd approvalcontracts.Crea
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	item := &approvalModel.Approval{
-		ID:          cmd.ApprovalID,
-		WorkspaceID: cmd.WorkspaceID,
-		RunID:       cmd.RunID,
-		StepID:      cmd.StepID,
-		Reason:      cmd.Reason,
-		Action:      cmd.Action,
-		Context:     cloneApprovalContext(cmd.Context),
-		State:       common.ApprovalStatePending,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:             cmd.ApprovalID,
+		WorkspaceID:    cmd.WorkspaceID,
+		RunID:          cmd.RunID,
+		StepID:         cmd.StepID,
+		Reason:         cmd.Reason,
+		Action:         cmd.Action,
+		Context:        cloneApprovalContext(cmd.Context),
+		State:          common.ApprovalStatePending,
+		AutoGovernance: cloneApprovalContext(cmd.AutoGovernance),
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 	if err := s.approvals.Create(ctx, item); err != nil {
 		return err
@@ -180,7 +181,10 @@ func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval,
 	if item.State != common.ApprovalStatePending {
 		return common.ErrConflict
 	}
-	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	item.UpdatedAt = now
+	item.ResolvedAt = now
+	item.ResolvedBy = firstNonEmptyApprovalString(approvalStringValue(resolutionContext, "resolvedBy"), approvalStringValue(resolutionContext, "actor"))
 	item.Context = mergeApprovalContext(item.Context, resolutionContext)
 	item.State = target
 	if err := s.approvals.Update(ctx, item); err != nil {
@@ -268,6 +272,20 @@ func cloneApprovalContext(input map[string]any) map[string]any {
 		ret[key] = value
 	}
 	return ret
+}
+
+func firstNonEmptyApprovalString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func approvalStringValue(input map[string]any, key string) string {
+	value, _ := input[key].(string)
+	return value
 }
 
 func mergeApprovalContext(existing map[string]any, overlay map[string]any) map[string]any {

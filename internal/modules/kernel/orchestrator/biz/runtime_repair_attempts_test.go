@@ -22,7 +22,7 @@ func TestRuntimeOrchestrator_RuntimeRepairAttemptCountIncludesDispatchedProvider
 			ID:    common.StepID(runID + "/provider-misrouted-repair"),
 			RunID: runID,
 			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				stepInputKeyRuntimeRepairFollowUp: true,
 				failureOutputKeyClass:             failureClassProviderTimeout,
@@ -47,7 +47,7 @@ func TestRuntimeOrchestrator_RuntimeRepairAttemptCountIncludesDispatchedProvider
 			ID:    common.StepID(runID + "/real-runtime-repair"),
 			RunID: runID,
 			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				stepInputKeyRuntimeRepairFollowUp: true,
 				failureOutputKeyClass:             failureClassRuntime,
@@ -79,7 +79,7 @@ func TestRuntimeOrchestrator_RuntimeRepairAttemptCountIsScopedByFailureSignature
 			ID:    common.StepID(fmt.Sprintf("%s/repair-a-%d", runID, attempt)),
 			RunID: runID,
 			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				stepInputKeyRuntimeRepairFollowUp: true,
 				stepInputKeyRuntimeRepairAttempt:  attempt,

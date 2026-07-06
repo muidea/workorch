@@ -323,13 +323,13 @@ func TestRuntimeOrchestrator_DispatchesConcreteGraphReturnedByExecutionLLMNode(t
 		},
 		events.NewMemoryHub(),
 	)
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateRunning}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{
 			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
@@ -341,7 +341,7 @@ func TestRuntimeOrchestrator_DispatchesConcreteGraphReturnedByExecutionLLMNode(t
 		ID:     rootStepID,
 		RunID:  runID,
 		Kind:   llmWorkspaceExecutionStepKind,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"executionGraph": map[string]any{"nodes": []map[string]any{{"id": "plan-impl", "kind": llmWorkspaceExecutionStepKind}}}},
 	}); err != nil {
 		t.Fatalf("seed root step: %v", err)
@@ -350,7 +350,7 @@ func TestRuntimeOrchestrator_DispatchesConcreteGraphReturnedByExecutionLLMNode(t
 	if err := orch.dispatchStepWithWorkspace(ctx, &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{
 			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
@@ -373,7 +373,7 @@ func TestRuntimeOrchestrator_DispatchesConcreteGraphReturnedByExecutionLLMNode(t
 		if err != nil {
 			t.Fatalf("get step %s: %v", id, err)
 		}
-		if step.State != common.StepStateCompleted {
+		if step.State != common.StepStateSucceeded {
 			t.Fatalf("step %s state = %s, want completed", id, step.State)
 		}
 		if id != llmStepID && step.Input[stepInputKeyGraphRootStepID] != string(llmStepID) {
@@ -2115,7 +2115,7 @@ func TestRuntimeOrchestrator_InvalidPatchGraphTargetRefRoutesToRuntimeRepair(t *
 		WorkspaceID:     workspaceID,
 		GoalID:          "goal-invalid-patch-targetref-repair",
 		DoDID:           "dod-invalid-patch-targetref-repair",
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)

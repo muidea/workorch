@@ -44,5 +44,5 @@ func CurrentRunStatusStep(run *runmodel.Run, steps []*runmodel.Step, checkpoints
 }
 
 func runningCompletedStepWouldMasqueradeAsActive(run *runmodel.Run, state common.StepState) bool {
-	return run != nil && !IsTerminalRunState(string(run.State)) && state == common.StepStateCompleted
+	return run != nil && !IsTerminalRunState(string(run.State)) && state == common.StepStateSucceeded
 }

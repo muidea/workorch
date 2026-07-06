@@ -27,6 +27,11 @@ func Contracts() []eventcontract.Contract {
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassNotify, eventcontract.LanePolicyState,
 		TopicOrchestratorDispatchStepRequested,
+		TopicOrchestratorStageChanged,
+		TopicOrchestratorGraphDispatched,
+		TopicOrchestratorRepairStarted,
+		TopicOrchestratorReplanTriggered,
+		TopicOrchestratorContractViolation,
 		TopicOrchestratorContractViolationRecorded,
 		TopicOrchestratorContractViolationRetryRequested,
 		TopicOrchestratorContractViolationEscalated,

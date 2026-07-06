@@ -8,7 +8,7 @@ import (
 func workspaceProgressMilestones(snapshot readmodelcore.WorkspaceSnapshot, labels WorkspaceTaskProgressLabels) []readmodelcore.ProgressMilestone {
 	return []readmodelcore.ProgressMilestone{
 		{ID: "workspace_defined", Title: labels.WorkspaceDefined, State: "completed", EvidenceRefs: []string{snapshot.Workspace.ID}},
-		{ID: "formal_result", Title: labels.FormalResult, State: ProgressStateFromCount(len(snapshot.Results), false, snapshot.Workspace.State == string(common.WorkspaceStateCompleted)), EvidenceRefs: IDsFromResults(snapshot.Results)},
+		{ID: "formal_result", Title: labels.FormalResult, State: ProgressStateFromCount(len(snapshot.Results), false, snapshot.Workspace.State == string(common.WorkspaceStateActive)), EvidenceRefs: IDsFromResults(snapshot.Results)},
 	}
 }
 

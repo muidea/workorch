@@ -221,10 +221,10 @@ func TestRuntimeManagedTargetSnapshotAcquisitionDispatchesReadOnlyGraphWithoutRo
 		ID:                   workspaceID,
 		Title:                "runtime managed target snapshot",
 		DeliverableDirectory: deliverableDir,
-		State:                common.WorkspaceStateRunning,
+		State:                common.WorkspaceStateActive,
 		ActiveRunID:          runID,
 	}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestRuntimeManagedTargetSnapshotAcquisitionDispatchesReadOnlyGraphWithoutRo
 	if err != nil {
 		t.Fatalf("get root step: %v", err)
 	}
-	if rootStep.State != common.StepStateCompleted || rootStep.Output["runtimeManagedTargetSnapshotAcquisition"] != true {
+	if rootStep.State != common.StepStateSucceeded || rootStep.Output["runtimeManagedTargetSnapshotAcquisition"] != true {
 		t.Fatalf("root step = %+v, want runtime-managed completed root", rootStep)
 	}
 	for _, request := range llmRuntime.requests {
@@ -267,7 +267,7 @@ func TestRuntimeManagedTargetSnapshotAcquisitionDispatchesReadOnlyGraphWithoutRo
 	if readStep.Input["path"] != "target.txt" || readStep.Input["runtimeManagedAcquisition"] != true {
 		t.Fatalf("read step input = %+v, want runtime-managed target.txt read", readStep.Input)
 	}
-	if readStep.State != common.StepStateCompleted {
+	if readStep.State != common.StepStateSucceeded {
 		t.Fatalf("read step state = %s, want completed", readStep.State)
 	}
 	records, err := evidenceRepo.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), runID)
@@ -284,7 +284,7 @@ func TestRuntimeManagedTargetSnapshotAcquisitionDispatchesReadOnlyGraphWithoutRo
 	if !snapshotRecord {
 		t.Fatalf("evidence records = %+v, want accepted target snapshot record for target.txt", records)
 	}
-	if !publishedStepState(hub.Published(), rootStepID, common.StepStateCompleted) {
+	if !publishedStepState(hub.Published(), rootStepID, common.StepStateSucceeded) {
 		t.Fatalf("events = %+v, want completed root step event", hub.Published())
 	}
 }

@@ -61,7 +61,7 @@ func TestOwnerReadersBuildsSnapshotAndStatusReaderBundles(t *testing.T) {
 		Payload: map[string]any{
 			events.PayloadKeyGoalID:             "goal-001",
 			events.PayloadKeyDoDID:              "dod-001",
-			events.PayloadKeyState:              string(common.RunStateRunning),
+			events.PayloadKeyState:              string(common.RunStateActive),
 			events.PayloadKeyBlockingTicketID:   "",
 			events.PayloadKeyBlockingApprovalID: "",
 		},

@@ -7,7 +7,7 @@ import (
 
 func ValidationProgressState(snapshot readmodelcore.RunSnapshot) string {
 	if len(snapshot.ValidationResults) == 0 {
-		if snapshot.Run.State == string(common.RunStateValidating) {
+		if snapshot.Run.State == string(common.RunStateActive) {
 			return "running"
 		}
 		return "pending"

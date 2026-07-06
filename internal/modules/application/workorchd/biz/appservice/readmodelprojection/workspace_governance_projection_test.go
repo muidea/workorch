@@ -13,7 +13,7 @@ func TestNormalizeWorkspaceGovernanceRequiresOpenDecisionTicket(t *testing.T) {
 	snapshot := readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{
 			ID:               "ws-governance-normalize",
-			State:            string(common.WorkspaceStateWaitingDecision),
+			State:            string(common.WorkspaceStateActive),
 			ActiveRunID:      "run-governance-normalize",
 			BlockingTicketID: "ticket-missing",
 		},
@@ -26,11 +26,11 @@ func TestNormalizeWorkspaceGovernanceRequiresOpenDecisionTicket(t *testing.T) {
 	}
 
 	got := NormalizeWorkspaceGovernanceProjection(snapshot)
-	if got.Workspace.State == string(common.WorkspaceStateWaitingDecision) ||
+	if got.Workspace.State != string(common.WorkspaceStateActive) ||
 		got.Workspace.BlockingTicketID != "" ||
 		got.TaskProgress.BlockingTicketID != "" ||
 		WorkspacePromptMode(got) == "decision" {
-		t.Fatalf("normalized snapshot = %+v, want no waiting_decision without open ticket", got)
+		t.Fatalf("normalized snapshot = %+v, want active workspace without decision prompt when ticket is not open", got)
 	}
 }
 
@@ -40,7 +40,7 @@ func TestNormalizeWorkspaceGovernanceRequiresPendingApproval(t *testing.T) {
 	snapshot := readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{
 			ID:                 "ws-approval-normalize",
-			State:              string(common.WorkspaceStateBlocked),
+			State:              string(common.WorkspaceStateBlockedOnApproval),
 			ActiveRunID:        "run-approval-normalize",
 			BlockingApprovalID: "approval-missing",
 		},
@@ -53,7 +53,7 @@ func TestNormalizeWorkspaceGovernanceRequiresPendingApproval(t *testing.T) {
 	}
 
 	got := NormalizeWorkspaceGovernanceProjection(snapshot)
-	if got.Workspace.State == string(common.WorkspaceStateBlocked) ||
+	if got.Workspace.State == string(common.WorkspaceStateBlockedOnApproval) ||
 		got.Workspace.BlockingApprovalID != "" ||
 		got.TaskProgress.BlockingApprovalID != "" ||
 		WorkspacePromptMode(got) == "approval" {
@@ -67,7 +67,7 @@ func TestProjectWorkspaceSnapshotSummaryKeepsBlockingDecision(t *testing.T) {
 	snapshot := readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{
 			ID:               "ws-governance-summary",
-			State:            string(common.WorkspaceStateRunning),
+			State:            string(common.WorkspaceStateActive),
 			ActiveRunID:      "run-governance-summary",
 			BlockingTicketID: "ticket-open",
 		},
@@ -86,10 +86,10 @@ func TestProjectWorkspaceSnapshotSummaryKeepsBlockingDecision(t *testing.T) {
 	}
 
 	got := ProjectWorkspaceSnapshotSummary(snapshot)
-	if got.Workspace.State != string(common.WorkspaceStateWaitingDecision) ||
+	if got.Workspace.State != string(common.WorkspaceStateActive) ||
 		got.Workspace.BlockingTicketID != "ticket-open" ||
 		WorkspacePromptMode(got) != "decision" {
-		t.Fatalf("summary governance = workspace:%+v mode=%s, want waiting decision", got.Workspace, WorkspacePromptMode(got))
+		t.Fatalf("summary governance = workspace:%+v mode=%s, want active decision prompt", got.Workspace, WorkspacePromptMode(got))
 	}
 	if len(got.Decisions) != 1 || got.Decisions[0].ID != "ticket-open" {
 		t.Fatalf("summary decisions = %+v, want blocking decision retained", got.Decisions)

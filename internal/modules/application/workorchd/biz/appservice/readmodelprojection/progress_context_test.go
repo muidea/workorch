@@ -62,7 +62,7 @@ func TestWorkspaceTaskProgressOnlyUsesActiveRunBlockers(t *testing.T) {
 	got := MapLocalizedWorkspaceTaskProgress(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{
 			ID:          "ws-active-blocker",
-			State:       string(common.WorkspaceStateWaitingDecision),
+			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: "run-current",
 		},
 		Decisions: []readmodelcore.Decision{
@@ -77,7 +77,7 @@ func TestWorkspaceTaskProgressOnlyUsesActiveRunBlockers(t *testing.T) {
 				ID:          "ticket-dismissed",
 				WorkspaceID: "ws-active-blocker",
 				RunID:       "run-current",
-				State:       string(common.DecisionTicketStateDismissed),
+				State:       string(common.DecisionTicketStateSuperseded),
 				Question:    "dismissed decision",
 			},
 			{
@@ -104,7 +104,7 @@ func TestWorkspaceTaskProgressRequiresSameScopeOpenGovernanceBlockers(t *testing
 	got := MapLocalizedWorkspaceTaskProgress(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{
 			ID:          "ws-current",
-			State:       string(common.WorkspaceStateWaitingDecision),
+			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: "run-shared",
 		},
 		Decisions: []readmodelcore.Decision{
@@ -150,7 +150,7 @@ func TestWorkspaceGovernanceProjectionClearsResolvedDecisionBlocker(t *testing.T
 	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{
 			ID:               "ws-resolved-blocker",
-			State:            string(common.WorkspaceStateWaitingDecision),
+			State:            string(common.WorkspaceStateActive),
 			ActiveRunID:      "run-current",
 			BlockingTicketID: "ticket-resolved",
 		},
@@ -179,7 +179,7 @@ func TestWorkspaceGovernanceProjectionClearsResolvedDecisionBlocker(t *testing.T
 		}},
 	})
 
-	if got.Workspace.State == string(common.WorkspaceStateWaitingDecision) ||
+	if got.Workspace.State != string(common.WorkspaceStateActive) ||
 		got.Workspace.BlockingTicketID != "" ||
 		got.TaskProgress.BlockingTicketID != "" ||
 		got.TaskProgress.Recovery.BlockingTicketID != "" ||
@@ -194,7 +194,7 @@ func TestWorkspaceGovernanceProjectionKeepsOpenDecisionBlocker(t *testing.T) {
 	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{
 			ID:               "ws-open-blocker",
-			State:            string(common.WorkspaceStateWaitingDecision),
+			State:            string(common.WorkspaceStateActive),
 			ActiveRunID:      "run-current",
 			BlockingTicketID: "ticket-open",
 		},
@@ -217,7 +217,7 @@ func TestWorkspaceGovernanceProjectionKeepsOpenDecisionBlocker(t *testing.T) {
 		}},
 	})
 
-	if got.Workspace.State != string(common.WorkspaceStateWaitingDecision) ||
+	if got.Workspace.State != string(common.WorkspaceStateActive) ||
 		got.Workspace.BlockingTicketID != "ticket-open" ||
 		got.TaskProgress.BlockingTicketID != "ticket-open" ||
 		got.TaskProgress.Recovery.Mode != "wait_decision" {

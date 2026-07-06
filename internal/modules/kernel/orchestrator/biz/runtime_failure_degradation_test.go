@@ -122,7 +122,7 @@ func auxiliaryMCPFallbackStep() *runmodel.Step {
 		ID:    "run-auxiliary-mcp-fallback/graph-001/001-init-lsp",
 		RunID: "run-auxiliary-mcp-fallback",
 		Kind:  "mcp/tool_call",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{
 			stepInputKeyGraphNodeID:     "init-lsp",
 			stepInputKeyGraphRootStepID: "run-auxiliary-semantic-mcp/root",

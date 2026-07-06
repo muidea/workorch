@@ -70,7 +70,7 @@ func ListRecoverableRuntimeGapRunCandidatesByOwnerCommand(ctx context.Context, h
 		return nil, common.ErrInvalidArgument
 	}
 	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandList, "run", "runtime-gap-candidates", "", "", map[string]any{
-		events.PayloadKeyStates:  []string{string(common.RunStateRunning)},
+		events.PayloadKeyStates:  []string{string(common.RunStateActive)},
 		events.PayloadKeyCompact: true,
 	})
 	if err != nil {

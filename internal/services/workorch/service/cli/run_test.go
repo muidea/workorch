@@ -213,7 +213,7 @@ type recordingRunResumeBackend struct {
 
 func (b *recordingRunResumeBackend) Command(_ context.Context, req backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
 	b.command = req
-	return &backend.RunInfo{ID: "run-command", WorkspaceID: req.WorkspaceID, State: common.RunStateRunning}, nil
+	return &backend.RunInfo{ID: "run-command", WorkspaceID: req.WorkspaceID, State: common.RunStateActive}, nil
 }
 
 func (b *recordingRunResumeBackend) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {

@@ -18,7 +18,7 @@ func LatestNonTerminalRunStatusStep(steps []*runmodel.Step) *runmodel.Step {
 		if step == nil {
 			continue
 		}
-		if step.State == common.StepStateDispatched || step.State == common.StepStatePending {
+		if step.State == common.StepStateExecuting || step.State == common.StepStatePending {
 			return step
 		}
 	}
@@ -46,7 +46,7 @@ func TerminalRunStatusStepWithCheckpoints(steps []*runmodel.Step, checkpoints []
 
 func selectTerminalRunStatusStep(terminals []*runmodel.Step) *runmodel.Step {
 	for _, step := range terminals {
-		if step.State == common.StepStateDispatched {
+		if step.State == common.StepStateExecuting {
 			return step
 		}
 	}

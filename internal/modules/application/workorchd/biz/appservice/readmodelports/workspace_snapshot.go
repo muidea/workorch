@@ -59,5 +59,11 @@ func workspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, wo
 			return readmodelcore.WorkspaceSnapshot{}, err
 		}
 	}
-	return readmodelprojection.WorkspaceSnapshotWithRunSnapshot(ret, &selectedRunSnapshot), nil
+	ret = readmodelprojection.WorkspaceSnapshotWithRunSnapshot(ret, &selectedRunSnapshot)
+	if cachedRunSnapshot != nil &&
+		cachedRunSnapshot.Run.WorkspaceID == string(workspaceID) &&
+		cachedRunSnapshot.TaskProgress.WorkspaceID != "" {
+		ret.TaskProgress = cachedRunSnapshot.TaskProgress
+	}
+	return ret, nil
 }

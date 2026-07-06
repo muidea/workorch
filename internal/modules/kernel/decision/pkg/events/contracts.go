@@ -7,7 +7,11 @@ func Contracts() []eventcontract.Contract {
 	ret = append(ret, eventcontract.Build("decision", eventcontract.CommandClassNotify, eventcontract.LanePolicyState,
 		TopicTicketCreated,
 		TopicTicketResolved,
+		TopicTicketSuperseded,
 		TopicTicketUpdated,
+		TopicDecisionTicketCreated,
+		TopicDecisionTicketResolved,
+		TopicDecisionTicketSuperseded,
 	)...)
 	ret = append(ret, eventcontract.Build("decision", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
 		TopicDecisionCommandGetTicket,

@@ -12,11 +12,11 @@ func AcceptedTerminalRun(snapshot readmodelcore.RunSnapshot) bool {
 }
 
 func IsResolvedDecisionState(state string) bool {
-	return state == string(common.DecisionTicketStateResolved) || state == string(common.DecisionTicketStateDismissed)
+	return state == string(common.DecisionTicketStateResolved) || state == string(common.DecisionTicketStateSuperseded)
 }
 
 func IsResolvedApprovalState(state string) bool {
-	return state == string(common.ApprovalStateApproved) || state == string(common.ApprovalStateRejected) || state == string(common.ApprovalStateResolved)
+	return state == string(common.ApprovalStateApproved) || state == string(common.ApprovalStateRejected) || state == string(common.ApprovalStateSuperseded)
 }
 
 func HasOpenDecisionBlocker(decisions []readmodelcore.Decision, workspaceID, runID, ticketID string) bool {

@@ -259,7 +259,7 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsReadOnlySideEffectEvidence(t
 		ID:    readStepID,
 		RunID: runID,
 		Kind:  "file/read",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}); err != nil {
 		t.Fatalf("seed read step: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestDoDAssessmentEvidenceKindRequirementDiagnosticsRequireStateChangingEvid
 		ID:    readStepID,
 		RunID: runID,
 		Kind:  "file/read",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}); err != nil {
 		t.Fatalf("seed read step: %v", err)
 	}
@@ -414,7 +414,7 @@ func TestDoDAssessmentEvidenceKindRequirementAcceptsActionEvidence(t *testing.T)
 		ID:    testStepID,
 		RunID: runID,
 		Kind:  shellcommon.StepKindCommand,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}); err != nil {
 		t.Fatalf("seed shell step: %v", err)
 	}
@@ -478,14 +478,14 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsPatchAndBuildForBehaviorClai
 			ID:    patchStepID,
 			RunID: runID,
 			Kind:  "patch/apply",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{"coverageTargets": []string{claim}},
 		},
 		{
 			ID:    buildStepID,
 			RunID: runID,
 			Kind:  shellcommon.StepKindCommand,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				"command":         "go build ./...",
 				"coverageTargets": []string{claim},
@@ -547,7 +547,7 @@ func TestDoDAssessmentEvidenceKindRequirementAcceptsTargetedTestForBehaviorClaim
 		ID:    testStepID,
 		RunID: runID,
 		Kind:  shellcommon.StepKindCommand,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"command":         "go test ./... -run TestStreamingProxyForwarding",
 			"coverageTargets": []string{claim},
@@ -598,7 +598,7 @@ func TestDoDAssessmentEvidenceQualityRejectsArtifactChunkEvidence(t *testing.T) 
 		ID:    chunkStepID,
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"artifactContinuationContext": map[string]any{
 				"state": string(common.ArtifactContinuationStateChunking),
@@ -640,7 +640,7 @@ func TestDoDAssessmentEvidenceQualityAllowsArtifactApplyEvidence(t *testing.T) {
 		ID:    stepID,
 		RunID: runID,
 		Kind:  artifactApplyStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"artifactContinuationApply": map[string]any{
 				"targetRef": "deliverable/target.txt",
@@ -682,7 +682,7 @@ func TestDoDAssessmentEvidenceKindRequirementAcceptsGitWriteDeliverableEvidence(
 		ID:    gitStepID,
 		RunID: runID,
 		Kind:  gitcommon.StepKindWrite,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{"operation": gitcommon.OperationCommit},
 		Output: map[string]any{
 			"operation": gitcommon.OperationCommit,
@@ -1021,7 +1021,7 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsWrongGitWriteOperation(t *te
 		ID:     addStepID,
 		RunID:  runID,
 		Kind:   gitcommon.StepKindWrite,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Input:  map[string]any{"operation": gitcommon.OperationAdd},
 		Output: map[string]any{"operation": gitcommon.OperationAdd},
 	}); err != nil {
@@ -1066,7 +1066,7 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsZeroWorkAcceptedEvidence(t *
 		ID:    commitStepID,
 		RunID: runID,
 		Kind:  gitcommon.StepKindWrite,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{"operation": gitcommon.OperationCommit},
 		Output: map[string]any{
 			"operation": gitcommon.OperationCommit,
@@ -1120,7 +1120,7 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsNegativeScalarShellEvidence(
 		ID:    stepID,
 		RunID: runID,
 		Kind:  shellcommon.StepKindCommand,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"command": "sh",
 			"args":    []any{"-c", "jq '.decisions | length' snapshot.json"},
@@ -1166,7 +1166,7 @@ func TestCoverageWorkItemStepUpdateRejectsNegativeScalarShellValidationEvidence(
 		ID:    "run-coverage-negative-scalar/validate",
 		RunID: "run-coverage-negative-scalar",
 		Kind:  shellcommon.StepKindCommand,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"coverageWorkItemIds": []string{"cwi-001"},
 		},
@@ -1194,8 +1194,8 @@ func TestDoDAssessmentEvidenceKindRequirementAllowsReadEvidenceWithActionEvidenc
 	readStepID := common.StepID("run-dod-evidence-kind-mixed/block/read")
 	actionStepID := common.StepID("run-dod-evidence-kind-mixed/block/action")
 	for _, step := range []*runmodel.Step{
-		{ID: readStepID, RunID: runID, Kind: "file/read", State: common.StepStateCompleted},
-		{ID: actionStepID, RunID: runID, Kind: shellcommon.StepKindCommand, State: common.StepStateCompleted},
+		{ID: readStepID, RunID: runID, Kind: "file/read", State: common.StepStateSucceeded},
+		{ID: actionStepID, RunID: runID, Kind: shellcommon.StepKindCommand, State: common.StepStateSucceeded},
 	} {
 		if err := stepRepo.Create(ctx, step); err != nil {
 			t.Fatalf("seed step %s: %v", step.ID, err)
@@ -1253,7 +1253,7 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsRejectedOnlyRequirement(t *t
 		ID:    readStepID,
 		RunID: runID,
 		Kind:  "file/read",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}); err != nil {
 		t.Fatalf("seed read step: %v", err)
 	}
@@ -1331,7 +1331,7 @@ func TestDoDAssessmentClaimEvidenceRequirementRejectsGenericValidationEvidence(t
 		ID:    stepID,
 		RunID: runID,
 		Kind:  shellcommon.StepKindCommand,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{"command": "go", "args": []string{"test", "-race", "./..."}},
 		Output: map[string]any{
 			"stdout": "ok  \texample.com/project\t(cached)",
@@ -1380,7 +1380,7 @@ func TestDoDAssessmentClaimEvidenceRequirementAcceptsAlignedCoverageTarget(t *te
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "patch/apply",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"targetRef":       "internal/proxy/proxy.go",
 			"coverageTargets": []string{claim},
@@ -1435,7 +1435,7 @@ func TestCompletionGateNormalizesEvidenceRefsToCanonicalUsableRuntimeEvidence(t 
 		ID:    validStepID,
 		RunID: runID,
 		Kind:  shellcommon.StepKindCommand,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{"graphNodeId": "verify_full_regression"},
 	}); err != nil {
 		t.Fatalf("seed valid step: %v", err)
@@ -1530,7 +1530,7 @@ func TestCompletionGateNormalizesSupersededFailureEvidenceToLatestSuccess(t *tes
 		ID:     latestSuccessStepID,
 		RunID:  runID,
 		Kind:   shellcommon.StepKindCommand,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stdout": "latest targeted validation passed"},
 	}); err != nil {
 		t.Fatalf("seed latest success step: %v", err)
@@ -1625,7 +1625,7 @@ func TestDefinitionChangeAssessmentRejectsHistoricalOnlyEvidence(t *testing.T) {
 		ID:     currentStepID,
 		RunID:  runID,
 		Kind:   shellcommon.StepKindCommand,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stdout": "latest definition verified"},
 	}); err != nil {
 		t.Fatalf("seed current step: %v", err)

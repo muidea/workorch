@@ -1,6 +1,8 @@
 package readmodelprojection
 
 import (
+	"strings"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -19,11 +21,13 @@ func MapDecision(item *decisionmodel.Ticket, resolution *decisionmodel.Resolutio
 		DecisionKind:           item.DecisionKind,
 		Question:               item.Question,
 		Context:                governancecore.CloneDecisionPayload(item.Context),
-		FailureClass:           governancecore.StringFromDecisionPayload(item.Context, "failureClass"),
-		FailureSignature:       governancecore.StringFromDecisionPayload(item.Context, "failureSignature"),
-		AllowedRecoveryActions: governancecore.RuntimeRepairAllowedRecoveryActions(item.Context),
+		FailureClass:           firstNonEmptyReadModelString(item.FailureClass, governancecore.StringFromDecisionPayload(item.Context, "failureClass")),
+		FailureSignature:       firstNonEmptyReadModelString(item.FailureSignature, governancecore.StringFromDecisionPayload(item.Context, "failureSignature")),
+		AllowedRecoveryActions: firstNonEmptyReadModelStringSlice(item.AllowedRecoveryActions, governancecore.RuntimeRepairAllowedRecoveryActions(item.Context)),
 		State:                  string(item.State),
 		AutoGovernance:         autoGovernance,
+		ResolvedAt:             item.ResolvedAt,
+		ResolvedBy:             item.ResolvedBy,
 		CreatedAt:              item.CreatedAt,
 		UpdatedAt:              item.UpdatedAt,
 	}
@@ -36,4 +40,22 @@ func MapDecision(item *decisionmodel.Ticket, resolution *decisionmodel.Resolutio
 		ret.SuccessorRunID = string(resolution.SuccessorRunID)
 	}
 	return ret
+}
+
+func firstNonEmptyReadModelString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func firstNonEmptyReadModelStringSlice(values ...[]string) []string {
+	for _, value := range values {
+		if len(value) > 0 {
+			return append([]string(nil), value...)
+		}
+	}
+	return nil
 }

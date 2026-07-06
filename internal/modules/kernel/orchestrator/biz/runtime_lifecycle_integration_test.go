@@ -93,7 +93,7 @@ func TestRuntimeOrchestrator_ProviderConfigReplanCreatesSuccessorWithoutRecovery
 	runID := common.RunID("run-provider-config-replan")
 	failedStepID := common.StepID(runID + "/provider-retry-002-of-planning-001")
 	ticketID := common.TicketID(failedStepID + "-provider-retry-exhausted-decision")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -175,11 +175,11 @@ func TestRunningTerminalStepRecoverySpecsAllowsCompletedStepContinuation(t *test
 	ctx := context.Background()
 	steps := memory.NewStepRepository()
 	runID := common.RunID("run-completed-terminal-continuation")
-	run := &runmodel.Run{ID: runID, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: runID, State: common.RunStateActive}
 	step := &runmodel.Step{
 		ID:    common.StepID(runID + "/step-1"),
 		RunID: runID,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}
 	if err := steps.Create(ctx, step); err != nil {
 		t.Fatalf("seed step: %v", err)
@@ -243,7 +243,7 @@ func TestRuntimeOrchestrator_RuntimeFailurePublishesWorkspaceReleaseEvent(t *tes
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -295,7 +295,7 @@ func TestRuntimeOrchestrator_TerminalRunDismissesOpenDecisionBlocker(t *testing.
 			workspaceID := common.WorkspaceID("ws-terminal-dismiss-" + tc.name)
 			runID := common.RunID("run-terminal-dismiss-" + tc.name)
 			ticketID := common.TicketID("ticket-terminal-dismiss-" + tc.name)
-			if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+			if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 				t.Fatalf("seed workspace: %v", err)
 			}
 			if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateBlockedOnDecision, BlockingTicketID: ticketID}); err != nil {
@@ -320,7 +320,7 @@ func TestRuntimeOrchestrator_TerminalRunDismissesOpenDecisionBlocker(t *testing.
 			if err != nil {
 				t.Fatalf("get ticket: %v", err)
 			}
-			if ticket.State != common.DecisionTicketStateDismissed || ticket.UpdatedAt == "" {
+			if ticket.State != common.DecisionTicketStateSuperseded || ticket.UpdatedAt == "" {
 				t.Fatalf("ticket = %+v, want dismissed with updatedAt", ticket)
 			}
 		})
@@ -339,10 +339,10 @@ func TestRuntimeOrchestrator_SupersedeCreatedRunReleasesWorkspace(t *testing.T) 
 
 	workspaceID := common.WorkspaceID("ws-supersede-created")
 	runID := common.RunID("run-supersede-created")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -385,7 +385,7 @@ func TestRuntimeOrchestrator_StartRunRejectsDifferentActiveRun(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -410,7 +410,7 @@ func TestRuntimeOrchestrator_StartRunAllowsStaleTerminalActiveRun(t *testing.T) 
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "ws",
-		State:       common.WorkspaceStateFailed,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: staleRunID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -418,7 +418,7 @@ func TestRuntimeOrchestrator_StartRunAllowsStaleTerminalActiveRun(t *testing.T) 
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: staleRunID, WorkspaceID: workspaceID, State: common.RunStateSuperseded}); err != nil {
 		t.Fatalf("seed stale run: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -432,7 +432,7 @@ func TestRuntimeOrchestrator_StartRunAllowsStaleTerminalActiveRun(t *testing.T) 
 	if ws.ActiveRunID == staleRunID {
 		t.Fatalf("workspace active run id = %q, want stale terminal run replaced", ws.ActiveRunID)
 	}
-	if ws.State != common.WorkspaceStateCompleted || ws.ActiveRunID != "" {
+	if ws.State != common.WorkspaceStateActive || ws.ActiveRunID != "" {
 		t.Fatalf("workspace = %+v, want completed with no stale active run", ws)
 	}
 }
@@ -453,7 +453,7 @@ func TestRuntimeOrchestrator_StartRunFailsRunWhenInitialDispatchSpecBuildFails(t
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -471,7 +471,7 @@ func TestRuntimeOrchestrator_StartRunFailsRunWhenInitialDispatchSpecBuildFails(t
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	if ws.State != common.WorkspaceStateFailed || ws.ActiveRunID != "" {
+	if ws.State != common.WorkspaceStateActive || ws.ActiveRunID != "" {
 		t.Fatalf("workspace = %+v, want failed with active run released", ws)
 	}
 }
@@ -491,12 +491,12 @@ func TestRuntimeOrchestrator_ResumeRunningRunWithNoStepsDispatchesInitialStep(t 
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "ws",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: runID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -514,7 +514,7 @@ func TestRuntimeOrchestrator_ResumeRunningRunWithNoStepsDispatchesInitialStep(t 
 	if err != nil {
 		t.Fatalf("get initial step: %v", err)
 	}
-	if step.State != common.StepStateCompleted {
+	if step.State != common.StepStateSucceeded {
 		t.Fatalf("step state = %q, want completed", step.State)
 	}
 }
@@ -533,7 +533,7 @@ func TestRuntimeOrchestrator_ReconcileWorkspaceActiveRunClearsTerminalActiveRun(
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "ws",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: runID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -549,8 +549,8 @@ func TestRuntimeOrchestrator_ReconcileWorkspaceActiveRunClearsTerminalActiveRun(
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	if ws.State != common.WorkspaceStateFailed || ws.ActiveRunID != "" {
-		t.Fatalf("workspace = %+v, want failed with no terminal active run", ws)
+	if ws.State != common.WorkspaceStateSuperseded || ws.ActiveRunID != "" {
+		t.Fatalf("workspace = %+v, want superseded with no terminal active run", ws)
 	}
 }
 
@@ -573,7 +573,7 @@ func TestRuntimeOrchestrator_StartRunRejectsNonCreatedState(t *testing.T) {
 		name  string
 		state common.RunState
 	}{
-		{name: "running", state: common.RunStateRunning},
+		{name: "running", state: common.RunStateActive},
 		{name: "blocked decision", state: common.RunStateBlockedOnDecision},
 		{name: "blocked approval", state: common.RunStateBlockedOnApproval},
 		{name: "completed", state: common.RunStateCompleted},
@@ -607,7 +607,7 @@ func TestRuntimeOrchestrator_StartRun_RuntimeFailureMarksRunAndStepFailed(t *tes
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -661,7 +661,7 @@ func TestRuntimeOrchestrator_DispatchNextStep_ValidateArguments(t *testing.T) {
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if err := orch.DispatchNextStep(ctx, runID); !errors.Is(err, common.ErrInvalidArgument) {
@@ -700,7 +700,7 @@ func TestRuntimeOrchestrator_BlockCommands_ValidateArgumentsAndSetExpectedRefs(t
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          decisionRunID,
 		WorkspaceID: decisionWorkspaceID,
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}); err != nil {
 		t.Fatalf("seed decision run: %v", err)
 	}
@@ -718,7 +718,7 @@ func TestRuntimeOrchestrator_BlockCommands_ValidateArgumentsAndSetExpectedRefs(t
 	if err != nil {
 		t.Fatalf("get decision-blocked workspace: %v", err)
 	}
-	if decisionWorkspace.State != common.WorkspaceStateWaitingDecision || decisionWorkspace.ActiveRunID != decisionRunID {
+	if decisionWorkspace.State != common.WorkspaceStateActive || decisionWorkspace.ActiveRunID != decisionRunID {
 		t.Fatalf("decision workspace = %+v, want waiting_decision with active run", decisionWorkspace)
 	}
 
@@ -730,7 +730,7 @@ func TestRuntimeOrchestrator_BlockCommands_ValidateArgumentsAndSetExpectedRefs(t
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          approvalRunID,
 		WorkspaceID: approvalWorkspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("seed approval run: %v", err)
 	}
@@ -748,7 +748,7 @@ func TestRuntimeOrchestrator_BlockCommands_ValidateArgumentsAndSetExpectedRefs(t
 	if err != nil {
 		t.Fatalf("get approval-blocked workspace: %v", err)
 	}
-	if approvalWorkspace.State != common.WorkspaceStateBlocked || approvalWorkspace.ActiveRunID != approvalRunID {
+	if approvalWorkspace.State != common.WorkspaceStateBlockedOnApproval || approvalWorkspace.ActiveRunID != approvalRunID {
 		t.Fatalf("approval workspace = %+v, want blocked with active run", approvalWorkspace)
 	}
 }
@@ -832,10 +832,10 @@ func TestRuntimeOrchestrator_ValidateRunProjectsWorkspaceState(t *testing.T) {
 
 	workspaceID := common.WorkspaceID("ws-validating")
 	runID := common.RunID("run-validating")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -847,7 +847,7 @@ func TestRuntimeOrchestrator_ValidateRunProjectsWorkspaceState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	if ws.State != common.WorkspaceStateValidating || ws.ActiveRunID != runID {
+	if ws.State != common.WorkspaceStateActive || ws.ActiveRunID != runID {
 		t.Fatalf("workspace = %+v, want validating with active run", ws)
 	}
 	published := hub.Published()
@@ -855,7 +855,7 @@ func TestRuntimeOrchestrator_ValidateRunProjectsWorkspaceState(t *testing.T) {
 		t.Fatalf("published events = %d, want run and workspace state events", len(published))
 	}
 	last := published[len(published)-1]
-	if last.Topic != workspaceevents.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyState] != string(common.WorkspaceStateValidating) {
+	if last.Topic != workspaceevents.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyState] != string(common.WorkspaceStateActive) {
 		t.Fatalf("last event = %#v, want workspace validating event", last)
 	}
 }
@@ -872,13 +872,13 @@ func TestRuntimeOrchestrator_BlockRunCanReplaceStaleTerminalActiveRun(t *testing
 	workspaceID := common.WorkspaceID("ws-stale-terminal-active")
 	staleRunID := common.RunID("run-stale-terminal-active")
 	currentRunID := common.RunID("run-current-block")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: staleRunID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: staleRunID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: staleRunID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
 		t.Fatalf("seed stale run: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: currentRunID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: currentRunID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed current run: %v", err)
 	}
 
@@ -890,7 +890,7 @@ func TestRuntimeOrchestrator_BlockRunCanReplaceStaleTerminalActiveRun(t *testing
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	if ws.State != common.WorkspaceStateBlocked || ws.ActiveRunID != currentRunID {
+	if ws.State != common.WorkspaceStateBlockedOnApproval || ws.ActiveRunID != currentRunID {
 		t.Fatalf("workspace = %+v, want current blocked run projection", ws)
 	}
 }
@@ -980,7 +980,7 @@ func TestRuntimeOrchestrator_ResumeProviderConfigRecoveryContinueDispatchesExpli
 	rootStepID := common.StepID(string(runID) + "/repair-001")
 	failedStepID := common.StepID(string(runID) + "/provider-retry-002-of-repair-001")
 	ticketID := common.TicketID(string(failedStepID) + "-provider-retry-exhausted-decision")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{

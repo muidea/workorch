@@ -9,7 +9,7 @@ import (
 )
 
 func selectTerminalWorkspaceResultRun(workspace *workspacemodel.Workspace, candidates map[common.RunID]*runmodel.Run, results []*resultmodel.Result, latestEvent *eventstreammodel.EventRecord) *runmodel.Run {
-	if workspace == nil || !IsTerminalProjectionState(string(workspace.State)) {
+	if workspace == nil {
 		return nil
 	}
 	result, resultRun := SelectTerminalResultRun(workspace.ID, candidates, results)

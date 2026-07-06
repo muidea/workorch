@@ -13,7 +13,7 @@ func MapWorkspaceWithRunProjection(workspace *workspacemodel.Workspace, run *run
 	if run == nil {
 		return ret
 	}
-	if run.State == common.RunStateCreated {
+	if run.State == common.RunStatePending {
 		return ret
 	}
 	ret.State = string(WorkspaceProjectionState(run.State))

@@ -50,11 +50,11 @@ func TestValidateAndCompleteRunPrevalidatesBeforeValidating(t *testing.T) {
 	run := &runmodel.Run{
 		ID:                 runID,
 		WorkspaceID:        workspaceID,
-		State:              common.RunStateRunning,
+		State:              common.RunStateActive,
 		DefinitionRevision: "rev-1",
 		ExecutionContext:   map[string]any{},
 	}
-	workspace := &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestValidateAndCompleteRunPrevalidatesBeforeValidating(t *testing.T) {
 	if getErr != nil {
 		t.Fatalf("get workspace: %v", getErr)
 	}
-	if persistedRun.State != common.RunStateRunning || persistedWorkspace.State != common.WorkspaceStateRunning {
+	if persistedRun.State != common.RunStateActive || persistedWorkspace.State != common.WorkspaceStateActive {
 		t.Fatalf("state after failed preflight run=%s workspace=%s, want running/running", persistedRun.State, persistedWorkspace.State)
 	}
 }

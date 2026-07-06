@@ -16,7 +16,7 @@ func MapWorkspace(item *workspacemodel.Workspace) appmodelcore.Workspace {
 		Description:          item.Description,
 		DeliverableDirectory: item.DeliverableDirectory,
 		InternalDirectory:    item.InternalDirectory,
-		State:                string(item.State),
+		State:                string(common.CanonicalWorkspaceOwnerState(item.State)),
 		ActiveRunID:          string(item.ActiveRunID),
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,

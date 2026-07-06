@@ -42,7 +42,7 @@ func reconcileStepShell(stepID string, command string) *runmodel.Step {
 		ID:    common.StepID(stepID),
 		RunID: "run-recon-1",
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"exitCode": 0,
 			"command":  command,
@@ -422,7 +422,7 @@ func TestReconcile_StepKindNotBindable(t *testing.T) {
 		ID:     "run-recon-1/graph-007/001-read-main-go",
 		RunID:  "run-recon-1",
 		Kind:   "file/read",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"path": "main.go"},
 	}
 	validation := reconcileValidValidation("val-010", step.ID)

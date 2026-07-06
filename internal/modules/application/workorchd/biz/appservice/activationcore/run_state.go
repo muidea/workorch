@@ -11,8 +11,7 @@ func IsTerminalRunState(state common.RunState) bool {
 
 func IsObservableRunState(state common.RunState) bool {
 	switch state {
-	case common.RunStateRunning,
-		common.RunStateValidating,
+	case common.RunStateActive,
 		common.RunStateBlockedOnDecision,
 		common.RunStateBlockedOnApproval,
 		common.RunStateCompleted,

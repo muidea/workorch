@@ -17,7 +17,7 @@ func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunI
 	if err != nil {
 		return err
 	}
-	if r.State != common.RunStateRunning && r.State != common.RunStateValidating {
+	if r.State != common.RunStateActive {
 		return common.ErrConflict
 	}
 	if requiresDoDAssessmentCompletionGate(r) && !o.resultManager().hasAcceptedCompletionResult(ctx, r) {
@@ -39,7 +39,7 @@ func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunI
 	if err := o.eventPublisher().publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
-	workspace, changed, err := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, r, common.WorkspaceStateCompleted)
+	workspace, changed, err := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, r, common.WorkspaceStateActive)
 	if err != nil || !changed {
 		return err
 	}
@@ -54,7 +54,7 @@ func (o *RuntimeOrchestrator) ValidateRun(ctx context.Context, runID common.RunI
 	if err != nil {
 		return err
 	}
-	if r.State != common.RunStateRunning {
+	if r.State != common.RunStateActive {
 		return common.ErrConflict
 	}
 	workspace, err := o.runStateManager().syncRunAndWorkspaceForValidation(ctx, r, nil)
@@ -71,7 +71,7 @@ func (o *RuntimeOrchestrator) validateAndCompleteRunWithWorkspace(ctx context.Co
 	if run == nil || run.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	if run.State != common.RunStateRunning {
+	if run.State != common.RunStateActive {
 		return common.ErrConflict
 	}
 	if err := o.validateRunReadyForCompletion(ctx, run); err != nil {

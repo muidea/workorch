@@ -102,7 +102,7 @@ func TestUpdateConvergenceBudgetResetsNoDeltaAfterCoverageDelta(t *testing.T) {
 	step := &runmodel.Step{
 		ID:    "run-convergence-budget-reset/verify",
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"status": "completed",
 		},
@@ -152,7 +152,7 @@ func TestUpdateConvergenceBudgetResetsRepairAttemptsAfterAcceptedCoverageDelta(t
 	step := &runmodel.Step{
 		ID:    "run-convergence-budget-positive-delta/graph-001/001-patch",
 		Kind:  "patch/apply",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"status": "completed",
 		},
@@ -310,7 +310,7 @@ func TestConvergenceBudgetDoesNotCountConcreteEvidenceGraphNodeAsRepairAttempt(t
 	evidenceNode := &runmodel.Step{
 		ID:    "run-convergence-budget-evidence-node/graph-001/001-list-root",
 		Kind:  "file/list",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphNodeID:           "list-root",
 			stepInputKeyGraphRootStepID:       "run-convergence-budget-evidence-node/repair-001",
@@ -385,7 +385,7 @@ func TestUpdateConvergenceBudgetDoesNotCountPendingExecutionGraphAsNoDelta(t *te
 	step := &runmodel.Step{
 		ID:    "run-convergence-budget-pending-graph/repair-001",
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyRuntimeStage:      runtimeStageRepair,
 			"repairActionPackage":         map[string]any{"requiredOutput": map[string]any{"mustIncludeStateChangingNode": true}},
@@ -446,7 +446,7 @@ func TestUpdateConvergenceBudgetDoesNotCountIntermediateCompletedGraphNodesAsNoD
 		{
 			ID:    "run-convergence-budget-intermediate-graph/graph-001/001-read-target",
 			Kind:  "file/read",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				stepInputKeyGraphNodeID:     "read-target",
 				stepInputKeyGraphRootStepID: "run-convergence-budget-intermediate-graph/step-1",
@@ -457,7 +457,7 @@ func TestUpdateConvergenceBudgetDoesNotCountIntermediateCompletedGraphNodesAsNoD
 		{
 			ID:    "run-convergence-budget-intermediate-graph/graph-001/002-patch-target",
 			Kind:  "patch/apply",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				stepInputKeyGraphNodeID:     "patch-target",
 				stepInputKeyGraphRootStepID: "run-convergence-budget-intermediate-graph/step-1",
@@ -484,7 +484,7 @@ func TestUpdateConvergenceBudgetDoesNotCountIntermediateCompletedGraphNodesAsNoD
 	validation := &runmodel.Step{
 		ID:    "run-convergence-budget-intermediate-graph/graph-001/003-validate-target",
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphNodeID:     "validate-target",
 			stepInputKeyGraphRootStepID: "run-convergence-budget-intermediate-graph/step-1",

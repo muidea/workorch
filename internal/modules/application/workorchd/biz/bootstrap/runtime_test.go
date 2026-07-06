@@ -379,7 +379,7 @@ func TestNewWithBackendRegistersOrchestratorCommandHandlers(t *testing.T) {
 		ID:     "run-command/approval",
 		RunID:  "run-command",
 		Kind:   "llm/workspace_execution",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stage": "blocked_on_approval"},
 	}); err != nil {
 		t.Fatalf("CreateStep: %v", err)
@@ -434,7 +434,7 @@ func TestWorkspaceScopedStepRepositoryUsesRuntimeWorkspaceForDuplicateRunIDs(t *
 		if err := exports.Repositories.Runs.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runmodel.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 		}); err != nil {
 			t.Fatalf("create run %s: %v", workspaceID, err)
 		}
@@ -443,12 +443,12 @@ func TestWorkspaceScopedStepRepositoryUsesRuntimeWorkspaceForDuplicateRunIDs(t *
 		ID:     stepID,
 		RunID:  runID,
 		Kind:   "llm/workspace_execution",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"status": "completed"},
 	}); err != nil {
 		t.Fatalf("create step in workspace A: %v", err)
 	}
-	if item, err := exports.Repositories.Steps.Get(ctxA, stepID); err != nil || item.State != common.StepStateCompleted {
+	if item, err := exports.Repositories.Steps.Get(ctxA, stepID); err != nil || item.State != common.StepStateSucceeded {
 		t.Fatalf("get step in workspace A = %+v, %v; want completed", item, err)
 	}
 	if _, err := exports.Repositories.Steps.Get(ctxB, stepID); !errors.Is(err, common.ErrNotFound) {
@@ -458,7 +458,7 @@ func TestWorkspaceScopedStepRepositoryUsesRuntimeWorkspaceForDuplicateRunIDs(t *
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "mcp/tool_call",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 	}); err != nil {
 		t.Fatalf("create duplicate step in workspace B: %v", err)
 	}
@@ -466,7 +466,7 @@ func TestWorkspaceScopedStepRepositoryUsesRuntimeWorkspaceForDuplicateRunIDs(t *
 	if err != nil {
 		t.Fatalf("get step in workspace B after create: %v", err)
 	}
-	if item.Kind != "mcp/tool_call" || item.State != common.StepStateDispatched {
+	if item.Kind != "mcp/tool_call" || item.State != common.StepStateExecuting {
 		t.Fatalf("workspace B step = %+v, want dispatched mcp/tool_call", item)
 	}
 }
@@ -703,7 +703,7 @@ func TestNewWithBackendFilePartitionsWorkspaceScopedRepositories(t *testing.T) {
 		t.Fatalf("workspace soul bindings = %+v/%+v, want persisted config values", workspaces[0].DefaultSoulID, workspaces[0].SoulBindings)
 	}
 	updated := *workspaces[0]
-	updated.State = common.WorkspaceStateRunning
+	updated.State = common.WorkspaceStateActive
 	updated.ActiveRunID = common.RunID("run-bootstrap-index-active")
 	updated.DefaultSoulID = common.SoulID("soul-updated")
 	updated.SoulBindings = map[string]common.SoulID{
@@ -721,7 +721,7 @@ func TestNewWithBackendFilePartitionsWorkspaceScopedRepositories(t *testing.T) {
 	if err := json.Unmarshal(indexPayload, &updatedIndex); err != nil {
 		t.Fatalf("decode updated workspace index: %v", err)
 	}
-	if !workspaceIndexContains(updatedIndex, workspaceID, common.WorkspaceStateRunning, common.RunID("run-bootstrap-index-active")) {
+	if !workspaceIndexContains(updatedIndex, workspaceID, common.WorkspaceStateActive, common.RunID("run-bootstrap-index-active")) {
 		t.Fatalf("updated workspace index = %+v, want running workspace with active run", updatedIndex)
 	}
 	goals, err := exports.Repositories.Goals.ListByWorkspaceID(ctx, workspaceID)
@@ -755,7 +755,7 @@ func TestWorkspaceScopedRunRepositoryResolvesDuplicateRunIDByWorkspaceContext(t 
 		if err := exports.Repositories.Runs.Create(scopedCtx, &runmodel.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 		}); err != nil {
 			t.Fatalf("create run %s/%s: %v", workspaceID, runID, err)
 		}
@@ -763,7 +763,7 @@ func TestWorkspaceScopedRunRepositoryResolvesDuplicateRunIDByWorkspaceContext(t 
 			ID:    common.StepID(string(runID) + "/step-" + string(workspaceID)),
 			RunID: runID,
 			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 		}); err != nil {
 			t.Fatalf("create step %s/%s: %v", workspaceID, runID, err)
 		}
@@ -898,10 +898,10 @@ func TestNewWithBackendFilePartitionsRunScopedRepositories(t *testing.T) {
 	runID := common.RunID("run-bootstrap-partition")
 	stepID := common.StepID("step-bootstrap-partition")
 	toolCallID := common.ToolCallID("tool-bootstrap-partition")
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, State: common.StepStateDispatched}); err != nil {
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, State: common.StepStateExecuting}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
 	if err := exports.Repositories.ToolCalls.Create(ctx, &runmodel.ToolCall{

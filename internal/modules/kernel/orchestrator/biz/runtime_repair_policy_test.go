@@ -555,7 +555,7 @@ func TestRunLevelIneffectiveConvergenceEscalatesRuntimeRepair(t *testing.T) {
 			ID:    common.StepID(fmt.Sprintf("%s/recovery-%03d", runID, idx)),
 			RunID: runID,
 			Kind:  llmWorkspaceExecutionStepKind,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				"graphFollowUp": true,
 			},
@@ -769,7 +769,7 @@ func TestProviderRetryBudgetUsesPolicyAfterStateChangeAttempt(t *testing.T) {
 		ID:    common.StepID(string(runID) + "/graph-001/001-apply"),
 		RunID: runID,
 		Kind:  "patch/apply",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}); err != nil {
 		t.Fatalf("seed state-changing step: %v", err)
 	}
@@ -902,7 +902,7 @@ func TestCoverageStateChangeGapEscalatesAfterValidationOnlyRepair(t *testing.T) 
 		ID:    common.StepID(string(runID) + "/graph-001/001-apply"),
 		RunID: runID,
 		Kind:  "patch/apply",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"status": "completed",
 			"stage":  "patch_apply",
@@ -1377,7 +1377,7 @@ func TestShouldNotBlockOnDuplicateRuntimeFailureForRepeatedRuntimeContractLoopWi
 		ID:    common.StepID(string(runID) + "/repair-001a-evidence"),
 		RunID: runID,
 		Kind:  "patch/apply",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"status": "completed",
 			"stage":  "patch_apply",

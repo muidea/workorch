@@ -153,7 +153,7 @@ func TestProcessEvidenceTimelineCompactsMCPToolEvidence(t *testing.T) {
 		ID:    "run-mcp-evidence/tool-001",
 		RunID: run.ID,
 		Kind:  "mcp/tool_call",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"serverId": "mcp-code",
 			"tool":     "semantic.lookup",
@@ -222,7 +222,7 @@ func TestRunExecutionContextPackageIncludesProcessEvidenceTimeline(t *testing.T)
 		ID:    "run-process-context/graph-001/001-write",
 		RunID: run.ID,
 		Kind:  "patch/apply",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyRuntimeStage: "execution",
 			stepInputKeyGraphNodeID:  "write_target",
@@ -386,7 +386,7 @@ func TestProcessEvidenceTimelineUsesRecentCompleteWindowAndCompactHistory(t *tes
 	run := &runmodel.Run{ID: "run-process-history-compact", WorkspaceID: "ws-process-history-compact"}
 	steps := make([]*runmodel.Step, 0, maxLLMContextSliceItems+5)
 	for idx := 0; idx < maxLLMContextSliceItems+5; idx++ {
-		state := common.StepStateCompleted
+		state := common.StepStateSucceeded
 		output := map[string]any{
 			"summary": strings.Repeat("historical payload ", 80),
 		}
@@ -478,7 +478,7 @@ func TestCompactProcessEvidenceTimelineForStateChangingRepairPrioritizesCurrentF
 			"stepId":     "run-process-context/graph-001/001-write",
 			"kind":       "patch/apply",
 			"actionKind": "artifact_write",
-			"state":      string(common.StepStateCompleted),
+			"state":      string(common.StepStateSucceeded),
 			"summary":    "state-changing output completed",
 		},
 		{
@@ -571,7 +571,7 @@ func TestCurrentProgressDigestPrefersLatestActionableFailureOverOlderActionableF
 			"order":      2,
 			"stepId":     "run-process-context/graph-002/001-fix",
 			"kind":       "patch/apply",
-			"state":      string(common.StepStateCompleted),
+			"state":      string(common.StepStateSucceeded),
 			"summary":    "old compile failure fixed",
 			"actionKind": "artifact_write",
 		},
@@ -610,7 +610,7 @@ func TestCurrentProgressDigestPrefersLatestActionableFailureOverOlderActionableF
 			"latestActionEvidence": []map[string]any{{
 				"stepId": "run-process-context/graph-004/002-verify",
 				"kind":   "shell/command",
-				"state":  string(common.StepStateCompleted),
+				"state":  string(common.StepStateSucceeded),
 				"outputSummary": map[string]any{
 					"stdoutPreview": "./main.go:5:2: \"bytes\" imported and not used\nFAIL",
 				},
@@ -680,7 +680,7 @@ func TestPromoteRepairActionPackageContextCopiesInformativeProgressDigest(t *tes
 			"lastAttempt": map[string]any{
 				"stepId": "run-progress/graph-001/002-collect-evidence",
 				"kind":   "shell/command",
-				"state":  string(common.StepStateCompleted),
+				"state":  string(common.StepStateSucceeded),
 			},
 		},
 		"repairActionPackage": map[string]any{

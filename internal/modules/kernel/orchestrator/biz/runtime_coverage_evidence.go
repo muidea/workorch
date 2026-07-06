@@ -164,7 +164,7 @@ func coverageWorkItemStepUpdate(step *runModel.Step) coverageWorkItemUpdate {
 		WorkItemIDs:       coverageWorkItemIDsFromStep(step),
 		TargetTokens:      coverageTargetTokensFromStep(step),
 		EvidenceRefs:      coverageStepEvidenceRefs(step),
-		Accepted:          step.State == common.StepStateCompleted,
+		Accepted:          step.State == common.StepStateSucceeded,
 		AcceptanceOptions: coverageEvidenceAcceptanceOptionsFromStep(step),
 	}
 	if runtimeStepCanRecordStateChangingEvidence(step) || runtimeStepStateChangeCanUpdateCoverage(step) {

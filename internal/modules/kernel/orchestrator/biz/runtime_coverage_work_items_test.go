@@ -157,7 +157,7 @@ func TestCoverageWorkItemsSyncProjectionToRepository(t *testing.T) {
 				"observedClaims":  []string{"repository coverage work item validation observed"},
 			},
 		},
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"evidenceRef": "evidence-cwi-repo-sync",
 		},
@@ -192,7 +192,7 @@ func TestEnsureGapBaselineHydratesCoverageContextFromOwnerRepository(t *testing.
 	run := &runmodel.Run{
 		ID:          "run-cwi-repo-hydrate",
 		WorkspaceID: "workspace-cwi-repo-hydrate",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"goal": map[string]any{
 				"id":   "goal-cwi-repo-hydrate",
@@ -235,7 +235,7 @@ func TestEnsureGapBaselineHydratesCoverageContextFromOwnerRepository(t *testing.
 				"observedClaims":  []string{"owner storage coverage context was hydrated"},
 			},
 		},
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"evidenceRef": "evidence-cwi-repo-hydrate",
 		},
@@ -298,7 +298,7 @@ func TestNextDispatchSpecsPersistsGapBaselineBeforeInitialStep(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"goal": map[string]any{
 				"id":   "goal-gap-baseline",
@@ -345,7 +345,7 @@ func TestGapBaselineNextActionUsesDeterministicCompleteForAcceptedBinding(t *tes
 	run := &runmodel.Run{
 		ID:          "run-gap-baseline-assessment",
 		WorkspaceID: "ws-gap-baseline-assessment",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			coverageWorkItemContextKey: map[string]any{
 				"definitionRevision":   "rev-assessment",
@@ -390,7 +390,7 @@ func TestGapBaselineNextActionSkipsAssessmentForDeterministicAcceptedBinding(t *
 	run := &runmodel.Run{
 		ID:          "run-gap-baseline-deterministic",
 		WorkspaceID: "ws-gap-baseline-deterministic",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			coverageWorkItemContextKey: map[string]any{
 				"definitionRevision":   "rev-deterministic",
@@ -439,7 +439,7 @@ func TestRefreshRunConvergenceAuthorityAlignsFocusAndBudgetToCurrentCoverage(t *
 	run := &runmodel.Run{
 		ID:          "run-refresh-authority",
 		WorkspaceID: "ws-refresh-authority",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			activeSliceIDKey: "slice-primary",
 			coverageFocusKey: map[string]any{
@@ -520,7 +520,7 @@ func TestConvergenceAuthoritySnapshotDrivesBaselineContractAndStagePacket(t *tes
 	run := &runmodel.Run{
 		ID:          "run-authority-snapshot",
 		WorkspaceID: "ws-authority-snapshot",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			activeSliceIDKey: "slice-authority",
 			coverageFocusKey: map[string]any{
@@ -621,7 +621,7 @@ func TestPrepareGapBaselineDispatchSpecsRebuildsStaleDynamicContractFromAuthorit
 	run := &runmodel.Run{
 		ID:              "run-authority-dispatch",
 		WorkspaceID:     "ws-authority-dispatch",
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{
 			"definitionRevision": "rev-authority-dispatch",
@@ -714,7 +714,7 @@ func TestInitialDispatchBuildsStateChangingContractFromGapBaseline(t *testing.T)
 	run := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"goal": map[string]any{
 				"id":   "goal-gap-state-changing",
@@ -782,7 +782,7 @@ func TestRefreshConvergenceAuthorityStripsCoverageFocusRuntimeDiagnostics(t *tes
 	run := &runmodel.Run{
 		ID:          "run-authority-focus-diagnostics",
 		WorkspaceID: "ws-authority-focus-diagnostics",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			activeSliceIDKey: "slice-authority",
 			coverageFocusKey: map[string]any{
@@ -839,7 +839,7 @@ func TestGapBaselineFromRunPreservesAcceptedAndRejectedEvidenceRefs(t *testing.T
 	run := &runmodel.Run{
 		ID:          "run-gap-baseline-evidence",
 		WorkspaceID: "ws-gap-baseline-evidence",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			coverageWorkItemContextKey: map[string]any{
 				"definitionRevision":   "rev-evidence",
@@ -2000,7 +2000,7 @@ func TestCoverageWorkItemsAdvanceFromStepAndAssessmentEvidence(t *testing.T) {
 		ID:    "run-cwi-advance/001-change",
 		RunID: run.ID,
 		Kind:  "artifact/write",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"targetRefs": []string{"goal-leaf-001"},
 		},
@@ -2024,7 +2024,7 @@ func TestCoverageWorkItemsAdvanceFromStepAndAssessmentEvidence(t *testing.T) {
 		ID:    "run-cwi-advance/002-assess",
 		RunID: run.ID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}
 	assessment := map[string]any{
 		"goalCoverage": map[string]any{
@@ -2078,7 +2078,7 @@ func TestCoverageWorkItemsAcceptDeclaredStateChangingRuntimeStep(t *testing.T) {
 		ID:    "run-cwi-runtime-state-changing-step/001-runtime-state-change",
 		RunID: run.ID,
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"stateChanging":       true,
 			"coverageWorkItemIds": []string{stringFromMap(items[0], "id")},
@@ -2125,7 +2125,7 @@ func TestCoverageWorkItemsDoNotAcceptValidationOnlyRuntimeStepAsStateChange(t *t
 		ID:    "run-cwi-validation-only/001-validate",
 		RunID: "run-cwi-validation-only",
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"coverageWorkItemIds": []string{"cwi-validation-only"},
 			"validationEvidence": map[string]any{
@@ -2168,7 +2168,7 @@ func TestCoverageWorkItemsBindGitWriteCommitFromRequiredOutputFocus(t *testing.T
 		ID:    "run-cwi-git/001-git-commit",
 		RunID: "run-cwi-git",
 		Kind:  "git/write",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"operation": "commit",
 			"requiredOutput": map[string]any{
@@ -2205,7 +2205,7 @@ func TestCoverageWorkItemsBindGitWriteCommitFromRequiredOutputFocus(t *testing.T
 		ID:    "run-cwi-git/002-git-add",
 		RunID: "run-cwi-git",
 		Kind:  "git/write",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"operation": "add",
 			"requiredOutput": map[string]any{
@@ -2322,7 +2322,7 @@ func TestCoverageWorkItemsMatchStructuredSourceRequirementID(t *testing.T) {
 		ID:    "run-cwi-source-requirement-id/001-verify",
 		RunID: run.ID,
 		Kind:  "mcp/tool_call",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"coverageTargets": []map[string]any{{
 				"sourceRequirementId": "goal-leaf-001",
@@ -2357,7 +2357,7 @@ func TestCoverageWorkItemsRejectUnclosedAssessmentEvidence(t *testing.T) {
 		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"acceptance gate"}}},
 	}
 	newCoverageSubsystem().ensure(run)
-	step := &runmodel.Step{ID: "run-cwi-reject/001-assess", RunID: run.ID, State: common.StepStateCompleted}
+	step := &runmodel.Step{ID: "run-cwi-reject/001-assess", RunID: run.ID, State: common.StepStateSucceeded}
 	assessment := map[string]any{
 		"items": []map[string]any{{
 			"item":          "acceptance gate",
@@ -2389,7 +2389,7 @@ func TestCoverageWorkItemsRejectUnlinkedSatisfiedAssessment(t *testing.T) {
 		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"acceptance gate"}}},
 	}
 	newCoverageSubsystem().ensure(run)
-	step := &runmodel.Step{ID: "run-cwi-unlinked-assessment/001-assess", RunID: run.ID, State: common.StepStateCompleted}
+	step := &runmodel.Step{ID: "run-cwi-unlinked-assessment/001-assess", RunID: run.ID, State: common.StepStateSucceeded}
 	assessment := map[string]any{
 		"items": []map[string]any{{
 			"item":         "unrelated satisfied claim",
@@ -2499,7 +2499,7 @@ func TestCoverageWorkItemsRejectionDoesNotDemoteCwiWithAcceptedEvidence(t *testi
 		ID:    "run-cwi-accepted-then-rejected/graph-001/001-go-build-verify",
 		RunID: run.ID,
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"coverageWorkItemIds": []string{stringFromMap(items[0], "id")},
 			"validationEvidence": map[string]any{
@@ -2604,7 +2604,7 @@ func TestCoverageWorkItemsRejectionWithPartialAcceptedSetsInProgress(t *testing.
 		ID:     "run-cwi-partial-accepted/graph-001/001-source-change",
 		RunID:  run.ID,
 		Kind:   "artifact/write",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"coverageTargets": []string{"source_change"}},
 	}
 	if !c.updateFromCompletedStep(run, stateChangeStep) {
@@ -2716,7 +2716,7 @@ func TestCoverageWorkItemsAcceptanceGateAllowsSatisfiedEvidence(t *testing.T) {
 		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"acceptance gate"}}},
 	}
 	newCoverageSubsystem().ensure(run)
-	step := &runmodel.Step{ID: "run-cwi-acceptance-ready/001-assess", RunID: run.ID, State: common.StepStateCompleted}
+	step := &runmodel.Step{ID: "run-cwi-acceptance-ready/001-assess", RunID: run.ID, State: common.StepStateSucceeded}
 	assessment := map[string]any{
 		"items": []map[string]any{{
 			"item":         "acceptance gate",
@@ -3164,7 +3164,7 @@ func TestCoverageWorkItemsGovernanceItemsRejectMCPValidationEvidence(t *testing.
 		},
 	}
 	newCoverageSubsystem().ensure(run)
-	assess := &runmodel.Step{ID: "run-cwi-governance-reject-mcp/001-assess", RunID: run.ID, State: common.StepStateCompleted}
+	assess := &runmodel.Step{ID: "run-cwi-governance-reject-mcp/001-assess", RunID: run.ID, State: common.StepStateSucceeded}
 	assessment := map[string]any{
 		"items": []map[string]any{
 			{
@@ -3233,7 +3233,7 @@ func TestCoverageWorkItemsGovernanceItemsAcceptOwnerEvidenceRefs(t *testing.T) {
 		},
 	}
 	newCoverageSubsystem().ensure(run)
-	assess := &runmodel.Step{ID: "run-cwi-governance-owner-evidence/001-assess", RunID: run.ID, State: common.StepStateCompleted}
+	assess := &runmodel.Step{ID: "run-cwi-governance-owner-evidence/001-assess", RunID: run.ID, State: common.StepStateSucceeded}
 	assessment := map[string]any{
 		"items": []map[string]any{
 			{
@@ -3367,7 +3367,7 @@ func TestCoverageWorkItemsAssessmentClosesEvidenceReadyItemWithoutNewRefs(t *tes
 		ID:    "run-cwi-evidence-ready-close/001-verify",
 		RunID: run.ID,
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"coverageWorkItemIds": []string{stringFromMap(items[0], "id")},
 			"validationEvidence": map[string]any{
@@ -3386,7 +3386,7 @@ func TestCoverageWorkItemsAssessmentClosesEvidenceReadyItemWithoutNewRefs(t *tes
 		t.Fatalf("status after evidence = %q, want evidence_ready", got)
 	}
 
-	assess := &runmodel.Step{ID: "run-cwi-evidence-ready-close/002-assess", RunID: run.ID, State: common.StepStateCompleted}
+	assess := &runmodel.Step{ID: "run-cwi-evidence-ready-close/002-assess", RunID: run.ID, State: common.StepStateSucceeded}
 	assessment := map[string]any{
 		"items": []map[string]any{{
 			"item":         "closure trace is exposed",
@@ -3453,7 +3453,7 @@ func TestGraphCompletionGateFailurePersistsCoverageWorkItemDiagnostics(t *testin
 	run := &runmodel.Run{
 		ID:               "run-cwi-graph-gate",
 		WorkspaceID:      "ws-cwi-graph-gate",
-		State:            common.RunStateRunning,
+		State:            common.RunStateActive,
 		InitialStepKind:  llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"acceptance gate"}}},
 	}
@@ -3461,14 +3461,14 @@ func TestGraphCompletionGateFailurePersistsCoverageWorkItemDiagnostics(t *testin
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: run.WorkspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: run.ID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: run.WorkspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: run.ID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	step := &runmodel.Step{
 		ID:    "run-cwi-graph-gate/001-assess",
 		RunID: run.ID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{stepInputKeyRuntimeRepairFollowUp: true},
 		Output: map[string]any{
 			stepOutputKeyDoDAssessment: map[string]any{

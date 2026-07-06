@@ -15,7 +15,7 @@ func TestSnapshotGovernanceFiltersCurrentDisplayRun(t *testing.T) {
 		},
 		Runs: []backend.RunInfo{
 			{ID: "run-old", WorkspaceID: "ws-a", State: common.RunStateBlockedOnDecision},
-			{ID: "run-current", WorkspaceID: "ws-a", State: common.RunStateRunning},
+			{ID: "run-current", WorkspaceID: "ws-a", State: common.RunStateActive},
 		},
 		Decisions: []backend.DecisionInfo{
 			{ID: "ticket-old", WorkspaceID: "ws-a", RunID: "run-old", State: "open"},

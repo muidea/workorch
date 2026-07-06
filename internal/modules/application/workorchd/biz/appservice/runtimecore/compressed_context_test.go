@@ -11,7 +11,7 @@ func TestCreatedRunCompressedContext(t *testing.T) {
 	compressed := CreatedRunCompressedContext(&runmodel.Run{
 		ID:          "run-core-created",
 		WorkspaceID: "ws-core-created",
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}, "en-US")
 	if compressed == nil {
 		t.Fatal("compressed context nil, want created-run projection")
@@ -28,7 +28,7 @@ func TestCreatedRunCompressedContext(t *testing.T) {
 	if running := CreatedRunCompressedContext(&runmodel.Run{
 		ID:          "run-core-running",
 		WorkspaceID: "ws-core-running",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}, "en-US"); running != nil {
 		t.Fatalf("running compressed = %+v, want nil", running)
 	}

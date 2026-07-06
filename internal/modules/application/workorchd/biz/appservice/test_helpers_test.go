@@ -339,7 +339,7 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 		ID:     stepID,
 		RunID:  common.RunID(runID),
 		Kind:   "llm/workspace_execution",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stage": "blocked_on_decision"},
 	}); err != nil {
 		t.Fatalf("Create decision step: %v", err)
@@ -395,7 +395,7 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 		ID:     stepID,
 		RunID:  common.RunID(runID),
 		Kind:   "llm/workspace_execution",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stage": "blocked_on_approval"},
 	}); err != nil {
 		t.Fatalf("Create approval step: %v", err)

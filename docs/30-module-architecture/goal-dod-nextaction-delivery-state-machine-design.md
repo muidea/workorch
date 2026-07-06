@@ -36,7 +36,7 @@ Related:
 
 近期核对暴露出多类现象：
 
-- workspace 能进入 running、repair、waiting_decision、waiting_approval 等状态，但长时间没有符合 Goal 的有效产物。
+- run 能进入 active、repair、blocked_on_decision、blocked_on_approval 等执行/治理状态，但长时间没有符合 Goal 的有效产物；workspace owner state 本身保持小集合，只表达 active、blocked_on_approval、superseded。
 - LLM 多次返回合同违例内容，runtime 在严格合同、自动重试、decision/replan、repair/follow-up 之间缺少统一收敛路径。
 - 已有 evidence、DoD coverage、当前 gap、accepted/rejected diagnostics、目标快照和当前 requiredOutput 没有稳定进入每次 LLM 请求。
 - 首次执行、resume、replan、restart、服务重启恢复等入口语义不统一，导致有时没有重新触发有效调度。
@@ -344,8 +344,10 @@ LLM/runtime output
   projection、TUI/Web 和 prompt 中各自补一套判断。
 - 每个阻塞条件只能有一个权威分类入口。例如 decision 是否可创建，只能由
   decision eligibility gate 判定；其他路径不得绕过该 gate 直接创建 ticket。
-- 每个 `waiting_decision` owner/projection 状态必须能解析到同 scope 的 open
-  decision ticket；如果没有 open ticket，则不能投影为 `waiting_decision`。
+- 每个 decision blocker 投影必须能解析到同 scope 的 open decision ticket；
+  如果没有 open ticket，则不能投影 `RunState=blocked_on_decision`、
+  `promptMode=decision` 或 decision prompt。Decision blocker 不改变 workspace
+  owner state，workspace 仍保持 `active`。
 - 每个可恢复 LLM 合同违例只能成为 `diagnostic/rejected` evidence；后续动作
   必须由 NextAction 重新推导，不能把违例文本本身变成新的状态权威。
 - 同一 workspace 或同一 failure signature 连续两次收口后仍未改善，必须停止
@@ -392,8 +394,9 @@ Runtime 只有在结构化 blocker 证明缺少 runtime 无法自行获得的信
 - `decisionEligibility.reason` 为结构化字段，不依赖自然语言 contains 判断。
 - `blockingTicketId` 与 ticket repository / governance owner 中的 open ticket
   一致。
-- projection 能从同一 owner snapshot 渲染 `waiting_decision`、
-  `blockingTicketId`、`promptMode=decision` 和 decision 列表。
+- projection 能从同一 owner snapshot 渲染 `RunState=blocked_on_decision`、
+  `blockingTicketId`、`promptMode=decision` 和 decision 列表，同时保持
+  workspace owner state 为 `active`。
 
 若上述检查失败，应按 runtime internal contract misalignment fail-fast 或重新
 推导 NextAction，不得创建半可见 decision blocker。
@@ -621,7 +624,7 @@ LLM candidate
   `state_change`，runtime 必须渲染对应 narrow requiredOutput，不能沿用旧
   requiredOutput。
 - 如果 recompute 得到 `fail` 或 governed blocked，必须记录 terminal/blocker
-  evidence 和 projection，不得保留 `run=running + currentStep=failed + no
+  evidence 和 projection，不得保留 `run=active + currentStep=failed + no
   blocker` 的撕裂状态。
 
 ## Resume / Replan / Restart Semantics
@@ -761,8 +764,8 @@ Watchdog 的必要性仅限于运行中健康检查和幂等补偿，主要覆�
 
 服务重启后：
 
-- 旧 running 但无本进程执行上下文的 run 不应继续显示为 active running。
-- 应刷新为 idle/recoverable/pending_activation 等可重新激活状态。
+- 旧 `active` 但无本进程执行上下文的 run 不应继续显示为正在执行。
+- 应刷新为 idle/recoverable/pending_activation 等可重新激活或可显式恢复状态。
 - 是否恢复执行由用户 `resume` 或明确策略触发，不靠隐式重启后自动跑偏。
 
 ## IO And History Strategy
@@ -834,7 +837,7 @@ Workspace 不能仅因 LLM 声称完成而 complete。Completion gate 必须检�
 - 统一 decision eligibility gate，删除或收敛 repair exhaustion、contract
   violation escalation、completion gate、projection 中并行创建 decision 的路径。
 - 将可恢复 LLM 违例固定为 rejected diagnostic evidence -> NextAction
-  recompute，不允许直接落入 waiting_decision。
+  recompute，不允许直接落入 decision blocker。
 
 ### Phase 4: Stage Packet And LLM Context
 
@@ -857,9 +860,9 @@ Workspace 不能仅因 LLM 声称完成而 complete。Completion gate 必须检�
 - workorchd 输出统一 WorkspaceViewModel revision。
 - TUI prompt、主视图、workspace 列表、状态栏来自同一 projection。
 - SSE 断线恢复、last event id、白屏错误和 incomplete chunked encoding 进入 projection/transport 测试。
-- `waiting_decision`、`blocked_on_decision`、`blockingTicketId`、decision 列表和
+- `blocked_on_decision`、`blockingTicketId`、decision 列表和
   `promptMode=decision` 必须来自同一 owner snapshot；没有 open ticket 时不得
-  投影成等待决策。
+  投影成等待决策。Decision blocker 不改变 workspace owner state。
 
 ### Phase 7: Watchdog And IO Budget
 
@@ -905,8 +908,9 @@ Workspace 不能仅因 LLM 声称完成而 complete。Completion gate 必须检�
   才能治理升级，否则 deterministic fail/block。
 - accepted evidence 是 coverage satisfied 的唯一依据。
 - TUI/Web 不再出现本地状态和 workorchd 投影不一致的 prompt/main view/workspace list。
-- 任意 `waiting_decision` 都能在同 scope 查询到 open decision ticket；任意
-  open decision ticket 都能在 projection/ViewModel 中稳定显示。
+- 任意 `RunState=blocked_on_decision` / `promptMode=decision` 都能在同 scope
+  查询到 open decision ticket；任意 open decision ticket 都能在
+  projection/ViewModel 中稳定显示。
 - 多 workspace 并发不会因同 lane 同步等待、全局锁、全量扫描或无 scope command 互相阻塞。
 - Core 目录中没有新增模板、业务、语言、命令、provider 或 live workspace 特判。
 - 软件开发相关推进策略能追溯到 workspaceTemplate/profile/Soul/policy/skill 绑定。
@@ -920,13 +924,13 @@ Workspace 不能仅因 LLM 声称完成而 complete。Completion gate 必须检�
 - 把 LLM 违例输出作为 accepted evidence 或长期 memory。
 - 把 old graph、old decision、old memory 当作当前权威合同。
 - 用 watchdog 反复补偿主路径未投递的 command。
-- TUI/Web 自行推断 decision/running/approval 状态。
+- TUI/Web 自行推断 decision/active/approval 状态。
 - 每轮 LLM 请求全量读取所有历史事件、文件和 artifact。
 - 使用被截断快照要求生成完整文件或精确 patch。
 - 对同一阻塞条件连续局部打补丁，而不回到完整合同审计。
 - 绕过 decision eligibility gate 直接从 LLM decision output、repair exhaustion、
   contract violation exhaustion 或 projection 生成 decision blocker。
-- 投影 `waiting_decision` 但不投影 open decision ticket。
+- 投影 decision prompt / blocked_on_decision 但不投影 open decision ticket。
 
 ## Open Items
 

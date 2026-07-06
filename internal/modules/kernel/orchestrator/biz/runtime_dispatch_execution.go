@@ -84,7 +84,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 			ID:    stepID,
 			RunID: run.ID,
 			Kind:  kind,
-			State: common.StepStateDispatched,
+			State: common.StepStateExecuting,
 			Input: cloneStepPayload(input),
 		}
 		if err := o.steps.Create(ctx, step); err != nil {
@@ -95,10 +95,10 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 			return common.ErrConflict
 		}
 		switch step.State {
-		case common.StepStateCompleted, common.StepStateFailed:
+		case common.StepStateSucceeded, common.StepStateFailed:
 			return fmt.Errorf("%w: runtime step %s is already terminal", common.ErrConflict, step.ID)
 		}
-		step.State = common.StepStateDispatched
+		step.State = common.StepStateExecuting
 		if kind != "" {
 			step.Kind = kind
 		}
@@ -386,7 +386,7 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 	defer unlock()
 	if current, err := o.steps.Get(ctx, step.ID); err == nil {
 		step = current
-		if step.State == common.StepStateCompleted {
+		if step.State == common.StepStateSucceeded {
 			return o.resumeCompletedGraphBatchStepContinuation(ctx, run, step, workspace)
 		}
 		if step.State == common.StepStateFailed {
@@ -571,7 +571,7 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 		}
 	}
 	if o.graphManager().hasActiveGraphWork(ctx, run, step) {
-		if step.State != common.StepStateCompleted {
+		if step.State != common.StepStateSucceeded {
 			if err := o.finalizeAcceptedRuntimeStep(ctx, run, step, toolCall, output); err != nil {
 				return err
 			}
@@ -717,7 +717,7 @@ func (o *RuntimeOrchestrator) persistLateRuntimeStepResultNotAccepted(
 		return common.ErrInvalidArgument
 	}
 	switch step.State {
-	case common.StepStateCompleted, common.StepStateFailed:
+	case common.StepStateSucceeded, common.StepStateFailed:
 		return nil
 	}
 	output := compactLateRuntimeResultNotAcceptedOutput(run, result.Output, execErr)
@@ -837,7 +837,7 @@ func (o *RuntimeOrchestrator) currentRunForRuntimeStepResult(ctx context.Context
 		return nil, false, common.ErrConflict
 	}
 	switch current.State {
-	case common.RunStateRunning, common.RunStateValidating:
+	case common.RunStateActive:
 		return current, true, nil
 	case common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
 		accepted, err := o.acceptResolvedGovernanceStepResult(ctx, current, step)
@@ -882,11 +882,11 @@ func (o *RuntimeOrchestrator) acceptResolvedGovernanceStepResult(ctx context.Con
 	default:
 		return false, nil
 	}
-	run.State = common.RunStateRunning
+	run.State = common.RunStateActive
 	run.BlockingTicketID = ""
 	run.BlockingApprovalID = ""
 	run.FailureReason = ""
-	workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, run, common.WorkspaceStateRunning, nil)
+	workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, run, common.WorkspaceStateActive, nil)
 	if err != nil {
 		return false, err
 	}
@@ -906,7 +906,7 @@ func (o *RuntimeOrchestrator) currentRunCanRecordRuntimeProgress(ctx context.Con
 	}
 	if errors.Is(err, common.ErrNotFound) && run != nil {
 		switch run.State {
-		case common.RunStateRunning, common.RunStateValidating:
+		case common.RunStateActive:
 			return true, nil
 		}
 		return false, nil
@@ -931,7 +931,7 @@ func (o *RuntimeOrchestrator) hasInFlightRuntimeRepairForSameScope(ctx context.C
 			continue
 		}
 		switch item.State {
-		case common.StepStateCompleted, common.StepStateFailed:
+		case common.StepStateSucceeded, common.StepStateFailed:
 			continue
 		}
 		if runtimeRepairDispatchScope(item.Input) == scope {
@@ -957,7 +957,7 @@ func (o *RuntimeOrchestrator) hasOtherActiveLLMWorkspaceExecution(ctx context.Co
 			continue
 		}
 		switch item.State {
-		case common.StepStateCompleted, common.StepStateFailed:
+		case common.StepStateSucceeded, common.StepStateFailed:
 			continue
 		default:
 			return true, nil
@@ -983,7 +983,7 @@ func (o *RuntimeOrchestrator) hasInFlightLLMGraphDispatchForSameScope(ctx contex
 			continue
 		}
 		switch item.State {
-		case common.StepStateCompleted, common.StepStateFailed:
+		case common.StepStateSucceeded, common.StepStateFailed:
 			continue
 		}
 		if llmGraphDispatchScope(item.Kind, item.Input) == scope {

@@ -4,7 +4,7 @@ import "github.com/muidea/workorch/internal/pkg/common"
 
 func IsTerminalProjectionState(state string) bool {
 	switch common.WorkspaceState(state) {
-	case common.WorkspaceStateCompleted, common.WorkspaceStateFailed, common.WorkspaceStateArchived:
+	case common.WorkspaceStateSuperseded:
 		return true
 	default:
 		return false

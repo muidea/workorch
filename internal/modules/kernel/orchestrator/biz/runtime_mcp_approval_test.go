@@ -40,13 +40,13 @@ func TestRuntimeOrchestratorBlocksOperatorMCPToolCallBeforeRuntimeExecution(t *t
 	workspaceID := common.WorkspaceID("ws-mcp-approval")
 	runID := common.RunID("run-mcp-approval")
 	stepID := common.StepID("run-mcp-approval/graph-001/001-call")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	run := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"mcpServers": []map[string]any{{
 				"id":                    "mcp-operator",
@@ -98,7 +98,7 @@ func TestRuntimeOrchestratorBlocksOperatorMCPToolCallBeforeRuntimeExecution(t *t
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
-	if step.State != common.StepStateCompleted {
+	if step.State != common.StepStateSucceeded {
 		t.Fatalf("step state = %s, want completed", step.State)
 	}
 }

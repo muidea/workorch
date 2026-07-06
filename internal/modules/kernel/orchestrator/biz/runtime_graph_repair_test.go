@@ -26,7 +26,7 @@ func TestLatestFailedRepairableGraphStepSkipsSupersededFailure(t *testing.T) {
 		ID:    common.StepID(runID + "/graph-005/002-rerun-lint"),
 		RunID: runID,
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphNodeID:     "rerun-lint",
 			stepInputKeyGraphRootStepID: string(runID) + "/step-1",
@@ -93,7 +93,7 @@ func TestCurrentProgressDigestClearsFailureSupersededByRepairSuccess(t *testing.
 			"order":                    2,
 			"stepId":                   string(runID) + "/graph-002/001-verify-target",
 			"kind":                     "shell/command",
-			"state":                    string(common.StepStateCompleted),
+			"state":                    string(common.StepStateSucceeded),
 			stepInputKeyRepairOfStepID: failedStepID,
 			"summary":                  "target check passed",
 		},
@@ -226,7 +226,7 @@ func TestProcessEvidenceTimelineKeepsCreationOrderAndSupersedesOldRepairGap(t *t
 			ID:    common.StepID(runID + "/graph-004/002-verify"),
 			RunID: runID,
 			Kind:  "shell/command",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				stepInputKeyGraphNodeID:    "verify",
 				stepInputKeyRepairOfStepID: string(runID + "/graph-003/002-verify"),
@@ -294,7 +294,7 @@ func TestCompletionEvidenceCatalogKeepsRepositoryOrderForLatestUsableScope(t *te
 		ID:    common.StepID(runID + "/graph-004/002-verify"),
 		RunID: runID,
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"failureTargetScope": scope,
 		},
@@ -322,7 +322,7 @@ func TestLatestActionEvidenceCandidatesKeepRepositoryOrder(t *testing.T) {
 		ID:    common.StepID(runID + "/repair-007-of-graph-002-002-verify"),
 		RunID: runID,
 		Kind:  "patch/apply",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"summary": "older repair action",
 		},
@@ -331,7 +331,7 @@ func TestLatestActionEvidenceCandidatesKeepRepositoryOrder(t *testing.T) {
 		ID:    common.StepID(runID + "/graph-004/002-verify"),
 		RunID: runID,
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"summary": "later validation action",
 		},
@@ -456,7 +456,7 @@ func TestProcessEvidenceTimelineTreatsCompletedShellWithFailureMarkersAsActionab
 		ID:    common.StepID(runID + "/graph-001/002-run-tests"),
 		RunID: runID,
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyRuntimeStage:        runtimeStageExecution,
 			stepInputKeyGraphNodeID:         "run-tests",
@@ -566,7 +566,7 @@ func TestCurrentProgressDigestDoesNotPromoteSuccessfulActionEvidenceToFailure(t 
 			"latestActionEvidence": []map[string]any{{
 				"stepId": "run-001/graph-001/002-test",
 				"kind":   "shell/command",
-				"state":  string(common.StepStateCompleted),
+				"state":  string(common.StepStateSucceeded),
 				"source": "latest_successful_action_evidence",
 				"output": map[string]any{
 					"stdout": "=== RUN   TestProxy\n--- PASS: TestProxy (0.00s)\nPASS\nok  \tmodule/proxy\t0.028s",
@@ -586,7 +586,7 @@ func TestProcessEvidenceTimelineIncludesArtifactContinuationMetadataOnly(t *test
 		ID:    common.StepID(runID + "/artifact-apply-001"),
 		RunID: runID,
 		Kind:  artifactApplyStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"artifactContinuationApply": map[string]any{
 				"id":                "artifact-continuation-001",
@@ -623,7 +623,7 @@ func TestEvidenceAcquisitionFollowUpKeepsCurrentFailure(t *testing.T) {
 		ID:    common.StepID(runID + "/step-1"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"concreteFailureEvidenceRequired": true,
 			"failedStepId":                    string(runID) + "/repair-001",
@@ -688,7 +688,7 @@ func TestEvidenceAcquisitionFollowUpCopiesFollowUpProgressIntoRepairActionPackag
 		ID:    common.StepID(runID + "/step-1"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"concreteFailureEvidenceRequired": true,
 			"repairActionPackage": map[string]any{
@@ -707,7 +707,7 @@ func TestEvidenceAcquisitionFollowUpCopiesFollowUpProgressIntoRepairActionPackag
 			"lastAttempt": map[string]any{
 				"stepId": "run-evidence-follow-up-progress/graph-001/002-collect-evidence",
 				"kind":   "shell/command",
-				"state":  string(common.StepStateCompleted),
+				"state":  string(common.StepStateSucceeded),
 			},
 		},
 	}
@@ -746,7 +746,7 @@ func TestEvidenceAcquisitionFollowUpPreservesLastFailureDiagnostics(t *testing.T
 		ID:    common.StepID(runID + "/repair-001"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"concreteFailureEvidenceRequired": true,
 			"failedStepOutput": map[string]any{
@@ -808,7 +808,7 @@ func TestEvidenceAcquisitionFollowUpRestoresCurrentFailureFromRepairOfScope(t *t
 		ID:    common.StepID(runID + "/repair-001"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"concreteFailureEvidenceRequired": true,
 			stepInputKeyRepairOfFailureClass:  failureClassMCPRuntime,
@@ -862,7 +862,7 @@ func TestEvidenceAcquisitionFollowUpPrefersRejectedResultGapOverHistoricalReplan
 		ID:    common.StepID(runID + "/step-1"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"concreteFailureEvidenceRequired": true,
 			"failedStepId":                    string(runID) + "/repair-001",

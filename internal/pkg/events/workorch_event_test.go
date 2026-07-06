@@ -21,7 +21,7 @@ func TestDecodeWorkorchEventReturnsTypedRunEvent(t *testing.T) {
 		Payload: map[string]any{
 			PayloadKeyGoalID:             "goal-1",
 			PayloadKeyDoDID:              "dod-1",
-			PayloadKeyState:              string(common.RunStateRunning),
+			PayloadKeyState:              string(common.RunStateActive),
 			PayloadKeyBlockingTicketID:   "",
 			PayloadKeyBlockingApprovalID: "",
 		},
@@ -34,8 +34,8 @@ func TestDecodeWorkorchEventReturnsTypedRunEvent(t *testing.T) {
 	if !ok {
 		t.Fatalf("event type = %T, want RunEvent", event)
 	}
-	if runEvent.Data.State != common.RunStateRunning {
-		t.Fatalf("run state = %s, want %s", runEvent.Data.State, common.RunStateRunning)
+	if runEvent.Data.State != common.RunStateActive {
+		t.Fatalf("run state = %s, want %s", runEvent.Data.State, common.RunStateActive)
 	}
 	if runEvent.Data.GoalID != "goal-1" || runEvent.Data.DoDID != "dod-1" {
 		t.Fatalf("run goal/dod = %s/%s, want goal-1/dod-1", runEvent.Data.GoalID, runEvent.Data.DoDID)
@@ -43,8 +43,34 @@ func TestDecodeWorkorchEventReturnsTypedRunEvent(t *testing.T) {
 	if runEvent.Envelope().Version != WorkorchEventVersion {
 		t.Fatalf("normalized version = %s, want %s", runEvent.Envelope().Version, WorkorchEventVersion)
 	}
-	if runEvent.Envelope().Payload[PayloadKeyState] != string(common.RunStateRunning) {
-		t.Fatalf("normalized payload state = %v, want %s", runEvent.Envelope().Payload[PayloadKeyState], common.RunStateRunning)
+	if runEvent.Envelope().Payload[PayloadKeyState] != string(common.RunStateActive) {
+		t.Fatalf("normalized payload state = %v, want %s", runEvent.Envelope().Payload[PayloadKeyState], common.RunStateActive)
+	}
+}
+
+func TestDecodeWorkorchEventReturnsTypedRunEventForDiscreteRunTopic(t *testing.T) {
+	event, ok := DecodeWorkorchEvent(Envelope{
+		Version: WorkorchEventVersion,
+		Topic:   runevents.TopicRunCompleted,
+		RunID:   "run-completed",
+		Payload: RunPayload(
+			common.GoalID("goal-completed"),
+			common.DoDID("dod-completed"),
+			common.RunStateCompleted,
+			"",
+			"",
+			"",
+		),
+	})
+	if !ok {
+		t.Fatalf("DecodeWorkorchEvent returned !ok")
+	}
+	runEvent, ok := event.(RunEvent)
+	if !ok {
+		t.Fatalf("event type = %T, want RunEvent", event)
+	}
+	if runEvent.Topic() != runevents.TopicRunCompleted || runEvent.Data.State != common.RunStateCompleted {
+		t.Fatalf("run event = %+v topic=%s, want completed run event", runEvent.Data, runEvent.Topic())
 	}
 }
 
@@ -227,7 +253,7 @@ func TestDecodeWorkorchEventRejectsIncompatibleVersion(t *testing.T) {
 		Version: "workorch.event.v2",
 		Topic:   runevents.TopicRunCreated,
 		RunID:   "run-1",
-		Payload: RunPayload("goal-1", "dod-1", common.RunStateRunning, "", "", ""),
+		Payload: RunPayload("goal-1", "dod-1", common.RunStateActive, "", "", ""),
 	})
 	if ok {
 		t.Fatalf("DecodeWorkorchEvent should reject incompatible version")

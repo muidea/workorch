@@ -792,8 +792,8 @@ func TestActivateWorkspaceExecutionWithBackendCreatesAndStartsRun(t *testing.T) 
 		item.Run.WorkspaceID != workspace.ID ||
 		item.Run.GoalID != goal.ID ||
 		item.Run.DoDID != dod.ID ||
-		item.Run.State != "running" {
-		t.Fatalf("activation run = %+v, want generated running run with goal/dod", item.Run)
+		item.Run.State != string(common.RunStateActive) {
+		t.Fatalf("activation run = %+v, want generated active run with goal/dod", item.Run)
 	}
 	if item.Snapshot.Workspace.ID != workspace.ID || len(item.Snapshot.Runs) != 1 {
 		t.Fatalf("activation snapshot = %+v, want workspace with one run", item.Snapshot)
@@ -842,8 +842,8 @@ func TestActivateWorkspaceExecutionWithBackendCreatesAndStartsRun(t *testing.T) 
 
 func TestActivationObservableRunState(t *testing.T) {
 	for _, state := range []common.RunState{
-		common.RunStateRunning,
-		common.RunStateValidating,
+		common.RunStateActive,
+		common.RunStateActive,
 		common.RunStateBlockedOnDecision,
 		common.RunStateBlockedOnApproval,
 		common.RunStateCompleted,
@@ -855,7 +855,7 @@ func TestActivationObservableRunState(t *testing.T) {
 			t.Fatalf("IsObservableRunState(%s) = false, want true", state)
 		}
 	}
-	for _, state := range []common.RunState{"", common.RunStateCreated} {
+	for _, state := range []common.RunState{"", common.RunStatePending} {
 		if activationcore.IsObservableRunState(state) {
 			t.Fatalf("IsObservableRunState(%s) = true, want false", state)
 		}
@@ -866,17 +866,17 @@ func TestActivationSnapshotDoesNotProjectCreatedRunAsActive(t *testing.T) {
 	workspace := &workspacemodel.Workspace{
 		ID:    common.WorkspaceID("ws-created-projection"),
 		Title: "created projection workspace",
-		State: common.WorkspaceStateFailed,
+		State: common.WorkspaceStateActive,
 	}
 	run := &runmodel.Run{
 		ID:          common.RunID("run-created-projection"),
 		WorkspaceID: workspace.ID,
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}
 
 	snapshot := readmodelprojection.ActivationSnapshot(workspace, run, nil, nil)
-	if snapshot.Workspace.State != string(common.WorkspaceStateFailed) || snapshot.Workspace.ActiveRunID != "" {
-		t.Fatalf("snapshot workspace = %+v, want persisted failed workspace without created active run projection", snapshot.Workspace)
+	if snapshot.Workspace.State != string(common.WorkspaceStateActive) || snapshot.Workspace.ActiveRunID != "" {
+		t.Fatalf("snapshot workspace = %+v, want active workspace without pending active run projection", snapshot.Workspace)
 	}
 }
 
@@ -1031,8 +1031,8 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestGoalAndDoDDefinitions(t 
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend latest: %v", err)
 	}
-	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != "running" {
-		t.Fatalf("activation run = %+v, want latest goal/dod running", item.Run)
+	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != string(common.RunStateActive) {
+		t.Fatalf("activation run = %+v, want latest goal/dod active", item.Run)
 	}
 	if item.Run.ExecutionContext["goalId"] != secondGoal.ID {
 		t.Fatalf("executionContext goalId = %+v, want latest goal", item.Run.ExecutionContext["goalId"])
@@ -1058,8 +1058,8 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestGoalAndDoDDefinitions(t 
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend explicit: %v", err)
 	}
-	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != "running" {
-		t.Fatalf("activation run = %+v, want stale explicit goal/dod upgraded to latest definitions and running", item.Run)
+	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != string(common.RunStateActive) {
+		t.Fatalf("activation run = %+v, want stale explicit goal/dod upgraded to latest definitions and active", item.Run)
 	}
 }
 
@@ -1106,8 +1106,8 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestDefinitionRevisionWithou
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
-	if item.Run.GoalID != updatedGoal.ID || item.Run.DoDID != updatedDoD.ID || item.Run.State != "running" {
-		t.Fatalf("activation run = %+v, want latest updated definition revision running", item.Run)
+	if item.Run.GoalID != updatedGoal.ID || item.Run.DoDID != updatedDoD.ID || item.Run.State != string(common.RunStateActive) {
+		t.Fatalf("activation run = %+v, want latest updated definition revision active", item.Run)
 	}
 	if item.Run.DefinitionRevision != "goal:"+updatedGoal.ID+"|dod:"+updatedDoD.ID {
 		t.Fatalf("activation run definitionRevision = %q, want latest definition revision", item.Run.DefinitionRevision)
@@ -1645,7 +1645,7 @@ func TestBuildWorkspaceExecutionContextInjectsLatestRejectedResultContinuation(t
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-rejected-continuation",
 		Title: "rejected continuation workspace",
-		State: common.WorkspaceStateFailed,
+		State: common.WorkspaceStateActive,
 	}
 	goal := &workspacemodel.Goal{
 		ID:          "goal-rejected-continuation",
@@ -1853,7 +1853,7 @@ func TestActivationContextUsesSelectedGoalAndDoDWithoutReload(t *testing.T) {
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-activation-definition-reuse",
 		Title: "activation definition reuse",
-		State: common.WorkspaceStateReady,
+		State: common.WorkspaceStateActive,
 	}
 	goal := &workspacemodel.Goal{
 		ID:          "goal-activation-definition-reuse",
@@ -1908,7 +1908,7 @@ func TestActivationContextMergesOperatorInputPatchWithoutOverridingDefinitions(t
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-activation-operator-input",
 		Title: "activation operator input",
-		State: common.WorkspaceStateReady,
+		State: common.WorkspaceStateActive,
 	}
 	goal := &workspacemodel.Goal{
 		ID:          "goal-activation-operator-input",
@@ -2003,7 +2003,7 @@ func TestActivationDefinitionSelectionReadsGoalAndDoDConcurrently(t *testing.T) 
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-activation-definition-parallel",
 		Title: "activation definition parallel",
-		State: common.WorkspaceStateReady,
+		State: common.WorkspaceStateActive,
 	}
 	goal := &workspacemodel.Goal{
 		ID:          "goal-activation-definition-parallel",
@@ -2075,7 +2075,7 @@ func TestActivationResponseReusesRunSnapshotRun(t *testing.T) {
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-activation-run-snapshot-reuse",
 		Title: "activation run snapshot reuse",
-		State: common.WorkspaceStateReady,
+		State: common.WorkspaceStateActive,
 	}
 	goal := &workspacemodel.Goal{
 		ID:          "goal-activation-run-snapshot-reuse",
@@ -2124,7 +2124,7 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-activation-inline-compressed",
 		Title: "activation inline compressed",
-		State: common.WorkspaceStateReady,
+		State: common.WorkspaceStateActive,
 	}
 	goal := &workspacemodel.Goal{
 		ID:          "goal-activation-inline-compressed",
@@ -2159,7 +2159,7 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 				DefinitionRevision: cmd.DefinitionRevision,
 				InitialStepKind:    cmd.InitialStepKind,
 				ExecutionContext:   runtimecore.CloneContextMap(cmd.ExecutionContext),
-				State:              common.RunStateCreated,
+				State:              common.RunStatePending,
 				Priority:           cmd.Priority,
 			})
 		}
@@ -2215,7 +2215,7 @@ func TestActivationResponseWorkspaceSnapshotReusesRunSnapshotWorkspace(t *testin
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-activation-workspace-snapshot-reuse",
 		Title: "activation workspace snapshot reuse",
-		State: common.WorkspaceStateReady,
+		State: common.WorkspaceStateActive,
 	}
 	goal := &workspacemodel.Goal{
 		ID:          "goal-activation-workspace-snapshot-reuse",
@@ -2275,7 +2275,7 @@ func TestBuildWorkspaceExecutionContextStartsIndependentReadsConcurrently(t *tes
 	workspace := &workspacemodel.Workspace{
 		ID:            "ws-activation-context-parallel",
 		Title:         "activation context parallel",
-		State:         common.WorkspaceStateReady,
+		State:         common.WorkspaceStateActive,
 		DefaultSoulID: "soul-activation-context-parallel",
 	}
 	goal := &workspacemodel.Goal{
@@ -2364,7 +2364,7 @@ func TestActivationContextReadsMCPServersAndCapabilitiesConcurrently(t *testing.
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-activation-mcp-parallel",
 		Title: "activation mcp parallel",
-		State: common.WorkspaceStateReady,
+		State: common.WorkspaceStateActive,
 	}
 	goal := &workspacemodel.Goal{
 		ID:          "goal-activation-mcp-parallel",
@@ -2539,7 +2539,7 @@ func TestActivateWorkspaceExecutionUsesInjectedConfigLoader(t *testing.T) {
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:    workspaceID,
 		Title: "injected config workspace",
-		State: common.WorkspaceStateReady,
+		State: common.WorkspaceStateActive,
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -4062,8 +4062,8 @@ func TestActivateWorkspaceExecutionWithBackendStartsCreatedActiveRun(t *testing.
 	if err != nil {
 		t.Fatalf("CreateRunWithBackend: %v", err)
 	}
-	if created.State != "created" {
-		t.Fatalf("created run = %+v, want created", created)
+	if created.State != string(common.RunStatePending) {
+		t.Fatalf("created run = %+v, want pending", created)
 	}
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
 	exports := session.Bootstrap.Exports()
@@ -4227,7 +4227,7 @@ func TestActivateWorkspaceExecutionWithBackendIgnoresTerminalActiveRun(t *testin
 		WorkspaceID: common.WorkspaceID(workspace.ID),
 		GoalID:      common.GoalID(goal.ID),
 		DoDID:       common.DoDID(dod.ID),
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("CreateRun old active: %v", err)
 	}
@@ -4244,7 +4244,7 @@ func TestActivateWorkspaceExecutionWithBackendIgnoresTerminalActiveRun(t *testin
 		t.Fatalf("get workspace: %v", err)
 	}
 	workspaceItem.ActiveRunID = oldRunID
-	workspaceItem.State = common.WorkspaceStateFailed
+	workspaceItem.State = common.WorkspaceStateActive
 	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace terminal active run: %v", err)
 	}
@@ -4304,7 +4304,7 @@ func TestActivateWorkspaceExecutionWithBackendContinuesRejectedTerminalResult(t 
 		t.Fatalf("get workspace: %v", err)
 	}
 	workspaceItem.ActiveRunID = ""
-	workspaceItem.State = common.WorkspaceStateFailed
+	workspaceItem.State = common.WorkspaceStateActive
 	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace terminal state: %v", err)
 	}
@@ -4377,7 +4377,7 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 		WorkspaceID: common.WorkspaceID(workspace.ID),
 		GoalID:      common.GoalID(oldGoal.ID),
 		DoDID:       common.DoDID(oldDoD.ID),
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"goalId": oldGoal.ID,
 			"goal": map[string]any{
@@ -4400,7 +4400,7 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 	if err != nil {
 		t.Fatalf("get old run: %v", err)
 	}
-	oldRun.State = common.RunStateRunning
+	oldRun.State = common.RunStateActive
 	if err := exports.Repositories.Runs.Update(ctx, oldRun); err != nil {
 		t.Fatalf("mark old run running: %v", err)
 	}
@@ -4409,7 +4409,7 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 		t.Fatalf("get workspace: %v", err)
 	}
 	workspaceItem.ActiveRunID = oldRunID
-	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.State = common.WorkspaceStateActive
 	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace active run: %v", err)
 	}

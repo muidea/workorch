@@ -5,6 +5,7 @@ type Run struct {
 	WorkspaceID        string         `json:"workspaceId"`
 	GoalID             string         `json:"goalId,omitempty"`
 	DoDID              string         `json:"doDId,omitempty"`
+	Lineage            RunLineage     `json:"lineage,omitempty"`
 	DefinitionRevision string         `json:"definitionRevision,omitempty"`
 	InitialStepKind    string         `json:"initialStepKind,omitempty"`
 	ExecutionContext   map[string]any `json:"executionContext,omitempty"`
@@ -16,4 +17,13 @@ type Run struct {
 	BlockingTicketID   string         `json:"blockingTicketId,omitempty"`
 	BlockingApprovalID string         `json:"blockingApprovalId,omitempty"`
 	FailureReason      string         `json:"failureReason,omitempty"`
+	CreatedAt          string         `json:"createdAt,omitempty"`
+	StartedAt          string         `json:"startedAt,omitempty"`
+	EndedAt            string         `json:"endedAt,omitempty"`
+}
+
+type RunLineage struct {
+	PredecessorRunID string `json:"predecessorRunId,omitempty"`
+	SuccessorRunID   string `json:"successorRunId,omitempty"`
+	LineageState     string `json:"lineageState,omitempty"`
 }

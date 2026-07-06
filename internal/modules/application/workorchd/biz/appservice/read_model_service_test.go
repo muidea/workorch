@@ -227,7 +227,7 @@ func TestGetRunFromRepositoryUsesScopedGetterWithoutWorkspaceList(t *testing.T) 
 	if err := baseRuns.Create(context.Background(), &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: "ws-run-helper-scoped",
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -577,7 +577,7 @@ func TestListRunStepsWithSessionPaginatesProjectedSteps(t *testing.T) {
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "step page", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	for idx := 1; idx <= 3; idx++ {
@@ -586,7 +586,7 @@ func TestListRunStepsWithSessionPaginatesProjectedSteps(t *testing.T) {
 			ID:    stepID,
 			RunID: runID,
 			Kind:  "llm/workspace_execution",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{"rawInput": strings.Repeat("i", 1024)},
 			Output: map[string]any{
 				"stage":       "stage-" + strconv.Itoa(idx),
@@ -631,7 +631,7 @@ func TestListRunToolCallsWithSessionPaginatesProjectedToolCalls(t *testing.T) {
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "tool page", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	for idx := 1; idx <= 3; idx++ {
@@ -680,7 +680,7 @@ func TestListRunRuntimeCheckpointsWithSessionPaginatesProjectedCheckpoints(t *te
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "checkpoint page", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	for idx := 1; idx <= 3; idx++ {
@@ -691,7 +691,7 @@ func TestListRunRuntimeCheckpointsWithSessionPaginatesProjectedCheckpoints(t *te
 			RunID:            runID,
 			CheckpointType:   common.CheckpointTypeRunState,
 			CurrentStepID:    common.StepID(fmt.Sprintf("%s/step-%d", runID, idx)),
-			RunStateSnapshot: common.RunStateRunning,
+			RunStateSnapshot: common.RunStateActive,
 			OccurredAt:       fmt.Sprintf("2026-05-16T10:0%d:00Z", idx),
 			Data:             map[string]any{"rawData": strings.Repeat("d", 1024)},
 		}); err != nil {
@@ -784,7 +784,7 @@ func TestListRunPatchesWithSessionPaginatesProjectedPatches(t *testing.T) {
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "patch page", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	for idx := 1; idx <= 3; idx++ {
@@ -833,7 +833,7 @@ func TestListRunValidationResultsWithSessionPaginatesProjectedValidationResults(
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "validation page", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	for idx := 1; idx <= 3; idx++ {
@@ -964,7 +964,7 @@ func TestReadRunSnapshotReadsDecisionResolutionsConcurrently(t *testing.T) {
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:    workspaceID,
 		Title: "concurrent resolution read",
-		State: common.WorkspaceStateWaitingDecision,
+		State: common.WorkspaceStateActive,
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -1061,7 +1061,7 @@ func TestReadRunSnapshotReadsWorkspaceAndRunScopedEvidenceConcurrently(t *testin
 		ID:     common.StepID("run-snapshot-concurrent/step-1"),
 		RunID:  runID,
 		Kind:   "llm/workspace_execution",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"summary": "done"},
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
@@ -1129,10 +1129,10 @@ func TestReadRunSnapshotScopesMemoryRecallTracesByWorkspace(t *testing.T) {
 	runRepo := memory.NewRunRepository()
 	memoryRecallRepo := memory.NewMemoryRecallTraceRepository()
 
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "memory snapshot", State: common.WorkspaceStateRunning}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "memory snapshot", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	if err := memoryRecallRepo.Create(ctx, &memorymodel.MemoryRecallTrace{
@@ -1210,7 +1210,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 		ID:     stepID,
 		RunID:  runID,
 		Kind:   "validation",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"result": "done"},
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
@@ -1432,7 +1432,7 @@ func TestReadRunSnapshotWithBackendReturnsSelectedAndUsedCapabilities(t *testing
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "mcp/tool_call",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"operation": "mcp/tool_call",
 			"serverId":  "mcp-capability-read-model",
@@ -1690,7 +1690,7 @@ func TestReadRunSnapshotLoadsCapabilityCatalogOnce(t *testing.T) {
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "mcp/tool_call",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"operation": "mcp/tool_call",
 			"serverId":  "mcp-capability-catalog",
@@ -1844,7 +1844,7 @@ func TestMapWebSourceTracesProjectsSearchAndFetchSteps(t *testing.T) {
 		{
 			ID:    "run-web/step-search",
 			Kind:  webcommon.StepKindSearch,
-			State: string(common.StepStateCompleted),
+			State: string(common.StepStateSucceeded),
 			Output: map[string]any{
 				"provider":   "default-http",
 				"query":      "golang latest",
@@ -1863,7 +1863,7 @@ func TestMapWebSourceTracesProjectsSearchAndFetchSteps(t *testing.T) {
 		{
 			ID:    "run-web/step-fetch",
 			Kind:  webcommon.StepKindFetch,
-			State: string(common.StepStateCompleted),
+			State: string(common.StepStateSucceeded),
 			Output: map[string]any{
 				"provider":    "default-http",
 				"url":         "https://go.dev/dl/",
@@ -1910,7 +1910,7 @@ func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 		Steps: []presenter.StepView{{
 			ID:    stepID,
 			Kind:  webcommon.StepKindSearch,
-			State: string(common.StepStateCompleted),
+			State: string(common.StepStateSucceeded),
 			Output: map[string]any{
 				"status":     "completed",
 				"stage":      "web_search",
@@ -1932,7 +1932,7 @@ func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 			RunID:       runID,
 			StepID:      stepID,
 			OccurredAt:  "2026-05-05T00:00:02Z",
-			Payload: events.StepPayload(webcommon.StepKindSearch, common.StepStateCompleted, nil, map[string]any{
+			Payload: events.StepPayload(webcommon.StepKindSearch, common.StepStateSucceeded, nil, map[string]any{
 				"status":     "completed",
 				"stage":      "web_search",
 				"provider":   "default-http",
@@ -1968,7 +1968,7 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 		{
 			ID:    "run-ctx/step-1",
 			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: string(common.StepStateCompleted),
+			State: string(common.StepStateSucceeded),
 			Output: map[string]any{
 				"contextBudget": map[string]any{
 					"maxBytes":              98304,
@@ -2018,7 +2018,7 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 		{
 			ID:    "run-ctx/step-shell",
 			Kind:  shellcommon.StepKindCommand,
-			State: string(common.StepStateCompleted),
+			State: string(common.StepStateSucceeded),
 			Output: map[string]any{
 				"status": "completed",
 			},
@@ -2089,11 +2089,11 @@ func TestRunContextBundleReusesSnapshotTaskProgress(t *testing.T) {
 
 func TestRunContextBundleFiltersCoverageWorkItemsFullLedger(t *testing.T) {
 	snapshot := RunSnapshot{
-		Workspace: Workspace{ID: "ws-context-coverage", State: string(common.WorkspaceStateRunning)},
+		Workspace: Workspace{ID: "ws-context-coverage", State: string(common.WorkspaceStateActive)},
 		Run: Run{
 			ID:          "run-context-coverage",
 			WorkspaceID: "ws-context-coverage",
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 			ExecutionContext: map[string]any{
 				"coverageWorkItems": []map[string]any{{
 					"id":      "large-ledger-item",
@@ -2128,11 +2128,11 @@ func TestRunContextBundleFiltersCoverageWorkItemsFullLedger(t *testing.T) {
 func TestRunProjectionHelpersReuseSnapshotDerivedViews(t *testing.T) {
 	snapshot := RunSnapshot{
 		Workspace: Workspace{ID: "ws-derived-view-reuse"},
-		Run:       Run{ID: "run-derived-view-reuse", WorkspaceID: "ws-derived-view-reuse", State: string(common.RunStateRunning)},
+		Run:       Run{ID: "run-derived-view-reuse", WorkspaceID: "ws-derived-view-reuse", State: string(common.RunStateActive)},
 		TaskProgress: TaskProgress{
 			WorkspaceID: "ws-derived-view-reuse",
 			RunID:       "run-derived-view-reuse",
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 			Summary:     "cached derived progress",
 		},
 		TaskDecompositions: []TaskDecomposition{{
@@ -2182,10 +2182,10 @@ func TestReadRunStatusUsesLatestCheckpointStep(t *testing.T) {
 	runID := common.RunID("run-status-current-step")
 	initialStepID := common.StepID("run-status-current-step/step-1")
 	latestStepID := common.StepID("run-status-current-step/provider-retry-002-of-repair-001-of-planning-001")
-	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: latestStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateFailed}); err != nil {
@@ -2199,7 +2199,7 @@ func TestReadRunStatusUsesLatestCheckpointStep(t *testing.T) {
 		WorkspaceID:      workspaceID,
 		RunID:            runID,
 		CurrentStepID:    latestStepID,
-		RunStateSnapshot: common.RunStateRunning,
+		RunStateSnapshot: common.RunStateActive,
 		OccurredAt:       "2026-05-12T11:20:53Z",
 		Data:             map[string]any{"event": "step_failed"},
 	}); err != nil {
@@ -2225,7 +2225,7 @@ func TestReadRunStatusPrefersBlockingDecisionStepOverStaleCheckpoint(t *testing.
 	staleStepID := common.StepID("run-status-blocking-step/graph-001/001-stale")
 	blockingStepID := common.StepID("run-status-blocking-step/provider-retry-010-of-repair-001")
 	ticketID := common.TicketID("ticket-run-status-blocking-step")
-	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
@@ -2236,7 +2236,7 @@ func TestReadRunStatusPrefersBlockingDecisionStepOverStaleCheckpoint(t *testing.
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: staleStepID, RunID: runID, Kind: "patch/apply", State: common.StepStateCompleted}); err != nil {
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: staleStepID, RunID: runID, Kind: "patch/apply", State: common.StepStateSucceeded}); err != nil {
 		t.Fatalf("create stale step: %v", err)
 	}
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: blockingStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateFailed}); err != nil {
@@ -2304,7 +2304,7 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"stage": "llm_execution_graph_plan",
 			"streamEvents": []map[string]any{
@@ -2444,10 +2444,10 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 	if len(item.Timeline) < 2 {
 		t.Fatalf("timeline = %+v, want checkpoint and events", item.Timeline)
 	}
-	if !timelineContainsStepOutput(item.Timeline, string(stepID), "llm_execution_graph_plan", "completed") {
+	if !timelineContainsStepOutput(item.Timeline, string(stepID), "llm_execution_graph_plan", string(common.StepStateSucceeded)) {
 		t.Fatalf("timeline = %+v, want step output timeline item", item.Timeline)
 	}
-	if !timelineContainsStreamDelta(item.Timeline, string(stepID), `{"completionState":"continue"`, "completed") {
+	if !timelineContainsStreamDelta(item.Timeline, string(stepID), `{"completionState":"continue"`, string(common.StepStateSucceeded)) {
 		t.Fatalf("timeline = %+v, want stream delta timeline item", item.Timeline)
 	}
 	if !timelineContainsStepOccurredAt(item.Timeline, "step", string(stepID), "2026-04-25T10:00:00Z") {
@@ -2491,7 +2491,7 @@ func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *t
 		Steps: []presenter.StepView{{
 			ID:    stepID,
 			Kind:  "llm/workspace_execution",
-			State: string(common.StepStateCompleted),
+			State: string(common.StepStateSucceeded),
 			Output: map[string]any{
 				"stage": "llm_execution_graph_plan",
 				"streamEvents": []map[string]any{
@@ -2531,8 +2531,8 @@ func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *t
 			if item.RunState == string(common.RunStateBlockedOnDecision) {
 				t.Fatalf("timeline item = %+v, want step/stream item not to inherit final blocked run state", item)
 			}
-			if item.RunState != string(common.StepStateCompleted) {
-				t.Fatalf("timeline item = %+v, want completed display state", item)
+			if item.RunState != string(common.StepStateSucceeded) {
+				t.Fatalf("timeline item = %+v, want succeeded display state", item)
 			}
 		}
 	}
@@ -2544,11 +2544,11 @@ func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *t
 func TestRuntimeTimelineUsesStreamDiagnosticsWhenRawEventsAreRefOnly(t *testing.T) {
 	stepID := "run-stream-diagnostics/llm-1"
 	timeline := readmodelprojection.RuntimeTimeline(RunSnapshot{
-		Run: Run{ID: "run-stream-diagnostics", WorkspaceID: "ws-stream-diagnostics", State: string(common.RunStateRunning)},
+		Run: Run{ID: "run-stream-diagnostics", WorkspaceID: "ws-stream-diagnostics", State: string(common.RunStateActive)},
 		Steps: []presenter.StepView{{
 			ID:    stepID,
 			Kind:  "llm/workspace_execution",
-			State: string(common.StepStateCompleted),
+			State: string(common.StepStateSucceeded),
 			Output: map[string]any{
 				"stage": "llm_execution_graph_plan",
 				"llmCallRefs": map[string]any{
@@ -2587,11 +2587,11 @@ func TestRuntimeTimelineCompactsLargeStreamDeltaOutput(t *testing.T) {
 		})
 	}
 	timeline := readmodelprojection.RuntimeTimeline(RunSnapshot{
-		Run: Run{ID: "run-large-stream", WorkspaceID: "ws-large-stream", State: string(common.RunStateRunning)},
+		Run: Run{ID: "run-large-stream", WorkspaceID: "ws-large-stream", State: string(common.RunStateActive)},
 		Steps: []presenter.StepView{{
 			ID:    stepID,
 			Kind:  "llm/workspace_execution",
-			State: string(common.StepStateCompleted),
+			State: string(common.StepStateSucceeded),
 			Output: map[string]any{
 				"stage":        "llm_execution_graph_plan",
 				"streamEvents": streamEvents,
@@ -2610,7 +2610,7 @@ func TestRuntimeTimelineCompactsLargeStreamDeltaOutput(t *testing.T) {
 		if item.Type == "omitted" {
 			omitted = &timeline[idx]
 		}
-		if item.RunState == string(common.RunStateRunning) {
+		if item.RunState == string(common.RunStateActive) {
 			t.Fatalf("stream timeline item = %+v, want step display state", item)
 		}
 	}
@@ -2640,7 +2640,7 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateCompleted}); err != nil {
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateSucceeded}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: failedStepID, RunID: runID, Kind: "patch/apply", State: common.StepStateFailed}); err != nil {
@@ -2896,7 +2896,7 @@ func TestMapEventRecordsCanonicalizesWorkspacePlanStepPayload(t *testing.T) {
 		SubjectType: "step",
 		Payload: map[string]any{
 			events.PayloadKeyKind:  llmcommon.StepKindWorkspacePlan,
-			events.PayloadKeyState: string(common.StepStateCompleted),
+			events.PayloadKeyState: string(common.StepStateSucceeded),
 			events.PayloadKeyOutput: map[string]any{
 				"executionGraph": map[string]any{
 					"nodes": []map[string]any{{
@@ -3078,13 +3078,13 @@ func TestReadRunTaskProgressSummaryCountsAppliedPatchesAsChangedFiles(t *testing
 	workspaceID := common.WorkspaceID("ws-task-progress-patches")
 	runID := common.RunID("run-task-progress-patches")
 	stepID := common.StepID("run-task-progress-patches/graph-001/001-apply-main")
-	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "patch/apply", State: common.StepStateCompleted}); err != nil {
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "patch/apply", State: common.StepStateSucceeded}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
 	if err := exports.Repositories.Patches.Create(ctx, &runmodel.Patch{
@@ -3117,7 +3117,7 @@ func TestMapTaskProgressProjectsRepairLoopState(t *testing.T) {
 		Run: Run{
 			ID:          "run-repair-loop",
 			WorkspaceID: "ws-repair-loop",
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 		},
 		Steps: []presenter.StepView{
 			{
@@ -3132,7 +3132,7 @@ func TestMapTaskProgressProjectsRepairLoopState(t *testing.T) {
 			{
 				ID:    "run-repair-loop/zz-llm-repair-run-tests-1",
 				Kind:  "llm/workspace_execution",
-				State: string(common.StepStateCompleted),
+				State: string(common.StepStateSucceeded),
 				Input: map[string]any{
 					"runtimeRepairFollowUp": true,
 					"runtimeRepairAttempt":  1,
@@ -3141,7 +3141,7 @@ func TestMapTaskProgressProjectsRepairLoopState(t *testing.T) {
 			{
 				ID:    "run-repair-loop/zz-llm-repair-run-tests-2",
 				Kind:  "llm/workspace_execution",
-				State: string(common.StepStateDispatched),
+				State: string(common.StepStateExecuting),
 				Input: map[string]any{
 					"runtimeRepairFollowUp": true,
 					"runtimeRepairAttempt":  2,
@@ -3206,7 +3206,7 @@ func TestMapTaskProgressRepairLoopSignalsPreferCurrentFailureStep(t *testing.T) 
 		Run: Run{
 			ID:          "run-current-failure-signals",
 			WorkspaceID: "ws-current-failure-signals",
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 		},
 		Steps: []presenter.StepView{
 			{
@@ -3224,7 +3224,7 @@ func TestMapTaskProgressRepairLoopSignalsPreferCurrentFailureStep(t *testing.T) 
 			{
 				ID:    "run-current-failure-signals/repair-003",
 				Kind:  "llm/workspace_execution",
-				State: string(common.StepStateDispatched),
+				State: string(common.StepStateExecuting),
 				Input: map[string]any{
 					"runtimeRepairFollowUp": true,
 					"runtimeRepairAttempt":  3,
@@ -3290,7 +3290,7 @@ func TestMapTaskProgressProjectsRepairLoopEscalation(t *testing.T) {
 			{
 				ID:    "run-repair-escalation/zz-llm-repair-run-tests-1",
 				Kind:  "llm/workspace_execution",
-				State: string(common.StepStateCompleted),
+				State: string(common.StepStateSucceeded),
 				Input: map[string]any{
 					"runtimeRepairFollowUp": true,
 					"runtimeRepairAttempt":  1,
@@ -3299,7 +3299,7 @@ func TestMapTaskProgressProjectsRepairLoopEscalation(t *testing.T) {
 			{
 				ID:    "run-repair-escalation/zz-llm-repair-run-tests-2",
 				Kind:  "llm/workspace_execution",
-				State: string(common.StepStateCompleted),
+				State: string(common.StepStateSucceeded),
 				Input: map[string]any{
 					"runtimeRepairFollowUp": true,
 					"runtimeRepairAttempt":  2,
@@ -3339,13 +3339,13 @@ func TestMapClosureTracesProjectsGraphLimitAssessmentAndMissingDoD(t *testing.T)
 		Run: Run{
 			ID:          "run-closure",
 			WorkspaceID: "ws-closure",
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 		},
 		Steps: []presenter.StepView{
 			{
 				ID:    "run-closure/zz-llm-after-graph-node",
 				Kind:  "llm/workspace_execution",
-				State: string(common.StepStateCompleted),
+				State: string(common.StepStateSucceeded),
 				Input: map[string]any{
 					"graphFollowUp": true,
 				},
@@ -3438,7 +3438,7 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"goal": map[string]any{"id": "goal-context-bundle", "text": "deliver context bundle"},
 			"dod":  map[string]any{"id": "dod-context-bundle", "state": "ready", "items": []any{"bundle exposes recovery context"}},
@@ -3461,7 +3461,7 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 			ID:     stepID,
 			RunID:  runID,
 			Kind:   "llm/workspace_execution",
-			State:  common.StepStateCompleted,
+			State:  common.StepStateSucceeded,
 			Output: map[string]any{"stage": "context_bundle_stage"},
 		}); err != nil {
 			t.Fatalf("create step: %v", err)
@@ -3472,7 +3472,7 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 			RunID:            runID,
 			CheckpointType:   common.CheckpointTypeRunState,
 			CurrentStepID:    stepID,
-			RunStateSnapshot: common.RunStateRunning,
+			RunStateSnapshot: common.RunStateActive,
 			OccurredAt:       "2026-04-29T10:00:" + twoDigitSecond(idx) + "Z",
 			Data:             map[string]any{"event": "step_completed"},
 		}); err != nil {
@@ -3546,14 +3546,14 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "task decomposition", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
 		ID:    rootStepID,
 		RunID: runID,
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"stage": "llm_execution_graph_plan",
 			"executionGraph": map[string]any{
@@ -3570,7 +3570,7 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 		ID:    common.StepID("run-task-decomposition/block/inspect"),
 		RunID: runID,
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"graphNodeId":     "inspect",
 			"graphRootStepId": string(rootStepID),
@@ -3653,7 +3653,7 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 		ID:    common.StepID("run-task-decomposition/block/verify"),
 		RunID: runID,
 		Kind:  "shell/command",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{
 			"graphNodeId":     "verify",
 			"graphRootStepId": string(rootStepID),
@@ -3904,8 +3904,8 @@ func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *t
 	if item.Workspace.ID != workspaceID {
 		t.Fatalf("workspace = %+v, want %s", item.Workspace, workspaceID)
 	}
-	if item.Workspace.State != "blocked" || item.Workspace.ActiveRunID != approvalRunID {
-		t.Fatalf("workspace projection = %+v, want blocked active run %s", item.Workspace, approvalRunID)
+	if item.Workspace.State != string(common.WorkspaceStateBlockedOnApproval) || item.Workspace.ActiveRunID != approvalRunID {
+		t.Fatalf("workspace projection = %+v, want blocked_on_approval active run %s", item.Workspace, approvalRunID)
 	}
 	if len(item.Runs) != 3 {
 		t.Fatalf("runs = %+v, want 3 runs", item.Runs)
@@ -4019,7 +4019,7 @@ func TestReadWorkspaceSnapshotProjectsWorkspaceStateFromRun(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
 		t.Fatalf("create run: %v", err)
@@ -4029,14 +4029,14 @@ func TestReadWorkspaceSnapshotProjectsWorkspaceStateFromRun(t *testing.T) {
 		runState       common.RunState
 		workspaceState string
 	}{
-		{runState: common.RunStateRunning, workspaceState: "running"},
-		{runState: common.RunStateBlockedOnDecision, workspaceState: "waiting_decision"},
-		{runState: common.RunStateBlockedOnApproval, workspaceState: "blocked"},
-		{runState: common.RunStateValidating, workspaceState: "validating"},
-		{runState: common.RunStateCompleted, workspaceState: "completed"},
-		{runState: common.RunStateFailed, workspaceState: "failed"},
-		{runState: common.RunStateCancelled, workspaceState: "failed"},
-		{runState: common.RunStateSuperseded, workspaceState: "failed"},
+		{runState: common.RunStateActive, workspaceState: string(common.WorkspaceStateActive)},
+		{runState: common.RunStateBlockedOnDecision, workspaceState: string(common.WorkspaceStateActive)},
+		{runState: common.RunStateBlockedOnApproval, workspaceState: string(common.WorkspaceStateBlockedOnApproval)},
+		{runState: common.RunStateActive, workspaceState: string(common.WorkspaceStateActive)},
+		{runState: common.RunStateCompleted, workspaceState: string(common.WorkspaceStateActive)},
+		{runState: common.RunStateFailed, workspaceState: string(common.WorkspaceStateActive)},
+		{runState: common.RunStateCancelled, workspaceState: string(common.WorkspaceStateActive)},
+		{runState: common.RunStateSuperseded, workspaceState: string(common.WorkspaceStateSuperseded)},
 	}
 	for _, tc := range tests {
 		t.Run(string(tc.runState), func(t *testing.T) {
@@ -4075,7 +4075,7 @@ func TestReadWorkspaceSnapshotWithRunSnapshotReusesProjectionSections(t *testing
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "cached run projection",
-		State:       common.WorkspaceStateCompleted,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: runID,
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -4089,7 +4089,7 @@ func TestReadWorkspaceSnapshotWithRunSnapshotReusesProjectionSections(t *testing
 	}
 
 	cached := RunSnapshot{
-		Workspace: Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateCompleted)},
+		Workspace: Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateActive)},
 		Run:       Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateCompleted)},
 		TaskProgress: TaskProgress{
 			WorkspaceID: string(workspaceID),
@@ -4128,7 +4128,7 @@ func TestReadWorkspaceSnapshotWithRunSnapshotAvoidsProjectionRunStepRead(t *test
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "cached run no step read",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: runID,
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -4156,7 +4156,7 @@ func TestReadWorkspaceSnapshotWithRunSnapshotAvoidsProjectionRunStepRead(t *test
 	countingSteps := &countingStepRepository{base: deps.steps}
 	deps.steps = countingSteps
 	cached := RunSnapshot{
-		Workspace: Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateRunning), ActiveRunID: string(runID)},
+		Workspace: Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateActive), ActiveRunID: string(runID)},
 		Run:       Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateBlockedOnDecision)},
 		TaskProgress: TaskProgress{
 			WorkspaceID: string(workspaceID),
@@ -4188,7 +4188,7 @@ func TestReadWorkspaceSnapshotProjectsActiveRunAndCurrentStep(t *testing.T) {
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "active run current step",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: runID,
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -4196,7 +4196,7 @@ func TestReadWorkspaceSnapshotProjectsActiveRunAndCurrentStep(t *testing.T) {
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4204,7 +4204,7 @@ func TestReadWorkspaceSnapshotProjectsActiveRunAndCurrentStep(t *testing.T) {
 		ID:    common.StepID(string(runID) + "/graph-001/001-read"),
 		RunID: runID,
 		Kind:  "file/read",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}); err != nil {
 		t.Fatalf("create completed step: %v", err)
 	}
@@ -4212,7 +4212,7 @@ func TestReadWorkspaceSnapshotProjectsActiveRunAndCurrentStep(t *testing.T) {
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 	}); err != nil {
 		t.Fatalf("create current step: %v", err)
 	}
@@ -4224,12 +4224,12 @@ func TestReadWorkspaceSnapshotProjectsActiveRunAndCurrentStep(t *testing.T) {
 	if snapshot.Run == nil || snapshot.Run.ID != string(runID) {
 		t.Fatalf("snapshot.Run = %+v, want active run", snapshot.Run)
 	}
-	if snapshot.Step == nil || snapshot.Step.ID != string(stepID) || snapshot.Step.State != string(common.StepStateDispatched) {
+	if snapshot.Step == nil || snapshot.Step.ID != string(stepID) || snapshot.Step.State != string(common.StepStateExecuting) {
 		t.Fatalf("snapshot.Step = %+v, want dispatched current step", snapshot.Step)
 	}
 	if snapshot.TaskProgress.CurrentStepID != string(stepID) ||
 		snapshot.TaskProgress.CurrentStepKind != "llm/workspace_execution" ||
-		snapshot.TaskProgress.CurrentStepState != string(common.StepStateDispatched) {
+		snapshot.TaskProgress.CurrentStepState != string(common.StepStateExecuting) {
 		t.Fatalf("taskProgress current step = %+v, want active run current step", snapshot.TaskProgress)
 	}
 }
@@ -4243,7 +4243,7 @@ func TestReadWorkspaceSnapshotProjectsCoverageSummaryFromActiveRun(t *testing.T)
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "coverage summary workspace",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: runID,
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -4251,7 +4251,7 @@ func TestReadWorkspaceSnapshotProjectsCoverageSummaryFromActiveRun(t *testing.T)
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"coverageWorkItems": []map[string]any{
 				{"id": "open-item", "status": "open"},
@@ -4297,7 +4297,7 @@ func TestReadWorkspaceSnapshotCanonicalizesWorkspacePlanCurrentStepKind(t *testi
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "active run current step alias",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: runID,
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -4305,7 +4305,7 @@ func TestReadWorkspaceSnapshotCanonicalizesWorkspacePlanCurrentStepKind(t *testi
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
@@ -4314,7 +4314,7 @@ func TestReadWorkspaceSnapshotCanonicalizesWorkspacePlanCurrentStepKind(t *testi
 		ID:    stepID,
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspacePlan,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 	}); err != nil {
 		t.Fatalf("create current step: %v", err)
 	}
@@ -4343,7 +4343,7 @@ func TestReadRunSnapshotIncludesArtifactContinuationMetadata(t *testing.T) {
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4394,7 +4394,7 @@ func TestReadRunSnapshotReadsCoverageWorkItemsFromOwnerRepository(t *testing.T) 
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"coverageWorkItemContext": map[string]any{"summary": "context projection retained"},
 		},
@@ -4567,7 +4567,7 @@ func TestReadWorkspaceSnapshotBindsWorkspaceScopeForWorkspaceScopedRunIDs(t *tes
 		if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
 			ID:          workspaceID,
 			Title:       string(workspaceID),
-			State:       common.WorkspaceStateRunning,
+			State:       common.WorkspaceStateActive,
 			ActiveRunID: runID,
 		}); err != nil {
 			t.Fatalf("create workspace %s: %v", workspaceID, err)
@@ -4575,7 +4575,7 @@ func TestReadWorkspaceSnapshotBindsWorkspaceScopeForWorkspaceScopedRunIDs(t *tes
 		if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 		}); err != nil {
 			t.Fatalf("create run %s/%s: %v", workspaceID, runID, err)
 		}
@@ -4608,7 +4608,7 @@ func TestReadWorkspaceSnapshotProjectsAcceptedResultOverStaleTerminalActiveRun(t
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "stale projection",
-		State:       common.WorkspaceStateFailed,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: staleRunID,
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -4643,8 +4643,8 @@ func TestReadWorkspaceSnapshotProjectsAcceptedResultOverStaleTerminalActiveRun(t
 	if err != nil {
 		t.Fatalf("ReadWorkspaceSnapshotWithBackend: %v", err)
 	}
-	if snapshot.Workspace.State != string(common.WorkspaceStateCompleted) {
-		t.Fatalf("workspace state = %q, want completed", snapshot.Workspace.State)
+	if snapshot.Workspace.State != string(common.WorkspaceStateActive) {
+		t.Fatalf("workspace state = %q, want active", snapshot.Workspace.State)
 	}
 	if snapshot.Outcome.State != "accepted" || !snapshot.Outcome.Accepted || snapshot.Outcome.RunID != string(completedRunID) {
 		t.Fatalf("workspace outcome = %+v, want accepted completed run", snapshot.Outcome)
@@ -4668,7 +4668,7 @@ func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResu
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:    workspaceID,
 		Title: "latest failure projection",
-		State: common.WorkspaceStateCompleted,
+		State: common.WorkspaceStateActive,
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -4728,8 +4728,8 @@ func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResu
 	if err != nil {
 		t.Fatalf("ReadWorkspaceSnapshotWithBackend: %v", err)
 	}
-	if snapshot.Workspace.State != string(common.WorkspaceStateFailed) {
-		t.Fatalf("workspace state = %q, want failed from latest run", snapshot.Workspace.State)
+	if snapshot.Workspace.State != string(common.WorkspaceStateActive) {
+		t.Fatalf("workspace state = %q, want active from latest run", snapshot.Workspace.State)
 	}
 	if snapshot.TaskProgress.RunID != string(failedRunID) || snapshot.TaskProgress.State != string(common.RunStateFailed) {
 		t.Fatalf("task progress = %+v, want latest failed run", snapshot.TaskProgress)
@@ -4756,7 +4756,7 @@ func TestReadWorkspaceSnapshotTaskProgressUsesLatestTerminalRejectedResult(t *te
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:    workspaceID,
 		Title: "terminal rejected progress",
-		State: common.WorkspaceStateFailed,
+		State: common.WorkspaceStateActive,
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -4840,7 +4840,7 @@ func TestMapWorkspaceOutcomePrefersLatestTerminalRunOverStaleTaskProgress(t *tes
 	snapshot := WorkspaceSnapshot{
 		Workspace: Workspace{
 			ID:    "ws-latest-outcome",
-			State: string(common.WorkspaceStateCompleted),
+			State: string(common.WorkspaceStateActive),
 		},
 		TaskProgress: TaskProgress{
 			RunID: olderRunID,
@@ -4898,10 +4898,14 @@ func TestMapWorkspaceOutcomeDoesNotReuseAcceptedResultAfterDefinitionsReopenWork
 			ID:    "ws-definition-reopened",
 			State: string(common.WorkspaceStateActive),
 		},
+		Goals: []Goal{{ID: "goal-current", WorkspaceID: "ws-definition-reopened"}},
+		DoDs:  []DoD{{ID: "dod-current", WorkspaceID: "ws-definition-reopened"}},
 		Runs: []Run{
 			{
 				ID:          "run-old-accepted",
 				WorkspaceID: "ws-definition-reopened",
+				GoalID:      "goal-old",
+				DoDID:       "dod-old",
 				State:       string(common.RunStateCompleted),
 			},
 		},
@@ -4910,6 +4914,8 @@ func TestMapWorkspaceOutcomeDoesNotReuseAcceptedResultAfterDefinitionsReopenWork
 				ID:          "run-old-accepted/result/dod-assessment",
 				WorkspaceID: "ws-definition-reopened",
 				RunID:       "run-old-accepted",
+				GoalID:      "goal-old",
+				DoDID:       "dod-old",
 				State:       string(common.ResultStateAccepted),
 				Summary:     "old accepted result",
 				CreatedAt:   "2026-05-18T10:00:00Z",
@@ -4936,10 +4942,10 @@ func TestMapWorkspaceOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 		Run: &Run{
 			ID:          "run-running-slice",
 			WorkspaceID: "ws-running-slice",
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 		},
 		Runs: []Run{
-			{ID: "run-running-slice", WorkspaceID: "ws-running-slice", State: string(common.RunStateRunning)},
+			{ID: "run-running-slice", WorkspaceID: "ws-running-slice", State: string(common.RunStateActive)},
 		},
 		Results: []Result{
 			{
@@ -4966,7 +4972,7 @@ func TestMapWorkspaceOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 	if outcome.Accepted || outcome.Terminal || outcome.ResultID != "" {
 		t.Fatalf("outcome = %+v, want running non-terminal outcome without accepted slice promotion", outcome)
 	}
-	if outcome.State != string(common.RunStateRunning) || outcome.RawWorkspaceState != string(common.WorkspaceStateActive) {
+	if outcome.State != string(common.RunStateActive) || outcome.RawWorkspaceState != string(common.WorkspaceStateActive) {
 		t.Fatalf("outcome = %+v, want running outcome with raw workspace active state retained", outcome)
 	}
 }
@@ -4976,7 +4982,7 @@ func TestMapRunOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 		Run: Run{
 			ID:          "run-slice-running",
 			WorkspaceID: "ws-slice-running",
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 		},
 		Results: []Result{
 			{
@@ -5001,7 +5007,7 @@ func TestMapRunOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 	if outcome.Accepted || outcome.Terminal || outcome.ResultID != "" {
 		t.Fatalf("outcome = %+v, want running non-terminal run outcome without accepted slice promotion", outcome)
 	}
-	if outcome.State != string(common.RunStateRunning) || outcome.RawState != string(common.RunStateRunning) {
+	if outcome.State != string(common.RunStateActive) || outcome.RawState != string(common.RunStateActive) {
 		t.Fatalf("outcome = %+v, want running state retained", outcome)
 	}
 }
@@ -5011,7 +5017,7 @@ func TestResultProgressDoesNotCompleteFromAcceptedSlice(t *testing.T) {
 		Run: Run{
 			ID:          "run-progress-slice",
 			WorkspaceID: "ws-progress-slice",
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 		},
 		Results: []Result{
 			{
@@ -5042,7 +5048,7 @@ func TestFinalAcceptedResultStillProducesTerminalOutcome(t *testing.T) {
 	snapshot := WorkspaceSnapshot{
 		Workspace: Workspace{
 			ID:    "ws-final-accepted",
-			State: string(common.WorkspaceStateCompleted),
+			State: string(common.WorkspaceStateActive),
 		},
 		Runs: []Run{
 			{ID: "run-final-accepted", WorkspaceID: "ws-final-accepted", State: string(common.RunStateCompleted)},
@@ -5071,7 +5077,7 @@ func TestTerminalRejectedResultStillProducesFailedOutcome(t *testing.T) {
 	snapshot := WorkspaceSnapshot{
 		Workspace: Workspace{
 			ID:    "ws-final-rejected",
-			State: string(common.WorkspaceStateFailed),
+			State: string(common.WorkspaceStateActive),
 		},
 		Runs: []Run{
 			{ID: "run-final-rejected", WorkspaceID: "ws-final-rejected", State: string(common.RunStateFailed)},
@@ -5182,7 +5188,7 @@ func TestMapWorkspaceOutcomeUsesLatestTerminalResult(t *testing.T) {
 	snapshot := WorkspaceSnapshot{
 		Workspace: Workspace{
 			ID:    "ws-outcome-latest-result",
-			State: string(common.WorkspaceStateFailed),
+			State: string(common.WorkspaceStateActive),
 		},
 		Runs: []Run{
 			{
@@ -5264,7 +5270,7 @@ func TestMapWorkspaceOutcomeUsesLatestRunEventOverHistoricalAcceptedResult(t *te
 	snapshot := WorkspaceSnapshot{
 		Workspace: Workspace{
 			ID:    "ws-latest-run-event",
-			State: string(common.WorkspaceStateFailed),
+			State: string(common.WorkspaceStateActive),
 		},
 		Runs: []Run{
 			{
@@ -5321,7 +5327,7 @@ func TestMapWorkspaceOutcomeIgnoresSupersededEventWhenReplacementRunFailed(t *te
 	snapshot := WorkspaceSnapshot{
 		Workspace: Workspace{
 			ID:    "ws-replan-failed",
-			State: string(common.WorkspaceStateFailed),
+			State: string(common.WorkspaceStateActive),
 		},
 		Runs: []Run{
 			{
@@ -5366,7 +5372,7 @@ func TestMapWorkspaceOutcomeFallsBackToReplacementRunWhenEventsOnlyContainSupers
 	snapshot := WorkspaceSnapshot{
 		Workspace: Workspace{
 			ID:    "ws-replan-failed-with-stale-events",
-			State: string(common.WorkspaceStateFailed),
+			State: string(common.WorkspaceStateActive),
 		},
 		Runs: []Run{
 			{
@@ -5403,7 +5409,7 @@ func TestMapWorkspaceOutcomeUsesNewerTerminalResultOverStaleRunEvents(t *testing
 	snapshot := WorkspaceSnapshot{
 		Workspace: Workspace{
 			ID:    "ws-newer-terminal-result",
-			State: string(common.WorkspaceStateFailed),
+			State: string(common.WorkspaceStateActive),
 		},
 		Runs: []Run{
 			{

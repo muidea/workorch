@@ -148,21 +148,21 @@ func TestRuntimeInFlightChecksUseStepSummaries(t *testing.T) {
 			ID:    common.StepID(runID + "/repair-existing"),
 			RunID: runID,
 			Kind:  llmWorkspaceExecutionStepKind,
-			State: common.StepStateDispatched,
+			State: common.StepStateExecuting,
 			Input: map[string]any{stepInputKeyRepairOfStepID: string(runID) + "/failed"},
 		},
 		{
 			ID:    common.StepID(runID + "/workspace-existing"),
 			RunID: runID,
 			Kind:  llmWorkspaceExecutionStepKind,
-			State: common.StepStateDispatched,
+			State: common.StepStateExecuting,
 			Input: map[string]any{},
 		},
 		{
 			ID:    common.StepID(runID + "/graph-existing"),
 			RunID: runID,
 			Kind:  llmWorkspaceExecutionStepKind,
-			State: common.StepStateDispatched,
+			State: common.StepStateExecuting,
 			Input: map[string]any{stepInputKeyGraphRootStepID: string(runID) + "/root"},
 		},
 	}
@@ -201,7 +201,7 @@ func TestNextDispatchSpecsUsesStepSummariesBeforeLoadingTerminalStep(t *testing.
 		ID:    common.StepID(runID + "/step-1"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			stepOutputKeyNextStep: "follow-up",
 			stepOutputKeyNextKind: llmWorkspaceExecutionStepKind,
@@ -217,7 +217,7 @@ func TestNextDispatchSpecsUsesStepSummariesBeforeLoadingTerminalStep(t *testing.
 	run := &runmodel.Run{
 		ID:               runID,
 		WorkspaceID:      "ws-summary-next-dispatch",
-		State:            common.RunStateRunning,
+		State:            common.RunStateActive,
 		InitialStepKind:  llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{},
 	}
@@ -263,7 +263,7 @@ func (r *blockingCompletedStepRepository) ListByRunSummary(ctx context.Context, 
 }
 
 func (r *blockingCompletedStepRepository) Update(ctx context.Context, item *runmodel.Step) error {
-	if item != nil && item.State == common.StepStateCompleted {
+	if item != nil && item.State == common.StepStateSucceeded {
 		if r.started != nil {
 			r.started <- "step-completed-update"
 		}
@@ -395,7 +395,7 @@ func (r *blockingValidatingRunRepository) ListByWorkspaceID(ctx context.Context,
 }
 
 func (r *blockingValidatingRunRepository) Update(ctx context.Context, item *runmodel.Run) error {
-	if item != nil && item.State == common.RunStateValidating {
+	if item != nil && item.State == common.RunStateActive {
 		if r.started != nil {
 			r.started <- "run-validating-update"
 		}
@@ -441,7 +441,7 @@ func (r *blockingRunningRunRepository) ListByWorkspaceID(ctx context.Context, wo
 }
 
 func (r *blockingRunningRunRepository) Update(ctx context.Context, item *runmodel.Run) error {
-	if item != nil && item.State == common.RunStateRunning {
+	if item != nil && item.State == common.RunStateActive {
 		if r.started != nil {
 			r.started <- "run-running-update"
 		}
@@ -606,7 +606,7 @@ func (r *blockingWorkspaceRepository) List(ctx context.Context) ([]*workspacemod
 }
 
 func (r *blockingWorkspaceRepository) Update(ctx context.Context, item *workspacemodel.Workspace) error {
-	if item != nil && item.State == common.WorkspaceStateCompleted && item.ActiveRunID == "" {
+	if item != nil && item.State == common.WorkspaceStateActive && item.ActiveRunID == "" {
 		if r.started != nil {
 			r.started <- "workspace-completed-update"
 		}
@@ -644,7 +644,7 @@ func (r *blockingValidatingWorkspaceRepository) List(ctx context.Context) ([]*wo
 }
 
 func (r *blockingValidatingWorkspaceRepository) Update(ctx context.Context, item *workspacemodel.Workspace) error {
-	if item != nil && item.State == common.WorkspaceStateValidating {
+	if item != nil && item.State == common.WorkspaceStateActive {
 		if r.started != nil {
 			r.started <- "workspace-validating-update"
 		}
@@ -682,7 +682,7 @@ func (r *blockingRunningWorkspaceRepository) List(ctx context.Context) ([]*works
 }
 
 func (r *blockingRunningWorkspaceRepository) Update(ctx context.Context, item *workspacemodel.Workspace) error {
-	if item != nil && item.State == common.WorkspaceStateRunning {
+	if item != nil && item.State == common.WorkspaceStateActive {
 		if r.started != nil {
 			r.started <- "workspace-running-update"
 		}
@@ -720,7 +720,7 @@ func (r *blockingBlockedWorkspaceRepository) List(ctx context.Context) ([]*works
 }
 
 func (r *blockingBlockedWorkspaceRepository) Update(ctx context.Context, item *workspacemodel.Workspace) error {
-	if item != nil && (item.State == common.WorkspaceStateWaitingDecision || item.State == common.WorkspaceStateBlocked) {
+	if item != nil && (item.State == common.WorkspaceStateActive || item.State == common.WorkspaceStateBlockedOnApproval) {
 		if r.started != nil {
 			r.started <- "workspace-blocked-update"
 		}

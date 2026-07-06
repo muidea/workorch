@@ -118,7 +118,7 @@ func TestRuntimeOrchestrator_RunningResumeReplansFromResolvedDecisionOnFailedNon
 		GoalID:             "goal-running-resolved-replan",
 		DoDID:              "dod-running-resolved-replan",
 		DefinitionRevision: "rev-running-resolved-replan",
-		State:              common.RunStateRunning,
+		State:              common.RunStateActive,
 		InitialStepKind:    llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{
 			"definitionRevision": "rev-running-resolved-replan",
@@ -288,7 +288,7 @@ func TestRuntimeOrchestrator_BlockerAutoResumePolicyMatrix(t *testing.T) {
 					ID:    common.StepID(runID + "/repair-1"),
 					RunID: runID,
 					Kind:  llmcommon.StepKindWorkspaceExecution,
-					State: common.StepStateCompleted,
+					State: common.StepStateSucceeded,
 					Input: map[string]any{
 						stepInputKeyRuntimeRepairFollowUp: true,
 						stepInputKeyRuntimeRepairAttempt:  1,
@@ -408,7 +408,7 @@ func TestRuntimeOrchestrator_BlockerAutoResumePolicyMatrix(t *testing.T) {
 							"targetText": "required coverage target",
 							"evidenceCandidates": []map[string]any{{
 								"kind":  shellcommon.StepKindCommand,
-								"state": common.StepStateCompleted,
+								"state": common.StepStateSucceeded,
 								"ref":   string(runID) + "/graph-009/verify",
 							}},
 						}},
@@ -457,7 +457,7 @@ func TestRuntimeOrchestrator_BlockerAutoResumePolicyMatrix(t *testing.T) {
 						"coverageTargetSet": []map[string]any{{
 							"targetText": "required coverage target",
 							"evidenceCandidates": []map[string]any{
-								{"kind": "file/read", "state": common.StepStateCompleted, "ref": string(runID) + "/graph-009/read"},
+								{"kind": "file/read", "state": common.StepStateSucceeded, "ref": string(runID) + "/graph-009/read"},
 								{"kind": shellcommon.StepKindCommand, "state": common.StepStateFailed, "ref": string(runID) + "/graph-009/verify"},
 							},
 						}},
@@ -629,7 +629,7 @@ func seedBlockerPolicyWorkspaceAndRun(
 	if err := repos.workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "ws",
-		State:       common.WorkspaceStateWaitingDecision,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: runID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)

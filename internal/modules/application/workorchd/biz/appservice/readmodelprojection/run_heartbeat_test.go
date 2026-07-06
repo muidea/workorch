@@ -14,12 +14,12 @@ func TestMapRunHeartbeatProjectsLatestProgressEvidence(t *testing.T) {
 	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
 		Runs: []readmodelcore.Run{
-			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateRunning)},
+			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 		},
 		TaskProgress: readmodelcore.TaskProgress{
 			WorkspaceID:      "ws-a",
 			RunID:            "run-a",
-			State:            string(common.RunStateRunning),
+			State:            string(common.RunStateActive),
 			CurrentStepID:    "step-a",
 			CurrentStepKind:  "llm/workspace_execution",
 			CurrentStepState: "running",
@@ -44,7 +44,7 @@ func TestMapRunHeartbeatProjectsLatestProgressEvidence(t *testing.T) {
 		},
 	})
 
-	if got.WorkspaceID != "ws-a" || got.RunID != "run-a" || got.State != string(common.RunStateRunning) {
+	if got.WorkspaceID != "ws-a" || got.RunID != "run-a" || got.State != string(common.RunStateActive) {
 		t.Fatalf("identity = %+v, want ws-a/run-a running", got)
 	}
 	if got.LatestStepID != "step-a" || got.LatestStepKind != "llm/workspace_execution" || got.LatestStepState != "running" {
@@ -67,7 +67,7 @@ func TestMapRunHeartbeatMarksLiveRunWithNoActivity(t *testing.T) {
 	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
 		Runs: []readmodelcore.Run{
-			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateRunning)},
+			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 		},
 	})
 	if got.ActivityState != "no_activity" || !got.Stalled {
@@ -81,7 +81,7 @@ func TestMapRunHeartbeatMarksConvergenceBudgetEscalationIneffectiveRetry(t *test
 	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
 		Runs: []readmodelcore.Run{
-			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateRunning)},
+			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 		},
 		Acceptance: readmodelcore.AcceptanceProjection{
 			Budget: &readmodelcore.ConvergenceBudget{
@@ -115,7 +115,7 @@ func TestMapRunHeartbeatMarksWaitingDecisionRetryExhaustionIneffectiveRetry(t *t
 func TestMapRunHeartbeatMarksLiveRunStalledAfterProgressThreshold(t *testing.T) {
 	t.Parallel()
 
-	got := mapRunHeartbeatAt(runHeartbeatSnapshotWithProgress("2026-06-10T00:00:00Z", string(common.RunStateRunning)), mustParseTime(t, "2026-06-10T00:11:00Z"))
+	got := mapRunHeartbeatAt(runHeartbeatSnapshotWithProgress("2026-06-10T00:00:00Z", string(common.RunStateActive)), mustParseTime(t, "2026-06-10T00:11:00Z"))
 	if got.ActivityState != "stalled" || !got.Stalled {
 		t.Fatalf("heartbeat = %+v, want stalled live run", got)
 	}
@@ -127,7 +127,7 @@ func TestMapRunHeartbeatMarksLiveRunStalledAfterProgressThreshold(t *testing.T) 
 func TestMapRunHeartbeatKeepsRecentProgressRunning(t *testing.T) {
 	t.Parallel()
 
-	got := mapRunHeartbeatAt(runHeartbeatSnapshotWithProgress("2026-06-10T00:00:00Z", string(common.RunStateRunning)), mustParseTime(t, "2026-06-10T00:09:59Z"))
+	got := mapRunHeartbeatAt(runHeartbeatSnapshotWithProgress("2026-06-10T00:00:00Z", string(common.RunStateActive)), mustParseTime(t, "2026-06-10T00:09:59Z"))
 	if got.ActivityState != "running" || got.Stalled {
 		t.Fatalf("heartbeat = %+v, want recent progress running", got)
 	}
@@ -136,7 +136,7 @@ func TestMapRunHeartbeatKeepsRecentProgressRunning(t *testing.T) {
 func TestMapRunHeartbeatIgnoresInvalidProgressTimeForStalledThreshold(t *testing.T) {
 	t.Parallel()
 
-	got := mapRunHeartbeatAt(runHeartbeatSnapshotWithProgress("not-a-time", string(common.RunStateRunning)), mustParseTime(t, "2026-06-10T00:11:00Z"))
+	got := mapRunHeartbeatAt(runHeartbeatSnapshotWithProgress("not-a-time", string(common.RunStateActive)), mustParseTime(t, "2026-06-10T00:11:00Z"))
 	if got.ActivityState != "running" || got.Stalled {
 		t.Fatalf("heartbeat = %+v, want invalid progress time to remain running", got)
 	}

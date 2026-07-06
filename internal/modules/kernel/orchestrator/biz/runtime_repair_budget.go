@@ -783,7 +783,7 @@ func coverageTargetHasCompletedActionEvidenceCandidate(target map[string]any) bo
 		return false
 	}
 	for _, candidate := range mapSliceFromValue(target["evidenceCandidates"]) {
-		if evidenceValueString(candidate["state"]) != string(common.StepStateCompleted) {
+		if evidenceValueString(candidate["state"]) != string(common.StepStateSucceeded) {
 			continue
 		}
 		switch evidenceValueString(candidate["kind"]) {
@@ -812,7 +812,7 @@ func knownReadableDecisionBlockerCanAutoRepair(
 		return false
 	}
 	step, err := steps.Get(ctx, ticket.StepID)
-	if err != nil || step == nil || step.State != common.StepStateCompleted {
+	if err != nil || step == nil || step.State != common.StepStateSucceeded {
 		return false
 	}
 	context := enrichDecisionContextWithReadableWorkspaceResources(ctx, workspaces, run, nil, ticket.Context, ticket.Question, ticket.Reason)
@@ -847,7 +847,7 @@ func runtimeRepairExhaustionBlockerHasSuccessEvidence(ctx context.Context, steps
 }
 
 func isRuntimeRepairSuccessEvidenceStep(step *runModel.Step, scope runtimeRepairScope) bool {
-	if step == nil || step.State != common.StepStateCompleted || step.Input == nil {
+	if step == nil || step.State != common.StepStateSucceeded || step.Input == nil {
 		return false
 	}
 	if !runtimeRepairStepMatchesScope(step, scope) {

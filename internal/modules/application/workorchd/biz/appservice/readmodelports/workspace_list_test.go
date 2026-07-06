@@ -88,8 +88,8 @@ func TestListProjectedWorkspacesUsesLatestRunProjection(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("expected one workspace, got %d", len(items))
 	}
-	if items[0].State != string(common.WorkspaceStateWaitingDecision) {
-		t.Fatalf("expected projected waiting decision state, got %q", items[0].State)
+	if items[0].State != string(common.WorkspaceStateActive) {
+		t.Fatalf("expected projected active state, got %q", items[0].State)
 	}
 	if items[0].ActiveRunID != "run-002" {
 		t.Fatalf("expected active run projection, got %q", items[0].ActiveRunID)

@@ -116,7 +116,7 @@ func RunDialogLanguage(item *runmodel.Run, fallback string) string {
 }
 
 func CreatedRunCompressedContext(item *runmodel.Run, language string) map[string]any {
-	if item == nil || item.State != common.RunStateCreated || item.ID == "" || item.WorkspaceID == "" {
+	if item == nil || item.State != common.RunStatePending || item.ID == "" || item.WorkspaceID == "" {
 		return nil
 	}
 	return CompressedContextMap(readmodelcore.CompressedContext{

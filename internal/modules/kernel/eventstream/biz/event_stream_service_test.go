@@ -72,7 +72,7 @@ func TestServicePersistsWorkorchEventsFromHub(t *testing.T) {
 		Payload: events.RunPayload(
 			common.GoalID("goal-event-stream"),
 			common.DoDID("dod-event-stream"),
-			common.RunStateCreated,
+			common.RunStatePending,
 			"",
 			"",
 			"",
@@ -85,7 +85,7 @@ func TestServicePersistsWorkorchEventsFromHub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list event records: %v", err)
 	}
-	if len(records) != 1 || records[0].ID != "event-stream-run-created" || records[0].Payload[events.PayloadKeyState] != string(common.RunStateCreated) {
+	if len(records) != 1 || records[0].ID != "event-stream-run-created" || records[0].Payload[events.PayloadKeyState] != string(common.RunStatePending) {
 		t.Fatalf("records = %+v, want persisted run-created event", records)
 	}
 }
@@ -111,7 +111,7 @@ func TestServiceStartIsIdempotentAndStopReleasesSubscription(t *testing.T) {
 		Payload: events.RunPayload(
 			common.GoalID("goal-event-stream-idempotent"),
 			common.DoDID("dod-event-stream-idempotent"),
-			common.RunStateCreated,
+			common.RunStatePending,
 			"",
 			"",
 			"",
@@ -134,7 +134,7 @@ func TestServiceStartIsIdempotentAndStopReleasesSubscription(t *testing.T) {
 		Payload: events.RunPayload(
 			common.GoalID("goal-event-stream-idempotent"),
 			common.DoDID("dod-event-stream-idempotent"),
-			common.RunStateCreated,
+			common.RunStatePending,
 			"",
 			"",
 			"",

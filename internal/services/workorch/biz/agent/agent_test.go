@@ -274,16 +274,16 @@ func (f fakeRun) Command(_ context.Context, req backend.WorkspaceRunCommand) (*b
 	if f.parent != nil {
 		f.parent.runCommand = req
 	}
-	return &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateRunning}, nil
+	return &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive}, nil
 }
 func (f fakeRun) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	if f.parent != nil {
 		f.parent.activateCalled = true
 	}
-	return &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateRunning}, nil
+	return &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive}, nil
 }
 func (fakeRun) Restart(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
-	return &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateRunning}, nil
+	return &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive}, nil
 }
 func (fakeRun) Resume(context.Context, common.WorkspaceID, common.RunID, ...map[string]any) (*backend.RunInfo, error) {
 	return &backend.RunInfo{}, nil

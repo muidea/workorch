@@ -85,11 +85,15 @@ func TestService_CreateTicket_SeedsOpenState(t *testing.T) {
 	service := NewService(ticketRepo, resolutionRepo, nil)
 
 	cmd := decisionservice.CreateTicketCommand{
-		TicketID:    common.TicketID("ticket-1"),
-		WorkspaceID: common.WorkspaceID("ws-1"),
-		RunID:       common.RunID("run-1"),
-		StepID:      common.StepID("run-1/step-1"),
-		Reason:      "need operator decision",
+		TicketID:               common.TicketID("ticket-1"),
+		WorkspaceID:            common.WorkspaceID("ws-1"),
+		RunID:                  common.RunID("run-1"),
+		StepID:                 common.StepID("run-1/step-1"),
+		Reason:                 "need operator decision",
+		AutoGovernance:         map[string]any{"policy": "manual"},
+		FailureClass:           "runtime_failed",
+		FailureSignature:       "class=runtime_failed",
+		AllowedRecoveryActions: []string{"replan"},
 	}
 	if err := service.CreateTicket(ctx, cmd); err != nil {
 		t.Fatalf("create ticket: %v", err)
@@ -101,6 +105,13 @@ func TestService_CreateTicket_SeedsOpenState(t *testing.T) {
 	}
 	if ticket.State != common.DecisionTicketStateOpen {
 		t.Fatalf("ticket state = %q, want open", ticket.State)
+	}
+	if ticket.AutoGovernance["policy"] != "manual" ||
+		ticket.FailureClass != "runtime_failed" ||
+		ticket.FailureSignature != "class=runtime_failed" ||
+		len(ticket.AllowedRecoveryActions) != 1 ||
+		ticket.AllowedRecoveryActions[0] != "replan" {
+		t.Fatalf("ticket governance fields = %+v", ticket)
 	}
 }
 
@@ -274,6 +285,9 @@ func TestService_ResolveTicket_OpenToResolvedAndPersistsResolution(t *testing.T)
 	}
 	if ticket.State != common.DecisionTicketStateResolved {
 		t.Fatalf("ticket state = %q, want resolved", ticket.State)
+	}
+	if ticket.ResolvedAt == "" || ticket.ResolvedBy != "operator" {
+		t.Fatalf("ticket resolution audit fields = %+v", ticket)
 	}
 
 	resolution, err := resolutionRepo.GetByTicketID(ctx, createCmd.TicketID)

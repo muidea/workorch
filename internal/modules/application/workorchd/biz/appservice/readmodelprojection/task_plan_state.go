@@ -8,11 +8,11 @@ import (
 
 func taskPlanStateFromStep(state string) string {
 	switch strings.TrimSpace(state) {
-	case string(common.StepStateCompleted):
+	case string(common.StepStateSucceeded):
 		return "accepted"
 	case string(common.StepStateFailed):
 		return "rejected"
-	case string(common.StepStateDispatched):
+	case string(common.StepStateExecuting):
 		return "proposed"
 	default:
 		return "proposed"

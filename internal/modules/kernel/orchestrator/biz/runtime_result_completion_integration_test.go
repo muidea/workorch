@@ -86,7 +86,7 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-1"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: "llm/workspace_execution",
 		ExecutionContext: map[string]any{
 			"skillIds": []string{"skill-dod-gate"},
@@ -221,7 +221,7 @@ func TestResultSubsystemRecordsAcceptedSliceResultWithoutFinalCompletion(t *test
 	step := &runmodel.Step{
 		ID:    "run-slice-result/001-assess",
 		RunID: run.ID,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}
 	if !coverage.updateFromAssessment(run, step, map[string]any{
 		"items": []map[string]any{{
@@ -260,7 +260,7 @@ func TestResultSubsystemRecordsAcceptedSliceResultWithoutFinalCompletion(t *test
 	secondStep := &runmodel.Step{
 		ID:    "run-slice-result/002-assess",
 		RunID: run.ID,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}
 	if !coverage.updateFromAssessment(run, secondStep, map[string]any{
 		"items": []map[string]any{{
@@ -314,7 +314,7 @@ func TestRuntimeOrchestratorRecordsSliceResultBeforeFinalCompletionGate(t *testi
 	workspaceID := common.WorkspaceID("ws-partial-slice-mainline")
 	runID := common.RunID("run-partial-slice-mainline")
 	stepID := common.StepID("run-partial-slice-mainline/step-1")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	run := &runmodel.Run{
@@ -322,7 +322,7 @@ func TestRuntimeOrchestratorRecordsSliceResultBeforeFinalCompletionGate(t *testi
 		WorkspaceID:     workspaceID,
 		GoalID:          "goal-partial-slice-mainline",
 		DoDID:           "dod-partial-slice-mainline",
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{
 			"goal": map[string]any{"text": "first required item\nsecond required item"},
@@ -339,7 +339,7 @@ func TestRuntimeOrchestratorRecordsSliceResultBeforeFinalCompletionGate(t *testi
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: llmcommon.StepKindWorkspaceExecution, State: common.StepStateDispatched, Input: map[string]any{}}); err != nil {
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: llmcommon.StepKindWorkspaceExecution, State: common.StepStateExecuting, Input: map[string]any{}}); err != nil {
 		t.Fatalf("seed step: %v", err)
 	}
 	if err := toolCallRepo.Create(ctx, &runmodel.ToolCall{ID: common.ToolCallID(string(stepID) + "/tool-call/runtime-execute"), WorkspaceID: workspaceID, RunID: runID, StepID: stepID, ToolName: string(llmcommon.StepKindWorkspaceExecution), State: common.ToolCallStateRunning}); err != nil {
@@ -405,7 +405,7 @@ func TestRuntimeOrchestratorRejectsFinalResultWhenCoverageOpen(t *testing.T) {
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           "dod-final-result-open-coverage",
-		State:           common.RunStateValidating,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{
 			coverageWorkItemsKey: []any{map[string]any{
@@ -542,7 +542,7 @@ func TestRuntimeOrchestrator_DoesNotRecordCompletionEvidenceForCreatedRun(t *tes
 		WorkspaceID:     workspaceID,
 		GoalID:          "goal-created-result-gate",
 		DoDID:           "dod-created-result-gate",
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}
 	assessment := map[string]any{
@@ -613,7 +613,7 @@ func TestRuntimeOrchestrator_RecordsValidationCommandMemoriesFromDoDAssessment(t
 		ID:    evidenceStepID,
 		RunID: runID,
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"command":  "go test ./...",
 			"exitCode": 1,
@@ -702,7 +702,7 @@ func TestRuntimeOrchestrator_ResultSummaryIncludesRuntimeEvidenceOutput(t *testi
 		ID:    evidenceStepID,
 		RunID: runID,
 		Kind:  "ssh/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"command":  "lscpu && free -h && df -h && docker --version",
 			"exitCode": 0,
@@ -913,7 +913,7 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludeWebSourceIndex(t *testing.T) 
 		ID:    searchStepID,
 		RunID: runID,
 		Kind:  webcommon.StepKindSearch,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"provider":   "default-http",
 			"query":      "reference latest",
@@ -936,7 +936,7 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludeWebSourceIndex(t *testing.T) 
 		ID:    fetchStepID,
 		RunID: runID,
 		Kind:  webcommon.StepKindFetch,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"provider":    "default-http",
 			"url":         "https://go.dev/dl/",
@@ -1061,7 +1061,7 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludeGitOperationIndex(t *testing.
 		ID:    gitStepID,
 		RunID: runID,
 		Kind:  gitcommon.StepKindWrite,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"operation":        "commit",
 			"status":           "completed",
@@ -1169,12 +1169,12 @@ func TestRuntimeOrchestrator_CompletionEvidenceWritesResultAndSkillFeedbackConcu
 
 	workspaceID := common.WorkspaceID("ws-completion-evidence-concurrent")
 	runID := common.RunID("run-completion-evidence-concurrent")
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}
 	run := &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-completion-evidence-concurrent"),
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{
 			"skillIds": []string{"skill-completion-evidence"},
@@ -1294,7 +1294,7 @@ func TestRuntimeOrchestrator_FinalRunAndWorkspaceCompletionWritesConcurrently(t 
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-terminal-write-concurrent"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1338,7 +1338,7 @@ func TestRuntimeOrchestrator_FinalRunAndWorkspaceCompletionWritesConcurrently(t 
 		if item.Topic == runevents.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateCompleted) {
 			completedRunIndex = idx
 		}
-		if item.Topic == workspaceevents.TopicWorkspaceStateChanged && item.Payload[events.PayloadKeyState] == string(common.WorkspaceStateCompleted) {
+		if item.Topic == workspaceevents.TopicWorkspaceStateChanged && item.Payload[events.PayloadKeyState] == string(common.WorkspaceStateActive) {
 			completedWorkspaceIndex = idx
 		}
 	}
@@ -1356,7 +1356,7 @@ func TestRuntimeOrchestrator_FinalRunAndWorkspaceCompletionWritesConcurrently(t 
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	if workspaceItem.State != common.WorkspaceStateCompleted || workspaceItem.ActiveRunID != "" {
+	if workspaceItem.State != common.WorkspaceStateActive || workspaceItem.ActiveRunID != "" {
 		t.Fatalf("workspace = %+v, want completed with active run cleared", workspaceItem)
 	}
 }
@@ -1383,7 +1383,7 @@ func TestRuntimeOrchestrator_ResultArtifactsWriteConcurrentlyBeforeAcceptedResul
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-result-manifest-prefetch"),
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: "llm/workspace_execution",
 	}
 	step := &runmodel.Step{

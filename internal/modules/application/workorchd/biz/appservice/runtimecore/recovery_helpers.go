@@ -7,7 +7,7 @@ import (
 
 func IsRecoverableRunningRun(item *runmodel.Run) bool {
 	return item != nil &&
-		item.State == common.RunStateRunning &&
+		item.State == common.RunStateActive &&
 		item.BlockingTicketID == "" &&
 		item.BlockingApprovalID == ""
 }
@@ -23,22 +23,17 @@ func IsTerminalRunState(state common.RunState) bool {
 
 func RecoveredWorkspaceStateForTerminalRun(state common.RunState) common.WorkspaceState {
 	switch state {
-	case common.RunStateCompleted:
-		return common.WorkspaceStateCompleted
-	case common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
-		return common.WorkspaceStateFailed
+	case common.RunStateSuperseded:
+		return common.WorkspaceStateSuperseded
+	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled:
+		return common.WorkspaceStateActive
 	default:
 		return common.WorkspaceStateActive
 	}
 }
 
 func IsActiveWorkspaceStateForRecovery(state common.WorkspaceState) bool {
-	switch state {
-	case common.WorkspaceStateRunning, common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked, common.WorkspaceStateValidating:
-		return true
-	default:
-		return false
-	}
+	return common.CanonicalWorkspaceOwnerState(state) == common.WorkspaceStateActive
 }
 
 func NonEmptyString(value any) bool {

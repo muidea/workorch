@@ -148,7 +148,16 @@ func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 			return nil, false
 		}
 		return event, true
-	case runevents.TopicRunCreated, runevents.TopicRunStateChanged:
+	case runevents.TopicRunCreated,
+		runevents.TopicRunStarted,
+		runevents.TopicRunResumed,
+		runevents.TopicRunBlockedOnDecision,
+		runevents.TopicRunBlockedOnApproval,
+		runevents.TopicRunCompleted,
+		runevents.TopicRunFailed,
+		runevents.TopicRunCancelled,
+		runevents.TopicRunSuperseded,
+		runevents.TopicRunStateChanged:
 		event, ok := DecodeRunEvent(envelope)
 		if !ok {
 			return nil, false
@@ -275,7 +284,7 @@ func DecodeWorkspaceEvent(envelope Envelope) (WorkspaceEvent, bool) {
 }
 
 func DecodeRunEvent(envelope Envelope) (RunEvent, bool) {
-	if envelope.Topic != runevents.TopicRunCreated && envelope.Topic != runevents.TopicRunStateChanged {
+	if !runEventTopic(envelope.Topic) {
 		return RunEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -297,6 +306,24 @@ func DecodeRunEvent(envelope Envelope) (RunEvent, bool) {
 		data.FailureReason,
 	)
 	return RunEvent{envelope: envelope, Data: data}, true
+}
+
+func runEventTopic(topic string) bool {
+	switch topic {
+	case runevents.TopicRunCreated,
+		runevents.TopicRunStarted,
+		runevents.TopicRunResumed,
+		runevents.TopicRunBlockedOnDecision,
+		runevents.TopicRunBlockedOnApproval,
+		runevents.TopicRunCompleted,
+		runevents.TopicRunFailed,
+		runevents.TopicRunCancelled,
+		runevents.TopicRunSuperseded,
+		runevents.TopicRunStateChanged:
+		return true
+	default:
+		return false
+	}
 }
 
 func DecodeLLMStreamProgressEvent(envelope Envelope) (LLMStreamProgressEvent, bool) {

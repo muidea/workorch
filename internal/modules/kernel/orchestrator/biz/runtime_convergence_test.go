@@ -401,7 +401,7 @@ func TestBuildConvergenceContractForcesStateChangeWhenFocusStillMissingStateChan
 	run := &runmodel.Run{
 		ID:          "run-stale-acquire-evidence-state-change",
 		WorkspaceID: "ws-stale-acquire-evidence-state-change",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			convergenceAuthorityKey: map[string]any{
 				"schemaVersion": convergenceAuthoritySchema,
@@ -3063,7 +3063,7 @@ func TestInitialStepInputAuthorityDeterministicCompletePreemptsStaleReplanStateC
 		ID:              "run-replan-authority-assessment",
 		WorkspaceID:     "ws-replan-authority-assessment",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"definitionRevision": "rev-replan-authority-assessment",
 			"dod": map[string]any{
@@ -4922,7 +4922,7 @@ func TestBuildConvergenceContractUsesLatestActionEvidenceAsConcreteTarget(t *tes
 			"latestActionEvidence": []map[string]any{{
 				"stepId": "run-convergence/graph-003/002-verify",
 				"kind":   "shell/command",
-				"state":  string(common.StepStateCompleted),
+				"state":  string(common.StepStateSucceeded),
 				"outputSummary": map[string]any{
 					"status":        "completed",
 					"command":       "sh",

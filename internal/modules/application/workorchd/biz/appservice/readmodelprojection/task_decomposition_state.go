@@ -7,11 +7,11 @@ import (
 
 func taskNodeStateFromStep(state string) string {
 	switch state {
-	case string(common.StepStateCompleted):
+	case string(common.StepStateSucceeded):
 		return "completed"
 	case string(common.StepStateFailed):
 		return "failed"
-	case string(common.StepStateDispatched):
+	case string(common.StepStateExecuting):
 		return "running"
 	default:
 		if state != "" {

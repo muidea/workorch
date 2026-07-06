@@ -8,6 +8,7 @@ import (
 )
 
 func NormalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
+	snapshot.Workspace.State = string(common.CanonicalWorkspaceOwnerState(common.WorkspaceState(snapshot.Workspace.State)))
 	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
 	if activeRunID == "" && snapshot.Run != nil {
 		activeRunID = strings.TrimSpace(snapshot.Run.ID)
@@ -48,21 +49,27 @@ func NormalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnap
 		snapshot.TaskProgress.Recovery.Mode = "resume"
 		snapshot.TaskProgress.Recovery.NextAction = "inspect_active_run"
 	}
+	switch common.RunState(snapshot.TaskProgress.State) {
+	case common.RunStateBlockedOnDecision:
+		if openDecisionID == "" {
+			snapshot.TaskProgress.State = string(common.RunStateActive)
+		}
+	case common.RunStateBlockedOnApproval:
+		if openApprovalID == "" {
+			snapshot.TaskProgress.State = string(common.RunStateActive)
+		}
+	}
 
 	switch common.WorkspaceState(snapshot.Workspace.State) {
-	case common.WorkspaceStateWaitingDecision:
-		if openDecisionID == "" {
-			snapshot.Workspace.State = string(common.WorkspaceStateActive)
-		}
-	case common.WorkspaceStateBlocked:
+	case common.WorkspaceStateBlockedOnApproval:
 		if openApprovalID == "" {
 			snapshot.Workspace.State = string(common.WorkspaceStateActive)
 		}
 	}
 	if openDecisionID != "" {
-		snapshot.Workspace.State = string(common.WorkspaceStateWaitingDecision)
+		snapshot.Workspace.State = string(common.WorkspaceStateActive)
 	} else if openApprovalID != "" {
-		snapshot.Workspace.State = string(common.WorkspaceStateBlocked)
+		snapshot.Workspace.State = string(common.WorkspaceStateBlockedOnApproval)
 	}
 	return snapshot
 }
@@ -80,16 +87,14 @@ func WorkspacePromptMode(snapshot readmodelcore.WorkspaceSnapshot) string {
 		return "approval"
 	}
 	switch common.WorkspaceState(workspace.State) {
-	case common.WorkspaceStateWaitingDecision:
-		if HasOpenDecisionBlocker(snapshot.Decisions, workspace.ID, activeRunID, workspace.BlockingTicketID) {
-			return "decision"
-		}
-	case common.WorkspaceStateBlocked:
+	case common.WorkspaceStateBlockedOnApproval:
 		if HasOpenApprovalBlocker(snapshot.Approvals, workspace.ID, activeRunID, workspace.BlockingApprovalID) {
 			return "approval"
 		}
-	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
-		return "running"
+	case common.WorkspaceStateActive:
+		if snapshot.Run != nil && common.RunState(snapshot.Run.State) == common.RunStateActive {
+			return "running"
+		}
 	}
 	return "workspace"
 }

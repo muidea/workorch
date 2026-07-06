@@ -20,6 +20,8 @@ func ProjectDecisionView(item readmodelcore.Decision) readmodelcore.Decision {
 		ResolutionType:         item.ResolutionType,
 		ResolutionPayload:      ProjectDecisionPayloadView(item.ResolutionPayload),
 		AutoGovernance:         item.AutoGovernance,
+		ResolvedAt:             item.ResolvedAt,
+		ResolvedBy:             item.ResolvedBy,
 		CreatedAt:              item.CreatedAt,
 		UpdatedAt:              item.UpdatedAt,
 	}

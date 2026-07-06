@@ -157,7 +157,7 @@ func guardTestRun(runID common.RunID) *runmodel.Run {
 		ID:              runID,
 		WorkspaceID:     common.WorkspaceID("ws-" + string(runID)),
 		DoDID:           common.DoDID(string(runID) + "-dod"),
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{
 			"skillIds": []string{"guard-skill"},
@@ -170,7 +170,7 @@ func guardTestStep(runID common.RunID, label string) *runmodel.Step {
 		ID:     common.StepID(string(runID) + "/" + label),
 		RunID:  runID,
 		Kind:   llmWorkspaceExecutionStepKind,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Input:  map[string]any{},
 		Output: map[string]any{},
 	}

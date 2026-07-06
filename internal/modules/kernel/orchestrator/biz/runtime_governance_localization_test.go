@@ -31,7 +31,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionUsesDialogLanguage(t *testin
 		ID:               runID,
 		WorkspaceID:      workspaceID,
 		DoDID:            common.DoDID("dod-runtime-repair-localized"),
-		State:            common.RunStateRunning,
+		State:            common.RunStateActive,
 		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{"dialogLanguage": "zh-CN"},
 	}
@@ -44,7 +44,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionUsesDialogLanguage(t *testin
 			ID:    stepID,
 			RunID: runID,
 			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{stepInputKeyRuntimeRepairFollowUp: true},
 		}); err != nil {
 			t.Fatalf("seed repair step: %v", err)
@@ -104,7 +104,7 @@ func TestRuntimeOrchestrator_ConvergenceBudgetExhaustionUsesBudgetCounters(t *te
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-convergence-budget-localized"),
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{
 			"dialogLanguage": "zh-CN",
@@ -178,7 +178,7 @@ func TestRuntimeOrchestrator_DuplicateRuntimeFailureUsesDialogLanguage(t *testin
 	run := &runmodel.Run{
 		ID:               runID,
 		WorkspaceID:      workspaceID,
-		State:            common.RunStateRunning,
+		State:            common.RunStateActive,
 		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{"dialogLanguage": "zh-CN"},
 	}

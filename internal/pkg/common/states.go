@@ -21,16 +21,9 @@ type ArtifactState string
 type ArtifactContinuationState string
 
 const (
-	WorkspaceStateActive          WorkspaceState = "active"
-	WorkspaceStateDraft           WorkspaceState = "draft"
-	WorkspaceStateReady           WorkspaceState = "ready"
-	WorkspaceStateRunning         WorkspaceState = "running"
-	WorkspaceStateWaitingDecision WorkspaceState = "waiting_decision"
-	WorkspaceStateBlocked         WorkspaceState = "blocked"
-	WorkspaceStateValidating      WorkspaceState = "validating"
-	WorkspaceStateCompleted       WorkspaceState = "completed"
-	WorkspaceStateFailed          WorkspaceState = "failed"
-	WorkspaceStateArchived        WorkspaceState = "archived"
+	WorkspaceStateActive            WorkspaceState = "active"
+	WorkspaceStateBlockedOnApproval WorkspaceState = "blocked_on_approval"
+	WorkspaceStateSuperseded        WorkspaceState = "superseded"
 )
 
 const (
@@ -40,11 +33,10 @@ const (
 )
 
 const (
-	RunStateCreated           RunState = "created"
-	RunStateRunning           RunState = "running"
+	RunStatePending           RunState = "pending"
+	RunStateActive            RunState = "active"
 	RunStateBlockedOnDecision RunState = "blocked_on_decision"
 	RunStateBlockedOnApproval RunState = "blocked_on_approval"
-	RunStateValidating        RunState = "validating"
 	RunStateCompleted         RunState = "completed"
 	RunStateFailed            RunState = "failed"
 	RunStateCancelled         RunState = "cancelled"
@@ -52,23 +44,25 @@ const (
 )
 
 const (
-	StepStatePending    StepState = "pending"
-	StepStateDispatched StepState = "dispatched"
-	StepStateCompleted  StepState = "completed"
-	StepStateFailed     StepState = "failed"
+	StepStatePending   StepState = "pending"
+	StepStateExecuting StepState = "executing"
+	StepStateSucceeded StepState = "succeeded"
+	StepStateFailed    StepState = "failed"
+	StepStateSkipped   StepState = "skipped"
+	StepStateCancelled StepState = "cancelled"
 )
 
 const (
-	DecisionTicketStateOpen      DecisionTicketState = "open"
-	DecisionTicketStateResolved  DecisionTicketState = "resolved"
-	DecisionTicketStateDismissed DecisionTicketState = "dismissed"
+	DecisionTicketStateOpen       DecisionTicketState = "open"
+	DecisionTicketStateResolved   DecisionTicketState = "resolved"
+	DecisionTicketStateSuperseded DecisionTicketState = "superseded"
 )
 
 const (
-	ApprovalStatePending  ApprovalState = "pending"
-	ApprovalStateApproved ApprovalState = "approved"
-	ApprovalStateRejected ApprovalState = "rejected"
-	ApprovalStateResolved ApprovalState = "resolved"
+	ApprovalStatePending    ApprovalState = "pending"
+	ApprovalStateApproved   ApprovalState = "approved"
+	ApprovalStateRejected   ApprovalState = "rejected"
+	ApprovalStateSuperseded ApprovalState = "superseded"
 )
 
 const (
@@ -87,9 +81,10 @@ const (
 )
 
 const (
-	ValidationResultStatePassed  ValidationResultState = "passed"
-	ValidationResultStateFailed  ValidationResultState = "failed"
-	ValidationResultStateWarning ValidationResultState = "warning"
+	ValidationResultStatePassed       ValidationResultState = "passed"
+	ValidationResultStateFailed       ValidationResultState = "failed"
+	ValidationResultStateInconclusive ValidationResultState = "inconclusive"
+	ValidationResultStateWarning      ValidationResultState = "warning"
 )
 
 const (
@@ -119,6 +114,10 @@ const (
 )
 
 const (
+	ArtifactContinuationStateActive  ArtifactContinuationState = "active"
+	ArtifactContinuationStateSealed  ArtifactContinuationState = "sealed"
+	ArtifactContinuationStateAborted ArtifactContinuationState = "aborted"
+
 	ArtifactContinuationStatePlanning   ArtifactContinuationState = "planning"
 	ArtifactContinuationStateChunking   ArtifactContinuationState = "chunking"
 	ArtifactContinuationStateAssembling ArtifactContinuationState = "assembling"

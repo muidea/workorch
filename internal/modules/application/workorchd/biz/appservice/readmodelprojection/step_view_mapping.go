@@ -4,6 +4,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 type StepView = readmodelcore.StepView
@@ -15,7 +16,7 @@ func MapStep(item *runmodel.Step) *StepView {
 	return &StepView{
 		ID:            string(item.ID),
 		Kind:          llmcommon.CanonicalRuntimeBlockKind(item.Kind),
-		State:         string(item.State),
+		State:         string(common.CanonicalStepState(item.State)),
 		Input:         cloneStepViewMap(item.Input),
 		Output:        cloneStepViewMap(item.Output),
 		ContractAudit: cloneStepViewMap(projectStepContractAudit(item.Input, item.Output)),

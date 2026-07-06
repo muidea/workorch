@@ -46,7 +46,7 @@ func TestRuntimeOrchestrator_StartRunToComplete_Mainline(t *testing.T) {
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -69,7 +69,7 @@ func TestRuntimeOrchestrator_StartRunToComplete_Mainline(t *testing.T) {
 	if ws.ActiveRunID != "" {
 		t.Fatalf("workspace active run id = %q, want empty", ws.ActiveRunID)
 	}
-	if ws.State != common.WorkspaceStateCompleted {
+	if ws.State != common.WorkspaceStateActive {
 		t.Fatalf("workspace state = %q, want completed", ws.State)
 	}
 
@@ -78,7 +78,7 @@ func TestRuntimeOrchestrator_StartRunToComplete_Mainline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
-	if step.State != common.StepStateCompleted {
+	if step.State != common.StepStateSucceeded {
 		t.Fatalf("step state = %q, want completed", step.State)
 	}
 	if step.Output["status"] != "ok" {
@@ -114,12 +114,12 @@ func TestRuntimeOrchestrator_StepDispatchEvidenceWritesConcurrently(t *testing.T
 			RuntimeCheckpoints: checkpointRepo,
 		},
 	}
-	run := &runmodel.Run{ID: "run-dispatch-evidence-parallel", WorkspaceID: "ws-dispatch-evidence-parallel", State: common.RunStateRunning}
+	run := &runmodel.Run{ID: "run-dispatch-evidence-parallel", WorkspaceID: "ws-dispatch-evidence-parallel", State: common.RunStateActive}
 	step := &runmodel.Step{
 		ID:    "run-dispatch-evidence-parallel/step-1",
 		RunID: "run-dispatch-evidence-parallel",
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{"seed": "yes"},
 	}
 
@@ -184,10 +184,10 @@ func TestRuntimeAdapterRegistryDispatchesByStepKind(t *testing.T) {
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "external/mock", State: common.StepStateDispatched, Input: map[string]any{"seed": "yes"}}); err != nil {
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "external/mock", State: common.StepStateExecuting, Input: map[string]any{"seed": "yes"}}); err != nil {
 		t.Fatalf("seed step: %v", err)
 	}
 
@@ -231,10 +231,10 @@ func TestRuntimeAdapterRegistryDoesNotFallbackForUnknownRuntimeKind(t *testing.T
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "mcp/tool_call", State: common.StepStateDispatched}); err != nil {
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "mcp/tool_call", State: common.StepStateExecuting}); err != nil {
 		t.Fatalf("seed step: %v", err)
 	}
 
@@ -293,11 +293,11 @@ func TestRuntimeOrchestrator_DispatchStepRequestsRuntimeExecutionWithoutWaitingF
 	workspaceID := common.WorkspaceID("ws-runtime-request-only")
 	runID := common.RunID("run-runtime-request-only")
 	stepID := common.StepID("run-runtime-request-only/step-1")
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestRuntimeOrchestrator_DispatchStepRequestsRuntimeExecutionWithoutWaitingF
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
-	if step.State != common.StepStateDispatched {
+	if step.State != common.StepStateExecuting {
 		t.Fatalf("step state after request = %s, want dispatched", step.State)
 	}
 	checkpoints, err := checkpointRepo.ListByRun(ctx, runID)
@@ -351,7 +351,7 @@ func TestRuntimeOrchestrator_DispatchStepRequestsRuntimeExecutionWithoutWaitingF
 	if err != nil {
 		t.Fatalf("get finalized step: %v", err)
 	}
-	if step.State != common.StepStateCompleted || step.Output["status"] != "ok" {
+	if step.State != common.StepStateSucceeded || step.Output["status"] != "ok" {
 		t.Fatalf("step after finalize = %+v, want completed status ok", step)
 	}
 	if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "duplicate"}}, nil); err != nil {
@@ -403,11 +403,11 @@ func TestRuntimeOrchestrator_DispatchPreparesValidationScratchBeforeRuntimeReque
 	t.Cleanup(func() {
 		_ = os.RemoveAll(filepath.Join(os.TempDir(), "workorch-validation-scratch", string(workspaceID)))
 	})
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -465,11 +465,11 @@ func TestRuntimeOrchestrator_DispatchPersistsManagedValidationResourceOwnershipB
 	t.Cleanup(func() {
 		_ = os.RemoveAll(filepath.Join(os.TempDir(), "workorch-validation-scratch", string(workspaceID)))
 	})
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -547,11 +547,11 @@ func TestRuntimeOrchestrator_DispatchPersistsOrdinaryValidationScratchOwnershipB
 	t.Cleanup(func() {
 		_ = os.RemoveAll(filepath.Join(os.TempDir(), "workorch-validation-scratch", string(workspaceID)))
 	})
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -619,7 +619,7 @@ func TestRuntimeOrchestrator_FinalizeRuntimeStepResultClosesLateResultAfterRunBl
 	workspaceID := common.WorkspaceID("ws-late-runtime-result")
 	runID := common.RunID("run-late-runtime-result")
 	stepID := common.StepID("run-late-runtime-result/step-1")
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -627,7 +627,7 @@ func TestRuntimeOrchestrator_FinalizeRuntimeStepResultClosesLateResultAfterRunBl
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched, Input: map[string]any{}}); err != nil {
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateExecuting, Input: map[string]any{}}); err != nil {
 		t.Fatalf("seed step: %v", err)
 	}
 
@@ -705,7 +705,7 @@ func TestRuntimeOrchestrator_CurrentRunAcceptsResolvedDecisionContinuationResult
 	runID := common.RunID("run-resolved-decision-result")
 	stepID := common.StepID("run-resolved-decision-result/after-decision")
 	ticketID := common.TicketID("ticket-resolved-decision-result")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateBlockedOnDecision, BlockingTicketID: ticketID}); err != nil {
@@ -724,7 +724,7 @@ func TestRuntimeOrchestrator_CurrentRunAcceptsResolvedDecisionContinuationResult
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{
 			"decisionResolution": map[string]any{
 				"ticketId":       string(ticketID),
@@ -743,24 +743,24 @@ func TestRuntimeOrchestrator_CurrentRunAcceptsResolvedDecisionContinuationResult
 	if !accepts {
 		t.Fatalf("accepts result = false, want true for resolved decision continuation")
 	}
-	if current.State != common.RunStateRunning || current.BlockingTicketID != "" {
+	if current.State != common.RunStateActive || current.BlockingTicketID != "" {
 		t.Fatalf("current run = %+v, want running with cleared decision blocker", current)
 	}
 	persisted, err := runRepo.GetByWorkspaceID(ctx, workspaceID, runID)
 	if err != nil {
 		t.Fatalf("get persisted run: %v", err)
 	}
-	if persisted.State != common.RunStateRunning || persisted.BlockingTicketID != "" {
+	if persisted.State != common.RunStateActive || persisted.BlockingTicketID != "" {
 		t.Fatalf("persisted run = %+v, want running with cleared decision blocker", persisted)
 	}
 	workspace, err := workspaceRepo.Get(ctx, workspaceID)
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	if workspace.State != common.WorkspaceStateRunning || workspace.ActiveRunID != runID {
+	if workspace.State != common.WorkspaceStateActive || workspace.ActiveRunID != runID {
 		t.Fatalf("workspace = %+v, want active running run", workspace)
 	}
-	if !publishedRunState(hub.Published(), runID, common.RunStateRunning) {
+	if !publishedRunState(hub.Published(), runID, common.RunStateActive) {
 		t.Fatalf("published events = %+v, want running run state", hub.Published())
 	}
 }
@@ -813,11 +813,11 @@ func TestRuntimeOrchestrator_DispatchSkipsDuplicateInFlightRepairScope(t *testin
 	failedStepID := common.StepID("run-duplicate-repair-scope/graph-001/verify")
 	firstRepairID := common.StepID("run-duplicate-repair-scope/repair-001-of-verify")
 	duplicateRepairID := common.StepID("run-duplicate-repair-scope/repair-002-of-verify")
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -825,7 +825,7 @@ func TestRuntimeOrchestrator_DispatchSkipsDuplicateInFlightRepairScope(t *testin
 		ID:    firstRepairID,
 		RunID: runID,
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{stepInputKeyRepairOfStepID: string(failedStepID)},
 	}); err != nil {
 		t.Fatalf("seed repair step: %v", err)
@@ -874,11 +874,11 @@ func TestRuntimeOrchestrator_EventDrivenDispatchRejectsMissingRequesterWithoutSy
 	workspaceID := common.WorkspaceID("ws-runtime-missing-requester")
 	runID := common.RunID("run-runtime-missing-requester")
 	stepID := common.StepID("run-runtime-missing-requester/step-1")
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -930,13 +930,13 @@ func TestRuntimeOrchestrator_DuplicateFailedRuntimeResultDoesNotRepeatSideEffect
 	workspaceID := common.WorkspaceID("ws-runtime-failed-duplicate")
 	runID := common.RunID("run-runtime-failed-duplicate")
 	stepID := common.StepID("run-runtime-failed-duplicate/step-1")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched, Input: map[string]any{}}); err != nil {
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateExecuting, Input: map[string]any{}}); err != nil {
 		t.Fatalf("seed step: %v", err)
 	}
 	if err := toolCallRepo.Create(ctx, &runmodel.ToolCall{ID: common.ToolCallID(string(stepID) + "/tool-call/runtime-execute"), WorkspaceID: workspaceID, RunID: runID, StepID: stepID, ToolName: "llm/workspace_execution", State: common.ToolCallStateRunning}); err != nil {
@@ -1034,13 +1034,13 @@ func TestRuntimeOrchestrator_FinalizeFailurePathsDoNotLeaveStepDispatched(t *tes
 			workspaceID := common.WorkspaceID("ws-" + tc.name)
 			runID := common.RunID("run-" + tc.name)
 			stepID := common.StepID(string(runID) + "/step-1")
-			if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+			if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 				t.Fatalf("seed workspace: %v", err)
 			}
-			if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+			if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 				t.Fatalf("seed run: %v", err)
 			}
-			if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched, Input: cloneStepPayload(tc.stepInput)}); err != nil {
+			if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateExecuting, Input: cloneStepPayload(tc.stepInput)}); err != nil {
 				t.Fatalf("seed step: %v", err)
 			}
 			if err := toolCallRepo.Create(ctx, &runmodel.ToolCall{ID: common.ToolCallID(string(stepID) + "/tool-call/runtime-execute"), WorkspaceID: workspaceID, RunID: runID, StepID: stepID, ToolName: "llm/workspace_execution", State: common.ToolCallStateRunning}); err != nil {
@@ -1054,7 +1054,7 @@ func TestRuntimeOrchestrator_FinalizeFailurePathsDoNotLeaveStepDispatched(t *tes
 			if err != nil {
 				t.Fatalf("get step: %v", err)
 			}
-			if step.State == common.StepStateDispatched {
+			if step.State == common.StepStateExecuting {
 				t.Fatalf("step = %+v, want terminal or structured recovery state, not dispatched", step)
 			}
 			if step.State != common.StepStateFailed {
@@ -1105,13 +1105,13 @@ func TestRuntimeOrchestrator_DuplicateCompletedRuntimeResultDoesNotRepeatMemoryW
 	workspaceID := common.WorkspaceID("ws-runtime-memory-duplicate")
 	runID := common.RunID("run-runtime-memory-duplicate")
 	stepID := common.StepID("run-runtime-memory-duplicate/step-1")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched, Input: map[string]any{}}); err != nil {
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateExecuting, Input: map[string]any{}}); err != nil {
 		t.Fatalf("seed step: %v", err)
 	}
 	if err := toolCallRepo.Create(ctx, &runmodel.ToolCall{ID: common.ToolCallID(string(stepID) + "/tool-call/runtime-execute"), WorkspaceID: workspaceID, RunID: runID, StepID: stepID, ToolName: "llm/workspace_execution", State: common.ToolCallStateRunning}); err != nil {
@@ -1210,7 +1210,7 @@ func TestRuntimeOrchestrator_DuplicateCompletedRuntimeResultDoesNotRepeatResultA
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod-result-artifact-duplicate", State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod-result-artifact-duplicate", State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1275,15 +1275,15 @@ func TestRuntimeOrchestrator_DuplicateCompletedRuntimeResultDoesNotRepeatGoverna
 
 	workspaceID := common.WorkspaceID("ws-governance-duplicate")
 	runID := common.RunID("run-governance-duplicate")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
 	decisionStepID := common.StepID("run-governance-duplicate/decision-step")
-	if err := stepRepo.Create(ctx, &runmodel.Step{ID: decisionStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched, Input: map[string]any{}}); err != nil {
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: decisionStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateExecuting, Input: map[string]any{}}); err != nil {
 		t.Fatalf("seed decision step: %v", err)
 	}
 	decisionOutput := map[string]any{
@@ -1311,11 +1311,11 @@ func TestRuntimeOrchestrator_DuplicateCompletedRuntimeResultDoesNotRepeatGoverna
 		t.Fatalf("tickets = %+v, want only original decision ticket", tickets)
 	}
 
-	if err := runRepo.Update(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Update(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("reset run: %v", err)
 	}
 	approvalStepID := common.StepID("run-governance-duplicate/approval-step")
-	if err := stepRepo.Create(ctx, &runmodel.Step{ID: approvalStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched, Input: map[string]any{}}); err != nil {
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: approvalStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateExecuting, Input: map[string]any{}}); err != nil {
 		t.Fatalf("seed approval step: %v", err)
 	}
 	approvalOutput := map[string]any{
@@ -1380,14 +1380,14 @@ func TestRuntimeOrchestrator_DispatchNextStepRunsShellCommandAdapter(t *testing.
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if err := stepRepo.Create(ctx, &runmodel.Step{
 		ID:    stepID,
 		RunID: runID,
 		Kind:  shellcommon.StepKindCommand,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{"command": "pwd"},
 	}); err != nil {
 		t.Fatalf("seed step: %v", err)
@@ -1476,14 +1476,14 @@ func TestRuntimeOrchestrator_DispatchNextStepRunsMCPHTTPAdapter(t *testing.T) {
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if err := stepRepo.Create(ctx, &runmodel.Step{
 		ID:    stepID,
 		RunID: runID,
 		Kind:  mcpblockcommon.StepKindToolCall,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{
 			"serverId": "mcp-http",
 			"tool":     "repo.summary",
@@ -1501,7 +1501,7 @@ func TestRuntimeOrchestrator_DispatchNextStepRunsMCPHTTPAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
-	if step.State != common.StepStateCompleted || step.Output["stage"] != "mcp_tool_call_completed" {
+	if step.State != common.StepStateSucceeded || step.Output["stage"] != "mcp_tool_call_completed" {
 		t.Fatalf("step = %+v, want completed mcp step", step)
 	}
 	if captured["workspaceId"] != "ws-mcp" || captured["tool"] != "repo.summary" {
@@ -1553,14 +1553,14 @@ func TestRuntimeOrchestrator_DispatchNextStepPreservesShellFailureEvidence(t *te
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if err := stepRepo.Create(ctx, &runmodel.Step{
 		ID:    stepID,
 		RunID: runID,
 		Kind:  shellcommon.StepKindCommand,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{
 			"command": "sh",
 			"args":    []any{"-c", "echo shell-out; echo shell-err >&2; exit 7"},
@@ -1642,14 +1642,14 @@ func TestRuntimeOrchestrator_DispatchNextStepPreservesShellTimeoutEvidence(t *te
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if err := stepRepo.Create(ctx, &runmodel.Step{
 		ID:    stepID,
 		RunID: runID,
 		Kind:  shellcommon.StepKindCommand,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{
 			"command": "sh",
 			"args":    []any{"-c", "sleep 1"},
@@ -1719,7 +1719,7 @@ func TestRuntimeOrchestrator_StartRunRecordsExecutionEvidence(t *testing.T) {
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1745,8 +1745,8 @@ func TestRuntimeOrchestrator_StartRunRecordsExecutionEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list checkpoints: %v", err)
 	}
-	if !hasRunCheckpointState(checkpoints, common.RunStateRunning) ||
-		!hasRunCheckpointState(checkpoints, common.RunStateValidating) ||
+	if !hasRunCheckpointState(checkpoints, common.RunStateActive) ||
+		!hasRunCheckpointState(checkpoints, common.RunStateActive) ||
 		!hasRunCheckpointState(checkpoints, common.RunStateCompleted) ||
 		!hasCheckpointEvent(checkpoints, "step_dispatched") ||
 		!hasCheckpointEvent(checkpoints, "step_completed") {
@@ -1806,7 +1806,7 @@ func TestRuntimeOrchestrator_StartRunRecordsRuntimeStepProgressCheckpoint(t *tes
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1825,14 +1825,14 @@ func TestRuntimeOrchestrator_StartRunRecordsRuntimeStepProgressCheckpoint(t *tes
 		t.Fatalf("checkpoints = %+v, want provider stream progress diagnostics", checkpoints)
 	}
 	stepID := common.StepID(string(runID) + "/step-1")
-	if !publishedLLMStreamProgress(hub.Published(), stepID, common.StepStateDispatched) {
+	if !publishedLLMStreamProgress(hub.Published(), stepID, common.StepStateExecuting) {
 		t.Fatalf("published events = %+v, want runtime progress as llm stream progress", hub.Published())
 	}
 	dispatchedStateChanges := 0
 	for _, item := range hub.Published() {
 		if item.Topic == runevents.TopicStepStateChanged &&
 			item.StepID == string(stepID) &&
-			item.Payload[events.PayloadKeyState] == string(common.StepStateDispatched) {
+			item.Payload[events.PayloadKeyState] == string(common.StepStateExecuting) {
 			dispatchedStateChanges++
 		}
 	}
@@ -1864,13 +1864,13 @@ func TestRuntimeOrchestrator_DispatchSkipsConcurrentLLMGraphScope(t *testing.T) 
 	workspace := &workspacemodel.Workspace{
 		ID:                   workspaceID,
 		Title:                "ws",
-		State:                common.WorkspaceStateRunning,
+		State:                common.WorkspaceStateActive,
 		DeliverableDirectory: t.TempDir(),
 	}
 	run := &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
@@ -1920,8 +1920,8 @@ func TestRuntimeStepProgressRecorderSkipsDuplicateNonTerminalPayload(t *testing.
 		RuntimeEvidenceRepositories{RuntimeCheckpoints: checkpointRepo},
 		events.NewMemoryHub(),
 	)
-	run := &runmodel.Run{ID: "run-progress-dedupe", WorkspaceID: "ws-progress-dedupe", State: common.RunStateRunning}
-	step := &runmodel.Step{ID: "run-progress-dedupe/step-1", RunID: run.ID, Kind: llmWorkspaceExecutionStepKind, State: common.StepStateDispatched}
+	run := &runmodel.Run{ID: "run-progress-dedupe", WorkspaceID: "ws-progress-dedupe", State: common.RunStateActive}
+	step := &runmodel.Step{ID: "run-progress-dedupe/step-1", RunID: run.ID, Kind: llmWorkspaceExecutionStepKind, State: common.StepStateExecuting}
 	recorder := orch.runtimeStepProgressRecorder(ctx, run, step)
 	if recorder == nil {
 		t.Fatal("runtimeStepProgressRecorder returned nil")
@@ -1996,7 +1996,7 @@ func TestRuntimeOrchestrator_StartRunRecordsFailedExecutionEvidence(t *testing.T
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -2096,7 +2096,7 @@ func TestRuntimeOrchestrator_StartRunAppliesRuntimePatchEvidence(t *testing.T) {
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -2235,7 +2235,7 @@ func TestRuntimeOrchestrator_DispatchRejectsCoverageBoundPatchBeforeApply(t *tes
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           "dod",
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -2245,7 +2245,7 @@ func TestRuntimeOrchestrator_DispatchRejectsCoverageBoundPatchBeforeApply(t *tes
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           "dod",
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}, common.StepID(string(runID)+"/llm-coverage-root"), llmWorkspaceExecutionStepKind, map[string]any{
 		stepInputKeyRuntimeStage:      runtimeStageRepair,
@@ -2257,7 +2257,7 @@ func TestRuntimeOrchestrator_DispatchRejectsCoverageBoundPatchBeforeApply(t *tes
 	}, &workspacemodel.Workspace{
 		ID:                   workspaceID,
 		DeliverableDirectory: deliverableDirectory,
-		State:                common.WorkspaceStateRunning,
+		State:                common.WorkspaceStateActive,
 	})
 	if err != nil && !strings.Contains(err.Error(), "coverageTargets") {
 		t.Fatalf("dispatch err = %v, want nil or coverageTargets recovery error", err)
@@ -2387,7 +2387,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesPatchApplyGraphNode(t *testing.T)
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-patch-graph"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)

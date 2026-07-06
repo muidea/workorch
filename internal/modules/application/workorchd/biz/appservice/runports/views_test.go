@@ -19,7 +19,7 @@ func TestRunViewProjectsRunModel(t *testing.T) {
 		DoDID:              "dod-run-view",
 		DefinitionRevision: "goal:goal-run-view|dod:dod-run-view",
 		InitialStepKind:    "llm/workspace_execution",
-		State:              common.RunStateRunning,
+		State:              common.RunStateActive,
 		Priority:           7,
 		BlockingTicketID:   "ticket-run-view",
 		BlockingApprovalID: "approval-run-view",
@@ -65,8 +65,8 @@ func TestRunViewsProjectsSlice(t *testing.T) {
 	t.Parallel()
 
 	got := RunViews([]*runmodel.Run{
-		{ID: "run-view-a", WorkspaceID: "ws-run-view", State: common.RunStateCreated},
-		{ID: "run-view-b", WorkspaceID: "ws-run-view", State: common.RunStateRunning},
+		{ID: "run-view-a", WorkspaceID: "ws-run-view", State: common.RunStatePending},
+		{ID: "run-view-b", WorkspaceID: "ws-run-view", State: common.RunStateActive},
 	})
 	if len(got) != 2 || got[0].ID != "run-view-a" || got[1].ID != "run-view-b" {
 		t.Fatalf("run views = %+v, want two projected views", got)
@@ -85,7 +85,7 @@ func TestReadRunViewUsesOwnerReadAndProjectsView(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-view-read",
 		WorkspaceID: "ws-run-view-read",
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}
 	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -110,8 +110,8 @@ func TestListRunViewsByWorkspaceUsesOwnerReadAndProjectsViews(t *testing.T) {
 	})
 	exports := runtime.Exports()
 	for _, item := range []*runmodel.Run{
-		{ID: "run-view-list-a", WorkspaceID: "ws-run-view-list-a", State: common.RunStateCreated},
-		{ID: "run-view-list-b", WorkspaceID: "ws-run-view-list-b", State: common.RunStateCreated},
+		{ID: "run-view-list-a", WorkspaceID: "ws-run-view-list-a", State: common.RunStatePending},
+		{ID: "run-view-list-b", WorkspaceID: "ws-run-view-list-b", State: common.RunStatePending},
 	} {
 		if err := exports.Repositories.Runs.Create(ctx, item); err != nil {
 			t.Fatalf("seed run %s: %v", item.ID, err)

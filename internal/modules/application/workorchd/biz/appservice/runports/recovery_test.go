@@ -109,7 +109,7 @@ func TestIsStuckRunningRunCandidateRequiresRunningUnblockedRunWithoutContinuatio
 	candidate := &runmodel.Run{
 		ID:          "run-stuck-candidate",
 		WorkspaceID: "ws-stuck-candidate",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	if err := exports.Repositories.Runs.Create(ctx, candidate); err != nil {
 		t.Fatalf("seed candidate run: %v", err)
@@ -127,7 +127,7 @@ func TestIsStuckRunningRunCandidateRequiresRunningUnblockedRunWithoutContinuatio
 	if IsStuckRunningRunCandidate(ctx, exports.Infrastructure.EventHub, &runmodel.Run{
 		ID:               "run-blocked",
 		WorkspaceID:      "ws-stuck-candidate",
-		State:            common.RunStateRunning,
+		State:            common.RunStateActive,
 		BlockingTicketID: "ticket-001",
 	}) {
 		t.Fatal("blocked run should not be a stuck-running candidate")
@@ -184,13 +184,13 @@ func TestRecoveryCandidateReadsRunScopedItemsWithWorkspaceScope(t *testing.T) {
 		return events.Response(events.Envelope{
 			Topic: envelope.Topic + "/response",
 			Payload: map[string]any{
-				events.PayloadKeySteps: []*runmodel.Step{{ID: "run-recovery-candidate-scope/root", RunID: runID, State: common.StepStateCompleted}},
+				events.PayloadKeySteps: []*runmodel.Step{{ID: "run-recovery-candidate-scope/root", RunID: runID, State: common.StepStateSucceeded}},
 			},
 		})
 	}
 	hub.Subscribe(runevents.TopicRunCommandListStepsByRun, stepListHandler)
 	hub.Subscribe(runevents.TopicRunCommandListStepSummariesByRun, stepListHandler)
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 
 	if !IsStuckRunningRunCandidate(ctx, hub, run) {
 		t.Fatal("running run without continuation checkpoint should be candidate")
@@ -219,7 +219,7 @@ func TestOrphanDispatchedTerminalStepReturnsDispatchedTerminalStep(t *testing.T)
 	run := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: "ws-orphan-terminal-runports",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -227,14 +227,14 @@ func TestOrphanDispatchedTerminalStepReturnsDispatchedTerminalStep(t *testing.T)
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
 		ID:    rootStepID,
 		RunID: runID,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}); err != nil {
 		t.Fatalf("seed root step: %v", err)
 	}
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
 		ID:    dispatchedStepID,
 		RunID: runID,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{"previousStepId": string(rootStepID)},
 	}); err != nil {
 		t.Fatalf("seed dispatched step: %v", err)
@@ -274,7 +274,7 @@ func TestRecoverOrphanDispatchedStepUsesInjectedResume(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -282,14 +282,14 @@ func TestRecoverOrphanDispatchedStepUsesInjectedResume(t *testing.T) {
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
 		ID:    rootStepID,
 		RunID: runID,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}); err != nil {
 		t.Fatalf("seed root step: %v", err)
 	}
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
 		ID:    dispatchedStepID,
 		RunID: runID,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{"previousStepId": string(rootStepID)},
 	}); err != nil {
 		t.Fatalf("seed dispatched step: %v", err)
@@ -302,7 +302,7 @@ func TestRecoverOrphanDispatchedStepUsesInjectedResume(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		step.State = common.StepStateCompleted
+		step.State = common.StepStateSucceeded
 		if err := exports.Repositories.Steps.Update(resumeCtx, step); err != nil {
 			return err
 		}
@@ -346,7 +346,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsRequestNotAcceptedGap(t *testing.T
 	run := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -355,7 +355,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsRequestNotAcceptedGap(t *testing.T
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 	}); err != nil {
 		t.Fatalf("seed dispatched step: %v", err)
 	}
@@ -410,7 +410,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesRuntimeTerminalResultAvailable(t
 	run := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -419,7 +419,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesRuntimeTerminalResultAvailable(t
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 	}); err != nil {
 		t.Fatalf("seed dispatched step: %v", err)
 	}
@@ -481,7 +481,7 @@ func TestRecoverStaleRuntimeGapRunViewsUsesGapSpecificRecovery(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -490,7 +490,7 @@ func TestRecoverStaleRuntimeGapRunViewsUsesGapSpecificRecovery(t *testing.T) {
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 	}); err != nil {
 		t.Fatalf("seed dispatched step: %v", err)
 	}
@@ -570,7 +570,7 @@ func TestRecoverStaleRuntimeGapRunViewsNoEligibleGapUsesBoundedReads(t *testing.
 			t.Fatalf("run list compact = %v, want true for watchdog candidate scan", envelope.Payload[events.PayloadKeyCompact])
 		}
 		states, _ := envelope.Payload[events.PayloadKeyStates].([]string)
-		if len(states) != 1 || states[0] != string(common.RunStateRunning) {
+		if len(states) != 1 || states[0] != string(common.RunStateActive) {
 			t.Fatalf("run list states = %+v, want running-only watchdog candidate scan", envelope.Payload[events.PayloadKeyStates])
 		}
 		return events.Response(events.Envelope{
@@ -579,7 +579,7 @@ func TestRecoverStaleRuntimeGapRunViewsNoEligibleGapUsesBoundedReads(t *testing.
 				events.PayloadKeyRuns: []*runmodel.Run{{
 					ID:          runID,
 					WorkspaceID: workspaceID,
-					State:       common.RunStateRunning,
+					State:       common.RunStateActive,
 				}},
 			},
 		})
@@ -595,7 +595,7 @@ func TestRecoverStaleRuntimeGapRunViewsNoEligibleGapUsesBoundedReads(t *testing.
 				events.PayloadKeySteps: []*runmodel.Step{{
 					ID:    stepID,
 					RunID: runID,
-					State: common.StepStateCompleted,
+					State: common.StepStateSucceeded,
 				}},
 			},
 		})
@@ -640,7 +640,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsRuntimeDoneWithoutTerminalResult(t
 	run := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -649,7 +649,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsRuntimeDoneWithoutTerminalResult(t
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 	}); err != nil {
 		t.Fatalf("seed dispatched step: %v", err)
 	}
@@ -716,7 +716,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsAcceptedWithoutWorkerLostEvidence(
 			run := &runmodel.Run{
 				ID:          runID,
 				WorkspaceID: workspaceID,
-				State:       common.RunStateRunning,
+				State:       common.RunStateActive,
 			}
 			if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
 				t.Fatalf("seed run: %v", err)
@@ -725,7 +725,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsAcceptedWithoutWorkerLostEvidence(
 				ID:    stepID,
 				RunID: runID,
 				Kind:  "llm/workspace_execution",
-				State: common.StepStateDispatched,
+				State: common.StepStateExecuting,
 			}); err != nil {
 				t.Fatalf("seed dispatched step: %v", err)
 			}
@@ -795,7 +795,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsNonIdempotentRuntimeGap(t *testing
 			run := &runmodel.Run{
 				ID:          runID,
 				WorkspaceID: workspaceID,
-				State:       common.RunStateRunning,
+				State:       common.RunStateActive,
 			}
 			if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
 				t.Fatalf("seed run: %v", err)
@@ -804,7 +804,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsNonIdempotentRuntimeGap(t *testing
 				ID:    stepID,
 				RunID: runID,
 				Kind:  "llm/workspace_execution",
-				State: common.StepStateDispatched,
+				State: common.StepStateExecuting,
 			}); err != nil {
 				t.Fatalf("seed dispatched step: %v", err)
 			}
@@ -890,7 +890,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsNonExternalRecoverablePolicy(t *te
 			run := &runmodel.Run{
 				ID:          runID,
 				WorkspaceID: workspaceID,
-				State:       common.RunStateRunning,
+				State:       common.RunStateActive,
 			}
 			if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
 				t.Fatalf("seed run: %v", err)
@@ -899,7 +899,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsNonExternalRecoverablePolicy(t *te
 				ID:    stepID,
 				RunID: runID,
 				Kind:  "llm/workspace_execution",
-				State: common.StepStateDispatched,
+				State: common.StepStateExecuting,
 			}); err != nil {
 				t.Fatalf("seed dispatched step: %v", err)
 			}
@@ -968,7 +968,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesWorkerLostGap(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -977,7 +977,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesWorkerLostGap(t *testing.T) {
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 	}); err != nil {
 		t.Fatalf("seed dispatched step: %v", err)
 	}
@@ -1042,7 +1042,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesStaleWorkerHeartbeatGap(t *testi
 	run := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1051,7 +1051,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesStaleWorkerHeartbeatGap(t *testi
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 	}); err != nil {
 		t.Fatalf("seed dispatched step: %v", err)
 	}
@@ -1138,7 +1138,7 @@ func TestRecordRecoveryMemoryRecallTraceUsesEventHubOwnerCommand(t *testing.T) {
 	err := RecordRecoveryMemoryRecallTrace(ctx, exports.Infrastructure.EventHub, readmodelports.MemoryRecallTraceReader{Hub: exports.Infrastructure.EventHub}, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}, map[string]any{
 		"sourceSectionRefs": []string{"run", "memory_recall"},
 	})
@@ -1171,7 +1171,7 @@ func TestAttachCompressedContextToRunUpdatesCreatedRunThroughEventHub(t *testing
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -1215,7 +1215,7 @@ func TestCompressedContextPatchForRunUsesRecoverySnapshotFallback(t *testing.T) 
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -1427,7 +1427,7 @@ func TestRecoverTerminalActiveWorkspacePointersClearsTerminalRun(t *testing.T) {
 		ID:                   workspaceID,
 		Title:                "terminal active runports",
 		DeliverableDirectory: "workspaces/ws-terminal-active-runports",
-		State:                common.WorkspaceStateRunning,
+		State:                common.WorkspaceStateActive,
 		ActiveRunID:          runID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -1447,8 +1447,8 @@ func TestRecoverTerminalActiveWorkspacePointersClearsTerminalRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read workspace: %v", err)
 	}
-	if workspace.ActiveRunID != "" || workspace.State != common.WorkspaceStateFailed {
-		t.Fatalf("workspace = %+v, want failed without active run", workspace)
+	if workspace.ActiveRunID != "" || workspace.State != common.WorkspaceStateSuperseded {
+		t.Fatalf("workspace = %+v, want superseded without active run", workspace)
 	}
 }
 
@@ -1468,7 +1468,7 @@ func TestFailRunAndRecoverActiveWorkspacePointerClearsActiveRun(t *testing.T) {
 		ID:                   workspaceID,
 		Title:                "fail active runports",
 		DeliverableDirectory: "workspaces/ws-fail-active-runports",
-		State:                common.WorkspaceStateRunning,
+		State:                common.WorkspaceStateActive,
 		ActiveRunID:          runID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -1476,7 +1476,7 @@ func TestFailRunAndRecoverActiveWorkspacePointerClearsActiveRun(t *testing.T) {
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -1484,7 +1484,7 @@ func TestFailRunAndRecoverActiveWorkspacePointerClearsActiveRun(t *testing.T) {
 	failed, err := FailRunAndRecoverActiveWorkspacePointer(ctx, exports.Infrastructure.EventHub, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}, "runports recovery failure")
 	if err != nil {
 		t.Fatalf("FailRunAndRecoverActiveWorkspacePointer: %v", err)
@@ -1496,8 +1496,8 @@ func TestFailRunAndRecoverActiveWorkspacePointerClearsActiveRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read workspace: %v", err)
 	}
-	if workspace.ActiveRunID != "" || workspace.State != common.WorkspaceStateFailed {
-		t.Fatalf("workspace = %+v, want failed without active run", workspace)
+	if workspace.ActiveRunID != "" || workspace.State != common.WorkspaceStateActive {
+		t.Fatalf("workspace = %+v, want active without active run", workspace)
 	}
 }
 
@@ -1517,7 +1517,7 @@ func TestRecoverStuckRunningRunViewsFailsRunningRunWithoutContinuation(t *testin
 		ID:                   workspaceID,
 		Title:                "recover run view",
 		DeliverableDirectory: "workspaces/ws-recover-run-view",
-		State:                common.WorkspaceStateRunning,
+		State:                common.WorkspaceStateActive,
 		ActiveRunID:          runID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -1525,7 +1525,7 @@ func TestRecoverStuckRunningRunViewsFailsRunningRunWithoutContinuation(t *testin
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -1561,7 +1561,7 @@ func TestRecoverStuckRunningRunViewsResumesRunningRunWithCompletedTerminalStep(t
 		ID:                   workspaceID,
 		Title:                "recover completed terminal",
 		DeliverableDirectory: "workspaces/ws-recover-completed-terminal",
-		State:                common.WorkspaceStateRunning,
+		State:                common.WorkspaceStateActive,
 		ActiveRunID:          runID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -1569,14 +1569,14 @@ func TestRecoverStuckRunningRunViewsResumesRunningRunWithCompletedTerminalStep(t
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
 		ID:    stepID,
 		RunID: runID,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}); err != nil {
 		t.Fatalf("seed terminal step: %v", err)
 	}

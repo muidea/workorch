@@ -23,7 +23,7 @@ func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
 	envelope := events.Envelope{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-remote",
-		Payload:     events.WorkspacePayload("remote workspace", "", "/tmp/remote", "", common.WorkspaceStateRunning, "run-remote"),
+		Payload:     events.WorkspacePayload("remote workspace", "", "/tmp/remote", "", common.WorkspaceStateActive, "run-remote"),
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/workorch/events/stream" {
@@ -293,13 +293,13 @@ func TestRemoteEventsBackendReconnectsWithLastEventID(t *testing.T) {
 		ID:          "evt-first",
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-replay",
-		Payload:     events.WorkspacePayload("replay", "", "/tmp/replay", "", common.WorkspaceStateRunning, "run-replay"),
+		Payload:     events.WorkspacePayload("replay", "", "/tmp/replay", "", common.WorkspaceStateActive, "run-replay"),
 	}
 	second := events.Envelope{
 		ID:          "evt-second",
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-replay",
-		Payload:     events.WorkspacePayload("replay", "", "/tmp/replay", "", common.WorkspaceStateCompleted, "run-replay"),
+		Payload:     events.WorkspacePayload("replay", "", "/tmp/replay", "", common.WorkspaceStateActive, "run-replay"),
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/workorch/events/stream" {

@@ -87,7 +87,7 @@ func hydrateRunCurrentStep(ctx context.Context, deps readModelDependencies, item
 
 func runListCurrentStepHydrationRequired(state string) bool {
 	switch common.RunState(strings.TrimSpace(state)) {
-	case common.RunStateRunning, common.RunStateValidating, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
+	case common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
 		return true
 	default:
 		return false

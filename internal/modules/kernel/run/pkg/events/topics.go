@@ -2,10 +2,22 @@ package events
 
 const (
 	TopicRunCreated           = "/run/created"
+	TopicRunStarted           = "/run/started"
+	TopicRunResumed           = "/run/resumed"
+	TopicRunBlockedOnDecision = "/run/blocked_on_decision"
+	TopicRunBlockedOnApproval = "/run/blocked_on_approval"
+	TopicRunCompleted         = "/run/completed"
+	TopicRunFailed            = "/run/failed"
+	TopicRunCancelled         = "/run/cancelled"
+	TopicRunSuperseded        = "/run/superseded"
 	TopicRunStateChanged      = "/run/state/changed"
 	TopicRunLLMStreamProgress = "/run/llm_stream/progress"
 	TopicRunLLMUsageRecorded  = "/run/llm_usage/recorded"
+	TopicStepCreated          = "/step/created"
 	TopicStepDispatched       = "/step/dispatched"
+	TopicStepSucceeded        = "/step/succeeded"
+	TopicStepFailed           = "/step/failed"
+	TopicStepSkipped          = "/step/skipped"
 	TopicStepStateChanged     = "/step/state/changed"
 
 	TopicRunCommandCreate                 = "/run/command/create"

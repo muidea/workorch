@@ -81,7 +81,7 @@ func (g *graphSubsystem) readyGraphStepSpecsWithSteps(
 }
 
 func graphSourceStepAdmitsSideEffects(step *runModel.Step) bool {
-	if step == nil || step.State != common.StepStateCompleted {
+	if step == nil || step.State != common.StepStateSucceeded {
 		return false
 	}
 	if strings.TrimSpace(stringFromMap(step.Output, outputKeyContractViolationType)) != "" {
@@ -115,7 +115,7 @@ func (g *graphSubsystem) hasActiveGraphWork(ctx context.Context, run *runModel.R
 			continue
 		}
 		switch step.State {
-		case common.StepStatePending, common.StepStateDispatched:
+		case common.StepStatePending, common.StepStateExecuting:
 			return true
 		}
 	}
@@ -246,7 +246,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	if err != nil {
 		return err
 	}
-	if currentRun.State != common.RunStateRunning {
+	if currentRun.State != common.RunStateActive {
 		return nil
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
@@ -587,7 +587,7 @@ func mapFromValue(value any) map[string]any {
 func completedGraphNodes(steps []*runModel.Step, rootStepID common.StepID) map[string]bool {
 	ret := map[string]bool{}
 	for _, step := range steps {
-		if step == nil || step.State != common.StepStateCompleted {
+		if step == nil || step.State != common.StepStateSucceeded {
 			continue
 		}
 		if !sameGraphRoot(step, rootStepID) {
@@ -619,7 +619,7 @@ func startedGraphNodes(steps []*runModel.Step, rootStepID common.StepID) map[str
 func selectedGraphBranch(steps []*runModel.Step) string {
 	branch := ""
 	for _, step := range steps {
-		if step == nil || step.State != common.StepStateCompleted {
+		if step == nil || step.State != common.StepStateSucceeded {
 			continue
 		}
 		if value, _ := step.Output[stepOutputKeyGraphBranch].(string); strings.TrimSpace(value) != "" {
@@ -684,7 +684,7 @@ func latestCompletedGraphBatchStepForRoot(steps []*runModel.Step, rootStepID com
 	}
 	for idx := len(steps) - 1; idx >= 0; idx-- {
 		step := steps[idx]
-		if step == nil || step.State != common.StepStateCompleted || !graphBatchStep(step) || graphNodeID(step) == "" {
+		if step == nil || step.State != common.StepStateSucceeded || !graphBatchStep(step) || graphNodeID(step) == "" {
 			continue
 		}
 		if sameGraphRoot(step, rootStepID) {
@@ -707,7 +707,7 @@ func graphHasActiveWorkFromSteps(steps []*runModel.Step, anchor *runModel.Step) 
 			continue
 		}
 		switch step.State {
-		case common.StepStatePending, common.StepStateDispatched:
+		case common.StepStatePending, common.StepStateExecuting:
 			return true
 		}
 	}
@@ -740,7 +740,7 @@ func graphRelevantNodesCompleted(graph runtimemodel.BlockExecutionGraph, steps [
 func selectedGraphBranchForRoot(steps []*runModel.Step, rootStepID common.StepID) string {
 	branch := ""
 	for _, step := range steps {
-		if step == nil || step.State != common.StepStateCompleted || !sameGraphRoot(step, rootStepID) {
+		if step == nil || step.State != common.StepStateSucceeded || !sameGraphRoot(step, rootStepID) {
 			continue
 		}
 		if value := strings.TrimSpace(stringFromMap(step.Output, stepOutputKeyGraphBranch)); value != "" {
@@ -1067,7 +1067,7 @@ func completedDependencyGraphEvidence(node runtimemodel.BlockExecutionNode, step
 	}
 	evidenceByNode := map[string]map[string]any{}
 	for _, step := range steps {
-		if step == nil || step.State != common.StepStateCompleted || !sameGraphRoot(step, rootStepID) {
+		if step == nil || step.State != common.StepStateSucceeded || !sameGraphRoot(step, rootStepID) {
 			continue
 		}
 		nodeID := graphNodeID(step)
@@ -1102,7 +1102,7 @@ func singleCompletedDependencyStep(node runtimemodel.BlockExecutionNode, steps [
 		return nil
 	}
 	for _, step := range steps {
-		if step == nil || step.State != common.StepStateCompleted || !sameGraphRoot(step, rootStepID) {
+		if step == nil || step.State != common.StepStateSucceeded || !sameGraphRoot(step, rootStepID) {
 			continue
 		}
 		if graphNodeID(step) == dependency {
@@ -1124,7 +1124,7 @@ var runtimeTemplatePattern = regexp.MustCompile(`\{\{\s*([A-Za-z0-9_-]+)\.([A-Za
 func graphRuntimeTemplateContext(steps []*runModel.Step, rootStepID common.StepID) map[string]map[string]any {
 	ret := make(map[string]map[string]any)
 	for _, step := range steps {
-		if step == nil || step.State != common.StepStateCompleted {
+		if step == nil || step.State != common.StepStateSucceeded {
 			continue
 		}
 		if rootStepID != "" && !sameGraphRoot(step, rootStepID) {
@@ -1304,7 +1304,7 @@ func completedGraphBatchStepHasDownstreamStep(steps []*runModel.Step, last *runM
 			continue
 		}
 		switch step.State {
-		case common.StepStatePending, common.StepStateDispatched, common.StepStateCompleted, common.StepStateFailed:
+		case common.StepStatePending, common.StepStateExecuting, common.StepStateSucceeded, common.StepStateFailed:
 			return true
 		}
 	}
@@ -1314,7 +1314,7 @@ func completedGraphBatchStepHasDownstreamStep(steps []*runModel.Step, last *runM
 func latestCompletedGraphStep(steps []*runModel.Step) *runModel.Step {
 	for idx := len(steps) - 1; idx >= 0; idx-- {
 		step := steps[idx]
-		if step != nil && step.State == common.StepStateCompleted && graphNodeID(step) != "" {
+		if step != nil && step.State == common.StepStateSucceeded && graphNodeID(step) != "" {
 			return step
 		}
 	}
@@ -1340,7 +1340,7 @@ func latestCompletedGraphBatchStep(steps []*runModel.Step, specs []stepDispatchS
 	}
 	for idx := len(steps) - 1; idx >= 0; idx-- {
 		step := steps[idx]
-		if step != nil && step.State == common.StepStateCompleted && dispatched[step.ID] && graphNodeID(step) != "" {
+		if step != nil && step.State == common.StepStateSucceeded && dispatched[step.ID] && graphNodeID(step) != "" {
 			return step
 		}
 	}
@@ -1349,7 +1349,7 @@ func latestCompletedGraphBatchStep(steps []*runModel.Step, specs []stepDispatchS
 	}
 	for idx := len(steps) - 1; idx >= 0; idx-- {
 		step := steps[idx]
-		if step != nil && step.State == common.StepStateCompleted && graphNodeID(step) != "" && sameGraphRoot(step, rootStepID) {
+		if step != nil && step.State == common.StepStateSucceeded && graphNodeID(step) != "" && sameGraphRoot(step, rootStepID) {
 			return step
 		}
 	}
@@ -1377,7 +1377,7 @@ func graphFailureSupersededByLaterSuccess(steps []*runModel.Step, failedIdx int,
 	}
 	for idx := failedIdx + 1; idx < len(steps); idx++ {
 		step := steps[idx]
-		if step == nil || step.State != common.StepStateCompleted {
+		if step == nil || step.State != common.StepStateSucceeded {
 			continue
 		}
 		if completionEvidenceStepScope(step) == scope {
@@ -2816,7 +2816,7 @@ func (g *graphSubsystem) completedGraphEvidenceFromSteps(run *runModel.Run, anch
 	}
 	completedByNode := map[string]*runModel.Step{}
 	for _, step := range steps {
-		if step == nil || step.State != common.StepStateCompleted {
+		if step == nil || step.State != common.StepStateSucceeded {
 			continue
 		}
 		if graphNodeID(step) != "" && graphRootStepID(step) != graphRootID {
@@ -2870,7 +2870,7 @@ func runEvidenceSummaryFromRunSteps(run *runModel.Run, steps []*runModel.Step) [
 		if step == nil {
 			continue
 		}
-		if step.State != common.StepStateCompleted && step.State != common.StepStateFailed {
+		if step.State != common.StepStateSucceeded && step.State != common.StepStateFailed {
 			continue
 		}
 		item := map[string]any{
@@ -2926,7 +2926,7 @@ func processEvidenceTimelineFromRunSteps(run *runModel.Run, steps []*runModel.St
 		if step == nil || step.ID == "" || step.ID == currentStepID {
 			continue
 		}
-		if step.State != common.StepStateCompleted && step.State != common.StepStateFailed {
+		if step.State != common.StepStateSucceeded && step.State != common.StepStateFailed {
 			continue
 		}
 		candidates = append(candidates, step)
@@ -3098,7 +3098,7 @@ func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order i
 		item["payloadRef"] = outputRef
 		item["outputRef"] = outputRef
 	}
-	if step.State == common.StepStateCompleted && completedShellCommandOutputHasFailureSignal(step) {
+	if step.State == common.StepStateSucceeded && completedShellCommandOutputHasFailureSignal(step) {
 		item["state"] = string(common.StepStateFailed)
 		item["failureClass"] = failureClassShellCommand
 		if signature := runtimeFailureSignature(failureClassShellCommand, step, step.Output, nil); signature != "" {
@@ -3225,7 +3225,7 @@ func processEvidenceArtifactContinuationSummary(step *runModel.Step) map[string]
 }
 
 func completedShellCommandOutputHasFailureSignal(step *runModel.Step) bool {
-	if step == nil || step.Kind != "shell/command" || step.State != common.StepStateCompleted || len(step.Output) == 0 {
+	if step == nil || step.Kind != "shell/command" || step.State != common.StepStateSucceeded || len(step.Output) == 0 {
 		return false
 	}
 	text := shellCommandFailureSignalText(step.Output)
@@ -3496,7 +3496,7 @@ func currentProgressDigestFromProcessEvidenceTimeline(timeline []map[string]any)
 			continue
 		}
 		lastAttempt = item
-		if strings.TrimSpace(stringFromMap(item, "state")) == string(common.StepStateCompleted) {
+		if strings.TrimSpace(stringFromMap(item, "state")) == string(common.StepStateSucceeded) {
 			if summary := strings.TrimSpace(stringFromMap(item, "summary")); summary != "" {
 				existingOutputs = append(existingOutputs, summary)
 			} else if stepID := strings.TrimSpace(stringFromMap(item, "stepId")); stepID != "" {
@@ -3563,7 +3563,7 @@ func lastFailureSupersededByCompletedItem(failure map[string]any, completed map[
 	if len(failure) == 0 || len(completed) == 0 {
 		return false
 	}
-	if strings.TrimSpace(stringFromMap(completed, "state")) != string(common.StepStateCompleted) {
+	if strings.TrimSpace(stringFromMap(completed, "state")) != string(common.StepStateSucceeded) {
 		return false
 	}
 	failedStepID := strings.TrimSpace(stringFromMap(failure, "stepId"))
@@ -3670,7 +3670,7 @@ func prioritizedRunEvidenceSummarySteps(steps []*runModel.Step, limit int) []*ru
 		if step == nil {
 			continue
 		}
-		if step.State != common.StepStateCompleted && step.State != common.StepStateFailed {
+		if step.State != common.StepStateSucceeded && step.State != common.StepStateFailed {
 			continue
 		}
 		candidates = append(candidates, candidate{

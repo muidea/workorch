@@ -63,7 +63,7 @@ func TestRuntimeOrchestratorPersistRunProgressUpdatePreservesBlockedDecisionLife
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestRuntimeOrchestratorPersistRunProgressUpdatePreservesBlockedDecisionLife
 	staleProgress := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"coverageProgress": "updated",
 		},
@@ -122,7 +122,7 @@ func TestRuntimeOrchestratorPersistRunProgressUpdateAppliesManagedProgressDeleti
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey:      map[string]any{"schemaVersion": "old"},
 			"ownerContinuation": map[string]any{"kind": "dispatch"},
@@ -134,7 +134,7 @@ func TestRuntimeOrchestratorPersistRunProgressUpdateAppliesManagedProgressDeleti
 	progress := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"coverageProgress": "updated",
 		},
@@ -164,11 +164,11 @@ func TestCanCloseRunAsUnsuccessfulTerminalDoesNotOwnCompletion(t *testing.T) {
 		common.RunStateCancelled,
 		common.RunStateSuperseded,
 	} {
-		if !canCloseRunAsUnsuccessfulTerminal(common.RunStateRunning, target) {
+		if !canCloseRunAsUnsuccessfulTerminal(common.RunStateActive, target) {
 			t.Fatalf("canCloseRunAsUnsuccessfulTerminal(running, %s) = false, want true", target)
 		}
 	}
-	if canCloseRunAsUnsuccessfulTerminal(common.RunStateRunning, common.RunStateCompleted) {
+	if canCloseRunAsUnsuccessfulTerminal(common.RunStateActive, common.RunStateCompleted) {
 		t.Fatal("canCloseRunAsUnsuccessfulTerminal(running, completed) = true, want completion to stay on CompleteRun path")
 	}
 }
@@ -183,7 +183,7 @@ func TestRunStateSubsystemReconcileWorkspaceActiveRunClearsMissingActiveRun(t *t
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "ws",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: "run-missing-active",
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -219,7 +219,7 @@ func TestRunStateSubsystemReconcileWorkspaceActiveRunUsesScopedGetter(t *testing
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "ws",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: runID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -227,7 +227,7 @@ func TestRunStateSubsystemReconcileWorkspaceActiveRunUsesScopedGetter(t *testing
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -247,25 +247,25 @@ func TestRunStateSubsystemReconcileWorkspaceActiveRunUsesScopedGetter(t *testing
 	}
 }
 
-func TestRunStateSubsystemRejectsIncompatibleActiveWorkspaceState(t *testing.T) {
+func TestRunStateSubsystemRejectsActiveWorkspaceStateForApprovalBlock(t *testing.T) {
 	ctx := context.Background()
 	runRepo := memory.NewRunRepository()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	subsystem := newRunStateSubsystem(runRepo, workspaceRepo)
 	workspaceID := common.WorkspaceID("ws-incompatible-active-state")
 	runID := common.RunID("run-incompatible-active-state")
-	ticketID := common.TicketID("ticket-incompatible-active-state")
+	approvalID := common.ApprovalID("approval-incompatible-active-state")
 
 	run := &runmodel.Run{
-		ID:               runID,
-		WorkspaceID:      workspaceID,
-		State:            common.RunStateBlockedOnDecision,
-		BlockingTicketID: ticketID,
+		ID:                 runID,
+		WorkspaceID:        workspaceID,
+		State:              common.RunStateBlockedOnApproval,
+		BlockingApprovalID: approvalID,
 	}
 	workspace := &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "ws",
-		State:       common.WorkspaceStateWaitingDecision,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: runID,
 	}
 	if err := runRepo.Create(ctx, run); err != nil {
@@ -275,7 +275,7 @@ func TestRunStateSubsystemRejectsIncompatibleActiveWorkspaceState(t *testing.T) 
 		t.Fatalf("seed workspace: %v", err)
 	}
 
-	if _, err := subsystem.syncRunAndWorkspaceForActiveState(ctx, run, common.WorkspaceStateRunning, workspace); !errors.Is(err, common.ErrConflict) {
+	if _, err := subsystem.syncRunAndWorkspaceForActiveState(ctx, run, common.WorkspaceStateActive, workspace); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("sync incompatible state error = %v, want conflict", err)
 	}
 	gotRun, err := runRepo.Get(ctx, runID)
@@ -286,11 +286,11 @@ func TestRunStateSubsystemRejectsIncompatibleActiveWorkspaceState(t *testing.T) 
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	if gotRun.State != common.RunStateBlockedOnDecision || gotRun.BlockingTicketID != ticketID {
-		t.Fatalf("run = %+v, want unchanged blocked decision", gotRun)
+	if gotRun.State != common.RunStateBlockedOnApproval || gotRun.BlockingApprovalID != approvalID {
+		t.Fatalf("run = %+v, want unchanged blocked approval", gotRun)
 	}
-	if gotWorkspace.State != common.WorkspaceStateWaitingDecision || gotWorkspace.ActiveRunID != runID {
-		t.Fatalf("workspace = %+v, want unchanged waiting decision", gotWorkspace)
+	if gotWorkspace.State != common.WorkspaceStateActive || gotWorkspace.ActiveRunID != runID {
+		t.Fatalf("workspace = %+v, want unchanged active workspace", gotWorkspace)
 	}
 }
 
@@ -301,14 +301,13 @@ func TestWorkspaceStateCompatibleWithRun(t *testing.T) {
 		workspaceState common.WorkspaceState
 		want           bool
 	}{
-		{name: "created starts running", runState: common.RunStateCreated, workspaceState: common.WorkspaceStateRunning, want: true},
-		{name: "running", runState: common.RunStateRunning, workspaceState: common.WorkspaceStateRunning, want: true},
-		{name: "validating", runState: common.RunStateValidating, workspaceState: common.WorkspaceStateValidating, want: true},
-		{name: "decision", runState: common.RunStateBlockedOnDecision, workspaceState: common.WorkspaceStateWaitingDecision, want: true},
-		{name: "approval", runState: common.RunStateBlockedOnApproval, workspaceState: common.WorkspaceStateBlocked, want: true},
-		{name: "decision cannot run workspace", runState: common.RunStateBlockedOnDecision, workspaceState: common.WorkspaceStateRunning, want: false},
-		{name: "approval cannot run workspace", runState: common.RunStateBlockedOnApproval, workspaceState: common.WorkspaceStateRunning, want: false},
-		{name: "terminal not active", runState: common.RunStateCompleted, workspaceState: common.WorkspaceStateRunning, want: false},
+		{name: "created starts running", runState: common.RunStatePending, workspaceState: common.WorkspaceStateActive, want: true},
+		{name: "running", runState: common.RunStateActive, workspaceState: common.WorkspaceStateActive, want: true},
+		{name: "validating", runState: common.RunStateActive, workspaceState: common.WorkspaceStateActive, want: true},
+		{name: "decision", runState: common.RunStateBlockedOnDecision, workspaceState: common.WorkspaceStateActive, want: true},
+		{name: "approval", runState: common.RunStateBlockedOnApproval, workspaceState: common.WorkspaceStateBlockedOnApproval, want: true},
+		{name: "approval cannot run workspace", runState: common.RunStateBlockedOnApproval, workspaceState: common.WorkspaceStateActive, want: false},
+		{name: "terminal not active", runState: common.RunStateCompleted, workspaceState: common.WorkspaceStateActive, want: false},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {

@@ -18,11 +18,11 @@ func TestWorkspaceSnapshotFromModelsProjectsBaseWorkspaceView(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-workspace-snapshot-projection")
 	activeRunID := common.RunID("run-active-workspace-projection")
 	got := WorkspaceSnapshotFromModels(WorkspaceSnapshotModelInput{
-		Workspace:     &workspacemodel.Workspace{ID: workspaceID, Title: "workspace projection", State: common.WorkspaceStateRunning, ActiveRunID: activeRunID},
-		ProjectionRun: &runmodel.Run{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		Workspace:     &workspacemodel.Workspace{ID: workspaceID, Title: "workspace projection", State: common.WorkspaceStateActive, ActiveRunID: activeRunID},
+		ProjectionRun: &runmodel.Run{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		Runs: []*runmodel.Run{
-			{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateRunning},
-			{ID: "run-other-workspace", WorkspaceID: "ws-other", State: common.RunStateRunning},
+			{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateActive},
+			{ID: "run-other-workspace", WorkspaceID: "ws-other", State: common.RunStateActive},
 		},
 		Goals: []*workspacemodel.Goal{{ID: "goal-workspace-projection", WorkspaceID: workspaceID, Text: "goal"}},
 		DoDs:  []*workspacemodel.DoD{{ID: "dod-workspace-projection", WorkspaceID: workspaceID, Items: []string{"dod"}, State: common.DoDStateReady}},
@@ -127,7 +127,7 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-workspace-run-merge")
 	runID := common.RunID("run-workspace-run-merge")
 	base := readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateRunning)},
+		Workspace: readmodelcore.Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateActive)},
 		Results: []readmodelcore.Result{
 			{ID: "result-run", WorkspaceID: string(workspaceID), RunID: string(runID), State: string(common.ResultStateRejected)},
 			{ID: "result-workspace-only", WorkspaceID: string(workspaceID), RunID: "run-previous", State: string(common.ResultStateAccepted)},
@@ -151,7 +151,7 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 		Run: readmodelcore.Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateCompleted)},
 		Step: &StepView{
 			ID:    "step-current",
-			State: string(common.StepStateCompleted),
+			State: string(common.StepStateSucceeded),
 		},
 		TaskProgress: readmodelcore.TaskProgress{WorkspaceID: string(workspaceID), RunID: string(runID), State: string(common.RunStateCompleted), CurrentStepID: "step-current"},
 		Acceptance:   readmodelcore.AcceptanceProjection{ActiveSliceID: "slice-run", Summary: readmodelcore.AcceptanceSummary{ActiveSlices: 1}},
@@ -295,7 +295,7 @@ func TestWorkspaceSnapshotFromModelsProjectsArtifactContinuations(t *testing.T) 
 
 	workspaceID := common.WorkspaceID("ws-workspace-continuation-projection")
 	got := WorkspaceSnapshotFromModels(WorkspaceSnapshotModelInput{
-		Workspace: &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning},
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive},
 		ArtifactContinuations: []*orchestratormodel.ArtifactContinuation{
 			{ID: "continuation-workspace", WorkspaceID: workspaceID, RunID: "run-continuation"},
 		},

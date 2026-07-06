@@ -12,12 +12,12 @@ func TestTerminalStepModelTreatsGraphRootAsReferenced(t *testing.T) {
 	root := &runmodel.Step{
 		ID:    common.StepID(runID + "/contract-retry-001"),
 		RunID: runID,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}
 	leaf := &runmodel.Step{
 		ID:    common.StepID(runID + "/graph-006/001-fix-main"),
 		RunID: runID,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"graphRootStepId": string(root.ID),
 			"graphNodeId":     "fix-main",
@@ -26,12 +26,12 @@ func TestTerminalStepModelTreatsGraphRootAsReferenced(t *testing.T) {
 	olderUnorderedRoot := &runmodel.Step{
 		ID:    common.StepID(runID + "/step-1"),
 		RunID: runID,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}
 	olderLeaf := &runmodel.Step{
 		ID:    common.StepID(runID + "/graph-001/001-read"),
 		RunID: runID,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"graphRootStepId": string(olderUnorderedRoot.ID),
 			"graphNodeId":     "read",

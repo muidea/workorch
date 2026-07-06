@@ -276,7 +276,7 @@ watchdog 是通用运行期健康检查，不是业务修复器。
 - run state compact metadata。
 - latest step/checkpoint compact metadata。
 - governance blocker compact state。
-- stale dispatched / resolved governance blocker / continuation checkpoint summary。
+- stale executing/dispatched-event / resolved governance blocker / continuation checkpoint summary。
 
 禁止读取：
 
@@ -571,9 +571,9 @@ cd web/workorch-console && npm run build
 
 2026-06-21 watchdog compact-state closure:
 
-- periodic watchdog still only invokes stale dispatched runtime-gap recovery.
+- periodic watchdog still only invokes stale executing/dispatched-event runtime-gap recovery.
 - runtime-gap candidate enumeration now uses run owner read command with
-  `states=[running]` and `compact=true`.
+  `states=[active]` and `compact=true`.
 - compact run list items omit `ExecutionContext` and retain only generic run
   metadata needed for recovery classification.
 - step lookup uses scoped step summaries; runtime evidence lookup uses scoped

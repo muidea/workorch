@@ -123,11 +123,11 @@ Last Updated: 2026-07-01
 | State Family | Values / Direction | Owner |
 | --- | --- | --- |
 | RuntimeStage | exploration, planning, execution, verification, acceptance, repair, replan, decision, approval | orchestrator stage contract |
-| RunState | created, running, blocked_on_decision, blocked_on_approval, validating, completed, failed, cancelled, superseded | kernel/run |
-| WorkspaceState | active, draft, ready, running, waiting_decision, blocked, validating, completed, failed, archived | workspace projection |
+| RunState | pending, active, blocked_on_decision, blocked_on_approval, completed, failed, cancelled, superseded | kernel/run |
+| WorkspaceState | active, blocked_on_approval, superseded | kernel/workspace owner; projection may derive prompt/progress from active run |
 | ConvergenceContract.State | need_evidence, need_state_change, need_validation, need_assessment, need_governance, blocked | orchestrator |
 | Completion | DeterministicComplete + CompletionReason | orchestrator |
-| StepState | pending, dispatched, completed, failed | kernel/run |
+| StepState | pending, executing, succeeded, failed, skipped, cancelled | kernel/run |
 | ResultState | accepted/rejected/superseded-style outcome state | kernel/result |
 
 ### 3.2 State Bridge
@@ -185,7 +185,7 @@ User start / activation command
   -> initial coverage baseline created
   -> executionContext assembled
   -> orchestrator dispatches first Step
-  -> projection shows running or governed wait
+  -> projection shows active execution or governed wait from run/ticket/approval state
 ```
 
 Input contract:
@@ -205,7 +205,7 @@ Output contract:
 ### 4.3 Planning / Execution Flow
 
 ```text
-Run running
+Run active
   -> BuildConvergenceContract
   -> ApplyConvergenceContract
   -> StagePacket + requiredOutput
@@ -438,7 +438,6 @@ Use this checklist when adding or changing product, flow, or module behavior:
 ## 9. Known Boundary Decisions
 
 - Web Console is not “read-only only”; it is “projection display + controlled operation entry”。It may create/update workspace resources and submit governance/configuration operations through formal API, but it does not own business state.
-- `blocked_on_approval` currently projects to `WorkspaceStateBlocked`; approval-specific wording may appear in run heartbeat/governance projection, but WorkspaceState has no separate `waiting_approval` value.
+- Workspace owner state is intentionally small: `active`, `blocked_on_approval`, `superseded`。Decision blockers do not mutate workspace owner state; they are expressed by `RunState=blocked_on_decision`, open decision ticket, `blockingTicketId`, prompt mode and governance projection. Approval blockers use `WorkspaceState=blocked_on_approval` only when the owner has an active approval blocker.
 - `validation/managed_session` is a runtime block kind owned by orchestrator/shell-backed managed validation flow and must be declared through central runtime vocabulary.
 - `internal/pkg/events` may aggregate event contracts, but aggregation must stay contract-level and must not become business outcome logic.
-

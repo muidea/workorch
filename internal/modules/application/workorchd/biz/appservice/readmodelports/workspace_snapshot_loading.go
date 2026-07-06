@@ -4,17 +4,13 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func loadWorkspaceSnapshotModels(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot, options workspaceSnapshotLoadOptions) (workspaceSnapshotModels, error) {
 	var models workspaceSnapshotModels
-	if cachedRunSnapshot != nil && cachedRunSnapshot.Workspace.ID == string(workspaceID) {
-		models.Workspace = workspacecore.WorkspaceModelFromView(cachedRunSnapshot.Workspace)
-	}
 
-	tasks := workspaceSnapshotBaseLoadTasks(ctx, readers, workspaceID, options, &models)
+	tasks := workspaceSnapshotBaseLoadTasks(ctx, readers, workspaceID, cachedRunSnapshot, options, &models)
 	if err := readmodelcore.RunTasks(tasks...); err != nil {
 		return workspaceSnapshotModels{}, err
 	}

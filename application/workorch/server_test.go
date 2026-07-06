@@ -257,7 +257,7 @@ func TestWorkorchServerModeSupportsFileRepositoryBackend(t *testing.T) {
 	assertRunListAvailable(t, "http://"+addr+"/api/v1/workorch/runs", "run-main-file")
 	assertRunAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-main-file", "run-main-file", workspaceID)
 	assertRunListAvailable(t, "http://"+addr+"/api/v1/workorch/runs?workspaceId="+workspaceID, "run-main-file")
-	assertRunStartAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-main-file/start", "run-main-file", "running")
+	assertRunStartAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-main-file/start", "run-main-file", string(common.RunStateActive))
 	blockedProviderRun := waitForRunStatusAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-main-file/status", "run-main-file", "blocked_on_decision")
 	if blockedProviderRun.Status.BlockingTicketID == "" {
 		t.Fatalf("blocked provider run ticket = %q, want non-empty", blockedProviderRun.Status.BlockingTicketID)
@@ -363,7 +363,7 @@ func TestWorkorchServerModeRetainsFileBackedTerminalStateAcrossRestart(t *testin
 	assertWorkspaceLayoutDirectories(t, dataDir, workspaceID)
 
 	createRunInstance(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", "run-restart-completed", "", "")
-	assertRunStartAvailable(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/start", "run-restart-completed", "running")
+	assertRunStartAvailable(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/start", "run-restart-completed", string(common.RunStateActive))
 	blockedProviderRun := waitForRunStatusAvailable(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/status", "run-restart-completed", "blocked_on_decision")
 
 	decisionWorkspaceID := createWorkspace(t, "http://"+firstAddr+"/api/v1/workorch/workspaces", "restart decision file workspace")
@@ -405,7 +405,7 @@ func TestWorkorchServerModeRetainsFileBackedTerminalStateAcrossRestart(t *testin
 
 	waitForHealthy(t, "http://"+secondAddr+"/healthz")
 
-	assertWorkspaceAvailable(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID, workspaceID, "restart file workspace", "waiting_decision")
+	assertWorkspaceAvailable(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID, workspaceID, "restart file workspace", string(common.WorkspaceStateActive))
 	assertRunAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed", "run-restart-completed", workspaceID, "blocked_on_decision")
 	assertRunSnapshotAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/snapshot", "run-restart-completed", workspaceID, "blocked_on_decision")
 	assertRunStatusAvailable(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/status", "run-restart-completed", "blocked_on_decision")
@@ -759,8 +759,8 @@ func createRunInstance(t *testing.T, endpoint string, runID string, goalID strin
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode create run response: %v", err)
 	}
-	if payload.Run.ID != runID || payload.Run.State != "created" {
-		t.Fatalf("created run = %+v, want %s/created", payload.Run, runID)
+	if payload.Run.ID != runID || payload.Run.State != string(common.RunStatePending) {
+		t.Fatalf("created run = %+v, want %s/pending", payload.Run, runID)
 	}
 }
 
@@ -823,7 +823,7 @@ func seedBlockedApprovalRunForProcess(t *testing.T, dataRoot string, workspaceID
 		ID:     stepID,
 		RunID:  common.RunID(runID),
 		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stage": "blocked_on_approval"},
 	}); err != nil {
 		t.Fatalf("seed approval step: %v", err)
@@ -883,7 +883,7 @@ func assertRunListAvailable(t *testing.T, endpoint string, runID string) {
 
 func assertRunAvailable(t *testing.T, endpoint string, runID string, workspaceID string) {
 	t.Helper()
-	assertRunAvailableWithState(t, endpoint, runID, workspaceID, "created")
+	assertRunAvailableWithState(t, endpoint, runID, workspaceID, string(common.RunStatePending))
 }
 
 func assertRunAvailableWithState(t *testing.T, endpoint string, runID string, workspaceID string, expectedState string) workorchRunInstanceResponse {
@@ -1015,7 +1015,7 @@ func waitForRunStatusMatching(t *testing.T, endpoint string, runID string, expec
 func startRunAndWaitForBlockedDecision(t *testing.T, baseURL string, workspaceID string, runID string) workorchRunStatusResponse {
 	t.Helper()
 
-	assertRunStartAvailable(t, baseURL+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+runID+"/start", runID, "running")
+	assertRunStartAvailable(t, baseURL+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+runID+"/start", runID, string(common.RunStateActive))
 	status := waitForRunStatusAvailable(t, baseURL+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+runID+"/status", runID, "blocked_on_decision")
 	if status.Status.BlockingTicketID == "" {
 		t.Fatalf("run %s blockingTicketId = %q, want non-empty", runID, status.Status.BlockingTicketID)

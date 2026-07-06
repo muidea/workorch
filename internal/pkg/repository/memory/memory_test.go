@@ -71,7 +71,7 @@ func TestRunRepository_CRUD(t *testing.T) {
 	r := &runmodel.Run{
 		ID:          common.RunID("run-1"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}
 	if err := repo.Create(ctx, r); err != nil {
 		t.Fatalf("create run: %v", err)
@@ -110,7 +110,7 @@ func TestStepRepository_CloneIsolation(t *testing.T) {
 		ID:    common.StepID("run-1/step-1"),
 		RunID: common.RunID("run-1"),
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{"workspaceId": "ws-1"},
 	}
 	if err := repo.Create(ctx, step); err != nil {
@@ -135,7 +135,7 @@ func TestStepRepository_CloneIsolation(t *testing.T) {
 		t.Fatalf("step output should still be nil, got %#v", fresh.Output)
 	}
 
-	fresh.State = common.StepStateCompleted
+	fresh.State = common.StepStateSucceeded
 	fresh.Output = map[string]any{"result": "done"}
 	if err := repo.Update(ctx, fresh); err != nil {
 		t.Fatalf("update step: %v", err)
@@ -145,7 +145,7 @@ func TestStepRepository_CloneIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get updated step: %v", err)
 	}
-	if updated.State != common.StepStateCompleted {
+	if updated.State != common.StepStateSucceeded {
 		t.Fatalf("step state = %q, want completed", updated.State)
 	}
 	if updated.Output["result"] != "done" {
@@ -162,7 +162,7 @@ func TestMemoryRunAndStepRepositoriesRequireScopedLookupForDuplicateWorkspaceLoc
 		if err := runs.Create(scoped, &runmodel.Run{
 			ID:          "run-shared",
 			WorkspaceID: workspaceID,
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 		}); err != nil {
 			t.Fatalf("create run %s: %v", workspaceID, err)
 		}
@@ -170,7 +170,7 @@ func TestMemoryRunAndStepRepositoriesRequireScopedLookupForDuplicateWorkspaceLoc
 			ID:    "run-shared/step-001",
 			RunID: "run-shared",
 			Kind:  "llm/workspace_execution",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 		}); err != nil {
 			t.Fatalf("create step %s: %v", workspaceID, err)
 		}

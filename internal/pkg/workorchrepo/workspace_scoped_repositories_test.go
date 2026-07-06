@@ -126,7 +126,7 @@ func TestWorkspaceScopedRunLocalGetRequiresUniqueUnscopedID(t *testing.T) {
 		if err := repos.Runs.Create(scoped, &runmodel.Run{
 			ID:          "run-shared-local",
 			WorkspaceID: workspaceID,
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 		}); err != nil {
 			t.Fatalf("create run %s: %v", workspaceID, err)
 		}
@@ -134,7 +134,7 @@ func TestWorkspaceScopedRunLocalGetRequiresUniqueUnscopedID(t *testing.T) {
 			ID:    "run-shared-local/step-001",
 			RunID: "run-shared-local",
 			Kind:  "validation",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 		}); err != nil {
 			t.Fatalf("create step %s: %v", workspaceID, err)
 		}
@@ -183,7 +183,7 @@ func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T
 		if err := repos.Runs.Create(scoped, &runmodel.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 		}); err != nil {
 			t.Fatalf("create run %s: %v", runID, err)
 		}
@@ -265,7 +265,7 @@ func TestWorkspaceScopedEventRecordWorkspaceLatestUsesBoundedPerRunLists(t *test
 		if err := repos.Runs.Create(scoped, &runmodel.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 		}); err != nil {
 			t.Fatalf("create run %s: %v", runID, err)
 		}

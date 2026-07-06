@@ -108,7 +108,7 @@ func (o *RuntimeOrchestrator) RecordRuntimeStepTerminalResult(
 }
 
 func (o *RuntimeOrchestrator) recoverRuntimeTerminalResultForRunningRun(ctx context.Context, run *runModel.Run) (bool, error) {
-	if o == nil || run == nil || run.State != common.RunStateRunning || o.steps == nil {
+	if o == nil || run == nil || run.State != common.RunStateActive || o.steps == nil {
 		return false, nil
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
@@ -116,7 +116,7 @@ func (o *RuntimeOrchestrator) recoverRuntimeTerminalResultForRunningRun(ctx cont
 		return false, err
 	}
 	step := terminalExecutionStep(steps)
-	if step == nil || step.State != common.StepStateDispatched {
+	if step == nil || step.State != common.StepStateExecuting {
 		return false, nil
 	}
 	result, execErr, ok, err := o.runtimeTerminalResultFromCheckpoint(ctx, run, step)

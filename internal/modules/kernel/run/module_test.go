@@ -92,14 +92,14 @@ func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: "ws-run-owner-a",
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: "ws-run-owner-b",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("create duplicate scoped run: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 		t.Fatalf("duplicate scoped get err = %v, want response", err)
 	}
 	item, ok := response.Payload[events.PayloadKeyRun].(*runmodel.Run)
-	if !ok || item == nil || item.WorkspaceID != "ws-run-owner-b" || item.State != common.RunStateRunning {
+	if !ok || item == nil || item.WorkspaceID != "ws-run-owner-b" || item.State != common.RunStateActive {
 		t.Fatalf("duplicate scoped response run = %+v, want workspace b running run", response.Payload[events.PayloadKeyRun])
 	}
 
@@ -174,7 +174,7 @@ func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID:               "run-compact-running",
 		WorkspaceID:      "ws-run-compact",
-		State:            common.RunStateRunning,
+		State:            common.RunStateActive,
 		ExecutionContext: map[string]any{"large": "context"},
 		Priority:         3,
 	}); err != nil {
@@ -205,7 +205,7 @@ func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 	err := hub.Publish(ctx, events.Envelope{
 		Topic: runevents.TopicRunCommandList,
 		Payload: map[string]any{
-			events.PayloadKeyStates:  []string{string(common.RunStateRunning)},
+			events.PayloadKeyStates:  []string{string(common.RunStateActive)},
 			events.PayloadKeyCompact: true,
 		},
 	})
@@ -233,7 +233,7 @@ func TestRunCommandDeleteHonorsWorkspaceScope(t *testing.T) {
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: "ws-run-delete-a",
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: "ws-write-scope-a",
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 			events.PayloadKeyCommand: runcontracts.UpdateRunCommand{
 				RunID:       runID,
 				WorkspaceID: "ws-write-scope-a",
-				State:       common.RunStateRunning,
+				State:       common.RunStateActive,
 			},
 		},
 	})
@@ -333,7 +333,7 @@ func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 			events.PayloadKeyCommand: runcontracts.UpdateRunCommand{
 				RunID:       runID,
 				WorkspaceID: "ws-write-scope-a",
-				State:       common.RunStateRunning,
+				State:       common.RunStateActive,
 			},
 		},
 	})
@@ -397,7 +397,7 @@ func TestRunStepReadCommandsHonorWorkspaceScope(t *testing.T) {
 	if err := runs.Create(wsCtx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: "ws-step-read-a",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestRunStepReadCommandsHonorWorkspaceScope(t *testing.T) {
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
@@ -476,7 +476,7 @@ func TestRunCheckpointReadCommandsHonorWorkspaceScope(t *testing.T) {
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: "ws-checkpoint-read-a",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}

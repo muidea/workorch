@@ -132,7 +132,7 @@ func TestEventHubRunResourceMapCompactsExecutionContext(t *testing.T) {
 		GoalID:             "goal-1",
 		DoDID:              "dod-1",
 		DefinitionRevision: "goal:goal-1|dod:dod-1",
-		State:              common.RunStateRunning,
+		State:              common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"goal":               map[string]any{"text": "goal text"},
 			"dod":                map[string]any{"items": []any{"dod item"}},
@@ -165,10 +165,10 @@ func TestEventHubRunResourceMapCompactsExecutionContext(t *testing.T) {
 
 func TestEventHubSnapshotResourceMapCompactsRunExecutionContext(t *testing.T) {
 	resource := resourceMap(WorkspaceSnapshotInfo{
-		Workspace: WorkspaceInfo{ID: "ws-1", State: common.WorkspaceStateRunning},
+		Workspace: WorkspaceInfo{ID: "ws-1", State: common.WorkspaceStateActive},
 		Runs: []RunInfo{{
 			ID:          "run-1",
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 			GoalID:      "goal-1",
 			DoDID:       "dod-1",
 			WorkspaceID: "ws-1",
@@ -195,7 +195,7 @@ func TestEventHubSnapshotResourceMapCompactsRunExecutionContext(t *testing.T) {
 
 func TestDecodeResultResourceUsesTypedPayloadBeforeJSONFallback(t *testing.T) {
 	want := WorkspaceSnapshotInfo{
-		Workspace: WorkspaceInfo{ID: "ws-typed", State: common.WorkspaceStateRunning},
+		Workspace: WorkspaceInfo{ID: "ws-typed", State: common.WorkspaceStateActive},
 	}
 	got, err := decodeResultResource[WorkspaceSnapshotInfo](events.CLIResultPayload{
 		TypedResource: &want,
@@ -872,7 +872,7 @@ func subscribeRunReadCLIResponses(t *testing.T, hub events.Hub, workspaceID comm
 			RunID:         cmd.RunID,
 			OccurredAt:    time.Now().UTC(),
 		}
-		run := RunInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+		run := RunInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 		switch cmd.Command {
 		case events.CommandRunGet:
 			payload.TypedResource = run
@@ -881,7 +881,7 @@ func subscribeRunReadCLIResponses(t *testing.T, hub events.Hub, workspaceID comm
 			payload.TypedResources = []any{run}
 			payload.Resources = []map[string]any{resourceMap(run)}
 		case events.CommandRunStatus:
-			status := RunStatusInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+			status := RunStatusInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 			payload.TypedResource = status
 			payload.Resource = resourceMap(status)
 		default:

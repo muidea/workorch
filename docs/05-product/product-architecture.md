@@ -248,6 +248,12 @@ User
 | Decision/Approval State | kernel governance/decision/approval | Web/TUI governance views |
 | Projection revision/health | workorchd projection | Web/TUI/API |
 
+Canonical state sets:
+
+- `WorkspaceState`: `active` / `blocked_on_approval` / `superseded`。Decision blockers are expressed through run/ticket/projection fields rather than workspace owner state.
+- `RunState`: `pending` / `active` / `blocked_on_decision` / `blocked_on_approval` / `completed` / `failed` / `cancelled` / `superseded`。
+- `StepState`: `pending` / `executing` / `succeeded` / `failed` / `skipped` / `cancelled`。
+
 ## 6. Interaction Architecture
 
 ### 6.1 Web Console
@@ -306,7 +312,7 @@ Deployment requirements:
 - config separates server/runtime/LLM/web-search sections。
 - provider-specific config belongs to adapter/config, not core state machine。
 - metrics/health/ready support operational checks。
-- service restart recovery must refresh inactive running projections and allow manual/explicit continuation.
+- service restart recovery must refresh inactive `active` run projections and allow manual/explicit continuation.
 
 ## 8. Architecture Invariants
 
@@ -330,4 +336,3 @@ Deployment requirements:
 | profiles and capability policies | `../40-profiles-capabilities/` |
 | API/TUI/Web/deployment | `../50-product-interface/` |
 | acceptance and verification | `../60-verification/` |
-

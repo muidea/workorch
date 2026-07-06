@@ -116,7 +116,7 @@ func TestRuntimeOrchestrator_LLMInputIncludesExecutionContextPackage(t *testing.
 		WorkspaceID:     workspaceID,
 		GoalID:          "goal-context-package",
 		DoDID:           "dod-context-package",
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{
 			"skills": []map[string]any{
@@ -768,7 +768,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageDoesNotScanProvidedWorkspace
 	if err := os.WriteFile(filepath.Join(workingDir, "README.md"), []byte("hello"), 0o644); err != nil {
 		t.Fatalf("seed workspace file: %v", err)
 	}
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: workingDir, State: common.WorkspaceStateRunning}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: workingDir, State: common.WorkspaceStateActive}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -802,7 +802,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageIncludesManifestForReplanSta
 			t.Fatalf("seed workspace file %s: %v", path, err)
 		}
 	}
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: workingDir, State: common.WorkspaceStateRunning}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: workingDir, State: common.WorkspaceStateActive}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -854,7 +854,7 @@ func TestRuntimeOrchestrator_EnrichLLMStepInputRealignsStateChangeWithoutTargetS
 	if err := os.WriteFile(filepath.Join(workingDir, "resource.txt"), []byte("current"), 0o644); err != nil {
 		t.Fatalf("seed workspace file: %v", err)
 	}
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: workingDir, State: common.WorkspaceStateRunning}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: workingDir, State: common.WorkspaceStateActive}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -927,7 +927,7 @@ func TestRuntimeOrchestrator_ResultManifestReusesProvidedWorkspace(t *testing.T)
 	if err := os.WriteFile(filepath.Join(workingDir, "README.md"), []byte("accepted"), 0o644); err != nil {
 		t.Fatalf("seed workspace file: %v", err)
 	}
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: workingDir, State: common.WorkspaceStateRunning}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: workingDir, State: common.WorkspaceStateActive}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -1081,8 +1081,8 @@ func TestRuntimeOrchestrator_RunStateTransitionsReuseProvidedWorkspace(t *testin
 	runRepo := memory.NewRunRepository()
 	workspaceID := common.WorkspaceID("ws-state-transition-workspace-reuse")
 	runID := common.RunID("run-state-transition-workspace-reuse")
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -1100,13 +1100,13 @@ func TestRuntimeOrchestrator_RunStateTransitionsReuseProvidedWorkspace(t *testin
 	if got := workspaceRepo.getCount.Load(); got != 0 {
 		t.Fatalf("workspace Get count after decision block = %d, want 0 when workspace is already provided", got)
 	}
-	if workspace.State != common.WorkspaceStateWaitingDecision {
+	if workspace.State != common.WorkspaceStateActive {
 		t.Fatalf("workspace state = %s, want waiting decision", workspace.State)
 	}
 
-	run.State = common.RunStateRunning
+	run.State = common.RunStateActive
 	run.BlockingTicketID = ""
-	workspace.State = common.WorkspaceStateRunning
+	workspace.State = common.WorkspaceStateActive
 	if err := runRepo.Update(ctx, run); err != nil {
 		t.Fatalf("reset run: %v", err)
 	}
@@ -1119,7 +1119,7 @@ func TestRuntimeOrchestrator_RunStateTransitionsReuseProvidedWorkspace(t *testin
 	if got := workspaceRepo.getCount.Load(); got != 0 {
 		t.Fatalf("workspace Get count after approval block = %d, want 0 when workspace is already provided", got)
 	}
-	if workspace.State != common.WorkspaceStateBlocked {
+	if workspace.State != common.WorkspaceStateBlockedOnApproval {
 		t.Fatalf("workspace state = %s, want blocked", workspace.State)
 	}
 }
@@ -1130,8 +1130,8 @@ func TestRuntimeOrchestrator_ValidateCompleteReusesProvidedWorkspace(t *testing.
 	runRepo := memory.NewRunRepository()
 	workspaceID := common.WorkspaceID("ws-complete-workspace-reuse")
 	runID := common.RunID("run-complete-workspace-reuse")
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -1152,7 +1152,7 @@ func TestRuntimeOrchestrator_ValidateCompleteReusesProvidedWorkspace(t *testing.
 	if run.State != common.RunStateCompleted {
 		t.Fatalf("run state = %s, want completed", run.State)
 	}
-	if workspace.State != common.WorkspaceStateCompleted || workspace.ActiveRunID != "" {
+	if workspace.State != common.WorkspaceStateActive || workspace.ActiveRunID != "" {
 		t.Fatalf("workspace = %+v, want completed and released", workspace)
 	}
 }
@@ -1174,8 +1174,8 @@ func TestRuntimeOrchestrator_ValidationRunAndWorkspaceWritesConcurrently(t *test
 	}
 	workspaceID := common.WorkspaceID("ws-validating-write-parallel")
 	runID := common.RunID("run-validating-write-parallel")
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -1211,10 +1211,10 @@ func TestRuntimeOrchestrator_ValidationRunAndWorkspaceWritesConcurrently(t *test
 	case <-ctx.Done():
 		t.Fatalf("sync validation state did not finish after release: %v", ctx.Err())
 	}
-	if run.State != common.RunStateValidating {
+	if run.State != common.RunStateActive {
 		t.Fatalf("run state = %s, want validating", run.State)
 	}
-	if workspace.State != common.WorkspaceStateValidating || workspace.ActiveRunID != runID {
+	if workspace.State != common.WorkspaceStateActive || workspace.ActiveRunID != runID {
 		t.Fatalf("workspace = %+v, want validating with active run", workspace)
 	}
 }
@@ -1236,8 +1236,8 @@ func TestRuntimeOrchestrator_ActiveRunAndWorkspaceWritesConcurrently(t *testing.
 	}
 	workspaceID := common.WorkspaceID("ws-active-write-parallel")
 	runID := common.RunID("run-active-write-parallel")
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -1251,7 +1251,7 @@ func TestRuntimeOrchestrator_ActiveRunAndWorkspaceWritesConcurrently(t *testing.
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := orch.runStateManager().syncRunAndWorkspaceForActiveState(ctx, run, common.WorkspaceStateRunning, workspace)
+		_, err := orch.runStateManager().syncRunAndWorkspaceForActiveState(ctx, run, common.WorkspaceStateActive, workspace)
 		done <- err
 	}()
 
@@ -1273,10 +1273,10 @@ func TestRuntimeOrchestrator_ActiveRunAndWorkspaceWritesConcurrently(t *testing.
 	case <-ctx.Done():
 		t.Fatalf("sync active state did not finish after release: %v", ctx.Err())
 	}
-	if run.State != common.RunStateRunning {
+	if run.State != common.RunStateActive {
 		t.Fatalf("run state = %s, want running", run.State)
 	}
-	if workspace.State != common.WorkspaceStateRunning || workspace.ActiveRunID != runID {
+	if workspace.State != common.WorkspaceStateActive || workspace.ActiveRunID != runID {
 		t.Fatalf("workspace = %+v, want running with active run", workspace)
 	}
 }
@@ -1301,7 +1301,7 @@ func TestRuntimeOrchestrator_StartRunActiveWritesConcurrently(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-start-active-write-parallel")
 	runID := common.RunID("run-start-active-write-parallel")
 	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -1333,7 +1333,7 @@ func TestRuntimeOrchestrator_StartRunActiveWritesConcurrently(t *testing.T) {
 		}
 	}
 	for _, item := range hub.Published() {
-		if item.Topic == runevents.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateRunning) {
+		if item.Topic == runevents.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateActive) {
 			t.Fatalf("published running run event before active writes were released: %+v", hub.Published())
 		}
 	}
@@ -1350,10 +1350,10 @@ func TestRuntimeOrchestrator_StartRunActiveWritesConcurrently(t *testing.T) {
 	var runningRunIndex = -1
 	var runningWorkspaceIndex = -1
 	for idx, item := range published {
-		if item.Topic == runevents.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateRunning) {
+		if item.Topic == runevents.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateActive) {
 			runningRunIndex = idx
 		}
-		if item.Topic == workspaceevents.TopicWorkspaceStateChanged && item.Payload[events.PayloadKeyState] == string(common.WorkspaceStateRunning) {
+		if item.Topic == workspaceevents.TopicWorkspaceStateChanged && item.Payload[events.PayloadKeyState] == string(common.WorkspaceStateActive) {
 			runningWorkspaceIndex = idx
 		}
 	}
@@ -1371,7 +1371,7 @@ func TestRuntimeOrchestrator_StartRunActiveWritesConcurrently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	if updatedWorkspace.State != common.WorkspaceStateCompleted || updatedWorkspace.ActiveRunID != "" {
+	if updatedWorkspace.State != common.WorkspaceStateActive || updatedWorkspace.ActiveRunID != "" {
 		t.Fatalf("workspace = %+v, want completed and released", updatedWorkspace)
 	}
 }
@@ -1386,7 +1386,7 @@ func TestRuntimeOrchestrator_BlockedRunAndWorkspaceWritesConcurrently(t *testing
 		{
 			name:           "decision",
 			runState:       common.RunStateBlockedOnDecision,
-			workspaceState: common.WorkspaceStateWaitingDecision,
+			workspaceState: common.WorkspaceStateActive,
 			configureRun: func(run *runmodel.Run) {
 				run.BlockingTicketID = common.TicketID("ticket-blocked-write-parallel")
 			},
@@ -1394,7 +1394,7 @@ func TestRuntimeOrchestrator_BlockedRunAndWorkspaceWritesConcurrently(t *testing
 		{
 			name:           "approval",
 			runState:       common.RunStateBlockedOnApproval,
-			workspaceState: common.WorkspaceStateBlocked,
+			workspaceState: common.WorkspaceStateBlockedOnApproval,
 			configureRun: func(run *runmodel.Run) {
 				run.BlockingApprovalID = common.ApprovalID("approval-blocked-write-parallel")
 			},
@@ -1418,7 +1418,7 @@ func TestRuntimeOrchestrator_BlockedRunAndWorkspaceWritesConcurrently(t *testing
 			}
 			workspaceID := common.WorkspaceID("ws-blocked-write-parallel-" + tt.name)
 			runID := common.RunID("run-blocked-write-parallel-" + tt.name)
-			workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}
+			workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}
 			run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: tt.runState}
 			tt.configureRun(run)
 			if err := workspaceRepo.Create(ctx, workspace); err != nil {
@@ -1476,8 +1476,8 @@ func TestRuntimeOrchestrator_BlockCheckpointUsesProvidedStepID(t *testing.T) {
 	runID := common.RunID("run-block-checkpoint-step-id")
 	stepID := common.StepID("run-block-checkpoint-step-id/step-1")
 	ticketID := common.TicketID("run-block-checkpoint-step-id/step-1-decision")
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -1487,7 +1487,7 @@ func TestRuntimeOrchestrator_BlockCheckpointUsesProvidedStepID(t *testing.T) {
 	if err := stepRepo.Create(ctx, &runmodel.Step{
 		ID:    stepID,
 		RunID: runID,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}); err != nil {
 		t.Fatalf("seed step: %v", err)
 	}
@@ -1544,8 +1544,8 @@ func TestRuntimeOrchestrator_CompletedStepEvidenceWritesConcurrently(t *testing.
 	runID := common.RunID("run-completed-step-evidence-parallel")
 	stepID := common.StepID("run-completed-step-evidence-parallel/step-1")
 	toolCallID := common.ToolCallID("run-completed-step-evidence-parallel/step-1/tool-call")
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
-	step := &runmodel.Step{ID: stepID, RunID: runID, State: common.StepStateCompleted}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
+	step := &runmodel.Step{ID: stepID, RunID: runID, State: common.StepStateSucceeded}
 	toolCall := &runmodel.ToolCall{
 		ID:          toolCallID,
 		WorkspaceID: workspaceID,
@@ -1620,19 +1620,19 @@ func TestRuntimeOrchestrator_CompletedStepStateAndCheckpointWritesConcurrently(t
 	workspaceID := common.WorkspaceID("ws-completed-step-state-parallel")
 	runID := common.RunID("run-completed-step-state-parallel")
 	stepID := common.StepID("run-completed-step-state-parallel/step-1")
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	step := &runmodel.Step{
 		ID:     stepID,
 		RunID:  runID,
 		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"status": "completed"},
 	}
 	if err := stepRepo.Create(ctx, &runmodel.Step{
 		ID:     stepID,
 		RunID:  runID,
 		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateDispatched,
+		State:  common.StepStateExecuting,
 		Output: map[string]any{"status": "running"},
 	}); err != nil {
 		t.Fatalf("seed step: %v", err)
@@ -1667,7 +1667,7 @@ func TestRuntimeOrchestrator_CompletedStepStateAndCheckpointWritesConcurrently(t
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
-	if updatedStep.State != common.StepStateCompleted {
+	if updatedStep.State != common.StepStateSucceeded {
 		t.Fatalf("step state = %s, want completed", updatedStep.State)
 	}
 	checkpoints, err := checkpointRepo.ListByRun(ctx, runID)
@@ -1699,7 +1699,7 @@ func TestRuntimeOrchestrator_StartRunDispatchReusesLoadedRun(t *testing.T) {
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1734,7 +1734,7 @@ func TestRuntimeOrchestrator_StartRunDispatchReusesLoadedWorkspace(t *testing.T)
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1790,7 +1790,7 @@ func TestRuntimeOrchestrator_ResumeRunDispatchReusesSyncedWorkspace(t *testing.T
 		ID:                   workspaceID,
 		Title:                "ws",
 		DeliverableDirectory: t.TempDir(),
-		State:                common.WorkspaceStateWaitingDecision,
+		State:                common.WorkspaceStateActive,
 		ActiveRunID:          runID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -1809,7 +1809,7 @@ func TestRuntimeOrchestrator_ResumeRunDispatchReusesSyncedWorkspace(t *testing.T
 		ID:    blockStepID,
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspaceExecution,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			stepOutputKeyNextStep: string(nextStepID),
 			stepOutputKeyNextKind: llmcommon.StepKindWorkspaceExecution,
@@ -1890,7 +1890,7 @@ func TestRuntimeOrchestrator_GraphBatchDispatchReusesLoadedWorkspace(t *testing.
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1934,10 +1934,10 @@ func TestRuntimeOrchestrator_ExecutionContextPackageIncludesRecentFailureSummary
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           "dod-context-package-failure",
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, run); err != nil {
@@ -2466,10 +2466,10 @@ func TestRuntimeOrchestrator_ExecutionContextPackageSkipsInitialStepFailureHisto
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           "dod-context-package-initial",
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, run); err != nil {
@@ -2515,10 +2515,10 @@ func TestRuntimeOrchestrator_ExecutionContextPackageSkipsFailureHistoryForNormal
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           "dod-context-package-normal-follow-up",
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, run); err != nil {
@@ -2559,7 +2559,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageBuildsIndependentContextRead
 	run := &runmodel.Run{
 		ID:          "run-context-package-concurrent",
 		WorkspaceID: "ws-context-package-concurrent",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	step := &runmodel.Step{
 		ID:    "run-context-package-concurrent/step-1",

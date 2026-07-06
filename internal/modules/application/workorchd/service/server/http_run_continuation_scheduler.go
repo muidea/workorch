@@ -328,7 +328,7 @@ func (s *runContinuationScheduler) runHasResolvedApproval(ctx context.Context, w
 		if item.ID == approvalID &&
 			item.WorkspaceID == workspaceID &&
 			item.RunID == runID &&
-			(item.State == string(common.ApprovalStateApproved) || item.State == string(common.ApprovalStateRejected) || item.State == string(common.ApprovalStateResolved)) {
+			(item.State == string(common.ApprovalStateApproved) || item.State == string(common.ApprovalStateRejected) || item.State == string(common.ApprovalStateSuperseded)) {
 			return true
 		}
 	}
@@ -515,14 +515,14 @@ func (s *runContinuationScheduler) recoverReplanContinuations(ctx context.Contex
 func workspaceNeedsReplanContinuationRecovery(workspace appservice.Workspace) bool {
 	state := common.WorkspaceState(strings.TrimSpace(workspace.State))
 	activeRunID := strings.TrimSpace(workspace.ActiveRunID)
-	if state == common.WorkspaceStateFailed && activeRunID == "" {
+	if state == common.WorkspaceStateActive && activeRunID == "" {
 		return true
 	}
 	if activeRunID == "" {
 		return false
 	}
 	switch state {
-	case common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked:
+	case common.WorkspaceStateActive, common.WorkspaceStateBlockedOnApproval:
 		return true
 	default:
 		return false
@@ -1155,7 +1155,7 @@ func (s *runContinuationScheduler) runContinuationConfirmedAdvanced(ctx context.
 	}
 	switch action {
 	case "start":
-		if common.RunState(readback.State) != common.RunStateCreated {
+		if common.RunState(readback.State) != common.RunStatePending {
 			readbackDiagnostic.Advanced = true
 			readbackDiagnostic.Reason = "run_state_advanced"
 			return true, "", readbackDiagnostic
@@ -1331,7 +1331,7 @@ func (s *runContinuationScheduler) runContinuationStillNeedsWork(ctx context.Con
 		}
 		switch strings.TrimSpace(req.Action) {
 		case "start":
-			return common.RunState(run.State) == common.RunStateCreated
+			return common.RunState(run.State) == common.RunStatePending
 		case "resume":
 			switch common.RunState(run.State) {
 			case common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:

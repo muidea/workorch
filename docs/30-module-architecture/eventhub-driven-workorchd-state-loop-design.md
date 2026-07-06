@@ -70,7 +70,7 @@ internal/modules/application/workorchd/service/server/http_workspace.go
 - `/run restart` 实际调用的是 workspace execution activation。
 - activation 逻辑在 workspace 已有 active non-terminal run 时，可能直接返回现有 run snapshot，而不是生成 restart/supersede/replacement request。
 - 这条路径没有进入统一调度队列，也没有和 replan/decision continuation 使用同一套事件驱动循环。
-- 因此在多 workspace、waiting decision、blocked、running 交错时，restart 容易表现为“请求成功但状态未变化”或“端侧认为提交了但后端没有新的执行动作”。
+- 因此在多 workspace、blocked_on_decision、blocked、running 交错时，restart 容易表现为“请求成功但状态未变化”或“端侧认为提交了但后端没有新的执行动作”。
 
 ### REST Run Start/Resume Path
 
@@ -89,7 +89,7 @@ internal/modules/application/workorchd/service/server/http_workspace.go
 - `workspaceviewcore.Manager` 订阅 WorkOrch owner events，并维护服务端 ViewModel projection。
 - `serverState.registerAutoGovernanceResumeWatcher` 订阅 auto-governance resolved event。
 - `serverState.registerReplanContinuationWatcher` 已存在但当前为空逻辑。
-- `runContinuationScheduler` 管理 periodic stale dispatched runtime gap recovery、manual governance/replan/resume/restart continuation；服务启动只注册 periodic watchdog timer，不自动恢复历史 running run。resolved governance 必须由 decision/approval resolve 主路径发布 continuation command，不能依赖 watchdog 扫描兜底。
+- `runContinuationScheduler` 管理 periodic stale executing runtime gap recovery、manual governance/replan/resume/restart continuation；服务启动只注册 periodic watchdog timer，不自动恢复历史 running run。resolved governance 必须由 decision/approval resolve 主路径发布 continuation command，不能依赖 watchdog 扫描兜底。
 - Workspace activation/restart、run start/resume、governance continuation 和 replan continuation 已统一通过 workorchd scheduler command handler 入队。同步 command 只有在 scheduler owner 返回明确 accepted response 且后台 work item 已成功提交后，REST/TUI 才能报告 accepted。
 - Embedded EventHub backend 的 `Run().Command` 已同步收口到同一 accepted
   语义：只有收到 `workorchd/scheduler` 返回的 `<topic>/accepted` 且
@@ -216,7 +216,7 @@ workorchd 内部 pending queue 必须满足：
   diagnostic，由用户通过 `/run resume`、`/run restart` 或对应 REST command
   重新激活。
 - watchdog 不能补偿 EventHub command/result 丢失或自动创建 replan
-  continuation；它只允许处理幂等、外部调用可能超时的 stale dispatched
+  continuation；它只允许处理幂等、外部调用可能超时的 stale executing
   runtime gap，并必须输出可观测诊断。
 
 ### Lane Rule
@@ -379,7 +379,7 @@ Web/TUI
   - 保留 BackgroundRoutine worker 和并发 slot 管理。
   - pending queue 改成 work item model，支持 continuation/replan/restart/start/resume 多类型。
   - 由 EventHub subscriber 入队，不由 HTTP handler 直接调用。
-  - 服务重启后不恢复旧进程 pending；watchdog 只处理幂等 stale dispatched
+  - 服务重启后不恢复旧进程 pending；watchdog 只处理幂等 stale executing
     runtime gap，并记录 diagnostic。
 - `http_types.go`
   - `registerReplanContinuationWatcher` 补齐或替换为统一 scheduler command subscriber。
@@ -464,7 +464,7 @@ Web/TUI
 
 - TUI `/decision replan` 提交后，后端必须出现 governance continuation requested event 和 pending/started worker evidence。
 - TUI `/run restart` 不再调用 activation-only path；必须创建 restart command event。
-- 多 workspace 同时处于 waiting_decision 时，分别 replan 后都能形成独立 pending key 并被执行。
+- 多 workspace 同时存在 `blocked_on_decision` active run / decision prompt 时，分别 replan 后都能形成独立 pending key 并被执行。
 - 服务重启后，resolved decision 但无 successor/resume 的 workspace 不自动重建
   replan pending；projection / scheduler diagnostics 必须提示需要 manual retry，
   用户重新提交 `/run resume`、`/run restart` 或 decision/replan command 后才入队。
@@ -502,7 +502,7 @@ Closure evidence:
 - 将当前 governance/replan continuation pending map 收口为统一 work item entry。
 - 支持 governance continuation、run continuation、workspace restart、workspace activation、run start/resume。
 - pending clear 必须基于 owner state still-needs-work 判定。
-- 服务重启后不恢复旧进程 pending；watchdog 只处理幂等 stale dispatched
+- 服务重启后不恢复旧进程 pending；watchdog 只处理幂等 stale executing
   runtime gap，不自动创建 replan/governance continuation。
 
 ### Phase 4: REST/TUI/Web Command Path Migration
@@ -517,7 +517,7 @@ Closure evidence:
 - 运行受影响包测试。
 - 运行全量 `go test ./... -p 1 -count=1`。
 - 使用自动管理服务执行 deployed e2e。
-- 在真实多 workspace 场景验证两个 waiting decision workspace 分别 replan 后都能入队并推进。
+- 在真实多 workspace 场景验证两个 blocked_on_decision workspace 分别 replan 后都能入队并推进。
 - 观测 CPU/IO，确认没有因为丢失 command 进入高频扫描或重复 fan-out。
 
 ## Acceptance Criteria
@@ -528,7 +528,7 @@ Closure evidence:
 - pending work item 按 workspace scoped key 管理，不同 workspace 的同名 run/ticket 不串扰。
 - 服务重启后，resolved governance blocker 与 superseded replan predecessor 不自动由
   recovery 重建 pending；它们必须投影为 explicit diagnostic / manual retry。
-  stale dispatched runtime gap 可由 watchdog 进行幂等恢复；stale running 但无
+  stale executing runtime gap 可由 watchdog 进行幂等恢复；stale active 但无
   外部 runtime gap 证据时不得被 watchdog 当作自动 replan/restart 入口。
 - `/run restart` 语义明确为 restart/replacement intent，不再等价于普通 activation 返回现有 active run。
 - Web/TUI prompt、主视图、workspace list 的最终状态只来自 workorchd projection。
@@ -540,7 +540,7 @@ Closure evidence:
    - 推荐：执行推动类接口采用 accepted + projection refresh；查询/owner read 仍同步返回。
 
 2. restart 的旧 active run 应默认 supersede、cancel，还是根据 run state 分流？
-   - 推荐：restart command 使用中立 policy：running/dispatched 先 request supersede/cancel；waiting_decision/waiting_approval/blocked 直接创建 replacement lineage；具体可由 owner state transition 返回是否允许。
+   - 推荐：restart command 使用中立 policy：active/executing 先 request supersede/cancel；blocked_on_decision/blocked_on_approval 直接创建 replacement lineage；具体可由 owner state transition 返回是否允许。Supersede 应走 orchestrator owner command path，避免 run command 再嵌套发布 orchestrator command。
 
 3. pending queue 是否需要持久化实体？
    - 当前推荐：短期以内存 pending + scheduler diagnostic + manual retry 闭环。

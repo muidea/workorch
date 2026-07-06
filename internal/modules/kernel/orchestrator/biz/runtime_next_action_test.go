@@ -163,7 +163,7 @@ func TestNextActionForRunMissingGapBaselineRequestsAssessment(t *testing.T) {
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestNextActionForRunEmptyCoverageLedgerRequestsGapRebuild(t *testing.T) {
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 		},
@@ -236,7 +236,7 @@ func TestDeriveMissingGapBaselineNextActionSkipsExistingBaselineAndTerminalRuns(
 	run := &runmodel.Run{
 		ID:          "run-gap-rule",
 		WorkspaceID: "ws-gap-rule",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	if action, ok := deriveMissingGapBaselineNextAction(run); !ok || action.Type != runtimemodel.NextActionTypeAssessGap {
 		t.Fatalf("derive missing gap baseline = %+v/%v, want assess_gap", action, ok)
@@ -286,7 +286,7 @@ func TestNextActionForRunMissingStateChangeRequestsStateChange(t *testing.T) {
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 		},
@@ -351,7 +351,7 @@ func TestNextActionForRunMissingStateChangeAcquiresTargetSnapshotFirst(t *testin
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			"repairActionPackage": map[string]any{
@@ -428,7 +428,7 @@ func TestNextActionForRunStateChangeWithCurrentFailureTargetAcquiresSnapshotFirs
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			"repairActionPackage": map[string]any{
@@ -499,7 +499,7 @@ func TestNextActionForRunHydratesAcceptedTargetSnapshotEvidenceBeforeStateChange
 	run := &runmodel.Run{
 		ID:                 runID,
 		WorkspaceID:        workspaceID,
-		State:              common.RunStateRunning,
+		State:              common.RunStateActive,
 		DefinitionRevision: "rev-accepted-snapshot",
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
@@ -533,7 +533,7 @@ func TestNextActionForRunHydratesAcceptedTargetSnapshotEvidenceBeforeStateChange
 		ID:    "run-next-action-accepted-snapshot/read-target",
 		RunID: runID,
 		Kind:  "file/read",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphRootStepID: "run-next-action-accepted-snapshot/root",
 			stepInputKeyGraphNodeID:     "read-target",
@@ -607,7 +607,7 @@ func TestNextActionForRunIgnoresAcceptedTargetSnapshotAfterLaterAppliedPatch(t *
 	run := &runmodel.Run{
 		ID:                 runID,
 		WorkspaceID:        workspaceID,
-		State:              common.RunStateRunning,
+		State:              common.RunStateActive,
 		DefinitionRevision: "rev-stale-snapshot",
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
@@ -641,7 +641,7 @@ func TestNextActionForRunIgnoresAcceptedTargetSnapshotAfterLaterAppliedPatch(t *
 		ID:    "run-next-action-stale-snapshot/read-target",
 		RunID: runID,
 		Kind:  "file/read",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"stage":            "file_read",
 			"path":             "target.txt",
@@ -698,7 +698,7 @@ func TestDeriveAcquireTargetSnapshotNextActionSkipsWhenSnapshotExists(t *testing
 	run := &runmodel.Run{
 		ID:          "run-acquire-snapshot-skip",
 		WorkspaceID: "ws-acquire-snapshot-skip",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"repairActionPackage": map[string]any{
 				"requiresCurrentTargetSnapshotForStateChange": true,
@@ -729,7 +729,7 @@ func TestDeriveMissingStateChangeNextActionSkipsInactiveOrSatisfiedItems(t *test
 	run := &runmodel.Run{
 		ID:          "run-state-change-rule",
 		WorkspaceID: "ws-state-change-rule",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	items := []map[string]any{
 		{
@@ -787,7 +787,7 @@ func TestNextActionForRunMissingValidationRequestsValidation(t *testing.T) {
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
@@ -842,7 +842,7 @@ func TestNextActionForRunValidationPolicyDecisionDoesNotOverrideLedgerActionWith
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			"validationPolicies": []map[string]any{{
@@ -902,7 +902,7 @@ func TestNextActionForRunValidationImplementationGapRequestsStateChange(t *testi
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
@@ -978,7 +978,7 @@ func TestNextActionForRunNoDeltaValidationLoopRequestsStateChange(t *testing.T) 
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
@@ -1051,7 +1051,7 @@ func TestNextActionForRunRejectedValidationEvidenceLoopRequestsStateChange(t *te
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
@@ -1126,7 +1126,7 @@ func TestNextActionForRunValidationLoopRoutesStateChangeDespiteLatestContractDia
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
@@ -1216,7 +1216,7 @@ func TestNextActionForRunNoDeltaValidationLoopResetsAfterAcceptedStateChange(t *
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
@@ -1296,7 +1296,7 @@ func TestNextActionForRunNoDeltaValidationLoopIgnoresUnboundAcceptedRuntimeEvide
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
@@ -1395,7 +1395,7 @@ func TestNextActionForRunValidationContractRetryExhaustedFailsFast(t *testing.T)
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			"validationPolicies": []map[string]any{{
@@ -1470,7 +1470,7 @@ func TestNextActionForRunValidationCommandContractRetryExhaustsByClass(t *testin
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
@@ -1542,7 +1542,7 @@ func TestDeriveMissingValidationNextActionSkipsWhenStateChangeHasPriority(t *tes
 	run := &runmodel.Run{
 		ID:          "run-validation-rule",
 		WorkspaceID: "ws-validation-rule",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	items := []map[string]any{{
 		"id":                    "cwi-both",
@@ -1596,7 +1596,7 @@ func TestNextActionForRunRecoverableDiagnosticRequestsRepair(t *testing.T) {
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 		},
@@ -1663,7 +1663,7 @@ func TestNextActionForRunEvidenceGapPreemptsRecoverableDiagnostic(t *testing.T) 
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
@@ -1701,7 +1701,7 @@ func TestDeriveRecoverableDiagnosticNextActionSkipsDecisionRequiredAndSuperseded
 	run := &runmodel.Run{
 		ID:          "run-diagnostic-rule",
 		WorkspaceID: "ws-diagnostic-rule",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	records := []*runtimemodel.EvidenceRecord{
 		{
@@ -1764,7 +1764,7 @@ func TestDeriveRecoverableDiagnosticNextActionSkipsConsumedDiagnostic(t *testing
 	run := &runmodel.Run{
 		ID:          "run-diagnostic-consumed",
 		WorkspaceID: "ws-diagnostic-consumed",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	records := []*runtimemodel.EvidenceRecord{
 		{
@@ -1829,7 +1829,7 @@ func TestNextActionForRunAllSatisfiedRequestsComplete(t *testing.T) {
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
@@ -1891,7 +1891,7 @@ func TestNextActionForRunAllSatisfiedPreemptsRecoverableDiagnostic(t *testing.T)
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
@@ -1950,7 +1950,7 @@ func TestNextActionForRunSatisfiedAcceptedItemSkipsAssessmentAndSelectsNextFocus
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 			coverageWorkItemsKey: []map[string]any{{
@@ -2012,7 +2012,7 @@ func TestNextActionForRunEvidenceReadyAcceptedBindingClosesDeterministically(t *
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 		},
@@ -2090,7 +2090,7 @@ func TestNextActionForRunEvidenceReadyWithoutBindingStillRequiresValidation(t *t
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			gapBaselineKey: map[string]any{"schemaVersion": gapBaselineSchema, "baselineRevision": "gap-present"},
 		},
@@ -2130,7 +2130,7 @@ func TestDeriveAllSatisfiedCompleteNextActionRequiresSatisfiedAcceptedEvidence(t
 	run := &runmodel.Run{
 		ID:          "run-complete-rule",
 		WorkspaceID: "ws-complete-rule",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	if action, ok := deriveAllSatisfiedCompleteNextAction(run, nil); ok || action.Type != "" {
 		t.Fatalf("derive empty ledger = %+v/%v, want no complete", action, ok)
@@ -2159,7 +2159,7 @@ func TestDeriveAllSatisfiedCompleteNextActionRequiresSatisfiedAcceptedEvidence(t
 		t.Fatalf("derive complete = %+v/%v, want complete", action, ok)
 	}
 
-	run.State = common.RunStateCreated
+	run.State = common.RunStatePending
 	if action, ok := deriveAllSatisfiedCompleteNextAction(run, items); ok || action.Type != "" {
 		t.Fatalf("derive created run = %+v/%v, want no complete before running/validating", action, ok)
 	}
@@ -2230,7 +2230,7 @@ func mustCreateWorkspaceForNextAction(t *testing.T, ctx context.Context, repo *m
 	t.Helper()
 	if err := repo.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: runID,
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)

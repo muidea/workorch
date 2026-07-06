@@ -5,10 +5,7 @@ import (
 )
 
 func selectWorkspaceOutcomeRun(snapshot readmodelcore.WorkspaceSnapshot) *readmodelcore.Run {
-	var selectedRun *readmodelcore.Run
-	if IsTerminalProjectionState(snapshot.Workspace.State) {
-		selectedRun = latestWorkspaceRunForOutcome(snapshot)
-	}
+	selectedRun := latestWorkspaceRunForOutcome(snapshot)
 	if selectedRun == nil && snapshot.TaskProgress.RunID != "" {
 		selectedRun = workspaceRunByID(snapshot, snapshot.TaskProgress.RunID)
 	}

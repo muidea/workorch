@@ -11,7 +11,7 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 	snapshot := readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{
 			ID:               "ws-map",
-			State:            string(common.WorkspaceStateRunning),
+			State:            string(common.WorkspaceStateActive),
 			ActiveRunID:      "run-map",
 			BlockingTicketID: "ticket-map",
 		},
@@ -38,7 +38,7 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 		ConvergenceStatus: &readmodelcore.ConvergenceStatus{
 			WorkspaceID:                "ws-map",
 			RunID:                      "run-map",
-			RunState:                   string(common.RunStateRunning),
+			RunState:                   string(common.RunStateActive),
 			NextActionKind:             "produce_evidence",
 			RetryBudgetScope:           map[string]any{"focus": map[string]any{"id": "focus-1"}},
 			MissingEvidenceKinds:       []string{"artifact"},
@@ -63,7 +63,7 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 		Runs: []readmodelcore.Run{{
 			ID:               "run-map",
 			WorkspaceID:      "ws-map",
-			State:            string(common.RunStateRunning),
+			State:            string(common.RunStateActive),
 			ExecutionContext: map[string]any{"goal": map[string]any{"text": "goal"}},
 		}},
 		Decisions: []readmodelcore.Decision{{

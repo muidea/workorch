@@ -457,13 +457,13 @@ func ResumeRun(be backend.Backend, workspaceID string, runID string, operatorInp
 				return RunControlMsg{Run: run, WorkspaceID: workspaceID, Error: err}
 			}
 			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Run resume accepted; refreshing workspace state."}
-		case common.RunStateRunning:
+		case common.RunStateActive:
 			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is already running; refreshing workspace state."}
 		case common.RunStateBlockedOnDecision:
 			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is waiting for decision; answer the decision before resuming."}
 		case common.RunStateBlockedOnApproval:
 			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is waiting for approval; resolve the approval before resuming."}
-		case common.RunStateCreated:
+		case common.RunStatePending:
 			resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
 				WorkspaceID:           wsID,
 				ExpectedRunID:         run.ID,
@@ -476,8 +476,6 @@ func ResumeRun(be backend.Backend, workspaceID string, runID string, operatorInp
 				return RunControlMsg{Run: run, WorkspaceID: workspaceID, Error: err}
 			}
 			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Resuming workspace execution"}
-		case common.RunStateValidating:
-			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is validating; refreshing workspace state."}
 		default:
 			resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
 				WorkspaceID:           wsID,

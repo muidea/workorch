@@ -509,7 +509,7 @@ func TestValidateLLMRepairCoverageFocusNormalizesSingleFocusPatchTarget(t *testi
 		ID:    "run-repair-focus-contract/repair-version-001",
 		RunID: "run-repair-focus-contract",
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: input,
 	}
 	output := map[string]any{
@@ -579,7 +579,7 @@ func repairFocusEvidenceContractStep() *runmodel.Step {
 		ID:    "run-repair-focus-contract/repair-evidence-001",
 		RunID: "run-repair-focus-contract",
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: input,
 	}
 }
@@ -588,7 +588,7 @@ func repairFocusContractRun() *runmodel.Run {
 	return &runmodel.Run{
 		ID:              "run-repair-focus-contract",
 		WorkspaceID:     "ws-repair-focus-contract",
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}
 }
@@ -600,7 +600,7 @@ func repairFocusContractStep() *runmodel.Step {
 		ID:    "run-repair-focus-contract/repair-001",
 		RunID: "run-repair-focus-contract",
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: input,
 	}
 }

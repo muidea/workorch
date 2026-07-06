@@ -59,7 +59,7 @@ func TestNextGraphStepInputRendersDependencyOutputTemplates(t *testing.T) {
 		ID:    "run-render/block/get-weather",
 		RunID: "run-render",
 		Kind:  shellcommon.StepKindCommand,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphRootStepID: string(rootStepID),
 			stepInputKeyGraphNodeID:     "get_weather",
@@ -98,7 +98,7 @@ func TestNextGraphStepInputRefreshesStaleRunCoverageFocusBeforeValidationDispatc
 	run := &runmodel.Run{
 		ID:          "run-graph-focus",
 		WorkspaceID: "ws-graph-focus",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"definitionRevision": "rev-graph-focus",
 			"missingGoalCoverage": []map[string]any{
@@ -266,7 +266,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchConflictDiagnosticsA
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-patch-conflict-repair"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -559,7 +559,7 @@ func TestRuntimeOrchestrator_PatchApplyDuplicateFailureContinuesMechanicalRepair
 		ID:    common.StepID(string(runID) + "/repair-001-of-graph-001-001-apply"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyRuntimeRepairFollowUp: true,
 			stepInputKeyRepairOfFailureClass:  failureClassPatchApply,
@@ -2032,7 +2032,7 @@ func TestRuntimeOrchestrator_RuntimeRepairKeepsCurrentPatchFailureOverRejectedCo
 		ID:                   workspaceID,
 		Title:                "ws",
 		DeliverableDirectory: deliverableDirectory,
-		State:                common.WorkspaceStateRunning,
+		State:                common.WorkspaceStateActive,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -3777,7 +3777,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputUsesProgressFailureTargetSnapshot
 		ID:                   workspaceID,
 		Title:                "ws",
 		DeliverableDirectory: deliverableDirectory,
-		State:                common.WorkspaceStateRunning,
+		State:                common.WorkspaceStateActive,
 		ActiveRunID:          runID,
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)

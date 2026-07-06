@@ -18,7 +18,7 @@ func TestInitialStepInputAttachesMinimalStagePacket(t *testing.T) {
 		DoDID:              common.DoDID("dod-stage-packet"),
 		DefinitionRevision: "rev-stage-packet",
 		InitialStepKind:    llmWorkspaceExecutionStepKind,
-		State:              common.RunStateRunning,
+		State:              common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"definitionRevision": "rev-stage-packet",
 			"repairActionPackage": map[string]any{
@@ -92,7 +92,7 @@ func TestStagePacketActiveFocusExposesStructuredCoverageRefs(t *testing.T) {
 		ID:              common.RunID("run-stage-packet-structured-focus"),
 		WorkspaceID:     common.WorkspaceID("ws-stage-packet-structured-focus"),
 		InitialStepKind: llmWorkspaceExecutionStepKind,
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"definitionRevision": "rev-stage-packet-structured-focus",
 			"dod": map[string]any{
@@ -133,7 +133,7 @@ func TestStagePacketUsesOnlyAuthorityCurrentFocusWhenStaleFocusExists(t *testing
 		GoalID:             common.GoalID("goal-stage-packet-authority"),
 		DoDID:              common.DoDID("dod-stage-packet-authority"),
 		DefinitionRevision: "rev-stage-packet-authority",
-		State:              common.RunStateRunning,
+		State:              common.RunStateActive,
 	}
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{
@@ -188,7 +188,7 @@ func TestStagePacketCarriesCurrentNextActionAuthority(t *testing.T) {
 	run := &runModel.Run{
 		ID:          common.RunID("run-stage-packet-next-action"),
 		WorkspaceID: common.WorkspaceID("ws-stage-packet-next-action"),
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{
@@ -248,7 +248,7 @@ func TestStagePacketCarriesCurrentFailureDiagnostic(t *testing.T) {
 	run := &runModel.Run{
 		ID:          common.RunID("run-stage-packet-current-failure"),
 		WorkspaceID: common.WorkspaceID("ws-stage-packet-current-failure"),
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	input := map[string]any{
 		"currentFailure": map[string]any{
@@ -281,7 +281,7 @@ func TestStagePacketDerivesCurrentFailureFromCoverageGap(t *testing.T) {
 	run := &runModel.Run{
 		ID:          common.RunID("run-stage-packet-coverage-gap"),
 		WorkspaceID: common.WorkspaceID("ws-stage-packet-coverage-gap"),
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	input := map[string]any{
 		stepInputKeyRuntimeRepairFollowUp: true,
@@ -328,7 +328,7 @@ func TestStagePacketDerivesCurrentFailureFromContractViolationRecovery(t *testin
 	run := &runModel.Run{
 		ID:          common.RunID("run-stage-packet-contract-violation"),
 		WorkspaceID: common.WorkspaceID("ws-stage-packet-contract-violation"),
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	input := map[string]any{
 		stepInputKeyContractViolationRecovery: map[string]any{
@@ -369,7 +369,7 @@ func TestStagePacketCarriesCurrentGapFromAuthorityFocus(t *testing.T) {
 	run := &runModel.Run{
 		ID:          common.RunID("run-stage-packet-current-gap"),
 		WorkspaceID: common.WorkspaceID("ws-stage-packet-current-gap"),
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{
@@ -415,7 +415,7 @@ func TestStagePacketExplicitCurrentGapPreemptsProgressDigest(t *testing.T) {
 	run := &runModel.Run{
 		ID:          common.RunID("run-stage-packet-explicit-gap"),
 		WorkspaceID: common.WorkspaceID("ws-stage-packet-explicit-gap"),
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	input := map[string]any{
 		"currentGap": map[string]any{
@@ -443,7 +443,7 @@ func TestStagePacketDerivesCurrentGapFromProgressDigest(t *testing.T) {
 	run := &runModel.Run{
 		ID:          common.RunID("run-stage-packet-progress-gap"),
 		WorkspaceID: common.WorkspaceID("ws-stage-packet-progress-gap"),
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	input := map[string]any{
 		stepInputKeyCurrentProgressDigest: map[string]any{
@@ -470,7 +470,7 @@ func TestStagePacketCarriesProcessEvidenceTimeline(t *testing.T) {
 	run := &runModel.Run{
 		ID:          common.RunID("run-stage-packet-timeline"),
 		WorkspaceID: common.WorkspaceID("ws-stage-packet-timeline"),
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	input := map[string]any{
 		stepInputKeyProcessEvidenceTimeline: []map[string]any{{
@@ -541,7 +541,7 @@ func TestStagePacketCarriesTemplatePolicyRefs(t *testing.T) {
 	run := &runModel.Run{
 		ID:          common.RunID("run-stage-packet-policy-refs"),
 		WorkspaceID: common.WorkspaceID("ws-stage-packet-policy-refs"),
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"templatePolicyRefs": []string{"policy://run-bound"},
 		},
@@ -569,7 +569,7 @@ func TestStagePacketCarriesTemplatePolicyRefs(t *testing.T) {
 	withoutRefs := buildStagePacketFromStepInput(&runModel.Run{
 		ID:          run.ID,
 		WorkspaceID: run.WorkspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}, "step-stage-packet-policy-refs", map[string]any{}).ToMap()
 	if packet["idempotencyKey"] == withoutRefs["idempotencyKey"] {
 		t.Fatalf("idempotencyKey = %v, want templatePolicyRefs to affect stage packet identity", packet["idempotencyKey"])
@@ -580,7 +580,7 @@ func TestStagePacketCarriesCompactSummaryRef(t *testing.T) {
 	run := &runModel.Run{
 		ID:          common.RunID("run-stage-packet-summary-ref"),
 		WorkspaceID: common.WorkspaceID("ws-stage-packet-summary-ref"),
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	input := map[string]any{
 		"executionContext": map[string]any{
@@ -617,7 +617,7 @@ func TestStagePacketCarriesMemoryRefs(t *testing.T) {
 	run := &runModel.Run{
 		ID:          common.RunID("run-stage-packet-memory-refs"),
 		WorkspaceID: common.WorkspaceID("ws-stage-packet-memory-refs"),
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	input := map[string]any{
 		"memoryRefs": []string{"memory://explicit"},
@@ -665,7 +665,7 @@ func TestFollowUpStepInputRebuildsStagePacketAfterNextInputMutation(t *testing.T
 		GoalID:             common.GoalID("goal-follow-up"),
 		DoDID:              common.DoDID("dod-follow-up"),
 		DefinitionRevision: "rev-follow-up",
-		State:              common.RunStateRunning,
+		State:              common.RunStateActive,
 		ExecutionContext: map[string]any{
 			coverageWorkItemContextKey: map[string]any{
 				"definitionRevision": "rev-follow-up",

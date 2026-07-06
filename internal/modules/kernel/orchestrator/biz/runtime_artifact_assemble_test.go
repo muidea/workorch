@@ -364,7 +364,7 @@ func TestHandleArtifactOutputContinuationCreatesPlanAndDispatchesChunk(t *testin
 	stepRepo := memory.NewStepRepository()
 	runRepo := memory.NewRunRepository()
 	workspaceRepo := memory.NewWorkspaceRepository()
-	run := &runmodel.Run{ID: "run-artifact-plan-dispatch", WorkspaceID: "ws-artifact-plan-dispatch", InitialStepKind: llmWorkspaceExecutionStepKind, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: "run-artifact-plan-dispatch", WorkspaceID: "ws-artifact-plan-dispatch", InitialStepKind: llmWorkspaceExecutionStepKind, State: common.RunStateActive}
 	step := &runmodel.Step{
 		ID:    "run-artifact-plan-dispatch/001-plan",
 		RunID: run.ID,
@@ -377,7 +377,7 @@ func TestHandleArtifactOutputContinuationCreatesPlanAndDispatchesChunk(t *testin
 			},
 		},
 	}
-	workspace := &workspacemodel.Workspace{ID: run.WorkspaceID, Title: "ws", State: common.WorkspaceStateRunning, DeliverableDirectory: t.TempDir()}
+	workspace := &workspacemodel.Workspace{ID: run.WorkspaceID, Title: "ws", State: common.WorkspaceStateActive, DeliverableDirectory: t.TempDir()}
 	if err := stepRepo.Create(ctx, step); err != nil {
 		t.Fatalf("seed step: %v", err)
 	}
@@ -449,7 +449,7 @@ func TestHandleArtifactOutputContinuationRecordsChunkAndDispatchesAssemble(t *te
 	stepRepo := memory.NewStepRepository()
 	runRepo := memory.NewRunRepository()
 	workspaceRepo := memory.NewWorkspaceRepository()
-	run := &runmodel.Run{ID: "run-artifact-chunk-dispatch", WorkspaceID: "ws-artifact-chunk-dispatch", InitialStepKind: llmWorkspaceExecutionStepKind, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: "run-artifact-chunk-dispatch", WorkspaceID: "ws-artifact-chunk-dispatch", InitialStepKind: llmWorkspaceExecutionStepKind, State: common.RunStateActive}
 	item := newArtifactContinuationForAssembleTest()
 	item.ID = "artifact-continuation-chunk-dispatch"
 	item.WorkspaceID = run.WorkspaceID
@@ -470,7 +470,7 @@ func TestHandleArtifactOutputContinuationRecordsChunkAndDispatchesAssemble(t *te
 		Input: artifactContinuationNextStepInput(nil, item),
 	}
 	deliverableDir := t.TempDir()
-	workspace := &workspacemodel.Workspace{ID: run.WorkspaceID, Title: "ws", State: common.WorkspaceStateRunning, DeliverableDirectory: deliverableDir}
+	workspace := &workspacemodel.Workspace{ID: run.WorkspaceID, Title: "ws", State: common.WorkspaceStateActive, DeliverableDirectory: deliverableDir}
 	if err := stepRepo.Create(ctx, step); err != nil {
 		t.Fatalf("seed step: %v", err)
 	}
@@ -552,7 +552,7 @@ func TestHandleArtifactOutputContinuationApplyUpdatesCoverageWorkItems(t *testin
 		ID:              "run-artifact-coverage-update",
 		WorkspaceID:     "ws-artifact-coverage-update",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"goal": map[string]any{"text": "produce primary deliverable"},
 			"executionContract": map[string]any{
@@ -588,7 +588,7 @@ func TestHandleArtifactOutputContinuationApplyUpdatesCoverageWorkItems(t *testin
 		Input: artifactContinuationNextStepInput(nil, item),
 	}
 	deliverableDir := t.TempDir()
-	workspace := &workspacemodel.Workspace{ID: run.WorkspaceID, Title: "ws", State: common.WorkspaceStateRunning, DeliverableDirectory: deliverableDir}
+	workspace := &workspacemodel.Workspace{ID: run.WorkspaceID, Title: "ws", State: common.WorkspaceStateActive, DeliverableDirectory: deliverableDir}
 	if err := stepRepo.Create(ctx, step); err != nil {
 		t.Fatalf("seed step: %v", err)
 	}
@@ -648,7 +648,7 @@ func TestHandleArtifactOutputContinuationCompletesStepAfterValidModeContract(t *
 	stepRepo := memory.NewStepRepository()
 	runRepo := memory.NewRunRepository()
 	workspaceRepo := memory.NewWorkspaceRepository()
-	run := &runmodel.Run{ID: "run-artifact-complete-after-contract", WorkspaceID: "ws-artifact-complete-after-contract", InitialStepKind: llmWorkspaceExecutionStepKind, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: "run-artifact-complete-after-contract", WorkspaceID: "ws-artifact-complete-after-contract", InitialStepKind: llmWorkspaceExecutionStepKind, State: common.RunStateActive}
 	step := &runmodel.Step{
 		ID:    "run-artifact-complete-after-contract/001-plan",
 		RunID: run.ID,
@@ -665,7 +665,7 @@ func TestHandleArtifactOutputContinuationCompletesStepAfterValidModeContract(t *
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	workspace := &workspacemodel.Workspace{ID: run.WorkspaceID, Title: "ws", State: common.WorkspaceStateRunning, DeliverableDirectory: t.TempDir()}
+	workspace := &workspacemodel.Workspace{ID: run.WorkspaceID, Title: "ws", State: common.WorkspaceStateActive, DeliverableDirectory: t.TempDir()}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -707,7 +707,7 @@ func TestHandleArtifactOutputContinuationCompletesStepAfterValidModeContract(t *
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
-	if stored.State != common.StepStateCompleted {
+	if stored.State != common.StepStateSucceeded {
 		t.Fatalf("step state = %s, want completed after valid mode contract", stored.State)
 	}
 }
@@ -767,7 +767,7 @@ func TestResumeArtifactContinuationAfterContextGraphDispatchesNextChunk(t *testi
 	if err := continuations.Create(ctx, item); err != nil {
 		t.Fatalf("seed continuation: %v", err)
 	}
-	run := &runmodel.Run{ID: item.RunID, WorkspaceID: item.WorkspaceID, InitialStepKind: llmWorkspaceExecutionStepKind, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: item.RunID, WorkspaceID: item.WorkspaceID, InitialStepKind: llmWorkspaceExecutionStepKind, State: common.RunStateActive}
 	workspace := &workspacemodel.Workspace{ID: item.WorkspaceID, DeliverableDirectory: t.TempDir()}
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -805,7 +805,7 @@ func TestResumeArtifactContinuationAfterContextGraphDispatchesNextChunk(t *testi
 		Output: map[string]any{
 			stepOutputKeyExecutionGraph: map[string]any{"nodes": []map[string]any{{"id": "read", "kind": "file/read"}}},
 		},
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}
 	if err := stepRepo.Create(ctx, step); err != nil {
 		t.Fatalf("seed step: %v", err)
@@ -820,7 +820,7 @@ func TestResumeArtifactContinuationAfterContextGraphDispatchesNextChunk(t *testi
 			stepInputKeyGraphNodeID:     "read",
 		},
 		Output: map[string]any{"status": "completed", "summary": "read current artifact context"},
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 	}
 	if err := stepRepo.Create(ctx, graphStep); err != nil {
 		t.Fatalf("seed graph step: %v", err)

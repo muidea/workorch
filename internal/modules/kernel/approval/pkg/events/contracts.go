@@ -6,7 +6,10 @@ func Contracts() []eventcontract.Contract {
 	ret := []eventcontract.Contract{}
 	ret = append(ret, eventcontract.Build("approval", eventcontract.CommandClassNotify, eventcontract.LanePolicyState,
 		TopicApprovalCreated,
+		TopicApprovalApproved,
+		TopicApprovalRejected,
 		TopicApprovalResolved,
+		TopicApprovalSuperseded,
 	)...)
 	ret = append(ret, eventcontract.Build("approval", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
 		TopicApprovalCommandGet,

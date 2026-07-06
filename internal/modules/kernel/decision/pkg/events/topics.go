@@ -1,9 +1,14 @@
 package events
 
 const (
-	TopicTicketCreated  = "/ticket/created"
-	TopicTicketResolved = "/ticket/resolved"
-	TopicTicketUpdated  = "/ticket/updated"
+	TopicTicketCreated    = "/ticket/created"
+	TopicTicketResolved   = "/ticket/resolved"
+	TopicTicketSuperseded = "/ticket/superseded"
+	TopicTicketUpdated    = "/ticket/updated"
+
+	TopicDecisionTicketCreated    = "/decision_ticket/created"
+	TopicDecisionTicketResolved   = "/decision_ticket/resolved"
+	TopicDecisionTicketSuperseded = "/decision_ticket/superseded"
 
 	TopicDecisionCommandCreateTicket     = "/decision/command/create-ticket"
 	TopicDecisionCommandEnsureTicket     = "/decision/command/ensure-ticket"

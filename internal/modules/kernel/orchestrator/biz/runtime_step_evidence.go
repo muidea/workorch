@@ -99,7 +99,7 @@ func (o *RuntimeOrchestrator) recordToolCallCompleted(ctx context.Context, toolC
 }
 
 func (o *RuntimeOrchestrator) recordCompletedRuntimeStepEvidence(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any) error {
-	if step == nil || step.State != common.StepStateCompleted {
+	if step == nil || step.State != common.StepStateSucceeded {
 		return fmt.Errorf("%w: completed runtime step evidence requires completed step state", common.ErrConflict)
 	}
 	evidenceRef := ""
@@ -130,7 +130,7 @@ func (o *RuntimeOrchestrator) finalizeAcceptedRuntimeStep(ctx context.Context, r
 	if step.State == common.StepStateFailed {
 		return fmt.Errorf("%w: runtime step %s is already failed", common.ErrConflict, step.ID)
 	}
-	step.State = common.StepStateCompleted
+	step.State = common.StepStateSucceeded
 	step.Output = output
 	finalizeManagedValidationResourcesForStep(step, "released", "accepted_step")
 	if err := o.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, output); err != nil {
@@ -154,7 +154,7 @@ func (o *RuntimeOrchestrator) finalizeGovernedRuntimeStep(ctx context.Context, r
 	if step.State == common.StepStateFailed {
 		return fmt.Errorf("%w: runtime step %s is already failed", common.ErrConflict, step.ID)
 	}
-	step.State = common.StepStateCompleted
+	step.State = common.StepStateSucceeded
 	step.Output = output
 	finalizeManagedValidationResourcesForStep(step, "released", "governed_step")
 	if err := o.recordToolCallCompleted(ctx, toolCall, output, runDialogLanguage(run)); err != nil {

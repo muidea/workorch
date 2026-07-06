@@ -61,11 +61,12 @@ func TestService_CreateApproval_SeedsPendingState(t *testing.T) {
 	service := NewService(repo, nil)
 
 	cmd := approvalservice.CreateApprovalCommand{
-		ApprovalID:  common.ApprovalID("approval-1"),
-		WorkspaceID: common.WorkspaceID("ws-1"),
-		RunID:       common.RunID("run-1"),
-		StepID:      common.StepID("run-1/step-1"),
-		Reason:      "need human approval",
+		ApprovalID:     common.ApprovalID("approval-1"),
+		WorkspaceID:    common.WorkspaceID("ws-1"),
+		RunID:          common.RunID("run-1"),
+		StepID:         common.StepID("run-1/step-1"),
+		Reason:         "need human approval",
+		AutoGovernance: map[string]any{"policy": "manual"},
 	}
 	if err := service.CreateApproval(ctx, cmd); err != nil {
 		t.Fatalf("create approval: %v", err)
@@ -77,6 +78,9 @@ func TestService_CreateApproval_SeedsPendingState(t *testing.T) {
 	}
 	if approval.State != common.ApprovalStatePending {
 		t.Fatalf("approval state = %q, want pending", approval.State)
+	}
+	if approval.AutoGovernance["policy"] != "manual" {
+		t.Fatalf("approval auto governance = %+v", approval.AutoGovernance)
 	}
 }
 
@@ -249,7 +253,10 @@ func TestService_ResolveApproval_PendingTransitions(t *testing.T) {
 				t.Fatalf("create approval: %v", err)
 			}
 
-			if err := tc.resolve(service, ctx, approvalservice.ResolveApprovalCommand{ApprovalID: cmd.ApprovalID}); err != nil {
+			if err := tc.resolve(service, ctx, approvalservice.ResolveApprovalCommand{
+				ApprovalID: cmd.ApprovalID,
+				Context:    map[string]any{"actor": "operator"},
+			}); err != nil {
 				t.Fatalf("resolve approval: %v", err)
 			}
 
@@ -259,6 +266,9 @@ func TestService_ResolveApproval_PendingTransitions(t *testing.T) {
 			}
 			if approval.State != tc.wantState {
 				t.Fatalf("approval state = %q, want %q", approval.State, tc.wantState)
+			}
+			if approval.ResolvedAt == "" || approval.ResolvedBy != "operator" {
+				t.Fatalf("approval resolution audit fields = %+v", approval)
 			}
 		})
 	}

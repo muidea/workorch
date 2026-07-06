@@ -379,7 +379,7 @@ func TestApplyRuntimeRepairGraphEvidenceProjectionAddsTargetSnapshots(t *testing
 		ID:    "run-repair-graph-evidence/root",
 		RunID: run.ID,
 		Kind:  "llm",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			stepOutputKeyExecutionGraph: map[string]any{
 				"nodes": []map[string]any{{
@@ -393,7 +393,7 @@ func TestApplyRuntimeRepairGraphEvidenceProjectionAddsTargetSnapshots(t *testing
 		ID:    "run-repair-graph-evidence/read-config",
 		RunID: run.ID,
 		Kind:  "file/read",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphRootStepID: string(root.ID),
 			stepInputKeyGraphNodeID:     "read-config",
@@ -1390,7 +1390,7 @@ func TestRuntimeRepairCurrentExecutionProgressProjectsCoverageEvidenceAndAttempt
 			ID:    common.StepID(string(runID) + "/graph-001/001-build"),
 			RunID: runID,
 			Kind:  "shell/command",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				"stepSequence":              int64(1),
 				stepInputKeyGraphNodeID:     "build",

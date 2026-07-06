@@ -30,7 +30,7 @@ func TestRecordValidationResultWritesAcceptedAndRejectedEvidenceRecords(t *testi
 	passedStep := &runmodel.Step{
 		ID:     "run-validation-evidence/step-passed",
 		RunID:  run.ID,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"status": "ok"},
 	}
 	failedStep := &runmodel.Step{
@@ -141,7 +141,7 @@ func TestRecordCompletedRuntimeStepEvidenceWritesScopedStateChangeForDeclaredSta
 		ID:    "run-runtime-state-change-evidence/step-state-change",
 		RunID: run.ID,
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"stateChanging":       true,
 			"coverageFocusId":     "focus-cwi-001",
@@ -236,7 +236,7 @@ func TestRecordCompletedRuntimeStepEvidenceBindsGitWriteCommitFromRequiredOutput
 		ID:    "run-git-write-state-change-evidence/graph-001/002-git-commit",
 		RunID: run.ID,
 		Kind:  orchestratormodel.StepKindGitWrite,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"operation": "commit",
 			"message":   "record deliverable snapshot",
@@ -313,7 +313,7 @@ func TestRecordCompletedRuntimeStepEvidenceDoesNotWriteStateChangeForValidationO
 		ID:    "run-runtime-validation-only-evidence/step-validate",
 		RunID: run.ID,
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"coverageWorkItemIds": []string{"cwi-validate"},
 			"validationEvidence": map[string]any{
@@ -355,7 +355,7 @@ func TestRecordAcceptedTargetSnapshotEvidenceForCompletedFileRead(t *testing.T) 
 		ID:    "run-target-snapshot-evidence/read-target",
 		RunID: run.ID,
 		Kind:  "file/read",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphRootStepID: "run-target-snapshot-evidence/root",
 			stepInputKeyGraphNodeID:     "read-target-node",
@@ -477,7 +477,7 @@ func TestRecordAcceptedTargetSnapshotEvidenceRejectsUnsafeFileRead(t *testing.T)
 				ID:     common.StepID("run-unsafe-target-snapshot-evidence/" + name),
 				RunID:  run.ID,
 				Kind:   "file/read",
-				State:  common.StepStateCompleted,
+				State:  common.StepStateSucceeded,
 				Output: output,
 			}
 			if err := orch.recordAcceptedTargetSnapshotEvidenceForStep(ctx, run, step); err != nil {
@@ -595,7 +595,7 @@ func TestHandleRuntimeStepFailureRecordsRejectedDiagnosticEvidence(t *testing.T)
 		ID:     "run-diagnostic-failure-path/step-runtime-contract",
 		RunID:  run.ID,
 		Kind:   llmWorkspaceExecutionStepKind,
-		State:  common.StepStateDispatched,
+		State:  common.StepStateExecuting,
 		Input:  cloneStepPayload(contractViolationFailedStep(run.ID, "seed").Input),
 		Output: map[string]any{},
 	}

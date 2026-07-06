@@ -37,7 +37,7 @@ func TestRuntimeContextIntegrityGateFailureIsNotStateChangingRepair(t *testing.T
 
 	run := &runModel.Run{
 		ID:    common.RunID("run-ctx"),
-		State: common.RunStateRunning,
+		State: common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"completionGateRequired": true,
 		},
@@ -221,7 +221,7 @@ func TestRuntimeContextIntegrityGateCoverageTargetFailureCanRecover(t *testing.T
 
 	run := &runModel.Run{
 		ID:              common.RunID("run-ctx-coverage"),
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		DoDID:           "dod",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{
@@ -251,7 +251,7 @@ func TestBlockOnContextIntegrityGateRecordsRecommendedRecoveryAction(t *testing.
 	ticketRepo := memory.NewDecisionTicketRepository()
 	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{
 		ID:          workspaceID,
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: runID,
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -259,7 +259,7 @@ func TestBlockOnContextIntegrityGateRecordsRecommendedRecoveryAction(t *testing.
 	run := &runModel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("create run: %v", err)

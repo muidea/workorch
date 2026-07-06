@@ -848,7 +848,7 @@ func completionEvidenceStepUsable(step *runModel.Step) bool {
 		return false
 	}
 	switch step.State {
-	case common.StepStateCompleted:
+	case common.StepStateSucceeded:
 		return true
 	default:
 		return false
@@ -870,7 +870,7 @@ func latestCompletionClosureEvidence(ctx context.Context, steps repository.StepR
 	}
 	latestByScope := map[string]closureItem{}
 	for idx, step := range runSteps {
-		if step == nil || step.ID == "" || step.State != common.StepStateCompleted {
+		if step == nil || step.ID == "" || step.State != common.StepStateSucceeded {
 			continue
 		}
 		scope := completionEvidenceStepScope(step)

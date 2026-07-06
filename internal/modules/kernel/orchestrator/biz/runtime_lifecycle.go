@@ -36,7 +36,7 @@ func (o *RuntimeOrchestrator) acceptRunStart(ctx context.Context, runID common.R
 	if err != nil {
 		return nil, nil, err
 	}
-	if r.State != common.RunStateCreated {
+	if r.State != common.RunStatePending {
 		return nil, nil, common.ErrConflict
 	}
 	ws, err := o.runStateManager().workspaceForCreatedRunStart(ctx, r)
@@ -44,9 +44,9 @@ func (o *RuntimeOrchestrator) acceptRunStart(ctx context.Context, runID common.R
 		return nil, nil, err
 	}
 
-	r.State = common.RunStateRunning
+	r.State = common.RunStateActive
 	r.FailureReason = ""
-	ws, err = o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, ws)
+	ws, err = o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateActive, ws)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -107,7 +107,7 @@ func (o *RuntimeOrchestrator) blockOnDecisionAtStep(ctx context.Context, r *runM
 	if r == nil || r.ID == "" || ticketID == "" {
 		return common.ErrInvalidArgument
 	}
-	if r.State != common.RunStateCreated && r.State != common.RunStateRunning {
+	if r.State != common.RunStatePending && r.State != common.RunStateActive {
 		return common.ErrConflict
 	}
 	if err := o.finalizeManagedValidationResourcesForGovernedWait(ctx, r, currentStepID, "released", "run_blocked_on_decision"); err != nil {
@@ -117,7 +117,7 @@ func (o *RuntimeOrchestrator) blockOnDecisionAtStep(ctx context.Context, r *runM
 	r.BlockingTicketID = ticketID
 	r.BlockingApprovalID = ""
 	r.FailureReason = ""
-	workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateWaitingDecision, workspace)
+	workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateActive, workspace)
 	if err != nil {
 		return err
 	}
@@ -142,7 +142,7 @@ func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runM
 	if r == nil || r.ID == "" || approvalID == "" {
 		return common.ErrInvalidArgument
 	}
-	if r.State != common.RunStateCreated && r.State != common.RunStateRunning {
+	if r.State != common.RunStatePending && r.State != common.RunStateActive {
 		return common.ErrConflict
 	}
 	if err := o.finalizeManagedValidationResourcesForGovernedWait(ctx, r, currentStepID, "released", "run_blocked_on_approval"); err != nil {
@@ -152,7 +152,7 @@ func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runM
 	r.BlockingApprovalID = approvalID
 	r.BlockingTicketID = ""
 	r.FailureReason = ""
-	workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateBlocked, workspace)
+	workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateBlockedOnApproval, workspace)
 	if err != nil {
 		return err
 	}
@@ -198,7 +198,7 @@ func (o *RuntimeOrchestrator) CanResumeRun(ctx context.Context, runID common.Run
 		return err
 	}
 	switch r.State {
-	case common.RunStateRunning, common.RunStateValidating:
+	case common.RunStateActive:
 		return nil
 	case common.RunStateBlockedOnDecision:
 		if r.BlockingTicketID == "" || o.tickets == nil {
@@ -269,7 +269,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 				break
 			}
 			if runtimeRepairExhaustionBlockerCanAutoResume(ctx, o.steps, o.repairManager(), policy, r, ticket) {
-				ticket.State = common.DecisionTicketStateDismissed
+				ticket.State = common.DecisionTicketStateSuperseded
 				if err := o.tickets.Update(ctx, ticket); err != nil {
 					return err
 				}
@@ -278,7 +278,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 				break
 			}
 			if knownReadableDecisionBlockerCanAutoRepair(ctx, o.steps, o.workspaces, r, ticket) {
-				ticket.State = common.DecisionTicketStateDismissed
+				ticket.State = common.DecisionTicketStateSuperseded
 				if err := o.tickets.Update(ctx, ticket); err != nil {
 					return err
 				}
@@ -337,11 +337,11 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			patchApplication, err := o.applyApprovedPendingPatchApproval(ctx, r, approval)
 			if err != nil {
 				if errors.Is(err, errApprovedPatchApplyFailureHandled) {
-					r.State = common.RunStateRunning
+					r.State = common.RunStateActive
 					r.FailureReason = ""
 					r.BlockingApprovalID = ""
 					mergeRunExecutionContextPatch(r, executionContextPatch)
-					workspace, syncErr := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
+					workspace, syncErr := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateActive, nil)
 					if syncErr != nil {
 						return syncErr
 					}
@@ -367,7 +367,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 		default:
 			return common.ErrBlocked
 		}
-	case common.RunStateRunning:
+	case common.RunStateActive:
 		if recovered, err := o.recoverRuntimeTerminalResultForRunningRun(ctx, r); err != nil || recovered {
 			return err
 		}
@@ -398,10 +398,10 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 					return errors.Join(o.failRunningResume(ctx, r.ID, cause), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 				}
 			}
-			r.State = common.RunStateRunning
+			r.State = common.RunStateActive
 			r.FailureReason = ""
 			mergeRunExecutionContextPatch(r, executionContextPatch)
-			workspace, syncErr := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
+			workspace, syncErr := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateActive, nil)
 			if syncErr != nil {
 				return syncErr
 			}
@@ -419,7 +419,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 		if recoverStepID == "" {
 			if len(executionContextPatch) > 0 {
 				mergeRunExecutionContextPatch(r, executionContextPatch)
-				workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
+				workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateActive, nil)
 				if err != nil {
 					return err
 				}
@@ -437,7 +437,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	}
 
 	resumeRun := cloneRunForResume(r)
-	resumeRun.State = common.RunStateRunning
+	resumeRun.State = common.RunStateActive
 	resumeRun.FailureReason = ""
 	mergeRunExecutionContextPatch(resumeRun, executionContextPatch)
 	specs, err := nextDispatchSpecsAfterResolvedDecision(
@@ -462,7 +462,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	if err != nil {
 		return o.failResolvedDecisionResume(ctx, r, originalResumeState, executionContextPatch, err)
 	}
-	resumeRun.State = common.RunStateRunning
+	resumeRun.State = common.RunStateActive
 	resumeRun.FailureReason = ""
 	resumeRun.BlockingTicketID = ""
 	resumeRun.BlockingApprovalID = ""
@@ -472,7 +472,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	r.BlockingTicketID = resumeRun.BlockingTicketID
 	r.BlockingApprovalID = resumeRun.BlockingApprovalID
 	r.ExecutionContext = cloneStepPayload(resumeRun.ExecutionContext)
-	workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
+	workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateActive, nil)
 	if err != nil {
 		return err
 	}

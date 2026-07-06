@@ -1636,7 +1636,7 @@ func testRunRepositoryContract(t *testing.T, factory func() repository.RunReposi
 	item := &runmodel.Run{
 		ID:          common.RunID("run-contract"),
 		WorkspaceID: common.WorkspaceID("ws-contract"),
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create run: %v", err)
@@ -1690,7 +1690,7 @@ func testRunRepositoryContract(t *testing.T, factory func() repository.RunReposi
 	second := &runmodel.Run{
 		ID:          common.RunID("run-contract-2"),
 		WorkspaceID: common.WorkspaceID("ws-contract"),
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}
 	if err := repo.Create(ctx, second); err != nil {
 		t.Fatalf("create second run: %v", err)
@@ -1738,7 +1738,7 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 		ID:    common.StepID("run-contract/step-1"),
 		RunID: common.RunID("run-contract"),
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{"workspaceId": "ws-contract"},
 	}
 	if err := repo.Create(ctx, item); err != nil {
@@ -1766,7 +1766,7 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 		t.Fatalf("fresh output = %#v, want nil", fresh.Output)
 	}
 
-	fresh.State = common.StepStateCompleted
+	fresh.State = common.StepStateSucceeded
 	fresh.Output = map[string]any{
 		"status":           "completed",
 		"failureSignature": "class=runtime_failed|targetRef=main.go",
@@ -1780,7 +1780,7 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 	if err != nil {
 		t.Fatalf("get updated step: %v", err)
 	}
-	if updated.State != common.StepStateCompleted {
+	if updated.State != common.StepStateSucceeded {
 		t.Fatalf("step state = %q, want completed", updated.State)
 	}
 	if updated.Output["result"] != "done" {
@@ -1791,7 +1791,7 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 		ID:    common.StepID("run-contract/step-2"),
 		RunID: common.RunID("run-contract"),
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{"workspaceId": "ws-contract", "previousStepId": "run-contract/step-1"},
 	}); err != nil {
 		t.Fatalf("create second step: %v", err)
@@ -1800,7 +1800,7 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 		ID:    common.StepID("run-other/step-1"),
 		RunID: common.RunID("run-other"),
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}); err != nil {
 		t.Fatalf("create other run step: %v", err)
 	}
@@ -2150,7 +2150,7 @@ func testRuntimeCheckpointRepositoryContract(t *testing.T, factory func() reposi
 		RunID:            common.RunID("run-contract"),
 		CheckpointType:   common.CheckpointTypeRunState,
 		CurrentStepID:    common.StepID("run-contract/step-1"),
-		RunStateSnapshot: common.RunStateRunning,
+		RunStateSnapshot: common.RunStateActive,
 		OccurredAt:       "2026-04-25T00:00:00Z",
 		Data:             map[string]any{"thread": "main"},
 	}
@@ -2201,7 +2201,7 @@ func testRuntimeCheckpointRepositoryContract(t *testing.T, factory func() reposi
 		WorkspaceID:      item.WorkspaceID,
 		RunID:            common.RunID("run-other"),
 		CheckpointType:   common.CheckpointTypeRunState,
-		RunStateSnapshot: common.RunStateRunning,
+		RunStateSnapshot: common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("create other run runtime checkpoint: %v", err)
 	}
@@ -3069,7 +3069,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "manual/checkpoint",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{"workspaceId": string(workspaceID), "runId": string(runID)},
 	}
 	if err := bundle.steps.Create(ctx, step); err != nil {
@@ -3078,7 +3078,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	if err := bundle.steps.Create(ctx, step); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("duplicate step create err = %v, want conflict", err)
 	}
-	step.State = common.StepStateCompleted
+	step.State = common.StepStateSucceeded
 	step.Output = map[string]any{"status": "completed", "ticketId": string(ticketID)}
 	if err := bundle.steps.Update(ctx, step); err != nil {
 		t.Fatalf("update step: %v", err)

@@ -20,6 +20,11 @@ const (
 	TopicOrchestratorCommandListArtifactContinuationsByRun = "/orchestrator/command/list-artifact-continuations-by-run"
 
 	TopicOrchestratorDispatchStepRequested           = "/orchestrator/dispatch-step/requested"
+	TopicOrchestratorStageChanged                    = "/orchestrator/stage_changed"
+	TopicOrchestratorGraphDispatched                 = "/orchestrator/graph_dispatched"
+	TopicOrchestratorRepairStarted                   = "/orchestrator/repair_started"
+	TopicOrchestratorReplanTriggered                 = "/orchestrator/replan_triggered"
+	TopicOrchestratorContractViolation               = "/orchestrator/contract_violation"
 	TopicOrchestratorContractViolationRecorded       = "/orchestrator/contract_violation/recorded"
 	TopicOrchestratorContractViolationRetryRequested = "/orchestrator/contract_violation/retry_requested"
 	TopicOrchestratorContractViolationEscalated      = "/orchestrator/contract_violation/escalated"

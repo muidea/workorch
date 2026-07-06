@@ -20,6 +20,8 @@ func MapApproval(item *approvalmodel.Approval, autoGovernance *governancecore.Au
 		Context:        governancecore.CloneApprovalMap(item.Context),
 		State:          string(item.State),
 		AutoGovernance: autoGovernance,
+		ResolvedAt:     item.ResolvedAt,
+		ResolvedBy:     item.ResolvedBy,
 		CreatedAt:      item.CreatedAt,
 		UpdatedAt:      item.UpdatedAt,
 	}

@@ -27,7 +27,7 @@ func taskRetryPlanFromStep(snapshot readmodelcore.RunSnapshot, step StepView, oc
 		state = "blocked_on_decision"
 	} else if step.State == string(common.StepStateFailed) {
 		state = "retry_exhausted"
-	} else if step.State == string(common.StepStateCompleted) {
+	} else if step.State == string(common.StepStateSucceeded) {
 		state = "retry_completed"
 	}
 	plan := readmodelcore.TaskPlan{

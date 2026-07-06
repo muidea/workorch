@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"time"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/run/pkg/common"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
@@ -75,17 +76,20 @@ func (s *Service) CreateRun(ctx context.Context, cmd runcontracts.CreateRunComma
 	}
 
 	definitionRevision := firstNonEmptyString(cmd.DefinitionRevision, runDefinitionRevisionFromExecutionContext(cmd.ExecutionContext))
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	run := &runModel.Run{
 		ID:                 cmd.RunID,
 		WorkspaceID:        cmd.WorkspaceID,
 		GoalID:             cmd.GoalID,
 		DoDID:              cmd.DoDID,
+		Lineage:            runModel.RunLineage{LineageState: "active"},
 		DefinitionRevision: definitionRevision,
 		InitialStepKind:    cmd.InitialStepKind,
 		ExecutionContext:   cloneExecutionContext(cmd.ExecutionContext),
-		State:              common.RunStateCreated,
+		State:              common.RunStatePending,
 		Priority:           cmd.Priority,
 		FailureReason:      "",
+		CreatedAt:          now,
 	}
 	if err := s.runs.Create(ctx, run); err != nil {
 		return err
@@ -184,7 +188,7 @@ func (s *Service) EnsureStarted(ctx context.Context, cmd runcontracts.StartRunCo
 	if r.State == common.RunStateCompleted {
 		return nil
 	}
-	if isTerminalRunState(r.State) || r.State == common.RunStateValidating || r.State == common.RunStateBlockedOnDecision || r.State == common.RunStateBlockedOnApproval {
+	if isTerminalRunState(r.State) || r.State == common.RunStateActive || r.State == common.RunStateBlockedOnDecision || r.State == common.RunStateBlockedOnApproval {
 		return common.ErrConflict
 	}
 	return s.StartRun(ctx, cmd)
@@ -212,7 +216,7 @@ func (s *Service) ResumeRun(ctx context.Context, cmd runcontracts.ResumeRunComma
 		if err != nil {
 			return err
 		}
-		if loaded.State == common.RunStateRunning {
+		if loaded.State == common.RunStateActive {
 			return common.ErrConflict
 		}
 		if patcher, ok := s.orchestrator.(LoadedRunExecutionContextPatchOrchestrator); ok {
@@ -335,10 +339,10 @@ func (s *Service) ValidateRun(ctx context.Context, cmd runcontracts.ValidateRunC
 	if err != nil {
 		return err
 	}
-	if r.State != common.RunStateRunning {
+	if r.State != common.RunStateActive {
 		return common.ErrConflict
 	}
-	r.State = common.RunStateValidating
+	r.State = common.RunStateActive
 	r.FailureReason = ""
 	if err := s.runs.Update(ctx, r); err != nil {
 		return err
@@ -358,13 +362,16 @@ func (s *Service) CompleteRun(ctx context.Context, cmd runcontracts.CompleteRunC
 	if err != nil {
 		return err
 	}
-	if r.State != common.RunStateRunning && r.State != common.RunStateValidating {
+	if r.State != common.RunStateActive {
 		return common.ErrConflict
 	}
 	r.State = common.RunStateCompleted
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
 	r.FailureReason = ""
+	if strings.TrimSpace(r.EndedAt) == "" {
+		r.EndedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
 	if err := s.runs.Update(ctx, r); err != nil {
 		return err
 	}
@@ -390,6 +397,9 @@ func (s *Service) CancelRun(ctx context.Context, cmd runcontracts.CancelRunComma
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
 	r.FailureReason = ""
+	if strings.TrimSpace(r.EndedAt) == "" {
+		r.EndedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
 	if err := s.runs.Update(ctx, r); err != nil {
 		return err
 	}
@@ -412,9 +422,15 @@ func (s *Service) SupersedeRun(ctx context.Context, cmd runcontracts.SupersedeRu
 		return common.ErrConflict
 	}
 	r.State = common.RunStateSuperseded
+	if strings.TrimSpace(r.Lineage.LineageState) == "" || r.Lineage.LineageState == "active" {
+		r.Lineage.LineageState = "superseded"
+	}
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
 	r.FailureReason = ""
+	if strings.TrimSpace(r.EndedAt) == "" {
+		r.EndedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
 	if err := s.runs.Update(ctx, r); err != nil {
 		return err
 	}
@@ -440,6 +456,9 @@ func (s *Service) FailRun(ctx context.Context, cmd runcontracts.FailRunCommand) 
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
 	r.FailureReason = cmd.Reason
+	if strings.TrimSpace(r.EndedAt) == "" {
+		r.EndedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
 	if err := s.runs.Update(ctx, r); err != nil {
 		return err
 	}
@@ -455,7 +474,7 @@ func isTerminalRunState(state common.RunState) bool {
 
 func canCancelRun(state common.RunState) bool {
 	switch state {
-	case common.RunStateCreated, common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStateValidating:
+	case common.RunStatePending, common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
 		return true
 	default:
 		return false
@@ -464,7 +483,7 @@ func canCancelRun(state common.RunState) bool {
 
 func canSupersedeRun(state common.RunState) bool {
 	switch state {
-	case common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStateValidating:
+	case common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
 		return true
 	default:
 		return false
@@ -473,7 +492,7 @@ func canSupersedeRun(state common.RunState) bool {
 
 func canFailRun(state common.RunState) bool {
 	switch state {
-	case common.RunStateCreated, common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStateValidating:
+	case common.RunStatePending, common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
 		return true
 	default:
 		return false

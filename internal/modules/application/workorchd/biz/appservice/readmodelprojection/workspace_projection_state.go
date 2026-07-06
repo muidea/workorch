@@ -4,20 +4,18 @@ import "github.com/muidea/workorch/internal/pkg/common"
 
 func WorkspaceProjectionState(runState common.RunState) common.WorkspaceState {
 	switch runState {
-	case common.RunStateCreated:
-		return common.WorkspaceStateReady
-	case common.RunStateRunning:
-		return common.WorkspaceStateRunning
 	case common.RunStateBlockedOnDecision:
-		return common.WorkspaceStateWaitingDecision
+		return common.WorkspaceStateActive
 	case common.RunStateBlockedOnApproval:
-		return common.WorkspaceStateBlocked
-	case common.RunStateValidating:
-		return common.WorkspaceStateValidating
-	case common.RunStateCompleted:
-		return common.WorkspaceStateCompleted
-	case common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
-		return common.WorkspaceStateFailed
+		return common.WorkspaceStateBlockedOnApproval
+	case common.RunStateSuperseded:
+		return common.WorkspaceStateSuperseded
+	case common.RunStatePending,
+		common.RunStateActive,
+		common.RunStateCompleted,
+		common.RunStateFailed,
+		common.RunStateCancelled:
+		return common.WorkspaceStateActive
 	default:
 		return common.WorkspaceStateActive
 	}

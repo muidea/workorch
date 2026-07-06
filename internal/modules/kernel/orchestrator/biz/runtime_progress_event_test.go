@@ -56,10 +56,10 @@ func TestRuntimeOrchestratorRecordRuntimeStepProgressUsesScopedRunLookup(t *test
 	workspaceID := common.WorkspaceID("ws-progress-scoped-lookup")
 	runID := common.RunID("run-progress-scoped-lookup")
 	stepID := common.StepID("run-progress-scoped-lookup/step-1")
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: llmWorkspaceExecutionStepKind, State: common.StepStateDispatched}); err != nil {
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: llmWorkspaceExecutionStepKind, State: common.StepStateExecuting}); err != nil {
 		t.Fatalf("seed step: %v", err)
 	}
 
@@ -110,13 +110,13 @@ func TestRuntimeOrchestratorTerminalResultUsesScopedRunLookup(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-terminal-scoped-lookup")
 	runID := common.RunID("run-terminal-scoped-lookup")
 	stepID := common.StepID("run-terminal-scoped-lookup/step-1")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: llmWorkspaceExecutionStepKind, State: common.StepStateDispatched}); err != nil {
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: llmWorkspaceExecutionStepKind, State: common.StepStateExecuting}); err != nil {
 		t.Fatalf("seed step: %v", err)
 	}
 

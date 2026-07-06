@@ -386,7 +386,7 @@ func runtimeRepairRunHasCompletedStateChangeEvidence(ctx context.Context, repair
 }
 
 func runtimeStepIsCompletedStateChangeEvidence(step *runModel.Step) bool {
-	if step == nil || step.State != common.StepStateCompleted {
+	if step == nil || step.State != common.StepStateSucceeded {
 		return false
 	}
 	if boolValue(step.Output["zeroWork"]) {

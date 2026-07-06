@@ -68,7 +68,7 @@ func TestSchedulerDiagnosticsStatusShowsReadback(t *testing.T) {
 }
 
 func TestFetchAllUsesWorkspaceListWithoutSnapshot(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateRunning)
+	be := newRecordingBE(t, common.RunStateActive)
 	be.listWorkspaces = []backend.WorkspaceInfo{{
 		ID:    "ws-list-only",
 		Title: "List Only",
@@ -149,7 +149,7 @@ func projectWorkspace(m *AppModel, ws backend.WorkspaceInfo) {
 func projectDecisionBlocker(m *AppModel, workspaceID, runID, ticketID string) {
 	projectWorkspace(m, backend.WorkspaceInfo{
 		ID:               common.WorkspaceID(workspaceID),
-		State:            common.WorkspaceStateWaitingDecision,
+		State:            common.WorkspaceStateActive,
 		ActiveRunID:      common.RunID(runID),
 		BlockingTicketID: common.TicketID(ticketID),
 	})
@@ -158,7 +158,7 @@ func projectDecisionBlocker(m *AppModel, workspaceID, runID, ticketID string) {
 func projectApprovalBlocker(m *AppModel, workspaceID, runID, approvalID string) {
 	projectWorkspace(m, backend.WorkspaceInfo{
 		ID:                 common.WorkspaceID(workspaceID),
-		State:              common.WorkspaceStateBlocked,
+		State:              common.WorkspaceStateBlockedOnApproval,
 		ActiveRunID:        common.RunID(runID),
 		BlockingApprovalID: common.ApprovalID(approvalID),
 	})
@@ -167,7 +167,7 @@ func projectApprovalBlocker(m *AppModel, workspaceID, runID, approvalID string) 
 func projectRunningWorkspace(m *AppModel, workspaceID, runID string) {
 	projectWorkspace(m, backend.WorkspaceInfo{
 		ID:          common.WorkspaceID(workspaceID),
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: common.RunID(runID),
 	})
 }
@@ -340,16 +340,16 @@ func TestModelWorkspaceContextPartialUpdateDoesNotClearExistingDisplay(t *testin
 	m.activeRunID = "run-1"
 
 	m.applyWorkspaceContext(WorkspaceContextMsg{
-		Workspace: &backend.WorkspaceInfo{ID: "ws-1", State: common.WorkspaceStateRunning, ActiveRunID: "run-1"},
+		Workspace: &backend.WorkspaceInfo{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-1"},
 		ActiveRun: &backend.RunInfo{
 			ID:          "run-1",
 			WorkspaceID: "ws-1",
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 		},
 		DisplayRun: &backend.RunInfo{
 			ID:          "run-1",
 			WorkspaceID: "ws-1",
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 		},
 		WorkspaceHasLive: true,
 	})
@@ -404,11 +404,11 @@ func TestModelWorkspacePanelShowsActiveRunWhenPresent(t *testing.T) {
 func TestModelWorkspacePanelCountsOnlyActiveRunBlockers(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	next, _ := m.Update(WorkspaceContextMsg{
-		Workspace: &backend.WorkspaceInfo{ID: "ws-1", Title: "Project", State: common.WorkspaceStateRunning, ActiveRunID: "run-active"},
+		Workspace: &backend.WorkspaceInfo{ID: "ws-1", Title: "Project", State: common.WorkspaceStateActive, ActiveRunID: "run-active"},
 		ActiveRun: &backend.RunInfo{
 			ID:          "run-active",
 			WorkspaceID: "ws-1",
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 		},
 		Decisions: []backend.DecisionInfo{
 			{ID: "ticket-active", WorkspaceID: "ws-1", RunID: "run-active", State: "open"},
@@ -469,7 +469,7 @@ func TestModelSubmitGoalStartsRun(t *testing.T) {
 }
 
 func TestModelPlainInputWithActiveRunningRunDoesNotResume(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateRunning)
+	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-resume"
 	m.setInput("继续处理")
@@ -492,13 +492,13 @@ func TestModelPlainInputWithActiveRunningRunDoesNotResume(t *testing.T) {
 		t.Fatalf("resumes/patches = %v/%v, want no resume for already-running run", be.resumes, be.resumePatches)
 	}
 	runMsg, ok := msg.(RunControlMsg)
-	if !ok || runMsg.Run == nil || runMsg.Run.State != common.RunStateRunning {
+	if !ok || runMsg.Run == nil || runMsg.Run.State != common.RunStateActive {
 		t.Fatalf("message = %#v, want running RunControlMsg", msg)
 	}
 }
 
 func TestModelPlainInputIdleWorkspaceSubmitsGoal(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateRunning)
+	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = ""
 	m.running = false
@@ -521,10 +521,10 @@ func TestModelPlainInputIdleWorkspaceSubmitsGoal(t *testing.T) {
 }
 
 func TestModelPlainInputUsesCurrentWorkspaceLiveRunOnly(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateRunning)
+	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-b", "")
 	m.workspaces = []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
 		{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive},
 	}
 	m.activeWorkspaceID = "ws-b"
@@ -556,10 +556,10 @@ func TestModelPlainInputUsesCurrentWorkspaceLiveRunOnly(t *testing.T) {
 }
 
 func TestModelPlainInputFailedWorkspaceIgnoresStaleActiveRun(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateRunning)
+	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.workspaces = []backend.WorkspaceInfo{
-		{ID: "ws-1", Title: "failed", State: common.WorkspaceStateFailed, ActiveRunID: "run-stale"},
+		{ID: "ws-1", Title: "idle", State: common.WorkspaceStateActive},
 	}
 	m.activeRunID = "run-stale"
 	m.running = true
@@ -605,7 +605,7 @@ func TestModelIgnoresRunStartedErrorForInactiveWorkspace(t *testing.T) {
 }
 
 func TestModelGoalSlashCommandCanSubmitRunControlWordsAsGoal(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateRunning)
+	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-resume"
 	m.setInput("/goal 继续处理")
@@ -626,7 +626,7 @@ func TestModelGoalSlashCommandCanSubmitRunControlWordsAsGoal(t *testing.T) {
 }
 
 func TestModelRunResumeCommandDoesNotResumeAlreadyRunningRun(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateRunning)
+	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-resume"
 	m.setInput("/run resume 补充约束：优先修复当前失败项")
@@ -648,7 +648,7 @@ func TestModelRunResumeCommandDoesNotResumeAlreadyRunningRun(t *testing.T) {
 		t.Fatalf("activations = %d, want no activation for already-running run", len(be.activations))
 	}
 	runMsg, ok := msg.(RunControlMsg)
-	if !ok || runMsg.Run == nil || runMsg.Run.State != common.RunStateRunning {
+	if !ok || runMsg.Run == nil || runMsg.Run.State != common.RunStateActive {
 		t.Fatalf("message = %#v, want running RunControlMsg", msg)
 	}
 	next, _ = next.(*AppModel).Update(msg)
@@ -664,7 +664,7 @@ func TestModelRunResumeCommandDoesNotResumeAlreadyRunningRun(t *testing.T) {
 func TestModelRunResumeWithoutLiveRunDoesNotPredeclareContinuation(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateFailed)
 	be.snapshot = &backend.WorkspaceSnapshotInfo{
-		Workspace: backend.WorkspaceInfo{ID: "ws-1", Title: "failed", State: common.WorkspaceStateFailed},
+		Workspace: backend.WorkspaceInfo{ID: "ws-1", Title: "failed", State: common.WorkspaceStateActive},
 		Outcome: backend.WorkspaceOutcomeInfo{
 			WorkspaceID: "ws-1",
 			State:       string(common.RunStateFailed),
@@ -690,7 +690,7 @@ func TestModelRunResumeWithoutLiveRunDoesNotPredeclareContinuation(t *testing.T)
 	}
 	m := NewAppModel(be, "ws-1", "")
 	m.workspaces = []backend.WorkspaceInfo{
-		{ID: "ws-1", Title: "failed", State: common.WorkspaceStateFailed},
+		{ID: "ws-1", Title: "failed", State: common.WorkspaceStateActive},
 	}
 	m.setInput("/run resume retry with current workspace")
 
@@ -706,7 +706,7 @@ func TestModelRunResumeWithoutLiveRunDoesNotPredeclareContinuation(t *testing.T)
 	if !ok || msg.Error != nil || msg.Run == nil {
 		t.Fatalf("run resume msg = %#v, want RunControlMsg with resumed run", msg)
 	}
-	if msg.Run.ID != "run-failed" || msg.Run.State != common.RunStateRunning || !strings.Contains(msg.Message, "Resuming") {
+	if msg.Run.ID != "run-failed" || msg.Run.State != common.RunStateActive || !strings.Contains(msg.Message, "Resuming") {
 		t.Fatalf("run/message = %+v/%q, want resumed failed run", msg.Run, msg.Message)
 	}
 	if len(be.resumes) != 1 || be.resumes[0] != "run-failed" {
@@ -734,7 +734,7 @@ func TestModelRunResumeWithoutLiveRunDoesNotPredeclareContinuation(t *testing.T)
 }
 
 func TestModelRunResumeIgnoresStaleRunIDFromAnotherWorkspace(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateRunning)
+	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-2", "")
 	m.activeRunID = "run-from-ws-1"
 	m.setInput("/run resume 切换后继续当前工作区")
@@ -815,7 +815,7 @@ func TestModelRunRestartCommandRestartsWorkspaceWithOperatorInput(t *testing.T) 
 }
 
 func TestModelRunRestartSlashCommandActivatesWorkspaceWithoutCreatingGoal(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateRunning)
+	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-resume"
 	m.currentTask = "已有目标"
@@ -865,7 +865,7 @@ func TestModelNonCanonicalRunCommandsAreNotSupported(t *testing.T) {
 }
 
 func TestModelRunResumeCommandIsSupported(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateRunning)
+	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-resume"
 	m.setInput("/run resume")
@@ -898,7 +898,7 @@ func TestModelRunControlRunningClearsStaleResult(t *testing.T) {
 	m.runtimeEvents = []string{"stale event"}
 
 	next, _ := m.Update(RunControlMsg{
-		Run:         &backend.RunInfo{ID: "run-new", WorkspaceID: "ws-1", State: common.RunStateRunning},
+		Run:         &backend.RunInfo{ID: "run-new", WorkspaceID: "ws-1", State: common.RunStateActive},
 		WorkspaceID: "ws-1",
 		Message:     "Restarting workspace run",
 	})
@@ -941,7 +941,7 @@ func TestModelRunStartedDoesNotOverwriteStepProgress(t *testing.T) {
 		RunID:       "run-1",
 		Payload:     map[string]any{"kind": "llm/workspace-plan"},
 	})
-	next, _ := m.Update(RunStartedMsg{Run: &backend.RunInfo{ID: "run-1", State: common.RunStateRunning}})
+	next, _ := m.Update(RunStartedMsg{Run: &backend.RunInfo{ID: "run-1", State: common.RunStateActive}})
 	m = asModel(next)
 	if m.progressText != "Working: llm/workspace_execution" {
 		t.Fatalf("progress text = %q, want step progress preserved", m.progressText)
@@ -1096,12 +1096,12 @@ func TestModelPatchMemoryAndLLMUsageEventsUpdateIncrementally(t *testing.T) {
 }
 
 func TestModelBlockedWorkspaceInputRefreshesBlockerInsteadOfContinuing(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateRunning)
+	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeWorkspaceID = "ws-1"
 	m.workspaces = []backend.WorkspaceInfo{{
 		ID:               "ws-1",
-		State:            common.WorkspaceStateWaitingDecision,
+		State:            common.WorkspaceStateActive,
 		ActiveRunID:      "run-1",
 		BlockingTicketID: "ticket-1",
 		Projection:       backend.ProjectionInfo{WorkspaceRevision: 7},
@@ -1123,12 +1123,12 @@ func TestModelBlockedWorkspaceInputRefreshesBlockerInsteadOfContinuing(t *testin
 }
 
 func TestModelRunResumeDoesNotBypassBlockingDecision(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateRunning)
+	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeWorkspaceID = "ws-1"
 	m.workspaces = []backend.WorkspaceInfo{{
 		ID:               "ws-1",
-		State:            common.WorkspaceStateWaitingDecision,
+		State:            common.WorkspaceStateActive,
 		ActiveRunID:      "run-1",
 		BlockingTicketID: "ticket-1",
 		Projection:       backend.ProjectionInfo{WorkspaceRevision: 7},
@@ -1184,7 +1184,7 @@ func TestResumeRunActivatesWorkspaceWhenNoActiveRun(t *testing.T) {
 	if runMsg.Error != nil {
 		t.Fatalf("error = %v, want nil", runMsg.Error)
 	}
-	if runMsg.Run == nil || runMsg.Run.ID != "run-new" || runMsg.Run.State != common.RunStateRunning {
+	if runMsg.Run == nil || runMsg.Run.ID != "run-new" || runMsg.Run.State != common.RunStateActive {
 		t.Fatalf("run = %+v, want activated workspace run", runMsg.Run)
 	}
 	if len(be.activations) != 1 {
@@ -1199,7 +1199,7 @@ func TestResumeRunActivatesWorkspaceWhenNoActiveRun(t *testing.T) {
 }
 
 func TestResumeRunActivatesCreatedRun(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateCreated)
+	be := newRecordingBE(t, common.RunStatePending)
 	msg := ResumeRun(be, "ws-1", "run-resume", "start created run")()
 	runMsg, ok := msg.(RunControlMsg)
 	if !ok {
@@ -1387,7 +1387,7 @@ func TestModelRunStartedDoesNotOverwriteDecisionProgress(t *testing.T) {
 		RunID:       "run-1",
 		Payload:     map[string]any{"ticketId": "ticket-1", "reason": "缺少必要参数"},
 	})
-	next, _ := m.Update(RunStartedMsg{Run: &backend.RunInfo{ID: "run-1", State: common.RunStateRunning}})
+	next, _ := m.Update(RunStartedMsg{Run: &backend.RunInfo{ID: "run-1", State: common.RunStateActive}})
 	m = asModel(next)
 	if m.progress != progressWaitingDecision || m.progressText != "缺少必要参数" {
 		t.Fatalf("progress = %s/%q, want decision state preserved", m.progress, m.progressText)
@@ -1401,14 +1401,14 @@ func TestModelWorkspaceStateChangedUpdatesMainProgress(t *testing.T) {
 		Type:        backend.EventWorkspaceStateChanged,
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
-		Payload:     map[string]any{"state": string(common.WorkspaceStateFailed), "activeRunId": "run-1"},
+		Payload:     map[string]any{"state": string(common.WorkspaceStateActive), "activeRunId": "run-1"},
 	}})
 	m = asModel(next)
-	if m.running {
-		t.Fatal("expected running=false after workspace failed event")
+	if !m.running {
+		t.Fatal("expected running=true after active workspace event with active run")
 	}
-	if m.progress != progressFailed {
-		t.Fatalf("progress = %s, want failed", m.progress)
+	if m.progress != progressRunning {
+		t.Fatalf("progress = %s, want running", m.progress)
 	}
 }
 
@@ -1527,7 +1527,7 @@ func TestModelInputPromptUsesActiveWorkspace(t *testing.T) {
 
 func TestModelInputPromptReflectsLiveActiveRun(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
-	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-1", State: common.WorkspaceStateRunning, ActiveRunID: "run-1"}}
+	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-1"}}
 	m.activeRunID = "run-1"
 	m.progress = progressRunning
 	m.running = true
@@ -1566,7 +1566,7 @@ func TestModelTerminalRunWithRetainedRunIDReturnsGoalPrompt(t *testing.T) {
 }
 
 func TestModelRunResumeCommandClearsInputAndReturnsRunningPrompt(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateRunning)
+	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-97549a108e19d500", "")
 	m.activeRunID = "run-resume"
 	m.progress = progressRunning
@@ -1876,8 +1876,8 @@ func TestModelDecisionReplanAfterWorkspaceSwitchUsesOverviewBlocker(t *testing.T
 	be := &decisionRecordingBE{fakeBE: newFake(t)}
 	m := NewAppModel(be, "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-a", BlockingTicketID: "ticket-a", Projection: backend.ProjectionInfo{WorkspaceRevision: 11}},
-		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 12}},
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a", BlockingTicketID: "ticket-a", Projection: backend.ProjectionInfo{WorkspaceRevision: 11}},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 12}},
 	}})
 	m = asModel(next)
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-a", WorkspaceID: "ws-a", RunID: "run-a", State: "open"}
@@ -1914,8 +1914,8 @@ func TestModelDecisionReplanAfterWorkspaceSwitchReplacesStaleBlocker(t *testing.
 	be := &decisionRecordingBE{fakeBE: newFake(t)}
 	m := NewAppModel(be, "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-a", BlockingTicketID: "ticket-a", Projection: backend.ProjectionInfo{WorkspaceRevision: 11}},
-		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 12}},
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a", BlockingTicketID: "ticket-a", Projection: backend.ProjectionInfo{WorkspaceRevision: 11}},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 12}},
 	}})
 	m = asModel(next)
 
@@ -1951,7 +1951,7 @@ func TestModelDecisionReplanUsesCurrentOverviewTicketOverStaleLocalBlocker(t *te
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:               "ws-1",
 		Title:            "A",
-		State:            common.WorkspaceStateWaitingDecision,
+		State:            common.WorkspaceStateActive,
 		ActiveRunID:      "run-current",
 		BlockingTicketID: "ticket-current",
 		Projection:       backend.ProjectionInfo{WorkspaceRevision: 21},
@@ -1985,7 +1985,7 @@ func TestModelDecisionReplanUsesServerProjectionEvenAfterOptimisticResolvedMark(
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:               "ws-1",
 		Title:            "A",
-		State:            common.WorkspaceStateWaitingDecision,
+		State:            common.WorkspaceStateActive,
 		ActiveRunID:      "run-1",
 		BlockingTicketID: "ticket-1",
 		Projection:       backend.ProjectionInfo{WorkspaceRevision: 21},
@@ -2017,8 +2017,8 @@ func TestModelDecisionReplanUsesServerProjectionEvenAfterOptimisticResolvedMark(
 func TestModelResolvedMarkersAreScopedAcrossDuplicateIDs(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-b", "")
 	m.workspaces = []backend.WorkspaceInfo{
-		{ID: "ws-a", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-a", BlockingTicketID: "ticket-shared"},
-		{ID: "ws-b", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-shared"},
+		{ID: "ws-a", State: common.WorkspaceStateActive, ActiveRunID: "run-a", BlockingTicketID: "ticket-shared"},
+		{ID: "ws-b", State: common.WorkspaceStateActive, ActiveRunID: "run-b", BlockingTicketID: "ticket-shared"},
 	}
 	m.activeWorkspaceID = "ws-b"
 	m.activeRunID = "run-b"
@@ -2048,7 +2048,7 @@ func TestModelDecisionReplanDoesNotUseLocalBlockerWhenServerProjectionIsLive(t *
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:          "ws-1",
 		Title:       "A",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: "run-1",
 	}}})
 	m = asModel(next)
@@ -2076,7 +2076,7 @@ func TestModelApprovalApproveDoesNotUseLocalBlockerWhenServerProjectionIsLive(t 
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:          "ws-1",
 		Title:       "A",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: "run-1",
 	}}})
 	m = asModel(next)
@@ -2181,8 +2181,8 @@ func TestModelScrollableResultKeepsWorkspacePanelFixed(t *testing.T) {
 func TestTUIE2EViewportKeyboardScrollAndMouseSelectionContract(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-viewport", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-viewport", Title: "Viewport Workspace", State: common.WorkspaceStateCompleted},
-		{ID: "ws-other", Title: "Other Workspace", State: common.WorkspaceStateRunning},
+		{ID: "ws-viewport", Title: "Viewport Workspace", State: common.WorkspaceStateActive},
+		{ID: "ws-other", Title: "Other Workspace", State: common.WorkspaceStateActive},
 	}})
 	m = asModel(next)
 	next, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 16})
@@ -2201,8 +2201,8 @@ func TestTUIE2EViewportKeyboardScrollAndMouseSelectionContract(t *testing.T) {
 	if strings.Contains(firstScreen, "viewport-result-line-35") {
 		t.Fatalf("first screen should not expose later result lines before scrolling:\n%s", firstScreen)
 	}
-	if !strings.Contains(firstScreen, "> Viewport Work...  completed") ||
-		!strings.Contains(firstScreen, "Other Workspace  running") {
+	if !strings.Contains(firstScreen, "> Viewport Workspace  active") ||
+		!strings.Contains(firstScreen, "Other Workspace  active") {
 		t.Fatalf("first screen missing workspace monitor:\n%s", firstScreen)
 	}
 
@@ -2215,8 +2215,8 @@ func TestTUIE2EViewportKeyboardScrollAndMouseSelectionContract(t *testing.T) {
 	if strings.Contains(scrolledScreen, "viewport-result-line-00") {
 		t.Fatalf("PgDown should move the main display viewport away from the first line:\n%s", scrolledScreen)
 	}
-	if !strings.Contains(scrolledScreen, "> Viewport Work...  completed") ||
-		!strings.Contains(scrolledScreen, "Other Workspace  running") {
+	if !strings.Contains(scrolledScreen, "> Viewport Workspace  active") ||
+		!strings.Contains(scrolledScreen, "Other Workspace  active") {
 		t.Fatalf("workspace monitor must stay fixed while main display scrolls:\n%s", scrolledScreen)
 	}
 	if m.mainViewport == nil || m.mainViewport.MouseWheelEnabled {
@@ -2320,7 +2320,7 @@ func TestDetectThemeHonorsEnvironment(t *testing.T) {
 
 func TestModelRunningWithoutResultDoesNotRenderEmptyResultSection(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
-	next, _ := m.Update(RunStartedMsg{Run: &backend.RunInfo{ID: "run-1", State: common.RunStateRunning}})
+	next, _ := m.Update(RunStartedMsg{Run: &backend.RunInfo{ID: "run-1", State: common.RunStateActive}})
 	m = asModel(next)
 	m.width = 80
 	m.height = 16
@@ -2663,7 +2663,7 @@ func TestResolveApprovalIsIdempotentWhenAlreadyApproved(t *testing.T) {
 }
 
 func TestResolveApprovalSkipsResumeWhenRunAlreadyRunning(t *testing.T) {
-	be := &conflictApprovalBE{fakeBE: newFake(t), runState: common.RunStateRunning}
+	be := &conflictApprovalBE{fakeBE: newFake(t), runState: common.RunStateActive}
 	msg := ResolveApproval(be, "ws-1", "approval-1", true)()
 	resolved, ok := msg.(ApprovalResolvedMsg)
 	if !ok || resolved.Error != nil || resolved.Approval == nil || resolved.Approval.State != "approved" {
@@ -2757,7 +2757,7 @@ func TestModelDecisionResolvedRefreshesWorkspaceState(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.workspaces = []backend.WorkspaceInfo{{
 		ID:               "ws-1",
-		State:            common.WorkspaceStateWaitingDecision,
+		State:            common.WorkspaceStateActive,
 		ActiveRunID:      "run-1",
 		BlockingTicketID: "ticket-1",
 		Projection:       backend.ProjectionInfo{WorkspaceRevision: 7},
@@ -2781,7 +2781,7 @@ func TestModelDecisionResolvedRefreshesWorkspaceState(t *testing.T) {
 	if m.blockingDecision != nil || m.input != "" || m.activeRunID != "run-1" {
 		t.Fatalf("state not cleared/refreshed: blocker=%+v input=%q activeRun=%q", m.blockingDecision, m.input, m.activeRunID)
 	}
-	if ws := findWorkspace(m.workspaces, "ws-1"); ws == nil || ws.State != common.WorkspaceStateWaitingDecision {
+	if ws := findWorkspace(m.workspaces, "ws-1"); ws == nil || ws.State != common.WorkspaceStateActive {
 		t.Fatalf("workspace overview after resolve = %+v, want unchanged until server projection updates", ws)
 	}
 	m.width = 100
@@ -3000,8 +3000,8 @@ func TestModelWorkspaceSwitchRestoresCachedDisplayState(t *testing.T) {
 func TestModelWorkspaceSwitchUsesProjectedStateBeforeCachedBlocker(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
-		{ID: "ws-b", Title: "B", State: common.WorkspaceStateRunning, ActiveRunID: "run-b"},
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive, ActiveRunID: "run-b"},
 	}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-b"
@@ -3036,7 +3036,7 @@ func TestModelSubmitInputIgnoresStaleWorkspaceDecision(t *testing.T) {
 	m.workspaces = []backend.WorkspaceInfo{{
 		ID:          "ws-a",
 		Title:       "A",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: "run-a",
 	}}
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-b", WorkspaceID: "ws-b", RunID: "run-b", State: "open"}
@@ -3086,7 +3086,7 @@ func TestModelInspectStatusIncludesRunHeartbeat(t *testing.T) {
 	m.convergenceStatus = &backend.ConvergenceStatusInfo{
 		WorkspaceID:                 "ws-a",
 		RunID:                       "run-a",
-		RunState:                    common.RunStateRunning,
+		RunState:                    common.RunStateActive,
 		CurrentFocusID:              "focus-a",
 		NextActionKind:              "validate",
 		CurrentGap:                  "missing accepted evidence",
@@ -3128,7 +3128,7 @@ func TestModelIgnoresRunControlForInactiveWorkspace(t *testing.T) {
 
 	next, cmd := m.Update(RunControlMsg{
 		WorkspaceID: "ws-a",
-		Run:         &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", State: common.RunStateRunning},
+		Run:         &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", State: common.RunStateActive},
 		Message:     "Resuming active run",
 	})
 	m = asModel(next)
@@ -3235,7 +3235,7 @@ func TestModelIgnoresRunStartedForInactiveWorkspace(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-b", "")
 
 	next, cmd := m.Update(RunStartedMsg{
-		Run: &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", State: common.RunStateRunning},
+		Run: &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", State: common.RunStateActive},
 	})
 	m = asModel(next)
 	if cmd != nil {
@@ -3253,9 +3253,9 @@ func TestModelWorkspaceContextHydratesFreshSnapshot(t *testing.T) {
 	m.result = "old result"
 	m.blockingApproval = &backend.ApprovalInfo{ID: "approval-old", State: "pending"}
 	next, _ := m.Update(WorkspaceContextMsg{
-		Workspace: &backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateCompleted, ActiveRunID: "run-b"},
+		Workspace: &backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive, ActiveRunID: "run-b"},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
-			Workspace: backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateCompleted, ActiveRunID: "run-b"},
+			Workspace: backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive, ActiveRunID: "run-b"},
 			Outcome:   backend.WorkspaceOutcomeInfo{RunID: "run-b", Summary: "fresh result", ArtifactRefs: []string{"artifact-ref"}},
 			Runs:      []backend.RunInfo{{ID: "run-b", WorkspaceID: "ws-b", GoalID: "goal-b", State: common.RunStateCompleted}},
 			Results:   []backend.ResultInfo{{ID: "result-b", RunID: "run-b", Summary: "fresh result", ArtifactRefs: []string{"result-artifact"}}},
@@ -3297,9 +3297,9 @@ func TestModelWorkspaceContextDoesNotTreatOutcomeRunAsActive(t *testing.T) {
 	m.activeRunID = "run-old"
 	m.running = true
 	next, _ := m.Update(WorkspaceContextMsg{
-		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateFailed},
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
-			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateFailed},
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
 			Outcome:   backend.WorkspaceOutcomeInfo{RunID: "run-1", Summary: "failed result", Reason: "weak evidence"},
 			Runs:      []backend.RunInfo{{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: common.RunStateFailed, FailureReason: "weak evidence"}},
 		},
@@ -3310,7 +3310,7 @@ func TestModelWorkspaceContextDoesNotTreatOutcomeRunAsActive(t *testing.T) {
 	if m.activeRunID != "" || m.running {
 		t.Fatalf("active run state = %q/%v, want no live run", m.activeRunID, m.running)
 	}
-	if m.progress != progressFailed || m.progressText != "Workspace failed" {
+	if m.progress != progressFailed || m.progressText != "weak evidence" {
 		t.Fatalf("progress = %s/%q, want failed workspace state", m.progress, m.progressText)
 	}
 	if m.currentTask != "goal" || m.result != "failed result" {
@@ -3393,17 +3393,17 @@ func TestModelWorkspaceContextDoesNotRestoreOldOutcomeForLiveRun(t *testing.T) {
 	m.activeWorkspaceID = "ws-a"
 	m.result = "stale result"
 	next, _ := m.Update(WorkspaceContextMsg{
-		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-new"},
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-new"},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
-			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-new"},
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-new"},
 			Outcome:   backend.WorkspaceOutcomeInfo{Summary: "old outcome without run id"},
 			Runs: []backend.RunInfo{
 				{ID: "run-old", WorkspaceID: "ws-a", GoalID: "goal-old", State: common.RunStateCompleted},
-				{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateRunning},
+				{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateActive},
 			},
 		},
-		ActiveRun:        &backend.RunInfo{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateRunning},
-		DisplayRun:       &backend.RunInfo{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateRunning},
+		ActiveRun:        &backend.RunInfo{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateActive},
+		DisplayRun:       &backend.RunInfo{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateActive},
 		Goal:             &backend.GoalInfo{ID: "goal-new", Text: "new goal"},
 		WorkspaceHasLive: true,
 	})
@@ -3423,15 +3423,15 @@ func TestModelWorkspaceContextDoesNotRestoreOldRunBlockersForLiveRun(t *testing.
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-old", WorkspaceID: "ws-a", RunID: "run-old", State: "open"}
 	m.blockingApproval = &backend.ApprovalInfo{ID: "approval-old", WorkspaceID: "ws-a", RunID: "run-old", State: "pending"}
 	next, _ := m.Update(WorkspaceContextMsg{
-		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-new"},
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-new"},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
-			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-new"},
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-new"},
 			Runs: []backend.RunInfo{
 				{ID: "run-old", WorkspaceID: "ws-a", GoalID: "goal-old", State: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-old"},
-				{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateRunning},
+				{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateActive},
 			},
 		},
-		ActiveRun: &backend.RunInfo{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateRunning},
+		ActiveRun: &backend.RunInfo{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateActive},
 		Decisions: []backend.DecisionInfo{{
 			ID:          "ticket-old",
 			WorkspaceID: "ws-a",
@@ -3460,13 +3460,13 @@ func TestModelWorkspaceContextDoesNotRestoreOldRunBlockersForLiveRun(t *testing.
 func TestModelWorkspaceContextUsesEffectiveGoalAndDoDFromRunContext(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceContextMsg{
-		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
 		ActiveRun: &backend.RunInfo{
 			ID:          "run-a",
 			WorkspaceID: "ws-a",
 			GoalID:      "goal-latest",
 			DoDID:       "dod-latest",
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 			ExecutionContext: map[string]any{
 				"goal": map[string]any{
 					"id":   "goal-latest",
@@ -3528,11 +3528,11 @@ func TestModelWorkspaceContextPartialRefreshKeepsKnownGoalAndDoD(t *testing.T) {
 	m.transcript = []transcriptItem{{Kind: "Goal", Text: "已确认目标"}}
 	m.dodItems = []string{"已确认验收项"}
 	next, _ := m.Update(WorkspaceContextMsg{
-		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
 		ActiveRun: &backend.RunInfo{
 			ID:          "run-a",
 			WorkspaceID: "ws-a",
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 		},
 		WorkspaceHasLive: true,
 	})
@@ -3589,10 +3589,10 @@ func TestModelMemoryCommandShowsRecallSummary(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-a"
 	next, _ := m.Update(WorkspaceContextMsg{
-		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
-			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
-			Runs:      []backend.RunInfo{{ID: "run-a", WorkspaceID: "ws-a", GoalID: "goal-a", State: common.RunStateRunning}},
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
+			Runs:      []backend.RunInfo{{ID: "run-a", WorkspaceID: "ws-a", GoalID: "goal-a", State: common.RunStateActive}},
 			MemoryRecallTraces: []backend.MemoryRecallTraceInfo{{
 				ID:                 "trace-a",
 				WorkspaceID:        "ws-a",
@@ -3608,7 +3608,7 @@ func TestModelMemoryCommandShowsRecallSummary(t *testing.T) {
 				}},
 			}},
 		},
-		ActiveRun: &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", GoalID: "goal-a", State: common.RunStateRunning},
+		ActiveRun: &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", GoalID: "goal-a", State: common.RunStateActive},
 		Goal:      &backend.GoalInfo{ID: "goal-a", Text: "use memory"},
 	})
 	m = asModel(next)
@@ -3758,9 +3758,9 @@ Filesystem                         Size  Used Avail Use% Mounted on
 Docker version 29.2.1, build a5c7197
 ` + "```"
 	next, _ := m.Update(WorkspaceContextMsg{
-		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateCompleted, ActiveRunID: "run-1"},
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-1"},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
-			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateCompleted, ActiveRunID: "run-1"},
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-1"},
 			Outcome:   backend.WorkspaceOutcomeInfo{RunID: "run-1", Summary: "目标已完成，成功查询到远程服务器配置信息。"},
 			TaskProgress: backend.TaskProgressInfo{
 				State: "running",
@@ -3868,9 +3868,9 @@ func TestModelWorkspaceContextWithResultAutoScrollsMainViewportToResult(t *testi
 	}
 
 	next, _ := m.Update(WorkspaceContextMsg{
-		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateCompleted},
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
-			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateCompleted},
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
 			Outcome:   backend.WorkspaceOutcomeInfo{RunID: "run-1", Summary: "快照结果已完成"},
 			Runs:      []backend.RunInfo{{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: common.RunStateCompleted}},
 		},
@@ -3887,9 +3887,9 @@ func TestModelWorkspaceContextRendersBusinessSectionsFromSnapshot(t *testing.T) 
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-a"
 	next, _ := m.Update(WorkspaceContextMsg{
-		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-1"},
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-1"},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
-			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-1"},
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-1"},
 			TaskProgress: backend.TaskProgressInfo{
 				State: "running",
 			},
@@ -3941,7 +3941,7 @@ func TestModelWorkspaceContextRendersBusinessSectionsFromSnapshot(t *testing.T) 
 				{ID: "approval-1", RunID: "run-1", Reason: "准备执行潜在风险命令", State: "pending"},
 			},
 		},
-		ActiveRun: &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", DoDID: "dod-1", State: common.RunStateRunning},
+		ActiveRun: &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", DoDID: "dod-1", State: common.RunStateActive},
 		Goal:      &backend.GoalInfo{ID: "goal-1", Text: "完成服务配置修复"},
 		DoD:       &backend.DoDInfo{ID: "dod-1", Items: []string{"变更最小化", "验证通过"}},
 		Decisions: []backend.DecisionInfo{
@@ -4287,7 +4287,7 @@ func TestModelWorkspaceProjectionDetailEventRefreshesOnlyActiveDetail(t *testing
 func TestModelWorkspaceProjectionEventRefreshesLiveWorkspaceWithoutPolling(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
 	}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-a"
@@ -4329,7 +4329,7 @@ func TestModelWorkspaceListSynchronizesWaitingDecisionPrompt(t *testing.T) {
 		{
 			ID:               "ws-a",
 			Title:            "A",
-			State:            common.WorkspaceStateWaitingDecision,
+			State:            common.WorkspaceStateActive,
 			ActiveRunID:      "run-a",
 			BlockingTicketID: "ticket-a",
 			Projection:       backend.ProjectionInfo{WorkspaceRevision: 31},
@@ -4358,7 +4358,7 @@ func TestModelProjectedWaitingDecisionWithoutTicketDoesNotOwnPrompt(t *testing.T
 		{
 			ID:          "ws-a",
 			Title:       "A",
-			State:       common.WorkspaceStateWaitingDecision,
+			State:       common.WorkspaceStateActive,
 			ActiveRunID: "run-a",
 			Projection:  backend.ProjectionInfo{WorkspaceRevision: 31},
 			ViewModel:   backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", WorkspaceRevision: 31},
@@ -4385,7 +4385,7 @@ func TestModelProjectedBlockedWithoutApprovalIDDoesNotOwnPrompt(t *testing.T) {
 		{
 			ID:          "ws-a",
 			Title:       "A",
-			State:       common.WorkspaceStateBlocked,
+			State:       common.WorkspaceStateBlockedOnApproval,
 			ActiveRunID: "run-a",
 			Projection:  backend.ProjectionInfo{WorkspaceRevision: 31},
 			ViewModel:   backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", WorkspaceRevision: 31},
@@ -4409,7 +4409,7 @@ func TestModelWorkspaceOverviewWithoutProjectionDoesNotOwnDecisionPrompt(t *test
 	m.workspaces = []backend.WorkspaceInfo{{
 		ID:               "ws-a",
 		Title:            "A",
-		State:            common.WorkspaceStateWaitingDecision,
+		State:            common.WorkspaceStateActive,
 		ActiveRunID:      "run-a",
 		BlockingTicketID: "ticket-a",
 	}}
@@ -4435,7 +4435,7 @@ func TestModelWorkspaceViewModelWithoutRevisionDoesNotOwnPromptMode(t *testing.T
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:        "ws-a",
-		State:     common.WorkspaceStateRunning,
+		State:     common.WorkspaceStateActive,
 		ViewModel: backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", PromptMode: workspacePromptModeDecision},
 	}}})
 	m = asModel(next)
@@ -4449,11 +4449,11 @@ func TestModelWorkspaceViewModelWithoutRevisionDoesNotOwnPromptMode(t *testing.T
 }
 
 func TestFetchWorkspaceContextUsesProjectionSnapshotOnly(t *testing.T) {
-	be := newRecordingBE(t, common.RunStateRunning)
+	be := newRecordingBE(t, common.RunStateActive)
 	be.snapshot = &backend.WorkspaceSnapshotInfo{
 		Workspace: backend.WorkspaceInfo{
 			ID:          "ws-projection-context",
-			State:       common.WorkspaceStateRunning,
+			State:       common.WorkspaceStateActive,
 			ActiveRunID: "run-projection-context",
 			Projection:  backend.ProjectionInfo{State: "ready", WorkspaceRevision: 42},
 		},
@@ -4461,12 +4461,12 @@ func TestFetchWorkspaceContextUsesProjectionSnapshotOnly(t *testing.T) {
 		Runs: []backend.RunInfo{{
 			ID:          "run-projection-context",
 			WorkspaceID: "ws-projection-context",
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 		}},
 		TaskProgress: backend.TaskProgressInfo{
 			WorkspaceID: "ws-projection-context",
 			RunID:       "run-projection-context",
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 			Summary:     "projection task progress",
 			Recovery: backend.RecoveryPlanInfo{
 				StepID: "step-projection-context",
@@ -4475,7 +4475,7 @@ func TestFetchWorkspaceContextUsesProjectionSnapshotOnly(t *testing.T) {
 		RunHeartbeat: backend.RunHeartbeatInfo{
 			WorkspaceID:   "ws-projection-context",
 			RunID:         "run-projection-context",
-			State:         string(common.RunStateRunning),
+			State:         string(common.RunStateActive),
 			ActivityState: "running",
 			Summary:       "projection heartbeat",
 		},
@@ -4494,7 +4494,7 @@ func TestFetchWorkspaceContextUsesProjectionSnapshotOnly(t *testing.T) {
 	if be.lastStatusWorkspace != "" || be.lastListWorkspace != "" || be.lastGetWorkspace != "" {
 		t.Fatalf("unexpected extra run/workspace reads: status=%q list=%q get=%q", be.lastStatusWorkspace, be.lastListWorkspace, be.lastGetWorkspace)
 	}
-	if msg.Status == nil || msg.Status.CurrentStepID != "step-projection-context" || msg.Status.State != common.RunStateRunning {
+	if msg.Status == nil || msg.Status.CurrentStepID != "step-projection-context" || msg.Status.State != common.RunStateActive {
 		t.Fatalf("status = %+v, want projection task progress status", msg.Status)
 	}
 	if msg.Projection.WorkspaceRevision != 42 {
@@ -4537,8 +4537,8 @@ func TestModelWorkspaceSwitchToDecisionWorkspaceShowsDecisionTail(t *testing.T) 
 	m.width = 120
 	m.height = 16
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
-		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 41}},
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 41}},
 	}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-a"
@@ -4556,8 +4556,8 @@ func TestModelWorkspaceSwitchToDecisionWorkspaceShowsDecisionTail(t *testing.T) 
 	}
 
 	next, _ = m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
-		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 42}},
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 42}},
 	}})
 	m = asModel(next)
 	next, _ = m.Update(DecisionDetailMsg{
@@ -4585,8 +4585,8 @@ func TestModelWorkspaceSwitchToDecisionWorkspaceSuggestsDecisionCommandsBeforeDe
 	m.width = 120
 	m.height = 18
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
-		{ID: "ws-b460b00b639f57e4", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 41}},
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
+		{ID: "ws-b460b00b639f57e4", Title: "B", State: common.WorkspaceStateActive, ActiveRunID: "run-b", BlockingTicketID: "ticket-b", Projection: backend.ProjectionInfo{WorkspaceRevision: 41}},
 	}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-a"
@@ -4627,7 +4627,7 @@ func TestModelWorkspaceSwitchToDecisionWorkspaceSuggestsDecisionCommandsBeforeDe
 func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
 		{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive},
 	}})
 	m = asModel(next)
@@ -4659,7 +4659,7 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 	next, _ = m.Update(WorkspaceContextMsg{
 		RequestSeq:  99,
 		WorkspaceID: "ws-a",
-		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", Title: "A stale", State: common.WorkspaceStateFailed, ActiveRunID: "run-a"},
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", Title: "A stale", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
 		DisplayRun: &backend.RunInfo{
 			ID:          "run-a",
 			WorkspaceID: "ws-a",
@@ -4677,12 +4677,12 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 	next, _ = m.Update(WorkspaceContextMsg{
 		RequestSeq:  seq,
 		WorkspaceID: "ws-b",
-		Workspace:   &backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateRunning, ActiveRunID: "run-b"},
-		ActiveRun:   &backend.RunInfo{ID: "run-b", WorkspaceID: "ws-b", State: common.RunStateRunning},
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive, ActiveRunID: "run-b"},
+		ActiveRun:   &backend.RunInfo{ID: "run-b", WorkspaceID: "ws-b", State: common.RunStateActive},
 		DisplayRun: &backend.RunInfo{
 			ID:          "run-b",
 			WorkspaceID: "ws-b",
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 			ExecutionContext: map[string]any{
 				"goal": map[string]any{"text": "build workspace B"},
 				"dod":  map[string]any{"items": []any{"B result accepted"}},
@@ -4691,11 +4691,11 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 		Status: &backend.RunStatusInfo{
 			ID:              "run-b",
 			WorkspaceID:     "ws-b",
-			State:           common.RunStateRunning,
+			State:           common.RunStateActive,
 			CurrentStepKind: "llm/workspace_execution",
 		},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
-			Workspace:    backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateRunning, ActiveRunID: "run-b"},
+			Workspace:    backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive, ActiveRunID: "run-b"},
 			TaskProgress: backend.TaskProgressInfo{WorkspaceID: "ws-b", RunID: "run-b", State: "running", Summary: "B is making progress"},
 			RunHeartbeat: backend.RunHeartbeatInfo{WorkspaceID: "ws-b", RunID: "run-b", State: "running", ActivityState: "running", Summary: "B heartbeat"},
 			SchedulerDiagnostics: &backend.SchedulerDiagnosticsInfo{
@@ -4730,9 +4730,9 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 
 	next, _ = m.Update(WorkspaceContextMsg{
 		WorkspaceID: "ws-a",
-		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateFailed, ActiveRunID: "run-a"},
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
-			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateFailed, ActiveRunID: "run-a"},
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
 			SchedulerDiagnostics: &backend.SchedulerDiagnosticsInfo{
 				LatestContinuation: &backend.ContinuationDiagnosticInfo{
 					WorkspaceID: "ws-a",
@@ -4758,7 +4758,7 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 func TestTUIE2EWorkspaceSwitchProjectionRefreshVisualSnapshot(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
 		{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive},
 	}})
 	m = asModel(next)
@@ -4790,12 +4790,12 @@ func TestTUIE2EWorkspaceSwitchProjectionRefreshVisualSnapshot(t *testing.T) {
 	next, _ = m.Update(WorkspaceContextMsg{
 		RequestSeq:  seq,
 		WorkspaceID: "ws-b",
-		Workspace:   &backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateRunning, ActiveRunID: "run-b"},
-		ActiveRun:   &backend.RunInfo{ID: "run-b", WorkspaceID: "ws-b", State: common.RunStateRunning},
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive, ActiveRunID: "run-b"},
+		ActiveRun:   &backend.RunInfo{ID: "run-b", WorkspaceID: "ws-b", State: common.RunStateActive},
 		DisplayRun: &backend.RunInfo{
 			ID:          "run-b",
 			WorkspaceID: "ws-b",
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 			ExecutionContext: map[string]any{
 				"goal": map[string]any{"text": "build workspace B"},
 				"dod":  map[string]any{"items": []any{"B result accepted"}},
@@ -4804,11 +4804,11 @@ func TestTUIE2EWorkspaceSwitchProjectionRefreshVisualSnapshot(t *testing.T) {
 		Status: &backend.RunStatusInfo{
 			ID:              "run-b",
 			WorkspaceID:     "ws-b",
-			State:           common.RunStateRunning,
+			State:           common.RunStateActive,
 			CurrentStepKind: "llm/workspace_execution",
 		},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
-			Workspace:    backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateRunning, ActiveRunID: "run-b"},
+			Workspace:    backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive, ActiveRunID: "run-b"},
 			TaskProgress: backend.TaskProgressInfo{WorkspaceID: "ws-b", RunID: "run-b", State: "running", Summary: "B is making progress"},
 			RunHeartbeat: backend.RunHeartbeatInfo{WorkspaceID: "ws-b", RunID: "run-b", State: "running", ActivityState: "running", Summary: "B heartbeat"},
 		},
@@ -4888,7 +4888,7 @@ func TestModelRejectsWorkspaceContextOlderThanOverviewRevision(t *testing.T) {
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:          "ws-a",
 		Title:       "A",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: "run-new",
 		Projection:  backend.ProjectionInfo{WorkspaceRevision: 5},
 	}}})
@@ -4902,18 +4902,18 @@ func TestModelRejectsWorkspaceContextOlderThanOverviewRevision(t *testing.T) {
 	next, cmd := m.Update(WorkspaceContextMsg{
 		RequestSeq:  7,
 		WorkspaceID: "ws-a",
-		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateRunning, ActiveRunID: "run-old", Projection: backend.ProjectionInfo{WorkspaceRevision: 3}},
-		ActiveRun:   &backend.RunInfo{ID: "run-old", WorkspaceID: "ws-a", State: common.RunStateRunning},
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateActive, ActiveRunID: "run-old", Projection: backend.ProjectionInfo{WorkspaceRevision: 3}},
+		ActiveRun:   &backend.RunInfo{ID: "run-old", WorkspaceID: "ws-a", State: common.RunStateActive},
 		DisplayRun: &backend.RunInfo{
 			ID:          "run-old",
 			WorkspaceID: "ws-a",
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 			ExecutionContext: map[string]any{
 				"goal": map[string]any{"text": "old task"},
 			},
 		},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
-			Workspace: backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateRunning, ActiveRunID: "run-old", Projection: backend.ProjectionInfo{WorkspaceRevision: 3}},
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateActive, ActiveRunID: "run-old", Projection: backend.ProjectionInfo{WorkspaceRevision: 3}},
 			ViewModel: backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", Revision: 3, WorkspaceRevision: 3},
 		},
 		WorkspaceHasLive: true,
@@ -4932,18 +4932,18 @@ func TestModelRejectsWorkspaceContextOlderThanOverviewRevision(t *testing.T) {
 	next, cmd = m.Update(WorkspaceContextMsg{
 		RequestSeq:  8,
 		WorkspaceID: "ws-a",
-		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateRunning, ActiveRunID: "run-current", Projection: backend.ProjectionInfo{WorkspaceRevision: 5}},
-		ActiveRun:   &backend.RunInfo{ID: "run-current", WorkspaceID: "ws-a", State: common.RunStateRunning},
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateActive, ActiveRunID: "run-current", Projection: backend.ProjectionInfo{WorkspaceRevision: 5}},
+		ActiveRun:   &backend.RunInfo{ID: "run-current", WorkspaceID: "ws-a", State: common.RunStateActive},
 		DisplayRun: &backend.RunInfo{
 			ID:          "run-current",
 			WorkspaceID: "ws-a",
-			State:       common.RunStateRunning,
+			State:       common.RunStateActive,
 			ExecutionContext: map[string]any{
 				"goal": map[string]any{"text": "current task"},
 			},
 		},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
-			Workspace: backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateRunning, ActiveRunID: "run-current", Projection: backend.ProjectionInfo{WorkspaceRevision: 5}},
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateActive, ActiveRunID: "run-current", Projection: backend.ProjectionInfo{WorkspaceRevision: 5}},
 			ViewModel: backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", Revision: 5, WorkspaceRevision: 5},
 		},
 		WorkspaceHasLive: true,
@@ -4989,7 +4989,7 @@ func TestModelTransientProjectionErrorKeepsOverviewDecisionState(t *testing.T) {
 	m.workspaces = []backend.WorkspaceInfo{{
 		ID:               "ws-a",
 		Title:            "A",
-		State:            common.WorkspaceStateWaitingDecision,
+		State:            common.WorkspaceStateActive,
 		ActiveRunID:      "run-a",
 		BlockingTicketID: "ticket-a",
 		Projection:       backend.ProjectionInfo{WorkspaceRevision: 51},
@@ -5022,11 +5022,11 @@ func TestModelWorkspaceContextSuccessClearsProjectionError(t *testing.T) {
 	next, _ := m.Update(WorkspaceContextMsg{
 		RequestSeq:  1,
 		WorkspaceID: "ws-a",
-		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
-		ActiveRun:   &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", State: common.RunStateRunning},
-		DisplayRun:  &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", State: common.RunStateRunning},
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
+		ActiveRun:   &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", State: common.RunStateActive},
+		DisplayRun:  &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", State: common.RunStateActive},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
-			Workspace:    backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+			Workspace:    backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
 			TaskProgress: backend.TaskProgressInfo{WorkspaceID: "ws-a", RunID: "run-a", State: "running", Summary: "run running"},
 		},
 		WorkspaceHasLive: true,
@@ -5104,7 +5104,7 @@ func TestModelWorkspaceListRefreshDoesNotQueueContextWhileContextInFlight(t *tes
 	next, cmd := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:         "ws-a",
 		Title:      "A",
-		State:      common.WorkspaceStateRunning,
+		State:      common.WorkspaceStateActive,
 		Projection: backend.ProjectionInfo{WorkspaceRevision: 5},
 	}}})
 	m = asModel(next)
@@ -5128,7 +5128,7 @@ func TestModelWorkspaceListRefreshRequestsContextWhenOverviewOutrunsDisplay(t *t
 	next, cmd := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:         "ws-a",
 		Title:      "A",
-		State:      common.WorkspaceStateRunning,
+		State:      common.WorkspaceStateActive,
 		Projection: backend.ProjectionInfo{WorkspaceRevision: 5},
 	}}})
 	m = asModel(next)
@@ -5141,7 +5141,7 @@ func TestModelWorkspaceListRefreshRequestsContextWhenOverviewOutrunsDisplay(t *t
 func TestModelWorkspaceContextRefreshCoalescesWhileInFlight(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
 	}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-a"
@@ -5158,7 +5158,7 @@ func TestModelWorkspaceContextRefreshCoalescesWhileInFlight(t *testing.T) {
 		t.Fatalf("second context refresh should coalesce = cmd:%v pending:%v seq:%d want %d", cmd != nil, entry.ContextPending, entry.ContextRequestSeq, previousSeq+1)
 	}
 
-	next, cmd = m.Update(WorkspaceContextMsg{RequestSeq: previousSeq + 1, WorkspaceID: "ws-a", Workspace: &backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateRunning}, Snapshot: &backend.WorkspaceSnapshotInfo{Workspace: backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateRunning}}})
+	next, cmd = m.Update(WorkspaceContextMsg{RequestSeq: previousSeq + 1, WorkspaceID: "ws-a", Workspace: &backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateActive}, Snapshot: &backend.WorkspaceSnapshotInfo{Workspace: backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateActive}}})
 	m = asModel(next)
 	entry = m.ensureWorkspaceRuntimeState("ws-a")
 	if cmd == nil || !entry.ContextInFlight || entry.ContextPending || entry.ContextRequestSeq != previousSeq+2 {
@@ -5280,7 +5280,7 @@ func TestModelLLMStreamProgressUpdatesStatus(t *testing.T) {
 func TestModelGovernanceResolvedEventRefreshesWorkspaceState(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
-		{ID: "ws-a", Title: "A", State: common.WorkspaceStateBlocked, ActiveRunID: "run-1"},
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateBlockedOnApproval, ActiveRunID: "run-1"},
 	}})
 	m = asModel(next)
 	m.workspaceListRefreshInFlight = false
@@ -5308,7 +5308,7 @@ func TestModelDecisionResolvedDoesNotHideServerOpenProjection(t *testing.T) {
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:               "ws-a",
 		Title:            "A",
-		State:            common.WorkspaceStateWaitingDecision,
+		State:            common.WorkspaceStateActive,
 		ActiveRunID:      "run-1",
 		BlockingTicketID: "ticket-1",
 		Projection:       backend.ProjectionInfo{WorkspaceRevision: 61},
@@ -5333,7 +5333,7 @@ func TestModelDecisionResolvedDoesNotHideServerOpenProjection(t *testing.T) {
 	next, _ = m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:               "ws-a",
 		Title:            "A",
-		State:            common.WorkspaceStateWaitingDecision,
+		State:            common.WorkspaceStateActive,
 		ActiveRunID:      "run-1",
 		BlockingTicketID: "ticket-1",
 		Projection:       backend.ProjectionInfo{WorkspaceRevision: 62},
@@ -5348,17 +5348,17 @@ func TestModelDecisionResolvedDoesNotHideServerOpenProjection(t *testing.T) {
 		Workspace: &backend.WorkspaceInfo{
 			ID:               "ws-a",
 			Title:            "A",
-			State:            common.WorkspaceStateWaitingDecision,
+			State:            common.WorkspaceStateActive,
 			ActiveRunID:      "run-1",
 			BlockingTicketID: "ticket-1",
 		},
-		ActiveRun:  &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-a", State: common.RunStateRunning},
-		DisplayRun: &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-a", State: common.RunStateRunning},
+		ActiveRun:  &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-a", State: common.RunStateActive},
+		DisplayRun: &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-a", State: common.RunStateActive},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
 			Workspace: backend.WorkspaceInfo{
 				ID:               "ws-a",
 				Title:            "A",
-				State:            common.WorkspaceStateWaitingDecision,
+				State:            common.WorkspaceStateActive,
 				ActiveRunID:      "run-1",
 				BlockingTicketID: "ticket-1",
 			},
@@ -5380,7 +5380,7 @@ func TestModelDecisionResolvedDoesNotHideServerOpenProjection(t *testing.T) {
 
 func TestModelLiveStateEventClearsStaleDecisionPrompt(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
-	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-a", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-1", BlockingTicketID: "ticket-1"}}
+	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-a", State: common.WorkspaceStateActive, ActiveRunID: "run-1", BlockingTicketID: "ticket-1"}}
 	m.activeRunID = "run-1"
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", WorkspaceID: "ws-a", RunID: "run-1", State: "open"}
 	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
@@ -5394,12 +5394,12 @@ func TestModelLiveStateEventClearsStaleDecisionPrompt(t *testing.T) {
 		WorkspaceID: "ws-a",
 		RunID:       "run-1",
 		Payload: map[string]any{
-			"state":       "running",
+			"state":       string(common.WorkspaceStateActive),
 			"activeRunId": "run-1",
 		},
 	})
 	if cmd != nil {
-		t.Fatalf("running workspace state event should not require immediate context refresh")
+		t.Fatalf("active workspace state event with active run should not require immediate context refresh")
 	}
 	if m.blockingDecision != nil || m.progress != progressRunning || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a running >") {
 		t.Fatalf("workspace running event kept stale decision prompt: input=%q blocker=%+v progress=%s", stripANSI(m.renderInput(120)), m.blockingDecision, m.progress)
@@ -5410,7 +5410,7 @@ func TestModelPromptModeUsesProjectionOverLocalDecisionCache(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.workspaces = []backend.WorkspaceInfo{{
 		ID:          "ws-a",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: "run-1",
 		Projection:  backend.ProjectionInfo{WorkspaceRevision: 20},
 		ViewModel:   backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", PromptMode: workspacePromptModeRunning, WorkspaceRevision: 20},
@@ -5441,7 +5441,7 @@ func TestModelWorkspaceListViewModelDrivesPromptMode(t *testing.T) {
 
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:          "ws-a",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: "run-1",
 		Projection:  backend.ProjectionInfo{WorkspaceRevision: 12},
 		ViewModel:   backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", PromptMode: workspacePromptModeRunning, WorkspaceRevision: 12},
@@ -5462,7 +5462,7 @@ func TestModelPromptModeProjectionRejectsOlderDecisionEvent(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:          "ws-a",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: "run-1",
 		Projection:  backend.ProjectionInfo{WorkspaceRevision: 20},
 		ViewModel:   backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", PromptMode: workspacePromptModeRunning, WorkspaceRevision: 20},
@@ -5491,7 +5491,7 @@ func TestModelPromptModeProjectionAcceptsSameModeOlderDecisionEvent(t *testing.T
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:               "ws-a",
-		State:            common.WorkspaceStateWaitingDecision,
+		State:            common.WorkspaceStateActive,
 		ActiveRunID:      "run-1",
 		BlockingTicketID: "ticket-current",
 		Projection:       backend.ProjectionInfo{WorkspaceRevision: 20},
@@ -5520,7 +5520,7 @@ func TestModelPromptModeProjectionRejectsOlderMismatchedDecisionEvent(t *testing
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:               "ws-a",
-		State:            common.WorkspaceStateWaitingDecision,
+		State:            common.WorkspaceStateActive,
 		ActiveRunID:      "run-1",
 		BlockingTicketID: "ticket-current",
 		Projection:       backend.ProjectionInfo{WorkspaceRevision: 20},
@@ -5549,7 +5549,7 @@ func TestModelPromptModeProjectionRejectsOlderMismatchedDecisionEvent(t *testing
 
 func TestModelLiveRunStateEventClearsStaleDecisionPrompt(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
-	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-a", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-1", BlockingTicketID: "ticket-1"}}
+	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-a", State: common.WorkspaceStateActive, ActiveRunID: "run-1", BlockingTicketID: "ticket-1"}}
 	m.activeRunID = "run-1"
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", WorkspaceID: "ws-a", RunID: "run-1", State: "open"}
 	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
@@ -5562,7 +5562,7 @@ func TestModelLiveRunStateEventClearsStaleDecisionPrompt(t *testing.T) {
 		Type:        backend.EventRunStateChanged,
 		WorkspaceID: "ws-a",
 		RunID:       "run-1",
-		Payload:     map[string]any{"state": "running"},
+		Payload:     map[string]any{"state": string(common.RunStateActive)},
 	})
 	if m.blockingDecision != nil || m.progress != progressRunning || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a running >") {
 		t.Fatalf("run running event kept stale decision prompt: input=%q blocker=%+v progress=%s", stripANSI(m.renderInput(120)), m.blockingDecision, m.progress)
@@ -5626,9 +5626,9 @@ func TestTUIE2EWorkspaceListLiveRefreshFromBackendEvents(t *testing.T) {
 	stateCmd := m.applyBackendEvent(backend.Event{
 		Type:        backend.EventWorkspaceStateChanged,
 		WorkspaceID: "ws-b",
-		Payload:     map[string]any{"state": string(common.WorkspaceStateRunning)},
+		Payload:     map[string]any{"state": string(common.WorkspaceStateActive)},
 	})
-	if stateCmd != nil || m.workspaces[1].State != common.WorkspaceStateRunning || m.progressText != "active progress" {
+	if stateCmd != nil || m.workspaces[1].State != common.WorkspaceStateActive || m.progressText != "active progress" {
 		t.Fatalf("non-active state event leaked into active view: cmd=%v ws=%+v progress=%q", stateCmd != nil, m.workspaces[1], m.progressText)
 	}
 
@@ -6047,11 +6047,11 @@ func (f *recordingRun) Command(ctx context.Context, req backend.WorkspaceRunComm
 
 func (f *recordingRun) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	f.parent.activations = append(f.parent.activations, req)
-	return &backend.RunInfo{ID: "run-new", WorkspaceID: wsID, GoalID: req.GoalID, DoDID: req.DoDID, State: common.RunStateRunning}, nil
+	return &backend.RunInfo{ID: "run-new", WorkspaceID: wsID, GoalID: req.GoalID, DoDID: req.DoDID, State: common.RunStateActive}, nil
 }
 func (f *recordingRun) Restart(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	f.parent.restarts = append(f.parent.restarts, req)
-	return &backend.RunInfo{ID: "run-new", WorkspaceID: wsID, GoalID: req.GoalID, DoDID: req.DoDID, State: common.RunStateRunning}, nil
+	return &backend.RunInfo{ID: "run-new", WorkspaceID: wsID, GoalID: req.GoalID, DoDID: req.DoDID, State: common.RunStateActive}, nil
 }
 func (f *recordingRun) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, executionContextPatch ...map[string]any) (*backend.RunInfo, error) {
 	f.parent.resumes = append(f.parent.resumes, id)
@@ -6063,7 +6063,7 @@ func (f *recordingRun) Resume(ctx context.Context, wsID common.WorkspaceID, id c
 	if workspaceID == "" {
 		workspaceID = "ws-1"
 	}
-	return &backend.RunInfo{ID: id, WorkspaceID: workspaceID, State: common.RunStateRunning}, nil
+	return &backend.RunInfo{ID: id, WorkspaceID: workspaceID, State: common.RunStateActive}, nil
 }
 func (f *recordingRun) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunInfo, error) {
 	f.parent.lastGetWorkspace = wsID
@@ -6162,14 +6162,14 @@ func (f *conflictRunBackend) Command(ctx context.Context, req backend.WorkspaceR
 }
 
 func (f *conflictRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
-	return &backend.RunInfo{ID: "run-1", WorkspaceID: wsID, State: common.RunStateRunning}, nil
+	return &backend.RunInfo{ID: "run-1", WorkspaceID: wsID, State: common.RunStateActive}, nil
 }
 func (f *conflictRunBackend) Restart(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
-	return &backend.RunInfo{ID: "run-1", WorkspaceID: wsID, State: common.RunStateRunning}, nil
+	return &backend.RunInfo{ID: "run-1", WorkspaceID: wsID, State: common.RunStateActive}, nil
 }
 func (f *conflictRunBackend) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, _ ...map[string]any) (*backend.RunInfo, error) {
 	f.parent.resumed = true
-	return &backend.RunInfo{ID: id, WorkspaceID: wsID, State: common.RunStateRunning}, nil
+	return &backend.RunInfo{ID: id, WorkspaceID: wsID, State: common.RunStateActive}, nil
 }
 func (f *conflictRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunInfo, error) {
 	return &backend.RunInfo{ID: id, WorkspaceID: wsID, State: f.parent.runState}, nil

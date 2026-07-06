@@ -26,7 +26,7 @@ func TestRuntimeRepairInputForSatisfiedDoDCoverageMissingIsAssessmentOnly(t *tes
 		ID:    common.StepID(runID + "/graph-001/003-test"),
 		RunID: runID,
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"stdout": "TestStream passed; token statistics include prompt tokens and completion tokens.",
 		},
@@ -105,7 +105,7 @@ func TestRuntimeRepairInputIncludesLatestClosureEvidenceForCoverageCorrection(t 
 	latestSuccessStepID := common.StepID(runID + "/graph-007/002-rerun-targeted-goal-test")
 	for _, step := range []*runmodel.Step{
 		{ID: oldFailedStepID, RunID: runID, Kind: shellcommon.StepKindCommand, State: common.StepStateFailed, Output: map[string]any{"stderr": "old failure"}},
-		{ID: latestSuccessStepID, RunID: runID, Kind: shellcommon.StepKindCommand, State: common.StepStateCompleted, Output: map[string]any{"stdout": "latest targeted validation passed"}},
+		{ID: latestSuccessStepID, RunID: runID, Kind: shellcommon.StepKindCommand, State: common.StepStateSucceeded, Output: map[string]any{"stdout": "latest targeted validation passed"}},
 	} {
 		if err := stepRepo.Create(ctx, step); err != nil {
 			t.Fatalf("seed step %s: %v", step.ID, err)
@@ -233,7 +233,7 @@ func TestRuntimeRepairInputTreatsGraphLimitAssessmentAsCoverageCorrection(t *tes
 		ID:     evidenceStepID,
 		RunID:  runID,
 		Kind:   shellcommon.StepKindCommand,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stdout": "validation passed"},
 	}); err != nil {
 		t.Fatalf("seed evidence step: %v", err)
@@ -514,7 +514,7 @@ func TestRuntimeRepairEvidenceCandidatesRequireCoverageBoundAction(t *testing.T)
 		ID:     unboundStepID,
 		RunID:  runID,
 		Kind:   shellcommon.StepKindCommand,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stdout": "latest action completed"},
 	}); err != nil {
 		t.Fatalf("seed unbound step: %v", err)
@@ -539,7 +539,7 @@ func TestRuntimeRepairEvidenceCandidatesRequireCoverageBoundAction(t *testing.T)
 		ID:    boundStepID,
 		RunID: runID,
 		Kind:  shellcommon.StepKindCommand,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"stdout":          "targeted action completed",
 			"coverageTargets": []string{"target alpha requirement"},
@@ -920,14 +920,14 @@ func TestRuntimeRepairFailedCompletionStateWithAssessmentUsesDoDGate(t *testing.
 		RuntimeEvidenceRepositories{Results: resultRepo},
 		events.NewMemoryHub(),
 	)
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	run := &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           "dod-failed-completion-assessment-gate",
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{
 			"dod": map[string]any{
@@ -1058,7 +1058,7 @@ func TestRuntimeRepairInputEscalatesRepeatedValidationAfterResourceSurfaceEviden
 		ID:    common.StepID(runID + "/graph-001/001-list-workspace"),
 		RunID: runID,
 		Kind:  "file/list",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphRootStepID: string(runID) + "/step-1",
 			stepInputKeyGraphNodeID:     "list-workspace",
@@ -1297,14 +1297,14 @@ func TestRuntimeOrchestrator_StateChangingProviderRetryViolationContinuesRecover
 
 	workspaceID := common.WorkspaceID("ws-state-changing-retry-closure")
 	runID := common.RunID("run-state-changing-retry-closure")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           "dod-state-changing-retry-closure",
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1360,7 +1360,7 @@ func TestRuntimeOrchestrator_StateChangingProviderRetryViolationContinuesRecover
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           "dod-state-changing-retry-closure",
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}, failedStep, errors.New("invalid argument: state-changing llm repair step returned read-only executionGraph without patch/apply")); err != nil {
 		t.Fatalf("dispatchRuntimeRepairFollowUp: %v", err)
@@ -1380,7 +1380,7 @@ func TestRuntimeOrchestrator_StateChangingProviderRetryViolationContinuesRecover
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if runItem.State == common.RunStateRunning {
+	if runItem.State == common.RunStateActive {
 		t.Fatalf("run state = running, want recovery closure to terminal/blocking state")
 	}
 	results, err := resultRepo.ListByRun(ctx, runID)

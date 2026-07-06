@@ -1654,7 +1654,7 @@ func TestContractViolationRecoveryPublishesRecordedRetryAndDispatchEvents(t *tes
 	run := &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}
 	failed := contractViolationFailedStep(runID, "failed-events")
@@ -1662,7 +1662,7 @@ func TestContractViolationRecoveryPublishesRecordedRetryAndDispatchEvents(t *tes
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := stepRepo.Create(ctx, failed); err != nil {
@@ -1750,7 +1750,7 @@ func TestEventSubsystemPublishesNotificationsThroughAsyncHub(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-event-subsystem-async",
 		WorkspaceID: "ws-event-subsystem-async",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	failed := contractViolationFailedStep(run.ID, "failed-event-subsystem-async")
 	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))

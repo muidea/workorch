@@ -50,7 +50,7 @@ func CurrentRunSnapshotStep(steps []StepView, decisionStep string, approvalStep 
 }
 
 func runningCompletedSnapshotStepWouldMasqueradeAsActive(step *StepView) bool {
-	return step != nil && step.State == string(common.StepStateCompleted)
+	return step != nil && step.State == string(common.StepStateSucceeded)
 }
 
 func currentRunSnapshotTerminalStep(steps []StepView, checkpoints []readmodelcore.RuntimeCheckpoint) *StepView {

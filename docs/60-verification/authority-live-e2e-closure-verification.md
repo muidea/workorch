@@ -63,7 +63,7 @@ The command is accepted only if owner readback later shows at least one of:
 - old blocker changed or cleared,
 - prompt mode changed,
 - ViewModel revision advanced,
-- state is `running`, `completed`, `failed` or `waiting_approval`,
+- run/projection state is `active`, `completed`, `failed`, `blocked_on_approval`, or an equivalent governed/terminal projection,
 - a new governance blocker replaces the previous blocker.
 
 ## Optional Decision Verification
@@ -138,7 +138,7 @@ scenario.
 
 The `waitingDecisions` section classifies obvious contract-retry or violation
 blockers separately from generic decision-required blockers so operators can
-avoid treating all `waiting_decision` states as the same condition.
+avoid treating all `blocked_on_decision` / decision prompt states as the same condition.
 
 The `authorityChecks` section records compact evidence for:
 
@@ -158,8 +158,9 @@ The `authorityChecks` section records compact evidence for:
 - Required metric markers are present.
 - If a command is submitted, owner state must visibly advance or enter a new
   governed/terminal condition.
-- A workspace cannot be `waiting_decision` or prompt `decision` unless the
-  scoped active-run decision ticket is still open.
+- A workspace cannot show prompt `decision`, and a run cannot be
+  `blocked_on_decision`, unless the scoped active-run decision ticket is still
+  open. Workspace owner state itself remains `active` for decision blockers.
 - A run cannot remain `blocked_on_decision` unless the scoped blocking decision
   ticket is still open.
 - A resolved replan decision must have successor evidence or a failed

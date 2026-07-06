@@ -3,8 +3,11 @@ package events
 import "github.com/muidea/workorch/internal/pkg/workorchownercontract"
 
 const (
-	TopicApprovalCreated  = "/approval/created"
-	TopicApprovalResolved = "/approval/resolved"
+	TopicApprovalCreated    = "/approval/created"
+	TopicApprovalApproved   = "/approval/approved"
+	TopicApprovalRejected   = "/approval/rejected"
+	TopicApprovalResolved   = "/approval/resolved"
+	TopicApprovalSuperseded = "/approval/superseded"
 
 	TopicApprovalCommandCreate          = "/approval/command/create"
 	TopicApprovalCommandEnsure          = "/approval/command/ensure"

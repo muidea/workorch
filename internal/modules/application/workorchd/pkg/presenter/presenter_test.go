@@ -109,7 +109,7 @@ func TestMapStepDeepClonesNestedPayloads(t *testing.T) {
 	step := &runmodel.Step{
 		ID:    "step-1",
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"workspaceId": "ws-1",
 			"items":       []any{"first", map[string]any{"nested": "original"}},
@@ -145,7 +145,7 @@ func TestMapStepCanonicalizesWorkspacePlanKind(t *testing.T) {
 	step := &runmodel.Step{
 		ID:    "step-alias",
 		Kind:  llmcommon.StepKindWorkspacePlan,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}
 
 	mapped := MapStep(step)

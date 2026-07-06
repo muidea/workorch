@@ -259,7 +259,7 @@ func TestRuntimeOrchestrator_ResumeRunClearsResolvedDecisionBeforeGapBaselineRef
 		events.NewMemoryHub(),
 	)
 
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateBlocked, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateBlockedOnApproval, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	coverageItem := map[string]any{
@@ -313,7 +313,7 @@ func TestRuntimeOrchestrator_ResumeRunClearsResolvedDecisionBeforeGapBaselineRef
 		ID:    stepID,
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			"status":   "completed",
 			"nextStep": string(nextStepID),
@@ -360,7 +360,7 @@ func TestRuntimeOrchestrator_ResumeRunClearsResolvedDecisionBeforeGapBaselineRef
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if runItem.State != common.RunStateRunning || runItem.BlockingTicketID != "" {
+	if runItem.State != common.RunStateActive || runItem.BlockingTicketID != "" {
 		t.Fatalf("run = %+v, want running with cleared decision blocker", runItem)
 	}
 	persistedBaseline := mapFromValue(runItem.ExecutionContext[gapBaselineKey])
@@ -371,7 +371,7 @@ func TestRuntimeOrchestrator_ResumeRunClearsResolvedDecisionBeforeGapBaselineRef
 	if err != nil {
 		t.Fatalf("get next step: %v", err)
 	}
-	if nextStep.State != common.StepStateDispatched {
+	if nextStep.State != common.StepStateExecuting {
 		t.Fatalf("next step = %+v, want dispatched request-only step", nextStep)
 	}
 }
@@ -412,7 +412,7 @@ func TestRuntimeOrchestrator_ResumeContextGateResolutionRegeneratesRepairContext
 	runID := common.RunID("run-context-gate-resume")
 	failedStepID := common.StepID(string(runID) + "/follow-up-read-config")
 	ticketID := common.TicketID(string(failedStepID) + "-context-integrity-decision")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -568,7 +568,7 @@ func TestRuntimeOrchestrator_ResumeRepairPlanRetryDispatchesRuntimeRepair(t *tes
 	runID := common.RunID("run-repair-plan-retry")
 	failedStepID := common.StepID(string(runID) + "/repair-010-of-verify")
 	ticketID := common.TicketID(string(failedStepID) + "-repair-exhausted-decision")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -1235,7 +1235,7 @@ func TestRuntimeOrchestrator_CompleteRunRejectsNonRunningState(t *testing.T) {
 		name string
 		run  *runmodel.Run
 	}{
-		{name: "created", run: &runmodel.Run{ID: common.RunID("run-complete-created"), WorkspaceID: workspaceID, State: common.RunStateCreated}},
+		{name: "created", run: &runmodel.Run{ID: common.RunID("run-complete-created"), WorkspaceID: workspaceID, State: common.RunStatePending}},
 		{name: "blocked decision", run: &runmodel.Run{ID: common.RunID("run-complete-blocked-decision"), WorkspaceID: workspaceID, State: common.RunStateBlockedOnDecision, BlockingTicketID: common.TicketID("ticket-1")}},
 		{name: "blocked approval", run: &runmodel.Run{ID: common.RunID("run-complete-blocked-approval"), WorkspaceID: workspaceID, State: common.RunStateBlockedOnApproval, BlockingApprovalID: common.ApprovalID("approval-1")}},
 		{name: "completed", run: &runmodel.Run{ID: common.RunID("run-complete-completed"), WorkspaceID: workspaceID, State: common.RunStateCompleted}},
@@ -1285,7 +1285,7 @@ func TestRuntimeOrchestrator_CompleteRunRequiresAcceptedResultForDoDGatedRun(t *
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "ws",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: runID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -1294,7 +1294,7 @@ func TestRuntimeOrchestrator_CompleteRunRequiresAcceptedResultForDoDGatedRun(t *
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           "dod-complete-result-gate",
-		State:           common.RunStateValidating,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1307,7 +1307,7 @@ func TestRuntimeOrchestrator_CompleteRunRequiresAcceptedResultForDoDGatedRun(t *
 	if err != nil {
 		t.Fatalf("get run after rejected complete: %v", err)
 	}
-	if got.State != common.RunStateValidating {
+	if got.State != common.RunStateActive {
 		t.Fatalf("run state = %q, want validating after rejected complete", got.State)
 	}
 
@@ -1384,7 +1384,7 @@ func TestRuntimeOrchestrator_CompleteRunRejectsOpenCoverageLedger(t *testing.T) 
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
 		ID:          workspaceID,
 		Title:       "ws",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: runID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -1393,7 +1393,7 @@ func TestRuntimeOrchestrator_CompleteRunRejectsOpenCoverageLedger(t *testing.T) 
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           "dod-complete-coverage-gate",
-		State:           common.RunStateValidating,
+		State:           common.RunStateActive,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1444,7 +1444,7 @@ func TestRuntimeOrchestrator_CompleteRunRejectsOpenCoverageLedger(t *testing.T) 
 	if err != nil {
 		t.Fatalf("get run after rejected complete: %v", err)
 	}
-	if got.State != common.RunStateValidating {
+	if got.State != common.RunStateActive {
 		t.Fatalf("run state = %q, want validating after coverage gate rejection", got.State)
 	}
 }

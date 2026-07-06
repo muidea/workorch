@@ -364,7 +364,7 @@ func TestReadAndListWorkspacesProjectActiveRunState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.State = common.WorkspaceStateActive
 	workspaceItem.ActiveRunID = common.RunID(run.ID)
 	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace: %v", err)
@@ -386,15 +386,15 @@ func TestReadAndListWorkspacesProjectActiveRunState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
 	}
-	if readBack.State != string(common.WorkspaceStateWaitingDecision) || readBack.ActiveRunID != run.ID || readBack.BlockingTicketID != "ticket-project-workspace" {
-		t.Fatalf("read workspace = %+v, want waiting decision projection with active run ticket", readBack)
+	if readBack.State != string(common.WorkspaceStateActive) || readBack.ActiveRunID != run.ID || readBack.BlockingTicketID != "ticket-project-workspace" {
+		t.Fatalf("read workspace = %+v, want active projection with decision ticket", readBack)
 	}
 	items, err := ListWorkspacesWithBackend(ctx, "file", dataRoot)
 	if err != nil {
 		t.Fatalf("ListWorkspacesWithBackend: %v", err)
 	}
-	if len(items) != 1 || items[0].State != string(common.WorkspaceStateWaitingDecision) || items[0].ActiveRunID != run.ID || items[0].BlockingTicketID != "ticket-project-workspace" {
-		t.Fatalf("listed workspaces = %+v, want waiting decision projection with active run ticket", items)
+	if len(items) != 1 || items[0].State != string(common.WorkspaceStateActive) || items[0].ActiveRunID != run.ID || items[0].BlockingTicketID != "ticket-project-workspace" {
+		t.Fatalf("listed workspaces = %+v, want active projection with decision ticket", items)
 	}
 }
 

@@ -32,7 +32,7 @@ func TestBuildWorkorchSnapshotIncludesExpectedPublishedTopics(t *testing.T) {
 		ID:    common.StepID("run-observed/step-1"),
 		RunID: run.ID,
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}
 	ticket := &decisionmodel.Ticket{
 		ID:          common.TicketID("ticket-observed"),
@@ -167,13 +167,13 @@ func TestBuildWorkorchSnapshotCanonicalizesWorkspacePlanStepKind(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          common.RunID("run-observed-alias"),
 		WorkspaceID: ws.ID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	step := &runmodel.Step{
 		ID:    common.StepID("run-observed-alias/step-1"),
 		RunID: run.ID,
 		Kind:  llmcommon.StepKindWorkspacePlan,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}
 
 	items := BuildWorkorchSnapshot(ws, run, []*runmodel.Step{step}, nil, nil, nil, []events.WorkorchEvent{
@@ -286,7 +286,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunAndStepEvents(t *testing.T) {
 		ID:    common.StepID("run-published/step-1"),
 		RunID: run.ID,
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}
 
 	items := BuildWorkorchSnapshot(ws, run, []*runmodel.Step{step}, nil, nil, nil, []events.WorkorchEvent{
@@ -319,7 +319,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunAndStepEvents(t *testing.T) {
 			StepID:       string(step.ID),
 			Payload: map[string]any{
 				"kind":   step.Kind,
-				"state":  string(common.StepStateCompleted),
+				"state":  string(common.StepStateSucceeded),
 				"output": map[string]any{"status": "completed"},
 			},
 		}),
@@ -345,7 +345,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunAndStepEvents(t *testing.T) {
 	if !ok {
 		t.Fatalf("step payload type = %T, want StepPayload", stepItem.Payload)
 	}
-	if stepPayload.State != string(common.StepStateCompleted) {
+	if stepPayload.State != string(common.StepStateSucceeded) {
 		t.Fatalf("step payload state = %v, want completed", stepPayload.State)
 	}
 	if stepItem.OccurredAt != "2026-04-21T09:00:01Z" {
@@ -380,7 +380,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunCreatedAndFailureReason(t *test
 			Payload: map[string]any{
 				events.PayloadKeyGoalID:             string(run.GoalID),
 				events.PayloadKeyDoDID:              string(run.DoDID),
-				events.PayloadKeyState:              string(common.RunStateCreated),
+				events.PayloadKeyState:              string(common.RunStatePending),
 				events.PayloadKeyBlockingTicketID:   "",
 				events.PayloadKeyBlockingApprovalID: "",
 			},
@@ -613,7 +613,7 @@ func TestBuildWorkorchSnapshotIgnoresPublishedEventsThatDoNotMatchCurrentObjects
 		ID:     common.StepID("run-unmatched-published/step-1"),
 		RunID:  run.ID,
 		Kind:   "llm/workspace_execution",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"status": "unmatched"},
 	}
 
@@ -628,7 +628,7 @@ func TestBuildWorkorchSnapshotIgnoresPublishedEventsThatDoNotMatchCurrentObjects
 			WorkspaceID:  string(ws.ID),
 			RunID:        "run-other",
 			Payload: map[string]any{
-				events.PayloadKeyState: string(common.RunStateRunning),
+				events.PayloadKeyState: string(common.RunStateActive),
 			},
 		}),
 		mustWorkorchEvent(t, events.Envelope{
@@ -643,7 +643,7 @@ func TestBuildWorkorchSnapshotIgnoresPublishedEventsThatDoNotMatchCurrentObjects
 			StepID:       "run-other/step-1",
 			Payload: map[string]any{
 				events.PayloadKeyKind:   step.Kind,
-				events.PayloadKeyState:  string(common.StepStateCompleted),
+				events.PayloadKeyState:  string(common.StepStateSucceeded),
 				events.PayloadKeyOutput: map[string]any{"status": "other"},
 			},
 		}),

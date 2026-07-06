@@ -71,11 +71,11 @@ func sourceOutputStateFromStep(step StepView, violation map[string]any) string {
 		return "retrying"
 	}
 	switch strings.TrimSpace(step.State) {
-	case string(common.StepStateCompleted):
+	case string(common.StepStateSucceeded):
 		return "accepted"
 	case string(common.StepStateFailed):
 		return "rejected"
-	case string(common.StepStateDispatched):
+	case string(common.StepStateExecuting):
 		return "running"
 	default:
 		return "proposed"

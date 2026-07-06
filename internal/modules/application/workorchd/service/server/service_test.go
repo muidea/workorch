@@ -122,7 +122,7 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 		ID:                   workspaceID,
 		Title:                "service startup inactive",
 		DeliverableDirectory: "workspaces/service-startup-inactive",
-		State:                common.WorkspaceStateRunning,
+		State:                common.WorkspaceStateActive,
 		ActiveRunID:          runID,
 	}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -130,7 +130,7 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 	if err := exports.Repositories.Runs.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}

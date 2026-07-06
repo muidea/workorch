@@ -15,7 +15,7 @@ func CreatedWorkspaceRunExecutionContext(runID common.RunID, workspaceID common.
 		DoDID:            dodID,
 		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: runtimecore.CloneContextMap(executionContext),
-		State:            common.RunStateCreated,
+		State:            common.RunStatePending,
 		Priority:         priority,
 	}
 	ret := runtimecore.CloneContextMap(executionContext)

@@ -25,8 +25,22 @@ func WorkspaceSnapshotFromModels(input WorkspaceSnapshotModelInput) readmodelcor
 	ret.Acceptance = MapWorkspaceAcceptanceProjection(ret)
 	ret.TaskProgress = MapLocalizedWorkspaceTaskProgress(ret)
 	ret.Outcome = MapWorkspaceOutcome(ret)
+	ret.Result = workspaceSnapshotResultByID(ret.Results, ret.Outcome.ResultID)
 	ret.RunHeartbeat = MapRunHeartbeat(ret)
 	ret.ConvergenceStatus = MapWorkspaceConvergenceStatus(ret)
 	ret = WorkspaceSnapshotWithContextBundle(ret)
 	return ret
+}
+
+func workspaceSnapshotResultByID(items []readmodelcore.Result, resultID string) *readmodelcore.Result {
+	if resultID == "" {
+		return nil
+	}
+	for idx := range items {
+		if items[idx].ID == resultID {
+			ret := items[idx]
+			return &ret
+		}
+	}
+	return nil
 }

@@ -21,9 +21,9 @@ import (
 func TestRunSnapshotBuildsSnapshotFromReaders(t *testing.T) {
 	t.Parallel()
 
-	workspace := &workspacemodel.Workspace{ID: "ws-run-snapshot", Title: "run snapshot", State: common.WorkspaceStateRunning}
-	run := &runmodel.Run{ID: "run-snapshot", WorkspaceID: workspace.ID, State: common.RunStateRunning}
-	steps := []*runmodel.Step{{ID: "step-snapshot", RunID: run.ID, Kind: "llm/workspace_execution", State: common.StepStateDispatched}}
+	workspace := &workspacemodel.Workspace{ID: "ws-run-snapshot", Title: "run snapshot", State: common.WorkspaceStateActive}
+	run := &runmodel.Run{ID: "run-snapshot", WorkspaceID: workspace.ID, State: common.RunStateActive}
+	steps := []*runmodel.Step{{ID: "step-snapshot", RunID: run.ID, Kind: "llm/workspace_execution", State: common.StepStateExecuting}}
 	events := &fakeRunSnapshotEventReader{}
 
 	got, err := RunSnapshot(context.Background(), RunSnapshotReaders{
@@ -58,7 +58,7 @@ func TestRunSnapshotBuildsSnapshotFromReaders(t *testing.T) {
 	}
 	if got.Run.CurrentStepID != string(steps[0].ID) ||
 		got.Run.CurrentStepKind != "llm/workspace_execution" ||
-		got.Run.CurrentStepState != string(common.StepStateDispatched) {
+		got.Run.CurrentStepState != string(common.StepStateExecuting) {
 		t.Fatalf("snapshot run current step = %+v, want %s/llm/workspace_execution/dispatched", got.Run, steps[0].ID)
 	}
 	if got.TaskProgress.CurrentStepID != got.Run.CurrentStepID {
@@ -81,8 +81,8 @@ func TestRunSnapshotBuildsSnapshotFromReaders(t *testing.T) {
 func TestRunObservabilityHydratesLLMUsagePayloads(t *testing.T) {
 	t.Parallel()
 
-	workspace := &workspacemodel.Workspace{ID: "ws-run-observability-usage", Title: "run observability usage", State: common.WorkspaceStateRunning}
-	run := &runmodel.Run{ID: "run-observability-usage", WorkspaceID: workspace.ID, State: common.RunStateRunning}
+	workspace := &workspacemodel.Workspace{ID: "ws-run-observability-usage", Title: "run observability usage", State: common.WorkspaceStateActive}
+	run := &runmodel.Run{ID: "run-observability-usage", WorkspaceID: workspace.ID, State: common.RunStateActive}
 	usage := &eventstreammodel.EventRecord{
 		ID:          "usage-run-observability",
 		Topic:       runevents.TopicRunLLMUsageRecorded,
@@ -140,7 +140,7 @@ func TestRunObservabilityHydratesLLMUsagePayloads(t *testing.T) {
 func TestRunSnapshotViewCompactBoundsStepsAndProjectsStepPayloads(t *testing.T) {
 	t.Parallel()
 
-	workspace := &workspacemodel.Workspace{ID: "ws-run-view-compact", Title: "run view compact", State: common.WorkspaceStateRunning}
+	workspace := &workspacemodel.Workspace{ID: "ws-run-view-compact", Title: "run view compact", State: common.WorkspaceStateActive}
 	run := &runmodel.Run{ID: "run-view-compact", WorkspaceID: workspace.ID, State: common.RunStateFailed}
 	steps := make([]*runmodel.Step, 0, runSnapshotViewCompactStepLimit+5)
 	for idx := 0; idx < runSnapshotViewCompactStepLimit+5; idx++ {
@@ -148,7 +148,7 @@ func TestRunSnapshotViewCompactBoundsStepsAndProjectsStepPayloads(t *testing.T) 
 			ID:    common.StepID("step-view-compact-" + string(rune('a'+idx%26)) + "-" + strconv.Itoa(idx)),
 			RunID: run.ID,
 			Kind:  "llm/workspace_execution",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{"large": "input"},
 			Output: map[string]any{
 				"stage":     "llm_execution_graph_plan",

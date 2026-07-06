@@ -78,32 +78,32 @@ func recoverStartupInactiveWorkspace(ctx context.Context, hub events.Hub, worksp
 	}
 	switch run.State {
 	case common.RunStateBlockedOnDecision:
-		workspace.State = common.WorkspaceStateWaitingDecision
+		workspace.State = common.WorkspaceStateActive
 		workspace.ActiveRunID = run.ID
 		if err := workspaceports.UpdateWorkspaceRecord(ctx, hub, workspace); err != nil {
 			return nil, false, fmt.Errorf("sync decision-blocked workspace state: %w", err)
 		}
 		return nil, true, nil
 	case common.RunStateBlockedOnApproval:
-		workspace.State = common.WorkspaceStateBlocked
+		workspace.State = common.WorkspaceStateBlockedOnApproval
 		workspace.ActiveRunID = run.ID
 		if err := workspaceports.UpdateWorkspaceRecord(ctx, hub, workspace); err != nil {
 			return nil, false, fmt.Errorf("sync approval-blocked workspace state: %w", err)
 		}
 		return nil, true, nil
-	case common.RunStateCreated:
+	case common.RunStatePending:
 		workspace.ActiveRunID = ""
 		workspace.State = common.WorkspaceStateActive
 		if err := workspaceports.UpdateWorkspaceRecord(ctx, hub, workspace); err != nil {
 			return nil, false, fmt.Errorf("clear created run pointer: %w", err)
 		}
 		return nil, true, nil
-	case common.RunStateRunning, common.RunStateValidating:
+	case common.RunStateActive:
 	default:
 		return nil, false, nil
 	}
 	switch workspace.State {
-	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
+	case common.WorkspaceStateActive:
 	default:
 		return nil, false, nil
 	}
@@ -141,7 +141,7 @@ func reconcileStartupGovernanceBlockedRun(ctx context.Context, hub events.Hub, w
 		if err := UpdateRun(common.ContextWithRuntimeWorkspaceID(ctx, workspace.ID), hub, run); err != nil {
 			return nil, false, fmt.Errorf("sync decision-blocked active run %q: %w", run.ID, err)
 		}
-		workspace.State = common.WorkspaceStateWaitingDecision
+		workspace.State = common.WorkspaceStateActive
 		workspace.ActiveRunID = run.ID
 		if err := workspaceports.UpdateWorkspaceRecord(ctx, hub, workspace); err != nil {
 			return nil, false, fmt.Errorf("sync decision-blocked active workspace %q: %w", workspace.ID, err)
@@ -157,7 +157,7 @@ func reconcileStartupGovernanceBlockedRun(ctx context.Context, hub events.Hub, w
 		if err := UpdateRun(common.ContextWithRuntimeWorkspaceID(ctx, workspace.ID), hub, run); err != nil {
 			return nil, false, fmt.Errorf("sync approval-blocked active run %q: %w", run.ID, err)
 		}
-		workspace.State = common.WorkspaceStateBlocked
+		workspace.State = common.WorkspaceStateBlockedOnApproval
 		workspace.ActiveRunID = run.ID
 		if err := workspaceports.UpdateWorkspaceRecord(ctx, hub, workspace); err != nil {
 			return nil, false, fmt.Errorf("sync approval-blocked active workspace %q: %w", workspace.ID, err)

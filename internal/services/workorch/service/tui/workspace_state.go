@@ -186,16 +186,17 @@ func promptModeFromWorkspaceOverview(ws *backend.WorkspaceInfo) string {
 		return workspacePromptModeWorkspace
 	}
 	switch ws.State {
-	case common.WorkspaceStateWaitingDecision:
+	case common.WorkspaceStateActive:
 		if ws.BlockingTicketID != "" && workspaceOverviewHasProjectionAuthority(ws) {
 			return workspacePromptModeDecision
 		}
-	case common.WorkspaceStateBlocked:
+		if ws.ActiveRunID != "" {
+			return workspacePromptModeRunning
+		}
+	case common.WorkspaceStateBlockedOnApproval:
 		if ws.BlockingApprovalID != "" && workspaceOverviewHasProjectionAuthority(ws) {
 			return workspacePromptModeApproval
 		}
-	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
-		return workspacePromptModeRunning
 	}
 	return workspacePromptModeWorkspace
 }
@@ -523,17 +524,12 @@ func (m *AppModel) selectedWorkspaceIndex() int {
 func (m *AppModel) activeWorkspaceRunID() string {
 	ws := m.activeWorkspaceOverview()
 	if ws != nil {
-		if !workspaceStateIsLive(ws.State) {
-			return ""
-		}
-		if ws.ActiveRunID != "" {
+		if ws.State == common.WorkspaceStateActive {
 			return string(ws.ActiveRunID)
 		}
-	}
-	if strings.TrimSpace(m.activeRunID) == "" {
 		return ""
 	}
-	if ws != nil && !workspaceStateIsLive(ws.State) {
+	if strings.TrimSpace(m.activeRunID) == "" {
 		return ""
 	}
 	return m.activeRunID
@@ -544,7 +540,7 @@ func (m *AppModel) activeWorkspaceStateIsLive() bool {
 	if ws == nil {
 		return false
 	}
-	return workspaceStateIsLive(ws.State)
+	return ws.State == common.WorkspaceStateActive && ws.ActiveRunID != "" && ws.BlockingTicketID == "" && ws.BlockingApprovalID == ""
 }
 
 func (m *AppModel) activeWorkspaceBlockerProgress() (progressState, bool) {
@@ -562,11 +558,11 @@ func (m *AppModel) activeWorkspaceBlockerProgress() (progressState, bool) {
 		return "", false
 	}
 	switch ws.State {
-	case common.WorkspaceStateWaitingDecision:
+	case common.WorkspaceStateActive:
 		if ws.BlockingTicketID != "" && workspaceOverviewHasProjectionAuthority(ws) {
 			return progressWaitingDecision, true
 		}
-	case common.WorkspaceStateBlocked:
+	case common.WorkspaceStateBlockedOnApproval:
 		if ws.BlockingApprovalID != "" && workspaceOverviewHasProjectionAuthority(ws) {
 			return progressWaitingApproval, true
 		}
@@ -584,7 +580,7 @@ func (m *AppModel) activeWorkspaceHasApprovalBlocker() bool {
 
 func (m *AppModel) ensureActiveBlockingDecisionFromOverview() bool {
 	ws := m.activeWorkspaceOverview()
-	if ws != nil && ws.State == common.WorkspaceStateWaitingDecision {
+	if ws != nil && ws.State == common.WorkspaceStateActive {
 		if ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 			return false
 		}
@@ -609,7 +605,7 @@ func (m *AppModel) ensureActiveBlockingDecisionFromOverview() bool {
 
 func (m *AppModel) ensureActiveBlockingApprovalFromOverview() bool {
 	ws := m.activeWorkspaceOverview()
-	if ws != nil && ws.State == common.WorkspaceStateBlocked {
+	if ws != nil && ws.State == common.WorkspaceStateBlockedOnApproval {
 		if ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 			return false
 		}
@@ -638,7 +634,7 @@ func (m *AppModel) syncActiveWorkspaceBlockerOverview() tea.Cmd {
 		return nil
 	}
 	switch ws.State {
-	case common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked:
+	case common.WorkspaceStateActive, common.WorkspaceStateBlockedOnApproval:
 		return m.syncActiveWorkspaceOverview()
 	default:
 		return nil
@@ -651,9 +647,9 @@ func (m *AppModel) restoreActiveWorkspaceBlockerFromOverview() bool {
 		return false
 	}
 	switch ws.State {
-	case common.WorkspaceStateWaitingDecision:
+	case common.WorkspaceStateActive:
 		return m.ensureActiveBlockingDecisionFromOverview()
-	case common.WorkspaceStateBlocked:
+	case common.WorkspaceStateBlockedOnApproval:
 		return m.ensureActiveBlockingApprovalFromOverview()
 	default:
 		return false
@@ -825,7 +821,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if msg.Snapshot != nil && payload[backend.PayloadKeyFailureReason] == "" {
 		payload[backend.PayloadKeyFailureReason] = msg.Snapshot.Outcome.Reason
 	}
-	if workspaceHasLive {
+	if workspaceHasLive || runStateIsTerminal(state) {
 		m.applyRunState(state, payload)
 	} else {
 		m.applyWorkspaceProgress(msg.Workspace.State)
@@ -917,12 +913,7 @@ func runStateIsLive(state common.RunState) bool {
 }
 
 func workspaceStateIsLive(state common.WorkspaceState) bool {
-	switch state {
-	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
-		return true
-	default:
-		return false
-	}
+	return false
 }
 
 func effectiveGoalText(run *backend.RunInfo) string {
@@ -1292,27 +1283,14 @@ func (m *AppModel) upsertWorkspace(ws backend.WorkspaceInfo) {
 
 func (m *AppModel) applyWorkspaceProgress(state common.WorkspaceState) {
 	switch state {
-	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
-		m.clearBlockingInputState()
-		m.running = true
-		m.progress = progressRunning
-		m.progressText = string(state) + "; waiting for progress or final result"
-	case common.WorkspaceStateWaitingDecision:
+	case common.WorkspaceStateActive:
 		m.running = false
-		m.progress = progressWaitingDecision
-		m.progressText = "Waiting for workspace input"
-	case common.WorkspaceStateBlocked:
+		m.progress = progressIdle
+		m.progressText = ""
+	case common.WorkspaceStateBlockedOnApproval:
 		m.running = false
 		m.progress = progressWaitingApproval
 		m.progressText = "Waiting for workspace approval"
-	case common.WorkspaceStateCompleted:
-		m.running = false
-		m.progress = progressCompleted
-		m.progressText = "Completed"
-	case common.WorkspaceStateFailed:
-		m.running = false
-		m.progress = progressFailed
-		m.progressText = "Workspace failed"
 	default:
 		m.running = false
 		m.progress = progressIdle
@@ -1360,14 +1338,19 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 	}
 	if ws.ActiveRunID != "" {
 		m.activeRunID = string(ws.ActiveRunID)
-	} else if !workspaceStateIsLive(ws.State) && ws.State != common.WorkspaceStateWaitingDecision && ws.State != common.WorkspaceStateBlocked {
+	} else if !workspaceStateIsLive(ws.State) && ws.State != common.WorkspaceStateActive && ws.State != common.WorkspaceStateBlockedOnApproval {
 		m.activeRunID = ""
 	}
 	m.applyWorkspaceProgress(ws.State)
 	switch ws.State {
-	case common.WorkspaceStateWaitingDecision:
+	case common.WorkspaceStateActive:
 		if ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 			m.clearBlockingInputState()
+			if ws.ActiveRunID != "" {
+				m.running = true
+				m.progress = progressRunning
+				m.progressText = "Running"
+			}
 			return nil
 		}
 		m.running = false
@@ -1376,7 +1359,7 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 		m.progressText = nonEmpty(blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
 		m.followBlockerTailUnlessUserScrolled()
 		return m.fetchActiveBlockerDetails()
-	case common.WorkspaceStateBlocked:
+	case common.WorkspaceStateBlockedOnApproval:
 		if ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 			m.clearBlockingInputState()
 			return nil

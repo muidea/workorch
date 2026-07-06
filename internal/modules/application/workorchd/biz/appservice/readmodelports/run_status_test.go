@@ -19,7 +19,7 @@ func TestRunStatusPrefersBlockingDecisionStep(t *testing.T) {
 		BlockingTicketID: "ticket-blocking",
 	}
 	steps := []*runmodel.Step{
-		{ID: "step-stale", RunID: run.ID, Kind: "llm/workspace_execution", State: common.StepStateCompleted},
+		{ID: "step-stale", RunID: run.ID, Kind: "llm/workspace_execution", State: common.StepStateSucceeded},
 		{ID: "step-blocking", RunID: run.ID, Kind: "approval", State: common.StepStatePending},
 	}
 	checkpoints := []*runmodel.RuntimeCheckpoint{
@@ -50,10 +50,10 @@ func TestRunStatusPrefersBlockingDecisionStep(t *testing.T) {
 func TestRunStatusUsesLatestCheckpointStep(t *testing.T) {
 	t.Parallel()
 
-	run := &runmodel.Run{ID: "run-checkpoint-status", WorkspaceID: "ws-checkpoint-status", State: common.RunStateRunning}
+	run := &runmodel.Run{ID: "run-checkpoint-status", WorkspaceID: "ws-checkpoint-status", State: common.RunStateActive}
 	steps := []*runmodel.Step{
-		{ID: "step-old", RunID: run.ID, Kind: "llm/planning", State: common.StepStateCompleted},
-		{ID: "step-current", RunID: run.ID, Kind: "llm/workspace_execution", State: common.StepStateDispatched},
+		{ID: "step-old", RunID: run.ID, Kind: "llm/planning", State: common.StepStateSucceeded},
+		{ID: "step-current", RunID: run.ID, Kind: "llm/workspace_execution", State: common.StepStateExecuting},
 	}
 	checkpoints := []*runmodel.RuntimeCheckpoint{
 		{ID: "checkpoint-current", WorkspaceID: run.WorkspaceID, RunID: run.ID, CurrentStepID: "step-current"},
@@ -75,7 +75,7 @@ func TestRunStatusUsesLatestCheckpointStep(t *testing.T) {
 	if got.CurrentStepKind != "llm/workspace_execution" {
 		t.Fatalf("CurrentStepKind = %q, want llm/workspace_execution", got.CurrentStepKind)
 	}
-	if got.CurrentStepState != string(common.StepStateDispatched) {
+	if got.CurrentStepState != string(common.StepStateExecuting) {
 		t.Fatalf("CurrentStepState = %q, want dispatched", got.CurrentStepState)
 	}
 }
@@ -83,10 +83,10 @@ func TestRunStatusUsesLatestCheckpointStep(t *testing.T) {
 func TestRunStatusProjectsRuntimeExecutionAcceptedNoProgress(t *testing.T) {
 	t.Parallel()
 
-	run := &runmodel.Run{ID: "run-runtime-status", WorkspaceID: "ws-runtime-status", State: common.RunStateRunning}
+	run := &runmodel.Run{ID: "run-runtime-status", WorkspaceID: "ws-runtime-status", State: common.RunStateActive}
 	stepID := common.StepID("step-runtime-status")
 	steps := []*runmodel.Step{
-		{ID: stepID, RunID: run.ID, Kind: "llm/workspace_execution", State: common.StepStateDispatched},
+		{ID: stepID, RunID: run.ID, Kind: "llm/workspace_execution", State: common.StepStateExecuting},
 	}
 	checkpoints := []*runmodel.RuntimeCheckpoint{
 		{
@@ -127,14 +127,14 @@ func TestRunStatusProjectsRuntimeExecutionAcceptedNoProgress(t *testing.T) {
 func TestRunStatusProjectsRuntimeExecutionContractViolation(t *testing.T) {
 	t.Parallel()
 
-	run := &runmodel.Run{ID: "run-contract-violation-status", WorkspaceID: "ws-contract-violation-status", State: common.RunStateRunning}
+	run := &runmodel.Run{ID: "run-contract-violation-status", WorkspaceID: "ws-contract-violation-status", State: common.RunStateActive}
 	stepID := common.StepID("step-contract-violation-status")
 	steps := []*runmodel.Step{
 		{
 			ID:    stepID,
 			RunID: run.ID,
 			Kind:  "llm/workspace_execution",
-			State: common.StepStateDispatched,
+			State: common.StepStateExecuting,
 			Input: map[string]any{
 				"contractViolationRecovery": map[string]any{
 					"violatedRule":     "state_changing_required_missing",

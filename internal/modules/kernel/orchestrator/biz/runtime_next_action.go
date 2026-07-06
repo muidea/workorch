@@ -107,7 +107,7 @@ func deriveMissingGapBaselineNextAction(run *runmodel.Run) (runtimemodel.NextAct
 
 func runStateAllowsGapAssessment(state common.RunState) bool {
 	switch state {
-	case common.RunStateCreated, common.RunStateRunning, common.RunStateValidating:
+	case common.RunStatePending, common.RunStateActive:
 		return true
 	default:
 		return false
@@ -116,7 +116,7 @@ func runStateAllowsGapAssessment(state common.RunState) bool {
 
 func runStateAllowsCompletionAction(state common.RunState) bool {
 	switch state {
-	case common.RunStateRunning, common.RunStateValidating:
+	case common.RunStateActive:
 		return true
 	default:
 		return false
@@ -445,7 +445,7 @@ func runtimeTimestampAfter(value string, baseline string) bool {
 }
 
 func targetSnapshotFromAcceptedEvidenceStep(record *runtimemodel.EvidenceRecord, step *runmodel.Step) map[string]any {
-	if record == nil || step == nil || step.ID != record.StepID || step.State != common.StepStateCompleted {
+	if record == nil || step == nil || step.ID != record.StepID || step.State != common.StepStateSucceeded {
 		return nil
 	}
 	output := mapFromValue(step.Output)

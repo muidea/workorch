@@ -92,8 +92,11 @@ func TestService_CreateRunStartRunCompleteRun_Mainline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get created run: %v", err)
 	}
-	if created.State != common.RunStateCreated {
+	if created.State != common.RunStatePending {
 		t.Fatalf("created run state = %q, want created", created.State)
+	}
+	if created.CreatedAt == "" || created.Lineage.LineageState != "active" {
+		t.Fatalf("created run lifecycle fields = %+v", created)
 	}
 
 	if err := service.StartRun(ctx, runservice.StartRunCommand{RunID: runID}); err != nil {
@@ -107,12 +110,15 @@ func TestService_CreateRunStartRunCompleteRun_Mainline(t *testing.T) {
 	if completed.State != common.RunStateCompleted {
 		t.Fatalf("completed run state = %q, want completed", completed.State)
 	}
+	if completed.StartedAt == "" || completed.EndedAt == "" {
+		t.Fatalf("completed run lifecycle fields = %+v", completed)
+	}
 
 	step, err := stepRepo.Get(ctx, common.StepID(string(runID)+"/step-1"))
 	if err != nil {
 		t.Fatalf("get completed step: %v", err)
 	}
-	if step.State != common.StepStateCompleted {
+	if step.State != common.StepStateSucceeded {
 		t.Fatalf("step state = %q, want completed", step.State)
 	}
 }
@@ -588,7 +594,7 @@ func TestService_ResumeRun_FromBlockedStates_ReachesMinimalExecutionChain(t *tes
 			if err != nil {
 				t.Fatalf("get created run: %v", err)
 			}
-			r.State = common.RunStateRunning
+			r.State = common.RunStateActive
 			if err := runRepo.Update(ctx, r); err != nil {
 				t.Fatalf("set run back to running: %v", err)
 			}
@@ -607,7 +613,7 @@ func TestService_ResumeRun_FromBlockedStates_ReachesMinimalExecutionChain(t *tes
 				ID:    sourceStepID,
 				RunID: runID,
 				Kind:  "llm/workspace_execution",
-				State: common.StepStateCompleted,
+				State: common.StepStateSucceeded,
 				Output: map[string]any{
 					"nextStep": string(stepID),
 				},
@@ -666,7 +672,7 @@ func TestService_ResumeRun_FromBlockedStates_ReachesMinimalExecutionChain(t *tes
 			if err != nil {
 				t.Fatalf("get resumed step: %v", err)
 			}
-			if resumedStep.State != common.StepStateCompleted {
+			if resumedStep.State != common.StepStateSucceeded {
 				t.Fatalf("resumed step state = %q, want completed", resumedStep.State)
 			}
 			if resumedStep.Output["status"] != tc.name {
@@ -703,8 +709,8 @@ func TestService_ResumeRun_RejectsNonBlockedStates(t *testing.T) {
 		name  string
 		state common.RunState
 	}{
-		{name: "created", state: common.RunStateCreated},
-		{name: "running", state: common.RunStateRunning},
+		{name: "created", state: common.RunStatePending},
+		{name: "running", state: common.RunStateActive},
 		{name: "completed", state: common.RunStateCompleted},
 		{name: "failed", state: common.RunStateFailed},
 	} {
@@ -744,7 +750,7 @@ func TestService_ResumeRunDelegatesStateReadToOrchestrator(t *testing.T) {
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -777,7 +783,7 @@ func TestService_ResumeRunReusesLoadedRunForOrchestrator(t *testing.T) {
 	loaded := &runmodel.Run{
 		ID:          common.RunID("run-resume-loaded-run"),
 		WorkspaceID: common.WorkspaceID("ws-resume-loaded-run"),
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}
 
 	if err := service.ResumeRun(ctx, runservice.ResumeRunCommand{RunID: loaded.ID, LoadedRun: loaded}); !errors.Is(err, common.ErrConflict) {
@@ -807,7 +813,7 @@ func TestService_CompleteRun_WithoutOrchestrator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get run before complete: %v", err)
 	}
-	running.State = common.RunStateRunning
+	running.State = common.RunStateActive
 	if err := runRepo.Update(ctx, running); err != nil {
 		t.Fatalf("set run running: %v", err)
 	}
@@ -845,7 +851,7 @@ func TestService_RunStateMutationUsesScopedGetterWhenWorkspaceContextExists(t *t
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -929,7 +935,7 @@ func TestService_RunStateMachineTransitionsWithoutOrchestrator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get validating run: %v", err)
 	}
-	validatingRun.State = common.RunStateRunning
+	validatingRun.State = common.RunStateActive
 	if err := runRepo.Update(ctx, validatingRun); err != nil {
 		t.Fatalf("set validating run running: %v", err)
 	}
@@ -940,7 +946,7 @@ func TestService_RunStateMachineTransitionsWithoutOrchestrator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get validated run: %v", err)
 	}
-	if validatingRun.State != common.RunStateValidating {
+	if validatingRun.State != common.RunStateActive {
 		t.Fatalf("state = %q, want validating", validatingRun.State)
 	}
 	if err := service.CompleteRun(ctx, runservice.CompleteRunCommand{RunID: validatingRunID}); err != nil {

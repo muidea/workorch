@@ -264,28 +264,32 @@ func approvalCreateCommandFromModel(item *approvalmodel.Approval) approvalcontra
 		return approvalcontracts.CreateApprovalCommand{}
 	}
 	return approvalcontracts.CreateApprovalCommand{
-		ApprovalID:  item.ID,
-		WorkspaceID: item.WorkspaceID,
-		RunID:       item.RunID,
-		StepID:      item.StepID,
-		Reason:      item.Reason,
-		Action:      item.Action,
-		Context:     cloneMap(item.Context),
+		ApprovalID:     item.ID,
+		WorkspaceID:    item.WorkspaceID,
+		RunID:          item.RunID,
+		StepID:         item.StepID,
+		Reason:         item.Reason,
+		Action:         item.Action,
+		Context:        cloneMap(item.Context),
+		AutoGovernance: cloneMap(item.AutoGovernance),
 	}
 }
 
 func approvalFromUpdateCommand(cmd approvalcontracts.UpdateApprovalCommand) *approvalmodel.Approval {
 	return &approvalmodel.Approval{
-		ID:          cmd.ApprovalID,
-		WorkspaceID: cmd.WorkspaceID,
-		RunID:       cmd.RunID,
-		StepID:      cmd.StepID,
-		Reason:      cmd.Reason,
-		Action:      cmd.Action,
-		Context:     cloneMap(cmd.Context),
-		State:       cmd.State,
-		CreatedAt:   cmd.CreatedAt,
-		UpdatedAt:   cmd.UpdatedAt,
+		ID:             cmd.ApprovalID,
+		WorkspaceID:    cmd.WorkspaceID,
+		RunID:          cmd.RunID,
+		StepID:         cmd.StepID,
+		Reason:         cmd.Reason,
+		Action:         cmd.Action,
+		Context:        cloneMap(cmd.Context),
+		State:          cmd.State,
+		AutoGovernance: cloneMap(cmd.AutoGovernance),
+		ResolvedAt:     cmd.ResolvedAt,
+		ResolvedBy:     cmd.ResolvedBy,
+		CreatedAt:      cmd.CreatedAt,
+		UpdatedAt:      cmd.UpdatedAt,
 	}
 }
 

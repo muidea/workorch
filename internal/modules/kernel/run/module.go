@@ -544,6 +544,7 @@ func compactRunListItem(item *runmodel.Run) *runmodel.Run {
 		WorkspaceID:        item.WorkspaceID,
 		GoalID:             item.GoalID,
 		DoDID:              item.DoDID,
+		Lineage:            item.Lineage,
 		DefinitionRevision: item.DefinitionRevision,
 		InitialStepKind:    item.InitialStepKind,
 		State:              item.State,
@@ -551,6 +552,9 @@ func compactRunListItem(item *runmodel.Run) *runmodel.Run {
 		BlockingTicketID:   item.BlockingTicketID,
 		BlockingApprovalID: item.BlockingApprovalID,
 		FailureReason:      item.FailureReason,
+		CreatedAt:          item.CreatedAt,
+		StartedAt:          item.StartedAt,
+		EndedAt:            item.EndedAt,
 	}
 }
 

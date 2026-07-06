@@ -39,6 +39,7 @@ func ActivateWorkspaceExecutionView(ctx context.Context, request ActivateWorkspa
 	if err := workspacecore.EnsureManagedConfigs(workspace.InternalDirectory, toolHints.Template, toolHints.Workspace); err != nil {
 		return readmodelcore.WorkspaceExecutionActivation{}, err
 	}
+	originalActiveRunID := workspace.ActiveRunID
 
 	cmd := request.Command
 	if workspace.ActiveRunID != "" {
@@ -73,7 +74,7 @@ func ActivateWorkspaceExecutionView(ctx context.Context, request ActivateWorkspa
 				}
 				return WorkspaceExecutionActivationSnapshot(workspace, startedRun, goal, dod), nil
 			}
-			if run.State == common.RunStateCreated {
+			if run.State == common.RunStatePending {
 				if err := StartRun(ctx, request.Hub, workspace.ID, run.ID); err != nil {
 					return readmodelcore.WorkspaceExecutionActivation{}, err
 				}
@@ -96,9 +97,26 @@ func ActivateWorkspaceExecutionView(ctx context.Context, request ActivateWorkspa
 	if err != nil {
 		return readmodelcore.WorkspaceExecutionActivation{}, err
 	}
+	if err := supersedePriorActivationRunIfNeeded(ctx, request, workspace.ID, originalActiveRunID, runID); err != nil {
+		return readmodelcore.WorkspaceExecutionActivation{}, err
+	}
 	startedRun, err := ownerreadports.ReadRunByOwnerCommand(ctx, request.Hub, runID)
 	if err != nil {
 		return readmodelcore.WorkspaceExecutionActivation{}, err
 	}
 	return WorkspaceExecutionActivationSnapshot(workspace, startedRun, goal, dod), nil
+}
+
+func supersedePriorActivationRunIfNeeded(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspaceID common.WorkspaceID, priorRunID common.RunID, replacementRunID common.RunID) error {
+	if priorRunID != "" && priorRunID != replacementRunID {
+		prior, err := ownerreadports.ReadRunByOwnerCommand(ctx, request.Hub, priorRunID)
+		if err != nil {
+			return err
+		}
+		if !activationcore.IsTerminalRunState(prior.State) {
+			return SupersedeRun(ctx, request.Hub, workspaceID, priorRunID)
+		}
+		return nil
+	}
+	return nil
 }

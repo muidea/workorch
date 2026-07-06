@@ -18,7 +18,17 @@ Last Updated: 2026-05-30
 
 - Workspace lifecycle
 - Goal / DoD formal definition
-- workspace-level state projection inputs
+- workspace owner state and workspace-level projection inputs
+
+Canonical owner states:
+
+- `active`
+- `blocked_on_approval`
+- `superseded`
+
+Decision blockers do not change workspace owner state. They are exposed through
+run/ticket/projection fields owned by `kernel/run`, `kernel/decision` and
+workorchd read model projection.
 
 ### `kernel/run`
 
@@ -26,6 +36,31 @@ Last Updated: 2026-05-30
 
 - Run / Step / ToolCall / Patch / ValidationResult / RuntimeCheckpoint persistence
 - Run state machine primitives
+
+Canonical `RunState` values:
+
+- `pending`
+- `active`
+- `blocked_on_decision`
+- `blocked_on_approval`
+- `completed`
+- `failed`
+- `cancelled`
+- `superseded`
+
+Canonical `StepState` values:
+
+- `pending`
+- `executing`
+- `succeeded`
+- `failed`
+- `skipped`
+- `cancelled`
+
+Run supersede is a lifecycle close command owned by orchestrator state
+transition. EventHub command callers should use the orchestrator command path
+instead of a separate run-module supersede command, so there is only one
+state-lane owner path for closing an active run as `superseded`.
 
 更细拆分方向：
 

@@ -198,7 +198,7 @@ core 只保留以下中立不变量：
 
 ### 与 Orchestrator 状态管理的结合
 
-`incrementalArtifact` 不得作为新的 Workspace / Run 顶层状态。Workspace / Run 仍只使用既有治理状态，例如 `running`、`waiting_decision`、`waiting_approval`、`completed`、`failed`、`superseded`。分片增量输出只是 `running` 内部某个 Step / Continuation 的输出承载模式。
+`incrementalArtifact` 不得作为新的 Workspace / Run 顶层状态。Run 只使用 canonical owner 状态：`pending`、`active`、`blocked_on_decision`、`blocked_on_approval`、`completed`、`failed`、`cancelled`、`superseded`。Workspace owner 只使用 `active`、`blocked_on_approval`、`superseded`。分片增量输出只是 `active` Run 内部某个 Step / Continuation 的输出承载模式。
 
 ### 统一状态层次
 
@@ -206,7 +206,7 @@ core 只保留以下中立不变量：
 
 | 层级 | 字段 / 对象 | 负责内容 | 禁止负责内容 |
 | --- | --- | --- | --- |
-| Workspace / Run 治理状态 | `WorkspaceState`、`RunState` | 工作空间是否有活跃 run、run 是否运行中 / 阻塞 / 完成 / 失败 | 不表达当前 LLM 该输出 graph、assessment 还是 artifact chunk |
+| Workspace / Run 治理状态 | `WorkspaceState`、`RunState` | 工作空间是否有活跃 run、run 是否 active / 阻塞 / 终态；workspace 是否 active / approval-blocked / superseded | 不表达当前 LLM 该输出 graph、assessment 还是 artifact chunk；decision blocker 不改变 workspace owner state |
 | 收敛状态 | `ConvergenceContract.State` | 当前缺口属于 `need_evidence`、`need_state_change`、`need_validation`、`need_assessment`、`need_governance` 还是 `blocked` | 不直接表达 provider prompt 的具体 JSON schema |
 | 阶段状态 | `runtimeStage`、`runtimeStageMode` | 当前轮次属于 `planning`、`execution`、`repair`、`verification`、`decision`、`approval` 等哪一类阶段，以及 `open_judgment` / `strict_convergence` / `structured_governance` 模式 | 不决定 artifact plan / chunk / graph 三选一 |
 | 输出承载模式 | `outputMode`、`artifactOutputContract`、`artifactContinuationContext` | 当前 `need_state_change` 具体采用 `executionGraph` 还是 `incrementalArtifact`，以及 artifact plan / chunk / apply continuation | 不得改变 `ConvergenceContract.State`，也不得单独把 run 推入 decision / approval |
@@ -214,7 +214,7 @@ core 只保留以下中立不变量：
 这四层的允许桥接方向只能是：
 
 ```text
-RunState(running)
+RunState(active)
   -> BuildConvergenceContract(...) = need_*
   -> ApplyConvergenceContract(...) = runtimeStage + requiredOutput
   -> selectOutputMode(...) = executionGraph | incrementalArtifact
@@ -385,13 +385,13 @@ mode selector、artifact plan/chunk/apply/validation、服务重启恢复、even
 ### 标准路径
 
 ```text
-created
+pending
   -> exploration
   -> planning
   -> execution
   -> verification
   -> acceptance
-  -> completed | failed | cancelled | superseded | blocked_on_decision
+  -> completed | failed | cancelled | superseded | blocked_on_decision | blocked_on_approval
 ```
 
 ### 恢复路径
@@ -625,7 +625,7 @@ Runtime 在以下边界必须执行 active-run 一致性核对：
 - 服务启动或运行恢复扫描时。
 - runtime 验证脚本核对 workspace/run 执行过程时。
 
-若发现 workspace 指向终态 run，runtime 必须清空 `ActiveRunID`，并按终态 run 状态收敛 workspace 状态：`completed` 映射为 workspace `completed`，`failed` / `cancelled` / `superseded` 映射为 workspace `failed`。若该 run 存在已解决 replan 决策，服务层恢复扫描可以在 workspace 回到无 active run 的终态后继续调度 successor，但 core runtime 不得通过业务领域逻辑推断 successor 内容。
+若发现 workspace 指向终态 run，runtime 必须清空 `ActiveRunID`。除 `superseded` run 可使 workspace owner 收敛为 `superseded` 外，`completed`、`failed`、`cancelled` run 收口后 workspace owner 回到 `active`，具体 outcome / taskProgress / failure reason 由 run/result/projection 表达。若该 run 存在已解决 replan 决策，服务层恢复扫描可以在 workspace 回到无 active run 后继续调度 successor，但 core runtime 不得通过业务领域逻辑推断 successor 内容。
 
 Workspace detail、workspace list、snapshot、taskProgress 等 read model 投影必须从当前 active run 派生 blocker refs。若 active run 为 `blocked_on_decision` 或 `blocked_on_approval`，workspace 级响应必须暴露对应 `blockingTicketId` / `blockingApprovalId`，并与 active run 的 blocker 保持一致。终态 run 不得继续污染 workspace blocker 投影。
 

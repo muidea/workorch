@@ -29,10 +29,10 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchSerializesLLMDispatchRequests(
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
 	hub := events.NewMemoryHub()
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	orch := NewRuntimeOrchestrator(
@@ -46,7 +46,7 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchSerializesLLMDispatchRequests(
 	)
 	orch.EnableEventDrivenDispatch()
 
-	err := orch.dispatchGraphStepBatchWithWorkspace(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}, []stepDispatchSpec{
+	err := orch.dispatchGraphStepBatchWithWorkspace(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}, []stepDispatchSpec{
 		{ID: common.StepID(runID + "/graph-001/001-a"), Kind: "llm/workspace_execution", Input: map[string]any{"node": "a"}},
 		{ID: common.StepID(runID + "/graph-001/002-b"), Kind: "llm/workspace_execution", Input: map[string]any{"node": "b"}},
 	}, &workspacemodel.Workspace{ID: workspaceID})
@@ -84,8 +84,8 @@ func TestRuntimeOrchestrator_CompletedGraphBatchDispatchesDependentValidation(t 
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
 	hub := events.NewMemoryHub()
-	workspace := &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -103,12 +103,12 @@ func TestRuntimeOrchestrator_CompletedGraphBatchDispatchesDependentValidation(t 
 			},
 		}},
 	}}
-	root := &runmodel.Step{ID: rootStepID, RunID: runID, Kind: llmcommon.StepKindWorkspaceExecution, State: common.StepStateCompleted, Output: map[string]any{stepOutputKeyExecutionGraph: graph, "status": "completed"}}
+	root := &runmodel.Step{ID: rootStepID, RunID: runID, Kind: llmcommon.StepKindWorkspaceExecution, State: common.StepStateSucceeded, Output: map[string]any{stepOutputKeyExecutionGraph: graph, "status": "completed"}}
 	patch := &runmodel.Step{
 		ID:    patchStepID,
 		RunID: runID,
 		Kind:  "patch/apply",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphBatch:      true,
 			stepInputKeyGraphNodeID:     "fix",
@@ -147,11 +147,11 @@ func TestRuntimeOrchestrator_RuntimeDispatchRejectsKindOutsideRequiredOutput(t *
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	workspace := &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestNormalizeGraphStateChangingDispatchAuthorityRewritesStaleValidationAuth
 	run := &runmodel.Run{
 		ID:          "run-graph-state-change-authority",
 		WorkspaceID: "ws-graph-state-change-authority",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			convergenceAuthorityKey: map[string]any{
 				"schemaVersion": convergenceAuthoritySchema,
@@ -276,7 +276,7 @@ func TestNormalizeGraphStateChangingDispatchAuthorityAcceptsGitWriteCommit(t *te
 	run := &runmodel.Run{
 		ID:          "run-graph-git-write-authority",
 		WorkspaceID: "ws-graph-git-write-authority",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{
@@ -336,7 +336,7 @@ func TestPrepareGapBaselineDispatchSpecsPreservesGraphLocalStateChangingAuthorit
 	run := &runmodel.Run{
 		ID:          "run-graph-local-authority",
 		WorkspaceID: "ws-graph-local-authority",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			convergenceAuthorityKey: map[string]any{
 				"schemaVersion": convergenceAuthoritySchema,
@@ -400,13 +400,13 @@ func TestDispatchRequestedStepPreservesGraphLocalAuthority(t *testing.T) {
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	run := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			coverageWorkItemContextKey: map[string]any{
 				"currentFocus": map[string]any{"id": "cwi-run", "missingEvidenceKinds": []string{"validation"}},
@@ -475,7 +475,7 @@ func TestNormalizeGraphValidationDispatchAuthorityBindsValidationEvidence(t *tes
 	run := &runmodel.Run{
 		ID:          "run-graph-validation-authority",
 		WorkspaceID: "ws-graph-validation-authority",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	input := map[string]any{
 		"command":             "go",
@@ -535,17 +535,17 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchStepCompletionDispatchesNextNo
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
 	hub := events.NewMemoryHub()
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if err := stepRepo.Create(ctx, &runmodel.Step{
 		ID:    rootStepID,
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspaceExecution,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			stepOutputKeyExecutionGraph: map[string]any{
 				"nodes": []map[string]any{
@@ -570,7 +570,7 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchStepCompletionDispatchesNextNo
 		ID:    childStepID,
 		RunID: runID,
 		Kind:  "file/list",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{
 			stepInputKeyGraphBatch:      true,
 			stepInputKeyGraphRootStepID: string(rootStepID),
@@ -629,17 +629,17 @@ func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayContinuesNextNode(
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
 	hub := events.NewMemoryHub()
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if err := stepRepo.Create(ctx, &runmodel.Step{
 		ID:    rootStepID,
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspaceExecution,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Output: map[string]any{
 			stepOutputKeyExecutionGraph: map[string]any{
 				"nodes": []map[string]any{
@@ -655,7 +655,7 @@ func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayContinuesNextNode(
 		ID:     childStepID,
 		RunID:  runID,
 		Kind:   "file/list",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"status": "completed"},
 		Input: map[string]any{
 			stepInputKeyGraphBatch:      true,
@@ -710,7 +710,7 @@ func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayDispatchesAuthorit
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
 	hub := events.NewMemoryHub()
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
@@ -732,7 +732,7 @@ func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayDispatchesAuthorit
 		ID:     rootStepID,
 		RunID:  runID,
 		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"status": "completed", stepOutputKeyExecutionGraph: graph},
 	}); err != nil {
 		t.Fatalf("seed root step: %v", err)
@@ -748,7 +748,7 @@ func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayDispatchesAuthorit
 		ID:     firstStepID,
 		RunID:  runID,
 		Kind:   "file/read",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Input:  withStepInput(staleEvidenceInput, stepInputKeyGraphNodeID, "read"),
 		Output: map[string]any{"status": "completed"},
 	}); err != nil {
@@ -758,7 +758,7 @@ func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayDispatchesAuthorit
 		ID:     lastStepID,
 		RunID:  runID,
 		Kind:   runtimemodel.StepKindShellCommand,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Input:  withStepInput(staleEvidenceInput, stepInputKeyGraphNodeID, "build"),
 		Output: map[string]any{"status": "completed", "validationEvidence": map[string]any{"mode": "runtime_behavior"}},
 	}); err != nil {
@@ -825,13 +825,13 @@ func TestRuntimeOrchestrator_CompletedPatchGraphNodeContinuesDependentValidation
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
 	hub := events.NewMemoryHub()
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	run := &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			coverageWorkItemContextKey: map[string]any{
 				"currentFocus": map[string]any{
@@ -888,7 +888,7 @@ func TestRuntimeOrchestrator_CompletedPatchGraphNodeContinuesDependentValidation
 		ID:     rootStepID,
 		RunID:  runID,
 		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"status": "completed", stepOutputKeyExecutionGraph: graph},
 	}); err != nil {
 		t.Fatalf("seed root step: %v", err)
@@ -897,7 +897,7 @@ func TestRuntimeOrchestrator_CompletedPatchGraphNodeContinuesDependentValidation
 		ID:    patchStepID,
 		RunID: runID,
 		Kind:  runtimemodel.RuntimeBlockKindPatchApply,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphBatch:      true,
 			stepInputKeyGraphRootStepID: string(rootStepID),
@@ -957,10 +957,10 @@ func TestRuntimeOrchestrator_GraphBatchPatchApplyFailureDispatchesRuntimeRepair(
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
 	hub := events.NewMemoryHub()
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: common.DoDID("dod-graph-patch-repair"), State: common.RunStateRunning, InitialStepKind: llmWorkspaceExecutionStepKind}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: common.DoDID("dod-graph-patch-repair"), State: common.RunStateActive, InitialStepKind: llmWorkspaceExecutionStepKind}
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -968,7 +968,7 @@ func TestRuntimeOrchestrator_GraphBatchPatchApplyFailureDispatchesRuntimeRepair(
 		ID:    stepID,
 		RunID: runID,
 		Kind:  llmcommon.RuntimeBlockKindPatchApply,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{
 			stepInputKeyGraphBatch:      true,
 			stepInputKeyGraphRootStepID: string(runID + "/step-1"),
@@ -1042,7 +1042,7 @@ func TestRuntimeOrchestrator_EventDrivenDispatchPublishesAuthorityAlignedInput(t
 	run := runWithAuthorityFocusForTest("validate")
 	run.ID = runID
 	run.WorkspaceID = workspaceID
-	run.State = common.RunStateRunning
+	run.State = common.RunStateActive
 	run.ExecutionContext[convergenceAuthorityKey].(map[string]any)["workspaceId"] = string(workspaceID)
 	run.ExecutionContext[convergenceAuthorityKey].(map[string]any)["runId"] = string(runID)
 	run.ExecutionContext[gapBaselineKey].(map[string]any)["workspaceId"] = string(workspaceID)
@@ -1050,7 +1050,7 @@ func TestRuntimeOrchestrator_EventDrivenDispatchPublishesAuthorityAlignedInput(t
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := NewRuntimeOrchestrator(
@@ -1123,19 +1123,19 @@ func TestRuntimeOrchestrator_NextDispatchReusesActiveLLMWorkspaceExecution(t *te
 	activeStepID := common.StepID(runID + "/follow-up-active")
 	stepRepo := memoryrepo.NewStepRepository()
 	orch := &RuntimeOrchestrator{steps: stepRepo}
-	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-active-llm-lane", State: common.RunStateRunning}
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-active-llm-lane", State: common.RunStateActive}
 	completedRoot := &runmodel.Step{
 		ID:     common.StepID(runID + "/step-1"),
 		RunID:  runID,
 		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"completionState": "continue"},
 	}
 	active := &runmodel.Step{
 		ID:    activeStepID,
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspaceExecution,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{"current": "active"},
 	}
 	for _, step := range []*runmodel.Step{completedRoot, active} {
@@ -1160,10 +1160,10 @@ func TestRuntimeOrchestrator_DispatchRequestedStepSkipsSecondActiveLLMWorkspaceE
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	activeStepID := common.StepID(runID + "/active-llm")
@@ -1171,7 +1171,7 @@ func TestRuntimeOrchestrator_DispatchRequestedStepSkipsSecondActiveLLMWorkspaceE
 		ID:    activeStepID,
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspaceExecution,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 	}); err != nil {
 		t.Fatalf("seed active step: %v", err)
 	}
@@ -1209,13 +1209,13 @@ func TestRuntimeOrchestrator_DispatchRequestedStepHydratesGapBaseline(t *testing
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"goal": map[string]any{
 				"text": "- complete the current requested outcome",
@@ -1267,13 +1267,13 @@ func TestRuntimeOrchestratorDispatchRequestedStepUsesScopedRunLookup(t *testing.
 	runRepo := newCountingRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -1356,7 +1356,7 @@ func TestRuntimeOrchestrator_DispatchRequestedStepHonorsGapBaselineWaitAction(t 
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateBlocked, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateBlockedOnApproval, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	if err := runRepo.Create(ctx, &runmodel.Run{
@@ -1492,7 +1492,7 @@ func TestRunEvidenceSummaryPrioritizesActionEvidenceWhenLarge(t *testing.T) {
 			ID:     common.StepID(fmt.Sprintf("%s/llm-%03d", runID, idx)),
 			RunID:  runID,
 			Kind:   llmWorkspaceExecutionStepKind,
-			State:  common.StepStateCompleted,
+			State:  common.StepStateSucceeded,
 			Output: map[string]any{"status": "completed"},
 		})
 	}
@@ -1500,7 +1500,7 @@ func TestRunEvidenceSummaryPrioritizesActionEvidenceWhenLarge(t *testing.T) {
 		ID:     common.StepID(runID + "/graph-001/002-verify"),
 		RunID:  runID,
 		Kind:   shellcommon.StepKindCommand,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stdout": "critical validation passed"},
 	}
 	steps = append([]*runmodel.Step{critical}, steps...)
@@ -1567,14 +1567,14 @@ func TestRuntimeOrchestrator_ReadyGraphStepSpecsReusesLoadedStepsForStepID(t *te
 		ID:     common.StepID(string(runID) + "/zz-llm-after-graph-root"),
 		RunID:  runID,
 		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
 	}
 	conflictingBaseStep := &runmodel.Step{
 		ID:     common.StepID(string(runID) + "/block/verify-file"),
 		RunID:  runID,
 		Kind:   "graph/mock",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Input:  map[string]any{stepInputKeyGraphNodeID: "verify-file", stepInputKeyGraphRootStepID: string(runID) + "/previous-root"},
 		Output: map[string]any{"stdout": "previous graph scope"},
 	}
@@ -1628,7 +1628,7 @@ func TestGraphSourceContractViolationBlocksSideEffectSpecs(t *testing.T) {
 		},
 		{
 			name:  "completed source with contract violation marker",
-			state: common.StepStateCompleted,
+			state: common.StepStateSucceeded,
 			output: map[string]any{
 				"status":                    "completed",
 				stepOutputKeyExecutionGraph: graph,
@@ -1639,7 +1639,7 @@ func TestGraphSourceContractViolationBlocksSideEffectSpecs(t *testing.T) {
 		},
 		{
 			name:  "completed admitted source",
-			state: common.StepStateCompleted,
+			state: common.StepStateSucceeded,
 			output: map[string]any{
 				"status":                    "completed",
 				stepOutputKeyExecutionGraph: graph,
@@ -1688,7 +1688,7 @@ func TestConcreteEvidenceAcquisitionGateStopsGraphAndRestoresStateChange(t *test
 		ID:     common.StepID(runID + "/repair-001"),
 		RunID:  runID,
 		Kind:   llmWorkspaceExecutionStepKind,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
 		Input: map[string]any{
 			"concreteFailureEvidenceRequired": true,
@@ -1714,7 +1714,7 @@ func TestConcreteEvidenceAcquisitionGateStopsGraphAndRestoresStateChange(t *test
 		ID:    graphScopedStepID(runID, 1, 1, "list-root"),
 		RunID: runID,
 		Kind:  "file/list",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphRootStepID:       string(root.ID),
 			stepInputKeyGraphNodeID:           "list-root",
@@ -1764,7 +1764,7 @@ func TestConcreteEvidenceAcquisitionGateDoesNotInterceptStateChangingGraph(t *te
 		ID:     common.StepID(runID + "/repair-001"),
 		RunID:  runID,
 		Kind:   llmWorkspaceExecutionStepKind,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{{ID: "list-root", Kind: "file/list"}}}},
 		Input: map[string]any{
 			"concreteFailureEvidenceRequired": true,
@@ -1790,7 +1790,7 @@ func TestConcreteEvidenceAcquisitionGateDoesNotInterceptStateChangingGraph(t *te
 		ID:    graphScopedStepID(runID, 1, 1, "list-root"),
 		RunID: runID,
 		Kind:  "file/list",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphRootStepID:       string(root.ID),
 			stepInputKeyGraphNodeID:           "list-root",
@@ -1821,7 +1821,7 @@ func TestConcreteEvidenceAcquisitionGateDoesNotInterceptStateChangingGraph(t *te
 		ID:    common.StepID(runID + "/follow-up-graph-list-root"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"graphFollowUp":                   true,
 			stepInputKeyRuntimeRepairFollowUp: true,

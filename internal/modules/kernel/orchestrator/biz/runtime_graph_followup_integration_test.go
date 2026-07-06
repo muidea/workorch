@@ -261,14 +261,14 @@ func TestGraphLLMNodeInputIncludesDependencyOutput(t *testing.T) {
 		ID:     common.StepID(string(run.ID) + "/step-1"),
 		RunID:  run.ID,
 		Kind:   llmWorkspaceExecutionStepKind,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
 	}
 	scan := &runmodel.Step{
 		ID:    common.StepID(string(run.ID) + "/graph-001/001-scan-workspace"),
 		RunID: run.ID,
 		Kind:  "file/list",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphNodeID:     "scan_workspace",
 			stepInputKeyGraphRootStepID: string(root.ID),
@@ -362,7 +362,7 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterExecutionGraphCompletes(t
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-graph-follow-up"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: "llm/workspace_execution",
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -466,7 +466,7 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterLLMPlannedShellLeaf(t *te
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-shell-follow-up"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: "llm/workspace_execution",
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -587,7 +587,7 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterLLMPatchSideEffect(t *tes
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-patch-follow-up"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: "llm/workspace_execution",
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -677,7 +677,7 @@ func TestRuntimeOrchestrator_GraphFollowUpIncludesAllCompletedParallelEvidence(t
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-graph-parallel-follow-up"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: "llm/workspace_execution",
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -725,7 +725,7 @@ func TestRuntimeOrchestrator_GraphFollowUpReusesLoadedStepsForEvidence(t *testin
 		ID:     common.StepID(string(runID) + "/step-1"),
 		RunID:  runID,
 		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
 	}
 	for _, step := range []*runmodel.Step{
@@ -734,7 +734,7 @@ func TestRuntimeOrchestrator_GraphFollowUpReusesLoadedStepsForEvidence(t *testin
 			ID:     common.StepID(string(runID) + "/block/cpu"),
 			RunID:  runID,
 			Kind:   "graph/mock",
-			State:  common.StepStateCompleted,
+			State:  common.StepStateSucceeded,
 			Input:  map[string]any{stepInputKeyGraphNodeID: "cpu", stepInputKeyGraphRootStepID: string(anchor.ID)},
 			Output: map[string]any{"stdout": "cpu ok"},
 		},
@@ -742,7 +742,7 @@ func TestRuntimeOrchestrator_GraphFollowUpReusesLoadedStepsForEvidence(t *testin
 			ID:     common.StepID(string(runID) + "/block/memory"),
 			RunID:  runID,
 			Kind:   "graph/mock",
-			State:  common.StepStateCompleted,
+			State:  common.StepStateSucceeded,
 			Input:  map[string]any{stepInputKeyGraphNodeID: "memory", stepInputKeyGraphRootStepID: string(anchor.ID)},
 			Output: map[string]any{"stdout": "memory ok"},
 		},
@@ -795,7 +795,7 @@ func TestRuntimeOrchestrator_GraphFollowUpRestoresRepairContractAfterConcreteEvi
 		ID:    common.StepID(string(runID) + "/step-1"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyRuntimeStage:          runtimeStageRepair,
 			stepInputKeySoulStage:             soulStageExecution,
@@ -817,7 +817,7 @@ func TestRuntimeOrchestrator_GraphFollowUpRestoresRepairContractAfterConcreteEvi
 		ID:    common.StepID(string(runID) + "/graph-001/001-read-shape"),
 		RunID: runID,
 		Kind:  "file/read",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphNodeID:     "read-shape",
 			stepInputKeyGraphRootStepID: string(anchor.ID),
@@ -871,7 +871,7 @@ func TestRuntimeOrchestrator_GraphFollowUpRestoresRepairContractFromRootAfterLis
 		ID:    common.StepID(string(runID) + "/repair-001"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyRuntimeStage:          runtimeStageRepair,
 			stepInputKeySoulStage:             soulStageExecution,
@@ -890,7 +890,7 @@ func TestRuntimeOrchestrator_GraphFollowUpRestoresRepairContractFromRootAfterLis
 		ID:    common.StepID(string(runID) + "/graph-002/001-list-targets"),
 		RunID: runID,
 		Kind:  "file/list",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphNodeID:     "list-targets",
 			stepInputKeyGraphRootStepID: string(root.ID),
@@ -908,7 +908,7 @@ func TestRuntimeOrchestrator_GraphFollowUpRestoresRepairContractFromRootAfterLis
 		ID:    common.StepID(string(runID) + "/graph-002/002-check-target"),
 		RunID: runID,
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphNodeID:     "check-target",
 			stepInputKeyGraphRootStepID: string(root.ID),
@@ -967,7 +967,7 @@ func TestRuntimeRepairFollowUpInheritsGraphSiblingEvidenceFromRoot(t *testing.T)
 		ID:    common.StepID(string(runID) + "/repair-001"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyRuntimeStage:          runtimeStageRepair,
 			stepInputKeySoulStage:             soulStageExecution,
@@ -983,7 +983,7 @@ func TestRuntimeRepairFollowUpInheritsGraphSiblingEvidenceFromRoot(t *testing.T)
 		ID:    common.StepID(string(runID) + "/graph-001/001-read-target"),
 		RunID: runID,
 		Kind:  "file/read",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphNodeID:     "read-target",
 			stepInputKeyGraphRootStepID: string(root.ID),
@@ -1053,7 +1053,7 @@ func TestRuntimeOrchestrator_GraphFollowUpDoesNotRestoreRepairContractWithoutCon
 		ID:    common.StepID(string(runID) + "/repair-001"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyRuntimeStage:          runtimeStageRepair,
 			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
@@ -1068,7 +1068,7 @@ func TestRuntimeOrchestrator_GraphFollowUpDoesNotRestoreRepairContractWithoutCon
 		ID:    common.StepID(string(runID) + "/graph-001/001-probe"),
 		RunID: runID,
 		Kind:  "shell/command",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			stepInputKeyGraphNodeID:     "probe",
 			stepInputKeyGraphRootStepID: string(root.ID),
@@ -1098,21 +1098,21 @@ func TestRuntimeOrchestrator_GraphFollowUpRunEvidenceIncludesPriorCompletedSteps
 		ID:     common.StepID(string(runID) + "/previous-validation"),
 		RunID:  runID,
 		Kind:   "shell/command",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stdout": "previous validation passed"},
 	}
 	anchor := &runmodel.Step{
 		ID:     common.StepID(string(runID) + "/step-1"),
 		RunID:  runID,
 		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
 	}
 	graphStep := &runmodel.Step{
 		ID:     common.StepID(string(runID) + "/block/verify"),
 		RunID:  runID,
 		Kind:   "shell/command",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Input:  map[string]any{stepInputKeyGraphNodeID: "verify", stepInputKeyGraphRootStepID: string(anchor.ID)},
 		Output: map[string]any{"stdout": "current graph validation passed"},
 	}
@@ -1153,12 +1153,12 @@ func TestGraphExpansionLimitAssessmentInputIncludesLatestClosureEvidence(t *test
 		ID:     common.StepID(runID + "/follow-up-graph-previous"),
 		RunID:  runID,
 		Kind:   llmWorkspaceExecutionStepKind,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"status": "completed"},
 	}
 	for _, step := range []*runmodel.Step{
 		{ID: failedStepID, RunID: runID, Kind: shellcommon.StepKindCommand, State: common.StepStateFailed, Output: map[string]any{"stderr": "old targeted failure"}},
-		{ID: latestStepID, RunID: runID, Kind: shellcommon.StepKindCommand, State: common.StepStateCompleted, Output: map[string]any{"stdout": "latest targeted validation passed"}},
+		{ID: latestStepID, RunID: runID, Kind: shellcommon.StepKindCommand, State: common.StepStateSucceeded, Output: map[string]any{"stdout": "latest targeted validation passed"}},
 		anchor,
 	} {
 		if err := stepRepo.Create(ctx, step); err != nil {
@@ -1256,7 +1256,7 @@ func TestCompletionFollowUpRestoresCoverageStateChangeConvergenceContract(t *tes
 		ID:     common.StepID(runID + "/graph-005/001-previous"),
 		RunID:  runID,
 		Kind:   llmWorkspaceExecutionStepKind,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"status": "completed"},
 	}
 
@@ -1300,7 +1300,7 @@ func TestCompletionFollowUpPreservesAssessmentOnlyAfterAcceptedStateChangeEviden
 		ID:     common.StepID(runID + "/artifact-apply-001"),
 		RunID:  runID,
 		Kind:   "artifact/apply",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"status": "completed"},
 	}
 
@@ -1364,7 +1364,7 @@ func TestGraphExpansionLimitFollowUpRestoresCoverageValidationConvergenceContrac
 		ID:     common.StepID(runID + "/follow-up-graph-previous"),
 		RunID:  runID,
 		Kind:   llmWorkspaceExecutionStepKind,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"status": "completed"},
 	}
 	if err := stepRepo.Create(ctx, anchor); err != nil {
@@ -1419,7 +1419,7 @@ func TestGraphFollowUpRestoresCoverageValidationConvergenceContract(t *testing.T
 		ID:     common.StepID(runID + "/graph-001/002-verify"),
 		RunID:  runID,
 		Kind:   shellcommon.StepKindCommand,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"status": "completed", "stdout": "bounded validation candidate"},
 	}
 	orch := &RuntimeOrchestrator{}
@@ -1525,26 +1525,26 @@ func TestRuntimeOrchestrator_DispatchStepGraphFollowUpReusesLoadedStepsForEviden
 		},
 		eventHub: events.NewMemoryHub(),
 	}
-	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}
 	run := &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-graph-follow-up-dispatch-efficiency"),
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 	}
 	root := &runmodel.Step{
 		ID:     common.StepID(string(runID) + "/llm-after-approval"),
 		RunID:  runID,
 		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
 	}
 	graphStep := &runmodel.Step{
 		ID:     common.StepID(string(runID) + "/block/loadtest-tool"),
 		RunID:  runID,
 		Kind:   "mcp/tool_call",
-		State:  common.StepStateDispatched,
+		State:  common.StepStateExecuting,
 		Input:  map[string]any{stepInputKeyGraphNodeID: "loadtest-tool", stepInputKeyGraphRootStepID: string(root.ID), stepOutputKeyExecutionGraph: graph, "previousStepId": string(root.ID)},
 		Output: map[string]any{"stdout": "loadtest evidence"},
 	}
@@ -1660,7 +1660,7 @@ func TestRuntimeOrchestrator_DispatchesRepeatedGraphNodeIDInNewGraphScope(t *tes
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-graph-repeat"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: "llm/workspace_execution",
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1760,7 +1760,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitRoutesToAssessmentOnly(t
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-graph-expansion-limit"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1801,14 +1801,14 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAllowsConcreteValidation
 		WorkspaceID:     "ws-graph-limit-validation-evidence",
 		DoDID:           "dod",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 	}
 	for i := 0; i < maxGraphFollowUpExpansionAttempts; i++ {
 		step := &runmodel.Step{
 			ID:    common.StepID(fmt.Sprintf("%s/follow-up-%d", runID, i)),
 			RunID: runID,
 			Kind:  llmWorkspaceExecutionStepKind,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{"graphFollowUp": true},
 			Output: map[string]any{
 				stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
@@ -1824,7 +1824,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAllowsConcreteValidation
 		ID:    common.StepID(string(runID) + "/follow-up-validation"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"graphFollowUp":              true,
 			stepInputKeyRuntimeStage:     runtimeStageVerification,
@@ -1892,7 +1892,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToRepeatedConcret
 		WorkspaceID:     workspaceID,
 		DoDID:           "dod",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 	}
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1902,7 +1902,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToRepeatedConcret
 			ID:    common.StepID(fmt.Sprintf("%s/follow-up-validation-%d", runID, i)),
 			RunID: runID,
 			Kind:  llmWorkspaceExecutionStepKind,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{"graphFollowUp": true},
 			Output: map[string]any{
 				stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
@@ -1918,7 +1918,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToRepeatedConcret
 		ID:    common.StepID(string(runID) + "/follow-up-current"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{
 			"graphFollowUp":              true,
 			stepInputKeyRuntimeStage:     runtimeStageVerification,
@@ -1949,7 +1949,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToRepeatedConcret
 		stored.Output["graphFollowUpExpansionKind"] != "concrete_validation_evidence" {
 		t.Fatalf("current output = %+v, want concrete validation expansion limit marker", stored.Output)
 	}
-	if stored.State != common.StepStateCompleted ||
+	if stored.State != common.StepStateSucceeded ||
 		stringFromMap(stored.Output, failureOutputKeyClass) != "" ||
 		stringFromMap(stored.Output, "contractViolationType") != "" {
 		t.Fatalf("stored step state=%s output=%+v, want completed transition without failure diagnostics", stored.State, stored.Output)
@@ -1998,7 +1998,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToConcreteFailure
 		WorkspaceID:     workspaceID,
 		DoDID:           "dod",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 	}
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -2008,7 +2008,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToConcreteFailure
 			ID:    common.StepID(fmt.Sprintf("%s/follow-up-%d", runID, i)),
 			RunID: runID,
 			Kind:  llmWorkspaceExecutionStepKind,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				"graphFollowUp":                   true,
 				"concreteFailureEvidenceRequired": true,
@@ -2028,7 +2028,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToConcreteFailure
 		ID:    common.StepID(string(runID) + "/follow-up-current"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{
 			"graphFollowUp":                   true,
 			"concreteFailureEvidenceRequired": true,
@@ -2058,7 +2058,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToConcreteFailure
 	if !boolValue(stored.Output["ignoredExecutionGraph"]) {
 		t.Fatalf("ignoredExecutionGraph = %v, want true", stored.Output["ignoredExecutionGraph"])
 	}
-	if stored.State != common.StepStateCompleted ||
+	if stored.State != common.StepStateSucceeded ||
 		stringFromMap(stored.Output, failureOutputKeyClass) != "" ||
 		stringFromMap(stored.Output, "contractViolationType") != "" {
 		t.Fatalf("stored step state=%s output=%+v, want completed transition without failure diagnostics", stored.State, stored.Output)
@@ -2080,14 +2080,14 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAllowsContractedStateCha
 		WorkspaceID:     "ws-graph-limit-state-change",
 		DoDID:           "dod",
 		InitialStepKind: llmWorkspaceExecutionStepKind,
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 	}
 	for i := 0; i < maxGraphFollowUpExpansionAttempts; i++ {
 		step := &runmodel.Step{
 			ID:    common.StepID(fmt.Sprintf("%s/follow-up-%d", runID, i)),
 			RunID: runID,
 			Kind:  llmWorkspaceExecutionStepKind,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{"graphFollowUp": true},
 			Output: map[string]any{
 				stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
@@ -2103,7 +2103,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAllowsContractedStateCha
 		ID:    common.StepID(string(runID) + "/follow-up-state-change"),
 		RunID: runID,
 		Kind:  llmWorkspaceExecutionStepKind,
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"graphFollowUp":               true,
 			stepInputKeyRuntimeStage:      runtimeStageRepair,
@@ -2420,7 +2420,7 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationDispatchesOneRetry(t
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-assessment-only-rejects-graph"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -2641,7 +2641,7 @@ func TestRuntimeOrchestrator_AssessmentOnlyExecutableOutputRetriesWithoutSideEff
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-assessment-only-ignores-graph-with-assessment"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -2755,7 +2755,7 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationEscalatesRepeatedGra
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-assessment-only-rejects-repeated-graph"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -2854,7 +2854,7 @@ func TestRuntimeOrchestrator_AssessmentOnlyDecisionForContinuableCandidateRoutes
 		WorkspaceID:     workspaceID,
 		GoalID:          common.GoalID("goal-assessment-only-decision-repair"),
 		DoDID:           common.DoDID("dod-assessment-only-decision-repair"),
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{
 			"dod": map[string]any{"items": []any{"produce implementation"}},
@@ -3002,7 +3002,7 @@ func TestRuntimeOrchestrator_FailedAssessmentDecisionWithActionableCoverageRoute
 		WorkspaceID:     workspaceID,
 		GoalID:          common.GoalID("goal-failed-assessment-decision-repair"),
 		DoDID:           common.DoDID("dod-failed-assessment-decision-repair"),
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{
 			"dod": map[string]any{"items": []any{"observable behavior"}},
@@ -3112,7 +3112,7 @@ func TestRuntimeOrchestrator_ContinuableDecisionRoutesToRepair(t *testing.T) {
 		WorkspaceID:     workspaceID,
 		GoalID:          common.GoalID("goal-continuable-decision-repair"),
 		DoDID:           common.DoDID("dod-continuable-decision-repair"),
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{
 			"dod": map[string]any{"items": []any{"produce implementation"}},
@@ -3227,7 +3227,7 @@ func TestRuntimeOrchestrator_KnownActionableDecisionRoutesToRepair(t *testing.T)
 		WorkspaceID:     workspaceID,
 		GoalID:          common.GoalID("goal-known-actionable-decision"),
 		DoDID:           common.DoDID("dod-known-actionable-decision"),
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{
 			"dod": map[string]any{"items": []any{"produce implementation"}},
@@ -3346,7 +3346,7 @@ func TestRuntimeOrchestrator_ReadableResourceDecisionRoutesToRepairWithHumanFiel
 		WorkspaceID:     workspaceID,
 		GoalID:          common.GoalID("goal-readable-resource-decision"),
 		DoDID:           common.DoDID("dod-readable-resource-decision"),
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: map[string]any{
 			"dod": map[string]any{"items": []any{"inspect source"}},
@@ -3478,7 +3478,7 @@ func TestRuntimeOrchestrator_FailsLLMRunCompletionWithoutDoDSummary(t *testing.T
 		ID:              runID,
 		WorkspaceID:     workspaceID,
 		DoDID:           common.DoDID("dod-1"),
-		State:           common.RunStateCreated,
+		State:           common.RunStatePending,
 		InitialStepKind: "llm/workspace_execution",
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)

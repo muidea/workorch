@@ -65,7 +65,7 @@ func workspaceWithSnapshotGovernance(workspace appmodelcore.Workspace, snapshot 
 		blockerRunID = strings.TrimSpace(snapshot.Workspace.ActiveRunID)
 	}
 	if ticketID, ok := snapshotDecisionBlocker(snapshot, blockerRunID); ok {
-		next.State = string(common.WorkspaceStateWaitingDecision)
+		next.State = string(common.WorkspaceStateActive)
 		if blockerRunID != "" {
 			next.ActiveRunID = blockerRunID
 		}
@@ -74,7 +74,7 @@ func workspaceWithSnapshotGovernance(workspace appmodelcore.Workspace, snapshot 
 		return next
 	}
 	if approvalID, ok := snapshotApprovalBlocker(snapshot, blockerRunID); ok {
-		next.State = string(common.WorkspaceStateBlocked)
+		next.State = string(common.WorkspaceStateBlockedOnApproval)
 		if blockerRunID != "" {
 			next.ActiveRunID = blockerRunID
 		}
@@ -1207,7 +1207,7 @@ func applyRuntimeProgressToSnapshot(snapshot *readmodelcore.WorkspaceSnapshot, u
 
 func isTerminalRuntimeProgressState(state string) bool {
 	switch common.StepState(strings.TrimSpace(state)) {
-	case common.StepStateCompleted, common.StepStateFailed:
+	case common.StepStateSucceeded, common.StepStateFailed:
 		return true
 	default:
 		return false

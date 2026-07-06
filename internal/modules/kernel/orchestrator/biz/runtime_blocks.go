@@ -720,15 +720,18 @@ func (o *RuntimeOrchestrator) createDecisionTicket(
 	}
 
 	ticket := &decisionmodel.Ticket{
-		ID:           spec.TicketID,
-		WorkspaceID:  run.WorkspaceID,
-		RunID:        run.ID,
-		StepID:       step.ID,
-		Reason:       common.RedactSensitiveString(spec.Reason),
-		DecisionKind: spec.DecisionKind,
-		Question:     common.RedactSensitiveString(spec.Question),
-		Context:      common.RedactSensitiveMap(cloneStepPayload(spec.Context)),
-		State:        common.DecisionTicketStateOpen,
+		ID:                     spec.TicketID,
+		WorkspaceID:            run.WorkspaceID,
+		RunID:                  run.ID,
+		StepID:                 step.ID,
+		Reason:                 common.RedactSensitiveString(spec.Reason),
+		DecisionKind:           spec.DecisionKind,
+		Question:               common.RedactSensitiveString(spec.Question),
+		Context:                common.RedactSensitiveMap(cloneStepPayload(spec.Context)),
+		State:                  common.DecisionTicketStateOpen,
+		FailureClass:           stringFromMap(spec.Context, "failureClass"),
+		FailureSignature:       stringFromMap(spec.Context, "failureSignature"),
+		AllowedRecoveryActions: stringListFromValue(spec.Context["allowedRecoveryActions"]),
 	}
 	if err := o.tickets.Create(ctx, ticket); err != nil {
 		return err

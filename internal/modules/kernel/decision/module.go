@@ -290,30 +290,40 @@ func ticketCreateCommandFromModel(item *decisionmodel.Ticket) decisioncontracts.
 		return decisioncontracts.CreateTicketCommand{}
 	}
 	return decisioncontracts.CreateTicketCommand{
-		TicketID:     item.ID,
-		WorkspaceID:  item.WorkspaceID,
-		RunID:        item.RunID,
-		StepID:       item.StepID,
-		Reason:       item.Reason,
-		DecisionKind: item.DecisionKind,
-		Question:     item.Question,
-		Context:      cloneMap(item.Context),
+		TicketID:               item.ID,
+		WorkspaceID:            item.WorkspaceID,
+		RunID:                  item.RunID,
+		StepID:                 item.StepID,
+		Reason:                 item.Reason,
+		DecisionKind:           item.DecisionKind,
+		Question:               item.Question,
+		Context:                cloneMap(item.Context),
+		AutoGovernance:         cloneMap(item.AutoGovernance),
+		FailureClass:           item.FailureClass,
+		FailureSignature:       item.FailureSignature,
+		AllowedRecoveryActions: append([]string(nil), item.AllowedRecoveryActions...),
 	}
 }
 
 func ticketFromUpdateCommand(cmd decisioncontracts.UpdateTicketCommand) *decisionmodel.Ticket {
 	return &decisionmodel.Ticket{
-		ID:           cmd.TicketID,
-		WorkspaceID:  cmd.WorkspaceID,
-		RunID:        cmd.RunID,
-		StepID:       cmd.StepID,
-		Reason:       cmd.Reason,
-		DecisionKind: cmd.DecisionKind,
-		Question:     cmd.Question,
-		Context:      cloneMap(cmd.Context),
-		State:        cmd.State,
-		CreatedAt:    cmd.CreatedAt,
-		UpdatedAt:    cmd.UpdatedAt,
+		ID:                     cmd.TicketID,
+		WorkspaceID:            cmd.WorkspaceID,
+		RunID:                  cmd.RunID,
+		StepID:                 cmd.StepID,
+		Reason:                 cmd.Reason,
+		DecisionKind:           cmd.DecisionKind,
+		Question:               cmd.Question,
+		Context:                cloneMap(cmd.Context),
+		State:                  cmd.State,
+		AutoGovernance:         cloneMap(cmd.AutoGovernance),
+		FailureClass:           cmd.FailureClass,
+		FailureSignature:       cmd.FailureSignature,
+		AllowedRecoveryActions: append([]string(nil), cmd.AllowedRecoveryActions...),
+		ResolvedAt:             cmd.ResolvedAt,
+		ResolvedBy:             cmd.ResolvedBy,
+		CreatedAt:              cmd.CreatedAt,
+		UpdatedAt:              cmd.UpdatedAt,
 	}
 }
 

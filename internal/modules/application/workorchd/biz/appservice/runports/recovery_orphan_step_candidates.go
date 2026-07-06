@@ -17,7 +17,7 @@ func IsStuckRunningRunCandidate(ctx context.Context, hub events.Hub, item *runmo
 func TerminalStepCanDriveRunningRunResume(ctx context.Context, hub events.Hub, item *runmodel.Run) bool {
 	ctx = contextWithRunWorkspace(ctx, item)
 	terminal, err := TerminalStepForRunningRun(ctx, hub, item)
-	return err == nil && terminal != nil && terminal.State != common.StepStateDispatched
+	return err == nil && terminal != nil && terminal.State != common.StepStateExecuting
 }
 
 func TerminalStepForRunningRun(ctx context.Context, hub events.Hub, item *runmodel.Run) (*runmodel.Step, error) {
@@ -38,7 +38,7 @@ func OrphanDispatchedTerminalStep(ctx context.Context, hub events.Hub, item *run
 	if err != nil {
 		return nil, err
 	}
-	if terminal == nil || terminal.State != common.StepStateDispatched {
+	if terminal == nil || terminal.State != common.StepStateExecuting {
 		return nil, nil
 	}
 	return terminal, nil

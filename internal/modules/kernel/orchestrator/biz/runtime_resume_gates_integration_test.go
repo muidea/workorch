@@ -48,13 +48,13 @@ func TestRuntimeOrchestrator_ResumeRunFinalizesDurableRuntimeTerminalResult(t *t
 	workspaceID := common.WorkspaceID("ws-resume-terminal-result")
 	runID := common.RunID("run-resume-terminal-result")
 	stepID := common.StepID("run-resume-terminal-result/step-1")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: llmcommon.StepKindWorkspaceExecution, State: common.StepStateDispatched, Input: map[string]any{}}); err != nil {
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: llmcommon.StepKindWorkspaceExecution, State: common.StepStateExecuting, Input: map[string]any{}}); err != nil {
 		t.Fatalf("seed step: %v", err)
 	}
 	if err := toolCallRepo.Create(ctx, &runmodel.ToolCall{
@@ -88,7 +88,7 @@ func TestRuntimeOrchestrator_ResumeRunFinalizesDurableRuntimeTerminalResult(t *t
 	if err != nil {
 		t.Fatalf("read step: %v", err)
 	}
-	if step.State != common.StepStateCompleted || step.Output["status"] != "ok" {
+	if step.State != common.StepStateSucceeded || step.Output["status"] != "ok" {
 		t.Fatalf("step = %+v, want completed from durable terminal result", step)
 	}
 	if len(runtime.calls) != 0 {
@@ -146,14 +146,14 @@ func TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval(
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if err := stepRepo.Create(ctx, &runmodel.Step{
 		ID:    prepareStepID,
 		RunID: runID,
 		Kind:  "graph/mock",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 		Input: map[string]any{
 			"executionGraph": graph,
 			"graphNodeId":    "prepare",
@@ -196,7 +196,7 @@ func TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval(
 	if err != nil {
 		t.Fatalf("get apply step: %v", err)
 	}
-	if applyStep.State != common.StepStateCompleted || applyStep.Input["graphPreviousNodeId"] != "prepare" {
+	if applyStep.State != common.StepStateSucceeded || applyStep.Input["graphPreviousNodeId"] != "prepare" {
 		t.Fatalf("apply step = %+v, want resumed graph node after prepare", applyStep)
 	}
 }
@@ -237,7 +237,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesConditionalBranchStep(t *testing.
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -265,7 +265,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesConditionalBranchStep(t *testing.
 	if err != nil {
 		t.Fatalf("get branch step: %v", err)
 	}
-	if stepFast.State != common.StepStateCompleted {
+	if stepFast.State != common.StepStateSucceeded {
 		t.Fatalf("branch step state = %s, want completed", stepFast.State)
 	}
 	if stepFast.Input["previousStepId"] != "run-branch/step-1" {
@@ -312,7 +312,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesConditionalReviewStep(t *testing.
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -340,7 +340,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesConditionalReviewStep(t *testing.
 	if err != nil {
 		t.Fatalf("get review step: %v", err)
 	}
-	if stepReview.State != common.StepStateCompleted {
+	if stepReview.State != common.StepStateSucceeded {
 		t.Fatalf("review step state = %s, want completed", stepReview.State)
 	}
 	if stepReview.Input["previousStepId"] != "run-branch-review/step-1" {
@@ -375,7 +375,7 @@ func TestRuntimeOrchestrator_StartRunBlocksOnDecisionWhenRuntimeRequestsDecision
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -409,7 +409,7 @@ func TestRuntimeOrchestrator_StartRunBlocksOnDecisionWhenRuntimeRequestsDecision
 	if err != nil {
 		t.Fatalf("get step1: %v", err)
 	}
-	if step1.State != common.StepStateCompleted {
+	if step1.State != common.StepStateSucceeded {
 		t.Fatalf("step1 state = %s, want completed", step1.State)
 	}
 	if _, err := stepRepo.Get(ctx, "run-runtime-block/step-2"); !errors.Is(err, common.ErrNotFound) {
@@ -455,7 +455,7 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeDecisionR
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -496,7 +496,7 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeDecisionR
 	if err != nil {
 		t.Fatalf("get step2: %v", err)
 	}
-	if step2.State != common.StepStateCompleted {
+	if step2.State != common.StepStateSucceeded {
 		t.Fatalf("step2 state = %s, want completed", step2.State)
 	}
 	if step2.Input["previousStepId"] != "run-runtime-resume/step-1" {
@@ -551,7 +551,7 @@ func TestRuntimeOrchestrator_ResumeRunResolvedDecisionUsesRunScopedTicketRead(t 
 		GoalID:          common.GoalID("goal-runtime-ticket-scope"),
 		DoDID:           common.DoDID("dod-runtime-ticket-scope"),
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -760,7 +760,7 @@ func TestRuntimeOrchestrator_ResumeRunRecoversRunningRunWithResolvedFailedStepDe
 		GoalID:          common.GoalID("goal-running-recovery"),
 		DoDID:           common.DoDID("dod-running-recovery"),
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
-		State:           common.RunStateRunning,
+		State:           common.RunStateActive,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -859,7 +859,7 @@ func TestRuntimeOrchestrator_ResumeRunCreatesUniqueStepForMultiRoundDecision(t *
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -961,7 +961,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsRuntimeDecisionWithoutDispatchingNe
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1049,7 +1049,7 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeApprovalA
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1093,7 +1093,7 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeApprovalA
 	if err != nil {
 		t.Fatalf("get step2: %v", err)
 	}
-	if step2.State != common.StepStateCompleted {
+	if step2.State != common.StepStateSucceeded {
 		t.Fatalf("step2 state = %s, want completed", step2.State)
 	}
 	if step2.Input["previousStepId"] != "run-runtime-approval/step-1" {
@@ -1150,7 +1150,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsRuntimeApprovalWithoutDispatchingNe
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1237,7 +1237,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsMultipleDecisionGates(t *testing.T
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1295,7 +1295,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsMultipleDecisionGates(t *testing.T
 	if err != nil {
 		t.Fatalf("get step3: %v", err)
 	}
-	if step3.State != common.StepStateCompleted {
+	if step3.State != common.StepStateSucceeded {
 		t.Fatalf("step3 state = %s, want completed", step3.State)
 	}
 	if step3.Input["previousStepId"] != "run-multi-gate/step-2" {
@@ -1346,7 +1346,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsSecondDecisionGateWithoutDispatchin
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1459,7 +1459,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsDecisionThenApprovalGates(t *testi
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1521,7 +1521,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsDecisionThenApprovalGates(t *testi
 	if err != nil {
 		t.Fatalf("get step3: %v", err)
 	}
-	if step3.State != common.StepStateCompleted {
+	if step3.State != common.StepStateSucceeded {
 		t.Fatalf("step3 state = %s, want completed", step3.State)
 	}
 	if step3.Input["previousStepId"] != "run-mixed-gate/step-2" {
@@ -1584,7 +1584,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsLLMNamedDecisionThenApprovalGates(
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated, DoDID: "dod-llm-mixed"}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending, DoDID: "dod-llm-mixed"}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1716,7 +1716,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsDecisionThenRejectedApproval(t *te
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStatePending}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1781,7 +1781,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsDecisionThenRejectedApproval(t *te
 	if err != nil {
 		t.Fatalf("get step2: %v", err)
 	}
-	if step2.State != common.StepStateCompleted {
+	if step2.State != common.StepStateSucceeded {
 		t.Fatalf("step2 state = %s, want completed", step2.State)
 	}
 	if step2.Input["previousStepId"] != "run-mixed-gate-reject/step-1" {

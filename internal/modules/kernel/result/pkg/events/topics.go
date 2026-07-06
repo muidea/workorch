@@ -1,6 +1,7 @@
 package events
 
 const (
+	TopicResultCreated    = "/result/created"
 	TopicResultAccepted   = "/result/accepted"
 	TopicResultRejected   = "/result/rejected"
 	TopicResultSuperseded = "/result/superseded"

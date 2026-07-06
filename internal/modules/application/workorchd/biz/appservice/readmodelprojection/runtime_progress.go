@@ -20,9 +20,9 @@ func MapRuntimeProgress(snapshot readmodelcore.RunSnapshot) readmodelcore.RunPro
 	}
 	for _, step := range snapshot.Steps {
 		switch step.State {
-		case string(common.StepStateDispatched):
+		case string(common.StepStateExecuting):
 			ret.StepDispatched++
-		case string(common.StepStateCompleted):
+		case string(common.StepStateSucceeded):
 			ret.StepCompleted++
 		case string(common.StepStateFailed):
 			ret.StepFailed++

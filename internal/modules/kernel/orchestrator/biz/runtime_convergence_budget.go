@@ -79,7 +79,7 @@ func updateConvergenceBudgetFromStep(run *runModel.Run, step *runModel.Step, cov
 }
 
 func convergenceBudgetPositiveCoverageDelta(step *runModel.Step) bool {
-	return step != nil && step.State == common.StepStateCompleted
+	return step != nil && step.State == common.StepStateSucceeded
 }
 
 func resetConvergenceBudgetForReplanSuccessor(executionContext map[string]any) bool {
@@ -201,11 +201,11 @@ func convergenceBudgetCountsNoDelta(step *runModel.Step) bool {
 	if convergenceBudgetSkipsNoDeltaForMechanicalPatchConflict(step) {
 		return false
 	}
-	return step.State == common.StepStateCompleted || step.State == common.StepStateFailed
+	return step.State == common.StepStateSucceeded || step.State == common.StepStateFailed
 }
 
 func convergenceBudgetSkipsNoDeltaForPendingExecutionGraph(step *runModel.Step) bool {
-	if step == nil || step.State != common.StepStateCompleted {
+	if step == nil || step.State != common.StepStateSucceeded {
 		return false
 	}
 	if canonicalLLMWorkspaceStepKind(strings.TrimSpace(step.Kind)) != llmWorkspaceExecutionStepKind {
@@ -216,7 +216,7 @@ func convergenceBudgetSkipsNoDeltaForPendingExecutionGraph(step *runModel.Step) 
 }
 
 func convergenceBudgetSkipsNoDeltaForIntermediateCompletedGraphNode(step *runModel.Step) bool {
-	if step == nil || step.State != common.StepStateCompleted || graphNodeID(step) == "" {
+	if step == nil || step.State != common.StepStateSucceeded || graphNodeID(step) == "" {
 		return false
 	}
 	return len(mapFromValue(step.Input["validationEvidence"])) == 0 &&

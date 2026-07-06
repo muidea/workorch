@@ -12,6 +12,8 @@ type Approval struct {
 	Context        map[string]any                        `json:"context,omitempty"`
 	State          string                                `json:"state"`
 	AutoGovernance *governancecore.AutoGovernanceSummary `json:"autoGovernance,omitempty"`
+	ResolvedAt     string                                `json:"resolvedAt,omitempty"`
+	ResolvedBy     string                                `json:"resolvedBy,omitempty"`
 	CreatedAt      string                                `json:"createdAt,omitempty"`
 	UpdatedAt      string                                `json:"updatedAt,omitempty"`
 }

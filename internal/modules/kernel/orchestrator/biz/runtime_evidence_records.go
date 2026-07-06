@@ -220,7 +220,7 @@ func (o *RuntimeOrchestrator) recordAcceptedStateChangeEvidenceForRuntimeStep(ct
 }
 
 func acceptedStateChangeEvidenceRecordForRuntimeStep(run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall) *orchestratormodel.EvidenceRecord {
-	if run == nil || step == nil || step.ID == "" || step.State != common.StepStateCompleted {
+	if run == nil || step == nil || step.ID == "" || step.State != common.StepStateSucceeded {
 		return nil
 	}
 	if !runtimeStepCanRecordStateChangingEvidence(step) || runtimeStepStateChangeEvidenceRecordedByDedicatedApply(step) {

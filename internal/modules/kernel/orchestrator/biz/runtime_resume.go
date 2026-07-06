@@ -36,9 +36,9 @@ func runningTerminalStepRecoverySpecs(
 	if last == nil {
 		return nil, nil
 	}
-	if last.State != common.StepStateCompleted &&
+	if last.State != common.StepStateSucceeded &&
 		last.State != common.StepStateFailed &&
-		last.State != common.StepStateDispatched {
+		last.State != common.StepStateExecuting {
 		return nil, nil
 	}
 	return nextFromStep(ctx, run, last)
@@ -71,7 +71,7 @@ func (o *RuntimeOrchestrator) failRunningResume(ctx context.Context, runID commo
 	if getErr != nil {
 		return errors.Join(cause, getErr)
 	}
-	if current.State != common.RunStateRunning {
+	if current.State != common.RunStateActive {
 		return cause
 	}
 	if err := o.FailRun(ctx, runID, cause.Error()); err != nil {

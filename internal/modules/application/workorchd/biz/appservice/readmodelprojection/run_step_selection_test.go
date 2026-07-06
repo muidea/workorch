@@ -13,7 +13,7 @@ func TestCurrentRunStatusStepTerminalRunPrefersFailedTerminalOverStaleCheckpoint
 		{
 			ID:    "run-terminal-selection/001-completed",
 			RunID: run.ID,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 		},
 		{
 			ID:    "run-terminal-selection/002-failed",
@@ -51,7 +51,7 @@ func TestCurrentRunStatusStepTerminalRunUsesCheckpointOrderForLexicallyEarlierFa
 		{
 			ID:    "run-terminal-checkpoint-order/graph-010",
 			RunID: run.ID,
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 		},
 	}
 	checkpoints := []*runmodel.RuntimeCheckpoint{

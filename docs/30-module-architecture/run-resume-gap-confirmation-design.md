@@ -123,7 +123,7 @@ client command
 
 ### 1. 正向推进不足的直接收口方向
 
-当前现象是：workspace 能进入 running / waiting_decision / repair 等状态，但没有稳定产生符合 Goal 的有效产物，或者 replan 后仍停留在 decision / repair 循环。
+当前现象是：run 能进入 active / blocked_on_decision / repair 等状态，但没有稳定产生符合 Goal 的有效产物，或者 replan 后仍停留在 decision / repair 循环。Workspace owner state 不承载 decision/running 语义，只通过 projection 展示 active run、ticket 和 prompt mode。
 
 设计判断：
 
@@ -352,9 +352,9 @@ Out of scope:
 | --- | --- |
 | no run exists | 基于最新 Goal/DoD/template 创建首个 run，并执行 gap confirmation |
 | idle with recoverable run | 重新激活当前有效 run，并执行 gap confirmation |
-| running / dispatched | 幂等返回当前运行状态，不重复调度 |
-| waiting_decision | 若 decision 已 resolution 且可继续，则进入 gap confirmation；否则提示先处理 decision |
-| waiting_approval | 若 approval 已批准且可继续，则进入 gap confirmation；否则提示先处理 approval |
+| active / executing | 幂等返回当前运行状态，不重复调度 |
+| blocked_on_decision | 若 decision 已 resolution 且可继续，则进入 gap confirmation；否则提示先处理 decision |
+| blocked_on_approval | 若 approval 已批准且可继续，则进入 gap confirmation；否则提示先处理 approval |
 | failed but recoverable | 基于当前 run 的失败 surface 和 coverage ledger 执行 gap confirmation，再决定 repair/replan/decision |
 | terminal completed | 返回已完成状态；除非用户显式 restart/reset，否则不创建新 run |
 
@@ -545,7 +545,7 @@ Gap confirmation must prefer deterministic reconstruction:
 - If workspace is empty, mark all Goal/DoD/deliverable expectations open.
 - If evidence ledger already proves an item, mark it satisfied or evidence_ready.
 - If rejected evidence exists, preserve it as rejected evidence and do not erase it.
-- If run is waiting decision/approval, nextAction must be wait unless resolution is already present.
+- If run is blocked_on_decision/approval, nextAction must be wait unless resolution is already present.
 - If a dispatched runtime step has durable terminal result, nextAction should finalize/recover before creating new LLM work.
 
 ### LLM Assessment Only When Needed
@@ -655,8 +655,8 @@ After gap confirmation:
 | GapBaseline nextAction | Scheduler behavior |
 | --- | --- |
 | `schedule_step` | Build convergence contract, create next step, publish runtime execute request |
-| `wait_decision` | Set run/workspace waiting_decision projection, do not schedule LLM |
-| `wait_approval` | Set run/workspace waiting_approval projection, do not schedule LLM |
+| `wait_decision` | Set run `blocked_on_decision` and decision projection, keep workspace owner `active`, do not schedule LLM |
+| `wait_approval` | Set run `blocked_on_approval` and approval projection; workspace owner may become `blocked_on_approval`, do not schedule LLM |
 | `no_action` | Return idempotent accepted/current state |
 | `fail_fast` | Mark run failed or create structured decision according to blocker class |
 
@@ -771,7 +771,7 @@ workorchd ViewModel must expose:
 - current focus
 - todo list summary
 - open/failed/satisfied coverage counts
-- waiting decision/approval blockers
+- blocked_on_decision/approval blockers
 - runtime pending/finalize gap
 - last accepted command and dedupe status
 - latest violation diagnostics summary
@@ -790,7 +790,7 @@ Projection 必须满足：
 - workspace list 与 workspace detail 使用同一投影源。
 - detail 投影未 ready 时，端侧显示 `projection refreshing`，但不得把旧 prompt 状态继续当成事实。
 - command accepted 后，投影至少要出现 accepted command revision；后续 scheduler/step 进展再通过 event stream 逐步刷新。
-- waiting decision/approval 的 prompt 必须绑定具体 blocker id；blocker 关闭后 prompt 必须随投影清空或切回 resume。
+- blocked_on_decision/approval 的 prompt 必须绑定具体 blocker id；blocker 关闭后 prompt 必须随投影清空或切回 resume。
 
 ## EventHub And Module Boundary
 
@@ -824,7 +824,7 @@ Core must not hardcode template id, language, command, file name, provider, prot
 - Ensure REST/Web/TUI all produce the same command event.
 - Ensure accepted response means command was validated and a BackgroundRoutine work item was accepted or no-op was determined.
 - Ensure command handlers never perform long-running execution inline.
-- Ensure service restart loads workspace projections and normalizes stale running/dispatched states to idle/recoverable unless a durable in-flight work item exists in the current process.
+- Ensure service restart loads workspace projections and normalizes stale active/executing states to idle/recoverable unless a durable in-flight work item exists in the current process.
 
 ### Appservice / ViewModel
 
@@ -891,7 +891,7 @@ Core must not hardcode template id, language, command, file name, provider, prot
 | `internal/modules/application/workorchd/service/server/http_run_continuation_scheduler.go` | run continuation scheduling bridge | 收口为 EventHub command 后的 scheduler bridge，不承担端侧语义推断 |
 | `internal/modules/application/workorchd/service/server/workorchd_scheduler_commands.go` | scheduler command consumer | 统一处理 resume/replan/restart/recover，落实 workspace scope、dedupe 和 accepted projection |
 | `internal/modules/application/workorchd/service/server/event_subscriptions.go` | service event subscriptions | 只订阅 owner event 并推动 projection/scheduler，不做业务特判 |
-| `internal/modules/application/workorchd/service/server/service.go` | workorchd service lifecycle | 启动期恢复 stale running/dispatched projection，等待显式 resume |
+| `internal/modules/application/workorchd/service/server/service.go` | workorchd service lifecycle | 启动期恢复 stale active/executing projection，等待显式 resume |
 
 ### Appservice And Projection
 
@@ -956,15 +956,15 @@ Core must not hardcode template id, language, command, file name, provider, prot
 | RG-08 | projection | Expose current focus, todo summary, gap baseline revision | read model snapshot tests |
 | RG-09 | MVVP | Ensure TUI/Web only consume projection gap/todo | code review / import boundary search |
 | RG-10 | restart | Make restart explicitly supersede old run and create replacement run | multi-run state transition test |
-| RG-11 | resume | Make resume idempotent for running/dispatched/pending work | duplicate command test |
+| RG-11 | resume | Make resume idempotent for active/executing/pending work | duplicate command test |
 | RG-12 | decision replan | Route resolved replan through same gap confirmation path | decision resolution integration test |
-| RG-13 | e2e | Add deployed-instance test for `/run resume` from idle/waiting_decision/service-restart | e2e script |
+| RG-13 | e2e | Add deployed-instance test for `/run resume` from idle/blocked_on_decision/service-restart | e2e script |
 | RG-14 | docs | Update CLI/TUI user docs and architecture docs | docs review |
 | RG-15 | first-run | Ensure first run creates GapBaseline before first state-changing LLM step | orchestrator/workorchd integration test |
 | RG-16 | violation retry | Record contract violations as rejected diagnostics and retry boundedly | contract violation recovery tests |
 | RG-17 | prompt balance | Split strict contract from flexible guidance in LLM step input | prompt rendering/cache tests |
 | RG-18 | projection prompt | Bind TUI prompt to projection blocker id and accepted command revision | TUI presenter tests |
-| RG-19 | restart recovery | Normalize stale running projection after service restart | server/appservice recovery tests |
+| RG-19 | restart recovery | Normalize stale active projection after service restart | server/appservice recovery tests |
 
 ## Acceptance Criteria
 
@@ -1021,8 +1021,8 @@ go test ./internal/modules/blocks/llm/biz -count=1
 4. 收口 deterministic GapBaseline：首次执行、resume、replan 都先生成 baseline，再调度 LLM/runtime。
 5. 收口 LLM step input：从 GapBaseline 构造 current focus、todo、requiredOutput、accepted/rejected evidence。
 6. 收口 violation feedback retry：违例输出 rejected diagnostic 化，bounded retry，不产生副作用。
-7. 收口 restart/service recovery：重启后 stale running 状态归一为 idle/recoverable，等待显式 resume。
-8. 补充 e2e：覆盖 idle resume、waiting_decision replan、service restart 后 resume、重复 resume 幂等、违例 retry 后成功推进。
+7. 收口 restart/service recovery：重启后 stale active 状态归一为 idle/recoverable，等待显式 resume。
+8. 补充 e2e：覆盖 idle resume、blocked_on_decision replan、service restart 后 resume、重复 resume 幂等、违例 retry 后成功推进。
 
 ## Boundary Audit Notes
 
@@ -1150,15 +1150,15 @@ go test ./internal/modules/blocks/llm/biz -count=1
 
 设计收口：
 
-- 服务启动加载 workspace projection 后，若不存在当前进程内 durable in-flight work item，stale running/dispatched 必须归一为 idle/recoverable，等待显式 `/run resume`。
+- 服务启动加载 workspace projection 后，若不存在当前进程内 durable in-flight work item，stale active/executing 必须归一为 idle/recoverable，等待显式 `/run resume`。
 - watchdog 只处理外部调用长期无返回、可幂等补偿的健康检查场景；不得替代正常 EventHub command 主路径。
 - 运行中 event 丢失必须定位丢失原因并修复，不用 watchdog 作为常态补偿。
 
 验收：
 
-- service restart 测试证明 stale running 归一为 idle/recoverable。
+- service restart 测试证明 stale active 归一为 idle/recoverable。
 - `/run resume` 可以重新激活 recoverable workspace，并先进入 gap confirmation。
-- watchdog 相关测试只覆盖外部调用 timeout / stale dispatched 的幂等恢复，不覆盖普通 command 投递失败。
+- watchdog 相关测试只覆盖外部调用 timeout / stale executing 的幂等恢复，不覆盖普通 command 投递失败。
 
 ## Code Closure Guardrails
 
@@ -1240,7 +1240,7 @@ go test ./internal/modules/blocks/llm/biz -count=1
 
 - empty workspace 首次 resume 创建 run 后先 checkpoint baseline，再调度 state-changing step。
 - existing run resume 复用最新 definition revision、accepted/rejected evidence 和 coverage ledger。
-- waiting decision/approval 只有 resolution 已满足时才进入 baseline/schedule，否则 nextAction 为 wait。
+- blocked_on_decision/approval 只有 resolution 已满足时才进入 baseline/schedule，否则 nextAction 为 wait。
 - deterministic 不足时仅允许 assessment-only gap confirmation。
 
 验收证据：
@@ -1285,7 +1285,7 @@ go test ./internal/modules/blocks/llm/biz -count=1
 
 验收证据：
 
-- TUI model tests 覆盖 workspace switch、waiting_decision、replan accepted、blocker closed、projection refreshing。
+- TUI model tests 覆盖 workspace switch、blocked_on_decision、replan accepted、blocker closed、projection refreshing。
 - projection store tests 覆盖 snapshot merge 不擦除 accepted command/gap baseline。
 - Web/TUI 代码搜索无端侧 gap/todo/run 状态推断。
 
@@ -1293,20 +1293,20 @@ go test ./internal/modules/blocks/llm/biz -count=1
 
 目标：
 
-- 服务重启后 stale running/dispatched 归一为 idle/recoverable，等待显式 resume。
+- 服务重启后 stale active/executing 归一为 idle/recoverable，等待显式 resume。
 - watchdog 只处理外部调用超时等幂等补偿，不替代主路径。
 - deployed e2e 覆盖关键路径。
 
 必须完成：
 
-- startup projection recovery 不保留无当前执行事件的 running 假象。
+- startup projection recovery 不保留无当前执行事件的 active 假象。
 - recoverable workspace resume 后先进入 GapBaseline gate。
-- watchdog 只覆盖外部调用长期无返回、worker lost、stale dispatched 等可幂等场景。
-- e2e 覆盖 idle resume、waiting decision replan、service restart 后 resume、重复 resume 幂等。
+- watchdog 只覆盖外部调用长期无返回、worker lost、stale executing 等可幂等场景。
+- e2e 覆盖 idle resume、blocked_on_decision replan、service restart 后 resume、重复 resume 幂等。
 
 验收证据：
 
-- service restart tests 证明 stale running -> idle/recoverable。
+- service restart tests 证明 stale active -> idle/recoverable。
 - deployed-instance e2e 证明 `/run resume` 和 decision replan 都能触发 command projection 与后续调度。
 - CPU/IO 观测证明不再因端侧轮询或反复全量扫描导致持续高负载。
 
@@ -1482,12 +1482,12 @@ go test ./internal/services/workorch/service/tui -count=1
 - `Phase F: Recovery And E2E`
 - `RG-06`: GapBaseline path for resume after service recovery
 - `RG-13`: deployed/service restart resume coverage
-- `RG-19`: normalize stale running projection after service restart
+- `RG-19`: normalize stale active projection after service restart
 
 收口结论：
 
 - Service startup recovery keeps `Validate` as a non-mutating readiness check, while `Service.Run` performs lifecycle recovery before workspace projection starts.
-- A workspace whose persisted state was `running` with an active `running` run from a previous process is normalized to `active` with no `activeRunId`; the old inactive run is cancelled.
+- A workspace whose persisted state was `active` with an active `active` run from a previous process is normalized to `active` with no `activeRunId`; the old inactive run is cancelled.
 - After this normalization, an explicit `intent=resume` command enters the unified `WorkspaceRunRequested` EventHub path and queues workspace activation, not a direct run continuation and not a destructive restart.
 - The queued activation preserves workspace scope and selected Goal/DoD definitions. The subsequent orchestrator dispatch continues to rely on the Phase C `GapBaseline` gate before any state-changing runtime step.
 - The deployed run-resume e2e script now also probes open decision tickets for the verified workspace. If one exists, it resolves the ticket with `resolutionType=replan` and verifies the projected command is `intent=replan`; `WORKORCH_RUN_RESUME_VERIFY_REQUIRE_REPLAN=1` can make this branch mandatory in a seeded environment.

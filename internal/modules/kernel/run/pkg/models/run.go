@@ -7,6 +7,7 @@ type Run struct {
 	WorkspaceID        common.WorkspaceID
 	GoalID             common.GoalID
 	DoDID              common.DoDID
+	Lineage            RunLineage
 	DefinitionRevision string
 	InitialStepKind    string
 	ExecutionContext   map[string]any
@@ -15,4 +16,13 @@ type Run struct {
 	BlockingTicketID   common.TicketID
 	BlockingApprovalID common.ApprovalID
 	FailureReason      string
+	CreatedAt          string
+	StartedAt          string
+	EndedAt            string
+}
+
+type RunLineage struct {
+	PredecessorRunID common.RunID
+	SuccessorRunID   common.RunID
+	LineageState     string
 }

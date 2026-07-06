@@ -39,6 +39,9 @@ func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshot, 
 	ret.LLMUsageTraces = MergeWorkspaceLLMUsageTraces(ret.LLMUsageTraces, runSnapshot.LLMUsageTraces)
 	ret.LLMUsageSummary = SummarizeLLMUsage(ret.LLMUsageTraces)
 	ret.Outcome = MapWorkspaceOutcome(ret)
+	if runSnapshot.TaskProgress.WorkspaceID != "" {
+		ret.TaskProgress = runSnapshot.TaskProgress
+	}
 	ret.RunHeartbeat = MapRunHeartbeat(ret)
 	ret.ConvergenceStatus = MapWorkspaceConvergenceStatus(ret)
 	bundle := MapRunContextBundle(*runSnapshot)

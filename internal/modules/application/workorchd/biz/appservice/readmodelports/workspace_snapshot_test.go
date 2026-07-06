@@ -72,13 +72,13 @@ func TestWorkspaceSnapshotMergesRunScopedLLMUsageEvents(t *testing.T) {
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			Title:       "workspace run usage",
-			State:       string(common.WorkspaceStateRunning),
+			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: string(secondRunID),
 		},
 		Run: appmodelcore.Run{
 			ID:          string(secondRunID),
 			WorkspaceID: string(workspaceID),
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 		},
 	}
 
@@ -86,12 +86,12 @@ func TestWorkspaceSnapshotMergesRunScopedLLMUsageEvents(t *testing.T) {
 		Workspaces: fakeRunSnapshotWorkspaceReader{items: []*workspacemodel.Workspace{{
 			ID:          workspaceID,
 			Title:       "workspace run usage",
-			State:       common.WorkspaceStateRunning,
+			State:       common.WorkspaceStateActive,
 			ActiveRunID: secondRunID,
 		}}},
 		Runs: fakeRunStatusRunReader{items: []*runmodel.Run{
 			{ID: firstRunID, WorkspaceID: workspaceID, State: common.RunStateCompleted},
-			{ID: secondRunID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+			{ID: secondRunID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		}},
 		Results:               fakeWorkspaceSnapshotResultReader{},
 		Artifacts:             fakeRunSnapshotArtifactReader{},
@@ -122,18 +122,18 @@ func TestWorkspaceSnapshotUsesCachedRunSnapshotForProjectionRun(t *testing.T) {
 
 	workspaceID := common.WorkspaceID("ws-workspace-cached-run")
 	runID := common.RunID("run-workspace-cached")
-	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	cached := &readmodelcore.RunSnapshot{
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			Title:       "cached workspace",
-			State:       string(common.WorkspaceStateRunning),
+			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: string(runID),
 		},
 		Run: appmodelcore.Run{
 			ID:          string(runID),
 			WorkspaceID: string(workspaceID),
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 		},
 		TaskProgress: readmodelcore.TaskProgress{
 			RunID:   string(runID),
@@ -175,13 +175,13 @@ func TestWorkspaceSnapshotLoadsRunScopedLLMUsageOnlyForProjectionRun(t *testing.
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			Title:       "cached workspace",
-			State:       string(common.WorkspaceStateRunning),
+			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: string(activeRunID),
 		},
 		Run: appmodelcore.Run{
 			ID:          string(activeRunID),
 			WorkspaceID: string(workspaceID),
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 		},
 	}
 
@@ -189,12 +189,12 @@ func TestWorkspaceSnapshotLoadsRunScopedLLMUsageOnlyForProjectionRun(t *testing.
 		Workspaces: fakeRunSnapshotWorkspaceReader{items: []*workspacemodel.Workspace{{
 			ID:          workspaceID,
 			Title:       "workspace usage projection run",
-			State:       common.WorkspaceStateRunning,
+			State:       common.WorkspaceStateActive,
 			ActiveRunID: activeRunID,
 		}}},
 		Runs: fakeRunStatusRunReader{items: []*runmodel.Run{
 			{ID: historicalRunID, WorkspaceID: workspaceID, State: common.RunStateCompleted},
-			{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+			{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		}},
 		Results:               fakeWorkspaceSnapshotResultReader{},
 		Artifacts:             fakeRunSnapshotArtifactReader{},
@@ -230,13 +230,13 @@ func TestWorkspaceProjectionSnapshotSkipsLLMUsagePayloadQueries(t *testing.T) {
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			Title:       "cached workspace",
-			State:       string(common.WorkspaceStateRunning),
+			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: string(activeRunID),
 		},
 		Run: appmodelcore.Run{
 			ID:          string(activeRunID),
 			WorkspaceID: string(workspaceID),
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 		},
 	}
 
@@ -244,11 +244,11 @@ func TestWorkspaceProjectionSnapshotSkipsLLMUsagePayloadQueries(t *testing.T) {
 		Workspaces: fakeRunSnapshotWorkspaceReader{items: []*workspacemodel.Workspace{{
 			ID:          workspaceID,
 			Title:       "workspace projection usage skip",
-			State:       common.WorkspaceStateRunning,
+			State:       common.WorkspaceStateActive,
 			ActiveRunID: activeRunID,
 		}}},
 		Runs: fakeRunStatusRunReader{items: []*runmodel.Run{
-			{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+			{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		}},
 		Results:               fakeWorkspaceSnapshotResultReader{},
 		Artifacts:             fakeRunSnapshotArtifactReader{},
@@ -285,13 +285,13 @@ func TestWorkspaceProjectionSnapshotSkipsHistoricalRunDerivedCollections(t *test
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			Title:       "cached workspace",
-			State:       string(common.WorkspaceStateRunning),
+			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: string(activeRunID),
 		},
 		Run: appmodelcore.Run{
 			ID:          string(activeRunID),
 			WorkspaceID: string(workspaceID),
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 		},
 	}
 
@@ -299,12 +299,12 @@ func TestWorkspaceProjectionSnapshotSkipsHistoricalRunDerivedCollections(t *test
 		Workspaces: fakeRunSnapshotWorkspaceReader{items: []*workspacemodel.Workspace{{
 			ID:          workspaceID,
 			Title:       "workspace projection derived skip",
-			State:       common.WorkspaceStateRunning,
+			State:       common.WorkspaceStateActive,
 			ActiveRunID: activeRunID,
 		}}},
 		Runs: fakeRunStatusRunReader{items: []*runmodel.Run{
 			{ID: historicalRunID, WorkspaceID: workspaceID, State: common.RunStateCompleted},
-			{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+			{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		}},
 		Results:               fakeWorkspaceSnapshotResultReader{},
 		Artifacts:             fakeRunSnapshotArtifactReader{},

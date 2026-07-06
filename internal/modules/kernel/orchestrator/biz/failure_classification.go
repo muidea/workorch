@@ -856,7 +856,7 @@ func runtimeFailureIsLLMContractLoop(step *runModel.Step) bool {
 
 func runtimeFailureRunHasCompletedActionEvidence(steps []*runModel.Step, failedStepID common.StepID) bool {
 	for _, step := range steps {
-		if step == nil || step.State != common.StepStateCompleted {
+		if step == nil || step.State != common.StepStateSucceeded {
 			continue
 		}
 		if step.ID == failedStepID {

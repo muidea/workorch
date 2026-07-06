@@ -930,7 +930,7 @@ func TestWorkspaceExecutionActivationSchedulesReplanContinuationForSupersededRun
 		}
 		continuation <- cmd
 		return appservice.WorkspaceExecutionActivation{
-			Run: appservice.Run{ID: "run-http-replan-continuation", WorkspaceID: workspaceID, State: string(common.RunStateRunning), Priority: cmd.Priority},
+			Run: appservice.Run{ID: "run-http-replan-continuation", WorkspaceID: workspaceID, State: string(common.RunStateActive), Priority: cmd.Priority},
 		}, nil
 	}
 
@@ -1375,7 +1375,7 @@ func TestEventStreamWritesIDRevisionAndStateSummary(t *testing.T) {
 	if err := hub.Publish(context.Background(), events.Envelope{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-stream-summary",
-		Payload:     events.WorkspacePayload("summary", "", "/tmp/summary", "", common.WorkspaceStateRunning, "run-001"),
+		Payload:     events.WorkspacePayload("summary", "", "/tmp/summary", "", common.WorkspaceStateActive, "run-001"),
 	}); err != nil {
 		t.Fatalf("publish state event: %v", err)
 	}
@@ -1388,7 +1388,7 @@ func TestEventStreamWritesIDRevisionAndStateSummary(t *testing.T) {
 		t.Fatalf("revision = %d, want 1", envelope.Revision)
 	}
 	summary, _ := envelope.Payload["stateSummary"].(map[string]any)
-	if summary["workspaceState"] != "running" || summary["activeRunId"] != "run-001" || numericTestValue(summary["revision"]) != 1 {
+	if summary["workspaceState"] != string(common.WorkspaceStateActive) || summary["activeRunId"] != "run-001" || numericTestValue(summary["revision"]) != 1 {
 		t.Fatalf("stateSummary = %+v, want workspace state, active run and revision", summary)
 	}
 }
@@ -1416,7 +1416,7 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 	if err := hub.Publish(context.Background(), events.Envelope{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-stream-replay",
-		Payload:     events.WorkspacePayload("first", "", "/tmp/first", "", common.WorkspaceStateRunning, ""),
+		Payload:     events.WorkspacePayload("first", "", "/tmp/first", "", common.WorkspaceStateActive, ""),
 	}); err != nil {
 		t.Fatalf("publish first event: %v", err)
 	}
@@ -1428,7 +1428,7 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 		Topic:       runevents.TopicRunStateChanged,
 		WorkspaceID: "ws-stream-replay",
 		RunID:       "run-replay",
-		Payload:     events.RunPayload("", "", common.RunStateRunning, "", "", ""),
+		Payload:     events.RunPayload("", "", common.RunStateActive, "", "", ""),
 	}); err != nil {
 		t.Fatalf("publish replay event: %v", err)
 	}
@@ -1476,7 +1476,7 @@ func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
 	if err := hub.Publish(context.Background(), events.Envelope{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-stream-query-replay",
-		Payload:     events.WorkspacePayload("first", "", "/tmp/first", "", common.WorkspaceStateRunning, ""),
+		Payload:     events.WorkspacePayload("first", "", "/tmp/first", "", common.WorkspaceStateActive, ""),
 	}); err != nil {
 		t.Fatalf("publish first event: %v", err)
 	}
@@ -1488,7 +1488,7 @@ func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
 		Topic:       runevents.TopicRunStateChanged,
 		WorkspaceID: "ws-stream-query-replay",
 		RunID:       "run-query-replay",
-		Payload:     events.RunPayload("", "", common.RunStateRunning, "", "", ""),
+		Payload:     events.RunPayload("", "", common.RunStateActive, "", "", ""),
 	}); err != nil {
 		t.Fatalf("publish replay event: %v", err)
 	}
@@ -1532,7 +1532,7 @@ func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
 			StepID:      "run-persist/step-1",
 			Revision:    12,
 			Payload: map[string]any{
-				events.PayloadKeyState: string(common.StepStateCompleted),
+				events.PayloadKeyState: string(common.StepStateSucceeded),
 			},
 		}}, nil
 	}
@@ -1559,7 +1559,7 @@ func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
 	if id != "evt-persisted-step" || replayed.Topic != runevents.TopicStepStateChanged || replayed.StepID != "run-persist/step-1" {
 		t.Fatalf("replayed id=%q envelope=%+v, want persisted step state event", id, replayed)
 	}
-	if replayed.Payload[events.PayloadKeyState] != string(common.StepStateCompleted) {
+	if replayed.Payload[events.PayloadKeyState] != string(common.StepStateSucceeded) {
 		t.Fatalf("payload = %+v, want completed state", replayed.Payload)
 	}
 }
@@ -2882,7 +2882,7 @@ func TestWorkspaceGetEndpointDerivesPromptFromOwnerStateWhenProjectionIsStale(t 
 	state.readWorkspace = func(context.Context, string, string, string) (appservice.Workspace, error) {
 		return appservice.Workspace{
 			ID:               string(workspaceID),
-			State:            string(common.WorkspaceStateWaitingDecision),
+			State:            string(common.WorkspaceStateActive),
 			ActiveRunID:      "run-get-prompt-owner-state",
 			BlockingTicketID: "ticket-get-prompt-owner-state",
 		}, nil
@@ -2915,7 +2915,7 @@ func TestWorkspaceGetEndpointDerivesPromptFromOwnerStateWhenProjectionIsStale(t 
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal workspace get: %v", err)
 	}
-	if body.Workspace.State != string(common.WorkspaceStateWaitingDecision) ||
+	if body.Workspace.State != string(common.WorkspaceStateActive) ||
 		body.Workspace.BlockingTicketID != "ticket-get-prompt-owner-state" ||
 		body.Workspace.ViewModel.PromptMode != "decision" {
 		t.Fatalf("workspace = %+v, want decision prompt derived from owner state", body.Workspace)
@@ -3154,8 +3154,8 @@ func TestRunCreateEndpointReturnsCreatedRun(t *testing.T) {
 	if err := json.Unmarshal(runRec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal created run: %v", err)
 	}
-	if body.Run.ID != "run-http" || body.Run.WorkspaceID != workspace.ID || body.Run.State != "created" {
-		t.Fatalf("created run = %+v, want run-http/%s/created", body.Run, workspace.ID)
+	if body.Run.ID != "run-http" || body.Run.WorkspaceID != workspace.ID || body.Run.State != string(common.RunStatePending) {
+		t.Fatalf("created run = %+v, want run-http/%s/pending", body.Run, workspace.ID)
 	}
 	if body.Run.GoalID != goalID || body.Run.DoDID != dodID {
 		t.Fatalf("created run goal/dod = %+v, want %s/%s", body.Run, goalID, dodID)
@@ -3495,7 +3495,7 @@ func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "validation",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
@@ -3637,11 +3637,11 @@ func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnOwnerRunStateEvent(
 		return appservice.RunStatus{
 			ID:          runID,
 			WorkspaceID: "ws-status-owner-event",
-			State:       string(common.RunStateRunning),
+			State:       string(common.RunStateActive),
 		}, nil
 	}
 	state.cacheRunSnapshot(appservice.RunSnapshot{
-		Workspace: appservice.Workspace{ID: "ws-status-owner-event", State: string(common.WorkspaceStateCompleted)},
+		Workspace: appservice.Workspace{ID: "ws-status-owner-event", State: string(common.WorkspaceStateActive)},
 		Run: appservice.Run{
 			ID:          "run-status-owner-event",
 			WorkspaceID: "ws-status-owner-event",
@@ -3669,7 +3669,7 @@ func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnOwnerRunStateEvent(
 		WorkspaceID: "ws-status-owner-event",
 		RunID:       "run-status-owner-event",
 		SubjectID:   "run-status-owner-event",
-		Payload:     events.RunPayload("", "", common.RunStateRunning, "", "", ""),
+		Payload:     events.RunPayload("", "", common.RunStateActive, "", "", ""),
 	}); err != nil {
 		t.Fatalf("publish run state changed: %v", err)
 	}
@@ -3683,7 +3683,7 @@ func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnOwnerRunStateEvent(
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal run status: %v", err)
 	}
-	if body.Status.State != string(common.RunStateRunning) {
+	if body.Status.State != string(common.RunStateActive) {
 		t.Fatalf("status after owner event = %+v, want fresh running status", body.Status)
 	}
 	if statusReads.Load() == 0 {
@@ -3743,7 +3743,7 @@ func TestTerminalRunSnapshotCacheReusesSnapshotForSnapshotAndStatusOnly(t *testi
 	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
 		snapshotReads.Add(1)
 		return appservice.RunSnapshot{
-			Workspace: appservice.Workspace{ID: "ws-cache", State: string(common.WorkspaceStateCompleted)},
+			Workspace: appservice.Workspace{ID: "ws-cache", State: string(common.WorkspaceStateActive)},
 			Run:       appservice.Run{ID: runID, WorkspaceID: "ws-cache", State: string(common.RunStateCompleted)},
 		}, nil
 	}
@@ -3787,7 +3787,7 @@ func TestTerminalRunSnapshotCacheReusesSnapshotForSnapshotAndStatusOnly(t *testi
 func TestRunSnapshotCacheByWorkspaceRequiresUniqueCachedRun(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	state.cacheRunSnapshot(appservice.RunSnapshot{
-		Workspace: appservice.Workspace{ID: "ws-cache-unique", State: string(common.WorkspaceStateCompleted)},
+		Workspace: appservice.Workspace{ID: "ws-cache-unique", State: string(common.WorkspaceStateActive)},
 		Run:       appservice.Run{ID: "run-cache-first", WorkspaceID: "ws-cache-unique", State: string(common.RunStateCompleted)},
 	})
 	if cached, ok := state.cachedRunSnapshotByWorkspace("ws-cache-unique"); !ok || cached.Run.ID != "run-cache-first" {
@@ -3795,7 +3795,7 @@ func TestRunSnapshotCacheByWorkspaceRequiresUniqueCachedRun(t *testing.T) {
 	}
 
 	state.cacheRunSnapshot(appservice.RunSnapshot{
-		Workspace: appservice.Workspace{ID: "ws-cache-unique", State: string(common.WorkspaceStateCompleted)},
+		Workspace: appservice.Workspace{ID: "ws-cache-unique", State: string(common.WorkspaceStateActive)},
 		Run:       appservice.Run{ID: "run-cache-second", WorkspaceID: "ws-cache-unique", State: string(common.RunStateCompleted)},
 	})
 	if cached, ok := state.cachedRunSnapshotByWorkspace("ws-cache-unique"); ok {
@@ -3812,7 +3812,7 @@ func TestRunStatusWaitWarmsTerminalRunSnapshotCache(t *testing.T) {
 	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
 		snapshotReads.Add(1)
 		return appservice.RunSnapshot{
-			Workspace: appservice.Workspace{ID: "ws-status-warm-cache", State: string(common.WorkspaceStateCompleted)},
+			Workspace: appservice.Workspace{ID: "ws-status-warm-cache", State: string(common.WorkspaceStateActive)},
 			Run:       appservice.Run{ID: runID, WorkspaceID: "ws-status-warm-cache", State: string(common.RunStateCompleted)},
 		}, nil
 	}
@@ -3847,7 +3847,7 @@ func TestRunStatusNotificationForTerminalRunWarmsSnapshotCache(t *testing.T) {
 	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
 		snapshotReads.Add(1)
 		return appservice.RunSnapshot{
-			Workspace: appservice.Workspace{ID: "ws-notify-warm-cache", State: string(common.WorkspaceStateCompleted)},
+			Workspace: appservice.Workspace{ID: "ws-notify-warm-cache", State: string(common.WorkspaceStateActive)},
 			Run:       appservice.Run{ID: runID, WorkspaceID: "ws-notify-warm-cache", State: string(common.RunStateCompleted)},
 		}, nil
 	}
@@ -3888,7 +3888,7 @@ func TestRunSnapshotReadWaitsForTerminalStatusWarmupInflight(t *testing.T) {
 		close(readStarted)
 		<-releaseRead
 		return appservice.RunSnapshot{
-			Workspace: appservice.Workspace{ID: "ws-status-inflight-cache", State: string(common.WorkspaceStateCompleted)},
+			Workspace: appservice.Workspace{ID: "ws-status-inflight-cache", State: string(common.WorkspaceStateActive)},
 			Run:       appservice.Run{ID: runID, WorkspaceID: "ws-status-inflight-cache", State: string(common.RunStateCompleted)},
 		}, nil
 	}
@@ -3940,7 +3940,7 @@ func TestRunSnapshotCacheInvalidationPreservesInflightWarmup(t *testing.T) {
 		t.Fatal("first inflight registration reported duplicate")
 	}
 	state.cacheRunSnapshot(appservice.RunSnapshot{
-		Workspace: appservice.Workspace{ID: "ws-inflight-clear", State: string(common.WorkspaceStateCompleted)},
+		Workspace: appservice.Workspace{ID: "ws-inflight-clear", State: string(common.WorkspaceStateActive)},
 		Run:       appservice.Run{ID: runID, WorkspaceID: "ws-inflight-clear", State: string(common.RunStateCompleted)},
 	})
 	state.clearRunSnapshotCache()
@@ -3958,7 +3958,7 @@ func TestRunSnapshotCacheInvalidationPreservesInflightWarmup(t *testing.T) {
 	}()
 	time.Sleep(20 * time.Millisecond)
 	state.completeRunSnapshotInflight(ctx, runID, appservice.RunSnapshot{
-		Workspace: appservice.Workspace{ID: "ws-inflight-clear", State: string(common.WorkspaceStateCompleted)},
+		Workspace: appservice.Workspace{ID: "ws-inflight-clear", State: string(common.WorkspaceStateActive)},
 		Run:       appservice.Run{ID: runID, WorkspaceID: "ws-inflight-clear", State: string(common.RunStateCompleted)},
 	}, nil)
 	state.finishRunSnapshotInflight(ctx, runID)
@@ -3987,7 +3987,7 @@ func TestRunObservabilityReadWaitsForTerminalStatusWarmupInflight(t *testing.T) 
 		close(readStarted)
 		<-releaseRead
 		return appservice.RunSnapshot{
-			Workspace: appservice.Workspace{ID: "ws-observability-inflight-cache", State: string(common.WorkspaceStateCompleted)},
+			Workspace: appservice.Workspace{ID: "ws-observability-inflight-cache", State: string(common.WorkspaceStateActive)},
 			Run:       appservice.Run{ID: runID, WorkspaceID: "ws-observability-inflight-cache", State: string(common.RunStateCompleted)},
 		}, nil
 	}
@@ -4079,8 +4079,8 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 	if body.Snapshot.Workspace.ID != workspace.ID {
 		t.Fatalf("workspace = %+v, want %s", body.Snapshot.Workspace, workspace.ID)
 	}
-	if body.Snapshot.Workspace.State != "blocked" || body.Snapshot.Workspace.ActiveRunID != approvalRun.ID {
-		t.Fatalf("workspace projection = %+v, want blocked active run %s", body.Snapshot.Workspace, approvalRun.ID)
+	if body.Snapshot.Workspace.State != string(common.WorkspaceStateBlockedOnApproval) || body.Snapshot.Workspace.ActiveRunID != approvalRun.ID {
+		t.Fatalf("workspace projection = %+v, want blocked_on_approval active run %s", body.Snapshot.Workspace, approvalRun.ID)
 	}
 	if len(body.Snapshot.Runs) != 3 {
 		t.Fatalf("runs = %+v, want 3 runs", body.Snapshot.Runs)
@@ -4115,7 +4115,7 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 		if err := repos.Runs.Create(ctx, &runmodel.Run{
 			ID:               runID,
 			WorkspaceID:      workspaceID,
-			State:            common.RunStateRunning,
+			State:            common.RunStateActive,
 			ExecutionContext: map[string]any{"large": strings.Repeat("x", 128)},
 		}); err != nil {
 			t.Fatalf("create run %s: %v", runID, err)
@@ -4215,13 +4215,13 @@ func TestWorkspaceSnapshotEndpointDefaultUsesExplicitCompactDetail(t *testing.T)
 	handler := newMuxWithState(state)
 	state.workspaceProjection.UpsertWorkspace(appservice.Workspace{
 		ID:          string(workspaceID),
-		State:       string(common.WorkspaceStateRunning),
+		State:       string(common.WorkspaceStateActive),
 		ActiveRunID: "run-explicit-compact-detail",
 	})
 	state.workspaceProjection.UpsertSnapshot(appservice.WorkspaceSnapshot{
 		Workspace: appservice.Workspace{
 			ID:                   string(workspaceID),
-			State:                string(common.WorkspaceStateRunning),
+			State:                string(common.WorkspaceStateActive),
 			ActiveRunID:          "run-explicit-compact-detail",
 			DeliverableDirectory: "workspaces/explicit-compact-detail",
 		},
@@ -4233,14 +4233,14 @@ func TestWorkspaceSnapshotEndpointDefaultUsesExplicitCompactDetail(t *testing.T)
 		return appservice.WorkspaceSnapshot{
 			Workspace: appservice.Workspace{
 				ID:                   string(workspaceID),
-				State:                string(common.WorkspaceStateRunning),
+				State:                string(common.WorkspaceStateActive),
 				ActiveRunID:          "run-explicit-compact-detail",
 				DeliverableDirectory: "workspaces/explicit-compact-detail",
 			},
 			Run: &appservice.Run{
 				ID:          "run-explicit-compact-detail",
 				WorkspaceID: string(workspaceID),
-				State:       string(common.RunStateRunning),
+				State:       string(common.RunStateActive),
 			},
 		}, nil
 	}
@@ -4249,7 +4249,7 @@ func TestWorkspaceSnapshotEndpointDefaultUsesExplicitCompactDetail(t *testing.T)
 		return appservice.WorkspaceSnapshot{
 			Workspace: appservice.Workspace{
 				ID:                   string(workspaceID),
-				State:                string(common.WorkspaceStateRunning),
+				State:                string(common.WorkspaceStateActive),
 				ActiveRunID:          "run-explicit-compact-detail",
 				ContextHints:         map[string]any{"large": strings.Repeat("x", 128)},
 				EvidencePolicies:     []map[string]any{{"large": strings.Repeat("x", 128)}},
@@ -4258,7 +4258,7 @@ func TestWorkspaceSnapshotEndpointDefaultUsesExplicitCompactDetail(t *testing.T)
 			Run: &appservice.Run{
 				ID:               "run-explicit-compact-detail",
 				WorkspaceID:      string(workspaceID),
-				State:            string(common.RunStateRunning),
+				State:            string(common.RunStateActive),
 				ExecutionContext: map[string]any{"large": strings.Repeat("x", 128)},
 			},
 		}, nil
@@ -4297,7 +4297,7 @@ func TestWorkspaceSnapshotEndpointSummaryDoesNotHydrateDetail(t *testing.T) {
 	handler := newMuxWithState(state)
 	state.workspaceProjection.UpsertWorkspace(appservice.Workspace{
 		ID:          string(workspaceID),
-		State:       string(common.WorkspaceStateRunning),
+		State:       string(common.WorkspaceStateActive),
 		ActiveRunID: "run-summary-no-detail-hydrate",
 	})
 	var projectionReads atomic.Int32
@@ -4351,7 +4351,7 @@ func TestWorkspaceSnapshotEndpointDoesNotOverlayStalePromptMode(t *testing.T) {
 		return appservice.WorkspaceSnapshot{
 			Workspace: appservice.Workspace{
 				ID:               string(workspaceID),
-				State:            string(common.WorkspaceStateWaitingDecision),
+				State:            string(common.WorkspaceStateActive),
 				ActiveRunID:      "run-detail-prompt-same-source",
 				BlockingTicketID: "ticket-detail-prompt-same-source",
 			},
@@ -4380,7 +4380,7 @@ func TestWorkspaceSnapshotEndpointDoesNotOverlayStalePromptMode(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal workspace snapshot: %v", err)
 	}
-	if body.Snapshot.Workspace.State != string(common.WorkspaceStateWaitingDecision) ||
+	if body.Snapshot.Workspace.State != string(common.WorkspaceStateActive) ||
 		body.Snapshot.Workspace.BlockingTicketID != "ticket-detail-prompt-same-source" ||
 		body.Snapshot.Run == nil ||
 		body.Snapshot.Run.State != string(common.RunStateBlockedOnDecision) {
@@ -4398,7 +4398,7 @@ func TestWorkspaceSnapshotEndpointObservabilityUsesExplicitFullRead(t *testing.T
 	state.workspaceProjection.UpsertSnapshot(appservice.WorkspaceSnapshot{
 		Workspace: appservice.Workspace{
 			ID:          string(workspaceID),
-			State:       string(common.WorkspaceStateRunning),
+			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: "run-observability-full-read",
 		},
 	})
@@ -4408,7 +4408,7 @@ func TestWorkspaceSnapshotEndpointObservabilityUsesExplicitFullRead(t *testing.T
 		return appservice.WorkspaceSnapshot{
 			Workspace: appservice.Workspace{
 				ID:                   string(workspaceID),
-				State:                string(common.WorkspaceStateRunning),
+				State:                string(common.WorkspaceStateActive),
 				ActiveRunID:          "run-observability-full-read",
 				ContextHints:         map[string]any{"large": strings.Repeat("x", 128)},
 				EvidencePolicies:     []map[string]any{{"large": strings.Repeat("x", 128)}},
@@ -4417,7 +4417,7 @@ func TestWorkspaceSnapshotEndpointObservabilityUsesExplicitFullRead(t *testing.T
 			Run: &appservice.Run{
 				ID:               "run-observability-full-read",
 				WorkspaceID:      string(workspaceID),
-				State:            string(common.RunStateRunning),
+				State:            string(common.RunStateActive),
 				ExecutionContext: map[string]any{"large": strings.Repeat("x", 128)},
 			},
 		}, nil
@@ -5079,7 +5079,7 @@ func TestServerStateSchedulesReplanContinuationForSupersededReplanRun(t *testing
 		}
 		activated <- cmd
 		return appservice.WorkspaceExecutionActivation{
-			Run: appservice.Run{ID: "run-replan-continuation", WorkspaceID: workspaceID, State: string(common.RunStateRunning)},
+			Run: appservice.Run{ID: "run-replan-continuation", WorkspaceID: workspaceID, State: string(common.RunStateActive)},
 		}, nil
 	}
 
@@ -5122,7 +5122,7 @@ func TestServerStateSkipsReplanContinuationWhenRuntimeSuccessorExists(t *testing
 			{
 				ID:          runID + "-replan-001",
 				WorkspaceID: workspaceID,
-				State:       string(common.RunStateRunning),
+				State:       string(common.RunStateActive),
 				ExecutionContext: map[string]any{
 					"replanContinuation": map[string]any{"predecessorRunId": runID},
 				},
@@ -5173,7 +5173,7 @@ func TestServerStateReplanContinuationIgnoresPrefixOnlySuccessor(t *testing.T) {
 	state.resumeWorkspaceExecution = func(_ context.Context, _, _, gotWorkspaceID string, _ appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		activated <- gotWorkspaceID
 		return appservice.WorkspaceExecutionActivation{
-			Run: appservice.Run{ID: runID + "-replan-002", WorkspaceID: gotWorkspaceID, State: string(common.RunStateRunning)},
+			Run: appservice.Run{ID: runID + "-replan-002", WorkspaceID: gotWorkspaceID, State: string(common.RunStateActive)},
 		}, nil
 	}
 
@@ -5228,7 +5228,7 @@ func TestServerStateReplanContinuationRetriesAfterActivationFailure(t *testing.T
 		case 2:
 			secondAttempt <- cmd
 			return appservice.WorkspaceExecutionActivation{
-				Run: appservice.Run{ID: "run-replan-retry-continuation", WorkspaceID: workspaceID, State: string(common.RunStateRunning)},
+				Run: appservice.Run{ID: "run-replan-retry-continuation", WorkspaceID: workspaceID, State: string(common.RunStateActive)},
 			}, nil
 		default:
 			t.Fatalf("unexpected activation retry count")
@@ -5336,7 +5336,7 @@ func TestServerStateAutoGovernanceResolvedSchedulesResumeAndReplanContinuation(t
 		}
 		activated <- cmd
 		return appservice.WorkspaceExecutionActivation{
-			Run: appservice.Run{ID: "run-auto-replan-continuation", WorkspaceID: workspaceID, State: string(common.RunStateRunning)},
+			Run: appservice.Run{ID: "run-auto-replan-continuation", WorkspaceID: workspaceID, State: string(common.RunStateActive)},
 		}, nil
 	}
 
@@ -5381,7 +5381,7 @@ func TestServerStateOwnerResolvedEventsScheduleGovernanceResume(t *testing.T) {
 					t.Fatalf("runID = %q, want run-owner-resolved", runID)
 				}
 				resumed <- runID
-				return appservice.Run{ID: runID, WorkspaceID: "ws-owner-resolved", State: string(common.RunStateRunning)}, nil
+				return appservice.Run{ID: runID, WorkspaceID: "ws-owner-resolved", State: string(common.RunStateActive)}, nil
 			}
 
 			if err := state.eventHub.Publish(context.Background(), events.Envelope{
@@ -5449,9 +5449,9 @@ func TestServerStateRecoverReplanContinuationsSchedulesSupersededReplanRuns(t *t
 	activated := make(chan string, 2)
 	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
 		return []appservice.Workspace{
-			{ID: "ws-replan-recover", State: string(common.WorkspaceStateFailed)},
-			{ID: "ws-replan-active", ActiveRunID: "run-active", State: string(common.WorkspaceStateRunning)},
-			{ID: "ws-replan-completed", State: string(common.WorkspaceStateCompleted)},
+			{ID: "ws-replan-recover", State: string(common.WorkspaceStateActive)},
+			{ID: "ws-replan-active", ActiveRunID: "run-active", State: string(common.WorkspaceStateActive)},
+			{ID: "ws-replan-completed", State: string(common.WorkspaceStateActive)},
 		}, nil
 	}
 	state.listRuns = func(_ context.Context, _, _, workspaceID string) ([]appservice.Run, error) {
@@ -5486,7 +5486,7 @@ func TestServerStateRecoverReplanContinuationsSchedulesSupersededReplanRuns(t *t
 		}
 		activated <- workspaceID
 		return appservice.WorkspaceExecutionActivation{
-			Run: appservice.Run{ID: "run-replan-recover-continuation", WorkspaceID: workspaceID, State: string(common.RunStateRunning)},
+			Run: appservice.Run{ID: "run-replan-recover-continuation", WorkspaceID: workspaceID, State: string(common.RunStateActive)},
 		}, nil
 	}
 
@@ -5719,7 +5719,7 @@ func TestServerStateRecoversResolvedDecisionBlockedRun(t *testing.T) {
 		BlockingTicketID: ticketID,
 	}
 	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
-		return []appservice.Workspace{{ID: workspaceID, State: string(common.WorkspaceStateBlocked), ActiveRunID: runID}}, nil
+		return []appservice.Workspace{{ID: workspaceID, State: string(common.WorkspaceStateBlockedOnApproval), ActiveRunID: runID}}, nil
 	}
 	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
 		return []appservice.Run{currentRun}, nil
@@ -5738,7 +5738,7 @@ func TestServerStateRecoversResolvedDecisionBlockedRun(t *testing.T) {
 		}
 		workspaceScope := common.RuntimeWorkspaceIDFromContext(ctx)
 		resumed <- workspaceScope
-		currentRun = appservice.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateRunning)}
+		currentRun = appservice.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateActive)}
 		return currentRun, nil
 	}
 
@@ -5782,8 +5782,8 @@ func TestServerStateRecoversResolvedDecisionBlockedRunWithWorkspaceScope(t *test
 	}
 	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
 		return []appservice.Workspace{
-			{ID: workspaceA, State: string(common.WorkspaceStateBlocked), ActiveRunID: runID},
-			{ID: workspaceB, State: string(common.WorkspaceStateBlocked), ActiveRunID: runID},
+			{ID: workspaceA, State: string(common.WorkspaceStateBlockedOnApproval), ActiveRunID: runID},
+			{ID: workspaceB, State: string(common.WorkspaceStateBlockedOnApproval), ActiveRunID: runID},
 		}, nil
 	}
 	state.listRuns = func(_ context.Context, _, _, workspaceID string) ([]appservice.Run, error) {
@@ -5822,7 +5822,7 @@ func TestServerStateRecoversResolvedDecisionBlockedRunWithWorkspaceScope(t *test
 		}
 		workspaceScope := common.RuntimeWorkspaceIDFromContext(ctx)
 		resumed <- workspaceScope
-		run := appservice.Run{ID: runID, WorkspaceID: string(workspaceScope), State: string(common.RunStateRunning)}
+		run := appservice.Run{ID: runID, WorkspaceID: string(workspaceScope), State: string(common.RunStateActive)}
 		runsByWorkspace[string(workspaceScope)] = run
 		return run, nil
 	}
@@ -5865,14 +5865,14 @@ func TestServerStateGovernanceResumeKeepsPendingAfterBackgroundSubmitFailure(t *
 
 	routine.err = nil
 	resumed := make(chan common.WorkspaceID, 1)
-	currentRun := appservice.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateRunning)}
+	currentRun := appservice.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateActive)}
 	state.resumeRun = func(ctx context.Context, _, _, id string, _ ...map[string]any) (appservice.Run, error) {
 		if id != runID {
 			t.Fatalf("runID = %q, want %s", id, runID)
 		}
 		workspaceScope := common.RuntimeWorkspaceIDFromContext(ctx)
 		resumed <- workspaceScope
-		currentRun = appservice.Run{ID: runID, WorkspaceID: string(workspaceScope), State: string(common.RunStateRunning)}
+		currentRun = appservice.Run{ID: runID, WorkspaceID: string(workspaceScope), State: string(common.RunStateActive)}
 		return currentRun, nil
 	}
 	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
@@ -5989,7 +5989,7 @@ func TestServerStateWorkspaceExecutionKeepsPendingAfterBackgroundSubmitFailure(t
 		}
 		activated <- cmd
 		return appservice.WorkspaceExecutionActivation{
-			Run: appservice.Run{ID: "run-workspace-execution-pending", WorkspaceID: workspaceID, State: string(common.RunStateRunning)},
+			Run: appservice.Run{ID: "run-workspace-execution-pending", WorkspaceID: workspaceID, State: string(common.RunStateActive)},
 		}, nil
 	}
 	if !state.runContinuations.scheduleWorkspaceRestart(req) {
@@ -6045,13 +6045,13 @@ func TestServerStateRunContinuationKeepsPendingAfterBackgroundSubmitFailure(t *t
 		}
 		workspaceScope := common.RuntimeWorkspaceIDFromContext(ctx)
 		started <- workspaceScope
-		return appservice.Run{ID: runID, WorkspaceID: string(workspaceScope), State: string(common.RunStateRunning)}, nil
+		return appservice.Run{ID: runID, WorkspaceID: string(workspaceScope), State: string(common.RunStateActive)}, nil
 	}
 	state.listRuns = func(_ context.Context, _, _, gotWorkspaceID string) ([]appservice.Run, error) {
 		if gotWorkspaceID != workspaceID {
 			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
 		}
-		return []appservice.Run{{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateRunning)}}, nil
+		return []appservice.Run{{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateActive)}}, nil
 	}
 	if !state.runContinuations.scheduleRunContinuation(req) {
 		t.Fatalf("run continuation scheduling failed after background routine recovery")
@@ -7043,7 +7043,7 @@ func TestServerStateDoesNotRecoverOpenDecisionBlockedRun(t *testing.T) {
 	const ticketID = "ticket-open-decision-recovery"
 	resumed := make(chan struct{}, 1)
 	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
-		return []appservice.Workspace{{ID: workspaceID, State: string(common.WorkspaceStateBlocked), ActiveRunID: runID}}, nil
+		return []appservice.Workspace{{ID: workspaceID, State: string(common.WorkspaceStateBlockedOnApproval), ActiveRunID: runID}}, nil
 	}
 	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
 		return []appservice.Run{{
@@ -7090,7 +7090,7 @@ func TestServerStateRecoverReplanContinuationsSchedulesWaitingDecisionActiveSupe
 	activated := make(chan string, 1)
 	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
 		return []appservice.Workspace{
-			{ID: workspaceID, State: string(common.WorkspaceStateWaitingDecision), ActiveRunID: activeRunID},
+			{ID: workspaceID, State: string(common.WorkspaceStateActive), ActiveRunID: activeRunID},
 		}, nil
 	}
 	state.listRuns = func(_ context.Context, _, _, gotWorkspaceID string) ([]appservice.Run, error) {
@@ -7125,7 +7125,7 @@ func TestServerStateRecoverReplanContinuationsSchedulesWaitingDecisionActiveSupe
 		}
 		activated <- gotWorkspaceID
 		return appservice.WorkspaceExecutionActivation{
-			Run: appservice.Run{ID: activeRunID + "-replan-001", WorkspaceID: gotWorkspaceID, State: string(common.RunStateRunning)},
+			Run: appservice.Run{ID: activeRunID + "-replan-001", WorkspaceID: gotWorkspaceID, State: string(common.RunStateActive)},
 		}, nil
 	}
 
@@ -7156,14 +7156,14 @@ func TestServerStateWatchdogDoesNotRecoverReplanContinuations(t *testing.T) {
 	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
 		workspaceScan.Store(true)
 		return []appservice.Workspace{
-			{ID: "ws-replan-watchdog", State: string(common.WorkspaceStateWaitingDecision), ActiveRunID: "run-replan-watchdog"},
+			{ID: "ws-replan-watchdog", State: string(common.WorkspaceStateActive), ActiveRunID: "run-replan-watchdog"},
 		}, nil
 	}
 	var activationCount atomic.Int32
 	state.resumeWorkspaceExecution = func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		activationCount.Add(1)
 		return appservice.WorkspaceExecutionActivation{
-			Run: appservice.Run{ID: "run-replan-watchdog-replan-001", WorkspaceID: "ws-replan-watchdog", State: string(common.RunStateRunning)},
+			Run: appservice.Run{ID: "run-replan-watchdog-replan-001", WorkspaceID: "ws-replan-watchdog", State: string(common.RunStateActive)},
 		}, nil
 	}
 
@@ -7198,7 +7198,7 @@ func TestServerStateRecoverReplanContinuationsRetriesAfterActivationFailure(t *t
 	firstAttempt := make(chan struct{}, 1)
 	secondAttempt := make(chan appservice.ActivateWorkspaceExecutionCommand, 1)
 	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
-		return []appservice.Workspace{{ID: workspaceID, State: string(common.WorkspaceStateFailed)}}, nil
+		return []appservice.Workspace{{ID: workspaceID, State: string(common.WorkspaceStateActive)}}, nil
 	}
 	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
 		return []appservice.Run{{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateSuperseded), Priority: 9}}, nil
@@ -7226,7 +7226,7 @@ func TestServerStateRecoverReplanContinuationsRetriesAfterActivationFailure(t *t
 		case 2:
 			secondAttempt <- cmd
 			return appservice.WorkspaceExecutionActivation{
-				Run: appservice.Run{ID: "run-replan-recover-retry-continuation", WorkspaceID: workspaceID, State: string(common.RunStateRunning)},
+				Run: appservice.Run{ID: "run-replan-recover-retry-continuation", WorkspaceID: workspaceID, State: string(common.RunStateActive)},
 			}, nil
 		default:
 			t.Fatalf("unexpected activation retry count")
@@ -7678,7 +7678,7 @@ func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	runItem.State = common.RunStateRunning
+	runItem.State = common.RunStateActive
 	if err := exports.Repositories.Runs.Update(ctx, runItem); err != nil {
 		t.Fatalf("update run: %v", err)
 	}
@@ -7713,7 +7713,7 @@ func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing
 		}
 		return body.Run
 	}
-	if run := getRun(); run.State != string(common.RunStateRunning) {
+	if run := getRun(); run.State != string(common.RunStateActive) {
 		t.Fatalf("run state after Validate = %s, want running until explicit recovery", run.State)
 	}
 	second.state.scheduleWatchdog()
@@ -7735,7 +7735,7 @@ func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing
 	if err := json.Unmarshal(getRec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal run: %v", err)
 	}
-	if body.Run.State != string(common.RunStateRunning) || body.Run.FailureReason != "" {
+	if body.Run.State != string(common.RunStateActive) || body.Run.FailureReason != "" {
 		t.Fatalf("run = %+v, want running run preserved for manual recovery", body.Run)
 	}
 }
@@ -7762,7 +7762,7 @@ func TestServiceRunRecoveredWorkspaceResumeEnqueuesWorkspaceActivation(t *testin
 	if err != nil {
 		t.Fatalf("get seeded run: %v", err)
 	}
-	runItem.State = common.RunStateRunning
+	runItem.State = common.RunStateActive
 	if err := repos.Runs.Update(ctx, runItem); err != nil {
 		t.Fatalf("mark seeded run running: %v", err)
 	}
@@ -7770,7 +7770,7 @@ func TestServiceRunRecoveredWorkspaceResumeEnqueuesWorkspaceActivation(t *testin
 	if err != nil {
 		t.Fatalf("get seeded workspace: %v", err)
 	}
-	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.State = common.WorkspaceStateActive
 	workspaceItem.ActiveRunID = common.RunID(runID)
 	if err := repos.Workspaces.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("mark seeded workspace running: %v", err)
@@ -7804,7 +7804,7 @@ func TestServiceRunRecoveredWorkspaceResumeEnqueuesWorkspaceActivation(t *testin
 		activated <- cmd
 		return appservice.WorkspaceExecutionActivation{
 			Workspace: appservice.Workspace{ID: workspace.ID, State: string(common.WorkspaceStateActive)},
-			Run:       appservice.Run{ID: "run-startup-recovered-resume-new", WorkspaceID: workspace.ID, State: string(common.RunStateRunning)},
+			Run:       appservice.Run{ID: "run-startup-recovered-resume-new", WorkspaceID: workspace.ID, State: string(common.RunStateActive)},
 		}, nil
 	}
 	if err := svc.http.state.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workspace.ID, "", map[string]any{
@@ -7958,7 +7958,7 @@ func seedBlockedDecisionRunInWorkspaceForHTTP(t *testing.T, dataRoot string, wor
 		ID:     stepID,
 		RunID:  common.RunID(runID),
 		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stage": "blocked_on_decision"},
 	}); err != nil {
 		t.Fatalf("create decision step: %v", err)
@@ -8017,7 +8017,7 @@ func seedBlockedDecisionRunWithTicketInWorkspaceForHTTP(t *testing.T, dataRoot s
 		ID:     stepID,
 		RunID:  common.RunID(runID),
 		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stage": "blocked_on_decision"},
 	}); err != nil {
 		t.Fatalf("create decision step: %v", err)
@@ -8079,7 +8079,7 @@ func seedBlockedApprovalRunInWorkspaceForHTTP(t *testing.T, dataRoot string, wor
 		ID:     stepID,
 		RunID:  common.RunID(runID),
 		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stage": "blocked_on_approval"},
 	}); err != nil {
 		t.Fatalf("create approval step: %v", err)
@@ -8135,7 +8135,7 @@ func seedBlockedApprovalRunWithApprovalInWorkspaceForHTTP(t *testing.T, dataRoot
 		ID:     stepID,
 		RunID:  common.RunID(runID),
 		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: map[string]any{"stage": "blocked_on_approval"},
 	}); err != nil {
 		t.Fatalf("create approval step: %v", err)
@@ -8175,7 +8175,7 @@ func seedBlockedRunForHTTP(t *testing.T, dataRoot string, title string, runID st
 	if err := runRepo.Create(ctx, &runmodel.Run{
 		ID:          common.RunID(runID),
 		WorkspaceID: workspace.ID,
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}

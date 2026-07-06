@@ -128,7 +128,7 @@ func (s *runStateSubsystem) releaseWorkspaceForTerminalRun(ctx context.Context, 
 		return ws, false, err
 	}
 	ws.ActiveRunID = ""
-	ws.State = state
+	ws.State = common.CanonicalWorkspaceOwnerState(state)
 	if err := s.workspaces.Update(ctx, ws); err != nil {
 		return nil, false, err
 	}
@@ -144,7 +144,7 @@ func (s *runStateSubsystem) syncWorkspaceForActiveRunState(ctx context.Context, 
 		return nil, err
 	}
 	ws.ActiveRunID = run.ID
-	ws.State = state
+	ws.State = common.CanonicalWorkspaceOwnerState(state)
 	if err := s.workspaces.Update(ctx, ws); err != nil {
 		return nil, err
 	}
@@ -160,8 +160,11 @@ func (s *runStateSubsystem) syncRunAndWorkspaceForActiveState(ctx context.Contex
 		return nil, err
 	}
 	normalizeRunConvergenceOwnerState(run)
+	if run.State == common.RunStateActive && strings.TrimSpace(run.StartedAt) == "" {
+		run.StartedAt = runtimeEvidenceTimestamp()
+	}
 	ws.ActiveRunID = run.ID
-	ws.State = state
+	ws.State = common.CanonicalWorkspaceOwnerState(state)
 	if err := runParallel(
 		func() error {
 			return s.runs.Update(ctx, run)
@@ -180,14 +183,12 @@ func workspaceStateCompatibleWithRun(run *runModel.Run, state common.WorkspaceSt
 		return false
 	}
 	switch run.State {
-	case common.RunStateCreated, common.RunStateRunning:
-		return state == common.WorkspaceStateRunning
-	case common.RunStateValidating:
-		return state == common.WorkspaceStateValidating
+	case common.RunStatePending, common.RunStateActive:
+		return common.CanonicalWorkspaceOwnerState(state) == common.WorkspaceStateActive
 	case common.RunStateBlockedOnDecision:
-		return state == common.WorkspaceStateWaitingDecision
+		return common.CanonicalWorkspaceOwnerState(state) == common.WorkspaceStateActive
 	case common.RunStateBlockedOnApproval:
-		return state == common.WorkspaceStateBlocked
+		return common.CanonicalWorkspaceOwnerState(state) == common.WorkspaceStateBlockedOnApproval
 	default:
 		return false
 	}
@@ -198,10 +199,10 @@ func (s *runStateSubsystem) syncRunAndWorkspaceForValidation(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	run.State = common.RunStateValidating
+	run.State = common.RunStateActive
 	run.FailureReason = ""
 	ws.ActiveRunID = run.ID
-	ws.State = common.WorkspaceStateValidating
+	ws.State = common.WorkspaceStateActive
 	if err := runParallel(
 		func() error {
 			return s.runs.Update(ctx, run)
@@ -233,8 +234,11 @@ func (s *runStateSubsystem) syncRunAndWorkspaceForCompletion(ctx context.Context
 	run.BlockingTicketID = ""
 	run.BlockingApprovalID = ""
 	run.FailureReason = ""
+	if strings.TrimSpace(run.EndedAt) == "" {
+		run.EndedAt = runtimeEvidenceTimestamp()
+	}
 	ws.ActiveRunID = ""
-	ws.State = common.WorkspaceStateCompleted
+	ws.State = common.WorkspaceStateActive
 	if err := runParallel(
 		func() error {
 			return s.runs.Update(ctx, run)
@@ -305,7 +309,7 @@ func (s *runStateSubsystem) reconcileWorkspaceActiveRun(
 		return ws, activeRunID, false, nil
 	}
 	ws.ActiveRunID = ""
-	ws.State = workspaceStateForTerminalRun(activeRun.State)
+	ws.State = common.CanonicalWorkspaceOwnerState(workspaceStateForTerminalRun(activeRun.State))
 	if err := s.workspaces.Update(ctx, ws); err != nil {
 		return nil, "", false, err
 	}

@@ -70,7 +70,7 @@ func CreateRunView(ctx context.Context, request CreateRunViewRequest) (appmodelc
 		DoDID:            common.DoDID(dodID),
 		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
 		ExecutionContext: executionContext,
-		State:            common.RunStateCreated,
+		State:            common.RunStatePending,
 	}); err != nil {
 		return appmodelcore.Run{}, err
 	}

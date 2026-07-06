@@ -427,7 +427,7 @@ type LLMUsagePayloadData struct {
 
 func WorkspacePayload(title string, description string, deliverableDirectory string, internalDirectory string, state common.WorkspaceState, activeRunID common.RunID) map[string]any {
 	payload := map[string]any{
-		PayloadKeyState:       string(state),
+		PayloadKeyState:       string(common.CanonicalWorkspaceOwnerState(state)),
 		PayloadKeyActiveRunID: string(activeRunID),
 	}
 	if title != "" {
@@ -454,7 +454,7 @@ func RunPayload(
 	failureReason string,
 ) map[string]any {
 	payload := map[string]any{
-		PayloadKeyState:              string(state),
+		PayloadKeyState:              string(common.CanonicalRunState(state)),
 		PayloadKeyBlockingTicketID:   string(blockingTicketID),
 		PayloadKeyBlockingApprovalID: string(blockingApprovalID),
 	}
@@ -473,7 +473,7 @@ func RunPayload(
 func StepPayload(kind string, state common.StepState, input, output map[string]any) map[string]any {
 	payload := map[string]any{
 		PayloadKeyKind:  llmcommon.CanonicalRuntimeBlockKind(kind),
-		PayloadKeyState: string(state),
+		PayloadKeyState: string(common.CanonicalStepState(state)),
 	}
 	if input != nil {
 		payload[PayloadKeyInput] = clonePayloadMap(input)
@@ -811,7 +811,7 @@ func DecodeWorkspacePayload(payload map[string]any) (WorkspacePayloadData, bool)
 		Description:          description,
 		DeliverableDirectory: deliverableDirectory,
 		InternalDirectory:    internalDirectory,
-		State:                common.WorkspaceState(state),
+		State:                common.CanonicalWorkspaceOwnerState(common.WorkspaceState(state)),
 		ActiveRunID:          common.RunID(activeRunID),
 	}, true
 }
@@ -838,7 +838,7 @@ func DecodeRunPayload(payload map[string]any) (RunPayloadData, bool) {
 	return RunPayloadData{
 		GoalID:             common.GoalID(goalID),
 		DoDID:              common.DoDID(dodID),
-		State:              common.RunState(state),
+		State:              common.CanonicalRunState(common.RunState(state)),
 		BlockingTicketID:   common.TicketID(blockingTicketID),
 		BlockingApprovalID: common.ApprovalID(blockingApprovalID),
 		FailureReason:      failureReason,
@@ -905,7 +905,7 @@ func DecodeStepPayload(payload map[string]any) (StepPayloadData, bool) {
 	}
 	return StepPayloadData{
 		Kind:   llmcommon.CanonicalRuntimeBlockKind(kind),
-		State:  common.StepState(state),
+		State:  common.CanonicalStepState(common.StepState(state)),
 		Input:  input,
 		Output: output,
 	}, true

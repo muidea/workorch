@@ -184,7 +184,7 @@ func resetCoverageProjectionForReplanSuccessor(executionContext map[string]any) 
 }
 
 func (c *coverageSubsystem) updateFromCompletedStep(run *runModel.Run, step *runModel.Step, contexts ...context.Context) bool {
-	if run == nil || step == nil || step.State != common.StepStateCompleted {
+	if run == nil || step == nil || step.State != common.StepStateSucceeded {
 		return false
 	}
 	c.ensure(run, contexts...)

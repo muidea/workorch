@@ -148,8 +148,8 @@ HTTP、Web Console、TUI、CLI/agent 必须看到一致的 workspace/run 状态�
 验收：
 
 - 任何 step 输出执行前必须通过 execution contract gate。
-- step finalization 必须先完成合同/治理/evidence 判定，再进入 completed 或 failed。
-- run 不得出现 `running + currentStep failed + no blocker + no next action` 的撕裂状态。
+- step finalization 必须先完成合同/治理/evidence 判定，再进入 `succeeded` 或 `failed`。
+- run 不得出现 `active + currentStep failed + no blocker + no next action` 的撕裂状态。
 
 ### 4.4 Evidence / Result / Artifact
 
@@ -219,7 +219,7 @@ HTTP、Web Console、TUI、CLI/agent 必须看到一致的 workspace/run 状态�
 ### Reliability
 
 - EventHub command/result 必须有 owner scope、lane policy 和错误回传。
-- 服务重启后 running 但无真实执行中的状态必须可刷新为可激活/可恢复状态。
+- 服务重启后 `active` 但无真实执行中的状态必须可刷新为可激活/可恢复状态。
 - external interaction timeout 允许幂等补偿，非预期 event 丢失必须定位并修复主路径。
 
 ### Observability

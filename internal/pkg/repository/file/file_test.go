@@ -54,7 +54,7 @@ func TestRunRepositoryCreateReturnsErrorWhenPersistedJSONCorrupt(t *testing.T) {
 	err := repo.Create(context.Background(), &runmodel.Run{
 		ID:          common.RunID("run-corrupt"),
 		WorkspaceID: common.WorkspaceID("ws-corrupt"),
-		State:       common.RunStateCreated,
+		State:       common.RunStatePending,
 	})
 	if err == nil {
 		t.Fatal("Create err = nil, want json error")
@@ -234,7 +234,7 @@ func TestStepRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 		ID:     stepID,
 		RunID:  common.RunID("run-item"),
 		Kind:   "llm",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Input:  map[string]any{"prompt": "hello"},
 		Output: map[string]any{"answer": "world"},
 	}); err != nil {
@@ -267,7 +267,7 @@ func TestStepRepositoryListByRunUsesSequenceScope(t *testing.T) {
 			ID:    "run-a/step-1",
 			RunID: "run-a",
 			Kind:  "shell",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 			Input: map[string]any{
 				"workspaceId":             "ws-a",
 				"executionContextPackage": strings.Repeat("x", 8192),
@@ -281,14 +281,14 @@ func TestStepRepositoryListByRunUsesSequenceScope(t *testing.T) {
 			ID:     "run-a/step-2",
 			RunID:  "run-a",
 			Kind:   "shell",
-			State:  common.StepStateCompleted,
+			State:  common.StepStateSucceeded,
 			Output: map[string]any{"value": "a2"},
 		},
 		{
 			ID:     "run-b/step-1",
 			RunID:  "run-b",
 			Kind:   "shell",
-			State:  common.StepStateCompleted,
+			State:  common.StepStateSucceeded,
 			Output: map[string]any{"value": "b1"},
 		},
 	} {
@@ -345,7 +345,7 @@ func TestStepRepositoryListByRunPreservesCreationOrderWhenStepIDSortWouldDiffer(
 			ID:    stepID,
 			RunID: runID,
 			Kind:  "llm/workspace_execution",
-			State: common.StepStateCompleted,
+			State: common.StepStateSucceeded,
 		}); err != nil {
 			t.Fatalf("create step %s: %v", stepID, err)
 		}
@@ -375,7 +375,7 @@ func TestStepRepositoryListByRunCacheReturnsClonesAndInvalidatesOnUpdate(t *test
 		ID:     "run-cache/step-1",
 		RunID:  "run-cache",
 		Kind:   "llm/workspace_execution",
-		State:  common.StepStateDispatched,
+		State:  common.StepStateExecuting,
 		Input:  map[string]any{"workspaceId": "ws-cache"},
 		Output: map[string]any{"status": "running"},
 	}
@@ -394,7 +394,7 @@ func TestStepRepositoryListByRunCacheReturnsClonesAndInvalidatesOnUpdate(t *test
 	if cached[0].Output["status"] != "running" {
 		t.Fatalf("cached step output = %v, want clone isolated from caller mutation", cached[0].Output)
 	}
-	step.State = common.StepStateCompleted
+	step.State = common.StepStateSucceeded
 	step.Output = map[string]any{"status": "completed"}
 	if err := repo.Update(ctx, step); err != nil {
 		t.Fatalf("update step: %v", err)
@@ -403,7 +403,7 @@ func TestStepRepositoryListByRunCacheReturnsClonesAndInvalidatesOnUpdate(t *test
 	if err != nil {
 		t.Fatalf("list updated steps: %v", err)
 	}
-	if updated[0].State != common.StepStateCompleted || updated[0].Output["status"] != "completed" {
+	if updated[0].State != common.StepStateSucceeded || updated[0].Output["status"] != "completed" {
 		t.Fatalf("updated step = state %s output %+v, want completed from invalidated cache", updated[0].State, updated[0].Output)
 	}
 }
@@ -417,7 +417,7 @@ func TestStepRepositoryListByRunSummaryRebuildsLegacySummary(t *testing.T) {
 		ID:    stepID,
 		RunID: "run-legacy",
 		Kind:  "llm/workspace_execution",
-		State: common.StepStateCompleted,
+		State: common.StepStateSucceeded,
 		Input: map[string]any{
 			"workspaceId":             "ws-legacy",
 			"runtimeRepairFollowUp":   true,
@@ -534,7 +534,7 @@ func TestRuntimeEvidenceRepositoriesUseRunScopedSequencePathsAndReuseExistingPat
 		ID:    stepID,
 		RunID: runID,
 		Kind:  "llm/planning",
-		State: common.StepStateDispatched,
+		State: common.StepStateExecuting,
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
@@ -546,7 +546,7 @@ func TestRuntimeEvidenceRepositoriesUseRunScopedSequencePathsAndReuseExistingPat
 	if err != nil {
 		t.Fatalf("get step by logical id: %v", err)
 	}
-	step.State = common.StepStateCompleted
+	step.State = common.StepStateSucceeded
 	step.Output = map[string]any{"status": "done"}
 	if err := stepRepo.Update(ctx, step); err != nil {
 		t.Fatalf("update step: %v", err)
@@ -819,7 +819,7 @@ func TestStepRepositoryStoresLongReadableIDsWithBoundedSequenceDirectories(t *te
 		ID:     stepID,
 		RunID:  runID,
 		Kind:   "llm/workspace_execution",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Input:  map[string]any{"input": "ok"},
 		Output: map[string]any{"output": "ok"},
 	}); err != nil {

@@ -1841,10 +1841,7 @@ func (m *AppModel) followBlockerTailUnlessUserScrolled() {
 func (m *AppModel) activeBlockingDecision() *backend.DecisionInfo {
 	ws := m.activeWorkspaceOverview()
 	if ws != nil {
-		if workspaceStateIsLive(ws.State) || ws.State == common.WorkspaceStateCompleted || ws.State == common.WorkspaceStateFailed {
-			return nil
-		}
-		if ws.State == common.WorkspaceStateWaitingDecision {
+		if ws.State == common.WorkspaceStateActive {
 			if ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 				return nil
 			}
@@ -1866,10 +1863,7 @@ func (m *AppModel) activeBlockingDecision() *backend.DecisionInfo {
 func (m *AppModel) activeBlockingApproval() *backend.ApprovalInfo {
 	ws := m.activeWorkspaceOverview()
 	if ws != nil {
-		if workspaceStateIsLive(ws.State) || ws.State == common.WorkspaceStateCompleted || ws.State == common.WorkspaceStateFailed {
-			return nil
-		}
-		if ws.State == common.WorkspaceStateBlocked {
+		if ws.State == common.WorkspaceStateBlockedOnApproval {
 			if ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 				return nil
 			}
@@ -1896,7 +1890,7 @@ func (m *AppModel) decisionMatchesActiveScope(item backend.DecisionInfo) bool {
 		return item.RunID == common.RunID(m.activeRunID)
 	}
 	ws := m.activeWorkspaceOverview()
-	if ws == nil || ws.State != common.WorkspaceStateWaitingDecision || ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
+	if ws == nil || ws.State != common.WorkspaceStateActive || ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 		return false
 	}
 	if item.ID != ws.BlockingTicketID {
@@ -1916,7 +1910,7 @@ func (m *AppModel) approvalMatchesActiveScope(item backend.ApprovalInfo) bool {
 		return item.RunID == common.RunID(m.activeRunID)
 	}
 	ws := m.activeWorkspaceOverview()
-	if ws == nil || ws.State != common.WorkspaceStateBlocked || ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
+	if ws == nil || ws.State != common.WorkspaceStateBlockedOnApproval || ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 		return false
 	}
 	if item.ID != ws.BlockingApprovalID {
@@ -2051,17 +2045,28 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		state := common.WorkspaceState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState))
 		activeRunID := firstPayloadString(evt.Payload, "activeRunId", "ActiveRunID", backend.PayloadKeyActiveRunID)
 		if activeRunID != "" {
-			if activeRunID != m.activeRunID && workspaceStateIsLive(state) {
+			if activeRunID != m.activeRunID && state == common.WorkspaceStateActive {
 				m.clearRunDisplayState()
 			}
 			m.activeRunID = activeRunID
 		}
 		m.applyWorkspaceProgress(state)
+		if state == common.WorkspaceStateActive && activeRunID != "" {
+			m.clearBlockingInputState()
+			m.running = true
+			m.progress = progressRunning
+			m.progressText = "Running"
+		}
 		if !knownWorkspace {
 			return m.requestWorkspaceListRefresh()
 		}
 		switch state {
-		case common.WorkspaceStateCompleted, common.WorkspaceStateFailed, common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked:
+		case common.WorkspaceStateActive:
+			if activeRunID != "" {
+				return nil
+			}
+			return m.requestWorkspaceContextRefresh(false)
+		case common.WorkspaceStateBlockedOnApproval:
 			return m.requestWorkspaceContextRefresh(false)
 		default:
 			return nil
@@ -2272,13 +2277,9 @@ func backendEventPromptMode(evt backend.Event) string {
 	switch evt.Type {
 	case backend.EventWorkspaceStateChanged:
 		switch common.WorkspaceState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)) {
-		case common.WorkspaceStateWaitingDecision:
-			return workspacePromptModeDecision
-		case common.WorkspaceStateBlocked:
+		case common.WorkspaceStateBlockedOnApproval:
 			return workspacePromptModeApproval
-		case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
-			return workspacePromptModeRunning
-		case common.WorkspaceStateActive, common.WorkspaceStateDraft, common.WorkspaceStateReady, common.WorkspaceStateArchived:
+		case common.WorkspaceStateActive, common.WorkspaceStateSuperseded:
 			return workspacePromptModeWorkspace
 		default:
 			return ""
@@ -2289,9 +2290,9 @@ func backendEventPromptMode(evt backend.Event) string {
 			return workspacePromptModeDecision
 		case common.RunStateBlockedOnApproval:
 			return workspacePromptModeApproval
-		case common.RunStateRunning, common.RunStateValidating:
+		case common.RunStateActive:
 			return workspacePromptModeRunning
-		case common.RunStateCreated:
+		case common.RunStatePending:
 			return workspacePromptModeWorkspace
 		default:
 			return ""
@@ -2430,7 +2431,7 @@ func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) 
 		m.progress = progressFailed
 		m.failureReason = nonEmpty(failureMessageFromPayload(payload), m.failureHint)
 		m.progressText = nonEmpty(m.failureReason, "Run failed")
-	case common.RunStateCreated:
+	case common.RunStatePending:
 		m.running = false
 		m.progress = progressIdle
 		m.progressText = "Run created"
@@ -2463,7 +2464,7 @@ func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) 
 			}
 			m.running = true
 			m.progress = progressRunning
-			if state == common.RunStateRunning {
+			if state == common.RunStateActive {
 				m.progressText = "Running; waiting for progress or final result"
 			} else {
 				m.progressText = string(state) + "; waiting for progress or final result"
@@ -2496,7 +2497,7 @@ func (m *AppModel) applyRunControlState(run *backend.RunInfo, message string) {
 		m.progress = progressFailed
 		m.failureReason = run.FailureReason
 		m.progressText = nonEmpty(message, m.failureReason, "Run failed")
-	case common.RunStateCreated:
+	case common.RunStatePending:
 		m.running = false
 		m.progress = progressIdle
 		m.progressText = nonEmpty(message, "Run created")

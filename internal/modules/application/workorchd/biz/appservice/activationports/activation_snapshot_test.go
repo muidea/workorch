@@ -14,7 +14,7 @@ func TestWorkspaceExecutionActivationSnapshotProjectsActivationResult(t *testing
 	workspace := &workspacemodel.Workspace{
 		ID:          "ws-activation-snapshot",
 		Title:       "activation snapshot",
-		State:       common.WorkspaceStateRunning,
+		State:       common.WorkspaceStateActive,
 		ActiveRunID: "run-activation-snapshot",
 	}
 	run := &runmodel.Run{
@@ -22,7 +22,7 @@ func TestWorkspaceExecutionActivationSnapshotProjectsActivationResult(t *testing
 		WorkspaceID: workspace.ID,
 		GoalID:      "goal-activation-snapshot",
 		DoDID:       "dod-activation-snapshot",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 	}
 	goal := &workspacemodel.Goal{ID: run.GoalID, WorkspaceID: workspace.ID, Text: "execute activation snapshot"}
 	dod := &workspacemodel.DoD{ID: run.DoDID, WorkspaceID: workspace.ID, Items: []string{"activation snapshot is projected"}}

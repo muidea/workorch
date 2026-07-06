@@ -84,7 +84,7 @@ func activeLLMWorkspaceExecutionStep(steps []*runModel.Step) *runModel.Step {
 			continue
 		}
 		switch step.State {
-		case common.StepStateCompleted, common.StepStateFailed:
+		case common.StepStateSucceeded, common.StepStateFailed:
 			continue
 		default:
 			return step
@@ -519,7 +519,7 @@ func knownReadableDecisionRepairSpecs(
 	if err != nil {
 		return nil, false, err
 	}
-	if step == nil || step.State != common.StepStateCompleted {
+	if step == nil || step.State != common.StepStateSucceeded {
 		return nil, false, nil
 	}
 	decisionSpec := decisionBlockSpec(step.Output)
@@ -558,7 +558,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 	if run == nil || last == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if last.State == common.StepStateCompleted {
+	if last.State == common.StepStateSucceeded {
 		specs, steps := o.graphManager().readyGraphStepSpecsWithSteps(ctx, run, last)
 		if len(specs) > 0 {
 			return specs, nil
@@ -631,7 +631,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			}}, nil
 		}
 	}
-	if last.State == common.StepStateDispatched {
+	if last.State == common.StepStateExecuting {
 		return []stepDispatchSpec{{
 			ID:    last.ID,
 			Kind:  last.Kind,
@@ -696,7 +696,7 @@ func (o *RuntimeOrchestrator) authorityContinuationSpecAfterCompletedStep(
 	run *runModel.Run,
 	last *runModel.Step,
 ) (stepDispatchSpec, bool, error) {
-	if o == nil || run == nil || last == nil || run.State != common.RunStateRunning {
+	if o == nil || run == nil || last == nil || run.State != common.RunStateActive {
 		return stepDispatchSpec{}, false, nil
 	}
 	input := nextStepInput(run, last.ID)
@@ -794,7 +794,7 @@ func terminalExecutionStep(steps []*runModel.Step) *runModel.Step {
 		return terminals[0]
 	}
 	for _, step := range terminals {
-		if step.State == common.StepStateDispatched {
+		if step.State == common.StepStateExecuting {
 			return step
 		}
 	}

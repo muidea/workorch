@@ -369,7 +369,7 @@ func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t
 		Title:                "stale title",
 		Description:          "stale description",
 		DeliverableDirectory: "/tmp/workorch/stale",
-		State:                common.WorkspaceStateArchived,
+		State:                common.WorkspaceStateSuperseded,
 		ActiveRunID:          common.RunID("run-stale"),
 	}); err != nil {
 		t.Fatalf("create stale workspace: %v", err)
@@ -463,7 +463,7 @@ func TestGoalDoDManager_DefinitionChangeReopensTerminalWorkspace(t *testing.T) {
 			if err := repo.Create(ctx, &workspacemodel.Workspace{
 				ID:          workspaceID,
 				Title:       "terminal workspace",
-				State:       common.WorkspaceStateCompleted,
+				State:       common.WorkspaceStateActive,
 				ActiveRunID: "run-terminal",
 			}); err != nil {
 				t.Fatalf("create workspace: %v", err)

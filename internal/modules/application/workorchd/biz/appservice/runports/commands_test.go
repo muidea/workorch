@@ -27,8 +27,8 @@ func TestListRunsByWorkspaceFiltersOwnerReadResults(t *testing.T) {
 	})
 	exports := runtime.Exports()
 	for _, item := range []*runmodel.Run{
-		{ID: "run-list-a", WorkspaceID: "ws-list-a", State: common.RunStateCreated},
-		{ID: "run-list-b", WorkspaceID: "ws-list-b", State: common.RunStateCreated},
+		{ID: "run-list-a", WorkspaceID: "ws-list-a", State: common.RunStatePending},
+		{ID: "run-list-b", WorkspaceID: "ws-list-b", State: common.RunStatePending},
 	} {
 		if err := exports.Repositories.Runs.Create(ctx, item); err != nil {
 			t.Fatalf("seed run %s: %v", item.ID, err)

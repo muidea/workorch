@@ -9,7 +9,8 @@ func GovernanceProgressState(snapshot readmodelcore.RunSnapshot) string {
 	if len(snapshot.Decisions) == 0 && len(snapshot.Approvals) == 0 {
 		return "pending"
 	}
-	if snapshot.Run.BlockingTicketID != "" || snapshot.Run.BlockingApprovalID != "" {
+	if HasOpenDecisionBlocker(snapshot.Decisions, snapshot.Run.WorkspaceID, snapshot.Run.ID, snapshot.Run.BlockingTicketID) ||
+		HasOpenApprovalBlocker(snapshot.Approvals, snapshot.Run.WorkspaceID, snapshot.Run.ID, snapshot.Run.BlockingApprovalID) {
 		return "blocked"
 	}
 	for _, item := range snapshot.Decisions {

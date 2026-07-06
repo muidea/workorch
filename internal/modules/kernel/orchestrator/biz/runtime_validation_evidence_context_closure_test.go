@@ -14,7 +14,7 @@ func TestAcceptedEvidenceRecordReusesAcrossMatchingCoverageItems(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-evidence-reuse",
 		WorkspaceID: "ws-evidence-reuse",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			coverageWorkItemsKey: []map[string]any{
 				coverageReuseTestItem("cwi-001", "req-001"),
@@ -72,7 +72,7 @@ func TestAcceptedValidationEvidenceRecordWithoutProofIsSupportingOnly(t *testing
 	run := &runmodel.Run{
 		ID:          "run-evidence-reuse-missing-proof",
 		WorkspaceID: "ws-evidence-reuse-missing-proof",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			coverageWorkItemsKey: []map[string]any{
 				coverageReuseTestItem("cwi-001", "req-001"),
@@ -112,7 +112,7 @@ func TestAcceptedValidationEvidenceRecordTextOnlyTargetRefsAreSupportingOnly(t *
 	run := &runmodel.Run{
 		ID:          "run-evidence-reuse-text-only",
 		WorkspaceID: "ws-evidence-reuse-text-only",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			coverageWorkItemsKey: []map[string]any{{
 				"id":                    "cwi-structured",
@@ -306,7 +306,7 @@ func TestAcceptedStateChangeEvidenceRecordDoesNotReuseByBroadCoverageTargets(t *
 	run := &runmodel.Run{
 		ID:          "run-evidence-reuse-coverage-target",
 		WorkspaceID: "ws-evidence-reuse-coverage-target",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			coverageWorkItemsKey: []map[string]any{{
 				"id":                    "cwi-target",
@@ -354,7 +354,7 @@ func TestAcceptedStateChangeEvidenceRecordReusesByExplicitSourceRequirement(t *t
 	run := &runmodel.Run{
 		ID:          "run-evidence-reuse-source-requirement",
 		WorkspaceID: "ws-evidence-reuse-source-requirement",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			coverageWorkItemsKey: []map[string]any{{
 				"id":                    "cwi-target",
@@ -403,7 +403,7 @@ func TestAcceptedEvidenceRecordReuseSkipsNonMatchingRejectedAndSupersededRecords
 	run := &runmodel.Run{
 		ID:          "run-evidence-reuse-skip",
 		WorkspaceID: "ws-evidence-reuse-skip",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			coverageWorkItemsKey: []map[string]any{coverageReuseTestItem("cwi-001", "req-001")},
 		},
@@ -461,7 +461,7 @@ func TestValidationNextActionRoutesFromPolicyWithoutBusinessSpecialCases(t *test
 	run := &runmodel.Run{
 		ID:          "run-validation-route",
 		WorkspaceID: "ws-validation-route",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			"validationPolicies": []map[string]any{{
 				"id":                     "policy-managed",
@@ -512,7 +512,7 @@ func TestGapBaselineUsesFocusAndLedgerRefsInsteadOfFullOpenLedger(t *testing.T) 
 	run := &runmodel.Run{
 		ID:          "run-gap-baseline-narrow",
 		WorkspaceID: "ws-gap-baseline-narrow",
-		State:       common.RunStateRunning,
+		State:       common.RunStateActive,
 		ExecutionContext: map[string]any{
 			coverageWorkItemContextKey: map[string]any{
 				"definitionRevision":   "rev-narrow",

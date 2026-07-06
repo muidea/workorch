@@ -111,7 +111,7 @@ func TestRunObservableAfterStartConflictReadsRunWithContextWorkspaceScope(t *tes
 				events.PayloadKeyRun: &runmodel.Run{
 					ID:          runID,
 					WorkspaceID: workspaceID,
-					State:       common.RunStateRunning,
+					State:       common.RunStateActive,
 				},
 			},
 		})

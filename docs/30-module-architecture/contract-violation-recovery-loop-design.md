@@ -96,7 +96,7 @@ LLM output
 
 - LLM 已经返回结构化内容，但因为字段缺失、输出类型不符合当前 `requiredOutput`、`evidenceRefs` 不完整、graph kind 与状态变更合同不一致等原因被判定为 `llm_decision_invalid` 或 runtime contract failure。
 - 这些违例本质上经常是“可被重新说明后修正”的 LLM 输出漂移，不等同于 provider 不可用、权限缺失、approval required 或用户必须选择方向。
-- 现有链路中，部分可恢复违例会很快进入 decision ticket，导致 workspace 停在 `waiting_decision`，需要用户反复 replan，而不是由 runtime 自己把违例原因反馈给 LLM 并重试。
+- 现有链路中，部分可恢复违例会很快进入 decision ticket，导致 run 停在 `blocked_on_decision` 且 projection 显示 decision prompt，需要用户反复 replan，而不是由 runtime 自己把违例原因反馈给 LLM 并重试。
 - 为了促进 goal 收敛，不能简单放松合同。放松合同会让无效或不安全输出进入执行链路，进一步污染 evidence、result、memory 和 DoD coverage。
 
 因此需要新增一个中立的 contract violation recovery loop：严格校验仍然是唯一准入门禁；门禁失败后先判断是否可自动恢复；可恢复时形成结构化诊断并重试；不可恢复或重复违例才升级 governance。
@@ -324,7 +324,7 @@ TUI/Web command
 
 要求：
 
-- 如果 workspace 处于 `waiting_decision` 且用户选择 replan，应关闭或 resolve 对应 ticket，并发布可调度事件。
+- 如果 run 处于 `blocked_on_decision` 且用户选择 replan，应关闭或 resolve 对应 ticket，并发布可调度事件。Decision blocker 不改变 workspace owner state。
 - 如果 replan 后仍有可恢复 contract violation，runtime 应自动进入 retry loop，而不是继续停留在 stale decision prompt。
 - TUI prompt 只能依据 projection 中的 active ticket / active approval / active run state 生成。
 - 多 workspace 下 command payload 必须携带 workspaceId，不能依赖当前端侧选中状态作为服务端唯一依据。
@@ -526,7 +526,7 @@ TUI/Web 不根据 `rule` 自行决定 replan、resume 或 retry。
 服务重启后：
 
 - 已 terminal 且无 retry/ticket 的 recoverable violation 应按持久化 checkpoint 恢复到 pending retry 或明确 failed。
-- 运行中但无实际执行上下文的 workspace 不应保持 stale running projection；应刷新为 idle / activation required，并等待用户或系统命令重新激活。
+- 运行中但无实际执行上下文的 workspace 不应保持 stale active projection；应刷新为 idle / activation required，并等待用户或系统命令重新激活。
 
 ## Scope List
 

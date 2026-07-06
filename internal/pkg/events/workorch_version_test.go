@@ -3,7 +3,11 @@ package events
 import (
 	"testing"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 )
 
@@ -19,6 +23,24 @@ func TestValidateWorkorchEventVersionUsesTopicMatrix(t *testing.T) {
 	}
 	if !ValidateWorkorchEventVersion(runevents.TopicRunLLMUsageRecorded, WorkorchEventVersion) {
 		t.Fatalf("ValidateWorkorchEventVersion should include llm usage topic")
+	}
+	for _, topic := range []string{
+		runevents.TopicRunStarted,
+		runevents.TopicRunBlockedOnDecision,
+		runevents.TopicRunCompleted,
+		runevents.TopicStepCreated,
+		runevents.TopicStepSucceeded,
+		decisionevents.TopicDecisionTicketCreated,
+		decisionevents.TopicDecisionTicketSuperseded,
+		approvalevents.TopicApprovalApproved,
+		approvalevents.TopicApprovalSuperseded,
+		resultevents.TopicResultCreated,
+		orchestratorevents.TopicOrchestratorStageChanged,
+		orchestratorevents.TopicOrchestratorContractViolation,
+	} {
+		if !ValidateWorkorchEventVersion(topic, WorkorchEventVersion) {
+			t.Fatalf("ValidateWorkorchEventVersion should include audit topic %q", topic)
+		}
 	}
 }
 

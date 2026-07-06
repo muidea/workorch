@@ -508,7 +508,7 @@ func progressEvidenceItemCanPromoteCurrentFailure(item map[string]any) bool {
 	switch strings.TrimSpace(stringFromMap(item, "state")) {
 	case string(common.StepStateFailed):
 		return true
-	case string(common.StepStateCompleted):
+	case string(common.StepStateSucceeded):
 		if strings.TrimSpace(stringFromMap(item, "evidenceValidity")) == "actionable_failure" {
 			return true
 		}
@@ -528,7 +528,7 @@ func completedProgressEvidenceOutputHasFailureSignal(output map[string]any) bool
 	}
 	return completedShellCommandOutputHasFailureSignal(&runModel.Step{
 		Kind:   "shell/command",
-		State:  common.StepStateCompleted,
+		State:  common.StepStateSucceeded,
 		Output: output,
 	})
 }
@@ -1298,7 +1298,7 @@ func selectProcessEvidenceForStateChangingRepair(input []map[string]any, targetS
 		item := input[idx]
 		state := strings.TrimSpace(stringFromMap(item, "state"))
 		actionKind := strings.TrimSpace(stringFromMap(item, "actionKind"))
-		if state == string(common.StepStateCompleted) && actionKind != "" && actionKind != "runtime" {
+		if state == string(common.StepStateSucceeded) && actionKind != "" && actionKind != "runtime" {
 			add(item)
 		}
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func ContextIDs(items []map[string]any, key string) []string {
@@ -61,17 +62,25 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 		return appmodelcore.Run{}
 	}
 	return appmodelcore.Run{
-		ID:                 string(item.ID),
-		WorkspaceID:        string(item.WorkspaceID),
-		GoalID:             string(item.GoalID),
-		DoDID:              string(item.DoDID),
+		ID:          string(item.ID),
+		WorkspaceID: string(item.WorkspaceID),
+		GoalID:      string(item.GoalID),
+		DoDID:       string(item.DoDID),
+		Lineage: appmodelcore.RunLineage{
+			PredecessorRunID: string(item.Lineage.PredecessorRunID),
+			SuccessorRunID:   string(item.Lineage.SuccessorRunID),
+			LineageState:     item.Lineage.LineageState,
+		},
 		DefinitionRevision: item.DefinitionRevision,
 		InitialStepKind:    item.InitialStepKind,
 		ExecutionContext:   CloneContextMap(item.ExecutionContext),
-		State:              string(item.State),
+		State:              string(common.CanonicalRunState(item.State)),
 		Priority:           item.Priority,
 		BlockingTicketID:   string(item.BlockingTicketID),
 		BlockingApprovalID: string(item.BlockingApprovalID),
 		FailureReason:      item.FailureReason,
+		CreatedAt:          item.CreatedAt,
+		StartedAt:          item.StartedAt,
+		EndedAt:            item.EndedAt,
 	}
 }

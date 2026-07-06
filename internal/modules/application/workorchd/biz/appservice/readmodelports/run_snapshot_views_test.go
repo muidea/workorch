@@ -14,9 +14,9 @@ import (
 func TestRunSnapshotViewsBuildDerivedViewsFromReaders(t *testing.T) {
 	t.Parallel()
 
-	workspace := &workspacemodel.Workspace{ID: "ws-run-snapshot-views", Title: "run snapshot views", State: common.WorkspaceStateRunning}
-	run := &runmodel.Run{ID: "run-snapshot-views", WorkspaceID: workspace.ID, State: common.RunStateRunning}
-	steps := []*runmodel.Step{{ID: "step-snapshot-views", RunID: run.ID, Kind: "llm/workspace_execution", State: common.StepStateCompleted}}
+	workspace := &workspacemodel.Workspace{ID: "ws-run-snapshot-views", Title: "run snapshot views", State: common.WorkspaceStateActive}
+	run := &runmodel.Run{ID: "run-snapshot-views", WorkspaceID: workspace.ID, State: common.RunStateActive}
+	steps := []*runmodel.Step{{ID: "step-snapshot-views", RunID: run.ID, Kind: "llm/workspace_execution", State: common.StepStateSucceeded}}
 	readers := RunSnapshotReaders{
 		Workspaces:            fakeRunSnapshotWorkspaceReader{items: []*workspacemodel.Workspace{workspace}},
 		Runs:                  fakeRunStatusRunReader{items: []*runmodel.Run{run}},
@@ -67,8 +67,8 @@ func TestRunSnapshotViewsBuildDerivedViewsFromReaders(t *testing.T) {
 func TestRunObservabilityUsesCompleteEventTimeline(t *testing.T) {
 	t.Parallel()
 
-	workspace := &workspacemodel.Workspace{ID: "ws-run-observability-events", Title: "run observability events", State: common.WorkspaceStateRunning}
-	run := &runmodel.Run{ID: "run-observability-events", WorkspaceID: workspace.ID, State: common.RunStateRunning}
+	workspace := &workspacemodel.Workspace{ID: "ws-run-observability-events", Title: "run observability events", State: common.WorkspaceStateActive}
+	run := &runmodel.Run{ID: "run-observability-events", WorkspaceID: workspace.ID, State: common.RunStateActive}
 	events := &fakeRunSnapshotEventReader{}
 
 	_, err := RunObservability(context.Background(), RunSnapshotReaders{
@@ -105,8 +105,8 @@ func TestRunObservabilityUsesCompleteEventTimeline(t *testing.T) {
 func TestRunSnapshotProjectionUsesCompactEventTimeline(t *testing.T) {
 	t.Parallel()
 
-	workspace := &workspacemodel.Workspace{ID: "ws-run-projection-events", Title: "run projection events", State: common.WorkspaceStateRunning}
-	run := &runmodel.Run{ID: "run-projection-events", WorkspaceID: workspace.ID, State: common.RunStateRunning}
+	workspace := &workspacemodel.Workspace{ID: "ws-run-projection-events", Title: "run projection events", State: common.WorkspaceStateActive}
+	run := &runmodel.Run{ID: "run-projection-events", WorkspaceID: workspace.ID, State: common.RunStateActive}
 	events := &fakeRunSnapshotEventReader{}
 
 	_, err := RunSnapshot(context.Background(), RunSnapshotReaders{
