@@ -11,10 +11,7 @@ import (
 	"time"
 
 	magictask "github.com/muidea/magicCommon/task"
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
@@ -30,6 +27,7 @@ import (
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	orchestratormodule "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -42,19 +40,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
-
-type testLifecycle struct {
-	id          string
-	runSeq      *[]string
-	teardownSeq *[]string
-	runErr      error
-	teardownErr error
-}
-
-type backgroundAwareLifecycle struct {
-	id      string
-	stopped *bool
-}
 
 type echoRuntimeAdapter struct{}
 
@@ -83,102 +68,90 @@ func (a echoRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runtim
 	}, nil
 }
 
-func (l testLifecycle) ID() string { return l.id }
-
-func (l testLifecycle) Start() error {
-	if l.runSeq != nil {
-		*l.runSeq = append(*l.runSeq, l.id)
+func buildRuntimeAdapterRegistry(eventHub events.Hub) (*orchestratormodule.RuntimeAdapterRegistry, error) {
+	runtimeRegistry := orchestratormodule.NewRuntimeAdapterRegistry()
+	eventAdapter := orchestratormodule.NewEventRuntimeAdapter(eventHub)
+	for _, stepKind := range []string{
+		filemodule.StepKindList,
+		filemodule.StepKindRead,
+		filemodule.StepKindEdit,
+	} {
+		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
+			return nil, err
+		}
 	}
-	return l.runErr
-}
-
-func (l testLifecycle) Stop(context.Context) error {
-	if l.teardownSeq != nil {
-		*l.teardownSeq = append(*l.teardownSeq, l.id)
+	for _, stepKind := range []string{
+		gitmodule.StepKindRead,
+		gitmodule.StepKindWrite,
+	} {
+		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
+			return nil, err
+		}
 	}
-	return l.teardownErr
-}
-
-func (l backgroundAwareLifecycle) ID() string { return l.id }
-
-func (l backgroundAwareLifecycle) Start() error { return nil }
-
-func (l backgroundAwareLifecycle) Stop(context.Context) error {
-	if l.stopped != nil {
-		*l.stopped = true
+	if err := runtimeRegistry.Register(shellmodule.StepKindCommand, eventAdapter); err != nil {
+		return nil, err
 	}
-	return nil
-}
-
-func publishTestCommand(ctx context.Context, hub events.Hub, envelope events.Envelope) error {
-	err := hub.Publish(ctx, envelope)
-	if _, ok := events.ResponseEnvelope(err); ok {
-		return nil
+	if err := runtimeRegistry.Register(sshmodule.StepKindCommand, eventAdapter); err != nil {
+		return nil, err
 	}
-	return err
+	for _, stepKind := range []string{
+		webmodule.StepKindSearch,
+		webmodule.StepKindFetch,
+	} {
+		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
+			return nil, err
+		}
+	}
+	for _, stepKind := range []string{
+		mcpblockmodule.StepKindToolCall,
+		mcpblockmodule.StepKindResourceRead,
+		mcpblockmodule.StepKindPromptGet,
+	} {
+		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
+			return nil, err
+		}
+	}
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchApply, eventAdapter); err != nil {
+		return nil, err
+	}
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchPreview, eventAdapter); err != nil {
+		return nil, err
+	}
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchRevert, eventAdapter); err != nil {
+		return nil, err
+	}
+	if err := runtimeRegistry.Register(llmmodule.StepKindWorkspaceExecution, eventAdapter); err != nil {
+		return nil, err
+	}
+	return runtimeRegistry, nil
 }
 
 func createTestWorkspace(ctx context.Context, exports Exports, workspaceID common.WorkspaceID, title string, internalDirectory string) error {
-	return publishTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        workspaceevents.TopicWorkspaceCommandCreate,
-		SourceModule: "workorch/bootstrap-test",
-		SubjectType:  "workspace",
-		SubjectID:    string(workspaceID),
-		WorkspaceID:  string(workspaceID),
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID:          string(workspaceID),
-			events.PayloadKeyTitle:                title,
-			events.PayloadKeyDeliverableDirectory: "workspaces/" + string(workspaceID),
-			events.PayloadKeyInternalDirectory:    internalDirectory,
-		},
+	return exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                title,
+		DeliverableDirectory: "workspaces/" + string(workspaceID),
+		InternalDirectory:    internalDirectory,
+		State:                common.WorkspaceStateActive,
 	})
 }
 
 func createTestRun(ctx context.Context, exports Exports, workspaceID common.WorkspaceID, runID common.RunID) error {
-	return publishTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        runevents.TopicRunCommandEnsure,
-		SourceModule: "workorch/bootstrap-test",
-		SubjectType:  "run",
-		SubjectID:    string(runID),
-		WorkspaceID:  string(workspaceID),
-		RunID:        string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: string(workspaceID),
-			events.PayloadKeyRunID:       string(runID),
-		},
+	return exports.Repositories.Runs.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateActive,
 	})
 }
 
 func createTestApproval(ctx context.Context, exports Exports, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, approvalID common.ApprovalID) error {
-	return publishTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        approvalevents.TopicApprovalCommandEnsure,
-		SourceModule: "workorch/bootstrap-test",
-		SubjectType:  "approval",
-		SubjectID:    string(approvalID),
-		WorkspaceID:  string(workspaceID),
-		RunID:        string(runID),
-		StepID:       string(stepID),
-		Payload: map[string]any{
-			events.PayloadKeyApprovalID:  string(approvalID),
-			events.PayloadKeyWorkspaceID: string(workspaceID),
-			events.PayloadKeyRunID:       string(runID),
-			events.PayloadKeyStepID:      string(stepID),
-			events.PayloadKeyReason:      "test approval gate",
-		},
-	})
-}
-
-func blockTestRunOnApproval(ctx context.Context, exports Exports, runID common.RunID, approvalID common.ApprovalID) error {
-	return publishTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        orchestratorevents.TopicOrchestratorCommandBlockApproval,
-		SourceModule: "workorch/bootstrap-test",
-		SubjectType:  "run",
-		SubjectID:    string(runID),
-		RunID:        string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyRunID:              string(runID),
-			events.PayloadKeyBlockingApprovalID: string(approvalID),
-		},
+	return exports.Repositories.Approvals.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &approvalmodel.Approval{
+		ID:          approvalID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		Reason:      "test approval gate",
+		State:       common.ApprovalStatePending,
 	})
 }
 
@@ -202,7 +175,7 @@ func TestNewWithBackendMemoryBuildsRuntime(t *testing.T) {
 	}
 }
 
-func TestNewWithBackendMemoryStartsSystemDefaultsModule(t *testing.T) {
+func TestNewWithBackendMemoryDoesNotStartSystemDefaultsModule(t *testing.T) {
 	ctx := context.Background()
 	rt := NewWithBackend("memory", "")
 	if rt == nil {
@@ -210,35 +183,15 @@ func TestNewWithBackendMemoryStartsSystemDefaultsModule(t *testing.T) {
 	}
 	exports := rt.Exports()
 
-	server, err := exports.Repositories.MCPServers.Get(ctx, common.MCPServerID("mcp-lsp-bridge"))
-	if err != nil {
-		t.Fatalf("get mcp-lsp-bridge server: %v", err)
+	if _, err := exports.Repositories.MCPServers.Get(ctx, common.MCPServerID("mcp-lsp-bridge")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("mcp-lsp-bridge err = %v, want not found without framework system module", err)
 	}
-	for _, tool := range []string{"lsp_status", "lsp_shutdown", "lsp_repair"} {
-		assertBootstrapStringSliceContains(t, server.AllowedTools, tool)
+	if _, err := exports.Repositories.MCPCapabilities.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_status")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("lsp_status capability err = %v, want not found without framework system module", err)
 	}
-
-	capability, err := exports.Repositories.MCPCapabilities.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_status"))
-	if err != nil {
-		t.Fatalf("get lsp_status capability: %v", err)
+	if _, err := exports.Repositories.WorkspaceTemplates.Get(ctx, "software-dev"); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("software-dev template err = %v, want not found without framework system module", err)
 	}
-	if capability.Category != "code_semantics" || capability.RiskLevel != "read_only" {
-		t.Fatalf("lsp_status capability = %+v, want code_semantics read_only", capability)
-	}
-
-	template, err := exports.Repositories.WorkspaceTemplates.Get(ctx, "software-dev")
-	if err != nil {
-		t.Fatalf("get software-dev template: %v", err)
-	}
-	semanticNavigation, ok := template.ContextHints["semanticCodeNavigation"].(map[string]any)
-	if !ok {
-		t.Fatalf("software-dev semanticCodeNavigation = %#v, want object", template.ContextHints["semanticCodeNavigation"])
-	}
-	defaultCapabilityIDs, ok := semanticNavigation["defaultCapabilityIds"].([]any)
-	if !ok {
-		t.Fatalf("semanticCodeNavigation.defaultCapabilityIds = %#v, want list", semanticNavigation["defaultCapabilityIds"])
-	}
-	assertBootstrapAnySliceContainsString(t, defaultCapabilityIDs, "mcp-lsp-bridge:tool:lsp_status")
 }
 
 func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T) {
@@ -361,7 +314,7 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 	}
 }
 
-func TestNewWithBackendRegistersOrchestratorCommandHandlers(t *testing.T) {
+func TestNewWithBackendDoesNotRegisterOrchestratorCommandHandlers(t *testing.T) {
 	rt := NewWithBackend("file", t.TempDir())
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -389,21 +342,22 @@ func TestNewWithBackendRegistersOrchestratorCommandHandlers(t *testing.T) {
 	if err := createTestApproval(context.Background(), exports, "ws-command", "run-command", "run-command/approval", "approval-command"); err != nil {
 		t.Fatalf("CreateApproval: %v", err)
 	}
-	if err := blockTestRunOnApproval(context.Background(), exports, "run-command", "approval-command"); err != nil {
-		t.Fatalf("BlockOnApproval: %v", err)
-	}
 	err := exports.Infrastructure.EventHub.Publish(context.Background(), events.Envelope{
 		Topic: orchestratorevents.TopicOrchestratorCommandBlockApproval,
 		Payload: map[string]any{
-			events.PayloadKeyRunID:              "run-missing",
-			events.PayloadKeyBlockingApprovalID: "approval-missing",
+			events.PayloadKeyRunID:              "run-command",
+			events.PayloadKeyBlockingApprovalID: "approval-command",
 		},
 	})
-	if err == nil {
-		t.Fatalf("Publish returned nil, want orchestrator handler error for missing run")
+	if err != nil {
+		t.Fatalf("Publish without framework handler err = %v, want nil", err)
 	}
-	if _, ok := events.ResponseEnvelope(err); ok {
-		t.Fatalf("Publish returned response for missing run, want handler error")
+	run, err := exports.Repositories.Runs.Get(common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-command"), "run-command")
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if run.State != common.RunStateActive {
+		t.Fatalf("run state = %s, want active because bootstrap does not own orchestrator handlers", run.State)
 	}
 }
 
@@ -1061,121 +1015,28 @@ func TestNewWithBackendFileUsesDefaultDataRootWhenUnset(t *testing.T) {
 	}
 }
 
-func TestRuntimeModuleLifecycleRunsAndShutsDownInOrder(t *testing.T) {
-	var runSeq []string
-	var teardownSeq []string
-	lifecycle, err := newRuntimeModuleLifecycle([]lifecycle{
-		testLifecycle{id: "first", runSeq: &runSeq, teardownSeq: &teardownSeq},
-		testLifecycle{id: "second", runSeq: &runSeq, teardownSeq: &teardownSeq},
-	})
-	if err != nil {
-		t.Fatalf("new lifecycle: %v", err)
-	}
-
-	if err := lifecycle.Start(); err != nil {
-		t.Fatalf("run lifecycle: %v", err)
-	}
-	if got, want := runSeq, []string{"first", "second"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("run seq = %v, want %v", got, want)
-	}
-
-	if err := lifecycle.Shutdown(context.Background()); err != nil {
-		t.Fatalf("shutdown lifecycle: %v", err)
-	}
-	if got, want := teardownSeq, []string{"second", "first"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("teardown seq = %v, want %v", got, want)
-	}
-}
-
-func TestRuntimeModuleLifecycleReturnsRunAndShutdownErrors(t *testing.T) {
-	errRun := errors.New("run failed")
-	runtimeLifecycle, err := newRuntimeModuleLifecycle([]lifecycle{
-		testLifecycle{id: "broken-run", runErr: errRun},
-	})
-	if err != nil {
-		t.Fatalf("new lifecycle: %v", err)
-	}
-	if err := runtimeLifecycle.Start(); err == nil || !strings.Contains(err.Error(), errRun.Error()) {
-		t.Fatalf("run err = %v, want %v", err, errRun)
-	}
-
-	errShutdown := errors.New("shutdown failed")
-	runtimeLifecycle, err = newRuntimeModuleLifecycle([]lifecycle{
-		testLifecycle{id: "broken-shutdown", teardownErr: errShutdown},
-	})
-	if err != nil {
-		t.Fatalf("new lifecycle: %v", err)
-	}
-	if err := runtimeLifecycle.Shutdown(context.Background()); !errors.Is(err, errShutdown) {
-		t.Fatalf("shutdown err = %v, want %v", err, errShutdown)
-	}
-}
-
-func TestRuntimeModuleLifecycleContinuesShutdownAfterError(t *testing.T) {
-	errShutdown := errors.New("shutdown failed")
-	var teardownSeq []string
-	runtimeLifecycle, err := newRuntimeModuleLifecycle([]lifecycle{
-		testLifecycle{id: "first", teardownSeq: &teardownSeq},
-		testLifecycle{id: "broken", teardownSeq: &teardownSeq, teardownErr: errShutdown},
-		testLifecycle{id: "last", teardownSeq: &teardownSeq},
-	})
-	if err != nil {
-		t.Fatalf("new lifecycle: %v", err)
-	}
-
-	err = runtimeLifecycle.Shutdown(context.Background())
-	if !errors.Is(err, errShutdown) {
-		t.Fatalf("shutdown err = %v, want %v", err, errShutdown)
-	}
-	if got, want := strings.Join(teardownSeq, ","), "last,broken,first"; got != want {
-		t.Fatalf("teardown seq = %s, want %s", got, want)
-	}
-	if runtimeLifecycle.modules != nil {
-		t.Fatal("shutdown did not clear lifecycle modules")
-	}
-}
-
-func TestRuntimeShutdownTerminatesHubAfterTeardownError(t *testing.T) {
-	errShutdown := errors.New("shutdown failed")
-	var teardownSeq []string
+func TestRuntimeShutdownTerminatesHub(t *testing.T) {
 	hub := &terminatingEventHub{}
 	rt := &Runtime{
-		modules: []lifecycle{
-			testLifecycle{id: "first", teardownSeq: &teardownSeq},
-			testLifecycle{id: "broken", teardownSeq: &teardownSeq, teardownErr: errShutdown},
-			testLifecycle{id: "last", teardownSeq: &teardownSeq},
-		},
 		exports: Exports{Infrastructure: InfrastructureExports{EventHub: hub}},
 	}
 
 	err := rt.Shutdown(context.Background())
-	if !errors.Is(err, errShutdown) {
-		t.Fatalf("shutdown err = %v, want %v", err, errShutdown)
-	}
-	if got, want := strings.Join(teardownSeq, ","), "last,broken,first"; got != want {
-		t.Fatalf("teardown seq = %s, want %s", got, want)
-	}
-	if rt.modules != nil {
-		t.Fatal("runtime shutdown did not clear modules")
+	if err != nil {
+		t.Fatalf("shutdown err = %v, want nil", err)
 	}
 	if !hub.terminated {
-		t.Fatal("runtime shutdown did not terminate event hub after teardown error")
+		t.Fatal("runtime shutdown did not terminate event hub")
 	}
 }
 
-func TestRuntimeShutdownDrainsBackgroundBeforeModuleTeardown(t *testing.T) {
+func TestRuntimeShutdownDrainsBackground(t *testing.T) {
 	background := magictask.NewBackgroundRoutine(4)
-	stopped := false
 	done := make(chan bool, 1)
-	rt := &Runtime{
-		modules: []lifecycle{
-			backgroundAwareLifecycle{id: "background-aware", stopped: &stopped},
-		},
-		background: background,
-	}
+	rt := &Runtime{background: background}
 	if err := background.AsyncFunction(func() {
 		time.Sleep(10 * time.Millisecond)
-		done <- stopped
+		done <- true
 	}); err != nil {
 		t.Fatalf("schedule background task: %v", err)
 	}
@@ -1184,34 +1045,11 @@ func TestRuntimeShutdownDrainsBackgroundBeforeModuleTeardown(t *testing.T) {
 		t.Fatalf("runtime shutdown: %v", err)
 	}
 	select {
-	case sawStopped := <-done:
-		if sawStopped {
-			t.Fatal("background task observed module teardown before background drain")
+	case completed := <-done:
+		if !completed {
+			t.Fatal("background task did not complete")
 		}
 	default:
 		t.Fatal("runtime shutdown returned before background task completed")
 	}
-	if !stopped {
-		t.Fatal("runtime shutdown did not teardown module after background drain")
-	}
-}
-
-func assertBootstrapStringSliceContains(t *testing.T, values []string, want string) {
-	t.Helper()
-	for _, value := range values {
-		if value == want {
-			return
-		}
-	}
-	t.Fatalf("values = %+v, want %q", values, want)
-}
-
-func assertBootstrapAnySliceContainsString(t *testing.T, values []any, want string) {
-	t.Helper()
-	for _, value := range values {
-		if got, ok := value.(string); ok && got == want {
-			return
-		}
-	}
-	t.Fatalf("values = %+v, want %q", values, want)
 }

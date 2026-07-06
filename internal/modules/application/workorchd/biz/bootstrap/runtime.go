@@ -2,7 +2,6 @@ package bootstrap
 
 import (
 	"context"
-	"errors"
 
 	magictask "github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -10,17 +9,9 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
-type lifecycle interface {
-	ID() string
-	Start() error
-	Stop(context.Context) error
-}
-
 type Runtime struct {
-	exports         Exports
-	modules         []lifecycle
-	moduleLifecycle *runtimeModuleLifecycle
-	background      magictask.BackgroundRoutine
+	exports    Exports
+	background magictask.BackgroundRoutine
 }
 
 type RepositoryExports struct {
@@ -64,28 +55,14 @@ type Exports struct {
 }
 
 func (r *Runtime) Shutdown(ctx context.Context) error {
-	var shutdownErr error
 	if r.background != nil {
 		r.background.Shutdown(ctx)
 		r.background = nil
 	}
-	if r.moduleLifecycle != nil && len(r.modules) == len(r.moduleLifecycle.modules) {
-		if err := r.moduleLifecycle.Shutdown(ctx); err != nil {
-			shutdownErr = errors.Join(shutdownErr, err)
-		}
-		r.moduleLifecycle = nil
-	} else {
-		for idx := len(r.modules) - 1; idx >= 0; idx-- {
-			if err := r.modules[idx].Stop(ctx); err != nil {
-				shutdownErr = errors.Join(shutdownErr, err)
-			}
-		}
-	}
-	r.modules = nil
 	if terminator, ok := r.exports.Infrastructure.EventHub.(interface{ Terminate(context.Context) }); ok {
 		terminator.Terminate(ctx)
 	}
-	return shutdownErr
+	return nil
 }
 
 func (r *Runtime) Exports() Exports {
