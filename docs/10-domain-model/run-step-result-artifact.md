@@ -182,6 +182,9 @@ ValidationResult 表示 build/test/check/assessment 这类验证动作的正式�
 - ValidationResult 只表达验证证据，不直接表达 accepted business outcome
 - 它通常从属于 `stepId`，并可被 DoD assessment / Result closeout 引用
 - ValidationResult 通过 evidence quality / alignment 参与 closure，但不能替代 Result 本体
+- `state` 的持久化枚举以 runtime evidence contract 为准：`passed` / `failed` /
+  `inconclusive` / `warning`。产品展示可以映射成 pass/fail/warning 文案，
+  但不得把展示标签反写成 owner state。
 
 ### RuntimeCheckpoint
 
@@ -233,6 +236,9 @@ CoverageWorkItem 是 run-scoped 的 coverage ledger 对象。
 - 它属于当前 run 的 coverage ledger，而不是 workspace formal definition
 - 它可以被 verification / acceptance / repair / replan 引用，但不替代 Run / Result 主状态机
 - 同一 `definitionRevision + normalizedSourceKey` 在当前 run 内只能有唯一 active item
+- `status` 的 canonical 集合是 `open` / `in_progress` / `evidence_ready` /
+  `satisfied` / `failed` / `blocked`。历史或展示层的 `closed`、`completed`
+  不得作为 coverage ledger 终态参与收敛判断。
 
 ### ArtifactContinuation
 
@@ -267,6 +273,10 @@ ArtifactContinuation 是 run-scoped 的 runtime internal continuation 对象。
 - 它服务恢复、诊断和 metadata-only projection，不直接表达 accepted business outcome
 - 它可以被 snapshot / observability / raw-detail 引用，但默认不暴露正文内容
 - apply / validation 完成后，正式 closeout 仍回到 Result / Artifact / Validation evidence
+- public lifecycle 只应表达 `active` / `sealed` / `failed` / `aborted` 这类
+  对外可解释状态；runtime 内部可以持久化 `planning` / `chunking` /
+  `assembling` / `applying` / `applied` 等 phase state，用于恢复与诊断。
+  这些 phase state 不能被前端或 Result gate 当作正式 deliverable 完成语义。
 
 ## Ownership Mapping
 

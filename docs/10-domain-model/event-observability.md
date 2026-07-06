@@ -126,6 +126,25 @@ EventRecord 与 Observability 的边界是：
 - append-only event stream 与 raw payload ref 可服务审计和回放，但都不应成为唯一 truth source
 - event payload summary 与 raw payload ref 应可同时存在：summary 用于默认读模型，ref 用于显式打开详情
 
+### Topic Granularity
+
+WorkOrch 的 owner notification topic 分为两层：
+
+- aggregate state topic：例如 `/run/state/changed`、`/step/state/changed`、
+  `/approval/resolved`。这是当前 projection、timeline 和 replay 的主消费面。
+- semantic discrete topic：例如 `/run/completed`、`/step/succeeded`、
+  `/approval/approved`。这些 topic 可以作为版本化合同被注册和识别，但是否
+  在每次状态转换时额外发布，必须由对应 owner 的 publisher/replay 合同明确声明。
+
+约束：
+
+- `WorkorchEventVersion` 覆盖某个 topic 只表示该 topic 是合法事件合同，不表示
+  每次状态转换必须同时发布 aggregate 与 discrete 两份事件。
+- UI / TUI / Web Console 不应依赖离散 topic 自行维护业务状态；正式展示仍应消费
+  workorchd projection 或 owner aggregate notification。
+- 若后续产品需要把离散 topic 作为订阅 SLA，必须同步补 publisher、replay 顺序、
+  projection 幂等和事件测试，不能只新增常量。
+
 ## Projection Boundary
 
 以下都应视为投影而非本体：

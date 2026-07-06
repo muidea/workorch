@@ -158,6 +158,28 @@ func TestDeriveCoverageWorkItemState(t *testing.T) {
 			wantAction:        coverageWorkItemActionNeedEvidence,
 			wantActionableGap: true,
 		},
+		{
+			name: "closed is not a canonical terminal coverage state",
+			item: map[string]any{
+				"id":                    "cwi-legacy-closed",
+				"status":                "closed",
+				"requiredEvidenceKinds": []string{"validation"},
+				"acceptedEvidenceRefs":  []string{"run/graph/validate"},
+			},
+			wantAction:        coverageWorkItemActionNeedEvidence,
+			wantActionableGap: true,
+		},
+		{
+			name: "completed is not a canonical terminal coverage state",
+			item: map[string]any{
+				"id":                    "cwi-legacy-completed",
+				"status":                "completed",
+				"requiredEvidenceKinds": []string{"validation"},
+				"acceptedEvidenceRefs":  []string{"run/graph/validate"},
+			},
+			wantAction:        coverageWorkItemActionNeedEvidence,
+			wantActionableGap: true,
+		},
 	}
 
 	for _, tt := range tests {

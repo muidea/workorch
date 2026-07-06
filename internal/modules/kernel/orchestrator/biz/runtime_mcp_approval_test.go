@@ -123,8 +123,14 @@ func TestRuntimeOrchestratorCreateApprovalPublishesNotificationThroughAsyncHub(t
 	if err := orch.createApproval(ctx, run, step, "approval-create-async", "requires approval", "apply patch", map[string]any{"operation": "test"}); err != nil {
 		t.Fatalf("createApproval: %v", err)
 	}
-	if _, err := approvalRepo.Get(ctx, "approval-create-async"); err != nil {
+	approval, err := approvalRepo.Get(ctx, "approval-create-async")
+	if err != nil {
 		t.Fatalf("get created approval: %v", err)
+	}
+	if approval.AutoGovernance["source"] != "orchestrator" ||
+		approval.AutoGovernance["status"] != "pending_evaluation" ||
+		approval.AutoGovernance["operation"] != "test" {
+		t.Fatalf("approval auto governance = %+v, want orchestrator pending evaluation seed", approval.AutoGovernance)
 	}
 	if len(hub.sync) != 0 {
 		t.Fatalf("sync publishes = %+v, want none for approval notification", hub.sync)

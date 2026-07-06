@@ -765,14 +765,15 @@ func (o *RuntimeOrchestrator) createApproval(
 	}
 
 	approval := &approvalmodel.Approval{
-		ID:          approvalID,
-		WorkspaceID: run.WorkspaceID,
-		RunID:       run.ID,
-		StepID:      step.ID,
-		Reason:      common.RedactSensitiveString(reason),
-		Action:      common.RedactSensitiveString(action),
-		Context:     common.RedactSensitiveMap(cloneStepPayload(approvalContext)),
-		State:       common.ApprovalStatePending,
+		ID:             approvalID,
+		WorkspaceID:    run.WorkspaceID,
+		RunID:          run.ID,
+		StepID:         step.ID,
+		Reason:         common.RedactSensitiveString(reason),
+		Action:         common.RedactSensitiveString(action),
+		Context:        common.RedactSensitiveMap(cloneStepPayload(approvalContext)),
+		State:          common.ApprovalStatePending,
+		AutoGovernance: common.RedactSensitiveMap(approvalAutoGovernanceSeed(run, step, approvalContext)),
 	}
 	if err := o.approvals.Create(ctx, approval); err != nil {
 		return err
@@ -791,6 +792,36 @@ func (o *RuntimeOrchestrator) createApproval(
 		StepID:       string(approval.StepID),
 		Payload:      events.ApprovalPayload(approval.Reason, approval.Action, approval.Context, approval.State),
 	})
+}
+
+func approvalAutoGovernanceSeed(run *runModel.Run, step *runModel.Step, approvalContext map[string]any) map[string]any {
+	ret := map[string]any{
+		"source":                  "orchestrator",
+		"status":                  "pending_evaluation",
+		"itemType":                "approval",
+		"requiresOwnerEvaluation": true,
+	}
+	if run != nil {
+		ret["workspaceId"] = string(run.WorkspaceID)
+		ret["runId"] = string(run.ID)
+	}
+	if step != nil {
+		ret["stepId"] = string(step.ID)
+	}
+	if embedded := mapFromValue(approvalContext["autoGovernance"]); len(embedded) > 0 {
+		for key, value := range embedded {
+			key = strings.TrimSpace(key)
+			if key != "" {
+				ret[key] = value
+			}
+		}
+	}
+	for _, key := range []string{"approvalPolicy", "operation", "risk", "riskLevel", "capabilityKind"} {
+		if value := strings.TrimSpace(stringFromMap(approvalContext, key)); value != "" {
+			ret[key] = value
+		}
+	}
+	return ret
 }
 
 func decisionResolutionInput(ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) map[string]any {

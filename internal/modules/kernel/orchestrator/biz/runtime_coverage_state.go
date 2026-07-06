@@ -47,7 +47,7 @@ func deriveCoverageWorkItemState(item map[string]any) coverageWorkItemDerivedSta
 		return ret
 	}
 	switch ret.Status {
-	case "satisfied", "closed", "completed":
+	case "satisfied":
 		return ret
 	}
 	if ret.Status == "evidence_ready" {
@@ -147,7 +147,7 @@ func coverageWorkItemAcceptedEvidenceCountForKind(item map[string]any, kind stri
 func coverageWorkItemFlatAcceptedRefsSatisfyRequiredKinds(item map[string]any, requiredKinds []string, requiredCounts map[string]int) bool {
 	status := strings.ToLower(strings.TrimSpace(stringFromMap(item, "status")))
 	switch status {
-	case "evidence_ready", "satisfied", "closed", "completed":
+	case "evidence_ready", "satisfied":
 	default:
 		return false
 	}
