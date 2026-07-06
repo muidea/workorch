@@ -1283,6 +1283,7 @@ func finalizeRuntimeRepairFollowUpStepInput(run *runModel.Run, failedStep *runMo
 	applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
 	input = normalizeDispatchInputAuthorityFocus(input)
 	input = normalizeCurrentActionContract(input, failedStep)
+	input = enforceCurrentAuthorityDerivedConsistency(run, stepID, input)
 	applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
 	input = attachStagePacketToStepInput(run, stepID, input)
 	applyRuntimeRepairCommandContractValidationProjection(input, failedStep)

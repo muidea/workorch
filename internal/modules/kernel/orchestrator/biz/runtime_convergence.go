@@ -659,6 +659,11 @@ func populateProfileStateChangingEvidenceConvergenceContract(input map[string]an
 		contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
 		return
 	}
+	if convergenceInputAuthorityRequiresStateChange(input) && repairActionPackageRequiresEvidenceAcquisition(pkg) {
+		required := enforceStateChangingRequiredOutputForConvergence(pkg, input)
+		addStrategyReassessmentRequiredOutputContract(pkg, required)
+		pkg["requiredOutput"] = required
+	}
 	if repairActionPackageRequiresEvidenceAcquisition(pkg) {
 		contract.State = convergenceStateNeedEvidence
 		contract.RuntimeStage = runtimeStageRepair
@@ -676,6 +681,15 @@ func populateProfileStateChangingEvidenceConvergenceContract(input map[string]an
 	contract.StateChangingOutputRequired = true
 	contract.RepairActionPackage = pkg
 	contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+}
+
+func convergenceInputAuthorityRequiresStateChange(input map[string]any) bool {
+	switch strings.TrimSpace(convergenceNextActionKind(nil, input)) {
+	case "state_change", "produce_state_change":
+		return true
+	default:
+		return false
+	}
 }
 
 func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[string]any, failedStep *runModel.Step, contract *ConvergenceContract) bool {

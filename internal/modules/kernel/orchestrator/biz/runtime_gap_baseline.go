@@ -619,9 +619,7 @@ func enforceCurrentAuthorityDerivedConsistency(run *runModel.Run, stepID common.
 	}
 	if strings.TrimSpace(stringFromMap(contract, "state")) == convergenceStateNeedStateChange &&
 		boolValue(contract["stateChangingOutputRequired"]) &&
-		requiredOutputHasAllowedStateChangingKind(required) &&
-		len(mapFromValue(input[stepInputKeyStagePacket])) > 0 &&
-		len(mapFromValue(input[currentActionContractKey])) > 0 {
+		requiredOutputHasAllowedStateChangingKind(required) {
 		return input
 	}
 	for _, key := range []string{

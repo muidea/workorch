@@ -696,7 +696,8 @@ func runtimeRepairExhaustionDecisionNotEligible(run *runModel.Run, failedStep *r
 
 func continuableContractViolationRule(rule string) bool {
 	switch strings.TrimSpace(rule) {
-	case contractViolationRuleValidationStaticOnly:
+	case contractViolationRuleValidationStaticOnly,
+		contractViolationRuleCoverageAssessmentIncomplete:
 		return true
 	default:
 		return false
@@ -706,6 +707,25 @@ func continuableContractViolationRule(rule string) bool {
 func contractViolationExhaustionCanContinueRuntimeRepair(failedStep *runModel.Step) bool {
 	if failedStep == nil || !continuableContractViolationRule(contractViolationRuleFromStep(failedStep)) {
 		return false
+	}
+	if contractViolationRuleFromStep(failedStep) == contractViolationRuleCoverageAssessmentIncomplete {
+		recovery := strings.TrimSpace(stringFromMap(mapFromValue(failedStep.Output[stepOutputKeyContractViolation]), "recoverability"))
+		if recovery == "" {
+			recovery = contractViolationRecoverabilityForRule(contractViolationRuleCoverageAssessmentIncomplete)
+		}
+		if recovery != runtimemodel.ContractViolationRecoverabilityRecomputeAuthority {
+			return false
+		}
+		switch strings.TrimSpace(convergenceNextActionKind(nil, failedStep.Input)) {
+		case "state_change", "produce_state_change",
+			"validate", "validation", "produce_validation_evidence",
+			"assessment", "complete_coverage_assessment",
+			"artifact", "produce_artifact_evidence",
+			"repair", "acquire_evidence", "acquire_target_snapshot":
+			return !failedStepHasExternalDecisionDependency(failedStep)
+		default:
+			return false
+		}
 	}
 	if strings.TrimSpace(stringFromMap(failedStep.Input, "repairObjective")) != repairObjectiveConcreteValidationEvidence {
 		return false

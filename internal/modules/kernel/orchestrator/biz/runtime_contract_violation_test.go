@@ -206,11 +206,16 @@ func TestContractViolationExhaustedStaticValidationContinuesRuntimeRepair(t *tes
 	}
 }
 
-func TestCoverageAssessmentIncompleteContractViolationExhaustsBudget(t *testing.T) {
+func TestCoverageAssessmentIncompleteContractViolationExhaustionContinuesRuntimeRepair(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-coverage-assessment-contract-exhausted")
 	repo := memory.NewStepRepository()
 	failed := coverageAssessmentIncompleteFailedStep(runID, "assessment-failed")
+	failed.Output["contractViolationRule"] = contractViolationRuleCoverageAssessmentIncomplete
+	failed.Output[stepOutputKeyContractViolation] = map[string]any{
+		"violatedRule":   contractViolationRuleCoverageAssessmentIncomplete,
+		"recoverability": runtimemodel.ContractViolationRecoverabilityRecomputeAuthority,
+	}
 	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-coverage-assessment-contract-exhausted", InitialStepKind: llmWorkspaceExecutionStepKind}
 	attachContractViolationDiagnostics(run, failed, errors.New("invalid argument: dodAssessment is not satisfied"))
 	for attempt := 1; attempt <= 2; attempt++ {
@@ -236,8 +241,8 @@ func TestCoverageAssessmentIncompleteContractViolationExhaustsBudget(t *testing.
 
 	action := runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{MaxContractViolationRetriesPerStep: 2}), true, true, run, failed)
 
-	if action != runtimeRecoveryActionContractViolationExhausted {
-		t.Fatalf("recovery action = %s, want contract violation exhausted for repeated coverage assessment violation", action)
+	if action != runtimeRecoveryActionRuntimeRepair {
+		t.Fatalf("recovery action = %s, want deterministic runtime repair for repeated coverage assessment violation", action)
 	}
 }
 
