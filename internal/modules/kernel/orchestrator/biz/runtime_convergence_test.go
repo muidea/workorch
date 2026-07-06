@@ -4828,6 +4828,47 @@ func TestShouldCreateDecisionTicketBlocksContinuableRuntimeContractViolationDeci
 	}
 }
 
+func TestShouldCreateDecisionTicketKeepsContractViolationRecoveryExhaustedBlocker(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": "state_change"},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+	}
+	output := decisionOutputFromSpec(runtimeDecisionBlockSpec{
+		Reason:       "contract violation recovery exhausted",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Choose a recovery action.",
+		Context: map[string]any{
+			decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
+			decisionContextKeyDependency:     decisionContextDependencyRuntimeContract,
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+			"runtimeRepairLoopState":         "contract_violation_recovery_exhausted",
+			"contractViolation": map[string]any{
+				"violatedRule": contractViolationRulePatchApplyContractFailed,
+			},
+		},
+	})
+	contract := ConvergenceContract{
+		State:                       convergenceStateNeedStateChange,
+		RuntimeStage:                runtimeStageRepair,
+		RepairObjective:             repairObjectiveStateChangingOutput,
+		StateChangingOutputRequired: true,
+		RepairActionPackage: map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+	}
+
+	if !ShouldCreateDecisionTicket(input, output, contract) {
+		t.Fatalf("ShouldCreateDecisionTicket = false, want governed blocker after contract retry exhaustion")
+	}
+}
+
 func TestShouldCreateDecisionTicketBlocksMechanicalEvidenceAcquisitionDecision(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:          runtimeStageRepair,

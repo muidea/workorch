@@ -2666,6 +2666,9 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 	if decisionBlockDeclaresValidationCommandContractRetryExhausted(spec.Context) {
 		return true
 	}
+	if decisionBlockDeclaresContractViolationRecoveryExhausted(spec.Context) {
+		return true
+	}
 	if decisionBlockDeclaresNonContractRuntimeDependency(spec.Context) {
 		return true
 	}
@@ -2734,6 +2737,13 @@ func decisionBlockDeclaresValidationCommandContractRetryExhausted(context map[st
 		}
 	}
 	return false
+}
+
+func decisionBlockDeclaresContractViolationRecoveryExhausted(context map[string]any) bool {
+	if len(context) == 0 {
+		return false
+	}
+	return strings.TrimSpace(stringFromMap(context, "runtimeRepairLoopState")) == "contract_violation_recovery_exhausted"
 }
 
 func continuableNextActionKind(kind string) bool {

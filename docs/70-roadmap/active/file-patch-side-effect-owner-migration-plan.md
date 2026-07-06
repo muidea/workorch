@@ -377,10 +377,11 @@ Exit criteria:
 
 ### Phase 7: Projection, Replay And Live Verification
 
-- [ ] Verify event stream still replays Patch evidence and projection state.
-- [ ] Verify workorchd patch/read-model projection consumes formal Patch records.
-- [ ] Verify Web/TUI do not infer success from block output.
-- [ ] Run `make verify-workspace-file-diff-patch`.
+- [x] Verify event stream still replays Patch evidence and projection state.
+- [x] Verify workorchd patch/read-model projection consumes formal Patch records.
+- [x] Verify Web/TUI do not infer success from block output.
+- [x] Run `make verify-workspace-file-diff-patch`.
+- [x] Ensure exhausted contract-violation recovery creates a governed blocker instead of terminal failed when automatic patch/state-change retry budget is exhausted.
 - [ ] Run deployed live validation for a workspace requiring patch apply + validation + DoD closeout.
 
 Exit criteria:
@@ -388,6 +389,13 @@ Exit criteria:
 - Live workspace progresses through state_change -> validation -> assessment -> complete or governed blocker.
 - No `run=active + currentStep=failed + no blocker + no next action`.
 - CPU/IO does not regress due to repeated full snapshot reads.
+
+Progress note:
+
+- 2026-07-06: `make verify-workspace-file-diff-patch` passed. This covers block patch mechanics, formal Patch event replay/projection, run snapshot/observability patch evidence, and TUI/CLI patch evidence rendering from formal Patch records.
+- 2026-07-06: deployed `ws-705249a8d7816330/run-083` reached formal Patch evidence and projection (`patchTotal=2`, `patchApplied=2`, `/patch/applied` events present), proving the file block side-effect owner migration path is active in live execution.
+- 2026-07-06: live closeout exposed a remaining orchestrator governance gap after Patch evidence: bounded contract-violation retry exhaustion could still be rejected by the mechanical decision gate and become terminal failed instead of a governed blocker. This is not a `blocks/file` patch side-effect ownership issue, but it is required by Phase 7 live exit criteria. The decision eligibility contract now allows `runtimeRepairLoopState=contract_violation_recovery_exhausted` to create the governed blocker while keeping ordinary mechanical state-changing decisions blocked.
+- 2026-07-06: deployed service later became unreachable on `127.0.0.1:8080` during verification polling, so the final deployed live DoD closeout checkbox remains open until the latest code is redeployed and the live scenario is rerun.
 
 ## Rollback Strategy
 
@@ -433,11 +441,11 @@ Non-goal in early phases:
 - Do not make Result acceptance depend on block output directly.
 - Do not add orchestrator special cases for specific file names, languages or commands.
 
-## Open Questions
+## Resolved Questions
 
-1. Should `patch/revert` be fully supported by `blocks/file` in Phase 1, or should it wait until reverse patch material is formalized in Patch record?
-2. Should `PatchExecutionRequest` live in `internal/pkg/workorchruntimecontract` or remain block-local until Phase 2?
-3. Should target snapshot acquisition be represented as a normal `file/read` Step, or as runtime-internal block execution evidence attached to the repair step?
-4. Should static boundary check block all orchestrator `os.ReadFile`, or only files matching patch/target snapshot side-effect paths?
+1. `patch/revert` remains phase-gated until formal reverse material is available to `blocks/file`. Orchestrator may keep formal revert governance, but must not perform raw revert side effects.
+2. `PatchExecutionRequest` remains block-local for this migration. The formal cross-module boundary is the runtime step input/output DTO and the admitted kernel Patch record.
+3. Target snapshot acquisition is represented as runtime-managed `file/read` evidence. Repair context may consume that evidence but must not materialize target content through direct orchestrator file reads.
+4. Static boundary checks block orchestrator-owned patch side-effect I/O and direct repair target snapshot reads. Read-only preflight helpers may remain only where they are explicitly governance/parser diagnostics and do not execute side effects.
 
-These questions must be answered before Phase 2 cuts the orchestrator main path.
+These answers are now reflected in Phase 1-7 implementation notes and boundary verification.
