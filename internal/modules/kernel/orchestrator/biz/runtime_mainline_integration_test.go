@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpblockbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
 	mcpblockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
@@ -2121,8 +2122,8 @@ func TestRuntimeOrchestrator_StartRunAppliesRuntimePatchEvidence(t *testing.T) {
 	if patches[0].OriginalExists && patches[0].BeforeHash == "" {
 		t.Fatalf("patch evidence = %+v, want before hash for existing target", patches[0])
 	}
-	if patches[0].AfterHash == "" || patches[0].BeforeHash == patches[0].AfterHash || patches[0].ReverseDiff == "" {
-		t.Fatalf("patch evidence = %+v, want before/after hash and reverse diff", patches[0])
+	if patches[0].AfterHash == "" || (patches[0].BeforeHash != "" && patches[0].BeforeHash == patches[0].AfterHash) {
+		t.Fatalf("patch evidence = %+v, want block-admitted hash transition", patches[0])
 	}
 	completedStep, err := stepRepo.Get(ctx, common.StepID("run-patch/step-1"))
 	if err != nil {
@@ -2354,7 +2355,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesPatchApplyGraphNode(t *testing.T)
 	if err := registry.Register(llmcommon.StepKindWorkspaceExecution, llmRuntime); err != nil {
 		t.Fatalf("register llm runtime: %v", err)
 	}
-	if err := registry.Register(llmcommon.RuntimeBlockKindPatchApply, NewPatchRuntimeAdapter()); err != nil {
+	if err := registry.Register(llmcommon.RuntimeBlockKindPatchApply, filebiz.NewRuntimeAdapter()); err != nil {
 		t.Fatalf("register patch runtime: %v", err)
 	}
 	if err := registry.Register(shellcommon.StepKindCommand, shellRuntime); err != nil {

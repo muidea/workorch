@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
@@ -527,6 +528,9 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterLLMPatchSideEffect(t *tes
 	runtime := &stubRuntimeAdapter{
 		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 			switch {
+			case request.Kind == "patch/apply":
+				result, err := filebiz.NewRuntimeAdapter().ExecuteRuntimeStep(ctx, request)
+				return result.Output, err
 			case request.StepID == "run-patch-follow-up/step-1":
 				return map[string]any{
 					"status": "completed",

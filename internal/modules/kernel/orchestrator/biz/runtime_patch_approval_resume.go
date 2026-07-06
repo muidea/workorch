@@ -9,6 +9,7 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 var errApprovedPatchApplyFailureHandled = errors.New("approved patch apply failure handled by runtime repair")
@@ -54,6 +55,9 @@ func (o *RuntimeOrchestrator) applyApprovedPendingPatchApproval(
 	if len(patches) == 0 {
 		return nil, common.ErrInvalidArgument
 	}
+	if len(patches) != 1 {
+		return nil, fmt.Errorf("%w: approved patch apply currently requires exactly one patch request", common.ErrInvalidArgument)
+	}
 	for _, patch := range patches {
 		patch["approvalId"] = string(approval.ID)
 	}
@@ -61,10 +65,12 @@ func (o *RuntimeOrchestrator) applyApprovedPendingPatchApproval(
 	if err != nil {
 		return nil, err
 	}
-	output := map[string]any{
-		"status":             "completed",
-		"stage":              "approved_patch_apply",
-		stepOutputKeyPatches: patches,
+	output, patchStep, err := o.executeApprovedPatchThroughRuntimeBlock(ctx, run, step, approval, workspace.DeliverableDirectory, patches[0])
+	if err != nil {
+		if repairErr := o.handleRuntimeStepFailure(ctx, run, step, nil, output, "runtime patch application failed", err); repairErr != nil {
+			return nil, repairErr
+		}
+		return nil, errApprovedPatchApplyFailureHandled
 	}
 	toolCall := &runmodel.ToolCall{
 		ID:          common.ToolCallID(fmt.Sprintf("%s/tool-call/approved-patch-apply", approval.StepID)),
@@ -75,7 +81,7 @@ func (o *RuntimeOrchestrator) applyApprovedPendingPatchApproval(
 		State:       common.ToolCallStateCompleted,
 		Output:      output,
 	}
-	if err := o.patchManager().apply(ctx, run, step, toolCall, output, workspace.DeliverableDirectory); err != nil {
+	if err := o.patchManager().apply(ctx, run, patchStep, toolCall, output, workspace.DeliverableDirectory); err != nil {
 		if repairErr := o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch application failed", err); repairErr != nil {
 			return nil, repairErr
 		}
@@ -87,6 +93,36 @@ func (o *RuntimeOrchestrator) applyApprovedPendingPatchApproval(
 		return nil, err
 	}
 	return applied, nil
+}
+
+func (o *RuntimeOrchestrator) executeApprovedPatchThroughRuntimeBlock(
+	ctx context.Context,
+	run *runmodel.Run,
+	blockedStep *runmodel.Step,
+	approval *approvalmodel.Approval,
+	deliverableDirectory string,
+	patch map[string]any,
+) (map[string]any, *runmodel.Step, error) {
+	if o == nil || o.runtime == nil || run == nil || blockedStep == nil || approval == nil || len(patch) == 0 {
+		return nil, nil, common.ErrInvalidArgument
+	}
+	patchInput := cloneStepPayload(patch)
+	patchInput["approvalId"] = string(approval.ID)
+	patchStep := *blockedStep
+	patchStep.Kind = "patch/apply"
+	patchStep.Input = patchInput
+	result, err := o.runtime.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		WorkspaceID:                   run.WorkspaceID,
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		RunID:                         run.ID,
+		StepID:                        blockedStep.ID,
+		Kind:                          "patch/apply",
+		Input:                         patchInput,
+	})
+	if err != nil {
+		return result.Output, &patchStep, err
+	}
+	return result.Output, &patchStep, nil
 }
 
 func (p *patchSubsystem) approvedPatchApplicationSummary(ctx context.Context, run *runmodel.Run, approval *approvalmodel.Approval) map[string]any {

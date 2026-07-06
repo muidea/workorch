@@ -63,7 +63,6 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 		module.eventHub != nil ||
 		module.steps != nil ||
 		module.backgroundRoutine != nil ||
-		module.patchExecutor != nil ||
 		len(module.unsub) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}

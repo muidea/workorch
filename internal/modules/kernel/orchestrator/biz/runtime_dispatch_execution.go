@@ -228,6 +228,9 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		}
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch dispatch gate failed", err)
 	}
+	if blocked, err := o.blockPatchApplyForApprovalBeforeRuntime(ctx, run, step, toolCall, workspace, runtimeInput); blocked || err != nil {
+		return err
+	}
 	if err := validateMCPToolCallStepInputBeforeRuntime(run, step, runtimeInput); err != nil {
 		output := map[string]any{
 			"status":    "failed",
@@ -440,8 +443,17 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 	}
 	if patchApproval.Reason != "" {
 		applyPatchApprovalBlockOutput(output, patchApproval)
-	} else if err := patches.apply(ctx, run, step, toolCall, output, workspace.DeliverableDirectory); err != nil {
-		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch application failed", err)
+	} else {
+		if handled, patchedOutput, err := o.applyPatchCandidatesThroughRuntimeBlocks(ctx, run, step, toolCall, output, workspace); handled || err != nil {
+			if patchedOutput != nil {
+				output = patchedOutput
+			}
+			if err != nil {
+				return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch application failed", err)
+			}
+		} else if err := patches.apply(ctx, run, step, toolCall, output, workspace.DeliverableDirectory); err != nil {
+			return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch application failed", err)
+		}
 	}
 	patchRevertApproval, err := patches.revertApprovalBlockSpec(ctx, run.ID, language, output)
 	if err != nil {

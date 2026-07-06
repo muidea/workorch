@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -24,47 +23,6 @@ type unifiedDiffHunk struct {
 	OldStart    int
 	HasOldStart bool
 	Lines       []string
-}
-
-func applyWorkspaceUnifiedDiff(deliverableDirectory string, targetRef string, diff string, baseHash string) error {
-	target, err := workspaceTargetPath(deliverableDirectory, targetRef)
-	if err != nil {
-		return err
-	}
-	filePatch, err := parseSingleFileUnifiedDiff(diff)
-	if err != nil {
-		return wrapPatchApplyParseError(targetRef, "unified_diff", err)
-	}
-	if !diffTargetMatches(targetRef, filePatch) {
-		return newPatchApplyDiagnosticError(
-			targetRef,
-			"unified_diff",
-			"patch_apply",
-			common.ErrInvalidArgument,
-			fmt.Sprintf("%s: unified diff target does not match targetRef", common.ErrInvalidArgument),
-			"Regenerate the patch for the current targetRef and keep the diff scoped to exactly one file.",
-			"unified_diff_target_mismatch",
-		)
-	}
-
-	currentContent, err := os.ReadFile(target)
-	if err != nil {
-		if !os.IsNotExist(err) || filePatch.OldRef != "/dev/null" {
-			return err
-		}
-		currentContent = nil
-	}
-	if err := verifyWorkspacePatchBaseHashBytes(target, currentContent, baseHash); err != nil {
-		return err
-	}
-	nextContent, err := applyUnifiedDiffFilePatch(string(currentContent), filePatch)
-	if err != nil {
-		return wrapPatchApplyExecutionError(targetRef, "unified_diff", err)
-	}
-	if err := ensureWorkspacePatchParentDirectory(deliverableDirectory, targetRef, target, "unified_diff"); err != nil {
-		return err
-	}
-	return os.WriteFile(target, []byte(nextContent), 0o644)
 }
 
 func parseSingleFileUnifiedDiff(diff string) (unifiedDiffFilePatch, error) {

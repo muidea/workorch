@@ -21,8 +21,11 @@ type patchApprovalRequirement struct {
 
 func (p *patchSubsystem) approvalBlockSpec(ctx context.Context, runID common.RunID, language string, output map[string]any) (runtimeApprovalBlockSpec, error) {
 	requests, err := runtimePatchRequests(output)
-	if err != nil || len(requests) == 0 {
+	if err != nil {
 		return runtimeApprovalBlockSpec{}, err
+	}
+	if len(requests) == 0 {
+		return p.patchPreviewApprovalBlockSpec(language, output), nil
 	}
 	requirement := patchApprovalRequirement{}
 	for _, request := range requests {
@@ -56,6 +59,20 @@ func (p *patchSubsystem) approvalBlockSpec(ctx context.Context, runID common.Run
 		Action:     localizedPatchApprovalAction(language),
 		Context:    patchApprovalContext(requirement),
 	}, nil
+}
+
+func (p *patchSubsystem) patchPreviewApprovalBlockSpec(language string, output map[string]any) runtimeApprovalBlockSpec {
+	_ = p
+	requirement, ok := patchPreviewApprovalRequirementFromOutput(output)
+	if !ok || !requirement.required {
+		return runtimeApprovalBlockSpec{}
+	}
+	return runtimeApprovalBlockSpec{
+		Reason:     localizedPatchApprovalReason(language),
+		ApprovalID: "",
+		Action:     localizedPatchApprovalAction(language),
+		Context:    patchApprovalContext(requirement),
+	}
 }
 
 func (p *patchSubsystem) approved(ctx context.Context, runID common.RunID, approvalID common.ApprovalID) (bool, error) {

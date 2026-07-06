@@ -2512,7 +2512,7 @@ func repairActionPackageForEvidenceAcquisitionFollowUp(input map[string]any, sou
 		pkg["currentTargetSnapshots"] = repairActionTargetSnapshotMetadata(mapSliceFromValue(pkg["targetSnapshots"]))
 		required["mustTargetFailureScope"] = true
 		required["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
-		required["mustUseCurrentTargetSnapshot"] = true
+		applyTargetSnapshotSafetyRequiredOutputContract(required, mapSliceFromValue(pkg["targetSnapshots"]))
 	}
 	pkg["requiredOutput"] = required
 	if targetSet := repairActionTargetSet(input, pkg); len(targetSet) > 0 {

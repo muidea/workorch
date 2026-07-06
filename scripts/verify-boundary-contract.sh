@@ -28,6 +28,8 @@ software_dev_bias_pattern='Code Change|code-change|go test \./|npm test|pytest|i
 lsp_profile_pattern='lsp|LSP|lsp-bridge|semanticCodeNavigation'
 deprecated_workspace_decision_endpoint_pattern='/api/v1/workorch/workspaces/[^[:space:]"]+/decisions|workspaces/\{workspaceId\}/decisions|workspaces/[^[:space:]"]+/decisions'
 readmodel_presenter_import_pattern='internal/modules/application/workorchd/pkg/presenter'
+orchestrator_patch_side_effect_pattern='PatchRuntimeAdapter|NewPatchRuntimeAdapter|applyWorkspacePatch|applyWorkspaceFileWrite|applyWorkspaceTextReplace|applyWorkspaceUnifiedDiff'
+orchestrator_repair_target_snapshot_read_pattern='os\.ReadFile|ioutil\.ReadFile'
 
 event_contract_violations=()
 while IFS= read -r topics_file; do
@@ -75,6 +77,41 @@ $matches
 Keep presentation mappers in pkg/presenter or product adapters. Shared
 read-model DTOs and projection logic must live in readmodelcore/readmodelprojection
 without depending on display-layer helpers.
+EOF
+  exit 1
+fi
+
+if matches="$(
+  rg -n --hidden -S "$orchestrator_patch_side_effect_pattern" \
+    internal/modules/kernel/orchestrator \
+    -g '!**/*_test.go' \
+    -g '!**/.git/**'
+)"; then
+  cat >&2 <<EOF
+Boundary contract violation: orchestrator must not own patch filesystem side-effect execution.
+
+$matches
+
+Patch preview/apply/revert technical filesystem work belongs to blocks/file.
+Orchestrator may only perform approval gating, runtime block dispatch, formal
+Patch evidence admission, coverage binding, and projection events.
+EOF
+  exit 1
+fi
+
+if matches="$(
+  rg -n --hidden -S "$orchestrator_repair_target_snapshot_read_pattern" \
+    internal/modules/kernel/orchestrator/biz/runtime_repair_context_material.go \
+    -g '!**/.git/**'
+)"; then
+  cat >&2 <<EOF
+Boundary contract violation: orchestrator repair context must not read target snapshot files directly.
+
+$matches
+
+Target snapshot content/hash acquisition belongs to blocks/file via runtime
+managed file/read. Orchestrator may request acquisition and consume successful
+block output, but must not materialize workspace file content itself.
 EOF
   exit 1
 fi

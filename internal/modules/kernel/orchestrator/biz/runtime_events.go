@@ -245,7 +245,7 @@ func (e *eventSubsystem) publishPatchChanged(ctx context.Context, run *runModel.
 			contentHash,
 			diffHash,
 			approvalID,
-			"",
+			patch.RiskLevel,
 			errText,
 		),
 	})
@@ -371,6 +371,9 @@ func patchEventName(topic string) string {
 func patchLineStats(patch *runModel.Patch) (int, int) {
 	if patch == nil {
 		return 0, 0
+	}
+	if patch.AddedLines != 0 || patch.DeletedLines != 0 {
+		return patch.AddedLines, patch.DeletedLines
 	}
 	if strings.TrimSpace(patch.Diff) != "" {
 		filePatch, err := parseSingleFileUnifiedDiff(patch.Diff)

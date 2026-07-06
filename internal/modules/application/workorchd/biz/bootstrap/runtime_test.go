@@ -17,6 +17,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
+	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	gitmodule "github.com/muidea/workorch/internal/modules/blocks/git"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
@@ -29,7 +30,6 @@ import (
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	orchestratormodule "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -264,7 +264,7 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 		t.Fatalf("run echo executor: %v", err)
 	}
 	defer executor.Teardown()
-	patchExecutor := runtimeevent.NewExecutor("test/patch", hub, background, orchestratormodule.NewPatchRuntimeAdapter(),
+	patchExecutor := runtimeevent.NewExecutor("test/patch", hub, background, filebiz.NewRuntimeAdapter(),
 		llmcommon.RuntimeBlockKindPatchApply,
 		llmcommon.RuntimeBlockKindPatchPreview,
 		llmcommon.RuntimeBlockKindPatchRevert,
@@ -308,10 +308,11 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 	}
 
 	result, err := registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceID: "ws-runtime-test",
-		RunID:       "run-001",
-		StepID:      "run-001-step-patch-apply",
-		Kind:        llmcommon.RuntimeBlockKindPatchApply,
+		WorkspaceID:                   "ws-runtime-test",
+		RunID:                         "run-001",
+		StepID:                        "run-001-step-patch-apply",
+		Kind:                          llmcommon.RuntimeBlockKindPatchApply,
+		WorkspaceDeliverableDirectory: t.TempDir(),
 		Input: map[string]any{
 			"patchType": "file_write",
 			"targetRef": "result.txt",
@@ -343,16 +344,17 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 		t.Fatalf("patch/preview output = %+v, want patch_preview stage", result.Output)
 	}
 	result, err = registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceID: "ws-runtime-test",
-		RunID:       "run-001",
-		StepID:      "run-001-step-patch-revert",
-		Kind:        llmcommon.RuntimeBlockKindPatchRevert,
+		WorkspaceID:                   "ws-runtime-test",
+		RunID:                         "run-001",
+		StepID:                        "run-001-step-patch-revert",
+		Kind:                          llmcommon.RuntimeBlockKindPatchRevert,
+		WorkspaceDeliverableDirectory: t.TempDir(),
 		Input: map[string]any{
 			"patchId": "run-1/step-1/patch/1",
 		},
 	})
-	if err != nil {
-		t.Fatalf("execute patch/revert: %v", err)
+	if err == nil {
+		t.Fatalf("execute patch/revert err = nil, want phase-gated failure")
 	}
 	if result.Output["stage"] != "patch_revert" {
 		t.Fatalf("patch/revert output = %+v, want patch_revert stage", result.Output)

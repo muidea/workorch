@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
@@ -33,6 +34,9 @@ func TestRuntimeOrchestrator_DispatchesLLMRepairAfterGraphNodeFailure(t *testing
 	var repairInput map[string]any
 	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 		switch {
+		case request.Kind == llmcommon.RuntimeBlockKindPatchApply:
+			result, err := filebiz.NewRuntimeAdapter().ExecuteRuntimeStep(ctx, request)
+			return result.Output, err
 		case request.StepID == "run-runtime-repair/step-1":
 			return map[string]any{
 				"status": "completed",
@@ -181,6 +185,9 @@ func TestRuntimeOrchestrator_SoftwareDevCodeAgentRepairsTestFailureAndDeliversDi
 	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 		stepID := string(request.StepID)
 		switch {
+		case request.Kind == llmcommon.RuntimeBlockKindPatchApply:
+			result, err := filebiz.NewRuntimeAdapter().ExecuteRuntimeStep(ctx, request)
+			return result.Output, err
 		case stepID == "run-software-dev-code-agent/step-1":
 			return map[string]any{
 				"status": "completed",

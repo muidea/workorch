@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -35,7 +34,7 @@ func (r *repairSubsystem) runtimeRepairPatchContext(ctx context.Context, run *ru
 		if idx >= 3 {
 			break
 		}
-		item := patchRepairTargetSnapshot(workspace.DeliverableDirectory, targetRef)
+		item := r.runtimeRepairPatchTargetSnapshot(ctx, run, targetRef)
 		if len(item) > 0 {
 			ret = append(ret, item)
 		}
@@ -43,12 +42,104 @@ func (r *repairSubsystem) runtimeRepairPatchContext(ctx context.Context, run *ru
 	return ret
 }
 
-func (r *repairSubsystem) runtimeRepairPatchSuggestions(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
-	if r == nil || r.workspaces == nil || run == nil || failedStep == nil {
+func (r *repairSubsystem) runtimeRepairPatchTargetSnapshot(ctx context.Context, run *runModel.Run, targetRef string) map[string]any {
+	if item := runtimeManagedPatchTargetSnapshotFromReadSteps(ctx, r.steps, run, targetRef); len(item) > 0 {
+		return item
+	}
+	return patchRepairTargetSnapshot(targetRef)
+}
+
+func runtimeManagedPatchTargetSnapshotFromReadSteps(ctx context.Context, steps repository.StepRepository, run *runModel.Run, targetRef string) map[string]any {
+	if steps == nil || run == nil || run.ID == "" {
 		return nil
 	}
-	workspace, err := r.workspaces.Get(ctx, run.WorkspaceID)
-	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
+	targetRef = normalizeRepairPatchTargetRef(targetRef)
+	if targetRef == "" {
+		return nil
+	}
+	items, err := steps.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID), run.ID)
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+	for idx := len(items) - 1; idx >= 0; idx-- {
+		step := items[idx]
+		if step == nil || step.State != common.StepStateSucceeded || strings.TrimSpace(step.Kind) != "file/read" {
+			continue
+		}
+		output := mapFromValue(step.Output)
+		if len(output) == 0 || strings.TrimSpace(stringFromMap(output, "stage")) != "file_read" {
+			continue
+		}
+		if !boolValue(step.Input["runtimeManagedAcquisition"]) && !boolValue(output["runtimeManagedAcquisition"]) {
+			continue
+		}
+		if strings.TrimSpace(firstNonEmptyString(stringFromMap(step.Input, "acquisitionKind"), stringFromMap(output, "acquisitionKind"))) != "target_snapshot" {
+			continue
+		}
+		path := normalizeRepairPatchTargetRef(firstNonEmptyString(
+			stringFromMap(output, "targetRef"),
+			stringFromMap(output, "path"),
+			stringFromMap(step.Input, "targetRef"),
+			stringFromMap(step.Input, "path"),
+		))
+		if path != targetRef {
+			continue
+		}
+		return runtimeManagedPatchTargetSnapshotFromReadStep(run, step, output, targetRef)
+	}
+	return nil
+}
+
+func runtimeManagedPatchTargetSnapshotFromReadStep(run *runModel.Run, step *runModel.Step, output map[string]any, targetRef string) map[string]any {
+	if run == nil || step == nil || len(output) == 0 {
+		return nil
+	}
+	exists := boolValue(output["exists"])
+	isBinary := boolValue(output["isBinary"])
+	truncated := boolValue(output["truncated"])
+	content := stringFromMap(output, "content")
+	redacted := containsRuntimeRedactionMarker(content)
+	contentHash := strings.TrimSpace(stringFromMap(output, "contentHash"))
+	contentComplete := exists && !isBinary && !truncated && !redacted
+	if _, ok := output["contentComplete"]; ok {
+		contentComplete = boolValue(output["contentComplete"])
+	}
+	safeForFileWrite := contentComplete && content != "" && contentHash != ""
+	if _, ok := output["safeForFileWrite"]; ok {
+		safeForFileWrite = boolValue(output["safeForFileWrite"])
+	} else if _, ok := output["safeForPatch"]; ok {
+		safeForFileWrite = boolValue(output["safeForPatch"])
+	}
+	item := map[string]any{
+		"targetRef":         targetRef,
+		"exists":            exists,
+		"content":           content,
+		"contentHash":       contentHash,
+		"contentComplete":   contentComplete,
+		"safeForFileWrite":  safeForFileWrite,
+		"safeForExactPatch": safeForFileWrite,
+		"redacted":          redacted,
+		"truncated":         truncated,
+		"isBinary":          isBinary,
+		"runtimeManaged":    true,
+		"source":            "runtime_managed_file_read",
+		"sourceStepId":      string(step.ID),
+		"evidenceRef":       string(step.ID),
+		"sourceOutputRef":   runtimeRawPayloadRef(run.WorkspaceID, run.ID, "steps", string(step.ID), "output.json"),
+		"snapshotValidity":  "runtime_managed_file_read_output",
+		"guidance":          "Use this runtime-managed target snapshot for repair; exact patch output must preserve contentHash as baseHash when baseHash is used.",
+	}
+	if size, ok := output["size"]; ok {
+		item["size"] = compactLLMContextValue(size, 1)
+	}
+	if lineCount, ok := output["lineCount"]; ok {
+		item["lineCount"] = compactLLMContextValue(lineCount, 1)
+	}
+	return item
+}
+
+func (r *repairSubsystem) runtimeRepairPatchSuggestions(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
+	if r == nil || r.workspaces == nil || run == nil || failedStep == nil {
 		return nil
 	}
 	targetRefs := patchRepairTargetRefs(failedStep)
@@ -76,9 +167,17 @@ func (r *repairSubsystem) runtimeRepairPatchSuggestions(ctx context.Context, run
 			if strings.TrimSpace(request.Diff) == "" {
 				continue
 			}
-			ret = append(ret, patchRepairSuggestionsForDiff(workspace.DeliverableDirectory, request.TargetRef, request.Diff)...)
+			snapshot := r.runtimeRepairPatchTargetSnapshot(ctx, run, request.TargetRef)
+			if !boolValue(snapshot["runtimeManaged"]) {
+				continue
+			}
+			ret = append(ret, patchRepairSuggestionsForDiff(snapshot, request.TargetRef, request.Diff)...)
 		case "text_replace":
-			if suggestion := patchRepairSuggestionForTextReplace(workspace.DeliverableDirectory, request); len(suggestion) > 0 {
+			snapshot := r.runtimeRepairPatchTargetSnapshot(ctx, run, request.TargetRef)
+			if !boolValue(snapshot["runtimeManaged"]) {
+				continue
+			}
+			if suggestion := patchRepairSuggestionForTextReplace(snapshot, request); len(suggestion) > 0 {
 				ret = append(ret, suggestion)
 			}
 		}
@@ -94,10 +193,6 @@ func (r *repairSubsystem) runtimeRepairPatchRefreshableSignals(ctx context.Conte
 		return nil
 	}
 	if !runtimeRepairPatchFailureNeedsCurrentTargetRefresh(failedStep) {
-		return nil
-	}
-	workspace, err := r.workspaces.Get(ctx, run.WorkspaceID)
-	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
 		return nil
 	}
 	targetRefs := patchRepairTargetRefs(failedStep)
@@ -124,9 +219,9 @@ func (r *repairSubsystem) runtimeRepairPatchRefreshableSignals(ctx context.Conte
 		if failedBaseHash == "" {
 			continue
 		}
-		snapshot := patchRepairTargetSnapshot(workspace.DeliverableDirectory, request.TargetRef)
+		snapshot := r.runtimeRepairPatchTargetSnapshot(ctx, run, request.TargetRef)
 		currentHash := strings.TrimSpace(stringFromMap(snapshot, "contentHash"))
-		if len(snapshot) == 0 || !boolValue(snapshot["exists"]) || boolValue(snapshot["isBinary"]) || currentHash == "" {
+		if len(snapshot) == 0 || !boolValue(snapshot["runtimeManaged"]) || !boolValue(snapshot["exists"]) || boolValue(snapshot["isBinary"]) || currentHash == "" {
 			continue
 		}
 		if strings.EqualFold(failedBaseHash, currentHash) {
@@ -151,10 +246,6 @@ func (r *repairSubsystem) runtimeRepairPatchRefreshableSignals(ctx context.Conte
 
 func (r *repairSubsystem) runtimeRepairPatchAlreadySatisfiedSignals(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
 	if r == nil || r.workspaces == nil || run == nil || failedStep == nil {
-		return nil
-	}
-	workspace, err := r.workspaces.Get(ctx, run.WorkspaceID)
-	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
 		return nil
 	}
 	targetRefs := patchRepairTargetRefs(failedStep)
@@ -182,11 +273,19 @@ func (r *repairSubsystem) runtimeRepairPatchAlreadySatisfiedSignals(ctx context.
 			if strings.TrimSpace(request.Diff) == "" {
 				continue
 			}
-			if signal := patchRepairAlreadySatisfiedSignalForDiff(workspace.DeliverableDirectory, request.TargetRef, request.Diff); len(signal) > 0 {
+			snapshot := r.runtimeRepairPatchTargetSnapshot(ctx, run, request.TargetRef)
+			if !boolValue(snapshot["runtimeManaged"]) {
+				continue
+			}
+			if signal := patchRepairAlreadySatisfiedSignalForDiff(snapshot, request.TargetRef, request.Diff); len(signal) > 0 {
 				ret = append(ret, signal)
 			}
 		case "text_replace":
-			if signal := patchRepairAlreadySatisfiedSignalForTextReplace(workspace.DeliverableDirectory, request); len(signal) > 0 {
+			snapshot := r.runtimeRepairPatchTargetSnapshot(ctx, run, request.TargetRef)
+			if !boolValue(snapshot["runtimeManaged"]) {
+				continue
+			}
+			if signal := patchRepairAlreadySatisfiedSignalForTextReplace(snapshot, request); len(signal) > 0 {
 				ret = append(ret, signal)
 			}
 		}
@@ -242,12 +341,14 @@ func (r *repairSubsystem) runtimeRepairFailureTargetContext(ctx context.Context,
 		if idx >= 3 {
 			break
 		}
-		item := patchRepairTargetSnapshot(workspace.DeliverableDirectory, targetRef)
+		item := r.runtimeRepairPatchTargetSnapshot(ctx, run, targetRef)
 		if len(item) == 0 || !runtimeRepairTargetRefAdmissible(targetRef) || boolValue(item["isBinary"]) {
 			continue
 		}
-		item["source"] = "failure_target_current_workspace_file"
-		item["guidance"] = "Use this current failure target snapshot for repair; failed stderr/stdout location is the authoritative target signal."
+		item["contextSource"] = "failure_target"
+		if boolValue(item["runtimeManaged"]) {
+			item["guidance"] = "Use this runtime-managed failure target snapshot for repair; failed stderr/stdout location is the authoritative target signal."
+		}
 		ret = append(ret, item)
 	}
 	return ret
@@ -309,8 +410,8 @@ func (r *repairSubsystem) runtimeRepairResourceShapeAlignmentContext(ctx context
 		if len(ret) >= 3 {
 			break
 		}
-		item := patchRepairTargetSnapshot(workspace.DeliverableDirectory, candidate.Path)
-		if len(item) == 0 || !boolValue(item["exists"]) {
+		item := r.runtimeRepairPatchTargetSnapshot(ctx, run, candidate.Path)
+		if len(item) == 0 || !boolValue(item["runtimeManaged"]) || !boolValue(item["exists"]) {
 			continue
 		}
 		item["source"] = "same_directory_resource_for_shape_conflict"
@@ -451,7 +552,7 @@ func (r *repairSubsystem) runtimeRepairRootCauseCandidateContext(ctx context.Con
 	}
 	if len(failedTargets) == 0 {
 		if includePrerequisiteCandidates {
-			return runtimeRepairPrerequisiteManifestCandidateContext(workspace.DeliverableDirectory, files, runtimeRepairPrerequisiteManifestTargetPatterns(run, workspace, failedStep))
+			return r.runtimeRepairPrerequisiteManifestCandidateContext(ctx, run, files, runtimeRepairPrerequisiteManifestTargetPatterns(run, workspace, failedStep))
 		}
 		return nil
 	}
@@ -483,8 +584,8 @@ func (r *repairSubsystem) runtimeRepairRootCauseCandidateContext(ctx context.Con
 				return
 			}
 		}
-		item := patchRepairTargetSnapshot(workspace.DeliverableDirectory, path)
-		if len(item) == 0 || !boolValue(item["exists"]) || boolValue(item["isBinary"]) {
+		item := r.runtimeRepairPatchTargetSnapshot(ctx, run, path)
+		if len(item) == 0 || !boolValue(item["runtimeManaged"]) || !boolValue(item["exists"]) || boolValue(item["isBinary"]) {
 			return
 		}
 		item["source"] = source
@@ -492,7 +593,7 @@ func (r *repairSubsystem) runtimeRepairRootCauseCandidateContext(ctx context.Con
 		ret = append(ret, item)
 	}
 	if includePrerequisiteCandidates {
-		for _, item := range runtimeRepairPrerequisiteManifestCandidateContext(workspace.DeliverableDirectory, files, runtimeRepairPrerequisiteManifestTargetPatterns(run, workspace, failedStep)) {
+		for _, item := range r.runtimeRepairPrerequisiteManifestCandidateContext(ctx, run, files, runtimeRepairPrerequisiteManifestTargetPatterns(run, workspace, failedStep)) {
 			if len(ret) >= 6 {
 				break
 			}
@@ -506,7 +607,7 @@ func (r *repairSubsystem) runtimeRepairRootCauseCandidateContext(ctx context.Con
 	for _, item := range runtimeRepairContextItemsFromStep(failedStep) {
 		addCandidate(stringFromMap(item, "targetRef"), "patch_repair_context")
 	}
-	for _, item := range runtimeRepairReferencedWorkspaceResourceCandidateContext(workspace.DeliverableDirectory, files, failedTargets, failedSet) {
+	for _, item := range r.runtimeRepairReferencedWorkspaceResourceCandidateContext(ctx, run, files, failedTargets, failedSet) {
 		addCandidate(stringFromMap(item, "targetRef"), "failure_target_referenced_workspace_resource")
 		if len(ret) >= 6 {
 			break
@@ -545,8 +646,8 @@ func (r *repairSubsystem) runtimeRepairRootCauseCandidateContext(ctx context.Con
 	return ret
 }
 
-func runtimeRepairReferencedWorkspaceResourceCandidateContext(deliverableDirectory string, files []workspaceDeliverableFile, failedTargets []string, failedSet map[string]bool) []map[string]any {
-	if strings.TrimSpace(deliverableDirectory) == "" || len(files) == 0 || len(failedTargets) == 0 {
+func (r *repairSubsystem) runtimeRepairReferencedWorkspaceResourceCandidateContext(ctx context.Context, run *runModel.Run, files []workspaceDeliverableFile, failedTargets []string, failedSet map[string]bool) []map[string]any {
+	if r == nil || run == nil || len(files) == 0 || len(failedTargets) == 0 {
 		return nil
 	}
 	seen := map[string]bool{}
@@ -556,9 +657,9 @@ func runtimeRepairReferencedWorkspaceResourceCandidateContext(deliverableDirecto
 		if target == "" {
 			continue
 		}
-		snapshot := patchRepairTargetSnapshot(deliverableDirectory, target)
+		snapshot := r.runtimeRepairPatchTargetSnapshot(ctx, run, target)
 		content := stringFromMap(snapshot, "content")
-		if strings.TrimSpace(content) == "" || boolValue(snapshot["isBinary"]) {
+		if !boolValue(snapshot["runtimeManaged"]) || strings.TrimSpace(content) == "" || boolValue(snapshot["isBinary"]) {
 			continue
 		}
 		for _, ref := range quotedLocalResourceRefsFromContent(content) {
@@ -604,8 +705,8 @@ func runtimeRepairReferencedWorkspaceResourceCandidateContext(deliverableDirecto
 	}
 	ret := make([]map[string]any, 0, min(len(candidates), maxLLMContextSliceItems))
 	for _, path := range candidates {
-		item := patchRepairTargetSnapshot(deliverableDirectory, path)
-		if len(item) == 0 || !boolValue(item["exists"]) || boolValue(item["isBinary"]) {
+		item := r.runtimeRepairPatchTargetSnapshot(ctx, run, path)
+		if len(item) == 0 || !boolValue(item["runtimeManaged"]) || !boolValue(item["exists"]) || boolValue(item["isBinary"]) {
 			continue
 		}
 		item["source"] = "failure_target_referenced_workspace_resource"
@@ -765,8 +866,8 @@ func runtimeRepairShouldIncludePrerequisiteManifestCandidates(failedStep *runMod
 	return false
 }
 
-func runtimeRepairPrerequisiteManifestCandidateContext(deliverableDirectory string, files []workspaceDeliverableFile, targetPatterns []string) []map[string]any {
-	if strings.TrimSpace(deliverableDirectory) == "" || len(files) == 0 {
+func (r *repairSubsystem) runtimeRepairPrerequisiteManifestCandidateContext(ctx context.Context, run *runModel.Run, files []workspaceDeliverableFile, targetPatterns []string) []map[string]any {
+	if r == nil || run == nil || len(files) == 0 {
 		return nil
 	}
 	candidates := make([]workspaceDeliverableFile, 0)
@@ -798,8 +899,8 @@ func runtimeRepairPrerequisiteManifestCandidateContext(deliverableDirectory stri
 		if len(ret) >= 4 {
 			break
 		}
-		item := patchRepairTargetSnapshot(deliverableDirectory, candidate.Path)
-		if len(item) == 0 || !boolValue(item["exists"]) || boolValue(item["isBinary"]) {
+		item := r.runtimeRepairPatchTargetSnapshot(ctx, run, candidate.Path)
+		if len(item) == 0 || !boolValue(item["runtimeManaged"]) || !boolValue(item["exists"]) || boolValue(item["isBinary"]) {
 			continue
 		}
 		item["source"] = "prerequisite_manifest_candidate"
@@ -1256,47 +1357,31 @@ func patchRepairTargetRefs(step *runModel.Step) []string {
 	return ret
 }
 
-func patchRepairTargetSnapshot(deliverableDirectory string, targetRef string) map[string]any {
-	target, err := workspaceTargetPath(deliverableDirectory, targetRef)
-	if err != nil {
-		return map[string]any{
-			"targetRef": targetRef,
-			"error":     err.Error(),
-		}
-	}
-	data, err := os.ReadFile(target)
-	if err != nil {
-		return map[string]any{
-			"targetRef": targetRef,
-			"exists":    false,
-			"error":     err.Error(),
-		}
-	}
+func patchRepairTargetSnapshot(targetRef string) map[string]any {
+	normalized := normalizeRepairPatchTargetRef(targetRef)
 	item := map[string]any{
-		"targetRef":   targetRef,
-		"exists":      true,
-		"size":        len(data),
-		"contentHash": sha256HexBytes(data),
-		"source":      "current_workspace_file",
-		"guidance":    "Use this current target snapshot for repair; failed patch text may be stale or syntactically invalid.",
+		"targetRef":                            normalized,
+		"requestedTargetRef":                   strings.TrimSpace(targetRef),
+		"source":                               "runtime_managed_file_read_required",
+		"runtimeManaged":                       false,
+		"runtimeManagedAcquisitionRequired":    true,
+		"requiredRuntimeBlock":                 "file/read",
+		"acquisitionKind":                      "target_snapshot",
+		"snapshotValidity":                     "runtime_managed_file_read_required",
+		"contentComplete":                      false,
+		"safeForPatch":                         false,
+		"safeForFileWrite":                     false,
+		"safeForExactPatch":                    false,
+		"guidance":                             "Acquire a runtime-managed file/read target snapshot before emitting exact file_write, exact oldText patch output, or content-derived repair signals.",
+		"materializedByOrchestrator":           false,
+		"orchestratorDirectReadContentBlocked": true,
 	}
-	if patchRepairLooksBinary(data) {
-		item["isBinary"] = true
-		item["contentComplete"] = false
-		item["safeForFileWrite"] = false
-		return item
+	if normalized == "" || !runtimeManagedTargetSnapshotRefReadable(normalized) || !runtimeRepairTargetRefAdmissible(normalized) {
+		item["targetRef"] = strings.TrimSpace(targetRef)
+		item["error"] = "runtime-managed target snapshot acquisition requires a readable workspace-relative targetRef"
+		item["runtimeManagedAcquisitionRequired"] = false
+		item["snapshotValidity"] = "invalid_target_ref_for_runtime_managed_file_read"
 	}
-	content := string(data)
-	contentComplete := true
-	if len(content) > maxPatchRepairSnapshotBytes {
-		content = content[:maxPatchRepairSnapshotBytes]
-		item["truncated"] = true
-		contentComplete = false
-	}
-	item["content"] = content
-	item["contentComplete"] = contentComplete
-	item["redacted"] = containsRuntimeRedactionMarker(content)
-	item["safeForFileWrite"] = contentComplete && !containsRuntimeRedactionMarker(content)
 	return item
 }
 
@@ -1355,21 +1440,19 @@ func patchRepairRequestKey(request runtimePatchRequest) string {
 	}, "\x00")
 }
 
-func patchRepairSuggestionsForDiff(deliverableDirectory string, targetRef string, diff string) []map[string]any {
-	target, err := workspaceTargetPath(deliverableDirectory, targetRef)
-	if err != nil {
-		return nil
-	}
-	data, err := os.ReadFile(target)
-	if err != nil || patchRepairLooksBinary(data) {
+func patchRepairSuggestionsForDiff(snapshot map[string]any, targetRef string, diff string) []map[string]any {
+	if !boolValue(snapshot["runtimeManaged"]) || !boolValue(snapshot["exists"]) || boolValue(snapshot["isBinary"]) {
 		return nil
 	}
 	filePatch, err := parseSingleFileUnifiedDiff(diff)
 	if err != nil || !diffTargetMatches(targetRef, filePatch) {
 		return nil
 	}
-	content := string(data)
-	contentHash := sha256HexBytes(data)
+	content := stringFromMap(snapshot, "content")
+	contentHash := strings.TrimSpace(stringFromMap(snapshot, "contentHash"))
+	if strings.TrimSpace(content) == "" || contentHash == "" || !boolValue(snapshot["contentComplete"]) {
+		return nil
+	}
 	var ret []map[string]any
 	seen := map[string]bool{}
 	for _, hunk := range filePatch.Hunks {
@@ -1406,22 +1489,21 @@ func patchRepairSuggestionsForDiff(deliverableDirectory string, targetRef string
 	return ret
 }
 
-func patchRepairSuggestionForTextReplace(deliverableDirectory string, request runtimePatchRequest) map[string]any {
+func patchRepairSuggestionForTextReplace(snapshot map[string]any, request runtimePatchRequest) map[string]any {
 	if strings.TrimSpace(request.TargetRef) == "" || request.PatchType != "text_replace" || request.OldText == "" {
 		return nil
 	}
 	if containsRuntimeRedactionMarker(request.OldText) || containsRuntimeRedactionMarker(request.NewText) {
 		return nil
 	}
-	target, err := workspaceTargetPath(deliverableDirectory, request.TargetRef)
-	if err != nil {
+	if !boolValue(snapshot["runtimeManaged"]) || !boolValue(snapshot["exists"]) || boolValue(snapshot["isBinary"]) {
 		return nil
 	}
-	data, err := os.ReadFile(target)
-	if err != nil || patchRepairLooksBinary(data) {
+	content := stringFromMap(snapshot, "content")
+	contentHash := strings.TrimSpace(stringFromMap(snapshot, "contentHash"))
+	if strings.TrimSpace(content) == "" || contentHash == "" || !boolValue(snapshot["contentComplete"]) {
 		return nil
 	}
-	content := string(data)
 	matchCount := strings.Count(content, request.OldText)
 	if matchCount != 1 {
 		return nil
@@ -1431,7 +1513,7 @@ func patchRepairSuggestionForTextReplace(deliverableDirectory string, request ru
 		"patchType":      "text_replace",
 		"oldText":        request.OldText,
 		"newText":        request.NewText,
-		"contentHash":    sha256HexBytes(data),
+		"contentHash":    contentHash,
 		"matchCount":     matchCount,
 		"source":         "current_text_replace_match",
 		"guidance":       "Use this exact current oldText/newText replacement with the current contentHash; do not retry stale baseHash or altered oldText.",
@@ -1439,20 +1521,19 @@ func patchRepairSuggestionForTextReplace(deliverableDirectory string, request ru
 	}
 }
 
-func patchRepairAlreadySatisfiedSignalForDiff(deliverableDirectory string, targetRef string, diff string) map[string]any {
-	target, err := workspaceTargetPath(deliverableDirectory, targetRef)
-	if err != nil {
-		return nil
-	}
-	data, err := os.ReadFile(target)
-	if err != nil || patchRepairLooksBinary(data) {
+func patchRepairAlreadySatisfiedSignalForDiff(snapshot map[string]any, targetRef string, diff string) map[string]any {
+	if !boolValue(snapshot["runtimeManaged"]) || !boolValue(snapshot["exists"]) || boolValue(snapshot["isBinary"]) {
 		return nil
 	}
 	filePatch, err := parseSingleFileUnifiedDiff(diff)
 	if err != nil || !diffTargetMatches(targetRef, filePatch) {
 		return nil
 	}
-	content := string(data)
+	content := stringFromMap(snapshot, "content")
+	contentHash := strings.TrimSpace(stringFromMap(snapshot, "contentHash"))
+	if strings.TrimSpace(content) == "" || contentHash == "" || !boolValue(snapshot["contentComplete"]) {
+		return nil
+	}
 	addedLines, deletedLines := patchRepairChangedLines(filePatch)
 	if len(addedLines) == 0 && len(deletedLines) == 0 {
 		return nil
@@ -1461,7 +1542,7 @@ func patchRepairAlreadySatisfiedSignalForDiff(deliverableDirectory string, targe
 		return map[string]any{
 			"targetRef":          targetRef,
 			"patchType":          "unified_diff",
-			"contentHash":        sha256HexBytes(data),
+			"contentHash":        contentHash,
 			"addedLineCount":     len(addedLines),
 			"deletedLineCount":   len(deletedLines),
 			"safeForValidation":  true,
@@ -1475,22 +1556,21 @@ func patchRepairAlreadySatisfiedSignalForDiff(deliverableDirectory string, targe
 	return nil
 }
 
-func patchRepairAlreadySatisfiedSignalForTextReplace(deliverableDirectory string, request runtimePatchRequest) map[string]any {
+func patchRepairAlreadySatisfiedSignalForTextReplace(snapshot map[string]any, request runtimePatchRequest) map[string]any {
 	if strings.TrimSpace(request.TargetRef) == "" || request.PatchType != "text_replace" || request.OldText == "" {
 		return nil
 	}
 	if containsRuntimeRedactionMarker(request.OldText) || containsRuntimeRedactionMarker(request.NewText) {
 		return nil
 	}
-	target, err := workspaceTargetPath(deliverableDirectory, request.TargetRef)
-	if err != nil {
+	if !boolValue(snapshot["runtimeManaged"]) || !boolValue(snapshot["exists"]) || boolValue(snapshot["isBinary"]) {
 		return nil
 	}
-	data, err := os.ReadFile(target)
-	if err != nil || patchRepairLooksBinary(data) {
+	content := stringFromMap(snapshot, "content")
+	contentHash := strings.TrimSpace(stringFromMap(snapshot, "contentHash"))
+	if strings.TrimSpace(content) == "" || contentHash == "" || !boolValue(snapshot["contentComplete"]) {
 		return nil
 	}
-	content := string(data)
 	if strings.Contains(content, request.OldText) {
 		return nil
 	}
@@ -1502,7 +1582,7 @@ func patchRepairAlreadySatisfiedSignalForTextReplace(deliverableDirectory string
 	return map[string]any{
 		"targetRef":          request.TargetRef,
 		"patchType":          "text_replace",
-		"contentHash":        sha256HexBytes(data),
+		"contentHash":        contentHash,
 		"oldTextHash":        sha256HexBytes([]byte(request.OldText)),
 		"newTextHash":        sha256HexBytes([]byte(request.NewText)),
 		"safeForValidation":  true,
@@ -1661,7 +1741,7 @@ func patchRepairLooksBinary(data []byte) bool {
 	return false
 }
 
-func convertedDecisionReadableResourceContext(ctx context.Context, workspaces repository.WorkspaceRepository, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
+func convertedDecisionReadableResourceContext(ctx context.Context, workspaces repository.WorkspaceRepository, steps repository.StepRepository, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
 	if workspaces == nil || run == nil || failedStep == nil {
 		return nil
 	}
@@ -1688,7 +1768,10 @@ func convertedDecisionReadableResourceContext(ctx context.Context, workspaces re
 		if idx >= 5 {
 			break
 		}
-		item := patchRepairTargetSnapshot(workspace.DeliverableDirectory, targetRef)
+		item := runtimeManagedPatchTargetSnapshotFromReadSteps(ctx, steps, run, targetRef)
+		if len(item) == 0 {
+			item = patchRepairTargetSnapshot(targetRef)
+		}
 		if len(item) == 0 {
 			continue
 		}

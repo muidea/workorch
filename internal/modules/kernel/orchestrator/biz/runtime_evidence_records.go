@@ -50,11 +50,27 @@ func acceptedStateChangeEvidenceRecordForPatch(run *runModel.Run, step *runModel
 	}
 	timestamp := firstNonEmptyString(strings.TrimSpace(patch.AppliedAt), runtimeEvidenceTimestamp())
 	metadata := map[string]any{
-		"patchId":    string(patch.ID),
-		"patchType":  strings.TrimSpace(patch.PatchType),
-		"targetRef":  strings.TrimSpace(patch.TargetRef),
-		"beforeHash": strings.TrimSpace(patch.BeforeHash),
-		"afterHash":  strings.TrimSpace(patch.AfterHash),
+		"patchId":       string(patch.ID),
+		"patchType":     strings.TrimSpace(patch.PatchType),
+		"targetRef":     strings.TrimSpace(patch.TargetRef),
+		"beforeHash":    strings.TrimSpace(patch.BeforeHash),
+		"afterHash":     strings.TrimSpace(patch.AfterHash),
+		"affectedFiles": append([]string(nil), patch.AffectedFiles...),
+	}
+	if patch.AddedLines != 0 {
+		metadata["addedLines"] = patch.AddedLines
+	}
+	if patch.DeletedLines != 0 {
+		metadata["deletedLines"] = patch.DeletedLines
+	}
+	if patch.RiskLevel != "" {
+		metadata["riskLevel"] = patch.RiskLevel
+	}
+	if len(patch.RiskReasons) > 0 {
+		metadata["riskReasons"] = append([]string(nil), patch.RiskReasons...)
+	}
+	if len(patch.Diagnostics) > 0 {
+		metadata["diagnostics"] = cloneMapSlice(patch.Diagnostics)
 	}
 	if toolCall != nil && toolCall.ID != "" {
 		metadata["toolCallId"] = string(toolCall.ID)
@@ -64,7 +80,8 @@ func acceptedStateChangeEvidenceRecordForPatch(run *runModel.Run, step *runModel
 	if patch.ApprovalID != "" {
 		metadata["approvalId"] = string(patch.ApprovalID)
 	}
-	if targets := stringSliceFromValue(patch.CoverageTargets); len(targets) > 0 {
+	coverageItemRefs := stringSliceFromValue(patch.CoverageTargets)
+	if targets := coverageItemRefs; len(targets) > 0 {
 		metadata["coverageTargets"] = targets
 	}
 	return &orchestratormodel.EvidenceRecord{
@@ -79,6 +96,7 @@ func acceptedStateChangeEvidenceRecordForPatch(run *runModel.Run, step *runModel
 		SourceRef:          string(patch.ID),
 		SubjectType:        evidenceRecordSubjectWorkspaceItem,
 		SubjectID:          strings.TrimSpace(patch.TargetRef),
+		CoverageItemRefs:   coverageItemRefs,
 		CreatedAt:          timestamp,
 		UpdatedAt:          timestamp,
 		Metadata:           metadata,
@@ -497,11 +515,14 @@ func acceptedTargetSnapshotEvidenceRecordForStep(run *runModel.Run, step *runMod
 	sourceRef := runtimeRawPayloadRef(run.WorkspaceID, run.ID, "steps", string(step.ID), "output.json")
 	timestamp := runtimeEvidenceTimestamp()
 	graphRootID := graphRootStepID(step)
+	recordID := orchestratormodel.StableEvidenceRecordID(sourceRef, "target-snapshot", targetRef)
 	metadata := map[string]any{
+		"evidenceRef":       string(recordID),
 		"targetRef":         targetRef,
 		"contentHash":       contentHash,
 		"contentComplete":   true,
 		"safeForFileWrite":  true,
+		"safeForPatch":      true,
 		"redacted":          false,
 		"truncated":         false,
 		"isBinary":          false,
@@ -525,7 +546,7 @@ func acceptedTargetSnapshotEvidenceRecordForStep(run *runModel.Run, step *runMod
 		metadata["source"] = source
 	}
 	return &orchestratormodel.EvidenceRecord{
-		ID:                 orchestratormodel.StableEvidenceRecordID(sourceRef, "target-snapshot", targetRef),
+		ID:                 recordID,
 		WorkspaceID:        run.WorkspaceID,
 		RunID:              firstNonEmptyRunID(step.RunID, run.ID),
 		StepID:             step.ID,

@@ -84,6 +84,10 @@ type PatchInfo struct {
 	DeletedLines     int
 	BeforeHash       string
 	AfterHash        string
+	AffectedFiles    []string
+	RiskLevel        string
+	RiskReasons      []string
+	Diagnostics      []map[string]any
 	CreatedAt        string
 	AppliedAt        string
 	RevertedAt       string

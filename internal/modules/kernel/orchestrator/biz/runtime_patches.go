@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"path/filepath"
 	"strings"
 
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -168,9 +168,30 @@ func (p *patchSubsystem) apply(
 	output map[string]any,
 	deliverableDirectory string,
 ) error {
-	requests, err := runtimePatchRequests(output)
+	blockRequest, blockApplied, err := runtimePatchRequestFromAppliedBlockResult(step, output)
 	if err != nil {
 		return err
+	}
+	requests := []runtimePatchRequest(nil)
+	if blockApplied {
+		requests = []runtimePatchRequest{blockRequest}
+	} else {
+		requests, err = runtimePatchRequests(output)
+		if err != nil {
+			return err
+		}
+		if len(requests) > 0 {
+			request := requests[0]
+			return newPatchApplyDiagnosticError(
+				request.TargetRef,
+				request.PatchType,
+				"patch_apply_requires_runtime_block",
+				common.ErrInvalidArgument,
+				fmt.Sprintf("%s: patch/apply filesystem side effects must be executed by blocks/file runtime block before orchestrator admission", common.ErrInvalidArgument),
+				"Dispatch a patch/apply runtime block and return its completed block result; orchestrator only admits formal Patch evidence after block execution.",
+				"direct_orchestrator_patch_apply_disabled",
+			)
+		}
 	}
 	if len(requests) == 0 {
 		return nil
@@ -193,6 +214,7 @@ func (p *patchSubsystem) apply(
 			Diff:            request.Diff,
 			Summary:         request.Summary,
 			CoverageTargets: request.CoverageTargets,
+			AffectedFiles:   []string{request.TargetRef},
 			State:           common.PatchStateCreated,
 			CreatedAt:       runtimeEvidenceTimestamp(),
 		}
@@ -204,69 +226,97 @@ func (p *patchSubsystem) apply(
 				return err
 			}
 		}
-		beforeState, err := workspacePatchBeforeStateForRequest(deliverableDirectory, request)
-		if err != nil {
-			patch.State = common.PatchStateFailed
-			_ = p.evidence.Patches.Update(ctx, patch)
-			if publishErr := p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchFailed, err); publishErr != nil {
-				return errors.Join(err, publishErr)
+		if blockApplied {
+			if err := p.admitAppliedBlockPatchResult(ctx, run, step, toolCall, output, idx, patch); err != nil {
+				return err
 			}
-			return err
-		}
-		patch.BeforeHash = beforeState.Hash
-		patch.OriginalContent = beforeState.Content
-		patch.OriginalExists = beforeState.Exists
-		if err := applyWorkspacePatch(deliverableDirectory, request); err != nil {
-			patch.State = common.PatchStateFailed
-			_ = p.evidence.Patches.Update(ctx, patch)
-			if publishErr := p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchFailed, err); publishErr != nil {
-				return errors.Join(err, publishErr)
-			}
-			return err
-		}
-		afterHash, err := workspacePatchAfterHash(deliverableDirectory, request.TargetRef)
-		if err != nil {
-			patch.State = common.PatchStateFailed
-			_ = p.evidence.Patches.Update(ctx, patch)
-			if publishErr := p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchFailed, err); publishErr != nil {
-				return errors.Join(err, publishErr)
-			}
-			return err
-		}
-		if strings.EqualFold(strings.TrimSpace(beforeState.Hash), strings.TrimSpace(afterHash)) {
-			err = newPatchApplyDiagnosticError(
-				request.TargetRef,
-				request.PatchType,
-				"patch_apply_noop",
-				common.ErrInvalidArgument,
-				fmt.Sprintf("invalid argument: runtime repair patch/apply %s for target %q is non-substantive", request.PatchType, request.TargetRef),
-				"Return a substantive state-changing artifact, a bounded validation graph when the current snapshot already satisfies the intended change, or a real governance blocker.",
-				"before/after content hashes are identical",
-			)
-			patch.State = common.PatchStateFailed
-			patch.AfterHash = afterHash
-			_ = p.evidence.Patches.Update(ctx, patch)
-			if publishErr := p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchFailed, err); publishErr != nil {
-				return errors.Join(err, publishErr)
-			}
-			return err
-		}
-		patch.State = common.PatchStateApplied
-		patch.AfterHash = afterHash
-		patch.ReverseDiff = reverseDiffForPatch(request.TargetRef, beforeState.Content, beforeState.Exists)
-		patch.AppliedAt = runtimeEvidenceTimestamp()
-		if err := p.evidence.Patches.Update(ctx, patch); err != nil {
-			return err
-		}
-		if err := p.recordAcceptedStateChangeEvidenceForPatch(ctx, run, step, toolCall, patch); err != nil {
-			return err
-		}
-		annotateAppliedPatchOutput(output, idx, patch)
-		if err := p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchApplied, nil); err != nil {
-			return err
 		}
 	}
 	return nil
+}
+
+func runtimePatchRequestFromAppliedBlockResult(step *runModel.Step, output map[string]any) (runtimePatchRequest, bool, error) {
+	if step == nil || strings.TrimSpace(step.Kind) != "patch/apply" || output == nil {
+		return runtimePatchRequest{}, false, nil
+	}
+	if strings.TrimSpace(stringFromMap(output, "status")) != "completed" ||
+		strings.TrimSpace(stringFromMap(output, "stage")) != "patch_apply" {
+		return runtimePatchRequest{}, false, nil
+	}
+	request, err := runtimePatchRequestFromMap(step.Input)
+	if err != nil {
+		return runtimePatchRequest{}, true, err
+	}
+	if targetRef := strings.TrimSpace(stringFromMap(output, "targetRef")); targetRef != "" && filepath.Clean(targetRef) != filepath.Clean(request.TargetRef) {
+		return runtimePatchRequest{}, true, fmt.Errorf("%w: patch block result targetRef %q does not match step input targetRef %q", common.ErrConflict, targetRef, request.TargetRef)
+	}
+	if patchType := strings.TrimSpace(stringFromMap(output, "patchType")); patchType != "" && patchType != request.PatchType {
+		return runtimePatchRequest{}, true, fmt.Errorf("%w: patch block result patchType %q does not match step input patchType %q", common.ErrConflict, patchType, request.PatchType)
+	}
+	return request, true, nil
+}
+
+func (p *patchSubsystem) admitAppliedBlockPatchResult(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	toolCall *runModel.ToolCall,
+	output map[string]any,
+	idx int,
+	patch *runModel.Patch,
+) error {
+	beforeHash := strings.TrimSpace(stringFromMap(output, "beforeHash"))
+	afterHash := strings.TrimSpace(stringFromMap(output, "afterHash"))
+	patch.AffectedFiles = patchResultAffectedFiles(output, patch.TargetRef)
+	patch.AddedLines = intFromAny(output["addedLines"])
+	patch.DeletedLines = intFromAny(output["deletedLines"])
+	patch.RiskLevel = strings.TrimSpace(stringFromMap(output, "riskLevel"))
+	patch.RiskReasons = stringSliceFromValue(output["riskReasons"])
+	patch.Diagnostics = mapSliceFromValue(output["diagnostics"])
+	if afterHash == "" {
+		err := fmt.Errorf("%w: patch block result afterHash is required", common.ErrInvalidArgument)
+		patch.Diagnostics = appendPatchDiagnostic(patch.Diagnostics, "patch_after_hash_required", err.Error())
+		patch.State = common.PatchStateFailed
+		_ = p.evidence.Patches.Update(ctx, patch)
+		if publishErr := p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchFailed, err); publishErr != nil {
+			return errors.Join(err, publishErr)
+		}
+		return err
+	}
+	patch.BeforeHash = beforeHash
+	patch.AfterHash = afterHash
+	patch.OriginalExists = beforeHash != ""
+	patch.OriginalContent = strings.TrimSpace(stringFromMap(output, "originalContent"))
+	patch.ReverseDiff = strings.TrimSpace(stringFromMap(output, "reverseDiff"))
+	if beforeHash != "" && strings.EqualFold(beforeHash, afterHash) {
+		err := newPatchApplyDiagnosticError(
+			patch.TargetRef,
+			patch.PatchType,
+			"patch_apply_noop",
+			common.ErrInvalidArgument,
+			fmt.Sprintf("invalid argument: runtime repair patch/apply %s for target %q is non-substantive", patch.PatchType, patch.TargetRef),
+			"Return a substantive state-changing artifact, a bounded validation graph when the current snapshot already satisfies the intended change, or a real governance blocker.",
+			"before/after content hashes are identical",
+		)
+		patch.Diagnostics = appendPatchDiagnostic(patch.Diagnostics, "patch_apply_noop", err.Error())
+		patch.State = common.PatchStateFailed
+		_ = p.evidence.Patches.Update(ctx, patch)
+		if publishErr := p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchFailed, err); publishErr != nil {
+			return errors.Join(err, publishErr)
+		}
+		return err
+	}
+	patch.State = common.PatchStateApplied
+	patch.AppliedAt = runtimeEvidenceTimestamp()
+	if err := p.evidence.Patches.Update(ctx, patch); err != nil {
+		return err
+	}
+	if err := p.recordAcceptedStateChangeEvidenceForPatch(ctx, run, step, toolCall, patch); err != nil {
+		return err
+	}
+	annotateAppliedPatchOutput(output, idx, patch)
+	annotateAppliedBlockPatchOutput(output, patch)
+	return p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchApplied, nil)
 }
 
 func annotateAppliedPatchOutput(output map[string]any, idx int, patch *runModel.Patch) {
@@ -307,6 +357,61 @@ func annotateAppliedPatchOutput(output map[string]any, idx int, patch *runModel.
 	}
 }
 
+func annotateAppliedBlockPatchOutput(output map[string]any, patch *runModel.Patch) {
+	if output == nil || patch == nil {
+		return
+	}
+	patchOutput := map[string]any{
+		"patchId":         string(patch.ID),
+		"evidenceRef":     string(patch.ID),
+		"state":           string(patch.State),
+		"toolCallId":      string(patch.ToolCallID),
+		"patchType":       patch.PatchType,
+		"targetRef":       patch.TargetRef,
+		"summary":         patch.Summary,
+		"beforeHash":      patch.BeforeHash,
+		"afterHash":       patch.AfterHash,
+		"affectedFiles":   append([]string(nil), patch.AffectedFiles...),
+		"addedLines":      patch.AddedLines,
+		"deletedLines":    patch.DeletedLines,
+		"riskLevel":       patch.RiskLevel,
+		"riskReasons":     append([]string(nil), patch.RiskReasons...),
+		"coverageTargets": patch.CoverageTargets,
+	}
+	if len(patch.Diagnostics) > 0 {
+		patchOutput["diagnostics"] = cloneMapSlice(patch.Diagnostics)
+	}
+	output["patchId"] = string(patch.ID)
+	output["evidenceRef"] = string(patch.ID)
+	output["state"] = string(patch.State)
+	output["toolCallId"] = string(patch.ToolCallID)
+	output[stepOutputKeyPatches] = []map[string]any{patchOutput}
+}
+
+func patchResultAffectedFiles(output map[string]any, fallback string) []string {
+	affected := compactUniqueStrings(stringSliceFromValue(output["affectedFiles"]))
+	if len(affected) > 0 {
+		return affected
+	}
+	fallback = strings.TrimSpace(fallback)
+	if fallback == "" {
+		return nil
+	}
+	return []string{fallback}
+}
+
+func appendPatchDiagnostic(items []map[string]any, code string, message string) []map[string]any {
+	code = strings.TrimSpace(code)
+	message = strings.TrimSpace(message)
+	if code == "" && message == "" {
+		return cloneMapSlice(items)
+	}
+	return append(cloneMapSlice(items), map[string]any{
+		"code":    code,
+		"message": message,
+	})
+}
+
 func (p *patchSubsystem) preflightApprovalCandidates(output map[string]any, deliverableDirectory string) error {
 	requests, err := runtimePatchRequests(output)
 	if err != nil {
@@ -345,64 +450,7 @@ func (p *patchSubsystem) revert(
 	if err != nil || !ok {
 		return err
 	}
-	if p == nil || p.evidence.Patches == nil {
-		return common.ErrInvalidArgument
-	}
-	patch, err := p.evidence.Patches.Get(ctx, request.PatchID)
-	if err != nil {
-		return err
-	}
-	if patch.WorkspaceID != run.WorkspaceID || patch.RunID != run.ID {
-		return common.ErrConflict
-	}
-	if patch.State != common.PatchStateApplied {
-		return fmt.Errorf("%w: patch %s is not applied", common.ErrInvalidArgument, patch.ID)
-	}
-	if patch.AfterHash == "" {
-		return fmt.Errorf("%w: patch %s has no afterHash and cannot be reverted", common.ErrInvalidArgument, patch.ID)
-	}
-	currentHash, err := workspacePatchAfterHash(deliverableDirectory, patch.TargetRef)
-	if err != nil {
-		return err
-	}
-	if !strings.EqualFold(currentHash, patch.AfterHash) {
-		return fmt.Errorf("%w: patch revert hash mismatch", common.ErrConflict)
-	}
-	if patch.OriginalExists {
-		target, err := workspaceTargetPath(deliverableDirectory, patch.TargetRef)
-		if err != nil {
-			return err
-		}
-		if err := ensureWorkspacePatchParentDirectory(deliverableDirectory, patch.TargetRef, target, "patch_revert"); err != nil {
-			return err
-		}
-		if err := os.WriteFile(target, []byte(patch.OriginalContent), 0o644); err != nil {
-			return err
-		}
-	} else {
-		target, err := workspaceTargetPath(deliverableDirectory, patch.TargetRef)
-		if err != nil {
-			return err
-		}
-		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	patch.State = common.PatchStateReverted
-	patch.RevertApprovalID = request.ApprovalID
-	patch.RevertedAt = runtimeEvidenceTimestamp()
-	if err := p.evidence.Patches.Update(ctx, patch); err != nil {
-		return err
-	}
-	output["patchRevert"] = map[string]any{
-		"patchId":    string(patch.ID),
-		"state":      string(patch.State),
-		"targetRef":  patch.TargetRef,
-		"beforeHash": patch.AfterHash,
-		"afterHash":  patch.BeforeHash,
-		"approvalId": string(request.ApprovalID),
-	}
-	return p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchReverted, nil)
+	return fmt.Errorf("%w: patch/revert is phase-gated until blocks/file receives formal reverse material for patch %s", common.ErrInvalidArgument, request.PatchID)
 }
 
 func runtimePatchRevertRequestFromOutput(output map[string]any) (runtimePatchRevertRequest, bool, error) {
@@ -424,11 +472,28 @@ func runtimePatchRevertRequestFromOutput(output map[string]any) (runtimePatchRev
 	}, true, nil
 }
 
+func boolFromAnyDefault(value any, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	typed, ok := value.(bool)
+	if !ok {
+		return fallback
+	}
+	return typed
+}
+
 func (p *patchSubsystem) publishPreviewFromOutput(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any) error {
 	if output == nil {
 		return nil
 	}
 	preview := mapFromValue(output["patchPreview"])
+	if len(preview) == 0 &&
+		strings.TrimSpace(stringFromMap(output, "status")) == "completed" &&
+		strings.TrimSpace(stringFromMap(output, "stage")) == "patch_preview" &&
+		strings.TrimSpace(stringFromMap(output, "targetRef")) != "" {
+		preview = cloneStepPayload(output)
+	}
 	if len(preview) == 0 {
 		return nil
 	}

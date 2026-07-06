@@ -71,6 +71,86 @@ func TestRuntimeRepairBaseInputProjectsFailedStepContract(t *testing.T) {
 	}
 }
 
+func TestRepairActionPackageTargetSnapshotSafetyContracts(t *testing.T) {
+	safeSnapshot := map[string]any{
+		"targetRef":         "src/app.txt",
+		"exists":            true,
+		"content":           "current content\n",
+		"contentHash":       "hash-current",
+		"contentComplete":   true,
+		"safeForPatch":      true,
+		"safeForFileWrite":  true,
+		"safeForExactPatch": true,
+		"runtimeManaged":    true,
+		"source":            "runtime_managed_file_read",
+	}
+	pkg := repairActionPackageFromRepairInput(map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"patchRepairContext":          []map[string]any{safeSnapshot},
+	})
+	required := mapFromValue(pkg["requiredOutput"])
+	if required["mustUseCurrentTargetSnapshot"] != true || required["mustPatchDirectlyFromProvidedSnapshot"] != true {
+		t.Fatalf("requiredOutput = %#v, want exact patch contract for runtime-managed complete snapshot", required)
+	}
+	if required["stateChangingForbidden"] == true || required["mustAcquireCurrentTargetSnapshot"] == true {
+		t.Fatalf("requiredOutput = %#v, did not expect acquisition-only contract for safe snapshot", required)
+	}
+
+	for name, snapshot := range map[string]map[string]any{
+		"acquisition_required": {
+			"targetRef":                         "src/app.txt",
+			"contentComplete":                   false,
+			"safeForPatch":                      false,
+			"safeForFileWrite":                  false,
+			"safeForExactPatch":                 false,
+			"runtimeManaged":                    false,
+			"runtimeManagedAcquisitionRequired": true,
+			"snapshotValidity":                  "runtime_managed_file_read_required",
+		},
+		"truncated_runtime": {
+			"targetRef":        "src/app.txt",
+			"exists":           true,
+			"content":          "partial",
+			"contentHash":      "hash-partial",
+			"contentComplete":  false,
+			"safeForPatch":     false,
+			"safeForFileWrite": false,
+			"runtimeManaged":   true,
+			"truncated":        true,
+		},
+		"redacted_runtime": {
+			"targetRef":        "src/app.txt",
+			"exists":           true,
+			"content":          "[REDACTED]",
+			"contentHash":      "hash-redacted",
+			"contentComplete":  true,
+			"safeForPatch":     false,
+			"safeForFileWrite": false,
+			"runtimeManaged":   true,
+			"redacted":         true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			pkg := repairActionPackageFromRepairInput(map[string]any{
+				"stateChangingOutputRequired": true,
+				"repairObjective":             repairObjectiveStateChangingOutput,
+				"patchRepairContext":          []map[string]any{snapshot},
+			})
+			required := mapFromValue(pkg["requiredOutput"])
+			if required["mustUseCurrentTargetSnapshot"] == true || required["mustPatchDirectlyFromProvidedSnapshot"] == true {
+				t.Fatalf("requiredOutput = %#v, want unsafe snapshot not to authorize exact patch", required)
+			}
+			if required["mustAcquireCurrentTargetSnapshot"] != true || required["stateChangingForbidden"] != true {
+				t.Fatalf("requiredOutput = %#v, want read-only acquisition contract for unsafe snapshot", required)
+			}
+			if pkg["targetSnapshotAcquisitionRequired"] != true {
+				t.Fatalf("repairActionPackage = %#v, want explicit acquisition requirement", pkg)
+			}
+		})
+	}
+}
+
 func TestRuntimeRepairBaseInputWithoutFailedStepUsesDefaults(t *testing.T) {
 	input := runtimeRepairBaseInput(runtimeRepairBaseInputDeps{}, &runmodel.Run{ID: "run-repair-base-default"}, nil, 0, nil)
 

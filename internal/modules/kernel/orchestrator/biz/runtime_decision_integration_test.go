@@ -201,6 +201,7 @@ func TestRuntimeOrchestrator_ConvertsKnownReadableResourceDecisionToRepair(t *te
 	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 		call++
 		if call == 1 {
+			seedRuntimeManagedTargetSnapshotStep(t, ctx, stepRepo, common.WorkspaceID("ws-known-resource-decision"), common.RunID("run-known-resource-decision"), "main_test.go", "package main\n\nfunc TestKnownResource() {}\n")
 			return map[string]any{
 				"status":                "completed",
 				"blockDecisionReason":   "need main_test.go content",
@@ -267,8 +268,8 @@ func TestRuntimeOrchestrator_ConvertsKnownReadableResourceDecisionToRepair(t *te
 	if err := orch.StartRun(ctx, runID); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	if call != 2 {
-		t.Fatalf("runtime calls = %d, want initial decision plus repair", call)
+	if call != 1 {
+		t.Fatalf("runtime calls = %d, want initial decision then runtime-managed target snapshot acquisition", call)
 	}
 	tickets, err := ticketRepo.ListByRunID(ctx, runID)
 	if err != nil {
@@ -277,21 +278,8 @@ func TestRuntimeOrchestrator_ConvertsKnownReadableResourceDecisionToRepair(t *te
 	if len(tickets) != 0 {
 		t.Fatalf("tickets = %+v, want no human decision for known readable resource", tickets)
 	}
-	runItem, err := runRepo.Get(ctx, runID)
-	if err != nil {
-		t.Fatalf("get run: %v", err)
-	}
-	if runItem.State != common.RunStateCompleted {
-		t.Fatalf("run state = %s, want completed", runItem.State)
-	}
-	if repairInput == nil || !boolValue(repairInput[stepInputKeyRuntimeRepairFollowUp]) {
-		t.Fatalf("repair input = %+v, want runtime repair follow-up", repairInput)
-	}
-	resourceContext := mapSliceFromValue(repairInput["readableResourceRepairContext"])
-	if len(resourceContext) != 1 ||
-		resourceContext[0]["targetRef"] != "main_test.go" ||
-		!strings.Contains(stringFromMap(resourceContext[0], "content"), "TestKnownResource") {
-		t.Fatalf("readableResourceRepairContext = %+v, want main_test.go content", resourceContext)
+	if repairInput != nil {
+		t.Fatalf("repair input = %+v, want file/read acquisition before LLM repair", repairInput)
 	}
 }
 
@@ -321,6 +309,8 @@ func TestRuntimeOrchestrator_ConvertsQuestionOnlyReadableResourceDecisionToRepai
 	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 		call++
 		if call == 1 {
+			seedRuntimeManagedTargetSnapshotStep(t, ctx, stepRepo, common.WorkspaceID("ws-question-readable-decision"), common.RunID("run-question-readable-decision"), "config/config.go", "package config\n\nconst AppName = \"workorch-test\"\n")
+			seedRuntimeManagedTargetSnapshotStep(t, ctx, stepRepo, common.WorkspaceID("ws-question-readable-decision"), common.RunID("run-question-readable-decision"), "handler/handler.go", "package handler\n\nfunc Route() string { return \"ok\" }\n")
 			return map[string]any{
 				"status":                "completed",
 				"blockDecisionReason":   "tests need actual file contents before patching",
@@ -378,8 +368,8 @@ func TestRuntimeOrchestrator_ConvertsQuestionOnlyReadableResourceDecisionToRepai
 	if err := orch.StartRun(ctx, runID); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	if call != 2 {
-		t.Fatalf("runtime calls = %d, want initial decision plus repair", call)
+	if call != 1 {
+		t.Fatalf("runtime calls = %d, want initial decision then runtime-managed target snapshot acquisition", call)
 	}
 	tickets, err := ticketRepo.ListByRunID(ctx, runID)
 	if err != nil {
@@ -388,17 +378,8 @@ func TestRuntimeOrchestrator_ConvertsQuestionOnlyReadableResourceDecisionToRepai
 	if len(tickets) != 0 {
 		t.Fatalf("tickets = %+v, want no human decision for workspace-readable files", tickets)
 	}
-	resourceContext := mapSliceFromValue(repairInput["readableResourceRepairContext"])
-	if len(resourceContext) != 2 {
-		t.Fatalf("readableResourceRepairContext = %+v, want two file snapshots", resourceContext)
-	}
-	contentsByTarget := map[string]string{}
-	for _, item := range resourceContext {
-		contentsByTarget[stringFromMap(item, "targetRef")] = stringFromMap(item, "content")
-	}
-	if !strings.Contains(contentsByTarget["config/config.go"], "AppName") ||
-		!strings.Contains(contentsByTarget["handler/handler.go"], "Route") {
-		t.Fatalf("readableResourceRepairContext = %+v, want config and handler snapshots", resourceContext)
+	if repairInput != nil {
+		t.Fatalf("repair input = %+v, want file/read acquisition before LLM repair", repairInput)
 	}
 }
 
@@ -429,6 +410,7 @@ func TestRuntimeRepairInputPromotesReadableResourceDecisionIntoStateChangingTarg
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, stepRepo, workspaceID, runID, "target/resource.txt", "current target content\n")
 	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive, InitialStepKind: llmWorkspaceExecutionStepKind}
 	failedStep := &runmodel.Step{
 		ID:    "run-readable-state-changing/repair-001",
@@ -471,11 +453,12 @@ func TestRuntimeRepairInputPromotesReadableResourceDecisionIntoStateChangingTarg
 	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
 	if len(targets) != 1 ||
 		targets[0]["targetRef"] != "target/resource.txt" ||
-		!strings.Contains(stringFromMap(targets[0], "content"), "current target content") {
-		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want readable resource promoted to actionable target snapshot", actionPackage["targetSnapshots"])
+		targets[0]["runtimeManaged"] != true ||
+		targets[0]["safeForFileWrite"] != true {
+		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want readable resource promoted from runtime-managed target snapshot", actionPackage["targetSnapshots"])
 	}
-	if required := mapFromValue(actionPackage["requiredOutput"]); required["mustIncludeStateChangingNode"] != true {
-		t.Fatalf("requiredOutput = %+v, want state-changing contract", required)
+	if required := mapFromValue(actionPackage["requiredOutput"]); required["mustUseCurrentTargetSnapshot"] != true || required["stateChangingForbidden"] == true {
+		t.Fatalf("requiredOutput = %+v, want state-changing repair from runtime-managed target snapshot", required)
 	}
 }
 
@@ -885,8 +868,9 @@ func TestRuntimeOrchestrator_ResumeRunAutoRepairsOpenKnownReadableResourceDecisi
 	resourceContext := mapSliceFromValue(repairInput["readableResourceRepairContext"])
 	if len(resourceContext) != 1 ||
 		resourceContext[0]["targetRef"] != "main_test.go" ||
-		!strings.Contains(stringFromMap(resourceContext[0], "content"), "TestReadableTicketResource") {
-		t.Fatalf("readableResourceRepairContext = %+v, want current main_test.go content", resourceContext)
+		resourceContext[0]["snapshotValidity"] != "runtime_managed_file_read_required" ||
+		stringFromMap(resourceContext[0], "content") != "" {
+		t.Fatalf("readableResourceRepairContext = %+v, want runtime-managed acquisition placeholder", resourceContext)
 	}
 }
 

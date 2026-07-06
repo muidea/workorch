@@ -2779,6 +2779,9 @@ func cloneStringMap(input map[string]string) map[string]string {
 func clonePatch(item *run.Patch) run.Patch {
 	cloned := *item
 	cloned.CoverageTargets = cloneAny(item.CoverageTargets)
+	cloned.AffectedFiles = cloneStringSlice(item.AffectedFiles)
+	cloned.RiskReasons = cloneStringSlice(item.RiskReasons)
+	cloned.Diagnostics = cloneMapSlice(item.Diagnostics)
 	return cloned
 }
 

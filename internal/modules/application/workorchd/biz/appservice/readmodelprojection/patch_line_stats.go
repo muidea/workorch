@@ -10,6 +10,9 @@ func patchLineStats(item *runmodel.Patch) (int, int) {
 	if item == nil {
 		return 0, 0
 	}
+	if item.AddedLines != 0 || item.DeletedLines != 0 {
+		return item.AddedLines, item.DeletedLines
+	}
 	text := item.Diff
 	if strings.TrimSpace(text) == "" {
 		text = item.Content

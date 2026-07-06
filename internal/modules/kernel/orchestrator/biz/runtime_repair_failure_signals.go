@@ -732,12 +732,18 @@ func repairActionTargetSnapshot(item map[string]any) map[string]any {
 		"exists",
 		"contentHash",
 		"contentComplete",
+		"safeForPatch",
 		"safeForFileWrite",
+		"safeForExactPatch",
 		"redacted",
 		"truncated",
 		"isBinary",
 		"size",
 		"source",
+		"runtimeManaged",
+		"sourceStepId",
+		"evidenceRef",
+		"snapshotValidity",
 		"error",
 	} {
 		if value, ok := item[key]; ok && value != nil {
@@ -751,6 +757,60 @@ func repairActionTargetSnapshot(item map[string]any) map[string]any {
 		} else {
 			ret["contentPreview"] = truncateLLMContextString(content)
 		}
+	}
+	return ret
+}
+
+func repairTargetSnapshotExactPatchSafe(item map[string]any) bool {
+	if len(item) == 0 || !runtimeRepairTargetRefAdmissible(stringFromMap(item, "targetRef")) {
+		return false
+	}
+	if exists, ok := item["exists"]; ok && !boolValue(exists) {
+		return false
+	}
+	if boolValue(item["isBinary"]) || boolValue(item["redacted"]) || boolValue(item["truncated"]) {
+		return false
+	}
+	if runtimeManaged, ok := item["runtimeManaged"]; ok && !boolValue(runtimeManaged) {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(item, "snapshotValidity")) == "diagnostic_only_direct_read" ||
+		strings.TrimSpace(stringFromMap(item, "source")) == "direct_workspace_file_snapshot_without_runtime_evidence" {
+		return false
+	}
+	if safeForExact, ok := item["safeForExactPatch"]; ok && !boolValue(safeForExact) {
+		return false
+	}
+	if !boolValue(item["contentComplete"]) {
+		return false
+	}
+	if !boolValue(item["safeForFileWrite"]) && !boolValue(item["safeForPatch"]) && !boolValue(item["safeForExactPatch"]) {
+		return false
+	}
+	return strings.TrimSpace(stringFromMap(item, "contentHash")) != ""
+}
+
+func repairTargetSnapshotsHaveExactPatchSafe(items []map[string]any) bool {
+	for _, item := range items {
+		if repairTargetSnapshotExactPatchSafe(item) {
+			return true
+		}
+	}
+	return false
+}
+
+func exactPatchSafeRepairTargetSnapshots(items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if repairTargetSnapshotExactPatchSafe(item) {
+			ret = append(ret, item)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
 	}
 	return ret
 }
@@ -802,13 +862,19 @@ func repairActionTargetSnapshotMetadata(items []map[string]any) []map[string]any
 			"exists",
 			"contentHash",
 			"contentComplete",
+			"safeForPatch",
 			"safeForFileWrite",
+			"safeForExactPatch",
 			"redacted",
 			"truncated",
 			"isBinary",
 			"size",
 			"source",
 			"contextSource",
+			"runtimeManaged",
+			"sourceStepId",
+			"evidenceRef",
+			"snapshotValidity",
 			"error",
 		} {
 			if value, ok := item[key]; ok && value != nil {
@@ -875,8 +941,7 @@ func promoteRepairActionPackagePrerequisiteRootCauseCandidates(pkg map[string]an
 	}
 	requiredOutput["mustTargetFailureScope"] = true
 	requiredOutput["targetRelation"] = "grounded_prerequisite_root_cause_candidate_or_declared_related_failure_target"
-	applyCurrentSnapshotDirectPatchContract(requiredOutput)
-	requiredOutput["fileWriteExistingTargetRule"] = "only allowed when the target snapshot is complete/safe and patch/apply file_write includes baseHash equal to that snapshot contentHash; otherwise use patch/apply text_replace with exact oldText/newText/baseHash, bounded unified_diff, file/edit, or a declared auditable shell/tool state-changing operation"
+	applyTargetSnapshotSafetyRequiredOutputContract(requiredOutput, promoted)
 	pkg["requiredOutput"] = requiredOutput
 	targets := stringSliceFromValue(pkg["repairTargetSet"])
 	for _, item := range promoted {

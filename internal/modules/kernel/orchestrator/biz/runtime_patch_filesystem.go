@@ -3,133 +3,22 @@ package orchestrator
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
-
-func applyWorkspacePatch(deliverableDirectory string, request runtimePatchRequest) error {
-	if err := preflightWorkspacePatch(deliverableDirectory, request); err != nil {
-		return err
-	}
-	switch request.PatchType {
-	case "file_write":
-		return applyWorkspaceFileWrite(deliverableDirectory, request.TargetRef, request.Content, request.BaseHash)
-	case "unified_diff":
-		return applyWorkspaceUnifiedDiff(deliverableDirectory, request.TargetRef, request.Diff, request.BaseHash)
-	case "text_replace":
-		return applyWorkspaceTextReplace(deliverableDirectory, request)
-	default:
-		return common.ErrInvalidArgument
-	}
-}
 
 func preflightWorkspacePatch(deliverableDirectory string, request runtimePatchRequest) error {
 	_, err := previewWorkspacePatch(deliverableDirectory, request)
 	return err
 }
 
-func workspacePatchBeforeStateForRequest(deliverableDirectory string, request runtimePatchRequest) (workspacePatchBeforeState, error) {
-	target, err := workspaceTargetPath(deliverableDirectory, request.TargetRef)
-	if err != nil {
-		return workspacePatchBeforeState{}, err
-	}
-	data, err := os.ReadFile(target)
-	if err != nil {
-		if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) {
-			return workspacePatchBeforeState{Exists: false}, nil
-		}
-		return workspacePatchBeforeState{}, err
-	}
-	return workspacePatchBeforeState{
-		Exists:  true,
-		Content: string(data),
-		Hash:    sha256HexBytes(data),
-	}, nil
-}
-
-func workspacePatchAfterHash(deliverableDirectory string, targetRef string) (string, error) {
-	target, err := workspaceTargetPath(deliverableDirectory, targetRef)
-	if err != nil {
-		return "", err
-	}
-	data, err := os.ReadFile(target)
-	if err != nil {
-		return "", err
-	}
-	return sha256HexBytes(data), nil
-}
-
-func reverseDiffForPatch(targetRef string, originalContent string, originalExists bool) string {
-	if !originalExists {
-		return fmt.Sprintf("--- a/%s\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-\n", filepath.ToSlash(filepath.Clean(targetRef)))
-	}
-	return fmt.Sprintf("--- a/%s\n+++ b/%s\n@@ -1,0 +1,%d @@\n%s",
-		filepath.ToSlash(filepath.Clean(targetRef)),
-		filepath.ToSlash(filepath.Clean(targetRef)),
-		countTextLines(originalContent),
-		prefixDiffLines(originalContent, "+"),
-	)
-}
-
-func prefixDiffLines(content string, prefix string) string {
-	if content == "" {
-		return ""
-	}
-	lines, _ := splitTextLines(content)
-	var b strings.Builder
-	for _, line := range lines {
-		b.WriteString(prefix)
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-	return b.String()
-}
-
 func sha256HexBytes(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
-}
-
-func applyWorkspaceFileWrite(deliverableDirectory string, targetRef string, content string, baseHash string) error {
-	target, err := workspaceTargetPath(deliverableDirectory, targetRef)
-	if err != nil {
-		return err
-	}
-	if err := verifyWorkspacePatchBaseHash(target, baseHash); err != nil {
-		return err
-	}
-	if err := ensureWorkspacePatchParentDirectory(deliverableDirectory, targetRef, target, "file_write"); err != nil {
-		return err
-	}
-	return os.WriteFile(target, []byte(content), 0o644)
-}
-
-func applyWorkspaceTextReplace(deliverableDirectory string, request runtimePatchRequest) error {
-	target, err := workspaceTargetPath(deliverableDirectory, request.TargetRef)
-	if err != nil {
-		return err
-	}
-	data, err := os.ReadFile(target)
-	if err != nil {
-		return err
-	}
-	if patchRepairLooksBinary(data) {
-		return fmt.Errorf("%w: patch text_replace target is binary", common.ErrInvalidArgument)
-	}
-	if err := verifyWorkspacePatchBaseHashBytes(target, data, request.BaseHash); err != nil {
-		return err
-	}
-	nextContent, _, err := applyExactTextReplacement(string(data), request.OldText, request.NewText, request.Occurrence)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(target, []byte(nextContent), 0o644)
 }
 
 func applyExactTextReplacement(content string, oldText string, newText string, occurrence int) (string, int, error) {
@@ -162,52 +51,6 @@ func applyExactTextReplacement(content string, oldText string, newText string, o
 		}
 		start = absolute + len(oldText)
 	}
-}
-
-func ensureWorkspacePatchParentDirectory(deliverableDirectory string, targetRef string, target string, operation string) error {
-	base, err := filepath.Abs(deliverableDirectory)
-	if err != nil {
-		return err
-	}
-	if base, err = filepath.EvalSymlinks(base); err != nil {
-		return err
-	}
-	parent := filepath.Dir(target)
-	if parent == base {
-		return nil
-	}
-	relParent, err := filepath.Rel(base, parent)
-	if err != nil {
-		return err
-	}
-	current := base
-	for _, part := range strings.Split(relParent, string(filepath.Separator)) {
-		if part == "" || part == "." {
-			continue
-		}
-		current = filepath.Join(current, part)
-		info, statErr := os.Stat(current)
-		if statErr == nil {
-			if !info.IsDir() {
-				conflictRef, relErr := filepath.Rel(base, current)
-				if relErr != nil {
-					conflictRef = filepath.Clean(targetRef)
-				}
-				return &workspacePathConflictError{
-					Operation:    operation,
-					TargetRef:    filepath.ToSlash(filepath.Clean(targetRef)),
-					ConflictRef:  filepath.ToSlash(conflictRef),
-					ConflictKind: "file",
-				}
-			}
-			continue
-		}
-		if !os.IsNotExist(statErr) {
-			return statErr
-		}
-		break
-	}
-	return os.MkdirAll(parent, 0o755)
 }
 
 func workspaceTargetPath(deliverableDirectory string, targetRef string) (string, error) {
@@ -276,26 +119,17 @@ func verifyWorkspacePatchBaseHash(target string, baseHash string) error {
 	if baseHash == "" {
 		return nil
 	}
-	currentHash, err := fileSHA256(target)
+	data, err := os.ReadFile(target)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("%w: patch baseHash mismatch: target does not exist", common.ErrConflict)
 		}
 		return err
 	}
-	if !strings.EqualFold(currentHash, baseHash) {
+	if !strings.EqualFold(sha256HexBytes(data), baseHash) {
 		return fmt.Errorf("%w: patch baseHash mismatch", common.ErrConflict)
 	}
 	return nil
-}
-
-func fileSHA256(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), nil
 }
 
 func verifyWorkspacePatchBaseHashBytes(target string, content []byte, baseHash string) error {

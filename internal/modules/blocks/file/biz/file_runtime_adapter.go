@@ -35,6 +35,13 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runtimemo
 		return a.read(request)
 	case "file/edit":
 		return a.edit(request)
+	case "patch/preview":
+		return a.patchPreview(request)
+	case "patch/apply":
+		return a.patchApply(request)
+	case "patch/revert":
+		err := fmt.Errorf("%w: patch/revert requires formal reverse material from orchestrator", common.ErrInvalidArgument)
+		return patchErrorResult("patch_revert", "revert", "", "", err, "patch_revert_phase_gated"), err
 	default:
 		return runtimemodel.StepExecutionResult{}, common.ErrInvalidArgument
 	}
@@ -186,9 +193,10 @@ func (a *RuntimeAdapter) read(request runtimemodel.StepExecutionRequest) (runtim
 	endLine := intInput(request.Input, "endLine", 0)
 	content := ""
 	truncated := false
+	ranged := startLine > 0 || endLine > 0
 	if !isBinary {
 		content = string(data)
-		if startLine > 0 || endLine > 0 {
+		if ranged {
 			content = lineRange(content, startLine, endLine)
 		}
 		if len(content) > maxBytes {
@@ -201,18 +209,26 @@ func (a *RuntimeAdapter) read(request runtimemodel.StepExecutionRequest) (runtim
 	} else {
 		truncated = len(data) > 0
 	}
+	redacted := containsRuntimeRedactionMarker(content)
+	contentComplete := !isBinary && !truncated && !redacted && !ranged
+	safeForPatch := contentComplete && len(data) > 0
 	return runtimemodel.StepExecutionResult{Output: map[string]any{
-		"status":      "completed",
-		"stage":       "file_read",
-		"path":        filepath.ToSlash(rel),
-		"exists":      true,
-		"content":     content,
-		"contentHash": hex.EncodeToString(hashBytes[:]),
-		"size":        info.Size(),
-		"mtime":       info.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00"),
-		"lineCount":   lineCount,
-		"truncated":   truncated,
-		"isBinary":    isBinary,
+		"status":           "completed",
+		"stage":            "file_read",
+		"path":             filepath.ToSlash(rel),
+		"targetRef":        filepath.ToSlash(rel),
+		"exists":           true,
+		"content":          content,
+		"contentHash":      hex.EncodeToString(hashBytes[:]),
+		"size":             info.Size(),
+		"mtime":            info.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00"),
+		"lineCount":        lineCount,
+		"truncated":        truncated,
+		"isBinary":         isBinary,
+		"redacted":         redacted,
+		"contentComplete":  contentComplete,
+		"safeForPatch":     safeForPatch,
+		"safeForFileWrite": safeForPatch,
 	}}, nil
 }
 
@@ -563,6 +579,13 @@ func diffLineStats(diff string) (int, int) {
 func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+func containsRuntimeRedactionMarker(value string) bool {
+	value = strings.ToUpper(value)
+	return strings.Contains(value, "[REDACTED]") ||
+		strings.Contains(value, "[SECRET]") ||
+		strings.Contains(value, "[MASKED]")
 }
 
 func editApprovalRequired(path string, changedLines int) bool {

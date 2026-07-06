@@ -59,7 +59,7 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	if targetRef == "" {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch targetRef is required", common.ErrInvalidArgument)
 	}
-	if isReservedWorkspacePatchTarget(targetRef) {
+	if isReservedWorkspacePatchTarget(targetRef) && !boolValue(item["allowReservedTarget"]) {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch targetRef %q is reserved for WorkOrch-managed artifacts; return final query/report content in dodAssessment instead of writing report-only deliverables into the workspace", common.ErrInvalidArgument, targetRef)
 	}
 	if patchType == "" {

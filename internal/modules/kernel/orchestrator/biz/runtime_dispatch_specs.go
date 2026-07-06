@@ -43,7 +43,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 	}
 	if len(stepSummaries) == 0 {
 		input := initialStepInput(run)
-		input = hydrateInitialRepairTargetSnapshots(ctx, o.workspaces, o.convergenceManager(), run, input)
+		input = hydrateInitialRepairTargetSnapshots(ctx, o.workspaces, o.steps, o.convergenceManager(), run, input)
 		if providerID := common.RuntimeLLMProviderIDFromContext(ctx); providerID != "" {
 			input["llmProviderId"] = providerID
 		}
@@ -84,6 +84,7 @@ func activeLLMWorkspaceExecutionStep(steps []*runModel.Step) *runModel.Step {
 func hydrateInitialRepairTargetSnapshots(
 	ctx context.Context,
 	workspaces repository.WorkspaceRepository,
+	steps repository.StepRepository,
 	convergence *convergenceSubsystem,
 	run *runModel.Run,
 	input map[string]any,
@@ -102,17 +103,17 @@ func hydrateInitialRepairTargetSnapshots(
 	if len(targetRefs) == 0 {
 		return convergence.apply(input, convergence.build(run, nil, nil, map[string]any{"input": input}, nil))
 	}
-	workspace, err := workspaces.Get(ctx, run.WorkspaceID)
-	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
-		return convergence.apply(input, convergence.build(run, nil, nil, map[string]any{"input": input}, nil))
-	}
 	var snapshots []map[string]any
 	for _, targetRef := range targetRefs {
 		if len(snapshots) >= 3 {
 			break
 		}
-		item := patchRepairTargetSnapshot(workspace.DeliverableDirectory, targetRef)
-		if len(item) == 0 || !boolValue(item["exists"]) || boolValue(item["isBinary"]) {
+		item := runtimeManagedPatchTargetSnapshotFromReadSteps(ctx, steps, run, targetRef)
+		if len(item) == 0 {
+			item = patchRepairTargetSnapshot(targetRef)
+		}
+		if len(item) == 0 || boolValue(item["isBinary"]) ||
+			(!boolValue(item["runtimeManaged"]) && !boolValue(item["runtimeManagedAcquisitionRequired"])) {
 			continue
 		}
 		snapshots = append(snapshots, item)

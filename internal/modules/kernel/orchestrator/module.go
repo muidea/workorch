@@ -19,7 +19,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
-	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -30,10 +29,6 @@ type RuntimeAdapterRegistry = orchestratorbiz.RuntimeAdapterRegistry
 
 func NewRuntimeAdapterRegistry() *RuntimeAdapterRegistry {
 	return orchestratorbiz.NewRuntimeAdapterRegistry()
-}
-
-func NewPatchRuntimeAdapter() *orchestratorbiz.PatchRuntimeAdapter {
-	return orchestratorbiz.NewPatchRuntimeAdapter()
 }
 
 type Dependencies struct {
@@ -57,7 +52,6 @@ type Module struct {
 	steps             repository.StepRepository
 	eventHub          events.Hub
 	backgroundRoutine task.BackgroundRoutine
-	patchExecutor     *runtimeevent.Executor
 	unsub             []func()
 
 	recoveryMu       sync.Mutex
@@ -122,17 +116,6 @@ func (m *Module) Configure(deps Dependencies) error {
 	m.steps = deps.Steps
 	m.eventHub = deps.EventHub
 	m.backgroundRoutine = deps.BackgroundRoutine
-	if deps.BackgroundRoutine != nil {
-		m.patchExecutor = runtimeevent.NewExecutor(
-			ModuleID,
-			deps.EventHub,
-			deps.BackgroundRoutine,
-			orchestratorbiz.NewPatchRuntimeAdapter(),
-			runtimemodel.RuntimeBlockKindPatchApply,
-			runtimemodel.RuntimeBlockKindPatchPreview,
-			runtimemodel.RuntimeBlockKindPatchRevert,
-		)
-	}
 	return nil
 }
 
@@ -166,17 +149,6 @@ func (m *Module) Start() error {
 		m.eventHub.Subscribe(runtimeevent.TopicRuntimeBlockExecuteCompleted, m.handleRuntimeResultEvent),
 		m.eventHub.Subscribe(runtimeevent.TopicRuntimeBlockExecuteFailed, m.handleRuntimeResultEvent),
 	)
-	if m.patchExecutor != nil {
-		if err := m.patchExecutor.Run(); err != nil {
-			for idx := len(m.unsub) - 1; idx >= 0; idx-- {
-				if m.unsub[idx] != nil {
-					m.unsub[idx]()
-				}
-			}
-			m.unsub = nil
-			return err
-		}
-	}
 	return nil
 }
 
@@ -205,10 +177,6 @@ func (m *Module) handleRuntimePolicyCommand(ctx context.Context, envelope events
 
 func (m *Module) Stop(ctx context.Context) error {
 	_ = ctx
-	if m.patchExecutor != nil {
-		m.patchExecutor.Teardown()
-		m.patchExecutor = nil
-	}
 	for idx := len(m.unsub) - 1; idx >= 0; idx-- {
 		if m.unsub[idx] != nil {
 			m.unsub[idx]()

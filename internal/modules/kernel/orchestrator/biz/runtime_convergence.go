@@ -904,11 +904,11 @@ func populateTargetSnapshotAcquisitionConvergenceContract(input map[string]any, 
 	if contract == nil {
 		return
 	}
-	contract.State = convergenceStateNeedStateChange
+	contract.State = convergenceStateNeedEvidence
 	contract.RuntimeStage = runtimeStageRepair
 	contract.RuntimeStageMode = "target_snapshot_acquisition"
-	contract.RepairObjective = repairObjectiveStateChangingOutput
-	contract.StateChangingOutputRequired = true
+	contract.RepairObjective = repairObjectiveAcquireFailureEvidence
+	contract.StateChangingOutputRequired = false
 	contract.ConcreteFailureEvidenceRequired = true
 	contract.Prerequisite = targetSnapshotAcquisitionPrerequisite()
 	if contract.RepairActionPackage == nil {
@@ -1014,14 +1014,17 @@ func stateChangeHasReadableTargetSnapshotRef(input map[string]any, pkg map[strin
 }
 
 func stateChangeHasCurrentTargetSnapshot(input map[string]any, pkg map[string]any) bool {
-	if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 || len(mapSliceFromValue(pkg["currentTargetSnapshots"])) > 0 {
+	if repairTargetSnapshotsHaveExactPatchSafe(mergeRepairTargetSnapshots(
+		mapSliceFromValue(pkg["targetSnapshots"]),
+		mapSliceFromValue(pkg["currentTargetSnapshots"]),
+	)) {
 		return true
 	}
-	if len(repairActionTargetSnapshots(input)) > 0 {
+	if repairTargetSnapshotsHaveExactPatchSafe(repairActionTargetSnapshots(input)) {
 		return true
 	}
 	for _, key := range []string{"targetSnapshots", "currentTargetSnapshots", "failureTargetRepairContext", "patchRepairContext", "rootCauseCandidateContext"} {
-		if repairContextHasAdmissibleTargetEvidence(input[key]) {
+		if repairTargetSnapshotsHaveExactPatchSafe(mapSliceFromValue(input[key])) {
 			return true
 		}
 	}
@@ -2078,7 +2081,7 @@ func syncRepairActionPackageTargetSnapshots(input map[string]any, pkg map[string
 	}
 	required["mustTargetFailureScope"] = true
 	required["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
-	applyCurrentSnapshotDirectPatchContract(required)
+	applyTargetSnapshotSafetyRequiredOutputContract(required, merged)
 	pkg["requiredOutput"] = required
 }
 
@@ -2087,9 +2090,10 @@ func enforceStateChangingRequiredOutputForConvergence(pkg map[string]any, inputs
 	required := stateChangingRepairRequiredOutput()
 	preserveStateChangingRequiredOutputSignals(required, mapFromValue(pkg["requiredOutput"]))
 	if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 || len(mapSliceFromValue(pkg["currentTargetSnapshots"])) > 0 {
+		snapshots := mergeRepairTargetSnapshots(mapSliceFromValue(pkg["targetSnapshots"]), mapSliceFromValue(pkg["currentTargetSnapshots"]))
 		required["mustTargetFailureScope"] = true
 		required["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
-		applyCurrentSnapshotDirectPatchContract(required)
+		applyTargetSnapshotSafetyRequiredOutputContract(required, snapshots)
 	}
 	if len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
 		required["mustTargetRepairTargetSet"] = true
@@ -3415,8 +3419,7 @@ func mergeCurrentRepairTargetEvidenceForProfileStateChange(input map[string]any,
 			pkg["currentTargetSnapshots"] = repairActionTargetSnapshotMetadata(merged)
 			required["mustTargetFailureScope"] = true
 			required["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
-			applyCurrentSnapshotDirectPatchContract(required)
-			required["fileWriteExistingTargetRule"] = "only allowed when the target snapshot is complete/safe and patch/apply file_write includes baseHash equal to that snapshot contentHash; otherwise use patch/apply text_replace with exact oldText/newText/baseHash, bounded unified_diff, or file/edit"
+			applyTargetSnapshotSafetyRequiredOutputContract(required, merged)
 		}
 	}
 	if targetSet := repairActionTargetSet(input, pkg); len(targetSet) > 0 {

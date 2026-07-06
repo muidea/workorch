@@ -42,7 +42,7 @@ block 不拥有：
 - `mcp/tool_call` / `mcp/resource_read` / `mcp/prompt_get` -> `blocks/mcp`
 - `shell/command` -> `blocks/shell`
 - `file/*` -> `blocks/file`
-- `patch/*` -> 当前由 `kernel/orchestrator` 的 controlled patch executor 承接
+- `patch/*` -> `blocks/file`
 - `git/*` -> `blocks/git`
 - `web/*` -> `blocks/web`
 - `ssh/command` -> `blocks/ssh`
@@ -62,9 +62,9 @@ block 不拥有：
 | `file/list` | `blocks/file` | `blocks/file` | 目录扫描与相对路径枚举 |
 | `file/read` | `blocks/file` | `blocks/file` | 文件正文读取与摘要 |
 | `file/edit` | `blocks/file` | `blocks/file` | 小范围编辑请求，转换为 patch intent |
-| `patch/preview` | `kernel/orchestrator` | `kernel/orchestrator` | controlled patch 预演、风险、审批需求和 patch evidence 输入 |
-| `patch/apply` | `kernel/orchestrator` | `kernel/orchestrator` | controlled patch 输出规范化、正式落盘和 patch evidence |
-| `patch/revert` | `kernel/orchestrator` | `kernel/orchestrator` | controlled patch revert metadata |
+| `patch/preview` | `kernel/orchestrator` | `blocks/file` | patch 技术预演、风险、审批需求和 patch evidence 输入 |
+| `patch/apply` | `kernel/orchestrator` | `blocks/file` | patch 技术落盘和结构化执行结果 |
+| `patch/revert` | `kernel/orchestrator` | `blocks/file` | patch reverse material 充分时的技术回滚执行 |
 | `git/read` | `blocks/git` | `blocks/git` | repo 状态、diff、log、show、branch 摘要 |
 | `git/write` | `blocks/git` | `blocks/git` | add / commit 等最小写入闭环 |
 | `web/search` | `blocks/web` | `blocks/web` | 候选来源发现 |
@@ -77,7 +77,7 @@ block 不拥有：
 - 是否允许某个 step kind 出现在当前 run，继续由 runtime contract、Soul、Skill、policy、approval 共同决定
 - 具体业务解释必须留在 profile / capability / product 层
 - `llm/assessment_only` 不是独立 step kind；它是 `llm/workspace_execution` 的 runtime mode / stage contract。
-- `patch/*` 当前归属 `kernel/orchestrator` 是因为 patch apply/revert 与 approval、patch evidence、repair contract、result gate 共享正式状态链路；若后续迁移到 `blocks/file`，必须同步迁移 governance-linked patch evidence contract，不能只迁移文件写入函数。
+- `patch/*` 的技术执行归属 `blocks/file`；`kernel/orchestrator` 仍然是 runtime contract、approval gate、formal Patch evidence、coverage ledger 和 result gate 的正式权威。迁移过程中不能把 block 执行结果提升为并行 Patch 事实源。
 
 ## LLM Block
 

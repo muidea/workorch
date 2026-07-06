@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
@@ -36,6 +37,10 @@ func (s *stubRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runti
 	if s.fnRequest != nil {
 		output, err := s.fnRequest(request)
 		return runtimemodel.StepExecutionResult{Output: output}, err
+	}
+	switch request.Kind {
+	case "patch/preview", "patch/apply", "patch/revert":
+		return filebiz.NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), request)
 	}
 	if s.fn != nil {
 		output, err := s.fn(stepID)

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -191,6 +192,7 @@ func TestApplyAssembledArtifactContinuationWritesDeliverableAndEvidence(t *testi
 		StepID:      step.ID,
 	}
 	orch := &RuntimeOrchestrator{
+		runtime: filebiz.NewRuntimeAdapter(),
 		evidence: RuntimeEvidenceRepositories{
 			ArtifactContinuations: continuations,
 			Patches:               patches,

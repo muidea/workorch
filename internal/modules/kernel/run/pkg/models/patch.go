@@ -18,6 +18,12 @@ type Patch struct {
 	State            common.PatchState
 	BeforeHash       string
 	AfterHash        string
+	AffectedFiles    []string
+	AddedLines       int
+	DeletedLines     int
+	RiskLevel        string
+	RiskReasons      []string
+	Diagnostics      []map[string]any
 	OriginalContent  string
 	OriginalExists   bool
 	ReverseDiff      string

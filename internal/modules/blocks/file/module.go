@@ -15,6 +15,9 @@ const ModuleID = modulecommon.ModuleID
 const StepKindList = modulecommon.StepKindList
 const StepKindRead = modulecommon.StepKindRead
 const StepKindEdit = modulecommon.StepKindEdit
+const StepKindPatchApply = modulecommon.StepKindPatchApply
+const StepKindPatchPreview = modulecommon.StepKindPatchPreview
+const StepKindPatchRevert = modulecommon.StepKindPatchRevert
 
 type Module struct {
 	runtimeAdapter *filebiz.RuntimeAdapter
@@ -48,7 +51,18 @@ func (m *Module) Start() error {
 	if m.executor != nil {
 		return nil
 	}
-	m.executor = runtimeevent.NewExecutor(ModuleID, m.eventHub, m.background, m.runtimeAdapter, StepKindList, StepKindRead, StepKindEdit)
+	m.executor = runtimeevent.NewExecutor(
+		ModuleID,
+		m.eventHub,
+		m.background,
+		m.runtimeAdapter,
+		StepKindList,
+		StepKindRead,
+		StepKindEdit,
+		StepKindPatchApply,
+		StepKindPatchPreview,
+		StepKindPatchRevert,
+	)
 	return m.executor.Run()
 }
 

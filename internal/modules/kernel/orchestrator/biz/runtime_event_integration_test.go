@@ -356,15 +356,15 @@ func TestRuntimeOrchestrator_StartRunFailsInvalidUnifiedDiffPatch(t *testing.T) 
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
-	if step.State != common.StepStateFailed || stringFromMap(step.Output, "stage") != "patch_apply_failed" {
-		t.Fatalf("step = %+v, want failed patch_apply_failed step", step)
+	if step.State != common.StepStateFailed || stringFromMap(step.Output, "stage") != "patch_apply" {
+		t.Fatalf("step = %+v, want failed patch_apply block step", step)
 	}
 	patches, err := patchRepo.ListByRun(ctx, runID)
 	if err != nil {
 		t.Fatalf("list patches: %v", err)
 	}
-	if len(patches) != 1 || patches[0].State != common.PatchStateFailed {
-		t.Fatalf("patches = %+v, want failed unified diff patch", patches)
+	if len(patches) != 0 {
+		t.Fatalf("patches = %+v, want no formal patch for failed block result", patches)
 	}
 	content, err := os.ReadFile(filepath.Join(deliverableDirectory, "docs", "result.txt"))
 	if err != nil {
@@ -433,15 +433,15 @@ func TestRuntimeOrchestrator_StartRunFailsInvalidRuntimePatchTarget(t *testing.T
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
-	if step.State != common.StepStateFailed || stringFromMap(step.Output, "stage") != "patch_apply_failed" {
-		t.Fatalf("step = %+v, want failed patch_apply_failed step", step)
+	if step.State != common.StepStateFailed || stringFromMap(step.Output, "stage") != "patch_apply" {
+		t.Fatalf("step = %+v, want failed patch_apply block step", step)
 	}
 	patches, err := patchRepo.ListByRun(ctx, runID)
 	if err != nil {
 		t.Fatalf("list patches: %v", err)
 	}
-	if len(patches) != 1 || patches[0].State != common.PatchStateFailed {
-		t.Fatalf("patches = %+v, want one failed patch", patches)
+	if len(patches) != 0 {
+		t.Fatalf("patches = %+v, want no formal patch for failed block result", patches)
 	}
 }
 

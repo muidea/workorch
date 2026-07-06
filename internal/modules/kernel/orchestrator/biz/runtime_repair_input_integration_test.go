@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
@@ -20,6 +21,50 @@ import (
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+type testStepCreator interface {
+	Create(context.Context, *runmodel.Step) error
+}
+
+func seedRuntimeManagedTargetSnapshotStep(t *testing.T, ctx context.Context, steps testStepCreator, workspaceID common.WorkspaceID, runID common.RunID, targetRef string, content string) {
+	t.Helper()
+	if steps == nil {
+		t.Fatalf("step repository is required")
+	}
+	stepID := common.StepID(fmt.Sprintf("%s/read-target-%s", runID, runtimeReadableIDPart(targetRef)))
+	if stepID == common.StepID(string(runID)+"/read-target-") {
+		stepID = common.StepID(string(runID) + "/read-target")
+	}
+	err := steps.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "file/read",
+		State: common.StepStateSucceeded,
+		Input: map[string]any{
+			"path":                      targetRef,
+			"targetRef":                 targetRef,
+			"runtimeManagedAcquisition": true,
+			"acquisitionKind":           "target_snapshot",
+		},
+		Output: map[string]any{
+			"status":                    "completed",
+			"stage":                     "file_read",
+			"path":                      targetRef,
+			"targetRef":                 targetRef,
+			"exists":                    true,
+			"content":                   content,
+			"contentHash":               sha256HexBytes([]byte(content)),
+			"contentComplete":           true,
+			"safeForFileWrite":          true,
+			"runtimeManagedAcquisition": true,
+			"acquisitionKind":           "target_snapshot",
+			"size":                      len(content),
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed runtime-managed target snapshot step: %v", err)
+	}
+}
 
 func TestDecisionWithQuestionReferencingReadableWorkspaceFileShouldRepair(t *testing.T) {
 	spec := runtimeDecisionBlockSpec{
@@ -47,9 +92,17 @@ func TestApplyWorkspaceUnifiedDiffReportsContextMismatch(t *testing.T) {
 	if err := os.WriteFile(targetPath, []byte("package main\n\nfunc TestAuth() {\n\tif auth != \"Bearer [REDACTED]\" {\n\t\tpanic(\"bad auth\")\n\t}\n}\n"), 0o644); err != nil {
 		t.Fatalf("seed target: %v", err)
 	}
-	err := applyWorkspaceUnifiedDiff(deliverableDirectory, "main_test.go", "--- a/main_test.go\n+++ b/main_test.go\n@@ -34,7 +34,7 @@\n \tauth := r.Header.Get(\"Authorization\")\n-\tif auth != \"Bearer [REDACTED]\" {\n+\tif auth != \"Bearer test-key\" {\n \t\thttp.Error(w, \"Unauthorized\", http.StatusUnauthorized)\n", "")
+	_, err := filebiz.NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          llmcommon.RuntimeBlockKindPatchApply,
+		Input: map[string]any{
+			"patchType": "unified_diff",
+			"targetRef": "main_test.go",
+			"diff":      "--- a/main_test.go\n+++ b/main_test.go\n@@ -34,7 +34,7 @@\n \tauth := r.Header.Get(\"Authorization\")\n-\tif auth != \"Bearer [REDACTED]\" {\n+\tif auth != \"Bearer test-key\" {\n \t\thttp.Error(w, \"Unauthorized\", http.StatusUnauthorized)\n",
+		},
+	})
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "unified diff hunk") {
-		t.Fatalf("applyWorkspaceUnifiedDiff err = %v, want contextual unified diff error", err)
+		t.Fatalf("patch/apply unified_diff err = %v, want contextual unified diff error", err)
 	}
 }
 
@@ -202,9 +255,11 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchConflictDiagnosticsA
 	validationRepo := memory.NewValidationResultRepository()
 	checkpointRepo := memory.NewRuntimeCheckpointRepository()
 	toolCallRepo := memory.NewToolCallRepository()
-	var repairInput map[string]any
 	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 		switch {
+		case request.Kind == llmcommon.RuntimeBlockKindPatchApply:
+			result, err := filebiz.NewRuntimeAdapter().ExecuteRuntimeStep(ctx, request)
+			return result.Output, err
 		case request.StepID == "run-patch-conflict-repair/step-1":
 			return map[string]any{
 				"status": "completed",
@@ -217,8 +272,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchConflictDiagnosticsA
 					},
 				},
 			}, nil
-		case strings.Contains(string(request.StepID), "/repair-"):
-			repairInput = request.Input
+		case strings.Contains(string(request.StepID), "repair"):
 			return map[string]any{
 				"status": "completed",
 				"dodAssessment": map[string]any{
@@ -275,23 +329,17 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchConflictDiagnosticsA
 	if err := orch.StartRun(ctx, runID); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	if repairInput == nil {
-		t.Fatalf("repair input was not captured")
+	failedStep, err := stepRepo.Get(ctx, common.StepID(string(runID)+"/step-1"))
+	if err != nil {
+		t.Fatalf("get failed step: %v", err)
 	}
-	failedOutput, ok := repairInput["failedStepOutput"].(map[string]any)
-	if !ok {
-		t.Fatalf("failedStepOutput = %#v, want map", repairInput["failedStepOutput"])
-	}
+	failedOutput := failedStep.Output
 	diagnostics, ok := failedOutput["runtimeDiagnostics"].(map[string]any)
 	if !ok || diagnostics["kind"] != "workspace_path_conflict" || diagnostics["conflictRef"] != "llm-proxy" {
 		t.Fatalf("runtimeDiagnostics = %#v, want workspace path conflict", failedOutput["runtimeDiagnostics"])
 	}
 	if failedOutput["failureClass"] != failureClassWorkspacePath || !strings.Contains(fmt.Sprint(failedOutput["failureSignature"]), "conflictRef=llm-proxy") {
 		t.Fatalf("failure classification = class:%#v signature:%#v, want workspace path conflict signature", failedOutput["failureClass"], failedOutput["failureSignature"])
-	}
-	manifest, ok := repairInput[stepInputKeyWorkspaceFileManifest].([]map[string]any)
-	if !ok || len(manifest) != 1 || manifest[0]["path"] != "llm-proxy" || manifest[0]["executable"] != true {
-		t.Fatalf("workspaceFileManifest = %#v, want executable llm-proxy file", repairInput[stepInputKeyWorkspaceFileManifest])
 	}
 	checkpoints, err := checkpointRepo.ListByRun(ctx, runID)
 	if err != nil {
@@ -315,6 +363,8 @@ func TestRuntimeOrchestrator_RuntimeRepairInputSkipsWorkspaceManifestForDoDFailu
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "gateway/main_test.go", "package gateway\n\nfunc TestProxyHandlerBasic(t *testing.T) {}\n")
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "gateway/main.go", "package gateway\n\nfunc proxyPath() string { return \"/chat/completions\" }\n")
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/validation"),
 		RunID: runID,
@@ -404,6 +454,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *te
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "source.txt", source)
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/block/apply"),
 		RunID: runID,
@@ -436,18 +487,32 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *te
 		t.Fatalf("convergenceContract = %+v, want need_state_change for patch hunk mismatch", contract)
 	}
 	item := patchContext[0]
-	if item["targetRef"] != "source.txt" || item["exists"] != true || item["source"] != "current_workspace_file" {
-		t.Fatalf("patchRepairContext item = %#v, want current source.txt snapshot", item)
+	if item["targetRef"] != "source.txt" ||
+		item["source"] != "runtime_managed_file_read" ||
+		item["runtimeManaged"] != true ||
+		item["snapshotValidity"] != "runtime_managed_file_read_output" {
+		t.Fatalf("patchRepairContext item = %#v, want runtime-managed source.txt snapshot", item)
 	}
 	content, _ := item["content"].(string)
 	if !strings.Contains(content, "*Type") || !strings.Contains(content, "*Value") {
-		t.Fatalf("patchRepairContext content = %q, want exact current source operators", content)
+		t.Fatalf("patchRepairContext content = %q, want runtime-managed current source operators", content)
 	}
 	if strings.TrimSpace(stringFromMap(item, "contentHash")) == "" {
 		t.Fatalf("patchRepairContext contentHash missing: %#v", item)
 	}
-	if item["contentComplete"] != true || item["safeForFileWrite"] != true {
-		t.Fatalf("patchRepairContext safety = %#v, want complete safe snapshot", item)
+	if item["contentComplete"] != true || item["safeForFileWrite"] != true || item["safeForExactPatch"] != true {
+		t.Fatalf("patchRepairContext safety = %#v, want complete exact-patch-safe runtime-managed snapshot", item)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	if required["mustUseCurrentTargetSnapshot"] != true || required["mustPatchDirectlyFromProvidedSnapshot"] != true {
+		t.Fatalf("requiredOutput = %#v, want runtime-managed snapshot to authorize exact patch", required)
+	}
+	if required["mustAcquireCurrentTargetSnapshot"] == true || required["stateChangingForbidden"] == true {
+		t.Fatalf("requiredOutput = %#v, did not expect acquisition-only contract for runtime-managed snapshot", required)
+	}
+	if pkg["targetSnapshotAcquisitionRequired"] == true {
+		t.Fatalf("repairActionPackage = %#v, did not expect acquisition requirement", pkg)
 	}
 	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
 	for _, want := range []string{"patchRepairContext", "failed patch text as stale", "safeForFileWrite", "minimal unified_diff", "runtime redaction marker tokens", "synchronizes modified file content", "input.content"} {
@@ -604,6 +669,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchRepairSuggestions(t 
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "source.txt", source)
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/block/apply"),
 		RunID: runID,
@@ -652,6 +718,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputDetectsAlreadySatisfiedFailedPatc
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "main.go", source)
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/graph-027/002-apply-import-fix"),
 		RunID: runID,
@@ -730,6 +797,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputDetectsAlreadySatisfiedTextReplac
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "source.txt", source)
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/graph-003/001-apply-replacement"),
 		RunID: runID,
@@ -805,6 +873,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesLineRemovalPatchSuggestio
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "gateway_test.go", source)
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/graph-006/001-fix-import"),
 		RunID: runID,
@@ -861,6 +930,8 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesMalformedDiffAndMissingNa
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "streaming_fallback_estimator_test.go", "package main\n\nfunc TestFallback(t *testing.T) {\n\t_ = Config{Port: 8080}\n\t_ = newGatewayHandler()\n}\n")
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "gateway.go", "package main\n\ntype Config struct { Address string }\n\nfunc NewGatewayHandler() {}\n")
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/graph-006/002-run-go-test-after-patch"),
 		RunID: runID,
@@ -899,37 +970,32 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesMalformedDiffAndMissingNa
 	}
 }
 
-func TestPatchRepairTargetSnapshotMarksRedactedOrTruncatedContentUnsafeForFileWrite(t *testing.T) {
-	deliverableDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(deliverableDirectory, "secret.txt"), []byte("token [REDACTED]\n"), 0o644); err != nil {
-		t.Fatalf("seed redacted file: %v", err)
+func TestPatchRepairTargetSnapshotRequiresRuntimeManagedAcquisition(t *testing.T) {
+	item := patchRepairTargetSnapshot("src/main.go")
+	if item["targetRef"] != "src/main.go" ||
+		item["source"] != "runtime_managed_file_read_required" ||
+		item["snapshotValidity"] != "runtime_managed_file_read_required" ||
+		item["runtimeManaged"] != false ||
+		item["runtimeManagedAcquisitionRequired"] != true ||
+		item["requiredRuntimeBlock"] != "file/read" ||
+		item["contentComplete"] != false ||
+		item["safeForFileWrite"] != false ||
+		item["safeForPatch"] != false ||
+		item["safeForExactPatch"] != false {
+		t.Fatalf("snapshot placeholder = %#v, want runtime-managed acquisition required", item)
 	}
-	largeSafe := strings.Repeat("safe-current-line\n", 900)
-	if len(largeSafe) <= maxLLMContextStringBytes {
-		t.Fatalf("test fixture too small")
+	if content := stringFromMap(item, "content"); content != "" {
+		t.Fatalf("snapshot placeholder content = %q, want no direct content", content)
 	}
-	if err := os.WriteFile(filepath.Join(deliverableDirectory, "large-safe.txt"), []byte(largeSafe), 0o644); err != nil {
-		t.Fatalf("seed large safe file: %v", err)
-	}
-	large := strings.Repeat("x", maxPatchRepairSnapshotBytes+1)
-	if err := os.WriteFile(filepath.Join(deliverableDirectory, "large.txt"), []byte(large), 0o644); err != nil {
-		t.Fatalf("seed large file: %v", err)
+	if hash := stringFromMap(item, "contentHash"); hash != "" {
+		t.Fatalf("snapshot placeholder contentHash = %q, want no direct content hash", hash)
 	}
 
-	redacted := patchRepairTargetSnapshot(deliverableDirectory, "secret.txt")
-	if redacted["redacted"] != true || redacted["safeForFileWrite"] != false || redacted["contentComplete"] != true {
-		t.Fatalf("redacted snapshot = %#v, want unsafe redacted complete snapshot", redacted)
-	}
-	safe := patchRepairTargetSnapshot(deliverableDirectory, "large-safe.txt")
-	if safe["truncated"] == true || safe["contentComplete"] != true || safe["safeForFileWrite"] != true {
-		t.Fatalf("large safe snapshot = %#v, want complete safe snapshot", safe)
-	}
-	if got, want := stringFromMap(safe, "content"), strings.TrimSpace(largeSafe); got != want {
-		t.Fatalf("large safe content length = %d, want full trimmed length %d", len(got), len(want))
-	}
-	truncated := patchRepairTargetSnapshot(deliverableDirectory, "large.txt")
-	if truncated["truncated"] != true || truncated["contentComplete"] != false || truncated["safeForFileWrite"] != false {
-		t.Fatalf("truncated snapshot = %#v, want unsafe truncated snapshot", truncated)
+	invalid := patchRepairTargetSnapshot("../secret.txt")
+	if invalid["runtimeManagedAcquisitionRequired"] != false ||
+		invalid["snapshotValidity"] != "invalid_target_ref_for_runtime_managed_file_read" ||
+		stringFromMap(invalid, "error") == "" {
+		t.Fatalf("invalid snapshot placeholder = %#v, want invalid target ref marker", invalid)
 	}
 }
 
@@ -950,6 +1016,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshot(t *
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "main_test.go", source)
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/graph-001/004-test"),
 		RunID: runID,
@@ -975,11 +1042,16 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshot(t *
 		t.Fatalf("failureTargetRepairContext = %#v, want one target snapshot", input["failureTargetRepairContext"])
 	}
 	item := targetContext[0]
-	if item["targetRef"] != "main_test.go" || item["exists"] != true || item["source"] != "failure_target_current_workspace_file" {
-		t.Fatalf("failureTargetRepairContext item = %#v, want current main_test.go target", item)
+	if item["targetRef"] != "main_test.go" ||
+		item["exists"] != true ||
+		item["source"] != "runtime_managed_file_read" ||
+		item["runtimeManaged"] != true ||
+		item["safeForFileWrite"] != true ||
+		item["snapshotValidity"] != "runtime_managed_file_read_output" {
+		t.Fatalf("failureTargetRepairContext item = %#v, want runtime-managed current main_test.go target", item)
 	}
 	if content := stringFromMap(item, "content"); !strings.Contains(content, "unused/pkg") {
-		t.Fatalf("failureTargetRepairContext content = %q, want current failing target content", content)
+		t.Fatalf("failureTargetRepairContext content = %q, want runtime-managed failing target content", content)
 	}
 	manifest := mapSliceFromValue(input[stepInputKeyWorkspaceFileManifest])
 	if len(manifest) != 2 || manifest[0]["path"] != "main_test.go" || manifest[1]["path"] != "support.txt" {
@@ -994,8 +1066,8 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshot(t *
 		t.Fatalf("repairActionPackage = %#v, want actionable package", input["repairActionPackage"])
 	}
 	required := mapFromValue(actionPackage["requiredOutput"])
-	if required["mustIncludeStateChangingNode"] != true || !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
-		t.Fatalf("repairActionPackage.requiredOutput = %#v, want patch/apply state-changing contract", required)
+	if required["mustUseCurrentTargetSnapshot"] != true || required["stateChangingForbidden"] == true {
+		t.Fatalf("repairActionPackage.requiredOutput = %#v, want state-changing contract from runtime-managed target snapshot", required)
 	}
 	if required["mustTargetFailureScope"] != true || required["targetRelation"] != "failure_target_repair_snapshot_or_declared_related_failure_target" {
 		t.Fatalf("repairActionPackage.requiredOutput = %#v, want target-relevant repair contract", required)
@@ -1025,6 +1097,8 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesRootCauseCandidatesForRes
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "gateway/main_test.go", "package main\n\nfunc TestProxyPath(t *testing.T) {}\n")
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "gateway/main.go", "package main\n\nfunc proxyPath() string { return \"/chat/completions\" }\n")
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/graph-001/006-test"),
 		RunID: runID,
@@ -1095,6 +1169,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesFailureTargetSnapshotFrom
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "nested/target_test.go", "package nested\n")
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/graph-001/003-validate"),
 		RunID: runID,
@@ -1219,6 +1294,8 @@ func TestRuntimeOrchestrator_RuntimeRepairInputPrioritizesResourceShapeDiagnosti
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "streaming_fallback_estimator_test.go", "package main\n\nfunc TestFallback(t *testing.T) {\n\t_ = Config{Port: 8080}\n\t_ = newGatewayHandler()\n}\n")
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "gateway.go", "package main\n\ntype Config struct { Address string }\nfunc newHandler(cfg Config) any { return cfg }\n")
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/graph-014/002-rerun-targeted-streaming-fallback-tests"),
 		RunID: runID,
@@ -1295,6 +1372,8 @@ func TestRuntimeOrchestrator_RuntimeRepairInputUsesInheritedShapeDiagnosticsForA
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "resource_contract_test.go", "package main\n\nfunc TestContract(t *testing.T) {\n\t_ = ResourceShape{MissingShapeField: 4096}\n}\n")
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "resource.go", "package main\n\ntype ResourceShape struct { ExistingField int }\n")
 	signals := map[string]any{
 		"targetRefs":  []string{"resource_contract_test.go"},
 		"identifiers": []string{"MissingShapeField", "ResourceShape"},
@@ -1393,6 +1472,9 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesReferencedWorkspaceResour
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	for name, content := range files {
+		seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, name, string(content))
+	}
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/graph-008/002-verify-build"),
 		RunID: runID,
@@ -1430,9 +1512,9 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesReferencedWorkspaceResour
 	}
 	actionPackage := mapFromValue(input["repairActionPackage"])
 	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
-	for _, want := range []string{"main.go", "internal/config/config.go", "internal/usage/recorder.go", "internal/observability/observability.go"} {
-		if !mapSliceContainsTargetRef(targets, want) {
-			t.Fatalf("repairActionPackage.targetSnapshots = %#v, want %s", targets, want)
+	for _, target := range targets {
+		if target["runtimeManaged"] != true || target["safeForFileWrite"] != true || target["snapshotValidity"] != "runtime_managed_file_read_output" {
+			t.Fatalf("repairActionPackage.targetSnapshots = %#v, want runtime-managed snapshots from file/read", targets)
 		}
 	}
 	targetSet := stringSliceFromValue(actionPackage["repairTargetSet"])
@@ -1468,6 +1550,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputResolvesUniqueSuffixFailureTarget
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "nested/target_test.go", "package nested\n")
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/graph-001/004-test"),
 		RunID: runID,
@@ -1537,14 +1620,14 @@ func TestRuntimeOrchestrator_ValidationFailureWithConcreteTargetEscalatesToState
 	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 1, errors.New("exit status 1"))
 
 	if input["repairObjective"] != repairObjectiveStateChangingOutput || !boolValue(input["stateChangingOutputRequired"]) {
-		t.Fatalf("repair input = %+v, want validation failure with concrete target to require state-changing repair", input)
+		t.Fatalf("repair input = %+v, want validation failure with concrete target lineage to retain state-changing parent objective", input)
 	}
 	if boolValue(input["boundedValidationRequired"]) || boolValue(input["concreteFailureEvidenceRequired"]) {
 		t.Fatalf("repair input = %+v, must not stay validation/failure-evidence only after targeted validation failure", input)
 	}
 	required := currentRequiredOutputForAuthority(input)
-	if !requiredOutputHasAllowedStateChangingKind(required) {
-		t.Fatalf("requiredOutput = %+v, want state-changing accepted kind", required)
+	if required["mustAcquireCurrentTargetSnapshot"] != true || required["stateChangingForbidden"] != true {
+		t.Fatalf("requiredOutput = %+v, want runtime-managed target snapshot acquisition before state change", required)
 	}
 }
 
@@ -1586,8 +1669,8 @@ func TestRuntimeOrchestrator_RuntimeRepairInputKeepsAmbiguousSuffixFailureTarget
 	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 1, errors.New("exit status 1"))
 
 	targetContext := mapSliceFromValue(input["failureTargetRepairContext"])
-	if len(targetContext) != 1 || targetContext[0]["targetRef"] != "target_test.go" || targetContext[0]["exists"] != false {
-		t.Fatalf("failureTargetRepairContext = %#v, want ambiguous short target preserved as missing snapshot", input["failureTargetRepairContext"])
+	if len(targetContext) != 1 || targetContext[0]["targetRef"] != "target_test.go" || targetContext[0]["snapshotValidity"] != "runtime_managed_file_read_required" {
+		t.Fatalf("failureTargetRepairContext = %#v, want ambiguous short target preserved as acquisition-required placeholder", input["failureTargetRepairContext"])
 	}
 }
 
@@ -2287,23 +2370,29 @@ func TestRuntimeOrchestrator_NextDispatchHydratesReplanRepairTargetSnapshot(t *t
 	}
 	input := specs[0].Input
 	if input["repairObjective"] != repairObjectiveStateChangingOutput || input["stateChangingOutputRequired"] != true {
-		t.Fatalf("input = %+v, want state-changing repair after target snapshot hydration", input)
+		t.Fatalf("input = %+v, want state-changing parent objective after target snapshot hydration", input)
 	}
-	if snapshots := mapSliceFromValue(input["patchRepairContext"]); len(snapshots) != 1 || snapshots[0]["targetRef"] != targetRef || !strings.Contains(stringFromMap(snapshots[0], "content"), "TestGateway") {
-		t.Fatalf("patchRepairContext = %#v, want hydrated current target snapshot", input["patchRepairContext"])
+	if snapshots := mapSliceFromValue(input["patchRepairContext"]); len(snapshots) != 1 ||
+		snapshots[0]["targetRef"] != targetRef ||
+		snapshots[0]["snapshotValidity"] != "runtime_managed_file_read_required" ||
+		stringFromMap(snapshots[0], "content") != "" {
+		t.Fatalf("patchRepairContext = %#v, want runtime-managed acquisition placeholder", input["patchRepairContext"])
 	}
 	actionPackage := mapFromValue(input["repairActionPackage"])
 	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
-	if len(targets) != 1 || targets[0]["targetRef"] != targetRef || !strings.Contains(stringFromMap(targets[0], "content"), "TestGateway") {
-		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want hydrated target snapshot", actionPackage["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["targetRef"] != targetRef || stringFromMap(targets[0], "content") != "" {
+		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want acquisition placeholder target snapshot", actionPackage["targetSnapshots"])
+	}
+	if targets[0]["runtimeManaged"] != false || targets[0]["safeForFileWrite"] != false {
+		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want no direct or runtime-managed content before file/read", actionPackage["targetSnapshots"])
 	}
 	required := mapFromValue(actionPackage["requiredOutput"])
-	if required["mustIncludeStateChangingNode"] != true || !boolValue(required["mustUseCurrentTargetSnapshot"]) {
-		t.Fatalf("requiredOutput = %#v, want state-changing current-snapshot contract", required)
+	if required["mustAcquireCurrentTargetSnapshot"] != true || required["stateChangingForbidden"] != true {
+		t.Fatalf("requiredOutput = %#v, want runtime-managed target snapshot acquisition before state change", required)
 	}
 	contract := mapFromValue(input["convergenceContract"])
 	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
-		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+		t.Fatalf("convergenceContract = %+v, want need_state_change with target snapshot acquisition required output", contract)
 	}
 }
 
@@ -2472,6 +2561,12 @@ func TestRuntimeOrchestrator_RuntimeRepairInputHydratesRootCauseCandidatesFromIn
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	for name, content := range files {
+		if name == "scope/runtime.bin" {
+			continue
+		}
+		seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, name, string(content))
+	}
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/repair-001-of-planning-001"),
 		RunID: runID,
@@ -2567,6 +2662,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputPromotesPrerequisiteManifestCandi
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "go.mod", string(files["go.mod"]))
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/graph-001/004-dependency-resolution"),
 		RunID: runID,
@@ -2603,16 +2699,16 @@ func TestRuntimeOrchestrator_RuntimeRepairInputPromotesPrerequisiteManifestCandi
 	}
 	actionPackage := mapFromValue(input["repairActionPackage"])
 	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
-	if len(targets) == 0 || stringFromMap(targets[0], "targetRef") != "go.mod" || !strings.Contains(stringFromMap(targets[0], "content"), "module example.test/app") {
-		t.Fatalf("repairActionPackage = %#v, rootCauseCandidateContext = %#v, want promoted go.mod current snapshot", actionPackage, input["rootCauseCandidateContext"])
+	if len(targets) != 1 || targets[0]["targetRef"] != "go.mod" || targets[0]["runtimeManaged"] != true {
+		t.Fatalf("repairActionPackage = %#v, rootCauseCandidateContext = %#v, want runtime-managed prerequisite manifest target snapshot", actionPackage, input["rootCauseCandidateContext"])
 	}
 	targetSet := stringSliceFromValue(actionPackage["repairTargetSet"])
 	if !stringSliceContains(targetSet, "go.mod") || stringSliceContains(targetSet, "142.251.45.145") {
 		t.Fatalf("repairTargetSet = %#v, want go.mod and no external endpoint", targetSet)
 	}
 	required := mapFromValue(actionPackage["requiredOutput"])
-	if required["mustPatchDirectlyFromProvidedSnapshot"] != true {
-		t.Fatalf("requiredOutput = %#v, want current snapshot patch contract", required)
+	if required["mustPatchDirectlyFromProvidedSnapshot"] != true || required["mustTargetRepairTargetSet"] != true {
+		t.Fatalf("requiredOutput = %#v, want repair target set with runtime-managed prerequisite snapshot patch contract", required)
 	}
 }
 
@@ -2644,6 +2740,8 @@ func TestRuntimeOrchestrator_RuntimeRepairInputKeepsPrerequisiteManifestCandidat
 		t.Fatalf("seed workspace: %v", err)
 	}
 	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "dependency.manifest", string(files["dependency.manifest"]))
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, orch.steps, workspaceID, runID, "src/client.txt", string(files["src/client.txt"]))
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/graph-001/002-verify"),
 		RunID: runID,
@@ -3170,7 +3268,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputEscalatesStateChangingEvidenceQua
 	}
 	contract := mapFromValue(input["convergenceContract"])
 	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
-		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+		t.Fatalf("convergenceContract = %+v, want need_state_change with authoritative target snapshot", contract)
 	}
 	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
 	if required["mustIncludeStateChangingNode"] != true ||
@@ -3505,9 +3603,8 @@ func TestRuntimeOrchestrator_RuntimeRepairInputEscalatesValidationGapWithCurrent
 		t.Fatalf("repair input = %+v, want validation-only contract cleared after target evidence is available", input)
 	}
 	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
-	if required["mustIncludeStateChangingNode"] != true ||
-		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
-		t.Fatalf("requiredOutput = %+v, want state-changing patch contract", required)
+	if required["mustAcquireCurrentTargetSnapshot"] != true || required["stateChangingForbidden"] != true {
+		t.Fatalf("requiredOutput = %+v, want runtime-managed target snapshot acquisition", required)
 	}
 }
 
@@ -3829,15 +3926,18 @@ func TestRuntimeOrchestrator_RuntimeRepairInputUsesProgressFailureTargetSnapshot
 	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 2, common.ErrInvalidArgument)
 
 	targets := mapSliceFromValue(mapFromValue(input["repairActionPackage"])["targetSnapshots"])
-	if len(targets) != 1 || targets[0]["targetRef"] != "target.txt" || !strings.Contains(stringFromMap(targets[0], "content"), "before\ncurrent") {
-		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want current target snapshot from progress failure", targets)
+	if len(targets) != 1 ||
+		targets[0]["targetRef"] != "target.txt" ||
+		targets[0]["runtimeManaged"] != false ||
+		targets[0]["safeForFileWrite"] != false {
+		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want diagnostic target snapshot from progress failure", targets)
 	}
 	if len(mapSliceFromValue(input["failureTargetRepairContext"])) != 1 {
 		t.Fatalf("failureTargetRepairContext = %+v, want current target snapshot", input["failureTargetRepairContext"])
 	}
 	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
-	if !boolValue(required["mustUseCurrentTargetSnapshot"]) || !boolValue(required["mustReturnPatchApplyNode"]) {
-		t.Fatalf("requiredOutput = %+v, want direct patch from current snapshot", required)
+	if !boolValue(required["mustAcquireCurrentTargetSnapshot"]) || !boolValue(required["stateChangingForbidden"]) {
+		t.Fatalf("requiredOutput = %+v, want runtime-managed target snapshot acquisition before direct patch", required)
 	}
 }
 

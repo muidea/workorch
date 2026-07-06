@@ -1097,6 +1097,7 @@ func TestRecoveryActionAllowsValidationWhenFailedPatchAlreadySatisfiedAtRepairBu
 		t.Fatalf("seed workspace: %v", err)
 	}
 	stepRepo := memory.NewStepRepository()
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, stepRepo, workspaceID, runID, "target.txt", "alpha\nfresh\nomega\n")
 	signature := "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|failureTargets=target.txt|error=conflict: patch text_replace oldtext not found"
 	repairAttempt := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/repair-001-of-graph-001-001-patch"),
@@ -1183,6 +1184,7 @@ func TestRecoveryActionAllowsPatchRefreshWhenBaseHashStaleAtRepairBudget(t *test
 		t.Fatalf("seed workspace: %v", err)
 	}
 	stepRepo := memory.NewStepRepository()
+	seedRuntimeManagedTargetSnapshotStep(t, ctx, stepRepo, workspaceID, runID, "target.txt", currentContent)
 	signature := "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|failureTargets=target.txt|error=conflict: patch basehash mismatch"
 	repairAttempt := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/repair-001-of-graph-001-001-patch"),

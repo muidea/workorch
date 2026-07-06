@@ -18,6 +18,7 @@ Last Updated: 2026-05-30
 - 文件能力默认限制在 Workspace `deliverableDirectory` 内
 - 最终状态变更应优先通过 `patch/apply` 落盘，而不是开放自由 `file/write`
 - patch 记录应复用现有 `run.Patch` / patch repository / patch evidence 链路，不引入并行事实源
+- `blocks/file` 返回的是 patch 技术执行结果，不是正式 Patch 记录；正式 Patch 记录仍由 orchestrator 在结果准入后写入 kernel evidence 链路
 
 ### Capability Surface
 
@@ -67,7 +68,7 @@ Last Updated: 2026-05-30
 | `file/read` | `blocks/file` | 正文读取与摘要证据 |
 | `file/edit` | `blocks/file` | 小范围编辑请求，转换为 patch intent |
 | `patch/preview` | `blocks/file` | 预演 diff、风险、审批需求 |
-| `patch/apply` | `blocks/file` | 正式落盘并生成 patch record |
+| `patch/apply` | `blocks/file` | 技术落盘并返回结构化执行结果；正式 patch record 由 orchestrator 生成 |
 
 当前 profile 解释约束：
 
@@ -166,7 +167,8 @@ Last Updated: 2026-05-30
 ## Directional Output
 
 - `file/read` 应返回 `contentHash`、`lineCount`、`truncated`、`isBinary`
-- `patch/preview` / `patch/apply` 应返回 `patchId`、`affectedFiles`、`addedLines`、`deletedLines`、`diffHash`、`conflicts`、`approvalId`
+- `patch/preview` / `patch/apply` 应返回 `affectedFiles`、`addedLines`、`deletedLines`、`beforeHash`、`afterHash`、`contentHash` 或 `diffHash`、`conflict`、`approvalRequired`、`riskLevel`、`riskReasons`、`diagnostics`
+- `patchId`、`approvalId` 和 accepted/rejected evidence relation 属于 orchestrator 准入后的正式状态字段，不由 block 自主生成
 - 大 diff、大正文和二进制内容都必须受大小和类型限制
 
 ## Source Documents

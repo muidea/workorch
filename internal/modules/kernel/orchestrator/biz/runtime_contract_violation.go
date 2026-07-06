@@ -590,14 +590,15 @@ func forcedNarrowContractViolationRequiredOutput(input map[string]any, failedSte
 				required[key] = value
 			}
 		}
+		var snapshots []map[string]any
+		if snapshots = contractViolationAvailableTargetSnapshotSummary(failedStep); len(snapshots) > 0 {
+			required["availableTargetSnapshots"] = snapshots
+		} else if snapshots = contractViolationTargetSnapshotSummary(failedStep); len(snapshots) > 0 {
+			required["targetSnapshots"] = snapshots
+		}
 		if shape == "valid_patch_apply" || shape == "state_changing_output_from_available_snapshot" {
 			required["acceptedKinds"] = []string{"patch/apply"}
-			applyCurrentSnapshotDirectPatchContract(required)
-		}
-		if snapshots := contractViolationAvailableTargetSnapshotSummary(failedStep); len(snapshots) > 0 {
-			required["availableTargetSnapshots"] = snapshots
-		} else if snapshots := contractViolationTargetSnapshotSummary(failedStep); len(snapshots) > 0 {
-			required["targetSnapshots"] = snapshots
+			applyTargetSnapshotSafetyRequiredOutputContract(required, snapshots)
 		}
 		return required
 	case "bounded_failure_evidence":
@@ -1286,7 +1287,7 @@ func contractViolationAvailableTargetSnapshotSummary(step *runModel.Step) []map[
 	}
 	ret := make([]map[string]any, 0, len(snapshots))
 	for _, snapshot := range snapshots {
-		if !boolValue(snapshot["contentComplete"]) || !boolValue(snapshot["safeForFileWrite"]) {
+		if !repairTargetSnapshotExactPatchSafe(snapshot) {
 			continue
 		}
 		ret = append(ret, snapshot)
@@ -1316,6 +1317,18 @@ func contractViolationTargetSnapshotSummary(step *runModel.Step) []map[string]an
 			"baseHash":         stringFromMap(item, "baseHash"),
 			"contentComplete":  boolValue(item["contentComplete"]),
 			"safeForFileWrite": boolValue(item["safeForFileWrite"]),
+			"redacted":         boolValue(item["redacted"]),
+			"truncated":        boolValue(item["truncated"]),
+			"isBinary":         boolValue(item["isBinary"]),
+		}
+		if value, ok := item["safeForPatch"]; ok {
+			summary["safeForPatch"] = boolValue(value)
+		}
+		if value, ok := item["safeForExactPatch"]; ok {
+			summary["safeForExactPatch"] = boolValue(value)
+		}
+		if value, ok := item["runtimeManaged"]; ok {
+			summary["runtimeManaged"] = boolValue(value)
 		}
 		for key, value := range summary {
 			if contractViolationEmptyValue(value) {

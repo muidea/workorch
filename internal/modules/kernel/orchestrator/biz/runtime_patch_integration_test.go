@@ -10,6 +10,7 @@ import (
 
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
+	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -27,20 +28,20 @@ func TestApplyWorkspaceFileWriteReportsPathConflict(t *testing.T) {
 		t.Fatalf("seed executable file: %v", err)
 	}
 
-	err := applyWorkspaceFileWrite(deliverableDirectory, "llm-proxy/config.yaml", "config", "")
+	_, err := filebiz.NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          llmcommon.RuntimeBlockKindPatchApply,
+		Input: map[string]any{
+			"patchType": "file_write",
+			"targetRef": "llm-proxy/config.yaml",
+			"content":   "config",
+		},
+	})
 	if err == nil {
-		t.Fatalf("applyWorkspaceFileWrite should fail for file-as-directory path conflict")
+		t.Fatalf("patch/apply should fail for file-as-directory path conflict")
 	}
-	var conflict *workspacePathConflictError
-	if !errors.As(err, &conflict) {
-		t.Fatalf("err = %T %[1]v, want workspacePathConflictError", err)
-	}
-	if conflict.TargetRef != "llm-proxy/config.yaml" || conflict.ConflictRef != "llm-proxy" || conflict.ConflictKind != "file" {
-		t.Fatalf("conflict = %+v, want target and conflict refs", conflict)
-	}
-	diagnostics := conflict.RuntimeFailureDiagnostics()
-	if diagnostics["kind"] != "workspace_path_conflict" || diagnostics["conflictRef"] != "llm-proxy" {
-		t.Fatalf("diagnostics = %+v, want structured path conflict diagnostics", diagnostics)
+	if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), "llm-proxy") {
+		t.Fatalf("err = %v, want structured parent conflict", err)
 	}
 }
 
@@ -51,14 +52,18 @@ func TestApplyWorkspacePatchRejectsBaseHashMismatch(t *testing.T) {
 		t.Fatalf("seed file: %v", err)
 	}
 
-	err := applyWorkspacePatch(deliverableDirectory, runtimePatchRequest{
-		TargetRef: "main.go",
-		Content:   "package changed\n",
-		PatchType: "file_write",
-		BaseHash:  "0000000000000000000000000000000000000000000000000000000000000000",
+	_, err := filebiz.NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          llmcommon.RuntimeBlockKindPatchApply,
+		Input: map[string]any{
+			"targetRef": "main.go",
+			"content":   "package changed\n",
+			"patchType": "file_write",
+			"baseHash":  "0000000000000000000000000000000000000000000000000000000000000000",
+		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "baseHash mismatch") {
-		t.Fatalf("applyWorkspacePatch err = %v, want baseHash mismatch", err)
+		t.Fatalf("patch/apply err = %v, want baseHash mismatch", err)
 	}
 	content, readErr := os.ReadFile(target)
 	if readErr != nil {
@@ -77,15 +82,19 @@ func TestApplyWorkspacePatchAppliesTextReplaceWithBaseHash(t *testing.T) {
 		t.Fatalf("seed file: %v", err)
 	}
 
-	err := applyWorkspacePatch(deliverableDirectory, runtimePatchRequest{
-		TargetRef: "main.go",
-		PatchType: "text_replace",
-		BaseHash:  sha256HexBytes([]byte(original)),
-		OldText:   "\tprintln(\"old\")",
-		NewText:   "\tprintln(\"new\")",
+	_, err := filebiz.NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          llmcommon.RuntimeBlockKindPatchApply,
+		Input: map[string]any{
+			"targetRef": "main.go",
+			"patchType": "text_replace",
+			"baseHash":  sha256HexBytes([]byte(original)),
+			"oldText":   "\tprintln(\"old\")",
+			"newText":   "\tprintln(\"new\")",
+		},
 	})
 	if err != nil {
-		t.Fatalf("applyWorkspacePatch text_replace err = %v", err)
+		t.Fatalf("patch/apply text_replace err = %v", err)
 	}
 	content, readErr := os.ReadFile(target)
 	if readErr != nil {
@@ -137,13 +146,17 @@ func TestApplyWorkspacePatchRejectsRangeLessStandardUnifiedDiff(t *testing.T) {
 		t.Fatalf("seed file: %v", err)
 	}
 
-	err := applyWorkspacePatch(deliverableDirectory, runtimePatchRequest{
-		TargetRef: "docs/sample.txt",
-		PatchType: "unified_diff",
-		Diff:      "--- a/docs/sample.txt\n+++ b/docs/sample.txt\n@@\n section one\n-old value\n+new value\n end section\n",
+	_, err := filebiz.NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          llmcommon.RuntimeBlockKindPatchApply,
+		Input: map[string]any{
+			"targetRef": "docs/sample.txt",
+			"patchType": "unified_diff",
+			"diff":      "--- a/docs/sample.txt\n+++ b/docs/sample.txt\n@@\n section one\n-old value\n+new value\n end section\n",
+		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "explicit line ranges") {
-		t.Fatalf("applyWorkspacePatch range-less standard diff err = %v, want explicit line range rejection", err)
+		t.Fatalf("patch/apply range-less standard diff err = %v, want explicit line range rejection", err)
 	}
 	content, readErr := os.ReadFile(target)
 	if readErr != nil {
@@ -165,18 +178,22 @@ func TestApplyWorkspacePatchAcceptsUnifiedDiffWithDriftedLineNumberWhenContextIs
 		t.Fatalf("seed file: %v", err)
 	}
 
-	err := applyWorkspacePatch(deliverableDirectory, runtimePatchRequest{
-		TargetRef: "handler/handler_test.go",
-		PatchType: "unified_diff",
-		Diff: "--- handler/handler_test.go\n+++ handler/handler_test.go\n@@ -8,7 +8,7 @@\n" +
-			" \t\"time\"\n" +
-			" \n" +
-			"-\t\"ai-gateway/config\"\n" +
-			"+\t\"openai-gateway/config\"\n" +
-			" )\n",
+	_, err := filebiz.NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          llmcommon.RuntimeBlockKindPatchApply,
+		Input: map[string]any{
+			"targetRef": "handler/handler_test.go",
+			"patchType": "unified_diff",
+			"diff": "--- handler/handler_test.go\n+++ handler/handler_test.go\n@@ -8,7 +8,7 @@\n" +
+				" \t\"time\"\n" +
+				" \n" +
+				"-\t\"ai-gateway/config\"\n" +
+				"+\t\"openai-gateway/config\"\n" +
+				" )\n",
+		},
 	})
 	if err != nil {
-		t.Fatalf("applyWorkspacePatch drifted line diff err = %v", err)
+		t.Fatalf("patch/apply drifted line diff err = %v", err)
 	}
 	content, readErr := os.ReadFile(target)
 	if readErr != nil {
@@ -198,13 +215,17 @@ func TestApplyWorkspacePatchAcceptsSingleFileApplyPatchStyleDiff(t *testing.T) {
 		t.Fatalf("seed file: %v", err)
 	}
 
-	err := applyWorkspacePatch(deliverableDirectory, runtimePatchRequest{
-		TargetRef: "docs/sample.txt",
-		PatchType: "unified_diff",
-		Diff:      "*** Begin Patch\n*** Update File: docs/sample.txt\n@@\n section one\n-old value\n+new value\n end section\n*** End Patch",
+	_, err := filebiz.NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          llmcommon.RuntimeBlockKindPatchApply,
+		Input: map[string]any{
+			"targetRef": "docs/sample.txt",
+			"patchType": "unified_diff",
+			"diff":      "*** Begin Patch\n*** Update File: docs/sample.txt\n@@\n section one\n-old value\n+new value\n end section\n*** End Patch",
+		},
 	})
 	if err != nil {
-		t.Fatalf("applyWorkspacePatch apply-patch style diff err = %v", err)
+		t.Fatalf("patch/apply apply-patch style diff err = %v", err)
 	}
 	content, readErr := os.ReadFile(target)
 	if readErr != nil {
@@ -217,7 +238,7 @@ func TestApplyWorkspacePatchAcceptsSingleFileApplyPatchStyleDiff(t *testing.T) {
 
 func TestPatchPreviewDoesNotWriteFile(t *testing.T) {
 	deliverableDirectory := t.TempDir()
-	result, err := NewPatchRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := filebiz.NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
 		WorkspaceDeliverableDirectory: deliverableDirectory,
 		Kind:                          llmcommon.RuntimeBlockKindPatchPreview,
 		Input: map[string]any{
@@ -238,7 +259,7 @@ func TestPatchPreviewDoesNotWriteFile(t *testing.T) {
 }
 
 func TestPatchRuntimeAdapterPreservesCoverageTargets(t *testing.T) {
-	result, err := NewPatchRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+	result, err := filebiz.NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
 		WorkspaceDeliverableDirectory: t.TempDir(),
 		Kind:                          llmcommon.RuntimeBlockKindPatchApply,
 		Input: map[string]any{
@@ -251,13 +272,276 @@ func TestPatchRuntimeAdapterPreservesCoverageTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("patch apply: %v", err)
 	}
-	patches, ok := result.Output["patches"].([]map[string]any)
-	if !ok || len(patches) != 1 {
-		t.Fatalf("patch apply output = %+v, want one patch", result.Output)
-	}
-	targets := stringSliceFromValue(patches[0]["coverageTargets"])
+	targets := stringSliceFromValue(result.Output["coverageTargets"])
 	if len(targets) != 2 || targets[0] != "goal-alpha" || targets[1] != "deliverable-alpha" {
-		t.Fatalf("coverageTargets = %+v, want preserved target metadata", patches[0]["coverageTargets"])
+		t.Fatalf("coverageTargets = %+v, want preserved target metadata", result.Output["coverageTargets"])
+	}
+}
+
+func TestPatchSubsystemAdmitsAppliedBlockResultWithoutReapplying(t *testing.T) {
+	ctx := context.Background()
+	deliverableDirectory := t.TempDir()
+	target := filepath.Join(deliverableDirectory, "result.txt")
+	before := []byte("before\n")
+	after := []byte("after\n")
+	if err := os.WriteFile(target, after, 0o644); err != nil {
+		t.Fatalf("seed already-applied file: %v", err)
+	}
+	patchRepo := memory.NewPatchRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	subsystem := newPatchSubsystem(RuntimeEvidenceRepositories{Patches: patchRepo, EvidenceRecords: evidenceRepo}, nil, nil)
+	run := &runmodel.Run{ID: "run-block-patch-admit", WorkspaceID: "ws-block-patch-admit"}
+	step := &runmodel.Step{
+		ID:    "run-block-patch-admit/step-1",
+		RunID: run.ID,
+		Kind:  "patch/apply",
+		Input: map[string]any{
+			"patchType":  "file_write",
+			"targetRef":  "result.txt",
+			"content":    string(after),
+			"baseHash":   sha256HexBytes(before),
+			"approvalId": "approval-block-patch-admit",
+			"coverageTargets": []string{
+				"coverage-item-block-patch",
+			},
+		},
+	}
+	toolCall := &runmodel.ToolCall{ID: "tool-block-patch-admit"}
+	output := map[string]any{
+		"status":        "completed",
+		"stage":         "patch_apply",
+		"patchType":     "file_write",
+		"targetRef":     "result.txt",
+		"affectedFiles": []string{"result.txt"},
+		"beforeHash":    sha256HexBytes(before),
+		"afterHash":     sha256HexBytes(after),
+		"addedLines":    1,
+		"deletedLines":  1,
+		"riskLevel":     "low",
+		"riskReasons":   []string{"bounded_patch"},
+		"diagnostics": []map[string]any{{
+			"code": "block_result_admitted",
+		}},
+	}
+
+	if err := subsystem.apply(ctx, run, step, toolCall, output, deliverableDirectory); err != nil {
+		t.Fatalf("admit applied block patch result: %v", err)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(content) != string(after) {
+		t.Fatalf("target content = %q, want already-applied content unchanged", string(content))
+	}
+	patches, err := patchRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list patches: %v", err)
+	}
+	if len(patches) != 1 || patches[0].State != common.PatchStateApplied {
+		t.Fatalf("patches = %+v, want one applied formal patch", patches)
+	}
+	if patches[0].ApprovalID != "approval-block-patch-admit" ||
+		patches[0].BeforeHash != sha256HexBytes(before) ||
+		patches[0].AfterHash != sha256HexBytes(after) ||
+		len(patches[0].AffectedFiles) != 1 ||
+		patches[0].AffectedFiles[0] != "result.txt" ||
+		patches[0].AddedLines != 1 ||
+		patches[0].DeletedLines != 1 ||
+		patches[0].RiskLevel != "low" ||
+		len(patches[0].RiskReasons) != 1 ||
+		patches[0].RiskReasons[0] != "bounded_patch" ||
+		len(patches[0].Diagnostics) != 1 ||
+		patches[0].Diagnostics[0]["code"] != "block_result_admitted" {
+		t.Fatalf("patch = %+v, want formal record populated from block result", patches[0])
+	}
+	if output["patchId"] != string(patches[0].ID) {
+		t.Fatalf("output = %+v, want formal patch annotation", output)
+	}
+	records, err := evidenceRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list evidence records: %v", err)
+	}
+	if len(records) != 1 ||
+		records[0].Kind != orchestratormodel.EvidenceKindStateChange ||
+		records[0].Status != orchestratormodel.EvidenceStatusAccepted ||
+		records[0].SourceType != evidenceRecordSourceTypePatch ||
+		records[0].SourceRef != string(patches[0].ID) ||
+		len(records[0].CoverageItemRefs) != 1 ||
+		records[0].CoverageItemRefs[0] != "coverage-item-block-patch" ||
+		len(stringSliceFromValue(records[0].Metadata["affectedFiles"])) != 1 ||
+		records[0].Metadata["approvalId"] != "approval-block-patch-admit" {
+		t.Fatalf("evidence records = %+v, want accepted state_change bound to formal patch", records)
+	}
+	if err := subsystem.apply(ctx, run, step, toolCall, output, deliverableDirectory); err != nil {
+		t.Fatalf("admit duplicate applied block patch result: %v", err)
+	}
+	patches, err = patchRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list patches after duplicate: %v", err)
+	}
+	if len(patches) != 1 || patches[0].State != common.PatchStateApplied {
+		t.Fatalf("patches after duplicate = %+v, want one applied formal patch", patches)
+	}
+}
+
+func TestPatchPreviewAndFailedBlockResultDoNotCreateAcceptedStateChangeEvidence(t *testing.T) {
+	ctx := context.Background()
+	patchRepo := memory.NewPatchRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	subsystem := newPatchSubsystem(RuntimeEvidenceRepositories{Patches: patchRepo, EvidenceRecords: evidenceRepo}, nil, nil)
+	run := &runmodel.Run{ID: "run-block-patch-no-evidence", WorkspaceID: "ws-block-patch-no-evidence"}
+	step := &runmodel.Step{
+		ID:    "run-block-patch-no-evidence/step-1",
+		RunID: run.ID,
+		Kind:  "patch/apply",
+		Input: map[string]any{
+			"patchType": "file_write",
+			"targetRef": "result.txt",
+			"content":   "after\n",
+		},
+	}
+	if err := subsystem.publishPreviewFromOutput(ctx, run, step, nil, map[string]any{
+		"status":     "completed",
+		"stage":      "patch_preview",
+		"patchType":  "file_write",
+		"targetRef":  "result.txt",
+		"beforeHash": "before-hash",
+		"afterHash":  "after-hash",
+	}); err != nil {
+		t.Fatalf("publish preview: %v", err)
+	}
+	if err := subsystem.apply(ctx, run, step, nil, map[string]any{
+		"status":      "failed",
+		"stage":       "patch_apply",
+		"patchType":   "file_write",
+		"targetRef":   "result.txt",
+		"diagnostics": []map[string]any{{"code": "patch_conflict"}},
+	}, t.TempDir()); err != nil {
+		t.Fatalf("failed block result admission should not create patch evidence: %v", err)
+	}
+	patches, err := patchRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list patches: %v", err)
+	}
+	if len(patches) != 0 {
+		t.Fatalf("patches = %+v, want no formal patch for preview/failed block result", patches)
+	}
+	records, err := evidenceRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list evidence: %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("records = %+v, want no accepted state_change evidence", records)
+	}
+}
+
+func TestPatchApplyPreflightApprovalBlocksBeforeRuntimeSideEffect(t *testing.T) {
+	ctx := context.Background()
+	deliverableDirectory := t.TempDir()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	workspaceID := common.WorkspaceID("ws-patch-preflight-approval")
+	runID := common.RunID("run-patch-preflight-approval")
+	stepID := common.StepID("run-patch-preflight-approval/step-1")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	step := &runmodel.Step{ID: stepID, RunID: runID, Kind: "patch/apply", State: common.StepStateExecuting}
+	if err := stepRepo.Create(ctx, step); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		approvalRepo,
+		RuntimeEvidenceRepositories{Patches: memory.NewPatchRepository()},
+		events.NewMemoryHub(),
+	)
+	input := map[string]any{
+		"patchType": "file_write",
+		"targetRef": ".env",
+		"content":   "TOKEN=secret\n",
+	}
+
+	blocked, err := orch.blockPatchApplyForApprovalBeforeRuntime(ctx, run, step, nil, &workspacemodel.Workspace{ID: workspaceID, DeliverableDirectory: deliverableDirectory}, input)
+	if err != nil {
+		t.Fatalf("preflight approval: %v", err)
+	}
+	if !blocked {
+		t.Fatalf("blocked = false, want patch/apply preflight approval block")
+	}
+	updatedRun, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updatedRun.State != common.RunStateBlockedOnApproval || updatedRun.BlockingApprovalID == "" {
+		t.Fatalf("run = %+v, want blocked on approval", updatedRun)
+	}
+	if _, err := approvalRepo.Get(ctx, updatedRun.BlockingApprovalID); err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(deliverableDirectory, ".env")); !os.IsNotExist(err) {
+		t.Fatalf("preflight approval wrote file before approval, stat err = %v", err)
+	}
+}
+
+func TestPatchPreviewApprovalRequiredUsesBlockRiskContext(t *testing.T) {
+	ctx := context.Background()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		memory.NewRunRepository(),
+		memory.NewStepRepository(),
+		memory.NewWorkspaceRepository(),
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{Patches: memory.NewPatchRepository()},
+		events.NewMemoryHub(),
+	)
+
+	spec, err := orch.patchManager().approvalBlockSpec(ctx, "run-preview-risk", "", map[string]any{
+		"status":           "completed",
+		"stage":            "patch_preview",
+		"patchType":        "file_write",
+		"targetRef":        ".env",
+		"affectedFiles":    []string{".env"},
+		"baseHash":         "before-sha",
+		"contentHash":      "content-sha",
+		"addedLines":       1,
+		"approvalRequired": true,
+		"riskLevel":        "high",
+		"riskReasons":      []string{"sensitive_path"},
+	})
+	if err != nil {
+		t.Fatalf("preview approval gate: %v", err)
+	}
+	if spec.Reason == "" {
+		t.Fatalf("approval spec = %+v, want approval required", spec)
+	}
+	requests := mapSliceFromValue(spec.Context["patchRequests"])
+	if len(requests) != 1 {
+		t.Fatalf("approval context = %+v, want one patch request", spec.Context)
+	}
+	request := requests[0]
+	if request["patchType"] != "file_write" ||
+		request["targetRef"] != ".env" ||
+		request["baseHash"] != "before-sha" ||
+		request["contentHash"] != "content-sha" ||
+		request["riskLevel"] != "high" ||
+		!stringSliceContains(stringSliceFromValue(request["affectedFiles"]), ".env") ||
+		!stringSliceContains(stringSliceFromValue(request["riskReasons"]), "sensitive_path") {
+		t.Fatalf("preview approval request = %+v, want block risk context fields", request)
 	}
 }
 
@@ -297,11 +581,14 @@ func TestRuntimeOrchestratorPublishesPatchPreviewEvent(t *testing.T) {
 	}
 }
 
-func TestRuntimeOrchestratorApplyRuntimePatchesPublishesAppliedAndFailedEvents(t *testing.T) {
+func TestRuntimeOrchestratorAdmitsBlockPatchResultAndRejectsDirectPatchSideEffect(t *testing.T) {
 	ctx := context.Background()
 	deliverableDirectory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte("before\n"), 0o644); err != nil {
 		t.Fatalf("seed main.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "applied.txt"), []byte("applied\n"), 0o644); err != nil {
+		t.Fatalf("seed applied block result target: %v", err)
 	}
 	hub := events.NewMemoryHub()
 	patchRepo := memory.NewPatchRepository()
@@ -317,18 +604,29 @@ func TestRuntimeOrchestratorApplyRuntimePatchesPublishesAppliedAndFailedEvents(t
 		hub,
 	)
 	run := &runmodel.Run{ID: "run-patch-event", WorkspaceID: "ws-patch-event"}
-	step := &runmodel.Step{ID: "run-patch-event/step-1", RunID: run.ID}
-	toolCall := &runmodel.ToolCall{ID: "run-patch-event/step-1/tool-call"}
-
-	if err := orch.patchManager().apply(ctx, run, step, toolCall, map[string]any{
-		stepOutputKeyPatches: []map[string]any{{
+	step := &runmodel.Step{
+		ID:    "run-patch-event/step-1",
+		RunID: run.ID,
+		Kind:  "patch/apply",
+		Input: map[string]any{
 			"patchType": "file_write",
 			"targetRef": "applied.txt",
 			"content":   "applied\n",
 			"summary":   "write applied file",
-		}},
+		},
+	}
+	toolCall := &runmodel.ToolCall{ID: "run-patch-event/step-1/tool-call"}
+
+	if err := orch.patchManager().apply(ctx, run, step, toolCall, map[string]any{
+		"status":        "completed",
+		"stage":         "patch_apply",
+		"patchType":     "file_write",
+		"targetRef":     "applied.txt",
+		"affectedFiles": []string{"applied.txt"},
+		"afterHash":     sha256HexBytes([]byte("applied\n")),
+		"addedLines":    1,
 	}, deliverableDirectory); err != nil {
-		t.Fatalf("apply patch: %v", err)
+		t.Fatalf("admit block patch result: %v", err)
 	}
 	if !publishedTopicForTarget(hub.Published(), orchestratorevents.TopicPatchApplied, "applied.txt") {
 		t.Fatalf("published = %+v, want patch applied event", hub.Published())
@@ -344,17 +642,17 @@ func TestRuntimeOrchestratorApplyRuntimePatchesPublishesAppliedAndFailedEvents(t
 		}},
 	}, deliverableDirectory)
 	if err == nil {
-		t.Fatalf("apply invalid diff should fail")
+		t.Fatalf("direct patch output should be rejected before orchestrator side effect")
 	}
-	if !publishedTopicForTarget(hub.Published(), orchestratorevents.TopicPatchFailed, "main.go") {
-		t.Fatalf("published = %+v, want patch failed event", hub.Published())
+	if publishedTopicForTarget(hub.Published(), orchestratorevents.TopicPatchFailed, "main.go") {
+		t.Fatalf("published = %+v, want no patch event for rejected direct side-effect path", hub.Published())
 	}
 }
 
 func TestRuntimeOrchestratorApplyRuntimePatchRecordsAcceptedStateChangeEvidence(t *testing.T) {
 	ctx := context.Background()
 	deliverableDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(deliverableDirectory, "accepted.txt"), []byte("before\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "accepted.txt"), []byte("accepted\n"), 0o644); err != nil {
 		t.Fatalf("seed accepted.txt: %v", err)
 	}
 	hub := events.NewMemoryHub()
@@ -372,19 +670,32 @@ func TestRuntimeOrchestratorApplyRuntimePatchRecordsAcceptedStateChangeEvidence(
 		hub,
 	)
 	run := &runmodel.Run{ID: "run-patch-evidence", WorkspaceID: "ws-patch-evidence", DefinitionRevision: "rev-patch-evidence"}
-	step := &runmodel.Step{ID: "run-patch-evidence/step-1", RunID: run.ID}
-	toolCall := &runmodel.ToolCall{ID: "run-patch-evidence/step-1/tool-call"}
-
-	if err := orch.patchManager().apply(ctx, run, step, toolCall, map[string]any{
-		stepOutputKeyPatches: []map[string]any{{
+	step := &runmodel.Step{
+		ID:    "run-patch-evidence/step-1",
+		RunID: run.ID,
+		Kind:  "patch/apply",
+		Input: map[string]any{
 			"patchType":       "file_write",
 			"targetRef":       "accepted.txt",
 			"content":         "accepted\n",
 			"summary":         "write accepted file",
 			"coverageTargets": []string{"coverage-item-1"},
-		}},
+		},
+	}
+	toolCall := &runmodel.ToolCall{ID: "run-patch-evidence/step-1/tool-call"}
+
+	if err := orch.patchManager().apply(ctx, run, step, toolCall, map[string]any{
+		"status":        "completed",
+		"stage":         "patch_apply",
+		"patchType":     "file_write",
+		"targetRef":     "accepted.txt",
+		"affectedFiles": []string{"accepted.txt"},
+		"beforeHash":    sha256HexBytes([]byte("before\n")),
+		"afterHash":     sha256HexBytes([]byte("accepted\n")),
+		"addedLines":    1,
+		"deletedLines":  1,
 	}, deliverableDirectory); err != nil {
-		t.Fatalf("apply patch: %v", err)
+		t.Fatalf("admit patch block result: %v", err)
 	}
 
 	records, err := evidenceRepo.ListByRun(ctx, run.ID)
@@ -466,10 +777,10 @@ func TestRuntimeOrchestratorPublishesArtifactContinuationMetadataEvent(t *testin
 	}
 }
 
-func TestRuntimeOrchestratorRevertsAppliedPatch(t *testing.T) {
+func TestRuntimeOrchestratorRevertIsPhaseGatedWithoutBlockReverseMaterial(t *testing.T) {
 	ctx := context.Background()
 	deliverableDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte("before\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte("after\n"), 0o644); err != nil {
 		t.Fatalf("seed main.go: %v", err)
 	}
 	hub := events.NewMemoryHub()
@@ -488,52 +799,51 @@ func TestRuntimeOrchestratorRevertsAppliedPatch(t *testing.T) {
 	run := &runmodel.Run{ID: "run-patch-revert", WorkspaceID: "ws-patch-revert"}
 	step := &runmodel.Step{ID: "run-patch-revert/step-1", RunID: run.ID}
 	toolCall := &runmodel.ToolCall{ID: "run-patch-revert/step-1/tool-call"}
-	if err := orch.patchManager().apply(ctx, run, step, toolCall, map[string]any{
-		stepOutputKeyPatches: []map[string]any{{
-			"patchType": "file_write",
-			"targetRef": "main.go",
-			"content":   "after\n",
-			"summary":   "write after",
-		}},
-	}, deliverableDirectory); err != nil {
-		t.Fatalf("apply patch: %v", err)
-	}
 	patchID := common.PatchID("run-patch-revert/step-1/patch/1")
+	if err := patchRepo.Create(ctx, &runmodel.Patch{
+		ID:              patchID,
+		WorkspaceID:     run.WorkspaceID,
+		RunID:           run.ID,
+		StepID:          step.ID,
+		ToolCallID:      toolCall.ID,
+		PatchType:       "file_write",
+		TargetRef:       "main.go",
+		State:           common.PatchStateApplied,
+		BeforeHash:      sha256HexBytes([]byte("before\n")),
+		AfterHash:       sha256HexBytes([]byte("after\n")),
+		OriginalExists:  true,
+		OriginalContent: "before\n",
+	}); err != nil {
+		t.Fatalf("seed applied patch: %v", err)
+	}
+	revertStep := &runmodel.Step{ID: "run-patch-revert/step-2", RunID: run.ID}
+	output := map[string]any{"patchRevert": map[string]any{"patchId": string(patchID)}}
+	if err := orch.patchManager().revert(ctx, run, revertStep, toolCall, output, deliverableDirectory); err == nil || !strings.Contains(err.Error(), "phase-gated") {
+		t.Fatalf("revert patch err = %v, want phase-gated", err)
+	}
+	content, err := os.ReadFile(filepath.Join(deliverableDirectory, "main.go"))
+	if err != nil {
+		t.Fatalf("read target file: %v", err)
+	}
+	if string(content) != "after\n" {
+		t.Fatalf("content = %q, want no orchestrator raw revert write", string(content))
+	}
 	patch, err := patchRepo.Get(ctx, patchID)
 	if err != nil {
 		t.Fatalf("get patch: %v", err)
 	}
-	if patch.BeforeHash == "" || patch.AfterHash == "" || !patch.OriginalExists || patch.OriginalContent != "before\n" {
-		t.Fatalf("patch metadata = %+v, want reversible metadata", patch)
+	if patch.State != common.PatchStateApplied || patch.RevertedAt != "" {
+		t.Fatalf("patch = %+v, want unchanged applied patch", patch)
 	}
-	revertStep := &runmodel.Step{ID: "run-patch-revert/step-2", RunID: run.ID}
-	output := map[string]any{"patchRevert": map[string]any{"patchId": string(patchID)}}
-	if err := orch.patchManager().revert(ctx, run, revertStep, toolCall, output, deliverableDirectory); err != nil {
-		t.Fatalf("revert patch: %v", err)
-	}
-	content, err := os.ReadFile(filepath.Join(deliverableDirectory, "main.go"))
-	if err != nil {
-		t.Fatalf("read reverted file: %v", err)
-	}
-	if string(content) != "before\n" {
-		t.Fatalf("content = %q, want reverted content", string(content))
-	}
-	patch, err = patchRepo.Get(ctx, patchID)
-	if err != nil {
-		t.Fatalf("get reverted patch: %v", err)
-	}
-	if patch.State != common.PatchStateReverted || patch.RevertedAt == "" {
-		t.Fatalf("patch = %+v, want reverted state", patch)
-	}
-	if !publishedTopicForTarget(hub.Published(), orchestratorevents.TopicPatchReverted, "main.go") {
-		t.Fatalf("published = %+v, want patch reverted event", hub.Published())
+	if publishedTopicForTarget(hub.Published(), orchestratorevents.TopicPatchReverted, "main.go") {
+		t.Fatalf("published = %+v, want no reverted event for phase-gated path", hub.Published())
 	}
 }
 
-func TestRuntimeOrchestratorRevertRejectsHashDrift(t *testing.T) {
+func TestRuntimeOrchestratorRevertDoesNotInspectOrMutateDriftedTarget(t *testing.T) {
 	ctx := context.Background()
 	deliverableDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte("before\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte("user changed\n"), 0o644); err != nil {
 		t.Fatalf("seed main.go: %v", err)
 	}
 	patchRepo := memory.NewPatchRepository()
@@ -551,25 +861,26 @@ func TestRuntimeOrchestratorRevertRejectsHashDrift(t *testing.T) {
 	run := &runmodel.Run{ID: "run-patch-revert-conflict", WorkspaceID: "ws-patch-revert-conflict"}
 	step := &runmodel.Step{ID: "run-patch-revert-conflict/step-1", RunID: run.ID}
 	toolCall := &runmodel.ToolCall{ID: "run-patch-revert-conflict/step-1/tool-call"}
-	if err := orch.patchManager().apply(ctx, run, step, toolCall, map[string]any{
-		stepOutputKeyPatches: []map[string]any{{
-			"patchType": "file_write",
-			"targetRef": "main.go",
-			"content":   "after\n",
-			"summary":   "write after",
-		}},
-	}, deliverableDirectory); err != nil {
-		t.Fatalf("apply patch: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte("user changed\n"), 0o644); err != nil {
-		t.Fatalf("drift file: %v", err)
-	}
 	patchID := common.PatchID("run-patch-revert-conflict/step-1/patch/1")
+	if err := patchRepo.Create(ctx, &runmodel.Patch{
+		ID:          patchID,
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		StepID:      step.ID,
+		ToolCallID:  toolCall.ID,
+		PatchType:   "file_write",
+		TargetRef:   "main.go",
+		State:       common.PatchStateApplied,
+		BeforeHash:  sha256HexBytes([]byte("before\n")),
+		AfterHash:   sha256HexBytes([]byte("after\n")),
+	}); err != nil {
+		t.Fatalf("seed applied patch: %v", err)
+	}
 	err := orch.patchManager().revert(ctx, run, &runmodel.Step{ID: "run-patch-revert-conflict/step-2", RunID: run.ID}, toolCall, map[string]any{
 		"patchRevert": map[string]any{"patchId": string(patchID)},
 	}, deliverableDirectory)
-	if !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("revert error = %v, want conflict", err)
+	if err == nil || !strings.Contains(err.Error(), "phase-gated") {
+		t.Fatalf("revert error = %v, want phase-gated", err)
 	}
 	content, err := os.ReadFile(filepath.Join(deliverableDirectory, "main.go"))
 	if err != nil {
@@ -670,7 +981,7 @@ func TestRuntimeOrchestratorAppliesApprovedPendingPatchOnResume(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	callCount := 0
-	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+	llmRuntime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 		callCount++
 		if callCount == 1 {
 			return map[string]any{
@@ -685,6 +996,13 @@ func TestRuntimeOrchestratorAppliesApprovedPendingPatchOnResume(t *testing.T) {
 		}
 		return map[string]any{"status": "completed", "stage": "approval_resume_followup"}, nil
 	}}
+	runtime := NewRuntimeAdapterRegistry()
+	if err := runtime.Register(llmcommon.StepKindWorkspaceExecution, llmRuntime); err != nil {
+		t.Fatalf("register llm runtime: %v", err)
+	}
+	if err := runtime.Register(llmcommon.RuntimeBlockKindPatchApply, filebiz.NewRuntimeAdapter()); err != nil {
+		t.Fatalf("register file patch runtime: %v", err)
+	}
 	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		runtime,
 		runRepo,

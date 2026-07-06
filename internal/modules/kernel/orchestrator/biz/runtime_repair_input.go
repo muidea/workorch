@@ -625,7 +625,15 @@ func applyRuntimeRepairPatchFailureRecoveryContract(input map[string]any, pkg ma
 	if len(required) == 0 {
 		required = stateChangingRepairRequiredOutput()
 	}
-	applyCurrentSnapshotDirectPatchContract(required)
+	applyTargetSnapshotSafetyRequiredOutputContract(required, patchContext)
+	if !repairTargetSnapshotsHaveExactPatchSafe(patchContext) {
+		required["mustUsePatchRepairContext"] = true
+		required["patchFailureFallbackRule"] = "current patchRepairContext is diagnostic-only or unsafe for exact patching; acquire a runtime-managed target snapshot before retrying patch/apply"
+		pkg["targetSnapshotAcquisitionRequired"] = true
+		pkg["targetSnapshotAcquisitionReason"] = "patch_recovery_context_not_exact_patch_safe"
+		pkg["requiredOutput"] = required
+		return
+	}
 	required["mustRepairFailedPatchApplication"] = true
 	required["mustUsePatchRepairContext"] = true
 	required["mustNotRetryFailedPatchLiteral"] = true
@@ -1142,7 +1150,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if len(rootCauseCandidates) > 0 {
 		applyRuntimeRepairRootCauseCandidateProjection(input, rootCauseCandidates)
 	}
-	if context := convertedDecisionReadableResourceContext(ctx, o.workspaces, run, failedStep); len(context) > 0 {
+	if context := convertedDecisionReadableResourceContext(ctx, o.workspaces, o.steps, run, failedStep); len(context) > 0 {
 		applyRuntimeRepairReadableResourceProjection(input, context)
 	}
 	assessmentOnlyFailedCoverageRepair := assessmentOnlyCoverageCorrectionFailedWithActionableGaps(failedStep)

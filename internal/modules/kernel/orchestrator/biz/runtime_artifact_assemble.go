@@ -608,7 +608,14 @@ func (o *RuntimeOrchestrator) applyAssembledArtifactContinuation(
 		return err
 	}
 	output := artifactContinuationApplyPatchOutput(item, metadata, content)
-	if err := o.patchManager().apply(ctx, run, step, toolCall, output, deliverableDirectory); err != nil {
+	handled, patchedOutput, err := o.applyPatchCandidatesThroughRuntimeBlocks(ctx, run, step, toolCall, output, &workspaceModel.Workspace{ID: run.WorkspaceID, DeliverableDirectory: deliverableDirectory})
+	if patchedOutput != nil {
+		output = patchedOutput
+	}
+	if err != nil || !handled {
+		if err == nil {
+			err = fmt.Errorf("%w: artifact continuation apply produced no patch candidate", common.ErrInvalidArgument)
+		}
 		item.State = common.ArtifactContinuationStateFailed
 		item.CurrentStepID = step.ID
 		item.OutputMode = outputModeIncrementalArtifact
@@ -684,17 +691,18 @@ func validateArtifactContinuationApplyPayload(item *orchestratormodel.ArtifactCo
 func artifactContinuationApplyPatchOutput(item *orchestratormodel.ArtifactContinuation, metadata *orchestratormodel.ArtifactContinuationAssembledMetadata, content string) map[string]any {
 	return map[string]any{
 		stepOutputKeyPatches: []map[string]any{{
-			"targetRef":        item.TargetRef,
-			"patchType":        "file_write",
-			"content":          content,
-			"summary":          "artifact continuation apply",
-			"coverageTargets":  append([]string(nil), item.CoverageTargets...),
-			"artifactId":       item.ArtifactID,
-			"continuationId":   string(item.ID),
-			"assembledBytes":   metadata.Bytes,
-			"assembledHash":    metadata.RollingHash,
-			"sourceChunkRefs":  append([]string(nil), metadata.SourceChunkRefs...),
-			"artifactApplyRef": fmt.Sprintf("%s/apply", item.ID),
+			"targetRef":           item.TargetRef,
+			"patchType":           "file_write",
+			"content":             content,
+			"summary":             "artifact continuation apply",
+			"coverageTargets":     append([]string(nil), item.CoverageTargets...),
+			"artifactId":          item.ArtifactID,
+			"continuationId":      string(item.ID),
+			"allowReservedTarget": true,
+			"assembledBytes":      metadata.Bytes,
+			"assembledHash":       metadata.RollingHash,
+			"sourceChunkRefs":     append([]string(nil), metadata.SourceChunkRefs...),
+			"artifactApplyRef":    fmt.Sprintf("%s/apply", item.ID),
 		}},
 	}
 }

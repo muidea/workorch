@@ -278,11 +278,15 @@ func TestBuildConvergenceContractValidationEscalationOverridesStaleValidationNex
 			"requiredEvidenceKinds": []string{"validation"},
 		}},
 		"failureTargetRepairContext": []map[string]any{{
-			"targetRef":        "target.txt",
-			"exists":           true,
-			"content":          "current target\n",
-			"contentComplete":  true,
-			"safeForFileWrite": true,
+			"targetRef":         "target.txt",
+			"exists":            true,
+			"content":           "current target\n",
+			"contentHash":       "hash-target",
+			"contentComplete":   true,
+			"safeForPatch":      true,
+			"safeForFileWrite":  true,
+			"safeForExactPatch": true,
+			"runtimeManaged":    true,
 		}},
 	}
 	failedStep := &runmodel.Step{
@@ -6534,12 +6538,12 @@ func TestBuildConvergenceContractStateChangeRequiresTargetSnapshotAcquisition(t 
 
 	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
 
-	if contract.State != convergenceStateNeedStateChange ||
+	if contract.State != convergenceStateNeedEvidence ||
 		contract.RuntimeStageMode != "target_snapshot_acquisition" ||
-		contract.RepairObjective != repairObjectiveStateChangingOutput ||
-		!contract.StateChangingOutputRequired ||
+		contract.RepairObjective != repairObjectiveAcquireFailureEvidence ||
+		contract.StateChangingOutputRequired ||
 		stringFromMap(contract.Prerequisite, "kind") != "acquire_target_snapshot" {
-		t.Fatalf("convergenceContract = %+v, want state_change with target snapshot prerequisite", contract)
+		t.Fatalf("convergenceContract = %+v, want read-only target snapshot prerequisite", contract)
 	}
 	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
 	if required["mustAcquireCurrentTargetSnapshot"] != true ||

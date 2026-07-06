@@ -11,6 +11,17 @@ func cloneReadModelMap(input map[string]any) map[string]any {
 	return ret
 }
 
+func cloneReadModelMapSlice(input []map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(input))
+	for _, item := range input {
+		ret = append(ret, cloneReadModelMap(item))
+	}
+	return ret
+}
+
 func cloneReadModelIntMap(input map[string]int) map[string]int {
 	if len(input) == 0 {
 		return nil

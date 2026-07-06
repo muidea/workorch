@@ -94,6 +94,82 @@ func patchApprovalContextRequest(request runtimePatchRequest, reasons []string) 
 	}
 }
 
+func patchPreviewApprovalRequirementFromOutput(output map[string]any) (patchApprovalRequirement, bool) {
+	preview := patchPreviewMapFromOutput(output)
+	if len(preview) == 0 || !boolValue(preview["approvalRequired"]) {
+		return patchApprovalRequirement{}, false
+	}
+	reasons := stringSliceFromValue(preview["riskReasons"])
+	if len(reasons) == 0 {
+		reasons = []string{"approval_required"}
+	}
+	return patchApprovalRequirement{
+		required: true,
+		reasons:  reasons,
+		patches:  []map[string]any{patchApprovalContextPreview(preview, reasons)},
+	}, true
+}
+
+func patchPreviewMapFromOutput(output map[string]any) map[string]any {
+	if len(output) == 0 {
+		return nil
+	}
+	if preview := mapFromValue(output["patchPreview"]); len(preview) > 0 {
+		return preview
+	}
+	if strings.TrimSpace(stringFromMap(output, "stage")) != "patch_preview" {
+		return nil
+	}
+	if strings.TrimSpace(stringFromMap(output, "targetRef")) == "" {
+		return nil
+	}
+	return cloneStepPayload(output)
+}
+
+func patchApprovalContextPreview(preview map[string]any, reasons []string) map[string]any {
+	return pruneEmptyPatchApprovalContext(map[string]any{
+		"patchType":        strings.TrimSpace(stringFromMap(preview, "patchType")),
+		"targetRef":        strings.TrimSpace(stringFromMap(preview, "targetRef")),
+		"summary":          strings.TrimSpace(stringFromMap(preview, "summary")),
+		"baseHash":         strings.TrimSpace(stringFromMap(preview, "baseHash")),
+		"beforeHash":       strings.TrimSpace(stringFromMap(preview, "beforeHash")),
+		"afterHash":        strings.TrimSpace(stringFromMap(preview, "afterHash")),
+		"contentHash":      strings.TrimSpace(stringFromMap(preview, "contentHash")),
+		"diffHash":         strings.TrimSpace(stringFromMap(preview, "diffHash")),
+		"addedLines":       intFromAny(preview["addedLines"]),
+		"deletedLines":     intFromAny(preview["deletedLines"]),
+		"affectedFiles":    stringSliceFromValue(preview["affectedFiles"]),
+		"riskLevel":        strings.TrimSpace(stringFromMap(preview, "riskLevel")),
+		"riskReasons":      append([]string(nil), reasons...),
+		"approvalRequired": true,
+	})
+}
+
+func pruneEmptyPatchApprovalContext(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		switch typed := value.(type) {
+		case string:
+			if strings.TrimSpace(typed) == "" {
+				continue
+			}
+		case []string:
+			if len(typed) == 0 {
+				continue
+			}
+		case int:
+			if typed == 0 {
+				continue
+			}
+		}
+		ret[key] = value
+	}
+	return ret
+}
+
 func isSensitivePatchTarget(targetRef string) bool {
 	clean := strings.ToLower(filepath.ToSlash(filepath.Clean(strings.TrimSpace(targetRef))))
 	clean = strings.TrimPrefix(clean, "./")

@@ -55,6 +55,15 @@ func TestRuntimeStepKindRegistrationMatrixMatchesCurrentRuntimeExecutors(t *test
 			t.Fatalf("registration %q owner = %q, want %q", stepKind, item.RuntimeOwner, owner)
 		}
 	}
+	for _, stepKind := range []string{
+		llmcommon.RuntimeBlockKindPatchApply,
+		llmcommon.RuntimeBlockKindPatchPreview,
+		llmcommon.RuntimeBlockKindPatchRevert,
+	} {
+		if seen[stepKind].ExecutorModule != filecommon.ModuleID {
+			t.Fatalf("registration %q executor = %q, want %q", stepKind, seen[stepKind].ExecutorModule, filecommon.ModuleID)
+		}
+	}
 	if _, ok := seen["llm/assessment_only"]; ok {
 		t.Fatalf("llm/assessment_only must remain a mode of %s, not a separately registered step kind", llmcommon.StepKindWorkspaceExecution)
 	}
