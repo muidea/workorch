@@ -748,11 +748,11 @@ func applyTargetSnapshotAcquisitionRequiredOutputContract(requiredOutput map[str
 	requiredOutput["stateChangingForbidden"] = true
 	requiredOutput["acceptedKinds"] = evidenceAcquisitionAcceptedKinds()
 	requiredOutput["acceptedKindsOnly"] = true
-	requiredOutput["forbiddenKinds"] = removeStringsFromSlice(
+	requiredOutput["forbiddenKinds"] = appendUniqueStrings(removeStringsFromSlice(
 		stringSliceFromValue(requiredOutput["forbiddenKinds"]),
 		"read_only_graph",
 		"same_graph_file_read_before_patch",
-	)
+	), "patch/apply", "git/write", "file/write", "shell/write", "approval/request", "decision/request")
 }
 
 func stateChangingRepairAcceptedKinds() []string {

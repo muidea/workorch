@@ -1433,19 +1433,19 @@ func deriveAcquireTargetSnapshotNextAction(run *runmodel.Run, stateChangeAction 
 	return runtimemodel.NextAction{
 		WorkspaceID:          run.WorkspaceID,
 		RunID:                run.ID,
-		Type:                 runtimemodel.NextActionTypeStateChange,
+		Type:                 runtimemodel.NextActionTypeAcquireTargetSnapshot,
 		SubjectType:          stateChangeAction.SubjectType,
 		SubjectID:            stateChangeAction.SubjectID,
 		FocusCoverageItemIDs: append([]common.CoverageWorkItemID(nil), stateChangeAction.FocusCoverageItemIDs...),
 		RequiredOutput:       required,
-		AllowedActions:       []string{runtimemodel.NextActionTypeStateChange},
+		AllowedActions:       []string{runtimemodel.NextActionTypeAcquireTargetSnapshot},
 		ForbiddenActions: []string{
-			runtimemodel.NextActionTypeAcquireTargetSnapshot,
+			runtimemodel.NextActionTypeStateChange,
 			runtimemodel.NextActionTypeComplete,
 			runtimemodel.NextActionTypeRequestDecision,
 		},
 		RequiredEvidenceKinds: []string{runtimemodel.EvidenceKindDiagnostic},
-		Stage:                 runtimemodel.NextActionTypeStateChange,
+		Stage:                 runtimemodel.NextActionTypeAcquireTargetSnapshot,
 		StageMode:             "target_snapshot_acquisition",
 		Reason:                "state_change requires current target snapshot prerequisite",
 	}.Normalized(), true

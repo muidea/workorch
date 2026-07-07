@@ -1351,6 +1351,56 @@ func TestCompactSelectedContextForCurrentDefinitionDropsStaleAndOldRevisionMemor
 	}
 }
 
+func TestCompactSelectedContextForTargetSnapshotBoundaryDropsReadOnlyGraphNoise(t *testing.T) {
+	selected := map[string]any{
+		"memories": []map[string]any{
+			{
+				"id":         "memory-read-only-noise",
+				"summary":    "previous read_only_graph attempted file/read before patch/apply",
+				"importance": 0.8,
+				"confidence": 0.8,
+			},
+			{
+				"id":           "memory-snapshot-provenance",
+				"summary":      "target_snapshot evidence is available for target.txt",
+				"evidenceKind": runtimemodel.EvidenceKindTargetSnapshot,
+				"targetRef":    "target.txt",
+				"contentHash":  "sha256:target",
+				"evidenceRef":  "ev-target-snapshot",
+				"importance":   0.8,
+				"confidence":   0.8,
+			},
+		},
+	}
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+		},
+		"repairActionPackage": map[string]any{
+			"targetSnapshots": []map[string]any{{
+				"targetRef":         "target.txt",
+				"contentHash":       "sha256:target",
+				"contentComplete":   true,
+				"safeForPatch":      true,
+				"safeForFileWrite":  true,
+				"safeForExactPatch": true,
+				"runtimeManaged":    true,
+			}},
+		},
+	}
+
+	got := compactSelectedContextForTargetSnapshotBoundary(selected, input)
+	memories := mapSliceFromValue(got["memories"])
+	if len(memories) != 1 || memories[0]["id"] != "memory-snapshot-provenance" {
+		t.Fatalf("selectedContext.memories = %+v, want only target snapshot provenance memory", memories)
+	}
+	compaction := mapFromValue(got["memoryCompaction"])
+	if compaction["targetSnapshotBoundaryPolicy"] != "exclude_read_only_graph_noise_without_target_snapshot_provenance" ||
+		compaction["omittedReadOnlyGraphMemoryCount"] != 1 {
+		t.Fatalf("memoryCompaction = %+v, want target snapshot boundary omission summary", compaction)
+	}
+}
+
 func TestRunExecutionContextPackageMergesCurrentRuntimeCapabilityContextIntoStableSelectedContext(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-selected-context-capability-merge",

@@ -84,6 +84,7 @@ func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []r
 	authorityFocus := MapValue(authority["currentFocus"])
 	var ret []readmodelcore.GapDiagnostic
 	ret = append(ret, authorityDiagnosticsFromRaw("run.executionContext.authorityDiagnostics", context["authorityDiagnostics"])...)
+	ret = append(ret, targetSnapshotAuthorityDiagnostics(authority)...)
 	for idx := range snapshot.Steps {
 		source := "step.input.authorityDiagnostics"
 		if snapshot.Steps[idx].ID != "" {
@@ -146,6 +147,34 @@ func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []r
 	addRequiredDiagnostic("repairActionPackage.requiredOutput", MapValue(MapValue(context["repairActionPackage"])["requiredOutput"]))
 	addRequiredDiagnostic("stagePacket.requiredOutput", MapValue(MapValue(context["stagePacket"])["requiredOutput"]))
 	return ret
+}
+
+func targetSnapshotAuthorityDiagnostics(authority map[string]any) []readmodelcore.GapDiagnostic {
+	if len(authority) == 0 {
+		return nil
+	}
+	status := strings.TrimSpace(stringValue(authority, "targetSnapshotStatus"))
+	if status != "missing" {
+		return nil
+	}
+	nextAction := MapValue(authority["nextAction"])
+	kind := strings.TrimSpace(stringValue(nextAction, "kind"))
+	if kind != "state_change" && kind != "acquire_target_snapshot" {
+		return nil
+	}
+	reason := strings.TrimSpace(stringValue(authority, "snapshotRequiredReason"))
+	if reason == "" {
+		reason = "state_change requires current target snapshot before patch/apply"
+	}
+	return []readmodelcore.GapDiagnostic{{
+		Code:             "target_snapshot_missing_before_state_change",
+		Severity:         "info",
+		Kind:             "authority_snapshot",
+		Source:           "run.executionContext.convergenceAuthority",
+		Candidate:        "targetSnapshotStatus=missing",
+		CurrentAuthority: kind,
+		Message:          reason,
+	}}
 }
 
 func completionGateDriftDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []readmodelcore.GapDiagnostic {

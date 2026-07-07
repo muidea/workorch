@@ -67,7 +67,7 @@ func realignLLMStepInputTargetSnapshotAuthority(run *runModel.Run, step *runMode
 		return
 	}
 	contract := BuildConvergenceContract(run, step, nil, map[string]any{"input": step.Input}, nil)
-	if contract.State != convergenceStateNeedStateChange || contract.RuntimeStageMode != "target_snapshot_acquisition" {
+	if contract.RuntimeStageMode != "target_snapshot_acquisition" {
 		return
 	}
 	step.Input = ApplyConvergenceContract(step.Input, contract)
@@ -851,6 +851,7 @@ func compactExecutionContextPackageForRepair(pkg map[string]any, step *runModel.
 	if selected := mapFromValue(pkg["selectedContext"]); len(selected) > 0 {
 		revision := coverageDefinitionRevision(executionContext)
 		selected = compactSelectedContextForCurrentDefinition(selected, revision)
+		selected = compactSelectedContextForTargetSnapshotBoundary(selected, step.Input)
 		if len(selected) == 0 {
 			delete(pkg, "selectedContext")
 		} else {
@@ -1132,6 +1133,95 @@ func compactSelectedMemoryForRepair(memory map[string]any) map[string]any {
 		ret["provenance"] = provenance
 	}
 	return ret
+}
+
+func compactSelectedContextForTargetSnapshotBoundary(selected map[string]any, input map[string]any) map[string]any {
+	if len(selected) == 0 || len(input) == 0 {
+		return selected
+	}
+	if strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind")) != orchestratormodel.NextActionTypeStateChange {
+		return selected
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(exactPatchSafeRepairTargetSnapshots(mergeRepairTargetSnapshots(mapSliceFromValue(pkg["targetSnapshots"]), repairActionTargetSnapshots(input)))) == 0 {
+		return selected
+	}
+	memories := mapSliceFromValue(selected["memories"])
+	if len(memories) == 0 {
+		return selected
+	}
+	filtered := make([]map[string]any, 0, len(memories))
+	omitted := 0
+	for _, memory := range memories {
+		if selectedMemoryReadOnlyGraphNoise(memory) && !selectedMemoryHasTargetSnapshotProvenance(memory) {
+			omitted++
+			continue
+		}
+		filtered = append(filtered, memory)
+	}
+	next := cloneStepPayload(selected)
+	if len(filtered) == 0 {
+		delete(next, "memories")
+	} else {
+		next["memories"] = filtered
+	}
+	if omitted > 0 {
+		compaction := mapFromValue(next["memoryCompaction"])
+		if compaction == nil {
+			compaction = map[string]any{}
+		}
+		compaction["targetSnapshotBoundaryPolicy"] = "exclude_read_only_graph_noise_without_target_snapshot_provenance"
+		compaction["omittedReadOnlyGraphMemoryCount"] = omitted
+		next["memoryCompaction"] = compaction
+	}
+	return next
+}
+
+func selectedMemoryReadOnlyGraphNoise(memory map[string]any) bool {
+	if len(memory) == 0 {
+		return false
+	}
+	for _, key := range []string{"kind", "memoryType", "evidenceKind", "violatedRule", "violationType", "summary", "content"} {
+		value := strings.ToLower(strings.TrimSpace(stringFromMap(memory, key)))
+		if value == "" {
+			continue
+		}
+		if strings.Contains(value, "read_only_graph") ||
+			strings.Contains(value, "same_graph_file_read_before_patch") ||
+			strings.Contains(value, "file/read") && strings.Contains(value, "patch/apply") {
+			return true
+		}
+	}
+	for _, tag := range stringSliceFromValue(memory["tags"]) {
+		tag = strings.ToLower(strings.TrimSpace(tag))
+		if tag == "read_only_graph" || tag == "same_graph_file_read_before_patch" {
+			return true
+		}
+	}
+	return false
+}
+
+func selectedMemoryHasTargetSnapshotProvenance(memory map[string]any) bool {
+	if len(memory) == 0 {
+		return false
+	}
+	for _, source := range []map[string]any{memory, mapFromValue(memory["metadata"]), mapFromValue(memory["context"])} {
+		if strings.TrimSpace(stringFromMap(source, "targetSnapshotRef")) != "" ||
+			strings.TrimSpace(stringFromMap(source, "targetSnapshotEvidenceRef")) != "" ||
+			strings.TrimSpace(stringFromMap(source, "evidenceRef")) != "" && strings.TrimSpace(stringFromMap(source, "targetRef")) != "" && strings.TrimSpace(stringFromMap(source, "contentHash")) != "" {
+			return true
+		}
+		if strings.TrimSpace(stringFromMap(source, "evidenceKind")) == orchestratormodel.EvidenceKindTargetSnapshot ||
+			strings.TrimSpace(stringFromMap(source, "kind")) == orchestratormodel.EvidenceKindTargetSnapshot {
+			return true
+		}
+		for _, tag := range stringSliceFromValue(source["tags"]) {
+			if strings.TrimSpace(tag) == orchestratormodel.EvidenceKindTargetSnapshot {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func selectedMemoryDefinitionRevision(memory map[string]any) string {

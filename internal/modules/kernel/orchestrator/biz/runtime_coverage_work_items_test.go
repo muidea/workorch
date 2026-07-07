@@ -435,6 +435,89 @@ func TestGapBaselineNextActionSkipsAssessmentForDeterministicAcceptedBinding(t *
 	}
 }
 
+func TestConvergenceAuthoritySnapshotExposesMissingTargetSnapshotReadiness(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-authority-target-snapshot-missing",
+		WorkspaceID: "ws-authority-target-snapshot-missing",
+		State:       common.RunStateActive,
+		ExecutionContext: map[string]any{
+			coverageWorkItemContextKey: map[string]any{
+				"definitionRevision": "rev-target-snapshot",
+				"currentFocus": map[string]any{
+					"id":                    "cwi-target-snapshot",
+					"requiredEvidenceKinds": []string{runtimecontract.EvidenceKindStateChange},
+					"missingEvidenceKinds":  []string{runtimecontract.EvidenceKindStateChange},
+				},
+				"unresolvedItems": []map[string]any{{
+					"id":                    "cwi-target-snapshot",
+					"requiredEvidenceKinds": []string{runtimecontract.EvidenceKindStateChange},
+					"missingEvidenceKinds":  []string{runtimecontract.EvidenceKindStateChange},
+				}},
+			},
+			"repairActionPackage": map[string]any{
+				"requiresCurrentTargetSnapshotForStateChange": true,
+				"repairTargetSet": []string{
+					"target.txt",
+				},
+				"requiredOutput": map[string]any{
+					"mustUseCurrentTargetSnapshot": true,
+				},
+			},
+		},
+	}
+
+	authority := convergenceAuthoritySnapshotForRun(run).ToMap()
+	if got := stringFromMap(authority, "targetSnapshotStatus"); got != "missing" {
+		t.Fatalf("convergenceAuthority.targetSnapshotStatus = %q, want missing; authority=%+v", got, authority)
+	}
+	if got := stringFromMap(authority, "snapshotRequiredReason"); got != "state_change_requires_current_target_snapshot" {
+		t.Fatalf("convergenceAuthority.snapshotRequiredReason = %q, want state_change_requires_current_target_snapshot", got)
+	}
+}
+
+func TestConvergenceAuthoritySnapshotExposesReadyTargetSnapshotRefs(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-authority-target-snapshot-ready",
+		WorkspaceID: "ws-authority-target-snapshot-ready",
+		State:       common.RunStateActive,
+		ExecutionContext: map[string]any{
+			coverageWorkItemContextKey: map[string]any{
+				"definitionRevision": "rev-target-snapshot-ready",
+				"currentFocus": map[string]any{
+					"id":                    "cwi-target-snapshot-ready",
+					"requiredEvidenceKinds": []string{runtimecontract.EvidenceKindStateChange},
+					"missingEvidenceKinds":  []string{runtimecontract.EvidenceKindStateChange},
+				},
+				"unresolvedItems": []map[string]any{{
+					"id":                    "cwi-target-snapshot-ready",
+					"requiredEvidenceKinds": []string{runtimecontract.EvidenceKindStateChange},
+					"missingEvidenceKinds":  []string{runtimecontract.EvidenceKindStateChange},
+				}},
+			},
+			"targetSnapshots": []map[string]any{{
+				"targetRef":         "target.txt",
+				"content":           "current\n",
+				"contentHash":       "sha256:current",
+				"contentComplete":   true,
+				"safeForPatch":      true,
+				"safeForFileWrite":  true,
+				"safeForExactPatch": true,
+				"runtimeManaged":    true,
+				"evidenceRef":       "ev-target-snapshot",
+			}},
+		},
+	}
+
+	authority := convergenceAuthoritySnapshotForRun(run).ToMap()
+	if got := stringFromMap(authority, "targetSnapshotStatus"); got != "ready" {
+		t.Fatalf("convergenceAuthority.targetSnapshotStatus = %q, want ready; authority=%+v", got, authority)
+	}
+	refs := mapSliceFromValue(authority["targetSnapshotRefs"])
+	if len(refs) != 1 || stringFromMap(refs[0], "targetRef") != "target.txt" || refs[0]["content"] != nil {
+		t.Fatalf("convergenceAuthority.targetSnapshotRefs = %+v, want compact target snapshot metadata", refs)
+	}
+}
+
 func TestRefreshRunConvergenceAuthorityAlignsFocusAndBudgetToCurrentCoverage(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-refresh-authority",

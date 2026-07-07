@@ -386,8 +386,8 @@ func TestNextActionForRunMissingStateChangeAcquiresTargetSnapshotFirst(t *testin
 	if err != nil {
 		t.Fatalf("NextActionForRun: %v", err)
 	}
-	if action.Type != runtimemodel.NextActionTypeStateChange || action.Stage != runtimemodel.NextActionTypeStateChange || action.StageMode != "target_snapshot_acquisition" {
-		t.Fatalf("next action = %+v, want state_change with target snapshot prerequisite", action)
+	if action.Type != runtimemodel.NextActionTypeAcquireTargetSnapshot || action.Stage != runtimemodel.NextActionTypeAcquireTargetSnapshot || action.StageMode != "target_snapshot_acquisition" {
+		t.Fatalf("next action = %+v, want acquire_target_snapshot preflight", action)
 	}
 	if action.RequiredOutput["mustAcquireCurrentTargetSnapshot"] != true || action.RequiredOutput["mustUseReadOnlySnapshotAcquisition"] != true {
 		t.Fatalf("required output = %+v, want read-only target snapshot acquisition", action.RequiredOutput)
@@ -400,8 +400,10 @@ func TestNextActionForRunMissingStateChangeAcquiresTargetSnapshotFirst(t *testin
 		stringSliceContains(stringSliceFromValue(action.RequiredOutput["forbiddenKinds"]), "same_graph_file_read_before_patch") {
 		t.Fatalf("required output = %+v, want read-only acquisition not forbidden", action.RequiredOutput)
 	}
-	if !stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeAcquireTargetSnapshot) {
-		t.Fatalf("forbidden actions = %+v, want top-level acquire_target_snapshot forbidden", action.ForbiddenActions)
+	if !stringSliceContains(action.AllowedActions, runtimemodel.NextActionTypeAcquireTargetSnapshot) ||
+		stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeAcquireTargetSnapshot) ||
+		!stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeStateChange) {
+		t.Fatalf("next action actions = allowed:%+v forbidden:%+v, want only acquire_target_snapshot preflight", action.AllowedActions, action.ForbiddenActions)
 	}
 }
 
@@ -463,8 +465,8 @@ func TestNextActionForRunStateChangeWithCurrentFailureTargetAcquiresSnapshotFirs
 	if err != nil {
 		t.Fatalf("NextActionForRun: %v", err)
 	}
-	if action.Type != runtimemodel.NextActionTypeStateChange || action.StageMode != "target_snapshot_acquisition" {
-		t.Fatalf("next action = %+v, want state_change target snapshot acquisition prerequisite", action)
+	if action.Type != runtimemodel.NextActionTypeAcquireTargetSnapshot || action.StageMode != "target_snapshot_acquisition" {
+		t.Fatalf("next action = %+v, want acquire_target_snapshot preflight", action)
 	}
 	if action.RequiredOutput["mustAcquireCurrentTargetSnapshot"] != true ||
 		action.RequiredOutput["mustUseReadOnlySnapshotAcquisition"] != true ||
@@ -689,8 +691,8 @@ func TestNextActionForRunIgnoresAcceptedTargetSnapshotAfterLaterAppliedPatch(t *
 	if err != nil {
 		t.Fatalf("NextActionForRun: %v", err)
 	}
-	if action.Type != runtimemodel.NextActionTypeStateChange || action.StageMode != "target_snapshot_acquisition" {
-		t.Fatalf("next action = %+v, want state_change target snapshot prerequisite because accepted snapshot is stale", action)
+	if action.Type != runtimemodel.NextActionTypeAcquireTargetSnapshot || action.StageMode != "target_snapshot_acquisition" {
+		t.Fatalf("next action = %+v, want acquire_target_snapshot preflight because accepted snapshot is stale", action)
 	}
 }
 

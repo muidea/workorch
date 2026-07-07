@@ -38,17 +38,21 @@ func schemaBoundRuntimeAuthorityMap(value any, expectedSchema string) map[string
 }
 
 type ConvergenceAuthoritySnapshot struct {
-	SchemaVersion           string
-	WorkspaceID             string
-	RunID                   string
-	DefinitionRevision      string
-	BaselineRevision        string
-	CurrentFocus            map[string]any
-	NextAction              map[string]any
-	CoverageWorkItemContext map[string]any
-	AcceptedEvidenceRefs    []string
-	RejectedEvidenceRefs    []string
-	BudgetScope             map[string]any
+	SchemaVersion             string
+	WorkspaceID               string
+	RunID                     string
+	DefinitionRevision        string
+	BaselineRevision          string
+	CurrentFocus              map[string]any
+	NextAction                map[string]any
+	CoverageWorkItemContext   map[string]any
+	AcceptedEvidenceRefs      []string
+	RejectedEvidenceRefs      []string
+	TargetSnapshotStatus      string
+	TargetSnapshotRefs        []map[string]any
+	SnapshotRequiredReason    string
+	SnapshotFreshnessRevision string
+	BudgetScope               map[string]any
 }
 
 func (s ConvergenceAuthoritySnapshot) ToMap() map[string]any {
@@ -80,6 +84,18 @@ func (s ConvergenceAuthoritySnapshot) ToMap() map[string]any {
 	}
 	if len(s.RejectedEvidenceRefs) > 0 {
 		ret["rejectedEvidenceRefs"] = compactUniqueStrings(s.RejectedEvidenceRefs)
+	}
+	if strings.TrimSpace(s.TargetSnapshotStatus) != "" {
+		ret["targetSnapshotStatus"] = strings.TrimSpace(s.TargetSnapshotStatus)
+	}
+	if len(s.TargetSnapshotRefs) > 0 {
+		ret["targetSnapshotRefs"] = cloneStepInputValue(s.TargetSnapshotRefs)
+	}
+	if strings.TrimSpace(s.SnapshotRequiredReason) != "" {
+		ret["snapshotRequiredReason"] = strings.TrimSpace(s.SnapshotRequiredReason)
+	}
+	if strings.TrimSpace(s.SnapshotFreshnessRevision) != "" {
+		ret["snapshotFreshnessRevision"] = strings.TrimSpace(s.SnapshotFreshnessRevision)
 	}
 	if len(s.BudgetScope) > 0 {
 		ret["budgetScope"] = cloneStepPayload(s.BudgetScope)
@@ -2455,20 +2471,66 @@ func convergenceAuthoritySnapshotForRun(run *runModel.Run) ConvergenceAuthorityS
 	focus := authoritativeCoverageFocusFromContext(run, context)
 	currentFocus := coverageWorkItemPrimaryFocus(context)
 	nextAction := gapNextActionForRun(run, unresolved)
+	snapshotStatus, snapshotRefs, snapshotReason, snapshotRevision := convergenceAuthorityTargetSnapshotReadiness(run, nextAction)
 	budgetScope := convergenceAuthorityBudgetScope(run)
 	return ConvergenceAuthoritySnapshot{
-		SchemaVersion:           convergenceAuthoritySchema,
-		WorkspaceID:             string(run.WorkspaceID),
-		RunID:                   string(run.ID),
-		DefinitionRevision:      stringFromMap(context, "definitionRevision"),
-		BaselineRevision:        firstNonEmptyString(stringFromMap(context, "coverageBaselineHash"), stringFromMap(context, "baselineRevision")),
-		CurrentFocus:            currentFocus,
-		NextAction:              nextAction,
-		CoverageWorkItemContext: coverageWorkItemContextAlignedToFocus(context, focus),
-		AcceptedEvidenceRefs:    gapEvidenceRefsFromCoverageItems(items, true),
-		RejectedEvidenceRefs:    gapEvidenceRefsFromCoverageItems(items, false),
-		BudgetScope:             budgetScope,
+		SchemaVersion:             convergenceAuthoritySchema,
+		WorkspaceID:               string(run.WorkspaceID),
+		RunID:                     string(run.ID),
+		DefinitionRevision:        stringFromMap(context, "definitionRevision"),
+		BaselineRevision:          firstNonEmptyString(stringFromMap(context, "coverageBaselineHash"), stringFromMap(context, "baselineRevision")),
+		CurrentFocus:              currentFocus,
+		NextAction:                nextAction,
+		CoverageWorkItemContext:   coverageWorkItemContextAlignedToFocus(context, focus),
+		AcceptedEvidenceRefs:      gapEvidenceRefsFromCoverageItems(items, true),
+		RejectedEvidenceRefs:      gapEvidenceRefsFromCoverageItems(items, false),
+		TargetSnapshotStatus:      snapshotStatus,
+		TargetSnapshotRefs:        snapshotRefs,
+		SnapshotRequiredReason:    snapshotReason,
+		SnapshotFreshnessRevision: snapshotRevision,
+		BudgetScope:               budgetScope,
 	}
+}
+
+func convergenceAuthorityTargetSnapshotReadiness(run *runModel.Run, nextAction map[string]any) (string, []map[string]any, string, string) {
+	if run == nil || run.ExecutionContext == nil {
+		return "", nil, "", ""
+	}
+	kind := strings.TrimSpace(stringFromMap(nextAction, "kind"))
+	if kind != runtimemodel.NextActionTypeStateChange && kind != runtimemodel.NextActionTypeAcquireTargetSnapshot {
+		return "not_required", nil, "", ""
+	}
+	input := cloneStepPayload(run.ExecutionContext)
+	pkg := mapFromValue(input["repairActionPackage"])
+	snapshots := mergeRepairTargetSnapshots(
+		mapSliceFromValue(pkg["targetSnapshots"]),
+		mapSliceFromValue(pkg["currentTargetSnapshots"]),
+	)
+	snapshots = mergeRepairTargetSnapshots(snapshots, repairActionTargetSnapshots(input))
+	if exact := exactPatchSafeRepairTargetSnapshots(snapshots); len(exact) > 0 {
+		return "ready", repairActionTargetSnapshotMetadata(exact), "state_change_has_runtime_managed_target_snapshot", convergenceAuthoritySnapshotFreshnessRevision(input, exact)
+	}
+	if len(snapshots) > 0 {
+		return "stale", repairActionTargetSnapshotMetadata(snapshots), "target_snapshot_present_but_not_exact_patch_safe", convergenceAuthoritySnapshotFreshnessRevision(input, snapshots)
+	}
+	if kind == runtimemodel.NextActionTypeAcquireTargetSnapshot || stateChangeRequiresTargetSnapshotAcquisition(input, pkg) {
+		return "missing", nil, "state_change_requires_current_target_snapshot", strings.TrimSpace(stringFromMap(mapFromValue(input[coverageWorkItemContextKey]), "definitionRevision"))
+	}
+	return "not_required", nil, "", ""
+}
+
+func convergenceAuthoritySnapshotFreshnessRevision(input map[string]any, snapshots []map[string]any) string {
+	for _, item := range snapshots {
+		for _, key := range []string{"definitionRevision", "baselineRevision", "sourceRevision", "capturedAt", "sourceStepId", "evidenceRef"} {
+			if value := strings.TrimSpace(stringFromMap(item, key)); value != "" {
+				return value
+			}
+		}
+	}
+	return firstNonEmptyString(
+		strings.TrimSpace(stringFromMap(mapFromValue(input[coverageWorkItemContextKey]), "definitionRevision")),
+		strings.TrimSpace(stringFromMap(mapFromValue(input[gapBaselineKey]), "definitionRevision")),
+	)
 }
 
 func convergenceAuthorityBudgetScope(run *runModel.Run) map[string]any {

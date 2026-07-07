@@ -225,6 +225,39 @@ func TestRuntimeRepairExhaustionDecisionGateRejectsContinuableRuntimeContractDec
 	}
 }
 
+func TestRuntimeRepairExhaustionDecisionGateRejectsRuntimeAcquirableTargetSnapshot(t *testing.T) {
+	run := &runmodel.Run{ID: "run-decision-gate-target-snapshot", WorkspaceID: "ws-decision-gate-target-snapshot"}
+	failed := &runmodel.Step{
+		ID:    "run-decision-gate-target-snapshot/failed",
+		RunID: run.ID,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeAcquireTargetSnapshot},
+			},
+			"convergenceContract": map[string]any{
+				"state":            convergenceStateNeedEvidence,
+				"runtimeStageMode": "target_snapshot_acquisition",
+			},
+			"requiredOutput": map[string]any{
+				"mustAcquireCurrentTargetSnapshot":   true,
+				"mustUseReadOnlySnapshotAcquisition": true,
+				"acceptedKinds":                      []string{"file/read"},
+			},
+		},
+		Output: map[string]any{
+			"error": "invalid argument: decision requests a continuable candidate choice",
+			stepOutputKeyBlockDecisionContext: map[string]any{
+				decisionContextKeyDependency: decisionContextDependencyRuntimeContract,
+			},
+		},
+	}
+
+	if !runtimeRepairExhaustionDecisionNotEligible(run, failed) {
+		t.Fatal("runtimeRepairExhaustionDecisionNotEligible = false, want runtime-acquirable target snapshot to deny decision")
+	}
+}
+
 func TestRuntimeRepairExhaustionDecisionGateAllowsProviderDependencyDecision(t *testing.T) {
 	run := &runmodel.Run{ID: "run-decision-gate-provider", WorkspaceID: "ws-decision-gate-provider"}
 	failed := &runmodel.Step{

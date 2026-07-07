@@ -889,6 +889,7 @@ func providerProtectedContextFields(input map[string]any) []string {
 			"nextAction",
 			"currentFocus",
 			"requiredOutput",
+			"targetSnapshots",
 			"outputDecisionContract",
 			"latestRejectedDiagnostic",
 		} {

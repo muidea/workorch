@@ -783,6 +783,33 @@ func TestAuthorityDiagnosticsFromRunSnapshotIncludesRuntimeDiagnostics(t *testin
 	}
 }
 
+func TestAuthorityDiagnosticsFromRunSnapshotReportsMissingTargetSnapshot(t *testing.T) {
+	t.Parallel()
+
+	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
+		Run: readmodelcore.Run{
+			ID: "run-target-snapshot-diagnostic",
+			ExecutionContext: map[string]any{
+				"convergenceAuthority": map[string]any{
+					"targetSnapshotStatus":   "missing",
+					"snapshotRequiredReason": "state_change_requires_current_target_snapshot",
+					"nextAction":             map[string]any{"kind": "acquire_target_snapshot"},
+					"currentFocus":           map[string]any{"id": "cwi-target"},
+				},
+			},
+		},
+	})
+
+	if len(got) != 1 {
+		t.Fatalf("AuthorityDiagnostics = %+v, want target snapshot diagnostic", got)
+	}
+	if got[0].Code != "target_snapshot_missing_before_state_change" ||
+		got[0].Source != "run.executionContext.convergenceAuthority" ||
+		got[0].Kind != "authority_snapshot" {
+		t.Fatalf("AuthorityDiagnostics[0] = %+v, want target snapshot authority diagnostic", got[0])
+	}
+}
+
 func TestAuthorityDiagnosticsFromRunSnapshotReportsCompletedOpenCoverageDrift(t *testing.T) {
 	t.Parallel()
 

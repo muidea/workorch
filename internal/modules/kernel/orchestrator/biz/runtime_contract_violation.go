@@ -33,6 +33,7 @@ const (
 	contractViolationRuleUnsafeOutput                       = "unsafe_output"
 	contractViolationRuleUnparseableOutput                  = runtimemodel.ContractViolationRuleUnparseableOutput
 	contractViolationRulePatchApplyContractFailed           = "patch_apply_contract_failed"
+	contractViolationRuleGraphDependsOnLLMBeforePatch       = "graph_depends_on_llm_before_patch"
 	contractViolationRuleAvailableSnapshotIgnored           = "available_snapshot_ignored"
 	contractViolationRuleRuntimeContract                    = "runtime_contract_violation"
 
@@ -101,8 +102,9 @@ func contractViolationRuleFromType(violationType string) string {
 		return contractViolationRuleDoDAssessmentEvidenceMissing
 	case contractViolationCoverageMapIncomplete:
 		return contractViolationRuleCoverageMapIncomplete
-	case contractViolationGraphDependsOnLLMBeforePatch,
-		contractViolationPatchTargetRefRequired,
+	case contractViolationGraphDependsOnLLMBeforePatch:
+		return contractViolationRuleGraphDependsOnLLMBeforePatch
+	case contractViolationPatchTargetRefRequired,
 		contractViolationPatchContentRequired,
 		contractViolationPatchUnresolvedTemplate,
 		contractViolationPatchDispatchInvalid,
@@ -864,8 +866,9 @@ func contractViolationRuleFromStep(step *runModel.Step) string {
 		return contractViolationRuleDoDAssessmentEvidenceMissing
 	case contractViolationCoverageMapIncomplete:
 		return contractViolationRuleCoverageMapIncomplete
-	case contractViolationGraphDependsOnLLMBeforePatch,
-		contractViolationPatchTargetRefRequired,
+	case contractViolationGraphDependsOnLLMBeforePatch:
+		return contractViolationRuleGraphDependsOnLLMBeforePatch
+	case contractViolationPatchTargetRefRequired,
 		contractViolationPatchContentRequired,
 		contractViolationPatchUnresolvedTemplate,
 		contractViolationPatchDispatchInvalid,
@@ -920,6 +923,8 @@ func contractViolationRecoverabilityForRule(rule string) string {
 		return runtimemodel.ContractViolationRecoverabilityNarrowContract
 	case contractViolationRuleCoverageAssessmentIncomplete:
 		return runtimemodel.ContractViolationRecoverabilityRecomputeAuthority
+	case contractViolationRuleGraphDependsOnLLMBeforePatch:
+		return runtimemodel.ContractViolationRecoverabilityRecomputeAuthority
 	default:
 		return runtimemodel.ContractViolationRecoverabilityRetrySameContract
 	}
@@ -929,6 +934,8 @@ func contractViolationRetryHint(rule string) string {
 	switch strings.TrimSpace(rule) {
 	case contractViolationRuleStateChangingRequiredMissing:
 		return "return output that satisfies stateChangingOutputRequired and requiredOutput without repeating a read-only graph"
+	case contractViolationRuleGraphDependsOnLLMBeforePatch:
+		return "do not put file/read before patch/apply in the same executionGraph; let runtime acquire target_snapshot first when the current snapshot is missing, otherwise patch directly from the provided snapshot"
 	case contractViolationRuleConcreteValidationMissing:
 		return "return bounded concrete validation evidence with validationEvidence mode, observation, target refs, and observed claims metadata"
 	case contractViolationRuleValidationEvidenceMetadataMissing:
@@ -992,6 +999,8 @@ func contractViolationForbiddenRepeat(rule string) []string {
 		return []string{"markdown wrapped JSON", "partial JSON", "multiple JSON objects"}
 	case contractViolationRulePatchApplyContractFailed:
 		return []string{"patch/apply without targetRef", "patch/apply without content or diff", "same-graph read-before-patch when current snapshot is supplied", "file_write without matching baseHash for existing target"}
+	case contractViolationRuleGraphDependsOnLLMBeforePatch:
+		return []string{"same-graph file/read before patch/apply", "patch/apply depending on llm/workspace_execution before patch"}
 	case contractViolationRuleAvailableSnapshotIgnored:
 		return []string{"claiming current target snapshots are missing when complete safe snapshots are already available", "file/read or context rehydration for already supplied targets"}
 	default:
@@ -1059,6 +1068,22 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 		if contractViolationRuleRequiresManagedValidationNarrow(rule) && mode == contractViolationCorrectionModeForcedNarrow {
 			profileID = "managed_validation_evidence"
 			applyManagedValidationCorrectionContract(contract)
+		}
+	case contractViolationRuleGraphDependsOnLLMBeforePatch:
+		profileID = "target_snapshot_before_patch"
+		contract["requiredOutputShape"] = "target_snapshot_acquisition_or_direct_snapshot_patch"
+		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("runtime_managed_acquire_target_snapshot_if_missing", "patch/apply_against_current_target_snapshot_if_available")
+		contract["forbiddenOutputs"] = []string{"same_graph_file_read_before_patch", "llm_workspace_execution_before_patch", "read_before_patch_when_snapshot_missing"}
+		contract["runtimeRecomputedAuthority"] = map[string]any{
+			"owner":    "runtime",
+			"required": true,
+			"source":   "target_snapshot_preflight",
+		}
+		if targetScope != "" {
+			contract["targetScope"] = targetScope
+		}
+		if snapshots := contractViolationAvailableTargetSnapshotSummary(step); len(snapshots) > 0 {
+			contract["availableTargetSnapshots"] = snapshots
 		}
 	case contractViolationRulePatchApplyContractFailed:
 		profileID = "patch_apply_contract"

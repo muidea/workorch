@@ -59,6 +59,9 @@ func currentActionContractFromInput(run *runModel.Run, stepID common.StepID, inp
 	if len(required) > 0 {
 		ret["requiredOutput"] = cloneStepPayload(required)
 	}
+	if snapshots := currentActionTargetSnapshotRefsFromInput(input); len(snapshots) > 0 {
+		ret["targetSnapshots"] = snapshots
+	}
 	for _, key := range []string{
 		"runtimeStage",
 		"runtimeStageMode",
@@ -79,6 +82,26 @@ func currentActionContractFromInput(run *runModel.Run, stepID common.StepID, inp
 		ret["latestRejectedDiagnostic"] = compactCurrentActionDiagnostic(recovery)
 	}
 	return ret
+}
+
+func currentActionTargetSnapshotRefsFromInput(input map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind")) != runtimemodel.NextActionTypeStateChange {
+		return nil
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	snapshots := mergeRepairTargetSnapshots(
+		mapSliceFromValue(pkg["targetSnapshots"]),
+		mapSliceFromValue(pkg["currentTargetSnapshots"]),
+	)
+	snapshots = mergeRepairTargetSnapshots(snapshots, repairActionTargetSnapshots(input))
+	exact := exactPatchSafeRepairTargetSnapshots(snapshots)
+	if len(exact) == 0 {
+		return nil
+	}
+	return repairActionTargetSnapshotMetadata(exact)
 }
 
 func currentActionNextActionFromInput(input map[string]any) map[string]any {
@@ -112,16 +135,13 @@ func currentActionNextActionFromConvergenceContract(contract map[string]any) map
 	switch state {
 	case convergenceStateNeedEvidence:
 		if strings.TrimSpace(stringFromMap(contract, "runtimeStageMode")) == "target_snapshot_acquisition" {
-			if parent := strings.TrimSpace(stringFromMap(mapFromValue(contract["parentNextAction"]), "kind")); parent != "" {
-				return map[string]any{"kind": parent, "reason": "current convergence contract carries parent action for target snapshot evidence"}
-			}
-			if strings.TrimSpace(stringFromMap(mapFromValue(contract["prerequisite"]), "kind")) == "acquire_target_snapshot" {
-				return map[string]any{"kind": "state_change", "reason": "state_change requires current target snapshot prerequisite"}
-			}
 			return map[string]any{"kind": "acquire_target_snapshot", "reason": "current convergence contract requires target snapshot evidence before state change"}
 		}
 		return map[string]any{"kind": "acquire_evidence", "reason": "current convergence contract requires bounded evidence before continuing"}
 	case convergenceStateNeedStateChange:
+		if strings.TrimSpace(stringFromMap(contract, "runtimeStageMode")) == "target_snapshot_acquisition" {
+			return map[string]any{"kind": "acquire_target_snapshot", "reason": "state_change requires current target snapshot prerequisite"}
+		}
 		next := map[string]any{"kind": "state_change", "reason": "current convergence contract requires state-changing output"}
 		if prerequisite := mapFromValue(contract["prerequisite"]); len(prerequisite) > 0 {
 			next["prerequisite"] = cloneStepPayload(prerequisite)

@@ -680,6 +680,15 @@ func TestContractViolationCorrectionProfilesCoverPrimaryRules(t *testing.T) {
 			wantTargetRule: true,
 		},
 		{
+			name:          "same graph read before patch",
+			violationType: contractViolationGraphDependsOnLLMBeforePatch,
+			errText:       "executionGraph patch/apply must not depend on same-graph file/read",
+			wantRule:      contractViolationRuleGraphDependsOnLLMBeforePatch,
+			wantProfile:   "target_snapshot_before_patch",
+			wantShape:     "target_snapshot_acquisition_or_direct_snapshot_patch",
+			wantForbidden: "same_graph_file_read_before_patch",
+		},
+		{
 			name:          "coverage evidence",
 			violationType: contractViolationDoDAssessmentEvidenceMissing,
 			errText:       "satisfied dodAssessment item requires evidenceRefs",

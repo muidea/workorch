@@ -53,6 +53,47 @@ func TestAttachCurrentActionContractFromAuthority(t *testing.T) {
 	}
 }
 
+func TestAttachCurrentActionContractSurfacesReadyTargetSnapshotRefs(t *testing.T) {
+	run := &runModel.Run{ID: "run-current-action-target-snapshot", WorkspaceID: "ws-current-action-target-snapshot"}
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction":   map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+			"currentFocus": map[string]any{"id": "cwi-target", "coverageWorkItemIds": []any{"cwi-target"}},
+		},
+		"convergenceContract": map[string]any{
+			"state":                       convergenceStateNeedStateChange,
+			"stateChangingOutputRequired": true,
+		},
+		"stateChangingOutputRequired": true,
+		"repairActionPackage": map[string]any{
+			"targetSnapshots": []map[string]any{{
+				"targetRef":         "target.txt",
+				"content":           "current content must stay out of currentActionContract",
+				"contentHash":       "sha256:target",
+				"contentComplete":   true,
+				"safeForPatch":      true,
+				"safeForFileWrite":  true,
+				"safeForExactPatch": true,
+				"runtimeManaged":    true,
+				"evidenceRef":       "ev-target-snapshot",
+			}},
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode": true,
+				"acceptedKinds":                []any{"patch/apply"},
+			},
+		},
+	}
+
+	got := attachCurrentActionContractToInput(run, common.StepID("run-current-action-target-snapshot/step-001"), input)
+	snapshots := mapSliceFromValue(mapFromValue(got[currentActionContractKey])["targetSnapshots"])
+	if len(snapshots) != 1 || snapshots[0]["targetRef"] != "target.txt" || snapshots[0]["contentHash"] != "sha256:target" {
+		t.Fatalf("currentActionContract.targetSnapshots = %+v, want compact ready snapshot ref", snapshots)
+	}
+	if snapshots[0]["content"] != nil {
+		t.Fatalf("currentActionContract.targetSnapshots = %+v, must not carry full content", snapshots)
+	}
+}
+
 func TestValidateConvergenceDispatchInputRejectsCurrentActionContractDrift(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{
@@ -241,8 +282,8 @@ func TestCurrentActionContractDoesNotFallbackToRunAuthority(t *testing.T) {
 	got := attachCurrentActionContractToInput(run, common.StepID("run-current-action-stale/step-001"), input)
 	contract := mapFromValue(got[currentActionContractKey])
 	next := mapFromValue(contract["nextAction"])
-	if next["kind"] != "state_change" {
-		t.Fatalf("currentActionContract.nextAction = %+v, want state_change parent action", next)
+	if next["kind"] != "acquire_target_snapshot" {
+		t.Fatalf("currentActionContract.nextAction = %+v, want acquire_target_snapshot preflight action", next)
 	}
 	if prerequisite := mapFromValue(contract["prerequisite"]); prerequisite["kind"] != "acquire_target_snapshot" {
 		t.Fatalf("currentActionContract.prerequisite = %+v, want target snapshot prerequisite", prerequisite)
