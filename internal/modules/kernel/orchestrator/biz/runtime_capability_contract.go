@@ -424,6 +424,12 @@ func declaredRuntimeMCPServerIDsFromSources(sources ...map[string]any) (map[stri
 		present = true
 		if id := strings.TrimSpace(stringFromMap(capability, "serverId")); id != "" {
 			ret[id] = true
+			return
+		}
+		if id := strings.TrimSpace(stringFromMap(capability, "id")); id != "" {
+			if idx := strings.Index(id, ":"); idx > 0 {
+				ret[strings.TrimSpace(id[:idx])] = true
+			}
 		}
 	}
 	addCapabilityID := func(value string) {
@@ -445,6 +451,12 @@ func declaredRuntimeMCPServerIDsFromSources(sources ...map[string]any) (map[stri
 			addServer(server)
 		}
 		for _, capability := range mapSliceFromValue(source["mcpCapabilities"]) {
+			addCapability(capability)
+		}
+		for _, capability := range mapSliceFromValue(source["selectedCapabilities"]) {
+			addCapability(capability)
+		}
+		for _, capability := range mapSliceFromValue(source["capabilities"]) {
 			addCapability(capability)
 		}
 		for _, id := range stringSliceFromValue(source["capabilityIds"]) {

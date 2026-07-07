@@ -5043,6 +5043,90 @@ func TestShouldCreateDecisionTicketKeepsContractViolationRecoveryExhaustedBlocke
 	}
 }
 
+func TestShouldCreateDecisionTicketBlocksManagedValidationOutputShapeExhaustedDecision(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:                  runtimeStageVerification,
+		"repairObjective":                         repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired":               true,
+		"managedValidationAvailable":              true,
+		"validationCommandContractRetryExhausted": true,
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []string{managedValidationSessionNodeKind},
+			},
+		},
+	}
+	output := decisionOutputFromSpec(runtimeDecisionBlockSpec{
+		Reason:       "validation command contract retry exhausted",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Choose a recovery action.",
+		Context: map[string]any{
+			decisionContextKeyScope:                   decisionContextScopeWorkorchRuntime,
+			"blockerKind":                             "validation_command_contract_retry_exhausted",
+			"managedValidationAvailable":              true,
+			"validationCommandContractRetryExhausted": true,
+			"contractViolation": map[string]any{
+				"violatedRule": contractViolationRuleValidationDetachedProcessForbidden,
+			},
+		},
+	})
+	contract := ConvergenceContract{
+		State:           convergenceStateNeedValidation,
+		RuntimeStage:    runtimeStageVerification,
+		RepairObjective: repairObjectiveConcreteValidationEvidence,
+		RepairActionPackage: map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []string{managedValidationSessionNodeKind},
+			},
+		},
+	}
+
+	if ShouldCreateDecisionTicket(input, output, contract) {
+		t.Fatalf("ShouldCreateDecisionTicket = true, want false while managed validation can still narrow output-shape retry")
+	}
+}
+
+func TestBuildConvergenceContractKeepsValidationOnRequiredOutputCapabilityMismatch(t *testing.T) {
+	failed := &runmodel.Step{
+		ID:   "step-validation-mcp",
+		Kind: runtimemodel.StepKindMCPToolCall,
+		Input: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+				"currentFocus": map[string]any{
+					"id":                   "cwi-validate",
+					"coverageWorkItemIds":  []string{"cwi-validate"},
+					"missingEvidenceKinds": []string{"validation"},
+				},
+			},
+			"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
+			"repairActionPackage": map[string]any{
+				"repairObjective":             repairObjectiveStateChangingOutput,
+				"stateChangingOutputRequired": true,
+				"requiredOutput":              stateChangingRepairRequiredOutput(),
+			},
+		},
+		Output: map[string]any{
+			"status":           "failed",
+			"failureClass":     failureClassRuntimeContractMisalign,
+			"failureReason":    "validation_required_output_capability_mismatch",
+			"failureSignature": "class=runtime_internal_contract_misalignment|kind=mcp/tool_call|stage=runtime_required_output_kind_rejected|error=validation_required_output_capability_mismatch: runtime step kind mcp/tool_call is not accepted by current requiredOutput.acceptedKinds",
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, failed, failed, map[string]any{"input": failed.Input}, nil)
+	if contract.State != convergenceStateNeedValidation {
+		t.Fatalf("contract.State = %q, want %q", contract.State, convergenceStateNeedValidation)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if boolValue(required["mustIncludeStateChangingNode"]) ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), runtimemodel.RuntimeBlockKindPatchApply) {
+		t.Fatalf("requiredOutput = %+v, want validation-only contract", required)
+	}
+}
+
 func TestShouldCreateDecisionTicketKeepsRuntimeRepairExhaustedBlockerWithContinuableNextAction(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:      runtimeStageRepair,

@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -60,6 +61,8 @@ func TestValidateRuntimeStepKindRequiredOutputBeforeRuntimeRejectsUnacceptedKind
 	input["requiredOutput"] = required
 	input["repairActionPackage"] = map[string]any{"requiredOutput": required}
 	input[stepInputKeyStagePacket] = map[string]any{"requiredOutput": required}
+	input["runtimeCapabilities"] = map[string]any{"mcpServers": []map[string]any{{"id": "semantic-mcp"}}}
+	delete(input, "convergenceContract")
 	input[currentActionContractKey] = map[string]any{
 		"currentFocus":   mapFromValue(input[coverageFocusKey]),
 		"requiredOutput": required,
@@ -70,6 +73,15 @@ func TestValidateRuntimeStepKindRequiredOutputBeforeRuntimeRejectsUnacceptedKind
 	err := validateRuntimeStepKindRequiredOutputBeforeRuntime(runtimemodel.StepKindMCPToolCall, input)
 	if err == nil || !strings.Contains(err.Error(), "not accepted") {
 		t.Fatalf("error = %v, want unaccepted runtime kind rejection", err)
+	}
+	var structured runtimeContractViolationError
+	if !errors.As(err, &structured) {
+		t.Fatalf("error = %T %[1]v, want runtimeContractViolationError", err)
+	}
+	if structured.violationType != contractViolationValidationRequiredOutputCapabilityMismatch ||
+		structured.rule != contractViolationRuleValidationRequiredOutputCapabilityMismatch ||
+		structured.recoverability != runtimemodel.ContractViolationRecoverabilityRebuildValidationRequiredOutput {
+		t.Fatalf("structured = %+v, want validation requiredOutput authority rebuild", structured)
 	}
 }
 

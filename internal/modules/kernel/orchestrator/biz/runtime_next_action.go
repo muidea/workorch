@@ -1617,7 +1617,8 @@ func contractViolationRecoverabilityCanRetry(value string) bool {
 	switch strings.TrimSpace(value) {
 	case runtimemodel.ContractViolationRecoverabilityRetrySameContract,
 		runtimemodel.ContractViolationRecoverabilityNarrowContract,
-		runtimemodel.ContractViolationRecoverabilityNormalizeThenRetry:
+		runtimemodel.ContractViolationRecoverabilityNormalizeThenRetry,
+		runtimemodel.ContractViolationRecoverabilityRebuildValidationRequiredOutput:
 		return true
 	default:
 		return false

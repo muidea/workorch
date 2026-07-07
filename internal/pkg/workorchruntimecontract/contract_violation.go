@@ -13,12 +13,13 @@ const (
 )
 
 const (
-	ContractViolationRecoverabilityRetrySameContract  = "retry_same_contract"
-	ContractViolationRecoverabilityNarrowContract     = "narrow_contract"
-	ContractViolationRecoverabilityNormalizeThenRetry = "normalize_then_retry"
-	ContractViolationRecoverabilityRecomputeAuthority = "recompute_authority"
-	ContractViolationRecoverabilityDecisionRequired   = "decision_required"
-	ContractViolationRecoverabilityFailFast           = "fail_fast"
+	ContractViolationRecoverabilityRetrySameContract               = "retry_same_contract"
+	ContractViolationRecoverabilityNarrowContract                  = "narrow_contract"
+	ContractViolationRecoverabilityNormalizeThenRetry              = "normalize_then_retry"
+	ContractViolationRecoverabilityRecomputeAuthority              = "recompute_authority"
+	ContractViolationRecoverabilityRebuildValidationRequiredOutput = "rebuild_validation_required_output_from_authority"
+	ContractViolationRecoverabilityDecisionRequired                = "decision_required"
+	ContractViolationRecoverabilityFailFast                        = "fail_fast"
 )
 
 type ContractViolation struct {
@@ -88,7 +89,8 @@ func (v ContractViolation) Recoverable() bool {
 	switch v.Normalized().Recoverability {
 	case ContractViolationRecoverabilityRetrySameContract,
 		ContractViolationRecoverabilityNarrowContract,
-		ContractViolationRecoverabilityNormalizeThenRetry:
+		ContractViolationRecoverabilityNormalizeThenRetry,
+		ContractViolationRecoverabilityRebuildValidationRequiredOutput:
 		return true
 	default:
 		return false
@@ -110,6 +112,7 @@ func normalizedContractViolationRecoverability(value string) string {
 		ContractViolationRecoverabilityNarrowContract,
 		ContractViolationRecoverabilityNormalizeThenRetry,
 		ContractViolationRecoverabilityRecomputeAuthority,
+		ContractViolationRecoverabilityRebuildValidationRequiredOutput,
 		ContractViolationRecoverabilityDecisionRequired,
 		ContractViolationRecoverabilityFailFast:
 		return strings.TrimSpace(value)

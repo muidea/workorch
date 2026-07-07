@@ -896,6 +896,7 @@ func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[strin
 	}
 	out["mustIncludeStateChangingNode"] = false
 	out["mustProduceConcreteValidationEvidence"] = true
+	out["mustNotMutateWorkspace"] = true
 	out["mustPreferExecutableBehaviorValidation"] = true
 	out["staticInspectionOnlyMayNotSatisfyRuntimeBehavior"] = true
 	out["mustAttemptControlledSubstituteWhenPrerequisiteUnavailable"] = true

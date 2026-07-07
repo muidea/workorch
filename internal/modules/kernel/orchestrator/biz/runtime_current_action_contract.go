@@ -325,17 +325,28 @@ func normalizeRequiredOutputMCPToolContract(input map[string]any, required map[s
 	}
 	declared, _ := declaredRuntimeMCPServerIDsFromSources(
 		input,
+		mapFromValue(input["selectedContext"]),
 		mapFromValue(input["executionContext"]),
+		mapFromValue(mapFromValue(input["executionContext"])["selectedContext"]),
 		mapFromValue(input[stepInputKeyExecutionContextPackage]),
+		mapFromValue(mapFromValue(input[stepInputKeyExecutionContextPackage])["selectedContext"]),
 		mapFromValue(input["runtimeCapabilities"]),
+		mapFromValue(mapFromValue(input["runtimeCapabilities"])["selectedContext"]),
 		mapFromValue(mapFromValue(input["executionContext"])["runtimeCapabilities"]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["runtimeCapabilities"])["selectedContext"]),
 	)
 	if len(declared) > 0 {
 		required["allowedMCPServerIds"] = sortedMCPServerIDs(declared)
+		delete(required, "mcpToolCallUnavailableReason")
+		delete(required, "mustResolveCapabilityGap")
+		delete(required, "missingKinds")
 		return required
 	}
 	required["acceptedKinds"] = removeStringsFromSlice(accepted, runtimemodel.StepKindMCPToolCall)
 	required["mcpToolCallUnavailableReason"] = "mcp/tool_call is not accepted for this validation action because no concrete MCP server is declared in the current runtime capability context"
+	required["mustResolveCapabilityGap"] = true
+	required["missingKinds"] = []string{runtimemodel.StepKindMCPToolCall}
+	required["availableKinds"] = compactUniqueStrings(requiredOutputSatisfiableRouteKinds(required))
 	return required
 }
 

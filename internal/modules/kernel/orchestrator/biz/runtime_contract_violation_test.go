@@ -640,6 +640,56 @@ func TestContractViolationClassifiesLLMSchemaInvalidAsRecoverableDiagnostic(t *t
 	}
 }
 
+func TestContractViolationValidationRequiredOutputCapabilityMismatchRebuildsAuthority(t *testing.T) {
+	runID := common.RunID("run-contract-validation-required-output-mismatch")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-validation-required-output-mismatch", InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := contractViolationFailedStep(runID, "failed-validation-required-output-mismatch")
+	failed.Input = validationDispatchInputFixture()
+	failed.Input[stepInputKeyRuntimeStage] = runtimeStageVerification
+	failed.Input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+	required := mapFromValue(failed.Input["requiredOutput"])
+	required["acceptedKinds"] = []string{runtimemodel.StepKindShellCommand, managedValidationSessionNodeKind}
+	failed.Input["requiredOutput"] = required
+	failed.Input["repairActionPackage"] = map[string]any{"requiredOutput": required}
+	failed.Input[stepInputKeyStagePacket] = map[string]any{"requiredOutput": required}
+	failed.Input[currentActionContractKey] = map[string]any{
+		"currentFocus":   mapFromValue(failed.Input[coverageFocusKey]),
+		"requiredOutput": required,
+		"nextAction":     map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		"schemaVersion":  currentActionContractSchema,
+	}
+	failed.Output = map[string]any{
+		"stage":                   "runtime_required_output_kind_rejected",
+		"error":                   "validation_required_output_capability_mismatch: runtime step kind mcp/tool_call is not accepted by current requiredOutput.acceptedKinds",
+		failureOutputKeyClass:     failureClassRuntimeContractMisalign,
+		failureOutputKeySignature: "class=runtime_internal_contract_misalignment|kind=mcp/tool_call|stage=runtime_required_output_kind_rejected",
+	}
+
+	attachContractViolationType(failed.Output, common.ErrInvalidArgument)
+	attachContractViolationDiagnostics(run, failed, common.ErrInvalidArgument)
+
+	recovery := contractViolationFromFailedOutput(failed)
+	if got := stringFromMap(recovery, "violationType"); got != contractViolationValidationRequiredOutputCapabilityMismatch {
+		t.Fatalf("violationType = %q, want %s; recovery=%+v", got, contractViolationValidationRequiredOutputCapabilityMismatch, recovery)
+	}
+	if got := stringFromMap(recovery, "violatedRule"); got != contractViolationRuleValidationRequiredOutputCapabilityMismatch {
+		t.Fatalf("violatedRule = %q, want %s; recovery=%+v", got, contractViolationRuleValidationRequiredOutputCapabilityMismatch, recovery)
+	}
+	if got := stringFromMap(recovery, "recoverability"); got != runtimemodel.ContractViolationRecoverabilityRebuildValidationRequiredOutput {
+		t.Fatalf("recoverability = %q, want validation requiredOutput authority rebuild; recovery=%+v", got, recovery)
+	}
+	if got := stringFromMap(recovery, "correctionProfileId"); got != "validation_required_output_authority_rebuild" {
+		t.Fatalf("correctionProfileId = %q, want validation authority rebuild; recovery=%+v", got, recovery)
+	}
+	contract := mapFromValue(recovery["correctionContract"])
+	if got := stringFromMap(contract, "requiredOutputShape"); got != "authority_derived_validation_required_output" {
+		t.Fatalf("requiredOutputShape = %q, want authority-derived validation requiredOutput; contract=%+v", got, contract)
+	}
+	if !failedStepHasRecoverableContractViolation(failed) || !failedStepRequiresAuthorityRecompute(failed) {
+		t.Fatalf("failed step should be recoverable authority recompute: recovery=%+v", recovery)
+	}
+}
+
 func TestContractViolationCorrectionProfilesCoverPrimaryRules(t *testing.T) {
 	tests := []struct {
 		name           string

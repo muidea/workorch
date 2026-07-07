@@ -25,9 +25,41 @@ func validateRuntimeStepKindRequiredOutputBeforeRuntime(kind string, input map[s
 		return nil
 	}
 	if !accepted[kind] {
+		if currentActionRequiresConcreteValidation(input) && runtimeValidationProducerKindDeclared(input, kind) {
+			return newRuntimeContractViolationRuleError(
+				contractViolationValidationRequiredOutputCapabilityMismatch,
+				contractViolationRuleValidationRequiredOutputCapabilityMismatch,
+				fmt.Sprintf("validation_required_output_capability_mismatch: runtime step kind %s is not accepted by current requiredOutput.acceptedKinds", kind),
+			)
+		}
 		return fmt.Errorf("%w: runtime step kind %s is not accepted by current requiredOutput.acceptedKinds", common.ErrInvalidArgument, kind)
 	}
 	return nil
+}
+
+func runtimeValidationProducerKindDeclared(input map[string]any, kind string) bool {
+	kind = canonicalRuntimeGraphNodeKind(kind)
+	if !runtimeStepKindCanProduceValidationEvidence(kind) {
+		return false
+	}
+	switch kind {
+	case runtimemodel.StepKindMCPToolCall:
+		declared, _ := declaredRuntimeMCPServerIDsFromSources(
+			input,
+			mapFromValue(input["selectedContext"]),
+			mapFromValue(input["executionContext"]),
+			mapFromValue(mapFromValue(input["executionContext"])["selectedContext"]),
+			mapFromValue(input[stepInputKeyExecutionContextPackage]),
+			mapFromValue(mapFromValue(input[stepInputKeyExecutionContextPackage])["selectedContext"]),
+			mapFromValue(input["runtimeCapabilities"]),
+			mapFromValue(mapFromValue(input["runtimeCapabilities"])["selectedContext"]),
+			mapFromValue(mapFromValue(input["executionContext"])["runtimeCapabilities"]),
+			mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["runtimeCapabilities"])["selectedContext"]),
+		)
+		return len(declared) > 0
+	default:
+		return true
+	}
 }
 
 func runtimeRequiredOutputAcceptedKinds(required map[string]any) map[string]bool {

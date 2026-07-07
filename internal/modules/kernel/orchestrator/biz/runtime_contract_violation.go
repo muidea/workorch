@@ -11,31 +11,32 @@ import (
 )
 
 const (
-	contractViolationRuleRequiredOutputMissing              = "required_output_missing"
-	contractViolationRuleWrongOutputShape                   = "wrong_output_shape"
-	contractViolationRuleAcceptedKindMismatch               = "accepted_kind_mismatch"
-	contractViolationRuleStateChangingRequiredMissing       = "state_changing_required_missing"
-	contractViolationRuleConcreteValidationMissing          = "concrete_validation_contract_missing"
-	contractViolationRuleValidationEvidenceMetadataMissing  = "validation_evidence_metadata_missing"
-	contractViolationRuleValidationScratchRequired          = "validation_scratch_required"
-	contractViolationRuleValidationScratchEscape            = "validation_scratch_escape"
-	contractViolationRuleValidationProcessControlForbidden  = "validation_process_control_forbidden"
-	contractViolationRuleValidationDetachedProcessForbidden = "validation_detached_process_forbidden"
-	contractViolationRuleValidationShellSafetyUnproven      = "validation_shell_safety_unproven"
-	contractViolationRuleValidationStaticOnly               = "validation_static_only"
-	contractViolationRuleManagedValidationRequired          = "managed_validation_required"
-	contractViolationRuleDoDAssessmentEvidenceMissing       = "dod_assessment_missing_evidence_refs"
-	contractViolationRuleCoverageAssessmentIncomplete       = "coverage_assessment_incomplete"
-	contractViolationRuleCoverageMapIncomplete              = "coverage_map_incomplete"
-	contractViolationRuleTraceabilityRefMismatch            = "traceability_ref_mismatch"
-	contractViolationRuleFocusBindingMismatch               = "focus_binding_mismatch"
-	contractViolationRuleDecisionBlockedWhenActionable      = "decision_blocked_when_actionable"
-	contractViolationRuleUnsafeOutput                       = "unsafe_output"
-	contractViolationRuleUnparseableOutput                  = runtimemodel.ContractViolationRuleUnparseableOutput
-	contractViolationRulePatchApplyContractFailed           = "patch_apply_contract_failed"
-	contractViolationRuleGraphDependsOnLLMBeforePatch       = "graph_depends_on_llm_before_patch"
-	contractViolationRuleAvailableSnapshotIgnored           = "available_snapshot_ignored"
-	contractViolationRuleRuntimeContract                    = "runtime_contract_violation"
+	contractViolationRuleRequiredOutputMissing                      = "required_output_missing"
+	contractViolationRuleWrongOutputShape                           = "wrong_output_shape"
+	contractViolationRuleAcceptedKindMismatch                       = "accepted_kind_mismatch"
+	contractViolationRuleStateChangingRequiredMissing               = "state_changing_required_missing"
+	contractViolationRuleConcreteValidationMissing                  = "concrete_validation_contract_missing"
+	contractViolationRuleValidationEvidenceMetadataMissing          = "validation_evidence_metadata_missing"
+	contractViolationRuleValidationScratchRequired                  = "validation_scratch_required"
+	contractViolationRuleValidationScratchEscape                    = "validation_scratch_escape"
+	contractViolationRuleValidationProcessControlForbidden          = "validation_process_control_forbidden"
+	contractViolationRuleValidationDetachedProcessForbidden         = "validation_detached_process_forbidden"
+	contractViolationRuleValidationShellSafetyUnproven              = "validation_shell_safety_unproven"
+	contractViolationRuleValidationStaticOnly                       = "validation_static_only"
+	contractViolationRuleManagedValidationRequired                  = "managed_validation_required"
+	contractViolationRuleValidationRequiredOutputCapabilityMismatch = "validation_required_output_capability_mismatch"
+	contractViolationRuleDoDAssessmentEvidenceMissing               = "dod_assessment_missing_evidence_refs"
+	contractViolationRuleCoverageAssessmentIncomplete               = "coverage_assessment_incomplete"
+	contractViolationRuleCoverageMapIncomplete                      = "coverage_map_incomplete"
+	contractViolationRuleTraceabilityRefMismatch                    = "traceability_ref_mismatch"
+	contractViolationRuleFocusBindingMismatch                       = "focus_binding_mismatch"
+	contractViolationRuleDecisionBlockedWhenActionable              = "decision_blocked_when_actionable"
+	contractViolationRuleUnsafeOutput                               = "unsafe_output"
+	contractViolationRuleUnparseableOutput                          = runtimemodel.ContractViolationRuleUnparseableOutput
+	contractViolationRulePatchApplyContractFailed                   = "patch_apply_contract_failed"
+	contractViolationRuleGraphDependsOnLLMBeforePatch               = "graph_depends_on_llm_before_patch"
+	contractViolationRuleAvailableSnapshotIgnored                   = "available_snapshot_ignored"
+	contractViolationRuleRuntimeContract                            = "runtime_contract_violation"
 
 	stepOutputKeyContractViolation        = "contractViolation"
 	stepInputKeyContractViolationRecovery = "contractViolationRecovery"
@@ -87,6 +88,8 @@ func contractViolationRuleFromType(violationType string) string {
 		return contractViolationRuleStateChangingRequiredMissing
 	case contractViolationValidationEvidenceRequired:
 		return contractViolationRuleConcreteValidationMissing
+	case contractViolationValidationRequiredOutputCapabilityMismatch:
+		return contractViolationRuleValidationRequiredOutputCapabilityMismatch
 	case contractViolationGraphNodeReturnedGraph,
 		contractViolationRepairReturnedGraph:
 		return contractViolationRuleWrongOutputShape
@@ -671,7 +674,8 @@ func failedStepHasRecoverableContractViolation(step *runModel.Step) bool {
 	switch recoverability {
 	case runtimemodel.ContractViolationRecoverabilityRetrySameContract,
 		runtimemodel.ContractViolationRecoverabilityNarrowContract,
-		runtimemodel.ContractViolationRecoverabilityNormalizeThenRetry:
+		runtimemodel.ContractViolationRecoverabilityNormalizeThenRetry,
+		runtimemodel.ContractViolationRecoverabilityRebuildValidationRequiredOutput:
 		return true
 	default:
 		return false
@@ -684,6 +688,7 @@ func failedStepRequiresAuthorityRecompute(step *runModel.Step) bool {
 		return false
 	}
 	return strings.TrimSpace(stringFromMap(violation, "recoverability")) == runtimemodel.ContractViolationRecoverabilityRecomputeAuthority ||
+		strings.TrimSpace(stringFromMap(violation, "recoverability")) == runtimemodel.ContractViolationRecoverabilityRebuildValidationRequiredOutput ||
 		strings.TrimSpace(stringFromMap(violation, "violatedRule")) == contractViolationRuleCoverageAssessmentIncomplete
 }
 
@@ -853,6 +858,8 @@ func contractViolationRuleFromStep(step *runModel.Step) string {
 		return contractViolationRuleStateChangingRequiredMissing
 	case contractViolationValidationEvidenceRequired:
 		return contractViolationRuleConcreteValidationMissing
+	case contractViolationValidationRequiredOutputCapabilityMismatch:
+		return contractViolationRuleValidationRequiredOutputCapabilityMismatch
 	case contractViolationGraphNodeReturnedGraph,
 		contractViolationRepairReturnedGraph:
 		return contractViolationRuleWrongOutputShape
@@ -919,6 +926,8 @@ func contractViolationRecoverabilityForRule(rule string) string {
 		return runtimemodel.ContractViolationRecoverabilityNarrowContract
 	case contractViolationRuleTraceabilityRefMismatch:
 		return runtimemodel.ContractViolationRecoverabilityNormalizeThenRetry
+	case contractViolationRuleValidationRequiredOutputCapabilityMismatch:
+		return runtimemodel.ContractViolationRecoverabilityRebuildValidationRequiredOutput
 	case contractViolationRuleFocusBindingMismatch:
 		return runtimemodel.ContractViolationRecoverabilityNarrowContract
 	case contractViolationRuleCoverageAssessmentIncomplete:
@@ -954,6 +963,8 @@ func contractViolationRetryHint(rule string) string {
 		return "return concrete runtime behavior evidence, dynamic execution, or a controlled substitute with executable observations; do not use static source inspection or grep-style scans to close runtime-behavior coverage"
 	case contractViolationRuleManagedValidationRequired:
 		return "return validation/managed_session only; plain shell/command is not accepted for this validation route"
+	case contractViolationRuleValidationRequiredOutputCapabilityMismatch:
+		return "rebuild validation requiredOutput from the current convergence authority and only dispatch a declared validation producer"
 	case contractViolationRuleDoDAssessmentEvidenceMissing, contractViolationRuleCoverageMapIncomplete:
 		return "rewrite the assessment so every satisfied item has traceable evidenceRefs and current coverage"
 	case contractViolationRuleUnparseableOutput:
@@ -993,6 +1004,8 @@ func contractViolationForbiddenRepeat(rule string) []string {
 		return []string{"static source inspection", "grep-only validation", "controlled substitute without executable behavior observation"}
 	case contractViolationRuleManagedValidationRequired:
 		return []string{"plain shell/command when managed validation route is mandatory"}
+	case contractViolationRuleValidationRequiredOutputCapabilityMismatch:
+		return []string{"dispatching validation producer kind not present in current requiredOutput.acceptedKinds", "reusing stale state-changing requiredOutput for validation"}
 	case contractViolationRuleDoDAssessmentEvidenceMissing:
 		return []string{"satisfied assessment item without evidenceRefs"}
 	case contractViolationRuleUnparseableOutput:
@@ -1109,6 +1122,17 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 		if snapshots := contractViolationAvailableTargetSnapshotSummary(step); len(snapshots) > 0 {
 			contract["availableTargetSnapshots"] = snapshots
 		}
+	case contractViolationRuleValidationRequiredOutputCapabilityMismatch:
+		profileID = "validation_required_output_authority_rebuild"
+		contract["requiredOutputShape"] = "authority_derived_validation_required_output"
+		contract["runtimeRecomputedAuthority"] = map[string]any{
+			"owner":    "runtime",
+			"required": true,
+			"source":   "validation_required_output_authority",
+		}
+		contract["allowedOutputs"] = contractViolationAllowedOutputsWithGovernanceBlockers("runtime_rebuild_validation_required_output", "executionGraph_with_declared_validationEvidence", "executionGraph_with_managed_validation_session")
+		contract["requiredFields"] = []string{"requiredOutput.acceptedKinds", "currentActionContract.nextAction=validate", "convergenceContract.state=need_validation"}
+		contract["forbiddenOutputs"] = append([]string{"state_changing_required_output", "patch/apply", "git/write", "undeclared_validation_producer"}, contractViolationForbiddenContinuableBlockers()...)
 	case contractViolationRuleCoverageAssessmentIncomplete:
 		profileID = "coverage_next_action_recompute"
 		contract["runtimeRecomputedAuthority"] = map[string]any{

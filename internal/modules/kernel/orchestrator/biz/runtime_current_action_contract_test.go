@@ -182,6 +182,58 @@ func TestCurrentActionValidationRequiredOutputKeepsDeclaredMCPServers(t *testing
 	}
 }
 
+func TestCurrentActionValidationRequiredOutputKeepsMCPFromExecutionContextCapabilityIDs(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction":   map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			"currentFocus": map[string]any{"id": "cwi-validate", "coverageWorkItemIds": []any{"cwi-validate"}},
+		},
+		"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
+		"executionContext": map[string]any{
+			"capabilityIds": []string{"semantic-mcp:tool:lsp_hover"},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []any{"shell/command", "mcp/tool_call", managedValidationSessionNodeKind},
+			},
+		},
+	}
+
+	required := activeRequiredOutputForCurrentAction(input)
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), runtimemodel.StepKindMCPToolCall) {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want mcp/tool_call from executionContext capabilityIds", required["acceptedKinds"])
+	}
+	if ids := stringSliceFromValue(required["allowedMCPServerIds"]); len(ids) != 1 || ids[0] != "semantic-mcp" {
+		t.Fatalf("requiredOutput.allowedMCPServerIds = %+v, want [semantic-mcp]", ids)
+	}
+}
+
+func TestCurrentActionValidationRequiredOutputReportsCapabilityGapWhenMCPUnavailable(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction":   map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			"currentFocus": map[string]any{"id": "cwi-validate", "coverageWorkItemIds": []any{"cwi-validate"}},
+		},
+		"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []any{"shell/command", "mcp/tool_call", managedValidationSessionNodeKind},
+			},
+		},
+	}
+
+	required := activeRequiredOutputForCurrentAction(input)
+	if !boolValue(required["mustResolveCapabilityGap"]) ||
+		!stringSliceContains(stringSliceFromValue(required["missingKinds"]), runtimemodel.StepKindMCPToolCall) {
+		t.Fatalf("requiredOutput = %+v, want explicit MCP capability gap", required)
+	}
+	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), runtimemodel.StepKindMCPToolCall) {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want mcp/tool_call removed", required["acceptedKinds"])
+	}
+}
+
 func TestSynchronizeCurrentRequiredOutputMirrorsUsesCurrentContractBeforeStaleMirrors(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{

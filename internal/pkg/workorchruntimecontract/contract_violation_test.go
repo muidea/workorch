@@ -50,6 +50,7 @@ func TestContractViolationRecoverableOnlyForRetryableValues(t *testing.T) {
 		ContractViolationRecoverabilityRetrySameContract,
 		ContractViolationRecoverabilityNarrowContract,
 		ContractViolationRecoverabilityNormalizeThenRetry,
+		ContractViolationRecoverabilityRebuildValidationRequiredOutput,
 	}
 	for _, value := range retryable {
 		if !(ContractViolation{Recoverability: value}).Recoverable() {

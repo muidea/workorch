@@ -54,25 +54,26 @@ const (
 )
 
 const (
-	contractViolationGraphNodeReturnedGraph         = "graph_node_returned_graph"
-	contractViolationRepairReturnedGraph            = "repair_returned_graph"
-	contractViolationRepairNoStateChangingOutput    = "repair_no_state_changing_output"
-	contractViolationRepairGraphWithoutPatchApply   = "repair_graph_without_patch_apply"
-	contractViolationExecutionNoStateChangingOutput = "execution_no_state_changing_output"
-	contractViolationGraphDependsOnLLMBeforePatch   = "graph_depends_on_llm_before_patch"
-	contractViolationPatchTargetRefRequired         = "patch_target_ref_required"
-	contractViolationCoverageTargetsRequired        = "coverage_targets_required"
-	contractViolationValidationEvidenceRequired     = "validation_evidence_required"
-	contractViolationPatchContentRequired           = "patch_content_required"
-	contractViolationPatchUnresolvedTemplate        = "patch_unresolved_template"
-	contractViolationPatchDispatchInvalid           = "patch_dispatch_invalid"
-	contractViolationFileEditConflict               = "file_edit_conflict"
-	contractViolationDoDAssessmentEvidenceMissing   = "dod_assessment_missing_evidence_refs"
-	contractViolationCoverageMapIncomplete          = "coverage_map_incomplete"
-	contractViolationAssessmentOnlyExecutableOutput = "assessment_only_executable_output"
-	contractViolationAvailableSnapshotIgnored       = "available_snapshot_ignored"
-	contractViolationLLMSchemaInvalid               = "llm_schema_invalid"
-	contractViolationFocusBindingMismatch           = "focus_binding_mismatch"
+	contractViolationGraphNodeReturnedGraph                     = "graph_node_returned_graph"
+	contractViolationRepairReturnedGraph                        = "repair_returned_graph"
+	contractViolationRepairNoStateChangingOutput                = "repair_no_state_changing_output"
+	contractViolationRepairGraphWithoutPatchApply               = "repair_graph_without_patch_apply"
+	contractViolationExecutionNoStateChangingOutput             = "execution_no_state_changing_output"
+	contractViolationGraphDependsOnLLMBeforePatch               = "graph_depends_on_llm_before_patch"
+	contractViolationPatchTargetRefRequired                     = "patch_target_ref_required"
+	contractViolationCoverageTargetsRequired                    = "coverage_targets_required"
+	contractViolationValidationEvidenceRequired                 = "validation_evidence_required"
+	contractViolationValidationRequiredOutputCapabilityMismatch = "validation_required_output_capability_mismatch"
+	contractViolationPatchContentRequired                       = "patch_content_required"
+	contractViolationPatchUnresolvedTemplate                    = "patch_unresolved_template"
+	contractViolationPatchDispatchInvalid                       = "patch_dispatch_invalid"
+	contractViolationFileEditConflict                           = "file_edit_conflict"
+	contractViolationDoDAssessmentEvidenceMissing               = "dod_assessment_missing_evidence_refs"
+	contractViolationCoverageMapIncomplete                      = "coverage_map_incomplete"
+	contractViolationAssessmentOnlyExecutableOutput             = "assessment_only_executable_output"
+	contractViolationAvailableSnapshotIgnored                   = "available_snapshot_ignored"
+	contractViolationLLMSchemaInvalid                           = "llm_schema_invalid"
+	contractViolationFocusBindingMismatch                       = "focus_binding_mismatch"
 )
 
 func runtimeFailureOutput(output map[string]any, execErr error) map[string]any {
@@ -407,6 +408,9 @@ func contractViolationTypeFromFailure(output map[string]any, execErr error) stri
 		strings.Contains(text, "concrete validation evidence graph must use non-destructive bounded validation") ||
 		strings.Contains(text, "concrete validation evidence graph must not start detached or background processes"):
 		return contractViolationValidationEvidenceRequired
+	case strings.Contains(text, "validation_required_output_capability_mismatch") ||
+		strings.Contains(text, "runtime step kind") && strings.Contains(text, "is not accepted by current requiredoutput.acceptedkinds") && strings.Contains(text, "validation"):
+		return contractViolationValidationRequiredOutputCapabilityMismatch
 	case strings.Contains(text, "satisfied dodassessment item requires evidencerefs") ||
 		strings.Contains(text, "satisfied dodassessment.goalcoverage item requires evidencerefs") ||
 		strings.Contains(text, "satisfied dodassessment.branchcoverage item") && strings.Contains(text, "requires evidencerefs") ||

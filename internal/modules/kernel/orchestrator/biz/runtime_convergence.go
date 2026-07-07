@@ -141,6 +141,10 @@ func BuildConvergenceContract(
 	if recoveryContract, ok := contractViolationRecoveryStateChangingContract(input, failedStep, contract.SourceRefs); ok {
 		return recoveryContract
 	}
+	if validationRequiredOutputCapabilityMismatch(input, mapFromValue(input["repairActionPackage"]), failedStep) {
+		populateCoverageWorkItemValidationConvergenceContract(input, &contract, false)
+		return contract
+	}
 	if convergenceCapabilityInputLocatorNeedsEvidence(input, failedStep) {
 		contract.State = convergenceStateNeedEvidence
 		contract.RuntimeStage = runtimeStageRepair
@@ -260,6 +264,14 @@ func populateConvergenceContractFromNextAction(run *runModel.Run, input map[stri
 		return false
 	}
 	if validationCommandContractFailure(input, mapFromValue(input["repairActionPackage"]), failedStep) {
+		if contract.RepairActionPackage == nil {
+			contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+		}
+		convergenceContractAttachCoverageContext(input, contract)
+		populateCoverageWorkItemValidationConvergenceContract(input, contract, false)
+		return true
+	}
+	if validationRequiredOutputCapabilityMismatch(input, mapFromValue(input["repairActionPackage"]), failedStep) {
 		if contract.RepairActionPackage == nil {
 			contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
 		}
@@ -1287,6 +1299,9 @@ func validationContractFailureMustRemainValidation(input map[string]any, pkg map
 	if validationOnlyFocusPreemptsStateChangingRepair(input, pkg, failedStep) {
 		return true
 	}
+	if validationRequiredOutputCapabilityMismatch(input, pkg, failedStep) {
+		return true
+	}
 	for _, diagnostic := range validationFailureDiagnosticCandidates(input, pkg, failedStep) {
 		if validationFailureDiagnosticIsCommandContractFailure(diagnostic) {
 			return true
@@ -1296,8 +1311,20 @@ func validationContractFailureMustRemainValidation(input map[string]any, pkg map
 	return strings.Contains(text, "shell_validation_contract_rejected") ||
 		strings.Contains(text, "validation command masks command failure") ||
 		strings.Contains(text, "validation shell command masks command failure") ||
+		strings.Contains(text, "validation_required_output_capability_mismatch") ||
+		strings.Contains(text, "not accepted by current requiredoutput.acceptedkinds") ||
 		strings.Contains(text, "validation runtime dispatch requires validationevidence") ||
 		strings.Contains(text, "validation runtime dispatch requires concrete validationevidence")
+}
+
+func validationRequiredOutputCapabilityMismatch(input map[string]any, pkg map[string]any, failedStep *runModel.Step) bool {
+	text := strings.ToLower(strings.Join(validationFailureDiagnosticTextCandidates(input, pkg, failedStep), "\n"))
+	if !strings.Contains(text, "validation_required_output_capability_mismatch") &&
+		!strings.Contains(text, "not accepted by current requiredoutput.acceptedkinds") {
+		return false
+	}
+	return currentActionRequiresConcreteValidation(input) ||
+		convergenceCurrentFocusNeedsValidationWithoutStateChange(input)
 }
 
 func validationOnlyFocusPreemptsStateChangingRepair(input map[string]any, pkg map[string]any, failedStep *runModel.Step) bool {
@@ -2791,6 +2818,9 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 		return true
 	}
 	if decisionBlockDeclaresValidationCommandContractRetryExhausted(spec.Context) {
+		if validationCommandContractRetryExhaustedCanContinue(input, spec.Context, contract) {
+			return false
+		}
 		return true
 	}
 	if decisionBlockDeclaresRuntimeRepairExhausted(spec.Context) {
@@ -2867,6 +2897,41 @@ func decisionBlockDeclaresValidationCommandContractRetryExhausted(context map[st
 		}
 	}
 	return false
+}
+
+func validationCommandContractRetryExhaustedCanContinue(input map[string]any, context map[string]any, contract ConvergenceContract) bool {
+	if contract.State != convergenceStateNeedValidation {
+		return false
+	}
+	if !boolValue(input["managedValidationAvailable"]) &&
+		!boolValue(context["managedValidationAvailable"]) &&
+		!boolValue(mapFromValue(context["runtimeDiagnostics"])["managedValidationAvailable"]) {
+		return false
+	}
+	pkg := mapFromValue(contract.RepairActionPackage)
+	if len(pkg) == 0 {
+		pkg = mapFromValue(input["repairActionPackage"])
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), managedValidationSessionNodeKind) &&
+		!boolValue(required["mustUseManagedHarness"]) {
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{
+		stringFromMap(context, "reason"),
+		stringFromMap(context, "blockerKind"),
+		stringFromMap(mapFromValue(context["runtimeDiagnostics"]), "reason"),
+		stringFromMap(mapFromValue(context["runtimeDiagnostics"]), "error"),
+		stringFromMap(mapFromValue(context["validationFailureDiagnostic"]), "class"),
+		stringFromMap(mapFromValue(context["validationFailureDiagnostic"]), "reason"),
+		stringFromMap(mapFromValue(context["contractViolation"]), "violatedRule"),
+	}, "\n"))
+	return strings.Contains(text, "validation_detached_process_forbidden") ||
+		strings.Contains(text, "managed validation shell must wait") ||
+		strings.Contains(text, "detached") ||
+		strings.Contains(text, "background") ||
+		strings.Contains(text, "process_control") ||
+		strings.Contains(text, runtimemodel.ValidationDiagnosticManagedValidationRequired)
 }
 
 func decisionBlockDeclaresRuntimeRepairExhausted(context map[string]any) bool {
