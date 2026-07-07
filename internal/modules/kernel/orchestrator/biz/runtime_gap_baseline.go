@@ -1439,6 +1439,7 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 	authorityMissing := coverageWorkItemMissingEvidenceKindSet(authorityFocus)
 	if authorityMissing["state_change"] && !authorityMissing["validation"] && !authorityMissing["artifact"] &&
 		(state == convergenceStateNeedEvidence || nextAction == "repair" || nextAction == "acquire_evidence") &&
+		!targetSnapshotAcquisitionDispatchActive(input, state, nextAction) &&
 		!targetSnapshotPrerequisiteActive(input) {
 		appendAuthorityDiagnostic(input, "next_action_mismatch_missing_state_change", "error", "internal_authority_mismatch", "nextAction", "coverage focus missing state_change cannot use evidence acquisition contract")
 		return convergenceDispatchMisalignmentError("next_action_mismatch_missing_state_change: missing state_change requires state_change next action")
@@ -1625,6 +1626,23 @@ func targetSnapshotPrerequisiteActive(input map[string]any) bool {
 		return true
 	}
 	return false
+}
+
+func targetSnapshotAcquisitionDispatchActive(input map[string]any, state string, nextAction string) bool {
+	if len(input) == 0 {
+		return false
+	}
+	state = strings.TrimSpace(state)
+	nextAction = strings.TrimSpace(nextAction)
+	if nextAction == runtimemodel.NextActionTypeAcquireTargetSnapshot && state == convergenceStateNeedEvidence {
+		return true
+	}
+	if targetSnapshotPrerequisiteActive(input) {
+		return true
+	}
+	required := activeRequiredOutputForCurrentAction(input)
+	return (nextAction == runtimemodel.NextActionTypeAcquireTargetSnapshot || state == convergenceStateNeedEvidence) &&
+		requiredOutputIsReadOnlyTargetSnapshotPrerequisite(required)
 }
 
 func requiredOutputIsReadOnlyTargetSnapshotPrerequisite(required map[string]any) bool {

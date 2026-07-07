@@ -1471,6 +1471,73 @@ func TestFinalizeLLMDispatchAuthorityInputRebuildsExecutionContextStateChangeAut
 	}
 }
 
+func TestInitialStepInputFinalizesReplanSuccessorStateChangeRequiredOutput(t *testing.T) {
+	focus := map[string]any{
+		"id":                    "cwi-current",
+		"activeCoverageFocusId": "focus-cwi-current",
+		"coverageWorkItemIds":   []string{"cwi-current"},
+		"missingEvidenceKinds":  []string{"state_change"},
+		"requiredEvidenceKinds": []string{"state_change"},
+		"status":                "open",
+	}
+	run := &runModel.Run{
+		ID:              "run-replan-successor-state-change",
+		WorkspaceID:     "ws-replan-successor-state-change",
+		State:           common.RunStateActive,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"currentFocus":  cloneStepPayload(focus),
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+			},
+			gapBaselineKey: map[string]any{
+				"schemaVersion": gapBaselineSchema,
+				"currentFocus":  cloneStepPayload(focus),
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+			},
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus":    cloneStepPayload(focus),
+				"unresolvedItems": []map[string]any{cloneStepPayload(focus)},
+			},
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-predecessor",
+				"reason":           "decision_replan",
+				stepInputKeyProcessEvidenceTimeline: []map[string]any{{
+					"stepId":              "run-predecessor/step-1",
+					"kind":                "shell/command",
+					failureOutputKeyClass: failureClassShellCommand,
+					"failureReason":       "previous state-changing attempt failed",
+				}},
+			},
+		},
+	}
+
+	input := initialStepInput(run)
+
+	if err := validateConvergenceDispatchInput(input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, input)
+	}
+	if state := stringFromMap(mapFromValue(input["convergenceContract"]), "state"); state != convergenceStateNeedEvidence {
+		t.Fatalf("convergenceContract.state = %q, want %s; input=%+v", state, convergenceStateNeedEvidence, input)
+	}
+	nextAction := mapFromValue(mapFromValue(input[currentActionContractKey])["nextAction"])
+	if kind := stringFromMap(nextAction, "kind"); kind != runtimemodel.NextActionTypeAcquireTargetSnapshot {
+		t.Fatalf("currentAction.nextAction = %+v, want acquire_target_snapshot; input=%+v", nextAction, input)
+	}
+	for label, required := range map[string]map[string]any{
+		"requiredOutput":                       mapFromValue(input["requiredOutput"]),
+		"repairActionPackage.requiredOutput":   mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":           mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+	} {
+		if !requiredOutputIsReadOnlyTargetSnapshotPrerequisite(required) {
+			t.Fatalf("%s = %+v, want read-only target snapshot acquisition requiredOutput", label, required)
+		}
+	}
+}
+
 func TestFinalizeRuntimeRepairFollowUpInputRebuildsStateChangeAuthority(t *testing.T) {
 	focus := map[string]any{
 		"id":                    "cwi-current",
