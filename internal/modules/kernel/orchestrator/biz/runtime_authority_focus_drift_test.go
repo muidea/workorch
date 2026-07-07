@@ -185,6 +185,128 @@ func TestRebuildDispatchInputStateChangeAuthorityRebindsEvidenceContract(t *test
 	}
 }
 
+func TestStripDerivedActionContractForReplanSuccessorKeepsOnlyLineageFacts(t *testing.T) {
+	context := map[string]any{
+		convergenceAuthorityKey:  map[string]any{"schemaVersion": convergenceAuthoritySchema},
+		gapBaselineKey:           map[string]any{"schemaVersion": gapBaselineSchema},
+		stepInputKeyStagePacket:  map[string]any{"nextAction": map[string]any{"kind": "request_governance"}},
+		"convergenceContract":    map[string]any{"state": convergenceStateNeedGovernance},
+		currentActionContractKey: map[string]any{"nextAction": map[string]any{"kind": "request_governance"}},
+		"repairActionPackage":    map[string]any{"requiredOutput": map[string]any{"mustRequestGovernance": true}},
+		"requiredOutput":         map[string]any{"mustRequestGovernance": true},
+		stepInputKeyRuntimeStage: "governance",
+		"repairObjective":        "request_governance",
+		"targetSnapshots":        []map[string]any{{"id": "snapshot-001"}},
+		"executionContract":      map[string]any{"version": "v1"},
+		"replanContinuation":     map[string]any{"predecessorRunId": "run-001"},
+	}
+
+	if !stripDerivedActionContractForReplanSuccessor(context) {
+		t.Fatal("stripDerivedActionContractForReplanSuccessor returned false, want derived fields removed")
+	}
+	for _, key := range []string{
+		stepInputKeyStagePacket,
+		"convergenceContract",
+		currentActionContractKey,
+		"repairActionPackage",
+		"requiredOutput",
+		stepInputKeyRuntimeStage,
+		"repairObjective",
+	} {
+		if _, ok := context[key]; ok {
+			t.Fatalf("context[%q] = %+v, want stripped", key, context[key])
+		}
+	}
+	if len(mapFromValue(context[convergenceAuthorityKey])) == 0 || len(mapFromValue(context[gapBaselineKey])) == 0 {
+		t.Fatalf("authority facts were stripped: %+v", context)
+	}
+	if len(mapSliceFromValue(context["targetSnapshots"])) != 1 ||
+		len(mapFromValue(context["executionContract"])) == 0 ||
+		len(mapFromValue(context["replanContinuation"])) == 0 {
+		t.Fatalf("lineage/fact fields were not preserved: %+v", context)
+	}
+}
+
+func TestMergeRunProgressUpdateDeletesOmittedDerivedActionContracts(t *testing.T) {
+	current := &runModel.Run{
+		ID:          "run-progress-current",
+		WorkspaceID: "ws-progress",
+		ExecutionContext: map[string]any{
+			stepInputKeyStagePacket:  map[string]any{"nextAction": map[string]any{"kind": "request_governance"}},
+			"convergenceContract":    map[string]any{"state": convergenceStateNeedGovernance},
+			currentActionContractKey: map[string]any{"nextAction": map[string]any{"kind": "request_governance"}},
+			"repairActionPackage":    map[string]any{"requiredOutput": map[string]any{"mustRequestGovernance": true}},
+			"requiredOutput":         map[string]any{"mustRequestGovernance": true},
+			stepInputKeyRuntimeStage: "governance",
+			"targetSnapshots":        []map[string]any{{"id": "snapshot-001"}},
+			"unmanagedFact":          "preserve",
+		},
+	}
+	progress := &runModel.Run{
+		ID:          current.ID,
+		WorkspaceID: current.WorkspaceID,
+		ExecutionContext: map[string]any{
+			"targetSnapshots": []map[string]any{{"id": "snapshot-002"}},
+		},
+	}
+
+	got := mergeRunProgressUpdate(current, progress)
+	for _, key := range []string{
+		stepInputKeyStagePacket,
+		"convergenceContract",
+		currentActionContractKey,
+		"repairActionPackage",
+		"requiredOutput",
+		stepInputKeyRuntimeStage,
+	} {
+		if _, ok := got.ExecutionContext[key]; ok {
+			t.Fatalf("ExecutionContext[%q] = %+v, want deleted when progress omits derived key", key, got.ExecutionContext[key])
+		}
+	}
+	if got.ExecutionContext["unmanagedFact"] != "preserve" {
+		t.Fatalf("unmanagedFact = %+v, want preserved", got.ExecutionContext["unmanagedFact"])
+	}
+	if snapshots := mapSliceFromValue(got.ExecutionContext["targetSnapshots"]); len(snapshots) != 1 || stringFromMap(snapshots[0], "id") != "snapshot-002" {
+		t.Fatalf("targetSnapshots = %+v, want progress value", got.ExecutionContext["targetSnapshots"])
+	}
+}
+
+func TestRefreshCurrentAuthorityDerivedSnapshotBuildsSingleStateChangeContract(t *testing.T) {
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	input := map[string]any{
+		"convergenceContract":   map[string]any{"state": convergenceStateNeedEvidence},
+		stepInputKeyStagePacket: map[string]any{"nextAction": map[string]any{"kind": "acquire_evidence"}},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteFailureEvidence": true,
+				"acceptedKinds":                      []string{"file/read"},
+				"forbiddenKinds":                     []string{"patch/apply"},
+			},
+		},
+	}
+
+	got, err := refreshCurrentAuthorityDerivedSnapshot(run, "step-state-change", input)
+	if err != nil {
+		t.Fatalf("refreshCurrentAuthorityDerivedSnapshot: %v", err)
+	}
+	if state := stringFromMap(mapFromValue(got["convergenceContract"]), "state"); state != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract.state = %q, want %q", state, convergenceStateNeedStateChange)
+	}
+	if action := mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["nextAction"]); firstNonEmptyString(stringFromMap(action, "type"), stringFromMap(action, "kind")) != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("stagePacket.nextAction = %+v, want state_change", action)
+	}
+	for label, required := range map[string]map[string]any{
+		"requiredOutput":                       mapFromValue(got["requiredOutput"]),
+		"repairActionPackage.requiredOutput":   mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":           mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["requiredOutput"]),
+		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(got[currentActionContractKey])["requiredOutput"]),
+	} {
+		if !requiredOutputHasAllowedStateChangingKind(required) {
+			t.Fatalf("%s = %+v, want state-changing required output", label, required)
+		}
+	}
+}
+
 func TestRequiredOutputFocusNormalizationRewritesTargetRefsAndExamples(t *testing.T) {
 	coverageFocus := map[string]any{
 		"id":                  "focus-cwi-current",

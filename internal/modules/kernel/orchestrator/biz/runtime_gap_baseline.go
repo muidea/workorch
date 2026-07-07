@@ -160,9 +160,9 @@ func (o *RuntimeOrchestrator) prepareGapBaselineDispatchSpecs(ctx context.Contex
 		if len(authority) > 0 && !recoveryScoped {
 			input[convergenceAuthorityKey] = cloneStepPayload(authority)
 		}
-		if canonicalLLMWorkspaceStepKind(ret[idx].Kind) == llmWorkspaceExecutionStepKind {
+		if dispatchInputRequiresConvergenceDispatchValidation(input) || canonicalLLMWorkspaceStepKind(ret[idx].Kind) == llmWorkspaceExecutionStepKind {
 			var err error
-			input, err = rebuildDispatchInputFromConvergenceAuthority(run, ret[idx].ID, input)
+			input, err = finalizeCurrentAuthorityDispatchInputForRun(run, ret[idx].ID, input)
 			if err != nil {
 				return nil, err
 			}
@@ -178,7 +178,6 @@ func dispatchInputHasRecoveryAuthority(input map[string]any) bool {
 	}
 	return boolValue(input[stepInputKeyRuntimeRepairFollowUp]) ||
 		boolValue(input[stepInputKeyProviderRetryFollowUp]) ||
-		boolValue(input["graphLocalDispatchAuthority"]) ||
 		strings.TrimSpace(stringFromMap(input, stepInputKeyRecoveryAction)) != "" ||
 		strings.TrimSpace(stringFromMap(input, stepInputKeyRepairOfStepID)) != "" ||
 		len(mapFromValue(input[stepInputKeyContractViolationRecovery])) > 0
@@ -196,11 +195,11 @@ func syncRunConvergenceDerivedFields(run *runModel.Run) bool {
 	if len(input) == 0 {
 		return false
 	}
-	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
-	input = ApplyConvergenceContract(input, contract)
-	input = normalizeDispatchInputAuthorityFocus(input)
-	input = attachStagePacketToStepInput(run, "", input)
-	input = enforceCurrentAuthorityDerivedConsistency(run, "", input)
+	var err error
+	input, err = refreshCurrentAuthorityDerivedSnapshot(run, "", input)
+	if err != nil {
+		return false
+	}
 	changed := false
 	for _, key := range convergenceDerivedExecutionContextKeys() {
 		value, ok := input[key]
@@ -260,6 +259,34 @@ func convergenceDerivedExecutionContextKeys() []string {
 	}
 }
 
+func stripDerivedActionContractForReplanSuccessor(context map[string]any) bool {
+	if len(context) == 0 {
+		return false
+	}
+	changed := false
+	for _, key := range convergenceDerivedExecutionContextKeys() {
+		if _, ok := context[key]; ok {
+			delete(context, key)
+			changed = true
+		}
+	}
+	for _, key := range []string{
+		"currentRuntimeStage",
+		"currentRuntimeStageMode",
+		"evidenceAcquisitionRequired",
+		"evidenceAcquisitionReason",
+		"concreteFailureEvidenceRequired",
+		"outputDecisionContract",
+		"exitCriteria",
+	} {
+		if _, ok := context[key]; ok {
+			delete(context, key)
+			changed = true
+		}
+	}
+	return changed
+}
+
 func mapFromValueOrScalar(value any) map[string]any {
 	if mapped := mapFromValue(value); len(mapped) > 0 {
 		return mapped
@@ -292,6 +319,13 @@ func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID comm
 	if dispatchInputHasStaleLocalAssessmentContract(run, input) {
 		input = clearStaleLocalAssessmentContract(input)
 	}
+	return refreshCurrentAuthorityDerivedSnapshot(run, stepID, input)
+}
+
+func refreshCurrentAuthorityDerivedSnapshot(run *runModel.Run, stepID common.StepID, input map[string]any) (map[string]any, error) {
+	if input == nil {
+		input = map[string]any{}
+	}
 	input = injectLatestRunAuthorityForDispatch(run, input)
 	if !dispatchInputHasConvergenceAuthority(run, input) {
 		input = attachStagePacketToStepInput(run, stepID, input)
@@ -300,18 +334,75 @@ func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID comm
 		input = scrubConvergenceDispatchDiagnosticAdvice(input)
 		return input, validateConvergenceDispatchInput(input)
 	}
+	requiredSeed := stateChangingRequiredOutputSeedForAuthorityRefresh(input)
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
 	input = ApplyConvergenceContract(input, contract)
+	input = restoreStateChangingRequiredOutputSeed(input, requiredSeed)
 	input = normalizeDispatchInputAuthorityFocus(input)
 	input = attachStagePacketToStepInput(run, stepID, input)
 	input = synchronizeCurrentRequiredOutputMirrors(input)
 	input = attachCurrentActionContractToInput(run, stepID, input)
 	input = enforceCurrentAuthorityDerivedConsistency(run, stepID, input)
+	input = synchronizeCurrentRequiredOutputMirrors(input)
+	input = attachCurrentActionContractToInput(run, stepID, input)
 	input = scrubConvergenceDispatchDiagnosticAdvice(input)
 	if err := validateConvergenceDispatchInput(input); err != nil {
 		return nil, err
 	}
 	return input, nil
+}
+
+func stateChangingRequiredOutputSeedForAuthorityRefresh(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	for _, required := range []map[string]any{
+		mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		mapFromValue(input["requiredOutput"]),
+		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+	} {
+		if requiredOutputRequiresStateChanging(required) {
+			return cloneStepPayload(required)
+		}
+	}
+	return nil
+}
+
+func restoreStateChangingRequiredOutputSeed(input map[string]any, seed map[string]any) map[string]any {
+	if len(input) == 0 || len(seed) == 0 || !requiredOutputRequiresStateChanging(seed) {
+		return input
+	}
+	if strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind")) != runtimemodel.NextActionTypeStateChange {
+		return input
+	}
+	if targetSnapshotPrerequisiteActive(input) {
+		return input
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if strings.TrimSpace(stringFromMap(contract, "state")) != convergenceStateNeedStateChange {
+		return input
+	}
+	current := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	merged := cloneStepPayload(current)
+	if len(merged) == 0 {
+		merged = map[string]any{}
+	}
+	for key, value := range seed {
+		if _, ok := merged[key]; ok {
+			continue
+		}
+		merged[key] = cloneStepInputValue(value)
+	}
+	merged["mustIncludeStateChangingNode"] = true
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	pkg["requiredOutput"] = merged
+	input["repairActionPackage"] = pkg
+	input["requiredOutput"] = cloneStepPayload(merged)
+	return input
 }
 
 func finalizeLLMDispatchAuthorityInput(run *runModel.Run, stepID common.StepID, input map[string]any) (map[string]any, error) {
@@ -596,6 +687,18 @@ func finalizeCurrentAuthorityDispatchInput(input map[string]any) (map[string]any
 	return input, nil
 }
 
+func finalizeCurrentAuthorityDispatchInputForRun(run *runModel.Run, stepID common.StepID, input map[string]any) (map[string]any, error) {
+	if input == nil {
+		input = map[string]any{}
+	}
+	if run != nil && run.ExecutionContext != nil &&
+		(dispatchInputRequiresConvergenceDispatchValidation(input) || dispatchInputHasConvergenceAuthority(run, input)) {
+		input = injectLatestRunAuthorityForDispatch(run, input)
+		return rebuildDispatchInputFromConvergenceAuthority(run, stepID, input)
+	}
+	return finalizeCurrentAuthorityDispatchInput(input)
+}
+
 func enforceCurrentAuthorityDerivedConsistency(run *runModel.Run, stepID common.StepID, input map[string]any) map[string]any {
 	if len(input) == 0 {
 		return input
@@ -696,6 +799,9 @@ func validateConvergenceDispatchInput(input map[string]any) error {
 	if nextAction == "" {
 		return nil
 	}
+	if err := validateGraphLocalDispatchAuthority(input, nextAction); err != nil {
+		return err
+	}
 	contract := mapFromValue(input["convergenceContract"])
 	state := strings.TrimSpace(stringFromMap(contract, "state"))
 	stateChanging := boolValue(input["stateChangingOutputRequired"]) || boolValue(contract["stateChangingOutputRequired"])
@@ -752,6 +858,21 @@ func validateConvergenceDispatchInput(input map[string]any) error {
 		return err
 	}
 	return validateConvergenceDispatchFocusAlignment(input)
+}
+
+func validateGraphLocalDispatchAuthority(input map[string]any, authorityNextAction string) error {
+	if len(input) == 0 || !boolValue(input["graphLocalDispatchAuthority"]) {
+		return nil
+	}
+	local := strings.TrimSpace(stringFromMap(mapFromValue(input["graphLocalNextAction"]), "kind"))
+	if local == "" {
+		return nil
+	}
+	if authorityNextAction == "" || local == authorityNextAction {
+		return nil
+	}
+	appendAuthorityDiagnostic(input, "graph_local_authority_obsolete", "error", "internal_authority_mismatch", "graphLocalNextAction", "graph continuation node action no longer matches current convergence authority")
+	return convergenceDispatchMisalignmentError("graph local action=%s authorityNextAction=%s", local, authorityNextAction)
 }
 
 func validateCurrentActionContract(input map[string]any) error {

@@ -165,6 +165,11 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	if len(specs) == 0 {
 		return common.ErrConflict
 	}
+	prepared, err := o.prepareGapBaselineDispatchSpecs(ctx, run, specs)
+	if err != nil {
+		return err
+	}
+	specs = prepared
 	specs = dedupeConcurrentLLMGraphDispatchSpecs(specs)
 	specs = selectDispatchSpecsForRunLane(specs)
 	if len(specs) == 0 {
@@ -177,7 +182,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 			spec.Input = cloneStepPayload(spec.Input)
 			spec.Input = graphBatchInputWithRoot(spec.Input, batchRootStepID)
 			var err error
-			spec.Input, err = finalizeCurrentAuthorityDispatchInput(spec.Input)
+			spec.Input, err = finalizeCurrentAuthorityDispatchInputForRun(run, spec.ID, spec.Input)
 			if err != nil {
 				return err
 			}
@@ -199,7 +204,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		}
 		spec.Input = graphBatchInputWithRoot(spec.Input, batchRootStepID)
 		var err error
-		spec.Input, err = finalizeCurrentAuthorityDispatchInput(spec.Input)
+		spec.Input, err = finalizeCurrentAuthorityDispatchInputForRun(run, spec.ID, spec.Input)
 		if err != nil {
 			return err
 		}
@@ -218,7 +223,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 			}
 			spec.Input = graphBatchInputWithRoot(spec.Input, batchRootStepID)
 			var err error
-			spec.Input, err = finalizeCurrentAuthorityDispatchInput(spec.Input)
+			spec.Input, err = finalizeCurrentAuthorityDispatchInputForRun(run, spec.ID, spec.Input)
 			if err != nil {
 				errCh <- err
 				continue
@@ -274,6 +279,16 @@ func graphDispatchConflictHasPersistedStep(ctx context.Context, steps repository
 	return err == nil && step != nil && step.RunID == runID
 }
 
+func graphLocalDispatchAuthorityObsolete(err error) bool {
+	if err == nil || !errors.Is(err, common.ErrConflict) {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, failureClassRuntimeContractMisalign) &&
+		strings.Contains(text, "graph local action=") &&
+		strings.Contains(text, "authorityNextAction=")
+}
+
 func (o *RuntimeOrchestrator) continueGraphBatchAfterCompletedStep(
 	ctx context.Context,
 	currentRun *runModel.Run,
@@ -293,6 +308,12 @@ func (o *RuntimeOrchestrator) continueGraphBatchAfterCompletedStep(
 				return o.RequestUniqueDispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), input, workspaceIDForDispatch(currentRun, workspace))
 			}
 			if err := o.dispatchGraphStepBatchWithWorkspace(ctx, currentRun, nextSpecs, workspace); err != nil {
+				if graphLocalDispatchAuthorityObsolete(err) {
+					input := o.graphManager().graphFollowUpStepInputFromSteps(currentRun, last, steps)
+					input["obsoleteGraphContinuationSkipped"] = true
+					input["obsoleteGraphContinuationReason"] = err.Error()
+					return o.RequestUniqueDispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), input, workspaceIDForDispatch(currentRun, workspace))
+				}
 				return o.handleGraphBatchCompletionGateFailure(ctx, currentRun, last, last.Output, "runtime graph continuation dispatch failed", err)
 			}
 			return nil
@@ -867,6 +888,7 @@ func normalizeGraphStateChangingDispatchAuthority(run *runModel.Run, stepID comm
 		"kind":   runtimemodel.NextActionTypeStateChange,
 		"reason": "current execution graph node requires state-changing output",
 	}
+	input["graphLocalNextAction"] = cloneStepPayload(action)
 	ensureGraphLocalAuthorityMaps(run, input, action)
 	currentActionSetNextAction(input, action)
 	input = normalizeDispatchInputAuthorityFocus(input)
@@ -923,6 +945,7 @@ func normalizeGraphValidationDispatchAuthority(run *runModel.Run, stepID common.
 		"kind":   runtimemodel.NextActionTypeValidate,
 		"reason": "current execution graph node requires concrete validation evidence",
 	}
+	input["graphLocalNextAction"] = cloneStepPayload(action)
 	ensureGraphLocalAuthorityMaps(run, input, action)
 	currentActionSetNextAction(input, action)
 	input = normalizeDispatchInputAuthorityFocus(input)

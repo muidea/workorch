@@ -332,7 +332,7 @@ func TestNormalizeGraphStateChangingDispatchAuthorityAcceptsGitWriteCommit(t *te
 	}
 }
 
-func TestPrepareGapBaselineDispatchSpecsPreservesGraphLocalStateChangingAuthority(t *testing.T) {
+func TestPrepareGapBaselineDispatchSpecsRejectsGraphLocalAuthorityDrift(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-graph-local-authority",
 		WorkspaceID: "ws-graph-local-authority",
@@ -373,26 +373,20 @@ func TestPrepareGapBaselineDispatchSpecsPreservesGraphLocalStateChangingAuthorit
 		},
 	}, runtimemodel.BlockExecutionNode{ID: "tidy", Kind: runtimemodel.StepKindShellCommand})
 
-	specs, err := (&RuntimeOrchestrator{}).prepareGapBaselineDispatchSpecs(context.Background(), run, []stepDispatchSpec{{
+	_, err := (&RuntimeOrchestrator{}).prepareGapBaselineDispatchSpecs(context.Background(), run, []stepDispatchSpec{{
 		ID:    "run-graph-local-authority/graph-001/001-tidy",
 		Kind:  runtimemodel.StepKindShellCommand,
 		Input: input,
 	}})
-	if err != nil {
-		t.Fatalf("prepareGapBaselineDispatchSpecs: %v", err)
+	if err == nil {
+		t.Fatal("prepareGapBaselineDispatchSpecs returned nil, want graph-local authority conflict")
 	}
-	if got := stringFromMap(currentActionNextActionFromInput(specs[0].Input), "kind"); got != runtimemodel.NextActionTypeStateChange {
-		t.Fatalf("nextAction = %q, want graph-local state_change", got)
-	}
-	if got := stringFromMap(mapFromValue(mapFromValue(specs[0].Input[convergenceAuthorityKey])["nextAction"]), "kind"); got != runtimemodel.NextActionTypeStateChange {
-		t.Fatalf("convergenceAuthority.nextAction = %q, want graph-local state_change", got)
-	}
-	if err := validateRuntimeValidationStepInputBeforeRuntime(runtimemodel.StepKindShellCommand, specs[0].Input); err != nil {
-		t.Fatalf("validateRuntimeValidationStepInputBeforeRuntime: %v", err)
+	if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), "graph local action=state_change authorityNextAction=validate") {
+		t.Fatalf("prepareGapBaselineDispatchSpecs error = %v, want graph-local authority conflict", err)
 	}
 }
 
-func TestDispatchRequestedStepPreservesGraphLocalAuthority(t *testing.T) {
+func TestDispatchRequestedStepRejectsGraphLocalAuthorityDriftBeforeStepCreate(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-dispatch-graph-local-authority")
 	workspaceID := common.WorkspaceID("ws-dispatch-graph-local-authority")
@@ -450,25 +444,167 @@ func TestDispatchRequestedStepPreservesGraphLocalAuthority(t *testing.T) {
 		events.NewMemoryHub(),
 	)
 
-	if err := orch.DispatchRequestedStep(ctx, orchestratorcontracts.DispatchStepCommand{
+	err := orch.DispatchRequestedStep(ctx, orchestratorcontracts.DispatchStepCommand{
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		StepID:      stepID,
 		Kind:        runtimemodel.StepKindShellCommand,
 		Input:       input,
-	}); err != nil {
-		t.Fatalf("DispatchRequestedStep: %v", err)
+	})
+	if err == nil {
+		t.Fatal("DispatchRequestedStep returned nil, want graph-local authority conflict")
 	}
-	created, err := stepRepo.Get(ctx, stepID)
+	if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), "graph local action=state_change authorityNextAction=validate") {
+		t.Fatalf("DispatchRequestedStep error = %v, want graph-local authority conflict", err)
+	}
+	if _, err := stepRepo.Get(ctx, stepID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("stale graph-local step err = %v, want not created before dispatch", err)
+	}
+
+	directStepID := common.StepID(runID + "/graph-001/002-state-change")
+	err = orch.dispatchStepWithWorkspace(ctx, run, directStepID, runtimemodel.StepKindShellCommand, cloneStepPayload(input), &workspacemodel.Workspace{ID: workspaceID})
+	if err == nil {
+		t.Fatal("dispatchStepWithWorkspace returned nil, want graph-local authority conflict")
+	}
+	if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), "graph local action=state_change authorityNextAction=validate") {
+		t.Fatalf("dispatchStepWithWorkspace error = %v, want graph-local authority conflict", err)
+	}
+	if _, err := stepRepo.Get(ctx, directStepID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("direct stale graph-local step err = %v, want not created before dispatch", err)
+	}
+}
+
+func TestContinueGraphBatchSkipsObsoleteGraphLocalAuthorityAndRequestsCurrentFollowUp(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-obsolete-graph-local-authority")
+	workspaceID := common.WorkspaceID("ws-obsolete-graph-local-authority")
+	rootStepID := common.StepID(runID + "/repair-001")
+	patchStepID := common.StepID(runID + "/graph-001/001-fix")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	hub := events.NewMemoryHub()
+	workspace := &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateActive,
+		ExecutionContext: map[string]any{
+			coverageFocusKey: map[string]any{
+				"id":                  "cwi-current",
+				"coverageWorkItemIds": []string{"cwi-current"},
+			},
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": map[string]any{
+					"id":                   "cwi-current",
+					"coverageWorkItemIds":  []string{"cwi-current"},
+					"missingEvidenceKinds": []string{"validation"},
+				},
+				"unresolvedItems": []map[string]any{
+					{
+						"id":                   "cwi-current",
+						"coverageWorkItemIds":  []string{"cwi-current"},
+						"missingEvidenceKinds": []string{"validation"},
+					},
+				},
+			},
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"workspaceId":   string(workspaceID),
+				"runId":         string(runID),
+				"currentFocus": map[string]any{
+					"id":                   "cwi-current",
+					"coverageWorkItemIds":  []string{"cwi-current"},
+					"missingEvidenceKinds": []string{"validation"},
+				},
+				"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			},
+			gapBaselineKey: map[string]any{
+				"schemaVersion": gapBaselineSchema,
+				"workspaceId":   string(workspaceID),
+				"runId":         string(runID),
+				"currentFocus": map[string]any{
+					"id":                   "cwi-current",
+					"coverageWorkItemIds":  []string{"cwi-current"},
+					"missingEvidenceKinds": []string{"validation"},
+				},
+				"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			},
+		},
+	}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "fix", Kind: "patch/apply", Input: map[string]any{"patchType": "file_write", "targetRef": "a.txt", "content": "a"}},
+		{ID: "stale-state-change", Kind: runtimemodel.StepKindShellCommand, DependsOn: []string{"fix"}, Input: map[string]any{
+			"stateChanging":       true,
+			"targetRef":           "workspace",
+			"stateChangingReason": "stale graph-local state change",
+		}},
+	}}
+	root := &runmodel.Step{
+		ID:     rootStepID,
+		RunID:  runID,
+		Kind:   llmcommon.StepKindWorkspaceExecution,
+		State:  common.StepStateSucceeded,
+		Output: map[string]any{stepOutputKeyExecutionGraph: graph, "status": "completed"},
+	}
+	patch := &runmodel.Step{
+		ID:    patchStepID,
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateSucceeded,
+		Input: map[string]any{
+			stepInputKeyGraphBatch:      true,
+			stepInputKeyGraphNodeID:     "fix",
+			stepInputKeyGraphRootStepID: string(rootStepID),
+		},
+		Output: map[string]any{"status": "completed"},
+	}
+	if err := stepRepo.Create(ctx, root); err != nil {
+		t.Fatalf("seed root step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, patch); err != nil {
+		t.Fatalf("seed graph step: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memoryrepo.NewDecisionTicketRepository(), memoryrepo.NewApprovalRepository(), hub)
+	orch.EnableEventDrivenDispatch()
+	steps, err := stepRepo.ListByRun(ctx, runID)
 	if err != nil {
-		t.Fatalf("get step: %v", err)
+		t.Fatalf("list steps: %v", err)
 	}
-	if got := stringFromMap(mapFromValue(mapFromValue(created.Input[convergenceAuthorityKey])["nextAction"]), "kind"); got != runtimemodel.NextActionTypeStateChange {
-		t.Fatalf("created convergenceAuthority.nextAction = %q, want state_change; input=%+v", got, created.Input)
+	if err := orch.continueGraphBatchAfterCompletedStep(ctx, run, patch, steps, workspace); err != nil {
+		t.Fatalf("continueGraphBatchAfterCompletedStep: %v", err)
 	}
-	if got := stringFromMap(mapFromValue(mapFromValue(created.Input[gapBaselineKey])["nextAction"]), "kind"); got != runtimemodel.NextActionTypeStateChange {
-		t.Fatalf("created gapBaseline.nextAction = %q, want state_change; input=%+v", got, created.Input)
+	reloadedPatch, err := stepRepo.Get(ctx, patchStepID)
+	if err != nil {
+		t.Fatalf("reload patch step: %v", err)
 	}
+	if reloadedPatch.State != common.StepStateSucceeded {
+		t.Fatalf("patch step state = %s, want succeeded; output=%+v", reloadedPatch.State, reloadedPatch.Output)
+	}
+	for _, envelope := range hub.Published() {
+		if envelope.Topic != orchestratorevents.TopicOrchestratorDispatchStepRequested {
+			continue
+		}
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
+		if !ok || cmd.Kind != llmcommon.StepKindWorkspaceExecution {
+			continue
+		}
+		input := mapFromValue(cmd.Input)
+		if !boolValue(input["obsoleteGraphContinuationSkipped"]) {
+			continue
+		}
+		if kind := stringFromMap(currentActionNextActionFromInput(input), "kind"); kind != runtimemodel.NextActionTypeValidate {
+			t.Fatalf("follow-up nextAction = %q, want validate; input=%+v", kind, input)
+		}
+		return
+	}
+	t.Fatalf("published events = %+v, want current-authority follow-up dispatch", hub.Published())
 }
 
 func TestNormalizeGraphValidationDispatchAuthorityBindsValidationEvidence(t *testing.T) {

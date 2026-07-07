@@ -3690,6 +3690,101 @@ func TestRuntimeOrchestrator_RuntimeRepairInputKeepsValidationOnlyFocusDespiteTa
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputValidationFailureMissingStateChangeDoesNotStayValidationOnly(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-validation-failure-state-change-authority")
+	workspaceID := common.WorkspaceID("ws-validation-failure-state-change-authority")
+	focus := map[string]any{
+		"id":                    "cwi-source-change",
+		"status":                "failed",
+		"sourceScope":           "deliverable",
+		"sourceRequirementId":   "source_change",
+		"targetText":            "source_change",
+		"requiredEvidenceKinds": []string{"validation", "state_change"},
+		"missingEvidenceKinds":  []string{"validation", "state_change"},
+		"targetRefs":            []string{"source_change"},
+		"structuredTargetRefs":  []string{"cwi-source-change", "source_change"},
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		ExecutionContext: map[string]any{
+			coverageFocusKey: focus,
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": focus,
+			},
+			convergenceAuthorityKey: map[string]any{
+				"currentFocus": focus,
+				"nextAction": map[string]any{
+					"kind":   runtimemodel.NextActionTypeStateChange,
+					"reason": "current focus still lacks state_change evidence",
+				},
+			},
+		},
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-004/001-verify"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			"repairObjective":            repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired":  true,
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": focus,
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+			},
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"error":                   "exit status 1",
+			"stderr":                  "main.go:12:2: unresolved implementation dependency",
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|stage=runtime_step_failed|failureTargets=main.go|exitCode=1",
+			"validationFailureDiagnostic": map[string]any{
+				"class":                         runtimemodel.ValidationDiagnosticBuildFailed,
+				"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetFailureSurface,
+				"targetRefs":                    []string{"cwi-source-change", "source_change", "main.go"},
+			},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, errors.New("exit status 1"))
+	contract := mapFromValue(input["convergenceContract"])
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if stringFromMap(contract, "state") == convergenceStateNeedValidation ||
+		boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		t.Fatalf("repair input = %+v, want validation failure with missing state_change to leave validation-only contract", input)
+	}
+	switch stringFromMap(contract, "state") {
+	case convergenceStateNeedStateChange:
+		if !boolValue(input["stateChangingOutputRequired"]) ||
+			!boolValue(required["mustIncludeStateChangingNode"]) ||
+			!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+			t.Fatalf("repair input = %+v, want state-changing requiredOutput", input)
+		}
+	case convergenceStateNeedEvidence:
+		if stringFromMap(mapFromValue(contract["prerequisite"]), "kind") != runtimemodel.NextActionTypeAcquireTargetSnapshot ||
+			!boolValue(required["mustAcquireCurrentTargetSnapshot"]) ||
+			!boolValue(required["mustUseReadOnlySnapshotAcquisition"]) {
+			t.Fatalf("repair input = %+v, want target snapshot prerequisite for state_change", input)
+		}
+	default:
+		t.Fatalf("convergenceContract = %+v, want state_change or target snapshot prerequisite", contract)
+	}
+	if err := validateConvergenceDispatchInput(input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, input)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputDemotesInheritedCoveragePatchContractToValidation(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{

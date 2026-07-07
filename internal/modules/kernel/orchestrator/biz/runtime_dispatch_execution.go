@@ -74,6 +74,12 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		} else if duplicate {
 			return nil
 		}
+	} else if dispatchInputRequiresConvergenceDispatchValidation(input) {
+		var finalizeErr error
+		input, finalizeErr = finalizeCurrentAuthorityDispatchInputForRun(run, stepID, cloneStepPayload(input))
+		if finalizeErr != nil {
+			return finalizeErr
+		}
 	}
 	step, err := o.steps.Get(ctx, stepID)
 	if err != nil {
@@ -142,7 +148,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		}
 	} else if dispatchInputRequiresConvergenceDispatchValidation(step.Input) {
 		var finalizeErr error
-		step.Input, finalizeErr = finalizeCurrentAuthorityDispatchInput(step.Input)
+		step.Input, finalizeErr = finalizeCurrentAuthorityDispatchInputForRun(run, step.ID, step.Input)
 		if finalizeErr != nil {
 			output := map[string]any{
 				"status":              "failed",

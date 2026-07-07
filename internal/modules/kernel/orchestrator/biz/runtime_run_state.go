@@ -44,6 +44,7 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 	if successorContext == nil {
 		successorContext = map[string]any{}
 	}
+	stripDerivedActionContractForReplanSuccessor(successorContext)
 	delete(successorContext, "compressedContext")
 	if history := mapSliceFromValue(successorContext["governanceHistory"]); len(history) > 0 {
 		successorContext["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(history, 6)
@@ -98,9 +99,12 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 		successor.InitialStepKind = initialStepKind(run)
 	}
 	o.coverageLedger().prepareReplanSuccessor(successor, ctx)
-	if contract := o.convergenceManager().build(successor, nil, nil, map[string]any{"input": successor.ExecutionContext}, nil); convergenceContractShouldPersist(contract) {
-		successor.ExecutionContext["convergenceContract"] = o.convergenceManager().compact(contract)
+	refreshRunConvergenceAuthority(successor)
+	refreshed, err := refreshCurrentAuthorityDerivedSnapshot(successor, "", successor.ExecutionContext)
+	if err != nil {
+		return err
 	}
+	successor.ExecutionContext = refreshed
 	successor.ExecutionContext["compressedContext"] = compressedContextForCreatedRuntimeRun(successor)
 	run.Lineage.SuccessorRunID = successor.ID
 	if err := o.closeLoadedRun(ctx, run, common.RunStateSuperseded, ""); err != nil {
@@ -363,7 +367,7 @@ func mergeRunProgressUpdate(current *runModel.Run, progress *runModel.Run) *runM
 }
 
 func managedRunProgressExecutionContextKeys() []string {
-	return []string{
+	ret := []string{
 		coverageWorkItemsKey,
 		coverageWorkItemContextKey,
 		gapBaselineKey,
@@ -381,6 +385,21 @@ func managedRunProgressExecutionContextKeys() []string {
 		"targetEvidence",
 		"targetSnapshots",
 	}
+	seen := make(map[string]struct{}, len(ret))
+	for _, key := range ret {
+		seen[key] = struct{}{}
+	}
+	for _, key := range convergenceDerivedExecutionContextKeys() {
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		ret = append(ret, key)
+		seen[key] = struct{}{}
+	}
+	return ret
 }
 
 func runParallel(tasks ...func() error) error {

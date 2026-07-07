@@ -850,7 +850,7 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 func coverageWorkItemStateChangeAuthorityNextActionKind(run *runModel.Run, input map[string]any, focus map[string]any, recomputeAuthority bool) string {
 	kind := strings.TrimSpace(convergenceNextActionKind(run, input))
 	missing := coverageWorkItemMissingEvidenceKindSet(focus)
-	if missing["state_change"] && !missing["validation"] && !missing["artifact"] {
+	if missing["state_change"] && (!missing["validation"] && !missing["artifact"] || coverageWorkItemStateChangeCanPreemptValidation(input)) {
 		switch kind {
 		case "", "repair", "acquire_evidence", "validate", "validation", "produce_validation_evidence", "artifact", "produce_artifact_evidence", "assessment", "complete_coverage_assessment":
 			if derived := strings.TrimSpace(stringFromMap(gapNextActionForCoverageItem(focus), "kind")); derived != "" {
@@ -869,6 +869,17 @@ func coverageWorkItemStateChangeAuthorityNextActionKind(run *runModel.Run, input
 		}
 	}
 	return kind
+}
+
+func coverageWorkItemStateChangeCanPreemptValidation(input map[string]any) bool {
+	pkg := mapFromValue(input["repairActionPackage"])
+	if stateChangingRepairHasActionableImplementationSurface(input, pkg) ||
+		len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 ||
+		len(filterAdmissibleRuntimeRepairTargetRefs(convergenceConcreteFailureTargetRefs(input, pkg))) > 0 {
+		return true
+	}
+	return inputHasConcreteValidationFailureDiagnostic(input, pkg) &&
+		len(filterAdmissibleRuntimeRepairTargetRefs(convergenceConcreteFailureTargetRefs(input, pkg))) > 0
 }
 
 func populateCoverageWorkItemAssessmentConvergenceContract(contract *ConvergenceContract) {
@@ -981,6 +992,7 @@ func populateCoverageWorkItemStateChangeConvergenceContract(input map[string]any
 	} else {
 		required = enforceStateChangingRequiredOutputForConvergence(contract.RepairActionPackage, input)
 	}
+	applyEvidenceKindRequirementsToStateChangingRequiredOutput(contract.RepairActionPackage, required, input)
 	required["mustReferenceCoverageWorkItem"] = true
 	contract.RepairActionPackage["requiredOutput"] = required
 	contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
@@ -1001,7 +1013,7 @@ func stateChangeRequiresTargetSnapshotAcquisition(input map[string]any, pkg map[
 		boolValue(required["mustUseCurrentTargetSnapshot"]) ||
 		boolValue(inputRequired["mustUseCurrentTargetSnapshot"])
 	if requiresSnapshot {
-		return hasReadableTarget
+		return true
 	}
 	if len(convergenceConcreteFailureTargetRefs(input, pkg)) > 0 {
 		return hasReadableTarget
@@ -2116,12 +2128,89 @@ func enforceStateChangingRequiredOutputForConvergence(pkg map[string]any, inputs
 		required["mustDeclareCoverageTargets"] = true
 		required["coverageTargetMatchRule"] = "patch/apply coverageTargets must match one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
 	}
+	applyEvidenceKindRequirementsToStateChangingRequiredOutput(pkg, required, inputs...)
 	pkg["requiredOutput"] = required
 	if len(inputs) > 0 {
 		reapplyRepairCoverageFocusContract(inputs[0], pkg)
 		required = mapFromValue(pkg["requiredOutput"])
+		applyEvidenceKindRequirementsToStateChangingRequiredOutput(pkg, required, inputs...)
+		pkg["requiredOutput"] = required
 	}
 	return required
+}
+
+func applyEvidenceKindRequirementsToStateChangingRequiredOutput(pkg map[string]any, required map[string]any, inputs ...map[string]any) {
+	if len(required) == 0 || !requiredOutputRequiresStateChanging(required) {
+		return
+	}
+	requirements := evidenceKindRequirementSummariesForRequiredOutput(pkg, inputs...)
+	if len(requirements) == 0 {
+		return
+	}
+	acceptedKinds := stringSliceFromValue(required["acceptedKinds"])
+	acceptedOperations := stringSliceFromValue(required["acceptedOperations"])
+	foundStateChangingRequirement := false
+	for _, requirement := range requirements {
+		requirementKinds := stringSliceFromValue(requirement["acceptedStepKinds"])
+		if len(requirementKinds) == 0 {
+			continue
+		}
+		stateChangingKinds := make([]string, 0, len(requirementKinds))
+		for _, kind := range requirementKinds {
+			if requiredOutputKindIsStateChanging(kind) {
+				stateChangingKinds = append(stateChangingKinds, strings.TrimSpace(kind))
+			}
+		}
+		if len(stateChangingKinds) == 0 {
+			continue
+		}
+		foundStateChangingRequirement = true
+		acceptedKinds = append(acceptedKinds, stateChangingKinds...)
+		acceptedOperations = append(acceptedOperations, stringSliceFromValue(requirement["acceptedOperations"])...)
+	}
+	if !foundStateChangingRequirement {
+		return
+	}
+	acceptedKinds = compactUniqueStrings(acceptedKinds)
+	required["acceptedKinds"] = acceptedKinds
+	if len(acceptedOperations) > 0 {
+		required["acceptedOperations"] = compactUniqueStrings(lowerStringSlice(acceptedOperations))
+	}
+	required["forbiddenKinds"] = removeStringsFromSlice(stringSliceFromValue(required["forbiddenKinds"]), acceptedKinds...)
+	if strings.TrimSpace(stringFromMap(required, "evidenceKindRequirementRule")) == "" {
+		required["evidenceKindRequirementRule"] = "state-changing outputs may satisfy current focus using acceptedStepKinds and acceptedOperations declared by evidenceKindRequirements; do not replace profile-required evidence kinds with unrelated generic patch output"
+	}
+}
+
+func evidenceKindRequirementSummariesForRequiredOutput(pkg map[string]any, inputs ...map[string]any) []map[string]any {
+	seen := map[string]bool{}
+	ret := make([]map[string]any, 0)
+	add := func(items []map[string]any) {
+		for _, item := range items {
+			if len(item) == 0 {
+				continue
+			}
+			key := strings.Join(compactUniqueStrings(append(
+				[]string{stringFromMap(item, "scope"), stringFromMap(item, "id"), stringFromMap(item, "evidenceRole")},
+				append(stringSliceFromValue(item["acceptedStepKinds"]), stringSliceFromValue(item["acceptedOperations"])...)...,
+			)), "|")
+			if key == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			ret = append(ret, item)
+		}
+	}
+	add(mapSliceFromValue(pkg["evidenceKindRequirements"]))
+	for _, input := range inputs {
+		add(mapSliceFromValue(input["evidenceKindRequirements"]))
+		add(mapSliceFromValue(mapFromValue(input["repairActionPackage"])["evidenceKindRequirements"]))
+		add(mapSliceFromValue(mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"])["evidenceKindRequirements"]))
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func clearEvidenceAcquisitionStateForStateChange(pkg map[string]any) {
@@ -2158,21 +2247,45 @@ func preserveStateChangingRequiredOutputSignals(required map[string]any, existin
 			if boolValue(existing["mustIncludeStateChangingNode"]) {
 				required[key] = value
 			}
+		case "forbiddenKinds":
+			preserved := make([]string, 0, len(stringSliceFromValue(value)))
+			for _, kind := range stringSliceFromValue(value) {
+				if requiredOutputKindIsStateChanging(kind) {
+					continue
+				}
+				preserved = append(preserved, kind)
+			}
+			required[key] = compactUniqueStrings(append(stringSliceFromValue(required[key]), preserved...))
 		case "mustReturnValidJSON",
 			"mustNotReuseRejectedJSON",
 			"forbiddenStalePatchReuse",
 			"mustReturnPatchApplyNode",
 			"patchApplyOnlyReason",
 			"mustRebuildFromCurrentEvidence",
+			"mustAddressPrimaryDiagnostics",
+			"primaryDiagnosticMatchRule",
 			"mustPatchDirectlyFromProvidedSnapshot",
+			"mustUseCurrentTargetSnapshot",
 			"sameGraphReadPatchRule",
 			"patchApplyFieldRule",
 			"readBeforePatchRecoveryRule",
+			"fileWriteExistingTargetRule",
+			"targetSnapshotSafetyRule",
+			"mustTargetFailureScope",
+			"targetRelation",
+			"rootCauseCandidateRule",
+			"resourceShapeAlignmentRule",
+			"mustRepairCapabilityPolicyFollowUp",
+			"capabilityPolicyFollowUpRule",
+			"capabilityPolicyRepairScopeRule",
+			"mustAvoidNoOpPatch",
+			"mustProduceSubstantivePatch",
 			"mustDeclareStrategyReassessmentFields",
 			"strategyReassessmentRequiredFields",
 			"strategyReassessmentRepairModes",
 			"strategyReassessmentMatchRule",
 			"mustReassessRepeatedFailedSurface",
+			"mustShiftRootCauseTarget",
 			"sameTargetContinuationRule",
 			"rootCauseTargetShiftRule",
 			"estimatedPatchContentBytes",
@@ -2680,6 +2793,9 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 	if decisionBlockDeclaresValidationCommandContractRetryExhausted(spec.Context) {
 		return true
 	}
+	if decisionBlockDeclaresRuntimeRepairExhausted(spec.Context) {
+		return true
+	}
 	if decisionBlockDeclaresContractViolationRecoveryExhausted(spec.Context) {
 		return true
 	}
@@ -2751,6 +2867,23 @@ func decisionBlockDeclaresValidationCommandContractRetryExhausted(context map[st
 		}
 	}
 	return false
+}
+
+func decisionBlockDeclaresRuntimeRepairExhausted(context map[string]any) bool {
+	if len(context) == 0 {
+		return false
+	}
+	if boolValue(context["runtimeRepairExhausted"]) {
+		return true
+	}
+	switch strings.TrimSpace(stringFromMap(context, "blockerKind")) {
+	case "runtime_repair_contract_exhausted",
+		"runtime_ineffective_convergence",
+		"runtime_convergence_budget_exhausted":
+		return true
+	default:
+		return false
+	}
 }
 
 func decisionBlockDeclaresContractViolationRecoveryExhausted(context map[string]any) bool {

@@ -1280,20 +1280,16 @@ func finalizeRuntimeRepairFollowUpStepInput(run *runModel.Run, failedStep *runMo
 	reapplyForcedNarrowContractViolationRequiredOutput(input, failedStep)
 	applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
 	input = normalizeCurrentActionContract(input, failedStep)
-	applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
 	input = normalizeDispatchInputAuthorityFocus(input)
 	input = normalizeCurrentActionContract(input, failedStep)
-	input = enforceCurrentAuthorityDerivedConsistency(run, stepID, input)
-	applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
-	input = attachStagePacketToStepInput(run, stepID, input)
-	applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
-	input = attachStagePacketToStepInput(run, stepID, input)
-	if len(mapFromValue(input[stepInputKeyContractViolationRecovery])) == 0 {
-		return input
+	refreshed, err := refreshCurrentAuthorityDerivedSnapshot(run, stepID, input)
+	if err != nil {
+		appendAuthorityDiagnostic(input, "authority_finalization_failed", "error", "internal_authority_mismatch", "repairFollowUp", err.Error())
+		input = enforceCurrentAuthorityDerivedConsistency(run, stepID, input)
+		input = synchronizeCurrentRequiredOutputMirrors(input)
+		return attachCurrentActionContractToInput(run, stepID, input)
 	}
-	input = attachCurrentActionContractToInput(run, stepID, input)
-	applyRuntimeRepairCommandContractValidationProjection(input, failedStep)
-	return attachCurrentActionContractToInput(run, stepID, input)
+	return refreshed
 }
 
 func refreshRuntimeRepairOutputDecisionContract(input map[string]any, failedStep *runModel.Step) {

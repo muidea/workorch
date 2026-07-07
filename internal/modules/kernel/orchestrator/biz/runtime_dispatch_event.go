@@ -168,7 +168,7 @@ func (o *RuntimeOrchestrator) DispatchRequestedStep(ctx context.Context, cmd orc
 		}
 	} else if dispatchInputRequiresConvergenceDispatchValidation(cmd.Input) {
 		var finalizeErr error
-		cmd.Input, finalizeErr = finalizeCurrentAuthorityDispatchInput(cloneStepPayload(cmd.Input))
+		cmd.Input, finalizeErr = finalizeCurrentAuthorityDispatchInputForRun(run, cmd.StepID, cloneStepPayload(cmd.Input))
 		if finalizeErr != nil {
 			return finalizeErr
 		}

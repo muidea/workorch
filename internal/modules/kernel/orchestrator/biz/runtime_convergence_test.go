@@ -152,6 +152,92 @@ func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCove
 	}
 }
 
+func TestBuildConvergenceContractPreservesAcceptedGitWriteFromExistingEvidenceRequirements(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-version-snapshot",
+				"coverageWorkItemIds":   []string{"cwi-version-snapshot"},
+				"sourceRequirementId":   "version_control_snapshot",
+				"sourceScope":           "deliverable",
+				"targetText":            "version_control_snapshot",
+				"evidenceRole":          "supplemental_evidence",
+				"requiredEvidenceKinds": []string{"state_change", "validation"},
+				"missingEvidenceKinds":  []string{"state_change", "validation"},
+				"targetRefs":            []string{"cwi-version-snapshot", "deliverable:deliverable:version_control_snapshot", "version_control_snapshot"},
+				"structuredTargetRefs":  []string{"cwi-version-snapshot", "deliverable:deliverable:version_control_snapshot", "version_control_snapshot"},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"coverageRepairRequired": true,
+			"evidenceKindRequirements": []map[string]any{{
+				"id":                 "version_control_snapshot",
+				"scope":              "deliverable",
+				"evidenceRole":       "supplemental_evidence",
+				"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+				"acceptedOperations": []string{gitcommon.OperationCommit},
+				"requireDirect":      true,
+			}},
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q", contract.State, convergenceStateNeedStateChange)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedOperations"]), gitcommon.OperationCommit) {
+		t.Fatalf("requiredOutput = %+v, want profile git/write commit accepted", required)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	step := &runmodel.Step{
+		ID:    "run-version-snapshot/repair-001",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: applied,
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "git-init",
+					"kind": gitcommon.StepKindWrite,
+					"input": map[string]any{
+						"operation": gitcommon.OperationInit,
+					},
+				},
+				{
+					"id":        "git-add",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"git-init"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationAdd,
+						"pathspecs": []string{"."},
+					},
+				},
+				{
+					"id":        "git-commit",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"git-add"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationCommit,
+						"message":   "record version snapshot",
+					},
+				},
+			},
+		},
+	}
+	if err := validateLLMExecutionOutputContract(&runmodel.Run{ID: "run-version-snapshot"}, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want git/write commit graph accepted", err)
+	}
+}
+
 func TestBuildConvergenceContractNextActionStateChangeUsesProfileEvidenceRequirement(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-convergence-profile-evidence-next-action",
@@ -4666,6 +4752,94 @@ func TestBuildConvergenceContractValidationOnlyFocusBuildFailurePreemptsTargetBa
 	}
 }
 
+func TestBuildConvergenceContractStateChangePreemptsValidationWhenFocusMissingBothKinds(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		currentActionContractKey: map[string]any{
+			"nextAction": map[string]any{"kind": "validate"},
+			"requiredOutput": concreteValidationEvidenceRequiredOutput(map[string]any{
+				"coverageWorkItemIds": []string{"cwi-source-change"},
+			}),
+		},
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-source-change",
+				"status":                "failed",
+				"sourceScope":           "deliverable",
+				"sourceRequirementId":   "source_change",
+				"targetText":            "source_change",
+				"requiredEvidenceKinds": []string{"validation", "state_change"},
+				"missingEvidenceKinds":  []string{"validation", "state_change"},
+				"targetRefs":            []string{"source_change"},
+				"structuredTargetRefs":  []string{"cwi-source-change", "source_change"},
+			},
+		},
+		"currentExecutionProgress": map[string]any{
+			"lastObservedFailure": map[string]any{
+				"stage":                   "runtime_validation_failed",
+				"failureReason":           "validation command failed before producing accepted evidence",
+				failureOutputKeySignature: "class=shell_command_failed|stage=runtime_validation_failed|failureTargets=main.go",
+				"validationFailureDiagnostic": map[string]any{
+					"class":                         runtimemodel.ValidationDiagnosticBuildFailed,
+					"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetFailureSurface,
+					"targetRefs":                    []string{"cwi-source-change", "source_change", "main.go"},
+				},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-validation-build/graph-004/001-verify",
+		Kind:  shellcommon.StepKindCommand,
+		Input: cloneStepPayload(input),
+		Output: map[string]any{
+			"status":                  "failed",
+			"error":                   "exit status 1",
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|stage=runtime_step_failed|failureTargets=main.go|exitCode=1",
+			"validationFailureDiagnostic": map[string]any{
+				"class":                         runtimemodel.ValidationDiagnosticBuildFailed,
+				"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetFailureSurface,
+				"targetRefs":                    []string{"cwi-source-change", "source_change", "main.go"},
+			},
+		},
+		State: common.StepStateFailed,
+	}
+
+	contract := BuildConvergenceContract(nil, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+	switch contract.State {
+	case convergenceStateNeedStateChange:
+		if contract.RepairObjective != repairObjectiveStateChangingOutput || !contract.StateChangingOutputRequired {
+			t.Fatalf("convergenceContract = %+v, want state-changing repair", contract)
+		}
+		required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+		if !boolValue(required["mustIncludeStateChangingNode"]) ||
+			!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+			boolValue(required["mustProduceConcreteValidationEvidence"]) {
+			t.Fatalf("requiredOutput = %+v, want state-changing patch/apply contract", required)
+		}
+	case convergenceStateNeedEvidence:
+		prereq := mapFromValue(contract.Prerequisite)
+		parent := mapFromValue(contract.RepairActionPackage["parentNextAction"])
+		if stringFromMap(prereq, "kind") != runtimemodel.NextActionTypeAcquireTargetSnapshot ||
+			stringFromMap(parent, "kind") != runtimemodel.NextActionTypeStateChange {
+			t.Fatalf("convergenceContract = %+v, want target snapshot prerequisite for state_change", contract)
+		}
+		required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+		if !boolValue(required["mustAcquireCurrentTargetSnapshot"]) ||
+			!boolValue(required["mustUseReadOnlySnapshotAcquisition"]) ||
+			boolValue(required["mustProduceConcreteValidationEvidence"]) ||
+			stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+			t.Fatalf("requiredOutput = %+v, want read-only target snapshot prerequisite, not validation-only contract", required)
+		}
+	default:
+		t.Fatalf("convergenceContract = %+v, want state_change or target snapshot prerequisite", contract)
+	}
+}
+
 func TestBuildConvergenceContractValidationOnlyFocusAllowsExplicitImplementationGapStateChange(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:      runtimeStageRepair,
@@ -4866,6 +5040,45 @@ func TestShouldCreateDecisionTicketKeepsContractViolationRecoveryExhaustedBlocke
 
 	if !ShouldCreateDecisionTicket(input, output, contract) {
 		t.Fatalf("ShouldCreateDecisionTicket = false, want governed blocker after contract retry exhaustion")
+	}
+}
+
+func TestShouldCreateDecisionTicketKeepsRuntimeRepairExhaustedBlockerWithContinuableNextAction(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": "state_change"},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+	}
+	output := decisionOutputFromSpec(runtimeDecisionBlockSpec{
+		Reason:       "runtime repair budget exhausted",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Choose a recovery action.",
+		Context: map[string]any{
+			decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
+			decisionContextKeyDependency:     decisionContextDependencyRuntimeContract,
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+			"blockerKind":                    "runtime_repair_contract_exhausted",
+			"runtimeRepairExhausted":         true,
+		},
+	})
+	contract := ConvergenceContract{
+		State:                       convergenceStateNeedStateChange,
+		RuntimeStage:                runtimeStageRepair,
+		RepairObjective:             repairObjectiveStateChangingOutput,
+		StateChangingOutputRequired: true,
+		RepairActionPackage: map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+	}
+
+	if !ShouldCreateDecisionTicket(input, output, contract) {
+		t.Fatalf("ShouldCreateDecisionTicket = false, want runtime repair exhausted blocker despite continuable next action")
 	}
 }
 
@@ -6597,7 +6810,7 @@ func TestBuildConvergenceContractStateChangeRequiresTargetSnapshotAcquisition(t 
 	}
 }
 
-func TestBuildConvergenceContractStateChangeDoesNotAcquireSnapshotForAbstractCoverageRefs(t *testing.T) {
+func TestBuildConvergenceContractStateChangeAcquiresSnapshotForAbstractCoverageRefs(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{
 			"nextAction": map[string]any{"kind": "state_change"},
@@ -6627,16 +6840,17 @@ func TestBuildConvergenceContractStateChangeDoesNotAcquireSnapshotForAbstractCov
 
 	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
 
-	if contract.State != convergenceStateNeedStateChange ||
-		contract.RuntimeStageMode == "target_snapshot_acquisition" ||
-		stringFromMap(contract.Prerequisite, "kind") == "acquire_target_snapshot" {
-		t.Fatalf("convergenceContract = %+v, want direct state_change without abstract target snapshot prerequisite", contract)
+	if contract.State != convergenceStateNeedEvidence ||
+		contract.RuntimeStageMode != "target_snapshot_acquisition" ||
+		stringFromMap(contract.Prerequisite, "kind") != "acquire_target_snapshot" {
+		t.Fatalf("convergenceContract = %+v, want read-only target snapshot prerequisite for abstract targets", contract)
 	}
 	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
-	if !boolValue(required["mustIncludeStateChangingNode"]) ||
-		boolValue(required["stateChangingForbidden"]) ||
-		boolValue(required["mustAcquireCurrentTargetSnapshot"]) {
-		t.Fatalf("requiredOutput = %+v, want state-changing output allowed without abstract snapshot acquisition", required)
+	if !boolValue(required["mustAcquireCurrentTargetSnapshot"]) ||
+		!boolValue(required["mustUseReadOnlySnapshotAcquisition"]) ||
+		!boolValue(required["stateChangingForbidden"]) ||
+		boolValue(required["mustIncludeStateChangingNode"]) {
+		t.Fatalf("requiredOutput = %+v, want read-only snapshot acquisition before state-changing output", required)
 	}
 }
 

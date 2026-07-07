@@ -1338,6 +1338,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 			"recentFailures":      runLevelStats.RecentFailures,
 		},
 		"contractViolationType":  stringFromMap(failedStep.Output, outputKeyContractViolationType),
+		"runtimeRepairExhausted": true,
 		"failureClass":           stringFromMap(failedStep.Output, failureOutputKeyClass),
 		"failureSignature":       stringFromMap(failedStep.Output, failureOutputKeySignature),
 		"failureTargetScope":     runtimeFailureTargetScopeFromStep(failedStep),
