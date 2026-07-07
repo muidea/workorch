@@ -1461,6 +1461,50 @@ func TestContractViolationProcessControlImmediatelyNarrowsToManagedValidation(t 
 	}
 }
 
+func TestForcedNarrowManagedValidationDoesNotOverrideStateChangeAuthority(t *testing.T) {
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	input := map[string]any{
+		convergenceAuthorityKey: cloneStepPayload(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])),
+		gapBaselineKey:          cloneStepPayload(mapFromValue(run.ExecutionContext[gapBaselineKey])),
+		stepInputKeyContractViolationRecovery: map[string]any{
+			"correctionMode":      contractViolationCorrectionModeForcedNarrow,
+			"correctionProfileId": "managed_validation_evidence",
+			"correctionContract": map[string]any{
+				"requiredOutputShape":   "managed_validation_evidence",
+				"allowedOutputs":        []any{"executionGraph_with_managed_validation_session"},
+				"forbiddenOutputs":      []any{"plain_shell_validation"},
+				"validationRoute":       runtimemodel.ValidationRouteManagedHarness,
+				"mustUseManagedHarness": true,
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []any{managedValidationSessionNodeKind},
+			},
+		},
+		"requiredOutput": map[string]any{
+			"mustProduceConcreteValidationEvidence": true,
+			"acceptedKinds":                         []any{managedValidationSessionNodeKind},
+		},
+	}
+
+	got, err := refreshCurrentAuthorityDerivedSnapshot(run, common.StepID("run-authority-focus/contract-retry"), input)
+	if err != nil {
+		t.Fatalf("refreshCurrentAuthorityDerivedSnapshot: %v; input=%+v", err, got)
+	}
+	contract := mapFromValue(got["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want state_change owner authority", contract)
+	}
+	required := mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		t.Fatalf("requiredOutput = %+v, want state-changing owner authority to override stale forced-narrow validation", required)
+	}
+}
+
 func TestForcedNarrowManagedValidationRecoveryRewritesAllVisibleContracts(t *testing.T) {
 	runID := common.RunID("run-forced-narrow-managed-visible")
 	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-forced-narrow-managed-visible"}

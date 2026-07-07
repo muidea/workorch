@@ -224,6 +224,9 @@ func forcedNarrowManagedValidationRequiredOutput(input map[string]any) map[strin
 		stringFromMap(mapFromValue(recovery["correctionContract"]), "requiredOutputShape") != "managed_validation_evidence" {
 		return nil
 	}
+	if forcedNarrowRecoveryObsoleteForOwnerAuthority(input, recovery) {
+		return nil
+	}
 	return forcedNarrowRequiredOutputFromRecovery(input, nil, recovery)
 }
 

@@ -365,6 +365,9 @@ func reapplyForcedNarrowContractViolationRequiredOutput(input map[string]any, fa
 	if len(recovery) == 0 || stringFromMap(recovery, "correctionMode") != contractViolationCorrectionModeForcedNarrow {
 		return
 	}
+	if forcedNarrowRecoveryObsoleteForOwnerAuthority(input, recovery) {
+		return
+	}
 	correction := map[string]any{
 		"profileId":   stringFromMap(recovery, "correctionProfileId"),
 		"mode":        stringFromMap(recovery, "correctionMode"),
@@ -380,6 +383,9 @@ func normalizeCurrentActionContract(input map[string]any, failedStep *runModel.S
 	}
 	recovery := mapFromValue(input[stepInputKeyContractViolationRecovery])
 	if len(recovery) == 0 || stringFromMap(recovery, "correctionMode") != contractViolationCorrectionModeForcedNarrow {
+		return input
+	}
+	if forcedNarrowRecoveryObsoleteForOwnerAuthority(input, recovery) {
 		return input
 	}
 	contract := mapFromValue(recovery["correctionContract"])
@@ -406,7 +412,39 @@ func normalizeForcedNarrowManagedValidationInput(input map[string]any) map[strin
 		stringFromMap(mapFromValue(recovery["correctionContract"]), "requiredOutputShape") != "managed_validation_evidence" {
 		return input
 	}
+	if forcedNarrowRecoveryObsoleteForOwnerAuthority(input, recovery) {
+		return input
+	}
 	return normalizeCurrentActionValidationEvidenceContract(input, nil, recovery)
+}
+
+func forcedNarrowRecoveryObsoleteForOwnerAuthority(input map[string]any, recovery map[string]any) bool {
+	if len(input) == 0 || len(recovery) == 0 {
+		return false
+	}
+	shape := strings.TrimSpace(stringFromMap(mapFromValue(recovery["correctionContract"]), "requiredOutputShape"))
+	if shape == "" {
+		return false
+	}
+	state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state"))
+	nextAction := strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind"))
+	if nextAction == "" {
+		nextAction = strings.TrimSpace(convergenceNextActionKind(nil, input))
+	}
+	obsolete := false
+	switch shape {
+	case "bounded_validation_evidence", "managed_validation_evidence":
+		obsolete = state == convergenceStateNeedStateChange || nextAction == runtimemodel.NextActionTypeStateChange
+	case "valid_patch_apply", "state_changing_output", "state_changing_output_from_available_snapshot":
+		obsolete = state == convergenceStateNeedValidation || nextAction == runtimemodel.NextActionTypeValidate || nextAction == "produce_validation_evidence"
+	case "bounded_failure_evidence":
+		obsolete = state == convergenceStateNeedStateChange || nextAction == runtimemodel.NextActionTypeStateChange ||
+			state == convergenceStateNeedValidation || nextAction == runtimemodel.NextActionTypeValidate || nextAction == "produce_validation_evidence"
+	}
+	if obsolete {
+		appendAuthorityDiagnostic(input, "stale_forced_narrow_recovery_ignored", "warning", "diagnostic_lineage", "contractViolationRecovery", "forced-narrow recovery contract no longer matches current owner authority")
+	}
+	return obsolete
 }
 
 func normalizeCurrentActionStateChangingContract(input map[string]any, failedStep *runModel.Step, recovery map[string]any) map[string]any {

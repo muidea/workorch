@@ -24,6 +24,37 @@ func (repairDispatchSpecBuilderStub) runtimeRepairFollowUpStepInput(_ context.Co
 	}
 }
 
+type repairDispatchStaleForcedNarrowBuilder struct{}
+
+func (repairDispatchStaleForcedNarrowBuilder) runtimeRepairFollowUpStepInput(_ context.Context, _ *runmodel.Run, _ *runmodel.Step, attempt int, execErr error) map[string]any {
+	return map[string]any{
+		stepInputKeyRuntimeRepairFollowUp: true,
+		stepInputKeyRuntimeRepairAttempt:  attempt,
+		"failureReason":                   errorString(execErr),
+		stepInputKeyContractViolationRecovery: map[string]any{
+			"correctionMode":      contractViolationCorrectionModeForcedNarrow,
+			"correctionProfileId": "managed_validation_evidence",
+			"correctionContract": map[string]any{
+				"requiredOutputShape":   "managed_validation_evidence",
+				"allowedOutputs":        []any{"executionGraph_with_managed_validation_session"},
+				"forbiddenOutputs":      []any{"plain_shell_validation"},
+				"validationRoute":       runtimemodel.ValidationRouteManagedHarness,
+				"mustUseManagedHarness": true,
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []any{managedValidationSessionNodeKind},
+			},
+		},
+		"requiredOutput": map[string]any{
+			"mustProduceConcreteValidationEvidence": true,
+			"acceptedKinds":                         []any{managedValidationSessionNodeKind},
+		},
+	}
+}
+
 type repairBlockedRecoveryExecutorStub struct {
 	called runtimeRecoveryAction
 	err    error
@@ -136,6 +167,42 @@ func TestRepairSubsystemRecoveryDispatchSpecPlansRuntimeRepairWithExactScope(t *
 	}
 	if spec.Input[stepInputKeyRuntimeRepairAttempt] != 2 {
 		t.Fatalf("runtime repair attempt = %#v, want 2", spec.Input[stepInputKeyRuntimeRepairAttempt])
+	}
+}
+
+func TestRepairSubsystemRecoveryDispatchSpecRebuildsStaleForcedNarrowFromStateChangeAuthority(t *testing.T) {
+	ctx := context.Background()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	run.InitialStepKind = llmcommon.StepKindWorkspaceExecution
+	stepRepo := memory.NewStepRepository()
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/graph-002/001-tidy-deps"),
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime|target=graph-node",
+		},
+	}
+
+	spec, ok, err := newRepairSubsystem(stepRepo, nil).recoveryDispatchSpec(ctx, run, failedStep, errors.New("exit status 1"), runtimeRecoveryActionRuntimeRepair, maxProviderRetryAttempts, repairDispatchStaleForcedNarrowBuilder{}, false)
+
+	if err != nil || !ok {
+		t.Fatalf("recoveryDispatchSpec ok/err = %v/%v, want state-changing repair spec", ok, err)
+	}
+	contract := mapFromValue(spec.Input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+	}
+	required := mapFromValue(mapFromValue(spec.Input["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		t.Fatalf("requiredOutput = %+v, want canonical state-changing output", required)
+	}
+	if err := validateConvergenceDispatchInput(spec.Input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, spec.Input)
 	}
 }
 

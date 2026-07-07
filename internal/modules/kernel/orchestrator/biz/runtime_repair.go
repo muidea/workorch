@@ -996,6 +996,10 @@ func (r *repairSubsystem) recoveryDispatchSpec(
 		}
 		input := builder.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr)
 		input["allowDispatchAfterRejectedResult"] = true
+		input, err = finalizeCurrentAuthorityDispatchInputForRun(run, stepID, cloneStepPayload(input))
+		if err != nil {
+			return stepDispatchSpec{}, true, err
+		}
 		return stepDispatchSpec{
 			ID:    stepID,
 			Kind:  initialStepKind(run),
@@ -1009,6 +1013,10 @@ func (r *repairSubsystem) recoveryDispatchSpec(
 		}
 		input := builder.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr)
 		input["allowDispatchAfterRejectedResult"] = true
+		input, err = finalizeCurrentAuthorityDispatchInputForRun(run, stepID, cloneStepPayload(input))
+		if err != nil {
+			return stepDispatchSpec{}, true, err
+		}
 		return stepDispatchSpec{
 			ID:    stepID,
 			Kind:  initialStepKind(run),
