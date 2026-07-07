@@ -1171,6 +1171,89 @@ func TestNormalizeCurrentActionStateChangingContractClearsStaleEvidenceAcquisiti
 	}
 }
 
+func TestAuthorityRecomputeContractViolationDoesNotInheritStaleStateChangingPackage(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-violation-recompute-authority")
+	focus := map[string]any{
+		"id":                   "cwi-validation",
+		"coverageWorkItemIds":  []string{"cwi-validation"},
+		"missingEvidenceKinds": []string{"validation"},
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-contract-violation-recompute-authority",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"currentFocus":  cloneStepPayload(focus),
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			},
+			gapBaselineKey: map[string]any{
+				"schemaVersion": gapBaselineSchema,
+				"currentFocus":  cloneStepPayload(focus),
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			},
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus":    cloneStepPayload(focus),
+				"unresolvedItems": []map[string]any{cloneStepPayload(focus)},
+			},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/failed-recompute"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"repairObjective":             repairObjectiveStateChangingOutput,
+				"stateChangingOutputRequired": true,
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply"},
+				},
+			},
+		},
+		Output: map[string]any{
+			"stage":                   "runtime_contract_failed",
+			"error":                   "dodAssessment coverage is incomplete",
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|rule=coverage_assessment_incomplete",
+			stepOutputKeyContractViolation: map[string]any{
+				"violatedRule":   contractViolationRuleCoverageAssessmentIncomplete,
+				"recoverability": runtimemodel.ContractViolationRecoverabilityRecomputeAuthority,
+			},
+		},
+	}
+	orch := &RuntimeOrchestrator{steps: memory.NewStepRepository()}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failed, 1, common.ErrInvalidArgument)
+
+	contract := mapFromValue(input["convergenceContract"])
+	if state := stringFromMap(contract, "state"); state != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract.state = %q, want %s; input=%+v", state, convergenceStateNeedValidation, input)
+	}
+	nextAction := mapFromValue(mapFromValue(input[currentActionContractKey])["nextAction"])
+	if kind := stringFromMap(nextAction, "kind"); kind != runtimemodel.NextActionTypeValidate {
+		t.Fatalf("currentAction.nextAction = %+v, want validate; input=%+v", nextAction, input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		boolValue(required["mustIncludeStateChangingNode"]) {
+		t.Fatalf("requiredOutput = %+v, want validation authority without inherited patch/apply", required)
+	}
+	if !boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		t.Fatalf("requiredOutput = %+v, want concrete validation evidence", required)
+	}
+	if err := validateConvergenceDispatchInput(input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, input)
+	}
+}
+
 func TestContractViolationRetryForcedNarrowValidationRequiredOutput(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-contract-violation-forced-narrow-validation")

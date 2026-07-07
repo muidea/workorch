@@ -676,6 +676,15 @@ func failedStepHasRecoverableContractViolation(step *runModel.Step) bool {
 	}
 }
 
+func failedStepRequiresAuthorityRecompute(step *runModel.Step) bool {
+	violation := contractViolationFromFailedOutput(step)
+	if len(violation) == 0 {
+		return false
+	}
+	return strings.TrimSpace(stringFromMap(violation, "recoverability")) == runtimemodel.ContractViolationRecoverabilityRecomputeAuthority ||
+		strings.TrimSpace(stringFromMap(violation, "violatedRule")) == contractViolationRuleCoverageAssessmentIncomplete
+}
+
 func contractViolationRetryAttemptCount(ctx context.Context, repair *repairSubsystem, runID common.RunID, failedStep *runModel.Step) int {
 	if repair == nil || repair.steps == nil || runID == "" || failedStep == nil {
 		return 0

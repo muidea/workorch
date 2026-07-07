@@ -274,15 +274,48 @@ func TestRuntimeManagedTargetSnapshotAcquisitionDispatchesReadOnlyGraphWithoutRo
 	if err != nil {
 		t.Fatalf("list evidence records: %v", err)
 	}
-	var snapshotRecord bool
+	var snapshotRecord *runtimemodel.EvidenceRecord
 	for _, record := range records {
 		if record.Kind == runtimemodel.EvidenceKindTargetSnapshot && stringFromMap(record.Metadata, "targetRef") == "target.txt" {
-			snapshotRecord = true
+			snapshotRecord = record
 			break
 		}
 	}
-	if !snapshotRecord {
+	if snapshotRecord == nil {
 		t.Fatalf("evidence records = %+v, want accepted target snapshot record for target.txt", records)
+	}
+	if snapshotRecord.SourceRef == "" || stringFromMap(snapshotRecord.Metadata, "sourceRef") != snapshotRecord.SourceRef {
+		t.Fatalf("snapshot metadata sourceRef = %q/%q, want record sourceRef", snapshotRecord.SourceRef, stringFromMap(snapshotRecord.Metadata, "sourceRef"))
+	}
+	if ids := stringSliceFromValue(snapshotRecord.Metadata["coverageWorkItemIds"]); !stringSliceContains(ids, "cwi-target-snapshot") {
+		t.Fatalf("snapshot coverageWorkItemIds = %+v, want current coverage item", ids)
+	}
+	if ids := snapshotRecord.CoverageItemRefs; !stringSliceContains(ids, "cwi-target-snapshot") {
+		t.Fatalf("snapshot CoverageItemRefs = %+v, want current coverage item", ids)
+	}
+	if refs := stringSliceFromValue(snapshotRecord.Metadata["structuredTargetRefs"]); !stringSliceContains(refs, "target.txt") {
+		t.Fatalf("snapshot structuredTargetRefs = %+v, want target.txt", refs)
+	}
+	if claims := stringSliceFromValue(snapshotRecord.Metadata["observedClaims"]); len(claims) == 0 {
+		t.Fatalf("snapshot observedClaims = %+v, want runtime-derived observed claim", claims)
+	}
+	for _, key := range []string{"contentHash", "contentComplete", "safeForFileWrite"} {
+		if _, ok := snapshotRecord.Metadata[key]; !ok {
+			t.Fatalf("snapshot metadata missing %s: %+v", key, snapshotRecord.Metadata)
+		}
+	}
+	snapshot := targetSnapshotFromAcceptedEvidenceStep(snapshotRecord, readStep)
+	if len(snapshot) == 0 {
+		t.Fatalf("targetSnapshotFromAcceptedEvidenceStep returned empty")
+	}
+	if ids := stringSliceFromValue(snapshot["coverageWorkItemIds"]); !stringSliceContains(ids, "cwi-target-snapshot") {
+		t.Fatalf("materialized snapshot coverageWorkItemIds = %+v, want current coverage item", ids)
+	}
+	if refs := stringSliceFromValue(snapshot["structuredTargetRefs"]); !stringSliceContains(refs, "target.txt") {
+		t.Fatalf("materialized snapshot structuredTargetRefs = %+v, want target.txt", refs)
+	}
+	if claims := stringSliceFromValue(snapshot["observedClaims"]); len(claims) == 0 {
+		t.Fatalf("materialized snapshot observedClaims = %+v, want observed claim", claims)
 	}
 	if !publishedStepState(hub.Published(), rootStepID, common.StepStateSucceeded) {
 		t.Fatalf("events = %+v, want completed root step event", hub.Published())
@@ -296,6 +329,9 @@ func runtimeManagedTargetSnapshotDispatchInput(workspaceID common.WorkspaceID, r
 		"mustIncludeStateChangingNode":       false,
 		"acceptedKinds":                      []string{"file/read", "file/list", "git/read"},
 		"repairTargetSet":                    []string{"target.txt"},
+		"coverageWorkItemIds":                []string{"cwi-target-snapshot"},
+		"structuredTargetRefs":               []string{"target.txt"},
+		"observedClaims":                     []string{"target snapshot content is available for the current coverage focus"},
 	}
 	return map[string]any{
 		convergenceAuthorityKey: map[string]any{

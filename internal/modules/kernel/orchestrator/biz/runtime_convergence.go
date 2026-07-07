@@ -102,7 +102,7 @@ func BuildConvergenceContract(
 		if sourceKey == "rejectedResultContinuation" && convergenceAssessmentOnly(input, failedStep) {
 			continue
 		}
-		if len(mapFromValue(input["repairActionPackage"])) == 0 {
+		if len(mapFromValue(input["repairActionPackage"])) == 0 && !failedStepRequiresAuthorityRecompute(failedStep) {
 			if pkg := mapFromValue(source["repairActionPackage"]); len(pkg) > 0 {
 				input["repairActionPackage"] = pkg
 			}
@@ -586,7 +586,7 @@ func contractViolationRecoveryStateChangingContract(input map[string]any, failed
 		}
 	}
 	pkg := cloneStepPayload(mapFromValue(input["repairActionPackage"]))
-	if len(pkg) == 0 && failedStep != nil {
+	if len(pkg) == 0 && failedStep != nil && !failedStepRequiresAuthorityRecompute(failedStep) {
 		pkg = cloneStepPayload(mapFromValue(failedStep.Input["repairActionPackage"]))
 	}
 	if len(pkg) == 0 {

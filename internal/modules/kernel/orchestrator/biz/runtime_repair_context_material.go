@@ -111,29 +111,50 @@ func runtimeManagedPatchTargetSnapshotFromReadStep(run *runModel.Run, step *runM
 		safeForFileWrite = boolValue(output["safeForPatch"])
 	}
 	item := map[string]any{
-		"targetRef":         targetRef,
-		"exists":            exists,
-		"content":           content,
-		"contentHash":       contentHash,
-		"contentComplete":   contentComplete,
-		"safeForFileWrite":  safeForFileWrite,
-		"safeForExactPatch": safeForFileWrite,
-		"redacted":          redacted,
-		"truncated":         truncated,
-		"isBinary":          isBinary,
-		"runtimeManaged":    true,
-		"source":            "runtime_managed_file_read",
-		"sourceStepId":      string(step.ID),
-		"evidenceRef":       string(step.ID),
-		"sourceOutputRef":   runtimeRawPayloadRef(run.WorkspaceID, run.ID, "steps", string(step.ID), "output.json"),
-		"snapshotValidity":  "runtime_managed_file_read_output",
-		"guidance":          "Use this runtime-managed target snapshot for repair; exact patch output must preserve contentHash as baseHash when baseHash is used.",
+		"targetRef":            targetRef,
+		"targetRefs":           []string{targetRef},
+		"structuredTargetRefs": []string{targetRef},
+		"exists":               exists,
+		"content":              content,
+		"contentHash":          contentHash,
+		"contentComplete":      contentComplete,
+		"safeForFileWrite":     safeForFileWrite,
+		"safeForExactPatch":    safeForFileWrite,
+		"redacted":             redacted,
+		"truncated":            truncated,
+		"isBinary":             isBinary,
+		"runtimeManaged":       true,
+		"source":               "runtime_managed_file_read",
+		"sourceRef":            runtimeRawPayloadRef(run.WorkspaceID, run.ID, "steps", string(step.ID), "output.json"),
+		"sourceStepId":         string(step.ID),
+		"evidenceRef":          string(step.ID),
+		"sourceOutputRef":      runtimeRawPayloadRef(run.WorkspaceID, run.ID, "steps", string(step.ID), "output.json"),
+		"snapshotValidity":     "runtime_managed_file_read_output",
+		"guidance":             "Use this runtime-managed target snapshot for repair; exact patch output must preserve contentHash as baseHash when baseHash is used.",
 	}
 	if size, ok := output["size"]; ok {
 		item["size"] = compactLLMContextValue(size, 1)
 	}
 	if lineCount, ok := output["lineCount"]; ok {
 		item["lineCount"] = compactLLMContextValue(lineCount, 1)
+	}
+	scope := runtimeStepCoverageScopeMetadata(step)
+	for key, value := range scope {
+		switch key {
+		case "targetRefs", "structuredTargetRefs":
+			item[key] = compactUniqueStrings(append(stringSliceFromValue(item[key]), stringSliceFromValue(value)...))
+		case "targetRef":
+			if strings.TrimSpace(stringFromMap(item, key)) == "" {
+				item[key] = value
+			}
+		default:
+			item[key] = value
+		}
+	}
+	item["targetRefs"] = compactUniqueStrings(append(stringSliceFromValue(item["targetRefs"]), targetRef))
+	item["structuredTargetRefs"] = compactUniqueStrings(append(stringSliceFromValue(item["structuredTargetRefs"]), targetRef))
+	if claims := stringSliceFromValue(item["observedClaims"]); len(claims) == 0 {
+		item["observedClaims"] = []string{"runtime-managed target snapshot captured complete target content"}
 	}
 	return item
 }

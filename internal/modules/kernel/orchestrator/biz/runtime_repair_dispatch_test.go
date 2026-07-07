@@ -7,7 +7,9 @@ import (
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -199,6 +201,54 @@ func TestRuntimeRepairExhaustionDecisionGateAllowsExternalDependencyDecision(t *
 	}
 }
 
+func TestRuntimeRepairExhaustionDecisionGateRejectsContinuableRuntimeContractDecision(t *testing.T) {
+	run := &runmodel.Run{ID: "run-decision-gate-runtime-contract", WorkspaceID: "ws-decision-gate-runtime-contract"}
+	failed := &runmodel.Step{
+		ID:    "run-decision-gate-runtime-contract/failed",
+		RunID: run.ID,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": "state_change"},
+			},
+		},
+		Output: map[string]any{
+			"error": "invalid argument: decision requests a continuable candidate choice",
+			stepOutputKeyBlockDecisionContext: map[string]any{
+				decisionContextKeyDependency: decisionContextDependencyRuntimeContract,
+			},
+		},
+	}
+
+	if !runtimeRepairExhaustionDecisionNotEligible(run, failed) {
+		t.Fatal("runtimeRepairExhaustionDecisionNotEligible = false, want runtime contract decision denied while next action is continuable")
+	}
+}
+
+func TestRuntimeRepairExhaustionDecisionGateAllowsProviderDependencyDecision(t *testing.T) {
+	run := &runmodel.Run{ID: "run-decision-gate-provider", WorkspaceID: "ws-decision-gate-provider"}
+	failed := &runmodel.Step{
+		ID:    "run-decision-gate-provider/failed",
+		RunID: run.ID,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": "state_change"},
+			},
+		},
+		Output: map[string]any{
+			"error": "invalid argument: decision requests a continuable candidate choice",
+			stepOutputKeyBlockDecisionContext: map[string]any{
+				decisionContextKeyDependency: decisionContextDependencyLLMProvider,
+			},
+		},
+	}
+
+	if runtimeRepairExhaustionDecisionNotEligible(run, failed) {
+		t.Fatal("runtimeRepairExhaustionDecisionNotEligible = true, want provider dependency decision allowed")
+	}
+}
+
 func TestRuntimeRepairExhaustionDecisionGateAllowsCommandContractBlocker(t *testing.T) {
 	run := &runmodel.Run{ID: "run-command-contract-gate", WorkspaceID: "ws-command-contract-gate"}
 	failed := &runmodel.Step{
@@ -242,6 +292,78 @@ func TestRepairSubsystemBlockRecoveryActionPersistsBlockerBeforeErrBlocked(t *te
 	}
 	if executor.called != runtimeRecoveryActionDuplicateFailure {
 		t.Fatalf("executor side effect = %s, want duplicate failure persisted before ErrBlocked", executor.called)
+	}
+}
+
+func TestCloseRepairDispatchFailureForNonGraphStepLeavesUniqueExit(t *testing.T) {
+	for _, stage := range []string{"prepare_authority_snapshot", "event_publish"} {
+		t.Run(stage, func(t *testing.T) {
+			ctx := context.Background()
+			runID := common.RunID("run-repair-dispatch-failure-" + stage)
+			workspaceID := common.WorkspaceID("ws-repair-dispatch-failure-" + stage)
+			runRepo := memory.NewRunRepository()
+			stepRepo := memory.NewStepRepository()
+			workspaceRepo := memory.NewWorkspaceRepository()
+			ticketRepo := memory.NewDecisionTicketRepository()
+			run := &runmodel.Run{
+				ID:          runID,
+				WorkspaceID: workspaceID,
+				State:       common.RunStateActive,
+			}
+			failedStep := &runmodel.Step{
+				ID:    common.StepID(runID + "/failed"),
+				RunID: runID,
+				Kind:  llmcommon.StepKindWorkspaceExecution,
+				State: common.StepStateFailed,
+				Input: map[string]any{
+					stepInputKeyRuntimeRepairFollowUp: true,
+				},
+				Output: map[string]any{
+					failureOutputKeyClass:     failureClassRuntime,
+					failureOutputKeySignature: "class=runtime|target=dispatch",
+				},
+			}
+			if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+				t.Fatalf("seed workspace: %v", err)
+			}
+			if err := runRepo.Create(ctx, run); err != nil {
+				t.Fatalf("seed run: %v", err)
+			}
+			if err := stepRepo.Create(ctx, failedStep); err != nil {
+				t.Fatalf("seed step: %v", err)
+			}
+			orch := NewRuntimeOrchestrator(
+				nil,
+				runRepo,
+				stepRepo,
+				workspaceRepo,
+				ticketRepo,
+				memory.NewApprovalRepository(),
+				events.NewMemoryHub(),
+			)
+
+			err := orch.closeRepairDispatchFailure(ctx, run, failedStep, errors.New("original failure"), runtimeDispatchRequestError{
+				Stage: stage,
+				Err:   common.ErrConflict,
+			})
+			if err != nil {
+				t.Fatalf("closeRepairDispatchFailure: %v", err)
+			}
+			updatedRun, err := runRepo.Get(ctx, runID)
+			if err != nil {
+				t.Fatalf("get run: %v", err)
+			}
+			if !runHasFailedStepUniqueExit(updatedRun) {
+				t.Fatalf("run state = %s ticket=%s approval=%s, want unique blocker or terminal exit", updatedRun.State, updatedRun.BlockingTicketID, updatedRun.BlockingApprovalID)
+			}
+			updatedStep, err := stepRepo.Get(ctx, failedStep.ID)
+			if err != nil {
+				t.Fatalf("get step: %v", err)
+			}
+			if stringFromMap(updatedStep.Output, "repairDispatchErrorStage") != stage {
+				t.Fatalf("repair dispatch diagnostic = %+v, want %s stage", updatedStep.Output, stage)
+			}
+		})
 	}
 }
 

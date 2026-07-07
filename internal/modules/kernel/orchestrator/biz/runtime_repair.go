@@ -208,17 +208,74 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUpOrBlock(
 		return o.blockOnRuntimeRepairExhaustion(ctx, run, failedStep, execErr)
 	}
 	err := o.dispatchRuntimeRepairFollowUp(ctx, run, failedStep, execErr)
-	if err == nil || errors.Is(err, common.ErrBlocked) || failedStep == nil || graphNodeID(failedStep) == "" {
+	if err == nil || errors.Is(err, common.ErrBlocked) {
 		return err
+	}
+	return o.closeRepairDispatchFailure(ctx, run, failedStep, execErr, err)
+}
+
+func (o *RuntimeOrchestrator) closeRepairDispatchFailure(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	execErr error,
+	dispatchErr error,
+) error {
+	if failedStep == nil {
+		return dispatchErr
 	}
 	if failedStep.Output == nil {
 		failedStep.Output = map[string]any{}
 	}
-	failedStep.Output["repairDispatchError"] = err.Error()
+	stage := runtimeDispatchRequestErrorStage(dispatchErr)
+	failedStep.Output["repairDispatchError"] = dispatchErr.Error()
+	if stage != "" {
+		failedStep.Output["repairDispatchErrorStage"] = stage
+	}
+	failedStep.Output["repairDispatchDiagnostic"] = map[string]any{
+		"class":  "runtime_internal_contract_misalignment",
+		"stage":  firstNonEmptyString(stage, "repair_dispatch"),
+		"reason": dispatchErr.Error(),
+	}
 	if o.steps != nil {
 		_ = o.steps.Update(ctx, failedStep)
 	}
-	return o.blockOnRuntimeRepairExhaustion(ctx, run, failedStep, fmt.Errorf("runtime repair dispatch failed: %w", err))
+	closedErr := fmt.Errorf("runtime repair dispatch failed: %w", dispatchErr)
+	if stage != "" {
+		failReason := closedErr.Error()
+		if execErr != nil {
+			failReason = fmt.Sprintf("%s; original failure: %v", failReason, execErr)
+		}
+		return o.failRunWithRejectedCompletionResult(ctx, run, failedStep, failReason)
+	}
+	blockErr := o.blockOnRuntimeRepairExhaustion(ctx, run, failedStep, closedErr)
+	if blockErr == nil || runHasFailedStepUniqueExit(run) {
+		return blockErr
+	}
+	failReason := closedErr.Error()
+	if execErr != nil {
+		failReason = fmt.Sprintf("%s; original failure: %v", failReason, execErr)
+	}
+	if failErr := o.failRunWithRejectedCompletionResult(ctx, run, failedStep, failReason); failErr != nil {
+		return fmt.Errorf("%w; blocker failed: %v; terminal fallback failed: %v", closedErr, blockErr, failErr)
+	}
+	return nil
+}
+
+func runHasFailedStepUniqueExit(run *runModel.Run) bool {
+	if run == nil {
+		return false
+	}
+	switch run.State {
+	case common.RunStateBlockedOnDecision:
+		return run.BlockingTicketID != ""
+	case common.RunStateBlockedOnApproval:
+		return run.BlockingApprovalID != ""
+	case common.RunStateFailed, common.RunStateCompleted, common.RunStateCancelled, common.RunStateSuperseded:
+		return true
+	default:
+		return false
+	}
 }
 
 func attachRuntimeFailureStage(output map[string]any, summary string) {
@@ -804,12 +861,12 @@ func failedStepHasExternalDecisionDependency(step *runModel.Step) bool {
 		if len(source) == 0 {
 			continue
 		}
-		if strings.TrimSpace(stringFromMap(source, decisionContextKeyDependency)) != "" ||
-			strings.TrimSpace(stringFromMap(source, "externalDependency")) != "" ||
-			boolValue(source["requiresExternalInput"]) ||
-			boolValue(source["requiresUserChoice"]) ||
-			boolValue(source["requiresCredential"]) ||
-			boolValue(source["requiresPermission"]) {
+		if decisionBlockDeclaresRequiredRealExternalDependency(source) ||
+			decisionBlockDeclaresNonContractRuntimeDependency(source) ||
+			decisionBlockDeclaresRuntimeRepairExhausted(source) ||
+			decisionBlockDeclaresContractViolationRecoveryExhausted(source) ||
+			decisionDependencyValueRequiresGovernedWait(stringFromMap(source, decisionContextKeyDependency)) ||
+			strings.TrimSpace(stringFromMap(source, "externalDependency")) != "" {
 			return true
 		}
 	}

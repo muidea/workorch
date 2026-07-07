@@ -1467,7 +1467,15 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 	}
 	top := firstRequiredOutputForSemantics(sources)
 	if len(top) == 0 {
+		if nextAction == runtimemodel.NextActionTypeAcquireTargetSnapshot {
+			appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "acquire_target_snapshot requires read-only target snapshot acquisition requiredOutput")
+			return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: acquire_target_snapshot missing read-only requiredOutput")
+		}
 		return nil
+	}
+	if nextAction == runtimemodel.NextActionTypeAcquireTargetSnapshot && !requiredOutputIsReadOnlyTargetSnapshotPrerequisite(top) {
+		appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "acquire_target_snapshot requires read-only target snapshot acquisition requiredOutput")
+		return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: acquire_target_snapshot requires read-only requiredOutput")
 	}
 	topStateChanging := requiredOutputRequiresStateChanging(top)
 	topValidationOnly := requiredOutputValidationOnly(top)

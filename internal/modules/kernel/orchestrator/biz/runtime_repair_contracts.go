@@ -370,7 +370,7 @@ func inheritPriorRepairContext(input map[string]any, failedStep *runModel.Step) 
 			inheritedStrategy = true
 		}
 	}
-	if len(mapFromValue(input["repairActionPackage"])) == 0 {
+	if len(mapFromValue(input["repairActionPackage"])) == 0 && !failedStepRequiresAuthorityRecompute(failedStep) {
 		if pkg := mapFromValue(failedStep.Input["repairActionPackage"]); len(pkg) > 0 {
 			input["repairActionPackage"] = cloneStepPayload(pkg)
 		}

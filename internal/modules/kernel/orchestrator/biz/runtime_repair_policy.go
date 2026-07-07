@@ -27,6 +27,9 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 	if doDVerificationEvidenceRepairRequired(failedStep) {
 		return false
 	}
+	if failedStepRequiresAuthorityRecompute(failedStep) {
+		return false
+	}
 	if boolValue(failedStep.Input["stateChangingOutputRequired"]) {
 		return true
 	}

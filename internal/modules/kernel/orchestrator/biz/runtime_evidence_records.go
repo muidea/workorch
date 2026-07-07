@@ -360,6 +360,10 @@ func runtimeStepCoverageScopeMetadata(step *runModel.Step) map[string]any {
 		mapFromValue(input["coverageFocus"]),
 		mapFromValue(mapFromValue(input["coverageWorkItemContext"])["currentFocus"]),
 		mapFromValue(mapFromValue(input["acceptance"])["currentFocus"]),
+		dispatchAuthorityCurrentFocus(input),
+		mapFromValue(mapFromValue(input[currentActionContractKey])["currentFocus"]),
+		mapFromValue(mapFromValue(input[convergenceAuthorityKey])["currentFocus"]),
+		mapFromValue(mapFromValue(input[gapBaselineKey])["currentFocus"]),
 	}
 	addString("coverageFocusId", firstNonEmptyString(stringFromMap(input, "coverageFocusId"), stringFromMap(output, "coverageFocusId")))
 	coverageWorkItemIDs := append(stringSliceFromValue(input["coverageWorkItemIds"]), stringSliceFromValue(output["coverageWorkItemIds"])...)
@@ -517,27 +521,48 @@ func acceptedTargetSnapshotEvidenceRecordForStep(run *runModel.Run, step *runMod
 	graphRootID := graphRootStepID(step)
 	recordID := orchestratormodel.StableEvidenceRecordID(sourceRef, "target-snapshot", targetRef)
 	metadata := map[string]any{
-		"evidenceRef":       string(recordID),
-		"targetRef":         targetRef,
-		"contentHash":       contentHash,
-		"contentComplete":   true,
-		"safeForFileWrite":  true,
-		"safeForPatch":      true,
-		"redacted":          false,
-		"truncated":         false,
-		"isBinary":          false,
-		"snapshotIntegrity": "complete_unredacted_text",
-		"snapshotValidity":  "valid_for_recorded_step_output",
-		"capturedAt":        timestamp,
-		"sourceStepId":      strings.TrimSpace(string(step.ID)),
-		"sourceOutputRef":   sourceRef,
-		"consumption":       "state_change_target_snapshot",
+		"evidenceRef":          string(recordID),
+		"sourceRef":            sourceRef,
+		"targetRef":            targetRef,
+		"targetRefs":           []string{targetRef},
+		"structuredTargetRefs": []string{targetRef},
+		"contentHash":          contentHash,
+		"contentComplete":      true,
+		"safeForFileWrite":     true,
+		"safeForPatch":         true,
+		"redacted":             false,
+		"truncated":            false,
+		"isBinary":             false,
+		"snapshotIntegrity":    "complete_unredacted_text",
+		"snapshotValidity":     "valid_for_recorded_step_output",
+		"capturedAt":           timestamp,
+		"sourceStepId":         strings.TrimSpace(string(step.ID)),
+		"sourceOutputRef":      sourceRef,
+		"consumption":          "state_change_target_snapshot",
 	}
 	if graphRootID != "" {
 		metadata["graphRootStepId"] = string(graphRootID)
 	}
 	if nodeID := strings.TrimSpace(graphNodeID(step)); nodeID != "" {
 		metadata["graphNodeId"] = nodeID
+	}
+	scope := runtimeStepCoverageScopeMetadata(step)
+	for key, value := range scope {
+		switch key {
+		case "targetRefs", "structuredTargetRefs":
+			metadata[key] = compactUniqueStrings(append(stringSliceFromValue(metadata[key]), stringSliceFromValue(value)...))
+		case "targetRef":
+			if strings.TrimSpace(stringFromMap(metadata, key)) == "" {
+				metadata[key] = value
+			}
+		default:
+			metadata[key] = value
+		}
+	}
+	metadata["targetRefs"] = compactUniqueStrings(append(stringSliceFromValue(metadata["targetRefs"]), targetRef))
+	metadata["structuredTargetRefs"] = compactUniqueStrings(append(stringSliceFromValue(metadata["structuredTargetRefs"]), targetRef))
+	if claims := stringSliceFromValue(metadata["observedClaims"]); len(claims) == 0 {
+		metadata["observedClaims"] = []string{"runtime-managed target snapshot captured complete target content"}
 	}
 	if size, ok := output["size"]; ok {
 		metadata["size"] = compactLLMContextValue(size, 1)
@@ -557,6 +582,7 @@ func acceptedTargetSnapshotEvidenceRecordForStep(run *runModel.Run, step *runMod
 		SourceRef:          sourceRef,
 		SubjectType:        evidenceRecordSubjectWorkspaceItem,
 		SubjectID:          targetRef,
+		CoverageItemRefs:   stringSliceFromValue(metadata["coverageWorkItemIds"]),
 		CreatedAt:          timestamp,
 		UpdatedAt:          timestamp,
 		Metadata:           metadata,

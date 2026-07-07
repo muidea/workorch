@@ -488,6 +488,13 @@ func targetSnapshotFromAcceptedEvidenceStep(record *runtimemodel.EvidenceRecord,
 	if len(snapshot) == 0 || !boolValue(snapshot["contentComplete"]) || !boolValue(snapshot["safeForFileWrite"]) {
 		return nil
 	}
+	for _, key := range []string{"sourceRef", "sourceOutputRef", "sourceStepId", "coverageWorkItemIds", "targetRefs", "structuredTargetRefs", "observedClaims"} {
+		if value, ok := record.Metadata[key]; ok {
+			snapshot[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	snapshot["targetRefs"] = compactUniqueStrings(append(stringSliceFromValue(snapshot["targetRefs"]), targetRef))
+	snapshot["structuredTargetRefs"] = compactUniqueStrings(append(stringSliceFromValue(snapshot["structuredTargetRefs"]), targetRef))
 	return snapshot
 }
 

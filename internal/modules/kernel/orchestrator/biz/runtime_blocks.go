@@ -297,6 +297,25 @@ func decisionBlockDeclaresRuntimeContractDependency(context map[string]any) bool
 	return false
 }
 
+func decisionDependencyValueRequiresGovernedWait(value string) bool {
+	switch strings.TrimSpace(value) {
+	case decisionContextDependencyLLMProvider,
+		decisionContextDependencyContextGate,
+		"external_dependency",
+		"external_information",
+		"external_input",
+		"third_party",
+		"credential",
+		"permission",
+		"configuration",
+		"user_choice",
+		"human_input":
+		return true
+	default:
+		return false
+	}
+}
+
 func decisionBlockDeclaresRequiredRealExternalDependency(context map[string]any) bool {
 	if strings.TrimSpace(stringFromMap(context, decisionContextKeyScope)) == decisionContextScopeExternalDependency {
 		return true

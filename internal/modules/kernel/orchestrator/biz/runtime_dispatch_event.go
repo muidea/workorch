@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -10,6 +12,40 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
+
+type runtimeDispatchRequestError struct {
+	Stage string
+	Err   error
+}
+
+func (e runtimeDispatchRequestError) Error() string {
+	if e.Err == nil {
+		return "runtime dispatch request failed"
+	}
+	if e.Stage == "" {
+		return e.Err.Error()
+	}
+	return fmt.Sprintf("runtime dispatch request failed at %s: %v", e.Stage, e.Err)
+}
+
+func (e runtimeDispatchRequestError) Unwrap() error {
+	return e.Err
+}
+
+func wrapRuntimeDispatchRequestError(stage string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return runtimeDispatchRequestError{Stage: stage, Err: err}
+}
+
+func runtimeDispatchRequestErrorStage(err error) string {
+	var dispatchErr runtimeDispatchRequestError
+	if !errors.As(err, &dispatchErr) {
+		return ""
+	}
+	return dispatchErr.Stage
+}
 
 func (o *RuntimeOrchestrator) EnableEventDrivenDispatch() {
 	if o == nil {
@@ -20,25 +56,25 @@ func (o *RuntimeOrchestrator) EnableEventDrivenDispatch() {
 
 func (o *RuntimeOrchestrator) requestDispatchStep(ctx context.Context, runID common.RunID, workspaceID common.WorkspaceID, spec stepDispatchSpec) error {
 	if o == nil || runID == "" || spec.ID == "" || spec.Kind == "" {
-		return common.ErrInvalidArgument
+		return wrapRuntimeDispatchRequestError("validate_request", common.ErrInvalidArgument)
 	}
 	run, err := o.runtimeEventRun(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), runID)
 	if err != nil {
-		return err
+		return wrapRuntimeDispatchRequestError("load_run", err)
 	}
 	if workspaceID == "" {
 		workspaceID = run.WorkspaceID
 	}
 	prepared, err := o.prepareGapBaselineDispatchSpecs(ctx, run, []stepDispatchSpec{spec})
 	if err != nil {
-		return err
+		return wrapRuntimeDispatchRequestError("prepare_authority_snapshot", err)
 	}
 	if len(prepared) != 1 {
-		return common.ErrConflict
+		return wrapRuntimeDispatchRequestError("prepare_dispatch_spec", common.ErrConflict)
 	}
 	spec = prepared[0]
 	if !o.eventDrivenDispatch {
-		return o.dispatchStepWithWorkspace(ctx, run, spec.ID, spec.Kind, spec.Input, nil)
+		return wrapRuntimeDispatchRequestError("direct_dispatch", o.dispatchStepWithWorkspace(ctx, run, spec.ID, spec.Kind, spec.Input, nil))
 	}
 	idempotencyKey := dispatchStepIdempotencyKey(workspaceID, runID, spec.ID, spec.Kind)
 	cmd := orchestratorcontracts.DispatchStepCommand{
@@ -49,7 +85,7 @@ func (o *RuntimeOrchestrator) requestDispatchStep(ctx context.Context, runID com
 		IdempotencyKey: idempotencyKey,
 		Input:          cloneStepPayload(spec.Input),
 	}
-	return o.eventHub.Publish(ctx, events.Envelope{
+	return wrapRuntimeDispatchRequestError("event_publish", o.eventHub.Publish(ctx, events.Envelope{
 		Topic:        orchestratorevents.TopicOrchestratorDispatchStepRequested,
 		SourceModule: "kernel/orchestrator",
 		SubjectType:  "step",
@@ -66,7 +102,7 @@ func (o *RuntimeOrchestrator) requestDispatchStep(ctx context.Context, runID com
 			events.PayloadKeyIdempotencyKey: idempotencyKey,
 			events.PayloadKeyInput:          cloneStepPayload(spec.Input),
 		},
-	})
+	}))
 }
 
 func workspaceIDForDispatch(run *runModel.Run, workspace *workspaceModel.Workspace) common.WorkspaceID {

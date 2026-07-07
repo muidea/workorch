@@ -1252,6 +1252,37 @@ func TestValidateConvergenceDispatchInputRejectsStagePacketNextActionDrift(t *te
 	}
 }
 
+func TestValidateConvergenceDispatchInputRejectsAcquireTargetSnapshotWithoutReadOnlyRequiredOutput(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"currentFocus": map[string]any{"id": "cwi-current"},
+			"nextAction":   map[string]any{"kind": runtimemodel.NextActionTypeAcquireTargetSnapshot},
+		},
+		"convergenceContract": map[string]any{"state": convergenceStateNeedEvidence},
+		"requiredOutput": map[string]any{
+			"acceptedKinds": []string{"file/read"},
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"activeFocus": map[string]any{"id": "cwi-current"},
+			"nextAction":  map[string]any{"type": runtimemodel.NextActionTypeAcquireTargetSnapshot},
+		},
+	}
+
+	err := validateConvergenceDispatchInput(input)
+	if err == nil {
+		t.Fatal("validateConvergenceDispatchInput returned nil, want acquire_target_snapshot read-only requiredOutput drift")
+	}
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want ErrConflict", err)
+	}
+	if !strings.Contains(err.Error(), "acquire_target_snapshot requires read-only requiredOutput") {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want acquire_target_snapshot read-only marker", err)
+	}
+	if diagnostics := mapSliceFromValue(input["authorityDiagnostics"]); len(diagnostics) != 1 || stringFromMap(diagnostics[0], "code") != "required_output_mismatch_next_action" {
+		t.Fatalf("authorityDiagnostics = %+v, want required_output_mismatch_next_action", input["authorityDiagnostics"])
+	}
+}
+
 func TestValidateConvergenceDispatchInputRejectsExecutionContextRequiredOutputDrift(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{
