@@ -41,11 +41,13 @@ type coverageWorkItemSource struct {
 
 type coverageWorkItemUpdate struct {
 	WorkItemIDs       []string
+	BindingRefs       []string
 	TargetTokens      []string
 	EvidenceKinds     []string
 	EvidenceRefs      []string
 	Accepted          bool
 	CloseSatisfied    bool
+	ExactBinding      bool
 	Reason            string
 	AcceptanceOptions coverageEvidenceAcceptanceOptions
 }

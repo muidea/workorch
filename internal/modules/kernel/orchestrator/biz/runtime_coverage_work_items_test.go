@@ -186,6 +186,65 @@ func TestCoverageWorkItemsSyncProjectionToRepository(t *testing.T) {
 	}
 }
 
+func TestValidationRejectedEvidenceDoesNotPolluteNonFocusCoverage(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-cwi-exact-rejected",
+		WorkspaceID: "workspace-cwi-exact-rejected",
+		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-cwi-exact-rejected",
+			"goal": map[string]any{
+				"id":   "goal-cwi-exact-rejected",
+				"text": "- unrelated target\n- exact validation focus",
+			},
+		},
+	}
+	coverage := newCoverageSubsystem()
+	if !coverage.ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want initial coverage projection")
+	}
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) != 2 {
+		t.Fatalf("coverageWorkItems = %+v, want two goal items", items)
+	}
+
+	step := &runmodel.Step{
+		ID:    "run-cwi-exact-rejected/step-validation-failed",
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"coverageWorkItemIds": []string{"cwi-002"},
+			"coverageTargetSet": []map[string]any{{
+				"targetText": "unrelated target",
+			}},
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+				"targetRefs":      []string{"cwi-002"},
+				"observedClaims":  []string{"exact validation focus was checked"},
+			},
+		},
+		Output: map[string]any{
+			"evidenceRef": "ev-validation-failed",
+			"error":       "validation failed",
+		},
+	}
+	if !coverage.updateFromFailedStep(run, step, "validation failed") {
+		t.Fatalf("updateFromFailedStep changed = false, want rejected evidence on exact focus")
+	}
+	items = mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	byID := map[string]map[string]any{}
+	for _, item := range items {
+		byID[stringFromMap(item, "id")] = item
+	}
+	if refs := stringSliceFromValue(byID["cwi-001"]["rejectedEvidenceRefs"]); len(refs) > 0 {
+		t.Fatalf("cwi-001 rejectedEvidenceRefs = %+v, want no pollution from cwi-002 failure", refs)
+	}
+	if refs := stringSliceFromValue(byID["cwi-002"]["rejectedEvidenceRefs"]); !stringSliceContains(refs, "ev-validation-failed") {
+		t.Fatalf("cwi-002 rejectedEvidenceRefs = %+v, want failed validation evidence ref", refs)
+	}
+}
+
 func TestEnsureGapBaselineHydratesCoverageContextFromOwnerRepository(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "workspace-cwi-repo-hydrate")
 	repo := memory.NewCoverageWorkItemRepository()

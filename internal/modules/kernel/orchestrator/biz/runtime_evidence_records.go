@@ -403,7 +403,17 @@ func runtimeStepCoverageScopeMetadata(step *runModel.Step) map[string]any {
 	for _, payload := range focusPayloads {
 		structuredTargetRefs = append(structuredTargetRefs, coverageStructuredBindingRefsFromValue(payload["structuredTargetRefs"])...)
 	}
-	addStrings("structuredTargetRefs", compactUniqueStrings(structuredTargetRefs))
+	structuredTargetRefs = compactUniqueStrings(structuredTargetRefs)
+	addStrings("structuredTargetRefs", structuredTargetRefs)
+	addStrings("evidenceBindingRefs", append(compactUniqueStrings(coverageWorkItemIDs), structuredTargetRefs...))
+	candidateTargetRefs := append(runtimeStepCoverageTargetRefs(step), stringSliceFromValue(input["coverageTargetSet"])...)
+	for _, target := range mapSliceFromValue(input["coverageTargetSet"]) {
+		candidateTargetRefs = append(candidateTargetRefs, patchNodeCoverageTargetTokens(target)...)
+	}
+	for _, target := range mapSliceFromValue(output["coverageTargetSet"]) {
+		candidateTargetRefs = append(candidateTargetRefs, patchNodeCoverageTargetTokens(target)...)
+	}
+	addStrings("candidateTargetRefs", candidateTargetRefs)
 	observedClaims := coverageObservedClaimsFromEvidence(evidence)
 	for _, payload := range requiredOutputs {
 		observedClaims = append(observedClaims, stringSliceFromValue(payload["observedClaims"])...)

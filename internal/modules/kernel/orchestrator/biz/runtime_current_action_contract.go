@@ -267,9 +267,6 @@ func currentActionRequiredOutputSeed(input map[string]any, state string) map[str
 	for _, required := range []map[string]any{
 		mapFromValue(mapFromValue(mapFromValue(input["convergenceContract"])["repairActionPackage"])["requiredOutput"]),
 		mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
-		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
-		mapFromValue(input["requiredOutput"]),
-		mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
 	} {
 		if currentActionRequiredOutputSeedMatchesState(required, state) {
 			return cloneStepPayload(required)

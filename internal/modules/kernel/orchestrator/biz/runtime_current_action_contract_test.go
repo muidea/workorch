@@ -303,6 +303,48 @@ func TestSynchronizeCurrentRequiredOutputMirrorsUsesCurrentContractBeforeStaleMi
 	}
 }
 
+func TestRequiredOutputSeedIgnoresStaleTargetSnapshotMirrorForStateChange(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction":   map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+			"currentFocus": map[string]any{"id": "cwi-current", "coverageWorkItemIds": []any{"cwi-current"}},
+		},
+		"convergenceContract": map[string]any{
+			"state":                       convergenceStateNeedStateChange,
+			"stateChangingOutputRequired": true,
+		},
+		"stateChangingOutputRequired": true,
+		"requiredOutput": map[string]any{
+			"mustAcquireCurrentTargetSnapshot":   true,
+			"mustUseReadOnlySnapshotAcquisition": true,
+			"acceptedKinds":                      []any{"target_snapshot"},
+			"forbiddenKinds":                     []any{"patch/apply"},
+		},
+		currentActionContractKey: map[string]any{
+			"prerequisite": targetSnapshotAcquisitionPrerequisite(),
+			"requiredOutput": map[string]any{
+				"mustAcquireCurrentTargetSnapshot":   true,
+				"mustUseReadOnlySnapshotAcquisition": true,
+				"acceptedKinds":                      []any{"target_snapshot"},
+				"forbiddenKinds":                     []any{"patch/apply"},
+			},
+		},
+	}
+
+	required := activeRequiredOutputForCurrentAction(input)
+	if boolValue(required["mustAcquireCurrentTargetSnapshot"]) ||
+		boolValue(required["mustUseReadOnlySnapshotAcquisition"]) ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "target_snapshot") {
+		t.Fatalf("requiredOutput = %+v, want current state-changing contract instead of stale target snapshot mirror", required)
+	}
+	if !requiredOutputHasAllowedStateChangingKind(required) {
+		t.Fatalf("requiredOutput = %+v, want state-changing accepted kind", required)
+	}
+	if stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput.forbiddenKinds = %+v, want patch/apply not forbidden by stale mirror", required["forbiddenKinds"])
+	}
+}
+
 func TestCurrentActionContractDoesNotFallbackToRunAuthority(t *testing.T) {
 	run := &runModel.Run{
 		ID:          "run-current-action-stale",

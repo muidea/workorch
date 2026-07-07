@@ -1285,9 +1285,15 @@ func finalizeRuntimeRepairFollowUpStepInput(run *runModel.Run, failedStep *runMo
 	refreshed, err := refreshCurrentAuthorityDerivedSnapshot(run, stepID, input)
 	if err != nil {
 		appendAuthorityDiagnostic(input, "authority_finalization_failed", "error", "internal_authority_mismatch", "repairFollowUp", err.Error())
-		input = enforceCurrentAuthorityDerivedConsistency(run, stepID, input)
-		input = synchronizeCurrentRequiredOutputMirrors(input)
-		return attachCurrentActionContractToInput(run, stepID, input)
+		input["runtimeInternalContractError"] = map[string]any{
+			"class":     failureClassRuntimeContractMisalign,
+			"stage":     "repairFollowUp",
+			"source":    "refreshCurrentAuthorityDerivedSnapshot",
+			"error":     err.Error(),
+			"failFast":  true,
+			"retryFrom": "coverage_ledger_recompute",
+		}
+		return input
 	}
 	return refreshed
 }

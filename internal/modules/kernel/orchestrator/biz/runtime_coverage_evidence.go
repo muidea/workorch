@@ -160,12 +160,15 @@ func coverageWorkItemStepUpdate(step *runModel.Step) coverageWorkItemUpdate {
 	if step == nil {
 		return coverageWorkItemUpdate{}
 	}
+	options := coverageEvidenceAcceptanceOptionsFromStep(step)
 	update := coverageWorkItemUpdate{
 		WorkItemIDs:       coverageWorkItemIDsFromStep(step),
+		BindingRefs:       coverageExactBindingRefsFromStep(step),
 		TargetTokens:      coverageTargetTokensFromStep(step),
 		EvidenceRefs:      coverageStepEvidenceRefs(step),
 		Accepted:          step.State == common.StepStateSucceeded,
-		AcceptanceOptions: coverageEvidenceAcceptanceOptionsFromStep(step),
+		ExactBinding:      true,
+		AcceptanceOptions: options,
 	}
 	if runtimeStepCanRecordStateChangingEvidence(step) || runtimeStepStateChangeCanUpdateCoverage(step) {
 		update.EvidenceKinds = append(update.EvidenceKinds, "state_change")
@@ -175,6 +178,18 @@ func coverageWorkItemStepUpdate(step *runModel.Step) coverageWorkItemUpdate {
 	}
 	update.EvidenceKinds = compactUniqueStrings(update.EvidenceKinds)
 	return update
+}
+
+func coverageExactBindingRefsFromStep(step *runModel.Step) []string {
+	if step == nil {
+		return nil
+	}
+	scope := runtimeStepCoverageScopeMetadata(step)
+	refs := coverageStructuredBindingRefsFromValue(scope["structuredTargetRefs"])
+	refs = append(refs, coverageValidationStructuredTargetRefsFromEvidence(coverageValidationEvidenceMetadataFromStep(step))...)
+	refs = append(refs, coverageStructuredBindingRefsFromValue(step.Input["structuredTargetRefs"])...)
+	refs = append(refs, coverageStructuredBindingRefsFromValue(step.Output["structuredTargetRefs"])...)
+	return compactUniqueStrings(refs)
 }
 
 func coverageStepCanProduceValidationEvidence(step *runModel.Step) bool {
@@ -542,6 +557,17 @@ func coverageWorkItemMatchesUpdate(item map[string]any, update coverageWorkItemU
 		return false
 	}
 	id := strings.TrimSpace(stringFromMap(item, "id"))
+	if update.ExactBinding && len(update.WorkItemIDs) > 0 {
+		for _, candidate := range update.WorkItemIDs {
+			if strings.TrimSpace(candidate) == id {
+				return true
+			}
+		}
+		return false
+	}
+	if update.ExactBinding && len(update.BindingRefs) > 0 {
+		return coverageStrictTargetRefsIntersect(update.BindingRefs, coverageAcceptedBindingRefsForItem(item))
+	}
 	for _, candidate := range update.WorkItemIDs {
 		if strings.TrimSpace(candidate) == id {
 			return true

@@ -567,6 +567,7 @@ func synchronizeCurrentRequiredOutputMirrors(input map[string]any) map[string]an
 	required := activeRequiredOutputForCurrentAction(input)
 	if len(required) == 0 {
 		delete(input, "requiredOutput")
+		input["currentAuthorityRequiredOutputMirrorsCanonical"] = true
 		if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
 			delete(pkg, "requiredOutput")
 			input["repairActionPackage"] = pkg
@@ -600,6 +601,7 @@ func synchronizeCurrentRequiredOutputMirrors(input map[string]any) map[string]an
 	required = cloneStepPayload(required)
 	appendRequiredOutputMirrorReboundDiagnostics(input, required)
 	input["requiredOutput"] = cloneStepPayload(required)
+	input["currentAuthorityRequiredOutputMirrorsCanonical"] = true
 	pkg := mapFromValue(input["repairActionPackage"])
 	if len(pkg) == 0 {
 		pkg = map[string]any{}
@@ -808,6 +810,13 @@ func validateConvergenceDispatchInput(input map[string]any) error {
 	if len(input) == 0 {
 		return nil
 	}
+	if errInfo := mapFromValue(input["runtimeInternalContractError"]); len(errInfo) > 0 {
+		errText := strings.TrimSpace(stringFromMap(errInfo, "error"))
+		if errText == "" {
+			errText = "runtime authority finalization failed"
+		}
+		return convergenceDispatchMisalignmentError("runtime_internal_contract_misalignment: %s", errText)
+	}
 	nextAction := strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind"))
 	if nextAction == "" {
 		nextAction = strings.TrimSpace(convergenceNextActionKind(nil, input))
@@ -870,10 +879,45 @@ func validateConvergenceDispatchInput(input map[string]any) error {
 	if err := validateCurrentActionContract(input); err != nil {
 		return err
 	}
+	if err := validateCurrentRequiredOutputMirrorEquality(input); err != nil {
+		return err
+	}
 	if err := validateConvergenceDispatchOutputShapeAdvice(input); err != nil {
 		return err
 	}
 	return validateConvergenceDispatchFocusAlignment(input)
+}
+
+func validateCurrentRequiredOutputMirrorEquality(input map[string]any) error {
+	if !boolValue(input["currentAuthorityRequiredOutputMirrorsCanonical"]) {
+		return nil
+	}
+	expected := activeRequiredOutputForCurrentAction(input)
+	if len(expected) == 0 {
+		return nil
+	}
+	expectedJSON := stableCoverageJSON(expected)
+	executionContext := mapFromValue(input["executionContext"])
+	for label, required := range map[string]map[string]any{
+		"requiredOutput":                                         mapFromValue(input["requiredOutput"]),
+		"repairActionPackage.requiredOutput":                     mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":                             mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"stagePacket.nextAction.requiredOutput":                  mapFromValue(mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+		"currentActionContract.requiredOutput":                   mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+		"executionContext.requiredOutput":                        mapFromValue(executionContext["requiredOutput"]),
+		"executionContext.repairActionPackage.requiredOutput":    mapFromValue(mapFromValue(executionContext["repairActionPackage"])["requiredOutput"]),
+		"executionContext.stagePacket.requiredOutput":            mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["requiredOutput"]),
+		"executionContext.stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+	} {
+		if len(required) == 0 {
+			continue
+		}
+		if stableCoverageJSON(required) != expectedJSON {
+			appendAuthorityDiagnostic(input, "required_output_mirror_mismatch", "error", "internal_authority_mismatch", label, "requiredOutput mirror does not match current authority-rendered requiredOutput")
+			return convergenceDispatchMisalignmentError("%s does not match current authority requiredOutput", label)
+		}
+	}
+	return nil
 }
 
 func validateGraphLocalDispatchAuthority(input map[string]any, authorityNextAction string) error {

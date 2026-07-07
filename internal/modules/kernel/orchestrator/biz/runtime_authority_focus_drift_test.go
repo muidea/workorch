@@ -883,6 +883,35 @@ func TestFinalizeRuntimeRepairFollowUpStepInputRebindsStaleRetryFocus(t *testing
 	}
 }
 
+func TestRepairFinalizationFailsFastOnAuthorityMisalignment(t *testing.T) {
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	input := map[string]any{
+		convergenceAuthorityKey:       cloneStepPayload(mapFromValue(run.ExecutionContext[convergenceAuthorityKey])),
+		gapBaselineKey:                cloneStepPayload(mapFromValue(run.ExecutionContext[gapBaselineKey])),
+		"graphLocalDispatchAuthority": true,
+		"graphLocalNextAction":        map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		"convergenceContract": map[string]any{
+			"state":                       convergenceStateNeedStateChange,
+			"stateChangingOutputRequired": true,
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode": true,
+				"acceptedKinds":                []string{"patch/apply"},
+			},
+		},
+	}
+	failed := &runModel.Step{ID: "run-authority-focus/failed-graph-local", RunID: run.ID}
+
+	got := finalizeRuntimeRepairFollowUpStepInput(run, failed, input)
+	if errText := strings.TrimSpace(stringFromMap(mapFromValue(got["runtimeInternalContractError"]), "error")); errText == "" {
+		t.Fatalf("runtimeInternalContractError = %+v, want fail-fast authority misalignment", got["runtimeInternalContractError"])
+	}
+	if err := validateConvergenceDispatchInput(got); err == nil || !strings.Contains(err.Error(), "runtime_internal_contract_misalignment") {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want internal contract misalignment rejection", err)
+	}
+}
+
 func TestNormalizeRunConvergenceOwnerStateRebindsPersistedDerivedFocus(t *testing.T) {
 	run := runWithAuthorityFocusForTest("validate")
 	run.ExecutionContext[coverageFocusKey] = map[string]any{
