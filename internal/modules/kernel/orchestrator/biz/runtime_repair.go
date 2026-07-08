@@ -686,7 +686,7 @@ func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *
 		return runtimeRecoveryActionRuntimeRepair
 	}
 	if failedStepHasRecoverableContractViolation(failedStep) {
-		if runtimeAvailable && contractViolationRetryWithinBudget(ctx, r, runtimePolicy, run, failedStep) {
+		if contractViolationRetryWithinBudget(ctx, r, runtimePolicy, run, failedStep) {
 			return runtimeRecoveryActionContractViolationRetry
 		}
 		if runtimeAvailable && contractViolationExhaustionDecisionNotEligible(ctx, r, runtimePolicy, run, failedStep) {

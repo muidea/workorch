@@ -31,6 +31,40 @@ func TestContractViolationRecoveryActionRetriesWithinBudget(t *testing.T) {
 	}
 }
 
+func TestContractViolationRecoveryActionRetriesWithoutRuntimeExecutor(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-violation-retry-no-runtime")
+	repo := memory.NewStepRepository()
+	failed := contractViolationFailedStep(runID, "failed-001")
+	failed.Kind = "patch/apply"
+	failed.Input[convergenceAuthorityKey] = map[string]any{
+		"schemaVersion": convergenceAuthoritySchema,
+		"workspaceId":   "ws-contract-violation-retry-no-runtime",
+		"runId":         string(runID),
+		"nextAction":    map[string]any{"kind": "state_change"},
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-contract-violation-retry-no-runtime",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"workspaceId":   "ws-contract-violation-retry-no-runtime",
+				"runId":         string(runID),
+				"nextAction":    map[string]any{"kind": "request_decision"},
+			},
+		},
+	}
+	attachContractViolationDiagnostics(run, failed, errors.New("runtime repair patch/apply file_write is non-substantive"))
+
+	action := runtimeRecoveryActionForFailedStep(ctx, newRepairSubsystem(repo, nil), NormalizeRuntimePolicy(RuntimePolicy{}), false, true, run, failed)
+
+	if action != runtimeRecoveryActionContractViolationRetry {
+		t.Fatalf("recovery action = %s, want contract violation retry without runtime executor", action)
+	}
+}
+
 func TestContractViolationRecoveryActionSkipsRetryWhenCurrentActionIsGovernance(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-contract-violation-governance-action")
