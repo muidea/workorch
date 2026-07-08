@@ -1018,12 +1018,13 @@ func stateChangeRequiresTargetSnapshotAcquisition(input map[string]any, pkg map[
 		return false
 	}
 	hasReadableTarget := stateChangeHasReadableTargetSnapshotRef(input, pkg)
-	required := mapFromValue(pkg["requiredOutput"])
-	inputRequired := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
 	requiresSnapshot := boolValue(input["requiresCurrentTargetSnapshotForStateChange"]) ||
 		boolValue(pkg["requiresCurrentTargetSnapshotForStateChange"]) ||
-		boolValue(required["mustUseCurrentTargetSnapshot"]) ||
-		boolValue(inputRequired["mustUseCurrentTargetSnapshot"])
+		stateChangeRequiredOutputRequiresCurrentTargetSnapshot(input, pkg) ||
+		boolValue(pkg["primaryStateChangeWithoutTargetEvidence"]) ||
+		boolValue(pkg["primaryStateChangeCoverageScoped"]) ||
+		boolValue(input["primaryStateChangeWithoutTargetEvidence"]) ||
+		boolValue(input["primaryStateChangeCoverageScoped"])
 	if requiresSnapshot {
 		return true
 	}
@@ -1035,6 +1036,23 @@ func stateChangeRequiresTargetSnapshotAcquisition(input map[string]any, pkg map[
 	}
 	if stateChangingRepairHasActionableImplementationSurface(input, pkg) {
 		return false
+	}
+	return false
+}
+
+func stateChangeRequiredOutputRequiresCurrentTargetSnapshot(input map[string]any, pkg map[string]any) bool {
+	for _, required := range []map[string]any{
+		mapFromValue(pkg["requiredOutput"]),
+		mapFromValue(input["requiredOutput"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"])["requiredOutput"]),
+		mapFromValue(mapFromValue(mapFromValue(input["executionContext"])[stepInputKeyStagePacket])["requiredOutput"]),
+	} {
+		if boolValue(required["mustUseCurrentTargetSnapshot"]) {
+			return true
+		}
 	}
 	return false
 }
@@ -1334,6 +1352,10 @@ func validationOnlyFocusPreemptsStateChangingRepair(input map[string]any, pkg ma
 	if !convergenceCurrentFocusNeedsValidationWithoutStateChange(input) || coverageRepairInputRequiresStateChange(input) {
 		return false
 	}
+	if validationFailureWithConcreteTargetRequiresStateChangingRepair(failedStep) &&
+		convergenceCurrentFocusRequiresEvidenceKind(input, "state_change") {
+		return false
+	}
 	hasValidationDiagnostic := false
 	for _, diagnostic := range validationFailureDiagnosticCandidates(input, pkg, failedStep) {
 		class := allowedValidationDiagnosticClass(stringFromMap(diagnostic, "class"))
@@ -1348,6 +1370,18 @@ func validationOnlyFocusPreemptsStateChangingRepair(input map[string]any, pkg ma
 		}
 	}
 	return hasValidationDiagnostic
+}
+
+func convergenceCurrentFocusRequiresEvidenceKind(input map[string]any, kind string) bool {
+	if strings.TrimSpace(kind) == "" {
+		return false
+	}
+	for _, item := range convergenceCurrentFocusCandidates(input) {
+		if stringSet(coverageWorkItemEffectiveRequiredEvidenceKinds(item))[kind] {
+			return true
+		}
+	}
+	return false
 }
 
 func validationFailureDiagnosticCandidates(input map[string]any, pkg map[string]any, failedStep *runModel.Step) []map[string]any {

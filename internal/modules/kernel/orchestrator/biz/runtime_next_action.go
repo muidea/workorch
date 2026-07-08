@@ -289,7 +289,7 @@ func (o *RuntimeOrchestrator) coverageItemsForNextAction(ctx context.Context, ru
 }
 
 func (o *RuntimeOrchestrator) hydrateCurrentTargetSnapshotsFromAcceptedEvidence(ctx context.Context, run *runmodel.Run) error {
-	if o == nil || o.evidence.EvidenceRecords == nil || o.evidence.Patches == nil || o.steps == nil || run == nil || run.ID == "" || run.WorkspaceID == "" {
+	if o == nil || o.evidence.EvidenceRecords == nil || o.steps == nil || run == nil || run.ID == "" || run.WorkspaceID == "" {
 		return nil
 	}
 	if len(mapSliceFromValue(mapFromValue(run.ExecutionContext["repairActionPackage"])["targetSnapshots"])) > 0 ||
@@ -306,12 +306,16 @@ func (o *RuntimeOrchestrator) hydrateCurrentTargetSnapshotsFromAcceptedEvidence(
 		}
 		return err
 	}
-	patches, err := o.evidence.Patches.ListByRun(scopedCtx, run.ID)
-	if err != nil {
-		if errors.Is(err, common.ErrNotFound) {
-			patches = nil
-		} else {
-			return err
+	var patches []*runmodel.Patch
+	if o.evidence.Patches != nil {
+		var err error
+		patches, err = o.evidence.Patches.ListByRun(scopedCtx, run.ID)
+		if err != nil {
+			if errors.Is(err, common.ErrNotFound) {
+				patches = nil
+			} else {
+				return err
+			}
 		}
 	}
 	snapshots := acceptedTargetSnapshotsFromEvidenceRecords(scopedCtx, run, records, o.steps, patches)

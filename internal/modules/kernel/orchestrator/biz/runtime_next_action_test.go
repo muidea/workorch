@@ -407,6 +407,44 @@ func TestNextActionForRunMissingStateChangeAcquiresTargetSnapshotFirst(t *testin
 	}
 }
 
+func TestDeriveAcquireTargetSnapshotNextActionForPrimaryStateChangeWithoutTargetEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-primary-state-change-without-target-evidence",
+		WorkspaceID: "ws-primary-state-change-without-target-evidence",
+		State:       common.RunStateActive,
+		ExecutionContext: map[string]any{
+			"repairActionPackage": map[string]any{
+				"primaryStateChangeWithoutTargetEvidence": true,
+				"primaryStateChangeCoverageScoped":        true,
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+		},
+	}
+	stateChange := runtimemodel.NextAction{
+		WorkspaceID:      run.WorkspaceID,
+		RunID:            run.ID,
+		Type:             runtimemodel.NextActionTypeStateChange,
+		RequiredOutput:   map[string]any{"mustIncludeStateChangingNode": true},
+		AllowedActions:   []string{runtimemodel.NextActionTypeStateChange},
+		ForbiddenActions: []string{runtimemodel.NextActionTypeComplete},
+	}.Normalized()
+
+	action, ok := deriveAcquireTargetSnapshotNextAction(run, stateChange)
+	if !ok || action.Type != runtimemodel.NextActionTypeAcquireTargetSnapshot {
+		t.Fatalf("derive acquire snapshot = %+v/%v, want acquire_target_snapshot", action, ok)
+	}
+	if action.RequiredOutput["mustAcquireCurrentTargetSnapshot"] != true ||
+		action.RequiredOutput["mustUseReadOnlySnapshotAcquisition"] != true ||
+		action.RequiredOutput["mustIncludeStateChangingNode"] != false {
+		t.Fatalf("required output = %+v, want read-only snapshot prerequisite", action.RequiredOutput)
+	}
+	if !stringSliceContains(action.ForbiddenActions, runtimemodel.NextActionTypeStateChange) {
+		t.Fatalf("forbidden actions = %+v, want state_change forbidden during acquisition", action.ForbiddenActions)
+	}
+}
+
 func TestNextActionForRunStateChangeWithCurrentFailureTargetAcquiresSnapshotFirst(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

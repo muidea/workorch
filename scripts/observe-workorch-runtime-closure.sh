@@ -46,6 +46,7 @@ GOAL_CONVERGENCE_RUN_STATES="${WORKORCH_OBSERVE_GOAL_CONVERGENCE_RUN_STATES:-com
 MIN_GOAL_ACCEPTED_RESULTS="${WORKORCH_OBSERVE_MIN_GOAL_ACCEPTED_RESULTS:-1}"
 MIN_GOAL_ARTIFACTS="${WORKORCH_OBSERVE_MIN_GOAL_ARTIFACTS:-0}"
 REQUIRE_GOAL_COVERAGE_CLOSED="${WORKORCH_OBSERVE_REQUIRE_GOAL_COVERAGE_CLOSED:-1}"
+MAX_STATE_CHANGING_REQUIRED_MISSING_AFTER_SNAPSHOT="${WORKORCH_OBSERVE_MAX_STATE_CHANGING_REQUIRED_MISSING_AFTER_SNAPSHOT:-}"
 
 mkdir -p "$TMP_DIR"
 
@@ -399,6 +400,7 @@ max_process_cpu_percent = os.environ.get("WORKORCH_OBSERVE_MAX_PROCESS_CPU_PERCE
 max_process_rss_bytes = os.environ.get("WORKORCH_OBSERVE_MAX_PROCESS_RSS_BYTES", "").strip()
 max_process_read_bytes_delta = os.environ.get("WORKORCH_OBSERVE_MAX_PROCESS_READ_BYTES_DELTA", "").strip()
 max_process_write_bytes_delta = os.environ.get("WORKORCH_OBSERVE_MAX_PROCESS_WRITE_BYTES_DELTA", "").strip()
+max_state_changing_required_missing_after_snapshot = os.environ.get("WORKORCH_OBSERVE_MAX_STATE_CHANGING_REQUIRED_MISSING_AFTER_SNAPSHOT", "").strip()
 
 def read_json(path):
     with open(path, "r", encoding="utf-8") as handle:
@@ -652,6 +654,47 @@ def bounded_text(value, limit=512):
     if len(text) <= limit:
         return text
     return text[:limit] + "...<truncated>"
+
+def nested_values(value):
+    yield value
+    if isinstance(value, dict):
+        for child in value.values():
+            yield from nested_values(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from nested_values(child)
+
+def nested_contract_violation_rule_refs(value, rule):
+    refs = set()
+    for item in nested_values(value):
+        if not isinstance(item, dict) or str(item.get("violatedRule") or "").strip() != rule:
+            continue
+        ref = (
+            str(item.get("id") or "").strip(),
+            str(item.get("failureSignature") or "").strip(),
+            str(item.get("stepId") or item.get("sourceRef") or "").strip(),
+            rule,
+        )
+        refs.add(ref)
+    return refs
+
+def snapshot_has_target_snapshot_preflight(snapshot):
+    convergence = snapshot.get("convergenceStatus") or {}
+    coverage_summary = snapshot.get("coverageSummary") or {}
+    current_focus = coverage_summary.get("currentFocus") or {}
+    next_action = str(convergence.get("nextActionKind") or current_focus.get("nextActionKind") or "").strip()
+    if next_action in {"acquire_target_snapshot", "state_change"}:
+        return True
+    for item in nested_values(snapshot):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("code") or "").strip() in {
+            "target_snapshot_missing_before_state_change",
+            "target_snapshot_acquisition_requested",
+            "state_change_missing_target_snapshot_preflight",
+        }:
+            return True
+    return False
 
 def workspace_live_summary(workspace_id, snapshot_body):
     snapshot = snapshot_body.get("snapshot") or {}
@@ -990,6 +1033,7 @@ workspace_list_projection = workspaces.get("projection") or {}
 workspace_summaries = []
 goal_convergence = []
 workspace_progress = []
+state_changing_required_missing_checks = []
 display_contract = {
     "listProjection": validate_projection_display_contract(workspace_list_projection, "workspace-list", False),
     "workspaceListItems": [
@@ -1061,6 +1105,29 @@ for workspace_id in workspace_ids:
         active_run_id = str(snapshot_workspace.get("activeRunId") or "").strip()
         if (heartbeat or active_run_id) and not heartbeat.get("activityState"):
             warnings.append(f"{workspace_id}: runHeartbeat.activityState missing or empty")
+        if max_state_changing_required_missing_after_snapshot:
+            run_state = str((snapshot.get("run") or {}).get("state") or "").strip()
+            if run_state in {"running", "dispatching", "blocked_on_decision", "blocked_on_approval"} and snapshot_has_target_snapshot_preflight(snapshot):
+                max_allowed = int(max_state_changing_required_missing_after_snapshot)
+                refs = nested_contract_violation_rule_refs(snapshot, "state_changing_required_missing")
+                count = len(refs)
+                check = {
+                    "workspaceId": workspace_id,
+                    "runId": (snapshot.get("run") or {}).get("id") or active_run_id,
+                    "runState": run_state,
+                    "rule": "state_changing_required_missing",
+                    "count": count,
+                    "refs": sorted("|".join(ref) for ref in refs),
+                    "maxAllowed": max_allowed,
+                    "targetSnapshotPreflightObserved": True,
+                    "pass": count <= max_allowed,
+                }
+                state_changing_required_missing_checks.append(check)
+                if not check["pass"]:
+                    errors.append(
+                        f"{workspace_id}: repeated state_changing_required_missing after target snapshot prerequisite "
+                        f"count={count} maxAllowed={max_allowed}"
+                    )
 
 display_contract_issues = []
 if not display_contract["listProjection"]["pass"]:
@@ -1743,6 +1810,7 @@ summary = {
     "workspaceSummaries": workspace_summaries,
     "workspaceProgress": workspace_progress_summary,
     "goalConvergence": goal_convergence_summary,
+    "stateChangingRequiredMissingAfterSnapshot": state_changing_required_missing_checks,
     "syntheticWorkspaceIds": synthetic_workspace_ids,
     "sseTopicCounts": topic_counts,
     "sseWorkspaceEventCounts": workspace_event_counts,

@@ -52,6 +52,10 @@ func TestRuntimeManagedTargetSnapshotAcquisitionBuildsReadOnlyGraph(t *testing.T
 	if node.Input["runtimeManagedAcquisition"] != true || node.Input["acquisitionKind"] != "target_snapshot" {
 		t.Fatalf("node input = %+v, want target snapshot acquisition metadata", node.Input)
 	}
+	diagnostics := mapSliceFromValue(output["authorityDiagnostics"])
+	if len(diagnostics) != 1 || stringFromMap(diagnostics[0], "code") != "target_snapshot_acquisition_requested" {
+		t.Fatalf("authorityDiagnostics = %+v, want target_snapshot_acquisition_requested", diagnostics)
+	}
 }
 
 func TestRuntimeManagedTargetSnapshotAcquisitionUsesCurrentFocusOnly(t *testing.T) {
@@ -170,6 +174,84 @@ func TestRuntimeManagedTargetSnapshotAcquisitionFailsFastForUnreadableTargetRefs
 	if graph := output[stepOutputKeyExecutionGraph]; graph != nil {
 		t.Fatalf("executionGraph = %+v, want no read graph for unreadable target refs", graph)
 	}
+	diagnostics := mapSliceFromValue(output["authorityDiagnostics"])
+	if len(diagnostics) != 1 || stringFromMap(diagnostics[0], "code") != "target_snapshot_acquisition_failed_abstract_refs" {
+		t.Fatalf("authorityDiagnostics = %+v, want target_snapshot_acquisition_failed_abstract_refs", diagnostics)
+	}
+}
+
+func TestConvergenceDispatchRejectsStateChangeWithoutRequiredTargetSnapshot(t *testing.T) {
+	input := map[string]any{
+		"convergenceContract": map[string]any{
+			"state":                       convergenceStateNeedStateChange,
+			"stateChangingOutputRequired": true,
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode":             true,
+				"mustUseCurrentTargetSnapshot":             true,
+				"mustPatchDirectlyFromProvidedSnapshot":    true,
+				"mustDeclareCoverageTargets":               true,
+				"mustBindCoverageFocus":                    true,
+				"acceptedKinds":                            []string{"patch/apply"},
+				"allowedOutputShapes":                      []string{"executionGraph"},
+				"sameGraphReadPatchRule":                   "forbidden",
+				"targetSnapshotPrerequisiteBeforeDispatch": true,
+			},
+		},
+		"requiredOutput": map[string]any{
+			"mustIncludeStateChangingNode":          true,
+			"mustUseCurrentTargetSnapshot":          true,
+			"mustPatchDirectlyFromProvidedSnapshot": true,
+			"acceptedKinds":                         []string{"patch/apply"},
+			"allowedOutputShapes":                   []string{"executionGraph"},
+		},
+	}
+
+	err := validateConvergenceDispatchRequiredOutputSemantics(input)
+	if err == nil {
+		t.Fatal("validateConvergenceDispatchRequiredOutputSemantics error = nil, want missing target snapshot preflight")
+	}
+	diagnostics := mapSliceFromValue(input["authorityDiagnostics"])
+	if len(diagnostics) != 1 || stringFromMap(diagnostics[0], "code") != "state_change_missing_target_snapshot_preflight" {
+		t.Fatalf("authorityDiagnostics = %+v, want state_change_missing_target_snapshot_preflight", diagnostics)
+	}
+}
+
+func TestConvergenceDispatchAllowsStateChangeWithExactPatchSafeTargetSnapshot(t *testing.T) {
+	required := map[string]any{
+		"mustIncludeStateChangingNode":          true,
+		"mustUseCurrentTargetSnapshot":          true,
+		"mustPatchDirectlyFromProvidedSnapshot": true,
+		"acceptedKinds":                         []string{"patch/apply"},
+		"allowedOutputShapes":                   []string{"executionGraph"},
+	}
+	input := map[string]any{
+		"convergenceContract": map[string]any{
+			"state":                       convergenceStateNeedStateChange,
+			"stateChangingOutputRequired": true,
+		},
+		"repairActionPackage": map[string]any{
+			"targetSnapshots": []map[string]any{{
+				"targetRef":         "target.txt",
+				"contentHash":       "sha256:target",
+				"contentComplete":   true,
+				"safeForPatch":      true,
+				"safeForFileWrite":  true,
+				"safeForExactPatch": true,
+				"runtimeManaged":    true,
+			}},
+			"requiredOutput": cloneStepPayload(required),
+		},
+		"requiredOutput": cloneStepPayload(required),
+	}
+
+	if err := validateConvergenceDispatchRequiredOutputSemantics(input); err != nil {
+		t.Fatalf("validateConvergenceDispatchRequiredOutputSemantics error = %v, want nil", err)
+	}
+	if diagnostics := mapSliceFromValue(input["authorityDiagnostics"]); len(diagnostics) != 0 {
+		t.Fatalf("authorityDiagnostics = %+v, want none", diagnostics)
+	}
 }
 
 func TestRuntimeManagedTargetSnapshotAcquisitionFailsFastForCurrentActionAbstractFocusRefs(t *testing.T) {
@@ -217,6 +299,96 @@ func TestRuntimeManagedTargetSnapshotAcquisitionFailsFastForCurrentActionAbstrac
 	}
 	if graph := output[stepOutputKeyExecutionGraph]; graph != nil {
 		t.Fatalf("executionGraph = %+v, want no read graph for abstract focus refs", graph)
+	}
+}
+
+func TestRuntimeManagedTargetSnapshotAcquisitionUsesManifestForAbstractFocus(t *testing.T) {
+	required := map[string]any{
+		"mustAcquireCurrentTargetSnapshot":   true,
+		"mustUseReadOnlySnapshotAcquisition": true,
+		"mustIncludeStateChangingNode":       false,
+	}
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeAcquireTargetSnapshot},
+			"currentFocus": map[string]any{
+				"id":         "cwi-current",
+				"targetRefs": []string{"cwi-current", "source_change", "deliverable:source_change"},
+			},
+		},
+		"convergenceContract": map[string]any{
+			"state":            convergenceStateNeedEvidence,
+			"runtimeStageMode": "target_snapshot_acquisition",
+		},
+		"repairActionPackage": map[string]any{
+			stepInputKeyWorkspaceFileManifest: []map[string]any{
+				{"path": "b.txt"},
+				{"path": "a.txt"},
+				{"path": "c.txt"},
+			},
+			"requiredOutput": required,
+		},
+	}
+
+	output, ok := runtimeManagedTargetSnapshotAcquisitionOutput(input)
+	if !ok {
+		t.Fatal("runtimeManagedTargetSnapshotAcquisitionOutput ok = false, want manifest-backed read-only graph")
+	}
+	if output["status"] != "completed" || output["runtimeManagedTargetSnapshotAcquisition"] != true {
+		t.Fatalf("output = %+v, want completed runtime-managed acquisition", output)
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok || len(graph.Nodes) != 3 {
+		t.Fatalf("graph = %+v/%v, want bounded manifest read graph", graph, ok)
+	}
+	for idx, want := range []string{"a.txt", "b.txt", "c.txt"} {
+		node := graph.Nodes[idx]
+		if node.Kind != "file/read" || node.Input["path"] != want || node.Input["targetRef"] != want {
+			t.Fatalf("node[%d] = %+v, want file/read %s", idx, node, want)
+		}
+	}
+}
+
+func TestRuntimeManagedTargetSnapshotAcquisitionLimitsManifestRefs(t *testing.T) {
+	required := map[string]any{
+		"mustAcquireCurrentTargetSnapshot":   true,
+		"mustUseReadOnlySnapshotAcquisition": true,
+		"mustIncludeStateChangingNode":       false,
+	}
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeAcquireTargetSnapshot},
+			"currentFocus": map[string]any{
+				"id":         "cwi-current",
+				"targetRefs": []string{"source_change"},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			stepInputKeyWorkspaceFileManifest: []map[string]any{
+				{"path": "target-06.txt"},
+				{"path": "target-01.txt"},
+				{"path": "target-04.txt"},
+				{"path": "target-02.txt"},
+				{"path": "target-03.txt"},
+				{"path": "target-05.txt"},
+				{"path": "target-07.txt"},
+			},
+			"requiredOutput": required,
+		},
+	}
+
+	output, ok := runtimeManagedTargetSnapshotAcquisitionOutput(input)
+	if !ok {
+		t.Fatal("runtimeManagedTargetSnapshotAcquisitionOutput ok = false, want bounded manifest graph")
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok || len(graph.Nodes) != runtimeManagedTargetSnapshotRefLimit {
+		t.Fatalf("graph = %+v/%v, want %d bounded manifest reads", graph, ok, runtimeManagedTargetSnapshotRefLimit)
+	}
+	for idx, want := range []string{"target-01.txt", "target-02.txt", "target-03.txt", "target-04.txt", "target-05.txt"} {
+		if got := graph.Nodes[idx].Input["path"]; got != want {
+			t.Fatalf("graph node[%d] path = %v, want %s", idx, got, want)
+		}
 	}
 }
 
@@ -405,6 +577,86 @@ func TestRuntimeManagedTargetSnapshotAcquisitionDispatchesReadOnlyGraphWithoutRo
 	}
 	if !publishedStepState(hub.Published(), rootStepID, common.StepStateSucceeded) {
 		t.Fatalf("events = %+v, want completed root step event", hub.Published())
+	}
+}
+
+func TestRuntimeManagedTargetSnapshotAcquisitionOptionalMissingFileDoesNotAcceptSnapshot(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	evidenceRepo := memory.NewEvidenceRecordRepository()
+	hub := events.NewMemoryHub()
+	deliverableDir := t.TempDir()
+
+	runtime := NewRuntimeAdapterRegistry()
+	llmRuntime := &requestCapturingRuntimeAdapter{output: map[string]any{"status": "completed"}}
+	if err := runtime.Register(llmWorkspaceExecutionStepKind, llmRuntime); err != nil {
+		t.Fatalf("register llm adapter: %v", err)
+	}
+	if err := runtime.Register(filecommon.StepKindRead, filebiz.NewRuntimeAdapter()); err != nil {
+		t.Fatalf("register file/read adapter: %v", err)
+	}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
+		hub,
+	)
+
+	workspaceID := common.WorkspaceID("ws-runtime-managed-target-snapshot-missing")
+	runID := common.RunID("run-runtime-managed-target-snapshot-missing")
+	rootStepID := common.StepID(runID + "/step-1")
+	workspace := &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "runtime managed missing target snapshot",
+		DeliverableDirectory: deliverableDir,
+		State:                common.WorkspaceStateActive,
+		ActiveRunID:          runID,
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	input := runtimeManagedTargetSnapshotDispatchInput(workspaceID, runID)
+	err := orch.dispatchStepWithWorkspace(ctx, run, rootStepID, llmWorkspaceExecutionStepKind, input, workspace)
+	if err != nil {
+		t.Fatalf("dispatch step: %v", err)
+	}
+	steps, err := stepRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	var readStep *runmodel.Step
+	for _, item := range steps {
+		if item.Kind == filecommon.StepKindRead {
+			readStep = item
+			break
+		}
+	}
+	if readStep == nil || readStep.State != common.StepStateSucceeded {
+		t.Fatalf("read step = %+v, want completed optional file/read", readStep)
+	}
+	if readStep.Output["exists"] != false {
+		t.Fatalf("read output = %+v, want exists=false optional acquisition", readStep.Output)
+	}
+	records, err := evidenceRepo.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), runID)
+	if err != nil {
+		t.Fatalf("list evidence records: %v", err)
+	}
+	for _, record := range records {
+		if record.Kind == runtimemodel.EvidenceKindTargetSnapshot {
+			t.Fatalf("evidence records = %+v, want no accepted target snapshot for missing optional file", records)
+		}
 	}
 }
 

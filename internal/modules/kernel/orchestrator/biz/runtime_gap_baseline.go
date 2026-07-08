@@ -354,6 +354,7 @@ func refreshCurrentAuthorityDerivedSnapshot(run *runModel.Run, stepID common.Ste
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
 	input = ApplyConvergenceContract(input, contract)
 	input = restoreStateChangingRequiredOutputSeed(input, requiredSeed)
+	input = enforceStateChangingContractRequiredOutput(input)
 	input = normalizeDispatchInputAuthorityFocus(input)
 	input = attachStagePacketToStepInput(run, stepID, input)
 	input = synchronizeCurrentRequiredOutputMirrors(input)
@@ -418,6 +419,69 @@ func restoreStateChangingRequiredOutputSeed(input map[string]any, seed map[strin
 	pkg["requiredOutput"] = merged
 	input["repairActionPackage"] = pkg
 	input["requiredOutput"] = cloneStepPayload(merged)
+	return input
+}
+
+func enforceStateChangingContractRequiredOutput(input map[string]any) map[string]any {
+	if len(input) == 0 || targetSnapshotPrerequisiteActive(input) {
+		return input
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if strings.TrimSpace(stringFromMap(contract, "state")) != convergenceStateNeedStateChange {
+		return input
+	}
+	for _, key := range []string{
+		"boundedValidationRequired",
+		"evidenceRepairRequired",
+		"concreteFailureEvidenceRequired",
+		stepInputKeyAssessmentOnly,
+		"assessmentOnlyReason",
+	} {
+		delete(input, key)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	clearEvidenceAcquisitionStateForStateChange(pkg)
+	required := mapFromValue(pkg["requiredOutput"])
+	if !requiredOutputHasAllowedStateChangingKind(required) {
+		required = enforceStateChangingRequiredOutputForConvergence(pkg, input)
+	} else {
+		required = cloneStepPayload(required)
+		required["mustIncludeStateChangingNode"] = true
+		required["forbiddenKinds"] = removeStringsFromSlice(
+			stringSliceFromValue(required["forbiddenKinds"]),
+			"patch/apply",
+			"git/write",
+			"shell/command",
+			"mcp/tool_call",
+		)
+		pkg["requiredOutput"] = cloneStepPayload(required)
+	}
+	pkg["repairObjective"] = repairObjectiveStateChangingOutput
+	pkg["stateChangingOutputRequired"] = true
+	for _, key := range []string{
+		"evidenceAcquisitionRequired",
+		"concreteFailureEvidenceRequired",
+		"evidenceAcquisitionReason",
+		"boundedValidationRequired",
+		"outputDecisionContract",
+		"exitCriteria",
+	} {
+		delete(pkg, key)
+	}
+	input["repairActionPackage"] = pkg
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	input["stateChangingOutputRequired"] = true
+	contract["repairObjective"] = repairObjectiveStateChangingOutput
+	contract["stateChangingOutputRequired"] = true
+	input["convergenceContract"] = contract
+	currentActionSetRequiredOutput(input, required)
+	currentActionSetNextAction(input, map[string]any{
+		"kind":   runtimemodel.NextActionTypeStateChange,
+		"reason": firstNonEmptyString(stringFromMap(currentActionNextActionFromInput(input), "reason"), "current convergence contract requires state-changing output"),
+	})
 	return input
 }
 
@@ -1558,6 +1622,13 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "state_change requiredOutput lacks an allowed state-changing accepted kind")
 		return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: state_change lacks allowed state-changing accepted kind")
 	}
+	if (state == convergenceStateNeedStateChange || nextAction == runtimemodel.NextActionTypeStateChange) &&
+		!prerequisiteActive &&
+		boolValue(top["mustUseCurrentTargetSnapshot"]) &&
+		!dispatchInputHasExactPatchSafeTargetSnapshot(input) {
+		appendAuthorityDiagnostic(input, "state_change_missing_target_snapshot_preflight", "error", "internal_authority_mismatch", "requiredOutput", "state_change requires an exact patch-safe target snapshot before dispatch")
+		return convergenceDispatchMisalignmentError("state_change_missing_target_snapshot_preflight: state_change requires current target snapshot")
+	}
 	if (state == convergenceStateNeedValidation || nextAction == runtimemodel.NextActionTypeValidate) && requiredOutputAcceptsKind(top, "patch/apply") {
 		appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "validation requiredOutput accepts workspace-mutating output")
 		return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: validation accepts workspace-mutating output")
@@ -1729,6 +1800,21 @@ func requiredOutputIsReadOnlyTargetSnapshotPrerequisite(required map[string]any)
 		return false
 	}
 	return true
+}
+
+func dispatchInputHasExactPatchSafeTargetSnapshot(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	snapshots := mergeRepairTargetSnapshots(
+		mapSliceFromValue(input["targetSnapshots"]),
+		mapSliceFromValue(input["currentTargetSnapshots"]),
+	)
+	snapshots = mergeRepairTargetSnapshots(snapshots, mapSliceFromValue(pkg["targetSnapshots"]))
+	snapshots = mergeRepairTargetSnapshots(snapshots, mapSliceFromValue(pkg["currentTargetSnapshots"]))
+	snapshots = mergeRepairTargetSnapshots(snapshots, repairActionTargetSnapshots(input))
+	return repairTargetSnapshotsHaveExactPatchSafe(snapshots)
 }
 
 func requiredOutputSatisfiableRouteKinds(required map[string]any) []string {

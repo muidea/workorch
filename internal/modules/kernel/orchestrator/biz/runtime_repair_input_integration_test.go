@@ -3785,6 +3785,129 @@ func TestRuntimeOrchestrator_RuntimeRepairInputValidationFailureMissingStateChan
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputValidationBuildFailureRebuildsStateChangingRequiredOutput(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-validation-build-failure-state-change")
+	workspaceID := common.WorkspaceID("ws-validation-build-failure-state-change")
+	focus := map[string]any{
+		"id":                    "cwi-source-change",
+		"status":                "in_progress",
+		"sourceScope":           "deliverable",
+		"sourceRequirementId":   "source_change",
+		"targetText":            "source_change",
+		"requiredEvidenceKinds": []string{"validation", "state_change"},
+		"missingEvidenceKinds":  []string{"validation"},
+		"acceptedEvidenceBindingByKind": map[string]any{
+			"state_change": []string{"graph-001/patch-source"},
+		},
+		"targetRefs":           []string{"source_change"},
+		"structuredTargetRefs": []string{"cwi-source-change", "source_change"},
+	}
+	validationRequired := concreteValidationEvidenceRequiredOutput(nil)
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		ExecutionContext: map[string]any{
+			coverageFocusKey: focus,
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": focus,
+			},
+			convergenceAuthorityKey: map[string]any{
+				"currentFocus": focus,
+				"nextAction": map[string]any{
+					"kind":   runtimemodel.NextActionTypeValidate,
+					"reason": "coverage work item is missing validation evidence",
+				},
+			},
+			gapBaselineKey: map[string]any{
+				"currentFocus": focus,
+				"nextAction": map[string]any{
+					"kind":   runtimemodel.NextActionTypeValidate,
+					"reason": "coverage work item is missing validation evidence",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": validationRequired,
+			},
+			"requiredOutput": validationRequired,
+			stepInputKeyStagePacket: map[string]any{
+				"nextAction": map[string]any{
+					"type":           runtimemodel.NextActionTypeValidate,
+					"requiredOutput": validationRequired,
+				},
+				"requiredOutput": validationRequired,
+			},
+		},
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-002/001-verify"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			"repairObjective":            repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired":  true,
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": focus,
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": validationRequired,
+			},
+			"requiredOutput": validationRequired,
+			stepInputKeyStagePacket: map[string]any{
+				"nextAction": map[string]any{
+					"type":           runtimemodel.NextActionTypeValidate,
+					"requiredOutput": validationRequired,
+				},
+				"requiredOutput": validationRequired,
+			},
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"error":                   "exit status 1",
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|stage=runtime_step_failed|failureTargets=main.go,proxy.go|exitCode=1|error=exit status 1",
+			"validationFailureDiagnostic": map[string]any{
+				"class":                         runtimemodel.ValidationDiagnosticBuildFailed,
+				"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetFailureSurface,
+				"targetRefs":                    []string{"cwi-source-change", "source_change", "main.go", "proxy.go"},
+			},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, errors.New("exit status 1"))
+
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change; input=%+v", contract, input)
+	}
+	if !boolValue(input["stateChangingOutputRequired"]) || input["repairObjective"] != repairObjectiveStateChangingOutput {
+		t.Fatalf("repair input = %+v, want state-changing objective", input)
+	}
+	for label, required := range map[string]map[string]any{
+		"requiredOutput":                        mapFromValue(input["requiredOutput"]),
+		"repairActionPackage.requiredOutput":    mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":            mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+		"currentActionContract.requiredOutput":  mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+	} {
+		if !boolValue(required["mustIncludeStateChangingNode"]) ||
+			!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+			stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") {
+			t.Fatalf("%s = %+v, want state-changing requiredOutput", label, required)
+		}
+	}
+	if err := validateConvergenceDispatchInput(input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, input)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputDemotesInheritedCoveragePatchContractToValidation(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{

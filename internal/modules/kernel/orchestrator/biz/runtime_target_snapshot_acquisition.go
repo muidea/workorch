@@ -75,6 +75,13 @@ func runtimeManagedTargetSnapshotAcquisitionOutput(input map[string]any) (map[st
 		"stage":  "runtime_managed_target_snapshot_acquisition",
 		"runtimeManagedTargetSnapshotAcquisition": true,
 		stepOutputKeyExecutionGraph:               runtimemodel.BlockExecutionGraph{Nodes: nodes},
+		"authorityDiagnostics": []map[string]any{{
+			"code":     "target_snapshot_acquisition_requested",
+			"severity": "info",
+			"kind":     "authority_snapshot",
+			"source":   "runtimeManagedTargetSnapshotAcquisition",
+			"message":  "runtime requested read-only target snapshot acquisition before state-changing dispatch",
+		}},
 	}, true
 }
 
@@ -90,6 +97,13 @@ func runtimeManagedTargetSnapshotAbstractRefFailureOutput(refs []string) map[str
 		"runtimeManagedTargetSnapshotAcquisition": true,
 		"abstractTargetRefs":                      refs,
 		"deterministicOutcome":                    "fail_fast_internal_contract_gap",
+		"authorityDiagnostics": []map[string]any{{
+			"code":     "target_snapshot_acquisition_failed_abstract_refs",
+			"severity": "error",
+			"kind":     "internal_authority_mismatch",
+			"source":   "runtimeManagedTargetSnapshotAcquisition",
+			"message":  "target snapshot acquisition cannot bind abstract target refs to readable runtime resources",
+		}},
 	}
 }
 
@@ -172,6 +186,14 @@ func runtimeManagedTargetSnapshotCandidateRefs(input map[string]any) []string {
 	focus := runtimeManagedTargetSnapshotCurrentFocus(input)
 	focused := runtimeManagedTargetSnapshotCandidateRefsFromCurrentScope(input, focus)
 	if len(focus) > 0 {
+		if runtimeManagedTargetSnapshotRefsIncludeReadable(focused) {
+			sort.Strings(focused)
+			return focused
+		}
+		manifestRefs := runtimeManagedTargetSnapshotManifestRefs(input)
+		if len(manifestRefs) > 0 {
+			focused = append(focused, manifestRefs...)
+		}
 		sort.Strings(focused)
 		return focused
 	}
@@ -210,6 +232,49 @@ func runtimeManagedTargetSnapshotCandidateRefs(input map[string]any) []string {
 		}
 	}
 	sort.Strings(ret)
+	return ret
+}
+
+func runtimeManagedTargetSnapshotRefsIncludeReadable(refs []string) bool {
+	for _, ref := range refs {
+		if runtimeManagedTargetSnapshotRefReadable(ref) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeManagedTargetSnapshotManifestRefs(input map[string]any) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := []string{}
+	addManifest := func(items []map[string]any) {
+		for _, item := range items {
+			path := strings.TrimSpace(firstNonEmptyString(
+				stringFromMap(item, "path"),
+				stringFromMap(item, "targetRef"),
+				stringFromMap(item, "resourcePath"),
+				stringFromMap(item, "filePath"),
+			))
+			if !runtimeManagedTargetSnapshotRefReadable(path) || seen[path] {
+				continue
+			}
+			seen[path] = true
+			ret = append(ret, path)
+		}
+	}
+	addManifest(mapSliceFromValue(input[stepInputKeyWorkspaceFileManifest]))
+	addManifest(mapSliceFromValue(input["workspaceFileManifest"]))
+	addManifest(mapSliceFromValue(mapFromValue(input[stepInputKeyExecutionContextPackage])[stepInputKeyWorkspaceFileManifest]))
+	addManifest(mapSliceFromValue(mapFromValue(input["repairActionPackage"])[stepInputKeyWorkspaceFileManifest]))
+	addManifest(mapSliceFromValue(mapFromValue(input["executionContext"])[stepInputKeyWorkspaceFileManifest]))
+	addManifest(mapSliceFromValue(mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"])[stepInputKeyWorkspaceFileManifest]))
+	sort.Strings(ret)
+	if len(ret) > runtimeManagedTargetSnapshotRefLimit {
+		ret = ret[:runtimeManagedTargetSnapshotRefLimit]
+	}
 	return ret
 }
 
