@@ -1328,7 +1328,7 @@ func validationContractFailureMustRemainValidation(input map[string]any, pkg map
 			return true
 		}
 	}
-	text := strings.ToLower(strings.Join(validationFailureDiagnosticTextCandidates(input, pkg, failedStep), "\n"))
+	text := strings.ToLower(strings.Join(validationFailureDiagnosticCurrentTextCandidates(input, pkg, failedStep), "\n"))
 	return strings.Contains(text, "shell_validation_contract_rejected") ||
 		strings.Contains(text, "validation command masks command failure") ||
 		strings.Contains(text, "validation shell command masks command failure") ||
@@ -1339,7 +1339,7 @@ func validationContractFailureMustRemainValidation(input map[string]any, pkg map
 }
 
 func validationRequiredOutputCapabilityMismatch(input map[string]any, pkg map[string]any, failedStep *runModel.Step) bool {
-	text := strings.ToLower(strings.Join(validationFailureDiagnosticTextCandidates(input, pkg, failedStep), "\n"))
+	text := strings.ToLower(strings.Join(validationFailureDiagnosticCurrentTextCandidates(input, pkg, failedStep), "\n"))
 	if !strings.Contains(text, "validation_required_output_capability_mismatch") &&
 		!strings.Contains(text, "not accepted by current requiredoutput.acceptedkinds") {
 		return false
@@ -1477,6 +1477,42 @@ func validationFailureDiagnosticTextCandidates(input map[string]any, pkg map[str
 	if failedStep != nil {
 		add(failedStep.Input)
 		add(failedStep.Output)
+	}
+	return texts
+}
+
+func validationFailureDiagnosticCurrentTextCandidates(input map[string]any, pkg map[string]any, failedStep *runModel.Step) []string {
+	var texts []string
+	add := func(source map[string]any) {
+		if len(source) == 0 {
+			return
+		}
+		for _, key := range []string{
+			"error",
+			"reason",
+			"stage",
+			"failureReason",
+			failureOutputKeySignature,
+			"failureSignature",
+		} {
+			if value := strings.TrimSpace(stringFromMap(source, key)); value != "" {
+				texts = append(texts, value)
+			}
+		}
+	}
+	add(input)
+	add(pkg)
+	for _, key := range []string{
+		"lastFailureDiagnostics",
+		"failedStepOutput",
+	} {
+		add(mapFromValue(input[key]))
+		add(mapFromValue(pkg[key]))
+	}
+	if failedStep != nil {
+		add(failedStep.Input)
+		add(failedStep.Output)
+		add(mapFromValue(failedStep.Output["lastFailureDiagnostics"]))
 	}
 	return texts
 }

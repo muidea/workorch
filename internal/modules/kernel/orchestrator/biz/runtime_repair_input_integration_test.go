@@ -3783,6 +3783,17 @@ func TestRuntimeOrchestrator_RuntimeRepairInputValidationFailureMissingStateChan
 	if err := validateConvergenceDispatchInput(input); err != nil {
 		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, input)
 	}
+
+	spec, ok, err := newRepairSubsystem(memory.NewStepRepository(), nil).recoveryDispatchSpec(ctx, run, failedStep, errors.New("exit status 1"), runtimeRecoveryActionRuntimeRepair, 2, orch, true)
+	if err != nil {
+		t.Fatalf("recoveryDispatchSpec: %v", err)
+	}
+	if !ok {
+		t.Fatal("recoveryDispatchSpec ok = false, want true")
+	}
+	if err := validateConvergenceDispatchInput(spec.Input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput(spec.Input): %v; input=%+v", err, spec.Input)
+	}
 }
 
 func TestRuntimeOrchestrator_RuntimeRepairInputValidationBuildFailureRebuildsStateChangingRequiredOutput(t *testing.T) {
@@ -3834,6 +3845,13 @@ func TestRuntimeOrchestrator_RuntimeRepairInputValidationBuildFailureRebuildsSta
 				"requiredOutput": validationRequired,
 			},
 			"requiredOutput": validationRequired,
+			"currentFailure": map[string]any{
+				"diagnosticKind":   "runtime_required_output_kind_rejected",
+				"failureClass":     failureClassRuntimeContractMisalign,
+				"failureSignature": "class=runtime_internal_contract_misalignment|kind=file/list|stage=runtime_required_output_kind_rejected",
+				"reason":           "invalid argument: runtime step kind file/list is not accepted by current requiredOutput.acceptedKinds",
+				"stage":            "runtime_required_output_kind_rejected",
+			},
 			stepInputKeyStagePacket: map[string]any{
 				"nextAction": map[string]any{
 					"type":           runtimemodel.NextActionTypeValidate,
@@ -3905,6 +3923,55 @@ func TestRuntimeOrchestrator_RuntimeRepairInputValidationBuildFailureRebuildsSta
 	}
 	if err := validateConvergenceDispatchInput(input); err != nil {
 		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, input)
+	}
+}
+
+func TestValidationBuildFailureIgnoresStaleRequiredOutputKindRejectionForStateChangingRepair(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-source-change",
+				"requiredEvidenceKinds": []string{"validation", "state_change"},
+				"missingEvidenceKinds":  []string{"validation"},
+				"acceptedEvidenceBindingByKind": map[string]any{
+					"state_change": []string{"graph-001/patch-source"},
+				},
+			},
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+		},
+		"currentFailure": map[string]any{
+			"diagnosticKind":   "runtime_required_output_kind_rejected",
+			"failureClass":     failureClassRuntimeContractMisalign,
+			"failureSignature": "class=runtime_internal_contract_misalignment|kind=file/list|stage=runtime_required_output_kind_rejected",
+			"reason":           "invalid argument: runtime step kind file/list is not accepted by current requiredOutput.acceptedKinds",
+			"stage":            "runtime_required_output_kind_rejected",
+		},
+	}
+	failedStep := &runmodel.Step{
+		State: common.StepStateFailed,
+		Kind:  shellcommon.StepKindCommand,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageVerification,
+		},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|stage=runtime_step_failed|failureTargets=main.go|exitCode=1",
+			"validationFailureDiagnostic": map[string]any{
+				"class":                         runtimemodel.ValidationDiagnosticBuildFailed,
+				"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetFailureSurface,
+				"targetRefs":                    []string{"cwi-source-change", "source_change"},
+			},
+		},
+	}
+
+	if validationRequiredOutputCapabilityMismatch(input, mapFromValue(input["repairActionPackage"]), failedStep) {
+		t.Fatal("validationRequiredOutputCapabilityMismatch = true for stale currentFailure; want false")
+	}
+	if validationContractFailureMustRemainValidation(input, mapFromValue(input["repairActionPackage"]), failedStep) {
+		t.Fatal("validationContractFailureMustRemainValidation = true for concrete validation build failure; want false")
 	}
 }
 
