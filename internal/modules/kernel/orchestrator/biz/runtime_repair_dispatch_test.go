@@ -105,6 +105,33 @@ func (repairDispatchValidationAuthorityBuilder) runtimeRepairFollowUpStepInput(_
 	}
 }
 
+type repairDispatchStaleValidationMirrorBuilder struct{}
+
+func (repairDispatchStaleValidationMirrorBuilder) runtimeRepairFollowUpStepInput(_ context.Context, _ *runmodel.Run, _ *runmodel.Step, attempt int, execErr error) map[string]any {
+	required := concreteValidationEvidenceRequiredOutputWithScratch(map[string]any{
+		"coverageWorkItemIds":  []string{"cwi-current"},
+		"structuredTargetRefs": []string{"cwi-current", "source_change"},
+	}, nil, nil)
+	return map[string]any{
+		stepInputKeyRuntimeRepairFollowUp:                true,
+		stepInputKeyRuntimeRepairAttempt:                 attempt,
+		"failureReason":                                  errorString(execErr),
+		"currentAuthorityRequiredOutputMirrorsCanonical": true,
+		"stateChangingOutputRequired":                    true,
+		"repairObjective":                                repairObjectiveStateChangingOutput,
+		"requiredOutput":                                 cloneStepPayload(required),
+		"repairActionPackage":                            map[string]any{"requiredOutput": cloneStepPayload(required)},
+		"convergenceContract":                            map[string]any{"state": convergenceStateNeedStateChange, "stateChangingOutputRequired": true},
+		stepInputKeyStagePacket: map[string]any{
+			"requiredOutput": cloneStepPayload(required),
+			"nextAction": map[string]any{
+				"type":           runtimemodel.NextActionTypeStateChange,
+				"requiredOutput": cloneStepPayload(required),
+			},
+		},
+	}
+}
+
 type repairBlockedRecoveryExecutorStub struct {
 	called runtimeRecoveryAction
 	err    error
@@ -250,6 +277,55 @@ func TestRepairSubsystemRecoveryDispatchSpecRebuildsStaleForcedNarrowFromStateCh
 		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
 		boolValue(required["mustProduceConcreteValidationEvidence"]) {
 		t.Fatalf("requiredOutput = %+v, want canonical state-changing output", required)
+	}
+	if err := validateConvergenceDispatchInput(spec.Input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, spec.Input)
+	}
+}
+
+func TestRepairSubsystemRecoveryDispatchSpecRebuildsStaleValidationMirrorFromStateChangeAuthority(t *testing.T) {
+	ctx := context.Background()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	run.InitialStepKind = llmcommon.StepKindWorkspaceExecution
+	stepRepo := memory.NewStepRepository()
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/graph-003/001-validate"),
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|stage=runtime_step_failed|failureTargets=main.go|exitCode=1",
+			"validationFailureDiagnostic": map[string]any{
+				"class":                         runtimemodel.ValidationDiagnosticBuildFailed,
+				"recommendedEvidenceTargetType": runtimemodel.ValidationEvidenceTargetFailureSurface,
+				"targetRefs":                    []string{"cwi-current", "source_change", "main.go"},
+			},
+		},
+	}
+
+	spec, ok, err := newRepairSubsystem(stepRepo, nil).recoveryDispatchSpec(ctx, run, failedStep, errors.New("exit status 1"), runtimeRecoveryActionRuntimeRepair, maxProviderRetryAttempts, repairDispatchStaleValidationMirrorBuilder{}, false)
+
+	if err != nil || !ok {
+		t.Fatalf("recoveryDispatchSpec ok/err = %v/%v, want state-changing repair spec", ok, err)
+	}
+	contract := mapFromValue(spec.Input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+	}
+	for label, required := range map[string]map[string]any{
+		"requiredOutput":                        mapFromValue(spec.Input["requiredOutput"]),
+		"repairActionPackage.requiredOutput":    mapFromValue(mapFromValue(spec.Input["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":            mapFromValue(mapFromValue(spec.Input[stepInputKeyStagePacket])["requiredOutput"]),
+		"stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(mapFromValue(spec.Input[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+		"currentActionContract.requiredOutput":  mapFromValue(mapFromValue(spec.Input[currentActionContractKey])["requiredOutput"]),
+	} {
+		if !boolValue(required["mustIncludeStateChangingNode"]) ||
+			!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+			stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") ||
+			boolValue(required["mustProduceConcreteValidationEvidence"]) {
+			t.Fatalf("%s = %+v, want state-changing requiredOutput", label, required)
+		}
 	}
 	if err := validateConvergenceDispatchInput(spec.Input); err != nil {
 		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, spec.Input)

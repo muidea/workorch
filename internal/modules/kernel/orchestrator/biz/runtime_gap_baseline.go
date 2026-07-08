@@ -778,17 +778,38 @@ func currentAuthorityRenderedRequiredOutput(input map[string]any) map[string]any
 	if len(input) == 0 || !boolValue(input["currentAuthorityRequiredOutputMirrorsCanonical"]) {
 		return nil
 	}
+	state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state"))
+	nextAction := strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind"))
 	for _, required := range []map[string]any{
 		mapFromValue(input["requiredOutput"]),
 		mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
 		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
 		mapFromValue(mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
 	} {
-		if len(required) > 0 {
+		if len(required) > 0 && currentAuthorityRenderedRequiredOutputMatchesState(input, required, state, nextAction) {
 			return cloneStepPayload(required)
 		}
 	}
 	return nil
+}
+
+func currentAuthorityRenderedRequiredOutputMatchesState(input map[string]any, required map[string]any, state string, nextAction string) bool {
+	if len(required) == 0 {
+		return false
+	}
+	switch {
+	case state == convergenceStateNeedStateChange || nextAction == runtimemodel.NextActionTypeStateChange:
+		if targetSnapshotPrerequisiteActive(input) && requiredOutputIsReadOnlyTargetSnapshotPrerequisite(required) {
+			return true
+		}
+		return requiredOutputRequiresStateChanging(required)
+	case state == convergenceStateNeedValidation || nextAction == runtimemodel.NextActionTypeValidate:
+		return !requiredOutputRequiresStateChanging(required) && !requiredOutputRequiresConcreteFailureEvidence(required)
+	case state == convergenceStateNeedEvidence || nextAction == runtimemodel.NextActionTypeAcquireTargetSnapshot || nextAction == "acquire_evidence":
+		return !requiredOutputRequiresStateChanging(required)
+	default:
+		return true
+	}
 }
 
 func dispatchInputHasConvergenceAuthority(run *runModel.Run, input map[string]any) bool {

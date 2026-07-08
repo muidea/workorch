@@ -427,6 +427,55 @@ func TestCurrentRequiredOutputIgnoresOldFailedStepLineage(t *testing.T) {
 	}
 }
 
+func TestCurrentAuthorityRenderedRequiredOutputIgnoresValidationMirrorForStateChange(t *testing.T) {
+	validationOnly := concreteValidationEvidenceRequiredOutputWithScratch(
+		map[string]any{
+			"coverageWorkItemIds":  []string{"cwi-state-change"},
+			"structuredTargetRefs": []string{"cwi-state-change", "source_change"},
+		},
+		nil,
+		nil,
+	)
+	input := map[string]any{
+		"currentAuthorityRequiredOutputMirrorsCanonical": true,
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus": map[string]any{
+				"id":                    "cwi-state-change",
+				"coverageWorkItemIds":   []string{"cwi-state-change"},
+				"requiredEvidenceKinds": []string{"validation", "state_change"},
+				"missingEvidenceKinds":  []string{"validation", "state_change"},
+			},
+			"nextAction": map[string]any{
+				"kind": runtimemodel.NextActionTypeStateChange,
+			},
+		},
+		"convergenceContract": map[string]any{
+			"state":                       convergenceStateNeedStateChange,
+			"stateChangingOutputRequired": true,
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": validationOnly,
+		},
+		"requiredOutput": validationOnly,
+		stepInputKeyStagePacket: map[string]any{
+			"schemaVersion":   "workorch.stage_packet.v1",
+			"requiredOutput":  validationOnly,
+			"nextAction":      map[string]any{"type": runtimemodel.NextActionTypeStateChange, "requiredOutput": validationOnly},
+			"coverageFocusId": "focus-cwi-state-change",
+		},
+	}
+
+	required := activeRequiredOutputForCurrentActionContract(input)
+
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") ||
+		boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		t.Fatalf("requiredOutput = %+v, want rebuilt state-changing output instead of stale validation mirror", required)
+	}
+}
+
 func TestCurrentActionContractDoesNotFallbackToRunAuthority(t *testing.T) {
 	run := &runModel.Run{
 		ID:          "run-current-action-stale",
