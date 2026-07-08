@@ -561,13 +561,14 @@ func injectLatestRunAuthorityForDispatch(run *runModel.Run, input map[string]any
 	if run == nil || run.ExecutionContext == nil {
 		return input
 	}
-	if authority := convergenceAuthorityMapFromValue(run.ExecutionContext[convergenceAuthorityKey]); len(authority) > 0 {
+	preserveLocalAuthority := dispatchInputShouldPreserveLocalRepairAuthority(run, input)
+	if authority := convergenceAuthorityMapFromValue(run.ExecutionContext[convergenceAuthorityKey]); len(authority) > 0 && !preserveLocalAuthority {
 		input[convergenceAuthorityKey] = cloneStepPayload(authority)
 	}
-	if baseline := gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey]); len(baseline) > 0 {
+	if baseline := gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey]); len(baseline) > 0 && !preserveLocalAuthority {
 		input[gapBaselineKey] = cloneStepPayload(baseline)
 	}
-	if context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]); len(context) > 0 {
+	if context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]); len(context) > 0 && !preserveLocalAuthority {
 		input[coverageWorkItemContextKey] = cloneStepPayload(context)
 	}
 	if snapshots := mapSliceFromValue(run.ExecutionContext["targetSnapshots"]); len(snapshots) > 0 {
@@ -592,6 +593,28 @@ func injectLatestRunAuthorityForDispatch(run *runModel.Run, input map[string]any
 		}
 	}
 	return input
+}
+
+func dispatchInputShouldPreserveLocalRepairAuthority(run *runModel.Run, input map[string]any) bool {
+	if run == nil || len(input) == 0 || !boolValue(input[stepInputKeyRuntimeRepairFollowUp]) {
+		return false
+	}
+	localAuthority := convergenceAuthorityMapFromValue(input[convergenceAuthorityKey])
+	if len(localAuthority) == 0 {
+		return false
+	}
+	localKind := strings.TrimSpace(stringFromMap(mapFromValue(localAuthority["nextAction"]), "kind"))
+	runKind := strings.TrimSpace(latestRunAuthorityNextActionKind(run))
+	if localKind == "" || runKind == "" || localKind == runKind {
+		return false
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if localKind == runtimemodel.NextActionTypeValidate &&
+		strings.TrimSpace(stringFromMap(contract, "state")) == convergenceStateNeedValidation {
+		appendAuthorityDiagnostic(input, "local_validation_repair_authority_preserved", "warning", "diagnostic_lineage", "convergenceAuthority", "runtime repair preserves terminal validation authority instead of rebinding stale run authority")
+		return true
+	}
+	return false
 }
 
 func latestRunAuthorityNextActionKind(run *runModel.Run) string {

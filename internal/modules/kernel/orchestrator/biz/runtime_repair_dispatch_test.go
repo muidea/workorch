@@ -55,6 +55,56 @@ func (repairDispatchStaleForcedNarrowBuilder) runtimeRepairFollowUpStepInput(_ c
 	}
 }
 
+type repairDispatchValidationAuthorityBuilder struct{}
+
+func (repairDispatchValidationAuthorityBuilder) runtimeRepairFollowUpStepInput(_ context.Context, run *runmodel.Run, _ *runmodel.Step, attempt int, execErr error) map[string]any {
+	workspaceID := "ws-validation-repair-authority"
+	runID := "run-validation-repair-authority"
+	if run != nil {
+		if run.WorkspaceID != "" {
+			workspaceID = string(run.WorkspaceID)
+		}
+		if run.ID != "" {
+			runID = string(run.ID)
+		}
+	}
+	required := map[string]any{
+		"mustProduceConcreteValidationEvidence": true,
+		"mustDeclareValidationEvidenceMode":     true,
+		"acceptedKinds":                         []any{"shell/command", managedValidationSessionNodeKind},
+		"forbiddenKinds":                        []any{"patch/apply", "git/write", "file/write"},
+	}
+	return map[string]any{
+		stepInputKeyRuntimeRepairFollowUp: true,
+		stepInputKeyRuntimeRepairAttempt:  attempt,
+		"failureReason":                   errorString(execErr),
+		"repairObjective":                 repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired":       true,
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"workspaceId":   workspaceID,
+			"runId":         runID,
+			"currentFocus": map[string]any{
+				"id":                   "cwi-current",
+				"missingEvidenceKinds": []string{"validation"},
+				"status":               "in_progress",
+			},
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		},
+		"convergenceContract": map[string]any{
+			"state":           convergenceStateNeedValidation,
+			"runtimeStage":    runtimeStageVerification,
+			"repairObjective": repairObjectiveConcreteValidationEvidence,
+		},
+		"repairActionPackage": map[string]any{
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"requiredOutput":            cloneStepPayload(required),
+		},
+		"requiredOutput": cloneStepPayload(required),
+	}
+}
+
 type repairBlockedRecoveryExecutorStub struct {
 	called runtimeRecoveryAction
 	err    error
@@ -200,6 +250,53 @@ func TestRepairSubsystemRecoveryDispatchSpecRebuildsStaleForcedNarrowFromStateCh
 		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
 		boolValue(required["mustProduceConcreteValidationEvidence"]) {
 		t.Fatalf("requiredOutput = %+v, want canonical state-changing output", required)
+	}
+	if err := validateConvergenceDispatchInput(spec.Input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, spec.Input)
+	}
+}
+
+func TestRepairSubsystemRecoveryDispatchSpecPreservesTerminalValidationAuthority(t *testing.T) {
+	ctx := context.Background()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	run.ID = "run-validation-repair-authority"
+	run.WorkspaceID = "ws-validation-repair-authority"
+	run.InitialStepKind = llmcommon.StepKindWorkspaceExecution
+	updateAuthorityScopeForTest(run, run.WorkspaceID, run.ID)
+	stepRepo := memory.NewStepRepository()
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/graph-004/001-validate"),
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
+			convergenceAuthorityKey: map[string]any{
+				"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			},
+		},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|stage=runtime_step_failed",
+			"stage":                   "runtime_step_failed",
+			"error":                   "exit status 1",
+		},
+	}
+
+	spec, ok, err := newRepairSubsystem(stepRepo, nil).recoveryDispatchSpec(ctx, run, failedStep, errors.New("exit status 1"), runtimeRecoveryActionRuntimeRepair, maxProviderRetryAttempts, repairDispatchValidationAuthorityBuilder{}, false)
+
+	if err != nil || !ok {
+		t.Fatalf("recoveryDispatchSpec ok/err = %v/%v, want validation repair spec", ok, err)
+	}
+	contract := mapFromValue(spec.Input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want need_validation", contract)
+	}
+	required := mapFromValue(mapFromValue(spec.Input["repairActionPackage"])["requiredOutput"])
+	if boolValue(required["mustIncludeStateChangingNode"]) ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		!boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		t.Fatalf("requiredOutput = %+v, want validation-only output", required)
 	}
 	if err := validateConvergenceDispatchInput(spec.Input); err != nil {
 		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, spec.Input)
