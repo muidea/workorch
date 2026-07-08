@@ -611,8 +611,31 @@ func dispatchInputShouldPreserveLocalRepairAuthority(run *runModel.Run, input ma
 	contract := mapFromValue(input["convergenceContract"])
 	if localKind == runtimemodel.NextActionTypeValidate &&
 		strings.TrimSpace(stringFromMap(contract, "state")) == convergenceStateNeedValidation {
+		if localRepairAuthorityFocusMissingStateChange(input, localAuthority) {
+			appendAuthorityDiagnostic(input, "local_validation_repair_authority_rejected", "warning", "internal_authority_mismatch", "convergenceAuthority", "local validation repair authority cannot override a focus that is still missing state_change evidence")
+			return false
+		}
 		appendAuthorityDiagnostic(input, "local_validation_repair_authority_preserved", "warning", "diagnostic_lineage", "convergenceAuthority", "runtime repair preserves terminal validation authority instead of rebinding stale run authority")
 		return true
+	}
+	return false
+}
+
+func localRepairAuthorityFocusMissingStateChange(input map[string]any, localAuthority map[string]any) bool {
+	for _, focus := range []map[string]any{
+		mapFromValue(localAuthority["currentFocus"]),
+		mapFromValue(mapFromValue(input[gapBaselineKey])["currentFocus"]),
+		mapFromValue(mapFromValue(input[currentActionContractKey])["currentFocus"]),
+		mapFromValue(mapFromValue(input["acceptance"])["currentFocus"]),
+	} {
+		if coverageWorkItemExplicitOrDerivedMissingEvidenceKindSet(focus)["state_change"] {
+			return true
+		}
+	}
+	if context := coverageWorkItemContextFromInput(input); len(context) > 0 {
+		if focus := coverageWorkItemPrimaryFocus(context); coverageWorkItemExplicitOrDerivedMissingEvidenceKindSet(focus)["state_change"] {
+			return true
+		}
 	}
 	return false
 }

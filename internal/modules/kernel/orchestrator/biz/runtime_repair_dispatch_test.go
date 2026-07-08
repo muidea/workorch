@@ -105,6 +105,34 @@ func (repairDispatchValidationAuthorityBuilder) runtimeRepairFollowUpStepInput(_
 	}
 }
 
+type repairDispatchValidationAuthorityWithStateChangeGapBuilder struct{}
+
+func (repairDispatchValidationAuthorityWithStateChangeGapBuilder) runtimeRepairFollowUpStepInput(ctx context.Context, run *runmodel.Run, step *runmodel.Step, attempt int, execErr error) map[string]any {
+	input := repairDispatchValidationAuthorityBuilder{}.runtimeRepairFollowUpStepInput(ctx, run, step, attempt, execErr)
+	focus := map[string]any{
+		"id":                    "cwi-current",
+		"missingEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange},
+		"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+		"status":                "failed",
+		"sourceRequirementId":   "source_change",
+		"sourceScope":           "deliverable",
+		"targetRefs":            []string{"cwi-current", "source_change"},
+		"structuredTargetRefs":  []string{"cwi-current", "source_change"},
+	}
+	if authority := mapFromValue(input[convergenceAuthorityKey]); len(authority) > 0 {
+		authority["currentFocus"] = cloneStepPayload(focus)
+		input[convergenceAuthorityKey] = authority
+	}
+	input[coverageWorkItemContextKey] = map[string]any{
+		"currentFocus": cloneStepPayload(focus),
+	}
+	input[currentActionContractKey] = map[string]any{
+		"currentFocus": cloneStepPayload(focus),
+		"nextAction":   map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+	}
+	return input
+}
+
 type repairDispatchStaleValidationMirrorBuilder struct{}
 
 func (repairDispatchStaleValidationMirrorBuilder) runtimeRepairFollowUpStepInput(_ context.Context, _ *runmodel.Run, _ *runmodel.Step, attempt int, execErr error) map[string]any {
@@ -373,6 +401,70 @@ func TestRepairSubsystemRecoveryDispatchSpecPreservesTerminalValidationAuthority
 		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
 		!boolValue(required["mustProduceConcreteValidationEvidence"]) {
 		t.Fatalf("requiredOutput = %+v, want validation-only output", required)
+	}
+	if err := validateConvergenceDispatchInput(spec.Input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, spec.Input)
+	}
+}
+
+func TestRepairSubsystemRecoveryDispatchSpecRejectsLocalValidationAuthorityWhenFocusStillNeedsStateChange(t *testing.T) {
+	ctx := context.Background()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	run.ID = "run-state-change-gap-local-validation"
+	run.WorkspaceID = "ws-state-change-gap-local-validation"
+	run.InitialStepKind = llmcommon.StepKindWorkspaceExecution
+	stateChangeFocus := map[string]any{
+		"id":                    "cwi-current",
+		"missingEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange},
+		"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+		"status":                "failed",
+		"sourceRequirementId":   "source_change",
+		"sourceScope":           "deliverable",
+		"targetRefs":            []string{"cwi-current", "source_change"},
+		"structuredTargetRefs":  []string{"cwi-current", "source_change"},
+	}
+	for _, key := range []string{convergenceAuthorityKey, gapBaselineKey} {
+		authority := mapFromValue(run.ExecutionContext[key])
+		authority["workspaceId"] = string(run.WorkspaceID)
+		authority["runId"] = string(run.ID)
+		authority["currentFocus"] = cloneStepPayload(stateChangeFocus)
+		authority["nextAction"] = map[string]any{"kind": runtimemodel.NextActionTypeStateChange}
+		run.ExecutionContext[key] = authority
+	}
+	run.ExecutionContext[coverageWorkItemContextKey] = map[string]any{"currentFocus": cloneStepPayload(stateChangeFocus)}
+	stepRepo := memory.NewStepRepository()
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/graph-004/001-validate"),
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|stage=runtime_step_failed",
+			"stage":                   "runtime_step_failed",
+			"error":                   "exit status 1",
+		},
+	}
+
+	spec, ok, err := newRepairSubsystem(stepRepo, nil).recoveryDispatchSpec(ctx, run, failedStep, errors.New("exit status 1"), runtimeRecoveryActionRuntimeRepair, maxProviderRetryAttempts, repairDispatchValidationAuthorityWithStateChangeGapBuilder{}, false)
+
+	if err != nil || !ok {
+		t.Fatalf("recoveryDispatchSpec ok/err = %v/%v, want state_change repair spec", ok, err)
+	}
+	contract := mapFromValue(spec.Input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+	}
+	required := mapFromValue(mapFromValue(spec.Input["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") ||
+		boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		t.Fatalf("requiredOutput = %+v, want state-changing output", required)
+	}
+	current := mapFromValue(spec.Input[currentActionContractKey])
+	if stringFromMap(mapFromValue(current["nextAction"]), "kind") != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("currentActionContract = %+v, want state_change nextAction", current)
 	}
 	if err := validateConvergenceDispatchInput(spec.Input); err != nil {
 		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, spec.Input)
