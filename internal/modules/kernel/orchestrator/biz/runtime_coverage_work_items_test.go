@@ -1234,6 +1234,14 @@ func TestBuildConvergenceContractUsesProfileStateChangingEvidenceRequirement(t *
 		stepInputKeyRuntimeRepairFollowUp: true,
 		"repairActionPackage": map[string]any{
 			"repairTargetSet": []string{"deliverable.txt"},
+			"currentTargetSnapshots": []map[string]any{{
+				"targetRef":        "deliverable.txt",
+				"exists":           true,
+				"contentHash":      "hash-deliverable",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"runtimeManaged":   true,
+			}},
 		},
 	}
 
@@ -2363,6 +2371,208 @@ func TestCoverageWorkItemsBindGitWriteCommitFromRequiredOutputFocus(t *testing.T
 	addUpdate := coverageWorkItemStepUpdate(addStep)
 	if coverageApplyWorkItemEvidenceWithOptions(addItem, addUpdate.EvidenceKinds, addUpdate.EvidenceRefs, addUpdate.Accepted, false, string(addStep.ID), "", addUpdate.AcceptanceOptions) {
 		t.Fatalf("git/write add changed coverage state_change, want commit-only binding")
+	}
+}
+
+func TestCoverageWorkItemsBindPatchApplyOnlyToExactCurrentFocus(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-cwi-patch-exact",
+		WorkspaceID: "ws-cwi-patch-exact",
+		State:       common.RunStateActive,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "first-target", "required": true, "evidenceRole": "primary_state_change"},
+							{"id": "second-target", "required": true, "evidenceRole": "primary_state_change"},
+						},
+					},
+				},
+			},
+		},
+	}
+	coverage := newCoverageSubsystem()
+	if !coverage.ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want initial coverage")
+	}
+	var stateChangeItems []map[string]any
+	for _, item := range mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey]) {
+		if stringSet(stringSliceFromValue(item["requiredEvidenceKinds"]))["state_change"] {
+			stateChangeItems = append(stateChangeItems, item)
+		}
+	}
+	if len(stateChangeItems) != 2 {
+		t.Fatalf("stateChange coverageWorkItems = %+v, want two focus candidates", stateChangeItems)
+	}
+	focusID := stringFromMap(stateChangeItems[1], "id")
+	patchStep := &runmodel.Step{
+		ID:    "run-cwi-patch-exact/001-patch",
+		RunID: run.ID,
+		Kind:  "patch/apply",
+		State: common.StepStateSucceeded,
+		Input: map[string]any{
+			"requiredOutput": map[string]any{
+				"acceptedKinds":                []string{"patch/apply"},
+				"mustIncludeStateChangingNode": true,
+				"coverageWorkItemIds":          []string{focusID},
+				"targetRefs":                   []string{focusID},
+				"structuredTargetRefs":         []string{focusID},
+			},
+		},
+		Output: map[string]any{"changed": true},
+	}
+
+	if !coverage.updateFromCompletedStep(run, patchStep) {
+		t.Fatalf("updateFromCompletedStep changed = false, want exact focus state_change evidence")
+	}
+	var updatedStateChangeItems []map[string]any
+	for _, item := range mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey]) {
+		if stringSet(stringSliceFromValue(item["requiredEvidenceKinds"]))["state_change"] {
+			updatedStateChangeItems = append(updatedStateChangeItems, item)
+		}
+	}
+	firstAccepted := mapStringSliceValue(updatedStateChangeItems[0]["acceptedEvidenceByKind"])
+	if len(firstAccepted["state_change"]) != 0 {
+		t.Fatalf("first item acceptedEvidenceByKind = %+v, want no state_change pollution", firstAccepted)
+	}
+	secondAccepted := mapStringSliceValue(updatedStateChangeItems[1]["acceptedEvidenceByKind"])
+	if !stringSliceContains(secondAccepted["state_change"], string(patchStep.ID)) {
+		t.Fatalf("second item acceptedEvidenceByKind = %+v, want patch/apply state_change evidence", secondAccepted)
+	}
+	if missing := stringSet(stringSliceFromValue(updatedStateChangeItems[1]["missingEvidenceKinds"])); missing["state_change"] {
+		t.Fatalf("second missingEvidenceKinds = %+v, want state_change closed", updatedStateChangeItems[1]["missingEvidenceKinds"])
+	}
+}
+
+func TestCoverageWorkItemsShellValidationWithoutObservedClaimsIsSupportingOnly(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-cwi-validation-claims",
+		WorkspaceID: "ws-cwi-validation-claims",
+		State:       common.RunStateActive,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"id":   "goal-cwi-validation-claims",
+				"text": "- validation target",
+			},
+		},
+	}
+	coverage := newCoverageSubsystem()
+	if !coverage.ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want initial coverage")
+	}
+	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	focusID := stringFromMap(item, "id")
+	step := &runmodel.Step{
+		ID:    "run-cwi-validation-claims/001-validate",
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateSucceeded,
+		Input: map[string]any{
+			"coverageWorkItemIds": []string{focusID},
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+				"targetRefs":      []string{focusID},
+			},
+		},
+		Output: map[string]any{"exitCode": 0},
+	}
+
+	if !coverage.updateFromCompletedStep(run, step) {
+		t.Fatalf("updateFromCompletedStep changed = false, want supporting validation evidence")
+	}
+	updated := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	if accepted := mapStringSliceValue(updated["acceptedEvidenceByKind"]); len(accepted["validation"]) != 0 {
+		t.Fatalf("acceptedEvidenceByKind = %+v, want no validation accepted without observedClaims", accepted)
+	}
+	supporting := mapStringSliceValue(updated["supportingEvidenceByKind"])
+	if !stringSliceContains(supporting["validation"], string(step.ID)+"/validation/runtime-step") {
+		t.Fatalf("supportingEvidenceByKind = %+v, want validation supporting evidence", supporting)
+	}
+	if missing := stringSet(stringSliceFromValue(updated["missingEvidenceKinds"])); !missing["validation"] {
+		t.Fatalf("missingEvidenceKinds = %+v, want validation still missing", updated["missingEvidenceKinds"])
+	}
+	if decisions := mapSliceFromValue(updated["evidenceBindingDecisions"]); len(decisions) == 0 || stringFromMap(decisions[0], "status") != "supporting_only" {
+		t.Fatalf("evidenceBindingDecisions = %+v, want supporting_only", decisions)
+	}
+}
+
+func TestGapBaselineRecomputeContainsFocusEvidenceNextActionAndBudgetScope(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-gap-ledger-contract",
+		WorkspaceID: "ws-gap-ledger-contract",
+		State:       common.RunStateActive,
+		ExecutionContext: map[string]any{
+			convergenceBudgetKey: map[string]any{
+				"focusId":             "focus-cwi-ledger",
+				"sliceId":             "slice-ledger",
+				"state":               "tracking",
+				"decision":            "continue",
+				"coverageWorkItemIds": []string{"cwi-ledger"},
+			},
+			coverageFocusKey: map[string]any{
+				"id":                  "focus-cwi-ledger",
+				"sliceId":             "slice-ledger",
+				"coverageWorkItemIds": []string{"cwi-ledger"},
+			},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                    "cwi-ledger",
+				"status":                "in_progress",
+				"sourceRequirementId":   "ledger-target",
+				"requiredEvidenceKinds": []string{"state_change", "validation"},
+				"requiredEvidenceCounts": map[string]any{
+					"state_change": 1,
+					"validation":   1,
+				},
+				"acceptedEvidenceByKind": map[string]any{
+					"state_change": []string{"step-state-change"},
+				},
+				"rejectedEvidenceByKind": map[string]any{
+					"validation": []string{"step-validation-rejected"},
+				},
+				"acceptedEvidenceRefs": []string{"step-state-change"},
+				"rejectedEvidenceRefs": []string{"step-validation-rejected"},
+				"missingEvidenceKinds": []string{"validation"},
+			}},
+			coverageWorkItemContextKey: map[string]any{
+				"definitionRevision": "rev-gap-ledger-contract",
+				"currentFocus": map[string]any{
+					"id":                    "cwi-ledger",
+					"status":                "in_progress",
+					"requiredEvidenceKinds": []string{"state_change", "validation"},
+					"missingEvidenceKinds":  []string{"validation"},
+					"acceptedEvidenceRefs":  []string{"step-state-change"},
+					"rejectedEvidenceRefs":  []string{"step-validation-rejected"},
+				},
+				"unresolvedItems": []map[string]any{{
+					"id":                   "cwi-ledger",
+					"missingEvidenceKinds": []string{"validation"},
+				}},
+			},
+		},
+	}
+
+	baseline := gapBaselineFromRun(run)
+	if focus := mapFromValue(baseline["currentFocus"]); stringFromMap(focus, "id") != "cwi-ledger" {
+		t.Fatalf("gapBaseline.currentFocus = %+v, want cwi-ledger", focus)
+	}
+	if missing := stringSliceFromValue(mapFromValue(baseline["currentFocus"])["missingEvidenceKinds"]); !stringSliceContains(missing, "validation") {
+		t.Fatalf("gapBaseline.currentFocus.missingEvidenceKinds = %+v, want validation", missing)
+	}
+	if refs := stringSliceFromValue(baseline["acceptedEvidenceRefs"]); !stringSliceContains(refs, "step-state-change") {
+		t.Fatalf("gapBaseline.acceptedEvidenceRefs = %+v, want state_change ref", refs)
+	}
+	if refs := stringSliceFromValue(baseline["rejectedEvidenceRefs"]); !stringSliceContains(refs, "step-validation-rejected") {
+		t.Fatalf("gapBaseline.rejectedEvidenceRefs = %+v, want rejected validation ref", refs)
+	}
+	if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got != "validate" {
+		t.Fatalf("gapBaseline.nextAction = %+v, want validate", baseline["nextAction"])
+	}
+	budget := mapFromValue(baseline["budgetScope"])
+	if stringFromMap(budget, "focusId") != "focus-cwi-ledger" || !stringSliceContains(stringSliceFromValue(budget["coverageWorkItemIds"]), "cwi-ledger") {
+		t.Fatalf("gapBaseline.budgetScope = %+v, want current focus budget", budget)
 	}
 }
 

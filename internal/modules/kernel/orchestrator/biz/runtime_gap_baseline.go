@@ -1531,6 +1531,10 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 			appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "acquire_target_snapshot requires read-only target snapshot acquisition requiredOutput")
 			return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: acquire_target_snapshot missing read-only requiredOutput")
 		}
+		if state == convergenceStateNeedValidation || nextAction == runtimemodel.NextActionTypeValidate {
+			appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "validation requires concrete validation requiredOutput before dispatch")
+			return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: validation missing requiredOutput")
+		}
 		return nil
 	}
 	if nextAction == runtimemodel.NextActionTypeAcquireTargetSnapshot && !requiredOutputIsReadOnlyTargetSnapshotPrerequisite(top) {
@@ -1630,7 +1634,8 @@ func validateRequiredOutputSatisfiableRoute(input map[string]any, label string, 
 		}
 	case state == convergenceStateNeedValidation || nextAction == runtimemodel.NextActionTypeValidate:
 		if !declaresRouteSet {
-			return nil
+			appendAuthorityDiagnostic(input, "required_output_unsatisfiable", "error", "internal_authority_mismatch", label, "validation next action has no declared validation output route")
+			return convergenceDispatchMisalignmentError("runtime_internal_contract_unsatisfiable: %s has no declared validation output route", label)
 		}
 		if !requiredOutputRouteHasValidationKind(routes) && !requiredOutputShapesAllowAssessment(shapes) {
 			appendAuthorityDiagnostic(input, "required_output_unsatisfiable", "error", "internal_authority_mismatch", label, "validation next action has no validation output route")
@@ -2220,6 +2225,9 @@ func gapBaselineFromRun(run *runModel.Run) map[string]any {
 	if len(authority.RejectedEvidenceRefs) > 0 {
 		baseline["rejectedEvidenceRefs"] = compactUniqueStrings(authority.RejectedEvidenceRefs)
 	}
+	if len(authority.BudgetScope) > 0 {
+		baseline["budgetScope"] = cloneStepPayload(authority.BudgetScope)
+	}
 	if len(mapFromValue(baseline["currentFocus"])) == 0 {
 		delete(baseline, "currentFocus")
 	}
@@ -2281,14 +2289,20 @@ func gapBaselineDispatchGate(run *runModel.Run) (bool, error) {
 		return false, nil
 	}
 	nextAction := mapFromValue(baseline["nextAction"])
-	switch strings.TrimSpace(stringFromMap(nextAction, "kind")) {
-	case "", "assess_gap", "repair", "state_change", "validate", "validation", "assessment", "artifact":
+	kind := strings.TrimSpace(stringFromMap(nextAction, "kind"))
+	switch classifyConvergenceNextActionOutcome(kind) {
+	case convergenceNextActionOutcomeUnknown:
+		if kind == "" {
+			return false, nil
+		}
+		return true, common.ErrConflict
+	case convergenceNextActionOutcomeDispatch:
 		return false, nil
-	case "wait_decision", "wait_approval", "request_decision", "request_approval":
+	case convergenceNextActionOutcomeGovernanceBlock:
 		return true, common.ErrBlocked
-	case "no_action", "complete":
+	case convergenceNextActionOutcomeTerminalComplete:
 		return true, nil
-	case "fail_fast", "fail":
+	case convergenceNextActionOutcomeTerminalFail:
 		return true, common.ErrConflict
 	default:
 		return true, common.ErrConflict

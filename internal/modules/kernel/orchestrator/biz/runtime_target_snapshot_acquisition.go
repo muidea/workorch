@@ -13,6 +13,8 @@ import (
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+const runtimeManagedTargetSnapshotRefLimit = 5
+
 func (o *RuntimeOrchestrator) dispatchRuntimeManagedTargetSnapshotAcquisition(
 	ctx context.Context,
 	run *runModel.Run,
@@ -123,6 +125,9 @@ func runtimeManagedTargetSnapshotRefs(input map[string]any) []string {
 		add(value)
 	}
 	sort.Strings(ret)
+	if len(ret) > runtimeManagedTargetSnapshotRefLimit {
+		ret = ret[:runtimeManagedTargetSnapshotRefLimit]
+	}
 	return ret
 }
 
@@ -163,6 +168,14 @@ func runtimeManagedTargetSnapshotCandidateRefs(input map[string]any) []string {
 			add(stringFromMap(source, key))
 		}
 	}
+
+	focus := runtimeManagedTargetSnapshotCurrentFocus(input)
+	focused := runtimeManagedTargetSnapshotCandidateRefsFromCurrentScope(input, focus)
+	if len(focus) > 0 {
+		sort.Strings(focused)
+		return focused
+	}
+
 	for _, source := range []map[string]any{
 		mapFromValue(input["repairActionPackage"]),
 		mapFromValue(input["requiredOutput"]),
@@ -198,6 +211,98 @@ func runtimeManagedTargetSnapshotCandidateRefs(input map[string]any) []string {
 	}
 	sort.Strings(ret)
 	return ret
+}
+
+func runtimeManagedTargetSnapshotCurrentFocus(input map[string]any) map[string]any {
+	focus := dispatchAuthorityCurrentFocus(input)
+	if len(focus) == 0 {
+		focus = mapFromValue(mapFromValue(input[currentActionContractKey])["currentFocus"])
+	}
+	if len(focus) == 0 {
+		focus = mapFromValue(mapFromValue(input[gapBaselineKey])["currentFocus"])
+	}
+	if len(focus) == 0 {
+		focus = mapFromValue(input[coverageFocusKey])
+	}
+	return focus
+}
+
+func runtimeManagedTargetSnapshotCandidateRefsFromCurrentScope(input map[string]any, focus map[string]any) []string {
+	if len(input) == 0 || len(focus) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ret []string
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	addFromSource := func(source map[string]any) {
+		if len(source) == 0 {
+			return
+		}
+		for _, key := range []string{"repairTargetSet", "targetRefs", "failureTargets", "relatedFailureTargets"} {
+			for _, value := range stringSliceFromValue(source[key]) {
+				add(value)
+			}
+			for _, item := range mapSliceFromValue(source[key]) {
+				for _, itemKey := range []string{"targetRef", "path", "resourcePath", "filePath"} {
+					add(stringFromMap(item, itemKey))
+				}
+			}
+		}
+		for _, item := range mapSliceFromValue(source["structuredTargetRefs"]) {
+			for _, itemKey := range []string{"targetRef", "path", "resourcePath", "filePath"} {
+				add(stringFromMap(item, itemKey))
+			}
+		}
+		for _, key := range []string{"targetRef", "path", "resourcePath", "filePath"} {
+			add(stringFromMap(source, key))
+		}
+	}
+	for _, source := range runtimeManagedTargetSnapshotFocusedSources(input, focus) {
+		addFromSource(source)
+	}
+	sort.Strings(ret)
+	return ret
+}
+
+func runtimeManagedTargetSnapshotFocusedSources(input map[string]any, focus map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	sources := []map[string]any{
+		mapFromValue(mapFromValue(input[currentActionContractKey])["currentFocus"]),
+		dispatchAuthorityCurrentFocus(input),
+		mapFromValue(mapFromValue(input[convergenceAuthorityKey])["currentFocus"]),
+		mapFromValue(mapFromValue(input[gapBaselineKey])["currentFocus"]),
+		mapFromValue(input[coverageFocusKey]),
+		mapFromValue(mapFromValue(input[coverageWorkItemContextKey])["currentFocus"]),
+		mapFromValue(mapFromValue(mapFromValue(input["repairActionPackage"])[coverageWorkItemContextKey])["currentFocus"]),
+		activeRequiredOutputForCurrentAction(input),
+		mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		mapFromValue(input["requiredOutput"]),
+	}
+	for _, source := range []map[string]any{
+		mapFromValue(input[coverageWorkItemContextKey]),
+		mapFromValue(input[convergenceAuthorityKey]),
+		mapFromValue(input[gapBaselineKey]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])[coverageWorkItemContextKey]),
+	} {
+		for _, key := range []string{"currentFocusItems", "ledgerSummary", "unresolvedItems", "coverageTargetSet", "repairTargetSet"} {
+			for _, item := range mapSliceFromValue(source[key]) {
+				if len(focus) == 0 || coverageContextItemMatchesFocus(item, focus) {
+					sources = append(sources, item)
+				}
+			}
+		}
+	}
+	return sources
 }
 
 func runtimeManagedTargetSnapshotRefReadable(ref string) bool {

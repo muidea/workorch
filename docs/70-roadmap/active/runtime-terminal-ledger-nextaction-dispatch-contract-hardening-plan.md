@@ -135,7 +135,7 @@ step terminal result
   - Expected:
     - EventHub publish / owner readback failure cannot leave run active without blocker.
 
-- [ ] Implement a single continuation gate:
+- [x] Implement a single continuation gate:
 
 ```text
 continueAfterTerminalResult(run)
@@ -147,7 +147,7 @@ continueAfterTerminalResult(run)
   -> if complete/fail: finalize terminal
 ```
 
-- [ ] Route graph terminal, repair succeeded, validation succeeded/failed, provider retry terminal and restart continuation through this same gate.
+- [x] Route graph terminal, repair succeeded, validation succeeded/failed, provider retry terminal and restart continuation through this same gate.
 
 Acceptance:
 
@@ -156,13 +156,13 @@ Acceptance:
 
 ## P0: Ledger Recompute Contract
 
-- [ ] Add test: `patch/apply` and `git/write` terminal success write accepted `state_change` evidence only to exact current focus.
+- [x] Add test: `patch/apply` and `git/write` terminal success write accepted `state_change` evidence only to exact current focus.
 
-- [ ] Add test: `shell/command` terminal success without `observedClaims` is supporting-only and does not close validation.
+- [x] Add test: `shell/command` terminal success without `observedClaims` is supporting-only and does not close validation.
 
-- [ ] Add test: rejected validation evidence remains rejected diagnostic and cannot close required validation.
+- [x] Add test: rejected validation evidence remains rejected diagnostic and cannot close required validation.
 
-- [ ] Ensure recompute result contains:
+- [x] Ensure recompute result contains:
   - current focus id
   - missing evidence kinds
   - accepted/rejected evidence refs
@@ -177,7 +177,7 @@ Acceptance:
 
 ## P0: Deterministic NextAction To Dispatch Contract
 
-- [ ] Add test matrix for NextAction mapping:
+- [x] Add test matrix for NextAction mapping:
   - `state_change` -> state-changing dispatch or target snapshot acquisition.
   - `validate` -> bounded validation dispatch.
   - `assessment` -> assessment dispatch/gate.
@@ -185,7 +185,7 @@ Acceptance:
   - `complete` -> run terminal completed.
   - `fail` -> run terminal failed with structured reason.
 
-- [ ] Centralize NextAction-to-dispatch selection.
+- [x] Centralize NextAction-to-dispatch selection.
   - Avoid separate graph/retry/restart/replan paths each making partial decisions.
 
 - [x] Make dispatch idempotency include workspace/run/step/kind/action scope.
@@ -201,14 +201,14 @@ Acceptance:
 
 - [x] Add failing test: `NextAction=state_change` without safe current target snapshot cannot dispatch direct patch LLM.
 
-- [ ] Required state-changing preflight:
+- [x] Required state-changing preflight:
   - current focus has target refs.
   - target snapshot exists for patch/file write target, or explicit acquire target snapshot is dispatched.
   - snapshot is complete, current, and safe for file write.
   - redacted/truncated snapshots are not safe for file write.
   - stale snapshots cannot seed patch.
 
-- [ ] If state-changing target context is insufficient, convert to:
+- [x] If state-changing target context is insufficient, convert to:
 
 ```text
 NextAction=acquire_target_snapshot
@@ -223,15 +223,15 @@ Acceptance:
 
 ### Validation Sufficiency
 
-- [ ] Add failing test: `NextAction=validate` with missing validation evidence route cannot dispatch ambiguous validation.
+- [x] Add failing test: `NextAction=validate` with missing validation evidence route cannot dispatch ambiguous validation.
 
-- [ ] Required validation preflight:
+- [x] Required validation preflight:
   - current focus binding exists.
   - validation requiredOutput contains accepted validation kinds.
   - validation scratch/resource lifecycle is declared when needed.
   - concrete validation must include `validationEvidence.mode`、`observationType`、`observedClaims`、`targetRefs` and coverage binding.
 
-- [ ] If validation context is insufficient, dispatch context acquisition or return governed blocker/fail-fast with typed reason.
+- [x] If validation context is insufficient, dispatch context acquisition or return governed blocker/fail-fast with typed reason.
 
 Acceptance:
 
@@ -248,13 +248,13 @@ Acceptance:
   - top-level `requiredOutput`
   - `currentActionContract.requiredOutput`
 
-- [ ] Ensure old failed step input/output only enters:
+- [x] Ensure old failed step input/output only enters:
   - `diagnosticLineage`
   - `latestRejectedDiagnostic`
   - `processEvidenceTimeline`
   - `currentFailure`
 
-- [ ] Dispatch preflight must reject mirror mismatch before provider call.
+- [x] Dispatch preflight must reject mirror mismatch before provider call.
 
 Acceptance:
 
@@ -265,7 +265,7 @@ Acceptance:
 
 - [x] Projection must show the same owner NextAction as run execution context.
 
-- [ ] After EventHub dispatch publish, owner readback must observe:
+- [x] After EventHub dispatch publish, owner readback must observe:
   - step exists or queued command exists.
   - run current step is updated or recoverability is explicitly pending.
 
@@ -277,11 +277,11 @@ Acceptance:
 
 ## P2: Resource And Context Noise Control
 
-- [ ] Ensure terminal continuation does not repeatedly hydrate full snapshots for polling views.
+- [x] Ensure terminal continuation does not repeatedly hydrate full snapshots for polling views.
 
-- [ ] Ensure target/context acquisition is bounded and focused on current coverage target, not entire workspace dump.
+- [x] Ensure target/context acquisition is bounded and focused on current coverage target, not entire workspace dump.
 
-- [ ] Ensure LLM context includes enough current facts but does not include stale old graph packages as competing authority.
+- [x] Ensure LLM context includes enough current facts but does not include stale old graph packages as competing authority.
 
 Acceptance:
 

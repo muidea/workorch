@@ -356,6 +356,60 @@ func TestRuntimeEvidenceAndStepEventsUseRawRefsInsteadOfDuplicatingFullPayloads(
 	}
 }
 
+func TestCompactLLMContextOmitsStaleGraphPackagesButKeepsCurrentAuthority(t *testing.T) {
+	input := map[string]any{
+		"failedExecutionGraph": map[string]any{"nodes": []map[string]any{{
+			"id":    "old-patch",
+			"kind":  "patch/apply",
+			"input": map[string]any{"diff": strings.Repeat("old", 2000)},
+		}}},
+		stepInputKeyGraphEvidence: []map[string]any{{
+			"nodeId": "old-patch",
+			"output": map[string]any{
+				"stdout": strings.Repeat("graph", 2000),
+			},
+		}},
+		convergenceAuthorityKey: map[string]any{
+			"nextAction":   map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			"currentFocus": map[string]any{"id": "cwi-current"},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": concreteValidationEvidenceRequiredOutputWithScratch(map[string]any{
+				"coverageWorkItemIds": []string{"cwi-current"},
+			}, nil, nil),
+			"previousRejectedOutputSummary": map[string]any{
+				"rejectedExecutionGraph": map[string]any{"nodeCount": 1},
+			},
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"schemaVersion": "workorch.stage_packet.v1",
+			"nextAction":    map[string]any{"type": runtimemodel.NextActionTypeValidate},
+		},
+		stepInputKeyProcessEvidenceTimeline: []map[string]any{{
+			"sourceRef":   "step://old-patch",
+			"summaryKind": "compact_history",
+		}},
+	}
+
+	got := compactStepInputForLLMContext(input)
+	if _, ok := got["failedExecutionGraph"]; ok {
+		t.Fatalf("compact input retained failedExecutionGraph: %+v", got["failedExecutionGraph"])
+	}
+	if _, ok := got[stepInputKeyGraphEvidence]; ok {
+		t.Fatalf("compact input retained graph evidence: %+v", got[stepInputKeyGraphEvidence])
+	}
+	if next := mapFromValue(mapFromValue(got[convergenceAuthorityKey])["nextAction"]); next["kind"] != runtimemodel.NextActionTypeValidate {
+		t.Fatalf("convergenceAuthority.nextAction = %+v, want current validate authority", next)
+	}
+	required := mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want current validation contract retained", required)
+	}
+	if timeline := mapSliceFromValue(got[stepInputKeyProcessEvidenceTimeline]); len(timeline) == 0 {
+		t.Fatalf("processEvidenceTimeline missing from compact input: %+v", got)
+	}
+}
+
 func TestRuntimeRepairInputOmitsInvalidLLMRawContentFromRepairContext(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{

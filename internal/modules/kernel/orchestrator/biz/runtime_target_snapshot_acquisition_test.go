@@ -54,6 +54,92 @@ func TestRuntimeManagedTargetSnapshotAcquisitionBuildsReadOnlyGraph(t *testing.T
 	}
 }
 
+func TestRuntimeManagedTargetSnapshotAcquisitionUsesCurrentFocusOnly(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeAcquireTargetSnapshot},
+			"currentFocus": map[string]any{
+				"id":         "cwi-current",
+				"targetRefs": []string{"current/target.txt"},
+			},
+		},
+		"convergenceContract": map[string]any{
+			"state":            convergenceStateNeedEvidence,
+			"runtimeStageMode": "target_snapshot_acquisition",
+		},
+		"repairActionPackage": map[string]any{
+			"repairTargetSet": []string{"stale/unrelated.txt"},
+			coverageWorkItemContextKey: map[string]any{
+				"ledgerSummary": []map[string]any{{
+					"id":         "cwi-stale",
+					"targetRefs": []string{"stale/from-ledger.txt"},
+				}, {
+					"id":         "cwi-current",
+					"targetRefs": []string{"current/target.txt"},
+				}},
+			},
+			"requiredOutput": map[string]any{
+				"mustAcquireCurrentTargetSnapshot":   true,
+				"mustUseReadOnlySnapshotAcquisition": true,
+				"mustIncludeStateChangingNode":       false,
+				"acceptedKinds":                      []string{"file/read"},
+			},
+		},
+	}
+
+	output, ok := runtimeManagedTargetSnapshotAcquisitionOutput(input)
+	if !ok {
+		t.Fatal("runtimeManagedTargetSnapshotAcquisitionOutput ok = false, want current-focus read graph")
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok || len(graph.Nodes) != 1 {
+		t.Fatalf("graph = %+v/%v, want one current focus read", graph, ok)
+	}
+	if got := graph.Nodes[0].Input["path"]; got != "current/target.txt" {
+		t.Fatalf("read path = %v, want current focus target only", got)
+	}
+}
+
+func TestRuntimeManagedTargetSnapshotAcquisitionDoesNotFallbackToStaleReadableRefsWhenCurrentFocusAbstract(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeAcquireTargetSnapshot},
+			"currentFocus": map[string]any{
+				"id":         "cwi-current",
+				"targetRefs": []string{"cwi-current", "source_change"},
+			},
+		},
+		"convergenceContract": map[string]any{
+			"state":            convergenceStateNeedEvidence,
+			"runtimeStageMode": "target_snapshot_acquisition",
+		},
+		"repairActionPackage": map[string]any{
+			"repairTargetSet": []string{"stale/readable.txt"},
+			"requiredOutput": map[string]any{
+				"mustAcquireCurrentTargetSnapshot":   true,
+				"mustUseReadOnlySnapshotAcquisition": true,
+				"mustIncludeStateChangingNode":       false,
+			},
+		},
+	}
+
+	output, ok := runtimeManagedTargetSnapshotAcquisitionOutput(input)
+	if !ok {
+		t.Fatal("runtimeManagedTargetSnapshotAcquisitionOutput ok = false, want deterministic abstract-ref failure")
+	}
+	if output["status"] != "failed" || output[failureOutputKeyClass] != failureClassRuntimeContractMisalign {
+		t.Fatalf("output = %+v, want contract misalignment failure", output)
+	}
+	if graph := output[stepOutputKeyExecutionGraph]; graph != nil {
+		t.Fatalf("executionGraph = %+v, want no stale readable target fallback", graph)
+	}
+	refs := stringSliceFromValue(output["abstractTargetRefs"])
+	if !stringSliceContains(refs, "cwi-current") || !stringSliceContains(refs, "source_change") ||
+		stringSliceContains(refs, "stale/readable.txt") {
+		t.Fatalf("abstractTargetRefs = %+v, want only current focus abstract refs", refs)
+	}
+}
+
 func TestRuntimeManagedTargetSnapshotAcquisitionFailsFastForUnreadableTargetRefs(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{

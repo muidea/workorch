@@ -141,6 +141,111 @@ func TestRuntimeOrchestrator_DispatchRequestedStepRefreshesAuthoritySnapshot(t *
 	}
 }
 
+func TestRequestDispatchStepRecordsEventPublishReadbackPending(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-dispatch-readback")
+	runID := common.RunID("run-dispatch-readback")
+	stepID := common.StepID(runID + "/step-1")
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateActive,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+	orch.EnableEventDrivenDispatch()
+
+	err := orch.requestDispatchStep(ctx, runID, workspaceID, stepDispatchSpec{
+		ID:    stepID,
+		Kind:  "shell/command",
+		Input: map[string]any{"command": "true"},
+	})
+	if err != nil {
+		t.Fatalf("requestDispatchStep: %v", err)
+	}
+	if _, err := stepRepo.Get(ctx, stepID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("step readback err = %v, want not found without event consumer", err)
+	}
+	persisted, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	readback := mapFromValue(persisted.ExecutionContext["dispatchReadback"])
+	if readback["state"] != "pending_owner_consumption" ||
+		readback["queuedCommandPublished"] != true ||
+		readback["stepExists"] != false ||
+		readback["stepId"] != string(stepID) {
+		t.Fatalf("dispatchReadback = %+v, want queued pending readback", readback)
+	}
+}
+
+func TestRecordDispatchPublishReadbackClearsPendingWhenStepExists(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-dispatch-readback-clear")
+	runID := common.RunID("run-dispatch-readback-clear")
+	stepID := common.StepID(runID + "/step-1")
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateActive,
+		ExecutionContext: map[string]any{
+			"dispatchReadback": map[string]any{
+				"schemaVersion":          "workorch.dispatch_readback.v1",
+				"state":                  "pending_owner_consumption",
+				"queuedCommandPublished": true,
+				"stepExists":             false,
+			},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "shell/command",
+		State: common.StepStateExecuting,
+		Input: map[string]any{"command": "true"},
+	}); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	orch := &RuntimeOrchestrator{runs: runRepo, steps: stepRepo}
+
+	err := orch.recordDispatchPublishReadback(ctx, run, orchestratorcontracts.DispatchStepCommand{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		Kind:        "shell/command",
+	})
+	if err != nil {
+		t.Fatalf("recordDispatchPublishReadback: %v", err)
+	}
+	persisted, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if readback := mapFromValue(persisted.ExecutionContext["dispatchReadback"]); len(readback) != 0 {
+		t.Fatalf("dispatchReadback = %+v, want cleared after owner step exists", readback)
+	}
+}
+
 func TestRuntimeOrchestrator_StartRunAppliesUnifiedDiffPatchEvidence(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

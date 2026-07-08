@@ -345,6 +345,88 @@ func TestRequiredOutputSeedIgnoresStaleTargetSnapshotMirrorForStateChange(t *tes
 	}
 }
 
+func TestCurrentRequiredOutputIgnoresOldFailedStepLineage(t *testing.T) {
+	required := concreteValidationEvidenceRequiredOutputWithScratch(
+		map[string]any{
+			"coverageWorkItemIds":  []string{"cwi-current"},
+			"structuredTargetRefs": []string{"cwi-current"},
+		},
+		nil,
+		nil,
+	)
+	staleFailedRequired := map[string]any{
+		"mustIncludeStateChangingNode": true,
+		"acceptedKinds":                []any{"patch/apply"},
+		"coverageWorkItemIds":          []any{"cwi-stale"},
+	}
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus": map[string]any{
+				"id":                  "cwi-current",
+				"coverageWorkItemIds": []string{"cwi-current"},
+			},
+			"nextAction": map[string]any{
+				"kind":           runtimemodel.NextActionTypeValidate,
+				"requiredOutput": required,
+			},
+		},
+		"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": required,
+		},
+		"currentFailure": map[string]any{
+			"failedStepId": "run-old/failed-step",
+			"failedStepInput": map[string]any{
+				"requiredOutput": staleFailedRequired,
+			},
+			"failedStepOutput": map[string]any{
+				"requiredOutput": staleFailedRequired,
+			},
+		},
+		"diagnosticLineage": map[string]any{
+			"oldFailedStep": map[string]any{
+				"input":  map[string]any{"requiredOutput": staleFailedRequired},
+				"output": map[string]any{"requiredOutput": staleFailedRequired},
+			},
+		},
+		stepInputKeyProcessEvidenceTimeline: []map[string]any{{
+			"stepId":         "run-old/failed-step",
+			"requiredOutput": staleFailedRequired,
+		}},
+		stepInputKeyStagePacket: map[string]any{
+			"schemaVersion": "workorch.stage_packet.v1",
+			"nextAction":    map[string]any{"type": runtimemodel.NextActionTypeValidate},
+		},
+	}
+	run := &runModel.Run{ID: "run-current-required-output-lineage", WorkspaceID: "ws-current-required-output-lineage"}
+	got := synchronizeCurrentRequiredOutputMirrors(input)
+	got = attachCurrentActionContractToInput(run, "run-current-required-output-lineage/step-001", got)
+
+	for label, mirror := range map[string]map[string]any{
+		"requiredOutput":                       mapFromValue(got["requiredOutput"]),
+		"repairActionPackage.requiredOutput":   mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":           mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["requiredOutput"]),
+		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(got[currentActionContractKey])["requiredOutput"]),
+	} {
+		if boolValue(mirror["mustIncludeStateChangingNode"]) ||
+			stringSliceContains(stringSliceFromValue(mirror["acceptedKinds"]), "patch/apply") ||
+			!boolValue(mirror["mustProduceConcreteValidationEvidence"]) {
+			t.Fatalf("%s = %+v, want current validation requiredOutput without old failed state-change contract", label, mirror)
+		}
+		if !stringSliceContains(stringSliceFromValue(mirror["coverageWorkItemIds"]), "cwi-current") ||
+			stringSliceContains(stringSliceFromValue(mirror["coverageWorkItemIds"]), "cwi-stale") {
+			t.Fatalf("%s.coverageWorkItemIds = %+v, want current focus only", label, mirror["coverageWorkItemIds"])
+		}
+	}
+	if gotFailure := mapFromValue(got["currentFailure"]); len(mapFromValue(gotFailure["failedStepInput"])) == 0 {
+		t.Fatalf("currentFailure = %+v, want old failed input preserved as diagnostic lineage", gotFailure)
+	}
+	if err := validateConvergenceDispatchInput(got); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, got)
+	}
+}
+
 func TestCurrentActionContractDoesNotFallbackToRunAuthority(t *testing.T) {
 	run := &runModel.Run{
 		ID:          "run-current-action-stale",

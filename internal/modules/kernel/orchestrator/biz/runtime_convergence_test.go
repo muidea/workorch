@@ -6974,6 +6974,64 @@ func TestBuildConvergenceContractStateChangeUsesExistingTargetSnapshot(t *testin
 	}
 }
 
+func TestBuildConvergenceContractStateChangeRejectsUnsafeTargetSnapshots(t *testing.T) {
+	baseSnapshot := map[string]any{
+		"targetRef":        "target.txt",
+		"exists":           true,
+		"contentHash":      "hash-target",
+		"contentComplete":  true,
+		"safeForFileWrite": true,
+		"runtimeManaged":   true,
+	}
+	tests := []struct {
+		name  string
+		patch map[string]any
+	}{
+		{name: "redacted", patch: map[string]any{"redacted": true}},
+		{name: "truncated", patch: map[string]any{"truncated": true}},
+		{name: "content incomplete", patch: map[string]any{"contentComplete": false}},
+		{name: "not runtime managed", patch: map[string]any{"runtimeManaged": false}},
+		{name: "diagnostic only", patch: map[string]any{"snapshotValidity": "diagnostic_only_direct_read"}},
+		{name: "unsafe exact patch", patch: map[string]any{"safeForExactPatch": false}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := cloneStepPayload(baseSnapshot)
+			for key, value := range tc.patch {
+				snapshot[key] = value
+			}
+			input := map[string]any{
+				convergenceAuthorityKey: map[string]any{
+					"nextAction": map[string]any{"kind": "state_change"},
+				},
+				"repairActionPackage": map[string]any{
+					"requiresCurrentTargetSnapshotForStateChange": true,
+					"targetSnapshots": []map[string]any{
+						snapshot,
+					},
+					"requiredOutput": map[string]any{
+						"mustUseCurrentTargetSnapshot": true,
+					},
+				},
+			}
+
+			contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+			if contract.State != convergenceStateNeedEvidence ||
+				contract.RuntimeStageMode != "target_snapshot_acquisition" ||
+				stringFromMap(contract.Prerequisite, "kind") != runtimemodel.NextActionTypeAcquireTargetSnapshot {
+				t.Fatalf("convergenceContract = %+v, want acquire_target_snapshot prerequisite for unsafe snapshot", contract)
+			}
+			required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+			if !boolValue(required["mustAcquireCurrentTargetSnapshot"]) ||
+				boolValue(required["mustIncludeStateChangingNode"]) ||
+				stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+				t.Fatalf("requiredOutput = %+v, want read-only snapshot acquisition contract", required)
+			}
+		})
+	}
+}
+
 func TestHydrateConvergenceTargetEvidenceOverwritesStalePackageSnapshots(t *testing.T) {
 	input := map[string]any{
 		"convergenceContract": map[string]any{

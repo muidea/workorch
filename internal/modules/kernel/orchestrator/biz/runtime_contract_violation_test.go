@@ -2007,6 +2007,11 @@ func TestContractViolationRecoveryScrubsConflictingDiagnosticOutputShapeAdvice(t
 }
 
 func TestValidateConvergenceDispatchRejectsOutputShapeAdviceConflict(t *testing.T) {
+	required := concreteValidationEvidenceRequiredOutputWithScratch(
+		map[string]any{validationScratchDirKey: "/tmp/workorch-validation-test/output-shape-conflict"},
+		nil,
+		nil,
+	)
 	input := map[string]any{
 		"convergenceContract": map[string]any{
 			"state": convergenceStateNeedValidation,
@@ -2014,18 +2019,12 @@ func TestValidateConvergenceDispatchRejectsOutputShapeAdviceConflict(t *testing.
 		convergenceAuthorityKey: map[string]any{
 			"nextAction": map[string]any{"kind": "validate"},
 		},
-		"requiredOutput": map[string]any{
-			"mustProduceConcreteValidationEvidence": true,
-		},
+		"requiredOutput": required,
 		"repairActionPackage": map[string]any{
-			"requiredOutput": map[string]any{
-				"mustProduceConcreteValidationEvidence": true,
-			},
+			"requiredOutput": required,
 		},
 		stepInputKeyStagePacket: map[string]any{
-			"requiredOutput": map[string]any{
-				"mustProduceConcreteValidationEvidence": true,
-			},
+			"requiredOutput": required,
 		},
 		"repairGuidance": []string{"return top-level `shellCommands` for this validation"},
 	}

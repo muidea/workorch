@@ -86,7 +86,7 @@ func (o *RuntimeOrchestrator) requestDispatchStep(ctx context.Context, runID com
 		IdempotencyKey: idempotencyKey,
 		Input:          cloneStepPayload(spec.Input),
 	}
-	return wrapRuntimeDispatchRequestError("event_publish", o.eventHub.Publish(ctx, events.Envelope{
+	envelope := events.Envelope{
 		Topic:        orchestratorevents.TopicOrchestratorDispatchStepRequested,
 		SourceModule: "kernel/orchestrator",
 		SubjectType:  "step",
@@ -103,7 +103,50 @@ func (o *RuntimeOrchestrator) requestDispatchStep(ctx context.Context, runID com
 			events.PayloadKeyIdempotencyKey: idempotencyKey,
 			events.PayloadKeyInput:          cloneStepPayload(spec.Input),
 		},
-	}))
+	}
+	if err := o.eventHub.Publish(ctx, envelope); err != nil {
+		return wrapRuntimeDispatchRequestError("event_publish", err)
+	}
+	return wrapRuntimeDispatchRequestError("event_publish_readback", o.recordDispatchPublishReadback(ctx, run, cmd))
+}
+
+func (o *RuntimeOrchestrator) recordDispatchPublishReadback(ctx context.Context, run *runModel.Run, cmd orchestratorcontracts.DispatchStepCommand) error {
+	if o == nil || run == nil || run.ID == "" || cmd.StepID == "" {
+		return common.ErrInvalidArgument
+	}
+	if o.steps == nil || o.runs == nil {
+		return common.ErrConflict
+	}
+	step, err := o.steps.Get(ctx, cmd.StepID)
+	if err == nil && step != nil && step.RunID == run.ID {
+		if len(mapFromValue(run.ExecutionContext["dispatchReadback"])) > 0 {
+			if run.ExecutionContext == nil {
+				run.ExecutionContext = map[string]any{}
+			}
+			delete(run.ExecutionContext, "dispatchReadback")
+			return o.runs.Update(ctx, run)
+		}
+		return nil
+	}
+	if err != nil && !errors.Is(err, common.ErrNotFound) {
+		return err
+	}
+	if run.ExecutionContext == nil {
+		run.ExecutionContext = map[string]any{}
+	}
+	run.ExecutionContext["dispatchReadback"] = map[string]any{
+		"schemaVersion":          "workorch.dispatch_readback.v1",
+		"state":                  "pending_owner_consumption",
+		"workspaceId":            string(cmd.WorkspaceID),
+		"runId":                  string(cmd.RunID),
+		"stepId":                 string(cmd.StepID),
+		"kind":                   cmd.Kind,
+		"idempotencyKey":         cmd.IdempotencyKey,
+		"queuedCommandPublished": true,
+		"stepExists":             false,
+		"recoverability":         "wait_for_eventhub_owner_consumption",
+	}
+	return o.runs.Update(ctx, run)
 }
 
 func workspaceIDForDispatch(run *runModel.Run, workspace *workspaceModel.Workspace) common.WorkspaceID {

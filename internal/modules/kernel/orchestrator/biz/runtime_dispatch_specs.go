@@ -13,6 +13,43 @@ import (
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+type convergenceNextActionOutcome string
+
+const (
+	convergenceNextActionOutcomeUnknown          convergenceNextActionOutcome = ""
+	convergenceNextActionOutcomeDispatch         convergenceNextActionOutcome = "dispatch"
+	convergenceNextActionOutcomeGovernanceBlock  convergenceNextActionOutcome = "governance_block"
+	convergenceNextActionOutcomeTerminalComplete convergenceNextActionOutcome = "terminal_complete"
+	convergenceNextActionOutcomeTerminalFail     convergenceNextActionOutcome = "terminal_fail"
+)
+
+func classifyConvergenceNextActionOutcome(action string) convergenceNextActionOutcome {
+	switch strings.TrimSpace(action) {
+	case runtimemodel.NextActionTypeStateChange,
+		runtimemodel.NextActionTypeValidate,
+		"validation",
+		runtimemodel.NextActionTypeAssessment,
+		runtimemodel.NextActionTypeAcquireTargetSnapshot,
+		"assess_gap",
+		"artifact",
+		"repair",
+		"acquire_evidence",
+		"produce_state_change",
+		"produce_validation_evidence":
+		return convergenceNextActionOutcomeDispatch
+	case "wait_decision", "wait_approval",
+		runtimemodel.NextActionTypeRequestDecision,
+		runtimemodel.NextActionTypeRequestApproval:
+		return convergenceNextActionOutcomeGovernanceBlock
+	case "no_action", runtimemodel.NextActionTypeComplete:
+		return convergenceNextActionOutcomeTerminalComplete
+	case "fail_fast", runtimemodel.NextActionTypeFail:
+		return convergenceNextActionOutcomeTerminalFail
+	default:
+		return convergenceNextActionOutcomeUnknown
+	}
+}
+
 func (o *RuntimeOrchestrator) nextDispatchSpecs(
 	ctx context.Context,
 	run *runModel.Run,
@@ -574,7 +611,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 				Input: nextStepInputFromOutput(run, last),
 			}}, nil
 		}
-		if spec, ok, err := o.authorityContinuationSpecAfterCompletedStep(ctx, run, last); ok || err != nil {
+		if spec, ok, err := o.terminalAuthorityContinuationSpec(ctx, run, last); ok || err != nil {
 			if err != nil {
 				return nil, err
 			}
@@ -626,6 +663,14 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			Kind:  last.Kind,
 			Input: cloneStepPayload(last.Input),
 		}}, nil
+	}
+	if last.State == common.StepStateFailed {
+		if spec, ok, err := o.terminalAuthorityContinuationSpec(ctx, run, last); ok || err != nil {
+			if err != nil {
+				return nil, err
+			}
+			return []stepDispatchSpec{spec}, nil
+		}
 	}
 	if last.State == common.StepStateFailed && requiresDoDAssessmentCompletionGate(run) {
 		policy := o.RuntimePolicy()
@@ -680,12 +725,17 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 	return nil, common.ErrConflict
 }
 
-func (o *RuntimeOrchestrator) authorityContinuationSpecAfterCompletedStep(
+func (o *RuntimeOrchestrator) terminalAuthorityContinuationSpec(
 	ctx context.Context,
 	run *runModel.Run,
 	last *runModel.Step,
 ) (stepDispatchSpec, bool, error) {
 	if o == nil || run == nil || last == nil || run.State != common.RunStateActive {
+		return stepDispatchSpec{}, false, nil
+	}
+	switch last.State {
+	case common.StepStateSucceeded, common.StepStateFailed:
+	default:
 		return stepDispatchSpec{}, false, nil
 	}
 	input := nextStepInput(run, last.ID)
@@ -708,18 +758,7 @@ func (o *RuntimeOrchestrator) authorityContinuationSpecAfterCompletedStep(
 }
 
 func authorityContinuationActionIsDispatchable(action string) bool {
-	switch strings.TrimSpace(action) {
-	case runtimemodel.NextActionTypeStateChange,
-		runtimemodel.NextActionTypeValidate,
-		runtimemodel.NextActionTypeAcquireTargetSnapshot,
-		"repair",
-		"acquire_evidence",
-		"produce_state_change",
-		"produce_validation_evidence":
-		return true
-	default:
-		return false
-	}
+	return classifyConvergenceNextActionOutcome(action) == convergenceNextActionOutcomeDispatch
 }
 
 func authorityContinuationStepID(runID common.RunID, last *runModel.Step) common.StepID {

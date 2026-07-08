@@ -80,6 +80,62 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 	}
 }
 
+func TestProjectWorkspaceSnapshotSummaryOmitsPollingHeavyRuntimeFields(t *testing.T) {
+	t.Parallel()
+
+	got := ProjectWorkspaceSnapshotSummary(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-summary-compact", ActiveRunID: "run-summary-compact"},
+		Run: &readmodelcore.Run{
+			ID:               "run-summary-compact",
+			WorkspaceID:      "ws-summary-compact",
+			State:            "running",
+			ExecutionContext: map[string]any{"large": strings.Repeat("x", workspaceSnapshotTraceStringLimit*4)},
+		},
+		Step: &readmodelcore.StepView{
+			ID:    "run-summary-compact/step-1",
+			Kind:  "llm/workspace_execution",
+			State: "running",
+			Input: map[string]any{
+				"repairActionPackage": map[string]any{
+					"targetSnapshots": []map[string]any{{
+						"targetRef": "target.txt",
+						"content":   strings.Repeat("snapshot", 2000),
+					}},
+				},
+			},
+		},
+		RuntimeExecution: &readmodelcore.RuntimeExecutionState{
+			StepID:         "run-summary-compact/step-1",
+			ResourceHealth: map[string]any{"full": strings.Repeat("resource", 2000)},
+		},
+		ContextBundle: &readmodelcore.ContextBundle{
+			WorkspaceID: "ws-summary-compact",
+			Sections:    repeatedContextSections(3, 3),
+		},
+		ExecutionSections: repeatedExecutionSectionsForSummary(3),
+		LLMUsageTraces: []readmodelcore.LLMUsageTrace{{
+			ID: "usage-summary-compact",
+			ContextBudget: map[string]any{
+				"large": strings.Repeat("budget", 2000),
+			},
+		}},
+		EventRecords: []readmodelcore.EventRecord{{
+			ID:      "evt-summary-compact",
+			Payload: map[string]any{"large": strings.Repeat("event", 2000)},
+		}},
+	})
+
+	if got.Run != nil || got.Step != nil || got.RuntimeExecution != nil || got.ContextBundle != nil {
+		t.Fatalf("summary retained heavy runtime fields: run=%+v step=%+v runtime=%+v context=%+v", got.Run, got.Step, got.RuntimeExecution, got.ContextBundle)
+	}
+	if len(got.ExecutionSections) != 0 || len(got.LLMUsageTraces) != 0 || len(got.EventRecords) != 0 {
+		t.Fatalf("summary retained polling-heavy slices: execution=%d usage=%d events=%d", len(got.ExecutionSections), len(got.LLMUsageTraces), len(got.EventRecords))
+	}
+	if got.Workspace.ActiveRunID != "run-summary-compact" {
+		t.Fatalf("summary workspace = %+v, want lightweight active run identity retained", got.Workspace)
+	}
+}
+
 func TestProjectWorkspaceSnapshotDetailCompactsRuntimeAndTaskGraphFields(t *testing.T) {
 	t.Parallel()
 
@@ -468,6 +524,17 @@ func repeatedContextSections(count int, refs int) []readmodelcore.ContextSection
 			Data: map[string]any{
 				"long": strings.Repeat("d", workspaceSnapshotTraceStringLimit+200),
 			},
+		})
+	}
+	return ret
+}
+
+func repeatedExecutionSectionsForSummary(count int) []readmodelcore.ExecutionSection {
+	ret := make([]readmodelcore.ExecutionSection, 0, count)
+	for idx := 0; idx < count; idx++ {
+		ret = append(ret, readmodelcore.ExecutionSection{
+			ID:      "execution-summary-" + strconv.Itoa(idx),
+			Summary: strings.Repeat("execution", 2000),
 		})
 	}
 	return ret

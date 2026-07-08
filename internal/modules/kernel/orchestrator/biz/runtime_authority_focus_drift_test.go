@@ -409,6 +409,19 @@ func TestValidateConvergenceDispatchInputRejectsNestedRequiredOutputFocusDrift(t
 			"activeFocus": map[string]any{"id": "focus-cwi-current", "coverageWorkItemIds": []string{"cwi-current"}},
 		},
 	}
+	run := &runModel.Run{ID: "run-stage-packet-mirror-mismatch", WorkspaceID: "ws-stage-packet-mirror-mismatch"}
+	input = synchronizeCurrentRequiredOutputMirrors(input)
+	input = attachCurrentActionContractToInput(run, "run-stage-packet-mirror-mismatch/step-001", input)
+	stagePacket := mapFromValue(input[stepInputKeyStagePacket])
+	stagePacket["requiredOutput"] = concreteValidationEvidenceRequiredOutputWithScratch(
+		map[string]any{
+			"coverageWorkItemIds":  []string{"cwi-stale"},
+			"structuredTargetRefs": []string{"cwi-stale"},
+		},
+		nil,
+		nil,
+	)
+	input[stepInputKeyStagePacket] = stagePacket
 
 	err := validateConvergenceDispatchInput(input)
 	if err == nil {
@@ -1216,6 +1229,58 @@ func TestValidateConvergenceDispatchInputRejectsStateChangeRequiredOutputForbids
 	}
 }
 
+func TestValidateConvergenceDispatchInputRejectsRequiredOutputMirrorMismatch(t *testing.T) {
+	input := map[string]any{
+		"currentAuthorityRequiredOutputMirrorsCanonical": true,
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus": map[string]any{
+				"id":                  "cwi-current",
+				"coverageWorkItemIds": []string{"cwi-current"},
+			},
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		},
+		"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
+		"requiredOutput": concreteValidationEvidenceRequiredOutputWithScratch(
+			map[string]any{
+				"coverageWorkItemIds":  []string{"cwi-current"},
+				"structuredTargetRefs": []string{"cwi-current"},
+			},
+			nil,
+			nil,
+		),
+		stepInputKeyStagePacket: map[string]any{
+			"activeFocus": map[string]any{"id": "cwi-current"},
+			"nextAction": map[string]any{
+				"type": runtimemodel.NextActionTypeValidate,
+			},
+			"requiredOutput": concreteValidationEvidenceRequiredOutputWithScratch(
+				map[string]any{
+					"coverageWorkItemIds":  []string{"cwi-stale"},
+					"structuredTargetRefs": []string{"cwi-stale"},
+				},
+				nil,
+				nil,
+			),
+		},
+	}
+
+	err := validateConvergenceDispatchInput(input)
+	if err == nil {
+		t.Fatal("validateConvergenceDispatchInput returned nil, want requiredOutput mirror mismatch")
+	}
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want ErrConflict", err)
+	}
+	if !strings.Contains(err.Error(), "does not match current authority requiredOutput") {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want mirror mismatch", err)
+	}
+	diagnostics := mapSliceFromValue(input["authorityDiagnostics"])
+	if len(diagnostics) != 1 || stringFromMap(diagnostics[0], "code") != "required_output_mirror_mismatch" {
+		t.Fatalf("authorityDiagnostics = %+v, want required_output_mirror_mismatch", diagnostics)
+	}
+}
+
 func TestValidateConvergenceDispatchInputRejectsValidationRequiredOutputAcceptsPatchApply(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{
@@ -1245,6 +1310,41 @@ func TestValidateConvergenceDispatchInputRejectsValidationRequiredOutputAcceptsP
 	}
 	if diagnostics := mapSliceFromValue(input["authorityDiagnostics"]); len(diagnostics) != 1 || stringFromMap(diagnostics[0], "code") != "required_output_mismatch_next_action" {
 		t.Fatalf("authorityDiagnostics = %+v, want required_output_mismatch_next_action", input["authorityDiagnostics"])
+	}
+}
+
+func TestValidateConvergenceDispatchInputRejectsValidationWithoutRequiredOutputRoute(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                  "cwi-current",
+				"coverageWorkItemIds": []string{"cwi-current"},
+				"missingEvidenceKinds": []string{
+					runtimemodel.EvidenceKindValidation,
+				},
+			},
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		},
+		"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
+		stepInputKeyStagePacket: map[string]any{
+			"activeFocus": map[string]any{"id": "cwi-current"},
+			"nextAction":  map[string]any{"type": runtimemodel.NextActionTypeValidate},
+		},
+	}
+
+	err := validateConvergenceDispatchInput(input)
+	if err == nil {
+		t.Fatal("validateConvergenceDispatchInput returned nil, want validation requiredOutput route rejection")
+	}
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want ErrConflict", err)
+	}
+	if !strings.Contains(err.Error(), "validation missing requiredOutput") {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want validation missing requiredOutput marker", err)
+	}
+	diagnostics := mapSliceFromValue(input["authorityDiagnostics"])
+	if len(diagnostics) != 1 || stringFromMap(diagnostics[0], "code") != "required_output_mismatch_next_action" {
+		t.Fatalf("authorityDiagnostics = %+v, want required_output_mismatch_next_action", diagnostics)
 	}
 }
 

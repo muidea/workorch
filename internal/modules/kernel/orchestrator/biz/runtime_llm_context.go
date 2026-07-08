@@ -43,9 +43,11 @@ func compactStepInputForLLMContext(input map[string]any) map[string]any {
 	}
 	ret := compactLLMContextMap(input, 0)
 	delete(ret, "executionContext")
+	delete(ret, "failedExecutionGraph")
 	delete(ret, "failedStepInput")
 	delete(ret, "failedStepOutput")
 	delete(ret, "previousStepOutput")
+	delete(ret, stepInputKeyGraphEvidence)
 	delete(ret, stepInputKeyExecutionContextPackage)
 	delete(ret, stepInputKeyWorkspaceFileManifest)
 	delete(ret, stepOutputKeyExecutionGraph)
@@ -1556,12 +1558,14 @@ func redactedRuntimeContentOmittedForLLMContext(value string) map[string]any {
 func shouldSkipLLMContextKey(key string) bool {
 	switch key {
 	case "executionContext",
+		"failedExecutionGraph",
 		"failedStepInput",
 		"failedStepOutput",
 		"llmProviderId",
 		"previousStepOutput",
 		"provider",
 		"providerId",
+		stepInputKeyGraphEvidence,
 		stepInputKeyExecutionContextPackage,
 		stepInputKeyWorkspaceFileManifest:
 		return true
