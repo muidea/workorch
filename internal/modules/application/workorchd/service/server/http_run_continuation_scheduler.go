@@ -12,6 +12,7 @@ import (
 	magictask "github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const runWatchdogInterval = 30 * time.Second
@@ -934,6 +935,22 @@ func (s *runContinuationScheduler) drainWorkspaceExecutionQueue() bool {
 				}
 				return
 			}
+			activationWorkspaceID := strings.TrimSpace(activation.Run.WorkspaceID)
+			if activationWorkspaceID == "" {
+				activationWorkspaceID = req.WorkspaceID
+			}
+			activationRunID := strings.TrimSpace(activation.Run.ID)
+			if activationRunID != "" {
+				if status, ok, needsWork := s.activeRunDispatchableContinuationStatus(runCtx, activationWorkspaceID, activationRunID); ok && needsWork {
+					readback := s.newContinuationReadbackDiagnostic(activationWorkspaceID, activationRunID, taskName, activation.Run)
+					applyContinuationReadbackRunStatus(readback, status)
+					readback.Reason = "active_executable_next_action_without_current_step"
+					s.recordContinuationFailed(activationWorkspaceID, activationRunID, kind, schedulerReasonOwnerReadbackNotAdvanced, errors.New("workspace execution accepted but active run still has executable next action without a current step"), readback)
+					slog.Warn("workorch workspace execution owner readback did not advance", "task", taskName, "workspaceID", activationWorkspaceID, "runID", activationRunID, "reason", readback.Reason)
+					state.notifyRunStatusChangedForRun(activation.Run)
+					return
+				}
+			}
 			s.clearWorkspaceExecutionPending(key)
 			state.metrics.observeRunOutcome(activation.Run)
 			s.recordContinuationCompleted(req.WorkspaceID, activation.Run.ID, kind)
@@ -1023,7 +1040,14 @@ func (s *runContinuationScheduler) workspaceExecutionStillNeedsWork(ctx context.
 	if req.Command.Restart {
 		return true
 	}
-	return strings.TrimSpace(workspace.ActiveRunID) == ""
+	activeRunID := strings.TrimSpace(workspace.ActiveRunID)
+	if activeRunID == "" {
+		return true
+	}
+	if ok, needsWork := s.activeRunStatusHasDispatchableContinuation(ctx, workspaceID, activeRunID); ok {
+		return needsWork
+	}
+	return false
 }
 
 func (s *runContinuationScheduler) scheduleRunContinuation(req runContinuationRequest) bool {
@@ -1190,6 +1214,14 @@ func (s *runContinuationScheduler) runContinuationConfirmedAdvanced(ctx context.
 			readbackDiagnostic.GovernedWait = true
 			readbackDiagnostic.Reason = "governed_wait_approval"
 			return true, "", readbackDiagnostic
+		case common.RunStateActive:
+			if ok, needsWork := s.activeRunStatusHasDispatchableContinuation(ctx, workspaceID, runID); ok && needsWork {
+				readbackDiagnostic.Reason = "active_executable_next_action_without_current_step"
+				return false, "resume command accepted but active run still has executable next action without a current step", readbackDiagnostic
+			}
+			readbackDiagnostic.Advanced = true
+			readbackDiagnostic.Reason = "run_state_advanced"
+			return true, "", readbackDiagnostic
 		default:
 			readbackDiagnostic.Advanced = true
 			readbackDiagnostic.Terminal = continuationReadbackTerminalState(readback.State)
@@ -1239,6 +1271,22 @@ func applyContinuationReadbackRun(ret *appservice.ContinuationReadbackDiagnostic
 	ret.NewBlockingApprovalID = strings.TrimSpace(run.BlockingApprovalID)
 	ret.Terminal = continuationReadbackTerminalState(run.State)
 	ret.GovernedWait = common.RunState(run.State) == common.RunStateBlockedOnDecision || common.RunState(run.State) == common.RunStateBlockedOnApproval
+}
+
+func applyContinuationReadbackRunStatus(ret *appservice.ContinuationReadbackDiagnostic, status appservice.RunStatus) {
+	if ret == nil {
+		return
+	}
+	ret.Found = strings.TrimSpace(status.ID) != ""
+	if !ret.Found {
+		return
+	}
+	ret.NewRunState = strings.TrimSpace(status.State)
+	ret.NewBlockingTicketID = strings.TrimSpace(status.BlockingTicketID)
+	ret.NewBlockingApprovalID = strings.TrimSpace(status.BlockingApprovalID)
+	ret.LatestStepID = strings.TrimSpace(status.CurrentStepID)
+	ret.Terminal = continuationReadbackTerminalState(status.State)
+	ret.GovernedWait = common.RunState(status.State) == common.RunStateBlockedOnDecision || common.RunState(status.State) == common.RunStateBlockedOnApproval
 }
 
 func continuationReadbackTerminalState(state string) bool {
@@ -1336,6 +1384,14 @@ func (s *runContinuationScheduler) runContinuationStillNeedsWork(ctx context.Con
 			switch common.RunState(run.State) {
 			case common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
 				return true
+			case common.RunStateActive:
+				if strings.TrimSpace(run.CurrentStepID) != "" {
+					return false
+				}
+				if ok, needsWork := s.activeRunStatusHasDispatchableContinuation(ctx, workspaceID, runID); ok {
+					return needsWork
+				}
+				return false
 			default:
 				return false
 			}
@@ -1344,4 +1400,59 @@ func (s *runContinuationScheduler) runContinuationStillNeedsWork(ctx context.Con
 		}
 	}
 	return false
+}
+
+func (s *runContinuationScheduler) activeRunStatusHasDispatchableContinuation(ctx context.Context, workspaceID, runID string) (bool, bool) {
+	_, ok, needsWork := s.activeRunDispatchableContinuationStatus(ctx, workspaceID, runID)
+	return ok, needsWork
+}
+
+func (s *runContinuationScheduler) activeRunDispatchableContinuationStatus(ctx context.Context, workspaceID, runID string) (appservice.RunStatus, bool, bool) {
+	if s == nil || s.state == nil || s.state.readRunStatus == nil {
+		return appservice.RunStatus{}, false, false
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	runID = strings.TrimSpace(runID)
+	if workspaceID == "" || runID == "" {
+		return appservice.RunStatus{}, false, false
+	}
+	status, err := s.state.readRunStatus(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID)), s.state.config.Backend, s.state.config.DataRoot, runID)
+	if err != nil {
+		if !errors.Is(err, common.ErrNotFound) {
+			slog.Warn("workorch continuation pending run status lookup failed", "workspaceID", workspaceID, "runID", runID, "err", err)
+		}
+		return appservice.RunStatus{}, false, false
+	}
+	if status.ID != "" && status.ID != runID {
+		return status, true, false
+	}
+	if status.WorkspaceID != "" && status.WorkspaceID != workspaceID {
+		return status, true, false
+	}
+	if common.RunState(status.State) != common.RunStateActive {
+		return status, true, false
+	}
+	if strings.TrimSpace(status.CurrentStepID) != "" {
+		return status, true, false
+	}
+	action := ""
+	if status.ConvergenceStatus != nil {
+		action = status.ConvergenceStatus.NextActionKind
+	}
+	return status, true, continuationNextActionIsDispatchable(action)
+}
+
+func continuationNextActionIsDispatchable(action string) bool {
+	switch strings.TrimSpace(action) {
+	case runtimemodel.NextActionTypeAssessGap,
+		runtimemodel.NextActionTypePlan,
+		runtimemodel.NextActionTypeAcquireTargetSnapshot,
+		runtimemodel.NextActionTypeStateChange,
+		runtimemodel.NextActionTypeValidate,
+		runtimemodel.NextActionTypeAssessment,
+		runtimemodel.NextActionTypeRepair:
+		return true
+	default:
+		return false
+	}
 }

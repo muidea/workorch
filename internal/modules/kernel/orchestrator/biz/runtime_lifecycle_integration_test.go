@@ -17,6 +17,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type listFailingStepRepository struct {
@@ -224,6 +225,40 @@ func (r *listFailingStepRepository) Update(ctx context.Context, item *runmodel.S
 }
 
 func (r *listFailingStepRepository) Delete(ctx context.Context, id common.StepID) error {
+	return r.inner.Delete(ctx, id)
+}
+
+type createFailingStepRepository struct {
+	inner       *memory.StepRepository
+	err         error
+	createCalls int
+}
+
+func (r *createFailingStepRepository) Create(context.Context, *runmodel.Step) error {
+	r.createCalls++
+	if r.err != nil {
+		return r.err
+	}
+	return common.ErrConflict
+}
+
+func (r *createFailingStepRepository) Get(ctx context.Context, id common.StepID) (*runmodel.Step, error) {
+	return r.inner.Get(ctx, id)
+}
+
+func (r *createFailingStepRepository) ListByRun(ctx context.Context, id common.RunID) ([]*runmodel.Step, error) {
+	return r.inner.ListByRun(ctx, id)
+}
+
+func (r *createFailingStepRepository) ListByRunSummary(ctx context.Context, id common.RunID) ([]*runmodel.Step, error) {
+	return r.inner.ListByRunSummary(ctx, id)
+}
+
+func (r *createFailingStepRepository) Update(ctx context.Context, item *runmodel.Step) error {
+	return r.inner.Update(ctx, item)
+}
+
+func (r *createFailingStepRepository) Delete(ctx context.Context, id common.StepID) error {
 	return r.inner.Delete(ctx, id)
 }
 
@@ -516,6 +551,377 @@ func TestRuntimeOrchestrator_ResumeRunningRunWithNoStepsDispatchesInitialStep(t 
 	}
 	if step.State != common.StepStateSucceeded {
 		t.Fatalf("step state = %q, want completed", step.State)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeRunningRunWithTerminalValidateAuthorityDispatchesContinuation(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &requestOnlyRuntimeAdapter{}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, nil)
+
+	workspaceID := common.WorkspaceID("ws-terminal-validate-continuation")
+	runID := common.RunID("run-terminal-validate-continuation")
+	terminalStepID := common.StepID(runID + "/graph-001/state-change")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "ws",
+		State:       common.WorkspaceStateActive,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := runWithAuthorityFocusForTest("validate")
+	run.ID = runID
+	run.WorkspaceID = workspaceID
+	run.State = common.RunStateActive
+	updateAuthorityScopeForTest(run, workspaceID, runID)
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    terminalStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateSucceeded,
+		Output: map[string]any{
+			"status": "completed",
+		},
+	}); err != nil {
+		t.Fatalf("seed terminal step: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume running terminal run: %v", err)
+	}
+	if len(runtime.requests) != 1 {
+		t.Fatalf("runtime requests = %d, want one authority continuation dispatch", len(runtime.requests))
+	}
+	request := runtime.requests[0]
+	if request.RunID != runID || request.Kind != llmcommon.StepKindWorkspaceExecution {
+		t.Fatalf("request = %+v, want scoped llm workspace execution", request)
+	}
+	nextAction := currentActionNextActionFromInput(request.Input)
+	if got := stringFromMap(nextAction, "kind"); got != "validate" {
+		t.Fatalf("request nextAction = %+v, want validate", nextAction)
+	}
+	required := mapFromValue(request.Input["requiredOutput"])
+	if len(required) == 0 {
+		t.Fatalf("request requiredOutput missing: %+v", request.Input)
+	}
+	acceptedKinds := stringSliceFromValue(required["acceptedKinds"])
+	if !stringSliceContains(acceptedKinds, runtimemodel.StepKindShellCommand) ||
+		!stringSliceContains(acceptedKinds, managedValidationSessionNodeKind) ||
+		stringSliceContains(acceptedKinds, runtimemodel.RuntimeBlockKindPatchApply) {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want bounded validation-only producers", acceptedKinds)
+	}
+	example := mapFromValue(required["validationEvidenceNodeExample"])
+	exampleInput := mapFromValue(example["input"])
+	exampleEvidence := mapFromValue(exampleInput["validationEvidence"])
+	if stringFromMap(exampleEvidence, "mode") == "" ||
+		stringFromMap(exampleEvidence, "observationType") == "" ||
+		len(stringSliceFromValue(exampleEvidence["observedClaims"])) == 0 ||
+		!stringSliceContains(stringSliceFromValue(exampleEvidence["coverageWorkItemIds"]), "cwi-current") {
+		t.Fatalf("validationEvidenceNodeExample = %+v, want concrete coverage-bound validation evidence", example)
+	}
+	assertRequiredOutputMirrorForTest(t, "repairActionPackage.requiredOutput", required, mapFromValue(mapFromValue(request.Input["repairActionPackage"])["requiredOutput"]))
+	stagePacket := mapFromValue(request.Input[stepInputKeyStagePacket])
+	assertRequiredOutputMirrorForTest(t, "stagePacket.requiredOutput", required, mapFromValue(stagePacket["requiredOutput"]))
+	assertRequiredOutputMirrorForTest(t, "stagePacket.nextAction.requiredOutput", required, mapFromValue(mapFromValue(stagePacket["nextAction"])["requiredOutput"]))
+	assertRequiredOutputMirrorForTest(t, "currentActionContract.requiredOutput", required, mapFromValue(mapFromValue(request.Input[currentActionContractKey])["requiredOutput"]))
+	continuation, err := stepRepo.Get(ctx, request.StepID)
+	if err != nil {
+		t.Fatalf("get continuation step: %v", err)
+	}
+	if continuation.State != common.StepStateExecuting {
+		t.Fatalf("continuation step state = %q, want executing", continuation.State)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeRunningRunWithTerminalStateChangeAuthorityDispatchesContinuation(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &requestOnlyRuntimeAdapter{}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, nil)
+
+	workspaceID := common.WorkspaceID("ws-terminal-statechange-continuation")
+	runID := common.RunID("run-terminal-statechange-continuation")
+	terminalStepID := common.StepID(runID + "/validation-diagnostic")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "ws",
+		State:       common.WorkspaceStateActive,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := stateChangeAuthorityRunForTest(workspaceID, runID, stateChangeAuthorityRunOptions{
+		TargetRef: "target.txt",
+		TargetSnapshots: []map[string]any{{
+			"targetRef":         "target.txt",
+			"exists":            true,
+			"content":           "current target content\n",
+			"contentHash":       "hash-target-current",
+			"contentComplete":   true,
+			"safeForFileWrite":  true,
+			"safeForExactPatch": true,
+			"runtimeManaged":    true,
+		}},
+	})
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    terminalStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateSucceeded,
+		Output: map[string]any{
+			"status": "completed",
+		},
+	}); err != nil {
+		t.Fatalf("seed terminal step: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume running terminal run: %v", err)
+	}
+	if len(runtime.requests) != 1 {
+		t.Fatalf("runtime requests = %d, want one state-changing authority continuation dispatch", len(runtime.requests))
+	}
+	request := runtime.requests[0]
+	nextAction := currentActionNextActionFromInput(request.Input)
+	if got := stringFromMap(nextAction, "kind"); got != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("request nextAction = %+v, want state_change", nextAction)
+	}
+	contract := mapFromValue(request.Input["convergenceContract"])
+	if got := stringFromMap(contract, "state"); got != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+	}
+	if targetSnapshotPrerequisiteActive(request.Input) {
+		t.Fatalf("request input unexpectedly requires target snapshot acquisition: %+v", request.Input)
+	}
+}
+
+func TestRuntimeOrchestrator_TerminalStateChangeAuthorityRebuildsTargetSnapshotPrerequisite(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo, workspaces: workspaceRepo}
+
+	workspaceID := common.WorkspaceID("ws-terminal-statechange-snapshot")
+	runID := common.RunID("run-terminal-statechange-snapshot")
+	terminalStepID := common.StepID(runID + "/validation-diagnostic")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "ws",
+		State:       common.WorkspaceStateActive,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := stateChangeAuthorityRunForTest(workspaceID, runID, stateChangeAuthorityRunOptions{
+		TargetRef:                     "target.txt",
+		RequiresCurrentTargetSnapshot: true,
+	})
+	terminalStep := &runmodel.Step{
+		ID:    terminalStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateSucceeded,
+		Output: map[string]any{
+			"status": "completed",
+		},
+	}
+	if err := stepRepo.Create(ctx, terminalStep); err != nil {
+		t.Fatalf("seed terminal step: %v", err)
+	}
+
+	specs, err := orch.nextDispatchSpecsFromStep(ctx, run, terminalStep)
+	if err != nil {
+		t.Fatalf("nextDispatchSpecsFromStep: %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("specs = %+v, want one authority continuation spec", specs)
+	}
+	input, err := rebuildDispatchInputFromConvergenceAuthority(run, specs[0].ID, specs[0].Input)
+	if err != nil {
+		t.Fatalf("rebuildDispatchInputFromConvergenceAuthority: %v", err)
+	}
+	nextAction := strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind"))
+	state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state"))
+	if !targetSnapshotAcquisitionDispatchActive(input, state, nextAction) {
+		t.Fatalf("targetSnapshotAcquisitionDispatchActive = false, state=%q nextAction=%q input=%+v", state, nextAction, input)
+	}
+	if !inputRequiresRuntimeManagedTargetSnapshotAcquisition(input) {
+		t.Fatalf("inputRequiresRuntimeManagedTargetSnapshotAcquisition = false, input=%+v", input)
+	}
+	output, ok := runtimeManagedTargetSnapshotAcquisitionOutput(input)
+	if !ok {
+		t.Fatalf("runtimeManagedTargetSnapshotAcquisitionOutput ok = false, input=%+v", input)
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok || len(graph.Nodes) != 1 || graph.Nodes[0].Kind != runtimemodel.StepKindFileRead || graph.Nodes[0].Input["path"] != "target.txt" {
+		t.Fatalf("target snapshot graph = %+v/%v, want one file/read target.txt node", graph, ok)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeRunningRunDispatchCreateFailureFailsRun(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	innerStepRepo := memory.NewStepRepository()
+	stepRepo := &createFailingStepRepository{
+		inner: innerStepRepo,
+		err:   errors.New("dispatch step create failed"),
+	}
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &requestOnlyRuntimeAdapter{}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, nil)
+
+	workspaceID := common.WorkspaceID("ws-terminal-dispatch-failure")
+	runID := common.RunID("run-terminal-dispatch-failure")
+	terminalStepID := common.StepID(runID + "/graph-001/state-change")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "ws",
+		State:       common.WorkspaceStateActive,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := runWithAuthorityFocusForTest("validate")
+	run.ID = runID
+	run.WorkspaceID = workspaceID
+	run.State = common.RunStateActive
+	updateAuthorityScopeForTest(run, workspaceID, runID)
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := innerStepRepo.Create(ctx, &runmodel.Step{
+		ID:    terminalStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateSucceeded,
+		Output: map[string]any{
+			"status": "completed",
+		},
+	}); err != nil {
+		t.Fatalf("seed terminal step: %v", err)
+	}
+
+	err := orch.ResumeRun(ctx, runID)
+	if err != nil && !strings.Contains(err.Error(), "dispatch step create failed") {
+		t.Fatalf("ResumeRun err = %v, want nil or dispatch create failure", err)
+	}
+	if stepRepo.createCalls != 1 {
+		t.Fatalf("dispatch create calls = %d, want one continuation create attempt", stepRepo.createCalls)
+	}
+	storedRun, getErr := runRepo.Get(ctx, runID)
+	if getErr != nil {
+		t.Fatalf("get run: %v", getErr)
+	}
+	if storedRun.State != common.RunStateFailed || !strings.Contains(storedRun.FailureReason, "dispatch step create failed") {
+		t.Fatalf("run state/reason = %q/%q, want failed structured dispatch failure", storedRun.State, storedRun.FailureReason)
+	}
+	workspace, getErr := workspaceRepo.Get(ctx, workspaceID)
+	if getErr != nil {
+		t.Fatalf("get workspace: %v", getErr)
+	}
+	if workspace.ActiveRunID != "" {
+		t.Fatalf("workspace active run = %q, want cleared after dispatch failure", workspace.ActiveRunID)
+	}
+	if len(runtime.requests) != 0 {
+		t.Fatalf("runtime requests = %d, want no direct runtime dispatch after event publish failure", len(runtime.requests))
+	}
+}
+
+type stateChangeAuthorityRunOptions struct {
+	TargetRef                     string
+	RequiresCurrentTargetSnapshot bool
+	TargetSnapshots               []map[string]any
+}
+
+func stateChangeAuthorityRunForTest(workspaceID common.WorkspaceID, runID common.RunID, opts stateChangeAuthorityRunOptions) *runmodel.Run {
+	targetRef := strings.TrimSpace(opts.TargetRef)
+	if targetRef == "" {
+		targetRef = "target.txt"
+	}
+	focus := map[string]any{
+		"id":                   "cwi-state-change-current",
+		"coverageWorkItemIds":  []string{"cwi-state-change-current"},
+		"missingEvidenceKinds": []string{runtimemodel.EvidenceKindStateChange},
+		"requiredEvidenceKinds": []string{
+			runtimemodel.EvidenceKindStateChange,
+			runtimemodel.EvidenceKindValidation,
+		},
+		"status":               "open",
+		"targetRefs":           []string{targetRef},
+		"structuredTargetRefs": []map[string]any{{"targetRef": targetRef}},
+	}
+	authority := map[string]any{
+		"schemaVersion": convergenceAuthoritySchema,
+		"workspaceId":   string(workspaceID),
+		"runId":         string(runID),
+		"currentFocus":  cloneStepPayload(focus),
+		"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+	}
+	pkg := map[string]any{
+		"repairTargetSet": []string{targetRef},
+		"requiredOutput": map[string]any{
+			"coverageWorkItemIds":           []string{"cwi-state-change-current"},
+			"structuredTargetRefs":          []string{targetRef},
+			"repairTargetSet":               []string{targetRef},
+			"requiredEvidenceKinds":         []string{runtimemodel.EvidenceKindStateChange},
+			"mustIncludeStateChangingNode":  true,
+			"mustBindCoverageFocus":         true,
+			"mustReferenceCoverageWorkItem": true,
+			"acceptedKinds": []string{
+				runtimemodel.RuntimeBlockKindPatchApply,
+				runtimemodel.StepKindShellCommand,
+				runtimemodel.StepKindMCPToolCall,
+				runtimemodel.StepKindGitWrite,
+			},
+		},
+	}
+	if opts.RequiresCurrentTargetSnapshot {
+		pkg["requiresCurrentTargetSnapshotForStateChange"] = true
+		required := mapFromValue(pkg["requiredOutput"])
+		required["mustUseCurrentTargetSnapshot"] = true
+		pkg["requiredOutput"] = required
+	}
+	if len(opts.TargetSnapshots) > 0 {
+		pkg["targetSnapshots"] = cloneStepInputValue(opts.TargetSnapshots)
+	}
+	return &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateActive,
+		ExecutionContext: map[string]any{
+			coverageFocusKey:        cloneStepPayload(focus),
+			convergenceAuthorityKey: cloneStepPayload(authority),
+			gapBaselineKey:          cloneStepPayload(authority),
+			"repairActionPackage":   pkg,
+		},
+	}
+}
+
+func assertRequiredOutputMirrorForTest(t *testing.T, label string, want map[string]any, got map[string]any) {
+	t.Helper()
+	if len(got) == 0 {
+		t.Fatalf("%s missing, want requiredOutput mirror", label)
+	}
+	if stableCoverageJSON(got) != stableCoverageJSON(want) {
+		t.Fatalf("%s = %+v, want mirror %+v", label, got, want)
 	}
 }
 

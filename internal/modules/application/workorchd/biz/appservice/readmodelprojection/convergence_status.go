@@ -20,6 +20,14 @@ func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *readmodelcore.Con
 		ret.AcceptedEvidenceCount = len(compactUniqueStrings(snapshot.GapBaseline.AcceptedEvidenceRefs))
 		ret.RejectedEvidenceCount = len(compactUniqueStrings(snapshot.GapBaseline.RejectedEvidenceRefs))
 	}
+	if authority := MapValue(snapshot.Run.ExecutionContext["convergenceAuthority"]); len(authority) > 0 {
+		if focusID := focusIDFromMap(MapValue(authority["currentFocus"])); focusID != "" {
+			ret.CurrentFocusID = focusID
+		}
+		if nextActionKind := strings.TrimSpace(stringValue(MapValue(authority["nextAction"]), "kind")); nextActionKind != "" {
+			ret.NextActionKind = nextActionKind
+		}
+	}
 	if snapshot.Acceptance.CurrentFocus != nil {
 		focus := snapshot.Acceptance.CurrentFocus
 		ret.CurrentFocusID = firstNonEmptyString(ret.CurrentFocusID, focus.ID)

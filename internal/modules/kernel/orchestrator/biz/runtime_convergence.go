@@ -1027,6 +1027,9 @@ func stateChangeRequiresTargetSnapshotAcquisition(input map[string]any, pkg map[
 	if requiresSnapshot {
 		return true
 	}
+	if hasReadableTarget {
+		return true
+	}
 	if len(convergenceConcreteFailureTargetRefs(input, pkg)) > 0 {
 		return hasReadableTarget
 	}

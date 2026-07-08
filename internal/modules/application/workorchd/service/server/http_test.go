@@ -6148,6 +6148,194 @@ func TestServerStateRunContinuationDoesNotCompleteWhenReadbackStillBlockedOnReso
 	}
 }
 
+func TestRunContinuationStillNeedsWorkForActiveExecutableNextActionWithoutCurrentStep(t *testing.T) {
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, &recordingBackgroundRoutine{})
+	const workspaceID = "ws-active-nextaction"
+	const runID = "run-active-nextaction"
+	req := runContinuationRequest{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		Action:      "resume",
+	}
+	state.listRuns = func(_ context.Context, _, _, gotWorkspaceID string) ([]appservice.Run, error) {
+		if gotWorkspaceID != workspaceID {
+			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
+		}
+		return []appservice.Run{{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       string(common.RunStateActive),
+		}}, nil
+	}
+	state.readRunStatus = func(_ context.Context, _, _, gotRunID string) (appservice.RunStatus, error) {
+		if gotRunID != runID {
+			t.Fatalf("runID = %q, want %s", gotRunID, runID)
+		}
+		return appservice.RunStatus{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       string(common.RunStateActive),
+			ConvergenceStatus: &readmodelcore.ConvergenceStatus{
+				NextActionKind: "validate",
+			},
+		}, nil
+	}
+
+	if !state.runContinuations.runContinuationStillNeedsWork(context.Background(), req) {
+		t.Fatalf("run continuation should still need work for active run with executable NextAction and no current step")
+	}
+}
+
+func TestRunContinuationReadbackRejectsActiveExecutableNextActionWithoutCurrentStep(t *testing.T) {
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, &recordingBackgroundRoutine{})
+	const workspaceID = "ws-active-readback-nextaction"
+	const runID = "run-active-readback-nextaction"
+	req := runContinuationRequest{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		Action:      "resume",
+	}
+	state.listRuns = func(_ context.Context, _, _, gotWorkspaceID string) ([]appservice.Run, error) {
+		if gotWorkspaceID != workspaceID {
+			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
+		}
+		return []appservice.Run{{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       string(common.RunStateActive),
+		}}, nil
+	}
+	state.readRunStatus = func(_ context.Context, _, _, gotRunID string) (appservice.RunStatus, error) {
+		if gotRunID != runID {
+			t.Fatalf("runID = %q, want %s", gotRunID, runID)
+		}
+		return appservice.RunStatus{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       string(common.RunStateActive),
+			ConvergenceStatus: &readmodelcore.ConvergenceStatus{
+				NextActionKind: "state_change",
+			},
+		}, nil
+	}
+
+	ok, detail, readback := state.runContinuations.runContinuationConfirmedAdvanced(context.Background(), req, appservice.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       string(common.RunStateActive),
+	})
+	if ok || readback == nil ||
+		readback.Reason != "active_executable_next_action_without_current_step" ||
+		!strings.Contains(detail, "executable next action") {
+		t.Fatalf("readback ok=%v detail=%q readback=%+v, want active executable next action gap", ok, detail, readback)
+	}
+}
+
+func TestWorkspaceExecutionStillNeedsWorkForActiveRunExecutableNextActionWithoutCurrentStep(t *testing.T) {
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, &recordingBackgroundRoutine{})
+	const workspaceID = "ws-workspace-active-nextaction"
+	const runID = "run-workspace-active-nextaction"
+	req := workspaceRestartRequest{
+		WorkspaceID: workspaceID,
+		Command: appservice.ActivateWorkspaceExecutionCommand{
+			Restart: false,
+		},
+	}
+	state.readWorkspace = func(_ context.Context, _, _, gotWorkspaceID string) (appservice.Workspace, error) {
+		if gotWorkspaceID != workspaceID {
+			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
+		}
+		return appservice.Workspace{
+			ID:          workspaceID,
+			State:       string(common.WorkspaceStateActive),
+			ActiveRunID: runID,
+		}, nil
+	}
+	state.readRunStatus = func(_ context.Context, _, _, gotRunID string) (appservice.RunStatus, error) {
+		if gotRunID != runID {
+			t.Fatalf("runID = %q, want %s", gotRunID, runID)
+		}
+		return appservice.RunStatus{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       string(common.RunStateActive),
+			ConvergenceStatus: &readmodelcore.ConvergenceStatus{
+				NextActionKind: "validate",
+			},
+		}, nil
+	}
+
+	if !state.runContinuations.workspaceExecutionStillNeedsWork(context.Background(), req) {
+		t.Fatalf("workspace execution should still need work while active run has executable NextAction and no current step")
+	}
+}
+
+func TestWorkspaceExecutionDoesNotCompleteWhenActiveRunStillHasExecutableNextActionWithoutCurrentStep(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	const workspaceID = "ws-workspace-readback-nextaction"
+	const runID = "run-workspace-readback-nextaction"
+	req := workspaceRestartRequest{
+		WorkspaceID: workspaceID,
+		Command: appservice.ActivateWorkspaceExecutionCommand{
+			Restart: false,
+		},
+	}
+	state.resumeWorkspaceExecution = func(_ context.Context, _, _, gotWorkspaceID string, _ appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		if gotWorkspaceID != workspaceID {
+			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
+		}
+		return appservice.WorkspaceExecutionActivation{
+			Run: appservice.Run{
+				ID:          runID,
+				WorkspaceID: workspaceID,
+				State:       string(common.RunStateActive),
+			},
+		}, nil
+	}
+	state.readRunStatus = func(_ context.Context, _, _, gotRunID string) (appservice.RunStatus, error) {
+		if gotRunID != runID {
+			t.Fatalf("runID = %q, want %s", gotRunID, runID)
+		}
+		return appservice.RunStatus{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       string(common.RunStateActive),
+			ConvergenceStatus: &readmodelcore.ConvergenceStatus{
+				NextActionKind: "validate",
+			},
+		}, nil
+	}
+
+	if !state.runContinuations.scheduleWorkspaceActivation(req) {
+		t.Fatalf("workspace execution scheduling failed")
+	}
+	if routine.function == nil {
+		t.Fatal("workspace execution background function was not queued")
+	}
+	routine.function()
+
+	state.runContinuations.restartMu.Lock()
+	_, pending := state.runContinuations.restartPending["workspace_activation/"+workspaceID]
+	state.runContinuations.restartMu.Unlock()
+	if !pending {
+		t.Fatalf("workspace execution pending entry was cleared despite active executable NextAction without current step")
+	}
+	diagnostics := state.schedulerDiagnostics.snapshot(workspaceID, runID)
+	if diagnostics == nil || diagnostics.LatestContinuation == nil {
+		t.Fatalf("scheduler diagnostics = %+v, want owner readback failure", diagnostics)
+	}
+	latest := diagnostics.LatestContinuation
+	if latest.Kind != schedulerKindWorkspaceActivation ||
+		latest.State != schedulerDiagnosticStateFailed ||
+		latest.Reason != schedulerReasonOwnerReadbackNotAdvanced ||
+		latest.Recoverability != schedulerRecoverabilityInspect ||
+		latest.Readback == nil ||
+		latest.Readback.Reason != "active_executable_next_action_without_current_step" {
+		t.Fatalf("latest continuation = %+v, want workspace readback failure", latest)
+	}
+}
+
 func TestWorkorchDSchedulerWorkspaceRunCommandEnqueuesRunContinuationByWorkspaceScope(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMemoryHub()

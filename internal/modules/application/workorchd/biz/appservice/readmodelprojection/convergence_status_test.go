@@ -93,6 +93,35 @@ func TestMapConvergenceStatusProjectsCompactRunState(t *testing.T) {
 	}
 }
 
+func TestMapConvergenceStatusPrefersOwnerAuthorityNextAction(t *testing.T) {
+	t.Parallel()
+
+	got := MapConvergenceStatus(readmodelcore.RunSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-authority-status"},
+		Run: readmodelcore.Run{
+			ID:          "run-authority-status",
+			WorkspaceID: "ws-authority-status",
+			State:       "running",
+			ExecutionContext: map[string]any{
+				"convergenceAuthority": map[string]any{
+					"currentFocus": map[string]any{"id": "focus-authority"},
+					"nextAction":   map[string]any{"kind": "validate"},
+				},
+			},
+		},
+		GapBaseline: &readmodelcore.GapBaseline{
+			CurrentFocus: map[string]any{"id": "focus-stale"},
+			NextAction:   readmodelcore.GapNextAction{Kind: "assessment"},
+		},
+	})
+	if got == nil {
+		t.Fatal("ConvergenceStatus is nil")
+	}
+	if got.CurrentFocusID != "focus-authority" || got.NextActionKind != "validate" {
+		t.Fatalf("ConvergenceStatus = %+v, want owner convergenceAuthority focus/nextAction", got)
+	}
+}
+
 func TestMapConvergenceStatusClassifiesRetryExhaustionDecision(t *testing.T) {
 	t.Parallel()
 

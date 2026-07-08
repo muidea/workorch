@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -76,7 +77,7 @@ func (o *RuntimeOrchestrator) requestDispatchStep(ctx context.Context, runID com
 	if !o.eventDrivenDispatch {
 		return wrapRuntimeDispatchRequestError("direct_dispatch", o.dispatchStepWithWorkspace(ctx, run, spec.ID, spec.Kind, spec.Input, nil))
 	}
-	idempotencyKey := dispatchStepIdempotencyKey(workspaceID, runID, spec.ID, spec.Kind)
+	idempotencyKey := dispatchStepIdempotencyKey(workspaceID, runID, spec.ID, spec.Kind, spec.Input)
 	cmd := orchestratorcontracts.DispatchStepCommand{
 		WorkspaceID:    workspaceID,
 		RunID:          runID,
@@ -115,8 +116,40 @@ func workspaceIDForDispatch(run *runModel.Run, workspace *workspaceModel.Workspa
 	return ""
 }
 
-func dispatchStepIdempotencyKey(workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, kind string) string {
-	return string(workspaceID) + "|" + string(runID) + "|" + string(stepID) + "|" + kind
+func dispatchStepIdempotencyKey(workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, kind string, input map[string]any) string {
+	parts := []string{string(workspaceID), string(runID), string(stepID), strings.TrimSpace(kind)}
+	if scope := dispatchStepActionIdempotencyScope(input); scope != "" {
+		parts = append(parts, "action:"+scope)
+	}
+	return strings.Join(parts, "|")
+}
+
+func dispatchStepActionIdempotencyScope(input map[string]any) string {
+	for _, action := range []map[string]any{
+		mapFromValue(mapFromValue(input[currentActionContractKey])["nextAction"]),
+		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["nextAction"]),
+		currentActionNextActionFromInput(input),
+		mapFromValue(mapFromValue(input[convergenceAuthorityKey])["nextAction"]),
+		mapFromValue(mapFromValue(input[gapBaselineKey])["nextAction"]),
+	} {
+		if len(action) == 0 {
+			continue
+		}
+		if key := strings.TrimSpace(stringFromMap(action, "idempotencyKey")); key != "" {
+			return key
+		}
+		if id := strings.TrimSpace(stringFromMap(action, "id")); id != "" {
+			return id
+		}
+		if kind := strings.TrimSpace(firstNonEmptyString(stringFromMap(action, "type"), stringFromMap(action, "kind"))); kind != "" {
+			hash := sha256HexBytes([]byte(stableCoverageJSON(action)))
+			if len(hash) > 16 {
+				hash = hash[:16]
+			}
+			return kind + ":" + hash
+		}
+	}
+	return ""
 }
 
 func (o *RuntimeOrchestrator) RequestUniqueDispatchStep(ctx context.Context, run *runModel.Run, stepID common.StepID, kind string, input map[string]any, workspaceID common.WorkspaceID) error {

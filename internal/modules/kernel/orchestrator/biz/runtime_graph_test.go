@@ -74,6 +74,42 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchSerializesLLMDispatchRequests(
 	}
 }
 
+func TestDispatchStepIdempotencyKeyIncludesCurrentActionScope(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-dispatch-idempotency")
+	runID := common.RunID("run-dispatch-idempotency")
+	stepID := common.StepID("run-dispatch-idempotency/step-2")
+	validateInput := map[string]any{
+		currentActionContractKey: map[string]any{
+			"nextAction": map[string]any{
+				"kind":           runtimemodel.NextActionTypeValidate,
+				"idempotencyKey": "next-action|validate|focus-a",
+			},
+		},
+	}
+	stateChangeInput := map[string]any{
+		currentActionContractKey: map[string]any{
+			"nextAction": map[string]any{
+				"kind":           runtimemodel.NextActionTypeStateChange,
+				"idempotencyKey": "next-action|state-change|focus-a",
+			},
+		},
+	}
+
+	validateKey := dispatchStepIdempotencyKey(workspaceID, runID, stepID, llmWorkspaceExecutionStepKind, validateInput)
+	stateChangeKey := dispatchStepIdempotencyKey(workspaceID, runID, stepID, llmWorkspaceExecutionStepKind, stateChangeInput)
+	if validateKey == stateChangeKey {
+		t.Fatalf("idempotency keys matched: %q", validateKey)
+	}
+	for _, want := range []string{string(workspaceID), string(runID), string(stepID), llmWorkspaceExecutionStepKind, "next-action|validate|focus-a"} {
+		if !strings.Contains(validateKey, want) {
+			t.Fatalf("validate idempotency key = %q, want scope %q", validateKey, want)
+		}
+	}
+	if !strings.Contains(stateChangeKey, "next-action|state-change|focus-a") {
+		t.Fatalf("state-change idempotency key = %q, want action scope", stateChangeKey)
+	}
+}
+
 func TestRuntimeOrchestrator_CompletedGraphBatchDispatchesDependentValidation(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-event-driven-graph-continuation")
