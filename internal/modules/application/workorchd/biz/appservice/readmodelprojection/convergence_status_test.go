@@ -122,6 +122,50 @@ func TestMapConvergenceStatusPrefersOwnerAuthorityNextAction(t *testing.T) {
 	}
 }
 
+func TestMapConvergenceStatusUsesOwnerAuthorityMissingEvidenceKinds(t *testing.T) {
+	t.Parallel()
+
+	got := MapConvergenceStatus(readmodelcore.RunSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-authority-missing"},
+		Run: readmodelcore.Run{
+			ID:          "run-authority-missing",
+			WorkspaceID: "ws-authority-missing",
+			State:       "running",
+			ExecutionContext: map[string]any{
+				"convergenceAuthority": map[string]any{
+					"currentFocus": map[string]any{
+						"id":                   "cwi-036",
+						"missingEvidenceKinds": []any{"validation"},
+					},
+					"nextAction": map[string]any{"kind": "validate"},
+				},
+			},
+		},
+		GapBaseline: &readmodelcore.GapBaseline{
+			CurrentFocus: map[string]any{"id": "cwi-036"},
+			NextAction:   readmodelcore.GapNextAction{Kind: "validate"},
+			TodoItems: []readmodelcore.GapTodoItem{{
+				RequiredEvidenceKinds: []string{"validation", "state_change"},
+			}},
+		},
+		Acceptance: readmodelcore.AcceptanceProjection{
+			CurrentFocus: &readmodelcore.CoverageFocus{
+				ID:                    "cwi-036",
+				RequiredEvidenceKinds: []string{"validation", "state_change"},
+			},
+		},
+	})
+	if got == nil {
+		t.Fatal("ConvergenceStatus is nil")
+	}
+	if got.CurrentFocusID != "cwi-036" || got.NextActionKind != "validate" {
+		t.Fatalf("ConvergenceStatus = %+v, want owner authority focus/action", got)
+	}
+	if len(got.MissingEvidenceKinds) != 1 || got.MissingEvidenceKinds[0] != "validation" {
+		t.Fatalf("MissingEvidenceKinds = %+v, want owner authority validation only", got.MissingEvidenceKinds)
+	}
+}
+
 func TestMapConvergenceStatusClassifiesRetryExhaustionDecision(t *testing.T) {
 	t.Parallel()
 

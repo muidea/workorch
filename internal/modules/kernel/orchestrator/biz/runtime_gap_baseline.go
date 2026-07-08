@@ -628,6 +628,7 @@ func synchronizeCurrentRequiredOutputMirrors(input map[string]any) map[string]an
 	if len(input) == 0 {
 		return input
 	}
+	input = synchronizeCurrentStagePacketMirror(input)
 	required := activeRequiredOutputForCurrentAction(input)
 	if len(required) == 0 {
 		delete(input, "requiredOutput")
@@ -699,6 +700,27 @@ func synchronizeCurrentRequiredOutputMirrors(input map[string]any) map[string]an
 	return input
 }
 
+func synchronizeCurrentStagePacketMirror(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	packet := mapFromValue(input[stepInputKeyStagePacket])
+	if len(packet) == 0 {
+		return input
+	}
+	executionContext := mapFromValue(input["executionContext"])
+	if len(executionContext) == 0 {
+		return input
+	}
+	existing := mapFromValue(executionContext[stepInputKeyStagePacket])
+	if len(existing) > 0 && stableCoverageJSON(existing) != stableCoverageJSON(packet) {
+		appendAuthorityDiagnostic(input, "stale_stage_packet_mirror_rebound", "warning", "diagnostic_lineage", "executionContext.stagePacket", "stale stagePacket mirror was rebound from current convergence authority before dispatch")
+	}
+	executionContext[stepInputKeyStagePacket] = cloneStepPayload(packet)
+	input["executionContext"] = executionContext
+	return input
+}
+
 func appendRequiredOutputMirrorReboundDiagnostics(input map[string]any, required map[string]any) {
 	if len(input) == 0 || len(required) == 0 {
 		return
@@ -727,6 +749,23 @@ func appendRequiredOutputMirrorReboundDiagnostics(input map[string]any, required
 			appendAuthorityDiagnostic(input, "stale_required_output_mirror_rebound", "warning", "diagnostic_lineage", label, "stale requiredOutput mirror was rebound from current convergence authority before dispatch")
 		}
 	}
+}
+
+func currentAuthorityRenderedRequiredOutput(input map[string]any) map[string]any {
+	if len(input) == 0 || !boolValue(input["currentAuthorityRequiredOutputMirrorsCanonical"]) {
+		return nil
+	}
+	for _, required := range []map[string]any{
+		mapFromValue(input["requiredOutput"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		mapFromValue(mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+	} {
+		if len(required) > 0 {
+			return cloneStepPayload(required)
+		}
+	}
+	return nil
 }
 
 func dispatchInputHasConvergenceAuthority(run *runModel.Run, input map[string]any) bool {
@@ -956,7 +995,10 @@ func validateCurrentRequiredOutputMirrorEquality(input map[string]any) error {
 	if !boolValue(input["currentAuthorityRequiredOutputMirrorsCanonical"]) {
 		return nil
 	}
-	expected := activeRequiredOutputForCurrentAction(input)
+	expected := currentAuthorityRenderedRequiredOutput(input)
+	if len(expected) == 0 {
+		expected = activeRequiredOutputForCurrentAction(input)
+	}
 	if len(expected) == 0 {
 		return nil
 	}
@@ -1009,7 +1051,7 @@ func validateCurrentActionContract(input map[string]any) error {
 		return convergenceDispatchMisalignmentError("currentActionContract nextAction=%s expected=%s", currentNext, expected)
 	}
 	currentRequired := mapFromValue(contract["requiredOutput"])
-	if expected := activeRequiredOutputForCurrentAction(input); len(expected) > 0 {
+	if expected := activeRequiredOutputForCurrentActionContract(input); len(expected) > 0 {
 		if len(currentRequired) == 0 {
 			return convergenceDispatchMisalignmentError("currentActionContract missing requiredOutput")
 		}
@@ -1633,6 +1675,10 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "validation requiredOutput accepts workspace-mutating output")
 		return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: validation accepts workspace-mutating output")
 	}
+	if requiredOutputRequiresManagedValidationOnly(top) && !requiredOutputIsManagedValidationOnly(top) {
+		appendAuthorityDiagnostic(input, "required_output_unsatisfiable", "error", "internal_authority_mismatch", "requiredOutput", "forced-narrow managed validation requiredOutput must expose only validation/managed_session")
+		return convergenceDispatchMisalignmentError("runtime_internal_contract_unsatisfiable: managed validation requiredOutput allows non-managed validation route")
+	}
 	if err := validateRequiredOutputSatisfiableRoute(input, "requiredOutput", top, state, nextAction); err != nil {
 		return err
 	}
@@ -1656,6 +1702,10 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 			appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", label, "state-changing requiredOutput has no allowed accepted kind")
 			return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: state-changing requiredOutput has no allowed accepted kind: %s", label)
 		}
+		if requiredOutputRequiresManagedValidationOnly(top) && !requiredOutputIsManagedValidationOnly(required) {
+			appendAuthorityDiagnostic(input, "required_output_unsatisfiable", "error", "internal_authority_mismatch", label, "forced-narrow managed validation mirror must expose only validation/managed_session")
+			return convergenceDispatchMisalignmentError("runtime_internal_contract_unsatisfiable: managed validation requiredOutput mirror allows non-managed validation route: %s", label)
+		}
 		if err := validateRequiredOutputSatisfiableRoute(input, label, required, state, nextAction); err != nil {
 			return err
 		}
@@ -1673,6 +1723,32 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		}
 	}
 	return nil
+}
+
+func requiredOutputRequiresManagedValidationOnly(required map[string]any) bool {
+	if len(required) == 0 {
+		return false
+	}
+	return strings.TrimSpace(stringFromMap(required, "contractViolationRequiredOutputShape")) == "managed_validation_evidence" ||
+		strings.TrimSpace(stringFromMap(required, "validationRoute")) == runtimemodel.ValidationRouteManagedHarness ||
+		boolValue(required["mustUseManagedHarness"])
+}
+
+func requiredOutputIsManagedValidationOnly(required map[string]any) bool {
+	if len(required) == 0 {
+		return false
+	}
+	accepted := stringSliceFromValue(required["acceptedKinds"])
+	if len(accepted) != 1 || strings.TrimSpace(accepted[0]) != managedValidationSessionNodeKind {
+		return false
+	}
+	if !boolValue(required["acceptedKindsOnly"]) {
+		return false
+	}
+	return !requiredOutputAcceptsKind(required, runtimemodel.StepKindShellCommand) &&
+		!requiredOutputAcceptsKind(required, runtimemodel.StepKindMCPToolCall) &&
+		!requiredOutputAcceptsKind(required, "patch/apply") &&
+		!requiredOutputAcceptsKind(required, "git/write")
 }
 
 func validateRequiredOutputSatisfiableRoute(input map[string]any, label string, required map[string]any, state string, nextAction string) error {

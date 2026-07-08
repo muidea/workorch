@@ -1567,6 +1567,97 @@ func TestForcedNarrowManagedValidationRecoveryRewritesAllVisibleContracts(t *tes
 	}
 }
 
+func TestForcedNarrowManagedValidationCanonicalRenderSurvivesCurrentActionAttach(t *testing.T) {
+	runID := common.RunID("run-forced-narrow-managed-canonical")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-forced-narrow-managed-canonical"}
+	input := map[string]any{
+		"convergenceContract": map[string]any{
+			"state":           convergenceStateNeedValidation,
+			"runtimeStage":    runtimeStageVerification,
+			"repairObjective": repairObjectiveConcreteValidationEvidence,
+		},
+		stepInputKeyContractViolationRecovery: map[string]any{
+			"correctionMode":      contractViolationCorrectionModeForcedNarrow,
+			"correctionProfileId": "managed_validation_evidence",
+			"correctionContract": map[string]any{
+				"requiredOutputShape":   "managed_validation_evidence",
+				"allowedOutputs":        []any{"executionGraph_with_managed_validation_session"},
+				"forbiddenOutputs":      []any{"plain_shell_validation", "top_level_shellCommands"},
+				"validationRoute":       runtimemodel.ValidationRouteManagedHarness,
+				"mustUseManagedHarness": true,
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []any{"shell/command", "mcp/tool_call", managedValidationSessionNodeKind},
+				"validationEvidenceNodeExample":         map[string]any{"kind": "shell/command"},
+				"coverageWorkItemIds":                   []any{"cwi-036"},
+			},
+		},
+		"requiredOutput": map[string]any{
+			"mustProduceConcreteValidationEvidence": true,
+			"acceptedKinds":                         []any{"shell/command", "mcp/tool_call", managedValidationSessionNodeKind},
+		},
+	}
+
+	input = attachStagePacketToStepInput(run, common.StepID("run-forced-narrow-managed-canonical/step-001"), input)
+	input = synchronizeCurrentRequiredOutputMirrors(input)
+	input = attachCurrentActionContractToInput(run, common.StepID("run-forced-narrow-managed-canonical/step-001"), input)
+
+	if err := validateConvergenceDispatchInput(input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput() error = %v; input=%+v", err, input)
+	}
+	for label, required := range map[string]map[string]any{
+		"top":                   mapFromValue(input["requiredOutput"]),
+		"pkg":                   mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		"stage":                 mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"stage.nextAction":      mapFromValue(mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+		"currentActionContract": mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+	} {
+		if !requiredOutputIsManagedValidationOnly(required) {
+			t.Fatalf("%s requiredOutput = %+v, want managed validation only", label, required)
+		}
+	}
+}
+
+func TestConvergenceDispatchRejectsManagedValidationRequiredOutputWithPlainShellRoute(t *testing.T) {
+	input := map[string]any{
+		"convergenceContract": map[string]any{
+			"state":        convergenceStateNeedValidation,
+			"runtimeStage": runtimeStageVerification,
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+		},
+		"requiredOutput": map[string]any{
+			"contractViolationRequiredOutputShape": "managed_validation_evidence",
+			"validationRoute":                      runtimemodel.ValidationRouteManagedHarness,
+			"mustUseManagedHarness":                true,
+			"acceptedKinds":                        []any{"shell/command", managedValidationSessionNodeKind},
+			"acceptedKindsOnly":                    true,
+		},
+	}
+	input["repairActionPackage"] = map[string]any{
+		"requiredOutput": cloneStepPayload(mapFromValue(input["requiredOutput"])),
+	}
+	input[stepInputKeyStagePacket] = map[string]any{
+		"nextAction": map[string]any{
+			"kind":           runtimemodel.NextActionTypeValidate,
+			"requiredOutput": cloneStepPayload(mapFromValue(input["requiredOutput"])),
+		},
+		"requiredOutput": cloneStepPayload(mapFromValue(input["requiredOutput"])),
+	}
+
+	err := validateConvergenceDispatchInput(input)
+	if err == nil {
+		t.Fatal("validateConvergenceDispatchInput returned nil, want managed validation route rejection")
+	}
+	if !strings.Contains(err.Error(), "managed validation requiredOutput allows non-managed validation route") {
+		t.Fatalf("validateConvergenceDispatchInput error = %v, want managed validation route rejection", err)
+	}
+}
+
 func TestConvergenceDispatchRejectsSplitCurrentActionRequiredOutput(t *testing.T) {
 	input := map[string]any{
 		"convergenceContract": map[string]any{

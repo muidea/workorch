@@ -1241,27 +1241,35 @@ func TestValidateConvergenceDispatchInputRejectsRequiredOutputMirrorMismatch(t *
 			"nextAction": map[string]any{"kind": runtimemodel.NextActionTypeValidate},
 		},
 		"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
-		"requiredOutput": concreteValidationEvidenceRequiredOutputWithScratch(
-			map[string]any{
-				"coverageWorkItemIds":  []string{"cwi-current"},
-				"structuredTargetRefs": []string{"cwi-current"},
+		"requiredOutput": map[string]any{
+			"mustProduceConcreteValidationEvidence": true,
+			"mustIncludeStateChangingNode":          false,
+			"acceptedKinds":                         []string{"shell/command"},
+			"forbiddenKinds":                        []string{"patch/apply"},
+			"coverageWorkItemIds":                   []string{"cwi-current"},
+			"structuredTargetRefs":                  []string{"cwi-current"},
+			"targetRefs":                            []string{"cwi-current"},
+			"validationEvidence": map[string]any{
+				"targetRefs": []string{"cwi-current"},
 			},
-			nil,
-			nil,
-		),
+		},
 		stepInputKeyStagePacket: map[string]any{
 			"activeFocus": map[string]any{"id": "cwi-current"},
 			"nextAction": map[string]any{
 				"type": runtimemodel.NextActionTypeValidate,
 			},
-			"requiredOutput": concreteValidationEvidenceRequiredOutputWithScratch(
-				map[string]any{
-					"coverageWorkItemIds":  []string{"cwi-stale"},
-					"structuredTargetRefs": []string{"cwi-stale"},
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"mustIncludeStateChangingNode":          false,
+				"acceptedKinds":                         []string{"mcp/tool_call"},
+				"forbiddenKinds":                        []string{"patch/apply"},
+				"coverageWorkItemIds":                   []string{"cwi-current"},
+				"structuredTargetRefs":                  []string{"cwi-current"},
+				"targetRefs":                            []string{"cwi-current"},
+				"validationEvidence": map[string]any{
+					"targetRefs": []string{"cwi-current"},
 				},
-				nil,
-				nil,
-			),
+			},
 		},
 	}
 
@@ -1627,6 +1635,111 @@ func TestFinalizeLLMDispatchAuthorityInputRebuildsExecutionContextStateChangeAut
 		}
 		if stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") {
 			t.Fatalf("%s.forbiddenKinds = %+v, want patch/apply not forbidden", label, required["forbiddenKinds"])
+		}
+	}
+}
+
+func TestPrepareGapBaselineDispatchSpecsRebuildsStaleStateChangeRequiredOutputMirrors(t *testing.T) {
+	focus := map[string]any{
+		"id":                    "cwi-current",
+		"activeCoverageFocusId": "focus-cwi-current",
+		"coverageWorkItemIds":   []string{"cwi-current"},
+		"missingEvidenceKinds":  []string{"validation", "state_change"},
+		"requiredEvidenceKinds": []string{"validation", "state_change"},
+		"status":                "open",
+	}
+	run := &runModel.Run{
+		ID:          "run-prepare-state-change",
+		WorkspaceID: "ws-prepare-state-change",
+		State:       common.RunStateActive,
+		ExecutionContext: map[string]any{
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"currentFocus":  cloneStepPayload(focus),
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+			},
+			gapBaselineKey: map[string]any{
+				"schemaVersion": gapBaselineSchema,
+				"currentFocus":  cloneStepPayload(focus),
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+			},
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus":    cloneStepPayload(focus),
+				"unresolvedItems": []map[string]any{cloneStepPayload(focus)},
+			},
+			"convergenceContract": map[string]any{
+				"state":                       convergenceStateNeedStateChange,
+				"runtimeStage":                runtimeStageRepair,
+				"runtimeStageMode":            "strict_convergence",
+				"repairObjective":             repairObjectiveStateChangingOutput,
+				"stateChangingOutputRequired": true,
+			},
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+	}
+	staleValidationRequired := map[string]any{
+		"mustProduceConcreteValidationEvidence": true,
+		"acceptedKinds":                         []string{"shell/command", "validation/managed_session"},
+		"forbiddenKinds":                        []string{"patch/apply", "git/write"},
+	}
+	specs, err := (&RuntimeOrchestrator{}).prepareGapBaselineDispatchSpecs(context.Background(), run, []stepDispatchSpec{{
+		ID:   "run-prepare-state-change/step-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"convergenceContract": map[string]any{
+				"state":        convergenceStateNeedValidation,
+				"runtimeStage": runtimeStageVerification,
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": cloneStepPayload(staleValidationRequired),
+			},
+			stepInputKeyStagePacket: map[string]any{
+				"schemaVersion": "workorch.stage_packet.v1",
+				"nextAction": map[string]any{
+					"kind":           runtimemodel.NextActionTypeValidate,
+					"requiredOutput": cloneStepPayload(staleValidationRequired),
+				},
+				"requiredOutput": cloneStepPayload(staleValidationRequired),
+			},
+			"executionContext": map[string]any{
+				"requiredOutput": cloneStepPayload(staleValidationRequired),
+				"repairActionPackage": map[string]any{
+					"requiredOutput": cloneStepPayload(staleValidationRequired),
+				},
+				stepInputKeyStagePacket: map[string]any{
+					"nextAction": map[string]any{
+						"kind":           runtimemodel.NextActionTypeValidate,
+						"requiredOutput": cloneStepPayload(staleValidationRequired),
+					},
+					"requiredOutput": cloneStepPayload(staleValidationRequired),
+				},
+			},
+			"requiredOutput": cloneStepPayload(staleValidationRequired),
+		},
+	}})
+	if err != nil {
+		t.Fatalf("prepareGapBaselineDispatchSpecs returned error = %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("prepared specs = %d, want 1", len(specs))
+	}
+	input := specs[0].Input
+	if err := validateConvergenceDispatchInput(input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput returned error = %v; input=%+v", err, input)
+	}
+	for label, required := range map[string]map[string]any{
+		"requiredOutput":                                         mapFromValue(input["requiredOutput"]),
+		"repairActionPackage.requiredOutput":                     mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":                             mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"stagePacket.nextAction.requiredOutput":                  mapFromValue(mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+		"currentActionContract.requiredOutput":                   mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+		"executionContext.requiredOutput":                        mapFromValue(mapFromValue(input["executionContext"])["requiredOutput"]),
+		"executionContext.repairActionPackage.requiredOutput":    mapFromValue(mapFromValue(mapFromValue(input["executionContext"])["repairActionPackage"])["requiredOutput"]),
+		"executionContext.stagePacket.requiredOutput":            mapFromValue(mapFromValue(mapFromValue(input["executionContext"])[stepInputKeyStagePacket])["requiredOutput"]),
+		"executionContext.stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(mapFromValue(mapFromValue(input["executionContext"])[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+	} {
+		if !requiredOutputRequiresStateChanging(required) || !requiredOutputHasAllowedStateChangingKind(required) {
+			t.Fatalf("%s = %+v, want canonical state-changing requiredOutput", label, required)
 		}
 	}
 }

@@ -33,7 +33,7 @@ func currentActionContractFromInput(run *runModel.Run, stepID common.StepID, inp
 		return nil
 	}
 	nextAction := currentActionNextActionFromInput(input)
-	required := activeRequiredOutputForCurrentAction(input)
+	required := activeRequiredOutputForCurrentActionContract(input)
 	if len(nextAction) == 0 && len(required) == 0 {
 		return nil
 	}
@@ -182,6 +182,13 @@ func currentActionPrerequisiteFromInput(input map[string]any) map[string]any {
 		return targetSnapshotAcquisitionPrerequisite()
 	}
 	return nil
+}
+
+func activeRequiredOutputForCurrentActionContract(input map[string]any) map[string]any {
+	if required := currentAuthorityRenderedRequiredOutput(input); len(required) > 0 {
+		return required
+	}
+	return activeRequiredOutputForCurrentAction(input)
 }
 
 func activeRequiredOutputForCurrentAction(input map[string]any) map[string]any {

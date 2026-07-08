@@ -20,18 +20,26 @@ func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *readmodelcore.Con
 		ret.AcceptedEvidenceCount = len(compactUniqueStrings(snapshot.GapBaseline.AcceptedEvidenceRefs))
 		ret.RejectedEvidenceCount = len(compactUniqueStrings(snapshot.GapBaseline.RejectedEvidenceRefs))
 	}
+	missingEvidenceAuthoritative := false
 	if authority := MapValue(snapshot.Run.ExecutionContext["convergenceAuthority"]); len(authority) > 0 {
-		if focusID := focusIDFromMap(MapValue(authority["currentFocus"])); focusID != "" {
+		currentFocus := MapValue(authority["currentFocus"])
+		if focusID := focusIDFromMap(currentFocus); focusID != "" {
 			ret.CurrentFocusID = focusID
 		}
 		if nextActionKind := strings.TrimSpace(stringValue(MapValue(authority["nextAction"]), "kind")); nextActionKind != "" {
 			ret.NextActionKind = nextActionKind
 		}
+		if missing := compactUniqueStrings(readModelStringSliceValue(currentFocus["missingEvidenceKinds"])); len(missing) > 0 {
+			ret.MissingEvidenceKinds = missing
+			missingEvidenceAuthoritative = true
+		}
 	}
 	if snapshot.Acceptance.CurrentFocus != nil {
 		focus := snapshot.Acceptance.CurrentFocus
 		ret.CurrentFocusID = firstNonEmptyString(ret.CurrentFocusID, focus.ID)
-		ret.MissingEvidenceKinds = compactUniqueStrings(append(ret.MissingEvidenceKinds, focus.RequiredEvidenceKinds...))
+		if !missingEvidenceAuthoritative {
+			ret.MissingEvidenceKinds = compactUniqueStrings(append(ret.MissingEvidenceKinds, focus.RequiredEvidenceKinds...))
+		}
 		if ret.AcceptedEvidenceCount == 0 {
 			ret.AcceptedEvidenceCount = len(compactUniqueStrings(focus.AcceptedEvidenceRefs))
 		}
