@@ -574,7 +574,7 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 			if input, ok := o.graphManager().concreteEvidenceAcquisitionFollowUpInputFromSteps(run, step, graphSteps); ok {
 				return o.RequestUniqueDispatchStep(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), input, workspaceIDForDispatch(run, workspace))
 			}
-			return o.dispatchGraphStepBatchWithWorkspace(ctx, run, graphSpecs, workspace)
+			return o.dispatchGraphStepBatchOrCurrentAuthorityFollowUp(ctx, run, step, graphSteps, graphSpecs, workspace)
 		}
 	} else {
 		graphSpecs, graphSteps = o.graphManager().readyGraphStepSpecsWithSteps(ctx, run, step)
@@ -585,7 +585,7 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 			if input, ok := o.graphManager().concreteEvidenceAcquisitionFollowUpInputFromSteps(run, step, graphSteps); ok {
 				return o.RequestUniqueDispatchStep(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), input, workspaceIDForDispatch(run, workspace))
 			}
-			return o.dispatchGraphStepBatchWithWorkspace(ctx, run, graphSpecs, workspace)
+			return o.dispatchGraphStepBatchOrCurrentAuthorityFollowUp(ctx, run, step, graphSteps, graphSpecs, workspace)
 		}
 	}
 	if o.graphManager().hasActiveGraphWork(ctx, run, step) {

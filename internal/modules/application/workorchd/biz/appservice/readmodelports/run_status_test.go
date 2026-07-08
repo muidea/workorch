@@ -184,6 +184,56 @@ func TestRunStatusProjectsRuntimeExecutionContractViolation(t *testing.T) {
 	}
 }
 
+func TestRunStatusProjectsOwnerDerivedConvergenceNextAction(t *testing.T) {
+	t.Parallel()
+
+	run := &runmodel.Run{
+		ID:          "run-owner-nextaction-status",
+		WorkspaceID: "ws-owner-nextaction-status",
+		State:       common.RunStateActive,
+		ExecutionContext: map[string]any{
+			"convergenceAuthority": map[string]any{
+				"currentFocus": map[string]any{
+					"id": "cwi-source-change",
+					"missingEvidenceKinds": []any{
+						"validation",
+						"state_change",
+					},
+				},
+				"nextAction": map[string]any{
+					"kind": "state_change",
+				},
+			},
+		},
+	}
+
+	got, err := RunStatus(context.Background(), RunStatusReaders{
+		Runs:        fakeRunStatusRunReader{items: []*runmodel.Run{run}},
+		Steps:       fakeRunStatusStepReader{},
+		Checkpoints: fakeRunStatusCheckpointReader{},
+		Tickets:     fakeTicketReader{},
+		Approvals:   fakeApprovalListReader{},
+	}, run.ID)
+	if err != nil {
+		t.Fatalf("RunStatus: %v", err)
+	}
+	if got.CurrentStepID != "" {
+		t.Fatalf("CurrentStepID = %q, want empty", got.CurrentStepID)
+	}
+	if got.ConvergenceStatus == nil {
+		t.Fatal("ConvergenceStatus is nil")
+	}
+	if got.ConvergenceStatus.NextActionKind != "state_change" ||
+		got.ConvergenceStatus.CurrentFocusID != "cwi-source-change" {
+		t.Fatalf("ConvergenceStatus = %+v, want owner-derived state_change focus", got.ConvergenceStatus)
+	}
+	if len(got.ConvergenceStatus.MissingEvidenceKinds) != 2 ||
+		got.ConvergenceStatus.MissingEvidenceKinds[0] != "validation" ||
+		got.ConvergenceStatus.MissingEvidenceKinds[1] != "state_change" {
+		t.Fatalf("MissingEvidenceKinds = %+v, want validation/state_change", got.ConvergenceStatus.MissingEvidenceKinds)
+	}
+}
+
 type fakeRunStatusRunReader struct {
 	items []*runmodel.Run
 }

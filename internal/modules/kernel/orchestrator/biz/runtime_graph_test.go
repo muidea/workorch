@@ -643,6 +643,74 @@ func TestContinueGraphBatchSkipsObsoleteGraphLocalAuthorityAndRequestsCurrentFol
 	t.Fatalf("published events = %+v, want current-authority follow-up dispatch", hub.Published())
 }
 
+func TestFinalizeRootGraphSkipsObsoleteGraphLocalAuthorityAndRequestsCurrentFollowUp(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-root-obsolete-graph-local-authority")
+	workspaceID := common.WorkspaceID("ws-root-obsolete-graph-local-authority")
+	rootStepID := common.StepID(runID + "/step-1")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	hub := events.NewMemoryHub()
+	workspace := &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeValidate)
+	run.ID = runID
+	run.WorkspaceID = workspaceID
+	run.InitialStepKind = llmWorkspaceExecutionStepKind
+	updateAuthorityScopeForTest(run, workspaceID, runID)
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    rootStepID,
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateExecuting,
+	}); err != nil {
+		t.Fatalf("seed root step: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memoryrepo.NewDecisionTicketRepository(), memoryrepo.NewApprovalRepository(), hub)
+	orch.EnableEventDrivenDispatch()
+
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "stale-state-change", Kind: runtimemodel.StepKindShellCommand, Input: map[string]any{
+			"stateChanging":       true,
+			"targetRef":           "workspace",
+			"stateChangingReason": "stale graph-local state change",
+		}},
+	}}
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, rootStepID, runtimemodel.StepExecutionResult{Output: map[string]any{
+		"status":                    "completed",
+		stepOutputKeyExecutionGraph: graph,
+	}}, nil); err != nil {
+		t.Fatalf("FinalizeRuntimeStepResult: %v", err)
+	}
+	for _, envelope := range hub.Published() {
+		if envelope.Topic != orchestratorevents.TopicOrchestratorDispatchStepRequested {
+			continue
+		}
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
+		if !ok || cmd.Kind != llmWorkspaceExecutionStepKind {
+			continue
+		}
+		input := mapFromValue(cmd.Input)
+		if !boolValue(input["obsoleteGraphContinuationSkipped"]) {
+			continue
+		}
+		if kind := stringFromMap(currentActionNextActionFromInput(input), "kind"); kind != runtimemodel.NextActionTypeValidate {
+			t.Fatalf("follow-up nextAction = %q, want validate; input=%+v", kind, input)
+		}
+		if strings.Contains(string(cmd.StepID), "stale-state-change") {
+			t.Fatalf("dispatch step = %s, want current-authority follow-up instead of stale graph node", cmd.StepID)
+		}
+		return
+	}
+	t.Fatalf("published events = %+v, want root graph current-authority follow-up dispatch", hub.Published())
+}
+
 func TestNormalizeGraphValidationDispatchAuthorityBindsValidationEvidence(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-graph-validation-authority",

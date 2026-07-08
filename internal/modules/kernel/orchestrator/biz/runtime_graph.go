@@ -289,6 +289,26 @@ func graphLocalDispatchAuthorityObsolete(err error) bool {
 		strings.Contains(text, "authorityNextAction=")
 }
 
+func (o *RuntimeOrchestrator) dispatchGraphStepBatchOrCurrentAuthorityFollowUp(
+	ctx context.Context,
+	currentRun *runModel.Run,
+	anchor *runModel.Step,
+	graphSteps []*runModel.Step,
+	specs []stepDispatchSpec,
+	workspace *workspaceModel.Workspace,
+) error {
+	if err := o.dispatchGraphStepBatchWithWorkspace(ctx, currentRun, specs, workspace); err != nil {
+		if graphLocalDispatchAuthorityObsolete(err) {
+			input := o.graphManager().graphFollowUpStepInputFromSteps(currentRun, anchor, graphSteps)
+			input["obsoleteGraphContinuationSkipped"] = true
+			input["obsoleteGraphContinuationReason"] = err.Error()
+			return o.RequestUniqueDispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, anchor), initialStepKind(currentRun), input, workspaceIDForDispatch(currentRun, workspace))
+		}
+		return err
+	}
+	return nil
+}
+
 func (o *RuntimeOrchestrator) continueGraphBatchAfterCompletedStep(
 	ctx context.Context,
 	currentRun *runModel.Run,
@@ -307,13 +327,7 @@ func (o *RuntimeOrchestrator) continueGraphBatchAfterCompletedStep(
 			if input, ok := o.graphManager().concreteEvidenceAcquisitionFollowUpInputFromSteps(currentRun, last, steps); ok {
 				return o.RequestUniqueDispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), input, workspaceIDForDispatch(currentRun, workspace))
 			}
-			if err := o.dispatchGraphStepBatchWithWorkspace(ctx, currentRun, nextSpecs, workspace); err != nil {
-				if graphLocalDispatchAuthorityObsolete(err) {
-					input := o.graphManager().graphFollowUpStepInputFromSteps(currentRun, last, steps)
-					input["obsoleteGraphContinuationSkipped"] = true
-					input["obsoleteGraphContinuationReason"] = err.Error()
-					return o.RequestUniqueDispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), input, workspaceIDForDispatch(currentRun, workspace))
-				}
+			if err := o.dispatchGraphStepBatchOrCurrentAuthorityFollowUp(ctx, currentRun, last, steps, nextSpecs, workspace); err != nil {
 				return o.handleGraphBatchCompletionGateFailure(ctx, currentRun, last, last.Output, "runtime graph continuation dispatch failed", err)
 			}
 			return nil
