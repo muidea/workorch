@@ -71,9 +71,7 @@ func realignLLMStepInputTargetSnapshotAuthority(run *runModel.Run, step *runMode
 		return
 	}
 	step.Input = ApplyConvergenceContract(step.Input, contract)
-	step.Input = attachStagePacketToStepInput(run, step.ID, step.Input)
-	step.Input = synchronizeCurrentRequiredOutputMirrors(step.Input)
-	step.Input = attachCurrentActionContractToInput(run, step.ID, step.Input)
+	step.Input = renderCurrentAuthorityDispatchInput(run, step.ID, step.Input)
 }
 
 type executionContextPackageDeps struct {

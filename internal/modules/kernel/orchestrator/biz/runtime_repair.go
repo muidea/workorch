@@ -979,6 +979,10 @@ func (r *repairSubsystem) recoveryDispatchSpec(
 		}
 		input := providerRetryStepInputWithMaxAttempts(failedStep, attempt, execErr, maxProviderRetryAttempts)
 		input["allowDispatchAfterRejectedResult"] = true
+		input, err = finalizeCurrentAuthorityDispatchInputForRun(run, stepID, cloneStepPayload(input))
+		if err != nil {
+			return stepDispatchSpec{}, true, err
+		}
 		return stepDispatchSpec{
 			ID:    stepID,
 			Kind:  failedStep.Kind,

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -232,6 +233,38 @@ func TestRepairSubsystemRecoveryDispatchSpecPlansProviderRetry(t *testing.T) {
 	}
 }
 
+func TestRepairSubsystemRecoveryDispatchSpecFinalizesProviderRetryFromCurrentAuthority(t *testing.T) {
+	ctx := context.Background()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	run.InitialStepKind = llmcommon.StepKindWorkspaceExecution
+	stateChangeFocusForRepairDispatchTest(run)
+	stepRepo := memory.NewStepRepository()
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/planning-001"),
+		RunID: run.ID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: repairDispatchValidationAuthorityBuilder{}.runtimeRepairFollowUpStepInput(ctx, run, nil, 1, nil),
+		Output: map[string]any{
+			"stage":               "llm_provider_timeout",
+			failureOutputKeyClass: failureClassProviderTimeout,
+		},
+	}
+
+	spec, ok, err := newRepairSubsystem(stepRepo, nil).recoveryDispatchSpec(ctx, run, failedStep, errors.New("timeout"), runtimeRecoveryActionProviderRetry, maxProviderRetryAttempts, repairDispatchSpecBuilderStub{}, false)
+
+	if err != nil || !ok {
+		t.Fatalf("recoveryDispatchSpec ok/err = %v/%v, want provider retry spec", ok, err)
+	}
+	assertStateChangingAuthorityDispatchForTest(t, spec.Input)
+	if spec.Input["authoritySnapshotId"] == "" {
+		t.Fatalf("authoritySnapshotId missing in provider retry input: %+v", spec.Input)
+	}
+	if err := validateConvergenceDispatchInput(spec.Input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, spec.Input)
+	}
+}
+
 func TestRepairSubsystemRecoveryDispatchSpecPlansRuntimeRepairWithExactScope(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-repair-dispatch-runtime")
@@ -272,6 +305,154 @@ func TestRepairSubsystemRecoveryDispatchSpecPlansRuntimeRepairWithExactScope(t *
 	}
 	if spec.Input[stepInputKeyRuntimeRepairAttempt] != 2 {
 		t.Fatalf("runtime repair attempt = %#v, want 2", spec.Input[stepInputKeyRuntimeRepairAttempt])
+	}
+}
+
+func TestResolvedDecisionRuntimeRepairSpecFinalizesCurrentAuthority(t *testing.T) {
+	ctx := context.Background()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	run.InitialStepKind = llmcommon.StepKindWorkspaceExecution
+	stateChangeFocusForRepairDispatchTest(run)
+	stepRepo := memory.NewStepRepository()
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/failed"),
+		RunID: run.ID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass: failureClassRuntime,
+		},
+	}
+	if err := stepRepo.Create(ctx, failedStep); err != nil {
+		t.Fatalf("seed failed step: %v", err)
+	}
+
+	specs, ok, err := runtimeRepairSpecsAfterResolvedDecision(ctx, stepRepo, newRepairSubsystem(stepRepo, nil), repairDispatchValidationAuthorityBuilder{}, run, failedStep.ID)
+
+	if err != nil || !ok || len(specs) != 1 {
+		t.Fatalf("runtimeRepairSpecsAfterResolvedDecision specs/ok/err = %d/%v/%v, want one spec", len(specs), ok, err)
+	}
+	assertStateChangingAuthorityDispatchForTest(t, specs[0].Input)
+	if specs[0].Input["decisionAuthorizedRetry"] != true {
+		t.Fatalf("decisionAuthorizedRetry = %#v, want true", specs[0].Input["decisionAuthorizedRetry"])
+	}
+	if err := validateConvergenceDispatchInput(specs[0].Input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, specs[0].Input)
+	}
+}
+
+func TestResolvedDecisionProviderRetrySpecFinalizesCurrentAuthority(t *testing.T) {
+	ctx := context.Background()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	run.InitialStepKind = llmcommon.StepKindWorkspaceExecution
+	stateChangeFocusForRepairDispatchTest(run)
+	stepRepo := memory.NewStepRepository()
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/provider-failed"),
+		RunID: run.ID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: repairDispatchValidationAuthorityBuilder{}.runtimeRepairFollowUpStepInput(ctx, run, nil, 1, nil),
+		Output: map[string]any{
+			"stage":               "llm_provider_timeout",
+			failureOutputKeyClass: failureClassProviderTimeout,
+		},
+	}
+	if err := stepRepo.Create(ctx, failedStep); err != nil {
+		t.Fatalf("seed provider failed step: %v", err)
+	}
+
+	specs, ok, err := providerRetrySpecsAfterResolvedDecision(ctx, stepRepo, newRepairSubsystem(stepRepo, nil), RuntimePolicy{}, run, failedStep.ID)
+
+	if err != nil || !ok || len(specs) != 1 {
+		t.Fatalf("providerRetrySpecsAfterResolvedDecision specs/ok/err = %d/%v/%v, want one spec", len(specs), ok, err)
+	}
+	assertStateChangingAuthorityDispatchForTest(t, specs[0].Input)
+	if specs[0].Input["decisionAuthorizedRetry"] != true {
+		t.Fatalf("decisionAuthorizedRetry = %#v, want true", specs[0].Input["decisionAuthorizedRetry"])
+	}
+	if err := validateConvergenceDispatchInput(specs[0].Input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, specs[0].Input)
+	}
+}
+
+func TestResolvedDecisionKnownReadableRepairSpecFinalizesCurrentAuthority(t *testing.T) {
+	ctx := context.Background()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	run.InitialStepKind = llmcommon.StepKindWorkspaceExecution
+	stateChangeFocusForRepairDispatchTest(run)
+	stepRepo := memory.NewStepRepository()
+	step := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/decision"),
+		RunID: run.ID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateSucceeded,
+		Input: repairDispatchValidationAuthorityBuilder{}.runtimeRepairFollowUpStepInput(ctx, run, nil, 1, nil),
+		Output: map[string]any{
+			stepOutputKeyBlockDecisionReason:   "Need to inspect known-resource.txt",
+			stepOutputKeyBlockDecisionQuestion: "Please provide known-resource.txt",
+			stepOutputKeyBlockDecisionKind:     decisioncommon.ResolutionTypeProvideMissingInfo,
+			stepOutputKeyBlockDecisionContext: map[string]any{
+				"workspaceFiles":               []any{"known-resource.txt"},
+				decisionContextKeyQuestion:     "Please provide known-resource.txt",
+				decisionContextKeyReason:       "Need to inspect known-resource.txt",
+				decisionContextKeyResultPolicy: decisionContextResultPolicyNone,
+			},
+		},
+	}
+	if err := stepRepo.Create(ctx, step); err != nil {
+		t.Fatalf("seed decision step: %v", err)
+	}
+
+	specs, ok, err := knownReadableDecisionRepairSpecs(ctx, stepRepo, nil, newRepairSubsystem(stepRepo, nil), repairDispatchValidationAuthorityBuilder{}, run, step.ID)
+
+	if err != nil || !ok || len(specs) != 1 {
+		t.Fatalf("knownReadableDecisionRepairSpecs specs/ok/err = %d/%v/%v, want one spec", len(specs), ok, err)
+	}
+	assertStateChangingAuthorityDispatchForTest(t, specs[0].Input)
+	if err := validateConvergenceDispatchInput(specs[0].Input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, specs[0].Input)
+	}
+}
+
+func TestResolvedDecisionContextIntegritySpecFinalizesCurrentAuthority(t *testing.T) {
+	ctx := context.Background()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	run.InitialStepKind = llmcommon.StepKindWorkspaceExecution
+	stateChangeFocusForRepairDispatchTest(run)
+	stepRepo := memory.NewStepRepository()
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/context-gate"),
+		RunID: run.ID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: repairDispatchValidationAuthorityBuilder{}.runtimeRepairFollowUpStepInput(ctx, run, nil, 1, nil),
+		Output: map[string]any{
+			"stage": "llm_context_integrity_failed",
+			"error": "invalid argument: llm context gate read_required: runtime_repair_current_failure_missing",
+			"contextBudget": map[string]any{
+				"contextGateAction": "read_required",
+				"contextGateReason": "runtime_repair_current_failure_missing",
+			},
+		},
+	}
+	if err := stepRepo.Create(ctx, failedStep); err != nil {
+		t.Fatalf("seed context gate step: %v", err)
+	}
+	resumeInput := map[string]any{
+		"ticketContext": map[string]any{
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyContext,
+		},
+	}
+
+	specs, ok, err := contextIntegritySpecsAfterResolvedDecision(ctx, stepRepo, run, failedStep.ID, resumeInput)
+
+	if err != nil || !ok || len(specs) != 1 {
+		t.Fatalf("contextIntegritySpecsAfterResolvedDecision specs/ok/err = %d/%v/%v, want one spec", len(specs), ok, err)
+	}
+	assertStateChangingAuthorityDispatchForTest(t, specs[0].Input)
+	if err := validateConvergenceDispatchInput(specs[0].Input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, specs[0].Input)
 	}
 }
 
@@ -768,5 +949,68 @@ func TestRepairSubsystemFailRunReasonFromFailedStep(t *testing.T) {
 				t.Fatalf("failRunReasonFromFailedStep() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func stateChangeFocusForRepairDispatchTest(run *runmodel.Run) {
+	if run == nil || run.ExecutionContext == nil {
+		return
+	}
+	focus := map[string]any{
+		"id":                    "cwi-current",
+		"missingEvidenceKinds":  []string{runtimemodel.EvidenceKindStateChange},
+		"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+		"status":                "failed",
+		"sourceRequirementId":   "source_change",
+		"sourceScope":           "deliverable",
+		"targetRefs":            []string{"cwi-current", "source_change"},
+		"structuredTargetRefs":  []string{"cwi-current", "source_change"},
+	}
+	for _, key := range []string{convergenceAuthorityKey, gapBaselineKey} {
+		authority := mapFromValue(run.ExecutionContext[key])
+		authority["currentFocus"] = cloneStepPayload(focus)
+		authority["nextAction"] = map[string]any{"kind": runtimemodel.NextActionTypeStateChange}
+		run.ExecutionContext[key] = authority
+	}
+	run.ExecutionContext[coverageWorkItemContextKey] = map[string]any{"currentFocus": cloneStepPayload(focus)}
+}
+
+func assertStateChangingAuthorityDispatchForTest(t *testing.T, input map[string]any) {
+	t.Helper()
+	contract := mapFromValue(input["convergenceContract"])
+	if got := stringFromMap(contract, "state"); got != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract.state = %q, want %q; input=%+v", got, convergenceStateNeedStateChange, input)
+	}
+	current := mapFromValue(input[currentActionContractKey])
+	if got := stringFromMap(mapFromValue(current["nextAction"]), "kind"); got != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("currentActionContract.nextAction.kind = %q, want state_change; current=%+v input=%+v", got, current, input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if len(required) == 0 {
+		required = activeRequiredOutputForCurrentAction(input)
+	}
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") ||
+		boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		t.Fatalf("requiredOutput = %+v, want canonical state-changing output", required)
+	}
+	snapshotID := stringFromMap(input, "authoritySnapshotId")
+	if snapshotID == "" {
+		t.Fatalf("authoritySnapshotId missing: %+v", input)
+	}
+	for label, value := range map[string]map[string]any{
+		"convergenceContract":    contract,
+		"repairActionPackage":    mapFromValue(input["repairActionPackage"]),
+		"currentActionContract":  current,
+		"stagePacket":            mapFromValue(input[stepInputKeyStagePacket]),
+		"stagePacket.nextAction": mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["nextAction"]),
+	} {
+		if len(value) == 0 {
+			continue
+		}
+		if got := stringFromMap(value, "authoritySnapshotId"); got != snapshotID {
+			t.Fatalf("%s.authoritySnapshotId = %q, want %q", label, got, snapshotID)
+		}
 	}
 }

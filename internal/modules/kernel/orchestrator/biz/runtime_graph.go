@@ -905,9 +905,7 @@ func normalizeGraphStateChangingDispatchAuthority(run *runModel.Run, stepID comm
 	input["graphLocalNextAction"] = cloneStepPayload(action)
 	ensureGraphLocalAuthorityMaps(run, input, action)
 	currentActionSetNextAction(input, action)
-	input = normalizeDispatchInputAuthorityFocus(input)
-	input = attachStagePacketToStepInput(run, stepID, input)
-	return attachCurrentActionContractToInput(run, stepID, input)
+	return renderCurrentAuthorityDispatchInput(run, stepID, input)
 }
 
 func normalizeGraphValidationDispatchAuthority(run *runModel.Run, stepID common.StepID, input map[string]any, node runtimemodel.BlockExecutionNode) map[string]any {
@@ -962,9 +960,7 @@ func normalizeGraphValidationDispatchAuthority(run *runModel.Run, stepID common.
 	input["graphLocalNextAction"] = cloneStepPayload(action)
 	ensureGraphLocalAuthorityMaps(run, input, action)
 	currentActionSetNextAction(input, action)
-	input = normalizeDispatchInputAuthorityFocus(input)
-	input = attachStagePacketToStepInput(run, stepID, input)
-	return attachCurrentActionContractToInput(run, stepID, input)
+	return renderCurrentAuthorityDispatchInput(run, stepID, input)
 }
 
 func ensureGraphLocalAuthorityMaps(run *runModel.Run, input map[string]any, action map[string]any) {

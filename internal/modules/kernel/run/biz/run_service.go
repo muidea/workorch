@@ -466,37 +466,19 @@ func (s *Service) FailRun(ctx context.Context, cmd runcontracts.FailRunCommand) 
 }
 
 func isTerminalRunState(state common.RunState) bool {
-	return state == common.RunStateCompleted ||
-		state == common.RunStateFailed ||
-		state == common.RunStateCancelled ||
-		state == common.RunStateSuperseded
+	return common.RunStateIsTerminal(state)
 }
 
 func canCancelRun(state common.RunState) bool {
-	switch state {
-	case common.RunStatePending, common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
-		return true
-	default:
-		return false
-	}
+	return common.RunStateCanTransition(state, common.RunStateCancelled)
 }
 
 func canSupersedeRun(state common.RunState) bool {
-	switch state {
-	case common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
-		return true
-	default:
-		return false
-	}
+	return common.RunStateCanTransition(state, common.RunStateSuperseded)
 }
 
 func canFailRun(state common.RunState) bool {
-	switch state {
-	case common.RunStatePending, common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
-		return true
-	default:
-		return false
-	}
+	return common.RunStateCanTransition(state, common.RunStateFailed)
 }
 
 func (s *Service) loadRun(ctx context.Context, runID common.RunID, explicitWorkspaceID common.WorkspaceID) (*runModel.Run, error) {

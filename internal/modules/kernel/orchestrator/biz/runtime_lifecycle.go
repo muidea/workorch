@@ -36,7 +36,7 @@ func (o *RuntimeOrchestrator) acceptRunStart(ctx context.Context, runID common.R
 	if err != nil {
 		return nil, nil, err
 	}
-	if r.State != common.RunStatePending {
+	if r.State != common.RunStatePending || !common.RunStateCanTransition(r.State, common.RunStateActive) {
 		return nil, nil, common.ErrConflict
 	}
 	ws, err := o.runStateManager().workspaceForCreatedRunStart(ctx, r)
@@ -107,7 +107,8 @@ func (o *RuntimeOrchestrator) blockOnDecisionAtStep(ctx context.Context, r *runM
 	if r == nil || r.ID == "" || ticketID == "" {
 		return common.ErrInvalidArgument
 	}
-	if r.State != common.RunStatePending && r.State != common.RunStateActive {
+	if (r.State != common.RunStatePending && r.State != common.RunStateActive) ||
+		!common.RunStateCanTransition(r.State, common.RunStateBlockedOnDecision) {
 		return common.ErrConflict
 	}
 	if err := o.finalizeManagedValidationResourcesForGovernedWait(ctx, r, currentStepID, "released", "run_blocked_on_decision"); err != nil {
@@ -142,7 +143,8 @@ func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runM
 	if r == nil || r.ID == "" || approvalID == "" {
 		return common.ErrInvalidArgument
 	}
-	if r.State != common.RunStatePending && r.State != common.RunStateActive {
+	if (r.State != common.RunStatePending && r.State != common.RunStateActive) ||
+		!common.RunStateCanTransition(r.State, common.RunStateBlockedOnApproval) {
 		return common.ErrConflict
 	}
 	if err := o.finalizeManagedValidationResourcesForGovernedWait(ctx, r, currentStepID, "released", "run_blocked_on_approval"); err != nil {

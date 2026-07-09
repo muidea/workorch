@@ -310,6 +310,10 @@ func runtimeRepairSpecsAfterResolvedDecision(
 	}
 	input := builder.runtimeRepairFollowUpStepInput(ctx, run, step, attempt, nil)
 	input["decisionAuthorizedRetry"] = true
+	input, err = finalizeCurrentAuthorityDispatchInputForRun(run, stepID, cloneStepPayload(input))
+	if err != nil {
+		return nil, true, err
+	}
 	return []stepDispatchSpec{{
 		ID:    stepID,
 		Kind:  initialStepKind(run),
@@ -352,6 +356,10 @@ func providerRetrySpecsAfterResolvedDecision(
 	}
 	input := providerRetryStepInputWithMaxAttempts(step, attempt, nil, repair.effectiveMaxProviderRetryAttempts(ctx, policy, run, step))
 	input["decisionAuthorizedRetry"] = true
+	input, err = finalizeCurrentAuthorityDispatchInputForRun(run, stepID, cloneStepPayload(input))
+	if err != nil {
+		return nil, true, err
+	}
 	return []stepDispatchSpec{{
 		ID:    stepID,
 		Kind:  step.Kind,
@@ -382,6 +390,10 @@ func contextIntegritySpecsAfterResolvedDecision(
 	}
 	baseID := common.StepID(fmt.Sprintf("%s/context-gate-retry", step.ID))
 	nextStepID, err := uniqueDispatchStepID(ctx, steps, run.ID, baseID)
+	if err != nil {
+		return nil, true, err
+	}
+	input, err = finalizeCurrentAuthorityDispatchInputForRun(run, nextStepID, cloneStepPayload(input))
 	if err != nil {
 		return nil, true, err
 	}
@@ -569,10 +581,15 @@ func knownReadableDecisionRepairSpecs(
 	if err != nil {
 		return nil, true, err
 	}
+	input := builder.runtimeRepairFollowUpStepInput(ctx, run, &repairOf, attempt, common.ErrInvalidArgument)
+	input, err = finalizeCurrentAuthorityDispatchInputForRun(run, stepID, cloneStepPayload(input))
+	if err != nil {
+		return nil, true, err
+	}
 	return []stepDispatchSpec{{
 		ID:    stepID,
 		Kind:  initialStepKind(run),
-		Input: builder.runtimeRepairFollowUpStepInput(ctx, run, &repairOf, attempt, common.ErrInvalidArgument),
+		Input: input,
 	}}, true, nil
 }
 

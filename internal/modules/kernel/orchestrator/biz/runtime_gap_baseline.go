@@ -326,10 +326,7 @@ func rebuildDispatchInputFromConvergenceAuthority(run *runModel.Run, stepID comm
 			RepairObjective:  "complete_dod_goal_coverage_assessment",
 		})
 		clearExecutableCoverageContinuationContract(input)
-		input = attachStagePacketToStepInput(run, stepID, input)
-		input = synchronizeCurrentRequiredOutputMirrors(input)
-		input = attachCurrentActionContractToInput(run, stepID, input)
-		input = scrubConvergenceDispatchDiagnosticAdvice(input)
+		input = renderCurrentAuthorityDispatchInput(run, stepID, input)
 		return input, validateConvergenceDispatchInput(input)
 	}
 	if dispatchInputHasStaleLocalAssessmentContract(run, input) {
@@ -344,10 +341,7 @@ func refreshCurrentAuthorityDerivedSnapshot(run *runModel.Run, stepID common.Ste
 	}
 	input = injectLatestRunAuthorityForDispatch(run, input)
 	if !dispatchInputHasConvergenceAuthority(run, input) {
-		input = attachStagePacketToStepInput(run, stepID, input)
-		input = synchronizeCurrentRequiredOutputMirrors(input)
-		input = attachCurrentActionContractToInput(run, stepID, input)
-		input = scrubConvergenceDispatchDiagnosticAdvice(input)
+		input = renderCurrentAuthorityDispatchInput(run, stepID, input)
 		return input, validateConvergenceDispatchInput(input)
 	}
 	requiredSeed := stateChangingRequiredOutputSeedForAuthorityRefresh(input)
@@ -355,18 +349,25 @@ func refreshCurrentAuthorityDerivedSnapshot(run *runModel.Run, stepID common.Ste
 	input = ApplyConvergenceContract(input, contract)
 	input = restoreStateChangingRequiredOutputSeed(input, requiredSeed)
 	input = enforceStateChangingContractRequiredOutput(input)
-	input = normalizeDispatchInputAuthorityFocus(input)
-	input = attachStagePacketToStepInput(run, stepID, input)
-	input = synchronizeCurrentRequiredOutputMirrors(input)
-	input = attachCurrentActionContractToInput(run, stepID, input)
+	input = renderCurrentAuthorityDispatchInput(run, stepID, input)
 	input = enforceCurrentAuthorityDerivedConsistency(run, stepID, input)
-	input = synchronizeCurrentRequiredOutputMirrors(input)
-	input = attachCurrentActionContractToInput(run, stepID, input)
-	input = scrubConvergenceDispatchDiagnosticAdvice(input)
+	input = renderCurrentAuthorityDispatchInput(run, stepID, input)
 	if err := validateConvergenceDispatchInput(input); err != nil {
 		return nil, err
 	}
 	return input, nil
+}
+
+func renderCurrentAuthorityDispatchInput(run *runModel.Run, stepID common.StepID, input map[string]any) map[string]any {
+	if input == nil {
+		input = map[string]any{}
+	}
+	input = normalizeDispatchInputAuthorityFocus(input)
+	input = attachStagePacketToStepInput(run, stepID, input)
+	input = synchronizeCurrentRequiredOutputMirrors(input)
+	input = attachCurrentActionContractToInput(run, stepID, input)
+	input = sealCurrentAuthoritySnapshotLineage(input)
+	return scrubConvergenceDispatchDiagnosticAdvice(input)
 }
 
 func stateChangingRequiredOutputSeedForAuthorityRefresh(input map[string]any) map[string]any {
@@ -492,10 +493,7 @@ func finalizeLLMDispatchAuthorityInput(run *runModel.Run, stepID common.StepID, 
 	if dispatchInputHasConvergenceAuthority(run, input) {
 		return rebuildDispatchInputFromConvergenceAuthority(run, stepID, input)
 	}
-	input = attachStagePacketToStepInput(run, stepID, input)
-	input = synchronizeCurrentRequiredOutputMirrors(input)
-	input = attachCurrentActionContractToInput(run, stepID, input)
-	input = scrubConvergenceDispatchDiagnosticAdvice(input)
+	input = renderCurrentAuthorityDispatchInput(run, stepID, input)
 	if err := validateConvergenceDispatchInput(input); err != nil {
 		return nil, err
 	}
@@ -611,12 +609,35 @@ func dispatchInputShouldPreserveLocalRepairAuthority(run *runModel.Run, input ma
 	contract := mapFromValue(input["convergenceContract"])
 	if localKind == runtimemodel.NextActionTypeValidate &&
 		strings.TrimSpace(stringFromMap(contract, "state")) == convergenceStateNeedValidation {
-		if localRepairAuthorityFocusMissingStateChange(input, localAuthority) {
+		if localRepairAuthorityFocusMissingStateChange(input, localAuthority) || runAuthorityFocusMissingStateChange(run) {
 			appendAuthorityDiagnostic(input, "local_validation_repair_authority_rejected", "warning", "internal_authority_mismatch", "convergenceAuthority", "local validation repair authority cannot override a focus that is still missing state_change evidence")
 			return false
 		}
 		appendAuthorityDiagnostic(input, "local_validation_repair_authority_preserved", "warning", "diagnostic_lineage", "convergenceAuthority", "runtime repair preserves terminal validation authority instead of rebinding stale run authority")
 		return true
+	}
+	return false
+}
+
+func runAuthorityFocusMissingStateChange(run *runModel.Run) bool {
+	if run == nil || run.ExecutionContext == nil {
+		return false
+	}
+	for _, source := range []map[string]any{
+		convergenceAuthorityMapFromValue(run.ExecutionContext[convergenceAuthorityKey]),
+		gapBaselineMapFromValue(run.ExecutionContext[gapBaselineKey]),
+		mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]),
+	} {
+		if len(source) == 0 {
+			continue
+		}
+		focus := mapFromValue(source["currentFocus"])
+		if len(focus) == 0 {
+			focus = source
+		}
+		if coverageWorkItemExplicitOrDerivedMissingEvidenceKindSet(focus)["state_change"] {
+			return true
+		}
 	}
 	return false
 }
@@ -864,8 +885,7 @@ func finalizeCurrentAuthorityDispatchInput(input map[string]any) (map[string]any
 	if input == nil {
 		input = map[string]any{}
 	}
-	input = synchronizeCurrentRequiredOutputMirrors(input)
-	input = scrubConvergenceDispatchDiagnosticAdvice(input)
+	input = renderCurrentAuthorityDispatchInput(nil, "", input)
 	if dispatchInputRequiresConvergenceDispatchValidation(input) {
 		input = enforceCurrentAuthorityDerivedConsistency(nil, "", input)
 		if err := validateConvergenceDispatchInput(input); err != nil {
@@ -970,10 +990,7 @@ func enforceCurrentAuthorityDerivedConsistency(run *runModel.Run, stepID common.
 		"reason": firstNonEmptyString(stringFromMap(currentActionNextActionFromInput(input), "reason"), "current convergence authority requires state-changing output"),
 	}
 	currentActionSetNextAction(input, action)
-	input = normalizeDispatchInputAuthorityFocus(input)
-	input = attachStagePacketToStepInput(run, stepID, input)
-	input = synchronizeCurrentRequiredOutputMirrors(input)
-	return attachCurrentActionContractToInput(run, stepID, input)
+	return renderCurrentAuthorityDispatchInput(run, stepID, input)
 }
 
 func validateConvergenceDispatchInput(input map[string]any) error {
@@ -1044,6 +1061,9 @@ func validateConvergenceDispatchInput(input map[string]any) error {
 		return err
 	}
 	if err := validateConvergenceDispatchRequiredOutputSemantics(input); err != nil {
+		return err
+	}
+	if err := validateCurrentAuthoritySnapshotLineage(input); err != nil {
 		return err
 	}
 	if err := validateCurrentActionContract(input); err != nil {
@@ -1742,6 +1762,9 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", "requiredOutput", "validation requiredOutput accepts workspace-mutating output")
 		return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: validation accepts workspace-mutating output")
 	}
+	if err := validateRequiredOutputStateMachineShape(input, "requiredOutput", top, state, nextAction); err != nil {
+		return err
+	}
 	if requiredOutputRequiresManagedValidationOnly(top) && !requiredOutputIsManagedValidationOnly(top) {
 		appendAuthorityDiagnostic(input, "required_output_unsatisfiable", "error", "internal_authority_mismatch", "requiredOutput", "forced-narrow managed validation requiredOutput must expose only validation/managed_session")
 		return convergenceDispatchMisalignmentError("runtime_internal_contract_unsatisfiable: managed validation requiredOutput allows non-managed validation route")
@@ -1768,6 +1791,9 @@ func validateConvergenceDispatchRequiredOutputSemantics(input map[string]any) er
 		if topStateChanging && !requiredOutputHasAllowedStateChangingKind(required) && !prerequisiteActive {
 			appendAuthorityDiagnostic(input, "required_output_mismatch_next_action", "error", "internal_authority_mismatch", label, "state-changing requiredOutput has no allowed accepted kind")
 			return convergenceDispatchMisalignmentError("required_output_mismatch_next_action: state-changing requiredOutput has no allowed accepted kind: %s", label)
+		}
+		if err := validateRequiredOutputStateMachineShape(input, label, required, state, nextAction); err != nil {
+			return err
 		}
 		if requiredOutputRequiresManagedValidationOnly(top) && !requiredOutputIsManagedValidationOnly(required) {
 			appendAuthorityDiagnostic(input, "required_output_unsatisfiable", "error", "internal_authority_mismatch", label, "forced-narrow managed validation mirror must expose only validation/managed_session")
@@ -1874,22 +1900,13 @@ func validateConvergenceContractStateMatchesNextAction(input map[string]any, sta
 	if targetSnapshotPrerequisiteActive(input) && nextAction == runtimemodel.NextActionTypeStateChange && state == convergenceStateNeedStateChange {
 		return nil
 	}
-	switch nextAction {
-	case runtimemodel.NextActionTypeStateChange, "produce_state_change":
-		if state != convergenceStateNeedStateChange {
-			appendAuthorityDiagnostic(input, "contract_state_mismatch_next_action", "error", "internal_authority_mismatch", "convergenceContract", "state_change nextAction requires need_state_change convergenceContract")
-			return convergenceDispatchMisalignmentError("contract_state_mismatch_next_action: state_change nextAction has contract state %s", state)
-		}
-	case runtimemodel.NextActionTypeValidate, "validation", "produce_validation_evidence":
-		if state != convergenceStateNeedValidation {
-			appendAuthorityDiagnostic(input, "contract_state_mismatch_next_action", "error", "internal_authority_mismatch", "convergenceContract", "validation nextAction requires need_validation convergenceContract")
-			return convergenceDispatchMisalignmentError("contract_state_mismatch_next_action: validation nextAction has contract state %s", state)
-		}
-	case runtimemodel.NextActionTypeRepair, "acquire_evidence":
-		if state != convergenceStateNeedEvidence {
-			appendAuthorityDiagnostic(input, "contract_state_mismatch_next_action", "error", "internal_authority_mismatch", "convergenceContract", "evidence acquisition nextAction requires need_evidence convergenceContract")
-			return convergenceDispatchMisalignmentError("contract_state_mismatch_next_action: evidence nextAction has contract state %s", state)
-		}
+	expected, ok := convergenceContractStateForNextAction(nextAction)
+	if !ok {
+		return nil
+	}
+	if state != expected {
+		appendAuthorityDiagnostic(input, "contract_state_mismatch_next_action", "error", "internal_authority_mismatch", "convergenceContract", fmt.Sprintf("%s nextAction requires %s convergenceContract", canonicalDispatchNextActionKind(nextAction), expected))
+		return convergenceDispatchMisalignmentError("contract_state_mismatch_next_action: %s nextAction has contract state %s, want %s", canonicalDispatchNextActionKind(nextAction), state, expected)
 	}
 	return nil
 }
