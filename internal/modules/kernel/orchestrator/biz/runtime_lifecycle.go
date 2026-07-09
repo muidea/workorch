@@ -260,36 +260,26 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			return err
 		}
 		if ticket.State != common.DecisionTicketStateResolved {
-			if runtimeRepairExhaustionBlockerHasSuccessEvidence(ctx, o.steps, ticket) {
-				r.BlockingTicketID = ""
-				break
+			eligibility := o.evaluateDecisionEligibility(ctx, r, ticket)
+			if eligibility.Action == decisionEligibilityBlocked {
+				return common.ErrBlocked
 			}
-			policy := o.RuntimePolicy()
-			if duplicateRuntimeFailureBlockerCanAutoResume(ctx, o.steps, o.repairManager(), policy, r, ticket) {
-				resumeAfterStepID = ticket.StepID
-				r.BlockingTicketID = ""
-				break
-			}
-			if runtimeRepairExhaustionBlockerCanAutoResume(ctx, o.steps, o.repairManager(), policy, r, ticket) {
+			if eligibility.SupersedeTicket {
 				ticket.State = common.DecisionTicketStateSuperseded
 				if err := o.tickets.Update(ctx, ticket); err != nil {
 					return err
 				}
-				resumeAfterStepID = ticket.StepID
-				r.BlockingTicketID = ""
-				break
 			}
-			if knownReadableDecisionBlockerCanAutoRepair(ctx, o.steps, o.workspaces, r, ticket) {
-				ticket.State = common.DecisionTicketStateSuperseded
-				if err := o.tickets.Update(ctx, ticket); err != nil {
-					return err
-				}
-				resumeAfterStepID = ticket.StepID
-				resumeInput = map[string]any{"knownReadableDecisionRepair": true}
-				r.BlockingTicketID = ""
-				break
+			if eligibility.ResumeAfterStepID != "" {
+				resumeAfterStepID = eligibility.ResumeAfterStepID
 			}
-			return common.ErrBlocked
+			if len(eligibility.ResumeInput) > 0 {
+				resumeInput = eligibility.ResumeInput
+			}
+			if eligibility.ClearBlocker {
+				r.BlockingTicketID = ""
+			}
+			break
 		}
 		resumeAfterStepID = ticket.StepID
 		if o.resolutions != nil {

@@ -1858,6 +1858,37 @@ func TestContractViolationRetryPreservesStateChangingExpectedContract(t *testing
 	}
 }
 
+func TestCurrentActionSetNextActionDoesNotOverwriteOwnerAuthority(t *testing.T) {
+	input := map[string]any{
+		convergenceAuthorityKey: map[string]any{
+			"nextAction": map[string]any{
+				"kind":   runtimemodel.NextActionTypeStateChange,
+				"reason": "owner authority from ledger",
+			},
+		},
+		gapBaselineKey: map[string]any{
+			"nextAction": map[string]any{
+				"kind": runtimemodel.NextActionTypeStateChange,
+			},
+		},
+	}
+
+	currentActionSetNextAction(input, map[string]any{
+		"kind":   runtimemodel.NextActionTypeValidate,
+		"reason": "diagnostic retry",
+	})
+
+	authority := mapFromValue(input[convergenceAuthorityKey])
+	next := mapFromValue(authority["nextAction"])
+	if got := stringFromMap(next, "kind"); got != runtimemodel.NextActionTypeStateChange {
+		t.Fatalf("convergenceAuthority.nextAction.kind = %q, want owner state_change authority", got)
+	}
+	diagnostics := mapSliceFromValue(input["authorityDiagnostics"])
+	if len(diagnostics) == 0 || stringFromMap(diagnostics[0], "code") != "current_action_next_action_diagnostic_only" {
+		t.Fatalf("authorityDiagnostics = %+v, want diagnostic-only nextAction warning", diagnostics)
+	}
+}
+
 func TestContractViolationRetryInputPreservesGapBaselineFromFailedStep(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-contract-violation-gap-baseline")

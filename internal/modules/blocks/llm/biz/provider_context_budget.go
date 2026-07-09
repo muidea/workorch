@@ -1073,13 +1073,18 @@ func providerInputRequiresProcessEvidence(input map[string]any) bool {
 	if boolValue(input["runtimeRepairFollowUp"]) {
 		return true
 	}
+	if boolValue(input["contractViolationRetry"]) || len(recordFromAny(input["contractViolationRecovery"])) > 0 {
+		return true
+	}
 	if len(recordFromAny(recordFromAny(input["executionContext"])["replanContinuation"])) > 0 ||
 		len(recordFromAny(recordFromAny(input["executionContextPackage"])["replanContinuation"])) > 0 {
 		return true
 	}
-	if strings.TrimSpace(strings.ToLower(stringValue(input["runtimeStage"]))) == "repair" ||
-		boolValue(input["stateChangingOutputRequired"]) {
-		return providerInputHasCurrentFailure(input)
+	if strings.TrimSpace(stringValue(input["failedStepId"])) != "" ||
+		len(recordFromAny(input["failedStepInput"])) > 0 ||
+		len(recordFromAny(input["failedStepOutput"])) > 0 ||
+		len(recordFromAny(input["lastFailureDiagnostics"])) > 0 {
+		return true
 	}
 	return false
 }

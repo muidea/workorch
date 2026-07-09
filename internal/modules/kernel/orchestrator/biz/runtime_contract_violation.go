@@ -596,12 +596,34 @@ func currentActionSetNextAction(input map[string]any, action map[string]any) {
 	if len(input) == 0 || len(action) == 0 {
 		return
 	}
-	syncConvergenceNextActionMap(input, convergenceAuthorityKey, action)
-	syncConvergenceNextActionMap(input, gapBaselineKey, action)
-	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
-		syncConvergenceNextActionMap(executionContext, convergenceAuthorityKey, action)
-		syncConvergenceNextActionMap(executionContext, gapBaselineKey, action)
-		input["executionContext"] = executionContext
+	if boolValue(input["graphLocalDispatchAuthority"]) {
+		syncConvergenceNextActionMap(input, convergenceAuthorityKey, action)
+		syncConvergenceNextActionMap(input, gapBaselineKey, action)
+		if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
+			syncConvergenceNextActionMap(executionContext, convergenceAuthorityKey, action)
+			syncConvergenceNextActionMap(executionContext, gapBaselineKey, action)
+			input["executionContext"] = executionContext
+		}
+		return
+	}
+	for _, source := range []struct {
+		label string
+		value map[string]any
+	}{
+		{convergenceAuthorityKey, mapFromValue(input[convergenceAuthorityKey])},
+		{gapBaselineKey, mapFromValue(input[gapBaselineKey])},
+		{"executionContext." + convergenceAuthorityKey, mapFromValue(mapFromValue(input["executionContext"])[convergenceAuthorityKey])},
+		{"executionContext." + gapBaselineKey, mapFromValue(mapFromValue(input["executionContext"])[gapBaselineKey])},
+	} {
+		existing := mapFromValue(source.value["nextAction"])
+		if len(existing) == 0 {
+			continue
+		}
+		existingKind := canonicalDispatchNextActionKind(stringFromMap(existing, "kind"))
+		derivedKind := canonicalDispatchNextActionKind(stringFromMap(action, "kind"))
+		if existingKind != "" && derivedKind != "" && existingKind != derivedKind {
+			appendAuthorityDiagnostic(input, "current_action_next_action_diagnostic_only", "warning", "diagnostic_lineage", source.label+".nextAction", "current action nextAction is derived diagnostic-only and cannot overwrite owner authority")
+		}
 	}
 }
 

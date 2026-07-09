@@ -574,28 +574,21 @@ func contractViolationRecoveryStateChangingContract(input map[string]any, failed
 	if len(recovery) == 0 {
 		return ConvergenceContract{}, false
 	}
+	if expected := mapFromValue(recovery["expectedContract"]); len(expected) > 0 {
+		appendAuthorityDiagnostic(input, "contract_violation_expected_contract_diagnostic_only", "info", "diagnostic_lineage", "contractViolationRecovery.expectedContract", "contract violation expectedContract is diagnostic-only and cannot drive convergence contract authority")
+	}
+	correction := mapFromValue(recovery["correctionContract"])
+	switch strings.TrimSpace(stringFromMap(correction, "requiredOutputShape")) {
+	case "valid_patch_apply", "state_changing_output", "state_changing_output_from_available_snapshot":
+	default:
+		return ConvergenceContract{}, false
+	}
 	if convergenceCoverageFocusRequiresValidation(input) &&
 		validationContractFailureMustRemainValidation(input, mapFromValue(input["repairActionPackage"]), failedStep) {
 		return ConvergenceContract{}, false
 	}
 	if contractViolationRecoveryCurrentContractPreemptsExpectedStateChange(input, recovery) {
 		return ConvergenceContract{}, false
-	}
-	expected := mapFromValue(recovery["expectedContract"])
-	if len(expected) == 0 {
-		return ConvergenceContract{}, false
-	}
-	if !boolValue(expected["stateChangingOutputRequired"]) &&
-		strings.TrimSpace(stringFromMap(expected, "repairObjective")) != repairObjectiveStateChangingOutput {
-		if convergence := mapFromValue(expected["convergenceContract"]); len(convergence) > 0 {
-			if !boolValue(convergence["stateChangingOutputRequired"]) &&
-				strings.TrimSpace(stringFromMap(convergence, "repairObjective")) != repairObjectiveStateChangingOutput &&
-				strings.TrimSpace(stringFromMap(convergence, "state")) != convergenceStateNeedStateChange {
-				return ConvergenceContract{}, false
-			}
-		} else {
-			return ConvergenceContract{}, false
-		}
 	}
 	pkg := cloneStepPayload(mapFromValue(input["repairActionPackage"]))
 	if len(pkg) == 0 && failedStep != nil && !failedStepRequiresAuthorityRecompute(failedStep) {
