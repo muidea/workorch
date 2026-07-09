@@ -2890,7 +2890,7 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 		return true
 	}
 	if decisionBlockDeclaresRuntimeRepairExhausted(spec.Context) {
-		return true
+		return runtimeRepairExhaustedDecisionCanCreateTicket(input, spec.Context, contract)
 	}
 	if decisionBlockDeclaresContractViolationRecoveryExhausted(spec.Context) {
 		return true
@@ -2917,6 +2917,17 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 	default:
 		return true
 	}
+}
+
+func runtimeRepairExhaustedDecisionCanCreateTicket(input map[string]any, context map[string]any, contract ConvergenceContract) bool {
+	if decisionBlockDeclaresNonContractRuntimeDependency(context) ||
+		decisionBlockDeclaresRequiredRealExternalDependency(context) {
+		return true
+	}
+	if continuableDecisionContract(input, context, contract) {
+		return false
+	}
+	return !continuableNextActionKind(convergenceNextActionKind(nil, input))
 }
 
 func continuableDecisionContract(input map[string]any, context map[string]any, contract ConvergenceContract) bool {

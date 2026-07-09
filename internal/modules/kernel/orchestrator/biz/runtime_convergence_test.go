@@ -5127,7 +5127,7 @@ func TestBuildConvergenceContractKeepsValidationOnRequiredOutputCapabilityMismat
 	}
 }
 
-func TestShouldCreateDecisionTicketKeepsRuntimeRepairExhaustedBlockerWithContinuableNextAction(t *testing.T) {
+func TestShouldCreateDecisionTicketBlocksRuntimeRepairExhaustedWithContinuableNextAction(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:      runtimeStageRepair,
 		"repairObjective":             repairObjectiveStateChangingOutput,
@@ -5161,8 +5161,8 @@ func TestShouldCreateDecisionTicketKeepsRuntimeRepairExhaustedBlockerWithContinu
 		},
 	}
 
-	if !ShouldCreateDecisionTicket(input, output, contract) {
-		t.Fatalf("ShouldCreateDecisionTicket = false, want runtime repair exhausted blocker despite continuable next action")
+	if ShouldCreateDecisionTicket(input, output, contract) {
+		t.Fatalf("ShouldCreateDecisionTicket = true, want false while runtime repair exhaustion still has a continuable authority action")
 	}
 }
 
