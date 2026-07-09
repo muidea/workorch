@@ -3,6 +3,8 @@ package governance
 import (
 	"context"
 
+	cd "github.com/muidea/magicCommon/def"
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	governancebiz "github.com/muidea/workorch/internal/modules/kernel/governance/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
@@ -21,7 +23,7 @@ type ResumeRunFunc = governancebiz.ResumeRunFunc
 
 type Dependencies struct {
 	AutoGovernanceTraces repository.AutoGovernanceTraceRepository
-	EventHub             events.Hub
+	EventHub             magicevent.Hub
 	TicketReader         governancebiz.TicketReader
 	ResolutionReader     governancebiz.ResolutionReader
 	ApprovalReader       governancebiz.ApprovalReader
@@ -38,8 +40,9 @@ type Dependencies struct {
 type Module struct {
 	bizPtr   *governancebiz.Service
 	traces   repository.AutoGovernanceTraceRepository
-	eventHub events.Hub
-	unsub    []func()
+	eventHub magicevent.Hub
+	observer magicevent.SimpleObserver
+	topics   []string
 }
 
 func New() *Module { return &Module{} }
@@ -54,32 +57,33 @@ func (m *Module) Configure(deps Dependencies) error {
 	if deps.LoadConfig == nil {
 		deps.LoadConfig = workorchconfig.Current
 	}
+	eventHubBridge := events.NewMagicHubWithHubOwner(deps.EventHub, ModuleID)
 	if deps.ResolveDecision == nil {
-		deps.ResolveDecision = eventResolveDecision(deps.EventHub)
+		deps.ResolveDecision = eventResolveDecision(eventHubBridge)
 	}
 	if deps.ResolveApproval == nil {
-		deps.ResolveApproval = eventResolveApproval(deps.EventHub)
+		deps.ResolveApproval = eventResolveApproval(eventHubBridge)
 	}
 	if deps.ResumeRun == nil {
-		deps.ResumeRun = eventResumeRun(deps.EventHub)
+		deps.ResumeRun = eventResumeRun(eventHubBridge)
 	}
 	if deps.TicketReader == nil {
-		deps.TicketReader = eventTicketReader{hub: deps.EventHub}
+		deps.TicketReader = eventTicketReader{hub: eventHubBridge}
 	}
 	if deps.ResolutionReader == nil {
-		deps.ResolutionReader = eventResolutionReader{hub: deps.EventHub}
+		deps.ResolutionReader = eventResolutionReader{hub: eventHubBridge}
 	}
 	if deps.ApprovalReader == nil {
-		deps.ApprovalReader = eventApprovalReader{hub: deps.EventHub}
+		deps.ApprovalReader = eventApprovalReader{hub: eventHubBridge}
 	}
 	if deps.RunReader == nil {
-		deps.RunReader = eventRunReader{hub: deps.EventHub}
+		deps.RunReader = eventRunReader{hub: eventHubBridge}
 	}
 	if deps.WorkspaceDefinitions == nil {
-		deps.WorkspaceDefinitions = eventWorkspaceReader{hub: deps.EventHub}
+		deps.WorkspaceDefinitions = eventWorkspaceReader{hub: eventHubBridge}
 	}
 	if deps.MemoryReader == nil {
-		deps.MemoryReader = eventMemoryReader{hub: deps.EventHub}
+		deps.MemoryReader = eventMemoryReader{hub: eventHubBridge}
 	}
 	m.bizPtr = governancebiz.NewService(governancebiz.Dependencies{
 		Tickets:              deps.TicketReader,
@@ -89,7 +93,7 @@ func (m *Module) Configure(deps Dependencies) error {
 		WorkspaceDefinitions: deps.WorkspaceDefinitions,
 		MemoryItems:          deps.MemoryReader,
 		AutoGovernanceTraces: deps.AutoGovernanceTraces,
-		EventHub:             deps.EventHub,
+		EventHub:             eventHubBridge,
 		ResolveDecision:      deps.ResolveDecision,
 		ResolveApproval:      deps.ResolveApproval,
 		ResumeRun:            deps.ResumeRun,
@@ -105,13 +109,17 @@ func (m *Module) Start() error {
 	if m == nil || m.bizPtr == nil || m.eventHub == nil {
 		return common.ErrInvalidArgument
 	}
-	if len(m.unsub) > 0 {
+	if m.observer != nil {
 		return nil
 	}
 	if err := m.bizPtr.Start(); err != nil {
 		return err
 	}
-	m.unsub = append(m.unsub, m.eventHub.Subscribe(governanceevents.TopicGovernanceAutoCommandListTraces, m.handleListTracesCommand))
+	m.observer = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
+	m.topics = []string{governanceevents.TopicGovernanceAutoCommandListTraces}
+	for _, topic := range m.topics {
+		m.observer.Subscribe(topic, m.handleCommand)
+	}
 	return nil
 }
 
@@ -122,16 +130,53 @@ func (m *Module) Stop(ctx context.Context) error {
 		m.bizPtr = nil
 	}
 	if m != nil {
-		for idx := len(m.unsub) - 1; idx >= 0; idx-- {
-			if m.unsub[idx] != nil {
-				m.unsub[idx]()
+		if m.observer != nil {
+			for idx := len(m.topics) - 1; idx >= 0; idx-- {
+				m.observer.Unsubscribe(m.topics[idx])
 			}
 		}
-		m.unsub = nil
+		m.topics = nil
+		m.observer = nil
 		m.traces = nil
 		m.eventHub = nil
 	}
 	return nil
+}
+
+func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
+	response, err := m.executeCommand(ev.Context(), ev.ID(), ev.Data())
+	setGovernanceMagicResult(result, response, err)
+}
+
+func (m *Module) executeCommand(ctx context.Context, topic string, data any) (governanceevents.GovernanceCommandResult, error) {
+	if m == nil || m.traces == nil {
+		return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
+	}
+	switch topic {
+	case governanceevents.TopicGovernanceAutoCommandListTraces:
+		cmd, ok := data.(governanceevents.ListAutoGovernanceTracesCommand)
+		if !ok {
+			return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
+		}
+		items, err := m.traces.List(ctx, cmd.Query)
+		if err != nil {
+			return governanceevents.GovernanceCommandResult{}, err
+		}
+		return governanceevents.GovernanceCommandResult{Traces: items}, nil
+	default:
+		return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
+	}
+}
+
+func setGovernanceMagicResult(result magicevent.Result, data any, err error) {
+	if result == nil {
+		return
+	}
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	result.Set(data, nil)
 }
 
 func (m *Module) handleListTracesCommand(ctx context.Context, envelope events.Envelope) error {

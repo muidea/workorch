@@ -9,11 +9,7 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
-	eventstreamcontracts "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/contracts"
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
-	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
-	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -50,8 +46,9 @@ func PurgeWorkspaceRecords(ctx context.Context, hub events.Hub, workspaceID comm
 		return err
 	}
 	for _, runID := range runIDs {
-		if err := ownercommandports.Publish(ctx, hub, runevents.TopicRunCommandDelete, "run", string(runID), workspaceID, runID, map[string]any{
-			events.PayloadKeyCommand: runcontracts.DeleteRunCommand{RunID: runID},
+		if _, err := sendWorkspaceMagicCommand[runevents.DeleteRunCommand, runevents.RunCommandResult](ctx, hub, runevents.TopicRunCommandDelete, runevents.CommandDestination, "run", string(runID), workspaceID, runID, runevents.DeleteRunCommand{
+			WorkspaceID: workspaceID,
+			RunID:       runID,
 		}); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
@@ -60,18 +57,12 @@ func PurgeWorkspaceRecords(ctx context.Context, hub events.Hub, workspaceID comm
 }
 
 func WorkspaceRunIDs(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]common.RunID, error) {
-	response, err := ownerreadports.PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
-		events.PayloadKeyWorkspaceID: string(workspaceID),
-	})
+	response, err := sendWorkspaceMagicCommand[runevents.ListRunsByWorkspaceCommand, runevents.RunCommandResult](ctx, hub, runevents.TopicRunCommandListByWorkspace, runevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", runevents.ListRunsByWorkspaceCommand{WorkspaceID: workspaceID})
 	if err != nil {
 		return nil, err
 	}
-	runs, ok := response.Payload[events.PayloadKeyRuns].([]*runmodel.Run)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	ret := make([]common.RunID, 0, len(runs))
-	for _, item := range runs {
+	ret := make([]common.RunID, 0, len(response.Runs))
+	for _, item := range response.Runs {
 		if item == nil || item.WorkspaceID != workspaceID {
 			continue
 		}
@@ -81,9 +72,7 @@ func WorkspaceRunIDs(ctx context.Context, hub events.Hub, workspaceID common.Wor
 }
 
 func PurgeWorkspaceEventStream(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
-	err := ownercommandports.Publish(ctx, hub, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
-		events.PayloadKeyCommand: eventstreamcontracts.PurgeWorkspaceCommand{WorkspaceID: workspaceID},
-	})
+	_, err := sendWorkspaceMagicCommand[eventstreamevents.PurgeWorkspaceCommand, eventstreamevents.EventStreamCommandResult](ctx, hub, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, eventstreamevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID})
 	if errors.Is(err, common.ErrNotFound) || errors.Is(err, common.ErrConflict) {
 		return nil
 	}

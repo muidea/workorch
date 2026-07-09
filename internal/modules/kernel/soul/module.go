@@ -3,14 +3,14 @@ package soul
 import (
 	"context"
 
+	cd "github.com/muidea/magicCommon/def"
+	magicevent "github.com/muidea/magicCommon/event"
 	soulbiz "github.com/muidea/workorch/internal/modules/kernel/soul/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/common"
 	soulcontracts "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/contracts"
 	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
-	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	soulservice "github.com/muidea/workorch/internal/modules/kernel/soul/service"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -23,14 +23,15 @@ type ValidateCapabilitySelectionCommand = soulcontracts.ValidateCapabilitySelect
 
 type Dependencies struct {
 	Souls    repository.SoulRepository
-	EventHub events.Hub
+	EventHub magicevent.Hub
 }
 
 type Module struct {
 	bizPtr     *soulbiz.Service
 	servicePtr *soulservice.Module
-	eventHub   events.Hub
-	unsub      []func()
+	eventHub   magicevent.Hub
+	observer   magicevent.SimpleObserver
+	topics     []string
 }
 
 func New() *Module { return &Module{} }
@@ -61,28 +62,33 @@ func (m *Module) Start() error {
 	if m.eventHub == nil {
 		return nil
 	}
-	if len(m.unsub) > 0 {
+	if m.observer != nil {
 		return nil
 	}
-	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(soulevents.TopicSoulCommandCreate, m.handleSoulCommand),
-		m.eventHub.Subscribe(soulevents.TopicSoulCommandGet, m.handleSoulCommand),
-		m.eventHub.Subscribe(soulevents.TopicSoulCommandList, m.handleSoulCommand),
-		m.eventHub.Subscribe(soulevents.TopicSoulCommandUpdate, m.handleSoulCommand),
-		m.eventHub.Subscribe(soulevents.TopicSoulCommandDelete, m.handleSoulCommand),
-		m.eventHub.Subscribe(soulevents.TopicSoulCommandValidateCapability, m.handleSoulCommand),
-	)
+	m.observer = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
+	m.topics = []string{
+		soulevents.TopicSoulCommandCreate,
+		soulevents.TopicSoulCommandGet,
+		soulevents.TopicSoulCommandList,
+		soulevents.TopicSoulCommandUpdate,
+		soulevents.TopicSoulCommandDelete,
+		soulevents.TopicSoulCommandValidateCapability,
+	}
+	for _, topic := range m.topics {
+		m.observer.Subscribe(topic, m.handleSoulCommand)
+	}
 	return nil
 }
 
 func (m *Module) Stop(ctx context.Context) error {
 	_ = ctx
-	for idx := len(m.unsub) - 1; idx >= 0; idx-- {
-		if m.unsub[idx] != nil {
-			m.unsub[idx]()
+	if m.observer != nil {
+		for idx := len(m.topics) - 1; idx >= 0; idx-- {
+			m.observer.Unsubscribe(m.topics[idx])
 		}
 	}
-	m.unsub = nil
+	m.topics = nil
+	m.observer = nil
 	m.servicePtr = nil
 	m.bizPtr = nil
 	m.eventHub = nil
@@ -96,150 +102,91 @@ func (m *Module) Service() Service {
 	return m.servicePtr
 }
 
-func (m *Module) handleSoulCommand(ctx context.Context, envelope events.Envelope) error {
+func (m *Module) handleSoulCommand(ev magicevent.Event, result magicevent.Result) {
+	response, err := m.executeSoulCommand(ev.Context(), ev.ID(), ev.Data())
+	setMagicResult(result, response, err)
+}
+
+func (m *Module) executeSoulCommand(ctx context.Context, topic string, data any) (soulevents.SoulCommandResult, error) {
 	if m == nil || m.servicePtr == nil {
-		return common.ErrInvalidArgument
+		return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 	}
-	switch envelope.Topic {
+	switch topic {
 	case soulevents.TopicSoulCommandCreate:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulcontracts.CreateSoulCommand)
+		cmd, ok := data.(soulevents.CreateSoulCommand)
 		if !ok {
-			var err error
-			cmd, err = soulCommandFromPayload(envelope.Payload)
-			if err != nil {
-				return err
-			}
+			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
 		if err := m.servicePtr.CreateSoul(ctx, cmd); err != nil {
-			return err
+			return soulevents.SoulCommandResult{}, err
 		}
 		item, err := m.servicePtr.GetSoul(ctx, cmd.SoulID)
 		if err != nil {
-			return err
+			return soulevents.SoulCommandResult{}, err
 		}
-		return soulCommandResponse(envelope, map[string]any{events.PayloadKeySoul: item})
+		return soulevents.SoulCommandResult{Soul: item}, nil
 	case soulevents.TopicSoulCommandGet:
-		item, err := m.servicePtr.GetSoul(ctx, common.SoulID(stringPayload(envelope.Payload, events.PayloadKeySoulID)))
-		if err != nil {
-			return err
+		cmd, ok := data.(soulevents.GetSoulCommand)
+		if !ok {
+			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
-		return soulCommandResponse(envelope, map[string]any{events.PayloadKeySoul: item})
+		item, err := m.servicePtr.GetSoul(ctx, cmd.SoulID)
+		if err != nil {
+			return soulevents.SoulCommandResult{}, err
+		}
+		return soulevents.SoulCommandResult{Soul: item}, nil
 	case soulevents.TopicSoulCommandList:
+		if _, ok := data.(soulevents.ListSoulsCommand); !ok {
+			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
+		}
 		items, err := m.servicePtr.ListSouls(ctx)
 		if err != nil {
-			return err
+			return soulevents.SoulCommandResult{}, err
 		}
-		return soulCommandResponse(envelope, map[string]any{events.PayloadKeySouls: items})
+		return soulevents.SoulCommandResult{Souls: items}, nil
 	case soulevents.TopicSoulCommandUpdate:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulcontracts.UpdateSoulCommand)
+		cmd, ok := data.(soulevents.UpdateSoulCommand)
 		if !ok {
-			var err error
-			cmd, err = soulCommandFromPayload(envelope.Payload)
-			if err != nil {
-				return err
-			}
+			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
 		if err := m.servicePtr.UpdateSoul(ctx, cmd); err != nil {
-			return err
+			return soulevents.SoulCommandResult{}, err
 		}
 		item, err := m.servicePtr.GetSoul(ctx, cmd.SoulID)
 		if err != nil {
-			return err
+			return soulevents.SoulCommandResult{}, err
 		}
-		return soulCommandResponse(envelope, map[string]any{events.PayloadKeySoul: item})
+		return soulevents.SoulCommandResult{Soul: item}, nil
 	case soulevents.TopicSoulCommandDelete:
-		if err := m.servicePtr.DeleteSoul(ctx, deleteSoulIDFromPayload(envelope.Payload)); err != nil {
-			return err
-		}
-		return soulCommandResponse(envelope, nil)
-	case soulevents.TopicSoulCommandValidateCapability:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulcontracts.ValidateCapabilitySelectionCommand)
+		cmd, ok := data.(soulevents.DeleteSoulCommand)
 		if !ok {
-			cmd = soulCapabilitySelectionCommandFromPayload(envelope.Payload)
-			if cmd.SoulID == "" {
-				return common.ErrInvalidArgument
-			}
+			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
+		}
+		if err := m.servicePtr.DeleteSoul(ctx, cmd.SoulID); err != nil {
+			return soulevents.SoulCommandResult{}, err
+		}
+		return soulevents.SoulCommandResult{}, nil
+	case soulevents.TopicSoulCommandValidateCapability:
+		cmd, ok := data.(soulevents.ValidateCapabilitySelectionCommand)
+		if !ok {
+			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
 		if err := m.servicePtr.ValidateCapabilitySelection(ctx, cmd); err != nil {
-			return err
+			return soulevents.SoulCommandResult{}, err
 		}
-		return soulCommandResponse(envelope, nil)
+		return soulevents.SoulCommandResult{}, nil
 	default:
-		return common.ErrInvalidArgument
+		return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 	}
 }
 
-func soulCommandResponse(request events.Envelope, payload map[string]any) error {
-	if payload == nil {
-		payload = map[string]any{}
+func setMagicResult(result magicevent.Result, data any, err error) {
+	if result == nil {
+		return
 	}
-	return events.Response(events.Envelope{
-		Topic:        request.Topic + "/response",
-		SourceModule: ModuleID,
-		SubjectType:  request.SubjectType,
-		SubjectID:    request.SubjectID,
-		WorkspaceID:  request.WorkspaceID,
-		RunID:        request.RunID,
-		StepID:       request.StepID,
-		Payload:      payload,
-	})
-}
-
-func stringPayload(payload map[string]any, key string) string {
-	value, _ := payload[key].(string)
-	return value
-}
-
-func stringSlicePayload(payload map[string]any, key string) []string {
-	switch value := payload[key].(type) {
-	case []string:
-		return append([]string(nil), value...)
-	case []any:
-		ret := make([]string, 0, len(value))
-		for _, item := range value {
-			if text, ok := item.(string); ok {
-				ret = append(ret, text)
-			}
-		}
-		return ret
-	default:
-		return nil
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
 	}
-}
-
-func soulCommandFromPayload(payload map[string]any) (soulcontracts.CreateSoulCommand, error) {
-	item, ok := payload[events.PayloadKeySoul].(*soulmodel.Soul)
-	if !ok || item == nil {
-		return soulcontracts.CreateSoulCommand{}, common.ErrInvalidArgument
-	}
-	return soulcontracts.CreateSoulCommand{
-		SoulID:                      item.ID,
-		Name:                        item.Name,
-		Description:                 item.Description,
-		BusinessDomains:             append([]string(nil), item.BusinessDomains...),
-		SoulMD:                      item.SoulMD,
-		AllowedSkillRefs:            append([]string(nil), item.AllowedSkillRefs...),
-		AllowedMCPServerRefs:        append([]string(nil), item.AllowedMCPServerRefs...),
-		AllowedCapabilityRefs:       append([]string(nil), item.AllowedCapabilityRefs...),
-		AllowedCapabilityCategories: append([]string(nil), item.AllowedCapabilityCategories...),
-		AllowedToolKinds:            append([]string(nil), item.AllowedToolKinds...),
-	}, nil
-}
-
-func deleteSoulIDFromPayload(payload map[string]any) common.SoulID {
-	if cmd, ok := payload[events.PayloadKeyCommand].(soulcontracts.DeleteSoulCommand); ok && cmd.SoulID != "" {
-		return cmd.SoulID
-	}
-	return common.SoulID(stringPayload(payload, events.PayloadKeySoulID))
-}
-
-func soulCapabilitySelectionCommandFromPayload(payload map[string]any) soulcontracts.ValidateCapabilitySelectionCommand {
-	return soulcontracts.ValidateCapabilitySelectionCommand{
-		SoulID:               common.SoulID(stringPayload(payload, events.PayloadKeySoulID)),
-		SkillRefs:            stringSlicePayload(payload, events.PayloadKeySkillRefs),
-		MCPServerRefs:        stringSlicePayload(payload, events.PayloadKeyMCPServerRefs),
-		CapabilityRefs:       stringSlicePayload(payload, events.PayloadKeyCapabilityRefs),
-		CapabilityCategories: stringSlicePayload(payload, events.PayloadKeyCapabilityCategories),
-		ToolKinds:            stringSlicePayload(payload, events.PayloadKeyToolKinds),
-	}
+	result.Set(data, nil)
 }

@@ -5,30 +5,36 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 
-	eventstreamcontracts "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/contracts"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
-type countingSubscribeHub struct {
-	subscribeCount   int
-	unsubscribeCount int
-}
-
-func (h *countingSubscribeHub) Publish(context.Context, events.Envelope) error {
-	return nil
-}
-
-func (h *countingSubscribeHub) Subscribe(string, events.Handler) func() {
-	h.subscribeCount++
-	return func() {
-		h.unsubscribeCount++
+func sendEventStreamTestCommand(ctx context.Context, rawHub magicevent.Hub, topic string, command any) (eventstreamevents.EventStreamCommandResult, error) {
+	ev := magicevent.NewEventWithContext(topic, "eventstream/module_test", eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	result := rawHub.Send(ev)
+	if result == nil {
+		return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
 	}
+	if err := result.Error(); err != nil {
+		if err.Cause != nil {
+			return eventstreamevents.EventStreamCommandResult{}, err.Cause
+		}
+		return eventstreamevents.EventStreamCommandResult{}, err
+	}
+	data, err := result.Get()
+	if err != nil {
+		return eventstreamevents.EventStreamCommandResult{}, err
+	}
+	response, ok := data.(eventstreamevents.EventStreamCommandResult)
+	if !ok {
+		return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+	}
+	return response, nil
 }
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
@@ -54,15 +60,15 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.unsub)
+	firstSubscriptionCount := len(module.topics)
 	if firstSubscriptionCount == 0 {
 		t.Fatal("Start did not subscribe eventstream commands")
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if len(module.unsub) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	if len(module.topics) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -71,7 +77,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 		module.bizPtr != nil ||
 		module.servicePtr != nil ||
 		module.eventHub != nil ||
-		len(module.unsub) != 0 {
+		module.observer != nil ||
+		len(module.topics) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -99,52 +106,51 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 
 func TestModuleRunIsIdempotentAndTeardownUnsubscribes(t *testing.T) {
 	ctx := context.Background()
-	hub := &countingSubscribeHub{}
 	module := New()
 	if err := module.Configure(Dependencies{
 		EventRecords: memory.NewEventRecordRepository(),
-		EventHub:     hub,
+		EventHub:     magicevent.NewHub(16),
 	}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	firstSubscribeCount := hub.subscribeCount
-	if firstSubscribeCount == 0 {
-		t.Fatalf("subscribe count = 0, want eventstream subscriptions")
+	firstTopicCount := len(module.topics)
+	if firstTopicCount == 0 {
+		t.Fatalf("topic count = 0, want eventstream subscriptions")
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
-	if hub.subscribeCount != firstSubscribeCount {
-		t.Fatalf("subscribe count after second Run = %d, want %d", hub.subscribeCount, firstSubscribeCount)
+	if len(module.topics) != firstTopicCount {
+		t.Fatalf("topic count after second Run = %d, want %d", len(module.topics), firstTopicCount)
 	}
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("Teardown: %v", err)
 	}
-	if hub.unsubscribeCount != firstSubscribeCount {
-		t.Fatalf("unsubscribe count = %d, want %d", hub.unsubscribeCount, firstSubscribeCount)
+	if module.observer != nil || len(module.topics) != 0 {
+		t.Fatalf("module subscriptions were not cleared: %+v", module)
 	}
 }
 
 func eventstreamModuleContractDependencies() Dependencies {
 	return Dependencies{
 		EventRecords: memory.NewEventRecordRepository(),
-		EventHub:     events.NewMemoryHub(),
+		EventHub:     magicevent.NewHub(16),
 	}
 }
 
 func TestPurgeWorkspaceCommandAcceptsContractPayload(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	repo := memory.NewEventRecordRepository()
 	workspaceID := common.WorkspaceID("ws-eventstream-contract")
 	if err := repo.Append(ctx, &eventstreammodel.EventRecord{ID: "event-contract", WorkspaceID: workspaceID, Topic: "/test"}); err != nil {
 		t.Fatalf("seed event record: %v", err)
 	}
 	module := New()
-	if err := module.Configure(Dependencies{EventRecords: repo, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{EventRecords: repo, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -156,16 +162,12 @@ func TestPurgeWorkspaceCommandAcceptsContractPayload(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       eventstreamevents.TopicEventStreamCommandPurgeWorkspace,
-		SubjectType: "workspace",
-		SubjectID:   string(workspaceID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand: eventstreamcontracts.PurgeWorkspaceCommand{WorkspaceID: workspaceID},
-		},
-	})
-	if _, ok := events.ResponseEnvelope(err); !ok {
-		t.Fatalf("purge err = %v, want response", err)
+	response, err := sendEventStreamTestCommand(ctx, rawHub, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID})
+	if err != nil {
+		t.Fatalf("purge err = %v", err)
+	}
+	if response.DeletedCount != 1 {
+		t.Fatalf("deleted count = %d, want 1", response.DeletedCount)
 	}
 	items, err := repo.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID})
 	if err != nil {

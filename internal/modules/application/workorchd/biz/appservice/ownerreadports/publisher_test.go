@@ -5,13 +5,13 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 
@@ -148,30 +148,6 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInEnvelopeAndPayload(t *testing.T) 
 			},
 		},
 		{
-			name:      "results by run",
-			topic:     resultevents.TopicResultCommandListByRun,
-			wantRunID: string(runID),
-			responsePayload: map[string]any{
-				events.PayloadKeyItems: []*resultmodel.Result{},
-			},
-			invoke: func(ctx context.Context, hub events.Hub) error {
-				_, err := ListResultsByRunOwnerCommand(ctx, hub, runID)
-				return err
-			},
-		},
-		{
-			name:      "artifacts by run",
-			topic:     resultevents.TopicArtifactCommandListByRun,
-			wantRunID: string(runID),
-			responsePayload: map[string]any{
-				events.PayloadKeyItems: []*resultmodel.Artifact{},
-			},
-			invoke: func(ctx context.Context, hub events.Hub) error {
-				_, err := ListArtifactsByRunOwnerCommand(ctx, hub, runID)
-				return err
-			},
-		},
-		{
 			name:      "decision ticket get",
 			topic:     decisionevents.TopicDecisionCommandGetTicket,
 			wantRunID: "",
@@ -248,4 +224,52 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInEnvelopeAndPayload(t *testing.T) 
 			}
 		})
 	}
+}
+
+func TestResultOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
+	const workspaceID = common.WorkspaceID("ws-scope-result-owner-read")
+	const runID = common.RunID("run-scope-result-owner-read")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHub(rawHub)
+
+	subscribeResultReadCommand(t, rawHub, resultevents.TopicResultCommandListByRun, func(ev magicevent.Event, response magicevent.Result) {
+		cmd, ok := ev.Data().(resultevents.ListResultsByRunCommand)
+		if !ok {
+			t.Fatalf("result command type = %T", ev.Data())
+		}
+		if cmd.RunID != runID {
+			t.Fatalf("result command runID = %q, want %s", cmd.RunID, runID)
+		}
+		if got := common.RuntimeWorkspaceIDFromContext(ev.Context()); got != workspaceID {
+			t.Fatalf("result command workspace context = %q, want %s", got, workspaceID)
+		}
+		response.Set(resultevents.ResultCommandResult{}, nil)
+	})
+	subscribeResultReadCommand(t, rawHub, resultevents.TopicArtifactCommandListByRun, func(ev magicevent.Event, response magicevent.Result) {
+		cmd, ok := ev.Data().(resultevents.ListArtifactsByRunCommand)
+		if !ok {
+			t.Fatalf("artifact command type = %T", ev.Data())
+		}
+		if cmd.RunID != runID {
+			t.Fatalf("artifact command runID = %q, want %s", cmd.RunID, runID)
+		}
+		if got := common.RuntimeWorkspaceIDFromContext(ev.Context()); got != workspaceID {
+			t.Fatalf("artifact command workspace context = %q, want %s", got, workspaceID)
+		}
+		response.Set(resultevents.ResultCommandResult{}, nil)
+	})
+
+	if _, err := ListResultsByRunOwnerCommand(ctx, hub, runID); err != nil {
+		t.Fatalf("ListResultsByRunOwnerCommand err = %v", err)
+	}
+	if _, err := ListArtifactsByRunOwnerCommand(ctx, hub, runID); err != nil {
+		t.Fatalf("ListArtifactsByRunOwnerCommand err = %v", err)
+	}
+}
+
+func subscribeResultReadCommand(t *testing.T, hub magicevent.Hub, topic string, handle func(magicevent.Event, magicevent.Result)) {
+	t.Helper()
+	observer := magicevent.NewSimpleObserver(resultevents.CommandDestination, hub)
+	observer.Subscribe(topic, handle)
 }

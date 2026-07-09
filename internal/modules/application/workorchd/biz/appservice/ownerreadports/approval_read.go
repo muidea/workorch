@@ -15,19 +15,15 @@ func ReadApprovalByOwnerCommand(ctx context.Context, hub events.Hub, approvalID 
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	payload := map[string]any{
-		events.PayloadKeyApprovalID: string(approvalID),
-	}
-	if workspaceID != "" {
-		payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
-	}
-	response, err := PublishCommandWithResponse(ctx, hub, approvalevents.TopicApprovalCommandGet, "approval", string(approvalID), workspaceID, "", payload)
+	response, err := sendMagicCommand[approvalevents.GetApprovalCommand, approvalevents.ApprovalCommandResult](ctx, hub, approvalevents.TopicApprovalCommandGet, approvalevents.CommandDestination, "approval", string(approvalID), approvalevents.GetApprovalCommand{
+		WorkspaceID: workspaceID,
+		ApprovalID:  approvalID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyApproval].(*approvalmodel.Approval)
-	if !ok || item == nil {
+	if response.Approval == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.Approval, nil
 }

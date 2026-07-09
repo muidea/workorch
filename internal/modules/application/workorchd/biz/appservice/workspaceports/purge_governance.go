@@ -7,19 +7,13 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
-	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func purgeWorkspaceDecisionTickets(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
-	response, err := ownerreadports.PublishCommandWithResponse(ctx, hub, decisionevents.TopicDecisionCommandListTicketsByWS, "workspace", string(workspaceID), workspaceID, "", map[string]any{
-		events.PayloadKeyWorkspaceID: string(workspaceID),
+	response, err := sendWorkspaceMagicCommand[decisionevents.ListTicketsByWorkspaceCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandListTicketsByWS, decisionevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", decisionevents.ListTicketsByWorkspaceCommand{
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
@@ -27,20 +21,24 @@ func purgeWorkspaceDecisionTickets(ctx context.Context, hub events.Hub, workspac
 		}
 		return err
 	}
-	items, ok := response.Payload[events.PayloadKeyTickets].([]*decisionmodel.Ticket)
-	if !ok {
-		return common.ErrInvalidArgument
-	}
+	items := response.Tickets
 	for _, item := range items {
 		if item == nil || item.WorkspaceID != workspaceID {
 			continue
 		}
-		_ = ownercommandports.Publish(ctx, hub, decisionevents.TopicDecisionCommandDeleteResolution, "decision_ticket", string(item.ID), workspaceID, item.RunID, map[string]any{
-			events.PayloadKeyCommand: decisioncontracts.DeleteResolutionCommand{TicketID: item.ID},
+		_, _ = sendWorkspaceMagicCommand[decisionevents.DeleteResolutionCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandDeleteResolution, decisionevents.CommandDestination, "decision_ticket", string(item.ID), workspaceID, item.RunID, decisionevents.DeleteResolutionCommand{
+			TicketID:    item.ID,
+			WorkspaceID: workspaceID,
+			RunID:       item.RunID,
+			StepID:      item.StepID,
 		})
-		if err := ownercommandports.Publish(ctx, hub, decisionevents.TopicDecisionCommandDeleteTicket, "decision_ticket", string(item.ID), workspaceID, item.RunID, map[string]any{
-			events.PayloadKeyCommand: decisioncontracts.DeleteTicketCommand{TicketID: item.ID},
-		}); err != nil && !errors.Is(err, common.ErrNotFound) {
+		_, err := sendWorkspaceMagicCommand[decisionevents.DeleteTicketCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandDeleteTicket, decisionevents.CommandDestination, "decision_ticket", string(item.ID), workspaceID, item.RunID, decisionevents.DeleteTicketCommand{
+			TicketID:    item.ID,
+			WorkspaceID: workspaceID,
+			RunID:       item.RunID,
+			StepID:      item.StepID,
+		})
+		if err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
 	}
@@ -48,8 +46,8 @@ func purgeWorkspaceDecisionTickets(ctx context.Context, hub events.Hub, workspac
 }
 
 func purgeWorkspaceApprovals(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
-	response, err := ownerreadports.PublishCommandWithResponse(ctx, hub, approvalevents.TopicApprovalCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
-		events.PayloadKeyWorkspaceID: string(workspaceID),
+	response, err := sendWorkspaceMagicCommand[approvalevents.ListApprovalsByWorkspaceCommand, approvalevents.ApprovalCommandResult](ctx, hub, approvalevents.TopicApprovalCommandListByWorkspace, approvalevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", approvalevents.ListApprovalsByWorkspaceCommand{
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
@@ -57,17 +55,18 @@ func purgeWorkspaceApprovals(ctx context.Context, hub events.Hub, workspaceID co
 		}
 		return err
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*approvalmodel.Approval)
-	if !ok {
-		return common.ErrInvalidArgument
-	}
+	items := response.Approvals
 	for _, item := range items {
 		if item == nil || item.WorkspaceID != workspaceID {
 			continue
 		}
-		if err := ownercommandports.Publish(ctx, hub, approvalevents.TopicApprovalCommandDelete, "approval", string(item.ID), workspaceID, item.RunID, map[string]any{
-			events.PayloadKeyCommand: approvalcontracts.DeleteApprovalCommand{ApprovalID: item.ID},
-		}); err != nil && !errors.Is(err, common.ErrNotFound) {
+		_, err := sendWorkspaceMagicCommand[approvalevents.DeleteApprovalCommand, approvalevents.ApprovalCommandResult](ctx, hub, approvalevents.TopicApprovalCommandDelete, approvalevents.CommandDestination, "approval", string(item.ID), workspaceID, item.RunID, approvalevents.DeleteApprovalCommand{
+			ApprovalID:  item.ID,
+			WorkspaceID: workspaceID,
+			RunID:       item.RunID,
+			StepID:      item.StepID,
+		})
+		if err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
 	}

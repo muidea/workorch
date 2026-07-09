@@ -15,32 +15,26 @@ func ReadDoDByOwnerCommand(ctx context.Context, hub events.Hub, dodID common.DoD
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(dodID), workspaceID, "", payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyDoDID: string(dodID),
-	}, workspaceID))
+	response, err := sendMagicCommand[workspaceevents.GetDoDCommand, workspaceevents.WorkspaceCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, workspaceevents.TopicWorkspaceCommandGetDoD, workspaceevents.CommandDestination, "dod", string(dodID), workspaceevents.GetDoDCommand{
+		WorkspaceID: workspaceID,
+		DoDID:       dodID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyDoD].(*workspacemodel.DoD)
-	if !ok || item == nil {
+	if response.DoD == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.DoD, nil
 }
 
 func ListDoDsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandListDoDsByWS, "workspace", string(workspaceID), workspaceID, "", map[string]any{
-		events.PayloadKeyWorkspaceID: string(workspaceID),
-	})
+	response, err := sendMagicCommand[workspaceevents.ListDoDsByWorkspaceCommand, workspaceevents.WorkspaceCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, workspaceevents.TopicWorkspaceCommandListDoDsByWS, workspaceevents.CommandDestination, "workspace", string(workspaceID), workspaceevents.ListDoDsByWorkspaceCommand{WorkspaceID: workspaceID})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyDoDs].([]*workspacemodel.DoD)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.DoDs, nil
 }

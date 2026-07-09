@@ -16,47 +16,37 @@ func ReadSoulByOwnerCommand(ctx context.Context, hub events.Hub, soulID common.S
 	if hub == nil || soulID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, soulevents.TopicSoulCommandGet, "soul", string(soulID), "", "", map[string]any{
-		events.PayloadKeySoulID: string(soulID),
-	})
+	result, err := sendMagicCommand[soulevents.GetSoulCommand, soulevents.SoulCommandResult](ctx, hub, soulevents.TopicSoulCommandGet, soulevents.CommandDestination, "soul", string(soulID), soulevents.GetSoulCommand{SoulID: soulID})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeySoul].(*soulmodel.Soul)
-	if !ok || item == nil {
+	if result.Soul == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return result.Soul, nil
 }
 
 func ReadSkillByOwnerCommand(ctx context.Context, hub events.Hub, skillID common.SkillID) (*skillmodel.Skill, error) {
 	if hub == nil || skillID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, skillevents.TopicSkillCommandGet, "skill", string(skillID), "", "", map[string]any{
-		events.PayloadKeySkillID: string(skillID),
-	})
+	result, err := sendMagicCommand[skillevents.GetSkillCommand, skillevents.SkillCommandResult](ctx, hub, skillevents.TopicSkillCommandGet, skillevents.CommandDestination, "skill", string(skillID), skillevents.GetSkillCommand{SkillID: skillID})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeySkill].(*skillmodel.Skill)
-	if !ok || item == nil {
+	if result.Skill == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return result.Skill, nil
 }
 
 func ListSkillsByOwnerCommand(ctx context.Context, hub events.Hub) ([]*skillmodel.Skill, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, skillevents.TopicSkillCommandList, "skill", "all", "", "", nil)
+	result, err := sendMagicCommand[skillevents.ListSkillsCommand, skillevents.SkillCommandResult](ctx, hub, skillevents.TopicSkillCommandList, skillevents.CommandDestination, "skill", "all", skillevents.ListSkillsCommand{})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeySkills].([]*skillmodel.Skill)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return result.Skills, nil
 }

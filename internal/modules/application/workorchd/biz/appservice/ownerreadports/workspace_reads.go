@@ -14,30 +14,23 @@ func ReadWorkspaceByOwnerCommand(ctx context.Context, hub events.Hub, workspaceI
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandGet, "workspace", string(workspaceID), workspaceID, "", map[string]any{
-		events.PayloadKeyWorkspaceID: string(workspaceID),
-	})
+	response, err := sendMagicCommand[workspaceevents.GetWorkspaceCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandGet, workspaceevents.CommandDestination, "workspace", string(workspaceID), workspaceevents.GetWorkspaceCommand{WorkspaceID: workspaceID})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyWorkspace].(*workspacemodel.Workspace)
-	if !ok || item == nil {
+	if response.Workspace == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.Workspace, nil
 }
 
 func ListWorkspacesByOwnerCommand(ctx context.Context, hub events.Hub) ([]*workspacemodel.Workspace, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandList, "workspace", "all", "", "", map[string]any{})
+	response, err := sendMagicCommand[workspaceevents.ListWorkspacesCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandList, workspaceevents.CommandDestination, "workspace", "all", workspaceevents.ListWorkspacesCommand{})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyWorkspaces].([]*workspacemodel.Workspace)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Workspaces, nil
 }

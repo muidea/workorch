@@ -5,7 +5,6 @@ import (
 
 	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
 
-	resultcontracts "github.com/muidea/workorch/internal/modules/kernel/result/pkg/contracts"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -15,17 +14,11 @@ func ListResultsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, wor
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, resultevents.TopicResultCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
-		events.PayloadKeyCommand: resultcontracts.ListResultsByWorkspaceCommand{WorkspaceID: workspaceID},
-	})
+	response, err := sendMagicCommand[resultevents.ListResultsByWorkspaceCommand, resultevents.ResultCommandResult](ctx, hub, resultevents.TopicResultCommandListByWorkspace, resultevents.CommandDestination, "workspace", string(workspaceID), resultevents.ListResultsByWorkspaceCommand{WorkspaceID: workspaceID})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*resultmodel.Result)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Results, nil
 }
 
 func ListResultsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*resultmodel.Result, error) {
@@ -33,16 +26,9 @@ func ListResultsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID com
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, resultevents.TopicResultCommandListByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyCommand: resultcontracts.ListResultsByRunCommand{RunID: runID},
-		events.PayloadKeyRunID:   string(runID),
-	}, workspaceID))
+	response, err := sendMagicCommand[resultevents.ListResultsByRunCommand, resultevents.ResultCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, resultevents.TopicResultCommandListByRun, resultevents.CommandDestination, "run", string(runID), resultevents.ListResultsByRunCommand{RunID: runID})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*resultmodel.Result)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Results, nil
 }

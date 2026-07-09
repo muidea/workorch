@@ -3,14 +3,14 @@ package skill
 import (
 	"context"
 
+	cd "github.com/muidea/magicCommon/def"
+	magicevent "github.com/muidea/magicCommon/event"
 	skillbiz "github.com/muidea/workorch/internal/modules/kernel/skill/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/common"
 	skillcontracts "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/contracts"
 	skillevents "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/events"
-	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
 	skillservice "github.com/muidea/workorch/internal/modules/kernel/skill/service"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -22,14 +22,15 @@ type UpdateSkillCommand = skillcontracts.UpdateSkillCommand
 
 type Dependencies struct {
 	Skills   repository.SkillRepository
-	EventHub events.Hub
+	EventHub magicevent.Hub
 }
 
 type Module struct {
 	bizPtr     *skillbiz.Service
 	servicePtr *skillservice.Module
-	eventHub   events.Hub
-	unsub      []func()
+	eventHub   magicevent.Hub
+	observer   magicevent.SimpleObserver
+	topics     []string
 }
 
 func New() *Module { return &Module{} }
@@ -58,26 +59,31 @@ func (m *Module) Start() error {
 	if m.eventHub == nil {
 		return nil
 	}
-	if len(m.unsub) > 0 {
+	if m.observer != nil {
 		return nil
 	}
-	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(skillevents.TopicSkillCommandCreate, m.handleSkillCommand),
-		m.eventHub.Subscribe(skillevents.TopicSkillCommandGet, m.handleSkillCommand),
-		m.eventHub.Subscribe(skillevents.TopicSkillCommandList, m.handleSkillCommand),
-		m.eventHub.Subscribe(skillevents.TopicSkillCommandUpdate, m.handleSkillCommand),
-	)
+	m.observer = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
+	m.topics = []string{
+		skillevents.TopicSkillCommandCreate,
+		skillevents.TopicSkillCommandGet,
+		skillevents.TopicSkillCommandList,
+		skillevents.TopicSkillCommandUpdate,
+	}
+	for _, topic := range m.topics {
+		m.observer.Subscribe(topic, m.handleSkillCommand)
+	}
 	return nil
 }
 
 func (m *Module) Stop(ctx context.Context) error {
 	_ = ctx
-	for idx := len(m.unsub) - 1; idx >= 0; idx-- {
-		if m.unsub[idx] != nil {
-			m.unsub[idx]()
+	if m.observer != nil {
+		for idx := len(m.topics) - 1; idx >= 0; idx-- {
+			m.observer.Unsubscribe(m.topics[idx])
 		}
 	}
-	m.unsub = nil
+	m.topics = nil
+	m.observer = nil
 	m.servicePtr = nil
 	m.bizPtr = nil
 	m.eventHub = nil
@@ -91,99 +97,73 @@ func (m *Module) Service() Service {
 	return m.servicePtr
 }
 
-func (m *Module) handleSkillCommand(ctx context.Context, envelope events.Envelope) error {
+func (m *Module) handleSkillCommand(ev magicevent.Event, result magicevent.Result) {
+	response, err := m.executeSkillCommand(ev.Context(), ev.ID(), ev.Data())
+	setMagicResult(result, response, err)
+}
+
+func (m *Module) executeSkillCommand(ctx context.Context, topic string, data any) (skillevents.SkillCommandResult, error) {
 	if m == nil || m.servicePtr == nil {
-		return common.ErrInvalidArgument
+		return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 	}
-	switch envelope.Topic {
+	switch topic {
 	case skillevents.TopicSkillCommandCreate:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(skillcontracts.CreateSkillCommand)
+		cmd, ok := data.(skillevents.CreateSkillCommand)
 		if !ok {
-			var err error
-			cmd, err = skillCommandFromPayload(envelope.Payload)
-			if err != nil {
-				return err
-			}
+			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 		}
 		if err := m.servicePtr.CreateSkill(ctx, cmd); err != nil {
-			return err
+			return skillevents.SkillCommandResult{}, err
 		}
 		item, err := m.servicePtr.GetSkill(ctx, cmd.SkillID)
 		if err != nil {
-			return err
+			return skillevents.SkillCommandResult{}, err
 		}
-		return skillCommandResponse(envelope, map[string]any{events.PayloadKeySkill: item})
+		return skillevents.SkillCommandResult{Skill: item}, nil
 	case skillevents.TopicSkillCommandGet:
-		item, err := m.servicePtr.GetSkill(ctx, common.SkillID(stringPayload(envelope.Payload, events.PayloadKeySkillID)))
-		if err != nil {
-			return err
+		cmd, ok := data.(skillevents.GetSkillCommand)
+		if !ok {
+			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 		}
-		return skillCommandResponse(envelope, map[string]any{events.PayloadKeySkill: item})
+		item, err := m.servicePtr.GetSkill(ctx, cmd.SkillID)
+		if err != nil {
+			return skillevents.SkillCommandResult{}, err
+		}
+		return skillevents.SkillCommandResult{Skill: item}, nil
 	case skillevents.TopicSkillCommandList:
+		if _, ok := data.(skillevents.ListSkillsCommand); !ok {
+			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
+		}
 		items, err := m.servicePtr.ListSkills(ctx)
 		if err != nil {
-			return err
+			return skillevents.SkillCommandResult{}, err
 		}
-		return skillCommandResponse(envelope, map[string]any{events.PayloadKeySkills: items})
+		return skillevents.SkillCommandResult{Skills: items}, nil
 	case skillevents.TopicSkillCommandUpdate:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(skillcontracts.UpdateSkillCommand)
+		cmd, ok := data.(skillevents.UpdateSkillCommand)
 		if !ok {
-			var err error
-			cmd, err = skillCommandFromPayload(envelope.Payload)
-			if err != nil {
-				return err
-			}
+			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 		}
 		if err := m.servicePtr.UpdateSkill(ctx, cmd); err != nil {
-			return err
+			return skillevents.SkillCommandResult{}, err
 		}
 		item, err := m.servicePtr.GetSkill(ctx, cmd.SkillID)
 		if err != nil {
-			return err
+			return skillevents.SkillCommandResult{}, err
 		}
-		return skillCommandResponse(envelope, map[string]any{events.PayloadKeySkill: item})
+		return skillevents.SkillCommandResult{Skill: item}, nil
 	default:
-		return common.ErrInvalidArgument
+		return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 	}
 }
 
-func skillCommandResponse(request events.Envelope, payload map[string]any) error {
-	if payload == nil {
-		payload = map[string]any{}
+func setMagicResult(result magicevent.Result, data any, err error) {
+	if result == nil {
+		return
 	}
-	return events.Response(events.Envelope{
-		Topic:        request.Topic + "/response",
-		SourceModule: ModuleID,
-		SubjectType:  request.SubjectType,
-		SubjectID:    request.SubjectID,
-		WorkspaceID:  request.WorkspaceID,
-		RunID:        request.RunID,
-		StepID:       request.StepID,
-		Payload:      payload,
-	})
-}
-
-func stringPayload(payload map[string]any, key string) string {
-	value, _ := payload[key].(string)
-	return value
-}
-
-func skillCommandFromPayload(payload map[string]any) (skillcontracts.CreateSkillCommand, error) {
-	item, ok := payload[events.PayloadKeySkill].(*skillmodel.Skill)
-	if !ok || item == nil {
-		return skillcontracts.CreateSkillCommand{}, common.ErrInvalidArgument
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
 	}
-	return skillcontracts.CreateSkillCommand{
-		SkillID:                item.ID,
-		Name:                   item.Name,
-		Version:                item.Version,
-		Description:            item.Description,
-		TriggerRules:           append([]string(nil), item.TriggerRules...),
-		Instruction:            item.Instruction,
-		ReferenceRefs:          append([]string(nil), item.ReferenceRefs...),
-		RequiredToolKinds:      append([]string(nil), item.RequiredToolKinds...),
-		RequiredMCPServerRefs:  append([]string(nil), item.RequiredMCPServerRefs...),
-		RequiredCapabilityRefs: append([]string(nil), item.RequiredCapabilityRefs...),
-		Constraints:            append([]string(nil), item.Constraints...),
-	}, nil
+	result.Set(data, nil)
 }

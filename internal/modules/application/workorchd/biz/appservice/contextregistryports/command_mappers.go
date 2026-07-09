@@ -4,13 +4,13 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
-	skillcontracts "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/contracts"
-	soulcontracts "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/contracts"
+	skillevents "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/events"
+	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func soulCommandFromView(cmd contextregistrycore.Soul) soulcontracts.CreateSoulCommand {
-	return soulcontracts.CreateSoulCommand{
+func soulCommandFromView(cmd contextregistrycore.Soul) soulevents.CreateSoulCommand {
+	return soulevents.CreateSoulCommand{
 		SoulID:                      common.SoulID(strings.TrimSpace(cmd.ID)),
 		Name:                        cmd.Name,
 		Description:                 cmd.Description,
@@ -24,8 +24,8 @@ func soulCommandFromView(cmd contextregistrycore.Soul) soulcontracts.CreateSoulC
 	}
 }
 
-func skillCommandFromView(cmd contextregistrycore.Skill) skillcontracts.CreateSkillCommand {
-	return skillcontracts.CreateSkillCommand{
+func skillCommandFromView(cmd contextregistrycore.Skill) skillevents.CreateSkillCommand {
+	return skillevents.CreateSkillCommand{
 		SkillID:                common.SkillID(strings.TrimSpace(cmd.ID)),
 		Name:                   cmd.Name,
 		Version:                cmd.Version,

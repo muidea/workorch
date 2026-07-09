@@ -56,6 +56,7 @@ type EventHubContract struct {
 }
 
 var eventHubContracts = buildEventHubContracts()
+var eventHubMessageContracts = buildEventHubMessageContracts()
 
 func ResolveEventHubContract(topic string) (EventHubContract, bool) {
 	topic = strings.TrimSpace(topic)
@@ -68,6 +69,21 @@ func ResolveEventHubContract(topic string) (EventHubContract, bool) {
 		}, true
 	}
 	contract, ok := eventHubContracts[topic]
+	return contract, ok
+}
+
+func ResolveEventHubMessageContract(topic string) (eventcontract.MessageContract, bool) {
+	topic = strings.TrimSpace(topic)
+	if strings.HasPrefix(topic, runtimeeventdefs.TopicRuntimeBlockCommandExecutePrefix) {
+		return eventcontract.CommandTopic[RuntimeBlockExecuteCommand, RuntimeBlockExecuteResult](
+			runtimeBlockKindFromTopic(topic),
+			"github.com/muidea/workorch/internal/pkg/events",
+			eventcontract.CommandClassExecute,
+			eventcontract.LanePolicyExecute,
+			topic,
+		).MessageContract(), true
+	}
+	contract, ok := eventHubMessageContracts[topic]
 	return contract, ok
 }
 
@@ -149,6 +165,35 @@ func buildEventHubContracts() map[string]EventHubContract {
 		}
 	}
 
+	return contracts
+}
+
+func buildEventHubMessageContracts() map[string]eventcontract.MessageContract {
+	contracts := map[string]eventcontract.MessageContract{}
+	for _, source := range [][]eventcontract.MessageContract{
+		workorchdevents.MessageContracts(),
+		llmevents.MessageContracts(),
+		runtimeeventdefs.MessageContracts(),
+		approvalevents.MessageContracts(),
+		decisionevents.MessageContracts(),
+		eventstreamevents.MessageContracts(),
+		governanceevents.MessageContracts(),
+		mcpevents.MessageContracts(),
+		memoryevents.MessageContracts(),
+		orchestratorevents.MessageContracts(),
+		resultevents.MessageContracts(),
+		runevents.MessageContracts(),
+		skillevents.MessageContracts(),
+		soulevents.MessageContracts(),
+		workspaceevents.MessageContracts(),
+	} {
+		for _, contract := range source {
+			if strings.TrimSpace(contract.Topic) == "" {
+				continue
+			}
+			contracts[contract.Topic] = contract
+		}
+	}
 	return contracts
 }
 

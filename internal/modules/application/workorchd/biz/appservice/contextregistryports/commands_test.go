@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	cd "github.com/muidea/magicCommon/def"
+	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 	skillevents "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/events"
@@ -12,13 +14,9 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
-	mcpcontracts "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/contracts"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
-	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	skillcontracts "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/contracts"
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
-	soulcontracts "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/contracts"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -65,87 +63,52 @@ func TestDeleteSoulRejectsMissingIDBeforePublishing(t *testing.T) {
 	}
 }
 
-func TestDeleteSoulPublishesCommandPayload(t *testing.T) {
+func TestDeleteSoulPublishesTypedCommand(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(soulevents.TopicSoulCommandDelete, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(envelope)
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHub(rawHub)
+	var captured soulevents.DeleteSoulCommand
+	subscribeMagicCommand(t, rawHub, soulevents.TopicSoulCommandDelete, soulevents.CommandDestination, func(cmd soulevents.DeleteSoulCommand, result magicevent.Result) {
+		captured = cmd
+		result.Set(soulevents.SoulCommandResult{}, nil)
 	})
 
 	if err := DeleteSoul(ctx, hub, " soul-delete-command "); err != nil {
 		t.Fatalf("DeleteSoul: %v", err)
 	}
 
-	published := hub.Published()
-	if len(published) != 1 {
-		t.Fatalf("published len = %d, want 1", len(published))
-	}
-	cmd, ok := published[0].Payload[events.PayloadKeyCommand].(soulcontracts.DeleteSoulCommand)
-	if !ok {
-		t.Fatalf("payload command = %T, want DeleteSoulCommand", published[0].Payload[events.PayloadKeyCommand])
-	}
-	if cmd.SoulID != "soul-delete-command" {
-		t.Fatalf("command soulID = %s, want soul-delete-command", cmd.SoulID)
-	}
-	if _, ok := published[0].Payload[events.PayloadKeySoulID]; ok {
-		t.Fatalf("payload contains legacy soulId field")
+	if captured.SoulID != "soul-delete-command" {
+		t.Fatalf("command soulID = %s, want soul-delete-command", captured.SoulID)
 	}
 }
 
 func TestDeleteMemoryItemPublishesCommandPayload(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-memory-delete")
-	hub := events.NewMemoryHub()
-	hub.Subscribe(memoryevents.TopicMemoryCommandDelete, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != "ws-memory-delete" {
-			t.Fatalf("delete envelope workspace = %q, want ws-memory-delete", envelope.WorkspaceID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != "ws-memory-delete" {
-			t.Fatalf("delete payload workspace = %v, want ws-memory-delete", envelope.Payload[events.PayloadKeyWorkspaceID])
-		}
-		return events.Response(envelope)
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHub(rawHub)
+	var captured memoryevents.DeleteMemoryCommand
+	subscribeMagicCommand(t, rawHub, memoryevents.TopicMemoryCommandDelete, memoryevents.CommandDestination, func(cmd memoryevents.DeleteMemoryCommand, result magicevent.Result) {
+		captured = cmd
+		result.Set(memoryevents.MemoryCommandResult{}, nil)
 	})
 
 	if err := DeleteMemoryItem(ctx, hub, "mem-context-delete"); err != nil {
 		t.Fatalf("DeleteMemoryItem: %v", err)
 	}
-
-	published := hub.Published()
-	if len(published) != 1 {
-		t.Fatalf("published len = %d, want 1", len(published))
-	}
-	cmd, ok := published[0].Payload[events.PayloadKeyCommand].(memorycontracts.DeleteMemoryItemCommand)
-	if !ok {
-		t.Fatalf("payload command = %T, want DeleteMemoryItemCommand", published[0].Payload[events.PayloadKeyCommand])
-	}
-	if cmd.MemoryID != "mem-context-delete" {
-		t.Fatalf("command memoryID = %s, want mem-context-delete", cmd.MemoryID)
-	}
-	if _, ok := published[0].Payload[events.PayloadKeyMemoryID]; ok {
-		t.Fatalf("payload contains legacy memoryId field")
+	if captured.MemoryID != "mem-context-delete" {
+		t.Fatalf("command memoryID = %s, want mem-context-delete", captured.MemoryID)
 	}
 }
 
 func TestPublishMemoryItemPublishesScopedCommandEnvelope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(memoryevents.TopicMemoryCommandCreate, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != "ws-memory-write" || envelope.RunID != "run-memory-write" {
-			t.Fatalf("envelope scope = workspace:%q run:%q", envelope.WorkspaceID, envelope.RunID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != "ws-memory-write" || envelope.Payload[events.PayloadKeyRunID] != "run-memory-write" {
-			t.Fatalf("payload scope = workspace:%v run:%v", envelope.Payload[events.PayloadKeyWorkspaceID], envelope.Payload[events.PayloadKeyRunID])
-		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(memorycontracts.CreateMemoryItemCommand)
-		if !ok {
-			t.Fatalf("command payload = %T, want CreateMemoryItemCommand", envelope.Payload[events.PayloadKeyCommand])
-		}
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHub(rawHub)
+	subscribeMagicCommand(t, rawHub, memoryevents.TopicMemoryCommandCreate, memoryevents.CommandDestination, func(cmd memoryevents.CreateMemoryCommand, result magicevent.Result) {
 		if cmd.MemoryID != "mem-write-scope" || cmd.WorkspaceID != "ws-memory-write" || cmd.RunID != "run-memory-write" {
 			t.Fatalf("command = %+v, want scoped memory command", cmd)
 		}
-		if _, ok := envelope.Payload[events.PayloadKeyMemoryID]; ok {
-			t.Fatalf("payload contains legacy memoryId field")
-		}
-		return events.Response(envelope)
+		result.Set(memoryevents.MemoryCommandResult{}, nil)
 	})
 
 	if err := PublishMemoryItem(ctx, hub, memoryevents.TopicMemoryCommandCreate, &memorymodel.MemoryItem{
@@ -203,45 +166,25 @@ func (h *recordingMemoryEventAsyncHub) Subscribe(string, events.Handler) func() 
 
 func TestMemoryQueriesPublishScopedOwnerReadCommands(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-memory-query-scope")
-	hub := events.NewMemoryHub()
-	hub.Subscribe(memoryevents.TopicMemoryCommandGet, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != "ws-memory-query-scope" {
-			t.Fatalf("get envelope workspace = %q, want ws-memory-query-scope", envelope.WorkspaceID)
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHub(rawHub)
+	subscribeMagicCommand(t, rawHub, memoryevents.TopicMemoryCommandGet, memoryevents.CommandDestination, func(cmd memoryevents.GetMemoryCommand, result magicevent.Result) {
+		if cmd.WorkspaceID != "ws-memory-query-scope" || cmd.MemoryID != "mem-query-scope" {
+			t.Fatalf("get command = %+v, want scoped get", cmd)
 		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != "ws-memory-query-scope" {
-			t.Fatalf("get payload workspace = %v, want ws-memory-query-scope", envelope.Payload[events.PayloadKeyWorkspaceID])
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyMemoryItem: &memorymodel.MemoryItem{ID: "mem-query-scope", WorkspaceID: "ws-memory-query-scope"},
-			},
-		})
+		result.Set(memoryevents.MemoryCommandResult{Item: &memorymodel.MemoryItem{ID: "mem-query-scope", WorkspaceID: "ws-memory-query-scope"}}, nil)
 	})
-	hub.Subscribe(memoryevents.TopicMemoryCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != "ws-memory-query-scope" {
-			t.Fatalf("list envelope workspace = %q, want ws-memory-query-scope", envelope.WorkspaceID)
+	subscribeMagicCommand(t, rawHub, memoryevents.TopicMemoryCommandListByWorkspace, memoryevents.CommandDestination, func(cmd memoryevents.ListMemoryByWorkspaceCommand, result magicevent.Result) {
+		if cmd.WorkspaceID != "ws-memory-query-scope" {
+			t.Fatalf("list command = %+v, want scoped list", cmd)
 		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != "ws-memory-query-scope" {
-			t.Fatalf("list payload workspace = %v, want ws-memory-query-scope", envelope.Payload[events.PayloadKeyWorkspaceID])
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyMemoryItems: []*memorymodel.MemoryItem{},
-			},
-		})
+		result.Set(memoryevents.MemoryCommandResult{Items: []*memorymodel.MemoryItem{}}, nil)
 	})
-	hub.Subscribe(memoryevents.TopicMemoryCommandSearch, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != "ws-memory-query-scope" {
-			t.Fatalf("search envelope workspace = %q, want ws-memory-query-scope", envelope.WorkspaceID)
+	subscribeMagicCommand(t, rawHub, memoryevents.TopicMemoryCommandSearch, memoryevents.CommandDestination, func(cmd memoryevents.SearchMemoryCommand, result magicevent.Result) {
+		if cmd.Query.WorkspaceID != "ws-memory-query-scope" {
+			t.Fatalf("search command = %+v, want scoped search", cmd)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyMemoryItems: []*memorymodel.MemoryItem{},
-			},
-		})
+		result.Set(memoryevents.MemoryCommandResult{Items: []*memorymodel.MemoryItem{}}, nil)
 	})
 
 	if _, err := ReadMemoryItem(ctx, hub, "mem-query-scope"); err != nil {
@@ -280,89 +223,45 @@ func TestEnsureWorkspaceExistsPublishesScopedOwnerReadCommand(t *testing.T) {
 
 func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHub(rawHub)
 
-	hub.Subscribe(soulevents.TopicSoulCommandCreate, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulcontracts.CreateSoulCommand)
-		if !ok {
-			t.Fatalf("soul command payload type = %T", envelope.Payload[events.PayloadKeyCommand])
-		}
+	subscribeMagicCommand(t, rawHub, soulevents.TopicSoulCommandCreate, soulevents.CommandDestination, func(cmd soulevents.CreateSoulCommand, result magicevent.Result) {
 		if cmd.SoulID != "soul-contract" || cmd.Name != "Soul Contract" {
 			t.Fatalf("soul command = %+v", cmd)
 		}
-		if _, ok := envelope.Payload[events.PayloadKeySoul]; ok {
-			t.Fatalf("soul command still carries owner model payload")
-		}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
-			events.PayloadKeySoul: &soulmodel.Soul{ID: cmd.SoulID, Name: cmd.Name, SoulMD: cmd.SoulMD},
-		}})
+		result.Set(soulevents.SoulCommandResult{Soul: &soulmodel.Soul{ID: cmd.SoulID, Name: cmd.Name, SoulMD: cmd.SoulMD}}, nil)
 	})
-	hub.Subscribe(skillevents.TopicSkillCommandCreate, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(skillcontracts.CreateSkillCommand)
-		if !ok {
-			t.Fatalf("skill command payload type = %T", envelope.Payload[events.PayloadKeyCommand])
-		}
+	subscribeMagicCommand(t, rawHub, skillevents.TopicSkillCommandCreate, skillevents.CommandDestination, func(cmd skillevents.CreateSkillCommand, result magicevent.Result) {
 		if cmd.SkillID != "skill-contract" || cmd.Name != "Skill Contract" {
 			t.Fatalf("skill command = %+v", cmd)
 		}
-		if _, ok := envelope.Payload[events.PayloadKeySkill]; ok {
-			t.Fatalf("skill command still carries owner model payload")
-		}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
-			events.PayloadKeySkill: &skillmodel.Skill{ID: cmd.SkillID, Name: cmd.Name, Instruction: cmd.Instruction},
-		}})
+		result.Set(skillevents.SkillCommandResult{Skill: &skillmodel.Skill{ID: cmd.SkillID, Name: cmd.Name, Instruction: cmd.Instruction}}, nil)
 	})
-	hub.Subscribe(mcpevents.TopicMCPCommandCreateServer, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpcontracts.CreateServerCommand)
-		if !ok {
-			t.Fatalf("server command payload type = %T", envelope.Payload[events.PayloadKeyCommand])
-		}
+	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandCreateServer, mcpevents.CommandDestination, func(cmd mcpevents.CreateServerCommand, result magicevent.Result) {
 		if cmd.ServerID != "mcp-contract" || cmd.Command != "python3" || cmd.Env["TOKEN"] != "secret" {
 			t.Fatalf("server command = %+v", cmd)
 		}
-		if _, ok := envelope.Payload[events.PayloadKeyServer]; ok {
-			t.Fatalf("server command still carries owner model payload")
-		}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
-			events.PayloadKeyServer: &mcpmodel.Server{ID: cmd.ServerID, Name: cmd.Name, Command: cmd.Command, Env: cmd.Env},
-		}})
+		result.Set(mcpevents.MCPCommandResult{Server: &mcpmodel.Server{ID: cmd.ServerID, Name: cmd.Name, Command: cmd.Command, Env: cmd.Env}}, nil)
 	})
-	hub.Subscribe(mcpevents.TopicMCPCommandCreateCapability, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpcontracts.CreateCapabilityCommand)
-		if !ok {
-			t.Fatalf("capability command payload type = %T", envelope.Payload[events.PayloadKeyCommand])
-		}
+	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandCreateCapability, mcpevents.CommandDestination, func(cmd mcpevents.CreateCapabilityCommand, result magicevent.Result) {
 		if cmd.ID != "cap-contract" || cmd.ServerID != "mcp-contract" || cmd.Schema["type"] != "object" {
 			t.Fatalf("capability command = %+v", cmd)
 		}
-		if _, ok := envelope.Payload[events.PayloadKeyCapability]; ok {
-			t.Fatalf("capability command still carries owner model payload")
-		}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
-			events.PayloadKeyCapability: &mcpmodel.Capability{ID: cmd.ID, ServerID: cmd.ServerID, Name: cmd.Name, Schema: cmd.Schema},
-		}})
+		result.Set(mcpevents.MCPCommandResult{Capability: &mcpmodel.Capability{ID: cmd.ID, ServerID: cmd.ServerID, Name: cmd.Name, Schema: cmd.Schema}}, nil)
 	})
-	hub.Subscribe(mcpevents.TopicMCPCommandListCapabilities, func(_ context.Context, envelope events.Envelope) error {
-		query, ok := envelope.Payload[events.PayloadKeyCapabilityQuery].(mcpcontracts.CapabilityQuery)
-		if !ok {
-			t.Fatalf("capability query payload type = %T", envelope.Payload[events.PayloadKeyCapabilityQuery])
-		}
+	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandListCapabilities, mcpevents.CommandDestination, func(cmd mcpevents.ListCapabilitiesCommand, result magicevent.Result) {
+		query := cmd.Query
 		if query.ServerID != "mcp-contract" || query.Kind != "tool" {
 			t.Fatalf("capability query = %+v", query)
 		}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
-			events.PayloadKeyCapabilities: []*mcpmodel.Capability{{ID: "cap-contract", ServerID: query.ServerID, Kind: query.Kind}},
-		}})
+		result.Set(mcpevents.MCPCommandResult{Capabilities: []*mcpmodel.Capability{{ID: "cap-contract", ServerID: query.ServerID, Kind: query.Kind}}}, nil)
 	})
-	hub.Subscribe(soulevents.TopicSoulCommandValidateCapability, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulcontracts.ValidateCapabilitySelectionCommand)
-		if !ok {
-			t.Fatalf("validate command payload type = %T", envelope.Payload[events.PayloadKeyCommand])
-		}
+	subscribeMagicCommand(t, rawHub, soulevents.TopicSoulCommandValidateCapability, soulevents.CommandDestination, func(cmd soulevents.ValidateCapabilitySelectionCommand, result magicevent.Result) {
 		if cmd.SoulID != "soul-contract" || len(cmd.CapabilityRefs) != 1 || cmd.CapabilityRefs[0] != "cap-contract" {
 			t.Fatalf("validate command = %+v", cmd)
 		}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{}})
+		result.Set(soulevents.SoulCommandResult{}, nil)
 	})
 
 	if _, err := CreateSoul(ctx, hub, contextregistrycore.Soul{ID: "soul-contract", Name: "Soul Contract", SoulMD: "# soul"}); err != nil {
@@ -387,37 +286,32 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 
 func TestMCPServerViewAndDerivedEntriesUseOwnerEventHubCommand(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHub(rawHub)
 	callCount := 0
-	hub.Subscribe(mcpevents.TopicMCPCommandGetServer, func(_ context.Context, envelope events.Envelope) error {
+	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandGetServer, mcpevents.CommandDestination, func(cmd mcpevents.GetServerCommand, result magicevent.Result) {
 		callCount++
-		if envelope.SourceModule != sourceModule {
-			t.Fatalf("source module = %q, want %q", envelope.SourceModule, sourceModule)
+		if got := string(cmd.ServerID); got != "mcp-stdio" {
+			t.Fatalf("server id = %v, want mcp-stdio", got)
 		}
-		if got := envelope.Payload[events.PayloadKeyServerID]; got != "mcp-stdio" {
-			t.Fatalf("server id payload = %v, want mcp-stdio", got)
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyServer: &mcpmodel.Server{
-					ID:                    "mcp-stdio",
-					Name:                  "stdio verification",
-					Transport:             "stdio",
-					Endpoint:              "/tmp/mcp_stdio_helper.py",
-					Command:               "python3",
-					Args:                  []string{"helper.py"},
-					Env:                   map[string]string{"TOKEN": "secret"},
-					Enabled:               true,
-					AllowedTools:          []string{"repo.summary"},
-					AllowedResources:      []string{"workspace://acceptance"},
-					AllowedPrompts:        []string{"workorch.acceptance"},
-					DefaultApprovalPolicy: "operator",
-					SessionPolicy:         "per_run",
-					TimeoutMillis:         5000,
-				},
+		result.Set(mcpevents.MCPCommandResult{
+			Server: &mcpmodel.Server{
+				ID:                    "mcp-stdio",
+				Name:                  "stdio verification",
+				Transport:             "stdio",
+				Endpoint:              "/tmp/mcp_stdio_helper.py",
+				Command:               "python3",
+				Args:                  []string{"helper.py"},
+				Env:                   map[string]string{"TOKEN": "secret"},
+				Enabled:               true,
+				AllowedTools:          []string{"repo.summary"},
+				AllowedResources:      []string{"workspace://acceptance"},
+				AllowedPrompts:        []string{"workorch.acceptance"},
+				DefaultApprovalPolicy: "operator",
+				SessionPolicy:         "per_run",
+				TimeoutMillis:         5000,
 			},
-		})
+		}, nil)
 	})
 
 	server, err := ReadMCPServerView(ctx, hub, "mcp-stdio")
@@ -472,12 +366,13 @@ func (f fakeSkillHubCatalog) ListWorkspaceSkills(_ context.Context, workspaceID 
 
 func TestReadSkillViewFallsBackToSkillHubWhenRepositorySkillMissing(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(skillevents.TopicSkillCommandGet, func(_ context.Context, envelope events.Envelope) error {
-		if got := envelope.Payload[events.PayloadKeySkillID]; got != "skillhub:workspace:ws-001:workspace-skill" {
-			t.Fatalf("skill id payload = %v", got)
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHub(rawHub)
+	subscribeMagicCommand(t, rawHub, skillevents.TopicSkillCommandGet, skillevents.CommandDestination, func(cmd skillevents.GetSkillCommand, result magicevent.Result) {
+		if got := string(cmd.SkillID); got != "skillhub:workspace:ws-001:workspace-skill" {
+			t.Fatalf("skill id = %v", got)
 		}
-		return common.ErrNotFound
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: common.ErrNotFound.Error(), Cause: common.ErrNotFound})
 	})
 	ref := "skillhub:workspace:ws-001:workspace-skill"
 	catalog := fakeSkillHubCatalog{
@@ -497,16 +392,12 @@ func TestReadSkillViewFallsBackToSkillHubWhenRepositorySkillMissing(t *testing.T
 
 func TestListSkillsViewMergesRepositoryAndSkillHubSkills(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(skillevents.TopicSkillCommandList, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeySkills: []*skillmodel.Skill{
-					{ID: "repo-skill", Name: "Repository Skill"},
-				},
-			},
-		})
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHub(rawHub)
+	subscribeMagicCommand(t, rawHub, skillevents.TopicSkillCommandList, skillevents.CommandDestination, func(_ skillevents.ListSkillsCommand, result magicevent.Result) {
+		result.Set(skillevents.SkillCommandResult{
+			Skills: []*skillmodel.Skill{{ID: "repo-skill", Name: "Repository Skill"}},
+		}, nil)
 	})
 	catalog := fakeSkillHubCatalog{
 		global: []contextregistrycore.Skill{{ID: "skillhub:global:global-skill", Source: contextregistrycore.SkillSourceSkillHub}},
@@ -532,4 +423,16 @@ func TestListSkillsViewMergesRepositoryAndSkillHubSkills(t *testing.T) {
 			t.Fatalf("ids = %#v, want %#v", got, want)
 		}
 	}
+}
+
+func subscribeMagicCommand[Command any](t *testing.T, hub magicevent.Hub, topic string, destination string, handle func(Command, magicevent.Result)) {
+	t.Helper()
+	observer := magicevent.NewSimpleObserver(destination, hub)
+	observer.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
+		cmd, ok := ev.Data().(Command)
+		if !ok {
+			t.Fatalf("event %s command type = %T", topic, ev.Data())
+		}
+		handle(cmd, result)
+	})
 }

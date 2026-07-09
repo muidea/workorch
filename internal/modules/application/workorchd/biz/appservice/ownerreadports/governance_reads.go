@@ -15,15 +15,9 @@ func ListAutoGovernanceTracesByOwnerCommand(ctx context.Context, hub events.Hub,
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, governanceevents.TopicGovernanceAutoCommandListTraces, "auto_governance_trace", "list", query.WorkspaceID, query.RunID, map[string]any{
-		events.PayloadKeyQuery: query,
-	})
+	response, err := sendMagicCommand[governanceevents.ListAutoGovernanceTracesCommand, governanceevents.GovernanceCommandResult](ctx, hub, governanceevents.TopicGovernanceAutoCommandListTraces, governanceevents.CommandDestination, "auto_governance_trace", "list", governanceevents.ListAutoGovernanceTracesCommand{Query: query})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*governancemodel.AutoGovernanceTrace)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Traces, nil
 }

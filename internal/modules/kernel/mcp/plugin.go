@@ -16,12 +16,8 @@ func init() {
 
 func (m *Module) Weight() int { return 28 }
 
-func (m *Module) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
+func (m *Module) Setup(_ context.Context, eventHub event.Hub, _ task.BackgroundRoutine) *cd.Error {
 	repos, err := workorchdeps.ResolveMCPRepositories(ModuleID)
-	if err != nil {
-		return err
-	}
-	eventHub, err := workorchdeps.ResolveEventHub(ModuleID)
 	if err != nil {
 		return err
 	}

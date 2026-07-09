@@ -12,23 +12,25 @@ import (
 )
 
 func CreateMCPCapability(ctx context.Context, hub events.Hub, cmd contextregistrycore.MCPCapability) (contextregistrycore.MCPCapability, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandCreateCapability, "mcp_capability", cmd.ID, map[string]any{
-		events.PayloadKeyCommand: mcpCapabilityCommandFromView(cmd),
-	})
+	if hub == nil {
+		return contextregistrycore.MCPCapability{}, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[mcpevents.CreateCapabilityCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandCreateCapability, mcpevents.CommandDestination, "mcp_capability", cmd.ID, mcpevents.CreateCapabilityCommand(mcpCapabilityCommandFromView(cmd)))
 	if err != nil {
 		return contextregistrycore.MCPCapability{}, err
 	}
-	return contextregistrycore.MCPCapabilityFromPayload(response.Payload, events.PayloadKeyCapability)
+	return mcpCapabilityFromCommandResult(result)
 }
 
 func UpdateMCPCapability(ctx context.Context, hub events.Hub, cmd contextregistrycore.MCPCapability) (contextregistrycore.MCPCapability, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandUpdateCapability, "mcp_capability", cmd.ID, map[string]any{
-		events.PayloadKeyCommand: mcpCapabilityCommandFromView(cmd),
-	})
+	if hub == nil {
+		return contextregistrycore.MCPCapability{}, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[mcpevents.UpdateCapabilityCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandUpdateCapability, mcpevents.CommandDestination, "mcp_capability", cmd.ID, mcpevents.UpdateCapabilityCommand(mcpCapabilityCommandFromView(cmd)))
 	if err != nil {
 		return contextregistrycore.MCPCapability{}, err
 	}
-	return contextregistrycore.MCPCapabilityFromPayload(response.Payload, events.PayloadKeyCapability)
+	return mcpCapabilityFromCommandResult(result)
 }
 
 func UpdateMCPCapabilityByID(ctx context.Context, hub events.Hub, capabilityID string, cmd contextregistrycore.MCPCapability) (contextregistrycore.MCPCapability, error) {
@@ -45,21 +47,38 @@ func UpdateMCPCapabilityByID(ctx context.Context, hub events.Hub, capabilityID s
 }
 
 func ReadMCPCapability(ctx context.Context, hub events.Hub, capabilityID string) (contextregistrycore.MCPCapability, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandGetCapability, "mcp_capability", capabilityID, map[string]any{
-		events.PayloadKeyCapabilityID: capabilityID,
-	})
+	if hub == nil {
+		return contextregistrycore.MCPCapability{}, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[mcpevents.GetCapabilityCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandGetCapability, mcpevents.CommandDestination, "mcp_capability", capabilityID, mcpevents.GetCapabilityCommand{CapabilityID: common.MCPCapabilityID(capabilityID)})
 	if err != nil {
 		return contextregistrycore.MCPCapability{}, err
 	}
-	return contextregistrycore.MCPCapabilityFromPayload(response.Payload, events.PayloadKeyCapability)
+	return mcpCapabilityFromCommandResult(result)
 }
 
 func ListMCPCapabilities(ctx context.Context, hub events.Hub, query contextregistrycore.MCPCapabilityQuery) ([]contextregistrycore.MCPCapability, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandListCapabilities, "mcp_capability", "all", map[string]any{
-		events.PayloadKeyCapabilityQuery: mcpCapabilityQueryFromView(query),
-	})
+	if hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[mcpevents.ListCapabilitiesCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandListCapabilities, mcpevents.CommandDestination, "mcp_capability", "all", mcpevents.ListCapabilitiesCommand{Query: mcpCapabilityQueryFromView(query)})
 	if err != nil {
 		return nil, err
 	}
-	return contextregistrycore.MCPCapabilitiesFromPayload(response.Payload, events.PayloadKeyCapabilities)
+	return mcpCapabilitiesFromCommandResult(result)
+}
+
+func mcpCapabilityFromCommandResult(result mcpevents.MCPCommandResult) (contextregistrycore.MCPCapability, error) {
+	if result.Capability == nil {
+		return contextregistrycore.MCPCapability{}, common.ErrInvalidArgument
+	}
+	return contextregistrycore.MapMCPCapability(result.Capability), nil
+}
+
+func mcpCapabilitiesFromCommandResult(result mcpevents.MCPCommandResult) ([]contextregistrycore.MCPCapability, error) {
+	ret := make([]contextregistrycore.MCPCapability, 0, len(result.Capabilities))
+	for _, item := range result.Capabilities {
+		ret = append(ret, contextregistrycore.MapMCPCapability(item))
+	}
+	return ret, nil
 }

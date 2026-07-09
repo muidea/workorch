@@ -18,84 +18,62 @@ func ReadRunByOwnerCommand(ctx context.Context, hub events.Hub, runID common.Run
 	if workspaceID != "" {
 		return ReadRunByWorkspaceOwnerCommand(ctx, hub, workspaceID, runID)
 	}
-	payload := map[string]any{
-		events.PayloadKeyRunID: string(runID),
-	}
-	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandGet, "run", string(runID), workspaceID, runID, payload)
+	response, err := sendMagicCommand[runevents.GetRunCommand, runevents.RunCommandResult](ctx, hub, runevents.TopicRunCommandGet, runevents.CommandDestination, "run", string(runID), runevents.GetRunCommand{RunID: runID})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyRun].(*runmodel.Run)
-	if !ok || item == nil {
+	if response.Run == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.Run, nil
 }
 
 func ReadRunByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID) (*runmodel.Run, error) {
 	if hub == nil || workspaceID == "" || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandGet, "run", string(runID), workspaceID, runID, map[string]any{
-		events.PayloadKeyWorkspaceID: string(workspaceID),
-		events.PayloadKeyRunID:       string(runID),
-	})
+	response, err := sendMagicCommand[runevents.GetRunCommand, runevents.RunCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, runevents.TopicRunCommandGet, runevents.CommandDestination, "run", string(runID), runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: runID})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyRun].(*runmodel.Run)
-	if !ok || item == nil {
+	if response.Run == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.Run, nil
 }
 
 func ListRunsByOwnerCommand(ctx context.Context, hub events.Hub) ([]*runmodel.Run, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandList, "run", "all", "", "", nil)
+	response, err := sendMagicCommand[runevents.ListRunsCommand, runevents.RunCommandResult](ctx, hub, runevents.TopicRunCommandList, runevents.CommandDestination, "run", "all", runevents.ListRunsCommand{})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyRuns].([]*runmodel.Run)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Runs, nil
 }
 
 func ListRecoverableRuntimeGapRunCandidatesByOwnerCommand(ctx context.Context, hub events.Hub) ([]*runmodel.Run, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandList, "run", "runtime-gap-candidates", "", "", map[string]any{
-		events.PayloadKeyStates:  []string{string(common.RunStateActive)},
-		events.PayloadKeyCompact: true,
+	response, err := sendMagicCommand[runevents.ListRunsCommand, runevents.RunCommandResult](ctx, hub, runevents.TopicRunCommandList, runevents.CommandDestination, "run", "runtime-gap-candidates", runevents.ListRunsCommand{
+		States:  []common.RunState{common.RunStateActive},
+		Compact: true,
 	})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyRuns].([]*runmodel.Run)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Runs, nil
 }
 
 func ListRunsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
-		events.PayloadKeyWorkspaceID: string(workspaceID),
-	})
+	response, err := sendMagicCommand[runevents.ListRunsByWorkspaceCommand, runevents.RunCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, runevents.TopicRunCommandListByWorkspace, runevents.CommandDestination, "workspace", string(workspaceID), runevents.ListRunsByWorkspaceCommand{WorkspaceID: workspaceID})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyRuns].([]*runmodel.Run)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Runs, nil
 }

@@ -14,30 +14,23 @@ func ReadWorkspaceTemplateByOwnerCommand(ctx context.Context, hub events.Hub, te
 	if hub == nil || templateID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandGet, "workspace_template", templateID, "", "", map[string]any{
-		events.PayloadKeyTemplateID: templateID,
-	})
+	response, err := sendMagicCommand[workspaceevents.GetWorkspaceTemplateCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandGet, workspaceevents.CommandDestination, "workspace_template", templateID, workspaceevents.GetWorkspaceTemplateCommand{TemplateID: templateID})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyWorkspaceTemplate].(*repository.WorkspaceTemplate)
-	if !ok || item == nil {
+	if response.Template == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.Template, nil
 }
 
 func ListWorkspaceTemplatesByOwnerCommand(ctx context.Context, hub events.Hub) ([]*repository.WorkspaceTemplate, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandList, "workspace_template", "all", "", "", map[string]any{})
+	response, err := sendMagicCommand[workspaceevents.ListWorkspaceTemplatesCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandList, workspaceevents.CommandDestination, "workspace_template", "all", workspaceevents.ListWorkspaceTemplatesCommand{})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyWorkspaceTemplates].([]*repository.WorkspaceTemplate)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Templates, nil
 }

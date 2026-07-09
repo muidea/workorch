@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
@@ -122,7 +123,8 @@ func assertRunEvidenceCount[T any](t *testing.T, ctx context.Context, repo runEv
 
 func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHub(rawHub)
 	steps := memoryrepo.NewStepRepository()
 	runID := common.RunID("run-purge-contract")
 	if err := steps.Create(ctx, &runmodel.Step{ID: "step-purge-contract", RunID: runID}); err != nil {
@@ -132,7 +134,7 @@ func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 	if err := memoryModule.Configure(memorymodule.Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
 		MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(),
-		EventHub:           hub,
+		EventHub:           rawHub,
 	}); err != nil {
 		t.Fatalf("configure memory module: %v", err)
 	}
@@ -191,7 +193,6 @@ func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 
 func TestPurgeRunCommandUsesWorkspaceScopeForDuplicateRunIDs(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	steps := memoryrepo.NewStepRepository()
 	runID := common.RunID("run-duplicate-purge")
 	workspaceA := common.WorkspaceID("ws-purge-a")
@@ -204,11 +205,13 @@ func TestPurgeRunCommandUsesWorkspaceScopeForDuplicateRunIDs(t *testing.T) {
 	if err := steps.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceB), &runmodel.Step{ID: stepB, RunID: runID}); err != nil {
 		t.Fatalf("seed step B: %v", err)
 	}
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHub(rawHub)
 	memoryModule := memorymodule.New()
 	if err := memoryModule.Configure(memorymodule.Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
 		MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(),
-		EventHub:           hub,
+		EventHub:           rawHub,
 	}); err != nil {
 		t.Fatalf("configure memory module: %v", err)
 	}

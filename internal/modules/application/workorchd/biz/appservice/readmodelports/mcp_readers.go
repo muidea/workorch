@@ -4,8 +4,6 @@ import (
 	"context"
 
 	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
-
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -19,13 +17,9 @@ func (r MCPCapabilityReader) List(ctx context.Context) ([]*mcpmodel.Capability, 
 	if r.Hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := ownerreadports.PublishCommandWithResponse(ctx, r.Hub, mcpevents.TopicMCPCommandListCapabilities, "mcp_capability", "all", "", "", map[string]any{})
+	result, err := sendMagicCommand[mcpevents.ListCapabilitiesCommand, mcpevents.MCPCommandResult](ctx, r.Hub, mcpevents.TopicMCPCommandListCapabilities, mcpevents.CommandDestination, "application/workorchd/readmodel", "mcp_capability", "all", mcpevents.ListCapabilitiesCommand{})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyCapabilities].([]*mcpmodel.Capability)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return result.Capabilities, nil
 }

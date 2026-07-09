@@ -11,13 +11,21 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
+func PublishMemoryItemDelete(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID, memoryID common.MemoryID) error {
+	_ = runID
+	if memoryID == "" {
+		return common.ErrInvalidArgument
+	}
+	_, err := sendMagicCommand[memoryevents.DeleteMemoryCommand, memoryevents.MemoryCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, memoryevents.TopicMemoryCommandDelete, memoryevents.CommandDestination, "memory", string(memoryID), memoryevents.DeleteMemoryCommand{MemoryID: memoryID})
+	return err
+}
+
 func PublishMemoryRecallTraceUpsert(ctx context.Context, hub events.Hub, trace *memorymodel.MemoryRecallTrace) error {
 	if trace == nil {
 		return common.ErrInvalidArgument
 	}
-	return Publish(ctx, hub, memoryevents.TopicMemoryRecallTraceCommandUpsert, "memory_recall", string(trace.ID), trace.WorkspaceID, trace.RunID, map[string]any{
-		events.PayloadKeyCommand: memoryRecallTraceCommandFromModel(trace),
-	})
+	_, err := sendMagicCommand[memoryevents.UpsertMemoryRecallTraceCommand, memoryevents.MemoryCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, trace.WorkspaceID), hub, memoryevents.TopicMemoryRecallTraceCommandUpsert, memoryevents.CommandDestination, "memory_recall", string(trace.ID), memoryevents.UpsertMemoryRecallTraceCommand(memoryRecallTraceCommandFromModel(trace)))
+	return err
 }
 
 func RecordMemoryRecallTrace(ctx context.Context, hub events.Hub, trace *memorymodel.MemoryRecallTrace) error {

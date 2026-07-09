@@ -8,30 +8,31 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
-	soulcontracts "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/contracts"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func CreateSoul(ctx context.Context, hub events.Hub, cmd contextregistrycore.Soul) (contextregistrycore.Soul, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, soulevents.TopicSoulCommandCreate, "soul", cmd.ID, map[string]any{
-		events.PayloadKeyCommand: soulCommandFromView(cmd),
-	})
+	if hub == nil {
+		return contextregistrycore.Soul{}, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[soulevents.CreateSoulCommand, soulevents.SoulCommandResult](ctx, hub, soulevents.TopicSoulCommandCreate, soulevents.CommandDestination, "soul", cmd.ID, soulevents.CreateSoulCommand(soulCommandFromView(cmd)))
 	if err != nil {
 		return contextregistrycore.Soul{}, err
 	}
-	return contextregistrycore.SoulFromPayload(response.Payload, events.PayloadKeySoul)
+	return soulFromCommandResult(result)
 }
 
 func UpdateSoul(ctx context.Context, hub events.Hub, cmd contextregistrycore.Soul) (contextregistrycore.Soul, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, soulevents.TopicSoulCommandUpdate, "soul", cmd.ID, map[string]any{
-		events.PayloadKeyCommand: soulCommandFromView(cmd),
-	})
+	if hub == nil {
+		return contextregistrycore.Soul{}, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[soulevents.UpdateSoulCommand, soulevents.SoulCommandResult](ctx, hub, soulevents.TopicSoulCommandUpdate, soulevents.CommandDestination, "soul", cmd.ID, soulevents.UpdateSoulCommand(soulCommandFromView(cmd)))
 	if err != nil {
 		return contextregistrycore.Soul{}, err
 	}
-	return contextregistrycore.SoulFromPayload(response.Payload, events.PayloadKeySoul)
+	return soulFromCommandResult(result)
 }
 
 func UpdateSoulByID(ctx context.Context, hub events.Hub, soulID string, cmd contextregistrycore.Soul) (contextregistrycore.Soul, error) {
@@ -49,22 +50,22 @@ func UpdateSoulByID(ctx context.Context, hub events.Hub, soulID string, cmd cont
 
 func DeleteSoul(ctx context.Context, hub events.Hub, soulID string) error {
 	soulID = strings.TrimSpace(soulID)
-	if soulID == "" {
+	if hub == nil || soulID == "" {
 		return common.ErrInvalidArgument
 	}
-	return PublishCommand(ctx, hub, soulevents.TopicSoulCommandDelete, "soul", soulID, map[string]any{
-		events.PayloadKeyCommand: soulcontracts.DeleteSoulCommand{SoulID: common.SoulID(soulID)},
-	})
+	_, err := sendMagicCommand[soulevents.DeleteSoulCommand, soulevents.SoulCommandResult](ctx, hub, soulevents.TopicSoulCommandDelete, soulevents.CommandDestination, "soul", soulID, soulevents.DeleteSoulCommand{SoulID: common.SoulID(soulID)})
+	return err
 }
 
 func ReadSoul(ctx context.Context, hub events.Hub, soulID string) (contextregistrycore.Soul, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, soulevents.TopicSoulCommandGet, "soul", soulID, map[string]any{
-		events.PayloadKeySoulID: soulID,
-	})
+	if hub == nil {
+		return contextregistrycore.Soul{}, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[soulevents.GetSoulCommand, soulevents.SoulCommandResult](ctx, hub, soulevents.TopicSoulCommandGet, soulevents.CommandDestination, "soul", soulID, soulevents.GetSoulCommand{SoulID: common.SoulID(soulID)})
 	if err != nil {
 		return contextregistrycore.Soul{}, err
 	}
-	return contextregistrycore.SoulFromPayload(response.Payload, events.PayloadKeySoul)
+	return soulFromCommandResult(result)
 }
 
 func ReadSoulRecord(ctx context.Context, hub events.Hub, soulID common.SoulID) (*soulmodel.Soul, error) {
@@ -72,9 +73,27 @@ func ReadSoulRecord(ctx context.Context, hub events.Hub, soulID common.SoulID) (
 }
 
 func ListSouls(ctx context.Context, hub events.Hub) ([]contextregistrycore.Soul, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, soulevents.TopicSoulCommandList, "soul", "all", nil)
+	if hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[soulevents.ListSoulsCommand, soulevents.SoulCommandResult](ctx, hub, soulevents.TopicSoulCommandList, soulevents.CommandDestination, "soul", "all", soulevents.ListSoulsCommand{})
 	if err != nil {
 		return nil, err
 	}
-	return contextregistrycore.SoulsFromPayload(response.Payload, events.PayloadKeySouls)
+	return soulsFromCommandResult(result)
+}
+
+func soulFromCommandResult(result soulevents.SoulCommandResult) (contextregistrycore.Soul, error) {
+	if result.Soul == nil {
+		return contextregistrycore.Soul{}, common.ErrInvalidArgument
+	}
+	return contextregistrycore.MapSoul(result.Soul), nil
+}
+
+func soulsFromCommandResult(result soulevents.SoulCommandResult) ([]contextregistrycore.Soul, error) {
+	ret := make([]contextregistrycore.Soul, 0, len(result.Souls))
+	for _, item := range result.Souls {
+		ret = append(ret, contextregistrycore.MapSoul(item))
+	}
+	return ret, nil
 }

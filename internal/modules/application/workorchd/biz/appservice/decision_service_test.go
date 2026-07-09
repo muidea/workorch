@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
@@ -85,9 +86,10 @@ func newCountingDecisionRuntimeSession(t *testing.T) (*RuntimeSession, *counting
 
 	tickets := newCountingAppDecisionTicketRepository()
 	resolutions := newCountingAppDecisionResolutionRepository()
-	eventHub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
+	eventHub := events.NewMagicHubWithHubOwner(rawHub, "appservice/decision_service_test")
 	decisionModule := decisionmodule.New()
-	if err := decisionModule.Configure(decisionmodule.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: eventHub}); err != nil {
+	if err := decisionModule.Configure(decisionmodule.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("setup decision module: %v", err)
 	}
 	if err := decisionModule.Start(); err != nil {
@@ -99,7 +101,7 @@ func newCountingDecisionRuntimeSession(t *testing.T) (*RuntimeSession, *counting
 		}
 	})
 	approvalModule := approvalmodule.New()
-	if err := approvalModule.Configure(approvalmodule.Dependencies{Approvals: memory.NewApprovalRepository(), EventHub: eventHub}); err != nil {
+	if err := approvalModule.Configure(approvalmodule.Dependencies{Approvals: memory.NewApprovalRepository(), EventHub: rawHub}); err != nil {
 		t.Fatalf("setup approval module: %v", err)
 	}
 	if err := approvalModule.Start(); err != nil {

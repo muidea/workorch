@@ -15,17 +15,17 @@ func ReadStepByOwnerCommand(ctx context.Context, hub events.Hub, stepID common.S
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandGetStep, "step", string(stepID), workspaceID, "", payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyStepID: string(stepID),
-	}, workspaceID))
+	response, err := sendMagicCommand[runevents.GetStepCommand, runevents.RunCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, runevents.TopicRunCommandGetStep, runevents.CommandDestination, "step", string(stepID), runevents.GetStepCommand{
+		WorkspaceID: workspaceID,
+		StepID:      stepID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyStep].(*runmodel.Step)
-	if !ok || item == nil {
+	if response.Step == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.Step, nil
 }
 
 func ListStepsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.Step, error) {
@@ -33,17 +33,14 @@ func ListStepsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID commo
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandListStepsByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyRunID: string(runID),
-	}, workspaceID))
+	response, err := sendMagicCommand[runevents.ListStepsByRunCommand, runevents.RunCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, runevents.TopicRunCommandListStepsByRun, runevents.CommandDestination, "run", string(runID), runevents.ListStepsByRunCommand{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeySteps].([]*runmodel.Step)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Steps, nil
 }
 
 func ListStepSummariesByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.Step, error) {
@@ -51,15 +48,12 @@ func ListStepSummariesByRunOwnerCommand(ctx context.Context, hub events.Hub, run
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandListStepSummariesByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyRunID: string(runID),
-	}, workspaceID))
+	response, err := sendMagicCommand[runevents.ListStepSummariesByRunCommand, runevents.RunCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, runevents.TopicRunCommandListStepSummariesByRun, runevents.CommandDestination, "run", string(runID), runevents.ListStepSummariesByRunCommand{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeySteps].([]*runmodel.Step)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Steps, nil
 }

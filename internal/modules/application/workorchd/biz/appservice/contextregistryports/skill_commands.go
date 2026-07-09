@@ -12,23 +12,25 @@ import (
 )
 
 func CreateSkill(ctx context.Context, hub events.Hub, cmd contextregistrycore.Skill) (contextregistrycore.Skill, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, skillevents.TopicSkillCommandCreate, "skill", cmd.ID, map[string]any{
-		events.PayloadKeyCommand: skillCommandFromView(cmd),
-	})
+	if hub == nil {
+		return contextregistrycore.Skill{}, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[skillevents.CreateSkillCommand, skillevents.SkillCommandResult](ctx, hub, skillevents.TopicSkillCommandCreate, skillevents.CommandDestination, "skill", cmd.ID, skillevents.CreateSkillCommand(skillCommandFromView(cmd)))
 	if err != nil {
 		return contextregistrycore.Skill{}, err
 	}
-	return contextregistrycore.SkillFromPayload(response.Payload, events.PayloadKeySkill)
+	return skillFromCommandResult(result)
 }
 
 func ReadSkill(ctx context.Context, hub events.Hub, skillID string) (contextregistrycore.Skill, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, skillevents.TopicSkillCommandGet, "skill", skillID, map[string]any{
-		events.PayloadKeySkillID: skillID,
-	})
+	if hub == nil {
+		return contextregistrycore.Skill{}, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[skillevents.GetSkillCommand, skillevents.SkillCommandResult](ctx, hub, skillevents.TopicSkillCommandGet, skillevents.CommandDestination, "skill", skillID, skillevents.GetSkillCommand{SkillID: common.SkillID(skillID)})
 	if err != nil {
 		return contextregistrycore.Skill{}, err
 	}
-	return contextregistrycore.SkillFromPayload(response.Payload, events.PayloadKeySkill)
+	return skillFromCommandResult(result)
 }
 
 func ReadSkillView(ctx context.Context, hub events.Hub, skillID string, query contextregistrycore.SkillQuery, skillHubCatalog contextregistrycore.SkillHubSkillCatalog) (contextregistrycore.Skill, error) {
@@ -43,11 +45,14 @@ func ReadSkillView(ctx context.Context, hub events.Hub, skillID string, query co
 }
 
 func ListSkills(ctx context.Context, hub events.Hub) ([]contextregistrycore.Skill, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, skillevents.TopicSkillCommandList, "skill", "all", nil)
+	if hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[skillevents.ListSkillsCommand, skillevents.SkillCommandResult](ctx, hub, skillevents.TopicSkillCommandList, skillevents.CommandDestination, "skill", "all", skillevents.ListSkillsCommand{})
 	if err != nil {
 		return nil, err
 	}
-	return contextregistrycore.SkillsFromPayload(response.Payload, events.PayloadKeySkills)
+	return skillsFromCommandResult(result)
 }
 
 func ListSkillsView(ctx context.Context, hub events.Hub, query contextregistrycore.SkillQuery, skillHubCatalog contextregistrycore.SkillHubSkillCatalog) ([]contextregistrycore.Skill, error) {
@@ -56,5 +61,20 @@ func ListSkillsView(ctx context.Context, hub events.Hub, query contextregistryco
 		return nil, err
 	}
 	ret = append(ret, contextregistrycore.ListSkillHubSkillsForQuery(ctx, skillHubCatalog, query)...)
+	return ret, nil
+}
+
+func skillFromCommandResult(result skillevents.SkillCommandResult) (contextregistrycore.Skill, error) {
+	if result.Skill == nil {
+		return contextregistrycore.Skill{}, common.ErrInvalidArgument
+	}
+	return contextregistrycore.MapRepositorySkill(result.Skill), nil
+}
+
+func skillsFromCommandResult(result skillevents.SkillCommandResult) ([]contextregistrycore.Skill, error) {
+	ret := make([]contextregistrycore.Skill, 0, len(result.Skills))
+	for _, item := range result.Skills {
+		ret = append(ret, contextregistrycore.MapRepositorySkill(item))
+	}
 	return ret, nil
 }

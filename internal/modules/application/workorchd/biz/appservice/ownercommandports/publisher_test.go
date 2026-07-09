@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
-	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -25,9 +25,12 @@ func TestPublishRejectsReadTopic(t *testing.T) {
 
 func TestPublishMemoryRecallTraceUpsertPublishesCommandPayload(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(memoryevents.TopicMemoryRecallTraceCommandUpsert, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(envelope)
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHub(rawHub)
+	var captured memoryevents.UpsertMemoryRecallTraceCommand
+	subscribeMemoryCommand(t, rawHub, memoryevents.TopicMemoryRecallTraceCommandUpsert, func(cmd memoryevents.UpsertMemoryRecallTraceCommand, result magicevent.Result) {
+		captured = cmd
+		result.Set(memoryevents.MemoryCommandResult{}, nil)
 	})
 	trace := &memorymodel.MemoryRecallTrace{
 		ID:                 "trace-command-payload",
@@ -48,31 +51,21 @@ func TestPublishMemoryRecallTraceUpsertPublishesCommandPayload(t *testing.T) {
 		t.Fatalf("PublishMemoryRecallTraceUpsert: %v", err)
 	}
 
-	published := hub.Published()
-	if len(published) != 1 {
-		t.Fatalf("published len = %d, want 1", len(published))
+	if captured.TraceID != trace.ID || captured.WorkspaceID != trace.WorkspaceID || captured.RunID != trace.RunID || captured.TypeQuota["episodic"] != 2 {
+		t.Fatalf("command = %+v, want populated trace command", captured)
 	}
-	cmd, ok := published[0].Payload[events.PayloadKeyCommand].(memorycontracts.UpsertMemoryRecallTraceCommand)
-	if !ok {
-		t.Fatalf("payload command = %T, want UpsertMemoryRecallTraceCommand", published[0].Payload[events.PayloadKeyCommand])
-	}
-	if cmd.TraceID != trace.ID || cmd.WorkspaceID != trace.WorkspaceID || cmd.RunID != trace.RunID || cmd.TypeQuota["episodic"] != 2 {
-		t.Fatalf("command = %+v, want populated trace command", cmd)
-	}
-	if len(cmd.RetrievedMemoryHits) != 1 || cmd.RetrievedMemoryHits[0].ID != "mem-hit" {
-		t.Fatalf("retrieved hits = %+v, want mem-hit", cmd.RetrievedMemoryHits)
-	}
-	if _, ok := published[0].Payload[events.PayloadKeyMemoryRecallTrace]; ok {
-		t.Fatalf("payload contains legacy memoryRecallTrace field")
-	}
-	if _, ok := published[0].Payload[events.PayloadKeyTraceID]; ok {
-		t.Fatalf("payload contains legacy traceId field")
+	if len(captured.RetrievedMemoryHits) != 1 || captured.RetrievedMemoryHits[0].ID != "mem-hit" {
+		t.Fatalf("retrieved hits = %+v, want mem-hit", captured.RetrievedMemoryHits)
 	}
 }
 
 func TestRecordMemoryRecallTracePublishesRecordedNotificationThroughAsyncHub(t *testing.T) {
 	ctx := context.Background()
-	hub := &recordingMemoryRecallAsyncHub{}
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHub(rawHub)
+	subscribeMemoryCommand(t, rawHub, memoryevents.TopicMemoryRecallTraceCommandUpsert, func(_ memoryevents.UpsertMemoryRecallTraceCommand, result magicevent.Result) {
+		result.Set(memoryevents.MemoryCommandResult{}, nil)
+	})
 	trace := &memorymodel.MemoryRecallTrace{
 		ID:                 "trace-recorded-async",
 		WorkspaceID:        "ws-trace-recorded-async",
@@ -86,15 +79,25 @@ func TestRecordMemoryRecallTracePublishesRecordedNotificationThroughAsyncHub(t *
 	if err := RecordMemoryRecallTrace(ctx, hub, trace); err != nil {
 		t.Fatalf("RecordMemoryRecallTrace: %v", err)
 	}
-	if len(hub.sync) != 1 || hub.sync[0].Topic != memoryevents.TopicMemoryRecallTraceCommandUpsert {
-		t.Fatalf("sync publishes = %+v, want one trace upsert command", hub.sync)
+	published := hub.Published()
+	if len(published) != 1 || published[0].Topic != memoryevents.TopicMemoryRecallRecorded {
+		t.Fatalf("published = %+v, want one memory recall recorded notification", published)
 	}
-	if len(hub.async) != 1 || hub.async[0].Topic != memoryevents.TopicMemoryRecallRecorded {
-		t.Fatalf("async publishes = %+v, want one memory recall recorded notification", hub.async)
+	if published[0].WorkspaceID != string(trace.WorkspaceID) || published[0].RunID != string(trace.RunID) {
+		t.Fatalf("notification scope = workspace:%q run:%q", published[0].WorkspaceID, published[0].RunID)
 	}
-	if hub.async[0].WorkspaceID != string(trace.WorkspaceID) || hub.async[0].RunID != string(trace.RunID) {
-		t.Fatalf("async scope = workspace:%q run:%q", hub.async[0].WorkspaceID, hub.async[0].RunID)
-	}
+}
+
+func subscribeMemoryCommand[Command any](t *testing.T, hub magicevent.Hub, topic string, handle func(Command, magicevent.Result)) {
+	t.Helper()
+	observer := magicevent.NewSimpleObserver(memoryevents.CommandDestination, hub)
+	observer.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
+		cmd, ok := ev.Data().(Command)
+		if !ok {
+			t.Fatalf("event %s command type = %T", topic, ev.Data())
+		}
+		handle(cmd, result)
+	})
 }
 
 type recordingMemoryRecallAsyncHub struct {

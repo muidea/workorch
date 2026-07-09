@@ -4,12 +4,12 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
-	mcpcontracts "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/contracts"
+	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func mcpServerCommandFromView(cmd contextregistrycore.MCPServer) mcpcontracts.CreateServerCommand {
-	return mcpcontracts.CreateServerCommand{
+func mcpServerCommandFromView(cmd contextregistrycore.MCPServer) mcpevents.CreateServerCommand {
+	return mcpevents.CreateServerCommand{
 		ServerID:              common.MCPServerID(strings.TrimSpace(cmd.ID)),
 		Name:                  cmd.Name,
 		Transport:             cmd.Transport,
@@ -27,8 +27,8 @@ func mcpServerCommandFromView(cmd contextregistrycore.MCPServer) mcpcontracts.Cr
 	}
 }
 
-func mcpCapabilityCommandFromView(cmd contextregistrycore.MCPCapability) mcpcontracts.CreateCapabilityCommand {
-	return mcpcontracts.CreateCapabilityCommand{
+func mcpCapabilityCommandFromView(cmd contextregistrycore.MCPCapability) mcpevents.CreateCapabilityCommand {
+	return mcpevents.CreateCapabilityCommand{
 		ID:             common.MCPCapabilityID(strings.TrimSpace(cmd.ID)),
 		ServerID:       common.MCPServerID(strings.TrimSpace(cmd.ServerID)),
 		Kind:           cmd.Kind,
@@ -50,8 +50,8 @@ func mcpCapabilityCommandFromView(cmd contextregistrycore.MCPCapability) mcpcont
 	}
 }
 
-func mcpCapabilityQueryFromView(query contextregistrycore.MCPCapabilityQuery) mcpcontracts.CapabilityQuery {
-	return mcpcontracts.CapabilityQuery{
+func mcpCapabilityQueryFromView(query contextregistrycore.MCPCapabilityQuery) mcpevents.CapabilityQuery {
+	return mcpevents.CapabilityQuery{
 		ServerID:  common.MCPServerID(strings.TrimSpace(query.ServerID)),
 		Kind:      strings.TrimSpace(query.Kind),
 		Category:  strings.TrimSpace(query.Category),

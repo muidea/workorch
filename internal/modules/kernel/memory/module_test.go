@@ -5,11 +5,11 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 
 	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -34,15 +34,15 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.unsub)
+	firstSubscriptionCount := len(module.topics)
 	if firstSubscriptionCount == 0 {
 		t.Fatal("Start did not subscribe memory commands")
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if len(module.unsub) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	if len(module.topics) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -51,7 +51,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 		module.bizPtr != nil ||
 		module.servicePtr != nil ||
 		module.eventHub != nil ||
-		len(module.unsub) != 0 {
+		module.observer != nil ||
+		len(module.topics) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -63,24 +64,11 @@ func TestModuleConfigureRequiresMemoryItems(t *testing.T) {
 	if err := New().Configure(Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Configure err = %v, want invalid argument", err)
 	}
-	module := New()
-	if err := module.Configure(Dependencies{MemoryItems: memoryrepo.NewMemoryItemRepository()}); err != nil {
-		t.Fatalf("Configure without EventHub: %v", err)
-	}
-	if module.Service() == nil {
-		t.Fatal("service is nil after Configure without EventHub")
-	}
-	if err := module.Start(); err != nil {
-		t.Fatalf("Start without EventHub should remain no-op: %v", err)
-	}
-	if len(module.unsub) != 0 {
-		t.Fatalf("subscriptions without EventHub = %d, want 0", len(module.unsub))
-	}
 }
 
 func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	hub := magicevent.NewHub(16)
 	traces := memoryrepo.NewMemoryRecallTraceRepository()
 	module := New()
 	if err := module.Configure(Dependencies{
@@ -100,38 +88,39 @@ func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 	})
 	traceID := common.MemoryRecallTraceID("trace-contract")
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       memoryevents.TopicMemoryRecallTraceCommandUpsert,
-		SubjectType: "memory_recall_trace",
-		SubjectID:   string(traceID),
-		WorkspaceID: "ws-trace-contract",
-		RunID:       "run-trace-contract",
-		Payload: map[string]any{
-			events.PayloadKeyCommand: memorycontracts.UpsertMemoryRecallTraceCommand{
-				TraceID:            traceID,
-				WorkspaceID:        "ws-trace-contract",
-				RunID:              "run-trace-contract",
-				Stage:              "activation",
-				CandidateMemoryIDs: []common.MemoryID{"mem-candidate"},
-				SelectedMemoryIDs:  []common.MemoryID{"mem-selected"},
-				ExcludedMemoryIDs:  []common.MemoryID{"mem-excluded"},
-				TypeQuota:          map[string]int{"episodic": 1},
-				SelectionScores: []memorycontracts.MemoryRecallSelectionScoreCommand{{
-					ID:     "mem-excluded",
-					Score:  10,
-					Reason: "excluded_low_value_process_memory",
-				}},
-				RetrievedMemoryHits: []memorycontracts.MemoryRecallHitCommand{{
-					ID:              "mem-hit",
-					Summary:         "hit",
-					VectorScore:     0.91,
-					VectorDimension: 4,
-				}},
-			},
+	response := hub.Send(magicevent.NewEventWithContext(
+		memoryevents.TopicMemoryRecallTraceCommandUpsert,
+		"test",
+		memoryevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		memoryevents.UpsertMemoryRecallTraceCommand{
+			TraceID:            traceID,
+			WorkspaceID:        "ws-trace-contract",
+			RunID:              "run-trace-contract",
+			Stage:              "activation",
+			CandidateMemoryIDs: []common.MemoryID{"mem-candidate"},
+			SelectedMemoryIDs:  []common.MemoryID{"mem-selected"},
+			ExcludedMemoryIDs:  []common.MemoryID{"mem-excluded"},
+			TypeQuota:          map[string]int{"episodic": 1},
+			SelectionScores: []memorycontracts.MemoryRecallSelectionScoreCommand{{
+				ID:     "mem-excluded",
+				Score:  10,
+				Reason: "excluded_low_value_process_memory",
+			}},
+			RetrievedMemoryHits: []memorycontracts.MemoryRecallHitCommand{{
+				ID:              "mem-hit",
+				Summary:         "hit",
+				VectorScore:     0.91,
+				VectorDimension: 4,
+			}},
 		},
-	})
-	if _, ok := events.ResponseEnvelope(err); !ok {
-		t.Fatalf("upsert err = %v, want response", err)
+	))
+	if response == nil {
+		t.Fatal("upsert response is nil")
+	}
+	if response.Error() != nil {
+		t.Fatalf("upsert error = %v", response.Error())
 	}
 	stored, err := traces.Get(ctx, traceID)
 	if err != nil {
@@ -147,16 +136,19 @@ func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 		t.Fatalf("stored trace = %+v, want selected/excluded recall audit fields", stored)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic:       memoryevents.TopicMemoryRecallTraceCommandDelete,
-		SubjectType: "memory_recall_trace",
-		SubjectID:   string(traceID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand: memorycontracts.DeleteMemoryRecallTraceCommand{TraceID: traceID},
-		},
-	})
-	if _, ok := events.ResponseEnvelope(err); !ok {
-		t.Fatalf("delete err = %v, want response", err)
+	response = hub.Send(magicevent.NewEventWithContext(
+		memoryevents.TopicMemoryRecallTraceCommandDelete,
+		"test",
+		memoryevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		memoryevents.DeleteMemoryRecallTraceCommand{TraceID: traceID},
+	))
+	if response == nil {
+		t.Fatal("delete response is nil")
+	}
+	if response.Error() != nil {
+		t.Fatalf("delete error = %v", response.Error())
 	}
 	if _, err := traces.Get(ctx, traceID); err == nil {
 		t.Fatalf("trace still exists after delete")
@@ -167,6 +159,6 @@ func memoryModuleContractDependencies() Dependencies {
 	return Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
 		MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(),
-		EventHub:           events.NewMemoryHub(),
+		EventHub:           magicevent.NewHub(16),
 	}
 }

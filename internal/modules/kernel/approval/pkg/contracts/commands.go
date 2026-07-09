@@ -37,5 +37,8 @@ type ResolveApprovalCommand struct {
 }
 
 type DeleteApprovalCommand struct {
-	ApprovalID common.ApprovalID
+	ApprovalID  common.ApprovalID
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	StepID      common.StepID
 }

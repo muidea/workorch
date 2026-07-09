@@ -5,14 +5,42 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
-	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
+
+func newRunModuleTestHub() (*events.MagicHub, magicevent.Hub) {
+	rawHub := magicevent.NewHub(16)
+	return events.NewMagicHubWithHub(rawHub), rawHub
+}
+
+func sendRunTestCommand(ctx context.Context, rawHub magicevent.Hub, topic string, command any) (runevents.RunCommandResult, error) {
+	ev := magicevent.NewEventWithContext(topic, "run/module_test", runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	result := rawHub.Send(ev)
+	if result == nil {
+		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+	}
+	if err := result.Error(); err != nil {
+		if err.Cause != nil {
+			return runevents.RunCommandResult{}, err.Cause
+		}
+		return runevents.RunCommandResult{}, err
+	}
+	data, err := result.Get()
+	if err != nil {
+		return runevents.RunCommandResult{}, err
+	}
+	response, ok := data.(runevents.RunCommandResult)
+	if !ok {
+		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+	}
+	return response, nil
+}
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	module := New()
@@ -22,12 +50,12 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.servicePtr != nil {
 		t.Fatal("new module service pointer is non-nil before Configure")
 	}
-	hub := events.NewMemoryHub()
+	_, rawHub := newRunModuleTestHub()
 	if err := module.Configure(Dependencies{
 		Runs:        memory.NewRunRepository(),
 		Steps:       memory.NewStepRepository(),
 		Checkpoints: memory.NewRuntimeCheckpointRepository(),
-		EventHub:    hub,
+		EventHub:    rawHub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -40,15 +68,15 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.unsub)
+	firstSubscriptionCount := len(module.topics)
 	if firstSubscriptionCount == 0 {
 		t.Fatal("Start did not subscribe run commands")
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if len(module.unsub) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	if len(module.topics) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -59,7 +87,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 		module.runs != nil ||
 		module.steps != nil ||
 		module.checkpoints != nil ||
-		len(module.unsub) != 0 {
+		module.observer != nil ||
+		len(module.topics) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -72,7 +101,7 @@ func TestModuleConfigureRequiresRunRepositoryAndEventHub(t *testing.T) {
 		name string
 		deps Dependencies
 	}{
-		{name: "missing runs", deps: Dependencies{EventHub: events.NewMemoryHub()}},
+		{name: "missing runs", deps: Dependencies{EventHub: magicevent.NewHub(16)}},
 		{name: "missing event hub", deps: Dependencies{Runs: memory.NewRunRepository()}},
 	}
 	for _, tc := range tests {
@@ -86,7 +115,7 @@ func TestModuleConfigureRequiresRunRepositoryAndEventHub(t *testing.T) {
 
 func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	_, rawHub := newRunModuleTestHub()
 	runs := memory.NewRunRepository()
 	runID := common.RunID("run-scoped-get")
 	if err := runs.Create(ctx, &runmodel.Run{
@@ -105,7 +134,7 @@ func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -117,59 +146,42 @@ func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandGet,
+	_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandGet, runevents.GetRunCommand{
 		WorkspaceID: "ws-run-owner-c",
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: "ws-run-owner-c",
-			events.PayloadKeyRunID:       string(runID),
-		},
+		RunID:       runID,
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("wrong workspace get err = %v, want not found", err)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandGet,
+	response, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandGet, runevents.GetRunCommand{
 		WorkspaceID: "ws-run-owner-b",
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: "ws-run-owner-b",
-			events.PayloadKeyRunID:       string(runID),
-		},
+		RunID:       runID,
 	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
+	if err != nil {
 		t.Fatalf("duplicate scoped get err = %v, want response", err)
 	}
-	item, ok := response.Payload[events.PayloadKeyRun].(*runmodel.Run)
-	if !ok || item == nil || item.WorkspaceID != "ws-run-owner-b" || item.State != common.RunStateActive {
-		t.Fatalf("duplicate scoped response run = %+v, want workspace b running run", response.Payload[events.PayloadKeyRun])
+	item := response.Run
+	if item == nil || item.WorkspaceID != "ws-run-owner-b" || item.State != common.RunStateActive {
+		t.Fatalf("duplicate scoped response run = %+v, want workspace b running run", response.Run)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandGet,
+	response, err = sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandGet, runevents.GetRunCommand{
 		WorkspaceID: "ws-run-owner-a",
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: "ws-run-owner-a",
-			events.PayloadKeyRunID:       string(runID),
-		},
+		RunID:       runID,
 	})
-	response, ok = events.ResponseEnvelope(err)
-	if !ok {
+	if err != nil {
 		t.Fatalf("scoped get err = %v, want response", err)
 	}
-	item, ok = response.Payload[events.PayloadKeyRun].(*runmodel.Run)
-	if !ok || item == nil || item.WorkspaceID != "ws-run-owner-a" || item.ID != runID {
-		t.Fatalf("response run = %+v, want scoped run", response.Payload[events.PayloadKeyRun])
+	item = response.Run
+	if item == nil || item.WorkspaceID != "ws-run-owner-a" || item.ID != runID {
+		t.Fatalf("response run = %+v, want scoped run", response.Run)
 	}
 }
 
 func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	_, rawHub := newRunModuleTestHub()
 	runs := memory.NewRunRepository()
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID:               "run-compact-running",
@@ -190,7 +202,7 @@ func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -202,21 +214,14 @@ func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic: runevents.TopicRunCommandList,
-		Payload: map[string]any{
-			events.PayloadKeyStates:  []string{string(common.RunStateActive)},
-			events.PayloadKeyCompact: true,
-		},
+	response, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandList, runevents.ListRunsCommand{
+		States:  []common.RunState{common.RunStateActive},
+		Compact: true,
 	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
+	if err != nil {
 		t.Fatalf("list err = %v, want response", err)
 	}
-	items, ok := response.Payload[events.PayloadKeyRuns].([]*runmodel.Run)
-	if !ok {
-		t.Fatalf("runs payload = %T, want run slice", response.Payload[events.PayloadKeyRuns])
-	}
+	items := response.Runs
 	if len(items) != 1 || items[0].ID != "run-compact-running" {
 		t.Fatalf("items = %+v, want only running run", items)
 	}
@@ -227,7 +232,7 @@ func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 
 func TestRunCommandDeleteHonorsWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	_, rawHub := newRunModuleTestHub()
 	runs := memory.NewRunRepository()
 	runID := common.RunID("run-scoped-delete")
 	if err := runs.Create(ctx, &runmodel.Run{
@@ -239,7 +244,7 @@ func TestRunCommandDeleteHonorsWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -251,14 +256,9 @@ func TestRunCommandDeleteHonorsWorkspaceScope(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandDelete,
+	_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandDelete, runevents.DeleteRunCommand{
 		WorkspaceID: "ws-run-delete-b",
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: "ws-run-delete-b",
-			events.PayloadKeyRunID:       string(runID),
-		},
+		RunID:       runID,
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("wrong workspace delete err = %v, want not found", err)
@@ -267,16 +267,11 @@ func TestRunCommandDeleteHonorsWorkspaceScope(t *testing.T) {
 		t.Fatalf("run deleted on wrong workspace: %v", err)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandDelete,
+	_, err = sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandDelete, runevents.DeleteRunCommand{
 		WorkspaceID: "ws-run-delete-a",
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: "ws-run-delete-a",
-			events.PayloadKeyRunID:       string(runID),
-		},
+		RunID:       runID,
 	})
-	if _, ok := events.ResponseEnvelope(err); !ok {
+	if err != nil {
 		t.Fatalf("scoped delete err = %v, want response", err)
 	}
 	if _, err := runs.Get(ctx, runID); !errors.Is(err, common.ErrNotFound) {
@@ -286,7 +281,7 @@ func TestRunCommandDeleteHonorsWorkspaceScope(t *testing.T) {
 
 func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	_, rawHub := newRunModuleTestHub()
 	runs := memory.NewRunRepository()
 	runID := common.RunID("run-write-scope")
 	if err := runs.Create(ctx, &runmodel.Run{
@@ -298,7 +293,7 @@ func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -310,55 +305,28 @@ func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic: runevents.TopicRunCommandUpdate,
-		RunID: string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand: runcontracts.UpdateRunCommand{
-				RunID:       runID,
-				WorkspaceID: "ws-write-scope-a",
-				State:       common.RunStateActive,
-			},
-		},
+	_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandUpdate, runevents.UpdateRunCommand{
+		RunID: runID,
+		State: common.RunStateActive,
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("unscoped update err = %v, want invalid argument", err)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandUpdate,
-		WorkspaceID: "ws-write-scope-b",
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand: runcontracts.UpdateRunCommand{
-				RunID:       runID,
-				WorkspaceID: "ws-write-scope-a",
-				State:       common.RunStateActive,
-			},
-		},
-	})
-	if !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("wrong scope update err = %v, want conflict", err)
-	}
-
-	err = hub.Publish(ctx, events.Envelope{
-		Topic: runevents.TopicRunCommandDelete,
-		RunID: string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand: runcontracts.DeleteRunCommand{RunID: runID},
-		},
+	_, err = sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandDelete, runevents.DeleteRunCommand{
+		RunID: runID,
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("unscoped delete err = %v, want invalid argument", err)
 	}
 }
 
-func TestRunCreateCommandRejectsWorkspaceScopeMismatch(t *testing.T) {
+func TestRunCreateCommandRequiresWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	_, rawHub := newRunModuleTestHub()
 	runs := memory.NewRunRepository()
 	module := New()
-	if err := module.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -370,25 +338,17 @@ func TestRunCreateCommandRejectsWorkspaceScopeMismatch(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandCreate,
-		WorkspaceID: "ws-create-scope-envelope",
-		RunID:       "run-create-scope",
-		Payload: map[string]any{
-			events.PayloadKeyCommand: runcontracts.CreateRunCommand{
-				RunID:       "run-create-scope",
-				WorkspaceID: "ws-create-scope-command",
-			},
-		},
+	_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandCreate, runevents.CreateRunCommand{
+		RunID: "run-create-scope",
 	})
-	if !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("create scope mismatch err = %v, want conflict", err)
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("create missing workspace err = %v, want invalid argument", err)
 	}
 }
 
 func TestRunStepReadCommandsHonorWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	_, rawHub := newRunModuleTestHub()
 	runs := memory.NewRunRepository()
 	steps := memory.NewStepRepository()
 	runID := common.RunID("run-step-read-scope")
@@ -411,7 +371,7 @@ func TestRunStepReadCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Runs: runs, Steps: steps, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Runs: runs, Steps: steps, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -423,52 +383,38 @@ func TestRunStepReadCommandsHonorWorkspaceScope(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandGetStep,
+	_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandGetStep, runevents.GetStepCommand{
 		WorkspaceID: "ws-step-read-b",
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: "ws-step-read-b",
-			events.PayloadKeyStepID:      string(stepID),
-		},
+		StepID:      stepID,
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("wrong workspace get step err = %v, want not found", err)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandListStepsByRun,
+	_, err = sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandListStepsByRun, runevents.ListStepsByRunCommand{
 		WorkspaceID: "ws-step-read-b",
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: "ws-step-read-b",
-			events.PayloadKeyRunID:       string(runID),
-		},
+		RunID:       runID,
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("wrong workspace list steps err = %v, want not found", err)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandGetStep,
+	response, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandGetStep, runevents.GetStepCommand{
 		WorkspaceID: "ws-step-read-a",
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: "ws-step-read-a",
-			events.PayloadKeyStepID:      string(stepID),
-		},
+		StepID:      stepID,
 	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
+	if err != nil {
 		t.Fatalf("scoped get step err = %v, want response", err)
 	}
-	item, ok := response.Payload[events.PayloadKeyStep].(*runmodel.Step)
-	if !ok || item == nil || item.ID != stepID || item.RunID != runID {
-		t.Fatalf("response step = %+v, want scoped step", response.Payload[events.PayloadKeyStep])
+	item := response.Step
+	if item == nil || item.ID != stepID || item.RunID != runID {
+		t.Fatalf("response step = %+v, want scoped step", response.Step)
 	}
 }
 
 func TestRunCheckpointReadCommandsHonorWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	_, rawHub := newRunModuleTestHub()
 	runs := memory.NewRunRepository()
 	checkpoints := memory.NewRuntimeCheckpointRepository()
 	runID := common.RunID("run-checkpoint-read-scope")
@@ -489,7 +435,7 @@ func TestRunCheckpointReadCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Runs: runs, Checkpoints: checkpoints, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Runs: runs, Checkpoints: checkpoints, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -501,45 +447,31 @@ func TestRunCheckpointReadCommandsHonorWorkspaceScope(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandGetRuntimeCheckpoint,
-		WorkspaceID: "ws-checkpoint-read-b",
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID:  "ws-checkpoint-read-b",
-			events.PayloadKeyCheckpointID: string(checkpointID),
-		},
+	_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandGetRuntimeCheckpoint, runevents.GetRuntimeCheckpointCommand{
+		WorkspaceID:  "ws-checkpoint-read-b",
+		CheckpointID: checkpointID,
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("wrong workspace get checkpoint err = %v, want not found", err)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandListCheckpointsByRun,
+	_, err = sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandListCheckpointsByRun, runevents.ListRuntimeCheckpointsByRunCommand{
 		WorkspaceID: "ws-checkpoint-read-b",
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: "ws-checkpoint-read-b",
-			events.PayloadKeyRunID:       string(runID),
-		},
+		RunID:       runID,
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("wrong workspace list checkpoints err = %v, want not found", err)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandGetRuntimeCheckpoint,
-		WorkspaceID: "ws-checkpoint-read-a",
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID:  "ws-checkpoint-read-a",
-			events.PayloadKeyCheckpointID: string(checkpointID),
-		},
+	response, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandGetRuntimeCheckpoint, runevents.GetRuntimeCheckpointCommand{
+		WorkspaceID:  "ws-checkpoint-read-a",
+		CheckpointID: checkpointID,
 	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
+	if err != nil {
 		t.Fatalf("scoped get checkpoint err = %v, want response", err)
 	}
-	item, ok := response.Payload[events.PayloadKeyCheckpoint].(*runmodel.RuntimeCheckpoint)
-	if !ok || item == nil || item.ID != checkpointID || item.RunID != runID || item.WorkspaceID != "ws-checkpoint-read-a" {
-		t.Fatalf("response checkpoint = %+v, want scoped checkpoint", response.Payload[events.PayloadKeyCheckpoint])
+	item := response.Checkpoint
+	if item == nil || item.ID != checkpointID || item.RunID != runID || item.WorkspaceID != "ws-checkpoint-read-a" {
+		t.Fatalf("response checkpoint = %+v, want scoped checkpoint", response.Checkpoint)
 	}
 }

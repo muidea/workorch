@@ -16,49 +16,34 @@ func ReadMemoryItemByOwnerCommand(ctx context.Context, hub events.Hub, id common
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, memoryevents.TopicMemoryCommandGet, "memory", string(id), workspaceID, "", payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyMemoryID: string(id),
-	}, workspaceID))
+	response, err := sendMagicCommand[memoryevents.GetMemoryCommand, memoryevents.MemoryCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, memoryevents.TopicMemoryCommandGet, memoryevents.CommandDestination, "memory", string(id), memoryevents.GetMemoryCommand{WorkspaceID: workspaceID, MemoryID: id})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyMemoryItem].(*memorymodel.MemoryItem)
-	if !ok || item == nil {
+	if response.Item == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.Item, nil
 }
 
 func ListMemoryItemsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, memoryevents.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
-		events.PayloadKeyWorkspaceID: string(workspaceID),
-	})
+	response, err := sendMagicCommand[memoryevents.ListMemoryByWorkspaceCommand, memoryevents.MemoryCommandResult](ctx, hub, memoryevents.TopicMemoryCommandListByWorkspace, memoryevents.CommandDestination, "workspace", string(workspaceID), memoryevents.ListMemoryByWorkspaceCommand{WorkspaceID: workspaceID})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyMemoryItems].([]*memorymodel.MemoryItem)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Items, nil
 }
 
 func SearchMemoryByOwnerCommand(ctx context.Context, hub events.Hub, query repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, memoryevents.TopicMemoryCommandSearch, "memory_search", string(query.WorkspaceID), query.WorkspaceID, "", map[string]any{
-		events.PayloadKeyMemorySearchQuery: query,
-	})
+	response, err := sendMagicCommand[memoryevents.SearchMemoryCommand, memoryevents.MemoryCommandResult](ctx, hub, memoryevents.TopicMemoryCommandSearch, memoryevents.CommandDestination, "memory_search", string(query.WorkspaceID), memoryevents.SearchMemoryCommand{Query: query})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyMemoryItems].([]*memorymodel.MemoryItem)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Items, nil
 }

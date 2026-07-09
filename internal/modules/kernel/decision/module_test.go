@@ -4,15 +4,39 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 
-	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
+
+func sendDecisionTestCommand(ctx context.Context, rawHub magicevent.Hub, topic string, command any) (decisionevents.DecisionCommandResult, error) {
+	ev := magicevent.NewEventWithContext(topic, "decision/module_test", decisionevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	result := rawHub.Send(ev)
+	if result == nil {
+		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+	}
+	if err := result.Error(); err != nil {
+		if err.Cause != nil {
+			return decisionevents.DecisionCommandResult{}, err.Cause
+		}
+		return decisionevents.DecisionCommandResult{}, err
+	}
+	data, err := result.Get()
+	if err != nil {
+		return decisionevents.DecisionCommandResult{}, err
+	}
+	response, ok := data.(decisionevents.DecisionCommandResult)
+	if !ok {
+		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+	}
+	return response, nil
+}
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	module := New()
@@ -42,15 +66,15 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.unsub)
+	firstSubscriptionCount := len(module.topics)
 	if firstSubscriptionCount == 0 {
 		t.Fatal("Start did not subscribe decision commands")
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if len(module.unsub) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	if len(module.topics) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -61,7 +85,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 		module.eventHub != nil ||
 		module.tickets != nil ||
 		module.resolutions != nil ||
-		len(module.unsub) != 0 {
+		module.observer != nil ||
+		len(module.topics) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -90,7 +115,7 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 
 func TestDecisionTicketCommandGetHonorsScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	ticketID := common.TicketID("ticket-scoped-get")
@@ -106,7 +131,7 @@ func TestDecisionTicketCommandGetHonorsScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -118,47 +143,33 @@ func TestDecisionTicketCommandGetHonorsScope(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicDecisionCommandGetTicket,
+	_, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandGetTicket, decisionevents.GetTicketCommand{
 		WorkspaceID: "ws-ticket-owner-b",
 		RunID:       "run-ticket-owner-a",
 		StepID:      "step-ticket-owner-a",
-		Payload: map[string]any{
-			events.PayloadKeyBlockingTicketID: string(ticketID),
-			events.PayloadKeyWorkspaceID:      "ws-ticket-owner-b",
-			events.PayloadKeyRunID:            "run-ticket-owner-a",
-			events.PayloadKeyStepID:           "step-ticket-owner-a",
-		},
+		TicketID:    ticketID,
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("wrong workspace get err = %v, want not found", err)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicDecisionCommandGetTicket,
+	response, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandGetTicket, decisionevents.GetTicketCommand{
 		WorkspaceID: "ws-ticket-owner-a",
 		RunID:       "run-ticket-owner-a",
 		StepID:      "step-ticket-owner-a",
-		Payload: map[string]any{
-			events.PayloadKeyBlockingTicketID: string(ticketID),
-			events.PayloadKeyWorkspaceID:      "ws-ticket-owner-a",
-			events.PayloadKeyRunID:            "run-ticket-owner-a",
-			events.PayloadKeyStepID:           "step-ticket-owner-a",
-		},
+		TicketID:    ticketID,
 	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
+	if err != nil {
 		t.Fatalf("scoped get err = %v, want response", err)
 	}
-	item, ok := response.Payload[events.PayloadKeyTicket].(*decisionmodel.Ticket)
-	if !ok || item == nil || item.WorkspaceID != "ws-ticket-owner-a" || item.ID != ticketID {
-		t.Fatalf("response ticket = %+v, want scoped ticket", response.Payload[events.PayloadKeyTicket])
+	if response.Ticket == nil || response.Ticket.WorkspaceID != "ws-ticket-owner-a" || response.Ticket.ID != ticketID {
+		t.Fatalf("response ticket = %+v, want scoped ticket", response.Ticket)
 	}
 }
 
 func TestDecisionTicketCommandListByRunHonorsWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	runID := common.RunID("run-shared-ticket")
@@ -184,7 +195,7 @@ func TestDecisionTicketCommandListByRunHonorsWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -196,28 +207,21 @@ func TestDecisionTicketCommandListByRunHonorsWorkspaceScope(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicDecisionCommandListTicketsByRun,
+	response, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandListTicketsByRun, decisionevents.ListTicketsByRunCommand{
 		WorkspaceID: "ws-ticket-list-a",
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: "ws-ticket-list-a",
-			events.PayloadKeyRunID:       string(runID),
-		},
+		RunID:       runID,
 	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
+	if err != nil {
 		t.Fatalf("list by run err = %v, want response", err)
 	}
-	items, ok := response.Payload[events.PayloadKeyTickets].([]*decisionmodel.Ticket)
-	if !ok || len(items) != 1 || items[0].WorkspaceID != "ws-ticket-list-a" {
-		t.Fatalf("response tickets = %+v, want one scoped ticket", response.Payload[events.PayloadKeyTickets])
+	if len(response.Tickets) != 1 || response.Tickets[0].WorkspaceID != "ws-ticket-list-a" {
+		t.Fatalf("response tickets = %+v, want one scoped ticket", response.Tickets)
 	}
 }
 
 func TestDecisionMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	ticketID := common.TicketID("ticket-scoped-mutation")
@@ -232,7 +236,7 @@ func TestDecisionMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -244,17 +248,12 @@ func TestDecisionMutationCommandsHonorWorkspaceScope(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicDecisionCommandEnsureResolved,
-		WorkspaceID: "ws-ticket-mutate-b",
-		RunID:       "run-ticket-mutate-a",
-		Payload: map[string]any{
-			events.PayloadKeyBlockingTicketID: string(ticketID),
-			events.PayloadKeyResolutionID:     "resolution-scoped-mutation",
-			events.PayloadKeyType:             "provide_missing_info",
-			events.PayloadKeyWorkspaceID:      "ws-ticket-mutate-b",
-			events.PayloadKeyRunID:            "run-ticket-mutate-a",
-		},
+	_, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandEnsureResolved, decisionevents.EnsureResolvedCommand{
+		TicketID:     ticketID,
+		ResolutionID: "resolution-scoped-mutation",
+		Type:         "provide_missing_info",
+		WorkspaceID:  "ws-ticket-mutate-b",
+		RunID:        "run-ticket-mutate-a",
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("wrong workspace resolve err = %v, want not found", err)
@@ -267,15 +266,10 @@ func TestDecisionMutationCommandsHonorWorkspaceScope(t *testing.T) {
 		t.Fatalf("ticket state = %s, want open", item.State)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicDecisionCommandDeleteTicket,
+	_, err = sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandDeleteTicket, decisionevents.DeleteTicketCommand{
+		TicketID:    ticketID,
 		WorkspaceID: "ws-ticket-mutate-b",
 		RunID:       "run-ticket-mutate-a",
-		Payload: map[string]any{
-			events.PayloadKeyBlockingTicketID: string(ticketID),
-			events.PayloadKeyWorkspaceID:      "ws-ticket-mutate-b",
-			events.PayloadKeyRunID:            "run-ticket-mutate-a",
-		},
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("wrong workspace delete err = %v, want not found", err)
@@ -287,7 +281,7 @@ func TestDecisionMutationCommandsHonorWorkspaceScope(t *testing.T) {
 
 func TestDecisionResolveCommandWithoutScopeResolvesUniqueOpenTicket(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	ticketID := common.TicketID("ticket-unscoped-unique")
@@ -303,7 +297,7 @@ func TestDecisionResolveCommandWithoutScopeResolvesUniqueOpenTicket(t *testing.T
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -315,22 +309,17 @@ func TestDecisionResolveCommandWithoutScopeResolvesUniqueOpenTicket(t *testing.T
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic: decisionevents.TopicDecisionCommandEnsureResolved,
-		Payload: map[string]any{
-			events.PayloadKeyBlockingTicketID: string(ticketID),
-			events.PayloadKeyResolutionID:     "resolution-unscoped-unique",
-			events.PayloadKeyType:             "provide_missing_info",
-			events.PayloadKeyPayload:          map[string]any{"answer": "ok"},
-		},
+	response, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandEnsureResolved, decisionevents.EnsureResolvedCommand{
+		TicketID:     ticketID,
+		ResolutionID: "resolution-unscoped-unique",
+		Type:         "provide_missing_info",
+		Payload:      map[string]any{"answer": "ok"},
 	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
+	if err != nil {
 		t.Fatalf("unscoped resolve err = %v, want response", err)
 	}
-	item, ok := response.Payload[events.PayloadKeyTicket].(*decisionmodel.Ticket)
-	if !ok || item == nil || item.ID != ticketID || item.WorkspaceID != "ws-ticket-unscoped-unique" || item.State != common.DecisionTicketStateResolved {
-		t.Fatalf("response ticket = %+v, want resolved unique ticket", response.Payload[events.PayloadKeyTicket])
+	if response.Ticket == nil || response.Ticket.ID != ticketID || response.Ticket.WorkspaceID != "ws-ticket-unscoped-unique" || response.Ticket.State != common.DecisionTicketStateResolved {
+		t.Fatalf("response ticket = %+v, want resolved unique ticket", response.Ticket)
 	}
 	resolution, err := resolutions.GetByTicketID(ctx, ticketID)
 	if err != nil {
@@ -343,7 +332,7 @@ func TestDecisionResolveCommandWithoutScopeResolvesUniqueOpenTicket(t *testing.T
 
 func TestDecisionResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	ticketID := common.TicketID("ticket-unscoped-duplicate")
@@ -369,7 +358,7 @@ func TestDecisionResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets(t *te
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -381,13 +370,10 @@ func TestDecisionResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets(t *te
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic: decisionevents.TopicDecisionCommandEnsureResolved,
-		Payload: map[string]any{
-			events.PayloadKeyBlockingTicketID: string(ticketID),
-			events.PayloadKeyResolutionID:     "resolution-unscoped-duplicate",
-			events.PayloadKeyType:             "provide_missing_info",
-		},
+	_, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandEnsureResolved, decisionevents.EnsureResolvedCommand{
+		TicketID:     ticketID,
+		ResolutionID: "resolution-unscoped-duplicate",
+		Type:         "provide_missing_info",
 	})
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("unscoped duplicate resolve err = %v, want conflict", err)
@@ -408,7 +394,7 @@ func TestDecisionResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets(t *te
 
 func TestDecisionDeleteCommandWithoutScopeDeletesUniqueOpenTicket(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	ticketID := common.TicketID("ticket-unscoped-delete")
@@ -423,7 +409,7 @@ func TestDecisionDeleteCommandWithoutScopeDeletesUniqueOpenTicket(t *testing.T) 
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -435,13 +421,10 @@ func TestDecisionDeleteCommandWithoutScopeDeletesUniqueOpenTicket(t *testing.T) 
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic: decisionevents.TopicDecisionCommandDeleteTicket,
-		Payload: map[string]any{
-			events.PayloadKeyBlockingTicketID: string(ticketID),
-		},
+	_, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandDeleteTicket, decisionevents.DeleteTicketCommand{
+		TicketID: ticketID,
 	})
-	if _, ok := events.ResponseEnvelope(err); !ok {
+	if err != nil {
 		t.Fatalf("unscoped delete err = %v, want response", err)
 	}
 	if _, err := tickets.Get(ctx, ticketID); !errors.Is(err, common.ErrNotFound) {
@@ -451,7 +434,7 @@ func TestDecisionDeleteCommandWithoutScopeDeletesUniqueOpenTicket(t *testing.T) 
 
 func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	ticketID := common.TicketID("ticket-resolution-contract")
@@ -469,7 +452,7 @@ func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
 	if err := module.Configure(Dependencies{
 		Tickets:     tickets,
 		Resolutions: resolutions,
-		EventHub:    hub,
+		EventHub:    rawHub,
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -482,26 +465,19 @@ func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicDecisionCommandCreateResolution,
-		SubjectType: "decision_resolution",
-		SubjectID:   "resolution-contract",
-		WorkspaceID: "ws-resolution-contract",
-		RunID:       "run-resolution-contract",
-		StepID:      "step-resolution-contract",
-		Payload: map[string]any{
-			events.PayloadKeyCommand: decisioncontracts.CreateResolutionCommand{
-				ResolutionID:       "resolution-contract",
-				TicketID:           ticketID,
-				Type:               "provide_missing_info",
-				Payload:            map[string]any{"answer": "ok"},
-				ContinuationAction: "resume",
-				ResumeRunID:        "run-current",
-				SuccessorRunID:     "run-next",
-			},
-		},
+	_, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandCreateResolution, decisionevents.CreateResolutionCommand{
+		ResolutionID:       "resolution-contract",
+		TicketID:           ticketID,
+		WorkspaceID:        "ws-resolution-contract",
+		RunID:              "run-resolution-contract",
+		StepID:             "step-resolution-contract",
+		Type:               "provide_missing_info",
+		Payload:            map[string]any{"answer": "ok"},
+		ContinuationAction: "resume",
+		ResumeRunID:        "run-current",
+		SuccessorRunID:     "run-next",
 	})
-	if _, ok := events.ResponseEnvelope(err); !ok {
+	if err != nil {
 		t.Fatalf("create resolution err = %v, want response", err)
 	}
 	item, err := resolutions.GetByTicketID(ctx, ticketID)
@@ -518,7 +494,7 @@ func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
 
 func TestDecisionCreateResolutionCommandRequiresTicketScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	ticketID := common.TicketID("ticket-resolution-scope-create")
@@ -533,7 +509,7 @@ func TestDecisionCreateResolutionCommandRequiresTicketScope(t *testing.T) {
 		t.Fatalf("seed ticket: %v", err)
 	}
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -545,19 +521,14 @@ func TestDecisionCreateResolutionCommandRequiresTicketScope(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicDecisionCommandCreateResolution,
-		WorkspaceID: "ws-resolution-create-other",
-		RunID:       "run-resolution-create-other",
-		StepID:      "step-resolution-create-other",
-		Payload: map[string]any{
-			events.PayloadKeyCommand: decisioncontracts.CreateResolutionCommand{
-				ResolutionID: "resolution-scope-create",
-				TicketID:     ticketID,
-				Type:         "provide_missing_info",
-				Payload:      map[string]any{"answer": "wrong scope"},
-			},
-		},
+	_, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandCreateResolution, decisionevents.CreateResolutionCommand{
+		ResolutionID: "resolution-scope-create",
+		TicketID:     ticketID,
+		WorkspaceID:  "ws-resolution-create-other",
+		RunID:        "run-resolution-create-other",
+		StepID:       "step-resolution-create-other",
+		Type:         "provide_missing_info",
+		Payload:      map[string]any{"answer": "wrong scope"},
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("create resolution with mismatched scope err = %v, want not found", err)
@@ -569,7 +540,7 @@ func TestDecisionCreateResolutionCommandRequiresTicketScope(t *testing.T) {
 
 func TestDecisionCreateResolutionCommandRejectsUnsupportedType(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	ticketID := common.TicketID("ticket-resolution-unsupported")
@@ -584,7 +555,7 @@ func TestDecisionCreateResolutionCommandRejectsUnsupportedType(t *testing.T) {
 		t.Fatalf("seed ticket: %v", err)
 	}
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -596,19 +567,14 @@ func TestDecisionCreateResolutionCommandRejectsUnsupportedType(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicDecisionCommandCreateResolution,
-		WorkspaceID: "ws-resolution-unsupported",
-		RunID:       "run-resolution-unsupported",
-		StepID:      "step-resolution-unsupported",
-		Payload: map[string]any{
-			events.PayloadKeyCommand: decisioncontracts.CreateResolutionCommand{
-				ResolutionID: "resolution-unsupported",
-				TicketID:     ticketID,
-				Type:         "unsupported_resolution",
-				Payload:      map[string]any{"answer": "nope"},
-			},
-		},
+	_, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandCreateResolution, decisionevents.CreateResolutionCommand{
+		ResolutionID: "resolution-unsupported",
+		TicketID:     ticketID,
+		WorkspaceID:  "ws-resolution-unsupported",
+		RunID:        "run-resolution-unsupported",
+		StepID:       "step-resolution-unsupported",
+		Type:         "unsupported_resolution",
+		Payload:      map[string]any{"answer": "nope"},
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("create resolution unsupported type err = %v, want invalid argument", err)
@@ -620,7 +586,7 @@ func TestDecisionCreateResolutionCommandRejectsUnsupportedType(t *testing.T) {
 
 func TestDecisionResolutionCommandGetHonorsTicketScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	ticketID := common.TicketID("ticket-resolution-scope")
@@ -644,7 +610,7 @@ func TestDecisionResolutionCommandGetHonorsTicketScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -656,47 +622,31 @@ func TestDecisionResolutionCommandGetHonorsTicketScope(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicDecisionCommandGetResolution,
+	_, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandGetResolution, decisionevents.GetResolutionCommand{
 		WorkspaceID: "ws-resolution-owner-b",
 		RunID:       "run-resolution-owner-a",
-		StepID:      "step-resolution-owner-a",
-		Payload: map[string]any{
-			events.PayloadKeyBlockingTicketID: string(ticketID),
-			events.PayloadKeyWorkspaceID:      "ws-resolution-owner-b",
-			events.PayloadKeyRunID:            "run-resolution-owner-a",
-			events.PayloadKeyStepID:           "step-resolution-owner-a",
-		},
+		TicketID:    ticketID,
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("wrong workspace get resolution err = %v, want not found", err)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicDecisionCommandGetResolution,
+	response, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandGetResolution, decisionevents.GetResolutionCommand{
 		WorkspaceID: "ws-resolution-owner-a",
 		RunID:       "run-resolution-owner-a",
-		StepID:      "step-resolution-owner-a",
-		Payload: map[string]any{
-			events.PayloadKeyBlockingTicketID: string(ticketID),
-			events.PayloadKeyWorkspaceID:      "ws-resolution-owner-a",
-			events.PayloadKeyRunID:            "run-resolution-owner-a",
-			events.PayloadKeyStepID:           "step-resolution-owner-a",
-		},
+		TicketID:    ticketID,
 	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
+	if err != nil {
 		t.Fatalf("scoped get resolution err = %v, want response", err)
 	}
-	item, ok := response.Payload[events.PayloadKeyResolution].(*decisionmodel.Resolution)
-	if !ok || item == nil || item.ID != "resolution-owner-a" || item.TicketID != ticketID {
-		t.Fatalf("response resolution = %+v, want scoped resolution", response.Payload[events.PayloadKeyResolution])
+	if response.Resolution == nil || response.Resolution.ID != "resolution-owner-a" || response.Resolution.TicketID != ticketID {
+		t.Fatalf("response resolution = %+v, want scoped resolution", response.Resolution)
 	}
 }
 
 func TestDecisionResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	ticketID := common.TicketID("ticket-resolution-duplicate")
@@ -722,7 +672,7 @@ func TestDecisionResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets(t 
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -734,21 +684,15 @@ func TestDecisionResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets(t 
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic: decisionevents.TopicDecisionCommandGetResolution,
-		Payload: map[string]any{
-			events.PayloadKeyBlockingTicketID: string(ticketID),
-		},
+	_, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandGetResolution, decisionevents.GetResolutionCommand{
+		TicketID: ticketID,
 	})
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("unscoped duplicate get resolution err = %v, want conflict", err)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic: decisionevents.TopicDecisionCommandDeleteResolution,
-		Payload: map[string]any{
-			events.PayloadKeyBlockingTicketID: string(ticketID),
-		},
+	_, err = sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandDeleteResolution, decisionevents.DeleteResolutionCommand{
+		TicketID: ticketID,
 	})
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("unscoped duplicate delete resolution err = %v, want conflict", err)
@@ -757,7 +701,7 @@ func TestDecisionResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets(t 
 
 func TestDecisionResolutionDeleteWithoutScopeDeletesUniqueTicketResolution(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	ticketID := common.TicketID("ticket-resolution-delete-unique")
@@ -780,7 +724,7 @@ func TestDecisionResolutionDeleteWithoutScopeDeletesUniqueTicketResolution(t *te
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -792,13 +736,10 @@ func TestDecisionResolutionDeleteWithoutScopeDeletesUniqueTicketResolution(t *te
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic: decisionevents.TopicDecisionCommandDeleteResolution,
-		Payload: map[string]any{
-			events.PayloadKeyBlockingTicketID: string(ticketID),
-		},
+	_, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandDeleteResolution, decisionevents.DeleteResolutionCommand{
+		TicketID: ticketID,
 	})
-	if _, ok := events.ResponseEnvelope(err); !ok {
+	if err != nil {
 		t.Fatalf("unscoped delete resolution err = %v, want response", err)
 	}
 	if _, err := resolutions.GetByTicketID(common.ContextWithRuntimeWorkspaceID(ctx, "ws-resolution-delete-unique"), ticketID); !errors.Is(err, common.ErrNotFound) {
@@ -810,13 +751,13 @@ func decisionModuleContractDependencies() Dependencies {
 	return Dependencies{
 		Tickets:     memory.NewDecisionTicketRepository(),
 		Resolutions: memory.NewDecisionResolutionRepository(),
-		EventHub:    events.NewMemoryHub(),
+		EventHub:    magicevent.NewHub(16),
 	}
 }
 
 func TestDecisionUpdateTicketCommandPublishesUpdatedNotification(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
 	ticketID := common.TicketID("ticket-update-notify")
@@ -835,6 +776,7 @@ func TestDecisionUpdateTicketCommandPublishesUpdatedNotification(t *testing.T) {
 	}
 
 	updated := make(chan events.Envelope, 1)
+	hub := events.NewMagicHubWithHubOwner(rawHub, "decision/module_test")
 	unsubscribe := hub.Subscribe(decisionevents.TopicTicketUpdated, func(_ context.Context, envelope events.Envelope) error {
 		updated <- envelope
 		return nil
@@ -842,7 +784,7 @@ func TestDecisionUpdateTicketCommandPublishesUpdatedNotification(t *testing.T) {
 	t.Cleanup(unsubscribe)
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -854,26 +796,18 @@ func TestDecisionUpdateTicketCommandPublishesUpdatedNotification(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicDecisionCommandUpdateTicket,
-		WorkspaceID: "ws-ticket-update",
-		RunID:       "run-ticket-update",
-		StepID:      "step-ticket-update",
-		Payload: map[string]any{
-			events.PayloadKeyCommand: decisioncontracts.UpdateTicketCommand{
-				TicketID:     ticketID,
-				WorkspaceID:  "ws-ticket-update",
-				RunID:        "run-ticket-update",
-				StepID:       "step-ticket-update",
-				State:        common.DecisionTicketStateOpen,
-				Reason:       "provider unavailable",
-				DecisionKind: "operator_input",
-				Question:     "provide runtime config",
-				Context:      map[string]any{"attempt": float64(2)},
-			},
-		},
+	_, err := sendDecisionTestCommand(ctx, rawHub, decisionevents.TopicDecisionCommandUpdateTicket, decisionevents.UpdateTicketCommand{
+		TicketID:     ticketID,
+		WorkspaceID:  "ws-ticket-update",
+		RunID:        "run-ticket-update",
+		StepID:       "step-ticket-update",
+		State:        common.DecisionTicketStateOpen,
+		Reason:       "provider unavailable",
+		DecisionKind: "operator_input",
+		Question:     "provide runtime config",
+		Context:      map[string]any{"attempt": float64(2)},
 	})
-	if _, ok := events.ResponseEnvelope(err); !ok {
+	if err != nil {
 		t.Fatalf("update ticket err = %v, want response", err)
 	}
 
@@ -900,7 +834,7 @@ func TestDecisionUpdateTicketCommandPublishesUpdatedNotification(t *testing.T) {
 		if payload.State != common.DecisionTicketStateOpen || payload.Reason != "provider unavailable" {
 			t.Fatalf("updated payload = %+v, want reopened provider ticket", payload)
 		}
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("ticket update command did not publish ticket updated notification")
 	}
 }

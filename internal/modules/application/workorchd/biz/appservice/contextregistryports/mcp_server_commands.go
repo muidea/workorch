@@ -13,13 +13,14 @@ import (
 )
 
 func CreateMCPServer(ctx context.Context, hub events.Hub, cmd contextregistrycore.MCPServer) (contextregistrycore.MCPServer, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandCreateServer, "mcp_server", cmd.ID, map[string]any{
-		events.PayloadKeyCommand: mcpServerCommandFromView(cmd),
-	})
+	if hub == nil {
+		return contextregistrycore.MCPServer{}, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[mcpevents.CreateServerCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandCreateServer, mcpevents.CommandDestination, "mcp_server", cmd.ID, mcpevents.CreateServerCommand(mcpServerCommandFromView(cmd)))
 	if err != nil {
 		return contextregistrycore.MCPServer{}, err
 	}
-	return contextregistrycore.MCPServerFromPayload(response.Payload, events.PayloadKeyServer)
+	return mcpServerFromCommandResult(result)
 }
 
 func UpdateMCPServer(ctx context.Context, hub events.Hub, cmd contextregistrycore.MCPServer) (contextregistrycore.MCPServer, error) {
@@ -30,13 +31,14 @@ func UpdateMCPServer(ctx context.Context, hub events.Hub, cmd contextregistrycor
 		}
 		cmd.Env = cloneStringMap(existing.Env)
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandUpdateServer, "mcp_server", cmd.ID, map[string]any{
-		events.PayloadKeyCommand: mcpServerCommandFromView(cmd),
-	})
+	if hub == nil {
+		return contextregistrycore.MCPServer{}, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[mcpevents.UpdateServerCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandUpdateServer, mcpevents.CommandDestination, "mcp_server", cmd.ID, mcpevents.UpdateServerCommand(mcpServerCommandFromView(cmd)))
 	if err != nil {
 		return contextregistrycore.MCPServer{}, err
 	}
-	return contextregistrycore.MCPServerFromPayload(response.Payload, events.PayloadKeyServer)
+	return mcpServerFromCommandResult(result)
 }
 
 func UpdateMCPServerByID(ctx context.Context, hub events.Hub, serverID string, cmd contextregistrycore.MCPServer) (contextregistrycore.MCPServer, error) {
@@ -53,25 +55,28 @@ func UpdateMCPServerByID(ctx context.Context, hub events.Hub, serverID string, c
 }
 
 func ListMCPServers(ctx context.Context, hub events.Hub) ([]contextregistrycore.MCPServer, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandListServers, "mcp_server", "all", nil)
+	if hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[mcpevents.ListServersCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandListServers, mcpevents.CommandDestination, "mcp_server", "all", mcpevents.ListServersCommand{})
 	if err != nil {
 		return nil, err
 	}
-	return contextregistrycore.MCPServersFromPayload(response.Payload, events.PayloadKeyServers)
+	return mcpServersFromCommandResult(result)
 }
 
 func ReadMCPServer(ctx context.Context, hub events.Hub, serverID string) (*mcpmodel.Server, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandGetServer, "mcp_server", serverID, map[string]any{
-		events.PayloadKeyServerID: serverID,
-	})
+	if hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	result, err := sendMagicCommand[mcpevents.GetServerCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandGetServer, mcpevents.CommandDestination, "mcp_server", serverID, mcpevents.GetServerCommand{ServerID: common.MCPServerID(serverID)})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyServer].(*mcpmodel.Server)
-	if !ok {
+	if result.Server == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return result.Server, nil
 }
 
 func ReadMCPServerView(ctx context.Context, hub events.Hub, serverID string) (contextregistrycore.MCPServer, error) {
@@ -80,4 +85,19 @@ func ReadMCPServerView(ctx context.Context, hub events.Hub, serverID string) (co
 		return contextregistrycore.MCPServer{}, err
 	}
 	return contextregistrycore.MapMCPServer(item), nil
+}
+
+func mcpServerFromCommandResult(result mcpevents.MCPCommandResult) (contextregistrycore.MCPServer, error) {
+	if result.Server == nil {
+		return contextregistrycore.MCPServer{}, common.ErrInvalidArgument
+	}
+	return contextregistrycore.MapMCPServer(result.Server), nil
+}
+
+func mcpServersFromCommandResult(result mcpevents.MCPCommandResult) ([]contextregistrycore.MCPServer, error) {
+	ret := make([]contextregistrycore.MCPServer, 0, len(result.Servers))
+	for _, item := range result.Servers {
+		ret = append(ret, contextregistrycore.MapMCPServer(item))
+	}
+	return ret, nil
 }

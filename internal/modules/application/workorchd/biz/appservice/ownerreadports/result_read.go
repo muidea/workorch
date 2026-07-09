@@ -5,7 +5,6 @@ import (
 
 	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
 
-	resultcontracts "github.com/muidea/workorch/internal/modules/kernel/result/pkg/contracts"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -16,15 +15,12 @@ func ReadResultByOwnerCommand(ctx context.Context, hub events.Hub, resultID comm
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, resultevents.TopicResultCommandGet, "result", string(resultID), workspaceID, "", payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyCommand: resultcontracts.GetResultCommand{ResultID: resultID},
-	}, workspaceID))
+	response, err := sendMagicCommand[resultevents.GetResultCommand, resultevents.ResultCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, resultevents.TopicResultCommandGet, resultevents.CommandDestination, "result", string(resultID), resultevents.GetResultCommand{ResultID: resultID})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyResult].(*resultmodel.Result)
-	if !ok || item == nil {
+	if response.Result == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.Result, nil
 }

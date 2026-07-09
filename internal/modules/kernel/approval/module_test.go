@@ -5,13 +5,36 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
+
+func sendApprovalTestCommand(ctx context.Context, rawHub magicevent.Hub, topic string, command any) (approvalevents.ApprovalCommandResult, error) {
+	ev := magicevent.NewEventWithContext(topic, "approval/module_test", approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	result := rawHub.Send(ev)
+	if result == nil {
+		return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
+	}
+	if err := result.Error(); err != nil {
+		if err.Cause != nil {
+			return approvalevents.ApprovalCommandResult{}, err.Cause
+		}
+		return approvalevents.ApprovalCommandResult{}, err
+	}
+	data, err := result.Get()
+	if err != nil {
+		return approvalevents.ApprovalCommandResult{}, err
+	}
+	response, ok := data.(approvalevents.ApprovalCommandResult)
+	if !ok {
+		return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
+	}
+	return response, nil
+}
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	module := New()
@@ -40,15 +63,15 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.unsub)
+	firstSubscriptionCount := len(module.topics)
 	if firstSubscriptionCount == 0 {
 		t.Fatal("Start did not subscribe approval commands")
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if len(module.unsub) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	if len(module.topics) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -58,7 +81,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 		module.servicePtr != nil ||
 		module.eventHub != nil ||
 		module.approvals != nil ||
-		len(module.unsub) != 0 {
+		module.observer != nil ||
+		len(module.topics) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -86,7 +110,7 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 
 func TestApprovalCommandGetHonorsScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	approvals := memory.NewApprovalRepository()
 	approvalID := common.ApprovalID("approval-scoped-get")
 	if err := approvals.Create(ctx, &approvalmodel.Approval{
@@ -101,7 +125,7 @@ func TestApprovalCommandGetHonorsScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -113,54 +137,38 @@ func TestApprovalCommandGetHonorsScope(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       approvalevents.TopicApprovalCommandGet,
+	_, err := sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandGet, approvalevents.GetApprovalCommand{
 		WorkspaceID: "ws-approval-owner-b",
 		RunID:       "run-approval-owner-a",
-		StepID:      "step-approval-owner-a",
-		Payload: map[string]any{
-			events.PayloadKeyApprovalID:  string(approvalID),
-			events.PayloadKeyWorkspaceID: "ws-approval-owner-b",
-			events.PayloadKeyRunID:       "run-approval-owner-a",
-			events.PayloadKeyStepID:      "step-approval-owner-a",
-		},
+		ApprovalID:  approvalID,
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("wrong workspace get err = %v, want not found", err)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic:       approvalevents.TopicApprovalCommandGet,
+	response, err := sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandGet, approvalevents.GetApprovalCommand{
 		WorkspaceID: "ws-approval-owner-a",
 		RunID:       "run-approval-owner-a",
-		StepID:      "step-approval-owner-a",
-		Payload: map[string]any{
-			events.PayloadKeyApprovalID:  string(approvalID),
-			events.PayloadKeyWorkspaceID: "ws-approval-owner-a",
-			events.PayloadKeyRunID:       "run-approval-owner-a",
-			events.PayloadKeyStepID:      "step-approval-owner-a",
-		},
+		ApprovalID:  approvalID,
 	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
+	if err != nil {
 		t.Fatalf("scoped get err = %v, want response", err)
 	}
-	item, ok := response.Payload[events.PayloadKeyApproval].(*approvalmodel.Approval)
-	if !ok || item == nil || item.WorkspaceID != "ws-approval-owner-a" || item.ID != approvalID {
-		t.Fatalf("response approval = %+v, want scoped approval", response.Payload[events.PayloadKeyApproval])
+	if response.Approval == nil || response.Approval.WorkspaceID != "ws-approval-owner-a" || response.Approval.ID != approvalID {
+		t.Fatalf("response approval = %+v, want scoped approval", response.Approval)
 	}
 }
 
 func approvalModuleContractDependencies() Dependencies {
 	return Dependencies{
 		Approvals: memory.NewApprovalRepository(),
-		EventHub:  events.NewMemoryHub(),
+		EventHub:  magicevent.NewHub(16),
 	}
 }
 
 func TestApprovalCommandListByRunHonorsWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	approvals := memory.NewApprovalRepository()
 	runID := common.RunID("run-shared-approval")
 	for _, item := range []*approvalmodel.Approval{
@@ -185,7 +193,7 @@ func TestApprovalCommandListByRunHonorsWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -197,28 +205,21 @@ func TestApprovalCommandListByRunHonorsWorkspaceScope(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       approvalevents.TopicApprovalCommandListByRun,
+	response, err := sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandListByRun, approvalevents.ListApprovalsByRunCommand{
 		WorkspaceID: "ws-approval-list-a",
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: "ws-approval-list-a",
-			events.PayloadKeyRunID:       string(runID),
-		},
+		RunID:       runID,
 	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
+	if err != nil {
 		t.Fatalf("list by run err = %v, want response", err)
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*approvalmodel.Approval)
-	if !ok || len(items) != 1 || items[0].WorkspaceID != "ws-approval-list-a" {
-		t.Fatalf("response approvals = %+v, want one scoped approval", response.Payload[events.PayloadKeyItems])
+	if len(response.Approvals) != 1 || response.Approvals[0].WorkspaceID != "ws-approval-list-a" {
+		t.Fatalf("response approvals = %+v, want one scoped approval", response.Approvals)
 	}
 }
 
 func TestApprovalMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	approvals := memory.NewApprovalRepository()
 	approvalID := common.ApprovalID("approval-scoped-mutation")
 	if err := approvals.Create(ctx, &approvalmodel.Approval{
@@ -232,7 +233,7 @@ func TestApprovalMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -244,15 +245,10 @@ func TestApprovalMutationCommandsHonorWorkspaceScope(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       approvalevents.TopicApprovalCommandEnsureApproved,
+	_, err := sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandEnsureApproved, approvalevents.EnsureApprovedCommand{
+		ApprovalID:  approvalID,
 		WorkspaceID: "ws-approval-mutate-b",
 		RunID:       "run-approval-mutate-a",
-		Payload: map[string]any{
-			events.PayloadKeyApprovalID:  string(approvalID),
-			events.PayloadKeyWorkspaceID: "ws-approval-mutate-b",
-			events.PayloadKeyRunID:       "run-approval-mutate-a",
-		},
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("wrong workspace approve err = %v, want not found", err)
@@ -265,15 +261,10 @@ func TestApprovalMutationCommandsHonorWorkspaceScope(t *testing.T) {
 		t.Fatalf("approval state = %s, want pending", item.State)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic:       approvalevents.TopicApprovalCommandDelete,
+	_, err = sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandDelete, approvalevents.DeleteApprovalCommand{
+		ApprovalID:  approvalID,
 		WorkspaceID: "ws-approval-mutate-b",
 		RunID:       "run-approval-mutate-a",
-		Payload: map[string]any{
-			events.PayloadKeyApprovalID:  string(approvalID),
-			events.PayloadKeyWorkspaceID: "ws-approval-mutate-b",
-			events.PayloadKeyRunID:       "run-approval-mutate-a",
-		},
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("wrong workspace delete err = %v, want not found", err)
@@ -285,7 +276,7 @@ func TestApprovalMutationCommandsHonorWorkspaceScope(t *testing.T) {
 
 func TestApprovalMutationCommandWithoutScopeResolvesUniquePendingApproval(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	approvals := memory.NewApprovalRepository()
 	approvalID := common.ApprovalID("approval-unscoped-unique")
 	if err := approvals.Create(ctx, &approvalmodel.Approval{
@@ -299,7 +290,7 @@ func TestApprovalMutationCommandWithoutScopeResolvesUniquePendingApproval(t *tes
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -311,25 +302,20 @@ func TestApprovalMutationCommandWithoutScopeResolvesUniquePendingApproval(t *tes
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic: approvalevents.TopicApprovalCommandEnsureApproved,
-		Payload: map[string]any{
-			events.PayloadKeyApprovalID: string(approvalID),
-		},
+	response, err := sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandEnsureApproved, approvalevents.EnsureApprovedCommand{
+		ApprovalID: approvalID,
 	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
+	if err != nil {
 		t.Fatalf("unscoped approve err = %v, want response", err)
 	}
-	item, ok := response.Payload[events.PayloadKeyApproval].(*approvalmodel.Approval)
-	if !ok || item == nil || item.ID != approvalID || item.State != common.ApprovalStateApproved {
-		t.Fatalf("response approval = %+v, want approved unique approval", response.Payload[events.PayloadKeyApproval])
+	if response.Approval == nil || response.Approval.ID != approvalID || response.Approval.State != common.ApprovalStateApproved {
+		t.Fatalf("response approval = %+v, want approved unique approval", response.Approval)
 	}
 }
 
 func TestApprovalMutationCommandWithoutScopeConflictsOnDuplicatePendingApprovals(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	approvals := memory.NewApprovalRepository()
 	approvalID := common.ApprovalID("approval-unscoped-duplicate")
 	for _, item := range []*approvalmodel.Approval{
@@ -354,7 +340,7 @@ func TestApprovalMutationCommandWithoutScopeConflictsOnDuplicatePendingApprovals
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -366,11 +352,8 @@ func TestApprovalMutationCommandWithoutScopeConflictsOnDuplicatePendingApprovals
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic: approvalevents.TopicApprovalCommandEnsureApproved,
-		Payload: map[string]any{
-			events.PayloadKeyApprovalID: string(approvalID),
-		},
+	_, err := sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandEnsureApproved, approvalevents.EnsureApprovedCommand{
+		ApprovalID: approvalID,
 	})
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("unscoped duplicate approve err = %v, want conflict", err)

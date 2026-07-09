@@ -23,3 +23,26 @@ func Contracts() []eventcontract.Contract {
 		TopicRuntimeBlockExecuteFailed,
 	)
 }
+
+const definitionPackage = "github.com/muidea/workorch/internal/pkg/runtimeevent/eventdefs"
+
+var (
+	RuntimeBlockExecuteAcceptedTopic  = eventcontract.DataTopic[AcceptedData]("runtimeevent", definitionPackage, eventcontract.LanePolicyState, TopicRuntimeBlockExecuteAccepted)
+	RuntimeBlockExecuteProgressTopic  = eventcontract.DataTopic[ProgressData]("runtimeevent", definitionPackage, eventcontract.LanePolicyState, TopicRuntimeBlockExecuteProgress)
+	RuntimeBlockExecuteCompletedTopic = eventcontract.DataTopic[CompletedData]("runtimeevent", definitionPackage, eventcontract.LanePolicyState, TopicRuntimeBlockExecuteCompleted)
+	RuntimeBlockExecuteFailedTopic    = eventcontract.DataTopic[FailedData]("runtimeevent", definitionPackage, eventcontract.LanePolicyState, TopicRuntimeBlockExecuteFailed)
+)
+
+func MessageContracts() []eventcontract.MessageContract {
+	return eventcontract.MessageContracts(
+		RuntimeBlockExecuteAcceptedTopic,
+		RuntimeBlockExecuteProgressTopic,
+		RuntimeBlockExecuteCompletedTopic,
+		RuntimeBlockExecuteFailedTopic,
+	)
+}
+
+type AcceptedData struct{}
+type ProgressData struct{}
+type CompletedData struct{}
+type FailedData struct{}

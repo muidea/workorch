@@ -3,7 +3,6 @@ package events
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -72,6 +71,13 @@ func NewMagicHubWithHubOwner(hub magicevent.Hub, owner string) *MagicHub {
 		return NewMagicHubWithOwner(owner)
 	}
 	return newMagicHub(hub, false, owner)
+}
+
+func (h *MagicHub) RawHub() magicevent.Hub {
+	if h == nil {
+		return nil
+	}
+	return h.hub
 }
 
 func newMagicHub(hub magicevent.Hub, ownsHub bool, owner string) *MagicHub {
@@ -247,11 +253,7 @@ func magicHubIdentityKey(hub magicevent.Hub) string {
 	if hub == nil {
 		return ""
 	}
-	value := reflect.ValueOf(hub)
-	if value.Kind() != reflect.Ptr || value.IsNil() {
-		return ""
-	}
-	return fmt.Sprintf("%T/%x", hub, value.Pointer())
+	return fmt.Sprintf("%T/%p", hub, hub)
 }
 
 func (h *MagicHub) Subscribe(topic string, handler Handler) func() {

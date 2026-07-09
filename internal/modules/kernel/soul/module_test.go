@@ -5,11 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	soulcontracts "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/contracts"
+	magicevent "github.com/muidea/magicCommon/event"
 	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -36,15 +35,15 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.unsub)
+	firstSubscriptionCount := len(module.topics)
 	if firstSubscriptionCount == 0 {
 		t.Fatal("Start did not subscribe soul commands")
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if len(module.unsub) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	if len(module.topics) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -53,7 +52,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 		module.bizPtr != nil ||
 		module.servicePtr != nil ||
 		module.eventHub != nil ||
-		len(module.unsub) != 0 {
+		len(module.topics) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -75,14 +74,14 @@ func TestModuleConfigureRequiresSoulRepository(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start without EventHub should remain no-op: %v", err)
 	}
-	if len(module.unsub) != 0 {
-		t.Fatalf("subscriptions without EventHub = %d, want 0", len(module.unsub))
+	if len(module.topics) != 0 {
+		t.Fatalf("subscriptions without EventHub = %d, want 0", len(module.topics))
 	}
 }
 
 func TestModuleSoulCommandsUseRegistryContract(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	hub := magicevent.NewHub(16)
 	module := New()
 	if err := module.Configure(Dependencies{Souls: memoryrepo.NewSoulRepository(), EventHub: hub}); err != nil {
 		t.Fatalf("Configure: %v", err)
@@ -96,42 +95,27 @@ func TestModuleSoulCommandsUseRegistryContract(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       soulevents.TopicSoulCommandCreate,
-		SubjectType: "soul",
-		SubjectID:   "soul-contract",
-		Payload: map[string]any{
-			events.PayloadKeyCommand: soulcontracts.CreateSoulCommand{
-				SoulID:          "soul-contract",
-				Name:            "Contract Soul",
-				SoulMD:          "# Contract Soul",
-				BusinessDomains: []string{"contract"},
-			},
+	createResult := sendSoulCommand(t, ctx, hub, soulevents.TopicSoulCommandCreate,
+		soulevents.CreateSoulCommand{
+			SoulID:          "soul-contract",
+			Name:            "Contract Soul",
+			SoulMD:          "# Contract Soul",
+			BusinessDomains: []string{"contract"},
 		},
-	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
-		t.Fatalf("create soul err = %v, want response", err)
-	}
-	item, ok := response.Payload[events.PayloadKeySoul].(*soulmodel.Soul)
-	if !ok || item == nil || item.ID != "soul-contract" || item.Name != "Contract Soul" {
-		t.Fatalf("soul = %+v, want created soul", response.Payload[events.PayloadKeySoul])
+	)
+	if createResult.Soul == nil || createResult.Soul.ID != "soul-contract" || createResult.Soul.Name != "Contract Soul" {
+		t.Fatalf("soul = %+v, want created soul", createResult.Soul)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{Topic: soulevents.TopicSoulCommandList})
-	response, ok = events.ResponseEnvelope(err)
-	if !ok {
-		t.Fatalf("list souls err = %v, want response", err)
-	}
-	items, ok := response.Payload[events.PayloadKeySouls].([]*soulmodel.Soul)
-	if !ok || len(items) != 1 || items[0].ID != "soul-contract" {
-		t.Fatalf("souls = %+v, want created soul", response.Payload[events.PayloadKeySouls])
+	listResult := sendSoulCommand(t, ctx, hub, soulevents.TopicSoulCommandList, soulevents.ListSoulsCommand{})
+	if len(listResult.Souls) != 1 || listResult.Souls[0].ID != "soul-contract" {
+		t.Fatalf("souls = %+v, want created soul", listResult.Souls)
 	}
 }
 
 func TestDeleteSoulCommandAcceptsContractPayload(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	hub := magicevent.NewHub(16)
 	repo := memoryrepo.NewSoulRepository()
 	if err := repo.Create(ctx, &soulmodel.Soul{ID: "soul-delete-contract", Name: "Delete Contract", SoulMD: "# soul"}); err != nil {
 		t.Fatalf("seed soul: %v", err)
@@ -149,17 +133,7 @@ func TestDeleteSoulCommandAcceptsContractPayload(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       soulevents.TopicSoulCommandDelete,
-		SubjectType: "soul",
-		SubjectID:   "soul-delete-contract",
-		Payload: map[string]any{
-			events.PayloadKeyCommand: soulcontracts.DeleteSoulCommand{SoulID: "soul-delete-contract"},
-		},
-	})
-	if _, ok := events.ResponseEnvelope(err); !ok {
-		t.Fatalf("delete err = %v, want response", err)
-	}
+	_ = sendSoulCommand(t, ctx, hub, soulevents.TopicSoulCommandDelete, soulevents.DeleteSoulCommand{SoulID: "soul-delete-contract"})
 	if _, err := repo.Get(ctx, "soul-delete-contract"); err == nil {
 		t.Fatalf("soul still exists after delete")
 	}
@@ -168,6 +142,24 @@ func TestDeleteSoulCommandAcceptsContractPayload(t *testing.T) {
 func soulModuleContractDependencies() Dependencies {
 	return Dependencies{
 		Souls:    memoryrepo.NewSoulRepository(),
-		EventHub: events.NewMemoryHub(),
+		EventHub: magicevent.NewHub(16),
 	}
+}
+
+func sendSoulCommand[Command any](t *testing.T, ctx context.Context, hub magicevent.Hub, topic string, command Command) soulevents.SoulCommandResult {
+	t.Helper()
+	ev := magicevent.NewEventWithContext(topic, "test", soulevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	result := hub.Send(ev)
+	if result == nil || result.Error() != nil {
+		t.Fatalf("send %s error: %v", topic, result)
+	}
+	data, err := result.Get()
+	if err != nil {
+		t.Fatalf("result %s: %v", topic, err)
+	}
+	typed, ok := data.(soulevents.SoulCommandResult)
+	if !ok {
+		t.Fatalf("result %s type = %T", topic, data)
+	}
+	return typed
 }

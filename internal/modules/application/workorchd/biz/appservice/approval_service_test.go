@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
@@ -479,9 +480,10 @@ func (r *appserviceCountingApprovalRepository) Delete(ctx context.Context, id co
 func newApprovalOnlySession(t *testing.T, repo *appserviceCountingApprovalRepository) *RuntimeSession {
 	t.Helper()
 
-	eventHub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
+	eventHub := events.NewMagicHubWithHubOwner(rawHub, "appservice/approval_service_test")
 	approvalModule := approvalmodule.New()
-	if err := approvalModule.Configure(approvalmodule.Dependencies{Approvals: repo, EventHub: eventHub}); err != nil {
+	if err := approvalModule.Configure(approvalmodule.Dependencies{Approvals: repo, EventHub: rawHub}); err != nil {
 		t.Fatalf("setup approval module: %v", err)
 	}
 	if err := approvalModule.Start(); err != nil {

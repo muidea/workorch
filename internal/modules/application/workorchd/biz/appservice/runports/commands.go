@@ -22,18 +22,17 @@ func CreateRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
 	if kind == "" {
 		kind = llmcommon.StepKindWorkspaceExecution
 	}
-	return ownercommandports.Publish(ctx, hub, runevents.TopicRunCommandCreate, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
-		events.PayloadKeyCommand: runcontracts.CreateRunCommand{
-			RunID:              item.ID,
-			WorkspaceID:        item.WorkspaceID,
-			GoalID:             item.GoalID,
-			DoDID:              item.DoDID,
-			DefinitionRevision: item.DefinitionRevision,
-			InitialStepKind:    kind,
-			ExecutionContext:   item.ExecutionContext,
-			Priority:           item.Priority,
-		},
+	_, err := sendRunMagicCommand[runevents.CreateRunCommand, runevents.RunCommandResult](ctx, hub, runevents.TopicRunCommandCreate, runevents.CommandDestination, "run", string(item.ID), item.WorkspaceID, item.ID, runevents.CreateRunCommand{
+		RunID:              item.ID,
+		WorkspaceID:        item.WorkspaceID,
+		GoalID:             item.GoalID,
+		DoDID:              item.DoDID,
+		DefinitionRevision: item.DefinitionRevision,
+		InitialStepKind:    kind,
+		ExecutionContext:   item.ExecutionContext,
+		Priority:           item.Priority,
 	})
+	return err
 }
 
 func StartRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {

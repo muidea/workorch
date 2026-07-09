@@ -15,17 +15,17 @@ func ReadRuntimeCheckpointByOwnerCommand(ctx context.Context, hub events.Hub, ch
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandGetRuntimeCheckpoint, "runtime_checkpoint", string(checkpointID), workspaceID, "", payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyCheckpointID: string(checkpointID),
-	}, workspaceID))
+	response, err := sendMagicCommand[runevents.GetRuntimeCheckpointCommand, runevents.RunCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, runevents.TopicRunCommandGetRuntimeCheckpoint, runevents.CommandDestination, "runtime_checkpoint", string(checkpointID), runevents.GetRuntimeCheckpointCommand{
+		WorkspaceID:  workspaceID,
+		CheckpointID: checkpointID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyCheckpoint].(*runmodel.RuntimeCheckpoint)
-	if !ok || item == nil {
+	if response.Checkpoint == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.Checkpoint, nil
 }
 
 func ListRuntimeCheckpointsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.RuntimeCheckpoint, error) {
@@ -33,15 +33,12 @@ func ListRuntimeCheckpointsByRunOwnerCommand(ctx context.Context, hub events.Hub
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandListCheckpointsByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyRunID: string(runID),
-	}, workspaceID))
+	response, err := sendMagicCommand[runevents.ListRuntimeCheckpointsByRunCommand, runevents.RunCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, runevents.TopicRunCommandListCheckpointsByRun, runevents.CommandDestination, "run", string(runID), runevents.ListRuntimeCheckpointsByRunCommand{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyCheckpoints].([]*runmodel.RuntimeCheckpoint)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Checkpoints, nil
 }

@@ -5,11 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	mcpcontracts "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/contracts"
+	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -36,15 +34,15 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.unsub)
+	firstSubscriptionCount := len(module.topics)
 	if firstSubscriptionCount == 0 {
 		t.Fatal("Start did not subscribe mcp commands")
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if len(module.unsub) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	if len(module.topics) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -53,7 +51,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 		module.bizPtr != nil ||
 		module.servicePtr != nil ||
 		module.eventHub != nil ||
-		len(module.unsub) != 0 {
+		len(module.topics) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -82,7 +80,7 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 
 func TestModuleMCPServerCommandsUseRegistryContract(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	hub := magicevent.NewHub(16)
 	module := New()
 	if err := module.Configure(Dependencies{
 		Servers:      memory.NewMCPServerRepository(),
@@ -100,47 +98,30 @@ func TestModuleMCPServerCommandsUseRegistryContract(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       mcpevents.TopicMCPCommandCreateServer,
-		SubjectType: "mcp_server",
-		SubjectID:   "mcp-server-contract",
-		Payload: map[string]any{
-			events.PayloadKeyCommand: mcpcontracts.CreateServerCommand{
-				ServerID:              "mcp-server-contract",
-				Name:                  "contract server",
-				Transport:             "stdio",
-				Command:               "mcp-server",
-				Enabled:               true,
-				AllowedTools:          []string{"contract_tool"},
-				DefaultApprovalPolicy: "read_only",
-			},
+	createResult := sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandCreateServer,
+		mcpevents.CreateServerCommand{
+			ServerID:              "mcp-server-contract",
+			Name:                  "contract server",
+			Transport:             "stdio",
+			Command:               "mcp-server",
+			Enabled:               true,
+			AllowedTools:          []string{"contract_tool"},
+			DefaultApprovalPolicy: "read_only",
 		},
-	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
-		t.Fatalf("create server err = %v, want response", err)
-	}
-	server, ok := response.Payload[events.PayloadKeyServer].(*mcpmodel.Server)
-	if !ok || server == nil || server.ID != "mcp-server-contract" || server.Transport != "stdio" {
-		t.Fatalf("server = %+v, want created server", response.Payload[events.PayloadKeyServer])
+	)
+	if createResult.Server == nil || createResult.Server.ID != "mcp-server-contract" || createResult.Server.Transport != "stdio" {
+		t.Fatalf("server = %+v, want created server", createResult.Server)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic: mcpevents.TopicMCPCommandListServers,
-	})
-	response, ok = events.ResponseEnvelope(err)
-	if !ok {
-		t.Fatalf("list servers err = %v, want response", err)
-	}
-	servers, ok := response.Payload[events.PayloadKeyServers].([]*mcpmodel.Server)
-	if !ok || len(servers) != 1 || servers[0].ID != "mcp-server-contract" {
-		t.Fatalf("servers = %+v, want created server", response.Payload[events.PayloadKeyServers])
+	listResult := sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandListServers, mcpevents.ListServersCommand{})
+	if len(listResult.Servers) != 1 || listResult.Servers[0].ID != "mcp-server-contract" {
+		t.Fatalf("servers = %+v, want created server", listResult.Servers)
 	}
 }
 
 func TestModuleMCPCapabilityCommandsUseStructuredRegistryContract(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	hub := magicevent.NewHub(16)
 	module := New()
 	if err := module.Configure(Dependencies{
 		Servers:      memory.NewMCPServerRepository(),
@@ -158,58 +139,40 @@ func TestModuleMCPCapabilityCommandsUseStructuredRegistryContract(t *testing.T) 
 		}
 	})
 
-	if err := hub.Publish(ctx, events.Envelope{
-		Topic:       mcpevents.TopicMCPCommandCreateServer,
-		SubjectType: "mcp_server",
-		SubjectID:   "mcp-server-contract",
-		Payload: map[string]any{
-			events.PayloadKeyCommand: mcpcontracts.CreateServerCommand{
-				ServerID:  "mcp-server-contract",
-				Name:      "contract server",
-				Transport: "stdio",
-				Command:   "mcp-server",
-				Enabled:   true,
-			},
+	_ = sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandCreateServer,
+		mcpevents.CreateServerCommand{
+			ServerID:  "mcp-server-contract",
+			Name:      "contract server",
+			Transport: "stdio",
+			Command:   "mcp-server",
+			Enabled:   true,
 		},
-	}); err == nil {
-		t.Fatalf("create server err = nil, want response envelope")
-	} else if _, ok := events.ResponseEnvelope(err); !ok {
-		t.Fatalf("create server err = %v, want response", err)
-	}
+	)
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       mcpevents.TopicMCPCommandCreateCapability,
-		SubjectType: "mcp_capability",
-		SubjectID:   "mcp-server-contract:tool:repo.summary",
-		Payload: map[string]any{
-			events.PayloadKeyCommand: mcpcontracts.CreateCapabilityCommand{
-				ID:             "mcp-server-contract:tool:repo.summary",
-				ServerID:       "mcp-server-contract",
-				Kind:           "tool",
-				Name:           "repo.summary",
-				DisplayName:    "Repository Summary",
-				Description:    "Structured repository summary capability",
-				Category:       "repository",
-				Tags:           []string{"read", "summary"},
-				UsageHint:      "Use for bounded repository summary.",
-				InputSummary:   "path/ref",
-				OutputSummary:  "bounded summary",
-				StageHints:     []string{"planning", "validation"},
-				RiskLevel:      "read_only",
-				Schema:         map[string]any{"type": "object", "required": []string{"path"}},
-				Enabled:        true,
-				ApprovalPolicy: "read_only",
-				Status:         "active",
-			},
+	createCapabilityResult := sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandCreateCapability,
+		mcpevents.CreateCapabilityCommand{
+			ID:             "mcp-server-contract:tool:repo.summary",
+			ServerID:       "mcp-server-contract",
+			Kind:           "tool",
+			Name:           "repo.summary",
+			DisplayName:    "Repository Summary",
+			Description:    "Structured repository summary capability",
+			Category:       "repository",
+			Tags:           []string{"read", "summary"},
+			UsageHint:      "Use for bounded repository summary.",
+			InputSummary:   "path/ref",
+			OutputSummary:  "bounded summary",
+			StageHints:     []string{"planning", "validation"},
+			RiskLevel:      "read_only",
+			Schema:         map[string]any{"type": "object", "required": []string{"path"}},
+			Enabled:        true,
+			ApprovalPolicy: "read_only",
+			Status:         "active",
 		},
-	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
-		t.Fatalf("create capability err = %v, want response", err)
-	}
-	capability, ok := response.Payload[events.PayloadKeyCapability].(*mcpmodel.Capability)
-	if !ok || capability == nil || capability.ID != "mcp-server-contract:tool:repo.summary" {
-		t.Fatalf("capability = %+v, want created capability", response.Payload[events.PayloadKeyCapability])
+	)
+	capability := createCapabilityResult.Capability
+	if capability == nil || capability.ID != "mcp-server-contract:tool:repo.summary" {
+		t.Fatalf("capability = %+v, want created capability", capability)
 	}
 	if capability.Kind != "tool" ||
 		capability.Category != "repository" ||
@@ -220,24 +183,18 @@ func TestModuleMCPCapabilityCommandsUseStructuredRegistryContract(t *testing.T) 
 		t.Fatalf("capability = %+v, want structured policy/capability fields preserved", capability)
 	}
 
-	err = hub.Publish(ctx, events.Envelope{
-		Topic: mcpevents.TopicMCPCommandListCapabilities,
-		Payload: map[string]any{
-			events.PayloadKeyCapabilityQuery: mcpcontracts.CapabilityQuery{
+	listCapabilityResult := sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandListCapabilities,
+		mcpevents.ListCapabilitiesCommand{
+			Query: mcpevents.CapabilityQuery{
 				ServerID:  "mcp-server-contract",
 				Kind:      "tool",
 				Category:  "repository",
 				RiskLevel: "read_only",
 			},
 		},
-	})
-	response, ok = events.ResponseEnvelope(err)
-	if !ok {
-		t.Fatalf("list capabilities err = %v, want response", err)
-	}
-	capabilities, ok := response.Payload[events.PayloadKeyCapabilities].([]*mcpmodel.Capability)
-	if !ok || len(capabilities) != 1 || capabilities[0].ID != capability.ID {
-		t.Fatalf("capabilities = %+v, want structured filtered capability", response.Payload[events.PayloadKeyCapabilities])
+	)
+	if len(listCapabilityResult.Capabilities) != 1 || listCapabilityResult.Capabilities[0].ID != capability.ID {
+		t.Fatalf("capabilities = %+v, want structured filtered capability", listCapabilityResult.Capabilities)
 	}
 }
 
@@ -245,6 +202,24 @@ func mcpModuleContractDependencies() Dependencies {
 	return Dependencies{
 		Servers:      memory.NewMCPServerRepository(),
 		Capabilities: memory.NewMCPCapabilityRepository(),
-		EventHub:     events.NewMemoryHub(),
+		EventHub:     magicevent.NewHub(16),
 	}
+}
+
+func sendMCPCommand[Command any](t *testing.T, ctx context.Context, hub magicevent.Hub, topic string, command Command) mcpevents.MCPCommandResult {
+	t.Helper()
+	ev := magicevent.NewEventWithContext(topic, "test", mcpevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	result := hub.Send(ev)
+	if result == nil || result.Error() != nil {
+		t.Fatalf("send %s error: %v", topic, result)
+	}
+	data, err := result.Get()
+	if err != nil {
+		t.Fatalf("result %s: %v", topic, err)
+	}
+	typed, ok := data.(mcpevents.MCPCommandResult)
+	if !ok {
+		t.Fatalf("result %s type = %T", topic, data)
+	}
+	return typed
 }

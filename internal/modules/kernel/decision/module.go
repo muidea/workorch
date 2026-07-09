@@ -3,6 +3,8 @@ package decision
 import (
 	"context"
 
+	cd "github.com/muidea/magicCommon/def"
+	magicevent "github.com/muidea/magicCommon/event"
 	decisionbiz "github.com/muidea/workorch/internal/modules/kernel/decision/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
@@ -25,16 +27,17 @@ type Dependencies struct {
 	Tickets         repository.DecisionTicketRepository
 	Resolutions     repository.DecisionResolutionRepository
 	EvidenceRecords repository.EvidenceRecordRepository
-	EventHub        events.Hub
+	EventHub        magicevent.Hub
 }
 
 type Module struct {
 	bizPtr      *decisionbiz.Service
 	servicePtr  *decisionservice.Module
-	eventHub    events.Hub
+	eventHub    magicevent.Hub
 	tickets     repository.DecisionTicketRepository
 	resolutions repository.DecisionResolutionRepository
-	unsub       []func()
+	observer    magicevent.SimpleObserver
+	topics      []string
 }
 
 func New() *Module { return &Module{} }
@@ -48,7 +51,8 @@ func (m *Module) Configure(deps Dependencies) error {
 	m.eventHub = deps.EventHub
 	m.tickets = deps.Tickets
 	m.resolutions = deps.Resolutions
-	m.bizPtr = decisionbiz.NewService(deps.Tickets, deps.Resolutions, deps.EventHub, deps.EvidenceRecords)
+	eventHubBridge := events.NewMagicHubWithHubOwner(deps.EventHub, ModuleID)
+	m.bizPtr = decisionbiz.NewService(deps.Tickets, deps.Resolutions, eventHubBridge, deps.EvidenceRecords)
 	m.servicePtr = decisionservice.New(decisionservice.Dependencies{
 		CreateTicket:                  m.bizPtr.CreateTicket,
 		EnsureTicket:                  m.bizPtr.EnsureTicket,
@@ -63,34 +67,39 @@ func (m *Module) Start() error {
 	if m == nil || m.servicePtr == nil || m.eventHub == nil {
 		return common.ErrInvalidArgument
 	}
-	if len(m.unsub) > 0 {
+	if m.observer != nil {
 		return nil
 	}
-	m.unsub = append(m.unsub, m.eventHub.Subscribe(decisionevents.TopicDecisionCommandEnsureResolved, m.handleEnsureResolvedCommand))
-	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandEnsureTicket, m.handleTicketCommand),
-		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandCreateTicket, m.handleTicketCommand),
-		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandGetTicket, m.handleTicketCommand),
-		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandListTickets, m.handleTicketCommand),
-		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandListTicketsByRun, m.handleTicketCommand),
-		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandListTicketsByWS, m.handleTicketCommand),
-		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandUpdateTicket, m.handleTicketCommand),
-		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandDeleteTicket, m.handleTicketCommand),
-		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandCreateResolution, m.handleResolutionCommand),
-		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandGetResolution, m.handleResolutionCommand),
-		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandDeleteResolution, m.handleResolutionCommand),
-	)
+	m.observer = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
+	m.topics = []string{
+		decisionevents.TopicDecisionCommandEnsureResolved,
+		decisionevents.TopicDecisionCommandEnsureTicket,
+		decisionevents.TopicDecisionCommandCreateTicket,
+		decisionevents.TopicDecisionCommandGetTicket,
+		decisionevents.TopicDecisionCommandListTickets,
+		decisionevents.TopicDecisionCommandListTicketsByRun,
+		decisionevents.TopicDecisionCommandListTicketsByWS,
+		decisionevents.TopicDecisionCommandUpdateTicket,
+		decisionevents.TopicDecisionCommandDeleteTicket,
+		decisionevents.TopicDecisionCommandCreateResolution,
+		decisionevents.TopicDecisionCommandGetResolution,
+		decisionevents.TopicDecisionCommandDeleteResolution,
+	}
+	for _, topic := range m.topics {
+		m.observer.Subscribe(topic, m.handleCommand)
+	}
 	return nil
 }
 
 func (m *Module) Stop(ctx context.Context) error {
 	_ = ctx
-	for idx := len(m.unsub) - 1; idx >= 0; idx-- {
-		if m.unsub[idx] != nil {
-			m.unsub[idx]()
+	if m.observer != nil {
+		for idx := len(m.topics) - 1; idx >= 0; idx-- {
+			m.observer.Unsubscribe(m.topics[idx])
 		}
 	}
-	m.unsub = nil
+	m.topics = nil
+	m.observer = nil
 	m.servicePtr = nil
 	m.bizPtr = nil
 	m.eventHub = nil
@@ -104,6 +113,195 @@ func (m *Module) Service() Service {
 		return nil
 	}
 	return m.servicePtr
+}
+
+func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
+	response, err := m.executeCommand(ev.Context(), ev.ID(), ev.Data())
+	setDecisionMagicResult(result, response, err)
+}
+
+func (m *Module) executeCommand(ctx context.Context, topic string, data any) (decisionevents.DecisionCommandResult, error) {
+	if m == nil || m.tickets == nil || m.resolutions == nil || m.servicePtr == nil {
+		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+	}
+	if workspaceID := decisionCommandWorkspaceID(data); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	}
+	switch topic {
+	case decisionevents.TopicDecisionCommandEnsureResolved:
+		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
+		if !ok {
+			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		}
+		if !decisionCommandHasScope(cmd) {
+			ticket, err := m.resolveUniqueTicketForUnscopedCommand(ctx, cmd.TicketID)
+			if err != nil {
+				return decisionevents.DecisionCommandResult{}, err
+			}
+			cmd.WorkspaceID = ticket.WorkspaceID
+			cmd.RunID = ticket.RunID
+			cmd.StepID = ticket.StepID
+			ctx = common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID)
+		}
+		ticket, resolution, err := m.servicePtr.EnsureResolvedTicketAndReturn(ctx, cmd)
+		if err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}, nil
+	case decisionevents.TopicDecisionCommandEnsureTicket:
+		cmd, ok := data.(decisionevents.EnsureTicketCommand)
+		if !ok {
+			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		}
+		if err := m.servicePtr.EnsureTicket(ctx, cmd); err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		return decisionevents.DecisionCommandResult{}, nil
+	case decisionevents.TopicDecisionCommandCreateTicket:
+		cmd, ok := data.(decisionevents.CreateTicketCommand)
+		if !ok {
+			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		}
+		if err := m.servicePtr.CreateTicket(ctx, cmd); err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		return decisionevents.DecisionCommandResult{}, nil
+	case decisionevents.TopicDecisionCommandGetTicket:
+		cmd, ok := data.(decisionevents.GetTicketCommand)
+		if !ok || cmd.TicketID == "" {
+			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		}
+		item, err := m.tickets.Get(ctx, cmd.TicketID)
+		if err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		if !ticketMatchesDecisionScope(item, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID}) {
+			return decisionevents.DecisionCommandResult{}, common.ErrNotFound
+		}
+		return decisionevents.DecisionCommandResult{Ticket: item}, nil
+	case decisionevents.TopicDecisionCommandListTickets:
+		if _, ok := data.(decisionevents.ListTicketsCommand); !ok {
+			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		}
+		items, err := m.tickets.List(ctx)
+		if err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		return decisionevents.DecisionCommandResult{Tickets: items}, nil
+	case decisionevents.TopicDecisionCommandListTicketsByRun:
+		cmd, ok := data.(decisionevents.ListTicketsByRunCommand)
+		if !ok || cmd.RunID == "" {
+			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		}
+		items, err := m.tickets.ListByRunID(ctx, cmd.RunID)
+		if err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		items = filterTicketsByDecisionScope(items, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID})
+		return decisionevents.DecisionCommandResult{Tickets: items}, nil
+	case decisionevents.TopicDecisionCommandListTicketsByWS:
+		cmd, ok := data.(decisionevents.ListTicketsByWorkspaceCommand)
+		if !ok || cmd.WorkspaceID == "" {
+			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		}
+		items, err := m.tickets.ListByWorkspaceID(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		return decisionevents.DecisionCommandResult{Tickets: items}, nil
+	case decisionevents.TopicDecisionCommandUpdateTicket:
+		cmd, ok := data.(decisionevents.UpdateTicketCommand)
+		if !ok || cmd.TicketID == "" {
+			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		}
+		item := ticketFromUpdateCommand(cmd)
+		if !ticketMatchesDecisionScope(item, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID}) {
+			return decisionevents.DecisionCommandResult{}, common.ErrNotFound
+		}
+		if err := m.tickets.Update(ctx, item); err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		if err := m.publishTicketUpdated(ctx, item); err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		return decisionevents.DecisionCommandResult{}, nil
+	case decisionevents.TopicDecisionCommandDeleteTicket:
+		cmd, ok := data.(decisionevents.DeleteTicketCommand)
+		if !ok || cmd.TicketID == "" {
+			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		}
+		scope := decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID}
+		if !scope.hasScope() {
+			ticket, err := m.resolveUniqueTicketForUnscopedCommand(ctx, cmd.TicketID)
+			if err != nil {
+				return decisionevents.DecisionCommandResult{}, err
+			}
+			ctx = common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID)
+		} else if err := m.ensureTicketScopeForCommand(ctx, cmd.TicketID, scope); err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		if err := m.tickets.Delete(ctx, cmd.TicketID); err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		return decisionevents.DecisionCommandResult{}, nil
+	case decisionevents.TopicDecisionCommandCreateResolution:
+		cmd, ok := data.(decisionevents.CreateResolutionCommand)
+		if !ok {
+			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		}
+		item, err := resolutionFromCreateCommand(cmd)
+		if err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		resolutionCtx, err := m.resolveResolutionTicketContextForCommand(ctx, item.TicketID, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID})
+		if err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		if err := m.resolutions.Create(resolutionCtx, item); err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		return decisionevents.DecisionCommandResult{}, nil
+	case decisionevents.TopicDecisionCommandGetResolution:
+		cmd, ok := data.(decisionevents.GetResolutionCommand)
+		if !ok || cmd.TicketID == "" {
+			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		}
+		resolutionCtx, err := m.resolveResolutionTicketContextForCommand(ctx, cmd.TicketID, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID})
+		if err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		item, err := m.resolutions.GetByTicketID(resolutionCtx, cmd.TicketID)
+		if err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		return decisionevents.DecisionCommandResult{Resolution: item}, nil
+	case decisionevents.TopicDecisionCommandDeleteResolution:
+		cmd, ok := data.(decisionevents.DeleteResolutionCommand)
+		if !ok || cmd.TicketID == "" {
+			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		}
+		resolutionCtx, err := m.resolveResolutionTicketContextForCommand(ctx, cmd.TicketID, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID})
+		if err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		if err := m.resolutions.DeleteByTicketID(resolutionCtx, cmd.TicketID); err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		return decisionevents.DecisionCommandResult{}, nil
+	default:
+		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+	}
+}
+
+func setDecisionMagicResult(result magicevent.Result, data any, err error) {
+	if result == nil {
+		return
+	}
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	result.Set(data, nil)
 }
 
 func (m *Module) handleEnsureResolvedCommand(ctx context.Context, envelope events.Envelope) error {
@@ -272,7 +470,7 @@ func (m *Module) publishTicketUpdated(ctx context.Context, item *decisionmodel.T
 	if m == nil || m.eventHub == nil || item == nil {
 		return nil
 	}
-	return m.eventHub.Publish(ctx, events.Envelope{
+	return events.PublishByContract(ctx, events.NewMagicHubWithHubOwner(m.eventHub, ModuleID), events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        decisionevents.TopicTicketUpdated,
 		SourceModule: modulecommon.ModuleID,
@@ -303,6 +501,76 @@ func ticketCreateCommandFromModel(item *decisionmodel.Ticket) decisioncontracts.
 		FailureSignature:       item.FailureSignature,
 		AllowedRecoveryActions: append([]string(nil), item.AllowedRecoveryActions...),
 	}
+}
+
+type decisionCommandScope struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	StepID      common.StepID
+}
+
+func (s decisionCommandScope) hasScope() bool {
+	return s.WorkspaceID != "" || s.RunID != "" || s.StepID != ""
+}
+
+func decisionCommandWorkspaceID(data any) common.WorkspaceID {
+	switch cmd := data.(type) {
+	case decisionevents.CreateTicketCommand:
+		return cmd.WorkspaceID
+	case decisionevents.UpdateTicketCommand:
+		return cmd.WorkspaceID
+	case decisionevents.DeleteTicketCommand:
+		return cmd.WorkspaceID
+	case decisionevents.CreateResolutionCommand:
+		return cmd.WorkspaceID
+	case decisionevents.EnsureResolvedCommand:
+		return cmd.WorkspaceID
+	case decisionevents.DeleteResolutionCommand:
+		return cmd.WorkspaceID
+	case decisionevents.GetTicketCommand:
+		return cmd.WorkspaceID
+	case decisionevents.ListTicketsByRunCommand:
+		return cmd.WorkspaceID
+	case decisionevents.ListTicketsByWorkspaceCommand:
+		return cmd.WorkspaceID
+	case decisionevents.GetResolutionCommand:
+		return cmd.WorkspaceID
+	default:
+		return ""
+	}
+}
+
+func decisionCommandHasScope(cmd decisionevents.EnsureResolvedCommand) bool {
+	return cmd.WorkspaceID != "" || cmd.RunID != "" || cmd.StepID != ""
+}
+
+func ticketMatchesDecisionScope(item *decisionmodel.Ticket, scope decisionCommandScope) bool {
+	if item == nil {
+		return false
+	}
+	if scope.WorkspaceID != "" && item.WorkspaceID != scope.WorkspaceID {
+		return false
+	}
+	if scope.RunID != "" && item.RunID != scope.RunID {
+		return false
+	}
+	if scope.StepID != "" && item.StepID != scope.StepID {
+		return false
+	}
+	return true
+}
+
+func filterTicketsByDecisionScope(items []*decisionmodel.Ticket, scope decisionCommandScope) []*decisionmodel.Ticket {
+	if len(items) == 0 || !scope.hasScope() {
+		return items
+	}
+	ret := make([]*decisionmodel.Ticket, 0, len(items))
+	for _, item := range items {
+		if ticketMatchesDecisionScope(item, scope) {
+			ret = append(ret, item)
+		}
+	}
+	return ret
 }
 
 func ticketFromUpdateCommand(cmd decisioncontracts.UpdateTicketCommand) *decisionmodel.Ticket {
@@ -418,6 +686,36 @@ func (m *Module) resolveResolutionTicketContext(ctx context.Context, ticketID co
 	return ctx, nil
 }
 
+func (m *Module) resolveResolutionTicketContextForCommand(ctx context.Context, ticketID common.TicketID, scope decisionCommandScope) (context.Context, error) {
+	if ticketID == "" {
+		return ctx, common.ErrInvalidArgument
+	}
+	if m == nil || m.tickets == nil {
+		return ctx, common.ErrInvalidArgument
+	}
+	if !scope.hasScope() {
+		ticket, err := m.resolveUniqueTicketForUnscopedCommand(ctx, ticketID)
+		if err != nil {
+			return ctx, err
+		}
+		if ticket.WorkspaceID != "" {
+			ctx = common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID)
+		}
+		return ctx, nil
+	}
+	item, err := m.tickets.Get(ctx, ticketID)
+	if err != nil {
+		return ctx, err
+	}
+	if !ticketMatchesDecisionScope(item, scope) {
+		return ctx, common.ErrNotFound
+	}
+	if item.WorkspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
+	}
+	return ctx, nil
+}
+
 func (m *Module) ensureTicketScope(ctx context.Context, ticketID common.TicketID, envelope events.Envelope) error {
 	if ticketID == "" {
 		return common.ErrInvalidArgument
@@ -434,6 +732,27 @@ func (m *Module) ensureTicketScope(ctx context.Context, ticketID common.TicketID
 		return err
 	}
 	if !ticketMatchesScope(item, envelope) {
+		return common.ErrNotFound
+	}
+	return nil
+}
+
+func (m *Module) ensureTicketScopeForCommand(ctx context.Context, ticketID common.TicketID, scope decisionCommandScope) error {
+	if ticketID == "" {
+		return common.ErrInvalidArgument
+	}
+	if m == nil || m.tickets == nil {
+		return common.ErrInvalidArgument
+	}
+	if !scope.hasScope() {
+		_, err := m.resolveUniqueTicketForUnscopedCommand(ctx, ticketID)
+		return err
+	}
+	item, err := m.tickets.Get(ctx, ticketID)
+	if err != nil {
+		return err
+	}
+	if !ticketMatchesDecisionScope(item, scope) {
 		return common.ErrNotFound
 	}
 	return nil
@@ -582,6 +901,24 @@ func resolutionFromPayload(payload map[string]any) (*decisionmodel.Resolution, e
 		return nil, common.ErrInvalidArgument
 	}
 	return item, nil
+}
+
+func resolutionFromCreateCommand(cmd decisionevents.CreateResolutionCommand) (*decisionmodel.Resolution, error) {
+	if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	if !modulecommon.IsSupportedResolutionType(cmd.Type) {
+		return nil, common.ErrInvalidArgument
+	}
+	return &decisionmodel.Resolution{
+		ID:                 cmd.ResolutionID,
+		TicketID:           cmd.TicketID,
+		Type:               cmd.Type,
+		Payload:            cloneMap(cmd.Payload),
+		ContinuationAction: nonEmptyString(cmd.ContinuationAction, stringPayloadValue(cmd.Payload, "continuationAction")),
+		ResumeRunID:        nonEmptyRunID(cmd.ResumeRunID, common.RunID(stringPayloadValue(cmd.Payload, "resumeRunId"))),
+		SuccessorRunID:     nonEmptyRunID(cmd.SuccessorRunID, common.RunID(stringPayloadValue(cmd.Payload, "successorRunId"))),
+	}, nil
 }
 
 func stringPayload(payload map[string]any, key string) string {

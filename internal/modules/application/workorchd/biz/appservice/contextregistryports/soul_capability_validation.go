@@ -6,7 +6,6 @@ import (
 	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
-	soulcontracts "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -18,8 +17,14 @@ func ValidateSoulCapabilitySelection(ctx context.Context, hub events.Hub, soulID
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	return PublishCommand(ctx, hub, soulevents.TopicSoulCommandValidateCapability, "soul", string(soulID), map[string]any{
-		events.PayloadKeyCommand: soulcontracts.ValidateCapabilitySelectionCommand{
+	_, err := sendMagicCommand[soulevents.ValidateCapabilitySelectionCommand, soulevents.SoulCommandResult](
+		ctx,
+		hub,
+		soulevents.TopicSoulCommandValidateCapability,
+		soulevents.CommandDestination,
+		"soul",
+		string(soulID),
+		soulevents.ValidateCapabilitySelectionCommand{
 			SoulID:               soulID,
 			SkillRefs:            contextregistrycore.CloneStrings(skillIDs),
 			MCPServerRefs:        contextregistrycore.CloneStrings(mcpServerIDs),
@@ -27,5 +32,6 @@ func ValidateSoulCapabilitySelection(ctx context.Context, hub events.Hub, soulID
 			CapabilityCategories: contextregistrycore.CloneStrings(capabilityCategories),
 			ToolKinds:            contextregistrycore.CloneStrings(toolKinds),
 		},
-	})
+	)
+	return err
 }

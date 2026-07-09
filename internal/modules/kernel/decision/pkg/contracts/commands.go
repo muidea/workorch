@@ -53,6 +53,9 @@ type ResolveTicketCommand struct {
 type CreateResolutionCommand struct {
 	ResolutionID       common.ResolutionID
 	TicketID           common.TicketID
+	WorkspaceID        common.WorkspaceID
+	RunID              common.RunID
+	StepID             common.StepID
 	Type               string
 	Payload            map[string]any
 	ContinuationAction string
@@ -61,9 +64,15 @@ type CreateResolutionCommand struct {
 }
 
 type DeleteTicketCommand struct {
-	TicketID common.TicketID
+	TicketID    common.TicketID
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	StepID      common.StepID
 }
 
 type DeleteResolutionCommand struct {
-	TicketID common.TicketID
+	TicketID    common.TicketID
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	StepID      common.StepID
 }

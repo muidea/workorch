@@ -5,14 +5,37 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
+
+func sendGovernanceTestCommand(ctx context.Context, rawHub magicevent.Hub, topic string, command any) (governanceevents.GovernanceCommandResult, error) {
+	ev := magicevent.NewEventWithContext(topic, "governance/module_test", governanceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	result := rawHub.Send(ev)
+	if result == nil {
+		return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
+	}
+	if err := result.Error(); err != nil {
+		if err.Cause != nil {
+			return governanceevents.GovernanceCommandResult{}, err.Cause
+		}
+		return governanceevents.GovernanceCommandResult{}, err
+	}
+	data, err := result.Get()
+	if err != nil {
+		return governanceevents.GovernanceCommandResult{}, err
+	}
+	response, ok := data.(governanceevents.GovernanceCommandResult)
+	if !ok {
+		return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
+	}
+	return response, nil
+}
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	module := New()
@@ -32,15 +55,15 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.unsub)
+	firstSubscriptionCount := len(module.topics)
 	if firstSubscriptionCount == 0 {
 		t.Fatal("Start did not subscribe governance commands")
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if len(module.unsub) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	if len(module.topics) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -48,7 +71,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.bizPtr != nil ||
 		module.traces != nil ||
 		module.eventHub != nil ||
-		len(module.unsub) != 0 {
+		module.observer != nil ||
+		len(module.topics) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -76,7 +100,7 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 
 func TestModuleListTracesCommandUsesRepositoryQueryContract(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
 	traces := memory.NewAutoGovernanceTraceRepository()
 	if err := traces.Create(ctx, &governancemodel.AutoGovernanceTrace{
 		ID:          "trace-owner-a",
@@ -103,7 +127,7 @@ func TestModuleListTracesCommandUsesRepositoryQueryContract(t *testing.T) {
 	module := New()
 	deps := governanceModuleContractDependencies()
 	deps.AutoGovernanceTraces = traces
-	deps.EventHub = hub
+	deps.EventHub = rawHub
 	if err := module.Configure(deps); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -116,34 +140,27 @@ func TestModuleListTracesCommandUsesRepositoryQueryContract(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       governanceevents.TopicGovernanceAutoCommandListTraces,
-		WorkspaceID: "ws-governance-owner-a",
-		RunID:       "run-governance-owner-a",
-		StepID:      "step-governance-owner-a",
-		Payload: map[string]any{
-			events.PayloadKeyQuery: repository.AutoGovernanceTraceQuery{
-				WorkspaceID: "ws-governance-owner-a",
-				RunID:       "run-governance-owner-a",
-				ItemType:    "decision",
-				Status:      "resolved",
-			},
+	response, err := sendGovernanceTestCommand(ctx, rawHub, governanceevents.TopicGovernanceAutoCommandListTraces, governanceevents.ListAutoGovernanceTracesCommand{
+		Query: repository.AutoGovernanceTraceQuery{
+			WorkspaceID: "ws-governance-owner-a",
+			RunID:       "run-governance-owner-a",
+			ItemType:    "decision",
+			Status:      "resolved",
 		},
 	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
+	if err != nil {
 		t.Fatalf("list traces err = %v, want response", err)
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*governancemodel.AutoGovernanceTrace)
-	if !ok || len(items) != 1 || items[0].ID != "trace-owner-a" {
-		t.Fatalf("items = %+v, want scoped governance trace", response.Payload[events.PayloadKeyItems])
+	items := response.Traces
+	if len(items) != 1 || items[0].ID != "trace-owner-a" {
+		t.Fatalf("items = %+v, want scoped governance trace", response.Traces)
 	}
 }
 
 func governanceModuleContractDependencies() Dependencies {
 	return Dependencies{
 		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
-		EventHub:             events.NewMemoryHub(),
+		EventHub:             magicevent.NewHub(16),
 		LoadConfig: func() (workorchconfig.Config, error) {
 			return workorchconfig.Config{}, nil
 		},

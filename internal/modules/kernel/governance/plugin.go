@@ -17,12 +17,8 @@ func init() {
 
 func (m *Module) Weight() int { return 45 }
 
-func (m *Module) Setup(_ context.Context, _ event.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
+func (m *Module) Setup(_ context.Context, eventHub event.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
 	repos, err := workorchdeps.ResolveGovernanceRepositories(ModuleID)
-	if err != nil {
-		return err
-	}
-	eventHub, err := workorchdeps.ResolveEventHub(ModuleID)
 	if err != nil {
 		return err
 	}

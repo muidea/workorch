@@ -14,32 +14,26 @@ func ReadMCPServerByOwnerCommand(ctx context.Context, hub events.Hub, id common.
 	if hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandGetServer, "mcp_server", string(id), "", "", map[string]any{
-		events.PayloadKeyServerID: string(id),
-	})
+	result, err := sendMagicCommand[mcpevents.GetServerCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandGetServer, mcpevents.CommandDestination, "mcp_server", string(id), mcpevents.GetServerCommand{ServerID: id})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyServer].(*mcpmodel.Server)
-	if !ok || item == nil {
+	if result.Server == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return result.Server, nil
 }
 
 func ReadMCPCapabilityByOwnerCommand(ctx context.Context, hub events.Hub, id common.MCPCapabilityID) (*mcpmodel.Capability, error) {
 	if hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandGetCapability, "mcp_capability", string(id), "", "", map[string]any{
-		events.PayloadKeyCapabilityID: string(id),
-	})
+	result, err := sendMagicCommand[mcpevents.GetCapabilityCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandGetCapability, mcpevents.CommandDestination, "mcp_capability", string(id), mcpevents.GetCapabilityCommand{CapabilityID: id})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyCapability].(*mcpmodel.Capability)
-	if !ok || item == nil {
+	if result.Capability == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return result.Capability, nil
 }

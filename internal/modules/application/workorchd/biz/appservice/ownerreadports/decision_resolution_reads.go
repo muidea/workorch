@@ -15,15 +15,15 @@ func ReadDecisionResolutionByTicketOwnerCommand(ctx context.Context, hub events.
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, decisionevents.TopicDecisionCommandGetResolution, "ticket", string(ticketID), workspaceID, "", payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyBlockingTicketID: string(ticketID),
-	}, workspaceID))
+	response, err := sendMagicCommand[decisionevents.GetResolutionCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandGetResolution, decisionevents.CommandDestination, "ticket", string(ticketID), decisionevents.GetResolutionCommand{
+		WorkspaceID: workspaceID,
+		TicketID:    ticketID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyResolution].(*decisionmodel.Resolution)
-	if !ok || item == nil {
+	if response.Resolution == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.Resolution, nil
 }

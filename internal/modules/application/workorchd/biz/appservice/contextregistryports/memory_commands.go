@@ -3,7 +3,6 @@ package contextregistryports
 import (
 	"context"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 
 	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
@@ -16,16 +15,17 @@ func PublishMemoryItem(ctx context.Context, hub events.Hub, topic string, item *
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	payload := map[string]any{
-		events.PayloadKeyCommand: memoryCommandFromModel(item),
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
+	switch topic {
+	case memoryevents.TopicMemoryCommandCreate:
+		_, err := sendMagicCommand[memoryevents.CreateMemoryCommand, memoryevents.MemoryCommandResult](ctx, hub, topic, memoryevents.CommandDestination, "memory", string(item.ID), memoryevents.CreateMemoryCommand(memoryCommandFromModel(item)))
+		return err
+	case memoryevents.TopicMemoryCommandUpdate:
+		_, err := sendMagicCommand[memoryevents.UpdateMemoryCommand, memoryevents.MemoryCommandResult](ctx, hub, topic, memoryevents.CommandDestination, "memory", string(item.ID), memoryevents.UpdateMemoryCommand(memoryCommandFromModel(item)))
+		return err
+	default:
+		return common.ErrInvalidArgument
 	}
-	if item.WorkspaceID != "" {
-		payload[events.PayloadKeyWorkspaceID] = string(item.WorkspaceID)
-	}
-	if item.RunID != "" {
-		payload[events.PayloadKeyRunID] = string(item.RunID)
-	}
-	return ownercommandports.PublishFrom(ctx, sourceModule, hub, topic, "memory", string(item.ID), item.WorkspaceID, item.RunID, payload)
 }
 
 func CreateMemoryItem(ctx context.Context, hub events.Hub, item *memorymodel.MemoryItem) (*memorymodel.MemoryItem, error) {
@@ -60,13 +60,8 @@ func UpdateMemoryItem(ctx context.Context, hub events.Hub, item *memorymodel.Mem
 
 func DeleteMemoryItem(ctx context.Context, hub events.Hub, memoryID string) error {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	payload := map[string]any{
-		events.PayloadKeyCommand: memorycontracts.DeleteMemoryItemCommand{MemoryID: common.MemoryID(memoryID)},
-	}
-	if workspaceID != "" {
-		payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
-	}
-	return ownercommandports.PublishFrom(ctx, sourceModule, hub, memoryevents.TopicMemoryCommandDelete, "memory", memoryID, workspaceID, "", payload)
+	_, err := sendMagicCommand[memoryevents.DeleteMemoryCommand, memoryevents.MemoryCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, memoryevents.TopicMemoryCommandDelete, memoryevents.CommandDestination, "memory", memoryID, memoryevents.DeleteMemoryCommand{MemoryID: common.MemoryID(memoryID)})
+	return err
 }
 
 func memoryCommandFromModel(item *memorymodel.MemoryItem) memorycontracts.CreateMemoryItemCommand {

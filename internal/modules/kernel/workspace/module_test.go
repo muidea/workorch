@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -21,7 +22,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 		t.Fatal("new module service pointer is non-nil before Configure")
 	}
 
-	hub := events.NewMemoryHub()
+	hub := magicevent.NewHub(16)
 	if err := module.Configure(Dependencies{
 		Workspaces: memory.NewWorkspaceRepository(),
 		Goals:      memory.NewGoalRepository(),
@@ -40,15 +41,15 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.unsub)
+	firstSubscriptionCount := len(module.topics)
 	if firstSubscriptionCount == 0 {
 		t.Fatal("Start did not subscribe workspace commands")
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if len(module.unsub) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	if len(module.topics) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -60,7 +61,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 		module.goals != nil ||
 		module.dods != nil ||
 		module.templates != nil ||
-		len(module.unsub) != 0 {
+		module.observer != nil ||
+		len(module.topics) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -74,7 +76,7 @@ func TestModuleConfigureRequiresAllRepositories(t *testing.T) {
 		Goals:      memory.NewGoalRepository(),
 		DoDs:       memory.NewDoDRepository(),
 		Templates:  memory.NewWorkspaceTemplateRepository(),
-		EventHub:   events.NewMemoryHub(),
+		EventHub:   magicevent.NewHub(16),
 	}
 	tests := []struct {
 		name string
@@ -84,6 +86,7 @@ func TestModuleConfigureRequiresAllRepositories(t *testing.T) {
 		{name: "missing goals", deps: Dependencies{Workspaces: valid.Workspaces, DoDs: valid.DoDs, Templates: valid.Templates, EventHub: valid.EventHub}},
 		{name: "missing dods", deps: Dependencies{Workspaces: valid.Workspaces, Goals: valid.Goals, Templates: valid.Templates, EventHub: valid.EventHub}},
 		{name: "missing templates", deps: Dependencies{Workspaces: valid.Workspaces, Goals: valid.Goals, DoDs: valid.DoDs, EventHub: valid.EventHub}},
+		{name: "missing event hub", deps: Dependencies{Workspaces: valid.Workspaces, Goals: valid.Goals, DoDs: valid.DoDs, Templates: valid.Templates}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

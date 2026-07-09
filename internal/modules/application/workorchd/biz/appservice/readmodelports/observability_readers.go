@@ -29,15 +29,9 @@ func (r MemoryRecallTraceReader) List(ctx context.Context, query repository.Memo
 	if r.Hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := ownerreadports.PublishCommandWithResponse(ctx, r.Hub, memoryevents.TopicMemoryRecallTraceCommandList, "memory_recall_trace", "list", query.WorkspaceID, query.RunID, map[string]any{
-		events.PayloadKeyMemoryRecallTraceQuery: query,
-	})
+	response, err := sendMagicCommand[memoryevents.ListMemoryRecallTracesCommand, memoryevents.MemoryCommandResult](ctx, r.Hub, memoryevents.TopicMemoryRecallTraceCommandList, memoryevents.CommandDestination, "workorchd/readmodelports", "memory_recall_trace", "list", memoryevents.ListMemoryRecallTracesCommand{Query: query})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyMemoryRecallTraces].([]*memorymodel.MemoryRecallTrace)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.RecallTraces, nil
 }

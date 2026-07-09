@@ -14,15 +14,11 @@ func ListApprovalsByOwnerCommand(ctx context.Context, hub events.Hub) ([]*approv
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, approvalevents.TopicApprovalCommandList, "approval", "all", "", "", map[string]any{})
+	response, err := sendMagicCommand[approvalevents.ListApprovalsCommand, approvalevents.ApprovalCommandResult](ctx, hub, approvalevents.TopicApprovalCommandList, approvalevents.CommandDestination, "approval", "all", approvalevents.ListApprovalsCommand{})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*approvalmodel.Approval)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Approvals, nil
 }
 
 func ListApprovalsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*approvalmodel.Approval, error) {
@@ -30,36 +26,25 @@ func ListApprovalsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID c
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	payload := map[string]any{
-		events.PayloadKeyRunID: string(runID),
-	}
-	if workspaceID != "" {
-		payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
-	}
-	response, err := PublishCommandWithResponse(ctx, hub, approvalevents.TopicApprovalCommandListByRun, "run", string(runID), workspaceID, runID, payload)
+	response, err := sendMagicCommand[approvalevents.ListApprovalsByRunCommand, approvalevents.ApprovalCommandResult](ctx, hub, approvalevents.TopicApprovalCommandListByRun, approvalevents.CommandDestination, "run", string(runID), approvalevents.ListApprovalsByRunCommand{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*approvalmodel.Approval)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Approvals, nil
 }
 
 func ListApprovalsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]*approvalmodel.Approval, error) {
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, approvalevents.TopicApprovalCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
-		events.PayloadKeyWorkspaceID: string(workspaceID),
+	response, err := sendMagicCommand[approvalevents.ListApprovalsByWorkspaceCommand, approvalevents.ApprovalCommandResult](ctx, hub, approvalevents.TopicApprovalCommandListByWorkspace, approvalevents.CommandDestination, "workspace", string(workspaceID), approvalevents.ListApprovalsByWorkspaceCommand{
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*approvalmodel.Approval)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Approvals, nil
 }

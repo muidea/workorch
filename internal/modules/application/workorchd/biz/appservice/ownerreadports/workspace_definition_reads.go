@@ -15,32 +15,26 @@ func ReadGoalByOwnerCommand(ctx context.Context, hub events.Hub, goalID common.G
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandGetGoal, "goal", string(goalID), workspaceID, "", payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyGoalID: string(goalID),
-	}, workspaceID))
+	response, err := sendMagicCommand[workspaceevents.GetGoalCommand, workspaceevents.WorkspaceCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, workspaceevents.TopicWorkspaceCommandGetGoal, workspaceevents.CommandDestination, "goal", string(goalID), workspaceevents.GetGoalCommand{
+		WorkspaceID: workspaceID,
+		GoalID:      goalID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyGoal].(*workspacemodel.Goal)
-	if !ok || item == nil {
+	if response.Goal == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.Goal, nil
 }
 
 func ListGoalsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandListGoalsByWS, "workspace", string(workspaceID), workspaceID, "", map[string]any{
-		events.PayloadKeyWorkspaceID: string(workspaceID),
-	})
+	response, err := sendMagicCommand[workspaceevents.ListGoalsByWorkspaceCommand, workspaceevents.WorkspaceCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, workspaceevents.TopicWorkspaceCommandListGoalsByWS, workspaceevents.CommandDestination, "workspace", string(workspaceID), workspaceevents.ListGoalsByWorkspaceCommand{WorkspaceID: workspaceID})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyGoals].([]*workspacemodel.Goal)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Goals, nil
 }

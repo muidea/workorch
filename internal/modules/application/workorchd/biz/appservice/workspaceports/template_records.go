@@ -5,7 +5,6 @@ import (
 
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -25,27 +24,24 @@ func CreateWorkspaceTemplateRecord(ctx context.Context, hub events.Hub, item *re
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandCreate, "workspace_template", item.ID, "", "", map[string]any{
-		events.PayloadKeyCommand: workspaceTemplateCommandFromRepository(item),
-	})
+	_, err := sendWorkspaceMagicCommand[workspaceevents.CreateWorkspaceTemplateCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandCreate, workspaceevents.CommandDestination, "workspace_template", item.ID, "", "", workspaceTemplateCommandFromRepository(item))
+	return err
 }
 
 func UpdateWorkspaceTemplateRecord(ctx context.Context, hub events.Hub, item *repository.WorkspaceTemplate) error {
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandUpdate, "workspace_template", item.ID, "", "", map[string]any{
-		events.PayloadKeyCommand: workspaceTemplateCommandFromRepository(item),
-	})
+	_, err := sendWorkspaceMagicCommand[workspaceevents.UpdateWorkspaceTemplateCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandUpdate, workspaceevents.CommandDestination, "workspace_template", item.ID, "", "", workspaceevents.UpdateWorkspaceTemplateCommand(workspaceTemplateCommandFromRepository(item)))
+	return err
 }
 
 func DeleteWorkspaceTemplateRecord(ctx context.Context, hub events.Hub, templateID string) error {
 	if templateID == "" {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandDelete, "workspace_template", templateID, "", "", map[string]any{
-		events.PayloadKeyCommand: workspacecontracts.DeleteWorkspaceTemplateCommand{TemplateID: templateID},
-	})
+	_, err := sendWorkspaceMagicCommand[workspaceevents.DeleteWorkspaceTemplateCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandDelete, workspaceevents.CommandDestination, "workspace_template", templateID, "", "", workspaceevents.DeleteWorkspaceTemplateCommand{TemplateID: templateID})
+	return err
 }
 
 func workspaceTemplateCommandFromRepository(item *repository.WorkspaceTemplate) workspacecontracts.CreateWorkspaceTemplateCommand {

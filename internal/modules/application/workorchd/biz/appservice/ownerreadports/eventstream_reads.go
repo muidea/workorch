@@ -15,15 +15,9 @@ func ListEventRecordsByOwnerCommand(ctx context.Context, hub events.Hub, query r
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, eventstreamevents.TopicEventStreamCommandList, "event_record", "list", query.WorkspaceID, query.RunID, map[string]any{
-		events.PayloadKeyQuery: query,
-	})
+	response, err := sendMagicCommand[eventstreamevents.ListEventsCommand, eventstreamevents.EventStreamCommandResult](ctx, hub, eventstreamevents.TopicEventStreamCommandList, eventstreamevents.CommandDestination, "event_record", "list", eventstreamevents.ListEventsCommand{Query: query})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*eventstreammodel.EventRecord)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Events, nil
 }
