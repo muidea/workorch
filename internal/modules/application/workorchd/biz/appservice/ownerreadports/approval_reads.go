@@ -3,14 +3,14 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ListApprovalsByOwnerCommand(ctx context.Context, hub events.Hub) ([]*approvalmodel.Approval, error) {
+func ListApprovalsByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*approvalmodel.Approval, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -21,7 +21,7 @@ func ListApprovalsByOwnerCommand(ctx context.Context, hub events.Hub) ([]*approv
 	return response.Approvals, nil
 }
 
-func ListApprovalsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*approvalmodel.Approval, error) {
+func ListApprovalsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*approvalmodel.Approval, error) {
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -36,7 +36,7 @@ func ListApprovalsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID c
 	return response.Approvals, nil
 }
 
-func ListApprovalsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]*approvalmodel.Approval, error) {
+func ListApprovalsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]*approvalmodel.Approval, error) {
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}

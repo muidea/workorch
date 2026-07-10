@@ -2,6 +2,24 @@
 
 Status: completed
 
+## 2026-07-10 EventHub 兼容层后续清理
+
+Status: completed
+
+- 新增 `EventHubLaneScope` / `EventHubLaneKeyFor`，具体 command 的 lane 计算不再为了复用 lane 策略临时构造 `Envelope`。
+- `kernel/governance` 的 decision/approval/run/workspace/memory owner adapter 已直接使用 framework 注入的 magicCommon `event.Hub`，删除包装后再调用 `RawHub()` 的反向兼容链。
+- `kernel/run` 的 workspace reader 与 orchestrator command adapter 已直接使用 raw EventHub，删除 `MagicHub.RawHub()` 类型断言。
+- `kernel/orchestrator` 已显式区分投影通知 `EventHub` 与跨 owner `CommandHub`；state/result/governance repository adapters 及 runtime adapter 已直接使用 `CommandHub`。
+- `workorch/runtime` initiator 与 application bootstrap exports 已增加显式 raw `CommandHub`；runtime session 同时校验 projection `EventHub` 和 `CommandHub`，为 appservice/server 删除 `RawHub()` 类型断言提供统一依赖入口。
+- `application/workorchd` 的 `runtimeports.EventHubActionPort` 与 managed runtime factory 已切换为显式 `CommandHub`，该目录不再包含 `RawHub()` 兼容代码。
+- setup draft LLM command、activation embedding/run command 与 CLI governance continuation 已改为显式使用 session `CommandHub`；对应分散的 `rawMagicHubProvider` 已删除。
+- server production startup 已显式传入 projection Hub 与 CommandHub；HTTP runtime policy update、scheduler command/watcher、测试 runtime 与 server fixture 均不再通过单 Hub 反查 `RawHub()`。
+- orchestrator biz dispatch-step 已改为显式 `CommandHub`，至此 `kernel/governance`、`kernel/run`、`kernel/orchestrator` 的生产代码均不再使用 `RawHub()` 反向拆包。
+- `application/workorchd` 七组 command/read port、bootstrap、runtime session、testkit、server、`internal/services/workorch` backend/runtime 的单 Hub 兼容层已全部删除；全仓 Go 代码中 `RawHub()`、`rawMagicHubProvider`、`RawMagicHubProvider` 扫描为零。
+- `internal/services/workorch` 到 `application/workorchd` 的 CLI facade 已从 `/cli/command` Envelope + `/cli/result` map/any 兼容协议切换为 owner 定义的 `CLICommand/CLIResult`，直接通过 magicCommon CommandHub 同步收发；旧 map 编解码与 `events.Response` 已删除。
+- 测试兼容残留也已清理：orchestrator graph/repair 测试不再把 `DispatchStepCommand` 复制为 command-topic Envelope 后通过 `Published()` 断言，而是直接记录并断言具体 command；server decision/approval 测试辅助直接向 owner CommandHub 发送具体 command 并校验具体 result。
+- `MagicHub` 仍作为 projection/SSE/事件回放载体，但不再暴露 raw Hub，也不承担 owner command/data/result 交互。后续若继续迁移 projection notification，应作为 typed notification 专项处理，而不是恢复兼容拆包。
+
 ## 2026-07-10 收口进展
 
 - Gap 1 已关闭：initiator exports 已补齐 `CoverageWorkItems`；appservice runtime session 逐项校验 26 个 repository exports 与 EventHub，并对缺失项返回具名错误。

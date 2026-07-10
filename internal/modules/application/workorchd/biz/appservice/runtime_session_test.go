@@ -19,8 +19,8 @@ import (
 )
 
 func TestBackendSessionUsesEventHubFromContext(t *testing.T) {
-	hub := &countingActivationEventHub{base: events.NewMagicHubWithOwner("appservice/runtime-session-context-test")}
-	ctx := ContextWithEventHub(context.Background(), hub)
+	hub := &countingActivationEventHub{base: magicevent.NewHub(16)}
+	ctx := ContextWithEventHubs(context.Background(), events.NewMagicHubWithHubOwner(hub, "appservice/runtime-session-context-test"), hub)
 
 	_, err := createWorkspaceWithIDWithBackend(ctx, "memory", "", "ws-context-hub", "context hub", "", "workspaces/context hub")
 	if err != nil {
@@ -109,7 +109,7 @@ func TestRuntimeSessionExportsReturnsInvalidArgumentWhenBootstrapMissing(t *test
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)
 	}
-	if exports.Repositories.Workspaces != nil || exports.Infrastructure.EventHub != nil {
+	if exports.Repositories.Workspaces != nil || exports.Infrastructure.CommandHub != nil {
 		t.Fatalf("exports = %#v, want zero exports", exports)
 	}
 
@@ -118,7 +118,7 @@ func TestRuntimeSessionExportsReturnsInvalidArgumentWhenBootstrapMissing(t *test
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)
 	}
-	if exports.Repositories.Workspaces != nil || exports.Infrastructure.EventHub != nil {
+	if exports.Repositories.Workspaces != nil || exports.Infrastructure.CommandHub != nil {
 		t.Fatalf("exports = %#v, want zero exports", exports)
 	}
 }
@@ -138,7 +138,7 @@ func TestRuntimeSessionExportsReturnsAssembledCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
-	if exports.Repositories.Workspaces == nil || exports.Infrastructure.EventHub == nil {
+	if exports.Repositories.Workspaces == nil || exports.Infrastructure.CommandHub == nil {
 		t.Fatalf("exports missing assembled capabilities: %#v", exports)
 	}
 }
@@ -168,7 +168,7 @@ func TestRuntimeSessionFromExportsBorrowsLongLivedRuntime(t *testing.T) {
 	}
 
 	exports := bootstrapRuntime.Exports()
-	if err := runtimeports.NewEventHubActionPort(exports.Infrastructure.EventHub).EnsureWorkspace(context.Background(), "ws-long-lived-export-session", "long lived export session"); err != nil {
+	if err := runtimeports.NewEventHubActionPort(exports.Infrastructure.CommandHub).EnsureWorkspace(context.Background(), "ws-long-lived-export-session", "long lived export session"); err != nil {
 		t.Fatalf("create workspace after borrowed close: %v", err)
 	}
 	if _, err := exports.Repositories.Workspaces.Get(context.Background(), "ws-long-lived-export-session"); err != nil {
@@ -209,9 +209,8 @@ func TestRuntimeSessionWithBackendPublishesOrchestratorCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
-	provider := exports.Infrastructure.EventHub.(interface{ RawHub() magicevent.Hub })
 	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandCancelRun, "workorchd/appservice/runtime-session-test", orchestratorevents.CommandDestination, magicevent.NewHeader(), context.Background(), orchestratorevents.CancelRunCommand{RunID: "run-missing"})
-	response := provider.RawHub().Send(event)
+	response := exports.Infrastructure.CommandHub.Send(event)
 	if response == nil || response.Error() == nil {
 		t.Fatalf("cancel response = %#v, want owner error", response)
 	}
@@ -229,7 +228,7 @@ func TestRuntimeSessionRunServiceBlockOnApprovalUsesEventCommand(t *testing.T) {
 	}
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-session-command")
 	ensureTestWorkspace(t, ctx, session, "ws-session-command")
-	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.EventHub)
+	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.CommandHub)
 	if err := actions.EnsureRun(ctx, "run-session-command", "ws-session-command"); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -269,14 +268,13 @@ func TestNewRuntimeSessionWithBackendFileUsesDefaultDataRootWhenUnset(t *testing
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
-	provider := exports.Infrastructure.EventHub.(interface{ RawHub() magicevent.Hub })
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandCreate, "workorchd/appservice/runtime-session-test", workspaceevents.CommandDestination, magicevent.NewHeader(), context.Background(), workspaceevents.CreateWorkspaceCommand{
 		WorkspaceID:          "ws-runtime-session-default-file",
 		Title:                "runtime session default file backend",
 		DeliverableDirectory: "workspaces/ws-runtime-session-default-file",
 		InternalDirectory:    filepath.Join(defaultDataDir, "internal", "workspaces", "ws-runtime-session-default-file"),
 	})
-	response := provider.RawHub().Send(event)
+	response := exports.Infrastructure.CommandHub.Send(event)
 	if response == nil || response.Error() != nil {
 		t.Fatalf("create workspace response = %#v", response)
 	}

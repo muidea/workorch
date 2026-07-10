@@ -14,7 +14,7 @@ import (
 )
 
 type decisionEventTicketRepository struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r decisionEventTicketRepository) Create(ctx context.Context, item *decisionmodel.Ticket) error {
@@ -75,7 +75,7 @@ func (r decisionEventTicketRepository) Delete(ctx context.Context, id common.Tic
 }
 
 type decisionEventResolutionRepository struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r decisionEventResolutionRepository) Create(ctx context.Context, item *decisionmodel.Resolution) error {
@@ -104,7 +104,7 @@ func (r decisionEventResolutionRepository) DeleteByTicketID(ctx context.Context,
 }
 
 type approvalEventRepository struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r approvalEventRepository) Create(ctx context.Context, item *approvalmodel.Approval) error {
@@ -164,11 +164,7 @@ func (r approvalEventRepository) Delete(ctx context.Context, id common.ApprovalI
 	return err
 }
 
-type rawMagicHubProvider interface {
-	RawHub() magicevent.Hub
-}
-
-func sendGovernanceOwnerCommand[Command any, Result any](ctx context.Context, hub events.Hub, topic string, destination string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, command Command) (Result, error) {
+func sendGovernanceOwnerCommand[Command any, Result any](ctx context.Context, hub magicevent.Hub, topic string, destination string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, command Command) (Result, error) {
 	var zero Result
 	if hub == nil || topic == "" {
 		return zero, common.ErrInvalidArgument
@@ -176,20 +172,15 @@ func sendGovernanceOwnerCommand[Command any, Result any](ctx context.Context, hu
 	if workspaceID == "" {
 		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
 	}
-	provider, ok := hub.(rawMagicHubProvider)
-	if !ok || provider.RawHub() == nil {
-		return zero, common.ErrInvalidArgument
-	}
 	ev := magicevent.NewEventWithContext(topic, ModuleID, destination, magicevent.NewHeader(), ctx, command)
-	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
-		Topic:       topic,
+	ev.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 		StepID:      string(stepID),
 	}))
-	response := provider.RawHub().Send(ev)
+	response := hub.Send(ev)
 	if response == nil {
 		return zero, common.ErrInvalidArgument
 	}

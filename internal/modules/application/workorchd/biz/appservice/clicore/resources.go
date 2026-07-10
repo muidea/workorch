@@ -6,7 +6,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func ResourceMap(v any) map[string]any {
@@ -195,7 +194,7 @@ func typedResourceMap(resource map[string]any, typed any) map[string]any {
 	if resource == nil {
 		resource = map[string]any{}
 	}
-	resource[events.CLIResultTypedResourceKey] = typed
+	resource[typedResourceKey] = typed
 	return resource
 }
 

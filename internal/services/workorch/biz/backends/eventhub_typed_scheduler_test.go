@@ -22,7 +22,7 @@ func TestEventHubRunBackendSendsTypedSchedulerCommand(t *testing.T) {
 	})
 	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
 
-	backend := NewEventHub(hub)
+	backend := NewEventHub(hub, rawHub)
 	_, err := backend.Run().Command(context.Background(), WorkspaceRunCommand{
 		WorkspaceID:        "ws-typed-backend",
 		ExpectedRunID:      "run-typed-backend",

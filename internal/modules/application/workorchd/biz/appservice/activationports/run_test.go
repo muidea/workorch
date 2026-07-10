@@ -25,7 +25,7 @@ func TestCreateAndStartWorkspaceExecutionRunUsesEventHubOwnerCommands(t *testing
 	dodID := common.DoDID("dod-activation-runports")
 	seedActivationDefinitions(t, ctx, exports, workspaceID, goalID, dodID)
 
-	runID, err := CreateAndStartWorkspaceExecutionRun(ctx, exports.Infrastructure.EventHub, CreateAndStartWorkspaceExecutionRunRequest{
+	runID, err := CreateAndStartWorkspaceExecutionRun(ctx, exports.Infrastructure.EventHub, exports.Infrastructure.CommandHub, CreateAndStartWorkspaceExecutionRunRequest{
 		WorkspaceID:           workspaceID,
 		GoalID:                goalID,
 		DoDID:                 dodID,
@@ -78,7 +78,7 @@ func TestCreateAndStartWorkspaceExecutionRunContinuesWorkspaceRunSequence(t *tes
 		t.Fatalf("seed run: %v", err)
 	}
 
-	runID, err := CreateAndStartWorkspaceExecutionRun(ctx, exports.Infrastructure.EventHub, CreateAndStartWorkspaceExecutionRunRequest{
+	runID, err := CreateAndStartWorkspaceExecutionRun(ctx, exports.Infrastructure.EventHub, exports.Infrastructure.CommandHub, CreateAndStartWorkspaceExecutionRunRequest{
 		WorkspaceID:           workspaceID,
 		GoalID:                "goal-activation-runports-sequence",
 		DoDID:                 "dod-activation-runports-sequence",
@@ -102,7 +102,7 @@ func TestRunObservableAfterStartConflictReadsRunWithContextWorkspaceScope(t *tes
 		t.Fatal(err)
 	}
 
-	observable, err := RunObservableAfterStartConflict(common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID), exports.Infrastructure.EventHub, runID)
+	observable, err := RunObservableAfterStartConflict(common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID), exports.Infrastructure.CommandHub, runID)
 	if err != nil {
 		t.Fatalf("RunObservableAfterStartConflict err = %v", err)
 	}
@@ -126,7 +126,7 @@ func TestBuildWorkspaceExecutionContextForIDsUsesEventHubInputs(t *testing.T) {
 	seedActivationDefinitions(t, ctx, exports, workspaceID, goalID, dodID)
 
 	contextData, err := BuildWorkspaceExecutionContextForIDs(ctx, WorkspaceExecutionContextByIDRequest{
-		Hub:                   exports.Infrastructure.EventHub,
+		Hub:                   exports.Infrastructure.CommandHub,
 		WorkspaceID:           workspaceID,
 		GoalID:                goalID,
 		DoDID:                 dodID,

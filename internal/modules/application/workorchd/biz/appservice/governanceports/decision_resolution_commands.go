@@ -3,14 +3,14 @@ package governanceports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ResolveDecision(ctx context.Context, hub events.Hub, ticket *decisionmodel.Ticket, resolutionType string, payload map[string]any) (*decisionmodel.Ticket, *decisionmodel.Resolution, error) {
+func ResolveDecision(ctx context.Context, hub magicevent.Hub, ticket *decisionmodel.Ticket, resolutionType string, payload map[string]any) (*decisionmodel.Ticket, *decisionmodel.Resolution, error) {
 	if ticket == nil || ticket.ID == "" {
 		return nil, nil, common.ErrInvalidArgument
 	}

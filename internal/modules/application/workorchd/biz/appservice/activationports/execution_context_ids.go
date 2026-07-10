@@ -8,7 +8,8 @@ func BuildWorkspaceExecutionContextForIDs(ctx context.Context, request Workspace
 		return nil, err
 	}
 	return BuildWorkspaceExecutionContext(ctx, WorkspaceExecutionContextRequest{
-		Hub:                            request.Hub,
+		Hub: request.Hub,
+
 		Workspace:                      inputs.Workspace,
 		Goal:                           inputs.Goal,
 		DoD:                            inputs.DoD,

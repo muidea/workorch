@@ -3,9 +3,9 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const (
@@ -28,7 +28,7 @@ var skillHubRunner SkillHubCommandRunner = contextregistryports.SkillHubExecComm
 
 type skillHubStatus = contextregistrycore.SkillHubStatus
 
-func skillHubCatalogForEventHub(hub events.Hub) contextregistrycore.SkillHubSkillCatalog {
+func skillHubCatalogForEventHub(hub magicevent.Hub) contextregistrycore.SkillHubSkillCatalog {
 	return contextregistryports.NewSkillHubCatalog(hub, listSkillHubGlobalSkills, listSkillHubWorkspaceSkills)
 }
 

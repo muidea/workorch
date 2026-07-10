@@ -3,14 +3,14 @@ package runports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ReadRunView(ctx context.Context, hub events.Hub, runID common.RunID) (appmodelcore.Run, error) {
+func ReadRunView(ctx context.Context, hub magicevent.Hub, runID common.RunID) (appmodelcore.Run, error) {
 	item, err := ReadRun(ctx, hub, runID)
 	if err != nil {
 		return appmodelcore.Run{}, err
@@ -18,7 +18,7 @@ func ReadRunView(ctx context.Context, hub events.Hub, runID common.RunID) (appmo
 	return RunView(item), nil
 }
 
-func ListRunViewsByWorkspace(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]appmodelcore.Run, error) {
+func ListRunViewsByWorkspace(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]appmodelcore.Run, error) {
 	items, err := ListRunsByWorkspace(ctx, hub, workspaceID)
 	if err != nil {
 		return nil, err

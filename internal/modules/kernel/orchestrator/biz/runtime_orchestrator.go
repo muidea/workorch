@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -110,6 +111,7 @@ type RuntimeOrchestrator struct {
 	approvals           repository.ApprovalRepository
 	evidence            RuntimeEvidenceRepositories
 	eventHub            events.Hub
+	commandHub          magicevent.Hub
 	eventDrivenDispatch bool
 	policyMu            sync.RWMutex
 	policy              RuntimePolicy

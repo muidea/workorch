@@ -3,14 +3,14 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
 
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ListArtifactsByResultOwnerCommand(ctx context.Context, hub events.Hub, resultID common.ResultID) ([]*resultmodel.Artifact, error) {
+func ListArtifactsByResultOwnerCommand(ctx context.Context, hub magicevent.Hub, resultID common.ResultID) ([]*resultmodel.Artifact, error) {
 	if hub == nil || resultID == "" {
 		return nil, common.ErrInvalidArgument
 	}

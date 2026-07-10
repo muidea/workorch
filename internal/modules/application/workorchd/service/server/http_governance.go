@@ -263,7 +263,7 @@ func projectDecisionViews(items []appservice.Decision) []appservice.Decision {
 }
 
 func governanceRequestContext(r *http.Request, state *serverState) context.Context {
-	ctx := appservice.ContextWithEventHub(r.Context(), state.eventHub)
+	ctx := appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub)
 	if workspaceID := strings.TrimSpace(r.URL.Query().Get("workspaceId")); workspaceID != "" {
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
 	}

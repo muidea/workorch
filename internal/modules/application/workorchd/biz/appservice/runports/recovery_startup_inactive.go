@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governanceports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
@@ -12,12 +13,11 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const StartupInactiveRunRecoveryReason = "startup inactive running run recovered: previous process has no active execution; workspace reset to idle manual activation"
 
-func RecoverStartupInactiveRunningWorkspaceViews(ctx context.Context, hub events.Hub) ([]appmodelcore.Run, error) {
+func RecoverStartupInactiveRunningWorkspaceViews(ctx context.Context, hub magicevent.Hub) ([]appmodelcore.Run, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -48,7 +48,7 @@ func workspaceIDForRecoveryError(workspace *workspacemodel.Workspace) string {
 	return string(workspace.ID)
 }
 
-func recoverStartupInactiveWorkspace(ctx context.Context, hub events.Hub, workspace *workspacemodel.Workspace) (*runmodel.Run, bool, error) {
+func recoverStartupInactiveWorkspace(ctx context.Context, hub magicevent.Hub, workspace *workspacemodel.Workspace) (*runmodel.Run, bool, error) {
 	if workspace == nil || workspace.ActiveRunID == "" {
 		return nil, false, nil
 	}
@@ -122,7 +122,7 @@ func recoverStartupInactiveWorkspace(ctx context.Context, hub events.Hub, worksp
 	return cancelled, true, nil
 }
 
-func reconcileStartupGovernanceBlockedRun(ctx context.Context, hub events.Hub, workspace *workspacemodel.Workspace, run *runmodel.Run) (*runmodel.Run, bool, error) {
+func reconcileStartupGovernanceBlockedRun(ctx context.Context, hub magicevent.Hub, workspace *workspacemodel.Workspace, run *runmodel.Run) (*runmodel.Run, bool, error) {
 	if workspace == nil || run == nil || run.ID == "" || run.WorkspaceID != workspace.ID {
 		return nil, false, nil
 	}
@@ -167,7 +167,7 @@ func reconcileStartupGovernanceBlockedRun(ctx context.Context, hub events.Hub, w
 	return nil, false, nil
 }
 
-func uniqueOpenDecisionTicketForRun(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID) (common.TicketID, bool, error) {
+func uniqueOpenDecisionTicketForRun(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID) (common.TicketID, bool, error) {
 	items, err := governanceports.DecisionTicketsForQuery(ctx, hub, string(workspaceID), string(runID))
 	if err != nil {
 		return "", false, err
@@ -185,7 +185,7 @@ func uniqueOpenDecisionTicketForRun(ctx context.Context, hub events.Hub, workspa
 	return ret, ret != "", nil
 }
 
-func uniqueOpenApprovalForRun(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID) (common.ApprovalID, bool, error) {
+func uniqueOpenApprovalForRun(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID) (common.ApprovalID, bool, error) {
 	items, err := governanceports.ApprovalsForQuery(ctx, hub, string(workspaceID), string(runID))
 	if err != nil {
 		return "", false, err

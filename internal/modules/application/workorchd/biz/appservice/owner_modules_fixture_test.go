@@ -8,19 +8,19 @@ import (
 
 func installAppserviceOwnerModuleTestFactories() func() {
 	originalBackend := newBootstrapWithBackend
-	originalPolicyHub := newBootstrapWithBackendRuntimePolicyAndEventHub
+	originalPolicyHub := newBootstrapWithBackendRuntimePolicyAndEventHubs
 	originalPolicy := newBootstrapWithBackendAndRuntimePolicy
 
 	newBootstrapWithBackend = func(backend string, dataRoot string) *bootstrap.Runtime {
-		return testkit.NewRuntime(backend, dataRoot, workorchruntimepolicy.RuntimePolicy{}, nil)
+		return testkit.NewRuntime(backend, dataRoot, workorchruntimepolicy.RuntimePolicy{}, nil, nil)
 	}
-	newBootstrapWithBackendRuntimePolicyAndEventHub = testkit.NewRuntime
+	newBootstrapWithBackendRuntimePolicyAndEventHubs = testkit.NewRuntime
 	newBootstrapWithBackendAndRuntimePolicy = func(backend string, dataRoot string, policy workorchruntimepolicy.RuntimePolicy) *bootstrap.Runtime {
-		return testkit.NewRuntime(backend, dataRoot, policy, nil)
+		return testkit.NewRuntime(backend, dataRoot, policy, nil, nil)
 	}
 	return func() {
 		newBootstrapWithBackend = originalBackend
-		newBootstrapWithBackendRuntimePolicyAndEventHub = originalPolicyHub
+		newBootstrapWithBackendRuntimePolicyAndEventHubs = originalPolicyHub
 		newBootstrapWithBackendAndRuntimePolicy = originalPolicy
 	}
 }

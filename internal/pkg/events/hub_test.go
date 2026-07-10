@@ -21,7 +21,7 @@ func TestMemoryHubAssignsWorkspaceRevision(t *testing.T) {
 	if err := hub.Publish(context.Background(), Envelope{Topic: workspaceevents.TopicWorkspaceCreated, WorkspaceID: "ws-b"}); err != nil {
 		t.Fatalf("publish other workspace event: %v", err)
 	}
-	if err := hub.Publish(context.Background(), Envelope{Topic: workorchdevents.TopicCLICommand}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: workorchdevents.TopicCLIProgress}); err != nil {
 		t.Fatalf("publish global event: %v", err)
 	}
 

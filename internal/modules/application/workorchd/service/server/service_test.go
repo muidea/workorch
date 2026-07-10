@@ -75,7 +75,7 @@ func TestServiceStartupRequiresFrameworkRuntime(t *testing.T) {
 func TestServiceRunUsesBackgroundRoutine(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	svc := &Service{
-		http:              NewHTTPServerWithEventHubAndBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, nil, routine),
+		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, nil, routine),
 		backgroundRoutine: routine,
 		done:              make(chan error, 1),
 	}
@@ -139,7 +139,7 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 
 	routine := &recordingBackgroundRoutine{}
 	svc := &Service{
-		http:              NewHTTPServerWithEventHubAndBackground(Config{Addr: "127.0.0.1:0", Backend: "file", DataRoot: dataRoot}, nil, routine),
+		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "file", DataRoot: dataRoot}, nil, routine),
 		backgroundRoutine: routine,
 		done:              make(chan error, 1),
 	}
@@ -217,7 +217,7 @@ func TestServiceRunReturnsErrorWhenBackgroundSubmitFails(t *testing.T) {
 	submitErr := errors.New("background routine is closed")
 	routine := &recordingBackgroundRoutine{err: submitErr}
 	svc := &Service{
-		http:              NewHTTPServerWithEventHubAndBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, nil, routine),
+		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, nil, routine),
 		backgroundRoutine: routine,
 		done:              make(chan error, 1),
 	}
@@ -236,7 +236,7 @@ func TestServiceRunReturnsErrorWhenBackgroundSubmitFails(t *testing.T) {
 
 func TestHTTPServerStartupOnlySchedulesWatchdogTimer(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	httpServer := NewHTTPServerWithEventHubAndBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, nil, routine)
+	httpServer := newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, nil, routine)
 
 	httpServer.state.scheduleWatchdog()
 	httpServer.state.scheduleWatchdog()
@@ -255,7 +255,7 @@ func TestHTTPServerStartupOnlySchedulesWatchdogTimer(t *testing.T) {
 func TestServerStateScheduleBackgroundFailureReleasesWaitGroup(t *testing.T) {
 	submitErr := errors.New("background routine is closed")
 	routine := &recordingBackgroundRoutine{err: submitErr}
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
 
 	if state.scheduleBackground("test", func(context.Context) {}) {
 		t.Fatal("scheduleBackground returned true after background submission failure")

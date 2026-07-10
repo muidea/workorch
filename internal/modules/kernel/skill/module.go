@@ -157,7 +157,7 @@ func (m *Module) executeSkillCommand(ctx context.Context, topic string, data any
 	}
 }
 
-func setMagicResult(result magicevent.Result, data any, err error) {
+func setMagicResult(result magicevent.Result, data skillevents.SkillCommandResult, err error) {
 	if result == nil {
 		return
 	}

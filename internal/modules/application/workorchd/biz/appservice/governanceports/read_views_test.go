@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 
@@ -14,7 +15,6 @@ import (
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -27,7 +27,7 @@ func (fn governanceTraceReaderFunc) List(ctx context.Context, query repository.A
 func TestDecisionPageProjectsResolutionAndAutoGovernance(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-read")
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandListTicketsByWS, func(data any) decisionevents.DecisionCommandResult {
 		cmd, ok := data.(decisionevents.ListTicketsByWorkspaceCommand)
@@ -103,7 +103,7 @@ func TestDecisionPageProjectsResolutionAndAutoGovernance(t *testing.T) {
 func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-read")
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
 		cmd, ok := data.(decisionevents.GetTicketCommand)
@@ -149,10 +149,12 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 		}
 	})
 	resumePublished := false
-	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ context.Context, envelope events.Envelope) error {
+	resumeObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	resumeObserver.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ magicevent.Event, result magicevent.Result) {
 		resumePublished = true
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response"})
+		result.Set(orchestratorevents.OrchestratorCommandResult{}, nil)
 	})
+	defer resumeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommandResumeRun)
 
 	item, err := ResolveDecisionView(ctx, hub, nil, "ticket-001", appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    "provide_missing_info",
@@ -184,7 +186,7 @@ func TestResolveDecisionViewRejectsNonSemanticMissingInfoPayload(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			testHub := newGovernanceMagicTestHub(t)
-			hub := testHub.hub
+			hub := testHub.rawHub
 			workspaceID := common.WorkspaceID("ws-governance-invalid-missing-info")
 			testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
 				cmd, ok := data.(decisionevents.GetTicketCommand)
@@ -226,7 +228,7 @@ func TestResolveDecisionViewRejectsNonSemanticMissingInfoPayload(t *testing.T) {
 func TestDecisionViewReadsTicketWithExplicitScope(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-detail-scope")
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
 		cmd, ok := data.(decisionevents.GetTicketCommand)
@@ -258,7 +260,7 @@ func TestDecisionViewReadsTicketWithExplicitScope(t *testing.T) {
 func TestResolveDecisionViewWithoutScopePrefersOpenDuplicateTicket(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandListTickets, func(data any) decisionevents.DecisionCommandResult {
 		if _, ok := data.(decisionevents.ListTicketsCommand); !ok {
 			t.Fatalf("command payload type = %T, want ListTicketsCommand", data)
@@ -308,7 +310,7 @@ func TestResolveDecisionViewWithoutScopePrefersOpenDuplicateTicket(t *testing.T)
 func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-scope")
 	ticketIDs := []string{"ticket-scope-001", "ticket-scope-002"}
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
@@ -343,10 +345,12 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload}
 		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
 	})
-	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ context.Context, envelope events.Envelope) error {
+	resumeObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	resumeObserver.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ magicevent.Event, result magicevent.Result) {
 		resumeCount++
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response"})
+		result.Set(orchestratorevents.OrchestratorCommandResult{}, nil)
 	})
+	defer resumeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommandResumeRun)
 
 	items, err := BatchResolveDecisionViews(ctx, hub, nil, appmodelcore.BatchResolveDecisionCommand{
 		TicketIDs:         ticketIDs,
@@ -375,7 +379,7 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 func TestApprovalViewsForQueryProjectsAutoGovernance(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-read")
 	testHub.subscribeApproval(approvalevents.TopicApprovalCommandListByRun, func(data any) approvalevents.ApprovalCommandResult {
 		cmd, ok := data.(approvalevents.ListApprovalsByRunCommand)
@@ -427,7 +431,7 @@ func TestApprovalViewsForQueryProjectsAutoGovernance(t *testing.T) {
 func TestApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-detail-scope")
 	testHub.subscribeApproval(approvalevents.TopicApprovalCommandGet, func(data any) approvalevents.ApprovalCommandResult {
 		cmd, ok := data.(approvalevents.GetApprovalCommand)
@@ -459,7 +463,7 @@ func TestApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
 func TestResolveApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-scope")
 	testHub.subscribeApproval(approvalevents.TopicApprovalCommandGet, func(data any) approvalevents.ApprovalCommandResult {
 		cmd, ok := data.(approvalevents.GetApprovalCommand)
@@ -508,7 +512,7 @@ func TestResolveApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
 func TestResolveApprovalViewWithCommandPublishesGovernanceSemanticContext(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-approval-semantic")
 	testHub.subscribeApproval(approvalevents.TopicApprovalCommandGet, func(data any) approvalevents.ApprovalCommandResult {
 		cmd, ok := data.(approvalevents.GetApprovalCommand)
@@ -566,7 +570,7 @@ func TestResolveApprovalViewWithCommandPublishesGovernanceSemanticContext(t *tes
 func TestResolveApprovalViewWithoutScopeResolvesUniquePendingApproval(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-approval-unique")
 	testHub.subscribeApproval(approvalevents.TopicApprovalCommandList, func(data any) approvalevents.ApprovalCommandResult {
 		if _, ok := data.(approvalevents.ListApprovalsCommand); !ok {
@@ -613,7 +617,7 @@ func TestResolveApprovalViewWithoutScopeResolvesUniquePendingApproval(t *testing
 func TestResolveApprovalViewWithoutScopeConflictsOnDuplicatePendingApprovals(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	testHub.subscribeApproval(approvalevents.TopicApprovalCommandList, func(data any) approvalevents.ApprovalCommandResult {
 		if _, ok := data.(approvalevents.ListApprovalsCommand); !ok {
 			t.Fatalf("command payload type = %T, want ListApprovalsCommand", data)
@@ -649,7 +653,7 @@ func TestResolveApprovalViewWithoutScopeConflictsOnDuplicatePendingApprovals(t *
 func TestBatchResolveApprovalViewsApprovesPendingItems(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-read")
 	approvalIDs := []string{"approval-001", "approval-002"}
 	testHub.subscribeApproval(approvalevents.TopicApprovalCommandGet, func(data any) approvalevents.ApprovalCommandResult {

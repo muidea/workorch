@@ -24,10 +24,11 @@
 - Decision/Approval contract: 创建治理对象时必须携带 workspace/run/step/action scope 和幂等键。
 - Orchestrator contract: recoverable runtime gap 应返回 runtime recovery action，而不是直接阻塞。
 - Projection contract: application 只能展示治理摘要与 trace，不把治理摘要当 owner state。
+- EventHub contract: owner command/read adapter 直接持有 framework 提供的 magicCommon `event.Hub`；禁止先包装为 `MagicHub` 再通过 `RawHub()` 反向取回。
 
 ## 已知缺口
 
-- 当前盘点未发现 Governance module 自身职责缺失；后续需继续验证 repeated failure escalation 的幂等边界。
+- 当前盘点未发现 Governance module 自身职责或 owner command/read EventHub 合同缺失；后续需继续验证 repeated failure escalation 的幂等边界。
 
 ## 边界约束
 

@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -45,6 +46,7 @@ type RepositoryExports struct {
 
 type InfrastructureExports struct {
 	EventHub          events.Hub
+	CommandHub        magicevent.Hub
 	BackgroundRoutine magictask.BackgroundRoutine
 	LoadConfig        func() (workorchconfig.Config, error)
 }
@@ -57,6 +59,8 @@ type Exports struct {
 func (r *Runtime) Shutdown(ctx context.Context) error {
 	if terminator, ok := r.exports.Infrastructure.EventHub.(interface{ Terminate(context.Context) }); ok {
 		terminator.Terminate(ctx)
+	} else if r.exports.Infrastructure.CommandHub != nil {
+		r.exports.Infrastructure.CommandHub.Terminate(ctx)
 	}
 	if r.background != nil {
 		r.background.Shutdown(ctx)

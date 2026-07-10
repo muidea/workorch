@@ -5,18 +5,18 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, cmd ActivateWorkspaceExecutionCommand) (ret WorkspaceExecutionActivation, err error) {
 	ctx = configcore.ContextWithLoader(ctx, session.ConfigLoader())
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (WorkspaceExecutionActivation, error) {
-		defaults, err := workspaceExecutionDefaultsFromContext(ctx, hub)
+	return withEventHubsSession(ctx, session, func(ctx context.Context, hubs eventHubSessionDependencies) (WorkspaceExecutionActivation, error) {
+		defaults, err := workspaceExecutionDefaultsFromContext(ctx, hubs.commandHub)
 		if err != nil {
 			return WorkspaceExecutionActivation{}, err
 		}
 		return activationports.ActivateWorkspaceExecutionView(ctx, activationports.ActivateWorkspaceExecutionViewRequest{
-			Hub:                            hub,
+			Hub:                            hubs.commandHub,
+			EventHub:                       hubs.eventHub,
 			WorkspaceID:                    workspaceID,
 			Command:                        cmd,
 			SystemDefaultSoulID:            defaults.systemDefaultSoulID,

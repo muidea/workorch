@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func purgeWorkspaceMemoryItems(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
+func purgeWorkspaceMemoryItems(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
 	items, err := ownerreadports.ListMemoryItemsByWorkspaceOwnerCommand(ctx, hub, workspaceID)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {

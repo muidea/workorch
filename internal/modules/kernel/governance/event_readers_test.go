@@ -8,13 +8,11 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestEventWorkspaceReaderCarriesRuntimeWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(8)
-	hub := events.NewMagicHubWithHubOwner(rawHub, ModuleID)
 	workspaceID := common.WorkspaceID("ws-governance-definition-scope")
 	goalID := common.GoalID("goal-governance-definition-scope")
 	dodID := common.DoDID("dod-governance-definition-scope")
@@ -39,7 +37,7 @@ func TestEventWorkspaceReaderCarriesRuntimeWorkspaceScope(t *testing.T) {
 		dodCommand = cmd
 		result.Set(workspaceevents.WorkspaceCommandResult{DoD: &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"dod"}, State: common.DoDStateReady}}, nil)
 	})
-	reader := eventWorkspaceReader{hub: hub}
+	reader := eventWorkspaceReader{hub: rawHub}
 	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 
 	if _, err := reader.GetGoal(scopedCtx, goalID); err != nil {

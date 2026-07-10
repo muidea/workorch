@@ -10,13 +10,11 @@ import (
 
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestResultEventArtifactRepositoryPublishesArtifactScopedCommands(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
 	var captured resultevents.CreateArtifactCommand
 	artifact := &resultmodel.Artifact{
 		ID:          "artifact-result-event-adapter",
@@ -30,7 +28,7 @@ func TestResultEventArtifactRepositoryPublishesArtifactScopedCommands(t *testing
 		result.Set(resultevents.ResultCommandResult{}, nil)
 	})
 
-	repo := resultEventArtifactRepository{hub: hub}
+	repo := resultEventArtifactRepository{hub: rawHub}
 	if err := repo.Create(ctx, artifact); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -41,7 +39,7 @@ func TestResultEventArtifactRepositoryPublishesArtifactScopedCommands(t *testing
 
 func TestResultEventRepositoryRequiresOwnerResponse(t *testing.T) {
 	ctx := context.Background()
-	repo := resultEventResultRepository{hub: events.NewMagicHubWithHub(magicevent.NewHub(16))}
+	repo := resultEventResultRepository{hub: magicevent.NewHub(16)}
 	result := &resultmodel.Result{
 		ID:          "result-no-response",
 		WorkspaceID: "ws-no-response",
@@ -58,7 +56,6 @@ func TestResultEventRepositoryRequiresOwnerResponse(t *testing.T) {
 func TestResultEventRepositoriesDecodeOwnerResponses(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
 	result := &resultmodel.Result{
 		ID:          "result-decode",
 		WorkspaceID: "ws-decode",
@@ -85,14 +82,14 @@ func TestResultEventRepositoriesDecodeOwnerResponses(t *testing.T) {
 		response.Set(resultevents.ResultCommandResult{Artifacts: []*resultmodel.Artifact{artifact}}, nil)
 	})
 
-	results, err := (resultEventResultRepository{hub: hub}).ListByWorkspace(ctx, result.WorkspaceID)
+	results, err := (resultEventResultRepository{hub: rawHub}).ListByWorkspace(ctx, result.WorkspaceID)
 	if err != nil {
 		t.Fatalf("ListByWorkspace() error = %v", err)
 	}
 	if len(results) != 1 || results[0] != result {
 		t.Fatalf("results = %#v, want original result", results)
 	}
-	artifacts, err := (resultEventArtifactRepository{hub: hub}).ListByResult(ctx, result.ID)
+	artifacts, err := (resultEventArtifactRepository{hub: rawHub}).ListByResult(ctx, result.ID)
 	if err != nil {
 		t.Fatalf("ListByResult() error = %v", err)
 	}

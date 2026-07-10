@@ -3,17 +3,17 @@ package readmodelports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 type AutoGovernanceTraceReader struct {
-	Hub events.Hub
+	Hub magicevent.Hub
 }
 
 func (r AutoGovernanceTraceReader) List(ctx context.Context, query repository.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
@@ -21,7 +21,7 @@ func (r AutoGovernanceTraceReader) List(ctx context.Context, query repository.Au
 }
 
 type DecisionTicketReader struct {
-	Hub events.Hub
+	Hub magicevent.Hub
 }
 
 func (r DecisionTicketReader) Get(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Ticket, error) {
@@ -41,7 +41,7 @@ func (r DecisionTicketReader) ListByWorkspaceID(ctx context.Context, workspaceID
 }
 
 type DecisionResolutionReader struct {
-	Hub events.Hub
+	Hub magicevent.Hub
 }
 
 func (r DecisionResolutionReader) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
@@ -49,7 +49,7 @@ func (r DecisionResolutionReader) GetByTicketID(ctx context.Context, ticketID co
 }
 
 type ApprovalReader struct {
-	Hub events.Hub
+	Hub magicevent.Hub
 }
 
 func (r ApprovalReader) Get(ctx context.Context, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {

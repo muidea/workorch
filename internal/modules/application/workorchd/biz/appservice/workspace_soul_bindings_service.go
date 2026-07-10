@@ -3,12 +3,12 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func ReadWorkspaceSoulBindingsWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret WorkspaceSoulBindings, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (WorkspaceSoulBindings, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (WorkspaceSoulBindings, error) {
 		return workspaceports.ReadWorkspaceSoulBindings(ctx, hub, workspaceID)
 	})
 }
@@ -20,7 +20,7 @@ func ReadWorkspaceSoulBindingsWithBackend(ctx context.Context, backend string, d
 }
 
 func UpdateWorkspaceSoulBindingsWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, cmd WorkspaceSoulBindings) (ret WorkspaceSoulBindings, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (WorkspaceSoulBindings, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (WorkspaceSoulBindings, error) {
 		return workspaceports.UpdateWorkspaceSoulBindingsView(ctx, hub, workspaceID, cmd)
 	})
 }

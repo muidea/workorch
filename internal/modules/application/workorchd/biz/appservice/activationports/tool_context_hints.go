@@ -3,9 +3,9 @@ package activationports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type WorkspaceToolContextHints struct {
@@ -14,11 +14,11 @@ type WorkspaceToolContextHints struct {
 	Effective map[string]any
 }
 
-func WorkspaceEffectiveToolContextHints(ctx context.Context, hub events.Hub, workspace *workspacemodel.Workspace) map[string]any {
+func WorkspaceEffectiveToolContextHints(ctx context.Context, hub magicevent.Hub, workspace *workspacemodel.Workspace) map[string]any {
 	return WorkspaceToolContextHintsFor(ctx, hub, workspace).Effective
 }
 
-func WorkspaceToolContextHintsFor(ctx context.Context, hub events.Hub, workspace *workspacemodel.Workspace) WorkspaceToolContextHints {
+func WorkspaceToolContextHintsFor(ctx context.Context, hub magicevent.Hub, workspace *workspacemodel.Workspace) WorkspaceToolContextHints {
 	if hub == nil || workspace == nil {
 		if workspace == nil {
 			return WorkspaceToolContextHints{}

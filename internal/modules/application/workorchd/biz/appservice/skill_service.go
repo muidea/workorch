@@ -3,12 +3,12 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func CreateSkillWithSession(ctx context.Context, session *RuntimeSession, cmd CreateSkillCommand) (ret Skill, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (Skill, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Skill, error) {
 		return contextregistryports.CreateSkill(ctx, hub, cmd)
 	})
 }

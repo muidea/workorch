@@ -64,6 +64,10 @@ func ExportsFromInitiator(consumer string) (Exports, error) {
 	if err != nil {
 		return Exports{}, err
 	}
+	commandHub, err := workorchdeps.ResolveCommandHub(consumer)
+	if err != nil {
+		return Exports{}, err
+	}
 	return Exports{
 		Repositories: RepositoryExports{
 			Souls:                 systemRepos.Souls,
@@ -95,6 +99,7 @@ func ExportsFromInitiator(consumer string) (Exports, error) {
 		},
 		Infrastructure: InfrastructureExports{
 			EventHub:   eventHub,
+			CommandHub: commandHub,
 			LoadConfig: workorchconfig.Current,
 		},
 	}, nil

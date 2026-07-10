@@ -3,6 +3,7 @@ package governance
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
@@ -15,11 +16,10 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type eventTicketReader struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r eventTicketReader) Get(ctx context.Context, id common.TicketID) (*decisionmodel.Ticket, error) {
@@ -35,7 +35,7 @@ func (r eventTicketReader) Get(ctx context.Context, id common.TicketID) (*decisi
 }
 
 type eventResolutionReader struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r eventResolutionReader) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
@@ -51,7 +51,7 @@ func (r eventResolutionReader) GetByTicketID(ctx context.Context, ticketID commo
 }
 
 type eventApprovalReader struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r eventApprovalReader) Get(ctx context.Context, id common.ApprovalID) (*approvalmodel.Approval, error) {
@@ -67,7 +67,7 @@ func (r eventApprovalReader) Get(ctx context.Context, id common.ApprovalID) (*ap
 }
 
 type eventRunReader struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r eventRunReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
@@ -102,7 +102,7 @@ func (r eventRunReader) List(ctx context.Context) ([]*runmodel.Run, error) {
 }
 
 type eventWorkspaceReader struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r eventWorkspaceReader) GetGoal(ctx context.Context, id common.GoalID) (*workspacemodel.Goal, error) {
@@ -130,7 +130,7 @@ func (r eventWorkspaceReader) GetDoD(ctx context.Context, id common.DoDID) (*wor
 }
 
 type eventMemoryReader struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r eventMemoryReader) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {

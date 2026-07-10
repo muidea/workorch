@@ -41,7 +41,7 @@ func (s *Service) Startup(ctx context.Context, serviceName string, eventHub even
 	}
 	s.eventHub = eventHub
 	s.backgroundRoutine = backgroundRoutine
-	s.http = NewHTTPServerWithEventHubAndBackground(s.config, workorchevents.NewMagicHubWithHubOwner(eventHub, "workorchd/http"), backgroundRoutine)
+	s.http = NewHTTPServerWithEventHubsAndBackground(s.config, workorchevents.NewMagicHubWithHubOwner(eventHub, "workorchd/http"), eventHub, backgroundRoutine)
 	s.done = make(chan error, 1)
 	s.runStarted.Store(false)
 	if err := s.http.Validate(ctx); err != nil {

@@ -14,7 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
-func sendEventStreamTestCommand(ctx context.Context, rawHub magicevent.Hub, topic string, command any) (eventstreamevents.EventStreamCommandResult, error) {
+func sendEventStreamTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (eventstreamevents.EventStreamCommandResult, error) {
 	ev := magicevent.NewEventWithContext(topic, "eventstream/module_test", eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := rawHub.Send(ev)
 	if result == nil {

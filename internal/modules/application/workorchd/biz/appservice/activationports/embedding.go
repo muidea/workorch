@@ -14,24 +14,16 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-type rawMagicHubProvider interface {
-	RawHub() magicevent.Hub
-}
-
-func GenerateEmbedding(ctx context.Context, hub events.Hub, providerID string, input string) (llmmodels.ProviderEmbeddingResult, error) {
+func GenerateEmbedding(ctx context.Context, hub magicevent.Hub, providerID string, input string) (llmmodels.ProviderEmbeddingResult, error) {
 	if hub == nil || strings.TrimSpace(providerID) == "" || strings.TrimSpace(input) == "" {
 		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
-	}
-	rawHub, err := activationRawMagicHub(hub)
-	if err != nil {
-		return llmmodels.ProviderEmbeddingResult{}, err
 	}
 	ev := magicevent.NewEventWithContext(llmevents.TopicLLMCommandGenerateEmbedding, modulecommon.ModuleID, llmevents.CommandDestination, magicevent.NewHeader(), ctx, llmevents.GenerateEmbeddingCommand{
 		ProviderID: strings.TrimSpace(providerID),
 		Input:      strings.TrimSpace(input),
 	})
-	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{Topic: llmevents.TopicLLMCommandGenerateEmbedding, SubjectType: "llm_embedding", SubjectID: strings.TrimSpace(providerID)}))
-	result := rawHub.Send(ev)
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.TopicLLMCommandGenerateEmbedding, events.EventHubLaneScope{SubjectType: "llm_embedding", SubjectID: strings.TrimSpace(providerID)}))
+	result := hub.Send(ev)
 	if result == nil {
 		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
 	}
@@ -50,12 +42,4 @@ func GenerateEmbedding(ctx context.Context, hub events.Hub, providerID string, i
 		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: llm embedding result type %T", common.ErrInvalidArgument, data)
 	}
 	return *response.Embedding, nil
-}
-
-func activationRawMagicHub(hub events.Hub) (magicevent.Hub, error) {
-	provider, ok := hub.(rawMagicHubProvider)
-	if !ok || provider.RawHub() == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	return provider.RawHub(), nil
 }

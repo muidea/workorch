@@ -3,15 +3,15 @@ package runports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func UpdateRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
+func UpdateRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -32,7 +32,7 @@ func UpdateRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
 	return err
 }
 
-func FailRun(ctx context.Context, hub events.Hub, item *runmodel.Run, reason string) error {
+func FailRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run, reason string) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -43,7 +43,7 @@ func FailRun(ctx context.Context, hub events.Hub, item *runmodel.Run, reason str
 	return err
 }
 
-func CancelRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
+func CancelRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}

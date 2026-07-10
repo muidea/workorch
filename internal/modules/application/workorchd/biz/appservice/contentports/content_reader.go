@@ -3,16 +3,16 @@ package contentports
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/pkg/events"
+	magicevent "github.com/muidea/magicCommon/event"
 )
 
 type Reader struct {
-	eventHub          events.Hub
+	eventHub          magicevent.Hub
 	repositoryBackend string
 	repositoryDataDir string
 }
 
-func NewReader(eventHub events.Hub, repositoryBackend string, repositoryDataDir string) *Reader {
+func NewReader(eventHub magicevent.Hub, repositoryBackend string, repositoryDataDir string) *Reader {
 	return &Reader{
 		eventHub:          eventHub,
 		repositoryBackend: strings.TrimSpace(repositoryBackend),

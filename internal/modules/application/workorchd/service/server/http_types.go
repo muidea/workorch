@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
@@ -580,7 +581,8 @@ type updateWebSearchConfigurationFunc func(appservice.UpdateWebSearchConfigurati
 type serverState struct {
 	config                       Config
 	eventHub                     events.Hub
-	schedulerHub                 events.Hub
+	commandHub                   magicevent.Hub
+	schedulerHub                 magicevent.Hub
 	eventReplay                  *sseReplayBuffer
 	metrics                      *serverMetrics
 	validate                     validateFunc
@@ -938,16 +940,12 @@ func normalizeConfig(config Config) Config {
 }
 
 func NewHTTPServer(config Config) *HTTPServer {
-	return NewHTTPServerWithEventHub(config, nil)
+	return NewHTTPServerWithEventHubsAndBackground(config, nil, nil, nil)
 }
 
-func NewHTTPServerWithEventHub(config Config, eventHub events.Hub) *HTTPServer {
-	return NewHTTPServerWithEventHubAndBackground(config, eventHub, nil)
-}
-
-func NewHTTPServerWithEventHubAndBackground(config Config, eventHub events.Hub, backgroundRoutine task.BackgroundRoutine) *HTTPServer {
+func NewHTTPServerWithEventHubsAndBackground(config Config, eventHub events.Hub, commandHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) *HTTPServer {
 	config = normalizeConfig(config)
-	state := newServerStateWithBackground(config, eventHub, backgroundRoutine)
+	state := newServerStateWithHubsAndBackground(config, eventHub, commandHub, backgroundRoutine)
 	handler := newMuxWithStateNoStart(state)
 	return &HTTPServer{
 		config: config,
@@ -978,7 +976,7 @@ func (s *HTTPServer) Validate(ctx context.Context) error {
 	if s == nil {
 		return errors.New("http server is not configured")
 	}
-	ctx = appservice.ContextWithEventHub(ctx, s.state.eventHub)
+	ctx = appservice.ContextWithEventHubs(ctx, s.state.eventHub, s.state.commandHub)
 	return s.state.validate(ctx, s.config.Backend, s.config.DataRoot)
 }
 
@@ -994,7 +992,7 @@ func (s *HTTPServer) Shutdown(ctx context.Context) error {
 }
 
 func newMux(config Config) http.Handler {
-	return newMuxWithState(newServerState(normalizeConfig(config), nil))
+	return newMuxWithState(newServerStateWithHubsAndBackground(normalizeConfig(config), nil, nil, nil))
 }
 
 func newMuxWithState(state *serverState) http.Handler {
@@ -1018,24 +1016,18 @@ func newMuxWithStateNoStart(state *serverState) http.Handler {
 	return handler
 }
 
-func newServerState(config Config, eventHub events.Hub) *serverState {
-	return newServerStateWithBackground(config, eventHub, nil)
-}
-
-func newServerStateWithBackground(config Config, eventHub events.Hub, backgroundRoutine task.BackgroundRoutine) *serverState {
-	schedulerHub := eventHub
-	if schedulerHub == nil {
-		schedulerHub = events.NewMemoryHub()
+func newServerStateWithHubsAndBackground(config Config, eventHub events.Hub, commandHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) *serverState {
+	if commandHub == nil {
+		commandHub = magicevent.NewHub(1024)
 	}
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
-	if eventHub != nil {
-		backgroundCtx = appservice.ContextWithEventHub(backgroundCtx, eventHub)
-	}
+	backgroundCtx = appservice.ContextWithEventHubs(backgroundCtx, eventHub, commandHub)
 	diagnostics := newSchedulerDiagnosticsStore()
 	state := &serverState{
 		config:                       config,
 		eventHub:                     eventHub,
-		schedulerHub:                 schedulerHub,
+		commandHub:                   commandHub,
+		schedulerHub:                 commandHub,
 		eventReplay:                  newSSEReplayBuffer(defaultSSEReplayLimit),
 		metrics:                      &serverMetrics{schedulerDiagnostics: diagnostics},
 		validate:                     defaultValidate,
@@ -1162,12 +1154,14 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		return
 	}
 	if s.eventHub == nil {
-		if exports, err := session.Exports(); err == nil && exports.Infrastructure.EventHub != nil {
+		if exports, err := session.Exports(); err == nil {
 			s.eventHub = exports.Infrastructure.EventHub
+			s.commandHub = exports.Infrastructure.CommandHub
+			s.schedulerHub = exports.Infrastructure.CommandHub
 		}
 	}
 	if s.eventHub != nil {
-		s.backgroundCtx = appservice.ContextWithEventHub(s.backgroundContext(), s.eventHub)
+		s.backgroundCtx = appservice.ContextWithEventHubs(s.backgroundContext(), s.eventHub, s.commandHub)
 	}
 	s.runtimeSessionErr = nil
 	s.setSharedSession(session)
@@ -2174,7 +2168,7 @@ func (s *serverState) eventContext(ctx context.Context) context.Context {
 	if s == nil || s.eventHub == nil {
 		return ctx
 	}
-	return appservice.ContextWithEventHub(ctx, s.eventHub)
+	return appservice.ContextWithEventHubs(ctx, s.eventHub, s.commandHub)
 }
 
 func (s *serverState) scheduleWatchdog() {

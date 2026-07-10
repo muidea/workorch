@@ -3,6 +3,7 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -10,9 +11,14 @@ import (
 )
 
 type governanceSessionDependencies struct {
-	hub            events.Hub
+	hub            magicevent.Hub
 	traces         governancecore.AutoGovernanceTraceReader
 	workspaceScope common.WorkspaceID
+}
+
+type eventHubSessionDependencies struct {
+	eventHub   events.Hub
+	commandHub magicevent.Hub
 }
 
 func withReadModelSession[T any](ctx context.Context, session *RuntimeSession, read func(context.Context, readModelDependencies) (T, error)) (ret T, err error) {
@@ -33,8 +39,30 @@ func withEventHubSession[T any](ctx context.Context, session *RuntimeSession, re
 	return read(ctx, hub)
 }
 
+func withCommandHubSession[T any](ctx context.Context, session *RuntimeSession, read func(context.Context, magicevent.Hub) (T, error)) (ret T, err error) {
+	hub, err := session.RequiredCommandHub()
+	if err != nil {
+		return ret, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	return read(ctx, hub)
+}
+
+func withEventHubsSession[T any](ctx context.Context, session *RuntimeSession, read func(context.Context, eventHubSessionDependencies) (T, error)) (ret T, err error) {
+	eventHub, err := session.RequiredEventHub()
+	if err != nil {
+		return ret, err
+	}
+	commandHub, err := session.RequiredCommandHub()
+	if err != nil {
+		return ret, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	return read(ctx, eventHubSessionDependencies{eventHub: eventHub, commandHub: commandHub})
+}
+
 func withGovernanceSession[T any](ctx context.Context, session *RuntimeSession, read func(context.Context, governanceSessionDependencies) (T, error)) (ret T, err error) {
-	hub, err := session.RequiredEventHub()
+	hub, err := session.RequiredCommandHub()
 	if err != nil {
 		return ret, err
 	}

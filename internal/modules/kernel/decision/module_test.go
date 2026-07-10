@@ -15,7 +15,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
-func sendDecisionTestCommand(ctx context.Context, rawHub magicevent.Hub, topic string, command any) (decisionevents.DecisionCommandResult, error) {
+func sendDecisionTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (decisionevents.DecisionCommandResult, error) {
 	ev := magicevent.NewEventWithContext(topic, "decision/module_test", decisionevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := rawHub.Send(ev)
 	if result == nil {

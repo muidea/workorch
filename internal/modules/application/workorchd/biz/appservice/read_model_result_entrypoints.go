@@ -3,12 +3,12 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func ListRunResultsWithSession(ctx context.Context, session *RuntimeSession, query ResultQuery) (ret ResultPage, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (ResultPage, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (ResultPage, error) {
 		return readmodelports.ReadRunResultsPage(ctx, hub, query)
 	})
 }
@@ -20,7 +20,7 @@ func ListRunResultsWithBackend(ctx context.Context, backend string, dataRoot str
 }
 
 func ListRunPatchesWithSession(ctx context.Context, session *RuntimeSession, query PatchQuery) (ret PatchPage, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (PatchPage, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (PatchPage, error) {
 		return readmodelports.ReadRunPatchesPage(ctx, hub, query)
 	})
 }
@@ -32,7 +32,7 @@ func ListRunPatchesWithBackend(ctx context.Context, backend string, dataRoot str
 }
 
 func ListRunValidationResultsWithSession(ctx context.Context, session *RuntimeSession, query ValidationResultQuery) (ret ValidationResultPage, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (ValidationResultPage, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (ValidationResultPage, error) {
 		return readmodelports.ReadRunValidationResultsPage(ctx, hub, query)
 	})
 }
@@ -44,7 +44,7 @@ func ListRunValidationResultsWithBackend(ctx context.Context, backend string, da
 }
 
 func ListRunArtifactsWithSession(ctx context.Context, session *RuntimeSession, query ArtifactQuery) (ret ArtifactPage, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (ArtifactPage, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (ArtifactPage, error) {
 		return readmodelports.ReadRunArtifactsPage(ctx, hub, query)
 	})
 }

@@ -15,7 +15,7 @@ import (
 
 func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/configuration", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		state.metrics.configurationReadRequests.Add(1)
 		item, err := state.readConfiguration()
 		if err != nil {
@@ -28,7 +28,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/configuration/server", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		state.metrics.configurationUpdateRequests.Add(1)
 		var req appservice.UpdateServerConfigurationCommand
 		if err := decodeJSON(r, &req); err != nil {
@@ -46,7 +46,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/configuration/runtime", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		state.metrics.configurationUpdateRequests.Add(1)
 		var req appservice.UpdateRuntimeConfigurationCommand
 		if err := decodeJSON(r, &req); err != nil {
@@ -68,7 +68,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/configuration/llm", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		state.metrics.configurationUpdateRequests.Add(1)
 		var req appservice.UpdateLLMConfigurationCommand
 		if err := decodeJSON(r, &req); err != nil {
@@ -86,7 +86,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/configuration/web-search", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		state.metrics.configurationUpdateRequests.Add(1)
 		var req appservice.UpdateWebSearchConfigurationCommand
 		if err := decodeJSON(r, &req); err != nil {
@@ -106,16 +106,12 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 }
 
 func (s *serverState) publishRuntimePolicyUpdate(ctx context.Context) error {
-	if s == nil || s.eventHub == nil {
+	if s == nil || s.commandHub == nil {
 		return common.ErrInvalidArgument
 	}
 	cfg, err := workorchconfig.Current()
 	if err != nil {
 		return err
-	}
-	provider, ok := s.eventHub.(interface{ RawHub() magicevent.Hub })
-	if !ok || provider.RawHub() == nil {
-		return common.ErrInvalidArgument
 	}
 	ev := magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorCommandUpdateRuntimePolicy,
@@ -125,7 +121,7 @@ func (s *serverState) publishRuntimePolicyUpdate(ctx context.Context) error {
 		ctx,
 		orchestratorevents.UpdateRuntimePolicyCommand{Policy: workorchruntimepolicy.FromConfig(cfg)},
 	)
-	result := provider.RawHub().Send(ev)
+	result := s.commandHub.Send(ev)
 	if result == nil {
 		return common.ErrInvalidArgument
 	}

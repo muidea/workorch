@@ -3,16 +3,16 @@ package activationports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type MemorySelectionOptions struct {
 	WorkspaceID             common.WorkspaceID
-	Hub                     events.Hub
+	Hub                     magicevent.Hub
 	IDs                     []string
 	Goal                    *workspacemodel.Goal
 	DoD                     *workspacemodel.DoD
@@ -24,7 +24,7 @@ type DefaultEmbeddingProviderLoader func(context.Context) (string, error)
 
 type WorkspaceMemorySelectionRequest struct {
 	WorkspaceID                    common.WorkspaceID
-	Hub                            events.Hub
+	Hub                            magicevent.Hub
 	IDs                            []string
 	Goal                           *workspacemodel.Goal
 	DoD                            *workspacemodel.DoD
@@ -35,9 +35,10 @@ func SelectedWorkspaceMemoryItems(ctx context.Context, request WorkspaceMemorySe
 	selection := MemorySelectionOptions{
 		WorkspaceID: request.WorkspaceID,
 		Hub:         request.Hub,
-		IDs:         request.IDs,
-		Goal:        request.Goal,
-		DoD:         request.DoD,
+
+		IDs:  request.IDs,
+		Goal: request.Goal,
+		DoD:  request.DoD,
 	}
 	if len(selection.IDs) == 0 && request.DefaultEmbeddingProviderLoader != nil {
 		providerID, err := request.DefaultEmbeddingProviderLoader(ctx)

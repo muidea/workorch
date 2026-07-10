@@ -11,8 +11,8 @@ import (
 
 func TestEventHubDependenciesMapGroupedCapabilities(t *testing.T) {
 	session, _ := newTestRuntimeSession(t, "memory", "")
-	hub := session.Bootstrap.Exports().Infrastructure.EventHub
-	deps := runtimeports.NewEventHubDependencies(hub)
+	exports := session.Bootstrap.Exports()
+	deps := runtimeports.NewEventHubDependencies(exports.Infrastructure.EventHub, exports.Infrastructure.CommandHub)
 
 	if deps.Snapshot == nil {
 		t.Fatal("snapshot read port is nil")
@@ -33,8 +33,8 @@ func TestEventHubDependenciesMapGroupedCapabilities(t *testing.T) {
 
 func TestEventHubDependenciesActionPortsDriveModuleServices(t *testing.T) {
 	session, _ := newTestRuntimeSession(t, "memory", "")
-	hub := session.Bootstrap.Exports().Infrastructure.EventHub
-	deps := runtimeports.NewEventHubDependencies(hub)
+	exports := session.Bootstrap.Exports()
+	deps := runtimeports.NewEventHubDependencies(exports.Infrastructure.EventHub, exports.Infrastructure.CommandHub)
 	runtime := runtimecore.NewAdapter(deps)
 	ctx := context.Background()
 

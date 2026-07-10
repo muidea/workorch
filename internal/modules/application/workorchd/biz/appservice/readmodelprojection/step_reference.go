@@ -1,9 +1,10 @@
 package readmodelprojection
 
 import (
+	"strings"
+
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"strings"
 )
 
 func PreviousStepID(step *runmodel.Step) common.StepID {

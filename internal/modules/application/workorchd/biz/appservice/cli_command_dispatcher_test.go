@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/clicore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -17,27 +18,50 @@ import (
 )
 
 func TestCLICommandDispatcherRunIsIdempotent(t *testing.T) {
-	hub := &countingCLIHub{}
-	dispatcher := NewCLICommandDispatcher(&RuntimeSession{}, hub, nil)
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	reader := &staticCLIWorkspaceViewReader{workspaces: []Workspace{{ID: "ws-cli-idempotent"}}}
+	dispatcher := NewCLICommandDispatcher(&RuntimeSession{}, nil, hub, reader)
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
-	if hub.subscribeCount != 1 {
-		t.Fatalf("subscribe count = %d, want 1", hub.subscribeCount)
+	if result := sendCLIListCommand(t, hub, "cmd-idempotent-1"); !result.OK || reader.listCalls != 1 {
+		t.Fatalf("first result = %+v list calls = %d, want one handler", result, reader.listCalls)
 	}
 	dispatcher.Close()
-	if hub.unsubscribeCount != 1 {
-		t.Fatalf("unsubscribe count = %d, want 1", hub.unsubscribeCount)
-	}
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("Run after Close: %v", err)
 	}
-	if hub.subscribeCount != 2 {
-		t.Fatalf("subscribe count after rerun = %d, want 2", hub.subscribeCount)
+	if result := sendCLIListCommand(t, hub, "cmd-idempotent-2"); !result.OK || reader.listCalls != 2 {
+		t.Fatalf("second result = %+v list calls = %d, want one handler per command", result, reader.listCalls)
 	}
+}
+
+func sendCLIListCommand(t *testing.T, hub magicevent.Hub, commandID string) workorchdevents.CLIResult {
+	t.Helper()
+	command := workorchdevents.CLICommand{
+		CommandID:     commandID,
+		CorrelationID: commandID + "/correlation",
+		Command:       workorchdevents.CommandWorkspaceList,
+		SubjectType:   "workspace",
+	}
+	event := magicevent.NewEventWithContext(workorchdevents.TopicCLICommand, "test", workorchdevents.CommandDestination, magicevent.NewHeader(), context.Background(), command)
+	response := hub.Send(event)
+	if response == nil || response.Error() != nil {
+		t.Fatalf("send CLI list command response = %+v", response)
+	}
+	data, err := response.Get()
+	if err != nil {
+		t.Fatalf("get CLI list result: %v", err)
+	}
+	result, ok := data.(workorchdevents.CLIResult)
+	if !ok {
+		t.Fatalf("CLI list result = %T, want CLIResult", data)
+	}
+	return result
 }
 
 func TestCLIWorkspaceSnapshotCommandProjectsDetailView(t *testing.T) {
@@ -67,8 +91,8 @@ func TestCLIWorkspaceSnapshotCommandProjectsDetailView(t *testing.T) {
 		},
 	}
 
-	resource, _, err := dispatcher.handleWorkspaceCommand(context.Background(), events.CLICommandPayload{
-		Command:     events.CommandWorkspaceSnapshot,
+	resource, _, err := dispatcher.handleWorkspaceCommand(context.Background(), clicore.Command{
+		Command:     clicore.CommandWorkspaceSnapshot,
 		WorkspaceID: "ws-cli-detail",
 		SubjectID:   "ws-cli-detail",
 	})
@@ -109,30 +133,25 @@ func TestCLIDecisionResolvePublishesSchedulerContinuation(t *testing.T) {
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	directResumePublished := false
-	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(context.Context, events.Envelope) error {
-		directResumePublished = true
-		return events.Response(events.Envelope{Topic: orchestratorevents.TopicOrchestratorCommandResumeRun + "/response"})
-	})
-	provider, ok := hub.(interface{ RawHub() magicevent.Hub })
-	if !ok || provider.RawHub() == nil {
-		t.Fatal("session event hub does not expose raw hub")
+	commandHub, err := session.RequiredCommandHub()
+	if err != nil {
+		t.Fatalf("session command hub: %v", err)
 	}
 	var schedulerCommand workorchdevents.WorkspaceRunRequestedCommand
-	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, provider.RawHub())
+	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
 	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(ev magicevent.Event, result magicevent.Result) {
 		schedulerCommand, _ = ev.Data().(workorchdevents.WorkspaceRunRequestedCommand)
 		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
 	})
 	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
 
-	dispatcher := NewCLICommandDispatcher(session, hub, nil)
-	resource, _, err := dispatcher.handleGovernanceCommand(context.Background(), events.CLICommandPayload{
+	dispatcher := NewCLICommandDispatcher(session, hub, commandHub, nil)
+	resource, _, err := dispatcher.handleGovernanceCommand(context.Background(), clicore.Command{
 		CommandID:   "cmd-cli-replan",
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		SubjectID:   string(ticketID),
-		Command:     events.CommandDecisionResolve,
+		Command:     clicore.CommandDecisionResolve,
 		Payload: map[string]any{
 			"resolutionType": decisioncommon.ResolutionTypeReplan,
 			"payload":        map[string]any{"operator": "tester"},
@@ -144,8 +163,12 @@ func TestCLIDecisionResolvePublishesSchedulerContinuation(t *testing.T) {
 	if resource["id"] != string(ticketID) {
 		t.Fatalf("resource id = %v, want %s", resource["id"], ticketID)
 	}
-	if directResumePublished {
-		t.Fatal("CLI decision resolve published direct orchestrator resume; want scheduler command only")
+	if publishedHub, ok := hub.(interface{ Published() []events.Envelope }); ok {
+		for _, envelope := range publishedHub.Published() {
+			if envelope.Topic == orchestratorevents.TopicOrchestratorCommandResumeRun {
+				t.Fatal("CLI decision resolve published direct orchestrator resume; want scheduler command only")
+			}
+		}
 	}
 	if schedulerCommand.WorkspaceID != workspaceID || schedulerCommand.RunID != runID {
 		t.Fatalf("scheduler command scope = workspace:%q run:%q, want %s/%s", schedulerCommand.WorkspaceID, schedulerCommand.RunID, workspaceID, runID)
@@ -169,33 +192,33 @@ func TestCLIWorkspaceObjectCommandsRequireMatchingWorkspaceScope(t *testing.T) {
 	}{
 		{
 			name:      "snapshot missing workspace scope",
-			command:   events.CommandWorkspaceSnapshot,
+			command:   clicore.CommandWorkspaceSnapshot,
 			subjectID: "ws-scope",
 			wantErr:   common.ErrInvalidArgument,
 		},
 		{
 			name:        "snapshot mismatched workspace scope",
-			command:     events.CommandWorkspaceSnapshot,
+			command:     clicore.CommandWorkspaceSnapshot,
 			workspaceID: "ws-a",
 			subjectID:   "ws-b",
 			wantErr:     common.ErrConflict,
 		},
 		{
 			name:        "get missing subject",
-			command:     events.CommandWorkspaceGet,
+			command:     clicore.CommandWorkspaceGet,
 			workspaceID: "ws-scope",
 			wantErr:     common.ErrInvalidArgument,
 		},
 		{
 			name:        "delete mismatched workspace scope",
-			command:     events.CommandWorkspaceDelete,
+			command:     clicore.CommandWorkspaceDelete,
 			workspaceID: "ws-a",
 			subjectID:   "ws-b",
 			wantErr:     common.ErrConflict,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := dispatcher.handleWorkspaceCommand(context.Background(), events.CLICommandPayload{
+			_, _, err := dispatcher.handleWorkspaceCommand(context.Background(), clicore.Command{
 				Command:     tc.command,
 				WorkspaceID: common.WorkspaceID(tc.workspaceID),
 				SubjectID:   tc.subjectID,
@@ -219,29 +242,29 @@ func TestCLIRunCommandsRequireWorkspaceScope(t *testing.T) {
 	}{
 		{
 			name:    "activate missing workspace",
-			command: events.CommandRunActivate,
+			command: clicore.CommandRunActivate,
 			wantErr: common.ErrInvalidArgument,
 		},
 		{
 			name:    "list missing workspace",
-			command: events.CommandRunList,
+			command: clicore.CommandRunList,
 			wantErr: common.ErrInvalidArgument,
 		},
 		{
 			name:      "resume missing workspace",
-			command:   events.CommandRunResume,
+			command:   clicore.CommandRunResume,
 			subjectID: "run-a",
 			wantErr:   common.ErrInvalidArgument,
 		},
 		{
 			name:        "get missing run subject",
-			command:     events.CommandRunGet,
+			command:     clicore.CommandRunGet,
 			workspaceID: "ws-a",
 			wantErr:     common.ErrInvalidArgument,
 		},
 		{
 			name:        "status mismatched run subject",
-			command:     events.CommandRunStatus,
+			command:     clicore.CommandRunStatus,
 			workspaceID: "ws-a",
 			runID:       "run-a",
 			subjectID:   "run-b",
@@ -249,7 +272,7 @@ func TestCLIRunCommandsRequireWorkspaceScope(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := dispatcher.handleRunCommand(context.Background(), events.CLICommandPayload{
+			_, _, err := dispatcher.handleRunCommand(context.Background(), clicore.Command{
 				Command:     tc.command,
 				WorkspaceID: common.WorkspaceID(tc.workspaceID),
 				RunID:       common.RunID(tc.runID),
@@ -272,8 +295,8 @@ func TestCLIWorkspaceListCommandUsesWorkspaceViewReader(t *testing.T) {
 	}
 	dispatcher := &CLICommandDispatcher{viewReader: reader}
 
-	_, resources, err := dispatcher.handleWorkspaceCommand(context.Background(), events.CLICommandPayload{
-		Command: events.CommandWorkspaceList,
+	_, resources, err := dispatcher.handleWorkspaceCommand(context.Background(), clicore.Command{
+		Command: clicore.CommandWorkspaceList,
 	})
 	if err != nil {
 		t.Fatalf("handle workspace list: %v", err)
@@ -302,8 +325,8 @@ func TestCLIWorkspaceSnapshotCommandUsesProjectionViewReaderAndOmitsEventPayload
 	}
 	dispatcher := &CLICommandDispatcher{viewReader: reader}
 
-	resource, _, err := dispatcher.handleWorkspaceCommand(context.Background(), events.CLICommandPayload{
-		Command:     events.CommandWorkspaceSnapshot,
+	resource, _, err := dispatcher.handleWorkspaceCommand(context.Background(), clicore.Command{
+		Command:     clicore.CommandWorkspaceSnapshot,
 		WorkspaceID: "ws-projection-snapshot",
 		SubjectID:   "ws-projection-snapshot",
 	})
@@ -326,9 +349,9 @@ func TestCLIWorkspaceSnapshotCommandUsesProjectionViewReaderAndOmitsEventPayload
 	if summary, _ := eventRecords[0]["payloadSummary"].(map[string]any); summary["state"] != "running" {
 		t.Fatalf("event record payloadSummary = %+v, want summary retained", eventRecords[0]["payloadSummary"])
 	}
-	typed, ok := resource[events.CLIResultTypedResourceKey].(port.WorkspaceSnapshotInfo)
+	typed, ok := clicore.TypedResource(resource).(port.WorkspaceSnapshotInfo)
 	if !ok {
-		t.Fatalf("typed resource = %T, want WorkspaceSnapshotInfo", resource[events.CLIResultTypedResourceKey])
+		t.Fatalf("typed resource = %T, want WorkspaceSnapshotInfo", clicore.TypedResource(resource))
 	}
 	if len(typed.EventRecords) != 1 {
 		t.Fatalf("typed event records = %+v, want one projected event", typed.EventRecords)
@@ -363,20 +386,4 @@ func (r *staticCLIWorkspaceViewReader) ReadWorkspaceViewSnapshot(_ context.Conte
 	r.snapshotCalls++
 	r.lastSnapshotWorkspaceID = workspaceID
 	return r.snapshot, nil
-}
-
-type countingCLIHub struct {
-	subscribeCount   int
-	unsubscribeCount int
-}
-
-func (h *countingCLIHub) Publish(context.Context, events.Envelope) error {
-	return nil
-}
-
-func (h *countingCLIHub) Subscribe(string, events.Handler) func() {
-	h.subscribeCount++
-	return func() {
-		h.unsubscribeCount++
-	}
 }

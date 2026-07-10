@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ import (
 
 func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 	ctx := context.Background()
-	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
+	be, _, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{
 		Title:                "eventhub workspace",
@@ -39,36 +40,25 @@ func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 		t.Fatalf("workspace = %+v, want id", ws)
 	}
 
-	publishedHub, ok := eventHub.(interface{ Published() []events.Envelope })
+	recordedHub, ok := commandHub.(*recordingMagicHub)
 	if !ok {
-		t.Fatal("event hub does not expose published envelopes")
+		t.Fatal("command hub does not expose sent events")
 	}
-	var sawCommand, sawResult bool
-	for _, envelope := range publishedHub.Published() {
-		switch envelope.Topic {
-		case workorchdevents.TopicCLICommand:
-			command, ok := events.DecodeCLICommandPayload(envelope.Payload)
-			if ok && command.Command == events.CommandWorkspaceCreate {
-				sawCommand = true
-			}
-		case workorchdevents.TopicCLIResult:
-			result, ok := events.DecodeCLIResultPayload(envelope.Payload)
-			if ok && result.OK && result.CommandID != "" {
-				sawResult = true
-			}
+	var sawCommand bool
+	for _, event := range recordedHub.Sent() {
+		command, ok := event.Data().(workorchdevents.CLICommand)
+		if ok && command.Command == workorchdevents.CommandWorkspaceCreate && command.CreateWorkspace != nil {
+			sawCommand = true
 		}
 	}
 	if !sawCommand {
 		t.Fatalf("published command=%v, want workspace create command", sawCommand)
 	}
-	if sawResult {
-		t.Fatalf("published result=%v, want synchronous response without duplicate CLI result event", sawResult)
-	}
 }
 
-func TestEventHubBackendCLICommandUsesAsyncDispatchWithoutSendTimeout(t *testing.T) {
+func TestEventHubBackendCLICommandUsesSynchronousTypedResult(t *testing.T) {
 	ctx := context.Background()
-	be, _ := newEventHubBackendWithDispatcher(t, ctx)
+	be, _, _ := newEventHubBackendWithDispatcher(t, ctx)
 
 	done := make(chan error, 1)
 	go func() {
@@ -85,7 +75,7 @@ func TestEventHubBackendCLICommandUsesAsyncDispatchWithoutSendTimeout(t *testing
 			t.Fatalf("create workspace: %v", err)
 		}
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("workspace create blocked waiting for nested CLI result event")
+		t.Fatal("workspace create blocked waiting for typed command result")
 	}
 }
 
@@ -96,7 +86,7 @@ func TestEventHubEventsBackendReceivesProjectionAcrossHubWrappers(t *testing.T) 
 
 	subscriberHub := events.NewMagicHubWithHubOwner(rawHub, "workorch/tui")
 	publisherHub := events.NewMagicHubWithHubOwner(rawHub, "workorchd/projection")
-	be := NewEventHub(subscriberHub)
+	be := NewEventHub(subscriberHub, rawHub)
 	received := make(chan Event, 1)
 	unsubscribe, err := be.Events().Subscribe(ctx, func(_ context.Context, evt Event) {
 		if evt.Type == EventWorkspaceProjectionChanged {
@@ -199,11 +189,8 @@ func TestDecodeResultResourceUsesTypedPayloadBeforeJSONFallback(t *testing.T) {
 	want := WorkspaceSnapshotInfo{
 		Workspace: WorkspaceInfo{ID: "ws-typed", State: common.WorkspaceStateActive},
 	}
-	got, err := decodeResultResource[WorkspaceSnapshotInfo](events.CLIResultPayload{
-		TypedResource: &want,
-		Resource: map[string]any{
-			"cannotJSONMarshal": make(chan struct{}),
-		},
+	got, err := decodeResultResource[WorkspaceSnapshotInfo](workorchdevents.CLIResult{
+		WorkspaceSnapshot: &want,
 	}, nil)
 	if err != nil {
 		t.Fatalf("decode typed resource: %v", err)
@@ -215,13 +202,9 @@ func TestDecodeResultResourceUsesTypedPayloadBeforeJSONFallback(t *testing.T) {
 
 func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 	ctx := context.Background()
-	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
-	provider, ok := eventHub.(interface{ RawHub() magicevent.Hub })
-	if !ok || provider.RawHub() == nil {
-		t.Fatal("event hub does not expose raw hub")
-	}
+	be, _, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 	var captured workorchdevents.WorkspaceRunRequestedCommand
-	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, provider.RawHub())
+	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
 	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(event magicevent.Event, result magicevent.Result) {
 		captured, _ = event.Data().(workorchdevents.WorkspaceRunRequestedCommand)
 		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
@@ -305,7 +288,7 @@ func TestEventHubRunCommandRequiresSchedulerAcceptedResponse(t *testing.T) {
 				unsubscribe := tc.subscribe(rawHub)
 				defer unsubscribe()
 			}
-			be := NewEventHub(hub)
+			be := NewEventHub(hub, rawHub)
 			_, err := be.Run().Command(ctx, WorkspaceRunCommand{
 				WorkspaceID: "ws-run-command-ack",
 				Intent:      RunCommandIntentResume,
@@ -327,7 +310,7 @@ func TestEventHubRunCommandRequiresSchedulerAcceptedResponse(t *testing.T) {
 
 func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 	ctx := context.Background()
-	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
+	be, _, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "snapshot workspace"})
 	if err != nil {
@@ -346,16 +329,13 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 	if snapshot == nil || snapshot.Workspace.ID != ws.ID {
 		t.Fatalf("snapshot = %+v, want workspace %s", snapshot, ws.ID)
 	}
-	publishedHub, ok := eventHub.(interface{ Published() []events.Envelope })
+	recordedHub, ok := commandHub.(*recordingMagicHub)
 	if !ok {
-		t.Fatal("event hub does not expose published envelopes")
+		t.Fatal("command hub does not expose sent events")
 	}
-	for _, envelope := range publishedHub.Published() {
-		if envelope.Topic != workorchdevents.TopicCLICommand {
-			continue
-		}
-		command, ok := events.DecodeCLICommandPayload(envelope.Payload)
-		if ok && command.Command == events.CommandWorkspaceSnapshot {
+	for _, event := range recordedHub.Sent() {
+		command, ok := event.Data().(workorchdevents.CLICommand)
+		if ok && command.Command == workorchdevents.CommandWorkspaceSnapshot {
 			return
 		}
 	}
@@ -364,7 +344,7 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 
 func TestEventHubRunCommandRejectsUnsupportedIntent(t *testing.T) {
 	hub := events.NewMemoryHub()
-	be := NewEventHub(hub)
+	be := NewEventHub(hub, nil)
 	_, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
 		WorkspaceID:   "ws-eventhub",
 		ExpectedRunID: "run-001",
@@ -401,7 +381,7 @@ func TestEventHubRunCommandRejectsInvalidIntentScopeBeforePublish(t *testing.T) 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hub := events.NewMemoryHub()
-			be := NewEventHub(hub)
+			be := NewEventHub(hub, nil)
 			_, err := be.Run().Command(context.Background(), tc.req)
 			if !errors.Is(err, common.ErrInvalidArgument) {
 				t.Fatalf("err = %v, want invalid argument", err)
@@ -471,7 +451,7 @@ func TestEventHubGovernanceObjectCommandsRequireWorkspaceScopeBeforePublish(t *t
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hub := events.NewMemoryHub()
-			be := NewEventHub(hub)
+			be := NewEventHub(hub, nil)
 			err := tc.call(be)
 			if !errors.Is(err, common.ErrInvalidArgument) {
 				t.Fatalf("err = %v, want invalid argument", err)
@@ -485,7 +465,7 @@ func TestEventHubGovernanceObjectCommandsRequireWorkspaceScopeBeforePublish(t *t
 
 func TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
+	be, _, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "workspace object scope"})
 	if err != nil {
@@ -507,9 +487,9 @@ func TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope(t *testing.T) {
 		t.Fatalf("delete workspace: %v", err)
 	}
 
-	assertCLICommandWorkspaceScope(t, eventHub, events.CommandWorkspaceGet, ws.ID, string(ws.ID))
-	assertCLICommandWorkspaceScope(t, eventHub, events.CommandWorkspaceSnapshot, ws.ID, string(ws.ID))
-	assertCLICommandWorkspaceScope(t, eventHub, events.CommandWorkspaceDelete, ws.ID, string(ws.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.CommandWorkspaceGet, ws.ID, string(ws.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.CommandWorkspaceSnapshot, ws.ID, string(ws.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.CommandWorkspaceDelete, ws.ID, string(ws.ID))
 }
 
 func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
@@ -548,7 +528,7 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 
 func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 	ctx := context.Background()
-	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
+	be, eventHub, _ := newEventHubBackendWithDispatcher(t, ctx)
 	var sawUpdatedGoal, sawUpdatedDoD bool
 	unsubscribeGoal := eventHub.Subscribe(workspaceevents.TopicGoalDefined, func(_ context.Context, envelope events.Envelope) error {
 		if envelope.Payload[events.PayloadKeyText] == "- updated goal" {
@@ -592,7 +572,7 @@ func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 
 func TestEventHubGoalAndDoDGetUpdateCommandsCarryWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
+	be, _, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "definition scope workspace"})
 	if err != nil {
@@ -619,18 +599,21 @@ func TestEventHubGoalAndDoDGetUpdateCommandsCarryWorkspaceScope(t *testing.T) {
 		t.Fatalf("update dod: %v", err)
 	}
 
-	assertCLICommandWorkspaceScope(t, eventHub, events.CommandGoalGet, ws.ID, string(goal.ID))
-	assertCLICommandWorkspaceScope(t, eventHub, events.CommandGoalUpdate, ws.ID, string(goal.ID))
-	assertCLICommandWorkspaceScope(t, eventHub, events.CommandDoDGet, ws.ID, string(dod.ID))
-	assertCLICommandWorkspaceScope(t, eventHub, events.CommandDoDUpdate, ws.ID, string(dod.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.CommandGoalGet, ws.ID, string(goal.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.CommandGoalUpdate, ws.ID, string(goal.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.CommandDoDGet, ws.ID, string(dod.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.CommandDoDUpdate, ws.ID, string(dod.ID))
 }
 
 func TestEventHubRunReadCommandsCarryWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	eventHub := events.NewMemoryHub()
-	unsubscribe := subscribeRunReadCLIResponses(t, eventHub, "ws-run-read-scope", "run-read-scope")
+	rawHub := magicevent.NewHub(16)
+	t.Cleanup(func() { rawHub.Terminate(ctx) })
+	recordedHub := &recordingMagicHub{Hub: rawHub}
+	unsubscribe := subscribeRunReadCLIResponses(t, rawHub, "ws-run-read-scope", "run-read-scope")
 	defer unsubscribe()
-	be := NewEventHub(eventHub)
+	be := NewEventHub(eventHub, recordedHub)
 
 	if _, err := be.Run().Get(ctx, "ws-run-read-scope", "run-read-scope"); err != nil {
 		t.Fatalf("get run: %v", err)
@@ -642,9 +625,9 @@ func TestEventHubRunReadCommandsCarryWorkspaceScope(t *testing.T) {
 		t.Fatalf("run status: %v", err)
 	}
 
-	assertCLICommandWorkspaceScope(t, eventHub, events.CommandRunGet, "ws-run-read-scope", "run-read-scope")
-	assertCLICommandWorkspaceScope(t, eventHub, events.CommandRunList, "ws-run-read-scope", "")
-	assertCLICommandWorkspaceScope(t, eventHub, events.CommandRunStatus, "ws-run-read-scope", "run-read-scope")
+	assertCLICommandWorkspaceScope(t, recordedHub, workorchdevents.CommandRunGet, "ws-run-read-scope", "run-read-scope")
+	assertCLICommandWorkspaceScope(t, recordedHub, workorchdevents.CommandRunList, "ws-run-read-scope", "")
+	assertCLICommandWorkspaceScope(t, recordedHub, workorchdevents.CommandRunStatus, "ws-run-read-scope", "run-read-scope")
 }
 
 func TestEventHubBackendWorkspaceListUsesProjectionViewReader(t *testing.T) {
@@ -658,12 +641,12 @@ func TestEventHubBackendWorkspaceListUsesProjectionViewReader(t *testing.T) {
 			State: string(common.WorkspaceStateActive),
 		}},
 	}
-	dispatcher := appservice.NewCLICommandDispatcher(&appservice.RuntimeSession{}, eventHub, reader)
+	dispatcher := appservice.NewCLICommandDispatcher(&appservice.RuntimeSession{}, eventHub, rawHub, reader)
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("run dispatcher: %v", err)
 	}
 	t.Cleanup(dispatcher.Close)
-	be := NewEventHub(eventHub)
+	be := NewEventHub(eventHub, rawHub)
 
 	items, err := be.Workspace().List(ctx)
 	if err != nil {
@@ -679,7 +662,7 @@ func TestEventHubBackendWorkspaceListUsesProjectionViewReader(t *testing.T) {
 
 func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	ctx := context.Background()
-	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
+	be, eventHub, _ := newEventHubBackendWithDispatcher(t, ctx)
 
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{
 		Title:                "memory workspace",
@@ -764,9 +747,9 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	}
 }
 
-func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backend, events.Hub) {
+func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backend, events.Hub, magicevent.Hub) {
 	t.Helper()
-	runtime := testkit.NewRuntime("memory", "", workorchruntimepolicy.RuntimePolicy{}, nil)
+	runtime := testkit.NewRuntime("memory", "", workorchruntimepolicy.RuntimePolicy{}, nil, nil)
 	session := appservice.NewRuntimeSession(runtime)
 	t.Cleanup(func() { _ = session.Close(ctx) })
 	var err error
@@ -774,21 +757,13 @@ func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backen
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
-	dispatcher := appservice.NewCLICommandDispatcher(session, exports.Infrastructure.EventHub, testWorkspaceViewReader{session: session})
+	dispatcher := appservice.NewCLICommandDispatcher(session, exports.Infrastructure.EventHub, exports.Infrastructure.CommandHub, testWorkspaceViewReader{session: session})
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("run dispatcher: %v", err)
 	}
 	t.Cleanup(dispatcher.Close)
-	return NewEventHub(exports.Infrastructure.EventHub), exports.Infrastructure.EventHub
-}
-
-func subscribeWorkspaceRunAccepted(t *testing.T, hub events.Hub) func() {
-	t.Helper()
-	provider, ok := hub.(interface{ RawHub() magicevent.Hub })
-	if !ok || provider.RawHub() == nil {
-		t.Fatal("event hub does not expose raw hub")
-	}
-	return subscribeWorkspaceRunResult(t, provider.RawHub(), workorchdevents.WorkspaceRunRequestedResult{Accepted: true})
+	commandHub := &recordingMagicHub{Hub: exports.Infrastructure.CommandHub}
+	return NewEventHub(exports.Infrastructure.EventHub, commandHub), exports.Infrastructure.EventHub, commandHub
 }
 
 func subscribeWorkspaceRunResult(t *testing.T, hub magicevent.Hub, response any) func() {
@@ -800,14 +775,15 @@ func subscribeWorkspaceRunResult(t *testing.T, hub magicevent.Hub, response any)
 	return func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) }
 }
 
-func subscribeRunReadCLIResponses(t *testing.T, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID) func() {
+func subscribeRunReadCLIResponses(t *testing.T, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID) func() {
 	t.Helper()
-	return hub.Subscribe(workorchdevents.TopicCLICommand, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := events.DecodeCLICommandPayload(envelope.Payload)
+	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, hub)
+	observer.Subscribe(workorchdevents.TopicCLICommand, func(event magicevent.Event, response magicevent.Result) {
+		cmd, ok := event.Data().(workorchdevents.CLICommand)
 		if !ok {
-			t.Fatalf("decode CLI command payload failed: %+v", envelope.Payload)
+			t.Fatalf("decode CLI command failed: %T", event.Data())
 		}
-		payload := events.CLIResultPayload{
+		result := workorchdevents.CLIResult{
 			CorrelationID: cmd.CorrelationID,
 			CommandID:     cmd.CommandID,
 			OK:            true,
@@ -817,51 +793,57 @@ func subscribeRunReadCLIResponses(t *testing.T, hub events.Hub, workspaceID comm
 		}
 		run := RunInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 		switch cmd.Command {
-		case events.CommandRunGet:
-			payload.TypedResource = run
-			payload.Resource = resourceMap(run)
-		case events.CommandRunList:
-			payload.TypedResources = []any{run}
-			payload.Resources = []map[string]any{resourceMap(run)}
-		case events.CommandRunStatus:
+		case workorchdevents.CommandRunGet:
+			result.Run = &run
+		case workorchdevents.CommandRunList:
+			result.Runs = []RunInfo{run}
+		case workorchdevents.CommandRunStatus:
 			status := RunStatusInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
-			payload.TypedResource = status
-			payload.Resource = resourceMap(status)
+			result.RunStatus = &status
 		default:
-			return nil
+			return
 		}
-		return events.Response(events.Envelope{
-			Topic:        workorchdevents.TopicCLIResult,
-			SourceModule: "workorchd/cli",
-			SubjectType:  envelope.SubjectType,
-			SubjectID:    envelope.SubjectID,
-			WorkspaceID:  envelope.WorkspaceID,
-			RunID:        envelope.RunID,
-			Payload:      events.CLIResultPayloadMap(payload),
-		})
+		response.Set(result, nil)
 	})
+	return func() { observer.Unsubscribe(workorchdevents.TopicCLICommand) }
 }
 
-func assertCLICommandWorkspaceScope(t *testing.T, hub events.Hub, command string, workspaceID common.WorkspaceID, subjectID string) {
+func assertCLICommandWorkspaceScope(t *testing.T, hub magicevent.Hub, command string, workspaceID common.WorkspaceID, subjectID string) {
 	t.Helper()
-	publishedHub, ok := hub.(interface{ Published() []events.Envelope })
+	recordedHub, ok := hub.(*recordingMagicHub)
 	if !ok {
-		t.Fatal("event hub does not expose published envelopes")
+		t.Fatal("command hub does not expose sent events")
 	}
-	for _, envelope := range publishedHub.Published() {
-		if envelope.Topic != workorchdevents.TopicCLICommand {
-			continue
-		}
-		cmd, ok := events.DecodeCLICommandPayload(envelope.Payload)
+	for _, event := range recordedHub.Sent() {
+		cmd, ok := event.Data().(workorchdevents.CLICommand)
 		if !ok || cmd.Command != command || cmd.SubjectID != subjectID {
 			continue
 		}
-		if envelope.WorkspaceID != string(workspaceID) || cmd.WorkspaceID != workspaceID {
-			t.Fatalf("%s command scope envelope=%q payload=%q, want %q", command, envelope.WorkspaceID, cmd.WorkspaceID, workspaceID)
+		if cmd.WorkspaceID != workspaceID {
+			t.Fatalf("%s command workspace scope=%q, want %q", command, cmd.WorkspaceID, workspaceID)
 		}
 		return
 	}
 	t.Fatalf("published CLI command %s subject=%s not found", command, subjectID)
+}
+
+type recordingMagicHub struct {
+	magicevent.Hub
+	mu   sync.Mutex
+	sent []magicevent.Event
+}
+
+func (h *recordingMagicHub) Send(event magicevent.Event) magicevent.Result {
+	h.mu.Lock()
+	h.sent = append(h.sent, event)
+	h.mu.Unlock()
+	return h.Hub.Send(event)
+}
+
+func (h *recordingMagicHub) Sent() []magicevent.Event {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]magicevent.Event(nil), h.sent...)
 }
 
 type testWorkspaceViewReader struct {

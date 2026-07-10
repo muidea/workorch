@@ -6,27 +6,26 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/clicore"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func (d *CLICommandDispatcher) handleWorkspaceCommand(ctx context.Context, cmd events.CLICommandPayload) (map[string]any, []map[string]any, error) {
+func (d *CLICommandDispatcher) handleWorkspaceCommand(ctx context.Context, cmd clicore.Command) (map[string]any, []map[string]any, error) {
 	switch cmd.Command {
-	case events.CommandWorkspaceCreate:
+	case clicore.CommandWorkspaceCreate:
 		item, err := CreateWorkspaceWithTemplateWithSession(ctx, d.borrow(), clicore.CreateWorkspaceCommandFromPayload(cmd.Payload))
 		return clicore.ResourceMap(item), nil, err
-	case events.CommandWorkspaceGet:
+	case clicore.CommandWorkspaceGet:
 		if err := validateCLIWorkspaceObjectScope(cmd); err != nil {
 			return nil, nil, err
 		}
 		item, err := ReadWorkspaceWithSession(ctx, d.borrow(), cmd.SubjectID)
 		return clicore.ResourceMap(item), nil, err
-	case events.CommandWorkspaceList:
+	case clicore.CommandWorkspaceList:
 		if d.viewReader == nil {
 			return nil, nil, common.ErrInvalidArgument
 		}
 		items, err := d.viewReader.ListWorkspaceView(ctx)
 		return nil, clicore.ResourceMaps(items), err
-	case events.CommandWorkspaceSnapshot:
+	case clicore.CommandWorkspaceSnapshot:
 		if err := validateCLIWorkspaceObjectScope(cmd); err != nil {
 			return nil, nil, err
 		}
@@ -39,7 +38,7 @@ func (d *CLICommandDispatcher) handleWorkspaceCommand(ctx context.Context, cmd e
 		}
 		item = ProjectWorkspaceSnapshotDetail(item)
 		return clicore.ResourceMap(item), nil, err
-	case events.CommandWorkspaceDelete:
+	case clicore.CommandWorkspaceDelete:
 		if err := validateCLIWorkspaceObjectScope(cmd); err != nil {
 			return nil, nil, err
 		}
@@ -50,7 +49,7 @@ func (d *CLICommandDispatcher) handleWorkspaceCommand(ctx context.Context, cmd e
 	}
 }
 
-func validateCLIWorkspaceObjectScope(cmd events.CLICommandPayload) error {
+func validateCLIWorkspaceObjectScope(cmd clicore.Command) error {
 	if cmd.WorkspaceID == "" || cmd.SubjectID == "" {
 		return fmt.Errorf("%w: workspace command %s requires workspace scope and subject id", common.ErrInvalidArgument, cmd.Command)
 	}

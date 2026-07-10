@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func purgeWorkspaceDecisionTickets(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
+func purgeWorkspaceDecisionTickets(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
 	response, err := sendWorkspaceMagicCommand[decisionevents.ListTicketsByWorkspaceCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandListTicketsByWS, decisionevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", decisionevents.ListTicketsByWorkspaceCommand{
 		WorkspaceID: workspaceID,
 	})
@@ -45,7 +45,7 @@ func purgeWorkspaceDecisionTickets(ctx context.Context, hub events.Hub, workspac
 	return nil
 }
 
-func purgeWorkspaceApprovals(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
+func purgeWorkspaceApprovals(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
 	response, err := sendWorkspaceMagicCommand[approvalevents.ListApprovalsByWorkspaceCommand, approvalevents.ApprovalCommandResult](ctx, hub, approvalevents.TopicApprovalCommandListByWorkspace, approvalevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", approvalevents.ListApprovalsByWorkspaceCommand{
 		WorkspaceID: workspaceID,
 	})

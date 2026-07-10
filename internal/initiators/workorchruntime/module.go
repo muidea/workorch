@@ -26,6 +26,7 @@ func init() {
 type Runtime struct {
 	repositories  repositorySet
 	eventHub      workorchevents.Hub
+	commandHub    event.Hub
 	runtimePolicy workorchruntimepolicy.RuntimePolicy
 }
 
@@ -80,6 +81,7 @@ func (r *Runtime) Setup(_ context.Context, eventHub event.Hub, _ task.Background
 		return cd.NewError(cd.IllegalParam, "invalid argument: "+err.Error())
 	}
 	r.repositories = repositories
+	r.commandHub = eventHub
 	r.eventHub = workorchevents.NewMagicHubWithHubOwner(eventHub, common.InitiatorID)
 	r.runtimePolicy = workorchruntimepolicy.FromConfig(cfg)
 	return nil
@@ -92,6 +94,7 @@ func (r *Runtime) Run(_ context.Context) *cd.Error {
 func (r *Runtime) Teardown(_ context.Context) {
 	r.repositories = repositorySet{}
 	r.eventHub = nil
+	r.commandHub = nil
 	r.runtimePolicy = workorchruntimepolicy.RuntimePolicy{}
 }
 
@@ -107,6 +110,13 @@ func (r *Runtime) EventHub() workorchevents.Hub {
 		return nil
 	}
 	return r.eventHub
+}
+
+func (r *Runtime) CommandHub() event.Hub {
+	if r == nil {
+		return nil
+	}
+	return r.commandHub
 }
 
 func (r *Runtime) RuntimePolicy() workorchruntimepolicy.RuntimePolicy {

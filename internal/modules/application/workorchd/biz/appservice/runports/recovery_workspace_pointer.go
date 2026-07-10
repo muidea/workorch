@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func RecoverTerminalActiveWorkspacePointers(ctx context.Context, hub events.Hub) error {
+func RecoverTerminalActiveWorkspacePointers(ctx context.Context, hub magicevent.Hub) error {
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
@@ -13,10 +14,9 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ResolveDecisionView(ctx context.Context, hub events.Hub, traces governancecore.AutoGovernanceTraceReader, ticketID common.TicketID, cmd appmodelcore.ResolveDecisionCommand, scope common.WorkspaceID) (readmodelcore.Decision, error) {
+func ResolveDecisionView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, ticketID common.TicketID, cmd appmodelcore.ResolveDecisionCommand, scope common.WorkspaceID) (readmodelcore.Decision, error) {
 	semantic := governancecommon.NormalizeDecisionResolution(cmd.ResolutionType, cmd.ResolutionPayload)
 	if !decisioncommon.IsSupportedResolutionType(semantic.ResolutionType) {
 		return readmodelcore.Decision{}, common.ErrInvalidArgument
@@ -119,7 +119,7 @@ func decisionResolutionPayloadHasExplicitRawInput(payload map[string]any) bool {
 	return false
 }
 
-func ReadDecisionTicketForResolution(ctx context.Context, hub events.Hub, ticketID common.TicketID, scope common.WorkspaceID) (*decisionmodel.Ticket, error) {
+func ReadDecisionTicketForResolution(ctx context.Context, hub magicevent.Hub, ticketID common.TicketID, scope common.WorkspaceID) (*decisionmodel.Ticket, error) {
 	if ticketID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -155,7 +155,7 @@ func ReadDecisionTicketForResolution(ctx context.Context, hub events.Hub, ticket
 	}
 }
 
-func resolveDecisionTicket(ctx context.Context, hub events.Hub, ticket *decisionmodel.Ticket, resolutionType string, payload map[string]any, scope common.WorkspaceID) (*decisionmodel.Ticket, *decisionmodel.Resolution, error) {
+func resolveDecisionTicket(ctx context.Context, hub magicevent.Hub, ticket *decisionmodel.Ticket, resolutionType string, payload map[string]any, scope common.WorkspaceID) (*decisionmodel.Ticket, *decisionmodel.Resolution, error) {
 	normalizedPayload, normalizedType, err := prepareDecisionResolution(ticket, resolutionType, payload, scope)
 	if err != nil {
 		return nil, nil, err

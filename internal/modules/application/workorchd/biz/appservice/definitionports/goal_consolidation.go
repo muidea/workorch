@@ -5,14 +5,14 @@ import (
 	"errors"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitioncore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ConsolidateGoal(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, canonicalID common.GoalID, text string, obsoleteIDs []common.GoalID) (*workspacemodel.Goal, error) {
+func ConsolidateGoal(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, canonicalID common.GoalID, text string, obsoleteIDs []common.GoalID) (*workspacemodel.Goal, error) {
 	updated, err := UpdateGoal(ctx, hub, workspaceID, canonicalID, text)
 	if err != nil {
 		return nil, err
@@ -28,7 +28,7 @@ func ConsolidateGoal(ctx context.Context, hub events.Hub, workspaceID common.Wor
 	return updated, nil
 }
 
-func ConsolidateWorkspaceGoal(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, existing []*workspacemodel.Goal, appended string) (*workspacemodel.Goal, error) {
+func ConsolidateWorkspaceGoal(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, existing []*workspacemodel.Goal, appended string) (*workspacemodel.Goal, error) {
 	plan, err := definitioncore.WorkspaceGoalConsolidationPlan(existing, workspaceID, appended)
 	if err != nil {
 		return nil, err
@@ -36,7 +36,7 @@ func ConsolidateWorkspaceGoal(ctx context.Context, hub events.Hub, workspaceID c
 	return ConsolidateGoal(ctx, hub, workspaceID, plan.CanonicalID, plan.Text, plan.ObsoleteIDs)
 }
 
-func DefineOrConsolidateWorkspaceGoal(ctx context.Context, hub events.Hub, eventRecords activationcore.EventRecordLister, workspaceID common.WorkspaceID, text string) (*workspacemodel.Goal, error) {
+func DefineOrConsolidateWorkspaceGoal(ctx context.Context, hub magicevent.Hub, eventRecords activationcore.EventRecordLister, workspaceID common.WorkspaceID, text string) (*workspacemodel.Goal, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil, common.ErrInvalidArgument
@@ -56,7 +56,7 @@ func DefineOrConsolidateWorkspaceGoal(ctx context.Context, hub events.Hub, event
 	return defineNewWorkspaceGoal(ctx, hub, workspaceID, text)
 }
 
-func ListConsolidatedWorkspaceGoals(ctx context.Context, hub events.Hub, eventRecords activationcore.EventRecordLister, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
+func ListConsolidatedWorkspaceGoals(ctx context.Context, hub magicevent.Hub, eventRecords activationcore.EventRecordLister, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
 	items, err := ListGoalsByWorkspace(ctx, hub, workspaceID)
 	if err != nil {
 		return nil, err

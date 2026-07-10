@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func FailRunAndRecoverActiveWorkspacePointer(ctx context.Context, hub events.Hub, item *runmodel.Run, reason string) (*runmodel.Run, error) {
+func FailRunAndRecoverActiveWorkspacePointer(ctx context.Context, hub magicevent.Hub, item *runmodel.Run, reason string) (*runmodel.Run, error) {
 	if hub == nil || item == nil {
 		return nil, common.ErrInvalidArgument
 	}

@@ -3,14 +3,14 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ReadApprovalByOwnerCommand(ctx context.Context, hub events.Hub, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {
+func ReadApprovalByOwnerCommand(ctx context.Context, hub magicevent.Hub, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {
 	if hub == nil || approvalID == "" {
 		return nil, common.ErrInvalidArgument
 	}

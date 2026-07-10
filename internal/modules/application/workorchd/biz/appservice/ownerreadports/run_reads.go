@@ -3,14 +3,14 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ReadRunByOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) (*runmodel.Run, error) {
+func ReadRunByOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) (*runmodel.Run, error) {
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -28,7 +28,7 @@ func ReadRunByOwnerCommand(ctx context.Context, hub events.Hub, runID common.Run
 	return response.Run, nil
 }
 
-func ReadRunByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID) (*runmodel.Run, error) {
+func ReadRunByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID) (*runmodel.Run, error) {
 	if hub == nil || workspaceID == "" || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -42,7 +42,7 @@ func ReadRunByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, workspa
 	return response.Run, nil
 }
 
-func ListRunsByOwnerCommand(ctx context.Context, hub events.Hub) ([]*runmodel.Run, error) {
+func ListRunsByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*runmodel.Run, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -53,7 +53,7 @@ func ListRunsByOwnerCommand(ctx context.Context, hub events.Hub) ([]*runmodel.Ru
 	return response.Runs, nil
 }
 
-func ListRecoverableRuntimeGapRunCandidatesByOwnerCommand(ctx context.Context, hub events.Hub) ([]*runmodel.Run, error) {
+func ListRecoverableRuntimeGapRunCandidatesByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*runmodel.Run, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -67,7 +67,7 @@ func ListRecoverableRuntimeGapRunCandidatesByOwnerCommand(ctx context.Context, h
 	return response.Runs, nil
 }
 
-func ListRunsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
+func ListRunsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}

@@ -3,6 +3,7 @@ package runports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
@@ -13,10 +14,9 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func WorkspaceDefinitionContextPatch(ctx context.Context, hub events.Hub, item *runmodel.Run) (map[string]any, error) {
+func WorkspaceDefinitionContextPatch(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) (map[string]any, error) {
 	if item == nil || item.WorkspaceID == "" || item.GoalID == "" || item.DoDID == "" {
 		return nil, nil
 	}

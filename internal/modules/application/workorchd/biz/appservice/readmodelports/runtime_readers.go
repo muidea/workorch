@@ -3,14 +3,14 @@ package readmodelports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type ToolCallReader struct {
-	Hub events.Hub
+	Hub magicevent.Hub
 }
 
 func (r ToolCallReader) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.ToolCall, error) {
@@ -18,7 +18,7 @@ func (r ToolCallReader) ListByRun(ctx context.Context, runID common.RunID) ([]*r
 }
 
 type PatchReader struct {
-	Hub events.Hub
+	Hub magicevent.Hub
 }
 
 func (r PatchReader) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.Patch, error) {
@@ -26,7 +26,7 @@ func (r PatchReader) ListByRun(ctx context.Context, runID common.RunID) ([]*runm
 }
 
 type ValidationResultReader struct {
-	Hub events.Hub
+	Hub magicevent.Hub
 }
 
 func (r ValidationResultReader) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.ValidationResult, error) {

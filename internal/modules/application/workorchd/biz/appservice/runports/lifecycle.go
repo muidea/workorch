@@ -4,17 +4,17 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type CreateRunViewRequest struct {
-	Hub                            events.Hub
+	Hub                            magicevent.Hub
 	WorkspaceID                    string
 	RunID                          string
 	GoalID                         string

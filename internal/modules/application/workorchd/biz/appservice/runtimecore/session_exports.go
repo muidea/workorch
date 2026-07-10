@@ -3,6 +3,7 @@ package runtimecore
 import (
 	"fmt"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -31,6 +32,17 @@ func (s *Session) RequiredEventHub() (events.Hub, error) {
 		return nil, common.ErrInvalidArgument
 	}
 	return exports.Infrastructure.EventHub, nil
+}
+
+func (s *Session) RequiredCommandHub() (magicevent.Hub, error) {
+	exports, err := s.Exports()
+	if err != nil {
+		return nil, err
+	}
+	if exports.Infrastructure.CommandHub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return exports.Infrastructure.CommandHub, nil
 }
 
 func (s *Session) ConfigLoader() func() (workorchconfig.Config, error) {
@@ -106,6 +118,7 @@ func ValidateRuntimeExports(exports bootstrap.Exports) error {
 		{"Repositories.Resolutions", repositories.Resolutions},
 		{"Repositories.Approvals", repositories.Approvals},
 		{"Infrastructure.EventHub", exports.Infrastructure.EventHub},
+		{"Infrastructure.CommandHub", exports.Infrastructure.CommandHub},
 	}
 	for _, item := range required {
 		if item.value == nil {

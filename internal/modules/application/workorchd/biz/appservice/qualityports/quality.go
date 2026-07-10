@@ -4,16 +4,16 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitioncore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/qualitycore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func CheckGoalDoDQuality(ctx context.Context, hub events.Hub, cmd qualitycore.Command) (qualitycore.Check, error) {
+func CheckGoalDoDQuality(ctx context.Context, hub magicevent.Hub, cmd qualitycore.Command) (qualitycore.Check, error) {
 	if hub == nil {
 		return qualitycore.Check{}, common.ErrInvalidArgument
 	}

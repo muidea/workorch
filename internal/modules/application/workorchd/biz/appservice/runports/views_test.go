@@ -90,7 +90,7 @@ func TestReadRunViewUsesOwnerReadAndProjectsView(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 
-	got, err := ReadRunView(ctx, exports.Infrastructure.EventHub, run.ID)
+	got, err := ReadRunView(ctx, exports.Infrastructure.CommandHub, run.ID)
 	if err != nil {
 		t.Fatalf("ReadRunView: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestListRunViewsByWorkspaceUsesOwnerReadAndProjectsViews(t *testing.T) {
 		}
 	}
 
-	got, err := ListRunViewsByWorkspace(ctx, exports.Infrastructure.EventHub, "ws-run-view-list-b")
+	got, err := ListRunViewsByWorkspace(ctx, exports.Infrastructure.CommandHub, "ws-run-view-list-b")
 	if err != nil {
 		t.Fatalf("ListRunViewsByWorkspace: %v", err)
 	}

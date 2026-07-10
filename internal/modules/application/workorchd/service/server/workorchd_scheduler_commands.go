@@ -75,13 +75,9 @@ func (s *serverState) publishWorkorchDSchedulerCommand(ctx context.Context, topi
 		return common.ErrInvalidArgument
 	}
 	command = prepareHTTPSchedulerCommand(topic, command)
-	provider, ok := s.schedulerHub.(interface{ RawHub() magicevent.Hub })
-	if !ok || provider.RawHub() == nil {
-		return common.ErrInvalidArgument
-	}
 	event := magicevent.NewEventWithContext(topic, "workorchd/http", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	event.BindLaneKey(events.EventHubLaneKey(events.Envelope{Topic: topic, SubjectType: schedulerSubjectType(topic), SubjectID: schedulerSubjectID(topic, command), WorkspaceID: strings.TrimSpace(string(command.WorkspaceID)), RunID: strings.TrimSpace(string(command.RunID))}))
-	response := provider.RawHub().Send(event)
+	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{SubjectType: schedulerSubjectType(topic), SubjectID: schedulerSubjectID(topic, command), WorkspaceID: strings.TrimSpace(string(command.WorkspaceID)), RunID: strings.TrimSpace(string(command.RunID))}))
+	response := s.schedulerHub.Send(event)
 	if response == nil {
 		s.recordSchedulerCommandResult(topic, "missing_response")
 		return fmt.Errorf("%w: scheduler command %s returned no accepted response", common.ErrConflict, topic)
@@ -255,11 +251,7 @@ func (s *serverState) registerWorkorchDSchedulerCommandWatcher() {
 	topics := []string{
 		workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
 	}
-	provider, ok := s.schedulerHub.(interface{ RawHub() magicevent.Hub })
-	if !ok || provider.RawHub() == nil {
-		return
-	}
-	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, provider.RawHub())
+	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, s.schedulerHub)
 	for _, topic := range topics {
 		topic := topic
 		observer.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {

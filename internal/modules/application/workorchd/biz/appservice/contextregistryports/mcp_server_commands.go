@@ -4,15 +4,15 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func CreateMCPServer(ctx context.Context, hub events.Hub, cmd contextregistrycore.MCPServer) (contextregistrycore.MCPServer, error) {
+func CreateMCPServer(ctx context.Context, hub magicevent.Hub, cmd contextregistrycore.MCPServer) (contextregistrycore.MCPServer, error) {
 	if hub == nil {
 		return contextregistrycore.MCPServer{}, common.ErrInvalidArgument
 	}
@@ -23,7 +23,7 @@ func CreateMCPServer(ctx context.Context, hub events.Hub, cmd contextregistrycor
 	return mcpServerFromCommandResult(result)
 }
 
-func UpdateMCPServer(ctx context.Context, hub events.Hub, cmd contextregistrycore.MCPServer) (contextregistrycore.MCPServer, error) {
+func UpdateMCPServer(ctx context.Context, hub magicevent.Hub, cmd contextregistrycore.MCPServer) (contextregistrycore.MCPServer, error) {
 	if cmd.Env == nil {
 		existing, err := ReadMCPServer(ctx, hub, cmd.ID)
 		if err != nil {
@@ -41,7 +41,7 @@ func UpdateMCPServer(ctx context.Context, hub events.Hub, cmd contextregistrycor
 	return mcpServerFromCommandResult(result)
 }
 
-func UpdateMCPServerByID(ctx context.Context, hub events.Hub, serverID string, cmd contextregistrycore.MCPServer) (contextregistrycore.MCPServer, error) {
+func UpdateMCPServerByID(ctx context.Context, hub magicevent.Hub, serverID string, cmd contextregistrycore.MCPServer) (contextregistrycore.MCPServer, error) {
 	serverID = strings.TrimSpace(serverID)
 	cmd.ID = strings.TrimSpace(cmd.ID)
 	if serverID == "" {
@@ -54,7 +54,7 @@ func UpdateMCPServerByID(ctx context.Context, hub events.Hub, serverID string, c
 	return UpdateMCPServer(ctx, hub, cmd)
 }
 
-func ListMCPServers(ctx context.Context, hub events.Hub) ([]contextregistrycore.MCPServer, error) {
+func ListMCPServers(ctx context.Context, hub magicevent.Hub) ([]contextregistrycore.MCPServer, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -65,7 +65,7 @@ func ListMCPServers(ctx context.Context, hub events.Hub) ([]contextregistrycore.
 	return mcpServersFromCommandResult(result)
 }
 
-func ReadMCPServer(ctx context.Context, hub events.Hub, serverID string) (*mcpmodel.Server, error) {
+func ReadMCPServer(ctx context.Context, hub magicevent.Hub, serverID string) (*mcpmodel.Server, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -79,7 +79,7 @@ func ReadMCPServer(ctx context.Context, hub events.Hub, serverID string) (*mcpmo
 	return result.Server, nil
 }
 
-func ReadMCPServerView(ctx context.Context, hub events.Hub, serverID string) (contextregistrycore.MCPServer, error) {
+func ReadMCPServerView(ctx context.Context, hub magicevent.Hub, serverID string) (contextregistrycore.MCPServer, error) {
 	item, err := ReadMCPServer(ctx, hub, serverID)
 	if err != nil {
 		return contextregistrycore.MCPServer{}, err

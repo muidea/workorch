@@ -4,15 +4,15 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-func WorkspaceExecutionContract(ctx context.Context, hub events.Hub, workspace *workspacemodel.Workspace) map[string]any {
+func WorkspaceExecutionContract(ctx context.Context, hub magicevent.Hub, workspace *workspacemodel.Workspace) map[string]any {
 	if hub == nil {
 		return map[string]any{"stateChangePolicy": "allowed_but_not_required"}
 	}
@@ -20,7 +20,7 @@ func WorkspaceExecutionContract(ctx context.Context, hub events.Hub, workspace *
 }
 
 type workspaceTemplateReader struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r workspaceTemplateReader) Get(ctx context.Context, id string) (*repository.WorkspaceTemplate, error) {

@@ -45,7 +45,7 @@ func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 		delete(templates, cmd.TemplateID)
 		return workspaceevents.WorkspaceCommandResult{}, nil
 	})
-	hub := testHub.hub
+	hub := testHub.raw
 
 	created, err := CreateWorkspaceTemplate(ctx, hub, workspacecore.WorkspaceTemplate{
 		ID:       " template-port ",

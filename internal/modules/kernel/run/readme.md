@@ -24,10 +24,11 @@
 - Workspace contract: 创建/启动 Run 前必须读取 `kernel/workspace` 的有效 definition revision。
 - Orchestrator contract: Run module 只发起编排命令，不解释 contract gate 结果；状态转换输入来自 orchestrator 的正式 outcome。
 - Governance contract: blocked_on_decision/blocked_on_approval 必须关联具体 ticket/approval scope。
+- EventHub contract: workspace read 与 orchestrator command adapter 直接使用 module 注入的 magicCommon `event.Hub`；不得通过 `MagicHub.RawHub()` 兼容路径发送 owner command。
 
 ## 已知缺口
 
-- 当前盘点未发现 Run module 自身职责缺失；后续需继续补 pairwise contract tests 验证 stuck run recovery 和 duplicate run scope。
+- 当前盘点未发现 Run module 自身职责或跨 owner EventHub 合同缺失；后续需继续补 pairwise contract tests 验证 stuck run recovery 和 duplicate run scope。
 
 ## 边界约束
 

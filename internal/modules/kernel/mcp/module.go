@@ -203,7 +203,7 @@ func (m *Module) executeMCPCommand(ctx context.Context, topic string, data any) 
 	}
 }
 
-func setMagicResult(result magicevent.Result, data any, err error) {
+func setMagicResult(result magicevent.Result, data mcpevents.MCPCommandResult, err error) {
 	if result == nil {
 		return
 	}

@@ -3,15 +3,15 @@ package governanceports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func BatchResolveApprovalViews(ctx context.Context, hub events.Hub, traces governancecore.AutoGovernanceTraceReader, cmd appmodelcore.BatchResolveApprovalCommand, scope common.WorkspaceID) ([]readmodelcore.Approval, error) {
+func BatchResolveApprovalViews(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, cmd appmodelcore.BatchResolveApprovalCommand, scope common.WorkspaceID) ([]readmodelcore.Approval, error) {
 	semantic := approvalSemanticFromCommand(appmodelcore.ResolveApprovalCommand{Action: cmd.Action, Payload: cmd.Payload}, "")
 	action, err := governancecore.NormalizeApprovalBatchAction(semantic.Action)
 	if err != nil {

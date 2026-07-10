@@ -3,13 +3,13 @@ package activationports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func WorkspaceGovernanceHistory(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, limit int) []map[string]any {
+func WorkspaceGovernanceHistory(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, limit int) []map[string]any {
 	if hub == nil || workspaceID == "" || limit <= 0 {
 		return nil
 	}
@@ -56,7 +56,7 @@ func WorkspaceGovernanceHistory(ctx context.Context, hub events.Hub, workspaceID
 	return ret
 }
 
-func RejectedResultContinuation(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID) (map[string]any, error) {
+func RejectedResultContinuation(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID) (map[string]any, error) {
 	if hub == nil || workspaceID == "" || goalID == "" || dodID == "" {
 		return nil, nil
 	}

@@ -226,9 +226,9 @@ func TestSelectedSkillsCanResolveSkillHubReferences(t *testing.T) {
 	}()
 
 	ref := "skillhub:workspace:" + workspace.ID + ":runtime-workspace-skill"
-	hub, err := session.RequiredEventHub()
+	hub, err := session.RequiredCommandHub()
 	if err != nil {
-		t.Fatalf("session.RequiredEventHub: %v", err)
+		t.Fatalf("session.RequiredCommandHub: %v", err)
 	}
 	items, err := activationports.SelectedSkills(ctx, hub, []string{ref}, workspace.ID, skillHubCatalogForEventHub(hub))
 	if err != nil {

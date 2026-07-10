@@ -4,13 +4,13 @@ import (
 	"context"
 	"sync"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ValidateRunDefinitions(ctx context.Context, hub events.Hub, workspaceID string, goalID string, dodID string) error {
+func ValidateRunDefinitions(ctx context.Context, hub magicevent.Hub, workspaceID string, goalID string, dodID string) error {
 	if goalID == "" && dodID == "" {
 		return nil
 	}

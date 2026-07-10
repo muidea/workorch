@@ -4,11 +4,11 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func createRunViewRequest(ctx context.Context, hub events.Hub, workspaceID string, runID string, goalID string, dodID string) (runports.CreateRunViewRequest, error) {
+func createRunViewRequest(ctx context.Context, hub magicevent.Hub, workspaceID string, runID string, goalID string, dodID string) (runports.CreateRunViewRequest, error) {
 	request := runports.CreateRunViewRequest{
 		Hub:         hub,
 		WorkspaceID: workspaceID,

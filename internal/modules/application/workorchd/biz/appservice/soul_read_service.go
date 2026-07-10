@@ -3,12 +3,12 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func ReadSoulWithSession(ctx context.Context, session *RuntimeSession, soulID string) (ret Soul, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (Soul, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Soul, error) {
 		return contextregistryports.ReadSoul(ctx, hub, soulID)
 	})
 }
@@ -20,7 +20,7 @@ func ReadSoulWithBackend(ctx context.Context, backend string, dataRoot string, s
 }
 
 func ListSoulsWithSession(ctx context.Context, session *RuntimeSession) (ret []Soul, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]Soul, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) ([]Soul, error) {
 		return contextregistryports.ListSouls(ctx, hub)
 	})
 }

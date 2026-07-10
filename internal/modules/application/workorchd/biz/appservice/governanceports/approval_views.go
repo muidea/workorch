@@ -3,15 +3,15 @@ package governanceports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ApprovalView(ctx context.Context, hub events.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, scope common.WorkspaceID) (readmodelcore.Approval, error) {
+func ApprovalView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, scope common.WorkspaceID) (readmodelcore.Approval, error) {
 	item, err := ReadApproval(contextWithGovernanceScope(ctx, scope), hub, approvalID)
 	if err != nil {
 		return readmodelcore.Approval{}, err
@@ -30,7 +30,7 @@ func ApprovalViewForItem(ctx context.Context, traces governancecore.AutoGovernan
 	return readmodelprojection.MapApproval(item, autoGovernance), nil
 }
 
-func ApprovalViewsForQuery(ctx context.Context, hub events.Hub, traces governancecore.AutoGovernanceTraceReader, workspaceID string, runID string) ([]readmodelcore.Approval, error) {
+func ApprovalViewsForQuery(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, workspaceID string, runID string) ([]readmodelcore.Approval, error) {
 	items, err := ApprovalsForQuery(ctx, hub, workspaceID, runID)
 	if err != nil {
 		return nil, err

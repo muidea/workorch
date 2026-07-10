@@ -14,7 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
-func sendGovernanceTestCommand(ctx context.Context, rawHub magicevent.Hub, topic string, command any) (governanceevents.GovernanceCommandResult, error) {
+func sendGovernanceTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (governanceevents.GovernanceCommandResult, error) {
 	ev := magicevent.NewEventWithContext(topic, "governance/module_test", governanceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := rawHub.Send(ev)
 	if result == nil {

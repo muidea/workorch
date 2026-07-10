@@ -1,11 +1,11 @@
 package readmodelports
 
 import (
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func NewOwnerReaders(hub events.Hub) (OwnerReaders, error) {
+func NewOwnerReaders(hub magicevent.Hub) (OwnerReaders, error) {
 	if hub == nil {
 		return OwnerReaders{}, common.ErrInvalidArgument
 	}

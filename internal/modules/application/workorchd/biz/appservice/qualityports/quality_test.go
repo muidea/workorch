@@ -9,13 +9,12 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestCheckGoalDoDQualityEvaluatesExplicitDraft(t *testing.T) {
 	t.Parallel()
 
-	got, err := CheckGoalDoDQuality(context.Background(), events.NewMemoryHub(), qualitycore.Command{
+	got, err := CheckGoalDoDQuality(context.Background(), magicevent.NewHub(8), qualitycore.Command{
 		WorkspaceID: " ws-quality-port ",
 		GoalText:    "实现质量预检端口迁移并保持接口行为",
 		DoDItems: []string{
@@ -40,7 +39,7 @@ func TestCheckGoalDoDQualityRejectsMissingHubOrWorkspace(t *testing.T) {
 	if _, err := CheckGoalDoDQuality(context.Background(), nil, qualitycore.Command{WorkspaceID: "ws"}); err != common.ErrInvalidArgument {
 		t.Fatalf("nil hub err = %v, want ErrInvalidArgument", err)
 	}
-	if _, err := CheckGoalDoDQuality(context.Background(), events.NewMemoryHub(), qualitycore.Command{}); err != common.ErrInvalidArgument {
+	if _, err := CheckGoalDoDQuality(context.Background(), magicevent.NewHub(8), qualitycore.Command{}); err != common.ErrInvalidArgument {
 		t.Fatalf("empty workspace err = %v, want ErrInvalidArgument", err)
 	}
 }
@@ -49,7 +48,6 @@ func TestCheckGoalDoDQualityReadsExplicitDefinitionsWithWorkspaceScope(t *testin
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(8)
 	defer rawHub.Terminate(ctx)
-	hub := events.NewMagicHubWithHubOwner(rawHub, "qualityports/test")
 	workspaceID := common.WorkspaceID("ws-quality-scope")
 	goalID := common.GoalID("goal-quality-scope")
 	dodID := common.DoDID("dod-quality-scope")
@@ -81,7 +79,7 @@ func TestCheckGoalDoDQualityReadsExplicitDefinitionsWithWorkspaceScope(t *testin
 	})
 	defer observer.Unsubscribe(workspaceevents.TopicWorkspaceCommandGetDoD)
 
-	got, err := CheckGoalDoDQuality(ctx, hub, qualitycore.Command{
+	got, err := CheckGoalDoDQuality(ctx, rawHub, qualitycore.Command{
 		WorkspaceID: string(workspaceID),
 		GoalID:      string(goalID),
 		DoDID:       string(dodID),

@@ -237,7 +237,7 @@ func memoryCommandContext(ctx context.Context, workspaceID common.WorkspaceID) c
 	return common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 }
 
-func setMemoryMagicResult(result magicevent.Result, data any, err error) {
+func setMemoryMagicResult(result magicevent.Result, data memoryevents.MemoryCommandResult, err error) {
 	if result == nil {
 		return
 	}

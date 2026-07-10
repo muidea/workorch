@@ -14,7 +14,7 @@ func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {
 	rawHub := magicevent.NewHub(16)
 	hub := events.NewMagicHubWithHubOwner(rawHub, "workorchd/scheduler/test")
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, &recordingBackgroundRoutine{})
+	state := newServerStateWithHubsAndBackground(normalizeConfig(Config{Backend: "memory"}), hub, rawHub, &recordingBackgroundRoutine{})
 	command := workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: "ws-typed-scheduler",
 		RunID:       "run-typed-scheduler",
@@ -52,7 +52,7 @@ func TestWorkorchDSchedulerRejectsInvalidTypedWorkspaceRunCommand(t *testing.T) 
 	rawHub := magicevent.NewHub(16)
 	hub := events.NewMagicHubWithHubOwner(rawHub, "workorchd/scheduler/test")
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
-	_ = newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, &recordingBackgroundRoutine{})
+	_ = newServerStateWithHubsAndBackground(normalizeConfig(Config{Backend: "memory"}), hub, rawHub, &recordingBackgroundRoutine{})
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "test", workorchdevents.CommandDestination, magicevent.NewHeader(), context.Background(), workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: common.WorkspaceID("ws-invalid-typed-scheduler"),
 	})

@@ -3,6 +3,7 @@ package runports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -18,6 +19,7 @@ type CompressedContextDependencies struct {
 	Resolutions      readmodelcore.DecisionResolutionReader
 	Approvals        readmodelcore.ApprovalReader
 	MemoryRecalls    readmodelcore.MemoryRecallTraceReader
+	CommandHub       magicevent.Hub
 	EventHub         events.Hub
 	RecoverySnapshot RecoverySnapshotFunc
 	DefaultLanguage  string
@@ -42,10 +44,10 @@ func CompressedContextPatchForRun(ctx context.Context, deps CompressedContextDep
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := RecordRecoveryMemoryRecallTrace(ctx, deps.EventHub, deps.MemoryRecalls, item, compressed); err != nil {
+	if err := RecordRecoveryMemoryRecallTrace(ctx, deps.CommandHub, deps.EventHub, deps.MemoryRecalls, item, compressed); err != nil {
 		return nil, nil, err
 	}
-	patch, err := WorkspaceDefinitionContextPatch(ctx, deps.EventHub, item)
+	patch, err := WorkspaceDefinitionContextPatch(ctx, deps.CommandHub, item)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -70,5 +72,5 @@ func AttachCompressedContextToLoadedRun(ctx context.Context, deps CompressedCont
 	}
 	executionContext["compressedContext"] = compressed
 	item.ExecutionContext = executionContext
-	return UpdateRun(ctx, deps.EventHub, item)
+	return UpdateRun(ctx, deps.CommandHub, item)
 }

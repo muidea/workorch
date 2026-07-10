@@ -59,31 +59,31 @@ func (m *Module) Configure(deps Dependencies) error {
 	}
 	eventHubBridge := events.NewMagicHubWithHubOwner(deps.EventHub, ModuleID)
 	if deps.ResolveDecision == nil {
-		deps.ResolveDecision = eventResolveDecision(eventHubBridge)
+		deps.ResolveDecision = eventResolveDecision(deps.EventHub)
 	}
 	if deps.ResolveApproval == nil {
-		deps.ResolveApproval = eventResolveApproval(eventHubBridge)
+		deps.ResolveApproval = eventResolveApproval(deps.EventHub)
 	}
 	if deps.ResumeRun == nil {
-		deps.ResumeRun = eventResumeRun(eventHubBridge)
+		deps.ResumeRun = eventResumeRun(deps.EventHub)
 	}
 	if deps.TicketReader == nil {
-		deps.TicketReader = eventTicketReader{hub: eventHubBridge}
+		deps.TicketReader = eventTicketReader{hub: deps.EventHub}
 	}
 	if deps.ResolutionReader == nil {
-		deps.ResolutionReader = eventResolutionReader{hub: eventHubBridge}
+		deps.ResolutionReader = eventResolutionReader{hub: deps.EventHub}
 	}
 	if deps.ApprovalReader == nil {
-		deps.ApprovalReader = eventApprovalReader{hub: eventHubBridge}
+		deps.ApprovalReader = eventApprovalReader{hub: deps.EventHub}
 	}
 	if deps.RunReader == nil {
-		deps.RunReader = eventRunReader{hub: eventHubBridge}
+		deps.RunReader = eventRunReader{hub: deps.EventHub}
 	}
 	if deps.WorkspaceDefinitions == nil {
-		deps.WorkspaceDefinitions = eventWorkspaceReader{hub: eventHubBridge}
+		deps.WorkspaceDefinitions = eventWorkspaceReader{hub: deps.EventHub}
 	}
 	if deps.MemoryReader == nil {
-		deps.MemoryReader = eventMemoryReader{hub: eventHubBridge}
+		deps.MemoryReader = eventMemoryReader{hub: deps.EventHub}
 	}
 	m.bizPtr = governancebiz.NewService(governancebiz.Dependencies{
 		Tickets:              deps.TicketReader,
@@ -168,7 +168,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (go
 	}
 }
 
-func setGovernanceMagicResult(result magicevent.Result, data any, err error) {
+func setGovernanceMagicResult(result magicevent.Result, data governanceevents.GovernanceCommandResult, err error) {
 	if result == nil {
 		return
 	}

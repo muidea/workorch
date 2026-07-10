@@ -12,12 +12,10 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraftcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestEventHubGeneratorUsesLLMCommandEvent(t *testing.T) {
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHubOwner(rawHub, "setupdraftports/test")
 	var seenRequest llmmodels.ProviderRequest
 	observer := magicevent.NewSimpleObserver(llmevents.CommandDestination, rawHub)
 	observer.Subscribe(llmevents.TopicLLMCommandCompleteProvider, func(ev magicevent.Event, result magicevent.Result) {
@@ -35,7 +33,7 @@ func TestEventHubGeneratorUsesLLMCommandEvent(t *testing.T) {
 	defer observer.Unsubscribe(llmevents.TopicLLMCommandCompleteProvider)
 	time.Sleep(10 * time.Millisecond)
 
-	draft, err := EventHubGenerator{EventHub: hub}.GenerateWorkspaceSetupDraft(context.Background(), setupdraftcore.GenerationRequest{
+	draft, err := EventHubGenerator{CommandHub: rawHub}.GenerateWorkspaceSetupDraft(context.Background(), setupdraftcore.GenerationRequest{
 		Template:       workspacecore.WorkspaceTemplate{ID: "template-001"},
 		DialogLanguage: "zh-CN",
 		Messages:       []setupdraftcore.Message{{Role: "user", Content: "Create a workspace"}},

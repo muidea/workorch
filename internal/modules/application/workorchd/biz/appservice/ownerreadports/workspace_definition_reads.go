@@ -3,14 +3,14 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ReadGoalByOwnerCommand(ctx context.Context, hub events.Hub, goalID common.GoalID) (*workspacemodel.Goal, error) {
+func ReadGoalByOwnerCommand(ctx context.Context, hub magicevent.Hub, goalID common.GoalID) (*workspacemodel.Goal, error) {
 	if hub == nil || goalID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -28,7 +28,7 @@ func ReadGoalByOwnerCommand(ctx context.Context, hub events.Hub, goalID common.G
 	return response.Goal, nil
 }
 
-func ListGoalsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
+func ListGoalsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}

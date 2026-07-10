@@ -262,7 +262,7 @@ func resultCommandContext(ctx context.Context, workspaceID common.WorkspaceID) c
 	return common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 }
 
-func setMagicResult(result magicevent.Result, data any, err error) {
+func setMagicResult(result magicevent.Result, data resultevents.ResultCommandResult, err error) {
 	if result == nil {
 		return
 	}

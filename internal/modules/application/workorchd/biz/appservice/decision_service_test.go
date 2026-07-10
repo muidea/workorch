@@ -133,7 +133,8 @@ func newCountingDecisionRuntimeSession(t *testing.T) (*RuntimeSession, *counting
 			Approvals:             memory.NewApprovalRepository(),
 		},
 		Infrastructure: bootstrap.InfrastructureExports{
-			EventHub: eventHub,
+			EventHub:   eventHub,
+			CommandHub: rawHub,
 		},
 	})
 	startFocusedGovernanceModule(t, exports, rawHub)

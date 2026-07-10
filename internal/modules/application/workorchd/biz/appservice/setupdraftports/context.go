@@ -4,15 +4,15 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraftcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func BuildGenerationRequest(ctx context.Context, hub events.Hub, cmd setupdraftcore.GenerationCommand) (setupdraftcore.GenerationRequest, error) {
+func BuildGenerationRequest(ctx context.Context, hub magicevent.Hub, cmd setupdraftcore.GenerationCommand) (setupdraftcore.GenerationRequest, error) {
 	workspace := setupdraftcore.Workspace{
 		Title:                strings.TrimSpace(cmd.Workspace.Title),
 		Description:          strings.TrimSpace(cmd.Workspace.Description),
@@ -37,7 +37,7 @@ func BuildGenerationRequest(ctx context.Context, hub events.Hub, cmd setupdraftc
 	}, nil
 }
 
-func TemplateContext(ctx context.Context, hub events.Hub, templateID string) (workspacecore.WorkspaceTemplate, []setupdraftcore.Soul, error) {
+func TemplateContext(ctx context.Context, hub magicevent.Hub, templateID string) (workspacecore.WorkspaceTemplate, []setupdraftcore.Soul, error) {
 	templateID = strings.TrimSpace(templateID)
 	if templateID == "" {
 		return workspacecore.WorkspaceTemplate{}, nil, nil
@@ -53,7 +53,7 @@ func TemplateContext(ctx context.Context, hub events.Hub, templateID string) (wo
 	return template, templateSouls(ctx, hub, template), nil
 }
 
-func templateSouls(ctx context.Context, hub events.Hub, template workspacecore.WorkspaceTemplate) []setupdraftcore.Soul {
+func templateSouls(ctx context.Context, hub magicevent.Hub, template workspacecore.WorkspaceTemplate) []setupdraftcore.Soul {
 	ids := map[string]struct{}{}
 	if strings.TrimSpace(template.DefaultSoulID) != "" {
 		ids[strings.TrimSpace(template.DefaultSoulID)] = struct{}{}

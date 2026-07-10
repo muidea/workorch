@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type workspaceCreateIDConflictError struct {
@@ -31,7 +31,7 @@ func isWorkspaceCreateIDConflict(err error) bool {
 	return errors.As(err, &target)
 }
 
-func createWorkspaceViewAttempt(ctx context.Context, hub events.Hub, req CreateWorkspaceViewRequest) (*workspacemodel.Workspace, error) {
+func createWorkspaceViewAttempt(ctx context.Context, hub magicevent.Hub, req CreateWorkspaceViewRequest) (*workspacemodel.Workspace, error) {
 	id := workspacecore.GenerateWorkspaceID()
 	layout, err := workspacecore.ResolveDirectoryLayout(req.RepositoryBackend, req.RepositoryDataDir, string(id), req.Command.DeliverableDirectory)
 	if err != nil {

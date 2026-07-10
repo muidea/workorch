@@ -32,7 +32,7 @@ func (m *Module) Setup(_ context.Context, rawEventHub event.Hub, backgroundRouti
 	}
 	eventHub := events.NewMagicHubWithHubOwner(rawEventHub, ModuleID)
 	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry()
-	eventAdapter := NewEventRuntimeAdapter(eventHub)
+	eventAdapter := NewEventRuntimeAdapter(rawEventHub)
 	if err := registerRuntimeStepKinds(runtimeRegistry, eventAdapter); err != nil {
 		return cd.NewError(cd.Unexpected, err.Error())
 	}
@@ -48,6 +48,7 @@ func (m *Module) Setup(_ context.Context, rawEventHub event.Hub, backgroundRouti
 		ArtifactContinuations: repos.ArtifactContinuations,
 		RuntimePolicy:         runtimePolicy,
 		EventHub:              eventHub,
+		CommandHub:            rawEventHub,
 		BackgroundRoutine:     backgroundRoutine,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())

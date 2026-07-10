@@ -4,33 +4,32 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/clicore"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func (d *CLICommandDispatcher) handleDefinitionCommand(ctx context.Context, cmd events.CLICommandPayload) (map[string]any, []map[string]any, error) {
+func (d *CLICommandDispatcher) handleDefinitionCommand(ctx context.Context, cmd clicore.Command) (map[string]any, []map[string]any, error) {
 	switch cmd.Command {
-	case events.CommandGoalDefine:
+	case clicore.CommandGoalDefine:
 		item, err := DefineGoalWithSession(ctx, d.borrow(), string(cmd.WorkspaceID), clicore.StringValue(cmd.Payload, "text"))
 		return clicore.ResourceMap(item), nil, err
-	case events.CommandGoalList:
+	case clicore.CommandGoalList:
 		items, err := ListGoalsWithSession(ctx, d.borrow(), string(cmd.WorkspaceID))
 		return nil, clicore.ResourceMaps(items), err
-	case events.CommandGoalGet:
+	case clicore.CommandGoalGet:
 		item, err := ReadGoalWithSession(ctx, d.borrow(), cmd.SubjectID)
 		return clicore.ResourceMap(item), nil, err
-	case events.CommandGoalUpdate:
+	case clicore.CommandGoalUpdate:
 		item, err := UpdateGoalWithSession(ctx, d.borrow(), cmd.SubjectID, clicore.StringValue(cmd.Payload, "text"))
 		return clicore.ResourceMap(item), nil, err
-	case events.CommandDoDDefine:
+	case clicore.CommandDoDDefine:
 		item, err := DefineDoDWithSession(ctx, d.borrow(), string(cmd.WorkspaceID), clicore.StringSliceValue(cmd.Payload, "items"))
 		return clicore.ResourceMap(item), nil, err
-	case events.CommandDoDList:
+	case clicore.CommandDoDList:
 		items, err := ListDoDsWithSession(ctx, d.borrow(), string(cmd.WorkspaceID))
 		return nil, clicore.ResourceMaps(items), err
-	case events.CommandDoDGet:
+	case clicore.CommandDoDGet:
 		item, err := ReadDoDWithSession(ctx, d.borrow(), cmd.SubjectID)
 		return clicore.ResourceMap(item), nil, err
-	case events.CommandDoDUpdate:
+	case clicore.CommandDoDUpdate:
 		item, err := UpdateDoDWithSession(ctx, d.borrow(), cmd.SubjectID, clicore.StringSliceValue(cmd.Payload, "items"))
 		return clicore.ResourceMap(item), nil, err
 	default:

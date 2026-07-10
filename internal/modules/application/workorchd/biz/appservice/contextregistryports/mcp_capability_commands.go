@@ -4,14 +4,14 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func CreateMCPCapability(ctx context.Context, hub events.Hub, cmd contextregistrycore.MCPCapability) (contextregistrycore.MCPCapability, error) {
+func CreateMCPCapability(ctx context.Context, hub magicevent.Hub, cmd contextregistrycore.MCPCapability) (contextregistrycore.MCPCapability, error) {
 	if hub == nil {
 		return contextregistrycore.MCPCapability{}, common.ErrInvalidArgument
 	}
@@ -22,7 +22,7 @@ func CreateMCPCapability(ctx context.Context, hub events.Hub, cmd contextregistr
 	return mcpCapabilityFromCommandResult(result)
 }
 
-func UpdateMCPCapability(ctx context.Context, hub events.Hub, cmd contextregistrycore.MCPCapability) (contextregistrycore.MCPCapability, error) {
+func UpdateMCPCapability(ctx context.Context, hub magicevent.Hub, cmd contextregistrycore.MCPCapability) (contextregistrycore.MCPCapability, error) {
 	if hub == nil {
 		return contextregistrycore.MCPCapability{}, common.ErrInvalidArgument
 	}
@@ -33,7 +33,7 @@ func UpdateMCPCapability(ctx context.Context, hub events.Hub, cmd contextregistr
 	return mcpCapabilityFromCommandResult(result)
 }
 
-func UpdateMCPCapabilityByID(ctx context.Context, hub events.Hub, capabilityID string, cmd contextregistrycore.MCPCapability) (contextregistrycore.MCPCapability, error) {
+func UpdateMCPCapabilityByID(ctx context.Context, hub magicevent.Hub, capabilityID string, cmd contextregistrycore.MCPCapability) (contextregistrycore.MCPCapability, error) {
 	capabilityID = strings.TrimSpace(capabilityID)
 	cmd.ID = strings.TrimSpace(cmd.ID)
 	if capabilityID == "" {
@@ -46,7 +46,7 @@ func UpdateMCPCapabilityByID(ctx context.Context, hub events.Hub, capabilityID s
 	return UpdateMCPCapability(ctx, hub, cmd)
 }
 
-func ReadMCPCapability(ctx context.Context, hub events.Hub, capabilityID string) (contextregistrycore.MCPCapability, error) {
+func ReadMCPCapability(ctx context.Context, hub magicevent.Hub, capabilityID string) (contextregistrycore.MCPCapability, error) {
 	if hub == nil {
 		return contextregistrycore.MCPCapability{}, common.ErrInvalidArgument
 	}
@@ -57,7 +57,7 @@ func ReadMCPCapability(ctx context.Context, hub events.Hub, capabilityID string)
 	return mcpCapabilityFromCommandResult(result)
 }
 
-func ListMCPCapabilities(ctx context.Context, hub events.Hub, query contextregistrycore.MCPCapabilityQuery) ([]contextregistrycore.MCPCapability, error) {
+func ListMCPCapabilities(ctx context.Context, hub magicevent.Hub, query contextregistrycore.MCPCapabilityQuery) ([]contextregistrycore.MCPCapability, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

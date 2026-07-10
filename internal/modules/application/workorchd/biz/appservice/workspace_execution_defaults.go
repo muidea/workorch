@@ -3,12 +3,12 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/localizationcore"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type workspaceExecutionDefaults struct {
@@ -18,7 +18,7 @@ type workspaceExecutionDefaults struct {
 	skillHubCatalog                contextregistrycore.SkillHubSkillCatalog
 }
 
-func workspaceExecutionDefaultsFromContext(ctx context.Context, hub events.Hub) (workspaceExecutionDefaults, error) {
+func workspaceExecutionDefaultsFromContext(ctx context.Context, hub magicevent.Hub) (workspaceExecutionDefaults, error) {
 	cfg, err := configcore.LoadFromContext(ctx)
 	if err != nil {
 		return workspaceExecutionDefaults{}, err

@@ -49,9 +49,12 @@ func runtimeDispatchRequestErrorStage(err error) string {
 	return dispatchErr.Stage
 }
 
-func (o *RuntimeOrchestrator) EnableEventDrivenDispatch() {
+func (o *RuntimeOrchestrator) EnableEventDrivenDispatch(commandHub ...magicevent.Hub) {
 	if o == nil {
 		return
+	}
+	if len(commandHub) > 0 {
+		o.commandHub = commandHub[0]
 	}
 	o.eventDrivenDispatch = true
 }
@@ -87,34 +90,25 @@ func (o *RuntimeOrchestrator) requestDispatchStep(ctx context.Context, runID com
 		IdempotencyKey: idempotencyKey,
 		Input:          cloneStepPayload(spec.Input),
 	}
-	if err := sendDispatchStepRequestedCommand(ctx, o.eventHub, cmd); err != nil {
+	if err := sendDispatchStepRequestedCommand(ctx, o.commandHub, cmd); err != nil {
 		return wrapRuntimeDispatchRequestError("event_publish", err)
 	}
 	return wrapRuntimeDispatchRequestError("event_publish_readback", o.recordDispatchPublishReadback(ctx, run, cmd))
 }
 
-type rawMagicHubProvider interface {
-	RawHub() magicevent.Hub
-}
-
-func sendDispatchStepRequestedCommand(ctx context.Context, hub events.Hub, cmd orchestratorevents.DispatchStepCommand) error {
+func sendDispatchStepRequestedCommand(ctx context.Context, hub magicevent.Hub, cmd orchestratorevents.DispatchStepCommand) error {
 	if hub == nil || cmd.RunID == "" || cmd.StepID == "" || cmd.Kind == "" {
 		return common.ErrInvalidArgument
 	}
-	provider, ok := hub.(rawMagicHubProvider)
-	if !ok || provider.RawHub() == nil {
-		return common.ErrInvalidArgument
-	}
 	ev := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorDispatchStepRequested, "kernel/orchestrator", orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, cmd)
-	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
-		Topic:       orchestratorevents.TopicOrchestratorDispatchStepRequested,
+	ev.BindLaneKey(events.EventHubLaneKeyFor(orchestratorevents.TopicOrchestratorDispatchStepRequested, events.EventHubLaneScope{
 		SubjectType: "step",
 		SubjectID:   string(cmd.StepID),
 		WorkspaceID: string(cmd.WorkspaceID),
 		RunID:       string(cmd.RunID),
 		StepID:      string(cmd.StepID),
 	}))
-	result := provider.RawHub().Send(ev)
+	result := hub.Send(ev)
 	if result == nil {
 		return common.ErrInvalidArgument
 	}

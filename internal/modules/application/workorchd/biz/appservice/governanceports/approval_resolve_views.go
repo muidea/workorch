@@ -4,20 +4,20 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ResolveApprovalView(ctx context.Context, hub events.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, action string, scope common.WorkspaceID) (readmodelcore.Approval, error) {
+func ResolveApprovalView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, action string, scope common.WorkspaceID) (readmodelcore.Approval, error) {
 	return ResolveApprovalViewWithCommand(ctx, hub, traces, approvalID, appmodelcore.ResolveApprovalCommand{Action: action}, scope)
 }
 
-func ResolveApprovalViewWithCommand(ctx context.Context, hub events.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, cmd appmodelcore.ResolveApprovalCommand, scope common.WorkspaceID) (readmodelcore.Approval, error) {
+func ResolveApprovalViewWithCommand(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, cmd appmodelcore.ResolveApprovalCommand, scope common.WorkspaceID) (readmodelcore.Approval, error) {
 	semantic := approvalSemanticFromCommand(cmd, "")
 	action, err := governancecore.NormalizeApprovalBatchAction(semantic.Action)
 	if err != nil {
@@ -35,7 +35,7 @@ func ResolveApprovalViewWithCommand(ctx context.Context, hub events.Hub, traces 
 	return ApprovalViewForItem(ctx, traces, item, scope)
 }
 
-func ReadApprovalForResolution(ctx context.Context, hub events.Hub, approvalID common.ApprovalID, scope common.WorkspaceID) (*approvalmodel.Approval, error) {
+func ReadApprovalForResolution(ctx context.Context, hub magicevent.Hub, approvalID common.ApprovalID, scope common.WorkspaceID) (*approvalmodel.Approval, error) {
 	if approvalID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -78,7 +78,7 @@ func ReadApprovalForResolution(ctx context.Context, hub events.Hub, approvalID c
 	}
 }
 
-func resolveApprovalItemByAction(ctx context.Context, hub events.Hub, item *approvalmodel.Approval, action string) (*approvalmodel.Approval, error) {
+func resolveApprovalItemByAction(ctx context.Context, hub magicevent.Hub, item *approvalmodel.Approval, action string) (*approvalmodel.Approval, error) {
 	return ResolveApprovalItemWithContext(ctx, hub, item, action, nil)
 }
 

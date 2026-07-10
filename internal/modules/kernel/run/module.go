@@ -66,11 +66,11 @@ func (m *Module) Configure(deps Dependencies) error {
 	eventHubBridge := events.NewMagicHubWithHubOwner(deps.EventHub, ModuleID)
 	workspaces := deps.Workspaces
 	if workspaces == nil {
-		workspaces = workspaceEventReader{hub: eventHubBridge}
+		workspaces = workspaceEventReader{hub: deps.EventHub}
 	}
 	orchestrator := deps.Orchestrator
 	if orchestrator == nil {
-		orchestrator = NewEventOrchestrator(eventHubBridge)
+		orchestrator = NewEventOrchestrator(deps.EventHub)
 	}
 	m.bizPtr = runbiz.NewServiceWithWorkspaceReader(deps.Runs, workspaces, orchestrator, eventHubBridge)
 	m.servicePtr = runservice.New(runservice.Dependencies{
@@ -345,7 +345,7 @@ func runStateFilter(states []common.RunState) map[common.RunState]struct{} {
 	return ret
 }
 
-func setRunMagicResult(result magicevent.Result, data any, err error) {
+func setRunMagicResult(result magicevent.Result, data runevents.RunCommandResult, err error) {
 	if result == nil {
 		return
 	}

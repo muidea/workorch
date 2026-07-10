@@ -3,12 +3,12 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func ReadMCPCapabilityWithSession(ctx context.Context, session *RuntimeSession, capabilityID string) (ret MCPCapability, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (MCPCapability, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (MCPCapability, error) {
 		return contextregistryports.ReadMCPCapability(ctx, hub, capabilityID)
 	})
 }
@@ -20,7 +20,7 @@ func ReadMCPCapabilityWithBackend(ctx context.Context, backend string, dataRoot 
 }
 
 func ListMCPCapabilitiesWithSession(ctx context.Context, session *RuntimeSession, query MCPCapabilityQuery) (ret []MCPCapability, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]MCPCapability, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) ([]MCPCapability, error) {
 		return contextregistryports.ListMCPCapabilities(ctx, hub, query)
 	})
 }

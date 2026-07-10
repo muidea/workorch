@@ -4,19 +4,19 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type soulRecordLoader struct {
 	ctx   context.Context
-	hub   events.Hub
+	hub   magicevent.Hub
 	cache map[common.SoulID]*soulmodel.Soul
 }
 
-func newSoulRecordLoader(ctx context.Context, hub events.Hub) *soulRecordLoader {
+func newSoulRecordLoader(ctx context.Context, hub magicevent.Hub) *soulRecordLoader {
 	return &soulRecordLoader{
 		ctx:   ctx,
 		hub:   hub,

@@ -3,14 +3,14 @@ package readmodelports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type MCPCapabilityReader struct {
-	Hub events.Hub
+	Hub magicevent.Hub
 }
 
 func (r MCPCapabilityReader) List(ctx context.Context) ([]*mcpmodel.Capability, error) {

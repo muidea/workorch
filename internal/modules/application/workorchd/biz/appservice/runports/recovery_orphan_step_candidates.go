@@ -4,23 +4,23 @@ import (
 	"context"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func IsStuckRunningRunCandidate(ctx context.Context, hub events.Hub, item *runmodel.Run) bool {
+func IsStuckRunningRunCandidate(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) bool {
 	return runtimecore.IsRecoverableRunningRun(item) && !HasContinuationCheckpointForRun(ctx, hub, item)
 }
 
-func TerminalStepCanDriveRunningRunResume(ctx context.Context, hub events.Hub, item *runmodel.Run) bool {
+func TerminalStepCanDriveRunningRunResume(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) bool {
 	ctx = contextWithRunWorkspace(ctx, item)
 	terminal, err := TerminalStepForRunningRun(ctx, hub, item)
 	return err == nil && terminal != nil && terminal.State != common.StepStateExecuting
 }
 
-func TerminalStepForRunningRun(ctx context.Context, hub events.Hub, item *runmodel.Run) (*runmodel.Step, error) {
+func TerminalStepForRunningRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) (*runmodel.Step, error) {
 	if hub == nil || !runtimecore.IsRecoverableRunningRun(item) {
 		return nil, nil
 	}
@@ -32,7 +32,7 @@ func TerminalStepForRunningRun(ctx context.Context, hub events.Hub, item *runmod
 	return runtimecore.TerminalStepModel(runSteps), nil
 }
 
-func OrphanDispatchedTerminalStep(ctx context.Context, hub events.Hub, item *runmodel.Run) (*runmodel.Step, error) {
+func OrphanDispatchedTerminalStep(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) (*runmodel.Step, error) {
 	ctx = contextWithRunWorkspace(ctx, item)
 	terminal, err := TerminalStepForRunningRun(ctx, hub, item)
 	if err != nil {
@@ -44,12 +44,12 @@ func OrphanDispatchedTerminalStep(ctx context.Context, hub events.Hub, item *run
 	return terminal, nil
 }
 
-func StaleOrphanDispatchedTerminalStep(ctx context.Context, hub events.Hub, item *runmodel.Run, minAge time.Duration, now time.Time) (*runmodel.Step, error) {
+func StaleOrphanDispatchedTerminalStep(ctx context.Context, hub magicevent.Hub, item *runmodel.Run, minAge time.Duration, now time.Time) (*runmodel.Step, error) {
 	step, _, err := staleOrphanDispatchedRuntimeGap(ctx, hub, item, minAge, now)
 	return step, err
 }
 
-func staleOrphanDispatchedRuntimeGap(ctx context.Context, hub events.Hub, item *runmodel.Run, minAge time.Duration, now time.Time) (*runmodel.Step, RuntimeGapRecovery, error) {
+func staleOrphanDispatchedRuntimeGap(ctx context.Context, hub magicevent.Hub, item *runmodel.Run, minAge time.Duration, now time.Time) (*runmodel.Step, RuntimeGapRecovery, error) {
 	ctx = contextWithRunWorkspace(ctx, item)
 	terminal, err := OrphanDispatchedTerminalStep(ctx, hub, item)
 	if err != nil || terminal == nil {

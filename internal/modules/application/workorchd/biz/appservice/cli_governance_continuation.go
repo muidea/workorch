@@ -5,15 +5,17 @@ import (
 	"fmt"
 	"strings"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/clicore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func (d *CLICommandDispatcher) publishDecisionContinuation(ctx context.Context, cmd events.CLICommandPayload, item appmodelcore.Decision) error {
+func (d *CLICommandDispatcher) publishDecisionContinuation(ctx context.Context, cmd clicore.Command, item appmodelcore.Decision) error {
 	intent := "resume"
 	reason := "decision_resolved"
 	if strings.TrimSpace(item.ResolutionType) == decisioncommon.ResolutionTypeReplan {
@@ -30,7 +32,7 @@ func (d *CLICommandDispatcher) publishDecisionContinuation(ctx context.Context, 
 	})
 }
 
-func (d *CLICommandDispatcher) publishDecisionContinuations(ctx context.Context, cmd events.CLICommandPayload, items []appmodelcore.Decision) error {
+func (d *CLICommandDispatcher) publishDecisionContinuations(ctx context.Context, cmd clicore.Command, items []appmodelcore.Decision) error {
 	for _, item := range items {
 		if err := d.publishDecisionContinuation(ctx, cmd, item); err != nil {
 			return err
@@ -39,7 +41,7 @@ func (d *CLICommandDispatcher) publishDecisionContinuations(ctx context.Context,
 	return nil
 }
 
-func (d *CLICommandDispatcher) publishApprovalContinuation(ctx context.Context, cmd events.CLICommandPayload, item appmodelcore.Approval) error {
+func (d *CLICommandDispatcher) publishApprovalContinuation(ctx context.Context, cmd clicore.Command, item appmodelcore.Approval) error {
 	return d.publishGovernanceContinuation(ctx, cmd, governanceContinuationRef{
 		WorkspaceID: item.WorkspaceID,
 		RunID:       item.RunID,
@@ -49,7 +51,7 @@ func (d *CLICommandDispatcher) publishApprovalContinuation(ctx context.Context, 
 	})
 }
 
-func (d *CLICommandDispatcher) publishApprovalContinuations(ctx context.Context, cmd events.CLICommandPayload, items []appmodelcore.Approval) error {
+func (d *CLICommandDispatcher) publishApprovalContinuations(ctx context.Context, cmd clicore.Command, items []appmodelcore.Approval) error {
 	for _, item := range items {
 		if err := d.publishApprovalContinuation(ctx, cmd, item); err != nil {
 			return err
@@ -67,8 +69,8 @@ type governanceContinuationRef struct {
 	DecisionID  string
 }
 
-func (d *CLICommandDispatcher) publishGovernanceContinuation(ctx context.Context, cmd events.CLICommandPayload, ref governanceContinuationRef) error {
-	if d == nil || d.eventHub == nil {
+func (d *CLICommandDispatcher) publishGovernanceContinuation(ctx context.Context, cmd clicore.Command, ref governanceContinuationRef) error {
+	if d == nil || d.session == nil {
 		return common.ErrInvalidArgument
 	}
 	workspaceID := strings.TrimSpace(ref.WorkspaceID)
@@ -81,9 +83,9 @@ func (d *CLICommandDispatcher) publishGovernanceContinuation(ctx context.Context
 	if parsedPriority, ok := cliPayloadInt(cmd.Payload, events.PayloadKeyPriority); ok {
 		priority = parsedPriority
 	}
-	provider, ok := d.eventHub.(interface{ RawHub() magicevent.Hub })
-	if !ok || provider.RawHub() == nil {
-		return common.ErrInvalidArgument
+	commandHub, err := d.session.RequiredCommandHub()
+	if err != nil {
+		return err
 	}
 	command := workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: common.WorkspaceID(workspaceID),
@@ -96,16 +98,16 @@ func (d *CLICommandDispatcher) publishGovernanceContinuation(ctx context.Context
 		Priority:    priority,
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "workorchd-cli-dispatcher", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	event.BindLaneKey(events.EventHubLaneKey(events.Envelope{Topic: event.ID(), SubjectType: "workspace", SubjectID: workspaceID, WorkspaceID: workspaceID, RunID: runID}))
-	response := provider.RawHub().Send(event)
+	event.BindLaneKey(events.EventHubLaneKeyFor(event.ID(), events.EventHubLaneScope{SubjectType: "workspace", SubjectID: workspaceID, WorkspaceID: workspaceID, RunID: runID}))
+	response := commandHub.Send(event)
 	if response == nil {
 		return fmt.Errorf("%w: scheduler command %s returned no result", common.ErrConflict, event.ID())
 	}
-	if err := response.Error(); err != nil {
+	if err := cd.ToStdError(response.Error()); err != nil {
 		return err
 	}
-	data, err := response.Get()
-	if err != nil {
+	data, resultErr := response.Get()
+	if err := cd.ToStdError(resultErr); err != nil {
 		return err
 	}
 	result, ok := data.(workorchdevents.WorkspaceRunRequestedResult)
@@ -115,7 +117,7 @@ func (d *CLICommandDispatcher) publishGovernanceContinuation(ctx context.Context
 	return nil
 }
 
-func cliGovernanceContinuationRequestID(cmd events.CLICommandPayload, kind string, id string, intent string) string {
+func cliGovernanceContinuationRequestID(cmd clicore.Command, kind string, id string, intent string) string {
 	if value := strings.TrimSpace(cmd.CommandID); value != "" {
 		return strings.Join([]string{value, strings.TrimSpace(kind), strings.TrimSpace(id), strings.TrimSpace(intent)}, "-")
 	}

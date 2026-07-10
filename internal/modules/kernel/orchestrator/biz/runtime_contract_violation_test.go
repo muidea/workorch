@@ -2016,7 +2016,7 @@ func TestContractViolationRecoveryPublishesRecordedRetryAndDispatchEvents(t *tes
 		t.Fatalf("seed failed step: %v", err)
 	}
 	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository(), hub)
-	orch.EnableEventDrivenDispatch()
+	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	if err := orch.eventPublisher().publishContractViolationRecorded(ctx, run, failed); err != nil {
 		t.Fatalf("publish recorded: %v", err)
@@ -2052,12 +2052,13 @@ func TestContractViolationRecoveryPublishesRecordedRetryAndDispatchEvents(t *tes
 		t.Fatalf("retry correctionMode = %q, want targeted; payload=%+v", got, retry.Payload)
 	}
 
-	dispatch := publishedTopic(hub.Published(), orchestratorevents.TopicOrchestratorDispatchStepRequested)
-	if dispatch == nil {
-		t.Fatalf("published events = %+v, want dispatch requested", hub.Published())
+	dispatches := hub.DispatchCommands()
+	if len(dispatches) != 1 {
+		t.Fatalf("dispatch commands = %+v, want one dispatch requested", dispatches)
 	}
-	if dispatch.WorkspaceID != string(workspaceID) || dispatch.RunID != string(runID) || dispatch.StepID == "" {
-		t.Fatalf("dispatch event = %+v, want scoped workspace/run/retry step", *dispatch)
+	dispatch := dispatches[0]
+	if dispatch.WorkspaceID != workspaceID || dispatch.RunID != runID || dispatch.StepID == "" {
+		t.Fatalf("dispatch command = %+v, want scoped workspace/run/retry step", dispatch)
 	}
 }
 

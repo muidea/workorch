@@ -3,13 +3,13 @@ package readmodelports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ReadRunResultsPage(ctx context.Context, hub events.Hub, query readmodelcore.ResultQuery) (readmodelcore.ResultPage, error) {
+func ReadRunResultsPage(ctx context.Context, hub magicevent.Hub, query readmodelcore.ResultQuery) (readmodelcore.ResultPage, error) {
 	ctx, runID, err := runScopedContext(ctx, hub, query.WorkspaceID, query.RunID)
 	if err != nil {
 		return readmodelcore.ResultPage{}, err
@@ -21,7 +21,7 @@ func ReadRunResultsPage(ctx context.Context, hub events.Hub, query readmodelcore
 	return readmodelprojection.PageRunResults(items, query), nil
 }
 
-func ReadRunPatchesPage(ctx context.Context, hub events.Hub, query readmodelcore.PatchQuery) (readmodelcore.PatchPage, error) {
+func ReadRunPatchesPage(ctx context.Context, hub magicevent.Hub, query readmodelcore.PatchQuery) (readmodelcore.PatchPage, error) {
 	ctx, runID, err := runScopedContext(ctx, hub, query.WorkspaceID, query.RunID)
 	if err != nil {
 		return readmodelcore.PatchPage{}, err
@@ -33,7 +33,7 @@ func ReadRunPatchesPage(ctx context.Context, hub events.Hub, query readmodelcore
 	return readmodelprojection.PageRunPatches(items, query), nil
 }
 
-func ReadRunValidationResultsPage(ctx context.Context, hub events.Hub, query readmodelcore.ValidationResultQuery) (readmodelcore.ValidationResultPage, error) {
+func ReadRunValidationResultsPage(ctx context.Context, hub magicevent.Hub, query readmodelcore.ValidationResultQuery) (readmodelcore.ValidationResultPage, error) {
 	ctx, runID, err := runScopedContext(ctx, hub, query.WorkspaceID, query.RunID)
 	if err != nil {
 		return readmodelcore.ValidationResultPage{}, err
@@ -45,7 +45,7 @@ func ReadRunValidationResultsPage(ctx context.Context, hub events.Hub, query rea
 	return readmodelprojection.PageRunValidationResults(items, query), nil
 }
 
-func ReadRunArtifactsPage(ctx context.Context, hub events.Hub, query readmodelcore.ArtifactQuery) (readmodelcore.ArtifactPage, error) {
+func ReadRunArtifactsPage(ctx context.Context, hub magicevent.Hub, query readmodelcore.ArtifactQuery) (readmodelcore.ArtifactPage, error) {
 	ctx, runID, err := runScopedContext(ctx, hub, query.WorkspaceID, query.RunID)
 	if err != nil {
 		return readmodelcore.ArtifactPage{}, err

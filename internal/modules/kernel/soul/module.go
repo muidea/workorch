@@ -180,7 +180,7 @@ func (m *Module) executeSoulCommand(ctx context.Context, topic string, data any)
 	}
 }
 
-func setMagicResult(result magicevent.Result, data any, err error) {
+func setMagicResult(result magicevent.Result, data soulevents.SoulCommandResult, err error) {
 	if result == nil {
 		return
 	}

@@ -3,6 +3,7 @@ package governance
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
@@ -11,7 +12,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func eventResolveDecision(hub events.Hub) ResolveDecisionFunc {
+func eventResolveDecision(hub magicevent.Hub) ResolveDecisionFunc {
 	return func(ctx context.Context, ticketID common.TicketID, resolutionType string, payload map[string]any) error {
 		if !decisioncommon.IsSupportedResolutionType(resolutionType) {
 			resolutionType = decisioncommon.ResolutionTypeProvideMissingInfo
@@ -32,7 +33,7 @@ func eventResolveDecision(hub events.Hub) ResolveDecisionFunc {
 	}
 }
 
-func eventResolveApproval(hub events.Hub) ResolveApprovalFunc {
+func eventResolveApproval(hub magicevent.Hub) ResolveApprovalFunc {
 	return func(ctx context.Context, approvalID common.ApprovalID) error {
 		workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 		_, err := sendOwnerMagicCommand[approvalevents.EnsureApprovedCommand, approvalevents.ApprovalCommandResult](ctx, hub, approvalevents.TopicApprovalCommandEnsureApproved, approvalevents.CommandDestination, "approval", string(approvalID), workspaceID, "", "", approvalevents.EnsureApprovedCommand{
@@ -43,7 +44,7 @@ func eventResolveApproval(hub events.Hub) ResolveApprovalFunc {
 	}
 }
 
-func eventResumeRun(hub events.Hub) ResumeRunFunc {
+func eventResumeRun(hub magicevent.Hub) ResumeRunFunc {
 	return func(ctx context.Context, runID common.RunID) error {
 		workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 		_, err := sendOwnerMagicCommand[orchestratorevents.ResumeRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandResumeRun, orchestratorevents.CommandDestination, "run", string(runID), workspaceID, runID, "", orchestratorevents.ResumeRunCommand{

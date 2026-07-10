@@ -3,15 +3,15 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-func ReadMemoryItemByOwnerCommand(ctx context.Context, hub events.Hub, id common.MemoryID) (*memorymodel.MemoryItem, error) {
+func ReadMemoryItemByOwnerCommand(ctx context.Context, hub magicevent.Hub, id common.MemoryID) (*memorymodel.MemoryItem, error) {
 	if hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -26,7 +26,7 @@ func ReadMemoryItemByOwnerCommand(ctx context.Context, hub events.Hub, id common
 	return response.Item, nil
 }
 
-func ListMemoryItemsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
+func ListMemoryItemsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -37,7 +37,7 @@ func ListMemoryItemsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub,
 	return response.Items, nil
 }
 
-func SearchMemoryByOwnerCommand(ctx context.Context, hub events.Hub, query repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
+func SearchMemoryByOwnerCommand(ctx context.Context, hub magicevent.Hub, query repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

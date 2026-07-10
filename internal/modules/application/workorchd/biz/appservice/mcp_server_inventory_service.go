@@ -3,12 +3,12 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func ListMCPServerToolsWithSession(ctx context.Context, session *RuntimeSession, serverID string) (ret []MCPTool, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]MCPTool, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) ([]MCPTool, error) {
 		return contextregistryports.ListMCPServerTools(ctx, hub, serverID)
 	})
 }
@@ -20,7 +20,7 @@ func ListMCPServerToolsWithBackend(ctx context.Context, backend string, dataRoot
 }
 
 func ListMCPServerResourcesWithSession(ctx context.Context, session *RuntimeSession, serverID string) (ret []MCPResource, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]MCPResource, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) ([]MCPResource, error) {
 		return contextregistryports.ListMCPServerResources(ctx, hub, serverID)
 	})
 }
@@ -32,7 +32,7 @@ func ListMCPServerResourcesWithBackend(ctx context.Context, backend string, data
 }
 
 func ListMCPServerPromptsWithSession(ctx context.Context, session *RuntimeSession, serverID string) (ret []MCPPrompt, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]MCPPrompt, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) ([]MCPPrompt, error) {
 		return contextregistryports.ListMCPServerPrompts(ctx, hub, serverID)
 	})
 }

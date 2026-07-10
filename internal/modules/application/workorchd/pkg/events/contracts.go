@@ -14,7 +14,8 @@ func Contracts() []eventcontract.Contract {
 	)...)
 	ret = append(ret, eventcontract.Build("cli", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic,
 		TopicCLICommand,
-		TopicCLIResult,
+	)...)
+	ret = append(ret, eventcontract.Build("cli", eventcontract.CommandClassNotify, eventcontract.LanePolicyTopic,
 		TopicCLIProgress,
 	)...)
 	return ret

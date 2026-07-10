@@ -415,7 +415,7 @@ func workspaceScopeFromCommand(topic string, data any) (common.WorkspaceID, erro
 	}
 }
 
-func setWorkspaceMagicResult(result magicevent.Result, data any, err error) {
+func setWorkspaceMagicResult(result magicevent.Result, data workspaceevents.WorkspaceCommandResult, err error) {
 	if result == nil {
 		return
 	}

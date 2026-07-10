@@ -28,7 +28,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 		topic           string
 		wantRunID       string
 		responsePayload map[string]any
-		invoke          func(context.Context, events.Hub) error
+		invoke          func(context.Context, magicevent.Hub) error
 	}{
 		{
 			name:      "run get",
@@ -37,7 +37,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			responsePayload: map[string]any{
 				events.PayloadKeyRun: &runmodel.Run{ID: runID, WorkspaceID: workspaceID},
 			},
-			invoke: func(ctx context.Context, hub events.Hub) error {
+			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ReadRunByOwnerCommand(ctx, hub, runID)
 				return err
 			},
@@ -49,7 +49,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			responsePayload: map[string]any{
 				events.PayloadKeySteps: []*runmodel.Step{},
 			},
-			invoke: func(ctx context.Context, hub events.Hub) error {
+			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListStepsByRunOwnerCommand(ctx, hub, runID)
 				return err
 			},
@@ -61,7 +61,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			responsePayload: map[string]any{
 				events.PayloadKeySteps: []*runmodel.Step{},
 			},
-			invoke: func(ctx context.Context, hub events.Hub) error {
+			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListStepSummariesByRunOwnerCommand(ctx, hub, runID)
 				return err
 			},
@@ -73,7 +73,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			responsePayload: map[string]any{
 				events.PayloadKeyCheckpoints: []*runmodel.RuntimeCheckpoint{},
 			},
-			invoke: func(ctx context.Context, hub events.Hub) error {
+			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListRuntimeCheckpointsByRunOwnerCommand(ctx, hub, runID)
 				return err
 			},
@@ -85,7 +85,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			responsePayload: map[string]any{
 				events.PayloadKeyItems: []*runmodel.ToolCall{},
 			},
-			invoke: func(ctx context.Context, hub events.Hub) error {
+			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListToolCallsByRunOwnerCommand(ctx, hub, runID)
 				return err
 			},
@@ -97,7 +97,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			responsePayload: map[string]any{
 				events.PayloadKeyItems: []*runtimecontract.ArtifactContinuation{},
 			},
-			invoke: func(ctx context.Context, hub events.Hub) error {
+			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListArtifactContinuationsByRunOwnerCommand(ctx, hub, runID)
 				return err
 			},
@@ -109,7 +109,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			responsePayload: map[string]any{
 				events.PayloadKeyItems: []*runtimecontract.CoverageWorkItem{},
 			},
-			invoke: func(ctx context.Context, hub events.Hub) error {
+			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListCoverageWorkItemsByRunOwnerCommand(ctx, hub, runID)
 				return err
 			},
@@ -121,7 +121,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			responsePayload: map[string]any{
 				events.PayloadKeyTicket: &decisionmodel.Ticket{ID: "ticket-scope-owner-read", WorkspaceID: workspaceID, RunID: runID},
 			},
-			invoke: func(ctx context.Context, hub events.Hub) error {
+			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ReadDecisionTicketByOwnerCommand(ctx, hub, "ticket-scope-owner-read")
 				return err
 			},
@@ -133,7 +133,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			responsePayload: map[string]any{
 				events.PayloadKeyTickets: []*decisionmodel.Ticket{},
 			},
-			invoke: func(ctx context.Context, hub events.Hub) error {
+			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListDecisionTicketsByRunOwnerCommand(ctx, hub, runID)
 				return err
 			},
@@ -145,7 +145,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			responsePayload: map[string]any{
 				events.PayloadKeyApproval: &approvalmodel.Approval{ID: "approval-scope-owner-read", WorkspaceID: workspaceID, RunID: runID},
 			},
-			invoke: func(ctx context.Context, hub events.Hub) error {
+			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ReadApprovalByOwnerCommand(ctx, hub, "approval-scope-owner-read")
 				return err
 			},
@@ -157,7 +157,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			responsePayload: map[string]any{
 				events.PayloadKeyItems: []*approvalmodel.Approval{},
 			},
-			invoke: func(ctx context.Context, hub events.Hub) error {
+			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListApprovalsByRunOwnerCommand(ctx, hub, runID)
 				return err
 			},
@@ -166,10 +166,8 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rawHub := magicevent.NewHub(16)
-			hub := events.NewMagicHubWithHubOwner(rawHub, "ownerreadports/test")
-			defer hub.Terminate(context.Background())
 			subscribeOwnerReadMagicResponse(t, rawHub, tt.topic, workspaceID, common.RunID(tt.wantRunID), tt.responsePayload)
-			if err := tt.invoke(ctx, hub); err != nil {
+			if err := tt.invoke(ctx, rawHub); err != nil {
 				t.Fatalf("invoke err = %v", err)
 			}
 		})
@@ -181,7 +179,6 @@ func TestResultOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 	const runID = common.RunID("run-scope-result-owner-read")
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
 
 	subscribeResultReadCommand(t, rawHub, resultevents.TopicResultCommandListByRun, func(ev magicevent.Event, response magicevent.Result) {
 		cmd, ok := ev.Data().(resultevents.ListResultsByRunCommand)
@@ -210,10 +207,10 @@ func TestResultOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 		response.Set(resultevents.ResultCommandResult{}, nil)
 	})
 
-	if _, err := ListResultsByRunOwnerCommand(ctx, hub, runID); err != nil {
+	if _, err := ListResultsByRunOwnerCommand(ctx, rawHub, runID); err != nil {
 		t.Fatalf("ListResultsByRunOwnerCommand err = %v", err)
 	}
-	if _, err := ListArtifactsByRunOwnerCommand(ctx, hub, runID); err != nil {
+	if _, err := ListArtifactsByRunOwnerCommand(ctx, rawHub, runID); err != nil {
 		t.Fatalf("ListArtifactsByRunOwnerCommand err = %v", err)
 	}
 }

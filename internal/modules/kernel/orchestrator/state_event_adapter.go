@@ -20,7 +20,7 @@ import (
 )
 
 type runEventRepository struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r runEventRepository) Create(ctx context.Context, item *runmodel.Run) error {
@@ -91,7 +91,7 @@ func (r runEventRepository) Delete(ctx context.Context, id common.RunID) error {
 }
 
 type workspaceEventRepository struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r workspaceEventRepository) Create(ctx context.Context, item *workspacemodel.Workspace) error {
@@ -135,7 +135,7 @@ func (r workspaceEventRepository) Delete(ctx context.Context, id common.Workspac
 }
 
 type memoryEventRepository struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r memoryEventRepository) Create(ctx context.Context, item *memorymodel.MemoryItem) error {
@@ -187,7 +187,7 @@ func (r memoryEventRepository) Delete(ctx context.Context, id common.MemoryID) e
 }
 
 type memoryRecallTraceEventRepository struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r memoryRecallTraceEventRepository) Create(ctx context.Context, item *memorymodel.MemoryRecallTrace) error {
@@ -226,11 +226,7 @@ func (r memoryRecallTraceEventRepository) Delete(ctx context.Context, id common.
 	return err
 }
 
-type stateRawMagicHubProvider interface {
-	RawHub() magicevent.Hub
-}
-
-func sendRunEventCommand[Command any](ctx context.Context, hub events.Hub, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, command Command) (runevents.RunCommandResult, error) {
+func sendRunEventCommand[Command any](ctx context.Context, hub magicevent.Hub, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, command Command) (runevents.RunCommandResult, error) {
 	result, err := sendStateEventCommand[Command, runevents.RunCommandResult](ctx, hub, topic, runevents.CommandDestination, subjectType, subjectID, workspaceID, runID, command)
 	if err != nil {
 		return runevents.RunCommandResult{}, err
@@ -238,7 +234,7 @@ func sendRunEventCommand[Command any](ctx context.Context, hub events.Hub, topic
 	return result, nil
 }
 
-func sendWorkspaceEventCommand[Command any](ctx context.Context, hub events.Hub, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, command Command) (workspaceevents.WorkspaceCommandResult, error) {
+func sendWorkspaceEventCommand[Command any](ctx context.Context, hub magicevent.Hub, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, command Command) (workspaceevents.WorkspaceCommandResult, error) {
 	result, err := sendStateEventCommand[Command, workspaceevents.WorkspaceCommandResult](ctx, hub, topic, workspaceevents.CommandDestination, subjectType, subjectID, workspaceID, runID, command)
 	if err != nil {
 		return workspaceevents.WorkspaceCommandResult{}, err
@@ -246,7 +242,7 @@ func sendWorkspaceEventCommand[Command any](ctx context.Context, hub events.Hub,
 	return result, nil
 }
 
-func sendStateEventCommand[Command any, Result any](ctx context.Context, hub events.Hub, topic string, destination string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, command Command) (Result, error) {
+func sendStateEventCommand[Command any, Result any](ctx context.Context, hub magicevent.Hub, topic string, destination string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, command Command) (Result, error) {
 	var zero Result
 	if hub == nil || topic == "" {
 		return zero, common.ErrInvalidArgument
@@ -254,19 +250,14 @@ func sendStateEventCommand[Command any, Result any](ctx context.Context, hub eve
 	if workspaceID == "" {
 		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
 	}
-	provider, ok := hub.(stateRawMagicHubProvider)
-	if !ok || provider.RawHub() == nil {
-		return zero, common.ErrInvalidArgument
-	}
 	ev := magicevent.NewEventWithContext(topic, ModuleID, destination, magicevent.NewHeader(), ctx, command)
-	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
-		Topic:       topic,
+	ev.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
-	response := provider.RawHub().Send(ev)
+	response := hub.Send(ev)
 	if response == nil {
 		return zero, fmt.Errorf("state event command %s returned no response", topic)
 	}
@@ -284,26 +275,21 @@ func sendStateEventCommand[Command any, Result any](ctx context.Context, hub eve
 	return result, nil
 }
 
-func sendMemoryEventCommand[Command any](ctx context.Context, hub events.Hub, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, command Command) (memoryevents.MemoryCommandResult, error) {
+func sendMemoryEventCommand[Command any](ctx context.Context, hub magicevent.Hub, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, command Command) (memoryevents.MemoryCommandResult, error) {
 	if hub == nil || topic == "" {
 		return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 	}
 	if workspaceID == "" {
 		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
 	}
-	provider, ok := hub.(stateRawMagicHubProvider)
-	if !ok || provider.RawHub() == nil {
-		return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
-	}
 	ev := magicevent.NewEventWithContext(topic, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
-		Topic:       topic,
+	ev.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
-	response := provider.RawHub().Send(ev)
+	response := hub.Send(ev)
 	if response == nil {
 		return memoryevents.MemoryCommandResult{}, fmt.Errorf("memory event command %s returned no response", topic)
 	}

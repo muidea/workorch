@@ -133,7 +133,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (ev
 	}
 }
 
-func setEventStreamMagicResult(result magicevent.Result, data any, err error) {
+func setEventStreamMagicResult(result magicevent.Result, data eventstreamevents.EventStreamCommandResult, err error) {
 	if result == nil {
 		return
 	}

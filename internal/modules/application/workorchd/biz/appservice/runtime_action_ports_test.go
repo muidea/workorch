@@ -14,7 +14,6 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestEventHubActionPortReturnsInvalidArgumentWhenHubOrRequiredInputMissing(t *testing.T) {
@@ -33,25 +32,25 @@ func TestEventHubActionPortReturnsInvalidArgumentWhenHubOrRequiredInputMissing(t
 			return port.EnsureApproval(context.Background(), "approval", "ws", "run", "run/manual-approval", "reason")
 		}},
 		{name: "workspace ensure missing id", run: func() error {
-			return runtimeports.NewEventHubActionPort(events.NewMemoryHub()).EnsureWorkspace(context.Background(), "", "title")
+			return runtimeports.NewEventHubActionPort(magicevent.NewHub(1)).EnsureWorkspace(context.Background(), "", "title")
 		}},
 		{name: "run ensure missing workspace", run: func() error {
-			return runtimeports.NewEventHubActionPort(events.NewMemoryHub()).EnsureRun(context.Background(), "run", "")
+			return runtimeports.NewEventHubActionPort(magicevent.NewHub(1)).EnsureRun(context.Background(), "run", "")
 		}},
 		{name: "run blocked decision", run: func() error {
-			return runtimeports.NewEventHubActionPort(events.NewMemoryHub()).EnsureRunBlockedOnDecision(context.Background(), "run", "")
+			return runtimeports.NewEventHubActionPort(magicevent.NewHub(1)).EnsureRunBlockedOnDecision(context.Background(), "run", "")
 		}},
 		{name: "run blocked approval", run: func() error {
-			return runtimeports.NewEventHubActionPort(events.NewMemoryHub()).EnsureRunBlockedOnApproval(context.Background(), "", "approval")
+			return runtimeports.NewEventHubActionPort(magicevent.NewHub(1)).EnsureRunBlockedOnApproval(context.Background(), "", "approval")
 		}},
 		{name: "run resumed missing id", run: func() error {
-			return runtimeports.NewEventHubActionPort(events.NewMemoryHub()).EnsureRunResumed(context.Background(), "")
+			return runtimeports.NewEventHubActionPort(magicevent.NewHub(1)).EnsureRunResumed(context.Background(), "")
 		}},
 		{name: "decision resolved missing resolution", run: func() error {
-			return runtimeports.NewEventHubActionPort(events.NewMemoryHub()).EnsureResolvedTicket(context.Background(), "", "ticket", "provide_missing_info", nil)
+			return runtimeports.NewEventHubActionPort(magicevent.NewHub(1)).EnsureResolvedTicket(context.Background(), "", "ticket", "provide_missing_info", nil)
 		}},
 		{name: "approval approved missing id", run: func() error {
-			return runtimeports.NewEventHubActionPort(events.NewMemoryHub()).EnsureApprovalApproved(context.Background(), "")
+			return runtimeports.NewEventHubActionPort(magicevent.NewHub(1)).EnsureApprovalApproved(context.Background(), "")
 		}},
 	}
 
@@ -67,8 +66,7 @@ func TestEventHubActionPortReturnsInvalidArgumentWhenHubOrRequiredInputMissing(t
 func TestEventHubActionPortPublishesOwnerCommands(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-action-port")
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
-	port := runtimeports.NewEventHubActionPort(hub)
+	port := runtimeports.NewEventHubActionPort(rawHub)
 	wantTopics := []string{
 		workspaceevents.TopicWorkspaceCommandEnsure,
 		runevents.TopicRunCommandEnsure,

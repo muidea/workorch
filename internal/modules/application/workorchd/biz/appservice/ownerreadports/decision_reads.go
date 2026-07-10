@@ -3,14 +3,14 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ListDecisionTicketsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]*decisionmodel.Ticket, error) {
+func ListDecisionTicketsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]*decisionmodel.Ticket, error) {
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -23,7 +23,7 @@ func ListDecisionTicketsByWorkspaceOwnerCommand(ctx context.Context, hub events.
 	return response.Tickets, nil
 }
 
-func ListDecisionTicketsByOwnerCommand(ctx context.Context, hub events.Hub) ([]*decisionmodel.Ticket, error) {
+func ListDecisionTicketsByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*decisionmodel.Ticket, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -34,7 +34,7 @@ func ListDecisionTicketsByOwnerCommand(ctx context.Context, hub events.Hub) ([]*
 	return response.Tickets, nil
 }
 
-func ListDecisionTicketsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*decisionmodel.Ticket, error) {
+func ListDecisionTicketsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*decisionmodel.Ticket, error) {
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}

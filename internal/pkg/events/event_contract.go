@@ -102,34 +102,52 @@ func EventHubDeliveryModeForTopic(topic string) EventHubDeliveryMode {
 	}
 }
 
-func EventHubLaneKey(envelope Envelope) string {
-	envelope.Topic = strings.TrimSpace(envelope.Topic)
-	if runtimeBlockExecuteAcceptedTopic(envelope.Topic) {
-		return runtimeExecutionStateLaneKey(envelope)
-	}
-	if runtimeBlockExecuteResultTopic(envelope.Topic) {
-		return stateLaneKey("orchestrator", envelope)
-	}
-	if contract, ok := ResolveEventHubContract(envelope.Topic); ok {
-		return contract.LaneKey(envelope)
-	}
-	return fallbackEventLaneKey(envelope)
+type EventHubLaneScope struct {
+	SubjectType string
+	SubjectID   string
+	WorkspaceID string
+	RunID       string
+	StepID      string
 }
 
-func (c EventHubContract) LaneKey(envelope Envelope) string {
+func EventHubLaneKey(envelope Envelope) string {
+	return EventHubLaneKeyFor(envelope.Topic, EventHubLaneScope{
+		SubjectType: envelope.SubjectType,
+		SubjectID:   envelope.SubjectID,
+		WorkspaceID: envelope.WorkspaceID,
+		RunID:       envelope.RunID,
+		StepID:      envelope.StepID,
+	})
+}
+
+func EventHubLaneKeyFor(topic string, scope EventHubLaneScope) string {
+	topic = strings.TrimSpace(topic)
+	if runtimeBlockExecuteAcceptedTopic(topic) {
+		return runtimeExecutionStateLaneKey(scope)
+	}
+	if runtimeBlockExecuteResultTopic(topic) {
+		return stateLaneKey("orchestrator", scope)
+	}
+	if contract, ok := ResolveEventHubContract(topic); ok {
+		return contract.LaneKey(scope)
+	}
+	return fallbackEventLaneKey(topic)
+}
+
+func (c EventHubContract) LaneKey(scope EventHubLaneScope) string {
 	switch c.LanePolicy {
 	case EventLanePolicyQuery:
-		return queryLaneKey(c.Topic, envelope)
+		return queryLaneKey(c.Topic, scope)
 	case EventLanePolicyState:
-		return stateLaneKey(c.Owner, envelope)
+		return stateLaneKey(c.Owner, scope)
 	case EventLanePolicyExecute:
-		return executeLaneKey(c, envelope)
+		return executeLaneKey(c, scope)
 	case EventLanePolicyGlobal:
 		return globalLaneKey(c.Owner)
 	case EventLanePolicyTopic:
 		return topicLaneKey(c.Topic)
 	default:
-		return fallbackEventLaneKey(envelope)
+		return fallbackEventLaneKey(c.Topic)
 	}
 }
 
@@ -197,8 +215,8 @@ func buildEventHubMessageContracts() map[string]eventcontract.MessageContract {
 	return contracts
 }
 
-func fallbackEventLaneKey(envelope Envelope) string {
-	topic := strings.TrimSpace(envelope.Topic)
+func fallbackEventLaneKey(topic string) string {
+	topic = strings.TrimSpace(topic)
 	if topic != "" {
 		return topicLaneKey(topic)
 	}
@@ -213,19 +231,19 @@ func topicLaneKey(topic string) string {
 	return "topic/" + topic
 }
 
-func queryLaneKey(topic string, envelope Envelope) string {
+func queryLaneKey(topic string, scope EventHubLaneScope) string {
 	topicPart := strings.Trim(strings.TrimSpace(topic), "/")
 	if topicPart == "" {
 		topicPart = "unknown"
 	}
-	workspaceID := strings.TrimSpace(envelope.WorkspaceID)
-	if runID := strings.TrimSpace(envelope.RunID); runID != "" {
+	workspaceID := strings.TrimSpace(scope.WorkspaceID)
+	if runID := strings.TrimSpace(scope.RunID); runID != "" {
 		if workspaceID != "" {
 			return "query/" + topicPart + "/workspace/" + workspaceID + "/run/" + runID
 		}
 		return "query/" + topicPart + "/run/" + runID
 	}
-	if stepID := strings.TrimSpace(envelope.StepID); stepID != "" {
+	if stepID := strings.TrimSpace(scope.StepID); stepID != "" {
 		if workspaceID != "" {
 			return "query/" + topicPart + "/workspace/" + workspaceID + "/step/" + stepID
 		}
@@ -234,25 +252,25 @@ func queryLaneKey(topic string, envelope Envelope) string {
 	if workspaceID != "" {
 		return "query/" + topicPart + "/workspace/" + workspaceID
 	}
-	if subjectID := strings.TrimSpace(envelope.SubjectID); subjectID != "" {
+	if subjectID := strings.TrimSpace(scope.SubjectID); subjectID != "" {
 		return "query/" + topicPart + "/subject/" + subjectID
 	}
 	return "query/" + topicPart
 }
 
-func stateLaneKey(owner string, envelope Envelope) string {
+func stateLaneKey(owner string, scope EventHubLaneScope) string {
 	owner = lanePart(owner, "owner")
-	workspaceID := strings.TrimSpace(envelope.WorkspaceID)
+	workspaceID := strings.TrimSpace(scope.WorkspaceID)
 	switch owner {
 	case "run":
-		if runID := strings.TrimSpace(envelope.RunID); runID != "" {
+		if runID := strings.TrimSpace(scope.RunID); runID != "" {
 			if workspaceID != "" {
 				return "state/run/" + workspaceID + "/" + runID
 			}
 			return "state/run/" + runID
 		}
 	case "orchestrator":
-		if runID := strings.TrimSpace(envelope.RunID); runID != "" {
+		if runID := strings.TrimSpace(scope.RunID); runID != "" {
 			if workspaceID != "" {
 				return "state/orchestrator/workspace/" + workspaceID + "/run/" + runID
 			}
@@ -263,13 +281,13 @@ func stateLaneKey(owner string, envelope Envelope) string {
 			return "state/workspace/" + workspaceID
 		}
 	}
-	if subjectID := strings.TrimSpace(envelope.SubjectID); subjectID != "" {
+	if subjectID := strings.TrimSpace(scope.SubjectID); subjectID != "" {
 		if workspaceID != "" {
 			return "state/" + owner + "/workspace/" + workspaceID + "/subject/" + subjectID
 		}
 		return "state/" + owner + "/" + subjectID
 	}
-	if runID := strings.TrimSpace(envelope.RunID); runID != "" {
+	if runID := strings.TrimSpace(scope.RunID); runID != "" {
 		if workspaceID != "" {
 			return "state/" + owner + "/workspace/" + workspaceID + "/run/" + runID
 		}
@@ -281,25 +299,25 @@ func stateLaneKey(owner string, envelope Envelope) string {
 	return "state/" + owner
 }
 
-func executeLaneKey(contract EventHubContract, envelope Envelope) string {
+func executeLaneKey(contract EventHubContract, scope EventHubLaneScope) string {
 	kind := lanePart(runtimeBlockKindFromTopic(contract.Topic), "")
 	if kind == "" {
 		kind = lanePart(contract.Owner, "unknown")
 	}
-	workspaceID := strings.TrimSpace(envelope.WorkspaceID)
-	if stepID := strings.TrimSpace(envelope.StepID); stepID != "" {
+	workspaceID := strings.TrimSpace(scope.WorkspaceID)
+	if stepID := strings.TrimSpace(scope.StepID); stepID != "" {
 		if workspaceID != "" {
 			return "exec/block/" + kind + "/workspace/" + workspaceID + "/step/" + stepID
 		}
 		return "exec/block/" + kind + "/" + stepID
 	}
-	if subjectID := strings.TrimSpace(envelope.SubjectID); subjectID != "" {
+	if subjectID := strings.TrimSpace(scope.SubjectID); subjectID != "" {
 		if workspaceID != "" {
 			return "exec/block/" + kind + "/workspace/" + workspaceID + "/subject/" + subjectID
 		}
 		return "exec/block/" + kind + "/subject/" + subjectID
 	}
-	if runID := strings.TrimSpace(envelope.RunID); runID != "" {
+	if runID := strings.TrimSpace(scope.RunID); runID != "" {
 		if workspaceID != "" {
 			return "exec/block/" + kind + "/workspace/" + workspaceID + "/run/" + runID
 		}
@@ -311,10 +329,10 @@ func executeLaneKey(contract EventHubContract, envelope Envelope) string {
 	return "exec/block/" + kind
 }
 
-func runtimeExecutionStateLaneKey(envelope Envelope) string {
-	workspaceID := strings.TrimSpace(envelope.WorkspaceID)
-	runID := strings.TrimSpace(envelope.RunID)
-	stepID := strings.TrimSpace(envelope.StepID)
+func runtimeExecutionStateLaneKey(scope EventHubLaneScope) string {
+	workspaceID := strings.TrimSpace(scope.WorkspaceID)
+	runID := strings.TrimSpace(scope.RunID)
+	stepID := strings.TrimSpace(scope.StepID)
 	if workspaceID != "" && runID != "" && stepID != "" {
 		return "state/runtime-exec/workspace/" + workspaceID + "/run/" + runID + "/step/" + stepID
 	}

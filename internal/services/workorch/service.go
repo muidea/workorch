@@ -7,7 +7,7 @@ import (
 	"os"
 
 	frameworkservice "github.com/muidea/magicCommon/framework/service"
-	"github.com/muidea/workorch/internal/services/workorch/biz/backends"
+	backend "github.com/muidea/workorch/internal/services/workorch/biz/backends"
 	"github.com/muidea/workorch/internal/services/workorch/biz/session"
 	"github.com/muidea/workorch/internal/services/workorch/service/cli"
 )

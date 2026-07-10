@@ -46,7 +46,7 @@ func TestWorkspaceDefinitionContextPatchUsesEventHubOwnerReads(t *testing.T) {
 		t.Fatalf("seed dod: %v", err)
 	}
 
-	patch, err := WorkspaceDefinitionContextPatch(ctx, exports.Infrastructure.EventHub, &runmodel.Run{
+	patch, err := WorkspaceDefinitionContextPatch(ctx, exports.Infrastructure.CommandHub, &runmodel.Run{
 		ID:          "run-runports-definition",
 		WorkspaceID: workspaceID,
 		GoalID:      goalID,

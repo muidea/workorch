@@ -29,7 +29,7 @@ func TestReadWorkspaceExecutionContextInputsReadsDefinitionsWithExplicitScope(t 
 		t.Fatal(err)
 	}
 
-	inputs, err := ReadWorkspaceExecutionContextInputs(ctx, exports.Infrastructure.EventHub, workspaceID, goalID, dodID)
+	inputs, err := ReadWorkspaceExecutionContextInputs(ctx, exports.Infrastructure.CommandHub, workspaceID, goalID, dodID)
 	if err != nil {
 		t.Fatalf("ReadWorkspaceExecutionContextInputs err = %v", err)
 	}
@@ -77,7 +77,7 @@ func TestWorkspaceGovernanceHistoryReadsRunAndResolutionWithWorkspaceScope(t *te
 		t.Fatal(err)
 	}
 
-	history := WorkspaceGovernanceHistory(ctx, exports.Infrastructure.EventHub, workspaceID, goalID, dodID, 1)
+	history := WorkspaceGovernanceHistory(ctx, exports.Infrastructure.CommandHub, workspaceID, goalID, dodID, 1)
 	if len(history) != 1 {
 		t.Fatalf("history length = %d, want 1: %+v", len(history), history)
 	}

@@ -3,12 +3,12 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func CreateRunWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, runID string, goalID string, dodID string) (ret Run, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (Run, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Run, error) {
 		request, err := createRunViewRequest(ctx, hub, workspaceID, runID, goalID, dodID)
 		if err != nil {
 			return Run{}, err
@@ -30,7 +30,7 @@ func CreateRunFromEnv(ctx context.Context, workspaceID string, runID string, goa
 }
 
 func StartRunWithSession(ctx context.Context, session *RuntimeSession, runID string) (ret Run, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (Run, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Run, error) {
 		ctx, deps, err := runCompressedContextDependencies(ctx, session)
 		if err != nil {
 			return Run{}, err
@@ -52,7 +52,7 @@ func StartRunFromEnv(ctx context.Context, runID string) (Run, error) {
 }
 
 func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID string, executionContextPatch ...map[string]any) (ret Run, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (Run, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Run, error) {
 		ctx, deps, err := runCompressedContextDependencies(ctx, session)
 		if err != nil {
 			return Run{}, err

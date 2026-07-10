@@ -3,14 +3,14 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-func ReadWorkspaceTemplateByOwnerCommand(ctx context.Context, hub events.Hub, templateID string) (*repository.WorkspaceTemplate, error) {
+func ReadWorkspaceTemplateByOwnerCommand(ctx context.Context, hub magicevent.Hub, templateID string) (*repository.WorkspaceTemplate, error) {
 	if hub == nil || templateID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -24,7 +24,7 @@ func ReadWorkspaceTemplateByOwnerCommand(ctx context.Context, hub events.Hub, te
 	return response.Template, nil
 }
 
-func ListWorkspaceTemplatesByOwnerCommand(ctx context.Context, hub events.Hub) ([]*repository.WorkspaceTemplate, error) {
+func ListWorkspaceTemplatesByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*repository.WorkspaceTemplate, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

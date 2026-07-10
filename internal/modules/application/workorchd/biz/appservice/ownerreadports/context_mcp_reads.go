@@ -3,14 +3,14 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
 
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ReadMCPServerByOwnerCommand(ctx context.Context, hub events.Hub, id common.MCPServerID) (*mcpmodel.Server, error) {
+func ReadMCPServerByOwnerCommand(ctx context.Context, hub magicevent.Hub, id common.MCPServerID) (*mcpmodel.Server, error) {
 	if hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -24,7 +24,7 @@ func ReadMCPServerByOwnerCommand(ctx context.Context, hub events.Hub, id common.
 	return result.Server, nil
 }
 
-func ReadMCPCapabilityByOwnerCommand(ctx context.Context, hub events.Hub, id common.MCPCapabilityID) (*mcpmodel.Capability, error) {
+func ReadMCPCapabilityByOwnerCommand(ctx context.Context, hub magicevent.Hub, id common.MCPCapabilityID) (*mcpmodel.Capability, error) {
 	if hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}

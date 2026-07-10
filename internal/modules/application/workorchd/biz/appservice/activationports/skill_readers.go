@@ -5,13 +5,13 @@ import (
 	"errors"
 	"sync"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func SelectedSkills(ctx context.Context, hub events.Hub, ids []string, workspaceID string, skillHubCatalog contextregistrycore.SkillHubSkillCatalog) ([]contextregistrycore.Skill, error) {
+func SelectedSkills(ctx context.Context, hub magicevent.Hub, ids []string, workspaceID string, skillHubCatalog contextregistrycore.SkillHubSkillCatalog) ([]contextregistrycore.Skill, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -51,7 +51,7 @@ func SelectedSkills(ctx context.Context, hub events.Hub, ids []string, workspace
 	return ret, nil
 }
 
-func SkillsForSelection(ctx context.Context, hub events.Hub, query contextregistrycore.SkillQuery, skillHubCatalog contextregistrycore.SkillHubSkillCatalog) ([]contextregistrycore.Skill, error) {
+func SkillsForSelection(ctx context.Context, hub magicevent.Hub, query contextregistrycore.SkillQuery, skillHubCatalog contextregistrycore.SkillHubSkillCatalog) ([]contextregistrycore.Skill, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

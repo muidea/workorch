@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -22,8 +23,8 @@ type CreateAndStartWorkspaceExecutionRunRequest struct {
 	MaxAttempts           int
 }
 
-func CreateAndStartWorkspaceExecutionRun(ctx context.Context, hub events.Hub, request CreateAndStartWorkspaceExecutionRunRequest) (common.RunID, error) {
-	if hub == nil || request.WorkspaceID == "" || request.GoalID == "" || request.DoDID == "" {
+func CreateAndStartWorkspaceExecutionRun(ctx context.Context, eventHub events.Hub, commandHub magicevent.Hub, request CreateAndStartWorkspaceExecutionRunRequest) (common.RunID, error) {
+	if eventHub == nil || commandHub == nil || request.WorkspaceID == "" || request.GoalID == "" || request.DoDID == "" {
 		return "", common.ErrInvalidArgument
 	}
 	maxAttempts := request.MaxAttempts
@@ -31,7 +32,7 @@ func CreateAndStartWorkspaceExecutionRun(ctx context.Context, hub events.Hub, re
 		maxAttempts = 8
 	}
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		runID, err := NextWorkspaceExecutionRunID(ctx, hub, request.WorkspaceID)
+		runID, err := NextWorkspaceExecutionRunID(ctx, commandHub, request.WorkspaceID)
 		if err != nil {
 			return "", err
 		}
@@ -44,19 +45,19 @@ func CreateAndStartWorkspaceExecutionRun(ctx context.Context, hub events.Hub, re
 			request.Priority,
 			request.DefaultDialogLanguage,
 		)
-		if err := CreateWorkspaceExecutionRun(ctx, hub, runID, request.WorkspaceID, request.GoalID, request.DoDID, createExecutionContext, request.Priority); err != nil {
+		if err := CreateWorkspaceExecutionRun(ctx, commandHub, runID, request.WorkspaceID, request.GoalID, request.DoDID, createExecutionContext, request.Priority); err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				continue
 			}
 			return "", err
 		}
-		if err := RecordActivationMemoryRecallTrace(ctx, hub, runID, request.WorkspaceID, createExecutionContext, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		if err := RecordActivationMemoryRecallTrace(ctx, eventHub, commandHub, runID, request.WorkspaceID, createExecutionContext, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			return "", err
 		}
 		startCtx := common.ContextWithRuntimeWorkspaceID(common.ContextWithRuntimeLLMProviderID(ctx, request.LLMProviderID), request.WorkspaceID)
-		if err := StartRun(startCtx, hub, request.WorkspaceID, runID); err != nil {
+		if err := StartRun(startCtx, commandHub, request.WorkspaceID, runID); err != nil {
 			if errors.Is(err, common.ErrConflict) {
-				observable, getErr := RunObservableAfterStartConflict(startCtx, hub, runID)
+				observable, getErr := RunObservableAfterStartConflict(startCtx, commandHub, runID)
 				if getErr != nil {
 					return "", getErr
 				}
@@ -64,7 +65,7 @@ func CreateAndStartWorkspaceExecutionRun(ctx context.Context, hub events.Hub, re
 					return runID, nil
 				}
 			}
-			_ = FailRun(ctx, hub, request.WorkspaceID, runID, fmt.Sprintf("activation start failed: %v", err))
+			_ = FailRun(ctx, commandHub, request.WorkspaceID, runID, fmt.Sprintf("activation start failed: %v", err))
 			return "", err
 		}
 		return runID, nil

@@ -3,14 +3,14 @@ package contextregistryports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ValidateSoulCapabilitySelection(ctx context.Context, hub events.Hub, soulID common.SoulID, skillIDs []string, mcpServerIDs []string, capabilityIDs []string, capabilityCategories []string, toolKinds []string) error {
+func ValidateSoulCapabilitySelection(ctx context.Context, hub magicevent.Hub, soulID common.SoulID, skillIDs []string, mcpServerIDs []string, capabilityIDs []string, capabilityCategories []string, toolKinds []string) error {
 	if soulID == "" {
 		return nil
 	}

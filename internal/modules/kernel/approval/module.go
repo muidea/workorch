@@ -250,7 +250,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (ap
 	}
 }
 
-func setApprovalMagicResult(result magicevent.Result, data any, err error) {
+func setApprovalMagicResult(result magicevent.Result, data approvalevents.ApprovalCommandResult, err error) {
 	if result == nil {
 		return
 	}

@@ -12,7 +12,6 @@ import (
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -44,7 +43,7 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchSerializesLLMDispatchRequests(
 		memoryrepo.NewApprovalRepository(),
 		hub,
 	)
-	orch.EnableEventDrivenDispatch()
+	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	err := orch.dispatchGraphStepBatchWithWorkspace(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}, []stepDispatchSpec{
 		{ID: common.StepID(runID + "/graph-001/001-a"), Kind: "llm/workspace_execution", Input: map[string]any{"node": "a"}},
@@ -53,21 +52,15 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchSerializesLLMDispatchRequests(
 	if err != nil {
 		t.Fatalf("dispatchGraphStepBatchWithWorkspace: %v", err)
 	}
-	published := hub.Published()
-	var dispatches []events.Envelope
-	for _, envelope := range published {
-		if envelope.Topic == orchestratorevents.TopicOrchestratorDispatchStepRequested {
-			dispatches = append(dispatches, envelope)
-		}
-	}
+	dispatches := hub.DispatchCommands()
 	if len(dispatches) != 1 {
-		t.Fatalf("dispatch events = %d in %+v, want 1 serialized LLM dispatch", len(dispatches), published)
+		t.Fatalf("dispatch commands = %d in %+v, want 1 serialized LLM dispatch", len(dispatches), dispatches)
 	}
-	if dispatches[0].RunID != string(runID) || dispatches[0].WorkspaceID != string(workspaceID) || dispatches[0].StepID == "" {
-		t.Fatalf("dispatch envelope = %+v, want scoped workspace/run/step", dispatches[0])
+	if dispatches[0].RunID != runID || dispatches[0].WorkspaceID != workspaceID || dispatches[0].StepID == "" {
+		t.Fatalf("dispatch command = %+v, want scoped workspace/run/step", dispatches[0])
 	}
-	if key, _ := dispatches[0].Payload[events.PayloadKeyIdempotencyKey].(string); key == "" {
-		t.Fatalf("dispatch payload = %+v, want idempotency key", dispatches[0].Payload)
+	if dispatches[0].IdempotencyKey == "" {
+		t.Fatalf("dispatch command = %+v, want idempotency key", dispatches[0])
 	}
 	if _, err := stepRepo.Get(ctx, common.StepID(runID+"/graph-001/001-a")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("graph step after dispatch request err = %v, want not found before dispatch handler runs", err)
@@ -159,7 +152,7 @@ func TestRuntimeOrchestrator_CompletedGraphBatchDispatchesDependentValidation(t 
 		t.Fatalf("seed patch step: %v", err)
 	}
 	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memoryrepo.NewDecisionTicketRepository(), memoryrepo.NewApprovalRepository(), hub)
-	orch.EnableEventDrivenDispatch()
+	orch.EnableEventDrivenDispatch(hub.rawHub)
 	steps, err := stepRepo.ListByRun(ctx, runID)
 	if err != nil {
 		t.Fatalf("list steps: %v", err)
@@ -167,12 +160,12 @@ func TestRuntimeOrchestrator_CompletedGraphBatchDispatchesDependentValidation(t 
 	if err := orch.continueGraphBatchAfterCompletedStep(ctx, run, patch, steps, workspace); err != nil {
 		t.Fatalf("continueGraphBatchAfterCompletedStep: %v", err)
 	}
-	for _, envelope := range hub.Published() {
-		if envelope.Topic == orchestratorevents.TopicOrchestratorDispatchStepRequested && strings.Contains(envelope.StepID, "verify") {
+	for _, command := range hub.DispatchCommands() {
+		if strings.Contains(string(command.StepID), "verify") {
 			return
 		}
 	}
-	t.Fatalf("published events = %+v, want dependent verify dispatch", hub.Published())
+	t.Fatalf("dispatch commands = %+v, want dependent verify dispatch", hub.DispatchCommands())
 }
 
 func TestRuntimeOrchestrator_RuntimeDispatchRejectsKindOutsideRequiredOutput(t *testing.T) {
@@ -608,7 +601,7 @@ func TestContinueGraphBatchSkipsObsoleteGraphLocalAuthorityAndRequestsCurrentFol
 		t.Fatalf("seed graph step: %v", err)
 	}
 	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memoryrepo.NewDecisionTicketRepository(), memoryrepo.NewApprovalRepository(), hub)
-	orch.EnableEventDrivenDispatch()
+	orch.EnableEventDrivenDispatch(hub.rawHub)
 	steps, err := stepRepo.ListByRun(ctx, runID)
 	if err != nil {
 		t.Fatalf("list steps: %v", err)
@@ -623,12 +616,8 @@ func TestContinueGraphBatchSkipsObsoleteGraphLocalAuthorityAndRequestsCurrentFol
 	if reloadedPatch.State != common.StepStateSucceeded {
 		t.Fatalf("patch step state = %s, want succeeded; output=%+v", reloadedPatch.State, reloadedPatch.Output)
 	}
-	for _, envelope := range hub.Published() {
-		if envelope.Topic != orchestratorevents.TopicOrchestratorDispatchStepRequested {
-			continue
-		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
-		if !ok || cmd.Kind != llmcommon.StepKindWorkspaceExecution {
+	for _, cmd := range hub.DispatchCommands() {
+		if cmd.Kind != llmcommon.StepKindWorkspaceExecution {
 			continue
 		}
 		input := mapFromValue(cmd.Input)
@@ -640,7 +629,7 @@ func TestContinueGraphBatchSkipsObsoleteGraphLocalAuthorityAndRequestsCurrentFol
 		}
 		return
 	}
-	t.Fatalf("published events = %+v, want current-authority follow-up dispatch", hub.Published())
+	t.Fatalf("dispatch commands = %+v, want current-authority follow-up dispatch", hub.DispatchCommands())
 }
 
 func TestFinalizeRootGraphSkipsObsoleteGraphLocalAuthorityAndRequestsCurrentFollowUp(t *testing.T) {
@@ -673,7 +662,7 @@ func TestFinalizeRootGraphSkipsObsoleteGraphLocalAuthorityAndRequestsCurrentFoll
 		t.Fatalf("seed root step: %v", err)
 	}
 	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memoryrepo.NewDecisionTicketRepository(), memoryrepo.NewApprovalRepository(), hub)
-	orch.EnableEventDrivenDispatch()
+	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
 		{ID: "stale-state-change", Kind: runtimemodel.StepKindShellCommand, Input: map[string]any{
@@ -688,12 +677,8 @@ func TestFinalizeRootGraphSkipsObsoleteGraphLocalAuthorityAndRequestsCurrentFoll
 	}}, nil); err != nil {
 		t.Fatalf("FinalizeRuntimeStepResult: %v", err)
 	}
-	for _, envelope := range hub.Published() {
-		if envelope.Topic != orchestratorevents.TopicOrchestratorDispatchStepRequested {
-			continue
-		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
-		if !ok || cmd.Kind != llmWorkspaceExecutionStepKind {
+	for _, cmd := range hub.DispatchCommands() {
+		if cmd.Kind != llmWorkspaceExecutionStepKind {
 			continue
 		}
 		input := mapFromValue(cmd.Input)
@@ -708,7 +693,7 @@ func TestFinalizeRootGraphSkipsObsoleteGraphLocalAuthorityAndRequestsCurrentFoll
 		}
 		return
 	}
-	t.Fatalf("published events = %+v, want root graph current-authority follow-up dispatch", hub.Published())
+	t.Fatalf("dispatch commands = %+v, want root graph current-authority follow-up dispatch", hub.DispatchCommands())
 }
 
 func TestNormalizeGraphValidationDispatchAuthorityBindsValidationEvidence(t *testing.T) {
@@ -830,24 +815,16 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchStepCompletionDispatchesNextNo
 		memoryrepo.NewApprovalRepository(),
 		hub,
 	)
-	orch.EnableEventDrivenDispatch()
+	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	if err := orch.FinalizeRuntimeStepResult(ctx, runID, childStepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "completed"}}, nil); err != nil {
 		t.Fatalf("FinalizeRuntimeStepResult: %v", err)
 	}
-	var dispatches []events.Envelope
-	for _, envelope := range hub.Published() {
-		if envelope.Topic == orchestratorevents.TopicOrchestratorDispatchStepRequested {
-			dispatches = append(dispatches, envelope)
-		}
-	}
+	dispatches := hub.DispatchCommands()
 	if len(dispatches) != 1 {
-		t.Fatalf("dispatch events = %d in %+v, want next graph node dispatch", len(dispatches), hub.Published())
+		t.Fatalf("dispatch commands = %d in %+v, want next graph node dispatch", len(dispatches), dispatches)
 	}
-	cmd, ok := dispatches[0].Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
-	if !ok {
-		t.Fatalf("dispatch command = %#v, want DispatchStepCommand", dispatches[0].Payload[events.PayloadKeyCommand])
-	}
+	cmd := dispatches[0]
 	if cmd.StepID != common.StepID(runID+"/graph-001/002-read-config") || cmd.Kind != "file/read" {
 		t.Fatalf("dispatch command = %+v, want read-config graph step", cmd)
 	}
@@ -916,24 +893,16 @@ func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayContinuesNextNode(
 		memoryrepo.NewApprovalRepository(),
 		hub,
 	)
-	orch.EnableEventDrivenDispatch()
+	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	if err := orch.FinalizeRuntimeStepResult(ctx, runID, childStepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "completed"}}, nil); err != nil {
 		t.Fatalf("FinalizeRuntimeStepResult: %v", err)
 	}
-	var dispatches []events.Envelope
-	for _, envelope := range hub.Published() {
-		if envelope.Topic == orchestratorevents.TopicOrchestratorDispatchStepRequested {
-			dispatches = append(dispatches, envelope)
-		}
-	}
+	dispatches := hub.DispatchCommands()
 	if len(dispatches) != 1 {
-		t.Fatalf("dispatch events = %d in %+v, want replay to continue graph", len(dispatches), hub.Published())
+		t.Fatalf("dispatch commands = %d in %+v, want replay to continue graph", len(dispatches), dispatches)
 	}
-	cmd, ok := dispatches[0].Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
-	if !ok {
-		t.Fatalf("dispatch command = %#v, want DispatchStepCommand", dispatches[0].Payload[events.PayloadKeyCommand])
-	}
+	cmd := dispatches[0]
 	if cmd.StepID != common.StepID(runID+"/graph-001/002-read-config") || cmd.Kind != "file/read" {
 		t.Fatalf("dispatch command = %+v, want read-config graph step", cmd)
 	}
@@ -1013,24 +982,17 @@ func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayDispatchesAuthorit
 		memoryrepo.NewApprovalRepository(),
 		hub,
 	)
-	orch.EnableEventDrivenDispatch()
+	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	if err := orch.FinalizeRuntimeStepResult(ctx, runID, firstStepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "completed"}}, nil); err != nil {
 		t.Fatalf("FinalizeRuntimeStepResult: %v", err)
 	}
 	var dispatch *orchestratorcontracts.DispatchStepCommand
-	for _, envelope := range hub.Published() {
-		if envelope.Topic != orchestratorevents.TopicOrchestratorDispatchStepRequested {
-			continue
-		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
-		if !ok {
-			t.Fatalf("dispatch command = %#v, want DispatchStepCommand", envelope.Payload[events.PayloadKeyCommand])
-		}
+	for _, cmd := range hub.DispatchCommands() {
 		dispatch = &cmd
 	}
 	if dispatch == nil {
-		t.Fatalf("published events = %+v, want graph terminal follow-up dispatch", hub.Published())
+		t.Fatalf("dispatch commands = %+v, want graph terminal follow-up dispatch", hub.DispatchCommands())
 	}
 	if !strings.Contains(string(dispatch.StepID), "follow-up-graph") || !strings.Contains(string(dispatch.StepID), "build") {
 		t.Fatalf("dispatch step = %s, want terminal graph follow-up anchored to latest graph node", dispatch.StepID)
@@ -1162,24 +1124,16 @@ func TestRuntimeOrchestrator_CompletedPatchGraphNodeContinuesDependentValidation
 		memoryrepo.NewApprovalRepository(),
 		hub,
 	)
-	orch.EnableEventDrivenDispatch()
+	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	if err := orch.FinalizeRuntimeStepResult(ctx, runID, patchStepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "completed"}}, nil); err != nil {
 		t.Fatalf("FinalizeRuntimeStepResult: %v", err)
 	}
-	var dispatches []events.Envelope
-	for _, envelope := range hub.Published() {
-		if envelope.Topic == orchestratorevents.TopicOrchestratorDispatchStepRequested {
-			dispatches = append(dispatches, envelope)
-		}
-	}
+	dispatches := hub.DispatchCommands()
 	if len(dispatches) != 1 {
-		t.Fatalf("dispatch events = %d in %+v, want dependent validation dispatch", len(dispatches), hub.Published())
+		t.Fatalf("dispatch commands = %d in %+v, want dependent validation dispatch", len(dispatches), dispatches)
 	}
-	cmd, ok := dispatches[0].Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
-	if !ok {
-		t.Fatalf("dispatch command = %#v, want DispatchStepCommand", dispatches[0].Payload[events.PayloadKeyCommand])
-	}
+	cmd := dispatches[0]
 	if cmd.StepID != common.StepID(runID+"/graph-001/002-verify-build") || cmd.Kind != runtimemodel.StepKindShellCommand {
 		t.Fatalf("dispatch command = %+v, want verify-build shell step", cmd)
 	}
@@ -1233,26 +1187,19 @@ func TestRuntimeOrchestrator_GraphBatchPatchApplyFailureDispatchesRuntimeRepair(
 		memoryrepo.NewApprovalRepository(),
 		hub,
 	)
-	orch.EnableEventDrivenDispatch()
+	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	if err := orch.handleRuntimeStepFailure(ctx, run, step, nil, step.Output, "runtime patch application failed", errors.New("conflict: patch baseHash mismatch")); err != nil {
 		t.Fatalf("handleRuntimeStepFailure: %v", err)
 	}
 
 	var repairDispatch *orchestratorcontracts.DispatchStepCommand
-	for _, envelope := range hub.Published() {
-		if envelope.Topic != orchestratorevents.TopicOrchestratorDispatchStepRequested {
-			continue
-		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
-		if !ok {
-			t.Fatalf("dispatch command = %#v, want DispatchStepCommand", envelope.Payload[events.PayloadKeyCommand])
-		}
+	for _, cmd := range hub.DispatchCommands() {
 		repairDispatch = &cmd
 		break
 	}
 	if repairDispatch == nil {
-		t.Fatalf("repair dispatch not published after graph batch patch failure; events=%+v", hub.Published())
+		t.Fatalf("repair dispatch command missing after graph batch patch failure; commands=%+v", hub.DispatchCommands())
 	}
 	if repairDispatch.Kind != llmWorkspaceExecutionStepKind || !boolValue(repairDispatch.Input[stepInputKeyRuntimeRepairFollowUp]) {
 		t.Fatalf("repair dispatch = %+v, want llm runtime repair follow-up", repairDispatch)
@@ -1302,7 +1249,7 @@ func TestRuntimeOrchestrator_EventDrivenDispatchPublishesAuthorityAlignedInput(t
 		memoryrepo.NewApprovalRepository(),
 		hub,
 	)
-	orch.EnableEventDrivenDispatch()
+	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	err := orch.RequestUniqueDispatchStep(ctx, run, stepID, llmWorkspaceExecutionStepKind, map[string]any{
 		convergenceAuthorityKey: map[string]any{
@@ -1329,20 +1276,14 @@ func TestRuntimeOrchestrator_EventDrivenDispatchPublishesAuthorityAlignedInput(t
 	if err != nil {
 		t.Fatalf("RequestUniqueDispatchStep: %v", err)
 	}
-	var dispatch events.Envelope
-	for _, envelope := range hub.Published() {
-		if envelope.Topic == orchestratorevents.TopicOrchestratorDispatchStepRequested {
-			dispatch = envelope
-		}
+	var dispatch orchestratorcontracts.DispatchStepCommand
+	for _, command := range hub.DispatchCommands() {
+		dispatch = command
 	}
-	if dispatch.Topic == "" {
-		t.Fatalf("published events = %+v, want dispatch requested", hub.Published())
+	if dispatch.StepID == "" {
+		t.Fatalf("dispatch commands = %+v, want dispatch requested", hub.DispatchCommands())
 	}
-	cmd, ok := dispatch.Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand)
-	if !ok {
-		t.Fatalf("dispatch command = %#v, want DispatchStepCommand", dispatch.Payload[events.PayloadKeyCommand])
-	}
-	input := cmd.Input
+	input := dispatch.Input
 	authority := mapFromValue(input[convergenceAuthorityKey])
 	if stringFromMap(authority, "workspaceId") != string(workspaceID) || stringFromMap(authority, "runId") != string(runID) {
 		t.Fatalf("queued authority = %+v, want current workspace/run", authority)

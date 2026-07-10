@@ -3,6 +3,7 @@ package activationports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
@@ -11,7 +12,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type WorkspaceExecutionDefinitionContext struct {
@@ -22,7 +22,7 @@ type WorkspaceExecutionDefinitionContext struct {
 	DefinitionChangeImpact map[string]any
 }
 
-func SelectWorkspaceExecutionDefinitions(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, requestedGoalID common.GoalID, requestedDoDID common.DoDID) (*workspacemodel.Goal, *workspacemodel.DoD, error) {
+func SelectWorkspaceExecutionDefinitions(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, requestedGoalID common.GoalID, requestedDoDID common.DoDID) (*workspacemodel.Goal, *workspacemodel.DoD, error) {
 	if hub == nil {
 		return nil, nil, common.ErrInvalidArgument
 	}
@@ -52,7 +52,7 @@ func SelectWorkspaceExecutionDefinitions(ctx context.Context, hub events.Hub, wo
 	return goal, dod, nil
 }
 
-func WorkspaceExecutionDefinitionsContext(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (WorkspaceExecutionDefinitionContext, error) {
+func WorkspaceExecutionDefinitionsContext(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (WorkspaceExecutionDefinitionContext, error) {
 	if hub == nil || workspaceID == "" || goal == nil || dod == nil {
 		return WorkspaceExecutionDefinitionContext{}, common.ErrInvalidArgument
 	}

@@ -45,7 +45,6 @@ import (
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -204,7 +203,7 @@ func workspaceGovernanceHistory(
 }
 
 func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session *RuntimeSession, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD, cmd ActivateWorkspaceExecutionCommand) (map[string]any, error) {
-	hub, err := session.RequiredEventHub()
+	hub, err := session.RequiredCommandHub()
 	if err != nil {
 		return nil, err
 	}
@@ -539,60 +538,27 @@ func (s *blockingMCPService) ListCapabilities(ctx context.Context, query mcpmodu
 var _ mcpmodule.Service = (*blockingMCPService)(nil)
 
 type countingActivationEventHub struct {
-	base   events.Hub
+	base   magicevent.Hub
 	mu     sync.Mutex
 	counts map[string]int
 	onSend func(magicevent.Event)
 }
 
-func (h *countingActivationEventHub) Publish(ctx context.Context, envelope events.Envelope) error {
-	if h == nil || h.base == nil {
-		return common.ErrInvalidArgument
-	}
-	h.mu.Lock()
-	if h.counts == nil {
-		h.counts = map[string]int{}
-	}
-	h.counts[envelope.Topic]++
-	h.mu.Unlock()
-	return h.base.Publish(ctx, envelope)
-}
-
-func (h *countingActivationEventHub) Subscribe(topic string, handler events.Handler) func() {
-	if h == nil || h.base == nil {
-		return func() {}
-	}
-	return h.base.Subscribe(topic, handler)
-}
-
-func (h *countingActivationEventHub) RawHub() magicevent.Hub {
-	provider, ok := h.base.(interface{ RawHub() magicevent.Hub })
-	if !ok || provider.RawHub() == nil {
-		return nil
-	}
-	return countingActivationRawHub{base: provider.RawHub(), owner: h}
-}
-
-type countingActivationRawHub struct {
-	base  magicevent.Hub
-	owner *countingActivationEventHub
-}
-
-func (h countingActivationRawHub) Subscribe(id string, observer magicevent.Observer) {
+func (h *countingActivationEventHub) Subscribe(id string, observer magicevent.Observer) {
 	h.base.Subscribe(id, observer)
 }
-func (h countingActivationRawHub) Unsubscribe(id string, observer magicevent.Observer) {
+func (h *countingActivationEventHub) Unsubscribe(id string, observer magicevent.Observer) {
 	h.base.Unsubscribe(id, observer)
 }
-func (h countingActivationRawHub) Post(event magicevent.Event) {
-	h.owner.capture(event)
+func (h *countingActivationEventHub) Post(event magicevent.Event) {
+	h.capture(event)
 	h.base.Post(event)
 }
-func (h countingActivationRawHub) Send(event magicevent.Event) magicevent.Result {
-	h.owner.capture(event)
+func (h *countingActivationEventHub) Send(event magicevent.Event) magicevent.Result {
+	h.capture(event)
 	return h.base.Send(event)
 }
-func (h countingActivationRawHub) Terminate(ctx context.Context) { h.base.Terminate(ctx) }
+func (h *countingActivationEventHub) Terminate(ctx context.Context) { h.base.Terminate(ctx) }
 
 func (h *countingActivationEventHub) record(topic string) {
 	h.mu.Lock()
@@ -620,68 +586,27 @@ func (h *countingActivationEventHub) Count(topic string) int {
 }
 
 type blockingActivationEventHub struct {
-	base    events.Hub
+	base    magicevent.Hub
 	started chan<- string
 	release <-chan struct{}
 	labels  map[string]string
 }
 
-func (h *blockingActivationEventHub) Publish(ctx context.Context, envelope events.Envelope) error {
-	if h != nil && h.labels != nil {
-		if label := h.labels[envelope.Topic]; label != "" {
-			select {
-			case h.started <- label:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-			select {
-			case <-h.release:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-	}
-	if h == nil || h.base == nil {
-		return common.ErrInvalidArgument
-	}
-	return h.base.Publish(ctx, envelope)
-}
-
-func (h *blockingActivationEventHub) Subscribe(topic string, handler events.Handler) func() {
-	if h == nil || h.base == nil {
-		return func() {}
-	}
-	return h.base.Subscribe(topic, handler)
-}
-
-func (h *blockingActivationEventHub) RawHub() magicevent.Hub {
-	provider, ok := h.base.(interface{ RawHub() magicevent.Hub })
-	if !ok || provider.RawHub() == nil {
-		return nil
-	}
-	return blockingActivationRawHub{base: provider.RawHub(), owner: h}
-}
-
-type blockingActivationRawHub struct {
-	base  magicevent.Hub
-	owner *blockingActivationEventHub
-}
-
-func (h blockingActivationRawHub) Subscribe(id string, observer magicevent.Observer) {
+func (h *blockingActivationEventHub) Subscribe(id string, observer magicevent.Observer) {
 	h.base.Subscribe(id, observer)
 }
-func (h blockingActivationRawHub) Unsubscribe(id string, observer magicevent.Observer) {
+func (h *blockingActivationEventHub) Unsubscribe(id string, observer magicevent.Observer) {
 	h.base.Unsubscribe(id, observer)
 }
-func (h blockingActivationRawHub) Post(event magicevent.Event) {
-	h.owner.wait(event.Context(), event.ID())
+func (h *blockingActivationEventHub) Post(event magicevent.Event) {
+	h.wait(event.Context(), event.ID())
 	h.base.Post(event)
 }
-func (h blockingActivationRawHub) Send(event magicevent.Event) magicevent.Result {
-	h.owner.wait(event.Context(), event.ID())
+func (h *blockingActivationEventHub) Send(event magicevent.Event) magicevent.Result {
+	h.wait(event.Context(), event.ID())
 	return h.base.Send(event)
 }
-func (h blockingActivationRawHub) Terminate(ctx context.Context) { h.base.Terminate(ctx) }
+func (h *blockingActivationEventHub) Terminate(ctx context.Context) { h.base.Terminate(ctx) }
 
 func (h *blockingActivationEventHub) wait(ctx context.Context, topic string) {
 	if h == nil || h.labels == nil {
@@ -701,7 +626,7 @@ func (h *blockingActivationEventHub) wait(ctx context.Context, topic string) {
 }
 
 func TestPublishActivationRunCommandRequiresResponse(t *testing.T) {
-	hub := events.NewMagicHubWithOwner("activationports/test")
+	hub := magicevent.NewHub(16)
 	err := activationports.StartRun(context.Background(), hub, "ws-activation", "run-activation")
 	if err == nil {
 		t.Fatal("activationports.StartRun returned nil, want missing response error")
@@ -1966,14 +1891,14 @@ func TestActivationContextUsesSelectedGoalAndDoDWithoutReload(t *testing.T) {
 	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
 		t.Fatalf("create dod: %v", err)
 	}
-	countingHub := &countingActivationEventHub{base: exports.Infrastructure.EventHub}
-	exports.Infrastructure.EventHub = countingHub
+	countingHub := &countingActivationEventHub{base: exports.Infrastructure.CommandHub}
+	exports.Infrastructure.CommandHub = countingHub
 	borrowed, err := NewRuntimeSessionFromExports(completeAppserviceTestExports(exports))
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
 	}
 
-	selectedGoal, selectedDoD, err := activationports.SelectWorkspaceExecutionDefinitions(ctx, exports.Infrastructure.EventHub, workspace.ID, "", "")
+	selectedGoal, selectedDoD, err := activationports.SelectWorkspaceExecutionDefinitions(ctx, exports.Infrastructure.CommandHub, workspace.ID, "", "")
 	if err != nil {
 		t.Fatalf("activationports.SelectWorkspaceExecutionDefinitions: %v", err)
 	}
@@ -2118,8 +2043,8 @@ func TestActivationDefinitionSelectionReadsGoalAndDoDConcurrently(t *testing.T) 
 	}
 	started := make(chan string, 2)
 	release := make(chan struct{})
-	exports.Infrastructure.EventHub = &blockingActivationEventHub{
-		base:    exports.Infrastructure.EventHub,
+	exports.Infrastructure.CommandHub = &blockingActivationEventHub{
+		base:    exports.Infrastructure.CommandHub,
 		started: started,
 		release: release,
 		labels: map[string]string{
@@ -2129,7 +2054,7 @@ func TestActivationDefinitionSelectionReadsGoalAndDoDConcurrently(t *testing.T) 
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		selectedGoal, selectedDoD, err := activationports.SelectWorkspaceExecutionDefinitions(ctx, exports.Infrastructure.EventHub, workspace.ID, "", "")
+		selectedGoal, selectedDoD, err := activationports.SelectWorkspaceExecutionDefinitions(ctx, exports.Infrastructure.CommandHub, workspace.ID, "", "")
 		if err == nil && (selectedGoal.ID != goal.ID || selectedDoD.ID != dod.ID) {
 			err = errors.New("selected unexpected goal or dod")
 		}
@@ -2188,8 +2113,8 @@ func TestActivationResponseReusesRunSnapshotRun(t *testing.T) {
 	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
 		t.Fatalf("create dod: %v", err)
 	}
-	countingHub := &countingActivationEventHub{base: exports.Infrastructure.EventHub}
-	exports.Infrastructure.EventHub = countingHub
+	countingHub := &countingActivationEventHub{base: exports.Infrastructure.CommandHub}
+	exports.Infrastructure.CommandHub = countingHub
 	borrowed, err := NewRuntimeSessionFromExports(completeAppserviceTestExports(exports))
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
@@ -2239,7 +2164,7 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 	}
 	countingRuns := &countingRunRepository{base: exports.Repositories.Runs}
 	var createdRuns []*runmodel.Run
-	countingHub := &countingActivationEventHub{base: exports.Infrastructure.EventHub}
+	countingHub := &countingActivationEventHub{base: exports.Infrastructure.CommandHub}
 	countingHub.onSend = func(event magicevent.Event) {
 		if event.ID() != runevents.TopicRunCommandCreate {
 			return
@@ -2259,7 +2184,7 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 			})
 		}
 	}
-	exports.Infrastructure.EventHub = countingHub
+	exports.Infrastructure.CommandHub = countingHub
 	exports.Repositories.Runs = countingRuns
 	borrowed, err := NewRuntimeSessionFromExports(completeAppserviceTestExports(exports))
 	if err != nil {
@@ -2403,8 +2328,8 @@ func TestBuildWorkspaceExecutionContextStartsIndependentReadsConcurrently(t *tes
 
 	started := make(chan string, 3)
 	release := make(chan struct{})
-	exports.Infrastructure.EventHub = &blockingActivationEventHub{
-		base:    exports.Infrastructure.EventHub,
+	exports.Infrastructure.CommandHub = &blockingActivationEventHub{
+		base:    exports.Infrastructure.CommandHub,
 		started: started,
 		release: release,
 		labels: map[string]string{
@@ -2492,8 +2417,8 @@ func TestActivationContextReadsMCPServersAndCapabilitiesConcurrently(t *testing.
 
 	started := make(chan string, 2)
 	release := make(chan struct{})
-	exports.Infrastructure.EventHub = &blockingActivationEventHub{
-		base:    exports.Infrastructure.EventHub,
+	exports.Infrastructure.CommandHub = &blockingActivationEventHub{
+		base:    exports.Infrastructure.CommandHub,
 		started: started,
 		release: release,
 		labels: map[string]string{
@@ -3996,7 +3921,6 @@ func TestSelectedMemoryItemsFiltersProviderRetryProcessMemory(t *testing.T) {
 		},
 	}}
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHubOwner(rawHub, "appservice/memory-selection-test")
 	observer := magicevent.NewSimpleObserver(memoryevents.CommandDestination, rawHub)
 	observer.Subscribe(memoryevents.TopicMemoryCommandListByWorkspace, func(event magicevent.Event, result magicevent.Result) {
 		command, ok := event.Data().(memoryevents.ListMemoryByWorkspaceCommand)
@@ -4015,7 +3939,7 @@ func TestSelectedMemoryItemsFiltersProviderRetryProcessMemory(t *testing.T) {
 
 	items, evidence, err := activationports.SelectedMemoryItems(ctx, activationports.MemorySelectionOptions{
 		WorkspaceID: workspaceID,
-		Hub:         hub,
+		Hub:         rawHub,
 	})
 	if err != nil {
 		t.Fatalf("selectedMemoryItems: %v", err)

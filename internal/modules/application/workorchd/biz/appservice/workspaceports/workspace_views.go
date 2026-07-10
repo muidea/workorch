@@ -5,10 +5,10 @@ import (
 	"errors"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type CreateWorkspaceViewRequest struct {
@@ -25,7 +25,7 @@ type DeleteWorkspaceViewRequest struct {
 	Command           appmodelcore.DeleteWorkspaceCommand
 }
 
-func CreateWorkspaceView(ctx context.Context, hub events.Hub, req CreateWorkspaceViewRequest) (appmodelcore.Workspace, error) {
+func CreateWorkspaceView(ctx context.Context, hub magicevent.Hub, req CreateWorkspaceViewRequest) (appmodelcore.Workspace, error) {
 	attempts := req.MaxConflictRetries
 	if attempts <= 0 {
 		attempts = 8
@@ -48,7 +48,7 @@ func CreateWorkspaceView(ctx context.Context, hub events.Hub, req CreateWorkspac
 	return appmodelcore.Workspace{}, common.ErrConflict
 }
 
-func DeleteWorkspaceView(ctx context.Context, hub events.Hub, req DeleteWorkspaceViewRequest) error {
+func DeleteWorkspaceView(ctx context.Context, hub magicevent.Hub, req DeleteWorkspaceViewRequest) error {
 	id := common.WorkspaceID(strings.TrimSpace(req.WorkspaceID))
 	if id == "" {
 		return common.ErrInvalidArgument

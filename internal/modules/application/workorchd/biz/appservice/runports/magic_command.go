@@ -9,28 +9,19 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-type rawMagicHubProvider interface {
-	RawHub() magicevent.Hub
-}
-
-func sendRunMagicCommand[Command any, Result any](ctx context.Context, hub events.Hub, topic string, destination string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, command Command) (Result, error) {
+func sendRunMagicCommand[Command any, Result any](ctx context.Context, hub magicevent.Hub, topic string, destination string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, command Command) (Result, error) {
 	var zero Result
 	if hub == nil || topic == "" {
 		return zero, common.ErrInvalidArgument
 	}
-	provider, ok := hub.(rawMagicHubProvider)
-	if !ok || provider.RawHub() == nil {
-		return zero, common.ErrInvalidArgument
-	}
 	ev := magicevent.NewEventWithContext(topic, "application/workorchd/appservice", destination, magicevent.NewHeader(), ctx, command)
-	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
-		Topic:       topic,
+	ev.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
-	response := provider.RawHub().Send(ev)
+	response := hub.Send(ev)
 	if response == nil {
 		return zero, common.ErrInvalidArgument
 	}

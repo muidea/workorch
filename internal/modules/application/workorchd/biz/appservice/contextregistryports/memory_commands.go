@@ -3,6 +3,7 @@ package contextregistryports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 
 	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
@@ -11,7 +12,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func PublishMemoryItem(ctx context.Context, hub events.Hub, topic string, item *memorymodel.MemoryItem) error {
+func PublishMemoryItem(ctx context.Context, hub magicevent.Hub, topic string, item *memorymodel.MemoryItem) error {
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
@@ -28,37 +29,37 @@ func PublishMemoryItem(ctx context.Context, hub events.Hub, topic string, item *
 	}
 }
 
-func CreateMemoryItem(ctx context.Context, hub events.Hub, item *memorymodel.MemoryItem) (*memorymodel.MemoryItem, error) {
-	if err := PublishMemoryItem(ctx, hub, memoryevents.TopicMemoryCommandCreate, item); err != nil {
+func CreateMemoryItem(ctx context.Context, commandHub magicevent.Hub, eventHub events.Hub, item *memorymodel.MemoryItem) (*memorymodel.MemoryItem, error) {
+	if err := PublishMemoryItem(ctx, commandHub, memoryevents.TopicMemoryCommandCreate, item); err != nil {
 		return nil, err
 	}
 	readCtx := common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
-	created, err := ReadMemoryItem(readCtx, hub, string(item.ID))
+	created, err := ReadMemoryItem(readCtx, commandHub, string(item.ID))
 	if err != nil {
 		return nil, err
 	}
-	if err := PublishMemoryEvent(ctx, hub, memoryevents.TopicMemoryCreated, created); err != nil {
+	if err := PublishMemoryEvent(ctx, eventHub, memoryevents.TopicMemoryCreated, created); err != nil {
 		return nil, err
 	}
 	return created, nil
 }
 
-func UpdateMemoryItem(ctx context.Context, hub events.Hub, item *memorymodel.MemoryItem) (*memorymodel.MemoryItem, error) {
-	if err := PublishMemoryItem(ctx, hub, memoryevents.TopicMemoryCommandUpdate, item); err != nil {
+func UpdateMemoryItem(ctx context.Context, commandHub magicevent.Hub, eventHub events.Hub, item *memorymodel.MemoryItem) (*memorymodel.MemoryItem, error) {
+	if err := PublishMemoryItem(ctx, commandHub, memoryevents.TopicMemoryCommandUpdate, item); err != nil {
 		return nil, err
 	}
 	readCtx := common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
-	updated, err := ReadMemoryItem(readCtx, hub, string(item.ID))
+	updated, err := ReadMemoryItem(readCtx, commandHub, string(item.ID))
 	if err != nil {
 		return nil, err
 	}
-	if err := PublishMemoryEvent(ctx, hub, memoryevents.TopicMemoryUpdated, updated); err != nil {
+	if err := PublishMemoryEvent(ctx, eventHub, memoryevents.TopicMemoryUpdated, updated); err != nil {
 		return nil, err
 	}
 	return updated, nil
 }
 
-func DeleteMemoryItem(ctx context.Context, hub events.Hub, memoryID string) error {
+func DeleteMemoryItem(ctx context.Context, hub magicevent.Hub, memoryID string) error {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 	_, err := sendMagicCommand[memoryevents.DeleteMemoryCommand, memoryevents.MemoryCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, memoryevents.TopicMemoryCommandDelete, memoryevents.CommandDestination, "memory", memoryID, memoryevents.DeleteMemoryCommand{MemoryID: common.MemoryID(memoryID)})
 	return err

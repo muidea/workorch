@@ -3,9 +3,9 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contentcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contentports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type ArtifactContent = contentcore.ArtifactContent
@@ -19,7 +19,7 @@ func ReadArtifactContentWithRunSnapshotWithSession(ctx context.Context, session 
 }
 
 func readArtifactContentWithSession(ctx context.Context, session *RuntimeSession, artifactURI string, cachedArtifacts []Artifact) (ret ArtifactContent, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (ArtifactContent, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (ArtifactContent, error) {
 		reader := contentports.NewReader(hub, session.RepositoryBackend(), session.RepositoryDataDir())
 		return reader.ReadArtifact(ctx, artifactURI, contentcore.ArtifactViews(cachedArtifacts))
 	})

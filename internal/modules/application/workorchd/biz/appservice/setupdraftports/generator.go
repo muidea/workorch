@@ -16,20 +16,12 @@ import (
 const WorkspaceSetupDraftSchemaName = "workorch.workspaceSetupDraft.v1"
 
 type EventHubGenerator struct {
-	EventHub events.Hub
-}
-
-type rawMagicHubProvider interface {
-	RawHub() magicevent.Hub
+	CommandHub magicevent.Hub
 }
 
 func (g EventHubGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, request setupdraftcore.GenerationRequest) (setupdraftcore.Draft, error) {
-	if g.EventHub == nil {
+	if g.CommandHub == nil {
 		return setupdraftcore.Draft{}, common.ErrInvalidArgument
-	}
-	rawHub, err := setupDraftRawMagicHub(g.EventHub)
-	if err != nil {
-		return setupdraftcore.Draft{}, err
 	}
 	payload := map[string]any{
 		"instructions": setupdraftcore.Instructions(),
@@ -47,8 +39,8 @@ func (g EventHubGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, requ
 			},
 		},
 	})
-	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{Topic: llmevents.TopicLLMCommandCompleteProvider, SubjectType: "workspace_setup_draft"}))
-	result := rawHub.Send(ev)
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.TopicLLMCommandCompleteProvider, events.EventHubLaneScope{SubjectType: "workspace_setup_draft"}))
+	result := g.CommandHub.Send(ev)
 	if result == nil {
 		return setupdraftcore.Draft{}, common.ErrInvalidArgument
 	}
@@ -67,12 +59,4 @@ func (g EventHubGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, requ
 		return setupdraftcore.Draft{}, fmt.Errorf("%w: llm completion result type %T", common.ErrInvalidArgument, data)
 	}
 	return setupdraftcore.ParseCompletion(response.Completion.Payload)
-}
-
-func setupDraftRawMagicHub(hub events.Hub) (magicevent.Hub, error) {
-	provider, ok := hub.(rawMagicHubProvider)
-	if !ok || provider.RawHub() == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	return provider.RawHub(), nil
 }

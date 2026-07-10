@@ -4,13 +4,13 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ListWorkspaceTemplates(ctx context.Context, hub events.Hub) ([]workspacecore.WorkspaceTemplate, error) {
+func ListWorkspaceTemplates(ctx context.Context, hub magicevent.Hub) ([]workspacecore.WorkspaceTemplate, error) {
 	items, err := ListWorkspaceTemplateRecords(ctx, hub)
 	if err != nil {
 		return nil, err
@@ -22,7 +22,7 @@ func ListWorkspaceTemplates(ctx context.Context, hub events.Hub) ([]workspacecor
 	return ret, nil
 }
 
-func ReadWorkspaceTemplate(ctx context.Context, hub events.Hub, templateID string) (workspacecore.WorkspaceTemplate, error) {
+func ReadWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, templateID string) (workspacecore.WorkspaceTemplate, error) {
 	templateID = strings.TrimSpace(templateID)
 	if templateID == "" {
 		return workspacecore.WorkspaceTemplate{}, common.ErrInvalidArgument
@@ -34,7 +34,7 @@ func ReadWorkspaceTemplate(ctx context.Context, hub events.Hub, templateID strin
 	return workspacecore.WorkspaceTemplateFromRepository(item), nil
 }
 
-func RefreshWorkspaceTemplateBinding(ctx context.Context, hub events.Hub, workspaceID string) (appmodelcore.Workspace, error) {
+func RefreshWorkspaceTemplateBinding(ctx context.Context, hub magicevent.Hub, workspaceID string) (appmodelcore.Workspace, error) {
 	item, err := ReadWorkspaceRecord(ctx, hub, common.WorkspaceID(strings.TrimSpace(workspaceID)))
 	if err != nil {
 		return appmodelcore.Workspace{}, err
@@ -56,7 +56,7 @@ func RefreshWorkspaceTemplateBinding(ctx context.Context, hub events.Hub, worksp
 	return workspacecore.MapWorkspace(item), nil
 }
 
-func CreateWorkspaceTemplate(ctx context.Context, hub events.Hub, template workspacecore.WorkspaceTemplate) (workspacecore.WorkspaceTemplate, error) {
+func CreateWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, template workspacecore.WorkspaceTemplate) (workspacecore.WorkspaceTemplate, error) {
 	item, err := workspacecore.NormalizeWorkspaceTemplate(template)
 	if err != nil {
 		return workspacecore.WorkspaceTemplate{}, err
@@ -71,7 +71,7 @@ func CreateWorkspaceTemplate(ctx context.Context, hub events.Hub, template works
 	return item, nil
 }
 
-func UpdateWorkspaceTemplate(ctx context.Context, hub events.Hub, templateID string, template workspacecore.WorkspaceTemplate) (workspacecore.WorkspaceTemplate, error) {
+func UpdateWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, templateID string, template workspacecore.WorkspaceTemplate) (workspacecore.WorkspaceTemplate, error) {
 	template.ID = strings.TrimSpace(templateID)
 	item, err := workspacecore.NormalizeWorkspaceTemplate(template)
 	if err != nil {
@@ -87,7 +87,7 @@ func UpdateWorkspaceTemplate(ctx context.Context, hub events.Hub, templateID str
 	return item, nil
 }
 
-func DeleteWorkspaceTemplate(ctx context.Context, hub events.Hub, templateID string) error {
+func DeleteWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, templateID string) error {
 	templateID = strings.TrimSpace(templateID)
 	if templateID == "" {
 		return common.ErrInvalidArgument

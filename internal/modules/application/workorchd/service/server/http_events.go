@@ -16,7 +16,7 @@ import (
 
 func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/events", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		state.metrics.eventListRequests.Add(1)
 		items, err := state.listEventRecords(r.Context(), state.config.Backend, state.config.DataRoot, eventRecordQueryFromRequest(r))
 		if err != nil {
@@ -31,7 +31,7 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/events/stream", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		if state.eventHub == nil {
 			writeBusinessError(w, common.ErrNotFound)
 			return

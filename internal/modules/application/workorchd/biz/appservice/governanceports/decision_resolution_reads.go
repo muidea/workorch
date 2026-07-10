@@ -4,17 +4,17 @@ import (
 	"context"
 	"errors"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ReadDecisionResolutionByTicket(ctx context.Context, hub events.Hub, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
+func ReadDecisionResolutionByTicket(ctx context.Context, hub magicevent.Hub, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
 	return ownerreadports.ReadDecisionResolutionByTicketOwnerCommand(ctx, hub, ticketID)
 }
 
-func ResolutionForTicket(ctx context.Context, hub events.Hub, item *decisionmodel.Ticket) (*decisionmodel.Resolution, error) {
+func ResolutionForTicket(ctx context.Context, hub magicevent.Hub, item *decisionmodel.Ticket) (*decisionmodel.Resolution, error) {
 	if item == nil || hub == nil || item.State != common.DecisionTicketStateResolved {
 		return nil, nil
 	}
@@ -29,7 +29,7 @@ func ResolutionForTicket(ctx context.Context, hub events.Hub, item *decisionmode
 	return resolution, nil
 }
 
-func ResolutionsForTickets(ctx context.Context, hub events.Hub, items []*decisionmodel.Ticket) (map[string]*decisionmodel.Resolution, error) {
+func ResolutionsForTickets(ctx context.Context, hub magicevent.Hub, items []*decisionmodel.Ticket) (map[string]*decisionmodel.Resolution, error) {
 	ret := make(map[string]*decisionmodel.Resolution, len(items))
 	for _, item := range items {
 		if item == nil || item.State != common.DecisionTicketStateResolved {

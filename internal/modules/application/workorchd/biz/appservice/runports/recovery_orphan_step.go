@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -31,11 +31,11 @@ type RuntimeGapRecovery struct {
 	Reason         string
 }
 
-func RecoverOrphanDispatchedStep(ctx context.Context, hub events.Hub, item *runmodel.Run, maxIterations int, resume ResumeRunFunc) (*runmodel.Step, bool, error) {
+func RecoverOrphanDispatchedStep(ctx context.Context, hub magicevent.Hub, item *runmodel.Run, maxIterations int, resume ResumeRunFunc) (*runmodel.Step, bool, error) {
 	return recoverOrphanDispatchedStep(ctx, hub, item, maxIterations, resume, nil)
 }
 
-func RecoverStaleOrphanDispatchedStep(ctx context.Context, hub events.Hub, item *runmodel.Run, maxIterations int, resume ResumeRunFunc, minAge time.Duration, now time.Time) (*runmodel.Step, bool, error) {
+func RecoverStaleOrphanDispatchedStep(ctx context.Context, hub magicevent.Hub, item *runmodel.Run, maxIterations int, resume ResumeRunFunc, minAge time.Duration, now time.Time) (*runmodel.Step, bool, error) {
 	if resume == nil {
 		return nil, false, nil
 	}
@@ -44,17 +44,17 @@ func RecoverStaleOrphanDispatchedStep(ctx context.Context, hub events.Hub, item 
 	}, minAge, now)
 }
 
-func RecoverStaleRuntimeGapDispatchedStep(ctx context.Context, hub events.Hub, item *runmodel.Run, maxIterations int, recover RecoverRuntimeGapFunc, minAge time.Duration, now time.Time) (*runmodel.Step, bool, error) {
+func RecoverStaleRuntimeGapDispatchedStep(ctx context.Context, hub magicevent.Hub, item *runmodel.Run, maxIterations int, recover RecoverRuntimeGapFunc, minAge time.Duration, now time.Time) (*runmodel.Step, bool, error) {
 	if minAge <= 0 {
 		minAge = DefaultStaleDispatchedStepMinAge
 	}
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	return recoverOrphanDispatchedStep(ctx, hub, item, maxIterations, nil, func(ctx context.Context, hub events.Hub, current *runmodel.Run) (*runmodel.Step, error) {
+	return recoverOrphanDispatchedStep(ctx, hub, item, maxIterations, nil, func(ctx context.Context, hub magicevent.Hub, current *runmodel.Run) (*runmodel.Step, error) {
 		step, _, err := staleOrphanDispatchedRuntimeGap(ctx, hub, current, minAge, now)
 		return step, err
-	}, func(ctx context.Context, hub events.Hub, current *runmodel.Run, terminal *runmodel.Step) error {
+	}, func(ctx context.Context, hub magicevent.Hub, current *runmodel.Run, terminal *runmodel.Step) error {
 		if recover == nil {
 			return common.ErrInvalidArgument
 		}
@@ -75,10 +75,10 @@ func RecoverStaleRuntimeGapDispatchedStep(ctx context.Context, hub events.Hub, i
 	})
 }
 
-type orphanDispatchedStepSelector func(context.Context, events.Hub, *runmodel.Run) (*runmodel.Step, error)
-type orphanDispatchedStepRecoveryExecutor func(context.Context, events.Hub, *runmodel.Run, *runmodel.Step) error
+type orphanDispatchedStepSelector func(context.Context, magicevent.Hub, *runmodel.Run) (*runmodel.Step, error)
+type orphanDispatchedStepRecoveryExecutor func(context.Context, magicevent.Hub, *runmodel.Run, *runmodel.Step) error
 
-func recoverOrphanDispatchedStep(ctx context.Context, hub events.Hub, item *runmodel.Run, maxIterations int, resume ResumeRunFunc, selector orphanDispatchedStepSelector, executors ...orphanDispatchedStepRecoveryExecutor) (*runmodel.Step, bool, error) {
+func recoverOrphanDispatchedStep(ctx context.Context, hub magicevent.Hub, item *runmodel.Run, maxIterations int, resume ResumeRunFunc, selector orphanDispatchedStepSelector, executors ...orphanDispatchedStepRecoveryExecutor) (*runmodel.Step, bool, error) {
 	if hub == nil ||
 		item == nil ||
 		!runtimecore.IsRecoverableRunningRun(item) {
@@ -146,7 +146,7 @@ func recoverOrphanDispatchedStep(ctx context.Context, hub events.Hub, item *runm
 	return recovered, true, fmt.Errorf("%w: orphan dispatched step recovery exceeded %d iterations", common.ErrConflict, maxIterations)
 }
 
-func executeOrphanDispatchedRecovery(ctx context.Context, hub events.Hub, current *runmodel.Run, terminal *runmodel.Step, resume ResumeRunFunc, executors ...orphanDispatchedStepRecoveryExecutor) error {
+func executeOrphanDispatchedRecovery(ctx context.Context, hub magicevent.Hub, current *runmodel.Run, terminal *runmodel.Step, resume ResumeRunFunc, executors ...orphanDispatchedStepRecoveryExecutor) error {
 	if len(executors) > 0 && executors[0] != nil {
 		return executors[0](ctx, hub, current, terminal)
 	}

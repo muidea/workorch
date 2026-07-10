@@ -11,25 +11,20 @@ import (
 )
 
 type workspaceEventReader struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r workspaceEventReader) Get(ctx context.Context, id common.WorkspaceID) (*workspacemodel.Workspace, error) {
 	if r.hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	provider, ok := r.hub.(rawMagicHubProvider)
-	if !ok || provider.RawHub() == nil {
-		return nil, common.ErrInvalidArgument
-	}
 	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceCommand{WorkspaceID: id})
-	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
-		Topic:       workspaceevents.TopicWorkspaceCommandGet,
+	ev.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.TopicWorkspaceCommandGet, events.EventHubLaneScope{
 		SubjectType: "workspace",
 		SubjectID:   string(id),
 		WorkspaceID: string(id),
 	}))
-	result := provider.RawHub().Send(ev)
+	result := r.hub.Send(ev)
 	if result == nil {
 		return nil, common.ErrInvalidArgument
 	}

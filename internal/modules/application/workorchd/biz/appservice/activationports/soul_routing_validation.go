@@ -4,13 +4,13 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ValidateSoulRoutingCapabilitySelection(ctx context.Context, hub events.Hub, routing appmodelcore.SoulRouting, skillIDs []string, mcpServerIDs []string, capabilityIDs []string, capabilityCategories []string, toolKinds []string) error {
+func ValidateSoulRoutingCapabilitySelection(ctx context.Context, hub magicevent.Hub, routing appmodelcore.SoulRouting, skillIDs []string, mcpServerIDs []string, capabilityIDs []string, capabilityCategories []string, toolKinds []string) error {
 	if routing.Status != "resolved" {
 		return nil
 	}

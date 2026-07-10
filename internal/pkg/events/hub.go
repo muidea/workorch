@@ -2,7 +2,6 @@ package events
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -10,26 +9,6 @@ import (
 )
 
 type Handler func(context.Context, Envelope) error
-
-type responseError struct {
-	envelope Envelope
-}
-
-func (e responseError) Error() string {
-	return "event response"
-}
-
-func Response(envelope Envelope) error {
-	return responseError{envelope: prepareEnvelope(envelope)}
-}
-
-func ResponseEnvelope(err error) (Envelope, bool) {
-	var response responseError
-	if !errors.As(err, &response) {
-		return Envelope{}, false
-	}
-	return cloneEnvelope(response.envelope), true
-}
 
 type Hub interface {
 	Publish(context.Context, Envelope) error
@@ -46,18 +25,11 @@ func PublishByContract(ctx context.Context, hub Hub, envelope Envelope) error {
 	}
 	if EventHubDeliveryModeForTopic(envelope.Topic) == EventHubDeliveryModeAsync {
 		if asyncHub, ok := hub.(AsyncHub); ok {
-			return ignoreNotifyResponse(asyncHub.PublishAsync(ctx, envelope))
+			return asyncHub.PublishAsync(ctx, envelope)
 		}
-		return ignoreNotifyResponse(hub.Publish(ctx, envelope))
+		return hub.Publish(ctx, envelope)
 	}
 	return hub.Publish(ctx, envelope)
-}
-
-func ignoreNotifyResponse(err error) error {
-	if _, ok := ResponseEnvelope(err); ok {
-		return nil
-	}
-	return err
 }
 
 type MemoryHub struct {
@@ -89,9 +61,6 @@ func (h *MemoryHub) Publish(ctx context.Context, envelope Envelope) error {
 			continue
 		}
 		if err := handler(ctx, cloneEnvelope(envelope)); err != nil {
-			if _, ok := ResponseEnvelope(err); ok {
-				return err
-			}
 			return fmt.Errorf("handle event %s: %w", envelope.Topic, err)
 		}
 	}

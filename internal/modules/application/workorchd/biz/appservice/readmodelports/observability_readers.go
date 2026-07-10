@@ -3,18 +3,18 @@ package readmodelports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 type EventRecordReader struct {
-	Hub events.Hub
+	Hub magicevent.Hub
 }
 
 func (r EventRecordReader) List(ctx context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
@@ -22,7 +22,7 @@ func (r EventRecordReader) List(ctx context.Context, query repository.EventRecor
 }
 
 type MemoryRecallTraceReader struct {
-	Hub events.Hub
+	Hub magicevent.Hub
 }
 
 func (r MemoryRecallTraceReader) List(ctx context.Context, query repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {

@@ -8,7 +8,6 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -16,7 +15,6 @@ import (
 func TestEventRuntimeAdapterExecuteRuntimeStepReturnsCompletedResult(t *testing.T) {
 	rawHub := magicevent.NewHub(16)
 	defer rawHub.Terminate(context.Background())
-	hub := events.NewMagicHubWithHubOwner(rawHub, ModuleID)
 	background := magictask.NewBackgroundRoutine(4)
 	defer background.Shutdown(context.Background())
 
@@ -28,7 +26,7 @@ func TestEventRuntimeAdapterExecuteRuntimeStepReturnsCompletedResult(t *testing.
 	}
 	defer executor.Teardown()
 
-	adapter := NewEventRuntimeAdapter(hub)
+	adapter := NewEventRuntimeAdapter(rawHub)
 	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimeStepRequest("llm/workspace_execution"))
 	if err != nil {
 		t.Fatalf("ExecuteRuntimeStep: %v", err)
@@ -41,7 +39,6 @@ func TestEventRuntimeAdapterExecuteRuntimeStepReturnsCompletedResult(t *testing.
 func TestEventRuntimeAdapterRequestRuntimeStepExecutionReturnsAcceptedBeforeResult(t *testing.T) {
 	rawHub := magicevent.NewHub(16)
 	defer rawHub.Terminate(context.Background())
-	hub := events.NewMagicHubWithHubOwner(rawHub, ModuleID)
 	background := magictask.NewBackgroundRoutine(4)
 	defer background.Shutdown(context.Background())
 
@@ -57,7 +54,7 @@ func TestEventRuntimeAdapterRequestRuntimeStepExecutionReturnsAcceptedBeforeResu
 	}
 	defer executor.Teardown()
 
-	adapter := NewEventRuntimeAdapter(hub).(interface {
+	adapter := NewEventRuntimeAdapter(rawHub).(interface {
 		RequestRuntimeStepExecution(context.Context, runtimemodel.StepExecutionRequest) (runtimemodel.RuntimeStepExecutionAccepted, error)
 	})
 	done := make(chan struct {
@@ -94,7 +91,6 @@ func TestEventRuntimeAdapterRequestRuntimeStepExecutionReturnsAcceptedBeforeResu
 func TestEventRuntimeAdapterExecuteRuntimeStepReturnsFailedEventError(t *testing.T) {
 	rawHub := magicevent.NewHub(16)
 	defer rawHub.Terminate(context.Background())
-	hub := events.NewMagicHubWithHubOwner(rawHub, ModuleID)
 	background := magictask.NewBackgroundRoutine(4)
 	defer background.Shutdown(context.Background())
 
@@ -106,7 +102,7 @@ func TestEventRuntimeAdapterExecuteRuntimeStepReturnsFailedEventError(t *testing
 	}
 	defer executor.Teardown()
 
-	adapter := NewEventRuntimeAdapter(hub)
+	adapter := NewEventRuntimeAdapter(rawHub)
 	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimeStepRequest("llm/workspace_execution"))
 	if err == nil {
 		t.Fatal("ExecuteRuntimeStep err = nil, want provider unavailable")
@@ -122,7 +118,6 @@ func TestEventRuntimeAdapterExecuteRuntimeStepReturnsFailedEventError(t *testing
 func TestEventRuntimeAdapterExecuteRuntimeStepReturnsContextErrorWhenNoResultArrives(t *testing.T) {
 	rawHub := magicevent.NewHub(16)
 	defer rawHub.Terminate(context.Background())
-	hub := events.NewMagicHubWithHubOwner(rawHub, ModuleID)
 	background := magictask.NewBackgroundRoutine(4)
 	defer background.Shutdown(context.Background())
 
@@ -136,7 +131,7 @@ func TestEventRuntimeAdapterExecuteRuntimeStepReturnsContextErrorWhenNoResultArr
 	}
 	defer executor.Teardown()
 
-	adapter := NewEventRuntimeAdapter(hub)
+	adapter := NewEventRuntimeAdapter(rawHub)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	_, err := adapter.ExecuteRuntimeStep(ctx, runtimeStepRequest("llm/workspace_execution"))

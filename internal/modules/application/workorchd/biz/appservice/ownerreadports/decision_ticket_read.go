@@ -3,14 +3,14 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ReadDecisionTicketByOwnerCommand(ctx context.Context, hub events.Hub, ticketID common.TicketID) (*decisionmodel.Ticket, error) {
+func ReadDecisionTicketByOwnerCommand(ctx context.Context, hub magicevent.Hub, ticketID common.TicketID) (*decisionmodel.Ticket, error) {
 	if hub == nil || ticketID == "" {
 		return nil, common.ErrInvalidArgument
 	}

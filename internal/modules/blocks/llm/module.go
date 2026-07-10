@@ -128,7 +128,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (ll
 	}
 }
 
-func setLLMMagicResult(result magicevent.Result, data any, err error) {
+func setLLMMagicResult(result magicevent.Result, data llmevents.LLMCommandResult, err error) {
 	if result == nil {
 		return
 	}

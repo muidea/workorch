@@ -3,12 +3,12 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func ListRunStepsWithSession(ctx context.Context, session *RuntimeSession, query StepQuery) (ret StepPage, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (StepPage, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (StepPage, error) {
 		return readmodelports.ReadRunStepsPage(ctx, hub, query)
 	})
 }
@@ -20,7 +20,7 @@ func ListRunStepsWithBackend(ctx context.Context, backend string, dataRoot strin
 }
 
 func ListRunToolCallsWithSession(ctx context.Context, session *RuntimeSession, query ToolCallQuery) (ret ToolCallPage, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (ToolCallPage, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (ToolCallPage, error) {
 		return readmodelports.ReadRunToolCallsPage(ctx, hub, query)
 	})
 }
@@ -32,7 +32,7 @@ func ListRunToolCallsWithBackend(ctx context.Context, backend string, dataRoot s
 }
 
 func ListRunRuntimeCheckpointsWithSession(ctx context.Context, session *RuntimeSession, query RuntimeCheckpointQuery) (ret RuntimeCheckpointPage, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (RuntimeCheckpointPage, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (RuntimeCheckpointPage, error) {
 		return readmodelports.ReadRunRuntimeCheckpointsPage(ctx, hub, query)
 	})
 }

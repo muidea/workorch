@@ -16,23 +16,18 @@ import (
 
 const activationRunCommandSource = "application/workorchd/workspace-activation"
 
-func sendActivationMagicCommand[Command any, Result any](ctx context.Context, hub events.Hub, topic string, destination string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, command Command) error {
+func sendActivationMagicCommand[Command any, Result any](ctx context.Context, hub magicevent.Hub, topic string, destination string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, command Command) error {
 	if hub == nil || topic == "" || destination == "" {
 		return common.ErrInvalidArgument
 	}
-	rawHub, err := activationRawMagicHub(hub)
-	if err != nil {
-		return err
-	}
 	ev := magicevent.NewEventWithContext(topic, activationRunCommandSource, destination, magicevent.NewHeader(), ctx, command)
-	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
-		Topic:       topic,
+	ev.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
-	response := rawHub.Send(ev)
+	response := hub.Send(ev)
 	if response == nil {
 		return fmt.Errorf("activation run command %s returned no response", topic)
 	}
@@ -49,13 +44,13 @@ func sendActivationMagicCommand[Command any, Result any](ctx context.Context, hu
 	return nil
 }
 
-func SupersedeRun(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID) error {
+func SupersedeRun(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID) error {
 	return sendActivationMagicCommand[orchestratorevents.SupersedeRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandSupersedeRun, orchestratorevents.CommandDestination, "run", string(runID), workspaceID, runID, orchestratorevents.SupersedeRunCommand{
 		RunID: runID,
 	})
 }
 
-func CreateWorkspaceExecutionRun(ctx context.Context, hub events.Hub, runID common.RunID, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any, priority int) error {
+func CreateWorkspaceExecutionRun(ctx context.Context, hub magicevent.Hub, runID common.RunID, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any, priority int) error {
 	return sendActivationMagicCommand[runevents.CreateRunCommand, runevents.RunCommandResult](ctx, hub, runevents.TopicRunCommandCreate, runevents.CommandDestination, "run", string(runID), workspaceID, runID, runevents.CreateRunCommand{
 		RunID:              runID,
 		WorkspaceID:        workspaceID,
@@ -68,13 +63,13 @@ func CreateWorkspaceExecutionRun(ctx context.Context, hub events.Hub, runID comm
 	})
 }
 
-func StartRun(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID) error {
+func StartRun(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID) error {
 	return sendActivationMagicCommand[orchestratorevents.StartRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandStartRun, orchestratorevents.CommandDestination, "run", string(runID), workspaceID, runID, orchestratorevents.StartRunCommand{
 		RunID: runID,
 	})
 }
 
-func FailRun(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID, failureReason string) error {
+func FailRun(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID, failureReason string) error {
 	return sendActivationMagicCommand[orchestratorevents.FailRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandFailRun, orchestratorevents.CommandDestination, "run", string(runID), workspaceID, runID, orchestratorevents.FailRunCommand{
 		RunID:  runID,
 		Reason: failureReason,

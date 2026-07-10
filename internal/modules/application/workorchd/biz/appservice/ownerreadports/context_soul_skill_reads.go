@@ -3,16 +3,16 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	skillevents "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/events"
 	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
 
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ReadSoulByOwnerCommand(ctx context.Context, hub events.Hub, soulID common.SoulID) (*soulmodel.Soul, error) {
+func ReadSoulByOwnerCommand(ctx context.Context, hub magicevent.Hub, soulID common.SoulID) (*soulmodel.Soul, error) {
 	if hub == nil || soulID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -26,7 +26,7 @@ func ReadSoulByOwnerCommand(ctx context.Context, hub events.Hub, soulID common.S
 	return result.Soul, nil
 }
 
-func ReadSkillByOwnerCommand(ctx context.Context, hub events.Hub, skillID common.SkillID) (*skillmodel.Skill, error) {
+func ReadSkillByOwnerCommand(ctx context.Context, hub magicevent.Hub, skillID common.SkillID) (*skillmodel.Skill, error) {
 	if hub == nil || skillID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -40,7 +40,7 @@ func ReadSkillByOwnerCommand(ctx context.Context, hub events.Hub, skillID common
 	return result.Skill, nil
 }
 
-func ListSkillsByOwnerCommand(ctx context.Context, hub events.Hub) ([]*skillmodel.Skill, error) {
+func ListSkillsByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*skillmodel.Skill, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

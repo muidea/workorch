@@ -3,8 +3,8 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func CreateWorkspaceWithSession(ctx context.Context, session *RuntimeSession, title string, description string, deliverableDirectory string) (ret Workspace, err error) {
@@ -16,7 +16,7 @@ func CreateWorkspaceWithSession(ctx context.Context, session *RuntimeSession, ti
 }
 
 func CreateWorkspaceWithTemplateWithSession(ctx context.Context, session *RuntimeSession, cmd CreateWorkspaceCommand) (ret Workspace, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (Workspace, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Workspace, error) {
 		return workspaceports.CreateWorkspaceView(ctx, hub, workspaceports.CreateWorkspaceViewRequest{
 			RepositoryBackend: session.RepositoryBackend(),
 			RepositoryDataDir: session.RepositoryDataDir(),
@@ -44,7 +44,7 @@ func CreateWorkspaceFromEnv(ctx context.Context, title string, description strin
 }
 
 func DeleteWorkspaceWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, cmd DeleteWorkspaceCommand) (err error) {
-	_, err = withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (struct{}, error) {
+	_, err = withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (struct{}, error) {
 		return struct{}{}, workspaceports.DeleteWorkspaceView(ctx, hub, workspaceports.DeleteWorkspaceViewRequest{
 			RepositoryBackend: session.RepositoryBackend(),
 			RepositoryDataDir: session.RepositoryDataDir(),
@@ -66,7 +66,7 @@ func DeleteWorkspaceWithBackend(ctx context.Context, backend string, dataRoot st
 }
 
 func RefreshWorkspaceTemplateBindingWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret Workspace, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (Workspace, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Workspace, error) {
 		return workspaceports.RefreshWorkspaceTemplateBinding(ctx, hub, workspaceID)
 	})
 }

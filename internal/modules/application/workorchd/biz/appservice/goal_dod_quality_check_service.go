@@ -3,9 +3,9 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/qualitycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/qualityports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type GoalDoDQualityCheckCommand = qualitycore.Command
@@ -13,7 +13,7 @@ type GoalDoDQualityIssue = qualitycore.Issue
 type GoalDoDQualityCheck = qualitycore.Check
 
 func CheckGoalDoDQualityWithSession(ctx context.Context, session *RuntimeSession, cmd GoalDoDQualityCheckCommand) (ret GoalDoDQualityCheck, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (GoalDoDQualityCheck, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (GoalDoDQualityCheck, error) {
 		return qualityports.CheckGoalDoDQuality(ctx, hub, cmd)
 	})
 }

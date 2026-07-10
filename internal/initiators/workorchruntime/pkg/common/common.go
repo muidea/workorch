@@ -1,6 +1,7 @@
 package common
 
 import (
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
@@ -100,5 +101,6 @@ type RepositoryProvider interface {
 type Helper interface {
 	RepositoryProvider() RepositoryProvider
 	EventHub() events.Hub
+	CommandHub() magicevent.Hub
 	RuntimePolicy() workorchruntimepolicy.RuntimePolicy
 }

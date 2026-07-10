@@ -5,30 +5,29 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/clicore"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func (d *CLICommandDispatcher) handleMemoryCommand(ctx context.Context, cmd events.CLICommandPayload) (map[string]any, []map[string]any, error) {
+func (d *CLICommandDispatcher) handleMemoryCommand(ctx context.Context, cmd clicore.Command) (map[string]any, []map[string]any, error) {
 	switch cmd.Command {
-	case events.CommandMemoryCreate:
+	case clicore.CommandMemoryCreate:
 		item, err := CreateMemoryItemWithSession(ctx, d.borrow(), string(cmd.WorkspaceID), clicore.MemoryCommandFromPayload(cmd.Payload))
 		return clicore.ResourceMap(item), nil, err
-	case events.CommandMemoryGet:
+	case clicore.CommandMemoryGet:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 		item, err := ReadMemoryItemWithSession(ctx, d.borrow(), cmd.SubjectID)
 		return clicore.ResourceMap(item), nil, err
-	case events.CommandMemoryUpdate:
+	case clicore.CommandMemoryUpdate:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 		item, err := UpdateMemoryItemWithSession(ctx, d.borrow(), cmd.SubjectID, clicore.MemoryCommandFromPayload(cmd.Payload))
 		return clicore.ResourceMap(item), nil, err
-	case events.CommandMemoryDelete:
+	case clicore.CommandMemoryDelete:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 		err := DeleteMemoryItemWithSession(ctx, d.borrow(), cmd.SubjectID)
 		return nil, nil, err
-	case events.CommandMemoryList:
+	case clicore.CommandMemoryList:
 		items, err := SearchMemoryWithSession(ctx, d.borrow(), MemoryQuery{WorkspaceID: string(cmd.WorkspaceID)})
 		return nil, clicore.ResourceMaps(items), err
-	case events.CommandMemorySearch:
+	case clicore.CommandMemorySearch:
 		items, err := SearchMemoryWithSession(ctx, d.borrow(), clicore.MemorySearchQueryFromPayload(string(cmd.WorkspaceID), cmd.Payload))
 		return nil, clicore.ResourceMaps(items), err
 	default:

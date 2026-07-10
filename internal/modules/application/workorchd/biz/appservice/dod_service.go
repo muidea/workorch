@@ -3,13 +3,13 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionports"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func DefineDoDWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, items []string) (ret DoD, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (DoD, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (DoD, error) {
 		return definitionports.DefineOrConsolidateWorkspaceDoDView(ctx, hub, common.WorkspaceID(workspaceID), items)
 	})
 }
@@ -27,7 +27,7 @@ func DefineDoDFromEnv(ctx context.Context, workspaceID string, items []string) (
 }
 
 func UpdateDoDWithSession(ctx context.Context, session *RuntimeSession, dodID string, items []string) (ret DoD, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (DoD, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (DoD, error) {
 		return definitionports.UpdateDoDView(ctx, hub, common.DoDID(dodID), items)
 	})
 }
@@ -45,7 +45,7 @@ func UpdateDoDFromEnv(ctx context.Context, dodID string, items []string) (DoD, e
 }
 
 func ReadDoDWithSession(ctx context.Context, session *RuntimeSession, dodID string) (ret DoD, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (DoD, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (DoD, error) {
 		return definitionports.ReadDoDView(ctx, hub, common.DoDID(dodID))
 	})
 }
@@ -57,7 +57,7 @@ func ReadDoDWithBackend(ctx context.Context, backend string, dataRoot string, do
 }
 
 func ListDoDsWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret []DoD, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]DoD, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) ([]DoD, error) {
 		return definitionports.ListConsolidatedWorkspaceDoDViews(ctx, hub, common.WorkspaceID(workspaceID))
 	})
 }

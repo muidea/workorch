@@ -3,23 +3,23 @@ package workspaceports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ReadWorkspaceRecord(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) (*workspacemodel.Workspace, error) {
+func ReadWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) (*workspacemodel.Workspace, error) {
 	return ownerreadports.ReadWorkspaceByOwnerCommand(ctx, hub, workspaceID)
 }
 
-func ListWorkspaceRecords(ctx context.Context, hub events.Hub) ([]*workspacemodel.Workspace, error) {
+func ListWorkspaceRecords(ctx context.Context, hub magicevent.Hub) ([]*workspacemodel.Workspace, error) {
 	return ownerreadports.ListWorkspacesByOwnerCommand(ctx, hub)
 }
 
-func CreateWorkspaceRecord(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, title string, description string, deliverableDirectory string, internalDirectory string) error {
+func CreateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, title string, description string, deliverableDirectory string, internalDirectory string) error {
 	_, err := sendWorkspaceMagicCommand[workspaceevents.CreateWorkspaceCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandCreate, workspaceevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", workspaceevents.CreateWorkspaceCommand{
 		WorkspaceID:          workspaceID,
 		Title:                title,
@@ -30,7 +30,7 @@ func CreateWorkspaceRecord(ctx context.Context, hub events.Hub, workspaceID comm
 	return err
 }
 
-func UpdateWorkspaceRecord(ctx context.Context, hub events.Hub, item *workspacemodel.Workspace) error {
+func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *workspacemodel.Workspace) error {
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
@@ -52,7 +52,7 @@ func UpdateWorkspaceRecord(ctx context.Context, hub events.Hub, item *workspacem
 	return err
 }
 
-func DeleteWorkspaceRecord(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
+func DeleteWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
 	_, err := sendWorkspaceMagicCommand[workspaceevents.DeleteWorkspaceCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandDelete, workspaceevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", workspaceevents.DeleteWorkspaceCommand{WorkspaceID: workspaceID})
 	return err
 }

@@ -19,7 +19,7 @@ func newRunModuleTestHub() (*events.MagicHub, magicevent.Hub) {
 	return events.NewMagicHubWithHub(rawHub), rawHub
 }
 
-func sendRunTestCommand(ctx context.Context, rawHub magicevent.Hub, topic string, command any) (runevents.RunCommandResult, error) {
+func sendRunTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (runevents.RunCommandResult, error) {
 	ev := magicevent.NewEventWithContext(topic, "run/module_test", runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := rawHub.Send(ev)
 	if result == nil {

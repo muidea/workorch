@@ -8,13 +8,11 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestDecisionResolutionEventRepositorySendsTypedOwnerCommand(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(8)
-	hub := events.NewMagicHubWithHubOwner(rawHub, ModuleID)
 	observer := magicevent.NewSimpleObserver(decisionevents.CommandDestination, rawHub)
 	defer observer.Unsubscribe(decisionevents.TopicDecisionCommandCreateResolution)
 	var got decisionevents.CreateResolutionCommand
@@ -26,7 +24,7 @@ func TestDecisionResolutionEventRepositorySendsTypedOwnerCommand(t *testing.T) {
 		got = cmd
 		result.Set(decisionevents.DecisionCommandResult{}, nil)
 	})
-	repo := decisionEventResolutionRepository{hub: hub}
+	repo := decisionEventResolutionRepository{hub: rawHub}
 
 	if err := repo.Create(ctx, &decisionmodel.Resolution{
 		ID:       "resolution-command-payload",

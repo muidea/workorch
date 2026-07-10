@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const StuckRunningRunFailureReason = "stuck running run recovered: no active execution, blocker, or continuation checkpoint"
@@ -16,7 +16,7 @@ const StaleDispatchedStepRecoveryReason = "stale dispatched step recovered by ru
 const MaxOrphanDispatchedStepRecoveryIterations = 16
 const DefaultStaleDispatchedStepMinAge = 2 * time.Minute
 
-func RecoverStuckRunningRunViews(ctx context.Context, hub events.Hub, resume ResumeRunFunc) ([]appmodelcore.Run, error) {
+func RecoverStuckRunningRunViews(ctx context.Context, hub magicevent.Hub, resume ResumeRunFunc) ([]appmodelcore.Run, error) {
 	if err := RecoverTerminalActiveWorkspacePointers(ctx, hub); err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func RecoverStuckRunningRunViews(ctx context.Context, hub events.Hub, resume Res
 	return ret, nil
 }
 
-func RecoverStaleDispatchedRunViews(ctx context.Context, hub events.Hub, resume ResumeRunFunc, minAge time.Duration, now time.Time) ([]appmodelcore.Run, error) {
+func RecoverStaleDispatchedRunViews(ctx context.Context, hub magicevent.Hub, resume ResumeRunFunc, minAge time.Duration, now time.Time) ([]appmodelcore.Run, error) {
 	if resume == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -81,7 +81,7 @@ func RecoverStaleDispatchedRunViews(ctx context.Context, hub events.Hub, resume 
 	}, minAge, now)
 }
 
-func RecoverStaleRuntimeGapRunViews(ctx context.Context, hub events.Hub, recover RecoverRuntimeGapFunc, minAge time.Duration, now time.Time) ([]appmodelcore.Run, error) {
+func RecoverStaleRuntimeGapRunViews(ctx context.Context, hub magicevent.Hub, recover RecoverRuntimeGapFunc, minAge time.Duration, now time.Time) ([]appmodelcore.Run, error) {
 	if minAge <= 0 {
 		minAge = DefaultStaleDispatchedStepMinAge
 	}

@@ -3,15 +3,15 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-func ListEventRecordsByOwnerCommand(ctx context.Context, hub events.Hub, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func ListEventRecordsByOwnerCommand(ctx context.Context, hub magicevent.Hub, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

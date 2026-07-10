@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
 
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func purgeWorkspaceResultsAndArtifacts(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
+func purgeWorkspaceResultsAndArtifacts(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
 	artifactResponse, err := sendWorkspaceMagicCommand[resultevents.ListArtifactsByWorkspaceCommand, resultevents.ResultCommandResult](ctx, hub, resultevents.TopicArtifactCommandListByWorkspace, resultevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", resultevents.ListArtifactsByWorkspaceCommand{WorkspaceID: workspaceID})
 	var artifacts []*resultmodel.Artifact
 	if err != nil {

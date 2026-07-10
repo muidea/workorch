@@ -3,6 +3,7 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
@@ -14,9 +15,9 @@ import (
 type RuntimeSession = runtimecore.Session
 
 var (
-	newBootstrapWithBackend                         = bootstrap.NewWithBackend
-	newBootstrapWithBackendRuntimePolicyAndEventHub = bootstrap.NewWithBackendRuntimePolicyAndEventHub
-	newBootstrapWithBackendAndRuntimePolicy         = bootstrap.NewWithBackendAndRuntimePolicy
+	newBootstrapWithBackend                          = bootstrap.NewWithBackend
+	newBootstrapWithBackendRuntimePolicyAndEventHubs = bootstrap.NewWithBackendRuntimePolicyAndEventHubs
+	newBootstrapWithBackendAndRuntimePolicy          = bootstrap.NewWithBackendAndRuntimePolicy
 )
 
 func NewRuntimeSession(bootstrapRuntime *bootstrap.Runtime) *RuntimeSession {
@@ -41,15 +42,16 @@ func NewRuntimeSessionWithBackend(backend string, dataRoot string) (*RuntimeSess
 	})
 }
 
-func NewRuntimeSessionWithBackendAndEventHub(backend string, dataRoot string, eventHub events.Hub) (*RuntimeSession, error) {
-	return runtimecore.NewSessionWithBackendAndEventHub(
+func NewRuntimeSessionWithBackendAndEventHubs(backend string, dataRoot string, eventHub events.Hub, commandHub magicevent.Hub) (*RuntimeSession, error) {
+	return runtimecore.NewSessionWithBackendAndEventHubs(
 		backend,
 		dataRoot,
 		eventHub,
+		commandHub,
 		workorchconfig.Current,
 		runtimeports.NewManagedRuntimeFromEventHub,
-		func(runtimePolicy workorchruntimepolicy.RuntimePolicy, eventHub events.Hub) *bootstrap.Runtime {
-			return newBootstrapWithBackendRuntimePolicyAndEventHub(backend, dataRoot, runtimePolicy, eventHub)
+		func(runtimePolicy workorchruntimepolicy.RuntimePolicy, eventHub events.Hub, commandHub magicevent.Hub) *bootstrap.Runtime {
+			return newBootstrapWithBackendRuntimePolicyAndEventHubs(backend, dataRoot, runtimePolicy, eventHub, commandHub)
 		},
 	)
 }
@@ -68,16 +70,20 @@ func NewRuntimeSessionFromEnv() (*RuntimeSession, error) {
 	)
 }
 
-func ContextWithEventHub(ctx context.Context, eventHub events.Hub) context.Context {
-	return runtimecore.ContextWithEventHub(ctx, eventHub)
-}
-
 func EventHubFromContext(ctx context.Context) events.Hub {
 	return runtimecore.EventHubFromContext(ctx)
 }
 
+func ContextWithEventHubs(ctx context.Context, eventHub events.Hub, commandHub magicevent.Hub) context.Context {
+	return runtimecore.ContextWithEventHubs(ctx, eventHub, commandHub)
+}
+
+func CommandHubFromContext(ctx context.Context) magicevent.Hub {
+	return runtimecore.CommandHubFromContext(ctx)
+}
+
 func newRuntimeSessionWithBackend(ctx context.Context, backend string, dataRoot string) (*RuntimeSession, error) {
-	return NewRuntimeSessionWithBackendAndEventHub(backend, dataRoot, EventHubFromContext(ctx))
+	return NewRuntimeSessionWithBackendAndEventHubs(backend, dataRoot, EventHubFromContext(ctx), CommandHubFromContext(ctx))
 }
 
 func exportsFromInitiator() (bootstrap.Exports, error) {

@@ -9,13 +9,11 @@ import (
 	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestReadArtifactFallbackListsArtifactsWithURIWorkspaceScope(t *testing.T) {
 	rawHub := magicevent.NewHub(8)
 	defer rawHub.Terminate(context.Background())
-	hub := events.NewMagicHubWithHubOwner(rawHub, "contentports/test")
 	var captured resultevents.ListArtifactsByRunCommand
 	var capturedWorkspace common.WorkspaceID
 	observer := magicevent.NewSimpleObserver(resultevents.CommandDestination, rawHub)
@@ -26,7 +24,7 @@ func TestReadArtifactFallbackListsArtifactsWithURIWorkspaceScope(t *testing.T) {
 	})
 	defer observer.Unsubscribe(resultevents.TopicArtifactCommandListByRun)
 
-	reader := NewReader(hub, "file", t.TempDir())
+	reader := NewReader(rawHub, "file", t.TempDir())
 	_, err := reader.ReadArtifact(context.Background(), "workorch://workspaces/ws-artifact-scope/artifacts/run-001/result-summary.txt", nil)
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("ReadArtifact err = %v, want not found after scoped owner list", err)

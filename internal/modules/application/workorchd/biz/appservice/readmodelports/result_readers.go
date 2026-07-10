@@ -3,15 +3,15 @@ package readmodelports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type ResultReader struct {
-	Hub events.Hub
+	Hub magicevent.Hub
 }
 
 func (r ResultReader) ListByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Result, error) {
@@ -23,7 +23,7 @@ func (r ResultReader) ListByRun(ctx context.Context, runID common.RunID) ([]*res
 }
 
 type ArtifactReader struct {
-	Hub events.Hub
+	Hub magicevent.Hub
 }
 
 func (r ArtifactReader) ListByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Artifact, error) {
@@ -39,7 +39,7 @@ func (r ArtifactReader) ListByResult(ctx context.Context, resultID common.Result
 }
 
 type ArtifactContinuationReader struct {
-	Hub events.Hub
+	Hub magicevent.Hub
 }
 
 func (r ArtifactContinuationReader) ListByRun(ctx context.Context, runID common.RunID) ([]*orchestratormodel.ArtifactContinuation, error) {
@@ -47,7 +47,7 @@ func (r ArtifactContinuationReader) ListByRun(ctx context.Context, runID common.
 }
 
 type CoverageWorkItemReader struct {
-	Hub events.Hub
+	Hub magicevent.Hub
 }
 
 func (r CoverageWorkItemReader) ListByRun(ctx context.Context, runID common.RunID) ([]*orchestratormodel.CoverageWorkItem, error) {

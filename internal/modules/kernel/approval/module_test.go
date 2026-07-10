@@ -13,7 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
-func sendApprovalTestCommand(ctx context.Context, rawHub magicevent.Hub, topic string, command any) (approvalevents.ApprovalCommandResult, error) {
+func sendApprovalTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (approvalevents.ApprovalCommandResult, error) {
 	ev := magicevent.NewEventWithContext(topic, "approval/module_test", approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := rawHub.Send(ev)
 	if result == nil {

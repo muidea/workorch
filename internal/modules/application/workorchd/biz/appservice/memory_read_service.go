@@ -3,12 +3,12 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func ReadMemoryItemWithSession(ctx context.Context, session *RuntimeSession, memoryID string) (ret MemoryItem, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (MemoryItem, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (MemoryItem, error) {
 		return contextregistryports.ReadMemoryItemView(ctx, hub, memoryID)
 	})
 }
@@ -20,7 +20,7 @@ func ReadMemoryItemWithBackend(ctx context.Context, backend string, dataRoot str
 }
 
 func ListMemoryByWorkspaceWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, query string) (ret []MemoryItem, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]MemoryItem, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) ([]MemoryItem, error) {
 		return contextregistryports.ListMemoryByWorkspaceView(ctx, hub, workspaceID, query)
 	})
 }
@@ -32,7 +32,7 @@ func ListMemoryByWorkspaceWithBackend(ctx context.Context, backend string, dataR
 }
 
 func SearchMemoryWithSession(ctx context.Context, session *RuntimeSession, query MemoryQuery) (ret []MemoryItem, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]MemoryItem, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) ([]MemoryItem, error) {
 		return contextregistryports.SearchMemoryView(ctx, hub, query)
 	})
 }

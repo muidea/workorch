@@ -4,14 +4,14 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-func ApplyWorkspaceTemplateOnCreate(ctx context.Context, hub events.Hub, item *workspacemodel.Workspace, templateID string) (*workspacemodel.Workspace, error) {
+func ApplyWorkspaceTemplateOnCreate(ctx context.Context, hub magicevent.Hub, item *workspacemodel.Workspace, templateID string) (*workspacemodel.Workspace, error) {
 	templateID = strings.TrimSpace(templateID)
 	if templateID == "" {
 		return item, nil
@@ -41,7 +41,7 @@ func ApplyWorkspaceTemplateOnCreate(ctx context.Context, hub events.Hub, item *w
 	return ReadWorkspaceRecord(ctx, hub, updated.ID)
 }
 
-func ValidateWorkspaceTemplateSoulRefs(ctx context.Context, hub events.Hub, template *repository.WorkspaceTemplate) error {
+func ValidateWorkspaceTemplateSoulRefs(ctx context.Context, hub magicevent.Hub, template *repository.WorkspaceTemplate) error {
 	if template == nil {
 		return common.ErrInvalidArgument
 	}

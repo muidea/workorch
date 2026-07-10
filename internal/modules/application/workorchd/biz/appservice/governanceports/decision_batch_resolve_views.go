@@ -3,6 +3,7 @@ package governanceports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
@@ -11,10 +12,9 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func BatchResolveDecisionViews(ctx context.Context, hub events.Hub, traces governancecore.AutoGovernanceTraceReader, cmd appmodelcore.BatchResolveDecisionCommand, scope common.WorkspaceID) ([]readmodelcore.Decision, error) {
+func BatchResolveDecisionViews(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, cmd appmodelcore.BatchResolveDecisionCommand, scope common.WorkspaceID) ([]readmodelcore.Decision, error) {
 	semantic := governancecommon.NormalizeDecisionResolution(cmd.ResolutionType, cmd.ResolutionPayload)
 	resolutionType := semantic.ResolutionType
 	if !decisioncommon.IsSupportedResolutionType(resolutionType) || len(cmd.TicketIDs) == 0 {

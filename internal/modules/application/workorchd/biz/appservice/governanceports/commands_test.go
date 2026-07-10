@@ -16,7 +16,7 @@ import (
 
 func TestApprovalsForQueryFiltersOwnerCommandResults(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	testHub.subscribeApproval(approvalevents.TopicApprovalCommandListByRun, func(data any) approvalevents.ApprovalCommandResult {
 		cmd, ok := data.(approvalevents.ListApprovalsByRunCommand)
 		if !ok {
@@ -49,7 +49,7 @@ func TestApprovalsForQueryFiltersOwnerCommandResults(t *testing.T) {
 
 func TestDecisionTicketsForQueryFiltersOwnerCommandResults(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandListTicketsByRun, func(data any) decisionevents.DecisionCommandResult {
 		cmd, ok := data.(decisionevents.ListTicketsByRunCommand)
 		if !ok {
@@ -82,7 +82,7 @@ func TestDecisionTicketsForQueryFiltersOwnerCommandResults(t *testing.T) {
 
 func TestResolutionForTicketReadsOnlyResolvedTickets(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	readCount := 0
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetResolution, func(data any) decisionevents.DecisionCommandResult {
 		readCount++
@@ -128,7 +128,7 @@ func TestResolutionForTicketReadsOnlyResolvedTickets(t *testing.T) {
 func TestResolveDecisionPublishesContractCommand(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
 		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
 		if !ok {
@@ -165,7 +165,7 @@ func TestResolveDecisionPublishesContractCommand(t *testing.T) {
 func TestResolveDecisionScopesResolutionIDByWorkspace(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	var resolutionIDs []common.ResolutionID
 	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
 		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
@@ -203,7 +203,7 @@ func TestResolveDecisionScopesResolutionIDByWorkspace(t *testing.T) {
 func TestResolveApprovalPublishesContractCommand(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
 		cmd, ok := data.(approvalevents.EnsureApprovedCommand)
 		if !ok {
@@ -227,7 +227,7 @@ func TestResolveApprovalPublishesContractCommand(t *testing.T) {
 func TestResolveApprovalItemPublishesScopedContractCommand(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
 		cmd, ok := data.(approvalevents.EnsureApprovedCommand)
 		if !ok {
@@ -262,6 +262,7 @@ func TestResolveApprovalItemPublishesScopedContractCommand(t *testing.T) {
 
 type governanceMagicTestHub struct {
 	hub              *events.MagicHub
+	rawHub           magicevent.Hub
 	decisionObserver magicevent.SimpleObserver
 	approvalObserver magicevent.SimpleObserver
 }
@@ -272,6 +273,7 @@ func newGovernanceMagicTestHub(t *testing.T) *governanceMagicTestHub {
 	hub := events.NewMagicHubWithHubOwner(rawHub, "governanceports/test")
 	ret := &governanceMagicTestHub{
 		hub:              hub,
+		rawHub:           rawHub,
 		decisionObserver: magicevent.NewSimpleObserver(decisionevents.CommandDestination, rawHub),
 		approvalObserver: magicevent.NewSimpleObserver(approvalevents.CommandDestination, rawHub),
 	}

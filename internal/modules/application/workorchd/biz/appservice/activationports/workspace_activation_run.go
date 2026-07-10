@@ -35,7 +35,8 @@ func createWorkspaceExecutionRun(ctx context.Context, request ActivateWorkspaceE
 
 func workspaceExecutionContext(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (map[string]any, error) {
 	return BuildWorkspaceExecutionContext(ctx, WorkspaceExecutionContextRequest{
-		Hub:                            request.Hub,
+		Hub: request.Hub,
+
 		Workspace:                      workspace,
 		Goal:                           goal,
 		DoD:                            dod,
@@ -48,7 +49,7 @@ func workspaceExecutionContext(ctx context.Context, request ActivateWorkspaceExe
 }
 
 func startWorkspaceExecutionRun(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any) (common.RunID, error) {
-	return CreateAndStartWorkspaceExecutionRun(ctx, request.Hub, CreateAndStartWorkspaceExecutionRunRequest{
+	return CreateAndStartWorkspaceExecutionRun(ctx, request.EventHub, request.Hub, CreateAndStartWorkspaceExecutionRunRequest{
 		WorkspaceID:           workspaceID,
 		GoalID:                goalID,
 		DoDID:                 dodID,

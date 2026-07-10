@@ -4,13 +4,13 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ReadMemoryItemView(ctx context.Context, hub events.Hub, memoryID string) (contextregistrycore.MemoryItem, error) {
+func ReadMemoryItemView(ctx context.Context, hub magicevent.Hub, memoryID string) (contextregistrycore.MemoryItem, error) {
 	if hub == nil {
 		return contextregistrycore.MemoryItem{}, common.ErrInvalidArgument
 	}
@@ -25,7 +25,7 @@ func ReadMemoryItemView(ctx context.Context, hub events.Hub, memoryID string) (c
 	return contextregistrycore.MapMemoryItem(item), nil
 }
 
-func ListMemoryByWorkspaceView(ctx context.Context, hub events.Hub, workspaceID string, query string) ([]contextregistrycore.MemoryItem, error) {
+func ListMemoryByWorkspaceView(ctx context.Context, hub magicevent.Hub, workspaceID string, query string) ([]contextregistrycore.MemoryItem, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -49,7 +49,7 @@ func ListMemoryByWorkspaceView(ctx context.Context, hub events.Hub, workspaceID 
 	return contextregistrycore.MapMemoryItems(items), nil
 }
 
-func SearchMemoryView(ctx context.Context, hub events.Hub, query contextregistrycore.MemoryQuery) ([]contextregistrycore.MemoryItem, error) {
+func SearchMemoryView(ctx context.Context, hub magicevent.Hub, query contextregistrycore.MemoryQuery) ([]contextregistrycore.MemoryItem, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

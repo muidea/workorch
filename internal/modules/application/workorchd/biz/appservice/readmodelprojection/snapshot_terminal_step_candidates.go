@@ -1,7 +1,5 @@
 package readmodelprojection
 
-import ()
-
 func terminalSnapshotStepCandidates(steps []StepView) []*StepView {
 	referenced := referencedSnapshotStepIDs(steps)
 	var terminals []*StepView

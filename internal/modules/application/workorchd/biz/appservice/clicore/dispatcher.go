@@ -3,21 +3,22 @@ package clicore
 import (
 	"context"
 
+	cd "github.com/muidea/magicCommon/def"
+	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-type CommandHandler func(context.Context, events.CLICommandPayload) (map[string]any, []map[string]any, error)
+type CommandHandler func(context.Context, Command) (map[string]any, []map[string]any, error)
 
 type Dispatcher struct {
-	eventHub events.Hub
+	eventHub magicevent.Hub
 	handler  CommandHandler
-	unsub    func()
+	observer magicevent.SimpleObserver
 }
 
-func NewDispatcher(eventHub events.Hub, handler CommandHandler) *Dispatcher {
+func NewDispatcher(eventHub magicevent.Hub, handler CommandHandler) *Dispatcher {
 	return &Dispatcher{eventHub: eventHub, handler: handler}
 }
 
@@ -25,10 +26,11 @@ func (d *Dispatcher) Run() error {
 	if d == nil || d.eventHub == nil || d.handler == nil {
 		return common.ErrInvalidArgument
 	}
-	if d.unsub != nil {
+	if d.observer != nil {
 		return nil
 	}
-	d.unsub = d.eventHub.Subscribe(workorchdevents.TopicCLICommand, d.handleEnvelope)
+	d.observer = magicevent.NewSimpleObserver(workorchdevents.CommandDestination, d.eventHub)
+	d.observer.Subscribe(workorchdevents.TopicCLICommand, d.handleCommand)
 	return nil
 }
 
@@ -36,26 +38,17 @@ func (d *Dispatcher) Close() {
 	if d == nil {
 		return
 	}
-	if d.unsub != nil {
-		d.unsub()
-		d.unsub = nil
+	if d.observer != nil {
+		d.observer.Unsubscribe(workorchdevents.TopicCLICommand)
+		d.observer = nil
 	}
 }
 
-func (d *Dispatcher) handleEnvelope(ctx context.Context, envelope events.Envelope) error {
-	cmd, ok := events.DecodeCLICommandPayload(envelope.Payload)
+func (d *Dispatcher) handleCommand(event magicevent.Event, result magicevent.Result) {
+	cmd, ok := event.Data().(workorchdevents.CLICommand)
 	if !ok {
-		return common.ErrInvalidArgument
+		result.Set(nil, cd.NewError(cd.IllegalParam, common.ErrInvalidArgument.Error()))
+		return
 	}
-	result := d.dispatchCommand(ctx, cmd)
-	resultEnvelope := events.Envelope{
-		Topic:        workorchdevents.TopicCLIResult,
-		SourceModule: "workorchd-cli-dispatcher",
-		SubjectType:  cmd.SubjectType,
-		SubjectID:    cmd.SubjectID,
-		WorkspaceID:  string(cmd.WorkspaceID),
-		RunID:        string(cmd.RunID),
-		Payload:      events.CLIResultPayloadMap(result),
-	}
-	return events.Response(resultEnvelope)
+	result.Set(d.dispatchCommand(event.Context(), legacyCommandPayload(cmd)), nil)
 }

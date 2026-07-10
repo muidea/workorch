@@ -34,5 +34,5 @@ func newManagedRuntimeFromExports(exports bootstrap.Exports, factory ManagedRunt
 	if factory == nil || !HasRuntimeExports(exports) {
 		return nil
 	}
-	return factory(exports.Infrastructure.EventHub)
+	return factory(exports.Infrastructure.EventHub, exports.Infrastructure.CommandHub)
 }

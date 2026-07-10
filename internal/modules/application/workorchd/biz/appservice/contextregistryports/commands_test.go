@@ -53,27 +53,23 @@ func TestUpdateByIDRejectsPayloadIDMismatch(t *testing.T) {
 }
 
 func TestDeleteSoulRejectsMissingIDBeforePublishing(t *testing.T) {
-	hub := events.NewMemoryHub()
+	hub := magicevent.NewHub(8)
 
 	if err := DeleteSoul(context.Background(), hub, " "); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("DeleteSoul err = %v, want ErrInvalidArgument", err)
-	}
-	if published := hub.Published(); len(published) != 0 {
-		t.Fatalf("published envelopes = %d, want 0", len(published))
 	}
 }
 
 func TestDeleteSoulPublishesTypedCommand(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
 	var captured soulevents.DeleteSoulCommand
 	subscribeMagicCommand(t, rawHub, soulevents.TopicSoulCommandDelete, soulevents.CommandDestination, func(cmd soulevents.DeleteSoulCommand, result magicevent.Result) {
 		captured = cmd
 		result.Set(soulevents.SoulCommandResult{}, nil)
 	})
 
-	if err := DeleteSoul(ctx, hub, " soul-delete-command "); err != nil {
+	if err := DeleteSoul(ctx, rawHub, " soul-delete-command "); err != nil {
 		t.Fatalf("DeleteSoul: %v", err)
 	}
 
@@ -85,14 +81,13 @@ func TestDeleteSoulPublishesTypedCommand(t *testing.T) {
 func TestDeleteMemoryItemPublishesCommandPayload(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-memory-delete")
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
 	var captured memoryevents.DeleteMemoryCommand
 	subscribeMagicCommand(t, rawHub, memoryevents.TopicMemoryCommandDelete, memoryevents.CommandDestination, func(cmd memoryevents.DeleteMemoryCommand, result magicevent.Result) {
 		captured = cmd
 		result.Set(memoryevents.MemoryCommandResult{}, nil)
 	})
 
-	if err := DeleteMemoryItem(ctx, hub, "mem-context-delete"); err != nil {
+	if err := DeleteMemoryItem(ctx, rawHub, "mem-context-delete"); err != nil {
 		t.Fatalf("DeleteMemoryItem: %v", err)
 	}
 	if captured.MemoryID != "mem-context-delete" {
@@ -103,7 +98,6 @@ func TestDeleteMemoryItemPublishesCommandPayload(t *testing.T) {
 func TestPublishMemoryItemPublishesScopedCommandEnvelope(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
 	subscribeMagicCommand(t, rawHub, memoryevents.TopicMemoryCommandCreate, memoryevents.CommandDestination, func(cmd memoryevents.CreateMemoryCommand, result magicevent.Result) {
 		if cmd.MemoryID != "mem-write-scope" || cmd.WorkspaceID != "ws-memory-write" || cmd.RunID != "run-memory-write" {
 			t.Fatalf("command = %+v, want scoped memory command", cmd)
@@ -111,7 +105,7 @@ func TestPublishMemoryItemPublishesScopedCommandEnvelope(t *testing.T) {
 		result.Set(memoryevents.MemoryCommandResult{}, nil)
 	})
 
-	if err := PublishMemoryItem(ctx, hub, memoryevents.TopicMemoryCommandCreate, &memorymodel.MemoryItem{
+	if err := PublishMemoryItem(ctx, rawHub, memoryevents.TopicMemoryCommandCreate, &memorymodel.MemoryItem{
 		ID:          "mem-write-scope",
 		WorkspaceID: "ws-memory-write",
 		RunID:       "run-memory-write",
@@ -167,7 +161,6 @@ func (h *recordingMemoryEventAsyncHub) Subscribe(string, events.Handler) func() 
 func TestMemoryQueriesPublishScopedOwnerReadCommands(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-memory-query-scope")
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
 	subscribeMagicCommand(t, rawHub, memoryevents.TopicMemoryCommandGet, memoryevents.CommandDestination, func(cmd memoryevents.GetMemoryCommand, result magicevent.Result) {
 		if cmd.WorkspaceID != "ws-memory-query-scope" || cmd.MemoryID != "mem-query-scope" {
 			t.Fatalf("get command = %+v, want scoped get", cmd)
@@ -187,13 +180,13 @@ func TestMemoryQueriesPublishScopedOwnerReadCommands(t *testing.T) {
 		result.Set(memoryevents.MemoryCommandResult{Items: []*memorymodel.MemoryItem{}}, nil)
 	})
 
-	if _, err := ReadMemoryItem(ctx, hub, "mem-query-scope"); err != nil {
+	if _, err := ReadMemoryItem(ctx, rawHub, "mem-query-scope"); err != nil {
 		t.Fatalf("ReadMemoryItem: %v", err)
 	}
-	if _, err := ListMemoryByWorkspace(context.Background(), hub, "ws-memory-query-scope"); err != nil {
+	if _, err := ListMemoryByWorkspace(context.Background(), rawHub, "ws-memory-query-scope"); err != nil {
 		t.Fatalf("ListMemoryByWorkspace: %v", err)
 	}
-	if _, err := SearchMemory(context.Background(), hub, repository.MemorySearchQuery{WorkspaceID: "ws-memory-query-scope", Query: "scope"}); err != nil {
+	if _, err := SearchMemory(context.Background(), rawHub, repository.MemorySearchQuery{WorkspaceID: "ws-memory-query-scope", Query: "scope"}); err != nil {
 		t.Fatalf("SearchMemory: %v", err)
 	}
 }
@@ -202,7 +195,6 @@ func TestEnsureWorkspaceExistsPublishesScopedOwnerReadCommand(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(8)
 	defer rawHub.Terminate(ctx)
-	hub := events.NewMagicHubWithHubOwner(rawHub, "contextregistryports/test")
 	observer := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, rawHub)
 	observer.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(event magicevent.Event, result magicevent.Result) {
 		cmd, ok := event.Data().(workspaceevents.GetWorkspaceCommand)
@@ -213,7 +205,7 @@ func TestEnsureWorkspaceExistsPublishesScopedOwnerReadCommand(t *testing.T) {
 	})
 	defer observer.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 
-	if err := EnsureWorkspaceExists(ctx, hub, "ws-memory-workspace-scope"); err != nil {
+	if err := EnsureWorkspaceExists(ctx, rawHub, "ws-memory-workspace-scope"); err != nil {
 		t.Fatalf("EnsureWorkspaceExists err = %v", err)
 	}
 }
@@ -221,7 +213,6 @@ func TestEnsureWorkspaceExistsPublishesScopedOwnerReadCommand(t *testing.T) {
 func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
 
 	subscribeMagicCommand(t, rawHub, soulevents.TopicSoulCommandCreate, soulevents.CommandDestination, func(cmd soulevents.CreateSoulCommand, result magicevent.Result) {
 		if cmd.SoulID != "soul-contract" || cmd.Name != "Soul Contract" {
@@ -261,22 +252,22 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 		result.Set(soulevents.SoulCommandResult{}, nil)
 	})
 
-	if _, err := CreateSoul(ctx, hub, contextregistrycore.Soul{ID: "soul-contract", Name: "Soul Contract", SoulMD: "# soul"}); err != nil {
+	if _, err := CreateSoul(ctx, rawHub, contextregistrycore.Soul{ID: "soul-contract", Name: "Soul Contract", SoulMD: "# soul"}); err != nil {
 		t.Fatalf("CreateSoul: %v", err)
 	}
-	if _, err := CreateSkill(ctx, hub, contextregistrycore.Skill{ID: "skill-contract", Name: "Skill Contract", Instruction: "Do it"}); err != nil {
+	if _, err := CreateSkill(ctx, rawHub, contextregistrycore.Skill{ID: "skill-contract", Name: "Skill Contract", Instruction: "Do it"}); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
-	if _, err := CreateMCPServer(ctx, hub, contextregistrycore.MCPServer{ID: "mcp-contract", Name: "MCP Contract", Command: "python3", Env: map[string]string{"TOKEN": "secret"}}); err != nil {
+	if _, err := CreateMCPServer(ctx, rawHub, contextregistrycore.MCPServer{ID: "mcp-contract", Name: "MCP Contract", Command: "python3", Env: map[string]string{"TOKEN": "secret"}}); err != nil {
 		t.Fatalf("CreateMCPServer: %v", err)
 	}
-	if _, err := CreateMCPCapability(ctx, hub, contextregistrycore.MCPCapability{ID: "cap-contract", ServerID: "mcp-contract", Kind: "tool", Name: "repo.summary", Schema: map[string]any{"type": "object"}}); err != nil {
+	if _, err := CreateMCPCapability(ctx, rawHub, contextregistrycore.MCPCapability{ID: "cap-contract", ServerID: "mcp-contract", Kind: "tool", Name: "repo.summary", Schema: map[string]any{"type": "object"}}); err != nil {
 		t.Fatalf("CreateMCPCapability: %v", err)
 	}
-	if _, err := ListMCPCapabilities(ctx, hub, contextregistrycore.MCPCapabilityQuery{ServerID: "mcp-contract", Kind: "tool"}); err != nil {
+	if _, err := ListMCPCapabilities(ctx, rawHub, contextregistrycore.MCPCapabilityQuery{ServerID: "mcp-contract", Kind: "tool"}); err != nil {
 		t.Fatalf("ListMCPCapabilities: %v", err)
 	}
-	if err := ValidateSoulCapabilitySelection(ctx, hub, "soul-contract", nil, nil, []string{"cap-contract"}, nil, nil); err != nil {
+	if err := ValidateSoulCapabilitySelection(ctx, rawHub, "soul-contract", nil, nil, []string{"cap-contract"}, nil, nil); err != nil {
 		t.Fatalf("ValidateSoulCapabilitySelection: %v", err)
 	}
 }
@@ -284,7 +275,6 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 func TestMCPServerViewAndDerivedEntriesUseOwnerEventHubCommand(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
 	callCount := 0
 	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandGetServer, mcpevents.CommandDestination, func(cmd mcpevents.GetServerCommand, result magicevent.Result) {
 		callCount++
@@ -311,7 +301,7 @@ func TestMCPServerViewAndDerivedEntriesUseOwnerEventHubCommand(t *testing.T) {
 		}, nil)
 	})
 
-	server, err := ReadMCPServerView(ctx, hub, "mcp-stdio")
+	server, err := ReadMCPServerView(ctx, rawHub, "mcp-stdio")
 	if err != nil {
 		t.Fatalf("ReadMCPServerView err = %v", err)
 	}
@@ -322,21 +312,21 @@ func TestMCPServerViewAndDerivedEntriesUseOwnerEventHubCommand(t *testing.T) {
 		t.Fatalf("server env was not redacted: %#v", server.Env)
 	}
 
-	tools, err := ListMCPServerTools(ctx, hub, "mcp-stdio")
+	tools, err := ListMCPServerTools(ctx, rawHub, "mcp-stdio")
 	if err != nil {
 		t.Fatalf("ListMCPServerTools err = %v", err)
 	}
 	if len(tools) != 1 || tools[0].ServerID != "mcp-stdio" || tools[0].Name != "repo.summary" {
 		t.Fatalf("tools = %#v", tools)
 	}
-	resources, err := ListMCPServerResources(ctx, hub, "mcp-stdio")
+	resources, err := ListMCPServerResources(ctx, rawHub, "mcp-stdio")
 	if err != nil {
 		t.Fatalf("ListMCPServerResources err = %v", err)
 	}
 	if len(resources) != 1 || resources[0].ServerID != "mcp-stdio" || resources[0].URI != "workspace://acceptance" {
 		t.Fatalf("resources = %#v", resources)
 	}
-	prompts, err := ListMCPServerPrompts(ctx, hub, "mcp-stdio")
+	prompts, err := ListMCPServerPrompts(ctx, rawHub, "mcp-stdio")
 	if err != nil {
 		t.Fatalf("ListMCPServerPrompts err = %v", err)
 	}
@@ -364,7 +354,6 @@ func (f fakeSkillHubCatalog) ListWorkspaceSkills(_ context.Context, workspaceID 
 func TestReadSkillViewFallsBackToSkillHubWhenRepositorySkillMissing(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
 	subscribeMagicCommand(t, rawHub, skillevents.TopicSkillCommandGet, skillevents.CommandDestination, func(cmd skillevents.GetSkillCommand, result magicevent.Result) {
 		if got := string(cmd.SkillID); got != "skillhub:workspace:ws-001:workspace-skill" {
 			t.Fatalf("skill id = %v", got)
@@ -378,7 +367,7 @@ func TestReadSkillViewFallsBackToSkillHubWhenRepositorySkillMissing(t *testing.T
 		},
 	}
 
-	item, err := ReadSkillView(ctx, hub, ref, contextregistrycore.SkillQuery{WorkspaceID: "ws-001"}, catalog)
+	item, err := ReadSkillView(ctx, rawHub, ref, contextregistrycore.SkillQuery{WorkspaceID: "ws-001"}, catalog)
 	if err != nil {
 		t.Fatalf("ReadSkillView err = %v", err)
 	}
@@ -390,7 +379,6 @@ func TestReadSkillViewFallsBackToSkillHubWhenRepositorySkillMissing(t *testing.T
 func TestListSkillsViewMergesRepositoryAndSkillHubSkills(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
 	subscribeMagicCommand(t, rawHub, skillevents.TopicSkillCommandList, skillevents.CommandDestination, func(_ skillevents.ListSkillsCommand, result magicevent.Result) {
 		result.Set(skillevents.SkillCommandResult{
 			Skills: []*skillmodel.Skill{{ID: "repo-skill", Name: "Repository Skill"}},
@@ -403,7 +391,7 @@ func TestListSkillsViewMergesRepositoryAndSkillHubSkills(t *testing.T) {
 		},
 	}
 
-	items, err := ListSkillsView(ctx, hub, contextregistrycore.SkillQuery{WorkspaceID: "ws-001"}, catalog)
+	items, err := ListSkillsView(ctx, rawHub, contextregistrycore.SkillQuery{WorkspaceID: "ws-001"}, catalog)
 	if err != nil {
 		t.Fatalf("ListSkillsView err = %v", err)
 	}

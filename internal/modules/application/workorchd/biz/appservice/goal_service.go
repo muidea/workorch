@@ -3,13 +3,13 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionports"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func DefineGoalWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, text string) (ret Goal, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (Goal, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Goal, error) {
 		return definitionports.DefineOrConsolidateWorkspaceGoalView(ctx, hub, common.WorkspaceID(workspaceID), text)
 	})
 }
@@ -27,7 +27,7 @@ func DefineGoalFromEnv(ctx context.Context, workspaceID string, text string) (Go
 }
 
 func UpdateGoalWithSession(ctx context.Context, session *RuntimeSession, goalID string, text string) (ret Goal, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (Goal, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Goal, error) {
 		return definitionports.UpdateGoalView(ctx, hub, common.GoalID(goalID), text)
 	})
 }
@@ -45,7 +45,7 @@ func UpdateGoalFromEnv(ctx context.Context, goalID string, text string) (Goal, e
 }
 
 func ReadGoalWithSession(ctx context.Context, session *RuntimeSession, goalID string) (ret Goal, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (Goal, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Goal, error) {
 		return definitionports.ReadGoalView(ctx, hub, common.GoalID(goalID))
 	})
 }
@@ -57,7 +57,7 @@ func ReadGoalWithBackend(ctx context.Context, backend string, dataRoot string, g
 }
 
 func ListGoalsWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret []Goal, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]Goal, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) ([]Goal, error) {
 		return definitionports.ListConsolidatedWorkspaceGoalViews(ctx, hub, common.WorkspaceID(workspaceID))
 	})
 }

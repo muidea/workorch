@@ -3,6 +3,7 @@ package runtimeports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
@@ -10,14 +11,13 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type EventHubSnapshotReadPort struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
-func NewEventHubSnapshotReadPort(hub events.Hub) runtimecore.SnapshotReadRuntime {
+func NewEventHubSnapshotReadPort(hub magicevent.Hub) runtimecore.SnapshotReadRuntime {
 	if hub == nil {
 		return nil
 	}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -17,7 +18,7 @@ func TestNewOwnerReadersRequiresHub(t *testing.T) {
 }
 
 func TestNewOwnerReadersBindsEveryReaderToHub(t *testing.T) {
-	hub := events.NewMemoryHub()
+	hub := magicevent.NewHub(8)
 
 	readers, err := NewOwnerReaders(hub)
 	if err != nil {
@@ -49,7 +50,7 @@ func TestNewOwnerReadersBindsEveryReaderToHub(t *testing.T) {
 }
 
 func TestOwnerReadersBuildsSnapshotAndStatusReaderBundles(t *testing.T) {
-	hub := events.NewMemoryHub()
+	hub := magicevent.NewHub(8)
 	readers, err := NewOwnerReaders(hub)
 	if err != nil {
 		t.Fatalf("NewOwnerReaders: %v", err)
@@ -126,7 +127,7 @@ func TestOwnerReadersBuildsSnapshotAndStatusReaderBundles(t *testing.T) {
 }
 
 func TestOwnerReaderCandidatesReuseOwnerBundlesWhenAllReadersMatch(t *testing.T) {
-	hub := events.NewMemoryHub()
+	hub := magicevent.NewHub(8)
 	readers, err := NewOwnerReaders(hub)
 	if err != nil {
 		t.Fatalf("NewOwnerReaders: %v", err)
@@ -165,12 +166,12 @@ func TestOwnerReaderCandidatesReuseOwnerBundlesWhenAllReadersMatch(t *testing.T)
 }
 
 func TestOwnerReaderCandidatesUseFallbackBundlesWhenReadersDiffer(t *testing.T) {
-	hub := events.NewMemoryHub()
+	hub := magicevent.NewHub(8)
 	readers, err := NewOwnerReaders(hub)
 	if err != nil {
 		t.Fatalf("NewOwnerReaders: %v", err)
 	}
-	otherHub := events.NewMemoryHub()
+	otherHub := magicevent.NewHub(8)
 	otherRunReader := RunReader{Hub: otherHub}
 	candidates := OwnerReaderCandidates{
 		Workspaces:            readers.Workspaces,

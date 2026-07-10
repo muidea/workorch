@@ -11,10 +11,10 @@ import (
 )
 
 type eventOrchestrator struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
-func NewEventOrchestrator(hub events.Hub) runbiz.Orchestrator {
+func NewEventOrchestrator(hub magicevent.Hub) runbiz.Orchestrator {
 	return eventOrchestrator{hub: hub}
 }
 
@@ -58,28 +58,19 @@ func (o eventOrchestrator) FailRun(ctx context.Context, runID common.RunID, reas
 	return o.publish(ctx, orchestratorevents.TopicOrchestratorCommandFailRun, runID, orchestratorevents.FailRunCommand{RunID: runID, Reason: reason})
 }
 
-type rawMagicHubProvider interface {
-	RawHub() magicevent.Hub
-}
-
 func (o eventOrchestrator) publish(ctx context.Context, topic string, runID common.RunID, command any) error {
 	if o.hub == nil || runID == "" || topic == "" {
 		return common.ErrInvalidArgument
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	provider, ok := o.hub.(rawMagicHubProvider)
-	if !ok || provider.RawHub() == nil {
-		return common.ErrInvalidArgument
-	}
 	ev := magicevent.NewEventWithContext(topic, ModuleID, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
-		Topic:       topic,
+	ev.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
 		SubjectType: "run",
 		SubjectID:   string(runID),
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
-	result := provider.RawHub().Send(ev)
+	result := o.hub.Send(ev)
 	if result == nil {
 		return common.ErrInvalidArgument
 	}

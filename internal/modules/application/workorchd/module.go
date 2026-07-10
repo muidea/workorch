@@ -74,7 +74,7 @@ func (m *Module) Run(ctx context.Context) *cd.Error {
 		return cd.NewError(err.Code, fmt.Sprintf("workorch service run failed: %s", err.Message))
 	}
 	if m.eventHub != nil {
-		m.cliDispatcher = appservice.NewCLICommandDispatcher(m.session, m.eventHub, m.service)
+		m.cliDispatcher = appservice.NewCLICommandDispatcher(m.session, m.eventHub, m.rawEventHub, m.service)
 		if err := m.cliDispatcher.Run(); err != nil {
 			m.cliDispatcher = nil
 			m.service.Shutdown(ctx)

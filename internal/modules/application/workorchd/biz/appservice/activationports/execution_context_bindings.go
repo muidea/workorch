@@ -42,8 +42,9 @@ func loadWorkspaceExecutionContextBindings(ctx context.Context, request Workspac
 		},
 		func() error {
 			memories, retrievalEvidence, err := SelectedWorkspaceMemoryItems(ctx, WorkspaceMemorySelectionRequest{
-				WorkspaceID:                    workspace.ID,
-				Hub:                            request.Hub,
+				WorkspaceID: workspace.ID,
+				Hub:         request.Hub,
+
 				IDs:                            memoryIDs,
 				Goal:                           effectiveGoal,
 				DoD:                            effectiveDoD,

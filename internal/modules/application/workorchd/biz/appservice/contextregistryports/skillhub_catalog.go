@@ -4,22 +4,22 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type SkillHubGlobalLister func(context.Context) ([]contextregistrycore.Skill, error)
 type SkillHubWorkspaceLister func(context.Context, string, string) ([]contextregistrycore.Skill, error)
 
 type skillHubCatalog struct {
-	hub           events.Hub
+	hub           magicevent.Hub
 	globalLister  SkillHubGlobalLister
 	workspaceList SkillHubWorkspaceLister
 }
 
-func NewSkillHubCatalog(hub events.Hub, globalLister SkillHubGlobalLister, workspaceLister SkillHubWorkspaceLister) contextregistrycore.SkillHubSkillCatalog {
+func NewSkillHubCatalog(hub magicevent.Hub, globalLister SkillHubGlobalLister, workspaceLister SkillHubWorkspaceLister) contextregistrycore.SkillHubSkillCatalog {
 	return skillHubCatalog{
 		hub:           hub,
 		globalLister:  globalLister,

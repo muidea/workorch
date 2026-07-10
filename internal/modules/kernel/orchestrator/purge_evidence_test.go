@@ -158,6 +158,7 @@ func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 		CoverageWorkItems:     memoryrepo.NewCoverageWorkItemRepository(),
 		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),
 		EventHub:              hub,
+		CommandHub:            rawHub,
 	}); err != nil {
 		t.Fatalf("configure orchestrator module: %v", err)
 	}
@@ -237,6 +238,7 @@ func TestPurgeRunCommandUsesWorkspaceScopeForDuplicateRunIDs(t *testing.T) {
 		CoverageWorkItems:     memoryrepo.NewCoverageWorkItemRepository(),
 		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),
 		EventHub:              hub,
+		CommandHub:            rawHub,
 	}); err != nil {
 		t.Fatalf("configure orchestrator module: %v", err)
 	}

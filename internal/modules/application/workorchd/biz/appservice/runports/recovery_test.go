@@ -15,7 +15,6 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -65,7 +64,7 @@ func TestHasContinuationCheckpointUsesLatestRecoveryCheckpoint(t *testing.T) {
 		t.Fatalf("seed progress checkpoint: %v", err)
 	}
 	run := &runmodel.Run{ID: runID}
-	if HasContinuationCheckpointForRun(ctx, exports.Infrastructure.EventHub, run) {
+	if HasContinuationCheckpointForRun(ctx, exports.Infrastructure.CommandHub, run) {
 		t.Fatal("progress checkpoint should not count as continuation checkpoint")
 	}
 
@@ -78,7 +77,7 @@ func TestHasContinuationCheckpointUsesLatestRecoveryCheckpoint(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed recovery checkpoint: %v", err)
 	}
-	if !HasContinuationCheckpointForRun(ctx, exports.Infrastructure.EventHub, run) {
+	if !HasContinuationCheckpointForRun(ctx, exports.Infrastructure.CommandHub, run) {
 		t.Fatal("latest recovery checkpoint with resume action should count")
 	}
 
@@ -91,7 +90,7 @@ func TestHasContinuationCheckpointUsesLatestRecoveryCheckpoint(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed empty recovery checkpoint: %v", err)
 	}
-	if HasContinuationCheckpointForRun(ctx, exports.Infrastructure.EventHub, run) {
+	if HasContinuationCheckpointForRun(ctx, exports.Infrastructure.CommandHub, run) {
 		t.Fatal("latest recovery checkpoint without continuation action should not count")
 	}
 }
@@ -114,17 +113,17 @@ func TestIsStuckRunningRunCandidateRequiresRunningUnblockedRunWithoutContinuatio
 	if err := exports.Repositories.Runs.Create(ctx, candidate); err != nil {
 		t.Fatalf("seed candidate run: %v", err)
 	}
-	if !IsStuckRunningRunCandidate(ctx, exports.Infrastructure.EventHub, candidate) {
+	if !IsStuckRunningRunCandidate(ctx, exports.Infrastructure.CommandHub, candidate) {
 		t.Fatal("running unblocked run without continuation checkpoint should be a stuck-running candidate")
 	}
-	if IsStuckRunningRunCandidate(ctx, exports.Infrastructure.EventHub, &runmodel.Run{
+	if IsStuckRunningRunCandidate(ctx, exports.Infrastructure.CommandHub, &runmodel.Run{
 		ID:          "run-completed",
 		WorkspaceID: "ws-stuck-candidate",
 		State:       common.RunStateCompleted,
 	}) {
 		t.Fatal("completed run should not be a stuck-running candidate")
 	}
-	if IsStuckRunningRunCandidate(ctx, exports.Infrastructure.EventHub, &runmodel.Run{
+	if IsStuckRunningRunCandidate(ctx, exports.Infrastructure.CommandHub, &runmodel.Run{
 		ID:               "run-blocked",
 		WorkspaceID:      "ws-stuck-candidate",
 		State:            common.RunStateActive,
@@ -144,7 +143,7 @@ func TestIsStuckRunningRunCandidateRequiresRunningUnblockedRunWithoutContinuatio
 	}); err != nil {
 		t.Fatalf("seed continuation checkpoint: %v", err)
 	}
-	if IsStuckRunningRunCandidate(ctx, exports.Infrastructure.EventHub, candidate) {
+	if IsStuckRunningRunCandidate(ctx, exports.Infrastructure.CommandHub, candidate) {
 		t.Fatal("running run with continuation checkpoint should not be a stuck-running candidate")
 	}
 }
@@ -164,10 +163,10 @@ func TestRecoveryCandidateReadsRunScopedItemsWithWorkspaceScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !IsStuckRunningRunCandidate(ctx, exports.Infrastructure.EventHub, run) {
+	if !IsStuckRunningRunCandidate(ctx, exports.Infrastructure.CommandHub, run) {
 		t.Fatal("running run without continuation checkpoint should be candidate")
 	}
-	terminal, err := TerminalStepForRunningRun(ctx, exports.Infrastructure.EventHub, run)
+	terminal, err := TerminalStepForRunningRun(ctx, exports.Infrastructure.CommandHub, run)
 	if err != nil {
 		t.Fatalf("TerminalStepForRunningRun: %v", err)
 	}
@@ -212,7 +211,7 @@ func TestOrphanDispatchedTerminalStepReturnsDispatchedTerminalStep(t *testing.T)
 		t.Fatalf("seed dispatched step: %v", err)
 	}
 
-	terminal, err := OrphanDispatchedTerminalStep(ctx, exports.Infrastructure.EventHub, run)
+	terminal, err := OrphanDispatchedTerminalStep(ctx, exports.Infrastructure.CommandHub, run)
 	if err != nil {
 		t.Fatalf("OrphanDispatchedTerminalStep: %v", err)
 	}
@@ -221,7 +220,7 @@ func TestOrphanDispatchedTerminalStepReturnsDispatchedTerminalStep(t *testing.T)
 	}
 
 	run.State = common.RunStateCompleted
-	terminal, err = OrphanDispatchedTerminalStep(ctx, exports.Infrastructure.EventHub, run)
+	terminal, err = OrphanDispatchedTerminalStep(ctx, exports.Infrastructure.CommandHub, run)
 	if err != nil {
 		t.Fatalf("OrphanDispatchedTerminalStep completed run: %v", err)
 	}
@@ -268,7 +267,7 @@ func TestRecoverOrphanDispatchedStepUsesInjectedResume(t *testing.T) {
 	}
 
 	resumeCalls := 0
-	recovered, changed, err := RecoverOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(resumeCtx context.Context, current *runmodel.Run) error {
+	recovered, changed, err := RecoverOrphanDispatchedStep(ctx, exports.Infrastructure.CommandHub, run, 4, func(resumeCtx context.Context, current *runmodel.Run) error {
 		resumeCalls++
 		step, err := exports.Repositories.Steps.Get(resumeCtx, dispatchedStepID)
 		if err != nil {
@@ -343,7 +342,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsRequestNotAcceptedGap(t *testing.T
 
 	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:10:00Z")
 	resumeCalls := 0
-	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.CommandHub, run, 4, func(context.Context, *runmodel.Run) error {
 		resumeCalls++
 		return nil
 	}, 10*time.Minute, now)
@@ -355,7 +354,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsRequestNotAcceptedGap(t *testing.T
 	}
 
 	now, _ = time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
-	recovered, changed, err = RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+	recovered, changed, err = RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.CommandHub, run, 4, func(context.Context, *runmodel.Run) error {
 		resumeCalls++
 		return nil
 	}, 10*time.Minute, now)
@@ -426,7 +425,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesRuntimeTerminalResultAvailable(t
 
 	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
 	resumeCalls := 0
-	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.CommandHub, run, 4, func(context.Context, *runmodel.Run) error {
 		resumeCalls++
 		return nil
 	}, 10*time.Minute, now)
@@ -499,7 +498,7 @@ func TestRecoverStaleRuntimeGapRunViewsUsesGapSpecificRecovery(t *testing.T) {
 
 	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
 	var got RuntimeGapRecovery
-	items, err := RecoverStaleRuntimeGapRunViews(ctx, exports.Infrastructure.EventHub, func(_ context.Context, current *runmodel.Run, recovery RuntimeGapRecovery) error {
+	items, err := RecoverStaleRuntimeGapRunViews(ctx, exports.Infrastructure.CommandHub, func(_ context.Context, current *runmodel.Run, recovery RuntimeGapRecovery) error {
 		if current.ID != runID || current.WorkspaceID != workspaceID {
 			t.Fatalf("current run = %+v, want scoped run", current)
 		}
@@ -528,7 +527,6 @@ func TestRecoverStaleRuntimeGapRunViewsNoEligibleGapUsesBoundedReads(t *testing.
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(8)
 	defer rawHub.Terminate(ctx)
-	hub := events.NewMagicHubWithHubOwner(rawHub, "runports/recovery-bounded-test")
 	workspaceID := common.WorkspaceID("ws-stale-gap-bounded-reads")
 	runID := common.RunID("run-stale-gap-bounded-reads")
 	stepID := common.StepID("run-stale-gap-bounded-reads/root")
@@ -567,7 +565,7 @@ func TestRecoverStaleRuntimeGapRunViewsNoEligibleGapUsesBoundedReads(t *testing.
 	defer observer.Unsubscribe(runevents.TopicRunCommandListStepSummariesByRun)
 
 	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
-	items, err := RecoverStaleRuntimeGapRunViews(ctx, hub, func(context.Context, *runmodel.Run, RuntimeGapRecovery) error {
+	items, err := RecoverStaleRuntimeGapRunViews(ctx, rawHub, func(context.Context, *runmodel.Run, RuntimeGapRecovery) error {
 		recoverCalls++
 		return nil
 	}, 10*time.Minute, now)
@@ -626,7 +624,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsRuntimeDoneWithoutTerminalResult(t
 
 	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
 	resumeCalls := 0
-	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.CommandHub, run, 4, func(context.Context, *runmodel.Run) error {
 		resumeCalls++
 		return nil
 	}, 10*time.Minute, now)
@@ -706,7 +704,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsAcceptedWithoutWorkerLostEvidence(
 
 			now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
 			resumeCalls := 0
-			recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+			recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.CommandHub, run, 4, func(context.Context, *runmodel.Run) error {
 				resumeCalls++
 				return nil
 			}, 10*time.Minute, now)
@@ -801,7 +799,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsNonIdempotentRuntimeGap(t *testing
 
 			now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
 			resumeCalls := 0
-			recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+			recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.CommandHub, run, 4, func(context.Context, *runmodel.Run) error {
 				resumeCalls++
 				return nil
 			}, 10*time.Minute, now)
@@ -896,7 +894,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsNonExternalRecoverablePolicy(t *te
 
 			now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
 			resumeCalls := 0
-			recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+			recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.CommandHub, run, 4, func(context.Context, *runmodel.Run) error {
 				resumeCalls++
 				return nil
 			}, 10*time.Minute, now)
@@ -972,7 +970,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesWorkerLostGap(t *testing.T) {
 
 	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
 	resumeCalls := 0
-	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.CommandHub, run, 4, func(context.Context, *runmodel.Run) error {
 		resumeCalls++
 		return nil
 	}, 10*time.Minute, now)
@@ -1046,7 +1044,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesStaleWorkerHeartbeatGap(t *testi
 
 	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
 	resumeCalls := 0
-	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.CommandHub, run, 4, func(context.Context, *runmodel.Run) error {
 		resumeCalls++
 		return nil
 	}, 10*time.Minute, now)
@@ -1092,7 +1090,7 @@ func TestRecordRecoveryMemoryRecallTraceUsesEventHubOwnerCommand(t *testing.T) {
 		t.Fatalf("seed other trace: %v", err)
 	}
 
-	err := RecordRecoveryMemoryRecallTrace(ctx, exports.Infrastructure.EventHub, readmodelports.MemoryRecallTraceReader{Hub: exports.Infrastructure.EventHub}, &runmodel.Run{
+	err := RecordRecoveryMemoryRecallTrace(ctx, exports.Infrastructure.CommandHub, exports.Infrastructure.EventHub, readmodelports.MemoryRecallTraceReader{Hub: exports.Infrastructure.CommandHub}, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
 		State:       common.RunStateActive,
@@ -1132,7 +1130,7 @@ func TestAttachCompressedContextToRunUpdatesCreatedRunThroughEventHub(t *testing
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	readers, err := readmodelports.NewOwnerReaders(exports.Infrastructure.EventHub)
+	readers, err := readmodelports.NewOwnerReaders(exports.Infrastructure.CommandHub)
 	if err != nil {
 		t.Fatalf("NewOwnerReaders: %v", err)
 	}
@@ -1140,6 +1138,7 @@ func TestAttachCompressedContextToRunUpdatesCreatedRunThroughEventHub(t *testing
 	if err := AttachCompressedContextToRun(ctx, CompressedContextDependencies{
 		Runs:          readers.Runs,
 		MemoryRecalls: readers.MemoryRecalls,
+		CommandHub:    exports.Infrastructure.CommandHub,
 		EventHub:      exports.Infrastructure.EventHub,
 		RecoverySnapshot: func(context.Context, common.RunID) (readmodelcore.RunSnapshot, error) {
 			return readmodelcore.RunSnapshot{}, nil
@@ -1176,7 +1175,7 @@ func TestCompressedContextPatchForRunUsesRecoverySnapshotFallback(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	readers, err := readmodelports.NewOwnerReaders(exports.Infrastructure.EventHub)
+	readers, err := readmodelports.NewOwnerReaders(exports.Infrastructure.CommandHub)
 	if err != nil {
 		t.Fatalf("NewOwnerReaders: %v", err)
 	}
@@ -1184,6 +1183,7 @@ func TestCompressedContextPatchForRunUsesRecoverySnapshotFallback(t *testing.T) 
 	patch, loaded, err := CompressedContextPatchForRun(ctx, CompressedContextDependencies{
 		Runs:          readers.Runs,
 		MemoryRecalls: readers.MemoryRecalls,
+		CommandHub:    exports.Infrastructure.CommandHub,
 		EventHub:      exports.Infrastructure.EventHub,
 		RecoverySnapshot: func(context.Context, common.RunID) (readmodelcore.RunSnapshot, error) {
 			snapshotCalls++
@@ -1397,7 +1397,7 @@ func TestRecoverTerminalActiveWorkspacePointersClearsTerminalRun(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 
-	if err := RecoverTerminalActiveWorkspacePointers(ctx, exports.Infrastructure.EventHub); err != nil {
+	if err := RecoverTerminalActiveWorkspacePointers(ctx, exports.Infrastructure.CommandHub); err != nil {
 		t.Fatalf("RecoverTerminalActiveWorkspacePointers: %v", err)
 	}
 	workspace, err := exports.Repositories.Workspaces.Get(ctx, workspaceID)
@@ -1438,7 +1438,7 @@ func TestFailRunAndRecoverActiveWorkspacePointerClearsActiveRun(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 
-	failed, err := FailRunAndRecoverActiveWorkspacePointer(ctx, exports.Infrastructure.EventHub, &runmodel.Run{
+	failed, err := FailRunAndRecoverActiveWorkspacePointer(ctx, exports.Infrastructure.CommandHub, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
 		State:       common.RunStateActive,
@@ -1487,7 +1487,7 @@ func TestRecoverStuckRunningRunViewsFailsRunningRunWithoutContinuation(t *testin
 		t.Fatalf("seed run: %v", err)
 	}
 
-	got, err := RecoverStuckRunningRunViews(ctx, exports.Infrastructure.EventHub, func(context.Context, *runmodel.Run) error {
+	got, err := RecoverStuckRunningRunViews(ctx, exports.Infrastructure.CommandHub, func(context.Context, *runmodel.Run) error {
 		return common.ErrConflict
 	})
 	if err != nil {
@@ -1539,7 +1539,7 @@ func TestRecoverStuckRunningRunViewsResumesRunningRunWithCompletedTerminalStep(t
 	}
 
 	resumeCalls := 0
-	got, err := RecoverStuckRunningRunViews(ctx, exports.Infrastructure.EventHub, func(resumeCtx context.Context, current *runmodel.Run) error {
+	got, err := RecoverStuckRunningRunViews(ctx, exports.Infrastructure.CommandHub, func(resumeCtx context.Context, current *runmodel.Run) error {
 		resumeCalls++
 		latest, err := exports.Repositories.Runs.Get(resumeCtx, current.ID)
 		if err != nil {

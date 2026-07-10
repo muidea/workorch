@@ -4,15 +4,15 @@ import (
 	"context"
 	"sync"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func SelectedMCPServers(ctx context.Context, hub events.Hub, ids []string, workspace *workspacemodel.Workspace) ([]*mcpmodel.Server, error) {
+func SelectedMCPServers(ctx context.Context, hub magicevent.Hub, ids []string, workspace *workspacemodel.Workspace) ([]*mcpmodel.Server, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -46,7 +46,7 @@ func SelectedMCPServers(ctx context.Context, hub events.Hub, ids []string, works
 	return ret, nil
 }
 
-func SelectedMCPCapabilities(ctx context.Context, hub events.Hub, ids []string) ([]*mcpmodel.Capability, error) {
+func SelectedMCPCapabilities(ctx context.Context, hub magicevent.Hub, ids []string) ([]*mcpmodel.Capability, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}

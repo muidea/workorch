@@ -3,10 +3,10 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraftcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraftports"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type WorkspaceSetupDraftWorkspace = setupdraftcore.Workspace
@@ -27,11 +27,11 @@ func GenerateWorkspaceSetupDraftWithBackend(ctx context.Context, backend string,
 }
 
 func GenerateWorkspaceSetupDraftWithSession(ctx context.Context, session *RuntimeSession, cmd WorkspaceSetupDraftGenerationCommand, generator WorkspaceSetupDraftGenerator) (ret WorkspaceSetupDraft, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (WorkspaceSetupDraft, error) {
+	return withEventHubsSession(ctx, session, func(ctx context.Context, hubs eventHubSessionDependencies) (WorkspaceSetupDraft, error) {
 		if generator == nil {
-			generator = setupdraftports.EventHubGenerator{EventHub: hub}
+			generator = setupdraftports.EventHubGenerator{CommandHub: hubs.commandHub}
 		}
-		request, err := setupdraftports.BuildGenerationRequest(ctx, hub, cmd)
+		request, err := setupdraftports.BuildGenerationRequest(ctx, hubs.commandHub, cmd)
 		if err != nil {
 			return WorkspaceSetupDraft{}, err
 		}
@@ -47,7 +47,7 @@ func BuildWorkspaceSetupDraftGenerationRequest(ctx context.Context, session *Run
 	if session == nil {
 		return WorkspaceSetupDraftGenerationRequest{}, common.ErrInvalidArgument
 	}
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (WorkspaceSetupDraftGenerationRequest, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (WorkspaceSetupDraftGenerationRequest, error) {
 		return setupdraftports.BuildGenerationRequest(ctx, hub, cmd)
 	})
 }

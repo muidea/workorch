@@ -9,17 +9,12 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-type rawMagicHubProvider interface {
-	RawHub() magicevent.Hub
-}
-
 const sourceModule = "application/workorchd/context-registry"
 
-func sendMagicCommand[Command any, Result any](ctx context.Context, hub events.Hub, topic string, destination string, subjectType string, subjectID string, command Command) (Result, error) {
+func sendMagicCommand[Command any, Result any](ctx context.Context, hub magicevent.Hub, topic string, destination string, subjectType string, subjectID string, command Command) (Result, error) {
 	var zero Result
-	rawHub, err := rawMagicHub(hub)
-	if err != nil {
-		return zero, err
+	if hub == nil {
+		return zero, common.ErrInvalidArgument
 	}
 	ev := magicevent.NewEventWithContext(
 		topic,
@@ -29,12 +24,11 @@ func sendMagicCommand[Command any, Result any](ctx context.Context, hub events.H
 		ctx,
 		command,
 	)
-	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
-		Topic:       topic,
+	ev.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
 	}))
-	response := rawHub.Send(ev)
+	response := hub.Send(ev)
 	if response == nil {
 		return zero, common.ErrInvalidArgument
 	}
@@ -50,19 +44,4 @@ func sendMagicCommand[Command any, Result any](ctx context.Context, hub events.H
 		return zero, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
 	}
 	return typed, nil
-}
-
-func rawMagicHub(hub events.Hub) (magicevent.Hub, error) {
-	if hub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	provider, ok := hub.(rawMagicHubProvider)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	raw := provider.RawHub()
-	if raw == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	return raw, nil
 }

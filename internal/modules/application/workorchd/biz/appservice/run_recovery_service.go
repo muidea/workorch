@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runports"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const stuckRunningRunFailureReason = runports.StuckRunningRunFailureReason
@@ -17,7 +17,7 @@ const maxOrphanDispatchedStepRecoveryIterations = runports.MaxOrphanDispatchedSt
 const DefaultStaleDispatchedStepMinAge = runports.DefaultStaleDispatchedStepMinAge
 
 func RecoverStuckRunningRunsWithSession(ctx context.Context, session *RuntimeSession) (ret []Run, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]Run, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) ([]Run, error) {
 		return runports.RecoverStuckRunningRunViews(ctx, hub, func(resumeCtx context.Context, current *runmodel.Run) error {
 			if session == nil || current == nil {
 				return common.ErrInvalidArgument
@@ -33,7 +33,7 @@ func RecoverStuckRunningRunsWithBackend(ctx context.Context, backend string, dat
 }
 
 func RecoverStartupInactiveRunningWorkspacesWithSession(ctx context.Context, session *RuntimeSession) (ret []Run, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]Run, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) ([]Run, error) {
 		return runports.RecoverStartupInactiveRunningWorkspaceViews(ctx, hub)
 	})
 }
@@ -43,7 +43,7 @@ func RecoverStartupInactiveRunningWorkspacesWithBackend(ctx context.Context, bac
 }
 
 func RecoverStaleDispatchedRunsWithSession(ctx context.Context, session *RuntimeSession, minAge time.Duration, now time.Time) (ret []Run, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]Run, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) ([]Run, error) {
 		return runports.RecoverStaleRuntimeGapRunViews(ctx, hub, func(recoverCtx context.Context, current *runmodel.Run, recovery runports.RuntimeGapRecovery) error {
 			if session == nil || current == nil {
 				return common.ErrInvalidArgument

@@ -3,16 +3,16 @@ package runports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func CreateRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
+func CreateRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) error {
 	if item == nil || item.ID == "" || item.WorkspaceID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -33,7 +33,7 @@ func CreateRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
 	return err
 }
 
-func StartRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
+func StartRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -43,7 +43,7 @@ func StartRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
 	return err
 }
 
-func ResumeRun(ctx context.Context, hub events.Hub, item *runmodel.Run, executionContextPatch map[string]any) error {
+func ResumeRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run, executionContextPatch map[string]any) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -55,7 +55,7 @@ func ResumeRun(ctx context.Context, hub events.Hub, item *runmodel.Run, executio
 	return err
 }
 
-func RecoverRuntimeGap(ctx context.Context, hub events.Hub, item *runmodel.Run, recovery RuntimeGapRecovery, executionContextPatch map[string]any) error {
+func RecoverRuntimeGap(ctx context.Context, hub magicevent.Hub, item *runmodel.Run, recovery RuntimeGapRecovery, executionContextPatch map[string]any) error {
 	if item == nil || item.ID == "" || recovery.StepID == "" || recovery.Gap == "" {
 		return common.ErrInvalidArgument
 	}

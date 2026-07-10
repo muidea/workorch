@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -12,39 +13,43 @@ func NewFromEnv() *Runtime {
 	if err != nil {
 		panic("load workorch config: " + err.Error())
 	}
-	return newWithBackendRuntimePolicyAndEventHub(
+	return newWithBackendRuntimePolicyAndEventHubs(
 		cfg.Repository.Backend,
 		cfg.Repository.DataDir,
 		workorchruntimepolicy.FromConfig(cfg),
+		nil,
 		nil,
 	)
 }
 
 func NewWithBackend(backend string, dataRoot string) *Runtime {
-	return NewWithBackendAndEventHub(backend, dataRoot, nil)
+	return newWithBackendRuntimePolicyAndEventHubs(backend, dataRoot, workorchruntimepolicy.RuntimePolicy{}, nil, nil)
 }
 
 func NewWithBackendAndRuntimePolicy(backend string, dataRoot string, runtimePolicy workorchruntimepolicy.RuntimePolicy) *Runtime {
-	return newWithBackendRuntimePolicyAndEventHub(backend, dataRoot, runtimePolicy, nil)
+	return newWithBackendRuntimePolicyAndEventHubs(backend, dataRoot, runtimePolicy, nil, nil)
 }
 
-func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.Hub) *Runtime {
-	return newWithBackendRuntimePolicyAndEventHub(backend, dataRoot, workorchruntimepolicy.RuntimePolicy{}, eventHub)
+func NewWithBackendAndEventHubs(backend string, dataRoot string, eventHub events.Hub, commandHub magicevent.Hub) *Runtime {
+	return newWithBackendRuntimePolicyAndEventHubs(backend, dataRoot, workorchruntimepolicy.RuntimePolicy{}, eventHub, commandHub)
 }
 
-func NewWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, runtimePolicy workorchruntimepolicy.RuntimePolicy, eventHub events.Hub) *Runtime {
-	return newWithBackendRuntimePolicyAndEventHub(backend, dataRoot, runtimePolicy, eventHub)
+func NewWithBackendRuntimePolicyAndEventHubs(backend string, dataRoot string, runtimePolicy workorchruntimepolicy.RuntimePolicy, eventHub events.Hub, commandHub magicevent.Hub) *Runtime {
+	return newWithBackendRuntimePolicyAndEventHubs(backend, dataRoot, runtimePolicy, eventHub, commandHub)
 }
 
-// newWithBackendRuntimePolicyAndEventHub builds repository-only exports.
+// newWithBackendRuntimePolicyAndEventHubs builds repository-only exports.
 // Module, block, and initiator lifecycles are owned exclusively by the
 // magicCommon framework plugin runtime.
-func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, runtimePolicy workorchruntimepolicy.RuntimePolicy, eventHub events.Hub) *Runtime {
+func newWithBackendRuntimePolicyAndEventHubs(backend string, dataRoot string, runtimePolicy workorchruntimepolicy.RuntimePolicy, eventHub events.Hub, commandHub magicevent.Hub) *Runtime {
 	_ = runtimePolicy
 	repos := buildRepositories(backend, dataRoot)
 
+	if commandHub == nil {
+		commandHub = magicevent.NewHub(1024)
+	}
 	if eventHub == nil {
-		eventHub = events.NewMagicHubWithOwner("workorch/bootstrap")
+		eventHub = events.NewMagicHubWithHubOwner(commandHub, "workorch/bootstrap")
 	}
 	backgroundRoutine := magictask.NewBackgroundRoutine(1024)
 
@@ -80,6 +85,7 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 			},
 			Infrastructure: InfrastructureExports{
 				EventHub:          eventHub,
+				CommandHub:        commandHub,
 				BackgroundRoutine: backgroundRoutine,
 				LoadConfig:        workorchconfig.Current,
 			},

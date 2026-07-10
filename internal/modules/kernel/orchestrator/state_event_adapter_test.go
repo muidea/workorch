@@ -8,13 +8,11 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestRunEventRepositoryGetPropagatesRuntimeWorkspaceScope(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-run-event-scope")
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
 	var captured runevents.GetRunCommand
 	observer := magicevent.NewSimpleObserver(runevents.CommandDestination, rawHub)
 	observer.Subscribe(runevents.TopicRunCommandGet, func(ev magicevent.Event, result magicevent.Result) {
@@ -28,7 +26,7 @@ func TestRunEventRepositoryGetPropagatesRuntimeWorkspaceScope(t *testing.T) {
 	})
 	t.Cleanup(func() { observer.Unsubscribe(runevents.TopicRunCommandGet) })
 
-	item, err := (runEventRepository{hub: hub}).Get(ctx, "run-001")
+	item, err := (runEventRepository{hub: rawHub}).Get(ctx, "run-001")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

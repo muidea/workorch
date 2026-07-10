@@ -18,7 +18,7 @@ import (
 
 func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		state.metrics.workspaceListRequests.Add(1)
 		items, projection, err := state.listProjectedWorkspaces()
 		if err != nil {
@@ -40,7 +40,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "" {
 			http.NotFound(w, r)
@@ -71,7 +71,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/snapshot", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "snapshot" {
 			http.NotFound(w, r)
@@ -150,7 +150,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/memory-recalls", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "memory-recalls" {
 			http.NotFound(w, r)
@@ -171,7 +171,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/soul-bindings", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "soul-bindings" {
 			http.NotFound(w, r)
@@ -190,7 +190,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "goals" {
 			http.NotFound(w, r)
@@ -210,7 +210,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals/:goalId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, goalID, ok := workspaceResourceIDFromPath(r.URL.Path, "goals")
 		if !ok {
 			http.NotFound(w, r)
@@ -235,7 +235,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/dods", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "dods" {
 			http.NotFound(w, r)
@@ -255,7 +255,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/dods/:dodId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, dodID, ok := workspaceResourceIDFromPath(r.URL.Path, "dods")
 		if !ok {
 			http.NotFound(w, r)
@@ -348,7 +348,7 @@ func projectionHTTPStatus(err error) int {
 
 func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		state.metrics.workspaceCreateRequests.Add(1)
 		var req createWorkspaceRequest
 		if err := decodeJSON(r, &req); err != nil {
@@ -378,7 +378,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "" {
 			http.NotFound(w, r)
@@ -410,7 +410,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		w.WriteHeader(http.StatusNoContent)
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/execution-activations", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "execution-activations" {
 			http.NotFound(w, r)
@@ -459,7 +459,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(state.config, "execution-activation", command))
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/soul-bindings", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "soul-bindings" {
 			http.NotFound(w, r)
@@ -484,7 +484,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "goals" {
 			http.NotFound(w, r)
@@ -510,7 +510,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals/:goalId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, goalID, ok := workspaceResourceIDFromPath(r.URL.Path, "goals")
 		if !ok {
 			http.NotFound(w, r)
@@ -546,7 +546,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/dods", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "dods" {
 			http.NotFound(w, r)
@@ -572,7 +572,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/dods/:dodId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, dodID, ok := workspaceResourceIDFromPath(r.URL.Path, "dods")
 		if !ok {
 			http.NotFound(w, r)
@@ -608,7 +608,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goal-dod-quality-check", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "goal-dod-quality-check" {
 			http.NotFound(w, r)

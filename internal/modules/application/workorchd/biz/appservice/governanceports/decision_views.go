@@ -3,15 +3,15 @@ package governanceports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func DecisionView(ctx context.Context, hub events.Hub, traces governancecore.AutoGovernanceTraceReader, ticketID common.TicketID, scope common.WorkspaceID) (readmodelcore.Decision, error) {
+func DecisionView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, ticketID common.TicketID, scope common.WorkspaceID) (readmodelcore.Decision, error) {
 	item, err := ReadDecisionTicket(contextWithGovernanceScope(ctx, scope), hub, ticketID)
 	if err != nil {
 		return readmodelcore.Decision{}, err
@@ -19,7 +19,7 @@ func DecisionView(ctx context.Context, hub events.Hub, traces governancecore.Aut
 	return DecisionViewForTicket(ctx, hub, traces, item, scope)
 }
 
-func DecisionViewForTicket(ctx context.Context, hub events.Hub, traces governancecore.AutoGovernanceTraceReader, item *decisionmodel.Ticket, scope common.WorkspaceID) (readmodelcore.Decision, error) {
+func DecisionViewForTicket(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, item *decisionmodel.Ticket, scope common.WorkspaceID) (readmodelcore.Decision, error) {
 	if err := governancecore.EnsureDecisionTicketWorkspaceScope(scope, item); err != nil {
 		return readmodelcore.Decision{}, err
 	}
@@ -34,7 +34,7 @@ func DecisionViewForTicket(ctx context.Context, hub events.Hub, traces governanc
 	return readmodelprojection.MapDecision(item, resolution, autoGovernance), nil
 }
 
-func DecisionViewsForQuery(ctx context.Context, hub events.Hub, traces governancecore.AutoGovernanceTraceReader, workspaceID string, runID string) ([]readmodelcore.Decision, error) {
+func DecisionViewsForQuery(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, workspaceID string, runID string) ([]readmodelcore.Decision, error) {
 	candidates, err := DecisionTicketsForQuery(ctx, hub, workspaceID, runID)
 	if err != nil {
 		return nil, err

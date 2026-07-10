@@ -108,7 +108,7 @@ func skipObsoleteSynchronousExecutionEndpointTest(t *testing.T) {
 func newTestServerState(t *testing.T, config Config, hub events.Hub) *serverState {
 	t.Helper()
 	routine := magictask.NewBackgroundRoutine(128)
-	state := newServerStateWithBackground(config, hub, routine)
+	state := newIsolatedTestServerStateWithBackground(config, hub, routine)
 	configureIsolatedTestSession(t, state, config)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -134,6 +134,7 @@ func configureIsolatedTestSession(t *testing.T, state *serverState, config Confi
 		config.DataRoot,
 		workorchruntimepolicy.FromConfig(runtimeConfig),
 		state.eventHub,
+		state.commandHub,
 	)
 	if err != nil {
 		return
@@ -148,7 +149,7 @@ func configureIsolatedTestSession(t *testing.T, state *serverState, config Confi
 	state.eventUnsubscribes = nil
 	state.configureSessionBackedOperations(session)
 	if replaceSchedulerHub {
-		state.schedulerHub = state.eventHub
+		state.schedulerHub = state.commandHub
 	}
 	state.registerEventReplayRecorder()
 	state.registerRunStatusCacheInvalidationWatcher()
@@ -162,7 +163,7 @@ func newOwnerRuntimeSession(t *testing.T, backend string, dataRoot string, exist
 	if err != nil {
 		t.Fatalf("load test runtime config: %v", err)
 	}
-	runtime, err := testkit.TryNewRuntime(backend, dataRoot, workorchruntimepolicy.FromConfig(runtimeConfig), existing)
+	runtime, err := testkit.TryNewRuntime(backend, dataRoot, workorchruntimepolicy.FromConfig(runtimeConfig), existing, nil)
 	if err != nil {
 		t.Fatalf("create owner-aware runtime: %v", err)
 	}
@@ -179,7 +180,7 @@ func newTestMux(t *testing.T, config Config) http.Handler {
 func newTestHTTPServer(t *testing.T, config Config) *HTTPServer {
 	t.Helper()
 	routine := magictask.NewBackgroundRoutine(128)
-	server := NewHTTPServerWithEventHubAndBackground(config, nil, routine)
+	server := newIsolatedTestHTTPServerWithBackground(config, nil, routine)
 	configureIsolatedTestSession(t, server.state, normalizeConfig(config))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -192,21 +193,12 @@ func newTestHTTPServer(t *testing.T, config Config) *HTTPServer {
 	return server
 }
 
-func publishHTTPTestCommand(ctx context.Context, hub events.Hub, envelope events.Envelope) error {
-	err := hub.Publish(ctx, envelope)
-	if _, ok := events.ResponseEnvelope(err); ok {
-		return nil
-	}
-	return err
-}
-
-func publishHTTPTestWorkspaceRunCommand(ctx context.Context, hub events.Hub, command workorchdevents.WorkspaceRunRequestedCommand) error {
-	provider, ok := hub.(interface{ RawHub() magicevent.Hub })
-	if !ok || provider.RawHub() == nil {
+func publishHTTPTestWorkspaceRunCommand(ctx context.Context, hub magicevent.Hub, command workorchdevents.WorkspaceRunRequestedCommand) error {
+	if hub == nil {
 		return common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "workorchd/test", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	result := provider.RawHub().Send(event)
+	result := hub.Send(event)
 	if result == nil {
 		return common.ErrInvalidArgument
 	}
@@ -511,7 +503,7 @@ func TestServerStateRequiresFrameworkInitiatorRuntimeSession(t *testing.T) {
 		_ = bg.Shutdown(shutdownCtx)
 	})
 
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, bg)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, bg)
 	t.Cleanup(func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -635,7 +627,8 @@ func TestUpdateRuntimeConfigurationEndpointSyncsOrchestratorPolicy(t *testing.T)
 		gotPolicy = cmd.Policy
 	}
 	hub := events.NewMagicHubWithHubOwner(rawHub, "server/runtime-policy-test")
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: t.TempDir()}), hub)
+	state := newServerStateWithHubsAndBackground(normalizeConfig(Config{Backend: "file", DataRoot: t.TempDir()}), hub, rawHub, magictask.NewBackgroundRoutine(128))
+	configureIsolatedTestSession(t, state, state.config)
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/configuration/runtime", strings.NewReader(`{
 		"maxRuntimeRepairAttempts":3,
@@ -1696,9 +1689,11 @@ func TestEventStreamProjectionReplayUsesMetadataOnlyRecords(t *testing.T) {
 }
 
 func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEvent(t *testing.T) {
-	hub := events.NewMagicHub()
+	rawHub := magicevent.NewHub(1024)
+	hub := events.NewMagicHubWithHub(rawHub)
 	defer hub.Terminate(context.Background())
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newServerStateWithHubsAndBackground(normalizeConfig(Config{Backend: "memory"}), hub, rawHub, magictask.NewBackgroundRoutine(128))
+	configureIsolatedTestSession(t, state, state.config)
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
 
@@ -1755,9 +1750,11 @@ func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEvent(t *testing.T) {
 }
 
 func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEventToMultipleClients(t *testing.T) {
-	hub := events.NewMagicHub()
+	rawHub := magicevent.NewHub(1024)
+	hub := events.NewMagicHubWithHub(rawHub)
 	defer hub.Terminate(context.Background())
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newServerStateWithHubsAndBackground(normalizeConfig(Config{Backend: "memory"}), hub, rawHub, magictask.NewBackgroundRoutine(128))
+	configureIsolatedTestSession(t, state, state.config)
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
 
@@ -4846,7 +4843,7 @@ func TestDecisionResolveEndpointProjectsReplanRunCommand(t *testing.T) {
 	dataRoot := t.TempDir()
 	routine := &recordingBackgroundRoutine{}
 	config := normalizeConfig(Config{Backend: "file", DataRoot: dataRoot})
-	state := newServerStateWithBackground(config, nil, routine)
+	state := newIsolatedTestServerStateWithBackground(config, nil, routine)
 	configureIsolatedTestSession(t, state, config)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -5720,7 +5717,7 @@ func TestServerStateGovernanceRunResumeUsesWorkspaceContext(t *testing.T) {
 
 func TestServerStateGovernanceRunResumeRejectsMissingWorkspaceScope(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	state := newServerStateWithBackground(normalizeConfig(Config{
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
 	}), nil, routine)
@@ -5909,7 +5906,7 @@ func TestServerStateRecoversResolvedDecisionBlockedRunWithWorkspaceScope(t *test
 
 func TestServerStateGovernanceResumeKeepsPendingAfterBackgroundSubmitFailure(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
 	const workspaceID = "ws-governance-resume-pending"
 	const runID = "run-governance-resume-pending"
 
@@ -5966,7 +5963,7 @@ func TestServerStateGovernanceResumeKeepsPendingAfterBackgroundSubmitFailure(t *
 
 func TestServerStateGovernanceResumeDoesNotCompleteWhenReadbackStillBlockedOnResolvedDecision(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
 	const workspaceID = "ws-governance-readback"
 	const runID = "run-governance-readback"
 	const ticketID = "ticket-governance-readback"
@@ -6023,7 +6020,7 @@ func TestServerStateGovernanceResumeDoesNotCompleteWhenReadbackStillBlockedOnRes
 
 func TestServerStateWorkspaceExecutionKeepsPendingAfterBackgroundSubmitFailure(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
 	const workspaceID = "ws-workspace-execution-pending"
 	req := workspaceRestartRequest{
 		WorkspaceID: workspaceID,
@@ -6079,7 +6076,7 @@ func TestServerStateWorkspaceExecutionKeepsPendingAfterBackgroundSubmitFailure(t
 
 func TestServerStateRunContinuationKeepsPendingAfterBackgroundSubmitFailure(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
 	const workspaceID = "ws-run-continuation-pending"
 	const runID = "run-continuation-pending"
 	req := runContinuationRequest{
@@ -6140,7 +6137,7 @@ func TestServerStateRunContinuationKeepsPendingAfterBackgroundSubmitFailure(t *t
 
 func TestServerStateRunContinuationDoesNotCompleteWhenReadbackStillBlockedOnResolvedDecision(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
 	const workspaceID = "ws-run-continuation-readback"
 	const runID = "run-continuation-readback"
 	const ticketID = "ticket-run-continuation-readback"
@@ -6211,7 +6208,7 @@ func TestServerStateRunContinuationDoesNotCompleteWhenReadbackStillBlockedOnReso
 }
 
 func TestRunContinuationStillNeedsWorkForActiveExecutableNextActionWithoutCurrentStep(t *testing.T) {
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, &recordingBackgroundRoutine{})
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, &recordingBackgroundRoutine{})
 	const workspaceID = "ws-active-nextaction"
 	const runID = "run-active-nextaction"
 	req := runContinuationRequest{
@@ -6249,7 +6246,7 @@ func TestRunContinuationStillNeedsWorkForActiveExecutableNextActionWithoutCurren
 }
 
 func TestRunContinuationReadbackRejectsActiveExecutableNextActionWithoutCurrentStep(t *testing.T) {
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, &recordingBackgroundRoutine{})
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, &recordingBackgroundRoutine{})
 	const workspaceID = "ws-active-readback-nextaction"
 	const runID = "run-active-readback-nextaction"
 	req := runContinuationRequest{
@@ -6294,7 +6291,7 @@ func TestRunContinuationReadbackRejectsActiveExecutableNextActionWithoutCurrentS
 }
 
 func TestWorkspaceExecutionStillNeedsWorkForActiveRunExecutableNextActionWithoutCurrentStep(t *testing.T) {
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, &recordingBackgroundRoutine{})
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, &recordingBackgroundRoutine{})
 	const workspaceID = "ws-workspace-active-nextaction"
 	const runID = "run-workspace-active-nextaction"
 	req := workspaceRestartRequest{
@@ -6334,7 +6331,7 @@ func TestWorkspaceExecutionStillNeedsWorkForActiveRunExecutableNextActionWithout
 
 func TestWorkspaceExecutionDoesNotCompleteWhenActiveRunStillHasExecutableNextActionWithoutCurrentStep(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
 	const workspaceID = "ws-workspace-readback-nextaction"
 	const runID = "run-workspace-readback-nextaction"
 	req := workspaceRestartRequest{
@@ -6401,12 +6398,12 @@ func TestWorkspaceExecutionDoesNotCompleteWhenActiveRunStillHasExecutableNextAct
 func TestWorkorchDSchedulerWorkspaceRunCommandEnqueuesRunContinuationByWorkspaceScope(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMagicHubWithOwner("server/scheduler-run-scope-test")
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	const workspaceID = "ws-scheduler-run-command"
 	const runID = "run-001"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"}})
 
-	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), hub, workorchdevents.WorkspaceRunRequestedCommand{
+	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), state.commandHub, workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: workspaceID, RunID: runID, Intent: "resume", Action: "resume", Priority: 5,
 	}); err != nil {
 		t.Fatalf("publish scheduler command: %v", err)
@@ -6426,14 +6423,14 @@ func TestWorkorchDSchedulerWorkspaceRunCommandEnqueuesRunContinuationByWorkspace
 func TestWorkorchDWorkspaceRunCommandResumeEnqueuesRunContinuation(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMagicHubWithOwner("server/scheduler-resume-test")
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	const workspaceID = "ws-scheduler-workspace-run-resume"
 	const runID = "run-001"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"},
 	})
 
-	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), hub, workorchdevents.WorkspaceRunRequestedCommand{
+	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), state.commandHub, workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: workspaceID, RunID: runID, Intent: "resume", RequestID: "request-resume", Source: "tui", Priority: 7,
 	}); err != nil {
 		t.Fatalf("publish workspace run command: %v", err)
@@ -6463,7 +6460,7 @@ func TestWorkorchDWorkspaceRunCommandResumeEnqueuesRunContinuation(t *testing.T)
 func TestWorkorchDWorkspaceRunCommandResumeCoalescesDuplicateContinuation(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMagicHubWithOwner("server/scheduler-resume-idempotency-test")
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	const workspaceID = "ws-scheduler-resume-idempotency"
 	const runID = "run-scheduler-resume-idempotency"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
@@ -6473,11 +6470,11 @@ func TestWorkorchDWorkspaceRunCommandResumeCoalescesDuplicateContinuation(t *tes
 	command := workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: workspaceID, RunID: runID, Intent: "resume", RequestID: "request-resume-1", Source: "tui", Priority: 7,
 	}
-	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), hub, command); err != nil {
+	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), state.commandHub, command); err != nil {
 		t.Fatalf("publish first resume command: %v", err)
 	}
 	command.RequestID = "request-resume-2"
-	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), hub, command); err != nil {
+	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), state.commandHub, command); err != nil {
 		t.Fatalf("publish duplicate resume command: %v", err)
 	}
 
@@ -6512,7 +6509,7 @@ func TestWorkorchDWorkspaceRunCommandResumeCoalescesDuplicateContinuation(t *tes
 func TestWorkorchDWorkspaceRunCommandGeneratesRequestIDWhenMissing(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMagicHubWithOwner("server/scheduler-generated-request-test")
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	const workspaceID = "ws-scheduler-generated-request"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"},
@@ -6642,7 +6639,7 @@ func TestWorkorchDRunResumeHTTPProjectsReplanIntent(t *testing.T) {
 func TestWorkorchDWorkspaceRunCommandReplanUsesScopedIdempotencyKey(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMagicHubWithOwner("server/scheduler-recover-reject-test")
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	const workspaceID = "ws-scheduler-replan-idempotency"
 	const runID = "run-scheduler-replan-idempotency"
 	const decisionID = "ticket-scheduler-replan-idempotency"
@@ -6653,11 +6650,11 @@ func TestWorkorchDWorkspaceRunCommandReplanUsesScopedIdempotencyKey(t *testing.T
 	command := workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: workspaceID, RunID: runID, Intent: "replan", DecisionID: decisionID, RequestID: "request-replan-1", Source: "tui",
 	}
-	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), hub, command); err != nil {
+	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), state.commandHub, command); err != nil {
 		t.Fatalf("publish first replan command: %v", err)
 	}
 	command.RequestID = "request-replan-2"
-	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), hub, command); err != nil {
+	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), state.commandHub, command); err != nil {
 		t.Fatalf("publish duplicate replan command: %v", err)
 	}
 
@@ -6848,10 +6845,10 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
 func TestWorkorchDSchedulerWorkspaceRunCommandEnqueuesWorkspaceRestartByWorkspaceScope(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMagicHubWithOwner("server/scheduler-restart-scope-test")
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	const workspaceID = "ws-scheduler-restart-command"
 
-	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), hub, workorchdevents.WorkspaceRunRequestedCommand{
+	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), state.commandHub, workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: workspaceID, Intent: "restart", GoalID: "goal-restart", DoDID: "dod-restart", LLMProviderID: "llm-restart", Priority: 6,
 	}); err != nil {
 		t.Fatalf("publish scheduler command: %v", err)
@@ -6880,7 +6877,7 @@ func TestWorkorchDSchedulerWorkspaceRunCommandEnqueuesWorkspaceRestartByWorkspac
 func TestWorkorchDWorkspaceRunCommandRestartEnqueuesWorkspaceRestart(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMagicHubWithOwner("server/scheduler-restart-idempotency-test")
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	const workspaceID = "ws-scheduler-workspace-run-restart"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"},
@@ -6890,11 +6887,11 @@ func TestWorkorchDWorkspaceRunCommandRestartEnqueuesWorkspaceRestart(t *testing.
 		WorkspaceID: workspaceID, Intent: "restart", RequestID: "request-restart-command", Source: "tui",
 		GoalID: "goal-restart", DoDID: "dod-restart", LLMProviderID: "llm-restart", Priority: 8,
 	}
-	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), hub, command); err != nil {
+	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), state.commandHub, command); err != nil {
 		t.Fatalf("publish workspace run restart command: %v", err)
 	}
 	command.RequestID = "request-restart-command-duplicate"
-	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), hub, command); err != nil {
+	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), state.commandHub, command); err != nil {
 		t.Fatalf("publish duplicate workspace run restart command: %v", err)
 	}
 
@@ -6938,7 +6935,7 @@ func TestWorkorchDWorkspaceRunCommandRestartEnqueuesWorkspaceRestart(t *testing.
 func TestWorkorchDSchedulerCommandRejectsRestartRunScope(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMagicHubWithOwner("server/scheduler-restart-run-scope-test")
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 
 	err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: "ws-scheduler-restart-run-scope",
@@ -6966,7 +6963,7 @@ func TestWorkorchDSchedulerCommandRejectsRestartRunScope(t *testing.T) {
 func TestWorkorchDSchedulerCommandRejectsRecoverIntent(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMagicHubWithOwner("server/scheduler-recover-reject-test")
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	const workspaceID = "ws-scheduler-reject-recover"
 	const runID = "run-scheduler-reject-recover"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
@@ -7003,7 +7000,7 @@ func TestWorkorchDSchedulerCommandRejectsRecoverIntent(t *testing.T) {
 func TestWorkorchDSchedulerCommandReturnsErrorWhenRunContinuationQueueFails(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
 	hub := events.NewMagicHubWithOwner("server/scheduler-queue-failure-test")
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	const workspaceID = "ws-scheduler-run-command-fail"
 	const runID = "run-scheduler-command-fail"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
@@ -7053,7 +7050,7 @@ func TestWorkorchDSchedulerCommandReturnsErrorWhenRunContinuationQueueFails(t *t
 }
 
 func TestWorkorchDSchedulerCommandRequiresAcceptedResponse(t *testing.T) {
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), events.NewMagicHubWithOwner("server/scheduler-missing-response-test"), &recordingBackgroundRoutine{})
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), events.NewMagicHubWithOwner("server/scheduler-missing-response-test"), &recordingBackgroundRoutine{})
 	for _, unsubscribe := range state.eventUnsubscribes {
 		unsubscribe()
 	}
@@ -7070,7 +7067,7 @@ func TestWorkorchDSchedulerCommandRequiresAcceptedResponse(t *testing.T) {
 
 func TestWorkorchDRESTCommandsReturnConflictWhenSchedulerQueueFails(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), events.NewMagicHubWithOwner("server/rest-scheduler-queue-failure-test"), routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), events.NewMagicHubWithOwner("server/rest-scheduler-queue-failure-test"), routine)
 	handler := newMuxWithState(state)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -7105,7 +7102,7 @@ func TestWorkorchDRESTCommandsReturnConflictWhenSchedulerQueueFails(t *testing.T
 
 func TestWorkorchDGovernanceResolutionReturnsConflictWhenSchedulerQueueFails(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), events.NewMagicHubWithOwner("server/governance-scheduler-queue-failure-test"), routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), events.NewMagicHubWithOwner("server/governance-scheduler-queue-failure-test"), routine)
 	const workspaceID = "ws-governance-scheduler-fail"
 	const runID = "run-governance-scheduler-fail"
 	state.resolveDecision = func(context.Context, string, string, string, appservice.ResolveDecisionCommand) (appservice.Decision, error) {
@@ -7249,7 +7246,7 @@ func TestServerStateRecoverReplanContinuationsSchedulesWaitingDecisionActiveSupe
 
 func TestServerStateWatchdogDoesNotRecoverReplanContinuations(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -7791,7 +7788,7 @@ func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing
 	}
 
 	routine := &recordingBackgroundRoutine{}
-	second := NewHTTPServerWithEventHubAndBackground(Config{Backend: "file", DataRoot: dataRoot}, nil, routine)
+	second := newIsolatedTestHTTPServerWithBackground(Config{Backend: "file", DataRoot: dataRoot}, nil, routine)
 	configureIsolatedTestSession(t, second.state, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}))
 	t.Cleanup(func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -7882,7 +7879,7 @@ func TestServiceRunRecoveredWorkspaceResumeEnqueuesWorkspaceActivation(t *testin
 
 	routine := &recordingBackgroundRoutine{}
 	svc := &Service{
-		http:              NewHTTPServerWithEventHubAndBackground(Config{Addr: "127.0.0.1:0", Backend: "file", DataRoot: dataRoot}, nil, routine),
+		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "file", DataRoot: dataRoot}, nil, routine),
 		backgroundRoutine: routine,
 		done:              make(chan error, 1),
 	}
@@ -8439,22 +8436,30 @@ func resolveDecisionForHTTP(t *testing.T, dataRoot string, ticketID string, reje
 		resolutionType = decisioncommon.ResolutionTypeRejectCurrentPath
 		resolutionID += "-reject"
 	}
-	exports, err := session.Exports()
+	commandHub, err := session.RequiredCommandHub()
 	if err != nil {
-		t.Fatalf("exports: %v", err)
+		t.Fatalf("command hub: %v", err)
 	}
-	if err := publishHTTPTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        decisionevents.TopicDecisionCommandEnsureResolved,
-		SourceModule: "workorchd/server/http-test",
-		SubjectType:  "decision_ticket",
-		SubjectID:    ticketID,
-		Payload: map[string]any{
-			events.PayloadKeyResolutionID:     resolutionID,
-			events.PayloadKeyBlockingTicketID: ticketID,
-			events.PayloadKeyType:             resolutionType,
-		},
-	}); err != nil {
+	command := decisionevents.EnsureResolvedCommand{
+		ResolutionID: common.ResolutionID(resolutionID),
+		TicketID:     common.TicketID(ticketID),
+		Type:         string(resolutionType),
+	}
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandEnsureResolved, "workorchd/server/http-test", decisionevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	event.BindLaneKey(events.EventHubLaneKeyFor(decisionevents.TopicDecisionCommandEnsureResolved, events.EventHubLaneScope{SubjectType: "decision_ticket", SubjectID: ticketID}))
+	result := commandHub.Send(event)
+	if result == nil {
+		t.Fatal("EnsureResolvedTicket: missing command result")
+	}
+	if err := result.Error(); err != nil {
 		t.Fatalf("EnsureResolvedTicket: %v", err)
+	}
+	data, err := result.Get()
+	if err != nil {
+		t.Fatalf("EnsureResolvedTicket result: %v", err)
+	}
+	if _, ok := data.(decisionevents.DecisionCommandResult); !ok {
+		t.Fatalf("EnsureResolvedTicket result type = %T, want DecisionCommandResult", data)
 	}
 }
 
@@ -8488,24 +8493,31 @@ func resolveApprovalForHTTP(t *testing.T, dataRoot string, approvalID string, re
 		}
 	}()
 
-	exports, err := session.Exports()
+	commandHub, err := session.RequiredCommandHub()
 	if err != nil {
-		t.Fatalf("exports: %v", err)
+		t.Fatalf("command hub: %v", err)
 	}
 	topic := approvalevents.TopicApprovalCommandEnsureApproved
+	command := approvalevents.EnsureApprovedCommand{ApprovalID: common.ApprovalID(approvalID)}
 	if reject {
 		topic = approvalevents.TopicApprovalCommandEnsureRejected
+		command = approvalevents.EnsureRejectedCommand{ApprovalID: common.ApprovalID(approvalID)}
 	}
-	if err := publishHTTPTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        topic,
-		SourceModule: "workorchd/server/http-test",
-		SubjectType:  "approval",
-		SubjectID:    approvalID,
-		Payload: map[string]any{
-			events.PayloadKeyApprovalID: approvalID,
-		},
-	}); err != nil {
+	event := magicevent.NewEventWithContext(topic, "workorchd/server/http-test", approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{SubjectType: "approval", SubjectID: approvalID}))
+	result := commandHub.Send(event)
+	if result == nil {
+		t.Fatal("resolve approval: missing command result")
+	}
+	if err := result.Error(); err != nil {
 		t.Fatalf("resolve approval: %v", err)
+	}
+	data, err := result.Get()
+	if err != nil {
+		t.Fatalf("resolve approval result: %v", err)
+	}
+	if _, ok := data.(approvalevents.ApprovalCommandResult); !ok {
+		t.Fatalf("resolve approval result type = %T, want ApprovalCommandResult", data)
 	}
 }
 

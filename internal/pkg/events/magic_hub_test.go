@@ -60,7 +60,7 @@ func TestMagicHubAssignsWorkspaceRevision(t *testing.T) {
 	if err := hub.Publish(context.Background(), Envelope{Topic: workspaceevents.TopicWorkspaceCreated, WorkspaceID: "ws-b"}); err != nil {
 		t.Fatalf("publish other workspace event: %v", err)
 	}
-	if err := hub.Publish(context.Background(), Envelope{Topic: workorchdevents.TopicCLICommand}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: workorchdevents.TopicCLIProgress}); err != nil {
 		t.Fatalf("publish global event: %v", err)
 	}
 
@@ -176,90 +176,6 @@ func TestMagicHubReturnsHandlerError(t *testing.T) {
 	}
 }
 
-func TestMagicHubPublishCanReturnHandlerResponse(t *testing.T) {
-	hub := NewMagicHub()
-	defer hub.Terminate(context.Background())
-
-	want := Envelope{Topic: workorchdevents.TopicCLIResult, Payload: map[string]any{"ok": true}}
-	unsubscribe := hub.Subscribe(workorchdevents.TopicCLICommand, func(_ context.Context, _ Envelope) error {
-		return Response(want)
-	})
-	defer unsubscribe()
-
-	err := hub.Publish(context.Background(), Envelope{Topic: workorchdevents.TopicCLICommand})
-	response, ok := ResponseEnvelope(err)
-	if !ok {
-		t.Fatalf("Publish err = %v, want response envelope", err)
-	}
-	if response.Topic != workorchdevents.TopicCLIResult || response.Payload["ok"] != true {
-		t.Fatalf("response = %+v, want CLI result payload", response)
-	}
-}
-
-func TestMagicHubPublishedDoesNotRetainHeavyCLIResultPayload(t *testing.T) {
-	hub := NewMagicHub()
-	defer hub.Terminate(context.Background())
-
-	large := strings.Repeat("x", 1024*1024)
-	err := hub.Publish(context.Background(), Envelope{
-		Topic:       workorchdevents.TopicCLIResult,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"correlationId": "corr-1",
-			"commandId":     "cmd-1",
-			"ok":            true,
-			"occurredAt":    time.Now().UTC().Format(time.RFC3339Nano),
-			"workspaceId":   "ws-1",
-			"runId":         "run-1",
-			"resource":      map[string]any{"large": large},
-			"resources":     []map[string]any{{"large": large}},
-			"snapshot":      map[string]any{"large": large},
-		},
-	})
-	if err != nil {
-		t.Fatalf("publish CLI result: %v", err)
-	}
-
-	published := hub.Published()
-	if len(published) != 1 {
-		t.Fatalf("published count = %d, want 1", len(published))
-	}
-	payload := published[0].Payload
-	if payload["resource"] != nil || payload["resources"] != nil || payload["snapshot"] != nil {
-		t.Fatalf("published payload retained heavy result fields: %+v", payload)
-	}
-	if payload["correlationId"] != "corr-1" || payload["commandId"] != "cmd-1" || payload["ok"] != true {
-		t.Fatalf("published payload lost audit fields: %+v", payload)
-	}
-	if payload["resourceSummary"] == nil || payload["resourcesSummary"] == nil || payload["snapshotSummary"] == nil {
-		t.Fatalf("published payload missing result summaries: %+v", payload)
-	}
-}
-
-func TestMagicHubWildcardObserverDoesNotSwallowHandlerResponse(t *testing.T) {
-	hub := NewMagicHub()
-	defer hub.Terminate(context.Background())
-
-	unsubscribeAll := hub.Subscribe("*", func(_ context.Context, _ Envelope) error {
-		return nil
-	})
-	defer unsubscribeAll()
-	unsubscribeCommand := hub.Subscribe(orchestratorevents.TopicOrchestratorCommandBlockApproval, func(_ context.Context, envelope Envelope) error {
-		return Response(Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{"ok": true}})
-	})
-	defer unsubscribeCommand()
-
-	err := hub.Publish(context.Background(), Envelope{Topic: orchestratorevents.TopicOrchestratorCommandBlockApproval})
-	response, ok := ResponseEnvelope(err)
-	if !ok {
-		t.Fatalf("Publish err = %v, want response envelope", err)
-	}
-	if response.Payload["ok"] != true {
-		t.Fatalf("response = %+v, want ok payload", response)
-	}
-}
-
 type blockingUnsubscribeHub struct{}
 
 func (blockingUnsubscribeHub) Subscribe(string, magicevent.Observer) {}
@@ -350,19 +266,6 @@ func (h *contractSyncOnlyHub) Subscribe(string, Handler) func() {
 	return func() {}
 }
 
-type contractResponseHub struct {
-	topic string
-}
-
-func (h *contractResponseHub) Publish(_ context.Context, envelope Envelope) error {
-	h.topic = envelope.Topic
-	return Response(Envelope{Topic: envelope.Topic + "/response"})
-}
-
-func (h *contractResponseHub) Subscribe(string, Handler) func() {
-	return func() {}
-}
-
 func TestMagicHubPublishWithoutSubscribersSucceeds(t *testing.T) {
 	hub := NewMagicHub()
 	defer hub.Terminate(context.Background())
@@ -442,11 +345,6 @@ func TestEventHubDeliveryModeForTopicClassifiesCommandsAndNotifications(t *testi
 			want:  EventHubDeliveryModeSync,
 		},
 		{
-			name:  "facade results keep synchronous response semantics",
-			topic: workorchdevents.TopicCLIResult,
-			want:  EventHubDeliveryModeSync,
-		},
-		{
 			name:  "runtime execute commands require synchronous accepted response semantics",
 			topic: runtimeeventdefs.RuntimeBlockExecuteTopic("mcp/tool_call"),
 			want:  EventHubDeliveryModeSync,
@@ -509,147 +407,72 @@ func TestPublishByContractFallsBackToSyncWhenAsyncUnavailable(t *testing.T) {
 	}
 }
 
-func TestPublishByContractIgnoresNotifyResponseWhenFallingBackToSync(t *testing.T) {
-	hub := &contractResponseHub{}
-
-	if err := PublishByContract(context.Background(), hub, Envelope{Topic: runevents.TopicRunStateChanged}); err != nil {
-		t.Fatalf("publish by contract notify response fallback: %v", err)
-	}
-	if hub.topic != runevents.TopicRunStateChanged {
-		t.Fatalf("published topic = %q, want %q", hub.topic, runevents.TopicRunStateChanged)
-	}
-}
-
-func TestPublishByContractUsesSyncForCommandTopics(t *testing.T) {
-	hub := &contractDeliveryHub{}
-
-	if err := PublishByContract(context.Background(), hub, Envelope{Topic: runevents.TopicRunCommandUpdate}); err != nil {
-		t.Fatalf("publish by contract: %v", err)
-	}
-	if hub.syncPublishes != 1 || hub.asyncPublishes != 0 {
-		t.Fatalf("publish counts = sync:%d async:%d, want sync delivery", hub.syncPublishes, hub.asyncPublishes)
-	}
-}
-
-func TestPublishByContractPreservesCommandResponseWhenUsingSync(t *testing.T) {
-	hub := &contractResponseHub{}
-
-	err := PublishByContract(context.Background(), hub, Envelope{Topic: runevents.TopicRunCommandUpdate})
-	if _, ok := ResponseEnvelope(err); !ok {
-		t.Fatalf("publish by contract command response = %v, want response envelope", err)
-	}
-}
-
 func TestMagicHubFallsBackToTopicLaneForGlobalEvents(t *testing.T) {
 	rawHub := &recordingLaneHub{}
 	hub := NewMagicHubWithHub(rawHub)
 
-	if err := hub.Publish(context.Background(), Envelope{Topic: workorchdevents.TopicCLICommand, WorkspaceID: "ws-a", RunID: "run-001"}); err != nil {
+	const topic = "/custom/global/notification"
+	if err := hub.Publish(context.Background(), Envelope{Topic: topic, WorkspaceID: "ws-a", RunID: "run-001"}); err != nil {
 		t.Fatalf("publish global event: %v", err)
 	}
-	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != "topic/"+workorchdevents.TopicCLICommand {
+	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != "topic/"+topic {
 		t.Fatalf("lanes = %v, want topic fallback lane", rawHub.lanes)
 	}
 }
 
-func TestMagicHubUsesTopicLaneForCLIResultWithScope(t *testing.T) {
-	rawHub := &recordingLaneHub{}
-	hub := NewMagicHubWithHub(rawHub)
-
-	if err := hub.Publish(context.Background(), Envelope{Topic: workorchdevents.TopicCLIResult, WorkspaceID: "ws-a", RunID: "run-001"}); err != nil {
-		t.Fatalf("publish scoped CLI result event: %v", err)
-	}
-	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != "topic/"+workorchdevents.TopicCLIResult {
-		t.Fatalf("lanes = %v, want CLI result topic lane", rawHub.lanes)
-	}
-}
-
-func TestMagicHubUsesQueryLaneForScopedReadCommands(t *testing.T) {
-	rawHub := &recordingLaneHub{}
-	hub := NewMagicHubWithHub(rawHub)
-
-	if err := hub.Publish(context.Background(), Envelope{
-		Topic:       runevents.TopicRunCommandListStepsByRun,
+func TestEventHubLaneKeyForUsesQueryLaneForScopedReadCommands(t *testing.T) {
+	got := EventHubLaneKeyFor(runevents.TopicRunCommandListStepsByRun, EventHubLaneScope{
 		WorkspaceID: "ws-a",
 		RunID:       "run-001",
-	}); err != nil {
-		t.Fatalf("publish scoped read command: %v", err)
-	}
-	if len(rawHub.lanes) != 1 {
-		t.Fatalf("lanes = %v, want one query lane", rawHub.lanes)
-	}
+	})
 	want := "query/run/command/list-steps-by-run/workspace/ws-a/run/run-001"
-	if rawHub.lanes[0] != want {
-		t.Fatalf("lane = %q, want %q", rawHub.lanes[0], want)
+	if got != want {
+		t.Fatalf("lane = %q, want %q", got, want)
 	}
 }
 
-func TestMagicHubKeepsRunOwnerWriteCommandsOnRunStateLane(t *testing.T) {
-	rawHub := &recordingLaneHub{}
-	hub := NewMagicHubWithHub(rawHub)
-
-	if err := hub.Publish(context.Background(), Envelope{
-		Topic:       runevents.TopicRunCommandUpdate,
+func TestEventHubLaneKeyForKeepsRunOwnerWriteCommandsOnRunStateLane(t *testing.T) {
+	got := EventHubLaneKeyFor(runevents.TopicRunCommandUpdate, EventHubLaneScope{
 		WorkspaceID: "ws-a",
 		RunID:       "run-001",
-	}); err != nil {
-		t.Fatalf("publish run owner write command: %v", err)
-	}
-	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != "state/run/ws-a/run-001" {
-		t.Fatalf("lanes = %v, want run state write command lane", rawHub.lanes)
+	})
+	if got != "state/run/ws-a/run-001" {
+		t.Fatalf("lane = %q, want run state write command lane", got)
 	}
 }
 
-func TestMagicHubKeepsOrchestratorCommandsOnOrchestratorStateLane(t *testing.T) {
-	rawHub := &recordingLaneHub{}
-	hub := NewMagicHubWithHub(rawHub)
-
-	if err := hub.Publish(context.Background(), Envelope{
-		Topic:       orchestratorevents.TopicOrchestratorCommandResumeRun,
+func TestEventHubLaneKeyForKeepsOrchestratorCommandsOnOrchestratorStateLane(t *testing.T) {
+	got := EventHubLaneKeyFor(orchestratorevents.TopicOrchestratorCommandResumeRun, EventHubLaneScope{
 		WorkspaceID: "ws-a",
 		RunID:       "run-001",
-	}); err != nil {
-		t.Fatalf("publish orchestrator command: %v", err)
-	}
+	})
 	want := "state/orchestrator/workspace/ws-a/run/run-001"
-	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != want {
-		t.Fatalf("lanes = %v, want %s", rawHub.lanes, want)
+	if got != want {
+		t.Fatalf("lane = %q, want %s", got, want)
 	}
 }
 
-func TestMagicHubKeepsOrchestratorDispatchRequestsOnOrchestratorStateLane(t *testing.T) {
-	rawHub := &recordingLaneHub{}
-	hub := NewMagicHubWithHub(rawHub)
-
-	if err := hub.Publish(context.Background(), Envelope{
-		Topic:       orchestratorevents.TopicOrchestratorDispatchStepRequested,
+func TestEventHubLaneKeyForKeepsOrchestratorDispatchRequestsOnOrchestratorStateLane(t *testing.T) {
+	got := EventHubLaneKeyFor(orchestratorevents.TopicOrchestratorDispatchStepRequested, EventHubLaneScope{
 		WorkspaceID: "ws-a",
 		RunID:       "run-001",
 		StepID:      "run-001-step-2",
-	}); err != nil {
-		t.Fatalf("publish orchestrator dispatch request: %v", err)
-	}
+	})
 	want := "state/orchestrator/workspace/ws-a/run/run-001"
-	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != want {
-		t.Fatalf("lanes = %v, want %s", rawHub.lanes, want)
+	if got != want {
+		t.Fatalf("lane = %q, want %s", got, want)
 	}
 }
 
-func TestMagicHubUsesExecuteLaneForRuntimeBlockCommands(t *testing.T) {
-	rawHub := &recordingLaneHub{}
-	hub := NewMagicHubWithHub(rawHub)
-
-	if err := hub.Publish(context.Background(), Envelope{
-		Topic:       runtimeeventdefs.RuntimeBlockExecuteTopic("mcp/tool_call"),
+func TestEventHubLaneKeyForUsesExecuteLaneForRuntimeBlockCommands(t *testing.T) {
+	got := EventHubLaneKeyFor(runtimeeventdefs.RuntimeBlockExecuteTopic("mcp/tool_call"), EventHubLaneScope{
 		WorkspaceID: "ws-a",
 		RunID:       "run-001",
 		StepID:      "run-001-step-2",
-	}); err != nil {
-		t.Fatalf("publish runtime block command: %v", err)
-	}
+	})
 	want := "exec/block/mcp-tool-call/workspace/ws-a/step/run-001-step-2"
-	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != want {
-		t.Fatalf("lanes = %v, want %s", rawHub.lanes, want)
+	if got != want {
+		t.Fatalf("lane = %q, want %s", got, want)
 	}
 }
 
@@ -724,37 +547,34 @@ func TestMagicHubKeepsRuntimeResultLanesWorkspaceScoped(t *testing.T) {
 	}
 }
 
-func TestMagicHubKeepsWorkspaceLocalRunStateLanesIndependent(t *testing.T) {
+func TestMagicHubKeepsWorkspaceLocalRunNotificationLanesIndependent(t *testing.T) {
 	hub := NewMagicHub()
 	defer hub.Terminate(context.Background())
 
 	writeStarted := make(chan struct{})
 	releaseWrite := make(chan struct{})
-	unsubscribeWrite := hub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ context.Context, envelope Envelope) error {
+	unsubscribeWrite := hub.Subscribe(runevents.TopicRunStateChanged, func(_ context.Context, envelope Envelope) error {
 		if envelope.WorkspaceID != "ws-a" || envelope.RunID != "run-001" {
 			t.Fatalf("write scope = %s/%s, want ws-a/run-001", envelope.WorkspaceID, envelope.RunID)
 		}
 		close(writeStarted)
 		<-releaseWrite
-		return Response(Envelope{Topic: envelope.Topic + "/response"})
+		return nil
 	})
 	defer unsubscribeWrite()
 
-	unsubscribeCreate := hub.Subscribe(runevents.TopicRunCommandCreate, func(_ context.Context, envelope Envelope) error {
+	unsubscribeCreate := hub.Subscribe(runevents.TopicStepStateChanged, func(_ context.Context, envelope Envelope) error {
 		if envelope.WorkspaceID != "ws-b" || envelope.RunID != "run-001" {
 			t.Fatalf("create scope = %s/%s, want ws-b/run-001", envelope.WorkspaceID, envelope.RunID)
 		}
-		return Response(Envelope{
-			Topic:   envelope.Topic + "/response",
-			Payload: map[string]any{"created": true},
-		})
+		return nil
 	})
 	defer unsubscribeCreate()
 
 	writeDone := make(chan error, 1)
 	go func() {
 		writeDone <- hub.Publish(context.Background(), Envelope{
-			Topic:       orchestratorevents.TopicOrchestratorCommandResumeRun,
+			Topic:       runevents.TopicRunStateChanged,
 			WorkspaceID: "ws-a",
 			RunID:       "run-001",
 		})
@@ -769,7 +589,7 @@ func TestMagicHubKeepsWorkspaceLocalRunStateLanesIndependent(t *testing.T) {
 	createDone := make(chan error, 1)
 	go func() {
 		createDone <- hub.Publish(context.Background(), Envelope{
-			Topic:       runevents.TopicRunCommandCreate,
+			Topic:       runevents.TopicStepStateChanged,
 			WorkspaceID: "ws-b",
 			RunID:       "run-001",
 		})
@@ -777,12 +597,8 @@ func TestMagicHubKeepsWorkspaceLocalRunStateLanesIndependent(t *testing.T) {
 
 	select {
 	case err := <-createDone:
-		response, ok := ResponseEnvelope(err)
-		if !ok {
-			t.Fatalf("create err = %v, want response envelope", err)
-		}
-		if response.Payload["created"] != true {
-			t.Fatalf("create response = %+v, want created payload", response)
+		if err != nil {
+			t.Fatalf("create returned error: %v", err)
 		}
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("workspace B run create blocked behind workspace A run state lane")
@@ -791,7 +607,7 @@ func TestMagicHubKeepsWorkspaceLocalRunStateLanesIndependent(t *testing.T) {
 	close(releaseWrite)
 	select {
 	case err := <-writeDone:
-		if _, ok := ResponseEnvelope(err); err != nil && !ok {
+		if err != nil {
 			t.Fatalf("write command returned error: %v", err)
 		}
 	case <-time.After(time.Second):
@@ -799,37 +615,34 @@ func TestMagicHubKeepsWorkspaceLocalRunStateLanesIndependent(t *testing.T) {
 	}
 }
 
-func TestMagicHubDoesNotBlockRunOwnerWriteBehindActiveOrchestratorLane(t *testing.T) {
+func TestMagicHubDoesNotBlockRunNotificationBehindActiveOrchestratorNotificationLane(t *testing.T) {
 	hub := NewMagicHub()
 	defer hub.Terminate(context.Background())
 
 	orchestratorStarted := make(chan struct{})
 	releaseOrchestrator := make(chan struct{})
-	unsubscribeOrchestrator := hub.Subscribe(orchestratorevents.TopicOrchestratorCommandFailRun, func(_ context.Context, envelope Envelope) error {
+	unsubscribeOrchestrator := hub.Subscribe(orchestratorevents.TopicOrchestratorStageChanged, func(_ context.Context, envelope Envelope) error {
 		if envelope.WorkspaceID != "ws-a" || envelope.RunID != "run-001" {
 			t.Fatalf("orchestrator scope = %s/%s, want ws-a/run-001", envelope.WorkspaceID, envelope.RunID)
 		}
 		close(orchestratorStarted)
 		<-releaseOrchestrator
-		return Response(Envelope{Topic: envelope.Topic + "/response"})
+		return nil
 	})
 	defer unsubscribeOrchestrator()
 
-	unsubscribeRunUpdate := hub.Subscribe(runevents.TopicRunCommandUpdate, func(_ context.Context, envelope Envelope) error {
+	unsubscribeRunUpdate := hub.Subscribe(runevents.TopicRunStateChanged, func(_ context.Context, envelope Envelope) error {
 		if envelope.WorkspaceID != "ws-a" || envelope.RunID != "run-001" {
 			t.Fatalf("run update scope = %s/%s, want ws-a/run-001", envelope.WorkspaceID, envelope.RunID)
 		}
-		return Response(Envelope{
-			Topic:   envelope.Topic + "/response",
-			Payload: map[string]any{"updated": true},
-		})
+		return nil
 	})
 	defer unsubscribeRunUpdate()
 
 	orchestratorDone := make(chan error, 1)
 	go func() {
 		orchestratorDone <- hub.Publish(context.Background(), Envelope{
-			Topic:       orchestratorevents.TopicOrchestratorCommandFailRun,
+			Topic:       orchestratorevents.TopicOrchestratorStageChanged,
 			WorkspaceID: "ws-a",
 			RunID:       "run-001",
 		})
@@ -844,7 +657,7 @@ func TestMagicHubDoesNotBlockRunOwnerWriteBehindActiveOrchestratorLane(t *testin
 	updateDone := make(chan error, 1)
 	go func() {
 		updateDone <- hub.Publish(context.Background(), Envelope{
-			Topic:       runevents.TopicRunCommandUpdate,
+			Topic:       runevents.TopicRunStateChanged,
 			WorkspaceID: "ws-a",
 			RunID:       "run-001",
 		})
@@ -852,12 +665,8 @@ func TestMagicHubDoesNotBlockRunOwnerWriteBehindActiveOrchestratorLane(t *testin
 
 	select {
 	case err := <-updateDone:
-		response, ok := ResponseEnvelope(err)
-		if !ok {
-			t.Fatalf("run update err = %v, want response envelope", err)
-		}
-		if response.Payload["updated"] != true {
-			t.Fatalf("run update response = %+v, want updated payload", response)
+		if err != nil {
+			t.Fatalf("run update returned error: %v", err)
 		}
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("run owner update blocked behind active orchestrator lane")
@@ -866,7 +675,7 @@ func TestMagicHubDoesNotBlockRunOwnerWriteBehindActiveOrchestratorLane(t *testin
 	close(releaseOrchestrator)
 	select {
 	case err := <-orchestratorDone:
-		if _, ok := ResponseEnvelope(err); err != nil && !ok {
+		if err != nil {
 			t.Fatalf("orchestrator command returned error: %v", err)
 		}
 	case <-time.After(time.Second):
@@ -874,36 +683,33 @@ func TestMagicHubDoesNotBlockRunOwnerWriteBehindActiveOrchestratorLane(t *testin
 	}
 }
 
-func TestMagicHubReadCommandIsNotBlockedByActiveRunWriteLane(t *testing.T) {
+func TestMagicHubProjectionNotificationIsNotBlockedByActiveRunNotificationLane(t *testing.T) {
 	hub := NewMagicHub()
 	defer hub.Terminate(context.Background())
 
 	writeStarted := make(chan struct{})
 	releaseWrite := make(chan struct{})
-	unsubscribeWrite := hub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ context.Context, envelope Envelope) error {
+	unsubscribeWrite := hub.Subscribe(runevents.TopicRunStateChanged, func(_ context.Context, envelope Envelope) error {
 		if envelope.RunID != "run-001" {
 			t.Fatalf("write run ID = %q, want run-001", envelope.RunID)
 		}
 		close(writeStarted)
 		<-releaseWrite
-		return Response(Envelope{Topic: envelope.Topic + "/response"})
+		return nil
 	})
 	defer unsubscribeWrite()
-	unsubscribeRead := hub.Subscribe(runevents.TopicRunCommandListStepsByRun, func(_ context.Context, envelope Envelope) error {
+	unsubscribeRead := hub.Subscribe(workorchdevents.TopicWorkspaceProjectionChanged, func(_ context.Context, envelope Envelope) error {
 		if envelope.RunID != "run-001" {
 			t.Fatalf("read run ID = %q, want run-001", envelope.RunID)
 		}
-		return Response(Envelope{
-			Topic:   envelope.Topic + "/response",
-			Payload: map[string]any{"ok": true},
-		})
+		return nil
 	})
 	defer unsubscribeRead()
 
 	writeDone := make(chan error, 1)
 	go func() {
 		writeDone <- hub.Publish(context.Background(), Envelope{
-			Topic:       orchestratorevents.TopicOrchestratorCommandResumeRun,
+			Topic:       runevents.TopicRunStateChanged,
 			WorkspaceID: "ws-a",
 			RunID:       "run-001",
 		})
@@ -918,7 +724,7 @@ func TestMagicHubReadCommandIsNotBlockedByActiveRunWriteLane(t *testing.T) {
 	readDone := make(chan error, 1)
 	go func() {
 		readDone <- hub.Publish(context.Background(), Envelope{
-			Topic:       runevents.TopicRunCommandListStepsByRun,
+			Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
 			WorkspaceID: "ws-a",
 			RunID:       "run-001",
 		})
@@ -926,12 +732,8 @@ func TestMagicHubReadCommandIsNotBlockedByActiveRunWriteLane(t *testing.T) {
 
 	select {
 	case err := <-readDone:
-		response, ok := ResponseEnvelope(err)
-		if !ok {
-			t.Fatalf("read err = %v, want response envelope", err)
-		}
-		if response.Payload["ok"] != true {
-			t.Fatalf("read response = %+v, want ok payload", response)
+		if err != nil {
+			t.Fatalf("read returned error: %v", err)
 		}
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("read command blocked behind active run write lane")
@@ -940,7 +742,7 @@ func TestMagicHubReadCommandIsNotBlockedByActiveRunWriteLane(t *testing.T) {
 	close(releaseWrite)
 	select {
 	case err := <-writeDone:
-		if _, ok := ResponseEnvelope(err); err != nil && !ok {
+		if err != nil {
 			t.Fatalf("write command returned error: %v", err)
 		}
 	case <-time.After(time.Second):

@@ -4,15 +4,15 @@ import (
 	"context"
 	"errors"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func PurgeWorkspaceRecords(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
+func PurgeWorkspaceRecords(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
 	if hub == nil || workspaceID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -52,7 +52,7 @@ func PurgeWorkspaceRecords(ctx context.Context, hub events.Hub, workspaceID comm
 	return nil
 }
 
-func WorkspaceRunIDs(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]common.RunID, error) {
+func WorkspaceRunIDs(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]common.RunID, error) {
 	response, err := sendWorkspaceMagicCommand[runevents.ListRunsByWorkspaceCommand, runevents.RunCommandResult](ctx, hub, runevents.TopicRunCommandListByWorkspace, runevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", runevents.ListRunsByWorkspaceCommand{WorkspaceID: workspaceID})
 	if err != nil {
 		return nil, err
@@ -67,7 +67,7 @@ func WorkspaceRunIDs(ctx context.Context, hub events.Hub, workspaceID common.Wor
 	return ret, nil
 }
 
-func PurgeWorkspaceEventStream(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
+func PurgeWorkspaceEventStream(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
 	_, err := sendWorkspaceMagicCommand[eventstreamevents.PurgeWorkspaceCommand, eventstreamevents.EventStreamCommandResult](ctx, hub, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, eventstreamevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID})
 	if errors.Is(err, common.ErrNotFound) || errors.Is(err, common.ErrConflict) {
 		return nil

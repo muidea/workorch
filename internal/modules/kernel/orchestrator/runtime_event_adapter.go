@@ -9,7 +9,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -23,12 +22,8 @@ type runtimeEventResult struct {
 	err    error
 }
 
-func NewEventRuntimeAdapter(hub events.Hub) orchestratorbiz.RuntimeAdapter {
-	provider, _ := hub.(rawMagicHubProvider)
-	if provider == nil {
-		return eventRuntimeAdapter{}
-	}
-	return eventRuntimeAdapter{hub: provider.RawHub()}
+func NewEventRuntimeAdapter(hub magicevent.Hub) orchestratorbiz.RuntimeAdapter {
+	return eventRuntimeAdapter{hub: hub}
 }
 
 func (a eventRuntimeAdapter) RequestRuntimeStepExecution(ctx context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.RuntimeStepExecutionAccepted, error) {

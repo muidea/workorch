@@ -20,7 +20,6 @@ const (
 	magicWildcardTopic                = "/#"
 	magicWorkorchObserverDestination  = "/_workorch_observer/#"
 	defaultMagicHubOwner              = "workorch/events"
-	cliResultTopic                    = "/cli/result"
 )
 
 type MagicHub struct {
@@ -73,13 +72,6 @@ func NewMagicHubWithHubOwner(hub magicevent.Hub, owner string) *MagicHub {
 	return newMagicHub(hub, false, owner)
 }
 
-func (h *MagicHub) RawHub() magicevent.Hub {
-	if h == nil {
-		return nil
-	}
-	return h.hub
-}
-
 func newMagicHub(hub magicevent.Hub, ownsHub bool, owner string) *MagicHub {
 	return &MagicHub{
 		hub:           hub,
@@ -124,16 +116,14 @@ func (h *MagicHub) Publish(ctx context.Context, envelope Envelope) error {
 	if result.Error() != nil && strings.Contains(result.Error().Message, "missing observer") {
 		return nil
 	}
-	if data, resultErr := result.Get(); resultErr == nil {
-		if envelope, ok := data.(Envelope); ok {
-			return Response(envelope)
-		}
-		if err, ok := data.(error); ok {
-			return err
-		}
-		return nil
+	if err := cd.ToStdError(result.Error()); err != nil {
+		return fmt.Errorf("handle event %s: %w", envelope.Topic, err)
 	}
-	return fmt.Errorf("handle event %s: %s", envelope.Topic, result.Error().Error())
+	_, resultErr := result.Get()
+	if err := cd.ToStdError(resultErr); err != nil {
+		return fmt.Errorf("handle event %s: %w", envelope.Topic, err)
+	}
+	return nil
 }
 
 func (h *MagicHub) PublishAsync(ctx context.Context, envelope Envelope) error {
@@ -177,52 +167,7 @@ func (h *MagicHub) recordPublishedEnvelopeLocked(envelope Envelope) {
 	if h == nil {
 		return
 	}
-	h.published = append(h.published, publishedEnvelopeForAudit(envelope))
-}
-
-func publishedEnvelopeForAudit(envelope Envelope) Envelope {
-	envelope = cloneEnvelope(envelope)
-	if envelope.Topic == cliResultTopic {
-		envelope.Payload = cliResultPayloadForAudit(envelope.Payload)
-	}
-	return envelope
-}
-
-func cliResultPayloadForAudit(payload map[string]any) map[string]any {
-	if payload == nil {
-		return nil
-	}
-	ret := map[string]any{}
-	for _, key := range []string{
-		"correlationId",
-		"commandId",
-		"ok",
-		"error",
-		"occurredAt",
-		"workspaceId",
-		"runId",
-	} {
-		if value, ok := payload[key]; ok {
-			ret[key] = value
-		}
-	}
-	if resource, ok := payload["resource"].(map[string]any); ok && len(resource) > 0 {
-		ret["resourceSummary"] = map[string]any{"fieldCount": len(resource)}
-	}
-	switch resources := payload["resources"].(type) {
-	case []map[string]any:
-		if len(resources) > 0 {
-			ret["resourcesSummary"] = map[string]any{"count": len(resources)}
-		}
-	case []any:
-		if len(resources) > 0 {
-			ret["resourcesSummary"] = map[string]any{"count": len(resources)}
-		}
-	}
-	if snapshot, ok := payload["snapshot"].(map[string]any); ok && len(snapshot) > 0 {
-		ret["snapshotSummary"] = map[string]any{"fieldCount": len(snapshot)}
-	}
-	return ret
+	h.published = append(h.published, cloneEnvelope(envelope))
 }
 
 func (s *workspaceRevisionState) next(workspaceID string) int64 {
@@ -347,9 +292,6 @@ func (h *MagicHub) dispatchLocalWildcard(ctx context.Context, envelope Envelope)
 			continue
 		}
 		if err := handler(ctx, cloneEnvelope(envelope)); err != nil {
-			if _, ok := ResponseEnvelope(err); ok {
-				continue
-			}
 			return fmt.Errorf("handle event %s: %w", envelope.Topic, err)
 		}
 	}
@@ -399,27 +341,16 @@ func (o *magicDispatchObserver) Notify(ev magicevent.Event, result magicevent.Re
 	}
 
 	handlers := o.snapshotHandlers()
-	var response Envelope
-	hasResponse := false
 	for _, handler := range handlers {
 		if handler == nil {
 			continue
 		}
 		if err := handler(ev.Context(), cloneEnvelope(envelope)); err != nil {
 			if result != nil {
-				if responseEnvelope, ok := ResponseEnvelope(err); ok {
-					hasResponse = true
-					response = responseEnvelope
-					continue
-				}
-				result.Set(err, nil)
+				result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 			}
 			return
 		}
-	}
-	if result != nil && hasResponse {
-		result.Set(response, nil)
-		return
 	}
 	if result != nil {
 		result.Set(nil, nil)

@@ -20,6 +20,7 @@
 ## 组件交互合同
 
 - Provider contract: `Setup` 完成后必须能通过 `workorchdeps` 解析 repository provider、EventHub 与 runtime policy。
+- EventHub export contract: initiator 同时导出 projection `EventHub` 与 framework `CommandHub`；跨 owner command 消费方必须直接使用 `CommandHub`。`MagicHub.RawHub()` 已删除，禁止从 projection Hub 反查 command transport。
 - Consumer contract: 下游 module 只能通过 `workorchdeps` 或构造参数读取基础设施，不能持有 initiator 内部结构。
 - Lifecycle contract: `Run` 不创建业务状态；`Teardown` 必须清理 repository provider、EventHub wrapper 和 runtime policy。
 - Failure contract: repository、config、EventHub helper 缺失时必须 fail-fast，不能让下游 module 运行到 nil dependency。

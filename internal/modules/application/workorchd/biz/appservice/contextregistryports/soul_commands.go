@@ -4,16 +4,16 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func CreateSoul(ctx context.Context, hub events.Hub, cmd contextregistrycore.Soul) (contextregistrycore.Soul, error) {
+func CreateSoul(ctx context.Context, hub magicevent.Hub, cmd contextregistrycore.Soul) (contextregistrycore.Soul, error) {
 	if hub == nil {
 		return contextregistrycore.Soul{}, common.ErrInvalidArgument
 	}
@@ -24,7 +24,7 @@ func CreateSoul(ctx context.Context, hub events.Hub, cmd contextregistrycore.Sou
 	return soulFromCommandResult(result)
 }
 
-func UpdateSoul(ctx context.Context, hub events.Hub, cmd contextregistrycore.Soul) (contextregistrycore.Soul, error) {
+func UpdateSoul(ctx context.Context, hub magicevent.Hub, cmd contextregistrycore.Soul) (contextregistrycore.Soul, error) {
 	if hub == nil {
 		return contextregistrycore.Soul{}, common.ErrInvalidArgument
 	}
@@ -35,7 +35,7 @@ func UpdateSoul(ctx context.Context, hub events.Hub, cmd contextregistrycore.Sou
 	return soulFromCommandResult(result)
 }
 
-func UpdateSoulByID(ctx context.Context, hub events.Hub, soulID string, cmd contextregistrycore.Soul) (contextregistrycore.Soul, error) {
+func UpdateSoulByID(ctx context.Context, hub magicevent.Hub, soulID string, cmd contextregistrycore.Soul) (contextregistrycore.Soul, error) {
 	soulID = strings.TrimSpace(soulID)
 	cmd.ID = strings.TrimSpace(cmd.ID)
 	if soulID == "" {
@@ -48,7 +48,7 @@ func UpdateSoulByID(ctx context.Context, hub events.Hub, soulID string, cmd cont
 	return UpdateSoul(ctx, hub, cmd)
 }
 
-func DeleteSoul(ctx context.Context, hub events.Hub, soulID string) error {
+func DeleteSoul(ctx context.Context, hub magicevent.Hub, soulID string) error {
 	soulID = strings.TrimSpace(soulID)
 	if hub == nil || soulID == "" {
 		return common.ErrInvalidArgument
@@ -57,7 +57,7 @@ func DeleteSoul(ctx context.Context, hub events.Hub, soulID string) error {
 	return err
 }
 
-func ReadSoul(ctx context.Context, hub events.Hub, soulID string) (contextregistrycore.Soul, error) {
+func ReadSoul(ctx context.Context, hub magicevent.Hub, soulID string) (contextregistrycore.Soul, error) {
 	if hub == nil {
 		return contextregistrycore.Soul{}, common.ErrInvalidArgument
 	}
@@ -68,11 +68,11 @@ func ReadSoul(ctx context.Context, hub events.Hub, soulID string) (contextregist
 	return soulFromCommandResult(result)
 }
 
-func ReadSoulRecord(ctx context.Context, hub events.Hub, soulID common.SoulID) (*soulmodel.Soul, error) {
+func ReadSoulRecord(ctx context.Context, hub magicevent.Hub, soulID common.SoulID) (*soulmodel.Soul, error) {
 	return ownerreadports.ReadSoulByOwnerCommand(ctx, hub, soulID)
 }
 
-func ListSouls(ctx context.Context, hub events.Hub) ([]contextregistrycore.Soul, error) {
+func ListSouls(ctx context.Context, hub magicevent.Hub) ([]contextregistrycore.Soul, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

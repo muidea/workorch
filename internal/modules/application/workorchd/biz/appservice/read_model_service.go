@@ -1,6 +1,7 @@
 package appservice
 
 import (
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -30,16 +31,21 @@ type readModelDependencies struct {
 	resolutions           readmodelcore.DecisionResolutionReader
 	approvals             readmodelcore.ApprovalReader
 	eventHub              events.Hub
+	commandHub            magicevent.Hub
 	published             []events.WorkorchEvent
 	loadConfig            func() (workorchconfig.Config, error)
 }
 
 func readModelDependenciesFromSession(session *RuntimeSession) (readModelDependencies, error) {
-	hub, err := session.RequiredEventHub()
+	eventHub, err := session.RequiredEventHub()
 	if err != nil {
 		return readModelDependencies{}, err
 	}
-	readers, err := readmodelports.NewOwnerReaders(hub)
+	commandHub, err := session.RequiredCommandHub()
+	if err != nil {
+		return readModelDependencies{}, err
+	}
+	readers, err := readmodelports.NewOwnerReaders(commandHub)
 	if err != nil {
 		return readModelDependencies{}, err
 	}
@@ -71,7 +77,8 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 		tickets:               readers.Tickets,
 		resolutions:           readers.Resolutions,
 		approvals:             readers.Approvals,
-		eventHub:              hub,
+		eventHub:              eventHub,
+		commandHub:            commandHub,
 		published:             published,
 		loadConfig:            session.ConfigLoader(),
 	}, nil

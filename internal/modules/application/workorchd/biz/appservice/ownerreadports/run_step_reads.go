@@ -3,14 +3,14 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ReadStepByOwnerCommand(ctx context.Context, hub events.Hub, stepID common.StepID) (*runmodel.Step, error) {
+func ReadStepByOwnerCommand(ctx context.Context, hub magicevent.Hub, stepID common.StepID) (*runmodel.Step, error) {
 	if hub == nil || stepID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -28,7 +28,7 @@ func ReadStepByOwnerCommand(ctx context.Context, hub events.Hub, stepID common.S
 	return response.Step, nil
 }
 
-func ListStepsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.Step, error) {
+func ListStepsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*runmodel.Step, error) {
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -43,7 +43,7 @@ func ListStepsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID commo
 	return response.Steps, nil
 }
 
-func ListStepSummariesByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.Step, error) {
+func ListStepSummariesByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*runmodel.Step, error) {
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}

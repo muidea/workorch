@@ -293,7 +293,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (de
 	}
 }
 
-func setDecisionMagicResult(result magicevent.Result, data any, err error) {
+func setDecisionMagicResult(result magicevent.Result, data decisionevents.DecisionCommandResult, err error) {
 	if result == nil {
 		return
 	}

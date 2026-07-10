@@ -3,12 +3,12 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func CreateSoulWithSession(ctx context.Context, session *RuntimeSession, cmd CreateSoulCommand) (ret Soul, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (Soul, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Soul, error) {
 		return contextregistryports.CreateSoul(ctx, hub, cmd)
 	})
 }
@@ -20,7 +20,7 @@ func CreateSoulWithBackend(ctx context.Context, backend string, dataRoot string,
 }
 
 func UpdateSoulWithSession(ctx context.Context, session *RuntimeSession, soulID string, cmd UpdateSoulCommand) (ret Soul, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (Soul, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Soul, error) {
 		return contextregistryports.UpdateSoulByID(ctx, hub, soulID, cmd)
 	})
 }
@@ -32,7 +32,7 @@ func UpdateSoulWithBackend(ctx context.Context, backend string, dataRoot string,
 }
 
 func DeleteSoulWithSession(ctx context.Context, session *RuntimeSession, soulID string) (err error) {
-	_, err = withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (struct{}, error) {
+	_, err = withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (struct{}, error) {
 		return struct{}{}, contextregistryports.DeleteSoul(ctx, hub, soulID)
 	})
 	return err

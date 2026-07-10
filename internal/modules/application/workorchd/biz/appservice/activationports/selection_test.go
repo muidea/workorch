@@ -55,7 +55,7 @@ func TestSelectedWorkspaceMemoryItemsReadsExplicitIDsWithWorkspaceScope(t *testi
 	items, evidence, err := SelectedWorkspaceMemoryItems(ctx, WorkspaceMemorySelectionRequest{
 		WorkspaceID: workspaceID,
 		IDs:         []string{"memory-selection-scope"},
-		Hub:         exports.Infrastructure.EventHub,
+		Hub:         exports.Infrastructure.CommandHub,
 	})
 	if err != nil {
 		t.Fatalf("SelectedWorkspaceMemoryItems err = %v", err)
@@ -99,7 +99,7 @@ func TestSelectWorkspaceExecutionSkillsAutoSelectsRepositorySkill(t *testing.T) 
 	}
 
 	result, err := SelectWorkspaceExecutionSkills(ctx, WorkspaceSkillSelectionRequest{
-		Hub:         exports.Infrastructure.EventHub,
+		Hub:         exports.Infrastructure.CommandHub,
 		WorkspaceID: "ws-auto-runports",
 		Goal:        &workspacemodel.Goal{Text: "complete auto runports verification"},
 		DoD:         &workspacemodel.DoD{Items: []string{"auto runports evidence"}},
@@ -133,7 +133,7 @@ func TestSelectWorkspaceExecutionSkillsResolvesExplicitRepositorySkill(t *testin
 	}
 
 	result, err := SelectWorkspaceExecutionSkills(ctx, WorkspaceSkillSelectionRequest{
-		Hub:          exports.Infrastructure.EventHub,
+		Hub:          exports.Infrastructure.CommandHub,
 		WorkspaceID:  "ws-explicit-runports",
 		RequestedIDs: []string{" skill-explicit-runports "},
 	})

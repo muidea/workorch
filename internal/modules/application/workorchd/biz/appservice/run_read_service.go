@@ -4,15 +4,15 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func ReadRunWithSession(ctx context.Context, session *RuntimeSession, runID string) (ret Run, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (Run, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Run, error) {
 		return runports.ReadRunView(ctx, hub, common.RunID(runID))
 	})
 }

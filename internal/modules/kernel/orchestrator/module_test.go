@@ -92,6 +92,7 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 		{name: "missing coverage", deps: func() Dependencies { d := base; d.CoverageWorkItems = nil; return d }()},
 		{name: "missing artifact continuations", deps: func() Dependencies { d := base; d.ArtifactContinuations = nil; return d }()},
 		{name: "missing event hub", deps: func() Dependencies { d := base; d.EventHub = nil; return d }()},
+		{name: "missing command hub", deps: func() Dependencies { d := base; d.CommandHub = nil; return d }()},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -493,7 +494,7 @@ func TestModuleDispatchStepRequestedSchedulesBackgroundDispatch(t *testing.T) {
 		Kind:        "llm/workspace_execution",
 		Input:       map[string]any{"seed": "yes"},
 	}
-	if err := module.dispatchRequestedStepCommand(ctx, magicOrchestratorEnvelope(orchestratorevents.TopicOrchestratorDispatchStepRequested, workspaceID, runID, stepID), cmd); err != nil {
+	if err := module.dispatchRequestedStepCommand(ctx, cmd); err != nil {
 		t.Fatalf("handleDispatchStepRequested: %v", err)
 	}
 	if bg.asyncFunctionCalls != 1 || bg.lastAsyncFunction == nil {
@@ -778,6 +779,7 @@ func TestModuleRuntimeProgressEventSchedulesCheckpoint(t *testing.T) {
 }
 
 func moduleContractDependencies() Dependencies {
+	rawHub := magicevent.NewHub(32)
 	return Dependencies{
 		Runtime:               moduleNoopRuntimeAdapter{},
 		Steps:                 memoryrepo.NewStepRepository(),
@@ -788,7 +790,8 @@ func moduleContractDependencies() Dependencies {
 		EvidenceRecords:       memoryrepo.NewEvidenceRecordRepository(),
 		CoverageWorkItems:     memoryrepo.NewCoverageWorkItemRepository(),
 		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),
-		EventHub:              events.NewMemoryHub(),
+		EventHub:              events.NewMagicHubWithHubOwner(rawHub, ModuleID+"/test"),
+		CommandHub:            rawHub,
 	}
 }
 

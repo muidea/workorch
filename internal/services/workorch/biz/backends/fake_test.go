@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/services/workorch/biz/backends"
+	backend "github.com/muidea/workorch/internal/services/workorch/biz/backends"
 )
 
 // fakeBackend implements backend.Backend for deterministic TUI and agent tests.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
@@ -16,7 +17,8 @@ import (
 )
 
 type ActivateWorkspaceExecutionViewRequest struct {
-	Hub                            events.Hub
+	Hub                            magicevent.Hub
+	EventHub                       events.Hub
 	WorkspaceID                    string
 	Command                        appmodelcore.ActivateWorkspaceExecutionCommand
 	SystemDefaultSoulID            common.SoulID
@@ -114,7 +116,7 @@ func ActivateWorkspaceExecutionView(ctx context.Context, request ActivateWorkspa
 	return WorkspaceExecutionActivationSnapshot(workspace, startedRun, goal, dod), nil
 }
 
-func uniqueNonTerminalRunID(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) (common.RunID, error) {
+func uniqueNonTerminalRunID(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) (common.RunID, error) {
 	runs, err := ownerreadports.ListRunsByWorkspaceOwnerCommand(ctx, hub, workspaceID)
 	if err != nil {
 		return "", err

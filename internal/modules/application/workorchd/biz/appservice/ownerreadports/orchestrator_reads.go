@@ -3,14 +3,14 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ListToolCallsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.ToolCall, error) {
+func ListToolCallsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*runmodel.ToolCall, error) {
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -22,7 +22,7 @@ func ListToolCallsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID c
 	return response.ToolCalls, nil
 }
 
-func ListPatchesByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.Patch, error) {
+func ListPatchesByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*runmodel.Patch, error) {
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -34,7 +34,7 @@ func ListPatchesByRunOwnerCommand(ctx context.Context, hub events.Hub, runID com
 	return response.Patches, nil
 }
 
-func ListValidationResultsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.ValidationResult, error) {
+func ListValidationResultsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*runmodel.ValidationResult, error) {
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}

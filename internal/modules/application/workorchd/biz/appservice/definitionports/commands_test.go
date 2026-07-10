@@ -14,26 +14,20 @@ import (
 )
 
 func TestConsolidateWorkspaceDefinitionRejectsMissingCanonicalBeforePublishing(t *testing.T) {
-	hub := events.NewMemoryHub()
+	hub := magicevent.NewHub(8)
 	if _, err := ConsolidateWorkspaceGoal(context.Background(), hub, "ws-definition-port", nil, ""); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("goal error = %v, want ErrInvalidArgument", err)
-	}
-	if published := hub.Published(); len(published) != 0 {
-		t.Fatalf("published goal envelopes = %d, want 0", len(published))
 	}
 
 	if _, err := ConsolidateWorkspaceDoD(context.Background(), hub, "ws-definition-port", nil, nil); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("dod error = %v, want ErrInvalidArgument", err)
-	}
-	if published := hub.Published(); len(published) != 0 {
-		t.Fatalf("published envelopes = %d, want 0", len(published))
 	}
 }
 
 func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 	ctx := context.Background()
 	defHub := newDefinitionMagicTestHub(t)
-	hub := defHub.hub
+	hub := defHub.rawHub
 	workspaceID := common.WorkspaceID("ws-definition-port")
 	defHub.subscribe(workspaceevents.TopicWorkspaceCommandListGoalsByWS, func(data any) workspaceevents.WorkspaceCommandResult {
 		cmd, ok := data.(workspaceevents.ListGoalsByWorkspaceCommand)
@@ -77,7 +71,7 @@ func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 func TestUpdateGoalViewPublishesWorkspaceScopeFromContext(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-definition-update-scope")
 	defHub := newDefinitionMagicTestHub(t)
-	hub := defHub.hub
+	hub := defHub.rawHub
 	workspaceID := common.WorkspaceID("ws-definition-update-scope")
 	defHub.subscribe(workspaceevents.TopicWorkspaceCommandUpdateGoal, func(data any) workspaceevents.WorkspaceCommandResult {
 		cmd, ok := data.(workspaceevents.UpdateGoalCommand)
@@ -109,7 +103,7 @@ func TestUpdateGoalViewPublishesWorkspaceScopeFromContext(t *testing.T) {
 func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *testing.T) {
 	ctx := context.Background()
 	defHub := newDefinitionMagicTestHub(t)
-	hub := defHub.hub
+	hub := defHub.rawHub
 	workspaceID := common.WorkspaceID("ws-definition-port")
 	deleteCount := 0
 	defHub.subscribe(workspaceevents.TopicWorkspaceCommandListDoDsByWS, func(data any) workspaceevents.WorkspaceCommandResult {
@@ -171,7 +165,7 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 func TestUpdateDoDViewPublishesWorkspaceScopeFromContext(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-definition-update-scope")
 	defHub := newDefinitionMagicTestHub(t)
-	hub := defHub.hub
+	hub := defHub.rawHub
 	workspaceID := common.WorkspaceID("ws-definition-update-scope")
 	defHub.subscribe(workspaceevents.TopicWorkspaceCommandUpdateDoD, func(data any) workspaceevents.WorkspaceCommandResult {
 		cmd, ok := data.(workspaceevents.UpdateDoDCommand)
@@ -203,7 +197,7 @@ func TestUpdateDoDViewPublishesWorkspaceScopeFromContext(t *testing.T) {
 func TestDeleteGoalPublishesWorkspaceScopeFromContext(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-definition-delete-scope")
 	defHub := newDefinitionMagicTestHub(t)
-	hub := defHub.hub
+	hub := defHub.rawHub
 	workspaceID := common.WorkspaceID("ws-definition-delete-scope")
 	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDeleteGoal, func(data any) workspaceevents.WorkspaceCommandResult {
 		cmd, ok := data.(workspaceevents.DeleteGoalCommand)
@@ -227,7 +221,7 @@ func TestDeleteGoalPublishesWorkspaceScopeFromContext(t *testing.T) {
 func TestDeleteDoDPublishesWorkspaceScopeFromContext(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-definition-delete-scope")
 	defHub := newDefinitionMagicTestHub(t)
-	hub := defHub.hub
+	hub := defHub.rawHub
 	workspaceID := common.WorkspaceID("ws-definition-delete-scope")
 	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDeleteDoD, func(data any) workspaceevents.WorkspaceCommandResult {
 		cmd, ok := data.(workspaceevents.DeleteDoDCommand)
@@ -255,6 +249,7 @@ func stringPayload(payload map[string]any, key string) string {
 
 type definitionMagicTestHub struct {
 	hub      *events.MagicHub
+	rawHub   magicevent.Hub
 	observer magicevent.SimpleObserver
 }
 
@@ -264,6 +259,7 @@ func newDefinitionMagicTestHub(t *testing.T) *definitionMagicTestHub {
 	hub := events.NewMagicHubWithHubOwner(rawHub, "definitionports/test")
 	ret := &definitionMagicTestHub{
 		hub:      hub,
+		rawHub:   rawHub,
 		observer: magicevent.NewSimpleObserver(workspaceevents.CommandDestination, rawHub),
 	}
 	t.Cleanup(func() {

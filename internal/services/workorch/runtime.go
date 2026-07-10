@@ -108,16 +108,12 @@ func queryServerDoneChannel(ctx context.Context) (<-chan error, error) {
 	if err != nil {
 		return nil, err
 	}
-	hub := runtime.EventHub()
+	hub := runtime.CommandHub()
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	provider, ok := hub.(interface{ RawHub() magicevent.Hub })
-	if !ok || provider.RawHub() == nil {
-		return nil, common.ErrInvalidArgument
-	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandDone, "workorch/app", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.DoneCommand{})
-	response := provider.RawHub().Send(event)
+	response := hub.Send(event)
 	if response == nil {
 		return nil, common.ErrInvalidArgument
 	}

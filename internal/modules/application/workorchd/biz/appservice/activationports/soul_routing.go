@@ -3,16 +3,16 @@ package activationports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type WorkspaceSoulRoutingRequest struct {
-	Hub                 events.Hub
+	Hub                 magicevent.Hub
 	Workspace           *workspacemodel.Workspace
 	RunDefaultSoulID    string
 	RunSoulBindings     map[string]string

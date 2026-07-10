@@ -45,7 +45,7 @@ func TestRuntimeOrchestrator_ResumeRunFinalizesDurableRuntimeTerminalResult(t *t
 		},
 		hub,
 	)
-	orch.EnableEventDrivenDispatch()
+	orch.EnableEventDrivenDispatch(hub.rawHub)
 	workspaceID := common.WorkspaceID("ws-resume-terminal-result")
 	runID := common.RunID("run-resume-terminal-result")
 	stepID := common.StepID("run-resume-terminal-result/step-1")

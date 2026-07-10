@@ -69,7 +69,7 @@ func (a echoRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runtim
 	}, nil
 }
 
-func buildRuntimeAdapterRegistry(eventHub events.Hub) (*orchestratormodule.RuntimeAdapterRegistry, error) {
+func buildRuntimeAdapterRegistry(eventHub magicevent.Hub) (*orchestratormodule.RuntimeAdapterRegistry, error) {
 	runtimeRegistry := orchestratormodule.NewRuntimeAdapterRegistry()
 	eventAdapter := orchestratormodule.NewEventRuntimeAdapter(eventHub)
 	for _, stepKind := range []string{
@@ -198,7 +198,6 @@ func TestNewWithBackendMemoryDoesNotStartSystemDefaultsModule(t *testing.T) {
 func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T) {
 	rawHub := magicevent.NewHub(32)
 	defer rawHub.Terminate(context.Background())
-	hub := events.NewMagicHubWithHubOwner(rawHub, "bootstrap/runtime-test")
 	background := magictask.NewBackgroundRoutine(32)
 	defer background.Shutdown(context.Background())
 	executor := runtimeevent.NewExecutor("test/block", rawHub, background, echoRuntimeAdapter{},
@@ -229,7 +228,7 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 		t.Fatalf("run patch executor: %v", err)
 	}
 	defer patchExecutor.Teardown()
-	registry, err := buildRuntimeAdapterRegistry(hub)
+	registry, err := buildRuntimeAdapterRegistry(rawHub)
 	if err != nil {
 		t.Fatalf("build registry: %v", err)
 	}
@@ -345,15 +344,11 @@ func TestNewWithBackendDoesNotRegisterOrchestratorCommandHandlers(t *testing.T) 
 	if err := createTestApproval(context.Background(), exports, "ws-command", "run-command", "run-command/approval", "approval-command"); err != nil {
 		t.Fatalf("CreateApproval: %v", err)
 	}
-	err := exports.Infrastructure.EventHub.Publish(context.Background(), events.Envelope{
-		Topic: orchestratorevents.TopicOrchestratorCommandBlockApproval,
-		Payload: map[string]any{
-			events.PayloadKeyRunID:              "run-command",
-			events.PayloadKeyBlockingApprovalID: "approval-command",
-		},
-	})
-	if err != nil {
-		t.Fatalf("Publish without framework handler err = %v, want nil", err)
+	command := orchestratorevents.BlockApprovalCommand{RunID: "run-command", ApprovalID: "approval-command"}
+	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandBlockApproval, "bootstrap/test", orchestratorevents.CommandDestination, magicevent.NewHeader(), context.Background(), command)
+	response := exports.Infrastructure.CommandHub.Send(event)
+	if response == nil || response.Error() == nil || !strings.Contains(response.Error().Message, "missing observer") {
+		t.Fatalf("command response = %+v, want missing observer because bootstrap does not own orchestrator handlers", response)
 	}
 	run, err := exports.Repositories.Runs.Get(common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-command"), "run-command")
 	if err != nil {

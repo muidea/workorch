@@ -16,18 +16,19 @@ type dispatchCommandRecorder struct {
 
 type recordingDispatchMagicHub struct {
 	*events.MagicHub
-
-	mu                 sync.Mutex
-	dispatchAuditItems []events.Envelope
+	rawHub   magicevent.Hub
+	recorder *dispatchCommandRecorder
 }
 
 func newRecordingDispatchMagicHub(t *testing.T) (*recordingDispatchMagicHub, *dispatchCommandRecorder) {
 	t.Helper()
 	rawHub := magicevent.NewHub(32)
+	recorder := &dispatchCommandRecorder{}
 	hub := &recordingDispatchMagicHub{
 		MagicHub: events.NewMagicHubWithHubOwner(rawHub, "kernel/orchestrator/test"),
+		rawHub:   rawHub,
+		recorder: recorder,
 	}
-	recorder := &dispatchCommandRecorder{}
 	observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub)
 	observer.Subscribe(orchestratorevents.TopicOrchestratorDispatchStepRequested, func(ev magicevent.Event, result magicevent.Result) {
 		cmd, ok := ev.Data().(orchestratorevents.DispatchStepCommand)
@@ -37,20 +38,6 @@ func newRecordingDispatchMagicHub(t *testing.T) (*recordingDispatchMagicHub, *di
 		recorder.mu.Lock()
 		recorder.commands = append(recorder.commands, cmd)
 		recorder.mu.Unlock()
-
-		hub.recordDispatchAudit(events.Envelope{
-			Topic:        orchestratorevents.TopicOrchestratorDispatchStepRequested,
-			SourceModule: "kernel/orchestrator/test",
-			SubjectType:  "step",
-			SubjectID:    string(cmd.StepID),
-			WorkspaceID:  string(cmd.WorkspaceID),
-			RunID:        string(cmd.RunID),
-			StepID:       string(cmd.StepID),
-			Payload: map[string]any{
-				events.PayloadKeyCommand:        cmd,
-				events.PayloadKeyIdempotencyKey: cmd.IdempotencyKey,
-			},
-		})
 		result.Set(orchestratorevents.OrchestratorCommandResult{}, nil)
 	})
 	t.Cleanup(func() {
@@ -59,24 +46,11 @@ func newRecordingDispatchMagicHub(t *testing.T) (*recordingDispatchMagicHub, *di
 	return hub, recorder
 }
 
-func (h *recordingDispatchMagicHub) recordDispatchAudit(envelope events.Envelope) {
-	if h == nil {
-		return
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.dispatchAuditItems = append(h.dispatchAuditItems, envelope)
-}
-
-func (h *recordingDispatchMagicHub) Published() []events.Envelope {
+func (h *recordingDispatchMagicHub) DispatchCommands() []orchestratorevents.DispatchStepCommand {
 	if h == nil {
 		return nil
 	}
-	ret := h.MagicHub.Published()
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	ret = append(ret, h.dispatchAuditItems...)
-	return ret
+	return h.recorder.Commands()
 }
 
 func (r *dispatchCommandRecorder) Commands() []orchestratorevents.DispatchStepCommand {

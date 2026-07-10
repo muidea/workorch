@@ -3,16 +3,16 @@ package activationports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type WorkspaceMCPSelectionRequest struct {
-	Hub                    events.Hub
+	Hub                    magicevent.Hub
 	Workspace              *workspacemodel.Workspace
 	RequestedMCPServerIDs  []string
 	DefaultMCPServerIDs    []string

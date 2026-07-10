@@ -33,14 +33,14 @@ func TestListRunsByWorkspaceFiltersOwnerReadResults(t *testing.T) {
 		}
 	}
 
-	all, err := ListRunsByWorkspace(ctx, exports.Infrastructure.EventHub, "")
+	all, err := ListRunsByWorkspace(ctx, exports.Infrastructure.CommandHub, "")
 	if err != nil {
 		t.Fatalf("ListRunsByWorkspace all: %v", err)
 	}
 	if len(all) != 2 {
 		t.Fatalf("all = %+v, want two runs", all)
 	}
-	filtered, err := ListRunsByWorkspace(ctx, exports.Infrastructure.EventHub, "ws-list-b")
+	filtered, err := ListRunsByWorkspace(ctx, exports.Infrastructure.CommandHub, "ws-list-b")
 	if err != nil {
 		t.Fatalf("ListRunsByWorkspace filtered: %v", err)
 	}
@@ -53,7 +53,6 @@ func TestListRunsByWorkspaceUsesWorkspaceScopedOwnerCommand(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(8)
 	defer rawHub.Terminate(ctx)
-	hub := events.NewMagicHubWithHubOwner(rawHub, "runports/list-test")
 	workspaceID := common.WorkspaceID("ws-list-command-scope")
 	observer := magicevent.NewSimpleObserver(runevents.CommandDestination, rawHub)
 	observer.Subscribe(runevents.TopicRunCommandListByWorkspace, func(event magicevent.Event, result magicevent.Result) {
@@ -65,7 +64,7 @@ func TestListRunsByWorkspaceUsesWorkspaceScopedOwnerCommand(t *testing.T) {
 	})
 	defer observer.Unsubscribe(runevents.TopicRunCommandListByWorkspace)
 
-	items, err := ListRunsByWorkspace(ctx, hub, workspaceID)
+	items, err := ListRunsByWorkspace(ctx, rawHub, workspaceID)
 	if err != nil {
 		t.Fatalf("ListRunsByWorkspace err = %v", err)
 	}
@@ -77,7 +76,7 @@ func TestListRunsByWorkspaceUsesWorkspaceScopedOwnerCommand(t *testing.T) {
 func TestResumeRunPublishesCommandPayload(t *testing.T) {
 	ctx := context.Background()
 	testHub := newRunportsMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	var captured orchestratorevents.ResumeRunCommand
 	testHub.subscribeOrchestrator(orchestratorevents.TopicOrchestratorCommandResumeRun, func(data any) orchestratorevents.OrchestratorCommandResult {
 		cmd, ok := data.(orchestratorevents.ResumeRunCommand)
@@ -102,7 +101,7 @@ func TestResumeRunPublishesCommandPayload(t *testing.T) {
 func TestRecoverRuntimeGapPublishesGapSpecificCommandPayload(t *testing.T) {
 	ctx := context.Background()
 	testHub := newRunportsMagicTestHub(t)
-	hub := testHub.hub
+	hub := testHub.rawHub
 	var captured orchestratorevents.RecoverRuntimeGapCommand
 	testHub.subscribeOrchestrator(orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, func(data any) orchestratorevents.OrchestratorCommandResult {
 		cmd, ok := data.(orchestratorevents.RecoverRuntimeGapCommand)
@@ -167,13 +166,14 @@ func TestValidateRunDefinitionsReadsDefinitionsWithWorkspaceScope(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	if err := ValidateRunDefinitions(ctx, exports.Infrastructure.EventHub, string(workspaceID), string(goalID), string(dodID)); err != nil {
+	if err := ValidateRunDefinitions(ctx, exports.Infrastructure.CommandHub, string(workspaceID), string(goalID), string(dodID)); err != nil {
 		t.Fatalf("ValidateRunDefinitions err = %v", err)
 	}
 }
 
 type runportsMagicTestHub struct {
 	hub                  *events.MagicHub
+	rawHub               magicevent.Hub
 	orchestratorObserver magicevent.SimpleObserver
 }
 
@@ -183,6 +183,7 @@ func newRunportsMagicTestHub(t *testing.T) *runportsMagicTestHub {
 	hub := events.NewMagicHubWithHubOwner(rawHub, "runports/test")
 	ret := &runportsMagicTestHub{
 		hub:                  hub,
+		rawHub:               rawHub,
 		orchestratorObserver: magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub),
 	}
 	t.Cleanup(func() {

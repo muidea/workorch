@@ -36,6 +36,7 @@ func runportsCompressedContextPatchForRun(ctx context.Context, session *RuntimeS
 		Resolutions:   deps.resolutions,
 		Approvals:     deps.approvals,
 		MemoryRecalls: deps.memoryRecalls,
+		CommandHub:    deps.commandHub,
 		EventHub:      deps.eventHub,
 		RecoverySnapshot: func(snapshotCtx context.Context, snapshotRunID common.RunID) (RunSnapshot, error) {
 			return readRunRecoverySnapshot(snapshotCtx, deps, snapshotRunID)
@@ -1592,14 +1593,14 @@ func TestReadRunWithSessionReturnsFailureReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
-	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.EventHub)
+	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.CommandHub)
 	if err := actions.EnsureWorkspace(ctx, "ws-run-failure", "run failure workspace"); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	if err := actions.EnsureRun(ctx, "run-failure", "ws-run-failure"); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if _, err := sendAppserviceTestCommand[orchestratorevents.FailRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, exports.Infrastructure.EventHub, orchestratorevents.TopicOrchestratorCommandFailRun, orchestratorevents.CommandDestination, orchestratorevents.FailRunCommand{
+	if _, err := sendAppserviceTestCommand[orchestratorevents.FailRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, exports.Infrastructure.CommandHub, orchestratorevents.TopicOrchestratorCommandFailRun, orchestratorevents.CommandDestination, orchestratorevents.FailRunCommand{
 		RunID:  "run-failure",
 		Reason: "manual fail",
 	}); err != nil {

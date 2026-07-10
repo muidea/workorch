@@ -4,12 +4,12 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func StartRunView(ctx context.Context, hub events.Hub, deps CompressedContextDependencies, runID string) (appmodelcore.Run, error) {
+func StartRunView(ctx context.Context, hub magicevent.Hub, deps CompressedContextDependencies, runID string) (appmodelcore.Run, error) {
 	if hub == nil {
 		return appmodelcore.Run{}, common.ErrInvalidArgument
 	}
@@ -36,7 +36,7 @@ func StartRunView(ctx context.Context, hub events.Hub, deps CompressedContextDep
 	return RunView(item), nil
 }
 
-func ResumeRunView(ctx context.Context, hub events.Hub, deps CompressedContextDependencies, runID string, executionContextPatch ...map[string]any) (appmodelcore.Run, error) {
+func ResumeRunView(ctx context.Context, hub magicevent.Hub, deps CompressedContextDependencies, runID string, executionContextPatch ...map[string]any) (appmodelcore.Run, error) {
 	if hub == nil {
 		return appmodelcore.Run{}, common.ErrInvalidArgument
 	}

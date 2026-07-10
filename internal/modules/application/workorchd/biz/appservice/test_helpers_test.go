@@ -62,6 +62,9 @@ func (testNoopSkillHubRunner) RunSkillHub(context.Context, string, ...string) ([
 var testSharedBackendSessionCleanup sync.Map
 
 func completeAppserviceTestExports(exports bootstrap.Exports) bootstrap.Exports {
+	if exports.Infrastructure.CommandHub == nil {
+		exports.Infrastructure.CommandHub = magicevent.NewHub(16)
+	}
 	repositories := &exports.Repositories
 	if repositories.Souls == nil {
 		repositories.Souls = memory.NewSoulRepository()
@@ -214,7 +217,7 @@ disabled = false
 }
 
 func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, title string, description string, deliverableDirectory string) (ret Workspace, err error) {
-	hub, err := session.RequiredEventHub()
+	hub, err := session.RequiredCommandHub()
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -227,10 +230,6 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 	if err := workspacecore.EnsureDirectoryLayout(layout); err != nil {
 		return Workspace{}, err
 	}
-	rawHubProvider, ok := hub.(interface{ RawHub() magicevent.Hub })
-	if !ok || rawHubProvider.RawHub() == nil {
-		return Workspace{}, common.ErrInvalidArgument
-	}
 	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandCreate, "application/workorchd/appservice/test", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.CreateWorkspaceCommand{
 		WorkspaceID:          id,
 		Title:                title,
@@ -238,13 +237,12 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 		DeliverableDirectory: layout.DeliverableDirectory,
 		InternalDirectory:    layout.InternalDirectory,
 	})
-	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
-		Topic:       workspaceevents.TopicWorkspaceCommandCreate,
+	ev.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.TopicWorkspaceCommandCreate, events.EventHubLaneScope{
 		SubjectType: "workspace",
 		SubjectID:   string(id),
 		WorkspaceID: string(id),
 	}))
-	result := rawHubProvider.RawHub().Send(ev)
+	result := hub.Send(ev)
 	if result == nil {
 		return Workspace{}, common.ErrInvalidArgument
 	}
@@ -368,14 +366,13 @@ func waitRunListWithBackend(t *testing.T, backend string, dataRoot string, works
 	}
 }
 
-func sendAppserviceTestCommand[Command any, Result any](ctx context.Context, hub events.Hub, topic string, destination string, command Command) (Result, error) {
+func sendAppserviceTestCommand[Command any, Result any](ctx context.Context, hub magicevent.Hub, topic string, destination string, command Command) (Result, error) {
 	var zero Result
-	provider, ok := hub.(interface{ RawHub() magicevent.Hub })
-	if !ok || provider.RawHub() == nil {
+	if hub == nil {
 		return zero, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(topic, "application/workorchd/appservice/test", destination, magicevent.NewHeader(), ctx, command)
-	response := provider.RawHub().Send(event)
+	response := hub.Send(event)
 	if response == nil {
 		return zero, common.ErrInvalidArgument
 	}
@@ -394,12 +391,12 @@ func sendAppserviceTestCommand[Command any, Result any](ctx context.Context, hub
 }
 
 func createTestMCPServerWithExports(ctx context.Context, exports bootstrap.Exports, cmd mcpevents.CreateServerCommand) error {
-	_, err := sendAppserviceTestCommand[mcpevents.CreateServerCommand, mcpevents.MCPCommandResult](ctx, exports.Infrastructure.EventHub, mcpevents.TopicMCPCommandCreateServer, mcpevents.CommandDestination, cmd)
+	_, err := sendAppserviceTestCommand[mcpevents.CreateServerCommand, mcpevents.MCPCommandResult](ctx, exports.Infrastructure.CommandHub, mcpevents.TopicMCPCommandCreateServer, mcpevents.CommandDestination, cmd)
 	return err
 }
 
 func updateTestMCPCapabilityWithExports(ctx context.Context, exports bootstrap.Exports, cmd mcpevents.UpdateCapabilityCommand) error {
-	_, err := sendAppserviceTestCommand[mcpevents.UpdateCapabilityCommand, mcpevents.MCPCommandResult](ctx, exports.Infrastructure.EventHub, mcpevents.TopicMCPCommandUpdateCapability, mcpevents.CommandDestination, cmd)
+	_, err := sendAppserviceTestCommand[mcpevents.UpdateCapabilityCommand, mcpevents.MCPCommandResult](ctx, exports.Infrastructure.CommandHub, mcpevents.TopicMCPCommandUpdateCapability, mcpevents.CommandDestination, cmd)
 	return err
 }
 
@@ -455,7 +452,7 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
-	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.EventHub)
+	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.CommandHub)
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
 	ensureTestWorkspace(t, ctx, session, workspaceID)
 	if err := actions.EnsureRun(ctx, common.RunID(runID), common.WorkspaceID(workspaceID)); err != nil {
@@ -470,7 +467,7 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 	}); err != nil {
 		t.Fatalf("Create decision step: %v", err)
 	}
-	if _, err := sendAppserviceTestCommand[decisionevents.EnsureTicketCommand, decisionevents.DecisionCommandResult](ctx, exports.Infrastructure.EventHub, decisionevents.TopicDecisionCommandEnsureTicket, decisionevents.CommandDestination, decisionevents.EnsureTicketCommand{
+	if _, err := sendAppserviceTestCommand[decisionevents.EnsureTicketCommand, decisionevents.DecisionCommandResult](ctx, exports.Infrastructure.CommandHub, decisionevents.TopicDecisionCommandEnsureTicket, decisionevents.CommandDestination, decisionevents.EnsureTicketCommand{
 		TicketID:     ticketID,
 		WorkspaceID:  common.WorkspaceID(workspaceID),
 		RunID:        common.RunID(runID),
@@ -502,7 +499,7 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
-	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.EventHub)
+	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.CommandHub)
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
 	ensureTestWorkspace(t, ctx, session, workspaceID)
 	if err := actions.EnsureRun(ctx, common.RunID(runID), common.WorkspaceID(workspaceID)); err != nil {

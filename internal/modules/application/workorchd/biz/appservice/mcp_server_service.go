@@ -3,12 +3,12 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func CreateMCPServerWithSession(ctx context.Context, session *RuntimeSession, cmd CreateMCPServerCommand) (ret MCPServer, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (MCPServer, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (MCPServer, error) {
 		return contextregistryports.CreateMCPServer(ctx, hub, cmd)
 	})
 }
@@ -20,7 +20,7 @@ func CreateMCPServerWithBackend(ctx context.Context, backend string, dataRoot st
 }
 
 func UpdateMCPServerWithSession(ctx context.Context, session *RuntimeSession, serverID string, cmd UpdateMCPServerCommand) (ret MCPServer, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (MCPServer, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (MCPServer, error) {
 		return contextregistryports.UpdateMCPServerByID(ctx, hub, serverID, cmd)
 	})
 }
@@ -32,7 +32,7 @@ func UpdateMCPServerWithBackend(ctx context.Context, backend string, dataRoot st
 }
 
 func ReadMCPServerWithSession(ctx context.Context, session *RuntimeSession, serverID string) (ret MCPServer, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (MCPServer, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (MCPServer, error) {
 		return contextregistryports.ReadMCPServerView(ctx, hub, serverID)
 	})
 }
@@ -44,7 +44,7 @@ func ReadMCPServerWithBackend(ctx context.Context, backend string, dataRoot stri
 }
 
 func ListMCPServersWithSession(ctx context.Context, session *RuntimeSession) (ret []MCPServer, err error) {
-	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]MCPServer, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) ([]MCPServer, error) {
 		return contextregistryports.ListMCPServers(ctx, hub)
 	})
 }

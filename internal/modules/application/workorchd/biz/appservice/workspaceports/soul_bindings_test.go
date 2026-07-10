@@ -44,7 +44,7 @@ func TestWorkspaceSoulBindingsViewUsesOwnerPorts(t *testing.T) {
 		return soulevents.SoulCommandResult{Soul: item}, nil
 	})
 
-	updated, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.hub, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
+	updated, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.raw, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
 		DefaultSoulID: " soul-default-port ",
 		Bindings: map[string]string{
 			appmodelcore.SoulBindingStageExecution: " soul-execution-port ",
@@ -56,7 +56,7 @@ func TestWorkspaceSoulBindingsViewUsesOwnerPorts(t *testing.T) {
 	if updated.DefaultSoulID != "soul-default-port" || updated.Bindings[appmodelcore.SoulBindingStageExecution] != "soul-execution-port" {
 		t.Fatalf("updated = %+v, want normalized default/execution bindings", updated)
 	}
-	readBack, err := ReadWorkspaceSoulBindings(ctx, testHub.hub, string(workspaceID))
+	readBack, err := ReadWorkspaceSoulBindings(ctx, testHub.raw, string(workspaceID))
 	if err != nil {
 		t.Fatalf("ReadWorkspaceSoulBindings: %v", err)
 	}
@@ -81,12 +81,12 @@ func TestUpdateWorkspaceSoulBindingsViewRejectsInvalidInput(t *testing.T) {
 		return nil, common.ErrNotFound
 	})
 
-	if _, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.hub, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
+	if _, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.raw, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
 		Bindings: map[string]string{"not-a-stage": "soul-missing"},
 	}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("invalid stage err = %v, want ErrInvalidArgument", err)
 	}
-	if _, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.hub, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
+	if _, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.raw, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
 		DefaultSoulID: "soul-missing",
 	}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing soul err = %v, want ErrNotFound", err)

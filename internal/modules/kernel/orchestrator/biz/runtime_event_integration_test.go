@@ -169,7 +169,7 @@ func TestRequestDispatchStepRecordsEventPublishReadbackPending(t *testing.T) {
 		memory.NewApprovalRepository(),
 		hub,
 	)
-	orch.EnableEventDrivenDispatch()
+	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	err := orch.requestDispatchStep(ctx, runID, workspaceID, stepDispatchSpec{
 		ID:    stepID,

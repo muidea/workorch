@@ -3,23 +3,23 @@ package definitionports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ReadDoD(ctx context.Context, hub events.Hub, dodID common.DoDID) (*workspacemodel.DoD, error) {
+func ReadDoD(ctx context.Context, hub magicevent.Hub, dodID common.DoDID) (*workspacemodel.DoD, error) {
 	return ownerreadports.ReadDoDByOwnerCommand(ctx, hub, dodID)
 }
 
-func ListDoDsByWorkspace(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
+func ListDoDsByWorkspace(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
 	return ownerreadports.ListDoDsByWorkspaceOwnerCommand(ctx, hub, workspaceID)
 }
 
-func DefineDoD(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, dodID common.DoDID, items []string) (*workspacemodel.DoD, error) {
+func DefineDoD(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, dodID common.DoDID, items []string) (*workspacemodel.DoD, error) {
 	response, err := sendDefinitionMagicCommand[workspaceevents.DefineDoDCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandDefineDoD, workspaceevents.CommandDestination, "dod", string(dodID), workspaceID, workspaceevents.DefineDoDCommand{
 		DoDID:       dodID,
 		WorkspaceID: workspaceID,
@@ -34,7 +34,7 @@ func DefineDoD(ctx context.Context, hub events.Hub, workspaceID common.Workspace
 	return response.DoD, nil
 }
 
-func UpdateDoD(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, dodID common.DoDID, items []string) (*workspacemodel.DoD, error) {
+func UpdateDoD(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, dodID common.DoDID, items []string) (*workspacemodel.DoD, error) {
 	if workspaceID == "" {
 		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
 	}
@@ -52,7 +52,7 @@ func UpdateDoD(ctx context.Context, hub events.Hub, workspaceID common.Workspace
 	return response.DoD, nil
 }
 
-func DeleteDoD(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, dodID common.DoDID) error {
+func DeleteDoD(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, dodID common.DoDID) error {
 	if workspaceID == "" {
 		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 )
@@ -25,15 +26,19 @@ func ResolveRepositoryConfig(backend string, dataRoot string) RepositoryConfig {
 }
 
 type eventHubContextKey struct{}
+type commandHubContextKey struct{}
 
-func ContextWithEventHub(ctx context.Context, eventHub events.Hub) context.Context {
+func ContextWithEventHubs(ctx context.Context, eventHub events.Hub, commandHub magicevent.Hub) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if eventHub == nil {
+	if eventHub != nil {
+		ctx = context.WithValue(ctx, eventHubContextKey{}, eventHub)
+	}
+	if commandHub == nil {
 		return ctx
 	}
-	return context.WithValue(ctx, eventHubContextKey{}, eventHub)
+	return context.WithValue(ctx, commandHubContextKey{}, commandHub)
 }
 
 func EventHubFromContext(ctx context.Context) events.Hub {
@@ -42,4 +47,12 @@ func EventHubFromContext(ctx context.Context) events.Hub {
 	}
 	eventHub, _ := ctx.Value(eventHubContextKey{}).(events.Hub)
 	return eventHub
+}
+
+func CommandHubFromContext(ctx context.Context) magicevent.Hub {
+	if ctx == nil {
+		return nil
+	}
+	commandHub, _ := ctx.Value(commandHubContextKey{}).(magicevent.Hub)
+	return commandHub
 }

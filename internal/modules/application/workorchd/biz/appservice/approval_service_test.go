@@ -514,7 +514,8 @@ func newApprovalOnlySession(t *testing.T, repo *appserviceCountingApprovalReposi
 			Approvals:             repo,
 		},
 		Infrastructure: bootstrap.InfrastructureExports{
-			EventHub: eventHub,
+			EventHub:   eventHub,
+			CommandHub: rawHub,
 		},
 	}
 	exports = completeAppserviceTestExports(exports)

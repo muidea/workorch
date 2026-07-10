@@ -3,14 +3,14 @@ package ownerreadports
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func ReadRuntimeCheckpointByOwnerCommand(ctx context.Context, hub events.Hub, checkpointID common.CheckpointID) (*runmodel.RuntimeCheckpoint, error) {
+func ReadRuntimeCheckpointByOwnerCommand(ctx context.Context, hub magicevent.Hub, checkpointID common.CheckpointID) (*runmodel.RuntimeCheckpoint, error) {
 	if hub == nil || checkpointID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -28,7 +28,7 @@ func ReadRuntimeCheckpointByOwnerCommand(ctx context.Context, hub events.Hub, ch
 	return response.Checkpoint, nil
 }
 
-func ListRuntimeCheckpointsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.RuntimeCheckpoint, error) {
+func ListRuntimeCheckpointsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*runmodel.RuntimeCheckpoint, error) {
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}

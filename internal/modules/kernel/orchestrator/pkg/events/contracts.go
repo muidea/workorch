@@ -24,9 +24,9 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorCommandFailRun,
 		TopicOrchestratorCommandPurgeRun,
 		TopicOrchestratorCommandUpdateRuntimePolicy,
+		TopicOrchestratorDispatchStepRequested,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassNotify, eventcontract.LanePolicyState,
-		TopicOrchestratorDispatchStepRequested,
 		TopicOrchestratorStageChanged,
 		TopicOrchestratorGraphDispatched,
 		TopicOrchestratorRepairStarted,

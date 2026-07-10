@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	skillevents "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func CreateSkill(ctx context.Context, hub events.Hub, cmd contextregistrycore.Skill) (contextregistrycore.Skill, error) {
+func CreateSkill(ctx context.Context, hub magicevent.Hub, cmd contextregistrycore.Skill) (contextregistrycore.Skill, error) {
 	if hub == nil {
 		return contextregistrycore.Skill{}, common.ErrInvalidArgument
 	}
@@ -22,7 +22,7 @@ func CreateSkill(ctx context.Context, hub events.Hub, cmd contextregistrycore.Sk
 	return skillFromCommandResult(result)
 }
 
-func ReadSkill(ctx context.Context, hub events.Hub, skillID string) (contextregistrycore.Skill, error) {
+func ReadSkill(ctx context.Context, hub magicevent.Hub, skillID string) (contextregistrycore.Skill, error) {
 	if hub == nil {
 		return contextregistrycore.Skill{}, common.ErrInvalidArgument
 	}
@@ -33,7 +33,7 @@ func ReadSkill(ctx context.Context, hub events.Hub, skillID string) (contextregi
 	return skillFromCommandResult(result)
 }
 
-func ReadSkillView(ctx context.Context, hub events.Hub, skillID string, query contextregistrycore.SkillQuery, skillHubCatalog contextregistrycore.SkillHubSkillCatalog) (contextregistrycore.Skill, error) {
+func ReadSkillView(ctx context.Context, hub magicevent.Hub, skillID string, query contextregistrycore.SkillQuery, skillHubCatalog contextregistrycore.SkillHubSkillCatalog) (contextregistrycore.Skill, error) {
 	ret, err := ReadSkill(ctx, hub, skillID)
 	if err == nil {
 		return ret, nil
@@ -44,7 +44,7 @@ func ReadSkillView(ctx context.Context, hub events.Hub, skillID string, query co
 	return contextregistrycore.ReadSkillHubSkill(ctx, skillHubCatalog, skillID, query)
 }
 
-func ListSkills(ctx context.Context, hub events.Hub) ([]contextregistrycore.Skill, error) {
+func ListSkills(ctx context.Context, hub magicevent.Hub) ([]contextregistrycore.Skill, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -55,7 +55,7 @@ func ListSkills(ctx context.Context, hub events.Hub) ([]contextregistrycore.Skil
 	return skillsFromCommandResult(result)
 }
 
-func ListSkillsView(ctx context.Context, hub events.Hub, query contextregistrycore.SkillQuery, skillHubCatalog contextregistrycore.SkillHubSkillCatalog) ([]contextregistrycore.Skill, error) {
+func ListSkillsView(ctx context.Context, hub magicevent.Hub, query contextregistrycore.SkillQuery, skillHubCatalog contextregistrycore.SkillHubSkillCatalog) ([]contextregistrycore.Skill, error) {
 	ret, err := ListSkills(ctx, hub)
 	if err != nil {
 		return nil, err

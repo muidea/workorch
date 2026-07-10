@@ -12,7 +12,7 @@ import (
 func TestManagedRuntimeFromEventHubBuildsRuntimeWithEventCollector(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
 	exports := session.Bootstrap.Exports()
-	runtime := runtimeports.NewManagedRuntimeFromEventHub(exports.Infrastructure.EventHub)
+	runtime := runtimeports.NewManagedRuntimeFromEventHub(exports.Infrastructure.EventHub, exports.Infrastructure.CommandHub)
 	if runtime == nil {
 		t.Fatal("expected runtime")
 	}
@@ -38,7 +38,7 @@ func TestManagedRuntimeFromEventHubBuildsRuntimeWithEventCollector(t *testing.T)
 }
 
 func TestManagedRuntimeFromEventHubReturnsNilWhenRequiredHubMissing(t *testing.T) {
-	runtime := runtimeports.NewManagedRuntimeFromEventHub(nil)
+	runtime := runtimeports.NewManagedRuntimeFromEventHub(nil, nil)
 	if runtime != nil {
 		t.Fatalf("runtime = %#v, want nil", runtime)
 	}

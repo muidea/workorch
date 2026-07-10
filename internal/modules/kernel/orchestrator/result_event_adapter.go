@@ -12,7 +12,7 @@ import (
 )
 
 type resultEventResultRepository struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r resultEventResultRepository) Create(ctx context.Context, item *resultmodel.Result) error {
@@ -64,7 +64,7 @@ func (r resultEventResultRepository) Delete(ctx context.Context, id common.Resul
 }
 
 type resultEventArtifactRepository struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
 func (r resultEventArtifactRepository) Create(ctx context.Context, item *resultmodel.Artifact) error {
@@ -123,30 +123,21 @@ func (r resultEventArtifactRepository) Delete(ctx context.Context, id common.Art
 	return err
 }
 
-type resultRawMagicHubProvider interface {
-	RawHub() magicevent.Hub
-}
-
-func sendResultEventCommand[Command any](ctx context.Context, hub events.Hub, topic string, subjectType string, workspaceID common.WorkspaceID, runID common.RunID, subjectID string, command Command) (resultevents.ResultCommandResult, error) {
+func sendResultEventCommand[Command any](ctx context.Context, hub magicevent.Hub, topic string, subjectType string, workspaceID common.WorkspaceID, runID common.RunID, subjectID string, command Command) (resultevents.ResultCommandResult, error) {
 	if hub == nil || topic == "" {
 		return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
 	}
 	if workspaceID == "" {
 		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
 	}
-	provider, ok := hub.(resultRawMagicHubProvider)
-	if !ok || provider.RawHub() == nil {
-		return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
-	}
 	ev := magicevent.NewEventWithContext(topic, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
-		Topic:       topic,
+	ev.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
-	response := provider.RawHub().Send(ev)
+	response := hub.Send(ev)
 	if response == nil {
 		return resultevents.ResultCommandResult{}, fmt.Errorf("result event command %s returned no response", topic)
 	}

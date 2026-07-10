@@ -43,8 +43,8 @@ type runtimeExecutionState struct {
 	QueueKey      string
 	WorkerID      string
 	WorkerCancel  context.CancelFunc
-	TerminalTopic string
-	TerminalData  any
+	CompletedData *CompletedData
+	FailedData    *FailedData
 }
 
 func NewExecutor(moduleID string, hub magicevent.Hub, background task.BackgroundRoutine, adapter Adapter, kinds ...string) *Executor {
@@ -126,7 +126,7 @@ func (e *Executor) Teardown() {
 func (e *Executor) handle(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(ExecuteCommand)
 	if !ok {
-		setMagicResult(result, nil, common.ErrInvalidArgument)
+		setMagicError(result, common.ErrInvalidArgument)
 		return
 	}
 	request := command.Request
@@ -134,7 +134,7 @@ func (e *Executor) handle(event magicevent.Event, result magicevent.Result) {
 		request.Kind = runtimeKindFromTopic(event.ID())
 	}
 	if request.Kind == "" || request.StepID == "" {
-		setMagicResult(result, nil, common.ErrInvalidArgument)
+		setMagicError(result, common.ErrInvalidArgument)
 		return
 	}
 	requestID := runtimeRequestID(command, request)
@@ -151,7 +151,7 @@ func (e *Executor) handle(event magicevent.Event, result magicevent.Result) {
 	}
 	schedule, replay, err := e.accept(queueKey, request, requestID)
 	if err != nil {
-		setMagicResult(result, nil, err)
+		setMagicError(result, err)
 		return
 	}
 	ctx := event.Context()
@@ -175,37 +175,52 @@ func (e *Executor) handle(event magicevent.Event, result magicevent.Result) {
 		}); err != nil {
 			workerCancel()
 			e.forget(queueKey)
-			setMagicResult(result, nil, err)
+			setMagicError(result, err)
 			return
 		}
 		if err := e.publishAccepted(ctx, accepted); err != nil {
 			workerCancel()
 			e.forget(queueKey)
-			setMagicResult(result, nil, err)
+			setMagicError(result, err)
 			return
 		}
 		close(startWorker)
-	} else if replay.Topic != "" {
-		if err := publishRuntimeNotification(e.hub, ctx, e.moduleID, replay.Topic, replay.Data); err != nil {
-			setMagicResult(result, nil, err)
+	} else if !replay.empty() {
+		if err := replay.publish(e.hub, ctx, e.moduleID); err != nil {
+			setMagicError(result, err)
 			return
 		}
 		if err := e.publishAccepted(ctx, accepted); err != nil {
-			setMagicResult(result, nil, err)
+			setMagicError(result, err)
 			return
 		}
 	} else {
 		if err := e.publishAccepted(ctx, accepted); err != nil {
-			setMagicResult(result, nil, err)
+			setMagicError(result, err)
 			return
 		}
 	}
-	setMagicResult(result, ExecuteCommandResult{Accepted: accepted}, nil)
+	setExecuteCommandResult(result, ExecuteCommandResult{Accepted: accepted})
 }
 
 type terminalNotification struct {
-	Topic string
-	Data  any
+	Completed *CompletedData
+	Failed    *FailedData
+}
+
+func (n terminalNotification) empty() bool {
+	return n.Completed == nil && n.Failed == nil
+}
+
+func (n terminalNotification) publish(hub magicevent.Hub, ctx context.Context, source string) error {
+	switch {
+	case n.Completed != nil:
+		return publishRuntimeNotification(hub, ctx, source, TopicRuntimeBlockExecuteCompleted, *n.Completed)
+	case n.Failed != nil:
+		return publishRuntimeNotification(hub, ctx, source, TopicRuntimeBlockExecuteFailed, *n.Failed)
+	default:
+		return common.ErrInvalidArgument
+	}
 }
 
 func (e *Executor) accept(queueKey string, request runtimemodel.StepExecutionRequest, requestID string) (bool, terminalNotification, error) {
@@ -222,7 +237,7 @@ func (e *Executor) accept(queueKey string, request runtimemodel.StepExecutionReq
 	}
 	if state := e.requests[queueKey]; state.Accepted {
 		if state.Terminal {
-			return false, terminalNotification{Topic: state.TerminalTopic, Data: state.TerminalData}, nil
+			return false, terminalNotification{Completed: cloneCompletedData(state.CompletedData), Failed: cloneFailedData(state.FailedData)}, nil
 		}
 		return false, terminalNotification{}, nil
 	}
@@ -411,7 +426,7 @@ func (e *Executor) publishCompleted(ctx context.Context, request runtimemodel.St
 	if err := publishRuntimeNotification(e.hub, ctx, e.moduleID, TopicRuntimeBlockExecuteCompleted, data); err != nil {
 		return err
 	}
-	e.recordTerminal(request, requestID, TopicRuntimeBlockExecuteCompleted, data)
+	e.recordCompleted(request, requestID, data)
 	return nil
 }
 
@@ -431,16 +446,24 @@ func (e *Executor) publishFailed(ctx context.Context, request runtimemodel.StepE
 	if err := publishRuntimeNotification(e.hub, ctx, e.moduleID, TopicRuntimeBlockExecuteFailed, data); err != nil {
 		return err
 	}
-	e.recordTerminal(request, requestID, TopicRuntimeBlockExecuteFailed, data)
+	e.recordFailed(request, requestID, data)
 	return nil
 }
 
-func (e *Executor) recordTerminal(request runtimemodel.StepExecutionRequest, requestID string, topic string, data any) {
+func (e *Executor) recordCompleted(request runtimemodel.StepExecutionRequest, requestID string, data CompletedData) {
+	e.recordTerminal(request, requestID, &data, nil)
+}
+
+func (e *Executor) recordFailed(request runtimemodel.StepExecutionRequest, requestID string, data FailedData) {
+	e.recordTerminal(request, requestID, nil, &data)
+}
+
+func (e *Executor) recordTerminal(request runtimemodel.StepExecutionRequest, requestID string, completed *CompletedData, failed *FailedData) {
 	if e == nil {
 		return
 	}
 	queueKey := runtimeQueueKey(request, requestID)
-	if queueKey == "" || topic == "" || data == nil {
+	if queueKey == "" || (completed == nil && failed == nil) {
 		return
 	}
 	e.mu.Lock()
@@ -452,39 +475,22 @@ func (e *Executor) recordTerminal(request runtimemodel.StepExecutionRequest, req
 	state.RequestID = requestID
 	state.QueueKey = queueKey
 	state.WorkerID = runtimeWorkerID(e.moduleID, requestID)
-	state.TerminalTopic = topic
-	state.TerminalData = data
+	state.CompletedData = cloneCompletedData(completed)
+	state.FailedData = cloneFailedData(failed)
 	e.requests[queueKey] = state
 }
 
-func publishRuntimeNotification(hub magicevent.Hub, ctx context.Context, source string, topic string, data any) error {
+type runtimeNotificationData interface {
+	AcceptedData | ProgressData | CompletedData | FailedData
+}
+
+func publishRuntimeNotification[Data runtimeNotificationData](hub magicevent.Hub, ctx context.Context, source string, topic string, data Data) error {
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(topic, source, NotificationDestination, magicevent.NewHeader(), ctx, data)
 	hub.Post(event)
 	return nil
-}
-
-func recordRuntimeNotificationPublishFailure(topic string, data any) {
-	switch topic {
-	case TopicRuntimeBlockExecuteAccepted:
-		runtimeEventAcceptedPublishFailuresTotal.Add(1)
-	case TopicRuntimeBlockExecuteCompleted, TopicRuntimeBlockExecuteFailed:
-		runtimeEventTerminalPublishFailuresTotal.Add(1)
-	case TopicRuntimeBlockExecuteProgress:
-		runtimeEventProgressPublishFailuresTotal.Add(1)
-		if progressData, ok := data.(ProgressData); ok {
-			progress := progressData.Progress
-			switch progress.Event {
-			case "runtime_worker_started", "runtime_worker_stopped", "runtime_worker_heartbeat", "runtime_worker_lost":
-				runtimeEventWorkerLifecycleFailuresTotal.Add(1)
-				if progress.Event == "runtime_worker_lost" {
-					runtimeEventWorkerLostPublishFailuresTotal.Add(1)
-				}
-			}
-		}
-	}
 }
 
 func runtimeRequestID(command ExecuteCommand, request runtimemodel.StepExecutionRequest) string {
@@ -533,13 +539,34 @@ func cloneMap(input map[string]any) map[string]any {
 	return ret
 }
 
-func setMagicResult(result magicevent.Result, data any, err error) {
+func setMagicError(result magicevent.Result, err error) {
 	if result == nil {
 		return
 	}
-	if err != nil {
-		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
-		return
+	if err == nil {
+		err = common.ErrInvalidArgument
 	}
-	result.Set(data, nil)
+	result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+}
+
+func setExecuteCommandResult(result magicevent.Result, data ExecuteCommandResult) {
+	if result != nil {
+		result.Set(data, nil)
+	}
+}
+
+func cloneCompletedData(data *CompletedData) *CompletedData {
+	if data == nil {
+		return nil
+	}
+	ret := *data
+	return &ret
+}
+
+func cloneFailedData(data *FailedData) *FailedData {
+	if data == nil {
+		return nil
+	}
+	ret := *data
+	return &ret
 }

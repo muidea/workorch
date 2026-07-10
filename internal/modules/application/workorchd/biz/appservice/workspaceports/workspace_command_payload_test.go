@@ -81,7 +81,7 @@ func TestCreateWorkspaceRecordSendsOwnerCommand(t *testing.T) {
 	})
 
 	workspaceID := common.WorkspaceID("ws-command-payload")
-	if err := CreateWorkspaceRecord(ctx, testHub.hub, workspaceID, "command workspace", "desc", "/tmp/workorch/ws-command-payload", "/tmp/workorch/ws-command-payload/.workorch"); err != nil {
+	if err := CreateWorkspaceRecord(ctx, testHub.raw, workspaceID, "command workspace", "desc", "/tmp/workorch/ws-command-payload", "/tmp/workorch/ws-command-payload/.workorch"); err != nil {
 		t.Fatalf("CreateWorkspaceRecord: %v", err)
 	}
 
@@ -117,13 +117,13 @@ func TestWorkspaceTemplateRecordsSendOwnerCommands(t *testing.T) {
 		EvidencePolicies: []map[string]any{{"kind": "validation"}},
 	}
 
-	if err := CreateWorkspaceTemplateRecord(ctx, testHub.hub, template); err != nil {
+	if err := CreateWorkspaceTemplateRecord(ctx, testHub.raw, template); err != nil {
 		t.Fatalf("CreateWorkspaceTemplateRecord: %v", err)
 	}
-	if err := UpdateWorkspaceTemplateRecord(ctx, testHub.hub, template); err != nil {
+	if err := UpdateWorkspaceTemplateRecord(ctx, testHub.raw, template); err != nil {
 		t.Fatalf("UpdateWorkspaceTemplateRecord: %v", err)
 	}
-	if err := DeleteWorkspaceTemplateRecord(ctx, testHub.hub, template.ID); err != nil {
+	if err := DeleteWorkspaceTemplateRecord(ctx, testHub.raw, template.ID); err != nil {
 		t.Fatalf("DeleteWorkspaceTemplateRecord: %v", err)
 	}
 
@@ -175,7 +175,7 @@ func TestPurgeWorkspaceRecordsSendsOwnerCommands(t *testing.T) {
 	testHub.subscribe(approvalevents.CommandDestination, approvalevents.TopicApprovalCommandDelete, emptyApprovalResult)
 	testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandDelete, emptyRunResult)
 
-	if err := PurgeWorkspaceRecords(ctx, testHub.hub, workspaceID); err != nil {
+	if err := PurgeWorkspaceRecords(ctx, testHub.raw, workspaceID); err != nil {
 		t.Fatalf("PurgeWorkspaceRecords: %v", err)
 	}
 
@@ -233,7 +233,7 @@ func TestPurgeWorkspaceRecordsTreatsMissingChildRecordsAsAlreadyPurged(t *testin
 		return nil, common.ErrNotFound
 	})
 
-	if err := PurgeWorkspaceRecords(ctx, testHub.hub, workspaceID); err != nil {
+	if err := PurgeWorkspaceRecords(ctx, testHub.raw, workspaceID); err != nil {
 		t.Fatalf("PurgeWorkspaceRecords err = %v, want nil", err)
 	}
 	if !resultListCalled {
@@ -254,7 +254,7 @@ func TestPurgeWorkspaceEventStreamTreatsMissingRecordsAsAlreadyPurged(t *testing
 			testHub.subscribe(eventstreamevents.CommandDestination, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, func(any) (any, error) {
 				return nil, tc.err
 			})
-			if err := PurgeWorkspaceEventStream(context.Background(), testHub.hub, "ws-eventstream-already-purged"); err != nil {
+			if err := PurgeWorkspaceEventStream(context.Background(), testHub.raw, "ws-eventstream-already-purged"); err != nil {
 				t.Fatalf("PurgeWorkspaceEventStream err = %v, want nil", err)
 			}
 		})
@@ -300,7 +300,7 @@ func TestDeleteWorkspaceViewDoesNotFailAfterWorkspaceDeletedWhenPostPurgeCleanup
 				return nil, tc.err
 			})
 
-			err := DeleteWorkspaceView(context.Background(), testHub.hub, DeleteWorkspaceViewRequest{
+			err := DeleteWorkspaceView(context.Background(), testHub.raw, DeleteWorkspaceViewRequest{
 				WorkspaceID: string(workspaceID),
 				Command:     appmodelcore.DeleteWorkspaceCommand{Purge: true},
 			})
@@ -317,7 +317,7 @@ func TestDeleteWorkspaceRecordSendsOwnerCommand(t *testing.T) {
 		return workspaceevents.WorkspaceCommandResult{}, nil
 	})
 	workspaceID := common.WorkspaceID("ws-delete-command-payload")
-	if err := DeleteWorkspaceRecord(context.Background(), testHub.hub, workspaceID); err != nil {
+	if err := DeleteWorkspaceRecord(context.Background(), testHub.raw, workspaceID); err != nil {
 		t.Fatalf("DeleteWorkspaceRecord: %v", err)
 	}
 	cmd, ok := testHub.command(t, workspaceevents.TopicWorkspaceCommandDelete, 0).(workspaceevents.DeleteWorkspaceCommand)
@@ -332,7 +332,7 @@ func TestPurgeWorkspaceEventStreamSendsOwnerCommand(t *testing.T) {
 		return eventstreamevents.EventStreamCommandResult{}, nil
 	})
 	workspaceID := common.WorkspaceID("ws-eventstream-purge-command")
-	if err := PurgeWorkspaceEventStream(context.Background(), testHub.hub, workspaceID); err != nil {
+	if err := PurgeWorkspaceEventStream(context.Background(), testHub.raw, workspaceID); err != nil {
 		t.Fatalf("PurgeWorkspaceEventStream: %v", err)
 	}
 	cmd, ok := testHub.command(t, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, 0).(eventstreamevents.PurgeWorkspaceCommand)
