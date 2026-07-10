@@ -3,11 +3,11 @@ package shell
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -18,7 +18,7 @@ const StepKindCommand = modulecommon.StepKindCommand
 type Module struct {
 	runtimeAdapter *shellbiz.RuntimeAdapter
 	executor       *runtimeevent.Executor
-	eventHub       events.Hub
+	eventHub       magicevent.Hub
 	background     magictask.BackgroundRoutine
 }
 
@@ -27,7 +27,7 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 type Dependencies struct {
-	EventHub   events.Hub
+	EventHub   magicevent.Hub
 	Background magictask.BackgroundRoutine
 }
 

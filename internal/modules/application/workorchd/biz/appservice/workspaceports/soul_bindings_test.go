@@ -6,36 +6,45 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestWorkspaceSoulBindingsViewUsesOwnerPorts(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
-	t.Cleanup(func() {
-		if err := runtime.Shutdown(context.Background()); err != nil {
-			t.Errorf("shutdown runtime: %v", err)
-		}
-	})
-	exports := runtime.Exports()
+	testHub := newWorkspaceCommandTestHub(t)
 	workspaceID := common.WorkspaceID("ws-workspaceports-soul-bindings")
-	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+	workspace := &workspacemodel.Workspace{
 		ID:    workspaceID,
 		Title: "workspaceports soul bindings",
 		State: common.WorkspaceStateActive,
-	}); err != nil {
-		t.Fatalf("seed workspace: %v", err)
 	}
+	souls := map[common.SoulID]*soulmodel.Soul{}
 	for _, id := range []common.SoulID{"soul-default-port", "soul-execution-port"} {
-		if err := exports.Repositories.Souls.Create(ctx, &soulmodel.Soul{ID: id, Name: string(id), SoulMD: "# " + string(id)}); err != nil {
-			t.Fatalf("seed soul %s: %v", id, err)
-		}
+		souls[id] = &soulmodel.Soul{ID: id, Name: string(id), SoulMD: "# " + string(id)}
 	}
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandGet, func(any) (any, error) {
+		return workspaceevents.WorkspaceCommandResult{Workspace: workspace}, nil
+	})
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandUpdate, func(data any) (any, error) {
+		cmd := data.(workspaceevents.UpdateWorkspaceCommand)
+		workspace.DefaultSoulID = cmd.DefaultSoulID
+		workspace.SoulBindings = cmd.SoulBindings
+		return workspaceevents.WorkspaceCommandResult{Workspace: workspace}, nil
+	})
+	testHub.subscribe(soulevents.CommandDestination, soulevents.TopicSoulCommandGet, func(data any) (any, error) {
+		cmd := data.(soulevents.GetSoulCommand)
+		item := souls[cmd.SoulID]
+		if item == nil {
+			return nil, common.ErrNotFound
+		}
+		return soulevents.SoulCommandResult{Soul: item}, nil
+	})
 
-	updated, err := UpdateWorkspaceSoulBindingsView(ctx, exports.Infrastructure.EventHub, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
+	updated, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.hub, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
 		DefaultSoulID: " soul-default-port ",
 		Bindings: map[string]string{
 			appmodelcore.SoulBindingStageExecution: " soul-execution-port ",
@@ -47,7 +56,7 @@ func TestWorkspaceSoulBindingsViewUsesOwnerPorts(t *testing.T) {
 	if updated.DefaultSoulID != "soul-default-port" || updated.Bindings[appmodelcore.SoulBindingStageExecution] != "soul-execution-port" {
 		t.Fatalf("updated = %+v, want normalized default/execution bindings", updated)
 	}
-	readBack, err := ReadWorkspaceSoulBindings(ctx, exports.Infrastructure.EventHub, string(workspaceID))
+	readBack, err := ReadWorkspaceSoulBindings(ctx, testHub.hub, string(workspaceID))
 	if err != nil {
 		t.Fatalf("ReadWorkspaceSoulBindings: %v", err)
 	}
@@ -58,28 +67,26 @@ func TestWorkspaceSoulBindingsViewUsesOwnerPorts(t *testing.T) {
 
 func TestUpdateWorkspaceSoulBindingsViewRejectsInvalidInput(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
-	t.Cleanup(func() {
-		if err := runtime.Shutdown(context.Background()); err != nil {
-			t.Errorf("shutdown runtime: %v", err)
-		}
-	})
-	exports := runtime.Exports()
+	testHub := newWorkspaceCommandTestHub(t)
 	workspaceID := common.WorkspaceID("ws-workspaceports-soul-bindings-invalid")
-	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+	workspace := &workspacemodel.Workspace{
 		ID:    workspaceID,
 		Title: "workspaceports soul bindings invalid",
 		State: common.WorkspaceStateActive,
-	}); err != nil {
-		t.Fatalf("seed workspace: %v", err)
 	}
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandGet, func(any) (any, error) {
+		return workspaceevents.WorkspaceCommandResult{Workspace: workspace}, nil
+	})
+	testHub.subscribe(soulevents.CommandDestination, soulevents.TopicSoulCommandGet, func(any) (any, error) {
+		return nil, common.ErrNotFound
+	})
 
-	if _, err := UpdateWorkspaceSoulBindingsView(ctx, exports.Infrastructure.EventHub, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
+	if _, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.hub, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
 		Bindings: map[string]string{"not-a-stage": "soul-missing"},
 	}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("invalid stage err = %v, want ErrInvalidArgument", err)
 	}
-	if _, err := UpdateWorkspaceSoulBindingsView(ctx, exports.Infrastructure.EventHub, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
+	if _, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.hub, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
 		DefaultSoulID: "soul-missing",
 	}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing soul err = %v, want ErrNotFound", err)

@@ -1997,7 +1997,7 @@ func TestContractViolationRecoveryPublishesRecordedRetryAndDispatchEvents(t *tes
 	runRepo := memory.NewRunRepository()
 	stepRepo := memory.NewStepRepository()
 	workspaceRepo := memory.NewWorkspaceRepository()
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	run := &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
@@ -2068,7 +2068,7 @@ func TestContractViolationEscalatedEventPayloadIsScoped(t *testing.T) {
 	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID}
 	failed := contractViolationFailedStep(runID, "failed-escalated")
 	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	publisher := newEventSubsystem(hub, nil, nil)
 	violation := contractViolationFromFailedOutput(failed)
 	context := map[string]any{"attempts": 2, "runAttempts": 3}

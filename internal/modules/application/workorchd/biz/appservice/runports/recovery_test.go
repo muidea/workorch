@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
@@ -46,7 +46,7 @@ func nonExternalRecoverableRuntimePolicyForTest() map[string]any {
 
 func TestHasContinuationCheckpointUsesLatestRecoveryCheckpoint(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -98,7 +98,7 @@ func TestHasContinuationCheckpointUsesLatestRecoveryCheckpoint(t *testing.T) {
 
 func TestIsStuckRunningRunCandidateRequiresRunningUnblockedRunWithoutContinuation(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -151,51 +151,23 @@ func TestIsStuckRunningRunCandidateRequiresRunningUnblockedRunWithoutContinuatio
 
 func TestRecoveryCandidateReadsRunScopedItemsWithWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	runtime := newOwnerRuntime()
+	defer runtime.Shutdown(ctx)
+	exports := runtime.Exports()
 	workspaceID := common.WorkspaceID("ws-recovery-candidate-scope")
 	runID := common.RunID("run-recovery-candidate-scope")
-	hub.Subscribe(runevents.TopicRunCommandListCheckpointsByRun, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("checkpoint list envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
-		}
-		if envelope.RunID != string(runID) {
-			t.Fatalf("checkpoint list envelope run = %q, want %s", envelope.RunID, runID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("checkpoint list payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
-		}
-		if envelope.Payload[events.PayloadKeyRunID] != string(runID) {
-			t.Fatalf("checkpoint list payload run = %v, want %s", envelope.Payload[events.PayloadKeyRunID], runID)
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyCheckpoints: []*runmodel.RuntimeCheckpoint{},
-			},
-		})
-	})
-	stepListHandler := func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("step list envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("step list payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeySteps: []*runmodel.Step{{ID: "run-recovery-candidate-scope/root", RunID: runID, State: common.StepStateSucceeded}},
-			},
-		})
-	}
-	hub.Subscribe(runevents.TopicRunCommandListStepsByRun, stepListHandler)
-	hub.Subscribe(runevents.TopicRunCommandListStepSummariesByRun, stepListHandler)
 	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
+	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: "run-recovery-candidate-scope/root", RunID: runID, State: common.StepStateSucceeded}); err != nil {
+		t.Fatal(err)
+	}
 
-	if !IsStuckRunningRunCandidate(ctx, hub, run) {
+	if !IsStuckRunningRunCandidate(ctx, exports.Infrastructure.EventHub, run) {
 		t.Fatal("running run without continuation checkpoint should be candidate")
 	}
-	terminal, err := TerminalStepForRunningRun(ctx, hub, run)
+	terminal, err := TerminalStepForRunningRun(ctx, exports.Infrastructure.EventHub, run)
 	if err != nil {
 		t.Fatalf("TerminalStepForRunningRun: %v", err)
 	}
@@ -206,7 +178,7 @@ func TestRecoveryCandidateReadsRunScopedItemsWithWorkspaceScope(t *testing.T) {
 
 func TestOrphanDispatchedTerminalStepReturnsDispatchedTerminalStep(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -260,7 +232,7 @@ func TestOrphanDispatchedTerminalStepReturnsDispatchedTerminalStep(t *testing.T)
 
 func TestRecoverOrphanDispatchedStepUsesInjectedResume(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -333,7 +305,7 @@ func TestRecoverOrphanDispatchedStepUsesInjectedResume(t *testing.T) {
 
 func TestRecoverStaleOrphanDispatchedStepSkipsRequestNotAcceptedGap(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -397,7 +369,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsRequestNotAcceptedGap(t *testing.T
 
 func TestRecoverStaleOrphanDispatchedStepResumesRuntimeTerminalResultAvailable(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -468,7 +440,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesRuntimeTerminalResultAvailable(t
 
 func TestRecoverStaleRuntimeGapRunViewsUsesGapSpecificRecovery(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -554,7 +526,9 @@ func TestRecoverStaleRuntimeGapRunViewsUsesGapSpecificRecovery(t *testing.T) {
 
 func TestRecoverStaleRuntimeGapRunViewsNoEligibleGapUsesBoundedReads(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(8)
+	defer rawHub.Terminate(ctx)
+	hub := events.NewMagicHubWithHubOwner(rawHub, "runports/recovery-bounded-test")
 	workspaceID := common.WorkspaceID("ws-stale-gap-bounded-reads")
 	runID := common.RunID("run-stale-gap-bounded-reads")
 	stepID := common.StepID("run-stale-gap-bounded-reads/root")
@@ -564,50 +538,33 @@ func TestRecoverStaleRuntimeGapRunViewsNoEligibleGapUsesBoundedReads(t *testing.
 	readRunCalls := 0
 	recoverCalls := 0
 
-	hub.Subscribe(runevents.TopicRunCommandList, func(_ context.Context, envelope events.Envelope) error {
+	observer := magicevent.NewSimpleObserver(runevents.CommandDestination, rawHub)
+	observer.Subscribe(runevents.TopicRunCommandList, func(event magicevent.Event, result magicevent.Result) {
 		listRunsCalls++
-		if compact, _ := envelope.Payload[events.PayloadKeyCompact].(bool); !compact {
-			t.Fatalf("run list compact = %v, want true for watchdog candidate scan", envelope.Payload[events.PayloadKeyCompact])
+		cmd, ok := event.Data().(runevents.ListRunsCommand)
+		if !ok || !cmd.Compact || len(cmd.States) != 1 || cmd.States[0] != common.RunStateActive {
+			t.Fatalf("run list command = %+v, want compact active-only scan", cmd)
 		}
-		states, _ := envelope.Payload[events.PayloadKeyStates].([]string)
-		if len(states) != 1 || states[0] != string(common.RunStateActive) {
-			t.Fatalf("run list states = %+v, want running-only watchdog candidate scan", envelope.Payload[events.PayloadKeyStates])
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyRuns: []*runmodel.Run{{
-					ID:          runID,
-					WorkspaceID: workspaceID,
-					State:       common.RunStateActive,
-				}},
-			},
-		})
+		result.Set(runevents.RunCommandResult{Runs: []*runmodel.Run{{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       common.RunStateActive,
+		}}}, nil)
 	})
-	hub.Subscribe(runevents.TopicRunCommandListStepSummariesByRun, func(_ context.Context, envelope events.Envelope) error {
+	defer observer.Unsubscribe(runevents.TopicRunCommandList)
+	observer.Subscribe(runevents.TopicRunCommandListStepSummariesByRun, func(event magicevent.Event, result magicevent.Result) {
 		stepSummaryCalls++
-		if envelope.WorkspaceID != string(workspaceID) || envelope.RunID != string(runID) {
-			t.Fatalf("step summary envelope scope = workspace %q run %q, want %s/%s", envelope.WorkspaceID, envelope.RunID, workspaceID, runID)
+		cmd, ok := event.Data().(runevents.ListStepSummariesByRunCommand)
+		if !ok || cmd.WorkspaceID != workspaceID || cmd.RunID != runID || common.RuntimeWorkspaceIDFromContext(event.Context()) != workspaceID {
+			t.Fatalf("step summary command = %+v context workspace=%q", cmd, common.RuntimeWorkspaceIDFromContext(event.Context()))
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeySteps: []*runmodel.Step{{
-					ID:    stepID,
-					RunID: runID,
-					State: common.StepStateSucceeded,
-				}},
-			},
-		})
+		result.Set(runevents.RunCommandResult{Steps: []*runmodel.Step{{
+			ID:    stepID,
+			RunID: runID,
+			State: common.StepStateSucceeded,
+		}}}, nil)
 	})
-	hub.Subscribe(runevents.TopicRunCommandListCheckpointsByRun, func(_ context.Context, envelope events.Envelope) error {
-		checkpointCalls++
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{events.PayloadKeyCheckpoints: []*runmodel.RuntimeCheckpoint{}}})
-	})
-	hub.Subscribe(runevents.TopicRunCommandGet, func(_ context.Context, envelope events.Envelope) error {
-		readRunCalls++
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{events.PayloadKeyRun: &runmodel.Run{ID: runID, WorkspaceID: workspaceID}}})
-	})
+	defer observer.Unsubscribe(runevents.TopicRunCommandListStepSummariesByRun)
 
 	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
 	items, err := RecoverStaleRuntimeGapRunViews(ctx, hub, func(context.Context, *runmodel.Run, RuntimeGapRecovery) error {
@@ -627,7 +584,7 @@ func TestRecoverStaleRuntimeGapRunViewsNoEligibleGapUsesBoundedReads(t *testing.
 
 func TestRecoverStaleOrphanDispatchedStepSkipsRuntimeDoneWithoutTerminalResult(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -703,7 +660,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsAcceptedWithoutWorkerLostEvidence(
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			runtime := bootstrap.NewWithBackend("memory", "")
+			runtime := newOwnerRuntime()
 			t.Cleanup(func() {
 				if err := runtime.Shutdown(context.Background()); err != nil {
 					t.Errorf("shutdown runtime: %v", err)
@@ -782,7 +739,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsNonIdempotentRuntimeGap(t *testing
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			runtime := bootstrap.NewWithBackend("memory", "")
+			runtime := newOwnerRuntime()
 			t.Cleanup(func() {
 				if err := runtime.Shutdown(context.Background()); err != nil {
 					t.Errorf("shutdown runtime: %v", err)
@@ -877,7 +834,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsNonExternalRecoverablePolicy(t *te
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			runtime := bootstrap.NewWithBackend("memory", "")
+			runtime := newOwnerRuntime()
 			t.Cleanup(func() {
 				if err := runtime.Shutdown(context.Background()); err != nil {
 					t.Errorf("shutdown runtime: %v", err)
@@ -955,7 +912,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsNonExternalRecoverablePolicy(t *te
 
 func TestRecoverStaleOrphanDispatchedStepResumesWorkerLostGap(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -1029,7 +986,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesWorkerLostGap(t *testing.T) {
 
 func TestRecoverStaleOrphanDispatchedStepResumesStaleWorkerHeartbeatGap(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -1103,7 +1060,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesStaleWorkerHeartbeatGap(t *testi
 
 func TestRecordRecoveryMemoryRecallTraceUsesEventHubOwnerCommand(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -1159,7 +1116,7 @@ func TestRecordRecoveryMemoryRecallTraceUsesEventHubOwnerCommand(t *testing.T) {
 
 func TestAttachCompressedContextToRunUpdatesCreatedRunThroughEventHub(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -1203,7 +1160,7 @@ func TestAttachCompressedContextToRunUpdatesCreatedRunThroughEventHub(t *testing
 
 func TestCompressedContextPatchForRunUsesRecoverySnapshotFallback(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -1413,7 +1370,7 @@ func (f fakeApprovalReader) ListByWorkspaceID(context.Context, common.WorkspaceI
 
 func TestRecoverTerminalActiveWorkspacePointersClearsTerminalRun(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -1454,7 +1411,7 @@ func TestRecoverTerminalActiveWorkspacePointersClearsTerminalRun(t *testing.T) {
 
 func TestFailRunAndRecoverActiveWorkspacePointerClearsActiveRun(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -1503,7 +1460,7 @@ func TestFailRunAndRecoverActiveWorkspacePointerClearsActiveRun(t *testing.T) {
 
 func TestRecoverStuckRunningRunViewsFailsRunningRunWithoutContinuation(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -1546,7 +1503,7 @@ func TestRecoverStuckRunningRunViewsFailsRunningRunWithoutContinuation(t *testin
 
 func TestRecoverStuckRunningRunViewsResumesRunningRunWithCompletedTerminalStep(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)

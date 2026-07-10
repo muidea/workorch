@@ -5,17 +5,17 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestGitModuleIdentityConfigureStartStopContract(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMagicHub()
-	defer hub.Terminate(ctx)
+	rawHub := magicevent.NewHub(16)
+	defer rawHub.Terminate(ctx)
 	background := magictask.NewBackgroundRoutine(1)
 	defer background.Shutdown(ctx)
 
@@ -26,7 +26,7 @@ func TestGitModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Start before Configure err = %v, want invalid argument", err)
 	}
-	if err := module.Configure(Dependencies{EventHub: hub, Background: background}); err != nil {
+	if err := module.Configure(Dependencies{EventHub: rawHub, Background: background}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if module.runtimeAdapter == nil || module.eventHub == nil || module.background == nil {
@@ -71,13 +71,13 @@ func TestGitModuleStartRequiresRuntimeDependencies(t *testing.T) {
 
 func TestGitModuleQueuesRuntimeExecution(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMagicHub()
-	defer hub.Terminate(ctx)
+	rawHub := magicevent.NewHub(16)
+	defer rawHub.Terminate(ctx)
 	background := magictask.NewBackgroundRoutine(2)
 	defer background.Shutdown(ctx)
 
 	module := New()
-	if err := module.Configure(Dependencies{EventHub: hub, Background: background}); err != nil {
+	if err := module.Configure(Dependencies{EventHub: rawHub, Background: background}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -85,28 +85,22 @@ func TestGitModuleQueuesRuntimeExecution(t *testing.T) {
 	}
 	defer module.Stop(ctx)
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       runtimeevent.RuntimeBlockExecuteTopic(StepKindRead),
-		WorkspaceID: "ws-git-queue",
-		RunID:       "run-git-queue",
-		StepID:      "run-git-queue/step-1",
-		Payload: map[string]any{
-			events.PayloadKeyRuntimeRequestID: "git-queue-request",
-			events.PayloadKeyRuntimeRequest: runtimemodel.StepExecutionRequest{
-				WorkspaceID:                   "ws-git-queue",
-				RunID:                         "run-git-queue",
-				StepID:                        "run-git-queue/step-1",
-				Kind:                          StepKindRead,
-				WorkspaceDeliverableDirectory: t.TempDir(),
-				Input:                         map[string]any{"operation": "status"},
-			},
-		},
-	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
-		t.Fatalf("runtime command err = %v, want accepted response", err)
+	result := rawHub.Send(magicevent.NewEventWithContext(
+		runtimeevent.RuntimeBlockExecuteTopic(StepKindRead), ModuleID, runtimeevent.CommandDestination, magicevent.NewHeader(), ctx,
+		runtimeevent.ExecuteCommand{RequestID: "git-queue-request", Request: runtimemodel.StepExecutionRequest{
+			WorkspaceID:                   "ws-git-queue",
+			RunID:                         "run-git-queue",
+			StepID:                        "run-git-queue/step-1",
+			Kind:                          StepKindRead,
+			WorkspaceDeliverableDirectory: t.TempDir(),
+			Input:                         map[string]any{"operation": "status"},
+		}},
+	))
+	if err := result.Error(); err != nil {
+		t.Fatalf("runtime command err = %v", err)
 	}
-	if _, ok := response.Payload[events.PayloadKeyRuntimeAccepted].(runtimemodel.RuntimeStepExecutionAccepted); !ok {
-		t.Fatalf("accepted payload missing: %#v", response.Payload)
+	data, err := result.Get()
+	if _, ok := data.(runtimeevent.ExecuteCommandResult); err != nil || !ok {
+		t.Fatalf("accepted result = %T, err=%v", data, err)
 	}
 }

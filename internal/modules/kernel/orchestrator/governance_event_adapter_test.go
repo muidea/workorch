@@ -4,18 +4,27 @@ import (
 	"context"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 
-	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func TestDecisionResolutionEventRepositoryPublishesCommandPayload(t *testing.T) {
+func TestDecisionResolutionEventRepositorySendsTypedOwnerCommand(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(decisionevents.TopicDecisionCommandCreateResolution, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(envelope)
+	rawHub := magicevent.NewHub(8)
+	hub := events.NewMagicHubWithHubOwner(rawHub, ModuleID)
+	observer := magicevent.NewSimpleObserver(decisionevents.CommandDestination, rawHub)
+	defer observer.Unsubscribe(decisionevents.TopicDecisionCommandCreateResolution)
+	var got decisionevents.CreateResolutionCommand
+	observer.Subscribe(decisionevents.TopicDecisionCommandCreateResolution, func(ev magicevent.Event, result magicevent.Result) {
+		cmd, ok := ev.Data().(decisionevents.CreateResolutionCommand)
+		if !ok {
+			t.Fatalf("event data = %T, want CreateResolutionCommand", ev.Data())
+		}
+		got = cmd
+		result.Set(decisionevents.DecisionCommandResult{}, nil)
 	})
 	repo := decisionEventResolutionRepository{hub: hub}
 
@@ -28,18 +37,7 @@ func TestDecisionResolutionEventRepositoryPublishesCommandPayload(t *testing.T) 
 		t.Fatalf("Create: %v", err)
 	}
 
-	published := hub.Published()
-	if len(published) != 1 {
-		t.Fatalf("published len = %d, want 1", len(published))
-	}
-	cmd, ok := published[0].Payload[events.PayloadKeyCommand].(decisioncontracts.CreateResolutionCommand)
-	if !ok {
-		t.Fatalf("payload command = %T, want CreateResolutionCommand", published[0].Payload[events.PayloadKeyCommand])
-	}
-	if cmd.ResolutionID != "resolution-command-payload" || cmd.TicketID != "ticket-command-payload" || cmd.Payload["answer"] != "ok" {
-		t.Fatalf("command = %+v, want populated resolution command", cmd)
-	}
-	if _, ok := published[0].Payload[events.PayloadKeyResolution]; ok {
-		t.Fatalf("payload contains legacy resolution field")
+	if got.ResolutionID != "resolution-command-payload" || got.TicketID != "ticket-command-payload" || got.Payload["answer"] != "ok" {
+		t.Fatalf("command = %+v, want populated resolution command", got)
 	}
 }

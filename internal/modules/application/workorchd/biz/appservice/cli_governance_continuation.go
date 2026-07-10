@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
@@ -76,40 +77,39 @@ func (d *CLICommandDispatcher) publishGovernanceContinuation(ctx context.Context
 	if workspaceID == "" || runID == "" || intent == "" {
 		return common.ErrInvalidArgument
 	}
-	payload := map[string]any{
-		events.PayloadKeyWorkspaceID: workspaceID,
-		events.PayloadKeyRunID:       runID,
-		events.PayloadKeyIntent:      intent,
-		events.PayloadKeyReason:      strings.TrimSpace(ref.Reason),
-		events.PayloadKeyRequestID:   strings.TrimSpace(ref.RequestID),
-		events.PayloadKeySource:      "cli",
+	priority := 0
+	if parsedPriority, ok := cliPayloadInt(cmd.Payload, events.PayloadKeyPriority); ok {
+		priority = parsedPriority
 	}
-	if strings.TrimSpace(ref.DecisionID) != "" {
-		payload[events.PayloadKeyDecisionID] = strings.TrimSpace(ref.DecisionID)
+	provider, ok := d.eventHub.(interface{ RawHub() magicevent.Hub })
+	if !ok || provider.RawHub() == nil {
+		return common.ErrInvalidArgument
 	}
-	if priority, ok := cliPayloadInt(cmd.Payload, events.PayloadKeyPriority); ok {
-		payload[events.PayloadKeyPriority] = priority
+	command := workorchdevents.WorkspaceRunRequestedCommand{
+		WorkspaceID: common.WorkspaceID(workspaceID),
+		RunID:       common.RunID(runID),
+		Intent:      intent,
+		Reason:      strings.TrimSpace(ref.Reason),
+		RequestID:   strings.TrimSpace(ref.RequestID),
+		Source:      "cli",
+		DecisionID:  strings.TrimSpace(ref.DecisionID),
+		Priority:    priority,
 	}
-	err := d.eventHub.Publish(ctx, events.Envelope{
-		Topic:        workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
-		SourceModule: "workorchd-cli-dispatcher",
-		SubjectType:  "workspace",
-		SubjectID:    workspaceID,
-		WorkspaceID:  workspaceID,
-		RunID:        runID,
-		Payload:      payload,
-	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
-		if err != nil {
-			return err
-		}
-		return fmt.Errorf("%w: scheduler command %s returned no accepted response", common.ErrConflict, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
+	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "workorchd-cli-dispatcher", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	event.BindLaneKey(events.EventHubLaneKey(events.Envelope{Topic: event.ID(), SubjectType: "workspace", SubjectID: workspaceID, WorkspaceID: workspaceID, RunID: runID}))
+	response := provider.RawHub().Send(event)
+	if response == nil {
+		return fmt.Errorf("%w: scheduler command %s returned no result", common.ErrConflict, event.ID())
 	}
-	if strings.TrimSpace(response.Topic) != workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested+"/accepted" {
-		return fmt.Errorf("%w: scheduler command %s returned unexpected response topic %s", common.ErrConflict, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, response.Topic)
+	if err := response.Error(); err != nil {
+		return err
 	}
-	if accepted, _ := response.Payload["accepted"].(bool); !accepted {
+	data, err := response.Get()
+	if err != nil {
+		return err
+	}
+	result, ok := data.(workorchdevents.WorkspaceRunRequestedResult)
+	if !ok || !result.Accepted {
 		return fmt.Errorf("%w: scheduler command %s was not accepted", common.ErrConflict, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
 	}
 	return nil

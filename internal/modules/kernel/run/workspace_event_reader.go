@@ -2,8 +2,8 @@ package run
 
 import (
 	"context"
-	"fmt"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -18,25 +18,31 @@ func (r workspaceEventReader) Get(ctx context.Context, id common.WorkspaceID) (*
 	if r.hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	err := r.hub.Publish(ctx, events.Envelope{
-		Topic:        workspaceevents.TopicWorkspaceCommandGet,
-		SourceModule: ModuleID,
-		SubjectType:  "workspace",
-		SubjectID:    string(id),
-		WorkspaceID:  string(id),
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: string(id),
-		},
-	})
-	if response, ok := events.ResponseEnvelope(err); ok {
-		item, ok := response.Payload[events.PayloadKeyWorkspace].(*workspacemodel.Workspace)
-		if !ok || item == nil {
-			return nil, common.ErrNotFound
-		}
-		return item, nil
+	provider, ok := r.hub.(rawMagicHubProvider)
+	if !ok || provider.RawHub() == nil {
+		return nil, common.ErrInvalidArgument
 	}
+	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceCommand{WorkspaceID: id})
+	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
+		Topic:       workspaceevents.TopicWorkspaceCommandGet,
+		SubjectType: "workspace",
+		SubjectID:   string(id),
+		WorkspaceID: string(id),
+	}))
+	result := provider.RawHub().Send(ev)
+	if result == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	if err := result.Error(); err != nil {
+		return nil, err
+	}
+	data, err := result.Get()
 	if err != nil {
 		return nil, err
 	}
-	return nil, fmt.Errorf("workspace command %s returned no response", workspaceevents.TopicWorkspaceCommandGet)
+	response, ok := data.(workspaceevents.WorkspaceCommandResult)
+	if !ok || response.Workspace == nil {
+		return nil, common.ErrNotFound
+	}
+	return response.Workspace, nil
 }

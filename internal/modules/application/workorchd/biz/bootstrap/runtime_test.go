@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
@@ -195,10 +196,12 @@ func TestNewWithBackendMemoryDoesNotStartSystemDefaultsModule(t *testing.T) {
 }
 
 func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T) {
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(32)
+	defer rawHub.Terminate(context.Background())
+	hub := events.NewMagicHubWithHubOwner(rawHub, "bootstrap/runtime-test")
 	background := magictask.NewBackgroundRoutine(32)
 	defer background.Shutdown(context.Background())
-	executor := runtimeevent.NewExecutor("test/block", hub, background, echoRuntimeAdapter{},
+	executor := runtimeevent.NewExecutor("test/block", rawHub, background, echoRuntimeAdapter{},
 		filemodule.StepKindList,
 		filemodule.StepKindRead,
 		filemodule.StepKindEdit,
@@ -217,7 +220,7 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 		t.Fatalf("run echo executor: %v", err)
 	}
 	defer executor.Teardown()
-	patchExecutor := runtimeevent.NewExecutor("test/patch", hub, background, filebiz.NewRuntimeAdapter(),
+	patchExecutor := runtimeevent.NewExecutor("test/patch", rawHub, background, filebiz.NewRuntimeAdapter(),
 		llmcommon.RuntimeBlockKindPatchApply,
 		llmcommon.RuntimeBlockKindPatchPreview,
 		llmcommon.RuntimeBlockKindPatchRevert,

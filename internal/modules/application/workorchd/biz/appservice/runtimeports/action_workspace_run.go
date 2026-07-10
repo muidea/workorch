@@ -7,22 +7,17 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
-	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
-	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func (p *EventHubActionPort) EnsureWorkspace(ctx context.Context, workspaceID common.WorkspaceID, title string) error {
 	if p == nil || p.hub == nil || workspaceID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.publish(ctx, workspaceevents.TopicWorkspaceCommandEnsure, "workspace", string(workspaceID), workspaceID, "", "", map[string]any{
-		events.PayloadKeyCommand: workspacecontracts.EnsureWorkspaceCommand{
-			WorkspaceID:          workspaceID,
-			Title:                title,
-			DeliverableDirectory: "workspaces/" + string(workspaceID),
-		},
+	return p.send(ctx, workspaceevents.TopicWorkspaceCommandEnsure, workspaceevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", "", workspaceevents.EnsureWorkspaceCommand{
+		WorkspaceID:          workspaceID,
+		Title:                title,
+		DeliverableDirectory: "workspaces/" + string(workspaceID),
 	})
 }
 
@@ -30,9 +25,7 @@ func (p *EventHubActionPort) EnsureRun(ctx context.Context, runID common.RunID, 
 	if p == nil || p.hub == nil || runID == "" || workspaceID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.publish(ctx, runevents.TopicRunCommandEnsure, "run", string(runID), workspaceID, runID, "", map[string]any{
-		events.PayloadKeyCommand: runcontracts.CreateRunCommand{RunID: runID, WorkspaceID: workspaceID},
-	})
+	return p.send(ctx, runevents.TopicRunCommandEnsure, runevents.CommandDestination, "run", string(runID), workspaceID, runID, "", runevents.EnsureRunCommand{RunID: runID, WorkspaceID: workspaceID})
 }
 
 func (p *EventHubActionPort) EnsureRunStarted(ctx context.Context, runID common.RunID) error {
@@ -43,9 +36,7 @@ func (p *EventHubActionPort) EnsureRunStarted(ctx context.Context, runID common.
 	if workspaceID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.publish(ctx, orchestratorevents.TopicOrchestratorCommandStartRun, "run", string(runID), workspaceID, runID, "", map[string]any{
-		events.PayloadKeyRunID: string(runID),
-	})
+	return p.send(ctx, orchestratorevents.TopicOrchestratorCommandStartRun, orchestratorevents.CommandDestination, "run", string(runID), workspaceID, runID, "", orchestratorevents.StartRunCommand{RunID: runID})
 }
 
 func (p *EventHubActionPort) EnsureRunBlockedOnDecision(ctx context.Context, runID common.RunID, ticketID common.TicketID) error {
@@ -56,9 +47,7 @@ func (p *EventHubActionPort) EnsureRunBlockedOnDecision(ctx context.Context, run
 	if workspaceID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.publish(ctx, orchestratorevents.TopicOrchestratorCommandBlockDecision, "run", string(runID), workspaceID, runID, "", map[string]any{
-		events.PayloadKeyCommand: runcontracts.BlockOnDecisionCommand{RunID: runID, TicketID: ticketID},
-	})
+	return p.send(ctx, orchestratorevents.TopicOrchestratorCommandBlockDecision, orchestratorevents.CommandDestination, "run", string(runID), workspaceID, runID, "", orchestratorevents.BlockDecisionCommand{RunID: runID, TicketID: ticketID})
 }
 
 func (p *EventHubActionPort) EnsureRunBlockedOnApproval(ctx context.Context, runID common.RunID, approvalID common.ApprovalID) error {
@@ -69,9 +58,7 @@ func (p *EventHubActionPort) EnsureRunBlockedOnApproval(ctx context.Context, run
 	if workspaceID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.publish(ctx, orchestratorevents.TopicOrchestratorCommandBlockApproval, "run", string(runID), workspaceID, runID, "", map[string]any{
-		events.PayloadKeyCommand: runcontracts.BlockOnApprovalCommand{RunID: runID, ApprovalID: approvalID},
-	})
+	return p.send(ctx, orchestratorevents.TopicOrchestratorCommandBlockApproval, orchestratorevents.CommandDestination, "run", string(runID), workspaceID, runID, "", orchestratorevents.BlockApprovalCommand{RunID: runID, ApprovalID: approvalID})
 }
 
 func (p *EventHubActionPort) EnsureRunResumed(ctx context.Context, runID common.RunID) error {
@@ -82,7 +69,5 @@ func (p *EventHubActionPort) EnsureRunResumed(ctx context.Context, runID common.
 	if workspaceID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.publish(ctx, orchestratorevents.TopicOrchestratorCommandResumeRun, "run", string(runID), workspaceID, runID, "", map[string]any{
-		events.PayloadKeyCommand: runcontracts.ResumeRunCommand{WorkspaceID: workspaceID, RunID: runID},
-	})
+	return p.send(ctx, orchestratorevents.TopicOrchestratorCommandResumeRun, orchestratorevents.CommandDestination, "run", string(runID), workspaceID, runID, "", orchestratorevents.ResumeRunCommand{WorkspaceID: workspaceID, RunID: runID})
 }

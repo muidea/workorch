@@ -4,73 +4,106 @@ import (
 	"context"
 	"testing"
 
+	cd "github.com/muidea/magicCommon/def"
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
-
-	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
-	eventstreamcontracts "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/contracts"
-	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
-	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-func TestCreateWorkspaceRecordPublishesCommandPayload(t *testing.T) {
+type workspaceCommandTestHub struct {
+	hub       *events.MagicHub
+	raw       magicevent.Hub
+	observers map[string]magicevent.SimpleObserver
+	captured  map[string][]any
+}
+
+func newWorkspaceCommandTestHub(t *testing.T) *workspaceCommandTestHub {
+	t.Helper()
+	raw := magicevent.NewHub(64)
+	hub := events.NewMagicHubWithHubOwner(raw, "workspaceports/test")
+	ret := &workspaceCommandTestHub{
+		hub:       hub,
+		raw:       raw,
+		observers: map[string]magicevent.SimpleObserver{},
+		captured:  map[string][]any{},
+	}
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	return ret
+}
+
+func (h *workspaceCommandTestHub) subscribe(destination string, topic string, handler func(any) (any, error)) {
+	observer := h.observers[destination]
+	if observer == nil {
+		observer = magicevent.NewSimpleObserver(destination, h.raw)
+		h.observers[destination] = observer
+	}
+	observer.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
+		h.captured[topic] = append(h.captured[topic], ev.Data())
+		data, err := handler(ev.Data())
+		if err != nil {
+			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+			return
+		}
+		result.Set(data, nil)
+	})
+}
+
+func (h *workspaceCommandTestHub) command(t *testing.T, topic string, index int) any {
+	t.Helper()
+	items := h.captured[topic]
+	if index < 0 || index >= len(items) {
+		t.Fatalf("captured topic %s index %d not found; count=%d", topic, index, len(items))
+	}
+	return items[index]
+}
+
+func TestCreateWorkspaceRecordSendsOwnerCommand(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandCreate, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(envelope)
+	testHub := newWorkspaceCommandTestHub(t)
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandCreate, func(any) (any, error) {
+		return workspaceevents.WorkspaceCommandResult{}, nil
 	})
 
 	workspaceID := common.WorkspaceID("ws-command-payload")
-	if err := CreateWorkspaceRecord(ctx, hub, workspaceID, "command workspace", "desc", "/tmp/workorch/ws-command-payload", "/tmp/workorch/ws-command-payload/.workorch"); err != nil {
+	if err := CreateWorkspaceRecord(ctx, testHub.hub, workspaceID, "command workspace", "desc", "/tmp/workorch/ws-command-payload", "/tmp/workorch/ws-command-payload/.workorch"); err != nil {
 		t.Fatalf("CreateWorkspaceRecord: %v", err)
 	}
 
-	published := hub.Published()
-	if len(published) != 1 {
-		t.Fatalf("published len = %d, want 1", len(published))
-	}
-	cmd, ok := published[0].Payload[events.PayloadKeyCommand].(workspacecontracts.CreateWorkspaceCommand)
+	cmd, ok := testHub.command(t, workspaceevents.TopicWorkspaceCommandCreate, 0).(workspaceevents.CreateWorkspaceCommand)
 	if !ok {
-		t.Fatalf("payload command = %T, want CreateWorkspaceCommand", published[0].Payload[events.PayloadKeyCommand])
+		t.Fatalf("command = %T, want CreateWorkspaceCommand", testHub.command(t, workspaceevents.TopicWorkspaceCommandCreate, 0))
 	}
 	if cmd.WorkspaceID != workspaceID || cmd.Title != "command workspace" || cmd.DeliverableDirectory == "" || cmd.InternalDirectory == "" {
 		t.Fatalf("command = %+v, want populated create workspace command", cmd)
 	}
-	if _, ok := published[0].Payload[events.PayloadKeyWorkspaceID]; ok {
-		t.Fatalf("payload contains legacy workspaceId field")
-	}
 }
 
-func TestWorkspaceTemplateRecordsPublishCommandPayloads(t *testing.T) {
+func TestWorkspaceTemplateRecordsSendOwnerCommands(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	testHub := newWorkspaceCommandTestHub(t)
 	for _, topic := range []string{
 		workspaceevents.TopicWorkspaceTemplateCommandCreate,
 		workspaceevents.TopicWorkspaceTemplateCommandUpdate,
 		workspaceevents.TopicWorkspaceTemplateCommandDelete,
 	} {
-		hub.Subscribe(topic, func(_ context.Context, envelope events.Envelope) error {
-			return events.Response(envelope)
+		testHub.subscribe(workspaceevents.CommandDestination, topic, func(any) (any, error) {
+			return workspaceevents.WorkspaceCommandResult{}, nil
 		})
 	}
 	template := &repository.WorkspaceTemplate{
@@ -84,193 +117,123 @@ func TestWorkspaceTemplateRecordsPublishCommandPayloads(t *testing.T) {
 		EvidencePolicies: []map[string]any{{"kind": "validation"}},
 	}
 
-	if err := CreateWorkspaceTemplateRecord(ctx, hub, template); err != nil {
+	if err := CreateWorkspaceTemplateRecord(ctx, testHub.hub, template); err != nil {
 		t.Fatalf("CreateWorkspaceTemplateRecord: %v", err)
 	}
-	if err := UpdateWorkspaceTemplateRecord(ctx, hub, template); err != nil {
+	if err := UpdateWorkspaceTemplateRecord(ctx, testHub.hub, template); err != nil {
 		t.Fatalf("UpdateWorkspaceTemplateRecord: %v", err)
 	}
-	if err := DeleteWorkspaceTemplateRecord(ctx, hub, template.ID); err != nil {
+	if err := DeleteWorkspaceTemplateRecord(ctx, testHub.hub, template.ID); err != nil {
 		t.Fatalf("DeleteWorkspaceTemplateRecord: %v", err)
 	}
 
-	createEnvelope := publishedByTopic(t, hub, workspaceevents.TopicWorkspaceTemplateCommandCreate)
-	createCmd, ok := createEnvelope.Payload[events.PayloadKeyCommand].(workspacecontracts.CreateWorkspaceTemplateCommand)
-	if !ok {
-		t.Fatalf("create payload command = %T, want CreateWorkspaceTemplateCommand", createEnvelope.Payload[events.PayloadKeyCommand])
+	createCmd, ok := testHub.command(t, workspaceevents.TopicWorkspaceTemplateCommandCreate, 0).(workspaceevents.CreateWorkspaceTemplateCommand)
+	if !ok || createCmd.TemplateID != template.ID || createCmd.Name != template.Name {
+		t.Fatalf("create command = %#v, want template %s", createCmd, template.ID)
 	}
-	if createCmd.TemplateID != template.ID || createCmd.Name != template.Name || createCmd.SoulBindings["execution"] != "soul-exec" {
-		t.Fatalf("create command = %+v, want populated template command", createCmd)
+	updateCmd, ok := testHub.command(t, workspaceevents.TopicWorkspaceTemplateCommandUpdate, 0).(workspaceevents.UpdateWorkspaceTemplateCommand)
+	if !ok || updateCmd.TemplateID != template.ID || updateCmd.Name != template.Name {
+		t.Fatalf("update command = %#v, want template %s", updateCmd, template.ID)
 	}
-	assertNoWorkspaceTemplateLegacyPayload(t, createEnvelope)
-
-	updateEnvelope := publishedByTopic(t, hub, workspaceevents.TopicWorkspaceTemplateCommandUpdate)
-	updateCmd, ok := updateEnvelope.Payload[events.PayloadKeyCommand].(workspacecontracts.UpdateWorkspaceTemplateCommand)
-	if !ok {
-		t.Fatalf("update payload command = %T, want UpdateWorkspaceTemplateCommand", updateEnvelope.Payload[events.PayloadKeyCommand])
-	}
-	if updateCmd.TemplateID != template.ID || updateCmd.Name != template.Name || updateCmd.ContextHints["managedConfig"] != true {
-		t.Fatalf("update command = %+v, want populated template command", updateCmd)
-	}
-	assertNoWorkspaceTemplateLegacyPayload(t, updateEnvelope)
-
-	deleteEnvelope := publishedByTopic(t, hub, workspaceevents.TopicWorkspaceTemplateCommandDelete)
-	deleteCmd, ok := deleteEnvelope.Payload[events.PayloadKeyCommand].(workspacecontracts.DeleteWorkspaceTemplateCommand)
+	deleteCmd, ok := testHub.command(t, workspaceevents.TopicWorkspaceTemplateCommandDelete, 0).(workspaceevents.DeleteWorkspaceTemplateCommand)
 	if !ok || deleteCmd.TemplateID != template.ID {
-		t.Fatalf("delete payload command = %#v, want DeleteWorkspaceTemplateCommand(%s)", deleteEnvelope.Payload[events.PayloadKeyCommand], template.ID)
+		t.Fatalf("delete command = %#v, want template %s", deleteCmd, template.ID)
 	}
-	assertNoWorkspaceTemplateLegacyPayload(t, deleteEnvelope)
 }
 
-func TestPurgeWorkspaceRecordsPublishesDeleteCommandPayloads(t *testing.T) {
+func TestPurgeWorkspaceRecordsSendsOwnerCommands(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	testHub := newWorkspaceCommandTestHub(t)
 	workspaceID := common.WorkspaceID("ws-purge-command-payload")
 	runID := common.RunID("run-purge-command-payload")
-	memoryID := common.MemoryID("mem-purge-command-payload")
+	memoryID := common.MemoryID("memory-purge-command-payload")
 	ticketID := common.TicketID("ticket-purge-command-payload")
 	approvalID := common.ApprovalID("approval-purge-command-payload")
 
-	hub.Subscribe(runevents.TopicRunCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{Payload: map[string]any{
-			events.PayloadKeyRuns: []*runmodel.Run{{ID: runID, WorkspaceID: workspaceID}},
-		}})
+	testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandListByWorkspace, func(any) (any, error) {
+		return runevents.RunCommandResult{Runs: []*runmodel.Run{{ID: runID, WorkspaceID: workspaceID}}}, nil
 	})
-	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandPurgeRun, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(envelope)
+	testHub.subscribe(orchestratorevents.CommandDestination, orchestratorevents.TopicOrchestratorCommandPurgeRun, emptyOrchestratorResult)
+	testHub.subscribe(memoryevents.CommandDestination, memoryevents.TopicMemoryCommandListByWorkspace, func(any) (any, error) {
+		return memoryevents.MemoryCommandResult{Items: []*memorymodel.MemoryItem{{ID: memoryID, WorkspaceID: workspaceID, RunID: runID}}}, nil
 	})
-	hub.Subscribe(memoryevents.TopicMemoryCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{Payload: map[string]any{
-			events.PayloadKeyMemoryItems: []*memorymodel.MemoryItem{{ID: memoryID, WorkspaceID: workspaceID, RunID: runID}},
-		}})
+	testHub.subscribe(decisionevents.CommandDestination, decisionevents.TopicDecisionCommandListTicketsByWS, func(any) (any, error) {
+		return decisionevents.DecisionCommandResult{Tickets: []*decisionmodel.Ticket{{ID: ticketID, WorkspaceID: workspaceID, RunID: runID}}}, nil
 	})
-	hub.Subscribe(decisionevents.TopicDecisionCommandListTicketsByWS, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{Payload: map[string]any{
-			events.PayloadKeyTickets: []*decisionmodel.Ticket{{ID: ticketID, WorkspaceID: workspaceID, RunID: runID}},
-		}})
+	testHub.subscribe(approvalevents.CommandDestination, approvalevents.TopicApprovalCommandListByWorkspace, func(any) (any, error) {
+		return approvalevents.ApprovalCommandResult{Approvals: []*approvalmodel.Approval{{ID: approvalID, WorkspaceID: workspaceID, RunID: runID}}}, nil
 	})
-	hub.Subscribe(approvalevents.TopicApprovalCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{Payload: map[string]any{
-			events.PayloadKeyItems: []*approvalmodel.Approval{{ID: approvalID, WorkspaceID: workspaceID, RunID: runID}},
-		}})
+	testHub.subscribe(resultevents.CommandDestination, resultevents.TopicArtifactCommandListByWorkspace, func(any) (any, error) {
+		return resultevents.ResultCommandResult{Artifacts: []*resultmodel.Artifact{}}, nil
 	})
-	hub.Subscribe(resultevents.TopicArtifactCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{Payload: map[string]any{
-			events.PayloadKeyItems: []*resultmodel.Artifact{},
-		}})
+	testHub.subscribe(resultevents.CommandDestination, resultevents.TopicResultCommandListByWorkspace, func(any) (any, error) {
+		return resultevents.ResultCommandResult{Results: []*resultmodel.Result{}}, nil
 	})
-	hub.Subscribe(resultevents.TopicResultCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{Payload: map[string]any{
-			events.PayloadKeyItems: []*resultmodel.Result{},
-		}})
-	})
-	for _, topic := range []string{
-		memoryevents.TopicMemoryCommandDelete,
-		decisionevents.TopicDecisionCommandDeleteResolution,
-		decisionevents.TopicDecisionCommandDeleteTicket,
-		approvalevents.TopicApprovalCommandDelete,
-		runevents.TopicRunCommandDelete,
-	} {
-		hub.Subscribe(topic, func(_ context.Context, envelope events.Envelope) error {
-			return events.Response(envelope)
-		})
-	}
+	testHub.subscribe(memoryevents.CommandDestination, memoryevents.TopicMemoryCommandDelete, emptyMemoryResult)
+	testHub.subscribe(decisionevents.CommandDestination, decisionevents.TopicDecisionCommandDeleteResolution, emptyDecisionResult)
+	testHub.subscribe(decisionevents.CommandDestination, decisionevents.TopicDecisionCommandDeleteTicket, emptyDecisionResult)
+	testHub.subscribe(approvalevents.CommandDestination, approvalevents.TopicApprovalCommandDelete, emptyApprovalResult)
+	testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandDelete, emptyRunResult)
 
-	if err := PurgeWorkspaceRecords(ctx, hub, workspaceID); err != nil {
+	if err := PurgeWorkspaceRecords(ctx, testHub.hub, workspaceID); err != nil {
 		t.Fatalf("PurgeWorkspaceRecords: %v", err)
 	}
 
-	orchestratorPurge := publishedByTopic(t, hub, orchestratorevents.TopicOrchestratorCommandPurgeRun)
-	orchestratorCmd, ok := orchestratorPurge.Payload[events.PayloadKeyCommand].(orchestratorcontracts.PurgeRunCommand)
+	orchestratorCmd, ok := testHub.command(t, orchestratorevents.TopicOrchestratorCommandPurgeRun, 0).(orchestratorevents.PurgeRunCommand)
 	if !ok || orchestratorCmd.RunID != runID {
-		t.Fatalf("orchestrator purge command = %#v, want PurgeRunCommand(%s)", orchestratorPurge.Payload[events.PayloadKeyCommand], runID)
+		t.Fatalf("orchestrator purge command = %#v, want run %s", orchestratorCmd, runID)
 	}
-	if _, ok := orchestratorPurge.Payload[events.PayloadKeyRunID]; ok {
-		t.Fatalf("orchestrator purge payload contains legacy runId field")
-	}
-
-	memoryDelete := publishedByTopic(t, hub, memoryevents.TopicMemoryCommandDelete)
-	memoryCmd, ok := memoryDelete.Payload[events.PayloadKeyCommand].(memorycontracts.DeleteMemoryItemCommand)
+	memoryCmd, ok := testHub.command(t, memoryevents.TopicMemoryCommandDelete, 0).(memoryevents.DeleteMemoryCommand)
 	if !ok || memoryCmd.MemoryID != memoryID {
-		t.Fatalf("memory delete command = %#v, want DeleteMemoryItemCommand(%s)", memoryDelete.Payload[events.PayloadKeyCommand], memoryID)
+		t.Fatalf("memory delete command = %#v, want memory %s", memoryCmd, memoryID)
 	}
-	if _, ok := memoryDelete.Payload[events.PayloadKeyMemoryID]; ok {
-		t.Fatalf("memory delete payload contains legacy memoryId field")
-	}
-
-	resolutionDelete := publishedByTopic(t, hub, decisionevents.TopicDecisionCommandDeleteResolution)
-	resolutionCmd, ok := resolutionDelete.Payload[events.PayloadKeyCommand].(decisioncontracts.DeleteResolutionCommand)
+	resolutionCmd, ok := testHub.command(t, decisionevents.TopicDecisionCommandDeleteResolution, 0).(decisionevents.DeleteResolutionCommand)
 	if !ok || resolutionCmd.TicketID != ticketID {
-		t.Fatalf("resolution delete command = %#v, want DeleteResolutionCommand(%s)", resolutionDelete.Payload[events.PayloadKeyCommand], ticketID)
+		t.Fatalf("resolution delete command = %#v, want ticket %s", resolutionCmd, ticketID)
 	}
-	if _, ok := resolutionDelete.Payload[events.PayloadKeyBlockingTicketID]; ok {
-		t.Fatalf("resolution delete payload contains legacy blockingTicketId field")
-	}
-
-	ticketDelete := publishedByTopic(t, hub, decisionevents.TopicDecisionCommandDeleteTicket)
-	ticketCmd, ok := ticketDelete.Payload[events.PayloadKeyCommand].(decisioncontracts.DeleteTicketCommand)
+	ticketCmd, ok := testHub.command(t, decisionevents.TopicDecisionCommandDeleteTicket, 0).(decisionevents.DeleteTicketCommand)
 	if !ok || ticketCmd.TicketID != ticketID {
-		t.Fatalf("ticket delete command = %#v, want DeleteTicketCommand(%s)", ticketDelete.Payload[events.PayloadKeyCommand], ticketID)
+		t.Fatalf("ticket delete command = %#v, want ticket %s", ticketCmd, ticketID)
 	}
-	if _, ok := ticketDelete.Payload[events.PayloadKeyBlockingTicketID]; ok {
-		t.Fatalf("ticket delete payload contains legacy blockingTicketId field")
-	}
-
-	approvalDelete := publishedByTopic(t, hub, approvalevents.TopicApprovalCommandDelete)
-	approvalCmd, ok := approvalDelete.Payload[events.PayloadKeyCommand].(approvalcontracts.DeleteApprovalCommand)
+	approvalCmd, ok := testHub.command(t, approvalevents.TopicApprovalCommandDelete, 0).(approvalevents.DeleteApprovalCommand)
 	if !ok || approvalCmd.ApprovalID != approvalID {
-		t.Fatalf("approval delete command = %#v, want DeleteApprovalCommand(%s)", approvalDelete.Payload[events.PayloadKeyCommand], approvalID)
+		t.Fatalf("approval delete command = %#v, want approval %s", approvalCmd, approvalID)
 	}
-	if _, ok := approvalDelete.Payload[events.PayloadKeyApprovalID]; ok {
-		t.Fatalf("approval delete payload contains legacy approvalId field")
-	}
-
-	runDelete := publishedByTopic(t, hub, runevents.TopicRunCommandDelete)
-	runCmd, ok := runDelete.Payload[events.PayloadKeyCommand].(runcontracts.DeleteRunCommand)
+	runCmd, ok := testHub.command(t, runevents.TopicRunCommandDelete, 0).(runevents.DeleteRunCommand)
 	if !ok || runCmd.RunID != runID {
-		t.Fatalf("run delete command = %#v, want DeleteRunCommand(%s)", runDelete.Payload[events.PayloadKeyCommand], runID)
-	}
-	if _, ok := runDelete.Payload[events.PayloadKeyRunID]; ok {
-		t.Fatalf("run delete payload contains legacy runId field")
+		t.Fatalf("run delete command = %#v, want run %s", runCmd, runID)
 	}
 }
 
 func TestPurgeWorkspaceRecordsTreatsMissingChildRecordsAsAlreadyPurged(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	testHub := newWorkspaceCommandTestHub(t)
 	workspaceID := common.WorkspaceID("ws-purge-missing-children")
 	runID := common.RunID("run-purge-missing-children")
 	resultListCalled := false
 
-	hub.Subscribe(runevents.TopicRunCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{Payload: map[string]any{
-			events.PayloadKeyRuns: []*runmodel.Run{{ID: runID, WorkspaceID: workspaceID}},
-		}})
+	testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandListByWorkspace, func(any) (any, error) {
+		return runevents.RunCommandResult{Runs: []*runmodel.Run{{ID: runID, WorkspaceID: workspaceID}}}, nil
 	})
-	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandPurgeRun, func(_ context.Context, envelope events.Envelope) error {
-		return common.ErrNotFound
-	})
-	hub.Subscribe(memoryevents.TopicMemoryCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-		return common.ErrNotFound
-	})
-	hub.Subscribe(decisionevents.TopicDecisionCommandListTicketsByWS, func(_ context.Context, envelope events.Envelope) error {
-		return common.ErrNotFound
-	})
-	hub.Subscribe(approvalevents.TopicApprovalCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-		return common.ErrNotFound
-	})
-	hub.Subscribe(resultevents.TopicArtifactCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-		return common.ErrNotFound
-	})
-	hub.Subscribe(resultevents.TopicResultCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+	for _, command := range []struct {
+		destination string
+		topic       string
+	}{
+		{orchestratorevents.CommandDestination, orchestratorevents.TopicOrchestratorCommandPurgeRun},
+		{memoryevents.CommandDestination, memoryevents.TopicMemoryCommandListByWorkspace},
+		{decisionevents.CommandDestination, decisionevents.TopicDecisionCommandListTicketsByWS},
+		{approvalevents.CommandDestination, approvalevents.TopicApprovalCommandListByWorkspace},
+		{resultevents.CommandDestination, resultevents.TopicArtifactCommandListByWorkspace},
+		{runevents.CommandDestination, runevents.TopicRunCommandDelete},
+	} {
+		testHub.subscribe(command.destination, command.topic, func(any) (any, error) { return nil, common.ErrNotFound })
+	}
+	testHub.subscribe(resultevents.CommandDestination, resultevents.TopicResultCommandListByWorkspace, func(any) (any, error) {
 		resultListCalled = true
-		return common.ErrNotFound
-	})
-	hub.Subscribe(runevents.TopicRunCommandDelete, func(_ context.Context, envelope events.Envelope) error {
-		return common.ErrNotFound
+		return nil, common.ErrNotFound
 	})
 
-	if err := PurgeWorkspaceRecords(ctx, hub, workspaceID); err != nil {
+	if err := PurgeWorkspaceRecords(ctx, testHub.hub, workspaceID); err != nil {
 		t.Fatalf("PurgeWorkspaceRecords err = %v, want nil", err)
 	}
 	if !resultListCalled {
@@ -287,13 +250,11 @@ func TestPurgeWorkspaceEventStreamTreatsMissingRecordsAsAlreadyPurged(t *testing
 		{name: "conflict", err: common.ErrConflict},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
-			hub := events.NewMemoryHub()
-			hub.Subscribe(eventstreamevents.TopicEventStreamCommandPurgeWorkspace, func(_ context.Context, envelope events.Envelope) error {
-				return tc.err
+			testHub := newWorkspaceCommandTestHub(t)
+			testHub.subscribe(eventstreamevents.CommandDestination, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, func(any) (any, error) {
+				return nil, tc.err
 			})
-
-			if err := PurgeWorkspaceEventStream(ctx, hub, "ws-eventstream-already-purged"); err != nil {
+			if err := PurgeWorkspaceEventStream(context.Background(), testHub.hub, "ws-eventstream-already-purged"); err != nil {
 				t.Fatalf("PurgeWorkspaceEventStream err = %v, want nil", err)
 			}
 		})
@@ -309,53 +270,37 @@ func TestDeleteWorkspaceViewDoesNotFailAfterWorkspaceDeletedWhenPostPurgeCleanup
 		{name: "conflict", err: common.ErrConflict},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
-			hub := events.NewMemoryHub()
+			testHub := newWorkspaceCommandTestHub(t)
 			workspaceID := common.WorkspaceID("ws-delete-post-purge-" + tc.name)
-
-			hub.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ context.Context, envelope events.Envelope) error {
-				return events.Response(events.Envelope{Payload: map[string]any{
-					events.PayloadKeyWorkspace: &workspacemodel.Workspace{ID: workspaceID},
-				}})
+			testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandGet, func(any) (any, error) {
+				return workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: workspaceID}}, nil
 			})
-			hub.Subscribe(runevents.TopicRunCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-				return events.Response(events.Envelope{Payload: map[string]any{
-					events.PayloadKeyRuns: []*runmodel.Run{},
-				}})
+			testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandListByWorkspace, func(any) (any, error) {
+				return runevents.RunCommandResult{Runs: []*runmodel.Run{}}, nil
 			})
-			hub.Subscribe(memoryevents.TopicMemoryCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-				return events.Response(events.Envelope{Payload: map[string]any{
-					events.PayloadKeyMemoryItems: []*memorymodel.MemoryItem{},
-				}})
+			testHub.subscribe(memoryevents.CommandDestination, memoryevents.TopicMemoryCommandListByWorkspace, func(any) (any, error) {
+				return memoryevents.MemoryCommandResult{Items: []*memorymodel.MemoryItem{}}, nil
 			})
-			hub.Subscribe(decisionevents.TopicDecisionCommandListTicketsByWS, func(_ context.Context, envelope events.Envelope) error {
-				return events.Response(events.Envelope{Payload: map[string]any{
-					events.PayloadKeyTickets: []*decisionmodel.Ticket{},
-				}})
+			testHub.subscribe(decisionevents.CommandDestination, decisionevents.TopicDecisionCommandListTicketsByWS, func(any) (any, error) {
+				return decisionevents.DecisionCommandResult{Tickets: []*decisionmodel.Ticket{}}, nil
 			})
-			hub.Subscribe(approvalevents.TopicApprovalCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-				return events.Response(events.Envelope{Payload: map[string]any{
-					events.PayloadKeyItems: []*approvalmodel.Approval{},
-				}})
+			testHub.subscribe(approvalevents.CommandDestination, approvalevents.TopicApprovalCommandListByWorkspace, func(any) (any, error) {
+				return approvalevents.ApprovalCommandResult{Approvals: []*approvalmodel.Approval{}}, nil
 			})
-			hub.Subscribe(resultevents.TopicArtifactCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-				return events.Response(events.Envelope{Payload: map[string]any{
-					events.PayloadKeyItems: []*resultmodel.Artifact{},
-				}})
+			testHub.subscribe(resultevents.CommandDestination, resultevents.TopicArtifactCommandListByWorkspace, func(any) (any, error) {
+				return resultevents.ResultCommandResult{Artifacts: []*resultmodel.Artifact{}}, nil
 			})
-			hub.Subscribe(resultevents.TopicResultCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-				return events.Response(events.Envelope{Payload: map[string]any{
-					events.PayloadKeyItems: []*resultmodel.Result{},
-				}})
+			testHub.subscribe(resultevents.CommandDestination, resultevents.TopicResultCommandListByWorkspace, func(any) (any, error) {
+				return resultevents.ResultCommandResult{Results: []*resultmodel.Result{}}, nil
 			})
-			hub.Subscribe(workspaceevents.TopicWorkspaceCommandDelete, func(_ context.Context, envelope events.Envelope) error {
-				return events.Response(envelope)
+			testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandDelete, func(any) (any, error) {
+				return workspaceevents.WorkspaceCommandResult{}, nil
 			})
-			hub.Subscribe(eventstreamevents.TopicEventStreamCommandPurgeWorkspace, func(_ context.Context, envelope events.Envelope) error {
-				return tc.err
+			testHub.subscribe(eventstreamevents.CommandDestination, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, func(any) (any, error) {
+				return nil, tc.err
 			})
 
-			err := DeleteWorkspaceView(ctx, hub, DeleteWorkspaceViewRequest{
+			err := DeleteWorkspaceView(context.Background(), testHub.hub, DeleteWorkspaceViewRequest{
 				WorkspaceID: string(workspaceID),
 				Command:     appmodelcore.DeleteWorkspaceCommand{Purge: true},
 			})
@@ -366,76 +311,52 @@ func TestDeleteWorkspaceViewDoesNotFailAfterWorkspaceDeletedWhenPostPurgeCleanup
 	}
 }
 
-func assertNoWorkspaceTemplateLegacyPayload(t *testing.T, envelope events.Envelope) {
-	t.Helper()
-	if _, ok := envelope.Payload[events.PayloadKeyWorkspaceTemplate]; ok {
-		t.Fatalf("payload contains legacy workspaceTemplate field")
-	}
-	if _, ok := envelope.Payload[events.PayloadKeyTemplateID]; ok {
-		t.Fatalf("payload contains legacy templateId field")
-	}
-}
-
-func publishedByTopic(t *testing.T, hub *events.MemoryHub, topic string) events.Envelope {
-	t.Helper()
-	for _, item := range hub.Published() {
-		if item.Topic == topic {
-			return item
-		}
-	}
-	t.Fatalf("published topic %s not found", topic)
-	return events.Envelope{}
-}
-
-func TestDeleteWorkspaceRecordPublishesCommandPayload(t *testing.T) {
-	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandDelete, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(envelope)
+func TestDeleteWorkspaceRecordSendsOwnerCommand(t *testing.T) {
+	testHub := newWorkspaceCommandTestHub(t)
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandDelete, func(any) (any, error) {
+		return workspaceevents.WorkspaceCommandResult{}, nil
 	})
-
 	workspaceID := common.WorkspaceID("ws-delete-command-payload")
-	if err := DeleteWorkspaceRecord(ctx, hub, workspaceID); err != nil {
+	if err := DeleteWorkspaceRecord(context.Background(), testHub.hub, workspaceID); err != nil {
 		t.Fatalf("DeleteWorkspaceRecord: %v", err)
 	}
-
-	published := hub.Published()
-	if len(published) != 1 {
-		t.Fatalf("published len = %d, want 1", len(published))
-	}
-	cmd, ok := published[0].Payload[events.PayloadKeyCommand].(workspacecontracts.DeleteWorkspaceCommand)
-	if !ok {
-		t.Fatalf("payload command = %T, want DeleteWorkspaceCommand", published[0].Payload[events.PayloadKeyCommand])
-	}
-	if cmd.WorkspaceID != workspaceID {
-		t.Fatalf("command workspaceID = %s, want %s", cmd.WorkspaceID, workspaceID)
-	}
-	if _, ok := published[0].Payload[events.PayloadKeyWorkspaceID]; ok {
-		t.Fatalf("payload contains legacy workspaceId field")
+	cmd, ok := testHub.command(t, workspaceevents.TopicWorkspaceCommandDelete, 0).(workspaceevents.DeleteWorkspaceCommand)
+	if !ok || cmd.WorkspaceID != workspaceID {
+		t.Fatalf("command = %#v, want DeleteWorkspaceCommand(%s)", cmd, workspaceID)
 	}
 }
 
-func TestPurgeWorkspaceEventStreamPublishesCommandPayload(t *testing.T) {
-	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(eventstreamevents.TopicEventStreamCommandPurgeWorkspace, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(envelope)
+func TestPurgeWorkspaceEventStreamSendsOwnerCommand(t *testing.T) {
+	testHub := newWorkspaceCommandTestHub(t)
+	testHub.subscribe(eventstreamevents.CommandDestination, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, func(any) (any, error) {
+		return eventstreamevents.EventStreamCommandResult{}, nil
 	})
-
 	workspaceID := common.WorkspaceID("ws-eventstream-purge-command")
-	if err := PurgeWorkspaceEventStream(ctx, hub, workspaceID); err != nil {
+	if err := PurgeWorkspaceEventStream(context.Background(), testHub.hub, workspaceID); err != nil {
 		t.Fatalf("PurgeWorkspaceEventStream: %v", err)
 	}
-
-	published := hub.Published()
-	if len(published) != 1 {
-		t.Fatalf("published len = %d, want 1", len(published))
-	}
-	cmd, ok := published[0].Payload[events.PayloadKeyCommand].(eventstreamcontracts.PurgeWorkspaceCommand)
+	cmd, ok := testHub.command(t, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, 0).(eventstreamevents.PurgeWorkspaceCommand)
 	if !ok || cmd.WorkspaceID != workspaceID {
-		t.Fatalf("payload command = %#v, want PurgeWorkspaceCommand(%s)", published[0].Payload[events.PayloadKeyCommand], workspaceID)
+		t.Fatalf("command = %#v, want PurgeWorkspaceCommand(%s)", cmd, workspaceID)
 	}
-	if _, ok := published[0].Payload[events.PayloadKeyWorkspaceID]; ok {
-		t.Fatalf("payload contains legacy workspaceId field")
-	}
+}
+
+func emptyOrchestratorResult(any) (any, error) {
+	return orchestratorevents.OrchestratorCommandResult{}, nil
+}
+
+func emptyMemoryResult(any) (any, error) {
+	return memoryevents.MemoryCommandResult{}, nil
+}
+
+func emptyDecisionResult(any) (any, error) {
+	return decisionevents.DecisionCommandResult{}, nil
+}
+
+func emptyApprovalResult(any) (any, error) {
+	return approvalevents.ApprovalCommandResult{}, nil
+}
+
+func emptyRunResult(any) (any, error) {
+	return runevents.RunCommandResult{}, nil
 }

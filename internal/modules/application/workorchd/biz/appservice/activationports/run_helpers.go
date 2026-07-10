@@ -4,8 +4,9 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
+	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -52,5 +53,28 @@ func RecordActivationMemoryRecallTrace(ctx context.Context, hub events.Hub, runI
 	if trace == nil {
 		return nil
 	}
-	return ownercommandports.RecordMemoryRecallTrace(ctx, hub, trace)
+	if err := sendActivationMagicCommand[memoryevents.UpsertMemoryRecallTraceCommand, memoryevents.MemoryCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, trace.WorkspaceID), hub, memoryevents.TopicMemoryRecallTraceCommandUpsert, memoryevents.CommandDestination, "memory_recall", string(trace.ID), trace.WorkspaceID, trace.RunID, memoryevents.UpsertMemoryRecallTraceCommandFromModel(trace)); err != nil {
+		return err
+	}
+	return events.PublishByContract(ctx, hub, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        memoryevents.TopicMemoryRecallRecorded,
+		OccurredAt:   trace.OccurredAt,
+		SourceModule: modulecommon.EventSourceModuleID,
+		SubjectType:  "memory_recall",
+		SubjectID:    string(trace.ID),
+		WorkspaceID:  string(trace.WorkspaceID),
+		RunID:        string(trace.RunID),
+		Payload: events.MemoryRecallPayload(
+			trace.ID,
+			trace.Stage,
+			trace.Source,
+			trace.Policy,
+			trace.Status,
+			trace.ProviderID,
+			trace.Operation,
+			trace.RetrievedMemoryIDs,
+			trace.Reason,
+		),
+	})
 }

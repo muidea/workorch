@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -12,10 +13,6 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
-	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
-	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
-	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
-	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -69,7 +66,8 @@ func TestEventHubActionPortReturnsInvalidArgumentWhenHubOrRequiredInputMissing(t
 
 func TestEventHubActionPortPublishesOwnerCommands(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-action-port")
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHub(rawHub)
 	port := runtimeports.NewEventHubActionPort(hub)
 	wantTopics := []string{
 		workspaceevents.TopicWorkspaceCommandEnsure,
@@ -84,12 +82,18 @@ func TestEventHubActionPortPublishesOwnerCommands(t *testing.T) {
 		approvalevents.TopicApprovalCommandEnsureApproved,
 		approvalevents.TopicApprovalCommandEnsureRejected,
 	}
-	for _, topic := range wantTopics {
-		topic := topic
-		hub.Subscribe(topic, func(_ context.Context, envelope events.Envelope) error {
-			return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: envelope.Payload})
-		})
-	}
+	captured := map[string]any{}
+	subscribeRuntimeActionCommand(t, rawHub, workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandEnsure, captured)
+	subscribeRuntimeActionCommand(t, rawHub, runevents.CommandDestination, runevents.TopicRunCommandEnsure, captured)
+	subscribeRuntimeActionCommand(t, rawHub, orchestratorevents.CommandDestination, orchestratorevents.TopicOrchestratorCommandStartRun, captured)
+	subscribeRuntimeActionCommand(t, rawHub, orchestratorevents.CommandDestination, orchestratorevents.TopicOrchestratorCommandBlockDecision, captured)
+	subscribeRuntimeActionCommand(t, rawHub, orchestratorevents.CommandDestination, orchestratorevents.TopicOrchestratorCommandBlockApproval, captured)
+	subscribeRuntimeActionCommand(t, rawHub, orchestratorevents.CommandDestination, orchestratorevents.TopicOrchestratorCommandResumeRun, captured)
+	subscribeRuntimeActionCommand(t, rawHub, decisionevents.CommandDestination, decisionevents.TopicDecisionCommandEnsureTicket, captured)
+	subscribeRuntimeActionCommand(t, rawHub, decisionevents.CommandDestination, decisionevents.TopicDecisionCommandEnsureResolved, captured)
+	subscribeRuntimeActionCommand(t, rawHub, approvalevents.CommandDestination, approvalevents.TopicApprovalCommandEnsure, captured)
+	subscribeRuntimeActionCommand(t, rawHub, approvalevents.CommandDestination, approvalevents.TopicApprovalCommandEnsureApproved, captured)
+	subscribeRuntimeActionCommand(t, rawHub, approvalevents.CommandDestination, approvalevents.TopicApprovalCommandEnsureRejected, captured)
 
 	if err := port.EnsureWorkspace(ctx, "ws-action-port", "workspace action port"); err != nil {
 		t.Fatalf("EnsureWorkspace: %v", err)
@@ -126,68 +130,62 @@ func TestEventHubActionPortPublishesOwnerCommands(t *testing.T) {
 		t.Fatalf("EnsureApprovalRejected: %v", err)
 	}
 
-	published := hub.Published()
-	if len(published) != len(wantTopics) {
-		t.Fatalf("published events = %d, want %d", len(published), len(wantTopics))
-	}
-	for idx, topic := range wantTopics {
-		if published[idx].Topic != topic {
-			t.Fatalf("event[%d].Topic = %s, want %s", idx, published[idx].Topic, topic)
-		}
-		if published[idx].SourceModule != "workorchd/appservice/runtime-actions" {
-			t.Fatalf("event[%d].SourceModule = %s", idx, published[idx].SourceModule)
+	for _, topic := range wantTopics {
+		if captured[topic] == nil {
+			t.Fatalf("missing captured command for %s", topic)
 		}
 	}
-	workspaceCmd, ok := published[0].Payload[events.PayloadKeyCommand].(workspacecontracts.EnsureWorkspaceCommand)
+	workspaceCmd, ok := captured[workspaceevents.TopicWorkspaceCommandEnsure].(workspaceevents.EnsureWorkspaceCommand)
 	if !ok || workspaceCmd.WorkspaceID != "ws-action-port" || workspaceCmd.Title != "workspace action port" {
-		t.Fatalf("workspace ensure command = %#v", published[0].Payload[events.PayloadKeyCommand])
+		t.Fatalf("workspace ensure command = %#v", captured[workspaceevents.TopicWorkspaceCommandEnsure])
 	}
-	runEnsureCmd, ok := published[1].Payload[events.PayloadKeyCommand].(runcontracts.CreateRunCommand)
+	runEnsureCmd, ok := captured[runevents.TopicRunCommandEnsure].(runevents.EnsureRunCommand)
 	if !ok || runEnsureCmd.RunID != "run-action-port" || runEnsureCmd.WorkspaceID != "ws-action-port" {
-		t.Fatalf("run ensure command = %#v", published[1].Payload[events.PayloadKeyCommand])
+		t.Fatalf("run ensure command = %#v", captured[runevents.TopicRunCommandEnsure])
 	}
-	if runID, ok := published[2].Payload[events.PayloadKeyRunID].(string); !ok || runID != "run-action-port" {
-		t.Fatalf("run start payload = %#v", published[2].Payload)
+	runStartCmd, ok := captured[orchestratorevents.TopicOrchestratorCommandStartRun].(orchestratorevents.StartRunCommand)
+	if !ok || runStartCmd.RunID != "run-action-port" {
+		t.Fatalf("run start command = %#v", captured[orchestratorevents.TopicOrchestratorCommandStartRun])
 	}
-	if published[2].WorkspaceID != "ws-action-port" {
-		t.Fatalf("run start workspace = %q", published[2].WorkspaceID)
-	}
-	blockDecisionCmd, ok := published[3].Payload[events.PayloadKeyCommand].(runcontracts.BlockOnDecisionCommand)
+	blockDecisionCmd, ok := captured[orchestratorevents.TopicOrchestratorCommandBlockDecision].(orchestratorevents.BlockDecisionCommand)
 	if !ok || blockDecisionCmd.RunID != "run-action-port" || blockDecisionCmd.TicketID != "ticket-action-port" {
-		t.Fatalf("block decision command = %#v", published[3].Payload[events.PayloadKeyCommand])
+		t.Fatalf("block decision command = %#v", captured[orchestratorevents.TopicOrchestratorCommandBlockDecision])
 	}
-	blockApprovalCmd, ok := published[4].Payload[events.PayloadKeyCommand].(runcontracts.BlockOnApprovalCommand)
+	blockApprovalCmd, ok := captured[orchestratorevents.TopicOrchestratorCommandBlockApproval].(orchestratorevents.BlockApprovalCommand)
 	if !ok || blockApprovalCmd.RunID != "run-action-port" || blockApprovalCmd.ApprovalID != "approval-action-port" {
-		t.Fatalf("block approval command = %#v", published[4].Payload[events.PayloadKeyCommand])
+		t.Fatalf("block approval command = %#v", captured[orchestratorevents.TopicOrchestratorCommandBlockApproval])
 	}
-	resumeCmd, ok := published[5].Payload[events.PayloadKeyCommand].(runcontracts.ResumeRunCommand)
+	resumeCmd, ok := captured[orchestratorevents.TopicOrchestratorCommandResumeRun].(orchestratorevents.ResumeRunCommand)
 	if !ok || resumeCmd.RunID != "run-action-port" || resumeCmd.WorkspaceID != "ws-action-port" {
-		t.Fatalf("run resume command = %#v", published[5].Payload[events.PayloadKeyCommand])
+		t.Fatalf("run resume command = %#v", captured[orchestratorevents.TopicOrchestratorCommandResumeRun])
 	}
-	ticketCmd, ok := published[6].Payload[events.PayloadKeyCommand].(decisioncontracts.CreateTicketCommand)
+	ticketCmd, ok := captured[decisionevents.TopicDecisionCommandEnsureTicket].(decisionevents.EnsureTicketCommand)
 	if !ok || ticketCmd.TicketID != "ticket-action-port" || ticketCmd.WorkspaceID != "ws-action-port" || ticketCmd.RunID != "run-action-port" {
-		t.Fatalf("decision ensure command = %#v", published[6].Payload[events.PayloadKeyCommand])
+		t.Fatalf("decision ensure command = %#v", captured[decisionevents.TopicDecisionCommandEnsureTicket])
 	}
-	resolveCmd, ok := published[7].Payload[events.PayloadKeyCommand].(decisioncontracts.ResolveTicketCommand)
+	resolveCmd, ok := captured[decisionevents.TopicDecisionCommandEnsureResolved].(decisionevents.EnsureResolvedCommand)
 	if !ok || resolveCmd.ResolutionID != "resolution-action-port" || resolveCmd.TicketID != "ticket-action-port" || resolveCmd.Payload["operator"] != "action-port" {
-		t.Fatalf("decision resolve command = %#v", published[7].Payload[events.PayloadKeyCommand])
+		t.Fatalf("decision resolve command = %#v", captured[decisionevents.TopicDecisionCommandEnsureResolved])
 	}
-	approvalCmd, ok := published[8].Payload[events.PayloadKeyCommand].(approvalcontracts.CreateApprovalCommand)
+	approvalCmd, ok := captured[approvalevents.TopicApprovalCommandEnsure].(approvalevents.EnsureApprovalCommand)
 	if !ok || approvalCmd.ApprovalID != "approval-action-port" || approvalCmd.WorkspaceID != "ws-action-port" || approvalCmd.RunID != "run-action-port" {
-		t.Fatalf("approval ensure command = %#v", published[8].Payload[events.PayloadKeyCommand])
+		t.Fatalf("approval ensure command = %#v", captured[approvalevents.TopicApprovalCommandEnsure])
 	}
-	approvedCmd, ok := published[9].Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
+	approvedCmd, ok := captured[approvalevents.TopicApprovalCommandEnsureApproved].(approvalevents.EnsureApprovedCommand)
 	if !ok || approvedCmd.ApprovalID != "approval-action-port" || approvedCmd.WorkspaceID != "ws-action-port" {
-		t.Fatalf("approval approved command = %#v", published[9].Payload[events.PayloadKeyCommand])
+		t.Fatalf("approval approved command = %#v", captured[approvalevents.TopicApprovalCommandEnsureApproved])
 	}
-	if published[9].WorkspaceID != "ws-action-port" || published[9].Payload[events.PayloadKeyWorkspaceID] != "ws-action-port" {
-		t.Fatalf("approval approved scope = envelope:%q payload:%#v, want workspace scope", published[9].WorkspaceID, published[9].Payload)
-	}
-	rejectedCmd, ok := published[10].Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
+	rejectedCmd, ok := captured[approvalevents.TopicApprovalCommandEnsureRejected].(approvalevents.EnsureRejectedCommand)
 	if !ok || rejectedCmd.ApprovalID != "approval-action-port" || rejectedCmd.WorkspaceID != "ws-action-port" {
-		t.Fatalf("approval rejected command = %#v", published[10].Payload[events.PayloadKeyCommand])
+		t.Fatalf("approval rejected command = %#v", captured[approvalevents.TopicApprovalCommandEnsureRejected])
 	}
-	if published[10].WorkspaceID != "ws-action-port" || published[10].Payload[events.PayloadKeyWorkspaceID] != "ws-action-port" {
-		t.Fatalf("approval rejected scope = envelope:%q payload:%#v, want workspace scope", published[10].WorkspaceID, published[10].Payload)
-	}
+}
+
+func subscribeRuntimeActionCommand(t *testing.T, rawHub magicevent.Hub, destination string, topic string, captured map[string]any) {
+	t.Helper()
+	observer := magicevent.NewSimpleObserver(destination, rawHub)
+	observer.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
+		captured[topic] = ev.Data()
+		result.Set(struct{}{}, nil)
+	})
 }

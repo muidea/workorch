@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -113,15 +114,17 @@ func TestCLIDecisionResolvePublishesSchedulerContinuation(t *testing.T) {
 		directResumePublished = true
 		return events.Response(events.Envelope{Topic: orchestratorevents.TopicOrchestratorCommandResumeRun + "/response"})
 	})
-	var schedulerEnvelope events.Envelope
-	hub.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(_ context.Context, envelope events.Envelope) error {
-		schedulerEnvelope = envelope
-		return events.Response(events.Envelope{
-			Topic:        envelope.Topic + "/accepted",
-			SourceModule: "workorchd/scheduler",
-			Payload:      map[string]any{"accepted": true},
-		})
+	provider, ok := hub.(interface{ RawHub() magicevent.Hub })
+	if !ok || provider.RawHub() == nil {
+		t.Fatal("session event hub does not expose raw hub")
+	}
+	var schedulerCommand workorchdevents.WorkspaceRunRequestedCommand
+	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, provider.RawHub())
+	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(ev magicevent.Event, result magicevent.Result) {
+		schedulerCommand, _ = ev.Data().(workorchdevents.WorkspaceRunRequestedCommand)
+		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
 	})
+	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
 
 	dispatcher := NewCLICommandDispatcher(session, hub, nil)
 	resource, _, err := dispatcher.handleGovernanceCommand(context.Background(), events.CLICommandPayload{
@@ -144,17 +147,14 @@ func TestCLIDecisionResolvePublishesSchedulerContinuation(t *testing.T) {
 	if directResumePublished {
 		t.Fatal("CLI decision resolve published direct orchestrator resume; want scheduler command only")
 	}
-	if schedulerEnvelope.Topic != workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested {
-		t.Fatalf("scheduler envelope topic = %q, want workspace run command", schedulerEnvelope.Topic)
+	if schedulerCommand.WorkspaceID != workspaceID || schedulerCommand.RunID != runID {
+		t.Fatalf("scheduler command scope = workspace:%q run:%q, want %s/%s", schedulerCommand.WorkspaceID, schedulerCommand.RunID, workspaceID, runID)
 	}
-	if schedulerEnvelope.WorkspaceID != string(workspaceID) || schedulerEnvelope.RunID != string(runID) {
-		t.Fatalf("scheduler envelope scope = workspace:%q run:%q, want %s/%s", schedulerEnvelope.WorkspaceID, schedulerEnvelope.RunID, workspaceID, runID)
-	}
-	if schedulerEnvelope.Payload[events.PayloadKeyIntent] != "replan" ||
-		schedulerEnvelope.Payload[events.PayloadKeyReason] != "decision_replan_resolved" ||
-		schedulerEnvelope.Payload[events.PayloadKeyDecisionID] != string(ticketID) ||
-		schedulerEnvelope.Payload[events.PayloadKeySource] != "cli" {
-		t.Fatalf("scheduler payload = %#v, want cli replan continuation", schedulerEnvelope.Payload)
+	if schedulerCommand.Intent != "replan" ||
+		schedulerCommand.Reason != "decision_replan_resolved" ||
+		schedulerCommand.DecisionID != string(ticketID) ||
+		schedulerCommand.Source != "cli" {
+		t.Fatalf("scheduler command = %#v, want cli replan continuation", schedulerCommand)
 	}
 }
 

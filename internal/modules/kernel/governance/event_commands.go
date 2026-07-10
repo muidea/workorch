@@ -2,7 +2,6 @@ package governance
 
 import (
 	"context"
-	"fmt"
 
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
@@ -20,59 +19,39 @@ func eventResolveDecision(hub events.Hub) ResolveDecisionFunc {
 		workspaceID := stringFromPayload(payload, events.PayloadKeyWorkspaceID)
 		runID := stringFromPayload(payload, events.PayloadKeyRunID)
 		stepID := stringFromPayload(payload, events.PayloadKeyStepID)
-		return publishGovernanceCommand(ctx, hub, decisionevents.TopicDecisionCommandEnsureResolved, "decision_ticket", string(ticketID), map[string]any{
-			events.PayloadKeyBlockingTicketID: string(ticketID),
-			events.PayloadKeyResolutionID:     "resolution-" + string(ticketID) + "-auto-governance",
-			events.PayloadKeyType:             resolutionType,
-			events.PayloadKeyPayload:          payload,
-			events.PayloadKeyWorkspaceID:      workspaceID,
-			events.PayloadKeyRunID:            runID,
-			events.PayloadKeyStepID:           stepID,
-		}, workspaceID, runID, stepID)
+		_, err := sendOwnerMagicCommand[decisionevents.EnsureResolvedCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandEnsureResolved, decisionevents.CommandDestination, "decision_ticket", string(ticketID), common.WorkspaceID(workspaceID), common.RunID(runID), common.StepID(stepID), decisionevents.EnsureResolvedCommand{
+			ResolutionID: common.ResolutionID("resolution-" + string(ticketID) + "-auto-governance"),
+			TicketID:     ticketID,
+			WorkspaceID:  common.WorkspaceID(workspaceID),
+			RunID:        common.RunID(runID),
+			StepID:       common.StepID(stepID),
+			Type:         resolutionType,
+			Payload:      payload,
+		})
+		return err
 	}
 }
 
 func eventResolveApproval(hub events.Hub) ResolveApprovalFunc {
 	return func(ctx context.Context, approvalID common.ApprovalID) error {
-		workspaceID := string(common.RuntimeWorkspaceIDFromContext(ctx))
-		return publishGovernanceCommand(ctx, hub, approvalevents.TopicApprovalCommandEnsureApproved, "approval", string(approvalID), map[string]any{
-			events.PayloadKeyApprovalID:  string(approvalID),
-			events.PayloadKeyWorkspaceID: workspaceID,
-		}, workspaceID, "", "")
+		workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+		_, err := sendOwnerMagicCommand[approvalevents.EnsureApprovedCommand, approvalevents.ApprovalCommandResult](ctx, hub, approvalevents.TopicApprovalCommandEnsureApproved, approvalevents.CommandDestination, "approval", string(approvalID), workspaceID, "", "", approvalevents.EnsureApprovedCommand{
+			ApprovalID:  approvalID,
+			WorkspaceID: workspaceID,
+		})
+		return err
 	}
 }
 
 func eventResumeRun(hub events.Hub) ResumeRunFunc {
 	return func(ctx context.Context, runID common.RunID) error {
-		workspaceID := string(common.RuntimeWorkspaceIDFromContext(ctx))
-		return publishGovernanceCommand(ctx, hub, orchestratorevents.TopicOrchestratorCommandResumeRun, "run", string(runID), map[string]any{
-			events.PayloadKeyWorkspaceID: workspaceID,
-			events.PayloadKeyRunID:       string(runID),
-		}, workspaceID, string(runID), "")
-	}
-}
-
-func publishGovernanceCommand(ctx context.Context, hub events.Hub, topic string, subjectType string, subjectID string, payload map[string]any, workspaceID string, runID string, stepID string) error {
-	if hub == nil || topic == "" || subjectID == "" {
-		return common.ErrInvalidArgument
-	}
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:        topic,
-		SourceModule: ModuleID,
-		SubjectType:  subjectType,
-		SubjectID:    subjectID,
-		WorkspaceID:  workspaceID,
-		RunID:        runID,
-		StepID:       stepID,
-		Payload:      payload,
-	})
-	if _, ok := events.ResponseEnvelope(err); ok {
-		return nil
-	}
-	if err != nil {
+		workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+		_, err := sendOwnerMagicCommand[orchestratorevents.ResumeRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandResumeRun, orchestratorevents.CommandDestination, "run", string(runID), workspaceID, runID, "", orchestratorevents.ResumeRunCommand{
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+		})
 		return err
 	}
-	return fmt.Errorf("governance command %s returned no response", topic)
 }
 
 func stringFromPayload(payload map[string]any, key string) string {

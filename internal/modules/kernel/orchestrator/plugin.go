@@ -8,6 +8,7 @@ import (
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
 	"github.com/muidea/magicCommon/task"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchdeps"
 )
 
@@ -17,12 +18,11 @@ func init() {
 
 func (m *Module) Weight() int { return 30 }
 
-func (m *Module) Setup(_ context.Context, _ event.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
-	repos, err := workorchdeps.ResolveOrchestratorRepositories(ModuleID)
-	if err != nil {
-		return err
+func (m *Module) Setup(_ context.Context, rawEventHub event.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
+	if rawEventHub == nil {
+		return cd.NewError(cd.IllegalParam, "event hub is required")
 	}
-	eventHub, err := workorchdeps.ResolveEventHub(ModuleID)
+	repos, err := workorchdeps.ResolveOrchestratorRepositories(ModuleID)
 	if err != nil {
 		return err
 	}
@@ -30,6 +30,7 @@ func (m *Module) Setup(_ context.Context, _ event.Hub, backgroundRoutine task.Ba
 	if err != nil {
 		return err
 	}
+	eventHub := events.NewMagicHubWithHubOwner(rawEventHub, ModuleID)
 	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry()
 	eventAdapter := NewEventRuntimeAdapter(eventHub)
 	if err := registerRuntimeStepKinds(runtimeRegistry, eventAdapter); err != nil {

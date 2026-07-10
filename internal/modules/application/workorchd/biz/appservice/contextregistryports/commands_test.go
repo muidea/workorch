@@ -200,21 +200,18 @@ func TestMemoryQueriesPublishScopedOwnerReadCommands(t *testing.T) {
 
 func TestEnsureWorkspaceExistsPublishesScopedOwnerReadCommand(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != "ws-memory-workspace-scope" {
-			t.Fatalf("workspace get envelope workspace = %q, want ws-memory-workspace-scope", envelope.WorkspaceID)
+	rawHub := magicevent.NewHub(8)
+	defer rawHub.Terminate(ctx)
+	hub := events.NewMagicHubWithHubOwner(rawHub, "contextregistryports/test")
+	observer := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, rawHub)
+	observer.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(event magicevent.Event, result magicevent.Result) {
+		cmd, ok := event.Data().(workspaceevents.GetWorkspaceCommand)
+		if !ok || cmd.WorkspaceID != "ws-memory-workspace-scope" || common.RuntimeWorkspaceIDFromContext(event.Context()) != "ws-memory-workspace-scope" {
+			t.Fatalf("workspace get command = %+v context workspace=%q", cmd, common.RuntimeWorkspaceIDFromContext(event.Context()))
 		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != "ws-memory-workspace-scope" {
-			t.Fatalf("workspace get payload workspace = %v, want ws-memory-workspace-scope", envelope.Payload[events.PayloadKeyWorkspaceID])
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyWorkspace: &workspacemodel.Workspace{ID: "ws-memory-workspace-scope"},
-			},
-		})
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: cmd.WorkspaceID}}, nil)
 	})
+	defer observer.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 
 	if err := EnsureWorkspaceExists(ctx, hub, "ws-memory-workspace-scope"); err != nil {
 		t.Fatalf("EnsureWorkspaceExists err = %v", err)

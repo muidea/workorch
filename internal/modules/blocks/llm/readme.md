@@ -24,10 +24,12 @@
 - Cache contract: C0/C1/C2/C3-C5 分层必须稳定，volatile runtime details 不得污染 stable prefix。
 - Orchestrator contract: orchestrator 是唯一 contract gate；LLM block 不决定 evidence accepted 或 Result accepted。
 - Event contract: provider usage、stream、cache usage 和 failure diagnostic 必须以 bounded payload/raw ref 发布。
+- EventHub contract: 直接订阅 `/runtime/block` 下 workspace execution topic 的 `runtimeevent.ExecuteCommand`，返回 `ExecuteCommandResult`，并向 `/runtime/orchestrator` 投递具体的 accepted/progress/completed/failed data；顶层载荷禁止使用 Envelope/map/JSON 转换。
 
 ## 已知缺口
 
 - 当前盘点未发现 LLM block 职责缺失；但 cache prefix 稳定性、critical field protection、large output mode 是高风险合同，修改时必须补专项测试。
+- 当前未发现与 orchestrator 的 runtime execute 交互合同缺失。
 
 ## 边界约束
 

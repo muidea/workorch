@@ -9,26 +9,29 @@ import (
 	"testing"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	governancemodule "github.com/muidea/workorch/internal/modules/kernel/governance"
 	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 func TestMain(m *testing.M) {
 	skillHubRunner = testNoopSkillHubRunner{}
+	restoreBootstrapFactories := installAppserviceOwnerModuleTestFactories()
+	defer restoreBootstrapFactories()
 	originalWD, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "get test working directory: %v\n", err)
@@ -57,6 +60,111 @@ func (testNoopSkillHubRunner) RunSkillHub(context.Context, string, ...string) ([
 }
 
 var testSharedBackendSessionCleanup sync.Map
+
+func completeAppserviceTestExports(exports bootstrap.Exports) bootstrap.Exports {
+	repositories := &exports.Repositories
+	if repositories.Souls == nil {
+		repositories.Souls = memory.NewSoulRepository()
+	}
+	if repositories.WorkspaceTemplates == nil {
+		repositories.WorkspaceTemplates = memory.NewWorkspaceTemplateRepository()
+	}
+	if repositories.MemoryItems == nil {
+		repositories.MemoryItems = memory.NewMemoryItemRepository()
+	}
+	if repositories.MemoryRecallTraces == nil {
+		repositories.MemoryRecallTraces = memory.NewMemoryRecallTraceRepository()
+	}
+	if repositories.AutoGovernanceTraces == nil {
+		repositories.AutoGovernanceTraces = memory.NewAutoGovernanceTraceRepository()
+	}
+	if repositories.Skills == nil {
+		repositories.Skills = memory.NewSkillRepository()
+	}
+	if repositories.MCPServers == nil {
+		repositories.MCPServers = memory.NewMCPServerRepository()
+	}
+	if repositories.MCPCapabilities == nil {
+		repositories.MCPCapabilities = memory.NewMCPCapabilityRepository()
+	}
+	if repositories.Results == nil {
+		repositories.Results = memory.NewResultRepository()
+	}
+	if repositories.Artifacts == nil {
+		repositories.Artifacts = memory.NewArtifactRepository()
+	}
+	if repositories.EventRecords == nil {
+		repositories.EventRecords = memory.NewEventRecordRepository()
+	}
+	if repositories.Workspaces == nil {
+		repositories.Workspaces = memory.NewWorkspaceRepository()
+	}
+	if repositories.Goals == nil {
+		repositories.Goals = memory.NewGoalRepository()
+	}
+	if repositories.DoDs == nil {
+		repositories.DoDs = memory.NewDoDRepository()
+	}
+	if repositories.Runs == nil {
+		repositories.Runs = memory.NewRunRepository()
+	}
+	if repositories.Steps == nil {
+		repositories.Steps = memory.NewStepRepository()
+	}
+	if repositories.ToolCalls == nil {
+		repositories.ToolCalls = memory.NewToolCallRepository()
+	}
+	if repositories.Patches == nil {
+		repositories.Patches = memory.NewPatchRepository()
+	}
+	if repositories.ValidationResults == nil {
+		repositories.ValidationResults = memory.NewValidationResultRepository()
+	}
+	if repositories.RuntimeCheckpoints == nil {
+		repositories.RuntimeCheckpoints = memory.NewRuntimeCheckpointRepository()
+	}
+	if repositories.EvidenceRecords == nil {
+		repositories.EvidenceRecords = memory.NewEvidenceRecordRepository()
+	}
+	if repositories.CoverageWorkItems == nil {
+		repositories.CoverageWorkItems = memory.NewCoverageWorkItemRepository()
+	}
+	if repositories.ArtifactContinuations == nil {
+		repositories.ArtifactContinuations = memory.NewArtifactContinuationRepository()
+	}
+	if repositories.Tickets == nil {
+		repositories.Tickets = memory.NewDecisionTicketRepository()
+	}
+	if repositories.Resolutions == nil {
+		repositories.Resolutions = memory.NewDecisionResolutionRepository()
+	}
+	if repositories.Approvals == nil {
+		repositories.Approvals = memory.NewApprovalRepository()
+	}
+	return exports
+}
+
+func startFocusedGovernanceModule(t *testing.T, exports bootstrap.Exports, rawHub magicevent.Hub) {
+	t.Helper()
+	module := governancemodule.New()
+	if err := module.Configure(governancemodule.Dependencies{
+		AutoGovernanceTraces: exports.Repositories.AutoGovernanceTraces,
+		EventHub:             rawHub,
+		LoadConfig: func() (workorchconfig.Config, error) {
+			return workorchconfig.Config{}, nil
+		},
+	}); err != nil {
+		t.Fatalf("configure focused governance module: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("start focused governance module: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(context.Background()); err != nil {
+			t.Errorf("stop focused governance module: %v", err)
+		}
+	})
+}
 
 func newTestRuntimeSession(t *testing.T, backend string, dataRoot string) (*RuntimeSession, context.Context) {
 	t.Helper()
@@ -119,13 +227,31 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 	if err := workspacecore.EnsureDirectoryLayout(layout); err != nil {
 		return Workspace{}, err
 	}
-	if err := ownercommandports.Publish(ctx, hub, workspaceevents.TopicWorkspaceCommandCreate, "workspace", string(id), id, "", map[string]any{
-		events.PayloadKeyWorkspaceID:          string(id),
-		events.PayloadKeyTitle:                title,
-		events.PayloadKeyDescription:          description,
-		events.PayloadKeyDeliverableDirectory: layout.DeliverableDirectory,
-		events.PayloadKeyInternalDirectory:    layout.InternalDirectory,
-	}); err != nil {
+	rawHubProvider, ok := hub.(interface{ RawHub() magicevent.Hub })
+	if !ok || rawHubProvider.RawHub() == nil {
+		return Workspace{}, common.ErrInvalidArgument
+	}
+	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandCreate, "application/workorchd/appservice/test", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.CreateWorkspaceCommand{
+		WorkspaceID:          id,
+		Title:                title,
+		Description:          description,
+		DeliverableDirectory: layout.DeliverableDirectory,
+		InternalDirectory:    layout.InternalDirectory,
+	})
+	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
+		Topic:       workspaceevents.TopicWorkspaceCommandCreate,
+		SubjectType: "workspace",
+		SubjectID:   string(id),
+		WorkspaceID: string(id),
+	}))
+	result := rawHubProvider.RawHub().Send(ev)
+	if result == nil {
+		return Workspace{}, common.ErrInvalidArgument
+	}
+	if err := result.Error(); err != nil {
+		return Workspace{}, err
+	}
+	if _, err := result.Get(); err != nil {
 		return Workspace{}, err
 	}
 
@@ -242,39 +368,39 @@ func waitRunListWithBackend(t *testing.T, backend string, dataRoot string, works
 	}
 }
 
-func publishAppserviceTestCommand(ctx context.Context, hub events.Hub, envelope events.Envelope) error {
-	err := hub.Publish(ctx, envelope)
-	if _, ok := events.ResponseEnvelope(err); ok {
-		return nil
+func sendAppserviceTestCommand[Command any, Result any](ctx context.Context, hub events.Hub, topic string, destination string, command Command) (Result, error) {
+	var zero Result
+	provider, ok := hub.(interface{ RawHub() magicevent.Hub })
+	if !ok || provider.RawHub() == nil {
+		return zero, common.ErrInvalidArgument
 	}
+	event := magicevent.NewEventWithContext(topic, "application/workorchd/appservice/test", destination, magicevent.NewHeader(), ctx, command)
+	response := provider.RawHub().Send(event)
+	if response == nil {
+		return zero, common.ErrInvalidArgument
+	}
+	if err := response.Error(); err != nil {
+		return zero, err
+	}
+	data, err := response.Get()
+	if err != nil {
+		return zero, err
+	}
+	result, ok := data.(Result)
+	if !ok {
+		return zero, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
+	}
+	return result, nil
+}
+
+func createTestMCPServerWithExports(ctx context.Context, exports bootstrap.Exports, cmd mcpevents.CreateServerCommand) error {
+	_, err := sendAppserviceTestCommand[mcpevents.CreateServerCommand, mcpevents.MCPCommandResult](ctx, exports.Infrastructure.EventHub, mcpevents.TopicMCPCommandCreateServer, mcpevents.CommandDestination, cmd)
 	return err
 }
 
-func createTestMCPServerWithExports(ctx context.Context, exports bootstrap.Exports, cmd mcpservice.CreateServerCommand) error {
-	return publishAppserviceTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        mcpevents.TopicMCPCommandCreateServer,
-		SourceModule: "workorchd/appservice/test",
-		SubjectType:  "mcp_server",
-		SubjectID:    string(cmd.ServerID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand:  cmd,
-			events.PayloadKeyServerID: string(cmd.ServerID),
-		},
-	})
-}
-
-func updateTestMCPCapabilityWithExports(ctx context.Context, exports bootstrap.Exports, cmd mcpservice.UpdateCapabilityCommand) error {
-	return publishAppserviceTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        mcpevents.TopicMCPCommandUpdateCapability,
-		SourceModule: "workorchd/appservice/test",
-		SubjectType:  "mcp_capability",
-		SubjectID:    string(cmd.ID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand:      cmd,
-			events.PayloadKeyCapabilityID: string(cmd.ID),
-			events.PayloadKeyServerID:     string(cmd.ServerID),
-		},
-	})
+func updateTestMCPCapabilityWithExports(ctx context.Context, exports bootstrap.Exports, cmd mcpevents.UpdateCapabilityCommand) error {
+	_, err := sendAppserviceTestCommand[mcpevents.UpdateCapabilityCommand, mcpevents.MCPCommandResult](ctx, exports.Infrastructure.EventHub, mcpevents.TopicMCPCommandUpdateCapability, mcpevents.CommandDestination, cmd)
+	return err
 }
 
 func readModelIntValue(value any) int {
@@ -344,24 +470,15 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 	}); err != nil {
 		t.Fatalf("Create decision step: %v", err)
 	}
-	if err := publishAppserviceTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        decisionevents.TopicDecisionCommandEnsureTicket,
-		SourceModule: "workorchd/appservice/test",
-		SubjectType:  "decision_ticket",
-		SubjectID:    string(ticketID),
-		WorkspaceID:  workspaceID,
-		RunID:        runID,
-		StepID:       string(stepID),
-		Payload: map[string]any{
-			events.PayloadKeyBlockingTicketID: string(ticketID),
-			events.PayloadKeyWorkspaceID:      workspaceID,
-			events.PayloadKeyRunID:            runID,
-			events.PayloadKeyStepID:           string(stepID),
-			events.PayloadKeyReason:           "test decision gate",
-			events.PayloadKeyKind:             decisioncommon.ResolutionTypeProvideMissingInfo,
-			events.PayloadKeyQuery:            "provide test decision input",
-			events.PayloadKeyContext:          map[string]any{"requiredFields": []any{"input"}},
-		},
+	if _, err := sendAppserviceTestCommand[decisionevents.EnsureTicketCommand, decisionevents.DecisionCommandResult](ctx, exports.Infrastructure.EventHub, decisionevents.TopicDecisionCommandEnsureTicket, decisionevents.CommandDestination, decisionevents.EnsureTicketCommand{
+		TicketID:     ticketID,
+		WorkspaceID:  common.WorkspaceID(workspaceID),
+		RunID:        common.RunID(runID),
+		StepID:       stepID,
+		Reason:       "test decision gate",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "provide test decision input",
+		Context:      map[string]any{"requiredFields": []any{"input"}},
 	}); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}

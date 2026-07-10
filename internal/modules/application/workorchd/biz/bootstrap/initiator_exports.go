@@ -88,6 +88,7 @@ func ExportsFromInitiator(consumer string) (Exports, error) {
 			ValidationResults:     orchestratorRepos.ValidationResults,
 			RuntimeCheckpoints:    runRepos.Checkpoints,
 			EvidenceRecords:       orchestratorRepos.EvidenceRecords,
+			CoverageWorkItems:     orchestratorRepos.CoverageWorkItems,
 			Tickets:               decisionRepos.Tickets,
 			Resolutions:           decisionRepos.Resolutions,
 			Approvals:             approvalRepos.Approvals,

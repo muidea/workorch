@@ -23,12 +23,15 @@
 - Snapshot contract: 每次 dispatch 必须基于同一组 workspace/run/definition/evidence 权威快照。
 - Block request contract: 派发给 blocks 的请求必须是 StagePacket/StepExecutionRequest 派生的结构化请求，并携带 workspace/run/step scope。
 - Block response contract: blocks 只返回 normalized result/error/raw ref；orchestrator 负责 evidence quality、coverage binding 和 next action。
+- EventHub contract: runtime execute 使用 magicCommon `event.Hub` 直接交互；orchestrator 向 `/runtime/block` 发送 `runtimeevent.ExecuteCommand`，同步接收 `ExecuteCommandResult`，并在 `/runtime/orchestrator` 按需订阅 `ProgressData`、`CompletedData`、`FailedData`。
+- Type ownership contract: `internal/pkg/runtimeevent` 是七个 runtime block 共用协议 owner；事件顶层禁止使用 `Envelope`、`map[string]any` 或 JSON marshal/unmarshal 转换。`StepExecutionRequest.Input`、result `Output` 与 progress `Data` 仅作为领域动态字段保留。
 - Result contract: 只有 accepted evidence 与 DoD coverage 满足后才能调用 `kernel/result` 创建 accepted Result。
 - Governance contract: decision/approval 只用于真实治理 gap；resolution/approval resume 必须继承原 stage contract。
 
 ## 已知缺口
 
 - 当前盘点未发现 Orchestrator module 职责缺失；但该模块是 P0 合同集中点，修改时必须补 StagePacket、requiredOutput、evidence gate 和 output mode 回归测试。
+- 当前未发现 runtime block 交互合同缺失；后续新增执行通知必须继续由 `internal/pkg/runtimeevent` 定义具体类型，并由消费者显式订阅。
 
 ## 边界约束
 

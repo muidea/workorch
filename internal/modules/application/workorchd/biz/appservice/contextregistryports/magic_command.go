@@ -13,6 +13,8 @@ type rawMagicHubProvider interface {
 	RawHub() magicevent.Hub
 }
 
+const sourceModule = "application/workorchd/context-registry"
+
 func sendMagicCommand[Command any, Result any](ctx context.Context, hub events.Hub, topic string, destination string, subjectType string, subjectID string, command Command) (Result, error) {
 	var zero Result
 	rawHub, err := rawMagicHub(hub)

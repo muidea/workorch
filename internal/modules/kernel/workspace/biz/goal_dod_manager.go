@@ -260,9 +260,12 @@ func (m *GoalDoDManager) markWorkspaceDefinitionsChanged(ctx context.Context, wo
 		return common.ErrInvalidArgument
 	}
 	changed := false
-	switch workspace.State {
-	case common.WorkspaceStateActive, common.WorkspaceStateSuperseded:
+	if workspace.State != common.WorkspaceStateActive {
 		workspace.State = common.WorkspaceStateActive
+		changed = true
+	}
+	if workspace.ActiveRunID != "" {
+		workspace.ActiveRunID = ""
 		changed = true
 	}
 	if !changed {

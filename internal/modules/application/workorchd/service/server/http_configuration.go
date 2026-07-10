@@ -2,15 +2,13 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
-	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
@@ -115,22 +113,27 @@ func (s *serverState) publishRuntimePolicyUpdate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	err = s.eventHub.Publish(ctx, events.Envelope{
-		Topic:        orchestratorevents.TopicOrchestratorCommandUpdateRuntimePolicy,
-		SourceModule: "workorchd/http/configuration",
-		SubjectType:  "runtimeConfiguration",
-		SubjectID:    "runtime",
-		Payload: map[string]any{
-			events.PayloadKeyCommand: orchestratorcontracts.UpdateRuntimePolicyCommand{
-				Policy: workorchruntimepolicy.FromConfig(cfg),
-			},
-		},
-	})
-	if _, ok := events.ResponseEnvelope(err); ok {
-		return nil
+	provider, ok := s.eventHub.(interface{ RawHub() magicevent.Hub })
+	if !ok || provider.RawHub() == nil {
+		return common.ErrInvalidArgument
 	}
-	if err != nil {
+	ev := magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorCommandUpdateRuntimePolicy,
+		"workorchd/http/configuration",
+		orchestratorevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		orchestratorevents.UpdateRuntimePolicyCommand{Policy: workorchruntimepolicy.FromConfig(cfg)},
+	)
+	result := provider.RawHub().Send(ev)
+	if result == nil {
+		return common.ErrInvalidArgument
+	}
+	if err := result.Error(); err != nil {
 		return err
 	}
-	return fmt.Errorf("%w: runtime policy update command returned no response", common.ErrConflict)
+	if _, err := result.Get(); err != nil {
+		return err
+	}
+	return nil
 }

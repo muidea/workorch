@@ -8,10 +8,11 @@ import (
 	"strings"
 	"sync"
 
+	cd "github.com/muidea/magicCommon/def"
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
-	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	orchestratorservice "github.com/muidea/workorch/internal/modules/kernel/orchestrator/service"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
@@ -51,8 +52,12 @@ type Module struct {
 	servicePtr        *orchestratorservice.Module
 	steps             repository.StepRepository
 	eventHub          events.Hub
+	rawEventHub       magicevent.Hub
+	rawObserver       magicevent.SimpleObserver
+	rawTopics         []string
+	runtimeObserver   magicevent.SimpleObserver
+	runtimeTopics     []string
 	backgroundRoutine task.BackgroundRoutine
-	unsub             []func()
 
 	recoveryMu       sync.Mutex
 	recoveryInFlight map[string]struct{}
@@ -115,6 +120,9 @@ func (m *Module) Configure(deps Dependencies) error {
 	m.bizPtr.EnableEventDrivenDispatch()
 	m.steps = deps.Steps
 	m.eventHub = deps.EventHub
+	if provider, ok := deps.EventHub.(rawMagicHubProvider); ok {
+		m.rawEventHub = provider.RawHub()
+	}
 	m.backgroundRoutine = deps.BackgroundRoutine
 	return nil
 }
@@ -123,70 +131,70 @@ func (m *Module) Start() error {
 	if m == nil || m.servicePtr == nil || m.eventHub == nil {
 		return common.ErrInvalidArgument
 	}
-	if len(m.unsub) > 0 {
+	if m.rawObserver != nil || m.runtimeObserver != nil {
 		return nil
 	}
-	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandStartRun, m.handleCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandBlockDecision, m.handleCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandBlockApproval, m.handleCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, m.handleCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, m.handleCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandValidateRun, m.handleCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandCompleteRun, m.handleCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandCancelRun, m.handleCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandSupersedeRun, m.handleCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandFailRun, m.handleCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandPurgeRun, m.handlePurgeRunCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandUpdateRuntimePolicy, m.handleRuntimePolicyCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListToolCallsByRun, m.handleEvidenceReadCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListPatchesByRun, m.handleEvidenceReadCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun, m.handleEvidenceReadCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun, m.handleEvidenceReadCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun, m.handleEvidenceReadCommand),
-		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorDispatchStepRequested, m.handleDispatchStepRequested),
-		m.eventHub.Subscribe(runtimeevent.TopicRuntimeBlockExecuteProgress, m.handleRuntimeProgressEvent),
-		m.eventHub.Subscribe(runtimeevent.TopicRuntimeBlockExecuteCompleted, m.handleRuntimeResultEvent),
-		m.eventHub.Subscribe(runtimeevent.TopicRuntimeBlockExecuteFailed, m.handleRuntimeResultEvent),
-	)
+	if m.rawEventHub != nil {
+		m.runtimeObserver = magicevent.NewSimpleObserverWithMatchID(ModuleID+"/runtime", runtimeevent.NotificationDestination, m.rawEventHub)
+		m.runtimeTopics = []string{
+			runtimeevent.TopicRuntimeBlockExecuteProgress,
+			runtimeevent.TopicRuntimeBlockExecuteCompleted,
+			runtimeevent.TopicRuntimeBlockExecuteFailed,
+		}
+		m.runtimeObserver.Subscribe(runtimeevent.TopicRuntimeBlockExecuteProgress, m.handleRuntimeProgressEvent)
+		m.runtimeObserver.Subscribe(runtimeevent.TopicRuntimeBlockExecuteCompleted, m.handleRuntimeResultEvent)
+		m.runtimeObserver.Subscribe(runtimeevent.TopicRuntimeBlockExecuteFailed, m.handleRuntimeResultEvent)
+	}
+	if m.rawEventHub != nil && m.rawObserver == nil {
+		m.rawObserver = magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, m.rawEventHub)
+		m.rawTopics = []string{
+			orchestratorevents.TopicOrchestratorCommandStartRun,
+			orchestratorevents.TopicOrchestratorCommandBlockDecision,
+			orchestratorevents.TopicOrchestratorCommandBlockApproval,
+			orchestratorevents.TopicOrchestratorCommandResumeRun,
+			orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap,
+			orchestratorevents.TopicOrchestratorCommandValidateRun,
+			orchestratorevents.TopicOrchestratorCommandCompleteRun,
+			orchestratorevents.TopicOrchestratorCommandCancelRun,
+			orchestratorevents.TopicOrchestratorCommandSupersedeRun,
+			orchestratorevents.TopicOrchestratorCommandFailRun,
+			orchestratorevents.TopicOrchestratorCommandPurgeRun,
+			orchestratorevents.TopicOrchestratorCommandUpdateRuntimePolicy,
+			orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,
+			orchestratorevents.TopicOrchestratorCommandListPatchesByRun,
+			orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun,
+			orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun,
+			orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun,
+			orchestratorevents.TopicOrchestratorDispatchStepRequested,
+		}
+		for _, topic := range m.rawTopics {
+			m.rawObserver.Subscribe(topic, m.handleMagicCommand)
+		}
+	}
 	return nil
-}
-
-func (m *Module) handleRuntimePolicyCommand(ctx context.Context, envelope events.Envelope) error {
-	_ = ctx
-	if m == nil || m.bizPtr == nil {
-		return common.ErrInvalidArgument
-	}
-	cmd, ok := envelope.Payload[events.PayloadKeyCommand].(orchestratorcontracts.UpdateRuntimePolicyCommand)
-	if !ok {
-		return common.ErrInvalidArgument
-	}
-	if err := m.bizPtr.UpdateRuntimePolicy(cmd.Policy); err != nil {
-		return err
-	}
-	return events.Response(events.Envelope{
-		Topic:        envelope.Topic + "/response",
-		SourceModule: ModuleID,
-		SubjectType:  envelope.SubjectType,
-		SubjectID:    envelope.SubjectID,
-		WorkspaceID:  envelope.WorkspaceID,
-		RunID:        envelope.RunID,
-		StepID:       envelope.StepID,
-	})
 }
 
 func (m *Module) Stop(ctx context.Context) error {
 	_ = ctx
-	for idx := len(m.unsub) - 1; idx >= 0; idx-- {
-		if m.unsub[idx] != nil {
-			m.unsub[idx]()
+	if m.runtimeObserver != nil {
+		for idx := len(m.runtimeTopics) - 1; idx >= 0; idx-- {
+			m.runtimeObserver.Unsubscribe(m.runtimeTopics[idx])
 		}
 	}
-	m.unsub = nil
+	m.runtimeObserver = nil
+	m.runtimeTopics = nil
+	if m.rawObserver != nil {
+		for idx := len(m.rawTopics) - 1; idx >= 0; idx-- {
+			m.rawObserver.Unsubscribe(m.rawTopics[idx])
+		}
+	}
+	m.rawObserver = nil
+	m.rawTopics = nil
 	m.servicePtr = nil
 	m.bizPtr = nil
 	m.steps = nil
 	m.eventHub = nil
+	m.rawEventHub = nil
 	m.backgroundRoutine = nil
 	return nil
 }
@@ -195,66 +203,131 @@ func (m *Module) Service() Service {
 	return m.servicePtr
 }
 
-func (m *Module) handleCommand(ctx context.Context, envelope events.Envelope) error {
+func (m *Module) handleMagicCommand(ev magicevent.Event, result magicevent.Result) {
+	response, err := m.executeMagicCommand(ev.Context(), ev.ID(), ev.Data())
+	setOrchestratorMagicResult(result, response, err)
+}
+
+func (m *Module) executeMagicCommand(ctx context.Context, topic string, data any) (orchestratorevents.OrchestratorCommandResult, error) {
 	if m == nil || m.servicePtr == nil {
-		return common.ErrInvalidArgument
+		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
-	payload := envelope.Payload
-	runID := common.RunID(stringPayload(payload, events.PayloadKeyRunID))
-	if runID == "" {
-		runID = common.RunID(envelope.RunID)
-	}
-	var err error
-	switch envelope.Topic {
+	switch topic {
 	case orchestratorevents.TopicOrchestratorCommandStartRun:
-		err = m.handleStartRunCommand(ctx, envelope, runID)
+		cmd, ok := data.(orchestratorevents.StartRunCommand)
+		if !ok || cmd.RunID == "" {
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+		}
+		envelope := magicOrchestratorEnvelope(topic, common.RuntimeWorkspaceIDFromContext(ctx), cmd.RunID, "")
+		return orchestratorevents.OrchestratorCommandResult{}, m.handleStartRunCommand(ctx, envelope, cmd.RunID)
 	case orchestratorevents.TopicOrchestratorCommandBlockDecision:
-		cmd, ok := payload[events.PayloadKeyCommand].(runcontracts.BlockOnDecisionCommand)
-		if !ok {
-			cmd = runcontracts.BlockOnDecisionCommand{RunID: runID, TicketID: common.TicketID(stringPayload(payload, events.PayloadKeyBlockingTicketID))}
+		cmd, ok := data.(orchestratorevents.BlockDecisionCommand)
+		if !ok || cmd.RunID == "" {
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
-		if cmd.RunID == "" {
-			cmd.RunID = runID
-		}
-		err = m.servicePtr.BlockOnDecision(ctx, cmd.RunID, cmd.TicketID)
+		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.BlockOnDecision(ctx, cmd.RunID, cmd.TicketID)
 	case orchestratorevents.TopicOrchestratorCommandBlockApproval:
-		cmd, ok := payload[events.PayloadKeyCommand].(runcontracts.BlockOnApprovalCommand)
-		if !ok {
-			cmd = runcontracts.BlockOnApprovalCommand{RunID: runID, ApprovalID: common.ApprovalID(stringPayload(payload, events.PayloadKeyBlockingApprovalID))}
+		cmd, ok := data.(orchestratorevents.BlockApprovalCommand)
+		if !ok || cmd.RunID == "" {
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
-		if cmd.RunID == "" {
-			cmd.RunID = runID
-		}
-		err = m.servicePtr.BlockOnApproval(ctx, cmd.RunID, cmd.ApprovalID)
+		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.BlockOnApproval(ctx, cmd.RunID, cmd.ApprovalID)
 	case orchestratorevents.TopicOrchestratorCommandResumeRun:
-		err = m.handleResumeRunCommand(ctx, envelope, runID)
+		cmd, ok := data.(orchestratorevents.ResumeRunCommand)
+		if !ok || cmd.RunID == "" {
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+		}
+		envelope := magicOrchestratorEnvelope(topic, cmd.WorkspaceID, cmd.RunID, "")
+		return orchestratorevents.OrchestratorCommandResult{}, m.resumeRunMagicCommand(ctx, envelope, cmd)
 	case orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap:
-		err = m.handleRecoverRuntimeGapCommand(ctx, envelope, runID)
+		cmd, ok := data.(orchestratorevents.RecoverRuntimeGapCommand)
+		if !ok {
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+		}
+		envelope := magicOrchestratorEnvelope(topic, cmd.WorkspaceID, cmd.RunID, cmd.StepID)
+		return orchestratorevents.OrchestratorCommandResult{}, m.recoverRuntimeGapMagicCommand(ctx, envelope, cmd)
 	case orchestratorevents.TopicOrchestratorCommandValidateRun:
-		err = m.servicePtr.ValidateRun(ctx, runID)
+		cmd, ok := data.(orchestratorevents.ValidateRunCommand)
+		if !ok || cmd.RunID == "" {
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+		}
+		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.ValidateRun(ctx, cmd.RunID)
 	case orchestratorevents.TopicOrchestratorCommandCompleteRun:
-		err = m.servicePtr.CompleteRun(ctx, runID)
+		cmd, ok := data.(orchestratorevents.CompleteRunCommand)
+		if !ok || cmd.RunID == "" {
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+		}
+		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.CompleteRun(ctx, cmd.RunID)
 	case orchestratorevents.TopicOrchestratorCommandCancelRun:
-		err = m.servicePtr.CancelRun(ctx, runID)
+		cmd, ok := data.(orchestratorevents.CancelRunCommand)
+		if !ok || cmd.RunID == "" {
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+		}
+		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.CancelRun(ctx, cmd.RunID)
 	case orchestratorevents.TopicOrchestratorCommandSupersedeRun:
-		err = m.servicePtr.SupersedeRun(ctx, runID)
+		cmd, ok := data.(orchestratorevents.SupersedeRunCommand)
+		if !ok || cmd.RunID == "" {
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+		}
+		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.SupersedeRun(ctx, cmd.RunID)
 	case orchestratorevents.TopicOrchestratorCommandFailRun:
-		err = m.servicePtr.FailRun(ctx, runID, stringPayload(payload, events.PayloadKeyFailureReason))
+		cmd, ok := data.(orchestratorevents.FailRunCommand)
+		if !ok || cmd.RunID == "" {
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+		}
+		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.FailRun(ctx, cmd.RunID, cmd.Reason)
+	case orchestratorevents.TopicOrchestratorCommandPurgeRun:
+		cmd, ok := data.(orchestratorevents.PurgeRunCommand)
+		if !ok || cmd.RunID == "" {
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+		}
+		_, err := purgeRunEvidence(ctx, m.steps, m.bizPtr.EvidenceRepositories(), cmd.RunID)
+		return orchestratorevents.OrchestratorCommandResult{}, err
+	case orchestratorevents.TopicOrchestratorCommandUpdateRuntimePolicy:
+		cmd, ok := data.(orchestratorevents.UpdateRuntimePolicyCommand)
+		if !ok {
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+		}
+		return orchestratorevents.OrchestratorCommandResult{}, m.bizPtr.UpdateRuntimePolicy(cmd.Policy)
+	case orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,
+		orchestratorevents.TopicOrchestratorCommandListPatchesByRun,
+		orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun,
+		orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun,
+		orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun:
+		return m.readEvidenceMagicCommand(ctx, topic, data)
+	case orchestratorevents.TopicOrchestratorDispatchStepRequested:
+		cmd, ok := data.(orchestratorevents.DispatchStepCommand)
+		if !ok || cmd.RunID == "" || cmd.StepID == "" || cmd.Kind == "" {
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+		}
+		envelope := magicOrchestratorEnvelope(topic, cmd.WorkspaceID, cmd.RunID, cmd.StepID)
+		return orchestratorevents.OrchestratorCommandResult{}, m.dispatchRequestedStepCommand(ctx, envelope, cmd)
 	default:
-		return common.ErrInvalidArgument
+		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+	}
+}
+
+func setOrchestratorMagicResult(result magicevent.Result, data any, err error) {
+	if result == nil {
+		return
 	}
 	if err != nil {
-		return err
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
 	}
-	return events.Response(events.Envelope{
-		Topic:        envelope.Topic + "/response",
+	result.Set(data, nil)
+}
+
+func magicOrchestratorEnvelope(topic string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID) events.Envelope {
+	return events.Envelope{
+		Topic:        topic,
 		SourceModule: ModuleID,
-		SubjectType:  envelope.SubjectType,
-		SubjectID:    envelope.SubjectID,
-		WorkspaceID:  envelope.WorkspaceID,
+		SubjectType:  "run",
+		SubjectID:    string(runID),
+		WorkspaceID:  string(workspaceID),
 		RunID:        string(runID),
-		StepID:       envelope.StepID,
-	})
+		StepID:       string(stepID),
+	}
 }
 
 func (m *Module) handleStartRunCommand(ctx context.Context, envelope events.Envelope, runID common.RunID) error {
@@ -283,68 +356,40 @@ func (m *Module) handleStartRunCommand(ctx context.Context, envelope events.Enve
 	return nil
 }
 
-func (m *Module) handleResumeRunCommand(ctx context.Context, envelope events.Envelope, runID common.RunID) error {
-	if m == nil || m.bizPtr == nil || m.servicePtr == nil {
+func (m *Module) resumeRunMagicCommand(ctx context.Context, envelope events.Envelope, cmd orchestratorevents.ResumeRunCommand) error {
+	if m == nil || m.bizPtr == nil || m.servicePtr == nil || cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
-	payload := envelope.Payload
-	cmd, ok := payload[events.PayloadKeyCommand].(runcontracts.ResumeRunCommand)
-	var patch map[string]any
-	if ok {
-		if cmd.RunID != "" {
-			runID = cmd.RunID
-		}
-		patch = cloneCommandPatch(cmd.ExecutionContextPatch)
-	} else {
-		rawPatch, _ := payload[events.PayloadKeyExecutionContextPatch].(map[string]any)
-		patch = cloneCommandPatch(rawPatch)
-	}
-	if runID == "" {
-		return common.ErrInvalidArgument
-	}
+	patch := cloneCommandPatch(cmd.ExecutionContextPatch)
 	if m.backgroundRoutine == nil {
 		if len(patch) > 0 {
-			return m.servicePtr.ResumeRunWithExecutionContextPatch(ctx, runID, patch)
+			return m.servicePtr.ResumeRunWithExecutionContextPatch(ctx, cmd.RunID, patch)
 		}
-		return m.servicePtr.ResumeRun(ctx, runID)
+		return m.servicePtr.ResumeRun(ctx, cmd.RunID)
 	}
-	if err := m.bizPtr.CanResumeRun(ctx, runID); err != nil {
+	if err := m.bizPtr.CanResumeRun(ctx, cmd.RunID); err != nil {
 		return err
 	}
 	bgCtx := orchestratorBackgroundContext(ctx, envelope)
-	if err := m.backgroundRoutine.AsyncFunction(func() {
+	return m.backgroundRoutine.AsyncFunction(func() {
 		var err error
 		if len(patch) > 0 {
-			err = m.servicePtr.ResumeRunWithExecutionContextPatch(bgCtx, runID, patch)
+			err = m.servicePtr.ResumeRunWithExecutionContextPatch(bgCtx, cmd.RunID, patch)
 		} else {
-			err = m.servicePtr.ResumeRun(bgCtx, runID)
+			err = m.servicePtr.ResumeRun(bgCtx, cmd.RunID)
 		}
 		if err == nil || errors.Is(err, context.Canceled) {
 			return
 		}
-		slog.Warn("workorch orchestrator background resume failed", "workspaceID", envelope.WorkspaceID, "runID", runID, "err", err)
-	}); err != nil {
-		return err
-	}
-	return nil
+		slog.Warn("workorch orchestrator background resume failed", "workspaceID", envelope.WorkspaceID, "runID", cmd.RunID, "err", err)
+	})
 }
 
-func (m *Module) handleRecoverRuntimeGapCommand(ctx context.Context, envelope events.Envelope, runID common.RunID) error {
+func (m *Module) recoverRuntimeGapMagicCommand(ctx context.Context, envelope events.Envelope, cmd orchestratorevents.RecoverRuntimeGapCommand) error {
 	if m == nil || m.bizPtr == nil || m.servicePtr == nil {
 		return common.ErrInvalidArgument
 	}
-	payload := envelope.Payload
-	cmd, ok := payload[events.PayloadKeyCommand].(runcontracts.RecoverRuntimeGapCommand)
-	if !ok {
-		return common.ErrInvalidArgument
-	}
-	if cmd.RunID != "" {
-		runID = cmd.RunID
-	}
-	if cmd.IdempotencyKey == "" {
-		cmd.IdempotencyKey = stringPayload(payload, events.PayloadKeyIdempotencyKey)
-	}
-	if runID == "" || cmd.WorkspaceID == "" || cmd.StepID == "" || cmd.Gap == "" {
+	if cmd.RunID == "" || cmd.WorkspaceID == "" || cmd.StepID == "" || cmd.Gap == "" {
 		return common.ErrInvalidArgument
 	}
 	if cmd.IdempotencyKey == "" {
@@ -355,9 +400,9 @@ func (m *Module) handleRecoverRuntimeGapCommand(ctx context.Context, envelope ev
 	}
 	patch := runtimeGapRecoveryPatch(cmd)
 	if m.backgroundRoutine == nil {
-		return m.servicePtr.ResumeRunWithExecutionContextPatch(ctx, runID, patch)
+		return m.servicePtr.ResumeRunWithExecutionContextPatch(ctx, cmd.RunID, patch)
 	}
-	if err := m.bizPtr.CanResumeRun(ctx, runID); err != nil {
+	if err := m.bizPtr.CanResumeRun(ctx, cmd.RunID); err != nil {
 		return err
 	}
 	if !m.markRuntimeGapRecoveryInFlight(cmd.IdempotencyKey) {
@@ -366,11 +411,11 @@ func (m *Module) handleRecoverRuntimeGapCommand(ctx context.Context, envelope ev
 	bgCtx := orchestratorBackgroundContext(ctx, envelope)
 	if err := m.backgroundRoutine.AsyncFunction(func() {
 		defer m.clearRuntimeGapRecoveryInFlight(cmd.IdempotencyKey)
-		err := m.servicePtr.ResumeRunWithExecutionContextPatch(bgCtx, runID, patch)
+		err := m.servicePtr.ResumeRunWithExecutionContextPatch(bgCtx, cmd.RunID, patch)
 		if err == nil || errors.Is(err, context.Canceled) {
 			return
 		}
-		slog.Warn("workorch orchestrator background runtime gap recovery failed", "workspaceID", envelope.WorkspaceID, "runID", runID, "stepID", cmd.StepID, "gap", cmd.Gap, "err", err)
+		slog.Warn("workorch orchestrator background runtime gap recovery failed", "workspaceID", envelope.WorkspaceID, "runID", cmd.RunID, "stepID", cmd.StepID, "gap", cmd.Gap, "err", err)
 	}); err != nil {
 		m.clearRuntimeGapRecoveryInFlight(cmd.IdempotencyKey)
 		return err
@@ -483,13 +528,9 @@ func cloneCommandPatch(input map[string]any) map[string]any {
 	return ret
 }
 
-func (m *Module) handleDispatchStepRequested(ctx context.Context, envelope events.Envelope) error {
+func (m *Module) dispatchRequestedStepCommand(ctx context.Context, envelope events.Envelope, cmd orchestratorevents.DispatchStepCommand) error {
 	if m == nil || m.bizPtr == nil {
 		return common.ErrInvalidArgument
-	}
-	cmd, err := dispatchStepCommandFromEnvelope(envelope)
-	if err != nil {
-		return err
 	}
 	if m.backgroundRoutine == nil {
 		return m.bizPtr.DispatchRequestedStep(ctx, cmd)
@@ -510,50 +551,6 @@ func (m *Module) handleDispatchStepRequested(ctx context.Context, envelope event
 	return nil
 }
 
-func dispatchStepCommandFromEnvelope(envelope events.Envelope) (orchestratorcontracts.DispatchStepCommand, error) {
-	if cmd, ok := envelope.Payload[events.PayloadKeyCommand].(orchestratorcontracts.DispatchStepCommand); ok {
-		if cmd.WorkspaceID == "" {
-			cmd.WorkspaceID = common.WorkspaceID(envelope.WorkspaceID)
-		}
-		if cmd.RunID == "" {
-			cmd.RunID = common.RunID(envelope.RunID)
-		}
-		if cmd.StepID == "" {
-			cmd.StepID = common.StepID(envelope.StepID)
-		}
-		if cmd.IdempotencyKey == "" {
-			cmd.IdempotencyKey = stringPayload(envelope.Payload, events.PayloadKeyIdempotencyKey)
-		}
-		if cmd.RunID == "" || cmd.StepID == "" || cmd.Kind == "" {
-			return orchestratorcontracts.DispatchStepCommand{}, common.ErrInvalidArgument
-		}
-		return cmd, nil
-	}
-	cmd := orchestratorcontracts.DispatchStepCommand{
-		WorkspaceID:    common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID)),
-		RunID:          common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID)),
-		StepID:         common.StepID(stringPayload(envelope.Payload, events.PayloadKeyStepID)),
-		Kind:           stringPayload(envelope.Payload, events.PayloadKeyKind),
-		IdempotencyKey: stringPayload(envelope.Payload, events.PayloadKeyIdempotencyKey),
-	}
-	if cmd.WorkspaceID == "" {
-		cmd.WorkspaceID = common.WorkspaceID(envelope.WorkspaceID)
-	}
-	if cmd.RunID == "" {
-		cmd.RunID = common.RunID(envelope.RunID)
-	}
-	if cmd.StepID == "" {
-		cmd.StepID = common.StepID(envelope.StepID)
-	}
-	if input, ok := envelope.Payload[events.PayloadKeyInput].(map[string]any); ok {
-		cmd.Input = cloneCommandPatch(input)
-	}
-	if cmd.RunID == "" || cmd.StepID == "" || cmd.Kind == "" {
-		return orchestratorcontracts.DispatchStepCommand{}, common.ErrInvalidArgument
-	}
-	return cmd, nil
-}
-
 func orchestratorBackgroundContext(ctx context.Context, envelope events.Envelope) context.Context {
 	bgCtx := context.Background()
 	if workspaceID := common.WorkspaceID(envelope.WorkspaceID); workspaceID != "" {
@@ -567,162 +564,99 @@ func orchestratorBackgroundContext(ctx context.Context, envelope events.Envelope
 	return bgCtx
 }
 
-func stringPayload(payload map[string]any, key string) string {
-	value, _ := payload[key].(string)
-	return value
+func (m *Module) handleRuntimeResultEvent(event magicevent.Event, result magicevent.Result) {
+	setOrchestratorMagicResult(result, nil, m.handleRuntimeResultData(event.Context(), event.ID(), event.Data()))
 }
 
-func (m *Module) handleRuntimeResultEvent(ctx context.Context, envelope events.Envelope) error {
+func (m *Module) handleRuntimeResultData(ctx context.Context, topic string, data any) error {
 	if m == nil || m.bizPtr == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.backgroundRoutine == nil {
-		return m.finalizeRuntimeResult(ctx, envelope)
+		return m.finalizeRuntimeResult(ctx, topic, data)
 	}
-	bgCtx := orchestratorBackgroundContext(ctx, envelope)
+	bgCtx := runtimeEventBackgroundContext(ctx, data)
 	return m.backgroundRoutine.AsyncFunction(func() {
-		if err := m.finalizeRuntimeResult(bgCtx, envelope); err != nil && !errors.Is(err, context.Canceled) {
+		if err := m.finalizeRuntimeResult(bgCtx, topic, data); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("workorch orchestrator runtime result finalize failed",
-				"topic", envelope.Topic,
-				"workspaceID", envelope.WorkspaceID,
-				"runID", envelope.RunID,
-				"stepID", envelope.StepID,
+				"topic", topic,
 				"err", err,
 			)
 		}
 	})
 }
 
-func (m *Module) handleRuntimeProgressEvent(ctx context.Context, envelope events.Envelope) error {
+func (m *Module) handleRuntimeProgressEvent(event magicevent.Event, result magicevent.Result) {
+	data, ok := event.Data().(runtimeevent.ProgressData)
+	if !ok {
+		setOrchestratorMagicResult(result, nil, common.ErrInvalidArgument)
+		return
+	}
+	setOrchestratorMagicResult(result, nil, m.handleRuntimeProgressData(event.Context(), event.ID(), data))
+}
+
+func (m *Module) handleRuntimeProgressData(ctx context.Context, topic string, data runtimeevent.ProgressData) error {
 	if m == nil || m.bizPtr == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.backgroundRoutine == nil {
-		return m.recordRuntimeProgress(ctx, envelope)
+		return m.recordRuntimeProgress(ctx, data)
 	}
-	bgCtx := orchestratorBackgroundContext(ctx, envelope)
+	bgCtx := runtimeEventBackgroundContext(ctx, data)
 	return m.backgroundRoutine.AsyncFunction(func() {
-		if err := m.recordRuntimeProgress(bgCtx, envelope); err != nil && !errors.Is(err, context.Canceled) {
+		if err := m.recordRuntimeProgress(bgCtx, data); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("workorch orchestrator runtime progress record failed",
-				"topic", envelope.Topic,
-				"workspaceID", envelope.WorkspaceID,
-				"runID", envelope.RunID,
-				"stepID", envelope.StepID,
+				"topic", topic,
 				"err", err,
 			)
 		}
 	})
 }
 
-func orchestratorScopedWorkspaceID(envelope events.Envelope) common.WorkspaceID {
-	workspaceID := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
-	if workspaceID == "" {
-		workspaceID = common.WorkspaceID(envelope.WorkspaceID)
-	}
-	return workspaceID
-}
-
-func (m *Module) handlePurgeRunCommand(ctx context.Context, envelope events.Envelope) error {
+func (m *Module) readEvidenceMagicCommand(ctx context.Context, topic string, data any) (orchestratorevents.OrchestratorCommandResult, error) {
 	if m == nil || m.bizPtr == nil {
-		return common.ErrInvalidArgument
+		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
-	if workspaceID := orchestratorScopedWorkspaceID(envelope); workspaceID != "" {
-		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	cmd, ok := data.(orchestratorevents.ListRunEvidenceCommand)
+	if !ok || cmd.RunID == "" {
+		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
-	runID := purgeRunIDFromPayload(envelope.Payload)
-	if runID == "" {
-		runID = common.RunID(envelope.RunID)
-	}
-	if runID == "" {
-		return common.ErrInvalidArgument
-	}
-	deleted, err := purgeRunEvidence(ctx, m.steps, m.bizPtr.EvidenceRepositories(), runID)
-	if err != nil {
-		return err
-	}
-	return events.Response(events.Envelope{
-		Topic:        envelope.Topic + "/response",
-		SourceModule: ModuleID,
-		SubjectType:  envelope.SubjectType,
-		SubjectID:    envelope.SubjectID,
-		WorkspaceID:  envelope.WorkspaceID,
-		RunID:        string(runID),
-		StepID:       envelope.StepID,
-		Payload: map[string]any{
-			events.PayloadKeyDeletedCount: deleted,
-		},
-	})
-}
-
-func purgeRunIDFromPayload(payload map[string]any) common.RunID {
-	if payload == nil {
-		return ""
-	}
-	if cmd, ok := payload[events.PayloadKeyCommand].(orchestratorcontracts.PurgeRunCommand); ok {
-		return cmd.RunID
-	}
-	return common.RunID(stringPayload(payload, events.PayloadKeyRunID))
-}
-
-func (m *Module) handleEvidenceReadCommand(ctx context.Context, envelope events.Envelope) error {
-	if m == nil || m.bizPtr == nil {
-		return common.ErrInvalidArgument
-	}
-	if workspaceID := orchestratorScopedWorkspaceID(envelope); workspaceID != "" {
-		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
-	}
-	runID := common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))
-	if runID == "" {
-		runID = common.RunID(envelope.RunID)
-	}
-	if runID == "" {
-		return common.ErrInvalidArgument
+	if cmd.WorkspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 	}
 	evidence := m.bizPtr.EvidenceRepositories()
-	var items any
-	var err error
-	switch envelope.Topic {
+	switch topic {
 	case orchestratorevents.TopicOrchestratorCommandListToolCallsByRun:
 		if evidence.ToolCalls == nil {
-			return common.ErrInvalidArgument
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err = evidence.ToolCalls.ListByRun(ctx, runID)
+		items, err := evidence.ToolCalls.ListByRun(ctx, cmd.RunID)
+		return orchestratorevents.OrchestratorCommandResult{ToolCalls: items}, err
 	case orchestratorevents.TopicOrchestratorCommandListPatchesByRun:
 		if evidence.Patches == nil {
-			return common.ErrInvalidArgument
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err = evidence.Patches.ListByRun(ctx, runID)
+		items, err := evidence.Patches.ListByRun(ctx, cmd.RunID)
+		return orchestratorevents.OrchestratorCommandResult{Patches: items}, err
 	case orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun:
 		if evidence.ValidationResults == nil {
-			return common.ErrInvalidArgument
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err = evidence.ValidationResults.ListByRun(ctx, runID)
+		items, err := evidence.ValidationResults.ListByRun(ctx, cmd.RunID)
+		return orchestratorevents.OrchestratorCommandResult{ValidationResults: items}, err
 	case orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun:
 		if evidence.CoverageWorkItems == nil {
-			return common.ErrInvalidArgument
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err = evidence.CoverageWorkItems.ListByRun(ctx, runID)
+		items, err := evidence.CoverageWorkItems.ListByRun(ctx, cmd.RunID)
+		return orchestratorevents.OrchestratorCommandResult{CoverageWorkItems: items}, err
 	case orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun:
 		if evidence.ArtifactContinuations == nil {
-			return common.ErrInvalidArgument
+			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err = evidence.ArtifactContinuations.ListByRun(ctx, runID)
+		items, err := evidence.ArtifactContinuations.ListByRun(ctx, cmd.RunID)
+		return orchestratorevents.OrchestratorCommandResult{ArtifactContinuations: items}, err
 	default:
-		return common.ErrInvalidArgument
+		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
-	if err != nil {
-		return err
-	}
-	return events.Response(events.Envelope{
-		Topic:        envelope.Topic + "/response",
-		SourceModule: ModuleID,
-		SubjectType:  envelope.SubjectType,
-		SubjectID:    envelope.SubjectID,
-		WorkspaceID:  envelope.WorkspaceID,
-		RunID:        string(runID),
-		StepID:       envelope.StepID,
-		Payload: map[string]any{
-			events.PayloadKeyItems: items,
-		},
-	})
 }

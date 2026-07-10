@@ -15,17 +15,11 @@ func ListToolCallsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID c
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, orchestratorevents.TopicOrchestratorCommandListToolCallsByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyRunID: string(runID),
-	}, workspaceID))
+	response, err := sendMagicCommand[orchestratorevents.ListToolCallsByRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandListToolCallsByRun, orchestratorevents.CommandDestination, "run", string(runID), orchestratorevents.ListToolCallsByRunCommand{WorkspaceID: workspaceID, RunID: runID})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*runmodel.ToolCall)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.ToolCalls, nil
 }
 
 func ListPatchesByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.Patch, error) {
@@ -33,17 +27,11 @@ func ListPatchesByRunOwnerCommand(ctx context.Context, hub events.Hub, runID com
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, orchestratorevents.TopicOrchestratorCommandListPatchesByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyRunID: string(runID),
-	}, workspaceID))
+	response, err := sendMagicCommand[orchestratorevents.ListPatchesByRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandListPatchesByRun, orchestratorevents.CommandDestination, "run", string(runID), orchestratorevents.ListPatchesByRunCommand{WorkspaceID: workspaceID, RunID: runID})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*runmodel.Patch)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Patches, nil
 }
 
 func ListValidationResultsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.ValidationResult, error) {
@@ -51,15 +39,9 @@ func ListValidationResultsByRunOwnerCommand(ctx context.Context, hub events.Hub,
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyRunID: string(runID),
-	}, workspaceID))
+	response, err := sendMagicCommand[orchestratorevents.ListValidationResultsByRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun, orchestratorevents.CommandDestination, "run", string(runID), orchestratorevents.ListValidationResultsByRunCommand{WorkspaceID: workspaceID, RunID: runID})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*runmodel.ValidationResult)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.ValidationResults, nil
 }

@@ -2,7 +2,6 @@ package ownerreadports
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -20,39 +19,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestPublishCommandWithResponseRejectsWriteTopic(t *testing.T) {
-	_, err := PublishCommandWithResponse(context.Background(), events.NewMemoryHub(), runevents.TopicRunCommandUpdate, "run", "run-001", "", "run-001", map[string]any{
-		events.PayloadKeyRunID: "run-001",
-	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("PublishCommandWithResponse err = %v, want invalid argument for write topic", err)
-	}
-}
-
-func TestPublishCommandWithResponsePublishesReadTopic(t *testing.T) {
-	hub := events.NewMemoryHub()
-	hub.Subscribe(runevents.TopicRunCommandGet, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{
-			Topic:        envelope.Topic + "/response",
-			SourceModule: "test",
-			Payload: map[string]any{
-				"ok": true,
-			},
-		})
-	})
-
-	response, err := PublishCommandWithResponse(context.Background(), hub, runevents.TopicRunCommandGet, "run", "run-001", "", "run-001", map[string]any{
-		events.PayloadKeyRunID: "run-001",
-	})
-	if err != nil {
-		t.Fatalf("PublishCommandWithResponse err = %v", err)
-	}
-	if response.Payload["ok"] != true {
-		t.Fatalf("response payload = %+v, want ok", response.Payload)
-	}
-}
-
-func TestOwnerReadCommandsCarryWorkspaceScopeInEnvelopeAndPayload(t *testing.T) {
+func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 	const workspaceID = common.WorkspaceID("ws-scope-owner-read")
 	const runID = common.RunID("run-scope-owner-read")
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
@@ -198,27 +165,10 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInEnvelopeAndPayload(t *testing.T) 
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			hub := events.NewMemoryHub()
-			hub.Subscribe(tt.topic, func(_ context.Context, envelope events.Envelope) error {
-				if envelope.WorkspaceID != string(workspaceID) {
-					t.Fatalf("envelope workspaceID = %q, want %s", envelope.WorkspaceID, workspaceID)
-				}
-				if tt.wantRunID != "" && envelope.RunID != tt.wantRunID {
-					t.Fatalf("envelope runID = %q, want %s", envelope.RunID, tt.wantRunID)
-				}
-				if got, _ := envelope.Payload[events.PayloadKeyWorkspaceID].(string); got != string(workspaceID) {
-					t.Fatalf("payload workspaceID = %q, want %s", got, workspaceID)
-				}
-				if tt.wantRunID != "" {
-					if got, _ := envelope.Payload[events.PayloadKeyRunID].(string); got != tt.wantRunID {
-						t.Fatalf("payload runID = %q, want %s", got, tt.wantRunID)
-					}
-				}
-				return events.Response(events.Envelope{
-					Topic:   envelope.Topic + "/response",
-					Payload: tt.responsePayload,
-				})
-			})
+			rawHub := magicevent.NewHub(16)
+			hub := events.NewMagicHubWithHubOwner(rawHub, "ownerreadports/test")
+			defer hub.Terminate(context.Background())
+			subscribeOwnerReadMagicResponse(t, rawHub, tt.topic, workspaceID, common.RunID(tt.wantRunID), tt.responsePayload)
 			if err := tt.invoke(ctx, hub); err != nil {
 				t.Fatalf("invoke err = %v", err)
 			}
@@ -272,4 +222,134 @@ func subscribeResultReadCommand(t *testing.T, hub magicevent.Hub, topic string, 
 	t.Helper()
 	observer := magicevent.NewSimpleObserver(resultevents.CommandDestination, hub)
 	observer.Subscribe(topic, handle)
+}
+
+func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic string, workspaceID common.WorkspaceID, runID common.RunID, payload map[string]any) {
+	t.Helper()
+	destination, ok := ownerReadMagicDestination(topic)
+	if !ok {
+		return
+	}
+	observer := magicevent.NewSimpleObserver(destination, hub)
+	observer.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
+		if got := common.RuntimeWorkspaceIDFromContext(ev.Context()); got != workspaceID {
+			t.Fatalf("magic command workspace context = %q, want %s", got, workspaceID)
+		}
+		switch topic {
+		case runevents.TopicRunCommandGet:
+			cmd, ok := ev.Data().(runevents.GetRunCommand)
+			if !ok {
+				t.Fatalf("run get command type = %T", ev.Data())
+			}
+			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
+				t.Fatalf("run get command = %+v, want %s/%s", cmd, workspaceID, runID)
+			}
+			result.Set(runevents.RunCommandResult{Run: payload[events.PayloadKeyRun].(*runmodel.Run)}, nil)
+		case runevents.TopicRunCommandListStepsByRun, runevents.TopicRunCommandListStepSummariesByRun:
+			cmd, ok := ev.Data().(runevents.ListStepsByRunCommand)
+			if !ok {
+				t.Fatalf("step list command type = %T", ev.Data())
+			}
+			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
+				t.Fatalf("step list command = %+v, want %s/%s", cmd, workspaceID, runID)
+			}
+			result.Set(runevents.RunCommandResult{Steps: payload[events.PayloadKeySteps].([]*runmodel.Step)}, nil)
+		case runevents.TopicRunCommandListCheckpointsByRun:
+			cmd, ok := ev.Data().(runevents.ListRuntimeCheckpointsByRunCommand)
+			if !ok {
+				t.Fatalf("checkpoint list command type = %T", ev.Data())
+			}
+			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
+				t.Fatalf("checkpoint list command = %+v, want %s/%s", cmd, workspaceID, runID)
+			}
+			result.Set(runevents.RunCommandResult{Checkpoints: payload[events.PayloadKeyCheckpoints].([]*runmodel.RuntimeCheckpoint)}, nil)
+		case orchestratorevents.TopicOrchestratorCommandListToolCallsByRun:
+			cmd, ok := ev.Data().(orchestratorevents.ListToolCallsByRunCommand)
+			if !ok {
+				t.Fatalf("tool call list command type = %T", ev.Data())
+			}
+			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
+				t.Fatalf("tool call list command = %+v, want %s/%s", cmd, workspaceID, runID)
+			}
+			result.Set(orchestratorevents.OrchestratorCommandResult{ToolCalls: payload[events.PayloadKeyItems].([]*runmodel.ToolCall)}, nil)
+		case orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun:
+			cmd, ok := ev.Data().(orchestratorevents.ListArtifactContinuationsByRunCommand)
+			if !ok {
+				t.Fatalf("artifact continuation list command type = %T", ev.Data())
+			}
+			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
+				t.Fatalf("artifact continuation list command = %+v, want %s/%s", cmd, workspaceID, runID)
+			}
+			result.Set(orchestratorevents.OrchestratorCommandResult{ArtifactContinuations: payload[events.PayloadKeyItems].([]*runtimecontract.ArtifactContinuation)}, nil)
+		case orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun:
+			cmd, ok := ev.Data().(orchestratorevents.ListCoverageWorkItemsByRunCommand)
+			if !ok {
+				t.Fatalf("coverage work item list command type = %T", ev.Data())
+			}
+			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
+				t.Fatalf("coverage work item list command = %+v, want %s/%s", cmd, workspaceID, runID)
+			}
+			result.Set(orchestratorevents.OrchestratorCommandResult{CoverageWorkItems: payload[events.PayloadKeyItems].([]*runtimecontract.CoverageWorkItem)}, nil)
+		case decisionevents.TopicDecisionCommandGetTicket:
+			cmd, ok := ev.Data().(decisionevents.GetTicketCommand)
+			if !ok {
+				t.Fatalf("ticket get command type = %T", ev.Data())
+			}
+			if cmd.WorkspaceID != workspaceID || cmd.TicketID == "" {
+				t.Fatalf("ticket get command = %+v, want workspace %s", cmd, workspaceID)
+			}
+			result.Set(decisionevents.DecisionCommandResult{Ticket: payload[events.PayloadKeyTicket].(*decisionmodel.Ticket)}, nil)
+		case decisionevents.TopicDecisionCommandListTicketsByRun:
+			cmd, ok := ev.Data().(decisionevents.ListTicketsByRunCommand)
+			if !ok {
+				t.Fatalf("ticket list command type = %T", ev.Data())
+			}
+			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
+				t.Fatalf("ticket list command = %+v, want %s/%s", cmd, workspaceID, runID)
+			}
+			result.Set(decisionevents.DecisionCommandResult{Tickets: payload[events.PayloadKeyTickets].([]*decisionmodel.Ticket)}, nil)
+		case approvalevents.TopicApprovalCommandGet:
+			cmd, ok := ev.Data().(approvalevents.GetApprovalCommand)
+			if !ok {
+				t.Fatalf("approval get command type = %T", ev.Data())
+			}
+			if cmd.WorkspaceID != workspaceID || cmd.ApprovalID == "" {
+				t.Fatalf("approval get command = %+v, want workspace %s", cmd, workspaceID)
+			}
+			result.Set(approvalevents.ApprovalCommandResult{Approval: payload[events.PayloadKeyApproval].(*approvalmodel.Approval)}, nil)
+		case approvalevents.TopicApprovalCommandListByRun:
+			cmd, ok := ev.Data().(approvalevents.ListApprovalsByRunCommand)
+			if !ok {
+				t.Fatalf("approval list command type = %T", ev.Data())
+			}
+			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
+				t.Fatalf("approval list command = %+v, want %s/%s", cmd, workspaceID, runID)
+			}
+			result.Set(approvalevents.ApprovalCommandResult{Approvals: payload[events.PayloadKeyItems].([]*approvalmodel.Approval)}, nil)
+		default:
+			t.Fatalf("unhandled magic owner read topic %s", topic)
+		}
+	})
+}
+
+func ownerReadMagicDestination(topic string) (string, bool) {
+	switch topic {
+	case runevents.TopicRunCommandGet,
+		runevents.TopicRunCommandListStepsByRun,
+		runevents.TopicRunCommandListStepSummariesByRun,
+		runevents.TopicRunCommandListCheckpointsByRun:
+		return runevents.CommandDestination, true
+	case orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,
+		orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun,
+		orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun:
+		return orchestratorevents.CommandDestination, true
+	case decisionevents.TopicDecisionCommandGetTicket,
+		decisionevents.TopicDecisionCommandListTicketsByRun:
+		return decisionevents.CommandDestination, true
+	case approvalevents.TopicApprovalCommandGet,
+		approvalevents.TopicApprovalCommandListByRun:
+		return approvalevents.CommandDestination, true
+	default:
+		return "", false
+	}
 }

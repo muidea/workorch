@@ -10,18 +10,33 @@ const definitionPackage = "github.com/muidea/workorch/internal/modules/applicati
 const CommandDestination = modulecommon.ModuleID
 
 type DoneCommand struct{}
-type DoneCommandResult struct{}
+type DoneCommandResult struct {
+	Done <-chan error
+}
 
 type WorkspaceRunRequestedCommand struct {
-	WorkspaceID        common.WorkspaceID
-	RunID              common.RunID
-	Intent             string
-	Reason             string
-	RequestID          string
-	IdempotencyKey     string
-	Source             string
-	DefinitionRevision string
-	DecisionID         common.TicketID
+	WorkspaceID           common.WorkspaceID
+	RunID                 common.RunID
+	Intent                string
+	Action                string
+	Reason                string
+	RequestID             string
+	IdempotencyKey        string
+	Source                string
+	DefinitionRevision    string
+	DecisionID            string
+	Priority              int
+	GoalID                common.GoalID
+	DoDID                 common.DoDID
+	LLMProviderID         string
+	SoulID                common.SoulID
+	SoulBindings          map[string]string
+	SkillIDs              []common.SkillID
+	MCPServerIDs          []common.MCPServerID
+	CapabilityIDs         []common.MCPCapabilityID
+	MemoryIDs             []common.MemoryID
+	DialogLanguage        string
+	ExecutionContextPatch map[string]any
 }
 
 type WorkspaceRunRequestedResult struct {

@@ -1,6 +1,9 @@
 package eventdefs
 
-import "github.com/muidea/workorch/internal/pkg/eventcontract"
+import (
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+)
 
 const TopicRuntimeBlockCommandExecutePrefix = "/runtime/block/command/execute/"
 
@@ -42,7 +45,21 @@ func MessageContracts() []eventcontract.MessageContract {
 	)
 }
 
-type AcceptedData struct{}
-type ProgressData struct{}
-type CompletedData struct{}
-type FailedData struct{}
+type AcceptedData struct {
+	Accepted runtimemodel.RuntimeStepExecutionAccepted
+}
+
+type ProgressData struct {
+	Progress runtimemodel.RuntimeStepExecutionProgressed
+}
+
+type CompletedData struct {
+	Completed runtimemodel.RuntimeStepExecutionCompleted
+	Result    runtimemodel.StepExecutionResult
+}
+
+type FailedData struct {
+	Failed runtimemodel.RuntimeStepExecutionFailed
+	Result runtimemodel.StepExecutionResult
+	Error  string
+}

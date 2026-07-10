@@ -10,7 +10,6 @@ import (
 	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
-	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -171,16 +170,19 @@ func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       orchestratorevents.TopicOrchestratorCommandPurgeRun,
-		SubjectType: "run",
-		SubjectID:   string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand: orchestratorcontracts.PurgeRunCommand{RunID: runID},
-		},
-	})
-	if _, ok := events.ResponseEnvelope(err); !ok {
-		t.Fatalf("purge err = %v, want response", err)
+	result := rawHub.Send(magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorCommandPurgeRun,
+		"test/orchestrator",
+		orchestratorevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		orchestratorevents.PurgeRunCommand{RunID: runID},
+	))
+	if result == nil {
+		t.Fatal("purge result is nil")
+	}
+	if result.Error() != nil {
+		t.Fatalf("purge err = %v", result.Error())
 	}
 	items, err := steps.ListByRun(ctx, runID)
 	if err != nil {
@@ -247,18 +249,19 @@ func TestPurgeRunCommandUsesWorkspaceScopeForDuplicateRunIDs(t *testing.T) {
 		}
 	})
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       orchestratorevents.TopicOrchestratorCommandPurgeRun,
-		SubjectType: "run",
-		SubjectID:   string(runID),
-		WorkspaceID: string(workspaceA),
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand: orchestratorcontracts.PurgeRunCommand{RunID: runID},
-		},
-	})
-	if _, ok := events.ResponseEnvelope(err); !ok {
-		t.Fatalf("purge err = %v, want response", err)
+	result := rawHub.Send(magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorCommandPurgeRun,
+		"test/orchestrator",
+		orchestratorevents.CommandDestination,
+		magicevent.NewHeader(),
+		common.ContextWithRuntimeWorkspaceID(ctx, workspaceA),
+		orchestratorevents.PurgeRunCommand{RunID: runID},
+	))
+	if result == nil {
+		t.Fatal("purge result is nil")
+	}
+	if result.Error() != nil {
+		t.Fatalf("purge err = %v", result.Error())
 	}
 	itemsA, err := steps.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, workspaceA), runID)
 	if err != nil {

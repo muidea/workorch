@@ -6,7 +6,6 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -37,17 +36,19 @@ func FailRun(ctx context.Context, hub events.Hub, item *runmodel.Run, reason str
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, orchestratorevents.TopicOrchestratorCommandFailRun, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
-		events.PayloadKeyRunID:         string(item.ID),
-		events.PayloadKeyFailureReason: reason,
+	_, err := sendRunMagicCommand[orchestratorevents.FailRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandFailRun, orchestratorevents.CommandDestination, "run", string(item.ID), item.WorkspaceID, item.ID, orchestratorevents.FailRunCommand{
+		RunID:  item.ID,
+		Reason: reason,
 	})
+	return err
 }
 
 func CancelRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, orchestratorevents.TopicOrchestratorCommandCancelRun, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
-		events.PayloadKeyRunID: string(item.ID),
+	_, err := sendRunMagicCommand[orchestratorevents.CancelRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandCancelRun, orchestratorevents.CommandDestination, "run", string(item.ID), item.WorkspaceID, item.ID, orchestratorevents.CancelRunCommand{
+		RunID: item.ID,
 	})
+	return err
 }

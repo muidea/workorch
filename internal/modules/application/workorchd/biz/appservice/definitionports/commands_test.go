@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
-	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -32,23 +32,23 @@ func TestConsolidateWorkspaceDefinitionRejectsMissingCanonicalBeforePublishing(t
 
 func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	defHub := newDefinitionMagicTestHub(t)
+	hub := defHub.hub
 	workspaceID := common.WorkspaceID("ws-definition-port")
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandListGoalsByWS, func(_ context.Context, envelope events.Envelope) error {
-		if got := envelope.Payload[events.PayloadKeyWorkspaceID]; got != string(workspaceID) {
-			t.Fatalf("workspace payload = %v, want %s", got, workspaceID)
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyGoals: []*workspacemodel.Goal{},
-			},
-		})
-	})
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandDefineGoal, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.DefineGoalCommand)
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandListGoalsByWS, func(data any) workspaceevents.WorkspaceCommandResult {
+		cmd, ok := data.(workspaceevents.ListGoalsByWorkspaceCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want DefineGoalCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want ListGoalsByWorkspaceCommand", data)
+		}
+		if cmd.WorkspaceID != workspaceID {
+			t.Fatalf("command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
+		}
+		return workspaceevents.WorkspaceCommandResult{Goals: []*workspacemodel.Goal{}}
+	})
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDefineGoal, func(data any) workspaceevents.WorkspaceCommandResult {
+		cmd, ok := data.(workspaceevents.DefineGoalCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want DefineGoalCommand", data)
 		}
 		goalID := cmd.GoalID
 		if goalID == "" {
@@ -58,16 +58,11 @@ func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 		if text != "- ship the feature" {
 			t.Fatalf("goal text = %q, want formatted bullet", text)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyGoal: &workspacemodel.Goal{
-					ID:          goalID,
-					WorkspaceID: workspaceID,
-					Text:        text,
-				},
-			},
-		})
+		return workspaceevents.WorkspaceCommandResult{Goal: &workspacemodel.Goal{
+			ID:          goalID,
+			WorkspaceID: workspaceID,
+			Text:        text,
+		}}
 	})
 
 	item, err := DefineOrConsolidateWorkspaceGoal(ctx, hub, nil, workspaceID, "ship the feature")
@@ -81,32 +76,25 @@ func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 
 func TestUpdateGoalViewPublishesWorkspaceScopeFromContext(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-definition-update-scope")
-	hub := events.NewMemoryHub()
+	defHub := newDefinitionMagicTestHub(t)
+	hub := defHub.hub
 	workspaceID := common.WorkspaceID("ws-definition-update-scope")
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandUpdateGoal, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
-		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.UpdateGoalCommand)
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandUpdateGoal, func(data any) workspaceevents.WorkspaceCommandResult {
+		cmd, ok := data.(workspaceevents.UpdateGoalCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want UpdateGoalCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want UpdateGoalCommand", data)
+		}
+		if cmd.WorkspaceID != workspaceID {
+			t.Fatalf("command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
 		if cmd.GoalID != "goal-definition-update-scope" || cmd.Text != "- updated goal" {
 			t.Fatalf("command = %+v, want updated scoped goal", cmd)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyGoal: &workspacemodel.Goal{
-					ID:          cmd.GoalID,
-					WorkspaceID: workspaceID,
-					Text:        cmd.Text,
-				},
-			},
-		})
+		return workspaceevents.WorkspaceCommandResult{Goal: &workspacemodel.Goal{
+			ID:          cmd.GoalID,
+			WorkspaceID: workspaceID,
+			Text:        cmd.Text,
+		}}
 	})
 
 	item, err := UpdateGoalView(ctx, hub, "goal-definition-update-scope", "updated goal")
@@ -120,24 +108,27 @@ func TestUpdateGoalViewPublishesWorkspaceScopeFromContext(t *testing.T) {
 
 func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	defHub := newDefinitionMagicTestHub(t)
+	hub := defHub.hub
 	workspaceID := common.WorkspaceID("ws-definition-port")
 	deleteCount := 0
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandListDoDsByWS, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyDoDs: []*workspacemodel.DoD{
-					{ID: "dod-001", WorkspaceID: workspaceID, Items: []string{"first"}},
-					{ID: "dod-002", WorkspaceID: workspaceID, Items: []string{"second"}},
-				},
-			},
-		})
-	})
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandUpdateDoD, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.UpdateDoDCommand)
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandListDoDsByWS, func(data any) workspaceevents.WorkspaceCommandResult {
+		cmd, ok := data.(workspaceevents.ListDoDsByWorkspaceCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want UpdateDoDCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want ListDoDsByWorkspaceCommand", data)
+		}
+		if cmd.WorkspaceID != workspaceID {
+			t.Fatalf("command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
+		}
+		return workspaceevents.WorkspaceCommandResult{DoDs: []*workspacemodel.DoD{
+			{ID: "dod-001", WorkspaceID: workspaceID, Items: []string{"first"}},
+			{ID: "dod-002", WorkspaceID: workspaceID, Items: []string{"second"}},
+		}}
+	})
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandUpdateDoD, func(data any) workspaceevents.WorkspaceCommandResult {
+		cmd, ok := data.(workspaceevents.UpdateDoDCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want UpdateDoDCommand", data)
 		}
 		dodID := cmd.DoDID
 		if dodID != "dod-002" {
@@ -147,27 +138,22 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 		if len(items) != 2 || items[0] != "first" || items[1] != "second" {
 			t.Fatalf("merged items = %#v, want first/second", items)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyDoD: &workspacemodel.DoD{
-					ID:          dodID,
-					WorkspaceID: workspaceID,
-					Items:       items,
-				},
-			},
-		})
+		return workspaceevents.WorkspaceCommandResult{DoD: &workspacemodel.DoD{
+			ID:          dodID,
+			WorkspaceID: workspaceID,
+			Items:       items,
+		}}
 	})
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandDeleteDoD, func(_ context.Context, envelope events.Envelope) error {
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDeleteDoD, func(data any) workspaceevents.WorkspaceCommandResult {
 		deleteCount++
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.DeleteDoDCommand)
+		cmd, ok := data.(workspaceevents.DeleteDoDCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want DeleteDoDCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want DeleteDoDCommand", data)
 		}
 		if got := cmd.DoDID; got != "dod-001" {
 			t.Fatalf("deleted dod id = %q, want dod-001", got)
 		}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{}})
+		return workspaceevents.WorkspaceCommandResult{}
 	})
 
 	items, err := ListConsolidatedWorkspaceDoDs(ctx, hub, nil, workspaceID)
@@ -184,32 +170,25 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 
 func TestUpdateDoDViewPublishesWorkspaceScopeFromContext(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-definition-update-scope")
-	hub := events.NewMemoryHub()
+	defHub := newDefinitionMagicTestHub(t)
+	hub := defHub.hub
 	workspaceID := common.WorkspaceID("ws-definition-update-scope")
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandUpdateDoD, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
-		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.UpdateDoDCommand)
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandUpdateDoD, func(data any) workspaceevents.WorkspaceCommandResult {
+		cmd, ok := data.(workspaceevents.UpdateDoDCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want UpdateDoDCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want UpdateDoDCommand", data)
+		}
+		if cmd.WorkspaceID != workspaceID {
+			t.Fatalf("command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
 		if cmd.DoDID != "dod-definition-update-scope" || len(cmd.Items) != 1 || cmd.Items[0] != "updated dod" {
 			t.Fatalf("command = %+v, want updated scoped dod", cmd)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyDoD: &workspacemodel.DoD{
-					ID:          cmd.DoDID,
-					WorkspaceID: workspaceID,
-					Items:       cmd.Items,
-				},
-			},
-		})
+		return workspaceevents.WorkspaceCommandResult{DoD: &workspacemodel.DoD{
+			ID:          cmd.DoDID,
+			WorkspaceID: workspaceID,
+			Items:       cmd.Items,
+		}}
 	})
 
 	item, err := UpdateDoDView(ctx, hub, "dod-definition-update-scope", []string{"updated dod"})
@@ -223,23 +202,21 @@ func TestUpdateDoDViewPublishesWorkspaceScopeFromContext(t *testing.T) {
 
 func TestDeleteGoalPublishesWorkspaceScopeFromContext(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-definition-delete-scope")
-	hub := events.NewMemoryHub()
+	defHub := newDefinitionMagicTestHub(t)
+	hub := defHub.hub
 	workspaceID := common.WorkspaceID("ws-definition-delete-scope")
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandDeleteGoal, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
-		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.DeleteGoalCommand)
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDeleteGoal, func(data any) workspaceevents.WorkspaceCommandResult {
+		cmd, ok := data.(workspaceevents.DeleteGoalCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want DeleteGoalCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want DeleteGoalCommand", data)
+		}
+		if cmd.WorkspaceID != workspaceID {
+			t.Fatalf("command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
 		if cmd.GoalID != "goal-definition-delete-scope" {
 			t.Fatalf("command = %+v, want scoped goal delete", cmd)
 		}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{}})
+		return workspaceevents.WorkspaceCommandResult{}
 	})
 
 	if err := DeleteGoal(ctx, hub, "", "goal-definition-delete-scope"); err != nil {
@@ -249,23 +226,21 @@ func TestDeleteGoalPublishesWorkspaceScopeFromContext(t *testing.T) {
 
 func TestDeleteDoDPublishesWorkspaceScopeFromContext(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-definition-delete-scope")
-	hub := events.NewMemoryHub()
+	defHub := newDefinitionMagicTestHub(t)
+	hub := defHub.hub
 	workspaceID := common.WorkspaceID("ws-definition-delete-scope")
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandDeleteDoD, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
-		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.DeleteDoDCommand)
+	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDeleteDoD, func(data any) workspaceevents.WorkspaceCommandResult {
+		cmd, ok := data.(workspaceevents.DeleteDoDCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want DeleteDoDCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want DeleteDoDCommand", data)
+		}
+		if cmd.WorkspaceID != workspaceID {
+			t.Fatalf("command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
 		if cmd.DoDID != "dod-definition-delete-scope" {
 			t.Fatalf("command = %+v, want scoped dod delete", cmd)
 		}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{}})
+		return workspaceevents.WorkspaceCommandResult{}
 	})
 
 	if err := DeleteDoD(ctx, hub, "", "dod-definition-delete-scope"); err != nil {
@@ -276,4 +251,29 @@ func TestDeleteDoDPublishesWorkspaceScopeFromContext(t *testing.T) {
 func stringPayload(payload map[string]any, key string) string {
 	value, _ := payload[key].(string)
 	return value
+}
+
+type definitionMagicTestHub struct {
+	hub      *events.MagicHub
+	observer magicevent.SimpleObserver
+}
+
+func newDefinitionMagicTestHub(t *testing.T) *definitionMagicTestHub {
+	t.Helper()
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHubOwner(rawHub, "definitionports/test")
+	ret := &definitionMagicTestHub{
+		hub:      hub,
+		observer: magicevent.NewSimpleObserver(workspaceevents.CommandDestination, rawHub),
+	}
+	t.Cleanup(func() {
+		hub.Terminate(context.Background())
+	})
+	return ret
+}
+
+func (h *definitionMagicTestHub) subscribe(topic string, handler func(any) workspaceevents.WorkspaceCommandResult) {
+	h.observer.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
+		result.Set(handler(ev.Data()), nil)
+	})
 }

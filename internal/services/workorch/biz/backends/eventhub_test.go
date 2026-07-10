@@ -17,8 +17,10 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
 func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
@@ -214,8 +216,17 @@ func TestDecodeResultResourceUsesTypedPayloadBeforeJSONFallback(t *testing.T) {
 func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 	ctx := context.Background()
 	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
-	unsubscribe := subscribeWorkspaceRunAccepted(t, eventHub)
-	defer unsubscribe()
+	provider, ok := eventHub.(interface{ RawHub() magicevent.Hub })
+	if !ok || provider.RawHub() == nil {
+		t.Fatal("event hub does not expose raw hub")
+	}
+	var captured workorchdevents.WorkspaceRunRequestedCommand
+	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, provider.RawHub())
+	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(event magicevent.Event, result magicevent.Result) {
+		captured, _ = event.Data().(workorchdevents.WorkspaceRunRequestedCommand)
+		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
+	})
+	defer observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
 
 	if _, err := be.Run().Command(ctx, WorkspaceRunCommand{
 		WorkspaceID:        "ws-restart-unified",
@@ -246,56 +257,11 @@ func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 		t.Fatalf("restart: %v", err)
 	}
 
-	publishedHub, ok := eventHub.(interface{ Published() []events.Envelope })
-	if !ok {
-		t.Fatal("event hub does not expose published envelopes")
+	if captured.WorkspaceID != "ws-restart-unified" || captured.Intent != string(RunCommandIntentRestart) || captured.RequestID != "request-restart-unified" || captured.Reason != "test_restart_unified" || captured.Source != "test" || captured.DefinitionRevision != "rev-restart-unified" || captured.DecisionID != "ticket-restart-unified" || captured.Priority != 7 || captured.GoalID != "goal-restart-unified" || captured.DoDID != "dod-restart-unified" || captured.LLMProviderID != "provider-restart-unified" || captured.SoulID != "soul-restart-unified" {
+		t.Fatalf("workspace run restart command = %+v", captured)
 	}
-	var sawUnified bool
-	const legacyRestartTopic = "/workorchd/command/workspace-restart/requested"
-	for _, envelope := range publishedHub.Published() {
-		if envelope.Topic == legacyRestartTopic {
-			t.Fatalf("published legacy restart topic: %+v", envelope)
-		}
-		if envelope.Topic != workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested {
-			continue
-		}
-		if envelope.WorkspaceID != "ws-restart-unified" ||
-			envelope.SubjectType != "workspace-run" ||
-			envelope.Payload[events.PayloadKeyIntent] != string(RunCommandIntentRestart) ||
-			envelope.Payload[events.PayloadKeyRequestID] != "request-restart-unified" ||
-			envelope.Payload[events.PayloadKeyReason] != "test_restart_unified" ||
-			envelope.Payload[events.PayloadKeySource] != "test" ||
-			envelope.Payload[events.PayloadKeyDefinitionRevision] != "rev-restart-unified" ||
-			envelope.Payload[events.PayloadKeyDecisionID] != "ticket-restart-unified" ||
-			envelope.Payload[events.PayloadKeyPriority] != 7 ||
-			envelope.Payload[events.PayloadKeyGoalID] != "goal-restart-unified" ||
-			envelope.Payload[events.PayloadKeyDoDID] != "dod-restart-unified" ||
-			envelope.Payload[events.PayloadKeyLLMProviderID] != "provider-restart-unified" ||
-			envelope.Payload[events.PayloadKeySoulID] != "soul-restart-unified" {
-			t.Fatalf("workspace run restart envelope = %+v", envelope)
-		}
-		if bindings, _ := envelope.Payload["soulBindings"].(map[string]string); bindings["validation"] != "soul-validation-restart-unified" {
-			t.Fatalf("restart envelope soulBindings = %+v, want validation binding", envelope.Payload["soulBindings"])
-		}
-		if got := stringSliceValue(envelope.Payload, "skillIds"); len(got) != 1 || got[0] != "skill-restart-unified" {
-			t.Fatalf("restart envelope skillIds = %+v", envelope.Payload["skillIds"])
-		}
-		if got := stringSliceValue(envelope.Payload, "mcpServerIds"); len(got) != 1 || got[0] != "mcp-restart-unified" {
-			t.Fatalf("restart envelope mcpServerIds = %+v", envelope.Payload["mcpServerIds"])
-		}
-		if got := stringSliceValue(envelope.Payload, "capabilityIds"); len(got) != 1 || got[0] != "mcp-restart-unified:tool:validate" {
-			t.Fatalf("restart envelope capabilityIds = %+v", envelope.Payload["capabilityIds"])
-		}
-		if got := stringSliceValue(envelope.Payload, "memoryIds"); len(got) != 1 || got[0] != "memory-restart-unified" {
-			t.Fatalf("restart envelope memoryIds = %+v", envelope.Payload["memoryIds"])
-		}
-		if patch, _ := envelope.Payload[events.PayloadKeyExecutionContextPatch].(map[string]any); patch == nil {
-			t.Fatalf("restart envelope missing execution context patch: %+v", envelope.Payload)
-		}
-		sawUnified = true
-	}
-	if !sawUnified {
-		t.Fatal("restart did not publish unified workspace-run command")
+	if captured.SoulBindings["validation"] != "soul-validation-restart-unified" || len(captured.SkillIDs) != 1 || len(captured.MCPServerIDs) != 1 || len(captured.CapabilityIDs) != 1 || len(captured.MemoryIDs) != 1 || captured.ExecutionContextPatch == nil {
+		t.Fatalf("workspace run activation contract = %+v", captured)
 	}
 }
 
@@ -303,63 +269,40 @@ func TestEventHubRunCommandRequiresSchedulerAcceptedResponse(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name      string
-		subscribe func(events.Hub) func()
+		subscribe func(magicevent.Hub) func()
 		wantError string
 	}{
 		{
 			name:      "missing scheduler response",
-			wantError: "returned no accepted response",
+			wantError: "missing observer",
 		},
 		{
-			name: "wrong response topic",
-			subscribe: func(hub events.Hub) func() {
-				return hub.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(_ context.Context, envelope events.Envelope) error {
-					return events.Response(events.Envelope{
-						Topic:        envelope.Topic + "/done",
-						SourceModule: "workorchd/scheduler",
-						Payload:      map[string]any{"accepted": true},
-					})
-				})
-			},
-			wantError: "unexpected response topic",
-		},
-		{
-			name: "not accepted",
-			subscribe: func(hub events.Hub) func() {
-				return hub.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(_ context.Context, envelope events.Envelope) error {
-					return events.Response(events.Envelope{
-						Topic:        envelope.Topic + "/accepted",
-						SourceModule: "workorchd/scheduler",
-						Payload:      map[string]any{"accepted": false},
-					})
-				})
+			name: "wrong response type",
+			subscribe: func(hub magicevent.Hub) func() {
+				return subscribeWorkspaceRunResult(t, hub, struct{ Accepted bool }{Accepted: true})
 			},
 			wantError: "was not accepted",
 		},
 		{
-			name: "wrong response owner",
-			subscribe: func(hub events.Hub) func() {
-				return hub.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(_ context.Context, envelope events.Envelope) error {
-					return events.Response(events.Envelope{
-						Topic:        envelope.Topic + "/accepted",
-						SourceModule: "other-owner",
-						Payload:      map[string]any{"accepted": true},
-					})
-				})
+			name: "not accepted",
+			subscribe: func(hub magicevent.Hub) func() {
+				return subscribeWorkspaceRunResult(t, hub, workorchdevents.WorkspaceRunRequestedResult{Accepted: false})
 			},
-			wantError: "returned response from other-owner",
+			wantError: "was not accepted",
 		},
 		{
 			name: "accepted",
-			subscribe: func(hub events.Hub) func() {
-				return subscribeWorkspaceRunAccepted(t, hub)
+			subscribe: func(hub magicevent.Hub) func() {
+				return subscribeWorkspaceRunResult(t, hub, workorchdevents.WorkspaceRunRequestedResult{Accepted: true})
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hub := events.NewMemoryHub()
+			rawHub := magicevent.NewHub(16)
+			defer rawHub.Terminate(ctx)
+			hub := events.NewMagicHubWithHubOwner(rawHub, "workorch/backend/ack-test")
 			if tc.subscribe != nil {
-				unsubscribe := tc.subscribe(hub)
+				unsubscribe := tc.subscribe(rawHub)
 				defer unsubscribe()
 			}
 			be := NewEventHub(hub)
@@ -606,6 +549,22 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 	ctx := context.Background()
 	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
+	var sawUpdatedGoal, sawUpdatedDoD bool
+	unsubscribeGoal := eventHub.Subscribe(workspaceevents.TopicGoalDefined, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.Payload[events.PayloadKeyText] == "- updated goal" {
+			sawUpdatedGoal = true
+		}
+		return nil
+	})
+	defer unsubscribeGoal()
+	unsubscribeDoD := eventHub.Subscribe(workspaceevents.TopicDoDDefined, func(_ context.Context, envelope events.Envelope) error {
+		items, _ := envelope.Payload[events.PayloadKeyItems].([]string)
+		if len(items) == 1 && items[0] == "updated dod" {
+			sawUpdatedDoD = true
+		}
+		return nil
+	})
+	defer unsubscribeDoD()
 
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "definition refresh workspace"})
 	if err != nil {
@@ -626,24 +585,6 @@ func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 		t.Fatalf("update dod: %v", err)
 	}
 
-	publishedHub, ok := eventHub.(interface{ Published() []events.Envelope })
-	if !ok {
-		t.Fatal("event hub does not expose published envelopes")
-	}
-	var sawUpdatedGoal, sawUpdatedDoD bool
-	for _, envelope := range publishedHub.Published() {
-		switch envelope.Topic {
-		case workspaceevents.TopicGoalDefined:
-			if envelope.SubjectID == string(goal.ID) && envelope.WorkspaceID == string(ws.ID) && envelope.Payload[events.PayloadKeyText] == "- updated goal" {
-				sawUpdatedGoal = true
-			}
-		case workspaceevents.TopicDoDDefined:
-			items, _ := envelope.Payload[events.PayloadKeyItems].([]string)
-			if envelope.SubjectID == string(dod.ID) && envelope.WorkspaceID == string(ws.ID) && len(items) == 1 && items[0] == "updated dod" {
-				sawUpdatedDoD = true
-			}
-		}
-	}
 	if !sawUpdatedGoal || !sawUpdatedDoD {
 		t.Fatalf("published updated goal=%v dod=%v, want both definition update events", sawUpdatedGoal, sawUpdatedDoD)
 	}
@@ -825,11 +766,10 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 
 func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backend, events.Hub) {
 	t.Helper()
-	session, err := appservice.NewRuntimeSessionWithBackend("memory", "")
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
+	runtime := testkit.NewRuntime("memory", "", workorchruntimepolicy.RuntimePolicy{}, nil)
+	session := appservice.NewRuntimeSession(runtime)
 	t.Cleanup(func() { _ = session.Close(ctx) })
+	var err error
 	exports, err := session.Exports()
 	if err != nil {
 		t.Fatalf("exports: %v", err)
@@ -844,17 +784,20 @@ func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backen
 
 func subscribeWorkspaceRunAccepted(t *testing.T, hub events.Hub) func() {
 	t.Helper()
-	return hub.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{
-			Topic:        envelope.Topic + "/accepted",
-			SourceModule: "workorchd/scheduler",
-			SubjectType:  envelope.SubjectType,
-			SubjectID:    envelope.SubjectID,
-			WorkspaceID:  envelope.WorkspaceID,
-			RunID:        envelope.RunID,
-			Payload:      map[string]any{"accepted": true},
-		})
+	provider, ok := hub.(interface{ RawHub() magicevent.Hub })
+	if !ok || provider.RawHub() == nil {
+		t.Fatal("event hub does not expose raw hub")
+	}
+	return subscribeWorkspaceRunResult(t, provider.RawHub(), workorchdevents.WorkspaceRunRequestedResult{Accepted: true})
+}
+
+func subscribeWorkspaceRunResult(t *testing.T, hub magicevent.Hub, response any) func() {
+	t.Helper()
+	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, hub)
+	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(response, nil)
 	})
+	return func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) }
 }
 
 func subscribeRunReadCLIResponses(t *testing.T, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID) func() {

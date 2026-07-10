@@ -8,9 +8,10 @@ import (
 	"sync"
 	"time"
 
+	cd "github.com/muidea/magicCommon/def"
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -22,11 +23,12 @@ var runtimeWorkerHeartbeatInterval = 30 * time.Second
 
 type Executor struct {
 	moduleID   string
-	hub        events.Hub
+	hub        magicevent.Hub
+	observer   magicevent.SimpleObserver
 	background task.BackgroundRoutine
 	adapter    Adapter
 	kinds      []string
-	unsub      []func()
+	topics     []string
 
 	mu       sync.Mutex
 	closed   bool
@@ -41,10 +43,11 @@ type runtimeExecutionState struct {
 	QueueKey      string
 	WorkerID      string
 	WorkerCancel  context.CancelFunc
-	TerminalEvent events.Envelope
+	TerminalTopic string
+	TerminalData  any
 }
 
-func NewExecutor(moduleID string, hub events.Hub, background task.BackgroundRoutine, adapter Adapter, kinds ...string) *Executor {
+func NewExecutor(moduleID string, hub magicevent.Hub, background task.BackgroundRoutine, adapter Adapter, kinds ...string) *Executor {
 	return &Executor{
 		moduleID:   moduleID,
 		hub:        hub,
@@ -59,7 +62,7 @@ func (e *Executor) Run() error {
 	if e == nil || e.hub == nil || e.background == nil || e.adapter == nil || len(e.kinds) == 0 {
 		return common.ErrInvalidArgument
 	}
-	if len(e.unsub) > 0 {
+	if e.observer != nil {
 		return nil
 	}
 	e.mu.Lock()
@@ -72,7 +75,12 @@ func (e *Executor) Run() error {
 		if kind == "" {
 			return common.ErrInvalidArgument
 		}
-		e.unsub = append(e.unsub, e.hub.Subscribe(RuntimeBlockExecuteTopic(kind), e.handle))
+		topic := RuntimeBlockExecuteTopic(kind)
+		if e.observer == nil {
+			e.observer = magicevent.NewSimpleObserverWithMatchID(e.moduleID, CommandDestination, e.hub)
+		}
+		e.observer.Subscribe(topic, e.handle)
+		e.topics = append(e.topics, topic)
 	}
 	return nil
 }
@@ -81,12 +89,13 @@ func (e *Executor) Teardown() {
 	if e == nil {
 		return
 	}
-	for idx := len(e.unsub) - 1; idx >= 0; idx-- {
-		if e.unsub[idx] != nil {
-			e.unsub[idx]()
+	if e.observer != nil {
+		for idx := len(e.topics) - 1; idx >= 0; idx-- {
+			e.observer.Unsubscribe(e.topics[idx])
 		}
 	}
-	e.unsub = nil
+	e.observer = nil
+	e.topics = nil
 	var lost []runtimeExecutionState
 	var cancels []context.CancelFunc
 	e.mu.Lock()
@@ -114,27 +123,21 @@ func (e *Executor) Teardown() {
 	}
 }
 
-func (e *Executor) handle(ctx context.Context, envelope events.Envelope) error {
-	request, ok := envelope.Payload[events.PayloadKeyRuntimeRequest].(runtimemodel.StepExecutionRequest)
+func (e *Executor) handle(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(ExecuteCommand)
 	if !ok {
-		return common.ErrInvalidArgument
+		setMagicResult(result, nil, common.ErrInvalidArgument)
+		return
 	}
+	request := command.Request
 	if request.Kind == "" {
-		request.Kind = runtimeKindFromTopic(envelope.Topic)
-	}
-	if request.WorkspaceID == "" && envelope.WorkspaceID != "" {
-		request.WorkspaceID = common.WorkspaceID(envelope.WorkspaceID)
-	}
-	if request.RunID == "" && envelope.RunID != "" {
-		request.RunID = common.RunID(envelope.RunID)
-	}
-	if request.StepID == "" && envelope.StepID != "" {
-		request.StepID = common.StepID(envelope.StepID)
+		request.Kind = runtimeKindFromTopic(event.ID())
 	}
 	if request.Kind == "" || request.StepID == "" {
-		return common.ErrInvalidArgument
+		setMagicResult(result, nil, common.ErrInvalidArgument)
+		return
 	}
-	requestID := runtimeRequestID(envelope, request)
+	requestID := runtimeRequestID(command, request)
 	queueKey := runtimeQueueKey(request, requestID)
 	accepted := runtimemodel.RuntimeStepExecutionAccepted{
 		WorkspaceID:    request.WorkspaceID,
@@ -148,8 +151,10 @@ func (e *Executor) handle(ctx context.Context, envelope events.Envelope) error {
 	}
 	schedule, replay, err := e.accept(queueKey, request, requestID)
 	if err != nil {
-		return err
+		setMagicResult(result, nil, err)
+		return
 	}
+	ctx := event.Context()
 	if schedule {
 		workerRequest := request
 		workerRequest.Progress = e.progressPublisher(request, requestID)
@@ -170,60 +175,56 @@ func (e *Executor) handle(ctx context.Context, envelope events.Envelope) error {
 		}); err != nil {
 			workerCancel()
 			e.forget(queueKey)
-			return err
+			setMagicResult(result, nil, err)
+			return
 		}
 		if err := e.publishAccepted(ctx, accepted); err != nil {
 			workerCancel()
 			e.forget(queueKey)
-			return err
+			setMagicResult(result, nil, err)
+			return
 		}
 		close(startWorker)
 	} else if replay.Topic != "" {
-		if err := publishRuntimeNotification(e.hub, ctx, replay); err != nil {
-			return err
+		if err := publishRuntimeNotification(e.hub, ctx, e.moduleID, replay.Topic, replay.Data); err != nil {
+			setMagicResult(result, nil, err)
+			return
 		}
 		if err := e.publishAccepted(ctx, accepted); err != nil {
-			return err
+			setMagicResult(result, nil, err)
+			return
 		}
 	} else {
 		if err := e.publishAccepted(ctx, accepted); err != nil {
-			return err
+			setMagicResult(result, nil, err)
+			return
 		}
 	}
-	payload := map[string]any{
-		events.PayloadKeyRuntimeAccepted:  accepted,
-		events.PayloadKeyRuntimeRequestID: requestID,
-		events.PayloadKeyRuntimeQueueKey:  queueKey,
-	}
-	return events.Response(events.Envelope{
-		Topic:        envelope.Topic + "/response",
-		SourceModule: e.moduleID,
-		SubjectType:  envelope.SubjectType,
-		SubjectID:    envelope.SubjectID,
-		WorkspaceID:  envelope.WorkspaceID,
-		RunID:        envelope.RunID,
-		StepID:       envelope.StepID,
-		Payload:      payload,
-	})
+	setMagicResult(result, ExecuteCommandResult{Accepted: accepted}, nil)
 }
 
-func (e *Executor) accept(queueKey string, request runtimemodel.StepExecutionRequest, requestID string) (bool, events.Envelope, error) {
+type terminalNotification struct {
+	Topic string
+	Data  any
+}
+
+func (e *Executor) accept(queueKey string, request runtimemodel.StepExecutionRequest, requestID string) (bool, terminalNotification, error) {
 	if e == nil || queueKey == "" {
-		return false, events.Envelope{}, common.ErrInvalidArgument
+		return false, terminalNotification{}, common.ErrInvalidArgument
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
-		return false, events.Envelope{}, fmt.Errorf("%w: runtime executor is closed", common.ErrInvalidArgument)
+		return false, terminalNotification{}, fmt.Errorf("%w: runtime executor is closed", common.ErrInvalidArgument)
 	}
 	if e.requests == nil {
 		e.requests = map[string]runtimeExecutionState{}
 	}
 	if state := e.requests[queueKey]; state.Accepted {
 		if state.Terminal {
-			return false, state.TerminalEvent, nil
+			return false, terminalNotification{Topic: state.TerminalTopic, Data: state.TerminalData}, nil
 		}
-		return false, events.Envelope{}, nil
+		return false, terminalNotification{}, nil
 	}
 	e.requests[queueKey] = runtimeExecutionState{
 		Accepted:  true,
@@ -232,7 +233,7 @@ func (e *Executor) accept(queueKey string, request runtimemodel.StepExecutionReq
 		QueueKey:  queueKey,
 		WorkerID:  runtimeWorkerID(e.moduleID, requestID),
 	}
-	return true, events.Envelope{}, nil
+	return true, terminalNotification{}, nil
 }
 
 func (e *Executor) forget(queueKey string) {
@@ -366,19 +367,7 @@ func (e *Executor) publishWorkerLifecycle(ctx context.Context, request runtimemo
 		OccurredAt:     nowRFC3339(),
 		RecoveryPolicy: request.RecoveryPolicy.Normalized(),
 	}
-	return publishRuntimeNotification(e.hub, ctx, events.Envelope{
-		Topic:        TopicRuntimeBlockExecuteProgress,
-		SourceModule: e.moduleID,
-		SubjectType:  "runtime_step",
-		SubjectID:    string(request.StepID),
-		WorkspaceID:  string(request.WorkspaceID),
-		RunID:        string(request.RunID),
-		StepID:       string(request.StepID),
-		Payload: map[string]any{
-			events.PayloadKeyRuntimeProgress:  progress,
-			events.PayloadKeyRuntimeRequestID: requestID,
-		},
-	})
+	return publishRuntimeNotification(e.hub, ctx, e.moduleID, TopicRuntimeBlockExecuteProgress, ProgressData{Progress: progress})
 }
 
 func (e *Executor) progressPublisher(request runtimemodel.StepExecutionRequest, requestID string) runtimemodel.StepExecutionProgressFunc {
@@ -396,19 +385,7 @@ func (e *Executor) progressPublisher(request runtimemodel.StepExecutionRequest, 
 			OccurredAt:     nowRFC3339(),
 			RecoveryPolicy: request.RecoveryPolicy.Normalized(),
 		}
-		if err := publishRuntimeNotification(e.hub, context.Background(), events.Envelope{
-			Topic:        TopicRuntimeBlockExecuteProgress,
-			SourceModule: e.moduleID,
-			SubjectType:  "runtime_step",
-			SubjectID:    string(request.StepID),
-			WorkspaceID:  string(request.WorkspaceID),
-			RunID:        string(request.RunID),
-			StepID:       string(request.StepID),
-			Payload: map[string]any{
-				events.PayloadKeyRuntimeProgress:  payload,
-				events.PayloadKeyRuntimeRequestID: requestID,
-			},
-		}); err != nil {
+		if err := publishRuntimeNotification(e.hub, context.Background(), e.moduleID, TopicRuntimeBlockExecuteProgress, ProgressData{Progress: payload}); err != nil {
 			return err
 		}
 		return nil
@@ -416,20 +393,7 @@ func (e *Executor) progressPublisher(request runtimemodel.StepExecutionRequest, 
 }
 
 func (e *Executor) publishAccepted(ctx context.Context, accepted runtimemodel.RuntimeStepExecutionAccepted) error {
-	return publishRuntimeNotification(e.hub, ctx, events.Envelope{
-		Topic:        TopicRuntimeBlockExecuteAccepted,
-		SourceModule: e.moduleID,
-		SubjectType:  "runtime_step",
-		SubjectID:    string(accepted.StepID),
-		WorkspaceID:  string(accepted.WorkspaceID),
-		RunID:        string(accepted.RunID),
-		StepID:       string(accepted.StepID),
-		Payload: map[string]any{
-			events.PayloadKeyRuntimeAccepted:  accepted,
-			events.PayloadKeyRuntimeRequestID: accepted.RequestID,
-			events.PayloadKeyRuntimeQueueKey:  accepted.QueueKey,
-		},
-	})
+	return publishRuntimeNotification(e.hub, ctx, e.moduleID, TopicRuntimeBlockExecuteAccepted, AcceptedData{Accepted: accepted})
 }
 
 func (e *Executor) publishCompleted(ctx context.Context, request runtimemodel.StepExecutionRequest, requestID string, result runtimemodel.StepExecutionResult) error {
@@ -443,24 +407,11 @@ func (e *Executor) publishCompleted(ctx context.Context, request runtimemodel.St
 		CompletedAt:    nowRFC3339(),
 		RecoveryPolicy: request.RecoveryPolicy.Normalized(),
 	}
-	envelope := events.Envelope{
-		Topic:        TopicRuntimeBlockExecuteCompleted,
-		SourceModule: e.moduleID,
-		SubjectType:  "runtime_step",
-		SubjectID:    string(request.StepID),
-		WorkspaceID:  string(request.WorkspaceID),
-		RunID:        string(request.RunID),
-		StepID:       string(request.StepID),
-		Payload: map[string]any{
-			events.PayloadKeyRuntimeCompleted: completed,
-			events.PayloadKeyRuntimeRequestID: requestID,
-			events.PayloadKeyRuntimeResult:    result,
-		},
-	}
-	if err := publishRuntimeNotification(e.hub, ctx, envelope); err != nil {
+	data := CompletedData{Completed: completed, Result: result}
+	if err := publishRuntimeNotification(e.hub, ctx, e.moduleID, TopicRuntimeBlockExecuteCompleted, data); err != nil {
 		return err
 	}
-	e.recordTerminal(request, requestID, envelope)
+	e.recordTerminal(request, requestID, TopicRuntimeBlockExecuteCompleted, data)
 	return nil
 }
 
@@ -476,34 +427,20 @@ func (e *Executor) publishFailed(ctx context.Context, request runtimemodel.StepE
 		RawResultRef:   "",
 		RecoveryPolicy: request.RecoveryPolicy.Normalized(),
 	}
-	envelope := events.Envelope{
-		Topic:        TopicRuntimeBlockExecuteFailed,
-		SourceModule: e.moduleID,
-		SubjectType:  "runtime_step",
-		SubjectID:    string(request.StepID),
-		WorkspaceID:  string(request.WorkspaceID),
-		RunID:        string(request.RunID),
-		StepID:       string(request.StepID),
-		Payload: map[string]any{
-			events.PayloadKeyRuntimeFailed:    failed,
-			events.PayloadKeyRuntimeRequestID: requestID,
-			events.PayloadKeyRuntimeResult:    result,
-			events.PayloadKeyError:            execErr.Error(),
-		},
-	}
-	if err := publishRuntimeNotification(e.hub, ctx, envelope); err != nil {
+	data := FailedData{Failed: failed, Result: result, Error: execErr.Error()}
+	if err := publishRuntimeNotification(e.hub, ctx, e.moduleID, TopicRuntimeBlockExecuteFailed, data); err != nil {
 		return err
 	}
-	e.recordTerminal(request, requestID, envelope)
+	e.recordTerminal(request, requestID, TopicRuntimeBlockExecuteFailed, data)
 	return nil
 }
 
-func (e *Executor) recordTerminal(request runtimemodel.StepExecutionRequest, requestID string, envelope events.Envelope) {
+func (e *Executor) recordTerminal(request runtimemodel.StepExecutionRequest, requestID string, topic string, data any) {
 	if e == nil {
 		return
 	}
 	queueKey := runtimeQueueKey(request, requestID)
-	if queueKey == "" || envelope.Topic == "" {
+	if queueKey == "" || topic == "" || data == nil {
 		return
 	}
 	e.mu.Lock()
@@ -515,30 +452,30 @@ func (e *Executor) recordTerminal(request runtimemodel.StepExecutionRequest, req
 	state.RequestID = requestID
 	state.QueueKey = queueKey
 	state.WorkerID = runtimeWorkerID(e.moduleID, requestID)
-	state.TerminalEvent = cloneEnvelope(envelope)
+	state.TerminalTopic = topic
+	state.TerminalData = data
 	e.requests[queueKey] = state
 }
 
-func publishRuntimeNotification(hub events.Hub, ctx context.Context, envelope events.Envelope) error {
+func publishRuntimeNotification(hub magicevent.Hub, ctx context.Context, source string, topic string, data any) error {
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	if err := events.PublishByContract(ctx, hub, envelope); err != nil {
-		recordRuntimeNotificationPublishFailure(envelope)
-		return err
-	}
+	event := magicevent.NewEventWithContext(topic, source, NotificationDestination, magicevent.NewHeader(), ctx, data)
+	hub.Post(event)
 	return nil
 }
 
-func recordRuntimeNotificationPublishFailure(envelope events.Envelope) {
-	switch envelope.Topic {
+func recordRuntimeNotificationPublishFailure(topic string, data any) {
+	switch topic {
 	case TopicRuntimeBlockExecuteAccepted:
 		runtimeEventAcceptedPublishFailuresTotal.Add(1)
 	case TopicRuntimeBlockExecuteCompleted, TopicRuntimeBlockExecuteFailed:
 		runtimeEventTerminalPublishFailuresTotal.Add(1)
 	case TopicRuntimeBlockExecuteProgress:
 		runtimeEventProgressPublishFailuresTotal.Add(1)
-		if progress, ok := envelope.Payload[events.PayloadKeyRuntimeProgress].(runtimemodel.RuntimeStepExecutionProgressed); ok {
+		if progressData, ok := data.(ProgressData); ok {
+			progress := progressData.Progress
 			switch progress.Event {
 			case "runtime_worker_started", "runtime_worker_stopped", "runtime_worker_heartbeat", "runtime_worker_lost":
 				runtimeEventWorkerLifecycleFailuresTotal.Add(1)
@@ -550,9 +487,9 @@ func recordRuntimeNotificationPublishFailure(envelope events.Envelope) {
 	}
 }
 
-func runtimeRequestID(envelope events.Envelope, request runtimemodel.StepExecutionRequest) string {
-	if value, _ := envelope.Payload[events.PayloadKeyRuntimeRequestID].(string); strings.TrimSpace(value) != "" {
-		return strings.TrimSpace(value)
+func runtimeRequestID(command ExecuteCommand, request runtimemodel.StepExecutionRequest) string {
+	if value := strings.TrimSpace(command.RequestID); value != "" {
+		return value
 	}
 	parts := []string{string(request.WorkspaceID), string(request.RunID), string(request.StepID), request.Kind}
 	return strings.Join(parts, "|")
@@ -596,8 +533,13 @@ func cloneMap(input map[string]any) map[string]any {
 	return ret
 }
 
-func cloneEnvelope(input events.Envelope) events.Envelope {
-	ret := input
-	ret.Payload = cloneMap(input.Payload)
-	return ret
+func setMagicResult(result magicevent.Result, data any, err error) {
+	if result == nil {
+		return
+	}
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	result.Set(data, nil)
 }

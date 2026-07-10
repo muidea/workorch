@@ -1,4 +1,4 @@
-package ownercommandports
+package governance
 
 import (
 	"context"
@@ -13,31 +13,34 @@ type rawMagicHubProvider interface {
 	RawHub() magicevent.Hub
 }
 
-func sendMagicCommand[Command any, Result any](ctx context.Context, hub events.Hub, topic string, destination string, subjectType string, subjectID string, command Command) (Result, error) {
+func sendOwnerMagicCommand[Command any, Result any](ctx context.Context, hub events.Hub, topic string, destination string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, command Command) (Result, error) {
 	var zero Result
-	if hub == nil || topic == "" {
+	if hub == nil || topic == "" || destination == "" {
 		return zero, common.ErrInvalidArgument
 	}
 	provider, ok := hub.(rawMagicHubProvider)
 	if !ok || provider.RawHub() == nil {
 		return zero, common.ErrInvalidArgument
 	}
-	ev := magicevent.NewEventWithContext(topic, sourceModule, destination, magicevent.NewHeader(), ctx, command)
+	ev := magicevent.NewEventWithContext(topic, ModuleID, destination, magicevent.NewHeader(), ctx, command)
 	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
 		Topic:       topic,
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
+		WorkspaceID: string(workspaceID),
+		RunID:       string(runID),
+		StepID:      string(stepID),
 	}))
 	response := provider.RawHub().Send(ev)
 	if response == nil {
 		return zero, common.ErrInvalidArgument
 	}
-	if err := response.Error(); err != nil {
-		return zero, err
+	if responseErr := response.Error(); responseErr != nil {
+		return zero, responseErr
 	}
-	data, err := response.Get()
-	if err != nil {
-		return zero, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return zero, resultErr
 	}
 	typed, ok := data.(Result)
 	if !ok {

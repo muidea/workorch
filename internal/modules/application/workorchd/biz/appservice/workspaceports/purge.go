@@ -8,8 +8,6 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
-	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -27,9 +25,7 @@ func PurgeWorkspaceRecords(ctx context.Context, hub events.Hub, workspaceID comm
 		}
 	}
 	for _, runID := range runIDs {
-		if err := ownercommandports.Publish(ctx, hub, orchestratorevents.TopicOrchestratorCommandPurgeRun, "run", string(runID), workspaceID, runID, map[string]any{
-			events.PayloadKeyCommand: orchestratorcontracts.PurgeRunCommand{RunID: runID},
-		}); err != nil && !errors.Is(err, common.ErrNotFound) {
+		if _, err := sendWorkspaceMagicCommand[orchestratorevents.PurgeRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandPurgeRun, orchestratorevents.CommandDestination, "run", string(runID), workspaceID, runID, orchestratorevents.PurgeRunCommand{RunID: runID}); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
 	}

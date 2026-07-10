@@ -39,6 +39,13 @@ func ActivateWorkspaceExecutionView(ctx context.Context, request ActivateWorkspa
 	if err := workspacecore.EnsureManagedConfigs(workspace.InternalDirectory, toolHints.Template, toolHints.Workspace); err != nil {
 		return readmodelcore.WorkspaceExecutionActivation{}, err
 	}
+	if workspace.ActiveRunID == "" {
+		activeRunID, err := uniqueNonTerminalRunID(ctx, request.Hub, workspace.ID)
+		if err != nil {
+			return readmodelcore.WorkspaceExecutionActivation{}, err
+		}
+		workspace.ActiveRunID = activeRunID
+	}
 	originalActiveRunID := workspace.ActiveRunID
 
 	cmd := request.Command
@@ -105,6 +112,24 @@ func ActivateWorkspaceExecutionView(ctx context.Context, request ActivateWorkspa
 		return readmodelcore.WorkspaceExecutionActivation{}, err
 	}
 	return WorkspaceExecutionActivationSnapshot(workspace, startedRun, goal, dod), nil
+}
+
+func uniqueNonTerminalRunID(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) (common.RunID, error) {
+	runs, err := ownerreadports.ListRunsByWorkspaceOwnerCommand(ctx, hub, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	var found common.RunID
+	for _, run := range runs {
+		if run == nil || activationcore.IsTerminalRunState(run.State) || run.State == common.RunStatePending {
+			continue
+		}
+		if found != "" && found != run.ID {
+			return "", common.ErrConflict
+		}
+		found = run.ID
+	}
+	return found, nil
 }
 
 func supersedePriorActivationRunIfNeeded(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspaceID common.WorkspaceID, priorRunID common.RunID, replacementRunID common.RunID) error {

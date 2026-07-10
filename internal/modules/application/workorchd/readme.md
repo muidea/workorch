@@ -22,13 +22,16 @@
 - Input contract: API/TUI/CLI 写请求必须转换为 scoped command 或正式 owner port 调用。
 - Output contract: 对外只返回 bounded projection DTO、command result、raw/detail ref 或配置 DTO。
 - Owner interaction contract: 访问 kernel owner state 必须通过 EventHub command/response 或稳定 read/command port。
+- Done command contract: `internal/services/workorch` 发送 `pkg/events.DoneCommand`，本 module 直接通过 magicCommon EventHub 返回 `DoneCommandResult{Done <-chan error}`；禁止使用 Envelope payload 传递 channel。
+- Scheduler command contract: HTTP、CLI 与 embedded backend 发送 `pkg/events.WorkspaceRunRequestedCommand`，server scheduler 返回 `WorkspaceRunRequestedResult`；workspace/run scope、intent、activation selection 与 continuation patch 均由具体 command 字段承载，禁止使用 `map[string]any` 作为 EventHub command/result。
 - Projection contract: projection 只能读取 owner 快照和事件，不修复 owner state，不重建业务状态机。
 - Runtime session contract: borrowed exports 必须包含 appservice 所需的完整 repository 与 EventHub 依赖。
 
 ## 已知缺口
 
-- `ExportsFromInitiator` 当前未填充 `CoverageWorkItems`，`runtimecore.HasRuntimeExports` 只检查 EventHub，导致缺依赖可能在下游表现为泛化 `invalid argument`。
-- `service/server` 存在 background submit failure 行为与测试期望不一致的问题，需要在 server lifecycle 合同中单独收口。
+- 当前盘点未发现 application module 职责或 owner command/result 交互合同缺失。
+- initiator exports 已补齐 `CoverageWorkItems`，runtime session 会逐项校验全部 repository exports 与 EventHub，并对缺失项返回具名错误；后续增加 borrowed export 时必须同步更新边界校验。
+- server scheduler 与 runtime block execute 链路已改用投递方定义的具体 command/data/result；后续新增跨组件事件时不得恢复 Envelope payload map、通用 `map[string]any` 或 JSON 类型转换桥。
 
 ## 边界约束
 

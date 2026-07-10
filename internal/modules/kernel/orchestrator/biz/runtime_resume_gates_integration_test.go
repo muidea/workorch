@@ -29,6 +29,7 @@ func TestRuntimeOrchestrator_ResumeRunFinalizesDurableRuntimeTerminalResult(t *t
 	toolCallRepo := memory.NewToolCallRepository()
 	validationRepo := memory.NewValidationResultRepository()
 	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "unexpected-runtime-call"}}
+	hub, _ := newRecordingDispatchMagicHub(t)
 	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		runtime,
 		runRepo,
@@ -42,7 +43,7 @@ func TestRuntimeOrchestrator_ResumeRunFinalizesDurableRuntimeTerminalResult(t *t
 			ValidationResults:  validationRepo,
 			RuntimeCheckpoints: checkpointRepo,
 		},
-		events.NewMemoryHub(),
+		hub,
 	)
 	orch.EnableEventDrivenDispatch()
 	workspaceID := common.WorkspaceID("ws-resume-terminal-result")

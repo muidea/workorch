@@ -14,7 +14,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState) {
@@ -449,15 +448,15 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			writeBusinessError(w, fmt.Errorf("%w: workspace execution command supports resume, restart or scoped replan intent, got %q", common.ErrInvalidArgument, intent))
 			return
 		}
-		payload := workspaceExecutionCommandSchedulerPayload(workspaceID, req, priority)
-		payload[events.PayloadKeyIntent] = intent
-		payload = prepareHTTPSchedulerCommandPayload(topic, workspaceID, runID, payload)
-		if err := state.publishWorkorchDSchedulerCommand(r.Context(), topic, workspaceID, runID, payload); err != nil {
+		command := workspaceExecutionCommandSchedulerCommand(workspaceID, req, priority)
+		command.Intent = intent
+		command = prepareHTTPSchedulerCommand(topic, command)
+		if err := state.publishWorkorchDSchedulerCommand(r.Context(), topic, command); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
 		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
-		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(state.config, workspaceID, runID, "execution-activation", payload))
+		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(state.config, "execution-activation", command))
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/soul-bindings", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
@@ -641,26 +640,26 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 	})
 }
 
-func workspaceExecutionCommandSchedulerPayload(workspaceID string, req workspaceExecutionCommandRequest, priority int) map[string]any {
-	return map[string]any{
-		events.PayloadKeyWorkspaceID:           workspaceID,
-		events.PayloadKeyRunID:                 strings.TrimSpace(req.RunID),
-		events.PayloadKeyGoalID:                req.GoalID,
-		events.PayloadKeyDoDID:                 req.DoDID,
-		events.PayloadKeyLLMProviderID:         req.LLMProviderID,
-		events.PayloadKeySoulID:                req.SoulID,
-		"soulBindings":                         req.SoulBindings,
-		"skillIds":                             req.SkillIDs,
-		"mcpServerIds":                         req.MCPServerIDs,
-		"capabilityIds":                        req.CapabilityIDs,
-		"memoryIds":                            req.MemoryIDs,
-		"dialogLanguage":                       req.DialogLanguage,
-		events.PayloadKeyReason:                req.Reason,
-		events.PayloadKeySource:                schedulerCommandSource(req.Source, "http"),
-		events.PayloadKeyRequestID:             req.RequestID,
-		events.PayloadKeyDefinitionRevision:    req.DefinitionRevision,
-		events.PayloadKeyDecisionID:            req.DecisionID,
-		events.PayloadKeyPriority:              priority,
-		events.PayloadKeyExecutionContextPatch: req.ExecutionContextPatch,
+func workspaceExecutionCommandSchedulerCommand(workspaceID string, req workspaceExecutionCommandRequest, priority int) workorchdevents.WorkspaceRunRequestedCommand {
+	return workorchdevents.WorkspaceRunRequestedCommand{
+		WorkspaceID:           common.WorkspaceID(workspaceID),
+		RunID:                 common.RunID(strings.TrimSpace(req.RunID)),
+		GoalID:                common.GoalID(req.GoalID),
+		DoDID:                 common.DoDID(req.DoDID),
+		LLMProviderID:         req.LLMProviderID,
+		SoulID:                common.SoulID(req.SoulID),
+		SoulBindings:          req.SoulBindings,
+		SkillIDs:              schedulerIDs[common.SkillID](req.SkillIDs),
+		MCPServerIDs:          schedulerIDs[common.MCPServerID](req.MCPServerIDs),
+		CapabilityIDs:         schedulerIDs[common.MCPCapabilityID](req.CapabilityIDs),
+		MemoryIDs:             schedulerIDs[common.MemoryID](req.MemoryIDs),
+		DialogLanguage:        req.DialogLanguage,
+		Reason:                req.Reason,
+		Source:                schedulerCommandSource(req.Source, "http"),
+		RequestID:             req.RequestID,
+		DefinitionRevision:    req.DefinitionRevision,
+		DecisionID:            req.DecisionID,
+		Priority:              priority,
+		ExecutionContextPatch: req.ExecutionContextPatch,
 	}
 }

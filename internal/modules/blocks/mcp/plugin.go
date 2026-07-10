@@ -7,7 +7,6 @@ import (
 	"github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
 	"github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/pkg/workorchdeps"
 )
 
 func init() {
@@ -16,11 +15,7 @@ func init() {
 
 func (m *Module) Weight() int { return 29 }
 
-func (m *Module) Setup(_ context.Context, _ event.Hub, background task.BackgroundRoutine) *cd.Error {
-	eventHub, err := workorchdeps.ResolveEventHub(ModuleID)
-	if err != nil {
-		return err
-	}
+func (m *Module) Setup(_ context.Context, eventHub event.Hub, background task.BackgroundRoutine) *cd.Error {
 	if setupErr := m.Configure(Dependencies{EventHub: eventHub, Background: background}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}

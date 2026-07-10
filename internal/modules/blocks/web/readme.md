@@ -24,10 +24,12 @@
 - Orchestrator contract: web content 是 context/evidence candidate；accepted evidence/result 由 orchestrator gate 判定。
 - Approval contract: 外部访问风险或敏感 URL 必须受 runtime policy 和 approval flow 控制。
 - LLM contract: LLM 只能声明 web candidate，不能把外部内容直接写成 owner state。
+- EventHub contract: 直接订阅 `/runtime/block` 下 web search/fetch topic 的 `runtimeevent.ExecuteCommand`，返回 `ExecuteCommandResult`，并向 `/runtime/orchestrator` 投递具体的 accepted/progress/completed/failed data；顶层载荷禁止使用 Envelope/map/JSON 转换。
 
 ## 已知缺口
 
 - 当前盘点未发现 Web block 职责缺失；provider/network failure 与 contract violation 的分类需要持续回归。
+- 当前未发现与 orchestrator 的 runtime execute 交互合同缺失。
 
 ## 边界约束
 

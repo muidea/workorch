@@ -15,15 +15,9 @@ func ListArtifactContinuationsByRunOwnerCommand(ctx context.Context, hub events.
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyRunID: string(runID),
-	}, workspaceID))
+	response, err := sendMagicCommand[orchestratorevents.ListArtifactContinuationsByRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun, orchestratorevents.CommandDestination, "run", string(runID), orchestratorevents.ListArtifactContinuationsByRunCommand{WorkspaceID: workspaceID, RunID: runID})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*orchestratormodel.ArtifactContinuation)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.ArtifactContinuations, nil
 }

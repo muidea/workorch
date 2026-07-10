@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -12,7 +11,7 @@ import (
 
 func TestWorkspaceDefinitionContextPatchUsesEventHubOwnerReads(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)

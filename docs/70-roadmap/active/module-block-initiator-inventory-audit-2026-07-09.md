@@ -1,6 +1,17 @@
 # Module / Block / Initiator Inventory Audit
 
-Status: draft
+Status: completed
+
+## 2026-07-10 收口进展
+
+- Gap 1 已关闭：initiator exports 已补齐 `CoverageWorkItems`；appservice runtime session 逐项校验 26 个 repository exports 与 EventHub，并对缺失项返回具名错误。
+- Gap 2 已关闭：Goal/DoD 定义变化会清理失效 `ActiveRunID`；activation 仅恢复唯一 active/blocking 非终态 run，多个候选返回 conflict。
+- Gap 3 的 appservice/server 测试装配缺口已关闭：测试通过显式 owner lifecycle fixture 启动 7 个 blocks 与 kernel owner modules；`go test ./internal/modules/application/workorchd/biz/appservice -count=1` 和 `go test ./internal/modules/application/workorchd/service/server -count=1` 均通过。
+- workorchd scheduler 已关闭 Envelope/map command 遗留：投递方定义并直接发送 `WorkspaceRunRequestedCommand`，消费方返回 `WorkspaceRunRequestedResult`。
+- runtime block 链路的代码缺口已关闭：`internal/pkg/runtimeevent` 定义 `ExecuteCommand`/`ExecuteCommandResult` 与 accepted/progress/completed/failed 具体 data；orchestrator 和 7 个 blocks 直接使用 magicCommon `event.Hub` 的 `Send/Post/Subscribe`，不再通过 Envelope 顶层 payload、通用 map 或 JSON 转换交互。
+- `internal/initiators/...` 与 `internal/services/workorch/...` 全量测试已通过；services backend 测试已改为显式启动 owner lifecycle，并直接模拟 typed scheduler result。
+- 5 个 appservice 子包测试夹具遗留已关闭：`activationports`、`contentports`、`contextregistryports`、`qualityports`、`runports` 已改为具体 owner command/result observer 或显式 owner lifecycle，不再通过 Envelope response 模拟 owner command。
+- `GOCACHE=/tmp/workorch-go-build go test -p 1 ./internal/modules/... -count=1` 已全量通过。默认并行执行曾因大量测试 runtime 同时创建 EventHub/BackgroundRoutine 而在 10 分钟超时；该现象属于测试环境资源饥饿，不是组件合同失败，最终门禁以串行全量结果为准。
 
 Date: 2026-07-09
 
@@ -33,8 +44,8 @@ than file size.
 | Kind | ID / component | Code path | Current fit |
 | --- | --- | --- | --- |
 | initiator | `workorch/runtime` | `internal/initiators/workorchruntime` | Fits initiator role: repository provider, EventHub owner wrapper, runtime policy. |
-| application module | `application/workorchd` | `internal/modules/application/workorchd` | Fits application role, but has borrowed-export validation gaps listed below. |
-| kernel module | `kernel/workspace` | `internal/modules/kernel/workspace` | Fits owner role for Workspace / Goal / DoD, with active-run clearing and event-count gaps listed below. |
+| application module | `application/workorchd` | `internal/modules/application/workorchd` | Fits application role; borrowed exports are validated at the runtime-session boundary. |
+| kernel module | `kernel/workspace` | `internal/modules/kernel/workspace` | Fits owner role for Workspace / Goal / DoD; definition changes clear stale active-run bindings. |
 | kernel module | `kernel/run` | `internal/modules/kernel/run` | Fits owner role for Run / Step lifecycle and runtime checkpoints. |
 | kernel module | `kernel/orchestrator` | `internal/modules/kernel/orchestrator` | Fits orchestration authority role for convergence, evidence, coverage, repair/replan, and block dispatch. |
 | kernel module | `kernel/result` | `internal/modules/kernel/result` | Fits Result / Artifact owner role. |
@@ -56,49 +67,31 @@ than file size.
 | runtime block | `blocks/web` | `internal/modules/blocks/web` | Fits web/search/fetch block role. |
 | process/product surface | workorch service / port / client / web | `internal/services/workorch`, `internal/pkg/workorchport`, `internal/pkg/workorchclient`, `web` | Fits process/product surface role; should stay outside `internal/modules`. |
 
-## Initial Gaps
+## Closed Gaps
 
-### Gap 1. Borrowed runtime exports are under-validated
+### Gap 1. Borrowed runtime exports were under-validated
 
 - Area: `application/workorchd` runtime session.
-- Evidence:
-  - `bootstrap.Exports` includes `CoverageWorkItems`.
-  - `ExportsFromInitiator` resolves orchestrator repositories but does not copy `CoverageWorkItems` into `RepositoryExports`.
-  - `runtimecore.HasRuntimeExports` only checks `Infrastructure.EventHub`, so incomplete borrowed exports can pass session construction and fail later as generic `invalid argument`.
-- Functional risk:
-  - Application projection and read-model code can run with a partial owner repository surface.
-  - Missing dependencies are discovered downstream instead of fail-fast at the application/initiator boundary.
-- Closure direction:
-  - Copy `orchestratorRepos.CoverageWorkItems` in `ExportsFromInitiator`.
-  - Strengthen `HasRuntimeExports` or add a named validation function for the exact appservice repository/export set.
-  - Add a pairwise test: initiator exports -> appservice session must include all owner repositories used by projection/runtime sessions.
+- Resolution:
+  - `ExportsFromInitiator` now copies `orchestratorRepos.CoverageWorkItems` into `RepositoryExports`.
+  - Runtime session construction validates all 26 repository exports and EventHub, returning a named missing-dependency error instead of a downstream generic `invalid argument`.
+  - Pairwise tests cover initiator exports -> appservice session assembly.
 
-### Gap 2. Workspace definition-change contract is not fully closed
+### Gap 2. Workspace definition-change contract was not fully closed
 
 - Area: `kernel/workspace`.
-- Evidence:
-  - `go test ./internal/modules/... -count=1` fails in `kernel/workspace/biz`.
-  - `TestGoalDoDManager_DefinitionChangeReopensTerminalWorkspace` expects terminal workspace definition changes to reopen the workspace without retaining `ActiveRunID`, but `markWorkspaceDefinitionsChanged` currently does not clear `ActiveRunID`.
-  - `TestGoalDoDManager_PublishesDefinitionNotificationsThroughAsyncHub` reports unexpected publish counts for definition notifications.
-- Functional risk:
-  - Workspace definition revision changes may leave stale run binding, which violates the owner invariant that a reopened definition should not keep a terminal run as active authority.
-  - Event consumers can see more definition-related notifications than the pairwise contract expects.
-- Closure direction:
-  - Clarify whether definition changes should publish both workspace-state and definition events, then make test and implementation agree.
-  - Clear stale `ActiveRunID` when a terminal/superseded workspace is reopened by Goal/DoD definition change.
+- Resolution:
+  - Goal/DoD definition changes clear stale `ActiveRunID` when reopening a terminal or superseded workspace.
+  - Workspace-state and definition notification counts are aligned with the asynchronous publish contract and covered by regression tests.
+  - Activation only restores a unique active/blocking non-terminal run; multiple candidates return conflict.
 
-### Gap 3. Application module tests expose broad invalid-argument failures
+### Gap 3. Application module tests exposed broad invalid-argument failures
 
 - Area: `application/workorchd/biz/appservice` and `application/workorchd/service/server`.
-- Evidence:
-  - `go test ./internal/modules/... -count=1` fails many appservice tests at `CreateWorkspaceWithSession`, `ReadRunSnapshotWithSession`, and related backend/session helpers with generic `invalid argument`.
-  - `TestServiceRunReturnsErrorWhenBackgroundSubmitFails` also fails in the server service package.
-- Functional risk:
-  - The failing shape suggests setup/borrowed runtime dependencies are not failing at the owning boundary with a specific missing dependency.
-  - This makes module/block closure harder because consumer failures are not attributed to one provider contract.
-- Closure direction:
-  - Fix the initiator/application export validation first, then rerun appservice tests to separate real appservice deviations from setup noise.
-  - Convert generic missing-dependency failures into named errors or test assertions at the session boundary.
+- Resolution:
+  - Appservice and server tests now use an explicit owner lifecycle fixture that starts the required kernel modules and runtime blocks.
+  - Owner command tests send concrete owner-defined command types and assert concrete result types; no Envelope response fixture is used for these command paths.
+  - `appservice/...`, `service/server`, and the serial `internal/modules/...` suite all pass.
 
 ## Boundary Checks
 
@@ -107,33 +100,26 @@ than file size.
 | Entry side-effect imports live in `application/workorch/main.go` | Pass. The entry explicitly imports the initiator, application module, kernel modules, and runtime blocks. |
 | Runtime blocks own no formal workspace/run/result state | Pass by structure. Blocks register `runtimeevent.Executor` handlers and hold adapters/executors, not owner repositories. |
 | Kernel modules expose owner command/query topics | Pass by structure. Kernel modules subscribe to module-specific EventHub topics in `Start`. |
-| Application/service code stays out of `internal/modules/kernel/*/biz` direct owner implementation | Needs focused scan after setup fixes. Current appservice uses owner ports heavily, but tests still use repositories as fixtures. |
-| Core runtime neutrality | Needs targeted scan, not complete in this audit. Known template/profile terms appear mostly in tests/default data; production kernel/runtime changes still need the standard neutrality scan before closure. |
+| Application/service code stays out of `internal/modules/kernel/*/biz` direct owner implementation | Pass for production interaction paths. Application/service code uses owner EventHub ports or stable contracts; repository access remains test-fixture setup only. |
+| Cross-component command/data/result ownership | Pass for the audited closure paths. Owner or sender packages define concrete message types; consumers import those definitions and use magicCommon EventHub directly. Runtime block and scheduler paths do not use Envelope/map/JSON conversion bridges. |
+| Core runtime neutrality | Pass for this change set. Event transport changes add no software-development, provider-specific, or business-domain strategy to orchestrator core. |
 
 ## Verification Run
 
 ```bash
-go test ./internal/initiators/... -count=1
+GOCACHE=/tmp/workorch-go-build go test ./internal/modules/application/workorchd/biz/appservice/... -count=1
+GOCACHE=/tmp/workorch-go-build go test -p 1 ./internal/modules/... -count=1
+GOCACHE=/tmp/workorch-go-build go test ./internal/initiators/... -count=1
+GOCACHE=/tmp/workorch-go-build go test ./internal/services/workorch/... -count=1
 ```
 
-Result: pass.
+Result: all pass on 2026-07-10.
 
-```bash
-go test ./internal/modules/... -count=1
-```
+The default parallel modules suite previously exceeded 10 minutes because many test runtimes created EventHub and BackgroundRoutine instances concurrently. The corresponding tests pass individually and the serial full suite passes, so closure uses the serial full-suite result as the deterministic gate.
 
-Result: fail.
+## Final Conclusion
 
-Primary observed failures:
-
-- `internal/modules/application/workorchd/biz/appservice`: broad `invalid argument` setup/session failures.
-- `internal/modules/application/workorchd/service/server`: background submit failure expectation mismatch.
-- `internal/modules/kernel/workspace/biz`: definition notification count and stale `ActiveRunID` on definition reopen.
-
-## Recommended Closure Order
-
-1. Close the initiator -> application export contract first.
-2. Close the workspace definition-change owner invariant.
-3. Rerun `go test ./internal/modules/application/workorchd/biz/appservice -count=1` and split remaining failures by owner boundary.
-4. Rerun `go test ./internal/modules/kernel/workspace/biz -count=1`.
-5. Re-run full `go test ./internal/modules/... -count=1`.
+- All 22 registered components have a Chinese root `readme.md` describing responsibility, interaction relationships, interaction contracts, and known gaps or continuing regression risks.
+- The three initial functional gaps are closed.
+- The audited cross-component runtime block and workorchd scheduler event paths use sender/owner-defined concrete command/data/result types without Envelope payload maps or JSON conversion.
+- No missing functional responsibility remains in the 22-component inventory at this audit point.

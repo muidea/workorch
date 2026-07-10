@@ -113,7 +113,7 @@ func newCountingDecisionRuntimeSession(t *testing.T) (*RuntimeSession, *counting
 		}
 	})
 
-	session, err := NewRuntimeSessionFromExports(bootstrap.Exports{
+	exports := completeAppserviceTestExports(bootstrap.Exports{
 		Repositories: bootstrap.RepositoryExports{
 			Workspaces:            memory.NewWorkspaceRepository(),
 			Runs:                  memory.NewRunRepository(),
@@ -136,6 +136,8 @@ func newCountingDecisionRuntimeSession(t *testing.T) (*RuntimeSession, *counting
 			EventHub: eventHub,
 		},
 	})
+	startFocusedGovernanceModule(t, exports, rawHub)
+	session, err := NewRuntimeSessionFromExports(exports)
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
 	}

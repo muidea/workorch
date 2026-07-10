@@ -14,15 +14,9 @@ func ListCoverageWorkItemsByRunOwnerCommand(ctx context.Context, hub events.Hub,
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	response, err := PublishCommandWithResponse(ctx, hub, orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
-		events.PayloadKeyRunID: string(runID),
-	}, workspaceID))
+	response, err := sendMagicCommand[orchestratorevents.ListCoverageWorkItemsByRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun, orchestratorevents.CommandDestination, "run", string(runID), orchestratorevents.ListCoverageWorkItemsByRunCommand{WorkspaceID: workspaceID, RunID: runID})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyItems].([]*orchestratormodel.CoverageWorkItem)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.CoverageWorkItems, nil
 }

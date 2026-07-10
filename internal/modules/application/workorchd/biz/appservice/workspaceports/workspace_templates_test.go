@@ -6,19 +6,46 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
-	t.Cleanup(func() {
-		if err := runtime.Shutdown(context.Background()); err != nil {
-			t.Errorf("shutdown runtime: %v", err)
-		}
+	testHub := newWorkspaceCommandTestHub(t)
+	templates := map[string]*repository.WorkspaceTemplate{}
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandCreate, func(data any) (any, error) {
+		cmd := data.(workspaceevents.CreateWorkspaceTemplateCommand)
+		templates[cmd.TemplateID] = workspaceTemplateRecordFromCommand(cmd)
+		return workspaceevents.WorkspaceCommandResult{Template: templates[cmd.TemplateID]}, nil
 	})
-	hub := runtime.Exports().Infrastructure.EventHub
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandList, func(any) (any, error) {
+		items := make([]*repository.WorkspaceTemplate, 0, len(templates))
+		for _, item := range templates {
+			items = append(items, item)
+		}
+		return workspaceevents.WorkspaceCommandResult{Templates: items}, nil
+	})
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandGet, func(data any) (any, error) {
+		cmd := data.(workspaceevents.GetWorkspaceTemplateCommand)
+		item := templates[cmd.TemplateID]
+		if item == nil {
+			return nil, common.ErrNotFound
+		}
+		return workspaceevents.WorkspaceCommandResult{Template: item}, nil
+	})
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandUpdate, func(data any) (any, error) {
+		cmd := data.(workspaceevents.UpdateWorkspaceTemplateCommand)
+		templates[cmd.TemplateID] = workspaceTemplateRecordFromCommand(cmd)
+		return workspaceevents.WorkspaceCommandResult{Template: templates[cmd.TemplateID]}, nil
+	})
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandDelete, func(data any) (any, error) {
+		cmd := data.(workspaceevents.DeleteWorkspaceTemplateCommand)
+		delete(templates, cmd.TemplateID)
+		return workspaceevents.WorkspaceCommandResult{}, nil
+	})
+	hub := testHub.hub
 
 	created, err := CreateWorkspaceTemplate(ctx, hub, workspacecore.WorkspaceTemplate{
 		ID:       " template-port ",
@@ -72,6 +99,20 @@ func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 	}
 	if workspaceTemplateListContains(items, "template-port") {
 		t.Fatalf("templates after delete = %#v, want template-port removed", items)
+	}
+}
+
+func workspaceTemplateRecordFromCommand(cmd workspaceevents.CreateWorkspaceTemplateCommand) *repository.WorkspaceTemplate {
+	return &repository.WorkspaceTemplate{
+		ID:               cmd.TemplateID,
+		Name:             cmd.Name,
+		Description:      cmd.Description,
+		GoalText:         cmd.GoalText,
+		DoDItems:         append([]string(nil), cmd.DoDItems...),
+		DefaultSoulID:    cmd.DefaultSoulID,
+		SoulBindings:     cmd.SoulBindings,
+		ContextHints:     cmd.ContextHints,
+		EvidencePolicies: cmd.EvidencePolicies,
 	}
 }
 

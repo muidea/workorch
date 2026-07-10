@@ -5,9 +5,7 @@ import (
 
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 
-	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func (p *EventHubActionPort) EnsureApproval(
@@ -21,14 +19,12 @@ func (p *EventHubActionPort) EnsureApproval(
 	if p == nil || p.hub == nil || approvalID == "" || workspaceID == "" || runID == "" || stepID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.publish(ctx, approvalevents.TopicApprovalCommandEnsure, "approval", string(approvalID), workspaceID, runID, stepID, map[string]any{
-		events.PayloadKeyCommand: approvalcontracts.CreateApprovalCommand{
-			ApprovalID:  approvalID,
-			WorkspaceID: workspaceID,
-			RunID:       runID,
-			StepID:      stepID,
-			Reason:      reason,
-		},
+	return p.send(ctx, approvalevents.TopicApprovalCommandEnsure, approvalevents.CommandDestination, "approval", string(approvalID), workspaceID, runID, stepID, approvalevents.EnsureApprovalCommand{
+		ApprovalID:  approvalID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		Reason:      reason,
 	})
 }
 
@@ -37,13 +33,7 @@ func (p *EventHubActionPort) EnsureApprovalApproved(ctx context.Context, approva
 		return common.ErrInvalidArgument
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	payload := map[string]any{
-		events.PayloadKeyCommand: approvalcontracts.ResolveApprovalCommand{ApprovalID: approvalID, WorkspaceID: workspaceID},
-	}
-	if workspaceID != "" {
-		payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
-	}
-	return p.publish(ctx, approvalevents.TopicApprovalCommandEnsureApproved, "approval", string(approvalID), workspaceID, "", "", payload)
+	return p.send(ctx, approvalevents.TopicApprovalCommandEnsureApproved, approvalevents.CommandDestination, "approval", string(approvalID), workspaceID, "", "", approvalevents.EnsureApprovedCommand{ApprovalID: approvalID, WorkspaceID: workspaceID})
 }
 
 func (p *EventHubActionPort) EnsureApprovalRejected(ctx context.Context, approvalID common.ApprovalID) error {
@@ -51,11 +41,5 @@ func (p *EventHubActionPort) EnsureApprovalRejected(ctx context.Context, approva
 		return common.ErrInvalidArgument
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	payload := map[string]any{
-		events.PayloadKeyCommand: approvalcontracts.ResolveApprovalCommand{ApprovalID: approvalID, WorkspaceID: workspaceID},
-	}
-	if workspaceID != "" {
-		payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
-	}
-	return p.publish(ctx, approvalevents.TopicApprovalCommandEnsureRejected, "approval", string(approvalID), workspaceID, "", "", payload)
+	return p.send(ctx, approvalevents.TopicApprovalCommandEnsureRejected, approvalevents.CommandDestination, "approval", string(approvalID), workspaceID, "", "", approvalevents.EnsureRejectedCommand{ApprovalID: approvalID, WorkspaceID: workspaceID})
 }

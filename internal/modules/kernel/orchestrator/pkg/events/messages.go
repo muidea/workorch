@@ -25,6 +25,7 @@ type SupersedeRunCommand = runcontracts.SupersedeRunCommand
 type FailRunCommand = runcontracts.FailRunCommand
 type PurgeRunCommand = orchestratorcontracts.PurgeRunCommand
 type UpdateRuntimePolicyCommand = orchestratorcontracts.UpdateRuntimePolicyCommand
+type DispatchStepCommand = orchestratorcontracts.DispatchStepCommand
 
 type ListRunEvidenceCommand struct {
 	WorkspaceID common.WorkspaceID
@@ -66,9 +67,9 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ListValidationResultsByRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorCommandListValidationResultsByRun).MessageContract(),
 		eventcontract.CommandTopic[ListCoverageWorkItemsByRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorCommandListCoverageWorkItemsByRun).MessageContract(),
 		eventcontract.CommandTopic[ListArtifactContinuationsByRunCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorCommandListArtifactContinuationsByRun).MessageContract(),
+		eventcontract.CommandTopic[DispatchStepCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorDispatchStepRequested).MessageContract(),
 	}
 	for _, topic := range []string{
-		TopicOrchestratorDispatchStepRequested,
 		TopicOrchestratorStageChanged,
 		TopicOrchestratorGraphDispatched,
 		TopicOrchestratorRepairStarted,

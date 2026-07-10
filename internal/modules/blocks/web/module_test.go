@@ -5,19 +5,20 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/workorchownercontract"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestWebModuleIdentityConfigureStartStopContract(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMagicHub()
-	defer hub.Terminate(ctx)
+	rawHub := magicevent.NewHub(16)
+	defer rawHub.Terminate(ctx)
 	background := magictask.NewBackgroundRoutine(1)
 	defer background.Shutdown(ctx)
 
@@ -28,7 +29,7 @@ func TestWebModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Start before Configure err = %v, want invalid argument", err)
 	}
-	if err := module.Configure(Dependencies{EventHub: hub, Background: background}); err != nil {
+	if err := module.Configure(Dependencies{EventHub: rawHub, Background: background}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if module.runtimeAdapter == nil || module.eventHub == nil || module.background == nil {
@@ -73,51 +74,51 @@ func TestWebModuleStartRequiresRuntimeDependencies(t *testing.T) {
 
 func TestWebApprovalGetterPublishesScopedOwnerCommand(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(8)
 	approvalID := common.ApprovalID("approval-web-scope")
 	runID := common.RunID("run-web-scope")
-	var captured events.Envelope
-	hub.Subscribe(workorchownercontract.TopicApprovalCommandGet, func(_ context.Context, envelope events.Envelope) error {
-		captured = envelope
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyApproval: &workorchownercontract.Approval{
-					ID:    approvalID,
-					RunID: runID,
-					State: common.ApprovalStateApproved,
-				},
-			},
-		})
+	var captured approvalevents.GetApprovalCommand
+	var source string
+	observer := magicevent.NewSimpleObserver(approvalevents.CommandDestination, rawHub)
+	observer.Subscribe(approvalevents.TopicApprovalCommandGet, func(ev magicevent.Event, result magicevent.Result) {
+		cmd, ok := ev.Data().(approvalevents.GetApprovalCommand)
+		if !ok {
+			t.Fatalf("command type = %T, want GetApprovalCommand", ev.Data())
+		}
+		captured = cmd
+		source = ev.Source()
+		result.Set(approvalevents.ApprovalCommandResult{Approval: &approvalmodel.Approval{
+			ID:    approvalID,
+			RunID: runID,
+			State: common.ApprovalStateApproved,
+		}}, nil)
 	})
+	t.Cleanup(func() { observer.Unsubscribe(approvalevents.TopicApprovalCommandGet) })
 
-	item, err := (webApprovalGetter{hub: hub}).GetForRun(ctx, approvalID, runID)
+	item, err := (webApprovalGetter{hub: rawHub}).GetForRun(ctx, approvalID, runID)
 	if err != nil {
 		t.Fatalf("GetForRun() error = %v", err)
 	}
 	if item == nil || item.ID != approvalID {
 		t.Fatalf("approval = %+v, want %s", item, approvalID)
 	}
-	if captured.Topic != workorchownercontract.TopicApprovalCommandGet {
-		t.Fatalf("topic = %q, want %q", captured.Topic, workorchownercontract.TopicApprovalCommandGet)
+	if source != ModuleID {
+		t.Fatalf("source = %q, want %q", source, ModuleID)
 	}
-	if captured.SourceModule != ModuleID || captured.SubjectType != "approval" || captured.SubjectID != string(approvalID) {
-		t.Fatalf("envelope source/subject = %q %q/%q", captured.SourceModule, captured.SubjectType, captured.SubjectID)
-	}
-	if captured.RunID != string(runID) || captured.Payload[events.PayloadKeyRunID] != string(runID) {
-		t.Fatalf("run scope = envelope %q payload %q, want %q", captured.RunID, captured.Payload[events.PayloadKeyRunID], runID)
+	if captured.ApprovalID != approvalID || captured.RunID != runID {
+		t.Fatalf("command = %+v, want approval/run scope", captured)
 	}
 }
 
 func TestWebModuleQueuesRuntimeExecution(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMagicHub()
-	defer hub.Terminate(ctx)
+	rawHub := magicevent.NewHub(16)
+	defer rawHub.Terminate(ctx)
 	background := magictask.NewBackgroundRoutine(2)
 	defer background.Shutdown(ctx)
 
 	module := New()
-	if err := module.Configure(Dependencies{EventHub: hub, Background: background}); err != nil {
+	if err := module.Configure(Dependencies{EventHub: rawHub, Background: background}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -125,27 +126,21 @@ func TestWebModuleQueuesRuntimeExecution(t *testing.T) {
 	}
 	defer module.Stop(ctx)
 
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:       runtimeevent.RuntimeBlockExecuteTopic(StepKindSearch),
-		WorkspaceID: "ws-web-queue",
-		RunID:       "run-web-queue",
-		StepID:      "run-web-queue/step-1",
-		Payload: map[string]any{
-			events.PayloadKeyRuntimeRequestID: "web-queue-request",
-			events.PayloadKeyRuntimeRequest: runtimemodel.StepExecutionRequest{
-				WorkspaceID: "ws-web-queue",
-				RunID:       "run-web-queue",
-				StepID:      "run-web-queue/step-1",
-				Kind:        StepKindSearch,
-				Input:       map[string]any{"query": "workorch"},
-			},
-		},
-	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
-		t.Fatalf("runtime command err = %v, want accepted response", err)
+	result := rawHub.Send(magicevent.NewEventWithContext(
+		runtimeevent.RuntimeBlockExecuteTopic(StepKindSearch), ModuleID, runtimeevent.CommandDestination, magicevent.NewHeader(), ctx,
+		runtimeevent.ExecuteCommand{RequestID: "web-queue-request", Request: runtimemodel.StepExecutionRequest{
+			WorkspaceID: "ws-web-queue",
+			RunID:       "run-web-queue",
+			StepID:      "run-web-queue/step-1",
+			Kind:        StepKindSearch,
+			Input:       map[string]any{"query": "workorch"},
+		}},
+	))
+	if err := result.Error(); err != nil {
+		t.Fatalf("runtime command err = %v", err)
 	}
-	if _, ok := response.Payload[events.PayloadKeyRuntimeAccepted].(runtimemodel.RuntimeStepExecutionAccepted); !ok {
-		t.Fatalf("accepted payload missing: %#v", response.Payload)
+	data, err := result.Get()
+	if _, ok := data.(runtimeevent.ExecuteCommandResult); err != nil || !ok {
+		t.Fatalf("accepted result = %T, err=%v", data, err)
 	}
 }

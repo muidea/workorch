@@ -9,9 +9,7 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -28,35 +26,44 @@ func (fn governanceTraceReaderFunc) List(ctx context.Context, query repository.A
 
 func TestDecisionPageProjectsResolutionAndAutoGovernance(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
 	workspaceID := common.WorkspaceID("ws-governance-read")
-	hub.Subscribe(decisionevents.TopicDecisionCommandListTicketsByWS, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyTickets: []*decisionmodel.Ticket{
-					{
-						ID:          "ticket-001",
-						WorkspaceID: workspaceID,
-						RunID:       "run-001",
-						State:       common.DecisionTicketStateResolved,
-						CreatedAt:   "2026-06-05T01:00:00Z",
-					},
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandListTicketsByWS, func(data any) decisionevents.DecisionCommandResult {
+		cmd, ok := data.(decisionevents.ListTicketsByWorkspaceCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want ListTicketsByWorkspaceCommand", data)
+		}
+		if cmd.WorkspaceID != workspaceID {
+			t.Fatalf("command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
+		}
+		return decisionevents.DecisionCommandResult{
+			Tickets: []*decisionmodel.Ticket{
+				{
+					ID:          "ticket-001",
+					WorkspaceID: workspaceID,
+					RunID:       "run-001",
+					State:       common.DecisionTicketStateResolved,
+					CreatedAt:   "2026-06-05T01:00:00Z",
 				},
 			},
-		})
+		}
 	})
-	hub.Subscribe(decisionevents.TopicDecisionCommandGetResolution, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyResolution: &decisionmodel.Resolution{
-					ID:       "resolution-001",
-					TicketID: common.TicketID("ticket-001"),
-					Type:     "provide_missing_info",
-				},
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetResolution, func(data any) decisionevents.DecisionCommandResult {
+		cmd, ok := data.(decisionevents.GetResolutionCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want GetResolutionCommand", data)
+		}
+		if cmd.TicketID != "ticket-001" {
+			t.Fatalf("command ticket = %q, want ticket-001", cmd.TicketID)
+		}
+		return decisionevents.DecisionCommandResult{
+			Resolution: &decisionmodel.Resolution{
+				ID:       "resolution-001",
+				TicketID: common.TicketID("ticket-001"),
+				Type:     "provide_missing_info",
 			},
-		})
+		}
 	})
 	traces := governanceTraceReaderFunc(func(_ context.Context, query repository.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
 		if query.ItemType != "ticket" || query.ItemID != "ticket-001" {
@@ -95,25 +102,30 @@ func TestDecisionPageProjectsResolutionAndAutoGovernance(t *testing.T) {
 
 func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
 	workspaceID := common.WorkspaceID("ws-governance-read")
-	hub.Subscribe(decisionevents.TopicDecisionCommandGetTicket, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyTicket: &decisionmodel.Ticket{
-					ID:          "ticket-001",
-					WorkspaceID: workspaceID,
-					RunID:       "run-001",
-					State:       common.DecisionTicketStateOpen,
-				},
-			},
-		})
-	})
-	hub.Subscribe(decisionevents.TopicDecisionCommandEnsureResolved, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.ResolveTicketCommand)
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
+		cmd, ok := data.(decisionevents.GetTicketCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want ResolveTicketCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want GetTicketCommand", data)
+		}
+		if cmd.WorkspaceID != workspaceID || cmd.TicketID != "ticket-001" {
+			t.Fatalf("command = %+v, want scoped ticket", cmd)
+		}
+		return decisionevents.DecisionCommandResult{
+			Ticket: &decisionmodel.Ticket{
+				ID:          "ticket-001",
+				WorkspaceID: workspaceID,
+				RunID:       "run-001",
+				State:       common.DecisionTicketStateOpen,
+			},
+		}
+	})
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
+		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want EnsureResolvedCommand", data)
 		}
 		if cmd.Type != "provide_missing_info" {
 			t.Fatalf("resolution type = %q, want provide_missing_info", cmd.Type)
@@ -121,23 +133,20 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 		if cmd.Payload["answer"] != "resume" {
 			t.Fatalf("payload = %#v, want answer resume", cmd.Payload)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyTicket: &decisionmodel.Ticket{
-					ID:          "ticket-001",
-					WorkspaceID: workspaceID,
-					RunID:       "run-001",
-					State:       common.DecisionTicketStateResolved,
-				},
-				events.PayloadKeyResolution: &decisionmodel.Resolution{
-					ID:       "resolution-001",
-					TicketID: "ticket-001",
-					Type:     cmd.Type,
-					Payload:  cmd.Payload,
-				},
+		return decisionevents.DecisionCommandResult{
+			Ticket: &decisionmodel.Ticket{
+				ID:          "ticket-001",
+				WorkspaceID: workspaceID,
+				RunID:       "run-001",
+				State:       common.DecisionTicketStateResolved,
 			},
-		})
+			Resolution: &decisionmodel.Resolution{
+				ID:       "resolution-001",
+				TicketID: "ticket-001",
+				Type:     cmd.Type,
+				Payload:  cmd.Payload,
+			},
+		}
 	})
 	resumePublished := false
 	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ context.Context, envelope events.Envelope) error {
@@ -174,25 +183,30 @@ func TestResolveDecisionViewRejectsNonSemanticMissingInfoPayload(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			hub := events.NewMemoryHub()
+			testHub := newGovernanceMagicTestHub(t)
+			hub := testHub.hub
 			workspaceID := common.WorkspaceID("ws-governance-invalid-missing-info")
-			hub.Subscribe(decisionevents.TopicDecisionCommandGetTicket, func(_ context.Context, envelope events.Envelope) error {
-				return events.Response(events.Envelope{
-					Topic: envelope.Topic + "/response",
-					Payload: map[string]any{
-						events.PayloadKeyTicket: &decisionmodel.Ticket{
-							ID:          "ticket-invalid-missing-info",
-							WorkspaceID: workspaceID,
-							RunID:       "run-invalid-missing-info",
-							State:       common.DecisionTicketStateOpen,
-						},
+			testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
+				cmd, ok := data.(decisionevents.GetTicketCommand)
+				if !ok {
+					t.Fatalf("command payload type = %T, want GetTicketCommand", data)
+				}
+				if cmd.WorkspaceID != workspaceID || cmd.TicketID != "ticket-invalid-missing-info" {
+					t.Fatalf("command = %+v, want invalid missing info ticket", cmd)
+				}
+				return decisionevents.DecisionCommandResult{
+					Ticket: &decisionmodel.Ticket{
+						ID:          "ticket-invalid-missing-info",
+						WorkspaceID: workspaceID,
+						RunID:       "run-invalid-missing-info",
+						State:       common.DecisionTicketStateOpen,
 					},
-				})
+				}
 			})
 			resolved := false
-			hub.Subscribe(decisionevents.TopicDecisionCommandEnsureResolved, func(_ context.Context, envelope events.Envelope) error {
+			testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
 				resolved = true
-				return events.Response(events.Envelope{Topic: envelope.Topic + "/response"})
+				return decisionevents.DecisionCommandResult{}
 			})
 
 			_, err := ResolveDecisionView(ctx, hub, nil, "ticket-invalid-missing-info", appmodelcore.ResolveDecisionCommand{
@@ -211,26 +225,25 @@ func TestResolveDecisionViewRejectsNonSemanticMissingInfoPayload(t *testing.T) {
 
 func TestDecisionViewReadsTicketWithExplicitScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
 	workspaceID := common.WorkspaceID("ws-governance-detail-scope")
-	hub.Subscribe(decisionevents.TopicDecisionCommandGetTicket, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("get ticket envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
+		cmd, ok := data.(decisionevents.GetTicketCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want GetTicketCommand", data)
 		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("get ticket payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		if cmd.WorkspaceID != workspaceID {
+			t.Fatalf("get ticket command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyTicket: &decisionmodel.Ticket{
-					ID:          "ticket-detail-scope",
-					WorkspaceID: workspaceID,
-					RunID:       "run-001",
-					State:       common.DecisionTicketStateOpen,
-				},
+		return decisionevents.DecisionCommandResult{
+			Ticket: &decisionmodel.Ticket{
+				ID:          "ticket-detail-scope",
+				WorkspaceID: workspaceID,
+				RunID:       "run-001",
+				State:       common.DecisionTicketStateOpen,
 			},
-		})
+		}
 	})
 
 	item, err := DecisionView(ctx, hub, nil, "ticket-detail-scope", workspaceID)
@@ -244,42 +257,40 @@ func TestDecisionViewReadsTicketWithExplicitScope(t *testing.T) {
 
 func TestResolveDecisionViewWithoutScopePrefersOpenDuplicateTicket(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(decisionevents.TopicDecisionCommandListTickets, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyTickets: []*decisionmodel.Ticket{
-					{
-						ID:          "ticket-duplicate",
-						WorkspaceID: "ws-old",
-						RunID:       "run-002",
-						State:       common.DecisionTicketStateResolved,
-					},
-					{
-						ID:          "ticket-duplicate",
-						WorkspaceID: "ws-current",
-						RunID:       "run-002",
-						State:       common.DecisionTicketStateOpen,
-					},
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandListTickets, func(data any) decisionevents.DecisionCommandResult {
+		if _, ok := data.(decisionevents.ListTicketsCommand); !ok {
+			t.Fatalf("command payload type = %T, want ListTicketsCommand", data)
+		}
+		return decisionevents.DecisionCommandResult{
+			Tickets: []*decisionmodel.Ticket{
+				{
+					ID:          "ticket-duplicate",
+					WorkspaceID: "ws-old",
+					RunID:       "run-002",
+					State:       common.DecisionTicketStateResolved,
+				},
+				{
+					ID:          "ticket-duplicate",
+					WorkspaceID: "ws-current",
+					RunID:       "run-002",
+					State:       common.DecisionTicketStateOpen,
 				},
 			},
-		})
+		}
 	})
-	hub.Subscribe(decisionevents.TopicDecisionCommandEnsureResolved, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.ResolveTicketCommand)
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
+		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want ResolveTicketCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want EnsureResolvedCommand", data)
 		}
 		if cmd.WorkspaceID != "ws-current" || cmd.TicketID != "ticket-duplicate" {
 			t.Fatalf("command scope = workspace:%q ticket:%q, want current open ticket", cmd.WorkspaceID, cmd.TicketID)
 		}
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
 		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
-			events.PayloadKeyTicket:     ticket,
-			events.PayloadKeyResolution: resolution,
-		}})
+		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
 	})
 
 	item, err := ResolveDecisionView(ctx, hub, nil, "ticket-duplicate", appmodelcore.ResolveDecisionCommand{
@@ -296,46 +307,41 @@ func TestResolveDecisionViewWithoutScopePrefersOpenDuplicateTicket(t *testing.T)
 
 func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
 	workspaceID := common.WorkspaceID("ws-governance-scope")
 	ticketIDs := []string{"ticket-scope-001", "ticket-scope-002"}
-	hub.Subscribe(decisionevents.TopicDecisionCommandGetTicket, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("get ticket envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
+		cmd, ok := data.(decisionevents.GetTicketCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want GetTicketCommand", data)
 		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("get ticket payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		if cmd.WorkspaceID != workspaceID {
+			t.Fatalf("get ticket command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
-		ticketID := common.TicketID(envelope.Payload[events.PayloadKeyBlockingTicketID].(string))
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyTicket: &decisionmodel.Ticket{
-					ID:          ticketID,
-					WorkspaceID: workspaceID,
-					RunID:       "run-001",
-					State:       common.DecisionTicketStateOpen,
-				},
+		return decisionevents.DecisionCommandResult{
+			Ticket: &decisionmodel.Ticket{
+				ID:          cmd.TicketID,
+				WorkspaceID: workspaceID,
+				RunID:       "run-001",
+				State:       common.DecisionTicketStateOpen,
 			},
-		})
+		}
 	})
 	resolvedCount := 0
 	resumeCount := 0
-	hub.Subscribe(decisionevents.TopicDecisionCommandEnsureResolved, func(_ context.Context, envelope events.Envelope) error {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
 		resolvedCount++
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.ResolveTicketCommand)
+		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want ResolveTicketCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want EnsureResolvedCommand", data)
 		}
 		if cmd.WorkspaceID != workspaceID || cmd.RunID != "run-001" {
 			t.Fatalf("decision command scope = workspace:%q run:%q, want %s/run-001", cmd.WorkspaceID, cmd.RunID, workspaceID)
 		}
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
 		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
-			events.PayloadKeyTicket:     ticket,
-			events.PayloadKeyResolution: resolution,
-		}})
+		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
 	})
 	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ context.Context, envelope events.Envelope) error {
 		resumeCount++
@@ -368,22 +374,27 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 
 func TestApprovalViewsForQueryProjectsAutoGovernance(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
 	workspaceID := common.WorkspaceID("ws-governance-read")
-	hub.Subscribe(approvalevents.TopicApprovalCommandListByRun, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyItems: []*approvalmodel.Approval{
-					{
-						ID:          "approval-001",
-						WorkspaceID: workspaceID,
-						RunID:       "run-001",
-						State:       common.ApprovalStatePending,
-					},
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandListByRun, func(data any) approvalevents.ApprovalCommandResult {
+		cmd, ok := data.(approvalevents.ListApprovalsByRunCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want ListApprovalsByRunCommand", data)
+		}
+		if cmd.RunID != "run-001" {
+			t.Fatalf("command run = %q, want run-001", cmd.RunID)
+		}
+		return approvalevents.ApprovalCommandResult{
+			Approvals: []*approvalmodel.Approval{
+				{
+					ID:          "approval-001",
+					WorkspaceID: workspaceID,
+					RunID:       "run-001",
+					State:       common.ApprovalStatePending,
 				},
 			},
-		})
+		}
 	})
 	traces := governanceTraceReaderFunc(func(_ context.Context, query repository.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
 		if query.ItemType != "approval" || query.ItemID != "approval-001" {
@@ -415,26 +426,25 @@ func TestApprovalViewsForQueryProjectsAutoGovernance(t *testing.T) {
 
 func TestApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
 	workspaceID := common.WorkspaceID("ws-governance-detail-scope")
-	hub.Subscribe(approvalevents.TopicApprovalCommandGet, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("get approval envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandGet, func(data any) approvalevents.ApprovalCommandResult {
+		cmd, ok := data.(approvalevents.GetApprovalCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want GetApprovalCommand", data)
 		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("get approval payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		if cmd.WorkspaceID != workspaceID {
+			t.Fatalf("get approval command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyApproval: &approvalmodel.Approval{
-					ID:          "approval-detail-scope",
-					WorkspaceID: workspaceID,
-					RunID:       "run-001",
-					State:       common.ApprovalStatePending,
-				},
+		return approvalevents.ApprovalCommandResult{
+			Approval: &approvalmodel.Approval{
+				ID:          "approval-detail-scope",
+				WorkspaceID: workspaceID,
+				RunID:       "run-001",
+				State:       common.ApprovalStatePending,
 			},
-		})
+		}
 	})
 
 	item, err := ApprovalView(ctx, hub, nil, "approval-detail-scope", workspaceID)
@@ -448,47 +458,42 @@ func TestApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
 
 func TestResolveApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
 	workspaceID := common.WorkspaceID("ws-governance-scope")
-	hub.Subscribe(approvalevents.TopicApprovalCommandGet, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("get approval envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("get approval payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
-		}
-		approvalID := common.ApprovalID(envelope.Payload[events.PayloadKeyApprovalID].(string))
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyApproval: &approvalmodel.Approval{
-					ID:          approvalID,
-					WorkspaceID: workspaceID,
-					RunID:       "run-001",
-					State:       common.ApprovalStatePending,
-				},
-			},
-		})
-	})
-	hub.Subscribe(approvalevents.TopicApprovalCommandEnsureApproved, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandGet, func(data any) approvalevents.ApprovalCommandResult {
+		cmd, ok := data.(approvalevents.GetApprovalCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want ResolveApprovalCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want GetApprovalCommand", data)
+		}
+		if cmd.WorkspaceID != workspaceID {
+			t.Fatalf("get approval command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
+		}
+		return approvalevents.ApprovalCommandResult{
+			Approval: &approvalmodel.Approval{
+				ID:          cmd.ApprovalID,
+				WorkspaceID: workspaceID,
+				RunID:       "run-001",
+				State:       common.ApprovalStatePending,
+			},
+		}
+	})
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
+		cmd, ok := data.(approvalevents.EnsureApprovedCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want EnsureApprovedCommand", data)
 		}
 		if cmd.WorkspaceID != workspaceID || cmd.RunID != "run-001" {
 			t.Fatalf("approval command scope = workspace:%q run:%q, want %s/run-001", cmd.WorkspaceID, cmd.RunID, workspaceID)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyApproval: &approvalmodel.Approval{
-					ID:          cmd.ApprovalID,
-					WorkspaceID: cmd.WorkspaceID,
-					RunID:       cmd.RunID,
-					State:       common.ApprovalStateApproved,
-				},
+		return approvalevents.ApprovalCommandResult{
+			Approval: &approvalmodel.Approval{
+				ID:          cmd.ApprovalID,
+				WorkspaceID: cmd.WorkspaceID,
+				RunID:       cmd.RunID,
+				State:       common.ApprovalStateApproved,
 			},
-		})
+		}
 	})
 
 	item, err := ResolveApprovalView(ctx, hub, nil, "approval-scope-001", "approve", workspaceID)
@@ -502,26 +507,27 @@ func TestResolveApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
 
 func TestResolveApprovalViewWithCommandPublishesGovernanceSemanticContext(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
 	workspaceID := common.WorkspaceID("ws-approval-semantic")
-	hub.Subscribe(approvalevents.TopicApprovalCommandGet, func(_ context.Context, envelope events.Envelope) error {
-		approvalID := common.ApprovalID(envelope.Payload[events.PayloadKeyApprovalID].(string))
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyApproval: &approvalmodel.Approval{
-					ID:          approvalID,
-					WorkspaceID: workspaceID,
-					RunID:       "run-approval-semantic",
-					State:       common.ApprovalStatePending,
-				},
-			},
-		})
-	})
-	hub.Subscribe(approvalevents.TopicApprovalCommandEnsureApproved, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandGet, func(data any) approvalevents.ApprovalCommandResult {
+		cmd, ok := data.(approvalevents.GetApprovalCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want ResolveApprovalCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want GetApprovalCommand", data)
+		}
+		return approvalevents.ApprovalCommandResult{
+			Approval: &approvalmodel.Approval{
+				ID:          cmd.ApprovalID,
+				WorkspaceID: workspaceID,
+				RunID:       "run-approval-semantic",
+				State:       common.ApprovalStatePending,
+			},
+		}
+	})
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
+		cmd, ok := data.(approvalevents.EnsureApprovedCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want EnsureApprovedCommand", data)
 		}
 		semantic, ok := cmd.Context["governanceSemantic"].(map[string]any)
 		if !ok {
@@ -530,18 +536,15 @@ func TestResolveApprovalViewWithCommandPublishesGovernanceSemanticContext(t *tes
 		if semantic["intent"] != "approve_execution" || semantic["rawInput"] != "同意继续" || semantic["source"] != "tui" {
 			t.Fatalf("governanceSemantic = %#v, want approve rawInput/source", semantic)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyApproval: &approvalmodel.Approval{
-					ID:          cmd.ApprovalID,
-					WorkspaceID: cmd.WorkspaceID,
-					RunID:       cmd.RunID,
-					State:       common.ApprovalStateApproved,
-					Context:     cmd.Context,
-				},
+		return approvalevents.ApprovalCommandResult{
+			Approval: &approvalmodel.Approval{
+				ID:          cmd.ApprovalID,
+				WorkspaceID: cmd.WorkspaceID,
+				RunID:       cmd.RunID,
+				State:       common.ApprovalStateApproved,
+				Context:     cmd.Context,
 			},
-		})
+		}
 	})
 
 	item, err := ResolveApprovalViewWithCommand(ctx, hub, nil, "approval-semantic-001", appmodelcore.ResolveApprovalCommand{
@@ -562,48 +565,40 @@ func TestResolveApprovalViewWithCommandPublishesGovernanceSemanticContext(t *tes
 
 func TestResolveApprovalViewWithoutScopeResolvesUniquePendingApproval(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
 	workspaceID := common.WorkspaceID("ws-approval-unique")
-	hub.Subscribe(approvalevents.TopicApprovalCommandList, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != "" {
-			t.Fatalf("list approval envelope workspace = %q, want empty no-scope list", envelope.WorkspaceID)
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandList, func(data any) approvalevents.ApprovalCommandResult {
+		if _, ok := data.(approvalevents.ListApprovalsCommand); !ok {
+			t.Fatalf("command payload type = %T, want ListApprovalsCommand", data)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyItems: []*approvalmodel.Approval{
-					{
-						ID:          "approval-unique",
-						WorkspaceID: workspaceID,
-						RunID:       "run-approval-unique",
-						State:       common.ApprovalStatePending,
-					},
+		return approvalevents.ApprovalCommandResult{
+			Approvals: []*approvalmodel.Approval{
+				{
+					ID:          "approval-unique",
+					WorkspaceID: workspaceID,
+					RunID:       "run-approval-unique",
+					State:       common.ApprovalStatePending,
 				},
 			},
-		})
-	})
-	hub.Subscribe(approvalevents.TopicApprovalCommandEnsureApproved, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
-		if !ok {
-			t.Fatalf("command payload type = %T, want ResolveApprovalCommand", envelope.Payload[events.PayloadKeyCommand])
 		}
-		if envelope.WorkspaceID != string(workspaceID) || envelope.RunID != "run-approval-unique" {
-			t.Fatalf("approval envelope scope = workspace:%q run:%q, want %s/run-approval-unique", envelope.WorkspaceID, envelope.RunID, workspaceID)
+	})
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
+		cmd, ok := data.(approvalevents.EnsureApprovedCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want EnsureApprovedCommand", data)
 		}
 		if cmd.WorkspaceID != workspaceID || cmd.RunID != "run-approval-unique" {
 			t.Fatalf("approval command scope = workspace:%q run:%q, want %s/run-approval-unique", cmd.WorkspaceID, cmd.RunID, workspaceID)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyApproval: &approvalmodel.Approval{
-					ID:          cmd.ApprovalID,
-					WorkspaceID: cmd.WorkspaceID,
-					RunID:       cmd.RunID,
-					State:       common.ApprovalStateApproved,
-				},
+		return approvalevents.ApprovalCommandResult{
+			Approval: &approvalmodel.Approval{
+				ID:          cmd.ApprovalID,
+				WorkspaceID: cmd.WorkspaceID,
+				RunID:       cmd.RunID,
+				State:       common.ApprovalStateApproved,
 			},
-		})
+		}
 	})
 
 	item, err := ResolveApprovalView(ctx, hub, nil, "approval-unique", "approve", "")
@@ -617,31 +612,32 @@ func TestResolveApprovalViewWithoutScopeResolvesUniquePendingApproval(t *testing
 
 func TestResolveApprovalViewWithoutScopeConflictsOnDuplicatePendingApprovals(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(approvalevents.TopicApprovalCommandList, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyItems: []*approvalmodel.Approval{
-					{
-						ID:          "approval-duplicate",
-						WorkspaceID: "ws-approval-duplicate-a",
-						RunID:       "run-001",
-						State:       common.ApprovalStatePending,
-					},
-					{
-						ID:          "approval-duplicate",
-						WorkspaceID: "ws-approval-duplicate-b",
-						RunID:       "run-001",
-						State:       common.ApprovalStatePending,
-					},
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandList, func(data any) approvalevents.ApprovalCommandResult {
+		if _, ok := data.(approvalevents.ListApprovalsCommand); !ok {
+			t.Fatalf("command payload type = %T, want ListApprovalsCommand", data)
+		}
+		return approvalevents.ApprovalCommandResult{
+			Approvals: []*approvalmodel.Approval{
+				{
+					ID:          "approval-duplicate",
+					WorkspaceID: "ws-approval-duplicate-a",
+					RunID:       "run-001",
+					State:       common.ApprovalStatePending,
+				},
+				{
+					ID:          "approval-duplicate",
+					WorkspaceID: "ws-approval-duplicate-b",
+					RunID:       "run-001",
+					State:       common.ApprovalStatePending,
 				},
 			},
-		})
+		}
 	})
-	hub.Subscribe(approvalevents.TopicApprovalCommandEnsureApproved, func(context.Context, events.Envelope) error {
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
 		t.Fatal("approval mutation should not be published for duplicate no-scope approval")
-		return nil
+		return approvalevents.ApprovalCommandResult{}
 	})
 
 	_, err := ResolveApprovalView(ctx, hub, nil, "approval-duplicate", "approve", "")
@@ -652,57 +648,46 @@ func TestResolveApprovalViewWithoutScopeConflictsOnDuplicatePendingApprovals(t *
 
 func TestBatchResolveApprovalViewsApprovesPendingItems(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
 	workspaceID := common.WorkspaceID("ws-governance-read")
 	approvalIDs := []string{"approval-001", "approval-002"}
-	hub.Subscribe(approvalevents.TopicApprovalCommandGet, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("get approval envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandGet, func(data any) approvalevents.ApprovalCommandResult {
+		cmd, ok := data.(approvalevents.GetApprovalCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want GetApprovalCommand", data)
 		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("get approval payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		if cmd.WorkspaceID != workspaceID {
+			t.Fatalf("get approval command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
-		approvalID := common.ApprovalID(envelope.Payload[events.PayloadKeyApprovalID].(string))
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyApproval: &approvalmodel.Approval{
-					ID:          approvalID,
-					WorkspaceID: workspaceID,
-					RunID:       "run-001",
-					State:       common.ApprovalStatePending,
-				},
+		return approvalevents.ApprovalCommandResult{
+			Approval: &approvalmodel.Approval{
+				ID:          cmd.ApprovalID,
+				WorkspaceID: workspaceID,
+				RunID:       "run-001",
+				State:       common.ApprovalStatePending,
 			},
-		})
+		}
 	})
 	approvedCount := 0
-	hub.Subscribe(approvalevents.TopicApprovalCommandEnsureApproved, func(_ context.Context, envelope events.Envelope) error {
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
 		approvedCount++
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
+		cmd, ok := data.(approvalevents.EnsureApprovedCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want ResolveApprovalCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want EnsureApprovedCommand", data)
 		}
 		approvalID := cmd.ApprovalID
 		if cmd.WorkspaceID != workspaceID || cmd.RunID != "run-001" {
 			t.Fatalf("approval command scope = workspace:%q run:%q, want %s/run-001", cmd.WorkspaceID, cmd.RunID, workspaceID)
 		}
-		if envelope.WorkspaceID != string(workspaceID) || envelope.RunID != "run-001" {
-			t.Fatalf("approval envelope scope = workspace:%q run:%q, want %s/run-001", envelope.WorkspaceID, envelope.RunID, workspaceID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) || envelope.Payload[events.PayloadKeyRunID] != "run-001" {
-			t.Fatalf("approval payload scope = workspace:%v run:%v, want %s/run-001", envelope.Payload[events.PayloadKeyWorkspaceID], envelope.Payload[events.PayloadKeyRunID], workspaceID)
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyApproval: &approvalmodel.Approval{
-					ID:          approvalID,
-					WorkspaceID: workspaceID,
-					RunID:       "run-001",
-					State:       common.ApprovalStateApproved,
-				},
+		return approvalevents.ApprovalCommandResult{
+			Approval: &approvalmodel.Approval{
+				ID:          approvalID,
+				WorkspaceID: workspaceID,
+				RunID:       "run-001",
+				State:       common.ApprovalStateApproved,
 			},
-		})
+		}
 	})
 
 	items, err := BatchResolveApprovalViews(ctx, hub, nil, appmodelcore.BatchResolveApprovalCommand{

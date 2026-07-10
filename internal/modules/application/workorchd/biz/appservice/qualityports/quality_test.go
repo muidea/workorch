@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/qualitycore"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -46,48 +47,39 @@ func TestCheckGoalDoDQualityRejectsMissingHubOrWorkspace(t *testing.T) {
 
 func TestCheckGoalDoDQualityReadsExplicitDefinitionsWithWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(8)
+	defer rawHub.Terminate(ctx)
+	hub := events.NewMagicHubWithHubOwner(rawHub, "qualityports/test")
 	workspaceID := common.WorkspaceID("ws-quality-scope")
 	goalID := common.GoalID("goal-quality-scope")
 	dodID := common.DoDID("dod-quality-scope")
 
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandGetGoal, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("goal envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+	observer := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, rawHub)
+	observer.Subscribe(workspaceevents.TopicWorkspaceCommandGetGoal, func(event magicevent.Event, result magicevent.Result) {
+		cmd, ok := event.Data().(workspaceevents.GetGoalCommand)
+		if !ok || cmd.WorkspaceID != workspaceID || cmd.GoalID != goalID || common.RuntimeWorkspaceIDFromContext(event.Context()) != workspaceID {
+			t.Fatalf("goal command = %+v context workspace=%q", cmd, common.RuntimeWorkspaceIDFromContext(event.Context()))
 		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("goal payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyGoal: &workspacemodel.Goal{
-					ID:          goalID,
-					WorkspaceID: workspaceID,
-					Text:        "- ship scoped quality check",
-				},
-			},
-		})
+		result.Set(workspaceevents.WorkspaceCommandResult{Goal: &workspacemodel.Goal{
+			ID:          goalID,
+			WorkspaceID: workspaceID,
+			Text:        "- ship scoped quality check",
+		}}, nil)
 	})
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandGetDoD, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("dod envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+	defer observer.Unsubscribe(workspaceevents.TopicWorkspaceCommandGetGoal)
+	observer.Subscribe(workspaceevents.TopicWorkspaceCommandGetDoD, func(event magicevent.Event, result magicevent.Result) {
+		cmd, ok := event.Data().(workspaceevents.GetDoDCommand)
+		if !ok || cmd.WorkspaceID != workspaceID || cmd.DoDID != dodID || common.RuntimeWorkspaceIDFromContext(event.Context()) != workspaceID {
+			t.Fatalf("dod command = %+v context workspace=%q", cmd, common.RuntimeWorkspaceIDFromContext(event.Context()))
 		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("dod payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyDoD: &workspacemodel.DoD{
-					ID:          dodID,
-					WorkspaceID: workspaceID,
-					Items:       []string{"scoped quality check is verifiable"},
-					State:       common.DoDStateReady,
-				},
-			},
-		})
+		result.Set(workspaceevents.WorkspaceCommandResult{DoD: &workspacemodel.DoD{
+			ID:          dodID,
+			WorkspaceID: workspaceID,
+			Items:       []string{"scoped quality check is verifiable"},
+			State:       common.DoDStateReady,
+		}}, nil)
 	})
+	defer observer.Unsubscribe(workspaceevents.TopicWorkspaceCommandGetDoD)
 
 	got, err := CheckGoalDoDQuality(ctx, hub, qualitycore.Command{
 		WorkspaceID: string(workspaceID),

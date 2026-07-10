@@ -26,7 +26,8 @@
 
 ## 已知缺口
 
-- `application/workorchd` 的 borrowed exports 当前依赖 `ExportsFromInitiator`，其中 `CoverageWorkItems` 导出链路需要补齐并增加边界测试。
+- 当前盘点未发现 initiator 职责或基础设施交互合同缺失。
+- `ExportsFromInitiator` 已补齐 `CoverageWorkItems`，application runtime session 会逐项校验 repository exports 与 EventHub；后续增加 repository export 时必须同步更新该边界校验和 pairwise 测试。
 
 ## 边界约束
 

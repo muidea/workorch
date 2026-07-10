@@ -304,8 +304,8 @@ func TestApproveApprovalWithSessionReusesReturnedApproval(t *testing.T) {
 	if item.ID != string(approvalID) || item.State != string(common.ApprovalStateApproved) {
 		t.Fatalf("approval = %+v, want approved", item)
 	}
-	if got := repo.getCount.Load() - before; got != 1 {
-		t.Fatalf("approval Get count during approve = %d, want only service transition read", got)
+	if got := repo.getCount.Load() - before; got != 2 {
+		t.Fatalf("approval Get count during approve = %d, want transition and governance reads", got)
 	}
 }
 
@@ -339,8 +339,8 @@ func TestBatchResolveApprovalsWithSessionReusesReturnedApprovals(t *testing.T) {
 	if len(items) != 2 || items[0].ID != string(secondID) || items[1].ID != string(firstID) {
 		t.Fatalf("items = %+v, want request order", items)
 	}
-	if got := repo.getCount.Load() - before; got != 4 {
-		t.Fatalf("approval Get count during batch approve = %d, want two prevalidation reads plus two service transition reads", got)
+	if got := repo.getCount.Load() - before; got != 6 {
+		t.Fatalf("approval Get count during batch approve = %d, want prevalidation, transition, and governance reads", got)
 	}
 }
 
@@ -517,6 +517,8 @@ func newApprovalOnlySession(t *testing.T, repo *appserviceCountingApprovalReposi
 			EventHub: eventHub,
 		},
 	}
+	exports = completeAppserviceTestExports(exports)
+	startFocusedGovernanceModule(t, exports, rawHub)
 	session, err := NewRuntimeSessionFromExports(exports)
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)

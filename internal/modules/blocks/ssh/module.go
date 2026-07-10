@@ -3,11 +3,11 @@ package ssh
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	sshbiz "github.com/muidea/workorch/internal/modules/blocks/ssh/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 )
 
@@ -17,7 +17,7 @@ const StepKindCommand = modulecommon.StepKindCommand
 type Module struct {
 	runtimeAdapter *sshbiz.RuntimeAdapter
 	executor       *runtimeevent.Executor
-	eventHub       events.Hub
+	eventHub       magicevent.Hub
 	background     magictask.BackgroundRoutine
 }
 
@@ -26,7 +26,7 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 type Dependencies struct {
-	EventHub   events.Hub
+	EventHub   magicevent.Hub
 	Background magictask.BackgroundRoutine
 }
 

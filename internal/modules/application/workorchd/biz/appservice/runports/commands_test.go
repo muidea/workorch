@@ -4,12 +4,10 @@ import (
 	"context"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
-	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -19,7 +17,7 @@ import (
 
 func TestListRunsByWorkspaceFiltersOwnerReadResults(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -53,22 +51,19 @@ func TestListRunsByWorkspaceFiltersOwnerReadResults(t *testing.T) {
 
 func TestListRunsByWorkspaceUsesWorkspaceScopedOwnerCommand(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(8)
+	defer rawHub.Terminate(ctx)
+	hub := events.NewMagicHubWithHubOwner(rawHub, "runports/list-test")
 	workspaceID := common.WorkspaceID("ws-list-command-scope")
-	hub.Subscribe(runevents.TopicRunCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+	observer := magicevent.NewSimpleObserver(runevents.CommandDestination, rawHub)
+	observer.Subscribe(runevents.TopicRunCommandListByWorkspace, func(event magicevent.Event, result magicevent.Result) {
+		cmd, ok := event.Data().(runevents.ListRunsByWorkspaceCommand)
+		if !ok || cmd.WorkspaceID != workspaceID || common.RuntimeWorkspaceIDFromContext(event.Context()) != workspaceID {
+			t.Fatalf("command = %+v context workspace=%q", cmd, common.RuntimeWorkspaceIDFromContext(event.Context()))
 		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyRuns: []*runmodel.Run{{ID: "run-list-command-scope", WorkspaceID: workspaceID}},
-			},
-		})
+		result.Set(runevents.RunCommandResult{Runs: []*runmodel.Run{{ID: "run-list-command-scope", WorkspaceID: workspaceID}}}, nil)
 	})
+	defer observer.Unsubscribe(runevents.TopicRunCommandListByWorkspace)
 
 	items, err := ListRunsByWorkspace(ctx, hub, workspaceID)
 	if err != nil {
@@ -81,9 +76,16 @@ func TestListRunsByWorkspaceUsesWorkspaceScopedOwnerCommand(t *testing.T) {
 
 func TestResumeRunPublishesCommandPayload(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(envelope)
+	testHub := newRunportsMagicTestHub(t)
+	hub := testHub.hub
+	var captured orchestratorevents.ResumeRunCommand
+	testHub.subscribeOrchestrator(orchestratorevents.TopicOrchestratorCommandResumeRun, func(data any) orchestratorevents.OrchestratorCommandResult {
+		cmd, ok := data.(orchestratorevents.ResumeRunCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want ResumeRunCommand", data)
+		}
+		captured = cmd
+		return orchestratorevents.OrchestratorCommandResult{}
 	})
 	run := &runmodel.Run{ID: "run-resume-command", WorkspaceID: "ws-resume-command"}
 	patch := map[string]any{"mode": "resume"}
@@ -92,30 +94,23 @@ func TestResumeRunPublishesCommandPayload(t *testing.T) {
 		t.Fatalf("ResumeRun: %v", err)
 	}
 
-	published := hub.Published()
-	if len(published) != 1 {
-		t.Fatalf("published len = %d, want 1", len(published))
-	}
-	cmd, ok := published[0].Payload[events.PayloadKeyCommand].(runcontracts.ResumeRunCommand)
-	if !ok {
-		t.Fatalf("payload command = %T, want ResumeRunCommand", published[0].Payload[events.PayloadKeyCommand])
-	}
-	if cmd.RunID != run.ID || cmd.WorkspaceID != run.WorkspaceID || cmd.ExecutionContextPatch["mode"] != "resume" {
-		t.Fatalf("command = %+v, want populated resume command", cmd)
-	}
-	if _, ok := published[0].Payload[events.PayloadKeyRunID]; ok {
-		t.Fatalf("payload contains legacy runId field")
-	}
-	if _, ok := published[0].Payload[events.PayloadKeyExecutionContextPatch]; ok {
-		t.Fatalf("payload contains legacy executionContextPatch field")
+	if captured.RunID != run.ID || captured.WorkspaceID != run.WorkspaceID || captured.ExecutionContextPatch["mode"] != "resume" {
+		t.Fatalf("command = %+v, want populated resume command", captured)
 	}
 }
 
 func TestRecoverRuntimeGapPublishesGapSpecificCommandPayload(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, func(_ context.Context, envelope events.Envelope) error {
-		return events.Response(envelope)
+	testHub := newRunportsMagicTestHub(t)
+	hub := testHub.hub
+	var captured orchestratorevents.RecoverRuntimeGapCommand
+	testHub.subscribeOrchestrator(orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, func(data any) orchestratorevents.OrchestratorCommandResult {
+		cmd, ok := data.(orchestratorevents.RecoverRuntimeGapCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want RecoverRuntimeGapCommand", data)
+		}
+		captured = cmd
+		return orchestratorevents.OrchestratorCommandResult{}
 	})
 	run := &runmodel.Run{ID: "run-runtime-gap-command", WorkspaceID: "ws-runtime-gap-command"}
 	recovery := RuntimeGapRecovery{
@@ -140,84 +135,64 @@ func TestRecoverRuntimeGapPublishesGapSpecificCommandPayload(t *testing.T) {
 		t.Fatalf("RecoverRuntimeGap: %v", err)
 	}
 
-	published := hub.Published()
-	if len(published) != 1 {
-		t.Fatalf("published len = %d, want 1", len(published))
-	}
-	if published[0].Topic != orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap {
-		t.Fatalf("topic = %q, want recover runtime gap", published[0].Topic)
-	}
-	cmd, ok := published[0].Payload[events.PayloadKeyCommand].(runcontracts.RecoverRuntimeGapCommand)
-	if !ok {
-		t.Fatalf("payload command = %T, want RecoverRuntimeGapCommand", published[0].Payload[events.PayloadKeyCommand])
-	}
-	if cmd.RunID != run.ID ||
-		cmd.WorkspaceID != run.WorkspaceID ||
-		cmd.StepID != recovery.StepID ||
-		cmd.Gap != string(runtimeExecutionGapWorkerLost) ||
-		cmd.IdempotencyKey != runtimeGapRecoveryIdempotencyKey(run.WorkspaceID, run.ID, recovery.StepID, string(runtimeExecutionGapWorkerLost), recovery.RequestID, recovery.QueueKey) ||
-		cmd.RequestID != recovery.RequestID ||
-		cmd.QueueKey != recovery.QueueKey ||
-		cmd.RecoveryPolicy.WatchdogRecovery != runtimemodel.WatchdogRecoveryRetryExternal ||
-		cmd.RecoverySafety != recovery.RecoverySafety ||
-		cmd.ExecutionContextPatch["mode"] != "recover" {
-		t.Fatalf("command = %+v, want populated runtime gap recovery command", cmd)
-	}
-	if published[0].Payload[events.PayloadKeyIdempotencyKey] != cmd.IdempotencyKey {
-		t.Fatalf("payload idempotency key = %v, want %s", published[0].Payload[events.PayloadKeyIdempotencyKey], cmd.IdempotencyKey)
+	if captured.RunID != run.ID ||
+		captured.WorkspaceID != run.WorkspaceID ||
+		captured.StepID != recovery.StepID ||
+		captured.Gap != string(runtimeExecutionGapWorkerLost) ||
+		captured.IdempotencyKey != runtimeGapRecoveryIdempotencyKey(run.WorkspaceID, run.ID, recovery.StepID, string(runtimeExecutionGapWorkerLost), recovery.RequestID, recovery.QueueKey) ||
+		captured.RequestID != recovery.RequestID ||
+		captured.QueueKey != recovery.QueueKey ||
+		captured.RecoveryPolicy.WatchdogRecovery != runtimemodel.WatchdogRecoveryRetryExternal ||
+		captured.RecoverySafety != recovery.RecoverySafety ||
+		captured.ExecutionContextPatch["mode"] != "recover" {
+		t.Fatalf("command = %+v, want populated runtime gap recovery command", captured)
 	}
 }
 
 func TestValidateRunDefinitionsReadsDefinitionsWithWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	runtime := newOwnerRuntime()
+	defer runtime.Shutdown(ctx)
+	exports := runtime.Exports()
 	workspaceID := common.WorkspaceID("ws-definition-validation-scope")
 	goalID := common.GoalID("goal-definition-validation")
 	dodID := common.DoDID("dod-definition-validation")
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("workspace get envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("workspace get payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyWorkspace: &workspacemodel.Workspace{ID: workspaceID},
-			},
-		})
-	})
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandGetGoal, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("goal get envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("goal get payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyGoal: &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "- scoped goal"},
-			},
-		})
-	})
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandGetDoD, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("dod get envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-			t.Fatalf("dod get payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyDoD: &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"scoped dod"}, State: common.DoDStateReady},
-			},
-		})
-	})
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := exports.Repositories.Goals.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "- scoped goal"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := exports.Repositories.DoDs.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"scoped dod"}, State: common.DoDStateReady}); err != nil {
+		t.Fatal(err)
+	}
 
-	if err := ValidateRunDefinitions(ctx, hub, string(workspaceID), string(goalID), string(dodID)); err != nil {
+	if err := ValidateRunDefinitions(ctx, exports.Infrastructure.EventHub, string(workspaceID), string(goalID), string(dodID)); err != nil {
 		t.Fatalf("ValidateRunDefinitions err = %v", err)
 	}
+}
+
+type runportsMagicTestHub struct {
+	hub                  *events.MagicHub
+	orchestratorObserver magicevent.SimpleObserver
+}
+
+func newRunportsMagicTestHub(t *testing.T) *runportsMagicTestHub {
+	t.Helper()
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHubOwner(rawHub, "runports/test")
+	ret := &runportsMagicTestHub{
+		hub:                  hub,
+		orchestratorObserver: magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub),
+	}
+	t.Cleanup(func() {
+		hub.Terminate(context.Background())
+	})
+	return ret
+}
+
+func (h *runportsMagicTestHub) subscribeOrchestrator(topic string, handler func(any) orchestratorevents.OrchestratorCommandResult) {
+	h.orchestratorObserver.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
+		result.Set(handler(ev.Data()), nil)
+	})
 }

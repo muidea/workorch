@@ -4,7 +4,9 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraftcore"
@@ -14,25 +16,24 @@ import (
 )
 
 func TestEventHubGeneratorUsesLLMCommandEvent(t *testing.T) {
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHubOwner(rawHub, "setupdraftports/test")
 	var seenRequest llmmodels.ProviderRequest
-	unsubscribe := hub.Subscribe(llmevents.TopicLLMCommandCompleteProvider, func(_ context.Context, envelope events.Envelope) error {
-		request, ok := envelope.Payload[events.PayloadKeyProviderRequest].(llmmodels.ProviderRequest)
+	observer := magicevent.NewSimpleObserver(llmevents.CommandDestination, rawHub)
+	observer.Subscribe(llmevents.TopicLLMCommandCompleteProvider, func(ev magicevent.Event, result magicevent.Result) {
+		cmd, ok := ev.Data().(llmevents.CompleteProviderCommand)
 		if !ok {
-			t.Fatalf("provider request payload = %#v, want ProviderRequest", envelope.Payload[events.PayloadKeyProviderRequest])
+			t.Fatalf("provider command = %#v, want CompleteProviderCommand", ev.Data())
 		}
-		seenRequest = request
-		return events.Response(events.Envelope{
-			Topic:        envelope.Topic + "/response",
-			SourceModule: "blocks/llm",
-			Payload: map[string]any{
-				events.PayloadKeyProviderCompletion: llmmodels.ProviderCompletionResult{
-					Payload: []byte(`{"draft":{"goalText":"Generated goal","doDItems":["Generated DoD"],"confidence":"high"}}`),
-				},
+		seenRequest = cmd.Request
+		result.Set(llmevents.LLMCommandResult{
+			Completion: &llmmodels.ProviderCompletionResult{
+				Payload: []byte(`{"draft":{"goalText":"Generated goal","doDItems":["Generated DoD"],"confidence":"high"}}`),
 			},
-		})
+		}, nil)
 	})
-	defer unsubscribe()
+	defer observer.Unsubscribe(llmevents.TopicLLMCommandCompleteProvider)
+	time.Sleep(10 * time.Millisecond)
 
 	draft, err := EventHubGenerator{EventHub: hub}.GenerateWorkspaceSetupDraft(context.Background(), setupdraftcore.GenerationRequest{
 		Template:       workspacecore.WorkspaceTemplate{ID: "template-001"},

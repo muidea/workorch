@@ -7,10 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/muidea/magicCommon/event"
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
@@ -23,34 +22,23 @@ func TestModuleIdentityAndDoneCommandContract(t *testing.T) {
 		t.Fatalf("Weight = %d, want 100", mod.Weight())
 	}
 
-	err := mod.handleDoneCommand(context.Background(), events.Envelope{
-		Topic:       workorchdevents.TopicWorkorchDCommandDone,
-		SubjectType: "workorchd",
-		SubjectID:   "done",
-		WorkspaceID: "ws-001",
-		RunID:       "run-001",
-		StepID:      "step-001",
-	})
-	response, ok := events.ResponseEnvelope(err)
+	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandDone, "test", workorchdevents.CommandDestination, magicevent.NewHeader(), context.Background(), workorchdevents.DoneCommand{})
+	response := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
+	mod.handleDoneCommand(event, response)
+	if err := response.Error(); err != nil {
+		t.Fatalf("handleDoneCommand error = %v", err)
+	}
+	data, err := response.Get()
+	if err != nil {
+		t.Fatalf("handleDoneCommand result: %v", err)
+	}
+	result, ok := data.(workorchdevents.DoneCommandResult)
 	if !ok {
-		t.Fatalf("handleDoneCommand error = %v, want response envelope", err)
+		t.Fatalf("done result = %T, want DoneCommandResult", data)
 	}
-	if response.Topic != workorchdevents.TopicWorkorchDCommandDone+"/response" {
-		t.Fatalf("response topic = %q", response.Topic)
-	}
-	if response.SourceModule != ModuleID {
-		t.Fatalf("response source module = %q, want %q", response.SourceModule, ModuleID)
-	}
-	if response.SubjectType != "workorchd" ||
-		response.SubjectID != "done" ||
-		response.WorkspaceID != "ws-001" ||
-		response.RunID != "run-001" ||
-		response.StepID != "step-001" {
-		t.Fatalf("response scope = %+v", response)
-	}
-	done, ok := response.Payload[events.PayloadKeyDoneChannel].(<-chan error)
-	if !ok {
-		t.Fatalf("done channel payload = %#v, want receive-only error channel", response.Payload[events.PayloadKeyDoneChannel])
+	done := result.Done
+	if done == nil {
+		t.Fatal("done channel is nil")
 	}
 	select {
 	case _, ok := <-done:
@@ -66,7 +54,7 @@ func TestModuleSetupReturnsConfigError(t *testing.T) {
 	useWorkorchModuleTestConfig(t, "127.0.0.1:0", "memory", "", "not-a-duration")
 	mod := New()
 
-	if err := mod.Setup(context.Background(), event.NewHub(8), task.NewBackgroundRoutine(8)); err == nil {
+	if err := mod.Setup(context.Background(), magicevent.NewHub(8), task.NewBackgroundRoutine(8)); err == nil {
 		t.Fatal("expected setup error")
 	}
 }

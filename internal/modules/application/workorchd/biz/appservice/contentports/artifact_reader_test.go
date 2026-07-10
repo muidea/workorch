@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -12,25 +13,25 @@ import (
 )
 
 func TestReadArtifactFallbackListsArtifactsWithURIWorkspaceScope(t *testing.T) {
-	hub := events.NewMemoryHub()
-	var captured events.Envelope
-	hub.Subscribe(resultevents.TopicArtifactCommandListByRun, func(ctx context.Context, envelope events.Envelope) error {
-		captured = envelope
-		return events.Response(events.Envelope{
-			Topic:   envelope.Topic,
-			Payload: map[string]any{events.PayloadKeyItems: []*resultmodel.Artifact{}},
-		})
+	rawHub := magicevent.NewHub(8)
+	defer rawHub.Terminate(context.Background())
+	hub := events.NewMagicHubWithHubOwner(rawHub, "contentports/test")
+	var captured resultevents.ListArtifactsByRunCommand
+	var capturedWorkspace common.WorkspaceID
+	observer := magicevent.NewSimpleObserver(resultevents.CommandDestination, rawHub)
+	observer.Subscribe(resultevents.TopicArtifactCommandListByRun, func(event magicevent.Event, result magicevent.Result) {
+		captured, _ = event.Data().(resultevents.ListArtifactsByRunCommand)
+		capturedWorkspace = common.RuntimeWorkspaceIDFromContext(event.Context())
+		result.Set(resultevents.ResultCommandResult{Artifacts: []*resultmodel.Artifact{}}, nil)
 	})
+	defer observer.Unsubscribe(resultevents.TopicArtifactCommandListByRun)
 
 	reader := NewReader(hub, "file", t.TempDir())
 	_, err := reader.ReadArtifact(context.Background(), "workorch://workspaces/ws-artifact-scope/artifacts/run-001/result-summary.txt", nil)
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("ReadArtifact err = %v, want not found after scoped owner list", err)
 	}
-	if captured.WorkspaceID != "ws-artifact-scope" || captured.RunID != "run-001" {
-		t.Fatalf("captured scope = workspace:%q run:%q, want URI workspace/run", captured.WorkspaceID, captured.RunID)
-	}
-	if captured.Payload[events.PayloadKeyWorkspaceID] != "ws-artifact-scope" || captured.Payload[events.PayloadKeyRunID] != "run-001" {
-		t.Fatalf("captured payload scope = workspace:%v run:%v, want URI workspace/run", captured.Payload[events.PayloadKeyWorkspaceID], captured.Payload[events.PayloadKeyRunID])
+	if capturedWorkspace != "ws-artifact-scope" || captured.RunID != "run-001" {
+		t.Fatalf("captured scope = workspace:%q run:%q, want URI workspace/run", capturedWorkspace, captured.RunID)
 	}
 }

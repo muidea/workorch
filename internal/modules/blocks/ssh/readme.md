@@ -24,10 +24,12 @@
 - Orchestrator contract: SSH result 只作为 evidence candidate 或 blocker；coverage/result 由 orchestrator gate 判定。
 - Approval contract: remote side effect 需要明确准入，缺 credential/permission 应返回 structured blocker。
 - LLM contract: LLM 只能声明 SSH candidate，不能把远程输出直接变成 accepted Result。
+- EventHub contract: 直接订阅 `/runtime/block` 下 SSH command topic 的 `runtimeevent.ExecuteCommand`，返回 `ExecuteCommandResult`，并向 `/runtime/orchestrator` 投递具体的 accepted/progress/completed/failed data；顶层载荷禁止使用 Envelope/map/JSON 转换。
 
 ## 已知缺口
 
 - 当前盘点未发现 SSH block 职责缺失；credential/permission blocker 与 remote side-effect policy 需要持续 pairwise 验证。
+- 当前未发现与 orchestrator 的 runtime execute 交互合同缺失。
 
 ## 边界约束
 

@@ -24,10 +24,12 @@
 - Registry contract: `kernel/mcp` 是 capability 权威；block 不自行创建或猜测 capability。
 - Orchestrator contract: MCP output 只作为 evidence candidate 或 context material，accepted 由 orchestrator 判定。
 - Approval contract: 高风险工具调用必须在执行前准入，或返回 structured approval blocker。
+- EventHub contract: 直接订阅 `/runtime/block` 下 tool_call/resource_read/prompt_get topic 的 `runtimeevent.ExecuteCommand`，返回 `ExecuteCommandResult`，并向 `/runtime/orchestrator` 投递具体的 accepted/progress/completed/failed data；顶层载荷禁止使用 Envelope/map/JSON 转换。
 
 ## 已知缺口
 
 - 当前盘点未发现 MCP block 职责缺失；registry capability schema 与 invocation params 的 pairwise 测试需要持续扩展。
+- 当前未发现与 orchestrator 的 runtime execute 交互合同缺失。
 
 ## 边界约束
 

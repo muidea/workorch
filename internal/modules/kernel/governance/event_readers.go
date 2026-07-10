@@ -2,7 +2,6 @@ package governance
 
 import (
 	"context"
-	"fmt"
 
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 
@@ -24,17 +23,15 @@ type eventTicketReader struct {
 }
 
 func (r eventTicketReader) Get(ctx context.Context, id common.TicketID) (*decisionmodel.Ticket, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, decisionevents.TopicDecisionCommandGetTicket, "decision_ticket", string(id), "", "", map[string]any{
-		events.PayloadKeyBlockingTicketID: string(id),
-	})
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	response, err := sendOwnerMagicCommand[decisionevents.GetTicketCommand, decisionevents.DecisionCommandResult](ctx, r.hub, decisionevents.TopicDecisionCommandGetTicket, decisionevents.CommandDestination, "decision_ticket", string(id), workspaceID, "", "", decisionevents.GetTicketCommand{WorkspaceID: workspaceID, TicketID: id})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyTicket].(*decisionmodel.Ticket)
-	if !ok || item == nil {
+	if response.Ticket == nil {
 		return nil, common.ErrNotFound
 	}
-	return item, nil
+	return response.Ticket, nil
 }
 
 type eventResolutionReader struct {
@@ -42,17 +39,15 @@ type eventResolutionReader struct {
 }
 
 func (r eventResolutionReader) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, decisionevents.TopicDecisionCommandGetResolution, "decision_ticket", string(ticketID), "", "", map[string]any{
-		events.PayloadKeyBlockingTicketID: string(ticketID),
-	})
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	response, err := sendOwnerMagicCommand[decisionevents.GetResolutionCommand, decisionevents.DecisionCommandResult](ctx, r.hub, decisionevents.TopicDecisionCommandGetResolution, decisionevents.CommandDestination, "decision_ticket", string(ticketID), workspaceID, "", "", decisionevents.GetResolutionCommand{WorkspaceID: workspaceID, TicketID: ticketID})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyResolution].(*decisionmodel.Resolution)
-	if !ok || item == nil {
+	if response.Resolution == nil {
 		return nil, common.ErrNotFound
 	}
-	return item, nil
+	return response.Resolution, nil
 }
 
 type eventApprovalReader struct {
@@ -60,17 +55,15 @@ type eventApprovalReader struct {
 }
 
 func (r eventApprovalReader) Get(ctx context.Context, id common.ApprovalID) (*approvalmodel.Approval, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, approvalevents.TopicApprovalCommandGet, "approval", string(id), "", "", map[string]any{
-		events.PayloadKeyApprovalID: string(id),
-	})
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	response, err := sendOwnerMagicCommand[approvalevents.GetApprovalCommand, approvalevents.ApprovalCommandResult](ctx, r.hub, approvalevents.TopicApprovalCommandGet, approvalevents.CommandDestination, "approval", string(id), workspaceID, "", "", approvalevents.GetApprovalCommand{WorkspaceID: workspaceID, ApprovalID: id})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyApproval].(*approvalmodel.Approval)
-	if !ok || item == nil {
+	if response.Approval == nil {
 		return nil, common.ErrNotFound
 	}
-	return item, nil
+	return response.Approval, nil
 }
 
 type eventRunReader struct {
@@ -78,44 +71,34 @@ type eventRunReader struct {
 }
 
 func (r eventRunReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, runevents.TopicRunCommandGet, "run", string(id), "", id, map[string]any{
-		events.PayloadKeyRunID: string(id),
-	})
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	response, err := sendOwnerMagicCommand[runevents.GetRunCommand, runevents.RunCommandResult](ctx, r.hub, runevents.TopicRunCommandGet, runevents.CommandDestination, "run", string(id), workspaceID, id, "", runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: id})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyRun].(*runmodel.Run)
-	if !ok || item == nil {
+	if response.Run == nil {
 		return nil, common.ErrNotFound
 	}
-	return item, nil
+	return response.Run, nil
 }
 
 func (r eventRunReader) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, runevents.TopicRunCommandGet, "run", string(id), workspaceID, id, map[string]any{
-		events.PayloadKeyWorkspaceID: string(workspaceID),
-		events.PayloadKeyRunID:       string(id),
-	})
+	response, err := sendOwnerMagicCommand[runevents.GetRunCommand, runevents.RunCommandResult](ctx, r.hub, runevents.TopicRunCommandGet, runevents.CommandDestination, "run", string(id), workspaceID, id, "", runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: id})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyRun].(*runmodel.Run)
-	if !ok || item == nil {
+	if response.Run == nil {
 		return nil, common.ErrNotFound
 	}
-	return item, nil
+	return response.Run, nil
 }
 
 func (r eventRunReader) List(ctx context.Context) ([]*runmodel.Run, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, runevents.TopicRunCommandList, "run", "all", "", "", nil)
+	response, err := sendOwnerMagicCommand[runevents.ListRunsCommand, runevents.RunCommandResult](ctx, r.hub, runevents.TopicRunCommandList, runevents.CommandDestination, "run", "all", "", "", "", runevents.ListRunsCommand{})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyRuns].([]*runmodel.Run)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
+	return response.Runs, nil
 }
 
 type eventWorkspaceReader struct {
@@ -124,34 +107,26 @@ type eventWorkspaceReader struct {
 
 func (r eventWorkspaceReader) GetGoal(ctx context.Context, id common.GoalID) (*workspacemodel.Goal, error) {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	response, err := publishGovernanceReadCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandGetGoal, "goal", string(id), workspaceID, "", map[string]any{
-		events.PayloadKeyWorkspaceID: string(workspaceID),
-		events.PayloadKeyGoalID:      string(id),
-	})
+	response, err := sendOwnerMagicCommand[workspaceevents.GetGoalCommand, workspaceevents.WorkspaceCommandResult](ctx, r.hub, workspaceevents.TopicWorkspaceCommandGetGoal, workspaceevents.CommandDestination, "goal", string(id), workspaceID, "", "", workspaceevents.GetGoalCommand{WorkspaceID: workspaceID, GoalID: id})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyGoal].(*workspacemodel.Goal)
-	if !ok || item == nil {
+	if response.Goal == nil {
 		return nil, common.ErrNotFound
 	}
-	return item, nil
+	return response.Goal, nil
 }
 
 func (r eventWorkspaceReader) GetDoD(ctx context.Context, id common.DoDID) (*workspacemodel.DoD, error) {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	response, err := publishGovernanceReadCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(id), workspaceID, "", map[string]any{
-		events.PayloadKeyWorkspaceID: string(workspaceID),
-		events.PayloadKeyDoDID:       string(id),
-	})
+	response, err := sendOwnerMagicCommand[workspaceevents.GetDoDCommand, workspaceevents.WorkspaceCommandResult](ctx, r.hub, workspaceevents.TopicWorkspaceCommandGetDoD, workspaceevents.CommandDestination, "dod", string(id), workspaceID, "", "", workspaceevents.GetDoDCommand{WorkspaceID: workspaceID, DoDID: id})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyDoD].(*workspacemodel.DoD)
-	if !ok || item == nil {
+	if response.DoD == nil {
 		return nil, common.ErrNotFound
 	}
-	return item, nil
+	return response.DoD, nil
 }
 
 type eventMemoryReader struct {
@@ -159,37 +134,9 @@ type eventMemoryReader struct {
 }
 
 func (r eventMemoryReader) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, memoryevents.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
-		events.PayloadKeyWorkspaceID: string(workspaceID),
-	})
+	response, err := sendOwnerMagicCommand[memoryevents.ListMemoryByWorkspaceCommand, memoryevents.MemoryCommandResult](ctx, r.hub, memoryevents.TopicMemoryCommandListByWorkspace, memoryevents.CommandDestination, "workspace", string(workspaceID), workspaceID, "", "", memoryevents.ListMemoryByWorkspaceCommand{WorkspaceID: workspaceID})
 	if err != nil {
 		return nil, err
 	}
-	items, ok := response.Payload[events.PayloadKeyMemoryItems].([]*memorymodel.MemoryItem)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	return items, nil
-}
-
-func publishGovernanceReadCommand(ctx context.Context, hub events.Hub, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, payload map[string]any) (events.Envelope, error) {
-	if hub == nil || topic == "" {
-		return events.Envelope{}, common.ErrInvalidArgument
-	}
-	err := hub.Publish(ctx, events.Envelope{
-		Topic:        topic,
-		SourceModule: ModuleID,
-		SubjectType:  subjectType,
-		SubjectID:    subjectID,
-		WorkspaceID:  string(workspaceID),
-		RunID:        string(runID),
-		Payload:      payload,
-	})
-	if response, ok := events.ResponseEnvelope(err); ok {
-		return response, nil
-	}
-	if err != nil {
-		return events.Envelope{}, err
-	}
-	return events.Envelope{}, fmt.Errorf("governance read command %s returned no response", topic)
+	return response.Items, nil
 }

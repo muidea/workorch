@@ -3,13 +3,14 @@ package mcp
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
+	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
+	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
-	"github.com/muidea/workorch/internal/pkg/workorchownercontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -18,14 +19,14 @@ const StepKindResourceRead = modulecommon.StepKindResourceRead
 const StepKindPromptGet = modulecommon.StepKindPromptGet
 
 type Dependencies struct {
-	EventHub   events.Hub
+	EventHub   magicevent.Hub
 	Background magictask.BackgroundRoutine
 }
 
 type Module struct {
 	runtimeAdapter *mcpbiz.RuntimeAdapter
 	executor       *runtimeevent.Executor
-	eventHub       events.Hub
+	eventHub       magicevent.Hub
 	background     magictask.BackgroundRoutine
 }
 
@@ -70,31 +71,35 @@ func (m *Module) Stop(ctx context.Context) error {
 }
 
 type mcpEventServerGetter struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
-func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServerID) (*workorchownercontract.MCPServer, error) {
+func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServerID) (*mcpmodel.Server, error) {
 	if g.hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	err := g.hub.Publish(ctx, events.Envelope{
-		Topic:        workorchownercontract.TopicMCPCommandGetServer,
-		SourceModule: ModuleID,
-		SubjectType:  "mcp_server",
-		SubjectID:    string(id),
-		Payload: map[string]any{
-			events.PayloadKeyServerID: string(id),
-		},
-	})
-	if response, ok := events.ResponseEnvelope(err); ok {
-		server, ok := response.Payload[events.PayloadKeyServer].(*workorchownercontract.MCPServer)
-		if !ok || server == nil {
-			return nil, common.ErrNotFound
-		}
-		return server, nil
+	ev := magicevent.NewEventWithContext(
+		mcpevents.TopicMCPCommandGetServer,
+		ModuleID,
+		mcpevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		mcpevents.GetServerCommand{ServerID: id},
+	)
+	result := g.hub.Send(ev)
+	if result == nil {
+		return nil, common.ErrInvalidArgument
 	}
+	if err := result.Error(); err != nil {
+		return nil, err
+	}
+	data, err := result.Get()
 	if err != nil {
 		return nil, err
 	}
-	return nil, common.ErrNotFound
+	response, ok := data.(mcpevents.MCPCommandResult)
+	if !ok || response.Server == nil {
+		return nil, common.ErrNotFound
+	}
+	return response.Server, nil
 }

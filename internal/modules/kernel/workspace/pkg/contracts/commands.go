@@ -63,12 +63,14 @@ type DefineGoalCommand struct {
 }
 
 type UpdateGoalCommand struct {
-	GoalID common.GoalID
-	Text   string
+	WorkspaceID common.WorkspaceID
+	GoalID      common.GoalID
+	Text        string
 }
 
 type DeleteGoalCommand struct {
-	GoalID common.GoalID
+	WorkspaceID common.WorkspaceID
+	GoalID      common.GoalID
 }
 
 type DefineDoDCommand struct {
@@ -78,10 +80,12 @@ type DefineDoDCommand struct {
 }
 
 type UpdateDoDCommand struct {
-	DoDID common.DoDID
-	Items []string
+	WorkspaceID common.WorkspaceID
+	DoDID       common.DoDID
+	Items       []string
 }
 
 type DeleteDoDCommand struct {
-	DoDID common.DoDID
+	WorkspaceID common.WorkspaceID
+	DoDID       common.DoDID
 }

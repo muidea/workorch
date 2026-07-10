@@ -24,10 +24,12 @@
 - Orchestrator contract: orchestrator 负责 state-changing admission、evidence quality 和 coverage binding。
 - Approval contract: 写入或 patch 操作的风险审批必须在进入 block 前完成或由 block 返回 structured blocker。
 - LLM contract: LLM 只能声明 file step candidate，不能绕过 orchestrator 直接调用文件写入。
+- EventHub contract: 直接订阅 `/runtime/block` 下对应 file step kind 的 `runtimeevent.ExecuteCommand`，返回 `ExecuteCommandResult`，并向 `/runtime/orchestrator` 投递 `AcceptedData`、`ProgressData`、`CompletedData` 或 `FailedData`；顶层载荷禁止使用 Envelope/map/JSON 转换。
 
 ## 已知缺口
 
 - 当前盘点未发现 File block 职责缺失；路径 scope、raw ref 和 large content 截断仍需持续回归。
+- 当前未发现与 orchestrator 的 runtime execute 交互合同缺失。
 
 ## 边界约束
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	cd "github.com/muidea/magicCommon/def"
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 
@@ -13,7 +15,6 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	llmproviderconfig "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/providerconfig"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -24,9 +25,11 @@ const StepKindWorkspaceExecution = modulecommon.StepKindWorkspaceExecution
 type Module struct {
 	runtimeAdapter *llmbiz.RuntimeAdapter
 	executor       *runtimeevent.Executor
-	eventHub       events.Hub
+	eventHub       magicevent.Hub
+	rawEventHub    magicevent.Hub
 	background     magictask.BackgroundRoutine
-	unsub          []func()
+	observer       magicevent.SimpleObserver
+	topics         []string
 }
 
 func New() *Module { return &Module{} }
@@ -34,12 +37,13 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 type Dependencies struct {
-	EventHub   events.Hub
+	EventHub   magicevent.Hub
 	Background magictask.BackgroundRoutine
 }
 
 func (m *Module) Configure(deps ...Dependencies) error {
 	if len(deps) > 0 {
+		m.rawEventHub = deps[0].EventHub
 		m.eventHub = deps[0].EventHub
 		m.background = deps[0].Background
 	}
@@ -48,59 +52,105 @@ func (m *Module) Configure(deps ...Dependencies) error {
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.runtimeAdapter == nil || m.eventHub == nil || m.background == nil {
+	if m == nil || m.runtimeAdapter == nil || m.eventHub == nil || m.rawEventHub == nil || m.background == nil {
 		return common.ErrInvalidArgument
 	}
-	if m.executor != nil || len(m.unsub) > 0 {
+	if m.executor != nil || m.observer != nil {
 		return nil
 	}
 	m.executor = runtimeevent.NewExecutor(ModuleID, m.eventHub, m.background, m.runtimeAdapter, StepKindWorkspaceExecution)
 	if err := m.executor.Run(); err != nil {
 		return err
 	}
-	m.unsub = append(m.unsub, m.eventHub.Subscribe(llmevents.TopicLLMCommandCompleteProvider, m.handleProviderCompleteCommand))
-	m.unsub = append(m.unsub, m.eventHub.Subscribe(llmevents.TopicLLMCommandGenerateEmbedding, m.handleGenerateEmbeddingCommand))
+	m.observer = magicevent.NewSimpleObserver(ModuleID, m.rawEventHub)
+	m.topics = []string{
+		llmevents.TopicLLMCommandCompleteProvider,
+		llmevents.TopicLLMCommandGenerateEmbedding,
+	}
+	for _, topic := range m.topics {
+		m.observer.Subscribe(topic, m.handleCommand)
+	}
 	return nil
 }
 
 func (m *Module) Stop(ctx context.Context) error {
 	_ = ctx
-	for idx := len(m.unsub) - 1; idx >= 0; idx-- {
-		if m.unsub[idx] != nil {
-			m.unsub[idx]()
+	if m.observer != nil {
+		for idx := len(m.topics) - 1; idx >= 0; idx-- {
+			m.observer.Unsubscribe(m.topics[idx])
 		}
 	}
-	m.unsub = nil
+	m.topics = nil
+	m.observer = nil
 	if m.executor != nil {
 		m.executor.Teardown()
 	}
 	m.executor = nil
 	m.runtimeAdapter = nil
 	m.eventHub = nil
+	m.rawEventHub = nil
 	m.background = nil
 	return nil
 }
 
-func (m *Module) handleProviderCompleteCommand(ctx context.Context, envelope events.Envelope) error {
+func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
+	response, err := m.executeCommand(ev.Context(), ev.ID(), ev.Data())
+	setLLMMagicResult(result, response, err)
+}
+
+func (m *Module) executeCommand(ctx context.Context, topic string, data any) (llmevents.LLMCommandResult, error) {
 	if m == nil {
-		return common.ErrInvalidArgument
+		return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
 	}
-	request, ok := envelope.Payload[events.PayloadKeyProviderRequest].(llmmodels.ProviderRequest)
-	if !ok {
-		return common.ErrInvalidArgument
+	switch topic {
+	case llmevents.TopicLLMCommandCompleteProvider:
+		cmd, ok := data.(llmevents.CompleteProviderCommand)
+		if !ok {
+			return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
+		}
+		completion, providerID, model, err := m.completeProvider(ctx, cmd.ProviderID, cmd.Request)
+		if err != nil {
+			return llmevents.LLMCommandResult{}, err
+		}
+		return llmevents.LLMCommandResult{ProviderID: providerID, Model: model, Completion: &completion}, nil
+	case llmevents.TopicLLMCommandGenerateEmbedding:
+		cmd, ok := data.(llmevents.GenerateEmbeddingCommand)
+		if !ok || strings.TrimSpace(cmd.ProviderID) == "" || strings.TrimSpace(cmd.Input) == "" {
+			return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
+		}
+		embedding, err := m.generateEmbedding(ctx, cmd.ProviderID, cmd.Input)
+		if err != nil {
+			return llmevents.LLMCommandResult{}, err
+		}
+		return llmevents.LLMCommandResult{ProviderID: embedding.ProviderID, Model: embedding.Model, Embedding: &embedding}, nil
+	default:
+		return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
 	}
+}
+
+func setLLMMagicResult(result magicevent.Result, data any, err error) {
+	if result == nil {
+		return
+	}
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	result.Set(data, nil)
+}
+
+func (m *Module) completeProvider(ctx context.Context, requestedProviderID string, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, string, string, error) {
 	defaultProviderID, configs, err := loadProviderConfigsFromWorkorchConfig()
 	if err != nil {
-		return err
+		return llmmodels.ProviderCompletionResult{}, "", "", err
 	}
-	requestedProviderID, _ := envelope.Payload[events.PayloadKeyProviderID].(string)
 	runtime, providerID, err := selectProviderConfig(strings.TrimSpace(requestedProviderID), defaultProviderID, configs)
 	if err != nil {
-		return err
+		return llmmodels.ProviderCompletionResult{}, "", "", err
 	}
 	provider := llmbiz.NewProviderFromConfig(runtime)
 	if provider == nil {
-		return fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
+		return llmmodels.ProviderCompletionResult{}, "", "", fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
 	}
 	if strings.TrimSpace(request.Model) == "" {
 		request.Model = runtime.Model
@@ -108,23 +158,9 @@ func (m *Module) handleProviderCompleteCommand(ctx context.Context, envelope eve
 	request.Config = llmproviderconfig.RedactedProviderConfig(runtime)
 	completion, err := provider.Complete(ctx, request)
 	if err != nil {
-		return err
+		return llmmodels.ProviderCompletionResult{}, "", "", err
 	}
-	return events.Response(events.Envelope{
-		Topic:        envelope.Topic + "/response",
-		SourceModule: ModuleID,
-		SubjectType:  envelope.SubjectType,
-		SubjectID:    envelope.SubjectID,
-		WorkspaceID:  envelope.WorkspaceID,
-		RunID:        envelope.RunID,
-		StepID:       envelope.StepID,
-		Payload: map[string]any{
-			events.PayloadKeyProviderCompletion: completion,
-			events.PayloadKeyProviderID:         providerID,
-			events.PayloadKeyLLMProviderID:      providerID,
-			events.PayloadKeyLLMModel:           runtime.Model,
-		},
-	})
+	return completion, providerID, runtime.Model, nil
 }
 
 func selectProviderConfig(requestedProviderID string, defaultProviderID string, configs map[string]llmmodels.ProviderConfig) (llmmodels.ProviderConfig, string, error) {
@@ -148,41 +184,18 @@ func selectProviderConfig(requestedProviderID string, defaultProviderID string, 
 	return llmmodels.ProviderConfig{}, "", fmt.Errorf("%w: no available llm provider is configured", common.ErrInvalidArgument)
 }
 
-func (m *Module) handleGenerateEmbeddingCommand(ctx context.Context, envelope events.Envelope) error {
-	if m == nil {
-		return common.ErrInvalidArgument
-	}
-	providerID, _ := envelope.Payload[events.PayloadKeyProviderID].(string)
+func (m *Module) generateEmbedding(ctx context.Context, providerID string, input string) (llmmodels.ProviderEmbeddingResult, error) {
 	providerID = strings.TrimSpace(providerID)
-	input, _ := envelope.Payload[events.PayloadKeyInput].(string)
 	input = strings.TrimSpace(input)
 	if providerID == "" || input == "" {
-		return common.ErrInvalidArgument
+		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
 	}
 	defaultProviderID, configs, err := loadProviderConfigsFromWorkorchConfig()
 	if err != nil {
-		return err
+		return llmmodels.ProviderEmbeddingResult{}, err
 	}
 	adapter := llmbiz.NewRuntimeAdapterFromConfigs(defaultProviderID, configs)
-	embedding, err := adapter.GenerateEmbedding(ctx, providerID, input)
-	if err != nil {
-		return err
-	}
-	return events.Response(events.Envelope{
-		Topic:        envelope.Topic + "/response",
-		SourceModule: ModuleID,
-		SubjectType:  envelope.SubjectType,
-		SubjectID:    envelope.SubjectID,
-		WorkspaceID:  envelope.WorkspaceID,
-		RunID:        envelope.RunID,
-		StepID:       envelope.StepID,
-		Payload: map[string]any{
-			events.PayloadKeyProviderEmbedding: embedding,
-			events.PayloadKeyProviderID:        embedding.ProviderID,
-			events.PayloadKeyLLMProviderID:     embedding.ProviderID,
-			events.PayloadKeyLLMModel:          embedding.Model,
-		},
-	})
+	return adapter.GenerateEmbedding(ctx, providerID, input)
 }
 
 func loadProviderConfigsFromWorkorchConfig() (string, map[string]llmmodels.ProviderConfig, error) {

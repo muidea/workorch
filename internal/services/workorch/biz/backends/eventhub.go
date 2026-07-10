@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
@@ -355,57 +356,51 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 	}
 	activation := mergeActivationRequest(req.Activation, req)
 	source := normalizedRunCommandSource(firstNonEmptyBackendString(req.Source, activation.Source))
-	payload := map[string]any{
-		events.PayloadKeyWorkspaceID:        string(req.WorkspaceID),
-		events.PayloadKeyRunID:              string(req.ExpectedRunID),
-		events.PayloadKeyIntent:             string(intent),
-		events.PayloadKeyReason:             req.Reason,
-		events.PayloadKeySource:             source,
-		events.PayloadKeyRequestID:          req.RequestID,
-		events.PayloadKeyDefinitionRevision: firstNonEmptyBackendString(req.DefinitionRevision, activation.DefinitionRevision),
-		events.PayloadKeyDecisionID:         firstNonEmptyBackendString(string(req.DecisionID), string(activation.DecisionID)),
-		events.PayloadKeyPriority:           req.Priority,
+	provider, ok := b.parent.eventHub.(interface{ RawHub() magicevent.Hub })
+	if !ok || provider.RawHub() == nil {
+		return nil, common.ErrInvalidArgument
 	}
-	payload[events.PayloadKeyGoalID] = string(activation.GoalID)
-	payload[events.PayloadKeyDoDID] = string(activation.DoDID)
-	payload[events.PayloadKeyLLMProviderID] = activation.LLMProviderID
-	payload[events.PayloadKeySoulID] = string(activation.SoulID)
-	payload["soulBindings"] = commonSoulBindingStrings(activation.SoulBindings)
-	payload["skillIds"] = skillIDStrings(activation.SkillIDs)
-	payload["mcpServerIds"] = mcpServerIDStrings(activation.MCPServerIDs)
-	payload["capabilityIds"] = capabilityIDStrings(activation.CapabilityIDs)
-	payload["memoryIds"] = memoryIDStrings(activation.MemoryIDs)
-	payload["dialogLanguage"] = activation.DialogLanguage
-	payload[events.PayloadKeyExecutionContextPatch] = activation.ExecutionContextPatch
-	envelope := events.Envelope{
-		Topic:        workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
-		SourceModule: "workorch/" + source,
-		SubjectType:  "workspace-run",
-		SubjectID:    string(req.WorkspaceID),
-		WorkspaceID:  string(req.WorkspaceID),
-		RunID:        string(req.ExpectedRunID),
-		Payload:      payload,
+	command := workorchdevents.WorkspaceRunRequestedCommand{
+		WorkspaceID:           req.WorkspaceID,
+		RunID:                 req.ExpectedRunID,
+		Intent:                string(intent),
+		Reason:                req.Reason,
+		RequestID:             req.RequestID,
+		Source:                source,
+		DefinitionRevision:    firstNonEmptyBackendString(req.DefinitionRevision, activation.DefinitionRevision),
+		DecisionID:            firstNonEmptyBackendString(string(req.DecisionID), string(activation.DecisionID)),
+		Priority:              req.Priority,
+		GoalID:                activation.GoalID,
+		DoDID:                 activation.DoDID,
+		LLMProviderID:         activation.LLMProviderID,
+		SoulID:                activation.SoulID,
+		SoulBindings:          commonSoulBindingStrings(activation.SoulBindings),
+		SkillIDs:              append([]common.SkillID(nil), activation.SkillIDs...),
+		MCPServerIDs:          append([]common.MCPServerID(nil), activation.MCPServerIDs...),
+		CapabilityIDs:         append([]common.MCPCapabilityID(nil), activation.CapabilityIDs...),
+		MemoryIDs:             append([]common.MemoryID(nil), activation.MemoryIDs...),
+		DialogLanguage:        activation.DialogLanguage,
+		ExecutionContextPatch: activation.ExecutionContextPatch,
 	}
-	if err := b.parent.eventHub.Publish(ctx, envelope); err != nil {
-		if response, ok := events.ResponseEnvelope(err); ok {
-			return nil, validateEventHubRunCommandAcceptedResponse(envelope.Topic, response)
-		}
+	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "workorch/"+source, workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	event.BindLaneKey(events.EventHubLaneKey(events.Envelope{Topic: workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, SubjectType: "workspace-run", SubjectID: string(req.WorkspaceID), WorkspaceID: string(req.WorkspaceID), RunID: string(req.ExpectedRunID)}))
+	response := provider.RawHub().Send(event)
+	if response == nil {
+		return nil, fmt.Errorf("%w: run command %s returned no result", common.ErrConflict, event.ID())
+	}
+	if err := response.Error(); err != nil {
 		return nil, err
 	}
-	return nil, fmt.Errorf("%w: run command %s returned no accepted response", common.ErrConflict, envelope.Topic)
-}
-
-func validateEventHubRunCommandAcceptedResponse(topic string, response events.Envelope) error {
-	if strings.TrimSpace(response.Topic) != strings.TrimSpace(topic)+"/accepted" {
-		return fmt.Errorf("%w: run command %s returned unexpected response topic %s", common.ErrConflict, topic, response.Topic)
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return nil, resultErr
 	}
-	if accepted, _ := response.Payload["accepted"].(bool); !accepted {
-		return fmt.Errorf("%w: run command %s was not accepted", common.ErrConflict, topic)
+	result, ok := data.(workorchdevents.WorkspaceRunRequestedResult)
+	if !ok || !result.Accepted {
+		return nil, fmt.Errorf("%w: run command %s was not accepted", common.ErrConflict, event.ID())
 	}
-	if strings.TrimSpace(response.SourceModule) != "workorchd/scheduler" {
-		return fmt.Errorf("%w: run command %s returned response from %s", common.ErrConflict, topic, response.SourceModule)
-	}
-	return nil
+	var noError error
+	return nil, noError
 }
 
 func normalizedRunCommandSource(source string) string {

@@ -6,19 +6,17 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
-	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func ApproveApproval(ctx context.Context, hub events.Hub, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {
-	return resolveApproval(ctx, hub, approvalevents.TopicApprovalCommandEnsureApproved, approvalcontracts.ResolveApprovalCommand{ApprovalID: approvalID})
+	return resolveApproval(ctx, hub, approvalevents.TopicApprovalCommandEnsureApproved, approvalevents.EnsureApprovedCommand{ApprovalID: approvalID})
 }
 
 func RejectApproval(ctx context.Context, hub events.Hub, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {
-	return resolveApproval(ctx, hub, approvalevents.TopicApprovalCommandEnsureRejected, approvalcontracts.ResolveApprovalCommand{ApprovalID: approvalID})
+	return resolveApproval(ctx, hub, approvalevents.TopicApprovalCommandEnsureRejected, approvalevents.EnsureRejectedCommand{ApprovalID: approvalID})
 }
 
 func ApproveApprovalItem(ctx context.Context, hub events.Hub, item *approvalmodel.Approval) (*approvalmodel.Approval, error) {
@@ -40,7 +38,7 @@ func resolveApprovalItem(ctx context.Context, hub events.Hub, topic string, item
 	if item == nil || item.ID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	return resolveApproval(ctx, hub, topic, approvalcontracts.ResolveApprovalCommand{
+	return resolveApproval(ctx, hub, topic, approvalevents.EnsureApprovedCommand{
 		ApprovalID:  item.ID,
 		WorkspaceID: item.WorkspaceID,
 		RunID:       item.RunID,
@@ -48,23 +46,13 @@ func resolveApprovalItem(ctx context.Context, hub events.Hub, topic string, item
 	})
 }
 
-func resolveApproval(ctx context.Context, hub events.Hub, topic string, cmd approvalcontracts.ResolveApprovalCommand) (*approvalmodel.Approval, error) {
-	payload := map[string]any{
-		events.PayloadKeyCommand: cmd,
-	}
-	if cmd.WorkspaceID != "" {
-		payload[events.PayloadKeyWorkspaceID] = string(cmd.WorkspaceID)
-	}
-	if cmd.RunID != "" {
-		payload[events.PayloadKeyRunID] = string(cmd.RunID)
-	}
-	response, err := ownercommandports.PublishWithResponse(ctx, hub, topic, "approval", string(cmd.ApprovalID), cmd.WorkspaceID, cmd.RunID, payload)
+func resolveApproval(ctx context.Context, hub events.Hub, topic string, cmd approvalevents.EnsureApprovedCommand) (*approvalmodel.Approval, error) {
+	response, err := sendGovernanceMagicCommand[approvalevents.EnsureApprovedCommand, approvalevents.ApprovalCommandResult](ctx, hub, topic, approvalevents.CommandDestination, "approval", string(cmd.ApprovalID), cmd.WorkspaceID, cmd.RunID, cmd)
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyApproval].(*approvalmodel.Approval)
-	if !ok || item == nil {
+	if response.Approval == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.Approval, nil
 }

@@ -3,11 +3,11 @@ package git
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	gitbiz "github.com/muidea/workorch/internal/modules/blocks/git/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -19,7 +19,7 @@ const StepKindWrite = modulecommon.StepKindWrite
 type Module struct {
 	runtimeAdapter *gitbiz.RuntimeAdapter
 	executor       *runtimeevent.Executor
-	eventHub       events.Hub
+	eventHub       magicevent.Hub
 	background     magictask.BackgroundRoutine
 }
 
@@ -28,7 +28,7 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 type Dependencies struct {
-	EventHub   events.Hub
+	EventHub   magicevent.Hub
 	Background magictask.BackgroundRoutine
 }
 

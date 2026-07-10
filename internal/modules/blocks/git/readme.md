@@ -24,10 +24,12 @@
 - Orchestrator contract: git result 只作为 evidence candidate；completion 由 orchestrator gate 判定。
 - Approval contract: write operation 必须由 runtime policy 准入，必要时先创建 approval。
 - LLM contract: LLM 只能声明受支持的 git step，不能生成任意 Git CLI 作为绕过路径。
+- EventHub contract: 直接订阅 `/runtime/block` 下 git read/write topic 的 `runtimeevent.ExecuteCommand`，返回 `ExecuteCommandResult`，并向 `/runtime/orchestrator` 投递具体的 accepted/progress/completed/failed data；顶层载荷禁止使用 Envelope/map/JSON 转换。
 
 ## 已知缺口
 
 - 当前盘点未发现 Git block 职责缺失；受支持 write operation 清单与 prompt 能力说明需要保持同步。
+- 当前未发现与 orchestrator 的 runtime execute 交互合同缺失。
 
 ## 边界约束
 

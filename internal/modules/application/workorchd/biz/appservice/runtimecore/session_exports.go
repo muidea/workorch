@@ -1,6 +1,8 @@
 package runtimecore
 
 import (
+	"fmt"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -68,5 +70,47 @@ func (s *Session) RepositoryDataDir() string {
 }
 
 func HasRuntimeExports(exports bootstrap.Exports) bool {
-	return exports.Infrastructure.EventHub != nil
+	return ValidateRuntimeExports(exports) == nil
+}
+
+func ValidateRuntimeExports(exports bootstrap.Exports) error {
+	repositories := exports.Repositories
+	required := []struct {
+		name  string
+		value any
+	}{
+		{"Repositories.Souls", repositories.Souls},
+		{"Repositories.WorkspaceTemplates", repositories.WorkspaceTemplates},
+		{"Repositories.MemoryItems", repositories.MemoryItems},
+		{"Repositories.MemoryRecallTraces", repositories.MemoryRecallTraces},
+		{"Repositories.AutoGovernanceTraces", repositories.AutoGovernanceTraces},
+		{"Repositories.Skills", repositories.Skills},
+		{"Repositories.MCPServers", repositories.MCPServers},
+		{"Repositories.MCPCapabilities", repositories.MCPCapabilities},
+		{"Repositories.Results", repositories.Results},
+		{"Repositories.Artifacts", repositories.Artifacts},
+		{"Repositories.EventRecords", repositories.EventRecords},
+		{"Repositories.Workspaces", repositories.Workspaces},
+		{"Repositories.Goals", repositories.Goals},
+		{"Repositories.DoDs", repositories.DoDs},
+		{"Repositories.Runs", repositories.Runs},
+		{"Repositories.Steps", repositories.Steps},
+		{"Repositories.ToolCalls", repositories.ToolCalls},
+		{"Repositories.Patches", repositories.Patches},
+		{"Repositories.ValidationResults", repositories.ValidationResults},
+		{"Repositories.RuntimeCheckpoints", repositories.RuntimeCheckpoints},
+		{"Repositories.EvidenceRecords", repositories.EvidenceRecords},
+		{"Repositories.CoverageWorkItems", repositories.CoverageWorkItems},
+		{"Repositories.ArtifactContinuations", repositories.ArtifactContinuations},
+		{"Repositories.Tickets", repositories.Tickets},
+		{"Repositories.Resolutions", repositories.Resolutions},
+		{"Repositories.Approvals", repositories.Approvals},
+		{"Infrastructure.EventHub", exports.Infrastructure.EventHub},
+	}
+	for _, item := range required {
+		if item.value == nil {
+			return fmt.Errorf("%w: missing runtime export %s", common.ErrInvalidArgument, item.name)
+		}
+	}
+	return nil
 }

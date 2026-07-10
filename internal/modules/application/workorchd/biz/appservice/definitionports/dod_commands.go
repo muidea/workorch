@@ -5,9 +5,7 @@ import (
 
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
-	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -22,50 +20,42 @@ func ListDoDsByWorkspace(ctx context.Context, hub events.Hub, workspaceID common
 }
 
 func DefineDoD(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, dodID common.DoDID, items []string) (*workspacemodel.DoD, error) {
-	response, err := ownercommandports.PublishWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandDefineDoD, "dod", string(dodID), workspaceID, "", map[string]any{
-		events.PayloadKeyCommand: workspacecontracts.DefineDoDCommand{
-			DoDID:       dodID,
-			WorkspaceID: workspaceID,
-			Items:       append([]string(nil), items...),
-		},
+	response, err := sendDefinitionMagicCommand[workspaceevents.DefineDoDCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandDefineDoD, workspaceevents.CommandDestination, "dod", string(dodID), workspaceID, workspaceevents.DefineDoDCommand{
+		DoDID:       dodID,
+		WorkspaceID: workspaceID,
+		Items:       append([]string(nil), items...),
 	})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyDoD].(*workspacemodel.DoD)
-	if !ok || item == nil {
+	if response.DoD == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.DoD, nil
 }
 
 func UpdateDoD(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, dodID common.DoDID, items []string) (*workspacemodel.DoD, error) {
 	if workspaceID == "" {
 		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
 	}
-	response, err := ownercommandports.PublishWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateDoD, "dod", string(dodID), workspaceID, "", map[string]any{
-		events.PayloadKeyCommand: workspacecontracts.UpdateDoDCommand{
-			DoDID: dodID,
-			Items: append([]string(nil), items...),
-		},
-		events.PayloadKeyWorkspaceID: string(workspaceID),
+	response, err := sendDefinitionMagicCommand[workspaceevents.UpdateDoDCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateDoD, workspaceevents.CommandDestination, "dod", string(dodID), workspaceID, workspaceevents.UpdateDoDCommand{
+		WorkspaceID: workspaceID,
+		DoDID:       dodID,
+		Items:       append([]string(nil), items...),
 	})
 	if err != nil {
 		return nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyDoD].(*workspacemodel.DoD)
-	if !ok || item == nil {
+	if response.DoD == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return item, nil
+	return response.DoD, nil
 }
 
 func DeleteDoD(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, dodID common.DoDID) error {
 	if workspaceID == "" {
 		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
 	}
-	return ownercommandports.Publish(ctx, hub, workspaceevents.TopicWorkspaceCommandDeleteDoD, "dod", string(dodID), workspaceID, "", map[string]any{
-		events.PayloadKeyCommand:     workspacecontracts.DeleteDoDCommand{DoDID: dodID},
-		events.PayloadKeyWorkspaceID: string(workspaceID),
-	})
+	_, err := sendDefinitionMagicCommand[workspaceevents.DeleteDoDCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandDeleteDoD, workspaceevents.CommandDestination, "dod", string(dodID), workspaceID, workspaceevents.DeleteDoDCommand{WorkspaceID: workspaceID, DoDID: dodID})
+	return err
 }

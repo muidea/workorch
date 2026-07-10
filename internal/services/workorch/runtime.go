@@ -6,12 +6,13 @@ import (
 	"strings"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
+
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 
 	"github.com/muidea/magicCommon/framework/application"
 	frameworkservice "github.com/muidea/magicCommon/framework/service"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchdeps"
 )
@@ -111,22 +112,25 @@ func queryServerDoneChannel(ctx context.Context) (<-chan error, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	publishErr := hub.Publish(ctx, events.Envelope{
-		Topic:        workorchdevents.TopicWorkorchDCommandDone,
-		SourceModule: "workorch/app",
-		SubjectType:  "workorchd",
-		SubjectID:    "server",
-	})
-	response, ok := events.ResponseEnvelope(publishErr)
-	if !ok {
-		if publishErr != nil {
-			return nil, publishErr
-		}
+	provider, ok := hub.(interface{ RawHub() magicevent.Hub })
+	if !ok || provider.RawHub() == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	done, ok := response.Payload[events.PayloadKeyDoneChannel].(<-chan error)
-	if !ok || done == nil {
+	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandDone, "workorch/app", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.DoneCommand{})
+	response := provider.RawHub().Send(event)
+	if response == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return done, nil
+	if err := response.Error(); err != nil {
+		return nil, err
+	}
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return nil, resultErr
+	}
+	result, ok := data.(workorchdevents.DoneCommandResult)
+	if !ok || result.Done == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return result.Done, nil
 }

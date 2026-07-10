@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
-	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	orchestratorservice "github.com/muidea/workorch/internal/modules/kernel/orchestrator/service"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
@@ -30,7 +30,11 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 		t.Fatal("new module service pointer is non-nil before Configure")
 	}
 
-	if err := module.Configure(moduleContractDependencies()); err != nil {
+	rawHub := magicevent.NewHub(32)
+	defer rawHub.Terminate(context.Background())
+	deps := moduleContractDependencies()
+	deps.EventHub = events.NewMagicHubWithHubOwner(rawHub, ModuleID)
+	if err := module.Configure(deps); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if module.servicePtr == nil {
@@ -45,15 +49,15 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.unsub)
+	firstSubscriptionCount := len(module.runtimeTopics) + len(module.rawTopics)
 	if firstSubscriptionCount == 0 {
 		t.Fatal("Start did not subscribe orchestrator commands")
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if len(module.unsub) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.unsub), firstSubscriptionCount)
+	if len(module.runtimeTopics)+len(module.rawTopics) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.runtimeTopics)+len(module.rawTopics), firstSubscriptionCount)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -63,7 +67,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 		module.eventHub != nil ||
 		module.steps != nil ||
 		module.backgroundRoutine != nil ||
-		len(module.unsub) != 0 {
+		len(module.runtimeTopics) != 0 ||
+		len(module.rawTopics) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -127,19 +132,13 @@ func TestModuleStartRunCommandAcceptsStateAndSchedulesBackgroundDispatch(t *test
 		backgroundRoutine: bg,
 	}
 
-	err := module.handleCommand(
-		common.ContextWithRuntimeLLMProviderID(ctx, "provider-test"),
-		events.Envelope{
-			Topic:       orchestratorevents.TopicOrchestratorCommandStartRun,
-			SubjectType: "run",
-			SubjectID:   string(runID),
-			WorkspaceID: string(workspaceID),
-			RunID:       string(runID),
-			Payload:     map[string]any{events.PayloadKeyRunID: string(runID)},
-		},
+	_, err := module.executeMagicCommand(
+		common.ContextWithRuntimeWorkspaceID(common.ContextWithRuntimeLLMProviderID(ctx, "provider-test"), workspaceID),
+		orchestratorevents.TopicOrchestratorCommandStartRun,
+		orchestratorevents.StartRunCommand{RunID: runID},
 	)
-	if _, ok := events.ResponseEnvelope(err); !ok {
-		t.Fatalf("start command err = %v, want response", err)
+	if err != nil {
+		t.Fatalf("start command err = %v", err)
 	}
 	if bg.asyncFunctionCalls != 1 || bg.lastAsyncFunction == nil {
 		t.Fatalf("background calls = %d fn=%v, want one scheduled dispatch", bg.asyncFunctionCalls, bg.lastAsyncFunction != nil)
@@ -189,25 +188,17 @@ func TestModuleResumeRunCommandSchedulesBackgroundDispatch(t *testing.T) {
 		backgroundRoutine: bg,
 	}
 
-	err := module.handleCommand(
+	_, err := module.executeMagicCommand(
 		common.ContextWithRuntimeLLMProviderID(ctx, "provider-test"),
-		events.Envelope{
-			Topic:       orchestratorevents.TopicOrchestratorCommandResumeRun,
-			SubjectType: "run",
-			SubjectID:   string(runID),
-			WorkspaceID: string(workspaceID),
-			RunID:       string(runID),
-			Payload: map[string]any{
-				events.PayloadKeyCommand: runcontracts.ResumeRunCommand{
-					WorkspaceID:           workspaceID,
-					RunID:                 runID,
-					ExecutionContextPatch: map[string]any{"decisionResolution": "replan"},
-				},
-			},
+		orchestratorevents.TopicOrchestratorCommandResumeRun,
+		orchestratorevents.ResumeRunCommand{
+			WorkspaceID:           workspaceID,
+			RunID:                 runID,
+			ExecutionContextPatch: map[string]any{"decisionResolution": "replan"},
 		},
 	)
-	if _, ok := events.ResponseEnvelope(err); !ok {
-		t.Fatalf("resume command err = %v, want response", err)
+	if err != nil {
+		t.Fatalf("resume command err = %v", err)
 	}
 	if bg.asyncFunctionCalls != 1 || bg.lastAsyncFunction == nil {
 		t.Fatalf("background calls = %d fn=%v, want one scheduled resume", bg.asyncFunctionCalls, bg.lastAsyncFunction != nil)
@@ -244,34 +235,25 @@ func TestModuleRecoverRuntimeGapCommandSchedulesBackgroundDispatch(t *testing.T)
 		backgroundRoutine: bg,
 	}
 
-	err := module.handleCommand(ctx, events.Envelope{
-		Topic:       orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap,
-		SubjectType: "run",
-		SubjectID:   string(runID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand: runcontracts.RecoverRuntimeGapCommand{
-				WorkspaceID:    workspaceID,
-				RunID:          runID,
-				StepID:         stepID,
-				StepKind:       "llm/workspace_execution",
-				Gap:            "worker_lost",
-				IdempotencyKey: "runtime-gap-recovery|ws-module-runtime-gap-recovery|run-module-runtime-gap-recovery|run-module-runtime-gap-recovery/step-001|worker_lost|request-runtime-gap|queue-runtime-gap",
-				RequestID:      "request-runtime-gap",
-				QueueKey:       "queue-runtime-gap",
-				LatestStepTime: "2026-06-17T14:00:00Z",
-				RecoveryPolicy: runtimemodel.RuntimeRecoveryPolicy{
-					SideEffectPolicy:  runtimemodel.SideEffectPolicyExternalRead,
-					IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
-					WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
-				},
-				Reason: "stale dispatched runtime gap: worker_lost",
-			},
+	_, err := module.executeMagicCommand(ctx, orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, orchestratorevents.RecoverRuntimeGapCommand{
+		WorkspaceID:    workspaceID,
+		RunID:          runID,
+		StepID:         stepID,
+		StepKind:       "llm/workspace_execution",
+		Gap:            "worker_lost",
+		IdempotencyKey: "runtime-gap-recovery|ws-module-runtime-gap-recovery|run-module-runtime-gap-recovery|run-module-runtime-gap-recovery/step-001|worker_lost|request-runtime-gap|queue-runtime-gap",
+		RequestID:      "request-runtime-gap",
+		QueueKey:       "queue-runtime-gap",
+		LatestStepTime: "2026-06-17T14:00:00Z",
+		RecoveryPolicy: runtimemodel.RuntimeRecoveryPolicy{
+			SideEffectPolicy:  runtimemodel.SideEffectPolicyExternalRead,
+			IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
+			WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
 		},
+		Reason: "stale dispatched runtime gap: worker_lost",
 	})
-	if _, ok := events.ResponseEnvelope(err); !ok {
-		t.Fatalf("recover runtime gap command err = %v, want response", err)
+	if err != nil {
+		t.Fatalf("recover runtime gap command err = %v", err)
 	}
 	if bg.asyncFunctionCalls != 1 || bg.lastAsyncFunction == nil {
 		t.Fatalf("background calls = %d fn=%v, want one scheduled runtime gap recovery", bg.asyncFunctionCalls, bg.lastAsyncFunction != nil)
@@ -308,43 +290,29 @@ func TestModuleRecoverRuntimeGapCommandDeduplicatesInFlightIdempotencyKey(t *tes
 		backgroundRoutine: bg,
 	}
 	key := "runtime-gap-recovery|ws-module-runtime-gap-recovery-dedupe|run-module-runtime-gap-recovery-dedupe|run-module-runtime-gap-recovery-dedupe/step-001|worker_lost|request-runtime-gap|queue-runtime-gap"
-	envelope := events.Envelope{
-		Topic:       orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap,
-		SubjectType: "run",
-		SubjectID:   string(runID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyIdempotencyKey: key,
-			events.PayloadKeyCommand: runcontracts.RecoverRuntimeGapCommand{
-				WorkspaceID:    workspaceID,
-				RunID:          runID,
-				StepID:         stepID,
-				StepKind:       "llm/workspace_execution",
-				Gap:            "worker_lost",
-				IdempotencyKey: key,
-				RequestID:      "request-runtime-gap",
-				QueueKey:       "queue-runtime-gap",
-				LatestStepTime: "2026-06-17T14:00:00Z",
-				RecoveryPolicy: runtimemodel.RuntimeRecoveryPolicy{
-					SideEffectPolicy:  runtimemodel.SideEffectPolicyExternalRead,
-					IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
-					WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
-				},
-				Reason: "stale dispatched runtime gap: worker_lost",
-			},
+	cmd := orchestratorevents.RecoverRuntimeGapCommand{
+		WorkspaceID:    workspaceID,
+		RunID:          runID,
+		StepID:         stepID,
+		StepKind:       "llm/workspace_execution",
+		Gap:            "worker_lost",
+		IdempotencyKey: key,
+		RequestID:      "request-runtime-gap",
+		QueueKey:       "queue-runtime-gap",
+		LatestStepTime: "2026-06-17T14:00:00Z",
+		RecoveryPolicy: runtimemodel.RuntimeRecoveryPolicy{
+			SideEffectPolicy:  runtimemodel.SideEffectPolicyExternalRead,
+			IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
+			WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
 		},
+		Reason: "stale dispatched runtime gap: worker_lost",
 	}
 
-	if err := module.handleCommand(ctx, envelope); err == nil {
-		t.Fatalf("first recover runtime gap command err = nil, want response")
-	} else if _, ok := events.ResponseEnvelope(err); !ok {
-		t.Fatalf("first recover runtime gap command err = %v, want response", err)
+	if _, err := module.executeMagicCommand(ctx, orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, cmd); err != nil {
+		t.Fatalf("first recover runtime gap command err = %v", err)
 	}
-	if err := module.handleCommand(ctx, envelope); err == nil {
-		t.Fatalf("duplicate recover runtime gap command err = nil, want response")
-	} else if _, ok := events.ResponseEnvelope(err); !ok {
-		t.Fatalf("duplicate recover runtime gap command err = %v, want response", err)
+	if _, err := module.executeMagicCommand(ctx, orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, cmd); err != nil {
+		t.Fatalf("duplicate recover runtime gap command err = %v", err)
 	}
 	if bg.asyncFunctionCalls != 1 {
 		t.Fatalf("background calls = %d, want duplicate in-flight key to schedule once", bg.asyncFunctionCalls)
@@ -381,30 +349,21 @@ func TestModuleRecoverRuntimeGapCommandRejectsUnsafeDirectCommand(t *testing.T) 
 		backgroundRoutine: bg,
 	}
 
-	err := module.handleCommand(ctx, events.Envelope{
-		Topic:       orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap,
-		SubjectType: "run",
-		SubjectID:   string(runID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand: runcontracts.RecoverRuntimeGapCommand{
-				WorkspaceID:    workspaceID,
-				RunID:          runID,
-				StepID:         stepID,
-				StepKind:       "llm/workspace_execution",
-				Gap:            "worker_lost",
-				IdempotencyKey: "runtime-gap-recovery|unsafe",
-				RequestID:      "request-runtime-gap",
-				QueueKey:       "queue-runtime-gap",
-				RecoveryPolicy: runtimemodel.RuntimeRecoveryPolicy{
-					SideEffectPolicy:  runtimemodel.SideEffectPolicyWorkspaceRead,
-					IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
-					WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
-				},
-				Reason: "stale dispatched runtime gap: worker_lost",
-			},
+	_, err := module.executeMagicCommand(ctx, orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, orchestratorevents.RecoverRuntimeGapCommand{
+		WorkspaceID:    workspaceID,
+		RunID:          runID,
+		StepID:         stepID,
+		StepKind:       "llm/workspace_execution",
+		Gap:            "worker_lost",
+		IdempotencyKey: "runtime-gap-recovery|unsafe",
+		RequestID:      "request-runtime-gap",
+		QueueKey:       "queue-runtime-gap",
+		RecoveryPolicy: runtimemodel.RuntimeRecoveryPolicy{
+			SideEffectPolicy:  runtimemodel.SideEffectPolicyWorkspaceRead,
+			IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
+			WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
 		},
+		Reason: "stale dispatched runtime gap: worker_lost",
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("recover unsafe runtime gap err = %v, want ErrInvalidArgument", err)
@@ -492,16 +451,7 @@ func TestModuleResumeRunCommandRejectsTerminalRunBeforeBackgroundDispatch(t *tes
 		backgroundRoutine: bg,
 	}
 
-	err := module.handleCommand(ctx, events.Envelope{
-		Topic:       orchestratorevents.TopicOrchestratorCommandResumeRun,
-		SubjectType: "run",
-		SubjectID:   string(runID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand: runcontracts.ResumeRunCommand{WorkspaceID: workspaceID, RunID: runID},
-		},
-	})
+	_, err := module.executeMagicCommand(ctx, orchestratorevents.TopicOrchestratorCommandResumeRun, orchestratorevents.ResumeRunCommand{WorkspaceID: workspaceID, RunID: runID})
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("resume terminal err = %v, want conflict", err)
 	}
@@ -536,21 +486,14 @@ func TestModuleDispatchStepRequestedSchedulesBackgroundDispatch(t *testing.T) {
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{bizPtr: orch, backgroundRoutine: bg}
 
-	if err := module.handleDispatchStepRequested(ctx, events.Envelope{
-		Topic:       orchestratorevents.TopicOrchestratorDispatchStepRequested,
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-		StepID:      string(stepID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand: orchestratorcontracts.DispatchStepCommand{
-				WorkspaceID: workspaceID,
-				RunID:       runID,
-				StepID:      stepID,
-				Kind:        "llm/workspace_execution",
-				Input:       map[string]any{"seed": "yes"},
-			},
-		},
-	}); err != nil {
+	cmd := orchestratorevents.DispatchStepCommand{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		Kind:        "llm/workspace_execution",
+		Input:       map[string]any{"seed": "yes"},
+	}
+	if err := module.dispatchRequestedStepCommand(ctx, magicOrchestratorEnvelope(orchestratorevents.TopicOrchestratorDispatchStepRequested, workspaceID, runID, stepID), cmd); err != nil {
 		t.Fatalf("handleDispatchStepRequested: %v", err)
 	}
 	if bg.asyncFunctionCalls != 1 || bg.lastAsyncFunction == nil {
@@ -609,21 +552,16 @@ func TestModuleRuntimeCompletedEventSchedulesFinalize(t *testing.T) {
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{bizPtr: orch, backgroundRoutine: bg}
 
-	err := module.handleRuntimeResultEvent(ctx, events.Envelope{
-		Topic:       runtimeevent.TopicRuntimeBlockExecuteCompleted,
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-		StepID:      string(stepID),
-		Payload: map[string]any{
-			events.PayloadKeyRuntimeCompleted: runtimemodel.RuntimeStepExecutionCompleted{
-				WorkspaceID: workspaceID,
-				RunID:       runID,
-				StepID:      stepID,
-				StepKind:    "llm/workspace_execution",
-				RequestID:   "request-1",
-				Output:      map[string]any{"status": "ok"},
-			},
+	err := module.handleRuntimeResultData(ctx, runtimeevent.TopicRuntimeBlockExecuteCompleted, runtimeevent.CompletedData{
+		Completed: runtimemodel.RuntimeStepExecutionCompleted{
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			StepID:      stepID,
+			StepKind:    "llm/workspace_execution",
+			RequestID:   "request-1",
+			Output:      map[string]any{"status": "ok"},
 		},
+		Result: runtimemodel.StepExecutionResult{Output: map[string]any{"status": "ok"}},
 	})
 	if err != nil {
 		t.Fatalf("handleRuntimeResultEvent: %v", err)
@@ -688,21 +626,16 @@ func TestModuleRuntimeFailedEventSchedulesFinalize(t *testing.T) {
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{bizPtr: orch, backgroundRoutine: bg}
 
-	err := module.handleRuntimeResultEvent(ctx, events.Envelope{
-		Topic:       runtimeevent.TopicRuntimeBlockExecuteFailed,
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-		StepID:      string(stepID),
-		Payload: map[string]any{
-			events.PayloadKeyRuntimeFailed: runtimemodel.RuntimeStepExecutionFailed{
-				WorkspaceID: workspaceID,
-				RunID:       runID,
-				StepID:      stepID,
-				StepKind:    "llm/workspace_execution",
-				RequestID:   "request-1",
-				Error:       "provider unavailable",
-			},
+	err := module.handleRuntimeResultData(ctx, runtimeevent.TopicRuntimeBlockExecuteFailed, runtimeevent.FailedData{
+		Failed: runtimemodel.RuntimeStepExecutionFailed{
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			StepID:      stepID,
+			StepKind:    "llm/workspace_execution",
+			RequestID:   "request-1",
+			Error:       "provider unavailable",
 		},
+		Error: "provider unavailable",
 	})
 	if err != nil {
 		t.Fatalf("handleRuntimeResultEvent: %v", err)
@@ -743,54 +676,14 @@ func TestModuleRuntimeResultEventRequiresWorkspaceScope(t *testing.T) {
 		),
 	}
 
-	err := module.handleRuntimeResultEvent(ctx, events.Envelope{
-		Topic:  runtimeevent.TopicRuntimeBlockExecuteCompleted,
-		RunID:  "run-terminal-missing-workspace",
-		StepID: "run-terminal-missing-workspace/step-1",
-		Payload: map[string]any{
-			events.PayloadKeyRuntimeCompleted: runtimemodel.RuntimeStepExecutionCompleted{
-				RunID:  "run-terminal-missing-workspace",
-				StepID: "run-terminal-missing-workspace/step-1",
-			},
+	err := module.handleRuntimeResultData(ctx, runtimeevent.TopicRuntimeBlockExecuteCompleted, runtimeevent.CompletedData{
+		Completed: runtimemodel.RuntimeStepExecutionCompleted{
+			RunID:  "run-terminal-missing-workspace",
+			StepID: "run-terminal-missing-workspace/step-1",
 		},
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("terminal result without workspace err = %v, want invalid argument", err)
-	}
-}
-
-func TestModuleRuntimeResultEventRejectsWorkspaceScopeMismatch(t *testing.T) {
-	ctx := context.Background()
-	module := &Module{
-		bizPtr: orchestratorbiz.NewRuntimeOrchestratorWithResolutionsAndEvidence(
-			moduleNoopRuntimeAdapter{},
-			memoryrepo.NewRunRepository(),
-			memoryrepo.NewStepRepository(),
-			memoryrepo.NewWorkspaceRepository(),
-			memoryrepo.NewDecisionTicketRepository(),
-			nil,
-			memoryrepo.NewApprovalRepository(),
-			orchestratorbiz.RuntimeEvidenceRepositories{RuntimeCheckpoints: memoryrepo.NewRuntimeCheckpointRepository()},
-			events.NewMemoryHub(),
-		),
-	}
-
-	err := module.handleRuntimeResultEvent(ctx, events.Envelope{
-		Topic:       runtimeevent.TopicRuntimeBlockExecuteFailed,
-		WorkspaceID: "ws-envelope",
-		RunID:       "run-terminal-scope-mismatch",
-		StepID:      "run-terminal-scope-mismatch/step-1",
-		Payload: map[string]any{
-			events.PayloadKeyRuntimeFailed: runtimemodel.RuntimeStepExecutionFailed{
-				WorkspaceID: "ws-payload",
-				RunID:       "run-terminal-scope-mismatch",
-				StepID:      "run-terminal-scope-mismatch/step-1",
-				Error:       "runtime failed",
-			},
-		},
-	})
-	if !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("terminal result workspace mismatch err = %v, want conflict", err)
 	}
 }
 
@@ -850,24 +743,18 @@ func TestModuleRuntimeProgressEventSchedulesCheckpoint(t *testing.T) {
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{bizPtr: orch, backgroundRoutine: bg}
 
-	err := module.handleRuntimeProgressEvent(ctx, events.Envelope{
-		Topic:       runtimeevent.TopicRuntimeBlockExecuteProgress,
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-		StepID:      string(stepID),
-		Payload: map[string]any{
-			events.PayloadKeyRuntimeProgress: runtimemodel.RuntimeStepExecutionProgressed{
-				WorkspaceID: workspaceID,
-				RunID:       runID,
-				StepID:      stepID,
-				StepKind:    "llm/workspace_execution",
-				RequestID:   "request-progress",
-				Event:       "provider_stream",
-				Stage:       "streaming",
-				Summary:     "tokens received",
-				Data:        map[string]any{"tokens": 3},
-				OccurredAt:  "2026-06-17T00:00:00Z",
-			},
+	err := module.handleRuntimeProgressData(ctx, runtimeevent.TopicRuntimeBlockExecuteProgress, runtimeevent.ProgressData{
+		Progress: runtimemodel.RuntimeStepExecutionProgressed{
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			StepID:      stepID,
+			StepKind:    "llm/workspace_execution",
+			RequestID:   "request-progress",
+			Event:       "provider_stream",
+			Stage:       "streaming",
+			Summary:     "tokens received",
+			Data:        map[string]any{"tokens": 3},
+			OccurredAt:  "2026-06-17T00:00:00Z",
 		},
 	})
 	if err != nil {

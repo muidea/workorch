@@ -8,7 +8,7 @@ import (
 
 	"github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -79,6 +79,7 @@ func TestServiceRunUsesBackgroundRoutine(t *testing.T) {
 		backgroundRoutine: routine,
 		done:              make(chan error, 1),
 	}
+	configureIsolatedTestSession(t, svc.http.state, svc.http.state.config)
 
 	if err := svc.Run(context.Background()); err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -110,10 +111,8 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 	dataRoot := t.TempDir()
 	const workspaceID = "ws-service-startup-inactive"
 	const runID = "run-service-startup-inactive"
-	session, err := appservice.NewRuntimeSessionWithBackend("file", dataRoot)
-	if err != nil {
-		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
-	}
+	session := newOwnerRuntimeSession(t, "file", dataRoot, nil)
+	var err error
 	exports, err := session.Exports()
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
@@ -144,29 +143,33 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 		backgroundRoutine: routine,
 		done:              make(chan error, 1),
 	}
+	configureIsolatedTestSession(t, svc.http.state, svc.http.state.config)
 	if err := svc.Run(ctx); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if routine.asyncFunctionCalls != 2 {
-		t.Fatalf("Run submitted %d background functions, want projection baseline and HTTP server only", routine.asyncFunctionCalls)
+	if routine.asyncFunctionCalls != 3 {
+		t.Fatalf("Run submitted %d background functions, want recovery projection, projection baseline, and HTTP server", routine.asyncFunctionCalls)
 	}
 	if routine.timerCalls != 1 {
 		t.Fatalf("Run submitted %d timers, want watchdog timer only", routine.timerCalls)
 	}
 
-	workspace, err := appservice.ReadWorkspaceWithBackend(ctx, "file", dataRoot, workspaceID)
+	readRuntime := bootstrap.NewWithBackend("file", dataRoot)
+	defer func() { _ = readRuntime.Shutdown(ctx) }()
+	readExports := readRuntime.Exports()
+	workspaceRecord, err := readExports.Repositories.Workspaces.Get(ctx, workspaceID)
 	if err != nil {
-		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
+		t.Fatalf("read recovered workspace: %v", err)
 	}
-	if workspace.State != string(common.WorkspaceStateActive) || workspace.ActiveRunID != "" {
-		t.Fatalf("workspace = %+v, want active without active run", workspace)
+	if workspaceRecord.State != common.WorkspaceStateActive || workspaceRecord.ActiveRunID != "" {
+		t.Fatalf("workspace = %+v, want active without active run", workspaceRecord)
 	}
-	run, err := appservice.ReadRunWithBackend(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), "file", dataRoot, runID)
+	runRecord, err := readExports.Repositories.Runs.GetByWorkspaceID(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), workspaceID, runID)
 	if err != nil {
-		t.Fatalf("ReadRunWithBackend: %v", err)
+		t.Fatalf("read recovered run: %v", err)
 	}
-	if run.State != string(common.RunStateCancelled) {
-		t.Fatalf("run = %+v, want cancelled startup inactive run", run)
+	if runRecord.State != common.RunStateCancelled {
+		t.Fatalf("run = %+v, want cancelled startup inactive run", runRecord)
 	}
 	if err := svc.http.state.workspaceProjection.RebuildWorkspace(ctx, workspaceID); err != nil {
 		t.Fatalf("RebuildWorkspace: %v", err)
@@ -178,8 +181,8 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 	if snapshot.Workspace.State != string(common.WorkspaceStateActive) || snapshot.Workspace.ActiveRunID != "" {
 		t.Fatalf("projected workspace = %+v, want active without active run", snapshot.Workspace)
 	}
-	if snapshot.TaskProgress.Recovery.Mode != "idle" || snapshot.TaskProgress.Recovery.NextAction != "start_workspace_execution" {
-		t.Fatalf("projected recovery = %+v, want idle start action", snapshot.TaskProgress.Recovery)
+	if snapshot.TaskProgress.Recovery.Mode != "restart" || snapshot.TaskProgress.Recovery.NextAction != "start_new_run" {
+		t.Fatalf("projected recovery = %+v, want restart with a new run", snapshot.TaskProgress.Recovery)
 	}
 	diagnostics := svc.http.state.schedulerDiagnostics.snapshot(workspaceID, runID)
 	if diagnostics == nil || diagnostics.LatestContinuation == nil {
@@ -218,6 +221,7 @@ func TestServiceRunReturnsErrorWhenBackgroundSubmitFails(t *testing.T) {
 		backgroundRoutine: routine,
 		done:              make(chan error, 1),
 	}
+	configureIsolatedTestSession(t, svc.http.state, svc.http.state.config)
 
 	if err := svc.Run(context.Background()); err == nil {
 		t.Fatal("Run returned nil error after background submission failure")

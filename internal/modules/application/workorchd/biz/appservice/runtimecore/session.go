@@ -2,7 +2,6 @@ package runtimecore
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
-	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
@@ -30,8 +29,8 @@ func NewSession(bootstrapRuntime *bootstrap.Runtime, runtimeFactory ManagedRunti
 }
 
 func NewSessionFromExports(exports bootstrap.Exports, runtimeFactory ManagedRuntimeFactory) (*Session, error) {
-	if !HasRuntimeExports(exports) {
-		return nil, common.ErrInvalidArgument
+	if err := ValidateRuntimeExports(exports); err != nil {
+		return nil, err
 	}
 	return &Session{
 		Runtime:        newManagedRuntimeFromExports(exports, runtimeFactory),

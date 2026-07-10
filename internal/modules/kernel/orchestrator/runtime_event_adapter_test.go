@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
@@ -13,12 +14,13 @@ import (
 )
 
 func TestEventRuntimeAdapterExecuteRuntimeStepReturnsCompletedResult(t *testing.T) {
-	hub := events.NewMagicHub()
-	defer hub.Terminate(context.Background())
+	rawHub := magicevent.NewHub(16)
+	defer rawHub.Terminate(context.Background())
+	hub := events.NewMagicHubWithHubOwner(rawHub, ModuleID)
 	background := magictask.NewBackgroundRoutine(4)
 	defer background.Shutdown(context.Background())
 
-	executor := runtimeevent.NewExecutor("runtime-test", hub, background, runtimeAdapterFunc(func(_ context.Context, _ runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
+	executor := runtimeevent.NewExecutor("runtime-test", rawHub, background, runtimeAdapterFunc(func(_ context.Context, _ runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
 		return runtimemodel.StepExecutionResult{Output: map[string]any{"status": "ok"}}, nil
 	}), "llm/workspace_execution")
 	if err := executor.Run(); err != nil {
@@ -37,14 +39,15 @@ func TestEventRuntimeAdapterExecuteRuntimeStepReturnsCompletedResult(t *testing.
 }
 
 func TestEventRuntimeAdapterRequestRuntimeStepExecutionReturnsAcceptedBeforeResult(t *testing.T) {
-	hub := events.NewMagicHub()
-	defer hub.Terminate(context.Background())
+	rawHub := magicevent.NewHub(16)
+	defer rawHub.Terminate(context.Background())
+	hub := events.NewMagicHubWithHubOwner(rawHub, ModuleID)
 	background := magictask.NewBackgroundRoutine(4)
 	defer background.Shutdown(context.Background())
 
 	started := make(chan struct{})
 	release := make(chan struct{})
-	executor := runtimeevent.NewExecutor("runtime-test", hub, background, runtimeAdapterFunc(func(_ context.Context, _ runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
+	executor := runtimeevent.NewExecutor("runtime-test", rawHub, background, runtimeAdapterFunc(func(_ context.Context, _ runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
 		close(started)
 		<-release
 		return runtimemodel.StepExecutionResult{Output: map[string]any{"status": "ok"}}, nil
@@ -89,12 +92,13 @@ func TestEventRuntimeAdapterRequestRuntimeStepExecutionReturnsAcceptedBeforeResu
 }
 
 func TestEventRuntimeAdapterExecuteRuntimeStepReturnsFailedEventError(t *testing.T) {
-	hub := events.NewMagicHub()
-	defer hub.Terminate(context.Background())
+	rawHub := magicevent.NewHub(16)
+	defer rawHub.Terminate(context.Background())
+	hub := events.NewMagicHubWithHubOwner(rawHub, ModuleID)
 	background := magictask.NewBackgroundRoutine(4)
 	defer background.Shutdown(context.Background())
 
-	executor := runtimeevent.NewExecutor("runtime-test", hub, background, runtimeAdapterFunc(func(_ context.Context, _ runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
+	executor := runtimeevent.NewExecutor("runtime-test", rawHub, background, runtimeAdapterFunc(func(_ context.Context, _ runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
 		return runtimemodel.StepExecutionResult{Output: map[string]any{"partial": true}}, errors.New("provider unavailable")
 	}), "llm/workspace_execution")
 	if err := executor.Run(); err != nil {
@@ -116,13 +120,14 @@ func TestEventRuntimeAdapterExecuteRuntimeStepReturnsFailedEventError(t *testing
 }
 
 func TestEventRuntimeAdapterExecuteRuntimeStepReturnsContextErrorWhenNoResultArrives(t *testing.T) {
-	hub := events.NewMagicHub()
-	defer hub.Terminate(context.Background())
+	rawHub := magicevent.NewHub(16)
+	defer rawHub.Terminate(context.Background())
+	hub := events.NewMagicHubWithHubOwner(rawHub, ModuleID)
 	background := magictask.NewBackgroundRoutine(4)
 	defer background.Shutdown(context.Background())
 
 	blocked := make(chan struct{})
-	executor := runtimeevent.NewExecutor("runtime-test", hub, background, runtimeAdapterFunc(func(_ context.Context, _ runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
+	executor := runtimeevent.NewExecutor("runtime-test", rawHub, background, runtimeAdapterFunc(func(_ context.Context, _ runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
 		<-blocked
 		return runtimemodel.StepExecutionResult{}, nil
 	}), "llm/workspace_execution")

@@ -13,6 +13,12 @@ import (
 
 type RuntimeSession = runtimecore.Session
 
+var (
+	newBootstrapWithBackend                         = bootstrap.NewWithBackend
+	newBootstrapWithBackendRuntimePolicyAndEventHub = bootstrap.NewWithBackendRuntimePolicyAndEventHub
+	newBootstrapWithBackendAndRuntimePolicy         = bootstrap.NewWithBackendAndRuntimePolicy
+)
+
 func NewRuntimeSession(bootstrapRuntime *bootstrap.Runtime) *RuntimeSession {
 	return runtimecore.NewSession(bootstrapRuntime, runtimeports.NewManagedRuntimeFromEventHub)
 }
@@ -31,7 +37,7 @@ func NewRuntimeSessionFromInitiator() (*RuntimeSession, error) {
 
 func NewRuntimeSessionWithBackend(backend string, dataRoot string) (*RuntimeSession, error) {
 	return runtimecore.NewSessionWithBackend(backend, dataRoot, runtimeports.NewManagedRuntimeFromEventHub, func() *bootstrap.Runtime {
-		return bootstrap.NewWithBackend(backend, dataRoot)
+		return newBootstrapWithBackend(backend, dataRoot)
 	})
 }
 
@@ -43,7 +49,7 @@ func NewRuntimeSessionWithBackendAndEventHub(backend string, dataRoot string, ev
 		workorchconfig.Current,
 		runtimeports.NewManagedRuntimeFromEventHub,
 		func(runtimePolicy workorchruntimepolicy.RuntimePolicy, eventHub events.Hub) *bootstrap.Runtime {
-			return bootstrap.NewWithBackendRuntimePolicyAndEventHub(backend, dataRoot, runtimePolicy, eventHub)
+			return newBootstrapWithBackendRuntimePolicyAndEventHub(backend, dataRoot, runtimePolicy, eventHub)
 		},
 	)
 }
@@ -53,7 +59,7 @@ func NewRuntimeSessionFromEnv() (*RuntimeSession, error) {
 		workorchconfig.Current,
 		runtimeports.NewManagedRuntimeFromEventHub,
 		func(cfg workorchconfig.Config) *bootstrap.Runtime {
-			return bootstrap.NewWithBackendAndRuntimePolicy(
+			return newBootstrapWithBackendAndRuntimePolicy(
 				cfg.Repository.Backend,
 				cfg.Repository.DataDir,
 				workorchruntimepolicy.FromConfig(cfg),

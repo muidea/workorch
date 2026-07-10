@@ -3,16 +3,17 @@ package web
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	webbiz "github.com/muidea/workorch/internal/modules/blocks/web/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
 	webproviderconfig "github.com/muidea/workorch/internal/modules/blocks/web/pkg/providerconfig"
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
-	"github.com/muidea/workorch/internal/pkg/workorchownercontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -20,14 +21,14 @@ const StepKindSearch = modulecommon.StepKindSearch
 const StepKindFetch = modulecommon.StepKindFetch
 
 type Dependencies struct {
-	EventHub   events.Hub
+	EventHub   magicevent.Hub
 	Background magictask.BackgroundRoutine
 }
 
 type Module struct {
 	runtimeAdapter *webbiz.RuntimeAdapter
 	executor       *runtimeevent.Executor
-	eventHub       events.Hub
+	eventHub       magicevent.Hub
 	background     magictask.BackgroundRoutine
 }
 
@@ -74,37 +75,39 @@ func loadProviderConfigsFromWorkorchConfig() (string, map[string]webmodels.Provi
 }
 
 type webApprovalGetter struct {
-	hub events.Hub
+	hub magicevent.Hub
 }
 
-func (g webApprovalGetter) Get(ctx context.Context, id common.ApprovalID) (*workorchownercontract.Approval, error) {
+func (g webApprovalGetter) Get(ctx context.Context, id common.ApprovalID) (*approvalmodel.Approval, error) {
 	return g.GetForRun(ctx, id, "")
 }
 
-func (g webApprovalGetter) GetForRun(ctx context.Context, id common.ApprovalID, runID common.RunID) (*workorchownercontract.Approval, error) {
+func (g webApprovalGetter) GetForRun(ctx context.Context, id common.ApprovalID, runID common.RunID) (*approvalmodel.Approval, error) {
 	if g.hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	err := g.hub.Publish(ctx, events.Envelope{
-		Topic:        workorchownercontract.TopicApprovalCommandGet,
-		SourceModule: ModuleID,
-		SubjectType:  "approval",
-		SubjectID:    string(id),
-		RunID:        string(runID),
-		Payload: map[string]any{
-			events.PayloadKeyApprovalID: string(id),
-			events.PayloadKeyRunID:      string(runID),
-		},
-	})
-	if response, ok := events.ResponseEnvelope(err); ok {
-		item, ok := response.Payload[events.PayloadKeyApproval].(*workorchownercontract.Approval)
-		if !ok || item == nil {
-			return nil, common.ErrNotFound
-		}
-		return item, nil
+	ev := magicevent.NewEventWithContext(
+		approvalevents.TopicApprovalCommandGet,
+		ModuleID,
+		approvalevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		approvalevents.GetApprovalCommand{RunID: runID, ApprovalID: id},
+	)
+	result := g.hub.Send(ev)
+	if result == nil {
+		return nil, common.ErrInvalidArgument
 	}
+	if err := result.Error(); err != nil {
+		return nil, err
+	}
+	data, err := result.Get()
 	if err != nil {
 		return nil, err
 	}
-	return nil, common.ErrNotFound
+	response, ok := data.(approvalevents.ApprovalCommandResult)
+	if !ok || response.Approval == nil {
+		return nil, common.ErrNotFound
+	}
+	return response.Approval, nil
 }

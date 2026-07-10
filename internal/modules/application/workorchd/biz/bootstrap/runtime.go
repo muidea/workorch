@@ -55,12 +55,12 @@ type Exports struct {
 }
 
 func (r *Runtime) Shutdown(ctx context.Context) error {
+	if terminator, ok := r.exports.Infrastructure.EventHub.(interface{ Terminate(context.Context) }); ok {
+		terminator.Terminate(ctx)
+	}
 	if r.background != nil {
 		r.background.Shutdown(ctx)
 		r.background = nil
-	}
-	if terminator, ok := r.exports.Infrastructure.EventHub.(interface{ Terminate(context.Context) }); ok {
-		terminator.Terminate(ctx)
 	}
 	return nil
 }

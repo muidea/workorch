@@ -1,6 +1,7 @@
 package runtimecore
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -11,11 +12,11 @@ import (
 
 func TestSessionRequiredEventHubReturnsBorrowedExportHub(t *testing.T) {
 	hub := events.NewMemoryHub()
-	session, err := NewSessionFromExports(bootstrap.Exports{
-		Infrastructure: bootstrap.InfrastructureExports{
-			EventHub: hub,
-		},
-	}, nil)
+	runtime := bootstrap.NewWithBackend("memory", "")
+	t.Cleanup(func() { _ = runtime.Shutdown(context.Background()) })
+	exports := runtime.Exports()
+	exports.Infrastructure.EventHub = hub
+	session, err := NewSessionFromExports(exports, nil)
 	if err != nil {
 		t.Fatalf("NewSessionFromExports: %v", err)
 	}
@@ -26,6 +27,21 @@ func TestSessionRequiredEventHubReturnsBorrowedExportHub(t *testing.T) {
 	}
 	if got != hub {
 		t.Fatalf("RequiredEventHub returned different hub")
+	}
+}
+
+func TestValidateRuntimeExportsNamesMissingCoverageWorkItems(t *testing.T) {
+	runtime := bootstrap.NewWithBackend("memory", "")
+	t.Cleanup(func() { _ = runtime.Shutdown(context.Background()) })
+	exports := runtime.Exports()
+	exports.Repositories.CoverageWorkItems = nil
+
+	err := ValidateRuntimeExports(exports)
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("ValidateRuntimeExports error = %v, want ErrInvalidArgument", err)
+	}
+	if got := err.Error(); got != "invalid argument: missing runtime export Repositories.CoverageWorkItems" {
+		t.Fatalf("ValidateRuntimeExports error = %q", got)
 	}
 }
 

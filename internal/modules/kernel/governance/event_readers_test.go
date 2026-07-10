@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -12,23 +13,31 @@ import (
 
 func TestEventWorkspaceReaderCarriesRuntimeWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	rawHub := magicevent.NewHub(8)
+	hub := events.NewMagicHubWithHubOwner(rawHub, ModuleID)
 	workspaceID := common.WorkspaceID("ws-governance-definition-scope")
 	goalID := common.GoalID("goal-governance-definition-scope")
 	dodID := common.DoDID("dod-governance-definition-scope")
-	var goalEnvelope events.Envelope
-	var dodEnvelope events.Envelope
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandGetGoal, func(_ context.Context, envelope events.Envelope) error {
-		goalEnvelope = envelope
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
-			events.PayloadKeyGoal: &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "goal"},
-		}})
+	var goalCommand workspaceevents.GetGoalCommand
+	var dodCommand workspaceevents.GetDoDCommand
+	observer := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, rawHub)
+	defer observer.Unsubscribe(workspaceevents.TopicWorkspaceCommandGetGoal)
+	defer observer.Unsubscribe(workspaceevents.TopicWorkspaceCommandGetDoD)
+	observer.Subscribe(workspaceevents.TopicWorkspaceCommandGetGoal, func(ev magicevent.Event, result magicevent.Result) {
+		cmd, ok := ev.Data().(workspaceevents.GetGoalCommand)
+		if !ok {
+			t.Fatalf("goal command type = %T", ev.Data())
+		}
+		goalCommand = cmd
+		result.Set(workspaceevents.WorkspaceCommandResult{Goal: &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "goal"}}, nil)
 	})
-	hub.Subscribe(workspaceevents.TopicWorkspaceCommandGetDoD, func(_ context.Context, envelope events.Envelope) error {
-		dodEnvelope = envelope
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
-			events.PayloadKeyDoD: &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"dod"}, State: common.DoDStateReady},
-		}})
+	observer.Subscribe(workspaceevents.TopicWorkspaceCommandGetDoD, func(ev magicevent.Event, result magicevent.Result) {
+		cmd, ok := ev.Data().(workspaceevents.GetDoDCommand)
+		if !ok {
+			t.Fatalf("dod command type = %T", ev.Data())
+		}
+		dodCommand = cmd
+		result.Set(workspaceevents.WorkspaceCommandResult{DoD: &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"dod"}, State: common.DoDStateReady}}, nil)
 	})
 	reader := eventWorkspaceReader{hub: hub}
 	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
@@ -39,10 +48,10 @@ func TestEventWorkspaceReaderCarriesRuntimeWorkspaceScope(t *testing.T) {
 	if _, err := reader.GetDoD(scopedCtx, dodID); err != nil {
 		t.Fatalf("GetDoD: %v", err)
 	}
-	if goalEnvelope.WorkspaceID != string(workspaceID) || goalEnvelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-		t.Fatalf("goal envelope scope = (%q, %v), want %s", goalEnvelope.WorkspaceID, goalEnvelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+	if goalCommand.WorkspaceID != workspaceID || goalCommand.GoalID != goalID {
+		t.Fatalf("goal command = %+v, want %s/%s", goalCommand, workspaceID, goalID)
 	}
-	if dodEnvelope.WorkspaceID != string(workspaceID) || dodEnvelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
-		t.Fatalf("dod envelope scope = (%q, %v), want %s", dodEnvelope.WorkspaceID, dodEnvelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+	if dodCommand.WorkspaceID != workspaceID || dodCommand.DoDID != dodID {
+		t.Fatalf("dod command = %+v, want %s/%s", dodCommand, workspaceID, dodID)
 	}
 }

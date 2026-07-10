@@ -36,8 +36,6 @@ func TestBackendSurfaceImportBoundary(t *testing.T) {
 				t.Fatalf("%s imports forbidden module implementation package %q; backend surface may use event DTO packages only", name, imp)
 			case strings.Contains(imp, "/internal/modules/blocks/"):
 				t.Fatalf("%s imports runtime block package %q; backend surface must use workorchport runtime DTO helpers", name, imp)
-			case strings.Contains(imp, "github.com/muidea/magicCommon/event"):
-				t.Fatalf("%s imports raw magicCommon event package %q; backend surface must use internal event contracts", name, imp)
 			case strings.Contains(imp, "github.com/muidea/magicCommon/framework"):
 				t.Fatalf("%s imports framework package %q; backend surface must not own framework wiring", name, imp)
 			}

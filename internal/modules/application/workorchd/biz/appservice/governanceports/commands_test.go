@@ -4,40 +4,38 @@ import (
 	"context"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 
-	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestApprovalsForQueryFiltersOwnerCommandResults(t *testing.T) {
-	hub := events.NewMemoryHub()
-	hub.Subscribe(approvalevents.TopicApprovalCommandListByRun, func(_ context.Context, envelope events.Envelope) error {
-		if got := envelope.Payload[events.PayloadKeyRunID]; got != "run-001" {
-			t.Fatalf("run payload = %v, want run-001", got)
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandListByRun, func(data any) approvalevents.ApprovalCommandResult {
+		cmd, ok := data.(approvalevents.ListApprovalsByRunCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want ListApprovalsByRunCommand", data)
 		}
-		if envelope.WorkspaceID != "ws-001" {
-			t.Fatalf("workspace envelope = %q, want ws-001", envelope.WorkspaceID)
+		if cmd.RunID != "run-001" {
+			t.Fatalf("run command = %q, want run-001", cmd.RunID)
 		}
-		if got := envelope.Payload[events.PayloadKeyWorkspaceID]; got != "ws-001" {
-			t.Fatalf("workspace payload = %v, want ws-001", got)
+		if cmd.WorkspaceID != "ws-001" {
+			t.Fatalf("workspace command = %q, want ws-001", cmd.WorkspaceID)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyItems: []*approvalmodel.Approval{
-					{ID: "approval-001", WorkspaceID: "ws-001", RunID: "run-001"},
-					{ID: "approval-other-workspace", WorkspaceID: "ws-other", RunID: "run-001"},
-					{ID: "approval-other-run", WorkspaceID: "ws-001", RunID: "run-other"},
-					nil,
-				},
+		return approvalevents.ApprovalCommandResult{
+			Approvals: []*approvalmodel.Approval{
+				{ID: "approval-001", WorkspaceID: "ws-001", RunID: "run-001"},
+				{ID: "approval-other-workspace", WorkspaceID: "ws-other", RunID: "run-001"},
+				{ID: "approval-other-run", WorkspaceID: "ws-001", RunID: "run-other"},
+				nil,
 			},
-		})
+		}
 	})
 
 	items, err := ApprovalsForQuery(context.Background(), hub, " ws-001 ", " run-001 ")
@@ -50,28 +48,27 @@ func TestApprovalsForQueryFiltersOwnerCommandResults(t *testing.T) {
 }
 
 func TestDecisionTicketsForQueryFiltersOwnerCommandResults(t *testing.T) {
-	hub := events.NewMemoryHub()
-	hub.Subscribe(decisionevents.TopicDecisionCommandListTicketsByRun, func(_ context.Context, envelope events.Envelope) error {
-		if got := envelope.Payload[events.PayloadKeyRunID]; got != "run-001" {
-			t.Fatalf("run payload = %v, want run-001", got)
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandListTicketsByRun, func(data any) decisionevents.DecisionCommandResult {
+		cmd, ok := data.(decisionevents.ListTicketsByRunCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want ListTicketsByRunCommand", data)
 		}
-		if envelope.WorkspaceID != "ws-001" {
-			t.Fatalf("workspace envelope = %q, want ws-001", envelope.WorkspaceID)
+		if cmd.RunID != "run-001" {
+			t.Fatalf("run command = %q, want run-001", cmd.RunID)
 		}
-		if got := envelope.Payload[events.PayloadKeyWorkspaceID]; got != "ws-001" {
-			t.Fatalf("workspace payload = %v, want ws-001", got)
+		if cmd.WorkspaceID != "ws-001" {
+			t.Fatalf("workspace command = %q, want ws-001", cmd.WorkspaceID)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyTickets: []*decisionmodel.Ticket{
-					{ID: "ticket-001", WorkspaceID: "ws-001", RunID: "run-001"},
-					{ID: "ticket-other-workspace", WorkspaceID: "ws-other", RunID: "run-001"},
-					{ID: "ticket-other-run", WorkspaceID: "ws-001", RunID: "run-other"},
-					nil,
-				},
+		return decisionevents.DecisionCommandResult{
+			Tickets: []*decisionmodel.Ticket{
+				{ID: "ticket-001", WorkspaceID: "ws-001", RunID: "run-001"},
+				{ID: "ticket-other-workspace", WorkspaceID: "ws-other", RunID: "run-001"},
+				{ID: "ticket-other-run", WorkspaceID: "ws-001", RunID: "run-other"},
+				nil,
 			},
-		})
+		}
 	})
 
 	items, err := DecisionTicketsForQuery(context.Background(), hub, " ws-001 ", " run-001 ")
@@ -84,23 +81,25 @@ func TestDecisionTicketsForQueryFiltersOwnerCommandResults(t *testing.T) {
 }
 
 func TestResolutionForTicketReadsOnlyResolvedTickets(t *testing.T) {
-	hub := events.NewMemoryHub()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
 	readCount := 0
-	hub.Subscribe(decisionevents.TopicDecisionCommandGetResolution, func(_ context.Context, envelope events.Envelope) error {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetResolution, func(data any) decisionevents.DecisionCommandResult {
 		readCount++
-		if got := envelope.Payload[events.PayloadKeyBlockingTicketID]; got != "ticket-resolved" {
-			t.Fatalf("ticket payload = %v, want ticket-resolved", got)
+		cmd, ok := data.(decisionevents.GetResolutionCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want GetResolutionCommand", data)
 		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyResolution: &decisionmodel.Resolution{
-					ID:       "resolution-001",
-					TicketID: "ticket-resolved",
-					Type:     "provide_missing_info",
-				},
+		if cmd.TicketID != "ticket-resolved" {
+			t.Fatalf("ticket command = %v, want ticket-resolved", cmd.TicketID)
+		}
+		return decisionevents.DecisionCommandResult{
+			Resolution: &decisionmodel.Resolution{
+				ID:       "resolution-001",
+				TicketID: "ticket-resolved",
+				Type:     "provide_missing_info",
 			},
-		})
+		}
 	})
 
 	openResolution, err := ResolutionForTicket(context.Background(), hub, &decisionmodel.Ticket{
@@ -128,11 +127,12 @@ func TestResolutionForTicketReadsOnlyResolvedTickets(t *testing.T) {
 
 func TestResolveDecisionPublishesContractCommand(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(decisionevents.TopicDecisionCommandEnsureResolved, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.ResolveTicketCommand)
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
+		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want ResolveTicketCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want EnsureResolvedCommand", data)
 		}
 		if cmd.TicketID != "ticket-contract" || cmd.WorkspaceID != "ws-contract" || cmd.RunID != "run-contract" || cmd.Type != "provide_missing_info" {
 			t.Fatalf("command = %+v", cmd)
@@ -143,15 +143,9 @@ func TestResolveDecisionPublishesContractCommand(t *testing.T) {
 		if cmd.Payload["answer"] != "42" {
 			t.Fatalf("command payload = %#v", cmd.Payload)
 		}
-		if _, ok := envelope.Payload[events.PayloadKeyBlockingTicketID]; ok {
-			t.Fatalf("legacy ticket id payload still present")
-		}
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
 		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
-			events.PayloadKeyTicket:     ticket,
-			events.PayloadKeyResolution: resolution,
-		}})
+		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
 	})
 
 	ticket, resolution, err := ResolveDecision(ctx, hub, &decisionmodel.Ticket{
@@ -170,20 +164,18 @@ func TestResolveDecisionPublishesContractCommand(t *testing.T) {
 
 func TestResolveDecisionScopesResolutionIDByWorkspace(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
 	var resolutionIDs []common.ResolutionID
-	hub.Subscribe(decisionevents.TopicDecisionCommandEnsureResolved, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.ResolveTicketCommand)
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
+		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want ResolveTicketCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want EnsureResolvedCommand", data)
 		}
 		resolutionIDs = append(resolutionIDs, cmd.ResolutionID)
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
 		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
-			events.PayloadKeyTicket:     ticket,
-			events.PayloadKeyResolution: resolution,
-		}})
+		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
 	})
 
 	for _, workspaceID := range []common.WorkspaceID{"ws-scope-a", "ws-scope-b"} {
@@ -210,21 +202,17 @@ func TestResolveDecisionScopesResolutionIDByWorkspace(t *testing.T) {
 
 func TestResolveApprovalPublishesContractCommand(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(approvalevents.TopicApprovalCommandEnsureApproved, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
+		cmd, ok := data.(approvalevents.EnsureApprovedCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want ResolveApprovalCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want EnsureApprovedCommand", data)
 		}
 		if cmd.ApprovalID != "approval-contract" {
 			t.Fatalf("command = %+v", cmd)
 		}
-		if _, ok := envelope.Payload[events.PayloadKeyApprovalID]; ok {
-			t.Fatalf("legacy approval id payload still present")
-		}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
-			events.PayloadKeyApproval: &approvalmodel.Approval{ID: cmd.ApprovalID, State: common.ApprovalStateApproved},
-		}})
+		return approvalevents.ApprovalCommandResult{Approval: &approvalmodel.Approval{ID: cmd.ApprovalID, State: common.ApprovalStateApproved}}
 	})
 
 	item, err := ApproveApproval(ctx, hub, "approval-contract")
@@ -238,29 +226,24 @@ func TestResolveApprovalPublishesContractCommand(t *testing.T) {
 
 func TestResolveApprovalItemPublishesScopedContractCommand(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	hub.Subscribe(approvalevents.TopicApprovalCommandEnsureApproved, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
+	testHub := newGovernanceMagicTestHub(t)
+	hub := testHub.hub
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
+		cmd, ok := data.(approvalevents.EnsureApprovedCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want ResolveApprovalCommand", envelope.Payload[events.PayloadKeyCommand])
+			t.Fatalf("command payload type = %T, want EnsureApprovedCommand", data)
 		}
 		if cmd.ApprovalID != "approval-scoped-contract" || cmd.WorkspaceID != "ws-scoped-contract" || cmd.RunID != "run-scoped-contract" {
 			t.Fatalf("command = %+v, want scoped approval command", cmd)
 		}
-		if envelope.WorkspaceID != "ws-scoped-contract" || envelope.RunID != "run-scoped-contract" {
-			t.Fatalf("envelope scope = workspace:%q run:%q, want scoped command envelope", envelope.WorkspaceID, envelope.RunID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != "ws-scoped-contract" || envelope.Payload[events.PayloadKeyRunID] != "run-scoped-contract" {
-			t.Fatalf("payload scope = workspace:%v run:%v, want explicit scope payload", envelope.Payload[events.PayloadKeyWorkspaceID], envelope.Payload[events.PayloadKeyRunID])
-		}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
-			events.PayloadKeyApproval: &approvalmodel.Approval{
+		return approvalevents.ApprovalCommandResult{
+			Approval: &approvalmodel.Approval{
 				ID:          cmd.ApprovalID,
 				WorkspaceID: cmd.WorkspaceID,
 				RunID:       cmd.RunID,
 				State:       common.ApprovalStateApproved,
 			},
-		}})
+		}
 	})
 
 	item, err := ApproveApprovalItem(ctx, hub, &approvalmodel.Approval{
@@ -275,4 +258,37 @@ func TestResolveApprovalItemPublishesScopedContractCommand(t *testing.T) {
 	if item.ID != "approval-scoped-contract" || item.WorkspaceID != "ws-scoped-contract" || item.RunID != "run-scoped-contract" || item.State != common.ApprovalStateApproved {
 		t.Fatalf("approval = %+v, want scoped approved item", item)
 	}
+}
+
+type governanceMagicTestHub struct {
+	hub              *events.MagicHub
+	decisionObserver magicevent.SimpleObserver
+	approvalObserver magicevent.SimpleObserver
+}
+
+func newGovernanceMagicTestHub(t *testing.T) *governanceMagicTestHub {
+	t.Helper()
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHubOwner(rawHub, "governanceports/test")
+	ret := &governanceMagicTestHub{
+		hub:              hub,
+		decisionObserver: magicevent.NewSimpleObserver(decisionevents.CommandDestination, rawHub),
+		approvalObserver: magicevent.NewSimpleObserver(approvalevents.CommandDestination, rawHub),
+	}
+	t.Cleanup(func() {
+		hub.Terminate(context.Background())
+	})
+	return ret
+}
+
+func (h *governanceMagicTestHub) subscribeDecision(topic string, handler func(any) decisionevents.DecisionCommandResult) {
+	h.decisionObserver.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
+		result.Set(handler(ev.Data()), nil)
+	})
+}
+
+func (h *governanceMagicTestHub) subscribeApproval(topic string, handler func(any) approvalevents.ApprovalCommandResult) {
+	h.approvalObserver.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
+		result.Set(handler(ev.Data()), nil)
+	})
 }

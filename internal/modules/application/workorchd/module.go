@@ -7,7 +7,7 @@ import (
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 
 	cd "github.com/muidea/magicCommon/def"
-	"github.com/muidea/magicCommon/event"
+	magicevent "github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
@@ -25,9 +25,10 @@ func init() {
 type Module struct {
 	service       *server.Service
 	eventHub      events.Hub
+	rawEventHub   magicevent.Hub
 	session       *appservice.RuntimeSession
 	cliDispatcher *appservice.CLICommandDispatcher
-	doneUnsub     func()
+	doneObserver  magicevent.SimpleObserver
 }
 
 func New() *Module {
@@ -42,12 +43,13 @@ func (m *Module) Weight() int {
 	return 100
 }
 
-func (m *Module) Setup(ctx context.Context, eventHub event.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
+func (m *Module) Setup(ctx context.Context, eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
 	config, err := server.ConfigFromEnv()
 	if err != nil {
 		return cd.NewError(cd.IllegalParam, err.Error())
 	}
 	m.eventHub = events.NewMagicHubWithHubOwner(eventHub, ModuleID)
+	m.rawEventHub = eventHub
 	m.service = server.NewService(config)
 	session, sessionErr := appservice.NewRuntimeSessionFromInitiator()
 	if sessionErr != nil {
@@ -78,7 +80,8 @@ func (m *Module) Run(ctx context.Context) *cd.Error {
 			m.service.Shutdown(ctx)
 			return cd.NewError(cd.IllegalParam, fmt.Sprintf("workorch cli dispatcher run failed: %v", err))
 		}
-		m.doneUnsub = m.eventHub.Subscribe(workorchdevents.TopicWorkorchDCommandDone, m.handleDoneCommand)
+		m.doneObserver = magicevent.NewSimpleObserver(workorchdevents.CommandDestination, m.rawEventHub)
+		m.doneObserver.Subscribe(workorchdevents.TopicWorkorchDCommandDone, m.handleDoneCommand)
 	}
 	return nil
 }
@@ -87,9 +90,9 @@ func (m *Module) Teardown(ctx context.Context) {
 	if m == nil {
 		return
 	}
-	if m.doneUnsub != nil {
-		m.doneUnsub()
-		m.doneUnsub = nil
+	if m.doneObserver != nil {
+		m.doneObserver.Unsubscribe(workorchdevents.TopicWorkorchDCommandDone)
+		m.doneObserver = nil
 	}
 	if m.cliDispatcher != nil {
 		m.cliDispatcher.Close()
@@ -104,6 +107,7 @@ func (m *Module) Teardown(ctx context.Context) {
 	}
 	m.service = nil
 	m.eventHub = nil
+	m.rawEventHub = nil
 }
 
 func (m *Module) Done() <-chan error {
@@ -115,17 +119,10 @@ func (m *Module) Done() <-chan error {
 	return m.service.Done()
 }
 
-func (m *Module) handleDoneCommand(_ context.Context, envelope events.Envelope) error {
-	return events.Response(events.Envelope{
-		Topic:        envelope.Topic + "/response",
-		SourceModule: ModuleID,
-		SubjectType:  envelope.SubjectType,
-		SubjectID:    envelope.SubjectID,
-		WorkspaceID:  envelope.WorkspaceID,
-		RunID:        envelope.RunID,
-		StepID:       envelope.StepID,
-		Payload: map[string]any{
-			events.PayloadKeyDoneChannel: m.Done(),
-		},
-	})
+func (m *Module) handleDoneCommand(ev magicevent.Event, result magicevent.Result) {
+	if _, ok := ev.Data().(workorchdevents.DoneCommand); !ok {
+		result.Set(nil, cd.NewError(cd.IllegalParam, "invalid workorchd done command"))
+		return
+	}
+	result.Set(workorchdevents.DoneCommandResult{Done: m.Done()}, nil)
 }

@@ -159,6 +159,7 @@ func TestRequestDispatchStepRecordsEventPublishReadbackPending(t *testing.T) {
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
+	hub, _ := newRecordingDispatchMagicHub(t)
 	orch := NewRuntimeOrchestrator(
 		&stubRuntimeAdapter{},
 		runRepo,
@@ -166,7 +167,7 @@ func TestRequestDispatchStepRecordsEventPublishReadbackPending(t *testing.T) {
 		workspaceRepo,
 		memory.NewDecisionTicketRepository(),
 		memory.NewApprovalRepository(),
-		events.NewMemoryHub(),
+		hub,
 	)
 	orch.EnableEventDrivenDispatch()
 
@@ -558,7 +559,7 @@ func TestRuntimeOrchestrator_StartRunPublishesRunAndStepEvents(t *testing.T) {
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
 
 	workspaceID := common.WorkspaceID("ws-evt")
@@ -648,7 +649,7 @@ func TestRuntimeOrchestrator_StartRunPublishesLLMStreamProgressEvent(t *testing.
 			{"type": "done"},
 		},
 	}}
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
 
 	workspaceID := common.WorkspaceID("ws-evt-stream")
@@ -731,7 +732,7 @@ func TestRuntimeOrchestrator_CompleteRunClearsStaleTerminalActiveRun(t *testing.
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"status": "ok"}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
 
 	workspaceID := common.WorkspaceID("ws-stale-active-complete")
@@ -799,7 +800,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesMultipleStepsWhenRuntimeRequestsN
 			}
 		},
 	}
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
 
 	workspaceID := common.WorkspaceID("ws-multi")

@@ -24,10 +24,12 @@
 - Orchestrator contract: shell output 只作为 evidence input；evidence accepted/rejected 由 orchestrator 判定。
 - Approval contract: destructive/background/unbounded command 必须由 policy 拒绝或 approval-gated。
 - LLM contract: LLM 只能声明 shell candidate，不能把 shell 文本直接标记为 DoD satisfied。
+- EventHub contract: 直接订阅 `/runtime/block` 下 shell command topic 的 `runtimeevent.ExecuteCommand`，返回 `ExecuteCommandResult`，并向 `/runtime/orchestrator` 投递具体的 accepted/progress/completed/failed data；顶层载荷禁止使用 Envelope/map/JSON 转换。
 
 ## 已知缺口
 
 - 当前盘点未发现 Shell block 职责缺失；long-running command 和 zero-work evidence policy 仍需要持续回归。
+- 当前未发现与 orchestrator 的 runtime execute 交互合同缺失。
 
 ## 边界约束
 

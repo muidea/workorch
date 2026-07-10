@@ -6,16 +6,14 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestCreateAndStartWorkspaceExecutionRunUsesEventHubOwnerCommands(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -63,7 +61,7 @@ func TestCreateAndStartWorkspaceExecutionRunUsesEventHubOwnerCommands(t *testing
 
 func TestCreateAndStartWorkspaceExecutionRunContinuesWorkspaceRunSequence(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)
@@ -95,29 +93,16 @@ func TestCreateAndStartWorkspaceExecutionRunContinuesWorkspaceRunSequence(t *tes
 }
 
 func TestRunObservableAfterStartConflictReadsRunWithContextWorkspaceScope(t *testing.T) {
-	hub := events.NewMemoryHub()
+	runtime := newOwnerRuntime()
+	defer runtime.Shutdown(context.Background())
+	exports := runtime.Exports()
 	workspaceID := common.WorkspaceID("ws-start-conflict-scope")
 	runID := common.RunID("run-001")
-	hub.Subscribe(runevents.TopicRunCommandGet, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.WorkspaceID != string(workspaceID) {
-			t.Fatalf("run get envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
-		}
-		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) || envelope.Payload[events.PayloadKeyRunID] != string(runID) {
-			t.Fatalf("run get payload scope = workspace:%v run:%v, want %s/%s", envelope.Payload[events.PayloadKeyWorkspaceID], envelope.Payload[events.PayloadKeyRunID], workspaceID, runID)
-		}
-		return events.Response(events.Envelope{
-			Topic: envelope.Topic + "/response",
-			Payload: map[string]any{
-				events.PayloadKeyRun: &runmodel.Run{
-					ID:          runID,
-					WorkspaceID: workspaceID,
-					State:       common.RunStateActive,
-				},
-			},
-		})
-	})
+	if err := exports.Repositories.Runs.Create(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
+		t.Fatal(err)
+	}
 
-	observable, err := RunObservableAfterStartConflict(common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID), hub, runID)
+	observable, err := RunObservableAfterStartConflict(common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID), exports.Infrastructure.EventHub, runID)
 	if err != nil {
 		t.Fatalf("RunObservableAfterStartConflict err = %v", err)
 	}
@@ -128,7 +113,7 @@ func TestRunObservableAfterStartConflictReadsRunWithContextWorkspaceScope(t *tes
 
 func TestBuildWorkspaceExecutionContextForIDsUsesEventHubInputs(t *testing.T) {
 	ctx := context.Background()
-	runtime := bootstrap.NewWithBackend("memory", "")
+	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
 		if err := runtime.Shutdown(context.Background()); err != nil {
 			t.Errorf("shutdown runtime: %v", err)

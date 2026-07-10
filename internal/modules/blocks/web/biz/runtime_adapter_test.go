@@ -9,9 +9,9 @@ import (
 	"time"
 
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
-	"github.com/muidea/workorch/internal/pkg/workorchownercontract"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -118,7 +118,7 @@ func TestRuntimeAdapterSearchLargeResultSetRequiresApproval(t *testing.T) {
 		t.Fatalf("approvalContext = %+v, want query context", blocked.Output["approvalContext"])
 	}
 	approvalID := common.ApprovalID("approval-web-search")
-	if err := approvals.Create(context.Background(), &workorchownercontract.Approval{
+	if err := approvals.Create(context.Background(), &approvalmodel.Approval{
 		ID:          approvalID,
 		WorkspaceID: request.WorkspaceID,
 		RunID:       request.RunID,
@@ -181,7 +181,7 @@ func TestRuntimeAdapterFetchBlocksLoopbackUntilApproved(t *testing.T) {
 		t.Fatalf("approvalContext = %+v, want map", blocked.Output["approvalContext"])
 	}
 	approvalID := common.ApprovalID("approval-web-fetch")
-	if err := approvals.Create(context.Background(), &workorchownercontract.Approval{
+	if err := approvals.Create(context.Background(), &approvalmodel.Approval{
 		ID:          approvalID,
 		WorkspaceID: request.WorkspaceID,
 		RunID:       request.RunID,
@@ -243,7 +243,7 @@ func TestRuntimeAdapterFetchRechecksFinalURLPolicy(t *testing.T) {
 		t.Fatalf("approvalContext = %+v, want final URL context", blocked.Output["approvalContext"])
 	}
 	approvalID := common.ApprovalID("approval-final-url")
-	if err := approvals.Create(context.Background(), &workorchownercontract.Approval{
+	if err := approvals.Create(context.Background(), &approvalmodel.Approval{
 		ID:          approvalID,
 		WorkspaceID: request.WorkspaceID,
 		RunID:       request.RunID,

@@ -5,9 +5,7 @@ import (
 
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 
-	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func (p *EventHubActionPort) EnsureTicket(
@@ -21,14 +19,12 @@ func (p *EventHubActionPort) EnsureTicket(
 	if p == nil || p.hub == nil || ticketID == "" || workspaceID == "" || runID == "" || stepID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.publish(ctx, decisionevents.TopicDecisionCommandEnsureTicket, "decision_ticket", string(ticketID), workspaceID, runID, stepID, map[string]any{
-		events.PayloadKeyCommand: decisioncontracts.CreateTicketCommand{
-			TicketID:    ticketID,
-			WorkspaceID: workspaceID,
-			RunID:       runID,
-			StepID:      stepID,
-			Reason:      reason,
-		},
+	return p.send(ctx, decisionevents.TopicDecisionCommandEnsureTicket, decisionevents.CommandDestination, "decision_ticket", string(ticketID), workspaceID, runID, stepID, decisionevents.EnsureTicketCommand{
+		TicketID:    ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		Reason:      reason,
 	})
 }
 
@@ -42,12 +38,12 @@ func (p *EventHubActionPort) EnsureResolvedTicket(
 	if p == nil || p.hub == nil || resolutionID == "" || ticketID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.publish(ctx, decisionevents.TopicDecisionCommandEnsureResolved, "decision_ticket", string(ticketID), "", "", "", map[string]any{
-		events.PayloadKeyCommand: decisioncontracts.ResolveTicketCommand{
-			ResolutionID: resolutionID,
-			TicketID:     ticketID,
-			Type:         resolutionType,
-			Payload:      cloneActionPayload(payload),
-		},
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	return p.send(ctx, decisionevents.TopicDecisionCommandEnsureResolved, decisionevents.CommandDestination, "decision_ticket", string(ticketID), workspaceID, "", "", decisionevents.EnsureResolvedCommand{
+		ResolutionID: resolutionID,
+		TicketID:     ticketID,
+		WorkspaceID:  workspaceID,
+		Type:         resolutionType,
+		Payload:      cloneActionPayload(payload),
 	})
 }

@@ -6,9 +6,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -39,22 +37,22 @@ func StartRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, orchestratorevents.TopicOrchestratorCommandStartRun, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
-		events.PayloadKeyRunID: string(item.ID),
+	_, err := sendRunMagicCommand[orchestratorevents.StartRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandStartRun, orchestratorevents.CommandDestination, "run", string(item.ID), item.WorkspaceID, item.ID, orchestratorevents.StartRunCommand{
+		RunID: item.ID,
 	})
+	return err
 }
 
 func ResumeRun(ctx context.Context, hub events.Hub, item *runmodel.Run, executionContextPatch map[string]any) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, orchestratorevents.TopicOrchestratorCommandResumeRun, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
-		events.PayloadKeyCommand: runcontracts.ResumeRunCommand{
-			WorkspaceID:           item.WorkspaceID,
-			RunID:                 item.ID,
-			ExecutionContextPatch: cloneMap(executionContextPatch),
-		},
+	_, err := sendRunMagicCommand[orchestratorevents.ResumeRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandResumeRun, orchestratorevents.CommandDestination, "run", string(item.ID), item.WorkspaceID, item.ID, orchestratorevents.ResumeRunCommand{
+		WorkspaceID:           item.WorkspaceID,
+		RunID:                 item.ID,
+		ExecutionContextPatch: cloneMap(executionContextPatch),
 	})
+	return err
 }
 
 func RecoverRuntimeGap(ctx context.Context, hub events.Hub, item *runmodel.Run, recovery RuntimeGapRecovery, executionContextPatch map[string]any) error {
@@ -72,24 +70,22 @@ func RecoverRuntimeGap(ctx context.Context, hub events.Hub, item *runmodel.Run, 
 	if idempotencyKey == "" {
 		idempotencyKey = runtimeGapRecoveryIdempotencyKey(workspaceID, item.ID, recovery.StepID, string(recovery.Gap), recovery.RequestID, recovery.QueueKey)
 	}
-	return ownercommandports.Publish(ctx, hub, orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, "run", string(item.ID), workspaceID, item.ID, map[string]any{
-		events.PayloadKeyIdempotencyKey: idempotencyKey,
-		events.PayloadKeyCommand: runcontracts.RecoverRuntimeGapCommand{
-			WorkspaceID:           workspaceID,
-			RunID:                 item.ID,
-			StepID:                recovery.StepID,
-			StepKind:              recovery.StepKind,
-			Gap:                   string(recovery.Gap),
-			IdempotencyKey:        idempotencyKey,
-			RequestID:             recovery.RequestID,
-			QueueKey:              recovery.QueueKey,
-			LatestStepTime:        recovery.LatestStepTime,
-			RecoveryPolicy:        recovery.RecoveryPolicy,
-			RecoverySafety:        recovery.RecoverySafety,
-			Reason:                recovery.Reason,
-			ExecutionContextPatch: cloneMap(executionContextPatch),
-		},
+	_, err := sendRunMagicCommand[orchestratorevents.RecoverRuntimeGapCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, orchestratorevents.CommandDestination, "run", string(item.ID), workspaceID, item.ID, orchestratorevents.RecoverRuntimeGapCommand{
+		WorkspaceID:           workspaceID,
+		RunID:                 item.ID,
+		StepID:                recovery.StepID,
+		StepKind:              recovery.StepKind,
+		Gap:                   string(recovery.Gap),
+		IdempotencyKey:        idempotencyKey,
+		RequestID:             recovery.RequestID,
+		QueueKey:              recovery.QueueKey,
+		LatestStepTime:        recovery.LatestStepTime,
+		RecoveryPolicy:        recovery.RecoveryPolicy,
+		RecoverySafety:        recovery.RecoverySafety,
+		Reason:                recovery.Reason,
+		ExecutionContextPatch: cloneMap(executionContextPatch),
 	})
+	return err
 }
 
 func cloneMap(input map[string]any) map[string]any {

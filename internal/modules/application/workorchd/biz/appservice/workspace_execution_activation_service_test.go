@@ -15,10 +15,11 @@ import (
 	"testing"
 	"time"
 
+	cd "github.com/muidea/magicCommon/def"
+	magicevent "github.com/muidea/magicCommon/event"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
@@ -541,6 +542,7 @@ type countingActivationEventHub struct {
 	base   events.Hub
 	mu     sync.Mutex
 	counts map[string]int
+	onSend func(magicevent.Event)
 }
 
 func (h *countingActivationEventHub) Publish(ctx context.Context, envelope events.Envelope) error {
@@ -561,6 +563,51 @@ func (h *countingActivationEventHub) Subscribe(topic string, handler events.Hand
 		return func() {}
 	}
 	return h.base.Subscribe(topic, handler)
+}
+
+func (h *countingActivationEventHub) RawHub() magicevent.Hub {
+	provider, ok := h.base.(interface{ RawHub() magicevent.Hub })
+	if !ok || provider.RawHub() == nil {
+		return nil
+	}
+	return countingActivationRawHub{base: provider.RawHub(), owner: h}
+}
+
+type countingActivationRawHub struct {
+	base  magicevent.Hub
+	owner *countingActivationEventHub
+}
+
+func (h countingActivationRawHub) Subscribe(id string, observer magicevent.Observer) {
+	h.base.Subscribe(id, observer)
+}
+func (h countingActivationRawHub) Unsubscribe(id string, observer magicevent.Observer) {
+	h.base.Unsubscribe(id, observer)
+}
+func (h countingActivationRawHub) Post(event magicevent.Event) {
+	h.owner.capture(event)
+	h.base.Post(event)
+}
+func (h countingActivationRawHub) Send(event magicevent.Event) magicevent.Result {
+	h.owner.capture(event)
+	return h.base.Send(event)
+}
+func (h countingActivationRawHub) Terminate(ctx context.Context) { h.base.Terminate(ctx) }
+
+func (h *countingActivationEventHub) record(topic string) {
+	h.mu.Lock()
+	if h.counts == nil {
+		h.counts = map[string]int{}
+	}
+	h.counts[topic]++
+	h.mu.Unlock()
+}
+
+func (h *countingActivationEventHub) capture(event magicevent.Event) {
+	h.record(event.ID())
+	if h.onSend != nil {
+		h.onSend(event)
+	}
 }
 
 func (h *countingActivationEventHub) Count(topic string) int {
@@ -607,16 +654,60 @@ func (h *blockingActivationEventHub) Subscribe(topic string, handler events.Hand
 	return h.base.Subscribe(topic, handler)
 }
 
-func TestPublishActivationRunCommandRequiresResponse(t *testing.T) {
-	hub := events.NewMemoryHub()
-	err := activationports.PublishRunCommand(context.Background(), hub, orchestratorevents.TopicOrchestratorCommandStartRun, "run", "run-activation", "ws-activation", "run-activation", map[string]any{
-		events.PayloadKeyRunID: "run-activation",
-	})
-	if err == nil {
-		t.Fatal("activationports.PublishRunCommand returned nil, want missing response error")
+func (h *blockingActivationEventHub) RawHub() magicevent.Hub {
+	provider, ok := h.base.(interface{ RawHub() magicevent.Hub })
+	if !ok || provider.RawHub() == nil {
+		return nil
 	}
-	if !strings.Contains(err.Error(), "returned no response") {
-		t.Fatalf("activationports.PublishRunCommand error = %v, want missing response error", err)
+	return blockingActivationRawHub{base: provider.RawHub(), owner: h}
+}
+
+type blockingActivationRawHub struct {
+	base  magicevent.Hub
+	owner *blockingActivationEventHub
+}
+
+func (h blockingActivationRawHub) Subscribe(id string, observer magicevent.Observer) {
+	h.base.Subscribe(id, observer)
+}
+func (h blockingActivationRawHub) Unsubscribe(id string, observer magicevent.Observer) {
+	h.base.Unsubscribe(id, observer)
+}
+func (h blockingActivationRawHub) Post(event magicevent.Event) {
+	h.owner.wait(event.Context(), event.ID())
+	h.base.Post(event)
+}
+func (h blockingActivationRawHub) Send(event magicevent.Event) magicevent.Result {
+	h.owner.wait(event.Context(), event.ID())
+	return h.base.Send(event)
+}
+func (h blockingActivationRawHub) Terminate(ctx context.Context) { h.base.Terminate(ctx) }
+
+func (h *blockingActivationEventHub) wait(ctx context.Context, topic string) {
+	if h == nil || h.labels == nil {
+		return
+	}
+	if label := h.labels[topic]; label != "" {
+		select {
+		case h.started <- label:
+		case <-ctx.Done():
+			return
+		}
+		select {
+		case <-h.release:
+		case <-ctx.Done():
+		}
+	}
+}
+
+func TestPublishActivationRunCommandRequiresResponse(t *testing.T) {
+	hub := events.NewMagicHubWithOwner("activationports/test")
+	err := activationports.StartRun(context.Background(), hub, "ws-activation", "run-activation")
+	if err == nil {
+		t.Fatal("activationports.StartRun returned nil, want missing response error")
+	}
+	if !strings.Contains(err.Error(), "missing observer") {
+		t.Fatalf("activationports.StartRun error = %v, want missing observer error", err)
 	}
 }
 
@@ -1877,7 +1968,7 @@ func TestActivationContextUsesSelectedGoalAndDoDWithoutReload(t *testing.T) {
 	}
 	countingHub := &countingActivationEventHub{base: exports.Infrastructure.EventHub}
 	exports.Infrastructure.EventHub = countingHub
-	borrowed, err := NewRuntimeSessionFromExports(exports)
+	borrowed, err := NewRuntimeSessionFromExports(completeAppserviceTestExports(exports))
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
 	}
@@ -2099,7 +2190,7 @@ func TestActivationResponseReusesRunSnapshotRun(t *testing.T) {
 	}
 	countingHub := &countingActivationEventHub{base: exports.Infrastructure.EventHub}
 	exports.Infrastructure.EventHub = countingHub
-	borrowed, err := NewRuntimeSessionFromExports(exports)
+	borrowed, err := NewRuntimeSessionFromExports(completeAppserviceTestExports(exports))
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
 	}
@@ -2148,8 +2239,12 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 	}
 	countingRuns := &countingRunRepository{base: exports.Repositories.Runs}
 	var createdRuns []*runmodel.Run
-	unsubscribe := exports.Infrastructure.EventHub.Subscribe(runevents.TopicRunCommandCreate, func(_ context.Context, envelope events.Envelope) error {
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runmodule.CreateRunCommand)
+	countingHub := &countingActivationEventHub{base: exports.Infrastructure.EventHub}
+	countingHub.onSend = func(event magicevent.Event) {
+		if event.ID() != runevents.TopicRunCommandCreate {
+			return
+		}
+		cmd, ok := event.Data().(runmodule.CreateRunCommand)
 		if ok {
 			createdRuns = append(createdRuns, &runmodel.Run{
 				ID:                 cmd.RunID,
@@ -2163,11 +2258,10 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 				Priority:           cmd.Priority,
 			})
 		}
-		return nil
-	})
-	defer unsubscribe()
+	}
+	exports.Infrastructure.EventHub = countingHub
 	exports.Repositories.Runs = countingRuns
-	borrowed, err := NewRuntimeSessionFromExports(exports)
+	borrowed, err := NewRuntimeSessionFromExports(completeAppserviceTestExports(exports))
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
 	}
@@ -2239,7 +2333,7 @@ func TestActivationResponseWorkspaceSnapshotReusesRunSnapshotWorkspace(t *testin
 	}
 	countingWorkspaces := &countingWorkspaceRepository{base: exports.Repositories.Workspaces}
 	exports.Repositories.Workspaces = countingWorkspaces
-	borrowed, err := NewRuntimeSessionFromExports(exports)
+	borrowed, err := NewRuntimeSessionFromExports(completeAppserviceTestExports(exports))
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
 	}
@@ -2319,7 +2413,7 @@ func TestBuildWorkspaceExecutionContextStartsIndependentReadsConcurrently(t *tes
 			decisionevents.TopicDecisionCommandListTicketsByWS: "governance",
 		},
 	}
-	borrowed, err := NewRuntimeSessionFromExports(exports)
+	borrowed, err := NewRuntimeSessionFromExports(completeAppserviceTestExports(exports))
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
 	}
@@ -2407,7 +2501,7 @@ func TestActivationContextReadsMCPServersAndCapabilitiesConcurrently(t *testing.
 			mcpevents.TopicMCPCommandGetCapability: "mcp-capability",
 		},
 	}
-	borrowed, err := NewRuntimeSessionFromExports(exports)
+	borrowed, err := NewRuntimeSessionFromExports(completeAppserviceTestExports(exports))
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
 	}
@@ -2558,7 +2652,7 @@ func TestActivateWorkspaceExecutionUsesInjectedConfigLoader(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create dod: %v", err)
 	}
-	borrowed, err := NewRuntimeSessionFromExports(exports)
+	borrowed, err := NewRuntimeSessionFromExports(completeAppserviceTestExports(exports))
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
 	}
@@ -3901,18 +3995,23 @@ func TestSelectedMemoryItemsFiltersProviderRetryProcessMemory(t *testing.T) {
 			Tags:        []string{"accepted_input", "tool_context"},
 		},
 	}}
-	hub := events.NewMemoryHub()
-	hub.Subscribe(memoryevents.TopicMemoryCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
-		wsID := common.WorkspaceID("")
-		if raw, _ := envelope.Payload[events.PayloadKeyWorkspaceID].(string); raw != "" {
-			wsID = common.WorkspaceID(raw)
+	rawHub := magicevent.NewHub(16)
+	hub := events.NewMagicHubWithHubOwner(rawHub, "appservice/memory-selection-test")
+	observer := magicevent.NewSimpleObserver(memoryevents.CommandDestination, rawHub)
+	observer.Subscribe(memoryevents.TopicMemoryCommandListByWorkspace, func(event magicevent.Event, result magicevent.Result) {
+		command, ok := event.Data().(memoryevents.ListMemoryByWorkspaceCommand)
+		if !ok {
+			result.Set(nil, nil)
+			return
 		}
-		items, err := service.ListMemoryByWorkspace(ctx, wsID)
+		items, err := service.ListMemoryByWorkspace(ctx, command.WorkspaceID)
 		if err != nil {
-			return err
+			result.Set(nil, cd.NewError(cd.Unexpected, err.Error()))
+			return
 		}
-		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{events.PayloadKeyMemoryItems: items}})
+		result.Set(memoryevents.MemoryCommandResult{Items: items}, nil)
 	})
+	defer observer.Unsubscribe(memoryevents.TopicMemoryCommandListByWorkspace)
 
 	items, evidence, err := activationports.SelectedMemoryItems(ctx, activationports.MemorySelectionOptions{
 		WorkspaceID: workspaceID,

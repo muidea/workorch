@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -86,28 +87,44 @@ func (o *RuntimeOrchestrator) requestDispatchStep(ctx context.Context, runID com
 		IdempotencyKey: idempotencyKey,
 		Input:          cloneStepPayload(spec.Input),
 	}
-	envelope := events.Envelope{
-		Topic:        orchestratorevents.TopicOrchestratorDispatchStepRequested,
-		SourceModule: "kernel/orchestrator",
-		SubjectType:  "step",
-		SubjectID:    string(spec.ID),
-		WorkspaceID:  string(workspaceID),
-		RunID:        string(runID),
-		StepID:       string(spec.ID),
-		Payload: map[string]any{
-			events.PayloadKeyCommand:        cmd,
-			events.PayloadKeyWorkspaceID:    string(workspaceID),
-			events.PayloadKeyRunID:          string(runID),
-			events.PayloadKeyStepID:         string(spec.ID),
-			events.PayloadKeyKind:           spec.Kind,
-			events.PayloadKeyIdempotencyKey: idempotencyKey,
-			events.PayloadKeyInput:          cloneStepPayload(spec.Input),
-		},
-	}
-	if err := o.eventHub.Publish(ctx, envelope); err != nil {
+	if err := sendDispatchStepRequestedCommand(ctx, o.eventHub, cmd); err != nil {
 		return wrapRuntimeDispatchRequestError("event_publish", err)
 	}
 	return wrapRuntimeDispatchRequestError("event_publish_readback", o.recordDispatchPublishReadback(ctx, run, cmd))
+}
+
+type rawMagicHubProvider interface {
+	RawHub() magicevent.Hub
+}
+
+func sendDispatchStepRequestedCommand(ctx context.Context, hub events.Hub, cmd orchestratorevents.DispatchStepCommand) error {
+	if hub == nil || cmd.RunID == "" || cmd.StepID == "" || cmd.Kind == "" {
+		return common.ErrInvalidArgument
+	}
+	provider, ok := hub.(rawMagicHubProvider)
+	if !ok || provider.RawHub() == nil {
+		return common.ErrInvalidArgument
+	}
+	ev := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorDispatchStepRequested, "kernel/orchestrator", orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, cmd)
+	ev.BindLaneKey(events.EventHubLaneKey(events.Envelope{
+		Topic:       orchestratorevents.TopicOrchestratorDispatchStepRequested,
+		SubjectType: "step",
+		SubjectID:   string(cmd.StepID),
+		WorkspaceID: string(cmd.WorkspaceID),
+		RunID:       string(cmd.RunID),
+		StepID:      string(cmd.StepID),
+	}))
+	result := provider.RawHub().Send(ev)
+	if result == nil {
+		return common.ErrInvalidArgument
+	}
+	if err := result.Error(); err != nil {
+		return err
+	}
+	if _, err := result.Get(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (o *RuntimeOrchestrator) recordDispatchPublishReadback(ctx context.Context, run *runModel.Run, cmd orchestratorcontracts.DispatchStepCommand) error {

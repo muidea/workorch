@@ -925,33 +925,6 @@ func TestRuntimeOrchestrator_ReplanSuccessorRecoversConcreteFailureFromAncestorL
 	if len(runtime.requests) != 0 {
 		t.Fatalf("runtime requests = %d, want runtime-managed target snapshot acquisition before successor LLM step", len(runtime.requests))
 	}
-	return
-	input := runtime.requests[0].Input
-	currentFailure := mapFromValue(input["currentFailure"])
-	if currentFailure["failureClass"] != failureClassShellCommand ||
-		currentFailure["failedStepId"] != "run-before-root/graph-001/009-build" ||
-		!strings.Contains(stringFromMap(currentFailure, "reason"), "Service") {
-		t.Fatalf("currentFailure = %+v, want ancestor concrete failure", currentFailure)
-	}
-	if strings.Contains(stringFromMap(currentFailure, "reason"), "without patch/apply") {
-		t.Fatalf("currentFailure = %+v, want wrapper failure suppressed", currentFailure)
-	}
-	signals := mapFromValue(mapFromValue(input["repairActionPackage"])["structuredFailureSignals"])
-	if refs := stringSliceFromValue(signals["targetRefs"]); !stringSliceContains(refs, "pkg/service.go") || !stringSliceContains(refs, "cmd/main.go") {
-		t.Fatalf("structuredFailureSignals = %+v, want ancestor target refs", signals)
-	}
-	successor, err := runRepo.Get(ctx, "run-wrapper-replan-replan-001")
-	if err != nil {
-		t.Fatalf("get successor: %v", err)
-	}
-	replan := mapFromValue(successor.ExecutionContext["replanContinuation"])
-	if len(mapFromValue(replan["repairActionPackage"])) > 0 {
-		t.Fatalf("successor replan repairActionPackage = %+v, want diagnostic lineage without stale repair package", replan["repairActionPackage"])
-	}
-	digest := mapFromValue(replan[stepInputKeyCurrentProgressDigest])
-	if stringFromMap(mapFromValue(digest["lastObservedFailure"]), "failureClass") != failureClassShellCommand {
-		t.Fatalf("successor replan digest = %+v, want inherited concrete failure persisted", digest)
-	}
 }
 
 func TestRuntimeOrchestrator_ResumeRunLegacyRepairResolutionPayloadReplans(t *testing.T) {

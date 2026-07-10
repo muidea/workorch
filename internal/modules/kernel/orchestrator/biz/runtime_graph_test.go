@@ -28,7 +28,7 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchSerializesLLMDispatchRequests(
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestRuntimeOrchestrator_CompletedGraphBatchDispatchesDependentValidation(t 
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	workspace := &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}
 	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
 	if err := workspaceRepo.Create(ctx, workspace); err != nil {
@@ -519,7 +519,7 @@ func TestContinueGraphBatchSkipsObsoleteGraphLocalAuthorityAndRequestsCurrentFol
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	workspace := &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}
 	run := &runmodel.Run{
 		ID:          runID,
@@ -651,7 +651,7 @@ func TestFinalizeRootGraphSkipsObsoleteGraphLocalAuthorityAndRequestsCurrentFoll
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	workspace := &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}
 	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeValidate)
 	run.ID = runID
@@ -774,7 +774,7 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchStepCompletionDispatchesNextNo
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -868,7 +868,7 @@ func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayContinuesNextNode(
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -949,7 +949,7 @@ func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayDispatchesAuthorit
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -1064,7 +1064,7 @@ func TestRuntimeOrchestrator_CompletedPatchGraphNodeContinuesDependentValidation
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -1196,7 +1196,7 @@ func TestRuntimeOrchestrator_GraphBatchPatchApplyFailureDispatchesRuntimeRepair(
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -1278,7 +1278,7 @@ func TestRuntimeOrchestrator_EventDrivenDispatchPublishesAuthorityAlignedInput(t
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	hub := events.NewMemoryHub()
+	hub, _ := newRecordingDispatchMagicHub(t)
 	run := runWithAuthorityFocusForTest("validate")
 	run.ID = runID
 	run.WorkspaceID = workspaceID

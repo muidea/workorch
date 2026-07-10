@@ -5,8 +5,6 @@ import (
 
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
-	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -18,32 +16,28 @@ func ResolveDecision(ctx context.Context, hub events.Hub, ticket *decisionmodel.
 	}
 	ticketID := string(ticket.ID)
 	resolutionID := "resolution-" + string(ticket.WorkspaceID) + "-" + ticketID + "-" + resolutionType
-	response, err := ownercommandports.PublishWithResponse(ctx, hub, decisionevents.TopicDecisionCommandEnsureResolved, "decision_ticket", ticketID, ticket.WorkspaceID, ticket.RunID, map[string]any{
-		events.PayloadKeyCommand: decisioncontracts.ResolveTicketCommand{
-			ResolutionID:       common.ResolutionID(resolutionID),
-			TicketID:           ticket.ID,
-			WorkspaceID:        ticket.WorkspaceID,
-			RunID:              ticket.RunID,
-			StepID:             ticket.StepID,
-			Type:               resolutionType,
-			Payload:            cloneMap(payload),
-			ContinuationAction: stringPayloadValue(payload, "continuationAction"),
-			ResumeRunID:        common.RunID(stringPayloadValue(payload, "resumeRunId")),
-			SuccessorRunID:     common.RunID(stringPayloadValue(payload, "successorRunId")),
-		},
+	response, err := sendGovernanceMagicCommand[decisionevents.EnsureResolvedCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandEnsureResolved, decisionevents.CommandDestination, "decision_ticket", ticketID, ticket.WorkspaceID, ticket.RunID, decisionevents.EnsureResolvedCommand{
+		ResolutionID:       common.ResolutionID(resolutionID),
+		TicketID:           ticket.ID,
+		WorkspaceID:        ticket.WorkspaceID,
+		RunID:              ticket.RunID,
+		StepID:             ticket.StepID,
+		Type:               resolutionType,
+		Payload:            cloneMap(payload),
+		ContinuationAction: stringPayloadValue(payload, "continuationAction"),
+		ResumeRunID:        common.RunID(stringPayloadValue(payload, "resumeRunId")),
+		SuccessorRunID:     common.RunID(stringPayloadValue(payload, "successorRunId")),
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	item, ok := response.Payload[events.PayloadKeyTicket].(*decisionmodel.Ticket)
-	if !ok || item == nil {
+	if response.Ticket == nil {
 		return nil, nil, common.ErrInvalidArgument
 	}
-	resolution, ok := response.Payload[events.PayloadKeyResolution].(*decisionmodel.Resolution)
-	if !ok || resolution == nil {
+	if response.Resolution == nil {
 		return nil, nil, common.ErrInvalidArgument
 	}
-	return item, resolution, nil
+	return response.Ticket, response.Resolution, nil
 }
 
 func cloneMap(input map[string]any) map[string]any {

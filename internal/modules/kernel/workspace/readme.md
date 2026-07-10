@@ -27,8 +27,8 @@
 
 ## 已知缺口
 
-- definition 变更重新打开 terminal/superseded workspace 时，当前实现存在保留旧 `ActiveRunID` 的测试失败。
-- definition notification 的 async publish 计数与测试期望不一致，需要明确 workspace-state event 与 definition event 的发布合同。
+- 当前盘点未发现 Workspace module 职责或 definition-change 交互合同缺失。
+- definition 变更重新打开 terminal/superseded workspace 时会清理失效 `ActiveRunID`；workspace-state event 与 definition event 的发布数量已有回归测试约束，后续修改时必须保持该 owner invariant。
 
 ## 边界约束
 
