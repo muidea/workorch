@@ -19,14 +19,8 @@ import (
 	"time"
 	"unicode"
 
-	filecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
-	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
-	mcpcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
-	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
-	sshcommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
-	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/dialoglanguage"
 	"github.com/muidea/workorch/internal/pkg/runtimepath"
@@ -3085,7 +3079,7 @@ func validateDecisionAgainstRequest(input map[string]any, decision llmmodels.LLM
 		return nil
 	}
 	for _, node := range decision.ExecutionGraph.Nodes {
-		if strings.TrimSpace(node.Kind) != shellcommon.StepKindCommand {
+		if strings.TrimSpace(node.Kind) != runtimemodel.StepKindShellCommand {
 			continue
 		}
 		command, _ := node.Input["command"].(string)
@@ -3244,7 +3238,7 @@ func validateExecutionGraph(graph llmmodels.BlockExecutionGraph) error {
 		if !allowedKinds[strings.TrimSpace(node.Kind)] {
 			return fmt.Errorf("%w: executionGraph node kind %q is not declared in runtimeCapabilities.blockKinds", common.ErrInvalidArgument, strings.TrimSpace(node.Kind))
 		}
-		if strings.TrimSpace(node.Kind) == shellcommon.StepKindCommand {
+		if strings.TrimSpace(node.Kind) == runtimemodel.StepKindShellCommand {
 			if command, _ := node.Input["command"].(string); strings.TrimSpace(command) != "" {
 				if err := validateShellCommandBoundary(command, stringSliceValue(node.Input["args"]), "executionGraph shell command"); err != nil {
 					return err
@@ -3252,18 +3246,18 @@ func validateExecutionGraph(graph llmmodels.BlockExecutionGraph) error {
 			}
 		}
 		switch strings.TrimSpace(node.Kind) {
-		case filecommon.StepKindRead:
+		case runtimemodel.StepKindFileRead:
 			path, _ := node.Input["path"].(string)
 			if strings.TrimSpace(path) == "" {
 				return fmt.Errorf("%w: executionGraph file/read path is required", common.ErrInvalidArgument)
 			}
-		case filecommon.StepKindEdit:
+		case runtimemodel.StepKindFileEdit:
 			path, _ := node.Input["path"].(string)
 			oldText, _ := node.Input["oldText"].(string)
 			if strings.TrimSpace(path) == "" || oldText == "" {
 				return fmt.Errorf("%w: executionGraph file/edit path and oldText are required", common.ErrInvalidArgument)
 			}
-		case filecommon.StepKindList:
+		case runtimemodel.StepKindFileList:
 			if path, ok := node.Input["path"].(string); ok && filepath.IsAbs(strings.TrimSpace(path)) {
 				return fmt.Errorf("%w: executionGraph file/list path must be workspace relative", common.ErrInvalidArgument)
 			}
@@ -3319,7 +3313,7 @@ func graphHasPatchApplyDependingOnFileRead(graph llmmodels.BlockExecutionGraph) 
 		if strings.TrimSpace(node.Kind) != llmcommon.RuntimeBlockKindPatchApply {
 			continue
 		}
-		if graphNodeHasAncestorBlockKind(node, nodes, filecommon.StepKindRead, map[string]bool{}) {
+		if graphNodeHasAncestorBlockKind(node, nodes, runtimemodel.StepKindFileRead, map[string]bool{}) {
 			return true
 		}
 	}
@@ -3362,7 +3356,7 @@ func normalizeDecisionGraphFileInput(node *llmmodels.BlockExecutionNode) {
 		return
 	}
 	switch strings.TrimSpace(node.Kind) {
-	case filecommon.StepKindRead, filecommon.StepKindEdit, filecommon.StepKindList:
+	case runtimemodel.StepKindFileRead, runtimemodel.StepKindFileEdit, runtimemodel.StepKindFileList:
 	default:
 		return
 	}
@@ -4001,37 +3995,37 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 			Description: "Plan the next workspace execution step from workspace goal, DoD, memory, skills, and MCP context.",
 		},
 		{
-			Kind:        shellcommon.StepKindCommand,
+			Kind:        runtimemodel.StepKindShellCommand,
 			Description: "Execute one bounded local shell command in the workspace deliverable directory.",
 			Input:       map[string]any{"command": "string", "args": "[]string"},
 		},
 		{
-			Kind:        filecommon.StepKindList,
+			Kind:        runtimemodel.StepKindFileList,
 			Description: "List files and directories under the workspace deliverable directory without modifying workspace state. Paths must be workspace-relative; large generated directories are skipped.",
 			Input:       map[string]any{"path": "relative directory path", "recursive": "boolean", "maxEntries": "number"},
 		},
 		{
-			Kind:        filecommon.StepKindRead,
+			Kind:        runtimemodel.StepKindFileRead,
 			Description: "Read bounded UTF-8 text content or binary metadata for one workspace-relative file. Use contentHash as the baseHash for later patch/apply or patch/preview when guarding against stale writes.",
 			Input:       map[string]any{"path": "relative file path", "startLine": "number", "endLine": "number", "maxBytes": "number"},
 		},
 		{
-			Kind:        filecommon.StepKindEdit,
+			Kind:        runtimemodel.StepKindFileEdit,
 			Description: "Create a non-mutating unified_diff patch preview by replacing a unique oldText with newText in one workspace-relative text file. This does not write files and must be followed by patch/preview or patch/apply to persist changes. oldText and newText must be exact, complete text fragments, not omitted placeholders.",
 			Input:       map[string]any{"path": "relative file path", "oldText": "exact text to replace", "newText": "replacement text", "baseHash": "sha256 content hash", "occurrence": "number when oldText is not unique"},
 		},
 		{
-			Kind:        sshcommon.StepKindCommand,
+			Kind:        runtimemodel.StepKindSSHCommand,
 			Description: "Execute one bounded non-interactive SSH command on a remote host using supplied password or private key credentials.",
 			Input:       map[string]any{"host": "string", "port": "number", "username": "string", "password": "string", "privateKey": "string", "privateKeyPath": "string", "command": "string", "timeoutMillis": "number"},
 		},
 		{
-			Kind:        webcommon.StepKindSearch,
+			Kind:        runtimemodel.StepKindWebSearch,
 			Description: "Search external web sources through a governed Web Search provider. Search results are candidate sources only; important facts should be verified by web/fetch before final use.",
 			Input:       map[string]any{"query": "string", "locale": "string", "recency": "day|week|month|year", "domains": "[]string", "excludeDomains": "[]string", "maxResults": "number", "safeSearch": "boolean", "reason": "string", "approvalId": "approved approval id when required"},
 		},
 		{
-			Kind:        webcommon.StepKindFetch,
+			Kind:        runtimemodel.StepKindWebFetch,
 			Description: "Fetch one HTTP(S) URL through a governed Web Search provider and return bounded content or metadata. Include approvalId when the source requires approval.",
 			Input:       map[string]any{"url": "string", "maxBytes": "number", "extractMode": "text|metadata|summary", "reason": "string", "approvalId": "approved approval id when required"},
 		},
@@ -4051,17 +4045,17 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 			Input:       map[string]any{"patchId": "WorkOrch patch id", "approvalId": "approved approval id when required", "strict": "boolean"},
 		},
 		{
-			Kind:        mcpcommon.StepKindToolCall,
+			Kind:        runtimemodel.StepKindMCPToolCall,
 			Description: "Call an explicitly configured MCP server tool.",
 			Input:       map[string]any{"serverId": "string", "tool": "string", "input": "object"},
 		},
 		{
-			Kind:        mcpcommon.StepKindResourceRead,
+			Kind:        runtimemodel.StepKindMCPResourceRead,
 			Description: "Read an explicitly allowed MCP resource from a configured server.",
 			Input:       map[string]any{"serverId": "string", "uri": "string"},
 		},
 		{
-			Kind:        mcpcommon.StepKindPromptGet,
+			Kind:        runtimemodel.StepKindMCPPromptGet,
 			Description: "Get an explicitly allowed MCP prompt from a configured server.",
 			Input:       map[string]any{"serverId": "string", "prompt": "string", "arguments": "object"},
 		},
@@ -4114,12 +4108,12 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 
 func appendGitRuntimeCapabilities(blockKinds []llmmodels.RuntimeBlockCapability) []llmmodels.RuntimeBlockCapability {
 	blockKinds = append(blockKinds, llmmodels.RuntimeBlockCapability{
-		Kind:        gitcommon.StepKindRead,
+		Kind:        runtimemodel.StepKindGitRead,
 		Description: "Read local Git repository state for the workspace deliverable repository. Supported operations: status, diff, log, show, branch. This block is read-only and path-scoped; it is not a general Git CLI.",
 		Input:       map[string]any{"operation": "status|diff|log|show|branch", "pathspecs": "[]relative path", "ref": "string", "baseRef": "string", "limit": "number", "reason": "string"},
 	})
 	blockKinds = append(blockKinds, llmmodels.RuntimeBlockCapability{
-		Kind:        gitcommon.StepKindWrite,
+		Kind:        runtimemodel.StepKindGitWrite,
 		Description: "Perform minimal local Git state changes in the workspace deliverable repository. Supported operations: init, add, commit. init initializes the workspace deliverable directory when it is not yet a Git repository; add requires explicit pathspecs; commit only commits already staged changes, rejects detached HEAD, does not run hooks, and does not support remote operations or history rewrite.",
 		Input:       map[string]any{"operation": "init|add|commit", "pathspecs": "[]relative path for add only", "message": "commit message for commit", "expectedHead": "optional full HEAD hash guard", "reason": "string"},
 	})

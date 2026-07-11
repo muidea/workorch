@@ -11,12 +11,11 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/events", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.eventListRequests.Add(1)
 		items, err := state.listEventRecords(r.Context(), state.config.Backend, state.config.DataRoot, eventRecordQueryFromRequest(r))
 		if err != nil {
@@ -31,8 +30,8 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/events/stream", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
-		if state.eventHub == nil {
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
+		if state.commandHub == nil {
 			writeBusinessError(w, common.ErrNotFound)
 			return
 		}
@@ -47,7 +46,7 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 		workspaceID := strings.TrimSpace(r.URL.Query().Get("workspaceId"))
 		runID := strings.TrimSpace(r.URL.Query().Get("runId"))
 		streamView := normalizeEventStreamView(r.URL.Query().Get("view"))
-		filterEnvelope := func(envelope events.Envelope) bool {
+		filterEnvelope := func(envelope streamEvent) bool {
 			if isProjectionEventStreamView(streamView) && envelope.Topic != workorchdevents.TopicWorkspaceProjectionChanged {
 				return false
 			}
@@ -59,8 +58,8 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 			}
 			return true
 		}
-		eventCh := make(chan events.Envelope, 128)
-		unsubscribers := subscribeServerStreamEvents(state.eventHub, streamView, func(_ context.Context, envelope events.Envelope) error {
+		eventCh := make(chan streamEvent, 128)
+		unsubscribers := subscribeServerStreamEvents(state.commandHub, streamView, func(_ context.Context, envelope streamEvent) error {
 			if !filterEnvelope(envelope) {
 				return nil
 			}

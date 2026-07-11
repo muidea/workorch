@@ -3,18 +3,18 @@ package server
 import (
 	"strings"
 
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
-	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const sseStateSummaryKey = "stateSummary"
 
-func enrichSSEEnvelope(envelope events.Envelope) events.Envelope {
+func enrichSSEEnvelope(envelope streamEvent) streamEvent {
 	envelope = cloneSSEEnvelope(envelope)
 	summary := map[string]any{}
 	if envelope.Revision > 0 {
@@ -54,7 +54,7 @@ func enrichSSEEnvelope(envelope events.Envelope) events.Envelope {
 	return envelope
 }
 
-func cloneSSEEnvelope(envelope events.Envelope) events.Envelope {
+func cloneSSEEnvelope(envelope streamEvent) streamEvent {
 	cloned := envelope
 	if envelope.Payload != nil {
 		cloned.Payload = make(map[string]any, len(envelope.Payload)+1)
@@ -74,7 +74,7 @@ func addSSEPayloadString(out map[string]any, key string, payload map[string]any,
 	}
 }
 
-func runProgressSummary(envelope events.Envelope) string {
+func runProgressSummary(envelope streamEvent) string {
 	state, _ := envelope.Payload[events.PayloadKeyState].(string)
 	switch state {
 	case "":

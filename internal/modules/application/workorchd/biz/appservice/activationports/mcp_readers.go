@@ -7,8 +7,8 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

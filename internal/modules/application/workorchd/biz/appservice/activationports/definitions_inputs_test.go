@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -14,7 +14,7 @@ func TestReadWorkspaceExecutionContextInputsReadsDefinitionsWithExplicitScope(t 
 	ctx := context.Background()
 	runtime := newOwnerRuntime()
 	defer runtime.Shutdown(ctx)
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	workspaceID := common.WorkspaceID("ws-activation-input-scope")
 	goalID := common.GoalID("goal-activation-input-scope")
 	dodID := common.DoDID("dod-activation-input-scope")
@@ -42,7 +42,7 @@ func TestWorkspaceGovernanceHistoryReadsRunAndResolutionWithWorkspaceScope(t *te
 	ctx := context.Background()
 	runtime := newOwnerRuntime()
 	defer runtime.Shutdown(ctx)
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	workspaceID := common.WorkspaceID("ws-governance-history-scope")
 	runID := common.RunID("run-001")
 	ticketID := common.TicketID("run-001-step-1-decision")

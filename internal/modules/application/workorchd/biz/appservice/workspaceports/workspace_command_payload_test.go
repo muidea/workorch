@@ -7,27 +7,25 @@ import (
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
-	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 type workspaceCommandTestHub struct {
-	hub       *events.MagicHub
 	raw       magicevent.Hub
 	observers map[string]magicevent.SimpleObserver
 	captured  map[string][]any
@@ -36,14 +34,12 @@ type workspaceCommandTestHub struct {
 func newWorkspaceCommandTestHub(t *testing.T) *workspaceCommandTestHub {
 	t.Helper()
 	raw := magicevent.NewHub(64)
-	hub := events.NewMagicHubWithHubOwner(raw, "workspaceports/test")
 	ret := &workspaceCommandTestHub{
-		hub:       hub,
 		raw:       raw,
 		observers: map[string]magicevent.SimpleObserver{},
 		captured:  map[string][]any{},
 	}
-	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	t.Cleanup(func() { raw.Terminate(context.Background()) })
 	return ret
 }
 

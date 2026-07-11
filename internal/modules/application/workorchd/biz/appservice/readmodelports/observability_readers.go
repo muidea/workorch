@@ -4,11 +4,11 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )

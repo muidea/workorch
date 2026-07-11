@@ -9,18 +9,17 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func TestBackendSessionUsesEventHubFromContext(t *testing.T) {
+func TestBackendSessionUsesCommandHubFromContext(t *testing.T) {
 	hub := &countingActivationEventHub{base: magicevent.NewHub(16)}
-	ctx := ContextWithEventHubs(context.Background(), events.NewMagicHubWithHubOwner(hub, "appservice/runtime-session-context-test"), hub)
+	ctx := ContextWithCommandHub(context.Background(), hub)
 
 	_, err := createWorkspaceWithIDWithBackend(ctx, "memory", "", "ws-context-hub", "context hub", "", "workspaces/context hub")
 	if err != nil {
@@ -109,7 +108,7 @@ func TestRuntimeSessionExportsReturnsInvalidArgumentWhenBootstrapMissing(t *test
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)
 	}
-	if exports.Repositories.Workspaces != nil || exports.Infrastructure.CommandHub != nil {
+	if exports.Infrastructure.CommandHub != nil {
 		t.Fatalf("exports = %#v, want zero exports", exports)
 	}
 
@@ -118,7 +117,7 @@ func TestRuntimeSessionExportsReturnsInvalidArgumentWhenBootstrapMissing(t *test
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)
 	}
-	if exports.Repositories.Workspaces != nil || exports.Infrastructure.CommandHub != nil {
+	if exports.Infrastructure.CommandHub != nil {
 		t.Fatalf("exports = %#v, want zero exports", exports)
 	}
 }
@@ -138,7 +137,7 @@ func TestRuntimeSessionExportsReturnsAssembledCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
-	if exports.Repositories.Workspaces == nil || exports.Infrastructure.CommandHub == nil {
+	if exports.Infrastructure.CommandHub == nil {
 		t.Fatalf("exports missing assembled capabilities: %#v", exports)
 	}
 }
@@ -167,7 +166,7 @@ func TestRuntimeSessionFromExportsBorrowsLongLivedRuntime(t *testing.T) {
 		t.Fatalf("close borrowed session: %v", err)
 	}
 
-	exports := bootstrapRuntime.Exports()
+	exports := testRuntimeExports(bootstrapRuntime)
 	if err := runtimeports.NewEventHubActionPort(exports.Infrastructure.CommandHub).EnsureWorkspace(context.Background(), "ws-long-lived-export-session", "long lived export session"); err != nil {
 		t.Fatalf("create workspace after borrowed close: %v", err)
 	}

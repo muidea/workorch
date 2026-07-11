@@ -80,7 +80,7 @@ func TestReadRunViewUsesOwnerReadAndProjectsView(t *testing.T) {
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	run := &runmodel.Run{
 		ID:          "run-view-read",
 		WorkspaceID: "ws-run-view-read",
@@ -107,7 +107,7 @@ func TestListRunViewsByWorkspaceUsesOwnerReadAndProjectsViews(t *testing.T) {
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	for _, item := range []*runmodel.Run{
 		{ID: "run-view-list-a", WorkspaceID: "ws-run-view-list-a", State: common.RunStatePending},
 		{ID: "run-view-list-b", WorkspaceID: "ws-run-view-list-b", State: common.RunStatePending},

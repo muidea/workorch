@@ -1,6 +1,6 @@
 package activationcore
 
-import workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+import workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 
 func DefinitionChangeImpactFromDefinitions(effectiveGoal *workspacemodel.Goal, goals []map[string]any, goalRevisions []map[string]any, effectiveDoD *workspacemodel.DoD, dods []map[string]any, doDRevisions []map[string]any) map[string]any {
 	goalRevisions = definitionRevisionContextsForEffectiveGoal(effectiveGoal, goalRevisions)

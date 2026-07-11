@@ -15,7 +15,7 @@
 - 接收 `kernel/orchestrator` 派发的 `shell/command` execution request。
 - `blocks/llm` 可在 execution graph 中声明 shell step。
 - 输出由 `kernel/orchestrator` 作为 validation evidence、diagnostic 或 blocker 处理。
-- 高风险命令应通过 `kernel/approval` 或 governance flow 完成授权。
+- 高风险命令应通过 `blocks/approval` 或 governance flow 完成授权。
 
 ## 组件交互合同
 

@@ -5,12 +5,12 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 

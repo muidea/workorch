@@ -4,8 +4,8 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
-	skillevents "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/events"
-	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
+	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
+	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

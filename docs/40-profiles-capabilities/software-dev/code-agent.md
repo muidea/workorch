@@ -62,10 +62,10 @@ Last Updated: 2026-05-30
 
 对应 kernel / application 约束层：
 
-- `kernel/soul`
-- `kernel/skill`
-- `kernel/mcp`
-- `kernel/memory`
+- `blocks/soul`
+- `blocks/skill`
+- `blocks/mcp-registry`
+- `blocks/memory`
 - `application/workorchd`
 
 ## Product / Read-Model Mapping

@@ -802,7 +802,7 @@ Acceptance criteria:
   idempotent, and opposite terminal states still return conflict. This reduces
   one generic file backend Approval read on each approved/rejected governance
   step before Run resume. Local verification passed with:
-  `go test ./internal/modules/kernel/approval/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz -count=1`
+  `go test ./internal/modules/blocks/approval/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz -count=1`
   and `go test ./... -count=1 -p 1`.
 - 2026-05-01: Quantified deployed Approval ensure loaded Approval reuse after
   rebuild/redeploy. Batch `load-20260501074909` kept 5/5 success with no HTTP /
@@ -826,7 +826,7 @@ Acceptance criteria:
   idempotent, and mismatched resolutions still return conflict. This reduces
   one generic file backend Ticket read on each Decision resolution before Run
   resume. Local verification passed with:
-  `go test ./internal/modules/kernel/decision/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz -count=1`
+  `go test ./internal/modules/blocks/decision/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz -count=1`
   and `go test ./... -count=1 -p 1`.
 - 2026-05-01: Verified the deployed QC29/QC30 build with full regression and
   governed concurrency before continuing single-workspace optimization.
@@ -1885,7 +1885,7 @@ Acceptance criteria:
   DoD validation, Result / Artifact materialization, and evidence chain; it
   only removes response-path read amplification from approval handling. Local
   verification passed with
-  `go test ./internal/modules/kernel/approval/... -count=1`,
+  `go test ./internal/modules/blocks/approval/... -count=1`,
   `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestApproveApprovalWithSessionReusesReturnedApproval|TestBatchResolveApprovalsWithSessionReusesReturnedApprovals|TestApproveApprovalWithBackendReturnsApprovedApproval|TestRejectApprovalWithBackendReturnsRejectedApproval|TestBatchResolveApprovalsWithBackendApprovesInRequestOrder' -count=1`,
   `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/run/biz -count=1`,
   and `go test ./... -count=1 -p 1`. Deployed quantification is pending the
@@ -2098,11 +2098,11 @@ Acceptance criteria:
   publication, Run continuation behavior, and existing runtime action ports;
   it only removes response-path read amplification from operator Decision
   resolution. Local verification passed with
-  `go test ./internal/modules/kernel/decision/biz -run 'TestService_EnsureResolvedTicket' -count=1`,
+  `go test ./internal/modules/blocks/decision/biz -run 'TestService_EnsureResolvedTicket' -count=1`,
   `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestResolveDecisionWithSessionReusesReturnedEntitiesForResponse|TestBatchResolveDecisionsWithSessionReusesReturnedEntitiesAfterPrevalidation' -count=1`,
-  `go test ./internal/modules/kernel/decision/... -count=1`,
+  `go test ./internal/modules/blocks/decision/... -count=1`,
   `go test ./internal/modules/application/workorchd/biz/appservice -run 'Test.*Decision' -count=1`,
-  `go test ./internal/modules/kernel/decision/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz ./internal/modules/kernel/run/biz -count=1`,
+  `go test ./internal/modules/blocks/decision/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz ./internal/modules/kernel/run/biz -count=1`,
   and `go test ./... -count=1 -p 1`. Deployed quantification should compare
   `decision1_resolve`, `decision2_resolve`, `decision1_to_decision2`, and
   `decision2_to_approval` against batch `load-20260502003117`; expected

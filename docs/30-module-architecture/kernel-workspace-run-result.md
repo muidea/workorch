@@ -1,4 +1,4 @@
-# Kernel Workspace / Run / Result Architecture
+# Workspace Block / Run / Result Architecture
 
 Status: active
 
@@ -8,11 +8,11 @@ Last Updated: 2026-05-30
 
 ## Purpose
 
-本文件说明 kernel 中负责正式业务状态的模块职责。
+本文件说明 Workspace stateful block 与 Run/Result/Eventstream modules 的正式业务状态职责。
 
-## Main Modules
+## Main Components
 
-### `kernel/workspace`
+### `blocks/workspace` stateful block
 
 职责：
 
@@ -27,7 +27,7 @@ Canonical owner states:
 - `superseded`
 
 Decision blockers do not change workspace owner state. They are exposed through
-run/ticket/projection fields owned by `kernel/run`, `kernel/decision` and
+run/ticket/projection fields owned by `kernel/run`, `blocks/decision` and
 workorchd read model projection.
 
 ### `kernel/run`
@@ -76,7 +76,7 @@ state-lane owner path for closing an active run as `superseded`.
 - run-scoped continuation
   - `ArtifactContinuation` 的正式 internal state 持有
 
-### `kernel/result`
+### `blocks/result` stateful block
 
 职责：
 
@@ -112,7 +112,7 @@ state-lane owner path for closing an active run as `superseded`.
 
 ## Boundary
 
-这些模块负责正式业务状态或正式业务证据，不应负责：
+这些组件负责正式业务状态或正式业务证据，不应负责：
 
 - provider request 组装
 - shell/MCP/file/git/web/ssh 执行
@@ -134,7 +134,7 @@ state-lane owner path for closing an active run as `superseded`.
 | run lifecycle | `kernel/run` |
 | run evidence | `kernel/run` 及其 evidence objects |
 | run-scoped coverage ledger / continuation | `kernel/run` |
-| result / artifact closeout | `kernel/result` |
+| result / artifact closeout | `blocks/result` |
 | formal event persistence / replay input | `kernel/eventstream` |
 
 这些责任可以彼此引用，但不应在同一模块里混成“单一大状态拥有者”。

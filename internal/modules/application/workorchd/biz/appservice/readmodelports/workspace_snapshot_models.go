@@ -3,12 +3,12 @@ package readmodelports
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 

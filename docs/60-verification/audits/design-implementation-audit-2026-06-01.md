@@ -250,7 +250,7 @@ go test ./internal/modules/kernel/run/biz -run TestService_RunStateMachineTransi
 ### 2026-06-22 补充收口：旧偏差 #2
 
 旧建议要求在 result 写入 API 增加 run state 校验。按当前
-framework/EventHub owner 边界，`kernel/result` 是正式 outcome owner，
+framework/EventHub owner 边界，`blocks/result` 是正式 outcome owner，
 不拥有 Run 状态，也不应为了校验直接注入 Run repository 或 Run owner
 service。实际收口落点放在 orchestrator 正式 result closeout 主路径：
 
@@ -273,7 +273,7 @@ go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator
 边界说明：
 
 - Result owner 仍只做 Result/Artifact model 校验与 owner repository 操作。
-- Run 状态约束留在 orchestrator closeout 主路径，避免 kernel/result
+- Run 状态约束留在 orchestrator closeout 主路径，避免 blocks/result
   跨 owner 读取 Run 状态。
 - 该收口不引入模板、语言、provider 或 workspace 特判。
 

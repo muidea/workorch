@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 )
 
 func ResultProjectionTime(item *resultmodel.Result) string {

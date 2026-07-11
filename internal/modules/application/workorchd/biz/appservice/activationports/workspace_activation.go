@@ -13,12 +13,10 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type ActivateWorkspaceExecutionViewRequest struct {
 	Hub                            magicevent.Hub
-	EventHub                       events.Hub
 	WorkspaceID                    string
 	Command                        appmodelcore.ActivateWorkspaceExecutionCommand
 	SystemDefaultSoulID            common.SoulID

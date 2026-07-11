@@ -4,12 +4,11 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 
-	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	memorycontracts "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/contracts"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func PublishMemoryItem(ctx context.Context, hub magicevent.Hub, topic string, item *memorymodel.MemoryItem) error {
@@ -29,7 +28,7 @@ func PublishMemoryItem(ctx context.Context, hub magicevent.Hub, topic string, it
 	}
 }
 
-func CreateMemoryItem(ctx context.Context, commandHub magicevent.Hub, eventHub events.Hub, item *memorymodel.MemoryItem) (*memorymodel.MemoryItem, error) {
+func CreateMemoryItem(ctx context.Context, commandHub magicevent.Hub, item *memorymodel.MemoryItem) (*memorymodel.MemoryItem, error) {
 	if err := PublishMemoryItem(ctx, commandHub, memoryevents.TopicMemoryCommandCreate, item); err != nil {
 		return nil, err
 	}
@@ -38,13 +37,10 @@ func CreateMemoryItem(ctx context.Context, commandHub magicevent.Hub, eventHub e
 	if err != nil {
 		return nil, err
 	}
-	if err := PublishMemoryEvent(ctx, eventHub, memoryevents.TopicMemoryCreated, created); err != nil {
-		return nil, err
-	}
 	return created, nil
 }
 
-func UpdateMemoryItem(ctx context.Context, commandHub magicevent.Hub, eventHub events.Hub, item *memorymodel.MemoryItem) (*memorymodel.MemoryItem, error) {
+func UpdateMemoryItem(ctx context.Context, commandHub magicevent.Hub, item *memorymodel.MemoryItem) (*memorymodel.MemoryItem, error) {
 	if err := PublishMemoryItem(ctx, commandHub, memoryevents.TopicMemoryCommandUpdate, item); err != nil {
 		return nil, err
 	}
@@ -53,15 +49,12 @@ func UpdateMemoryItem(ctx context.Context, commandHub magicevent.Hub, eventHub e
 	if err != nil {
 		return nil, err
 	}
-	if err := PublishMemoryEvent(ctx, eventHub, memoryevents.TopicMemoryUpdated, updated); err != nil {
-		return nil, err
-	}
 	return updated, nil
 }
 
 func DeleteMemoryItem(ctx context.Context, hub magicevent.Hub, memoryID string) error {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	_, err := sendMagicCommand[memoryevents.DeleteMemoryCommand, memoryevents.MemoryCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, memoryevents.TopicMemoryCommandDelete, memoryevents.CommandDestination, "memory", memoryID, memoryevents.DeleteMemoryCommand{MemoryID: common.MemoryID(memoryID)})
+	_, err := sendMagicCommand[memoryevents.DeleteMemoryCommand, memoryevents.MemoryCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, memoryevents.TopicMemoryCommandDelete, memoryevents.CommandDestination, "memory", memoryID, memoryevents.DeleteMemoryCommand{WorkspaceID: workspaceID, MemoryID: common.MemoryID(memoryID)})
 	return err
 }
 

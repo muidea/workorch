@@ -76,21 +76,21 @@ Last Updated: 2026-05-29
 - `docs/30-module-architecture/kernel-workspace-run-result.md`
 - `docs/30-module-architecture/kernel-orchestrator-governance.md`
 - `internal/modules/kernel/eventstream`
-- `internal/modules/kernel/result`
-- `internal/modules/kernel/decision`
-- `internal/modules/kernel/approval`
+- `internal/modules/blocks/result`
+- `internal/modules/blocks/decision`
+- `internal/modules/blocks/approval`
 - `internal/modules/kernel/governance`
 
 当前结论：
 
 - `kernel/eventstream` 已作为正式 EventRecord 持久化与 replay 输入模块存在，边界是不直接决定 workspace/run outcome 语义。
-- `kernel/result` 已作为 Result / Artifact 正式业务结果模型和 persistence contract 模块存在，边界是不承担 provider request、runtime block 调用或 Web/TUI 展示策略。
-- `kernel/decision` 与 `kernel/approval` 已分别承载 Decision Ticket / Resolution 与 Approval formal state，不再混在单一 governance 大模块中。
+- `blocks/result` 已作为 Result / Artifact 正式业务结果模型和 persistence contract 模块存在，边界是不承担 provider request、runtime block 调用或 Web/TUI 展示策略。
+- `blocks/decision` 与 `blocks/approval` 已分别承载 Decision Ticket / Resolution 与 Approval formal state，不再混在单一 governance 大模块中。
 - `kernel/governance` 保留治理集成与 auto-governance 协同责任，不替代 `run`、`result` 或产品交互层。
 
 验证：
 
-- `go test ./internal/modules/kernel/eventstream ./internal/modules/kernel/result ./internal/modules/kernel/decision ./internal/modules/kernel/approval ./internal/modules/kernel/governance -count=1 -timeout=180s`
+- `go test ./internal/modules/kernel/eventstream ./internal/modules/blocks/result ./internal/modules/blocks/decision ./internal/modules/blocks/approval ./internal/modules/kernel/governance -count=1 -timeout=180s`
 
 边界结论：
 

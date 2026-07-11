@@ -7,24 +7,72 @@ import (
 	"testing"
 	"time"
 
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	magicevent "github.com/muidea/magicCommon/event"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 
 	magictask "github.com/muidea/magicCommon/task"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
+
+func publishGovernanceTestTicketCreated(ctx context.Context, hub magicevent.Hub, ticketID common.TicketID, workspaceID common.WorkspaceID, runID common.RunID) error {
+	event := magicevent.NewEventWithContext(
+		decisionevents.TopicTicketCreated,
+		"blocks/decision",
+		decisionevents.NotificationDestination,
+		magicevent.NewHeader(),
+		ctx,
+		decisionevents.TicketChangedData{
+			TicketID:    ticketID,
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			State:       common.DecisionTicketStateOpen,
+		},
+	)
+	result := hub.Send(event)
+	if result == nil {
+		return common.ErrInvalidArgument
+	}
+	if resultErr := result.Error(); resultErr != nil {
+		return resultErr
+	}
+	return nil
+}
+
+func publishGovernanceTestApprovalCreated(ctx context.Context, hub magicevent.Hub, approvalID common.ApprovalID, workspaceID common.WorkspaceID, runID common.RunID) error {
+	event := magicevent.NewEventWithContext(
+		approvalevents.TopicApprovalCreated,
+		"blocks/approval",
+		approvalevents.NotificationDestination,
+		magicevent.NewHeader(),
+		ctx,
+		approvalevents.ApprovalChangedData{
+			ApprovalID:  approvalID,
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			State:       common.ApprovalStatePending,
+		},
+	)
+	result := hub.Send(event)
+	if result == nil {
+		return common.ErrInvalidArgument
+	}
+	if resultErr := result.Error(); resultErr != nil {
+		return resultErr
+	}
+	return nil
+}
 
 type testWorkspaceDefinitions struct {
 	goals interface {
@@ -159,7 +207,6 @@ func TestServiceUsesBackgroundRoutineForWorkerAndReconciliation(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: memory.NewGoalRepository(), dods: memory.NewDoDRepository()},
 		MemoryItems:          memory.NewMemoryItemRepository(),
 		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
-		EventHub:             events.NewMemoryHub(),
 		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
 		ResolveApproval:      func(context.Context, common.ApprovalID) error { return nil },
 		ResumeRun:            func(context.Context, common.RunID) error { return nil },
@@ -213,7 +260,6 @@ func TestProcessPendingTicketUsesWorkspaceScopedRunLookup(t *testing.T) {
 		WorkspaceDefinitions: definitions,
 		MemoryItems:          memory.NewMemoryItemRepository(),
 		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
-		EventHub:             events.NewMemoryHub(),
 		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
 		ResolveApproval:      func(context.Context, common.ApprovalID) error { return nil },
 		ResumeRun:            func(context.Context, common.RunID) error { return nil },
@@ -278,7 +324,6 @@ func TestProcessPendingApprovalUsesWorkspaceScopedRunLookup(t *testing.T) {
 		WorkspaceDefinitions: definitions,
 		MemoryItems:          memory.NewMemoryItemRepository(),
 		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
-		EventHub:             events.NewMemoryHub(),
 		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
 		ResolveApproval:      func(context.Context, common.ApprovalID) error { return nil },
 		ResumeRun:            func(context.Context, common.RunID) error { return nil },
@@ -306,8 +351,8 @@ func TestProcessPendingApprovalUsesWorkspaceScopedRunLookup(t *testing.T) {
 
 func TestPublishGovernanceEventCarriesTraceScope(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	svc := NewService(Dependencies{EventHub: hub})
+	hub := newRecordingGovernanceHub(t)
+	svc := NewService(Dependencies{NotificationHub: hub})
 	trace := &governancemodel.AutoGovernanceTrace{
 		ID:                "trace-scope",
 		WorkspaceID:       "ws-governance-event-scope",
@@ -336,34 +381,28 @@ func TestPublishGovernanceEventCarriesTraceScope(t *testing.T) {
 			t.Fatalf("publish %s: %v", topic, err)
 		}
 	}
-	published := hub.Published()
+	published := hub.Posted()
 	if len(published) != 4 {
 		t.Fatalf("published events = %d, want 4", len(published))
 	}
-	for _, envelope := range published {
-		if envelope.Version != events.WorkorchEventVersion ||
-			envelope.WorkspaceID != string(trace.WorkspaceID) ||
-			envelope.RunID != string(trace.RunID) ||
-			envelope.StepID != string(trace.StepID) ||
-			envelope.SubjectType != "auto_governance_trace" ||
-			envelope.SubjectID != string(trace.ID) {
-			t.Fatalf("governance envelope missing scope: %+v", envelope)
+	for _, event := range published {
+		data, ok := event.Data().(governanceevents.GovernanceData)
+		if !ok {
+			t.Fatalf("governance data type = %T", event.Data())
 		}
-		if envelope.Payload[events.PayloadKeyTraceID] != string(trace.ID) ||
-			envelope.Payload[events.PayloadKeyItemType] != trace.ItemType ||
-			envelope.Payload[events.PayloadKeyItemID] != trace.ItemID {
-			t.Fatalf("governance payload missing trace refs: %+v", envelope.Payload)
+		if data.Trace.WorkspaceID != trace.WorkspaceID || data.Trace.RunID != trace.RunID || data.Trace.StepID != trace.StepID || data.Trace.ID != trace.ID {
+			t.Fatalf("governance data missing scope: %+v", data)
 		}
-		if _, ok := events.DecodeAutoGovernanceEvent(envelope); !ok {
-			t.Fatalf("governance envelope did not decode: %+v", envelope)
+		if data.Trace.ItemType != trace.ItemType || data.Trace.ItemID != trace.ItemID || data.EscalationReason != "manual_escalation" {
+			t.Fatalf("governance data missing trace refs: %+v", data)
 		}
 	}
 }
 
-func TestPublishGovernanceEventUsesAsyncHubForNotifications(t *testing.T) {
+func TestPublishGovernanceEventUsesConcreteEventHubNotification(t *testing.T) {
 	ctx := context.Background()
-	hub := &recordingGovernanceAsyncHub{}
-	svc := NewService(Dependencies{EventHub: hub})
+	hub := newRecordingGovernanceHub(t)
+	svc := NewService(Dependencies{NotificationHub: hub})
 	trace := &governancemodel.AutoGovernanceTrace{
 		ID:          "trace-async",
 		WorkspaceID: "ws-governance-async",
@@ -378,17 +417,17 @@ func TestPublishGovernanceEventUsesAsyncHubForNotifications(t *testing.T) {
 		t.Fatalf("publish governance event: %v", err)
 	}
 
-	if hub.syncPublishes != 0 || hub.asyncPublishes != 1 {
-		t.Fatalf("publish counts = sync:%d async:%d, want async governance notification", hub.syncPublishes, hub.asyncPublishes)
+	published := hub.Posted()
+	if len(published) != 1 || published[0].ID() != governanceevents.TopicGovernanceAutoEvaluated {
+		t.Fatalf("published = %+v, want governance auto evaluated notification", published)
 	}
-	if len(hub.published) != 1 || hub.published[0].Topic != governanceevents.TopicGovernanceAutoEvaluated {
-		t.Fatalf("published = %+v, want governance auto evaluated notification", hub.published)
+	if _, ok := published[0].Data().(governanceevents.GovernanceData); !ok {
+		t.Fatalf("published data type = %T", published[0].Data())
 	}
 }
 
 func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	runRepo := memory.NewRunRepository()
@@ -434,7 +473,6 @@ func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		EventHub:             hub,
 		ResolveDecision: func(_ context.Context, id common.TicketID, _ string, payload map[string]any) error {
 			resolvedTicket = id
 			resolvedPayload = cloneMap(payload)
@@ -455,13 +493,7 @@ func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicTicketCreated,
-		SubjectType: "ticket",
-		SubjectID:   string(ticketID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-	}))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
 	waitForGovernanceCondition(t, func() bool {
 		return resolvedTicket == ticketID && resumedRun == runID
 	})
@@ -497,7 +529,6 @@ func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 
 func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	runRepo := memory.NewRunRepository()
 	goalRepo := memory.NewGoalRepository()
@@ -535,7 +566,6 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		EventHub:             hub,
 		ResolveDecision: func(context.Context, common.TicketID, string, map[string]any) error {
 			resolveCount++
 			return nil
@@ -550,13 +580,7 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicTicketCreated,
-		SubjectType: "ticket",
-		SubjectID:   string(ticketID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-	}))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
 	traceID := common.AutoGovernanceTraceID(string(ticketID) + "/auto-governance")
 	trace := waitForGovernanceTrace(t, ctx, traceRepo, traceID, func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
@@ -579,7 +603,6 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 
 func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	runRepo := memory.NewRunRepository()
@@ -638,7 +661,6 @@ func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		EventHub:             hub,
 		ResolveDecision: func(_ context.Context, id common.TicketID, resolutionType string, payload map[string]any) error {
 			resolvedTicket = id
 			resolvedResolutionType = resolutionType
@@ -660,13 +682,7 @@ func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicTicketCreated,
-		SubjectType: "ticket",
-		SubjectID:   string(ticketID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-	}))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
 	waitForGovernanceCondition(t, func() bool {
 		return resolvedTicket == ticketID && resumedRun == runID
 	})
@@ -698,7 +714,6 @@ func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
 
 func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	runRepo := memory.NewRunRepository()
@@ -742,7 +757,6 @@ func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		EventHub:             hub,
 		ResolveDecision: func(_ context.Context, id common.TicketID, resolutionType string, payload map[string]any) error {
 			resolvedTicket = id
 			resolvedResolutionType = resolutionType
@@ -764,13 +778,7 @@ func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicTicketCreated,
-		SubjectType: "ticket",
-		SubjectID:   string(ticketID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-	}))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
 	waitForGovernanceCondition(t, func() bool {
 		return resolvedTicket == ticketID && resumedRun == runID
 	})
@@ -798,7 +806,6 @@ func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.
 
 func TestServiceEscalatesReplanDecisionTicketWhenMissingFieldsRemain(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	runRepo := memory.NewRunRepository()
 	goalRepo := memory.NewGoalRepository()
@@ -839,7 +846,6 @@ func TestServiceEscalatesReplanDecisionTicketWhenMissingFieldsRemain(t *testing.
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		EventHub:             hub,
 		ResolveDecision: func(context.Context, common.TicketID, string, map[string]any) error {
 			resolveCount++
 			return nil
@@ -854,13 +860,7 @@ func TestServiceEscalatesReplanDecisionTicketWhenMissingFieldsRemain(t *testing.
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicTicketCreated,
-		SubjectType: "ticket",
-		SubjectID:   string(ticketID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-	}))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
 	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
@@ -875,7 +875,6 @@ func TestServiceEscalatesReplanDecisionTicketWhenMissingFieldsRemain(t *testing.
 
 func TestServiceEscalatesRuntimeRepairExhaustionWhenExternalRecoveryRequired(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	runRepo := memory.NewRunRepository()
 	goalRepo := memory.NewGoalRepository()
@@ -918,7 +917,6 @@ func TestServiceEscalatesRuntimeRepairExhaustionWhenExternalRecoveryRequired(t *
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		EventHub:             hub,
 		ResolveDecision: func(context.Context, common.TicketID, string, map[string]any) error {
 			resolveCount++
 			return nil
@@ -933,13 +931,7 @@ func TestServiceEscalatesRuntimeRepairExhaustionWhenExternalRecoveryRequired(t *
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicTicketCreated,
-		SubjectType: "ticket",
-		SubjectID:   string(ticketID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-	}))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
 	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
@@ -1038,7 +1030,6 @@ func TestServiceEscalatesRuntimeRepairExhaustionAfterAutoReplanLineage(t *testin
 
 func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	runRepo := memory.NewRunRepository()
@@ -1090,7 +1081,6 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		EventHub:             hub,
 		ResolveDecision: func(_ context.Context, id common.TicketID, _ string, payload map[string]any) error {
 			resolvedTicket = id
 			resolvedPayload = cloneMap(payload)
@@ -1111,13 +1101,7 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicTicketCreated,
-		SubjectType: "ticket",
-		SubjectID:   string(ticketID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-	}))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
 	waitForGovernanceCondition(t, func() bool {
 		return resolvedTicket == ticketID && resumedRun == runID
 	})
@@ -1190,7 +1174,6 @@ func TestInferMissingInfoAnswerDoesNotUseGoalOrDoDTextForCandidateTicket(t *test
 
 func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	runRepo := memory.NewRunRepository()
 	goalRepo := memory.NewGoalRepository()
@@ -1234,7 +1217,6 @@ func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		EventHub:             hub,
 		ResolveDecision: func(context.Context, common.TicketID, string, map[string]any) error {
 			resolveCount++
 			return nil
@@ -1246,13 +1228,7 @@ func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicTicketCreated,
-		SubjectType: "ticket",
-		SubjectID:   string(ticketID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-	}))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
 	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
@@ -1267,7 +1243,6 @@ func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T
 
 func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	approvalRepo := memory.NewApprovalRepository()
@@ -1309,7 +1284,6 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		EventHub:             hub,
 		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
 		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
 			resolveCount++
@@ -1329,13 +1303,7 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       approvalevents.TopicApprovalCreated,
-		SubjectType: "approval",
-		SubjectID:   string(approvalID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-	}))
+	mustNoErr(t, publishGovernanceTestApprovalCreated(ctx, svc.notificationHub, approvalID, workspaceID, runID))
 	waitForGovernanceCondition(t, func() bool {
 		return resolveCount == 1 && resumeCount == 1
 	})
@@ -1360,7 +1328,6 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 
 func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	approvalRepo := memory.NewApprovalRepository()
@@ -1410,7 +1377,6 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		EventHub:             hub,
 		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
 		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
 			resolveCount.Add(1)
@@ -1462,7 +1428,6 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 
 func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	approvalRepo := memory.NewApprovalRepository()
@@ -1505,7 +1470,6 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		EventHub:             hub,
 		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
 		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
 			resolveCount.Add(1)
@@ -1525,13 +1489,7 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       approvalevents.TopicApprovalCreated,
-		SubjectType: "approval",
-		SubjectID:   string(approvalID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-	}))
+	mustNoErr(t, publishGovernanceTestApprovalCreated(ctx, svc.notificationHub, approvalID, workspaceID, runID))
 	waitForGovernanceCondition(t, func() bool {
 		return resolveCount.Load() == 1 && resumeCount.Load() == 1
 	})
@@ -1574,7 +1532,6 @@ func TestClassifyApprovalRiskTreatsRuntimeDependencyGovernanceAsL2(t *testing.T)
 
 func TestServiceStartReturnsWithoutWaitingForBlockedRunResume(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	approvalRepo := memory.NewApprovalRepository()
@@ -1624,7 +1581,6 @@ func TestServiceStartReturnsWithoutWaitingForBlockedRunResume(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		EventHub:             hub,
 		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
 		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
 			item, err := approvalRepo.Get(ctx, id)
@@ -1696,7 +1652,6 @@ func TestServiceEscalatesWorkspaceWriteWhenAutoApprovalPolicyDisallowsIt(t *test
 
 func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	approvalRepo := memory.NewApprovalRepository()
@@ -1738,7 +1693,6 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		EventHub:             hub,
 		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
 		ResolveApproval: func(context.Context, common.ApprovalID) error {
 			resolveCount++
@@ -1753,13 +1707,7 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       approvalevents.TopicApprovalCreated,
-		SubjectType: "approval",
-		SubjectID:   string(approvalID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-	}))
+	mustNoErr(t, publishGovernanceTestApprovalCreated(ctx, svc.notificationHub, approvalID, workspaceID, runID))
 	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(approvalID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
@@ -1780,7 +1728,6 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 
 func TestServiceEscalatesTicketWhenRepeatedPromptBudgetExhausted(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	approvalRepo := memory.NewApprovalRepository()
@@ -1848,7 +1795,6 @@ func TestServiceEscalatesTicketWhenRepeatedPromptBudgetExhausted(t *testing.T) {
 		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
-		EventHub:             hub,
 		ResolveDecision: func(context.Context, common.TicketID, string, map[string]any) error {
 			resolveCount++
 			return nil
@@ -1887,13 +1833,7 @@ func TestServiceEscalatesTicketWhenRepeatedPromptBudgetExhausted(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       decisionevents.TopicTicketCreated,
-		SubjectType: "ticket",
-		SubjectID:   string(ticketID),
-		WorkspaceID: string(workspaceID),
-		RunID:       string(runID),
-	}))
+	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.notificationHub, ticketID, workspaceID, runID))
 	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
@@ -2020,24 +1960,29 @@ func mustNoErr(t *testing.T, err error) {
 	}
 }
 
-type recordingGovernanceAsyncHub struct {
-	syncPublishes  int
-	asyncPublishes int
-	published      []events.Envelope
+type recordingGovernanceHub struct {
+	magicevent.Hub
+	mu     sync.Mutex
+	posted []magicevent.Event
 }
 
-func (h *recordingGovernanceAsyncHub) Publish(_ context.Context, envelope events.Envelope) error {
-	h.syncPublishes++
-	h.published = append(h.published, envelope)
-	return nil
+func newRecordingGovernanceHub(t *testing.T) *recordingGovernanceHub {
+	t.Helper()
+	rawHub := magicevent.NewHub(32)
+	hub := &recordingGovernanceHub{Hub: rawHub}
+	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
+	return hub
 }
 
-func (h *recordingGovernanceAsyncHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
-	h.asyncPublishes++
-	h.published = append(h.published, envelope)
-	return nil
+func (h *recordingGovernanceHub) Post(event magicevent.Event) {
+	h.mu.Lock()
+	h.posted = append(h.posted, event)
+	h.mu.Unlock()
+	h.Hub.Post(event)
 }
 
-func (h *recordingGovernanceAsyncHub) Subscribe(string, events.Handler) func() {
-	return func() {}
+func (h *recordingGovernanceHub) Posted() []magicevent.Event {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]magicevent.Event(nil), h.posted...)
 }

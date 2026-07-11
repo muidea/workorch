@@ -1,49 +1,104 @@
 package observed
 
 import (
-	"context"
+	"fmt"
 	"sync"
+	"sync/atomic"
 
+	magicevent "github.com/muidea/magicCommon/event"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type Collector struct {
-	mu            sync.RWMutex
-	published     []events.WorkorchEvent
-	unsubscribers []func()
+	mu        sync.RWMutex
+	published []eventstreamevents.EventRecordData
+	observer  magicevent.SimpleObserver
 }
 
-const maxCollectedWorkorchEvents = 256
+const maxCollectedEventRecords = 256
 
-func NewCollector(hub events.Hub) *Collector {
+var collectorObserverSequence atomic.Uint64
+
+func NewCollector(hub magicevent.Hub) *Collector {
 	collector := &Collector{}
 	if hub == nil {
 		return collector
 	}
 
-	collector.unsubscribers = events.SubscribeWorkorch(hub, func(_ context.Context, event events.WorkorchEvent) error {
+	observerID := fmt.Sprintf("/eventstream/consumers/application/workorchd/observed/%d", collectorObserverSequence.Add(1))
+	collector.observer = magicevent.NewSimpleObserverWithMatchID(observerID, observerID, hub)
+	collector.observer.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
+		data, ok := event.Data().(eventstreamevents.EventRecordAppendedData)
+		if !ok {
+			if result != nil {
+				result.Set(nil, nil)
+			}
+			return
+		}
+		if !validObservedRecord(data.Record) {
+			if result != nil {
+				result.Set(nil, nil)
+			}
+			return
+		}
 		collector.mu.Lock()
 		defer collector.mu.Unlock()
-		collector.published = append(collector.published, cloneWorkorchEvent(event))
-		if len(collector.published) > maxCollectedWorkorchEvents {
-			copy(collector.published, collector.published[len(collector.published)-maxCollectedWorkorchEvents:])
-			collector.published = collector.published[:maxCollectedWorkorchEvents]
+		collector.published = append(collector.published, cloneEventRecordData(data.Record))
+		if len(collector.published) > maxCollectedEventRecords {
+			copy(collector.published, collector.published[len(collector.published)-maxCollectedEventRecords:])
+			collector.published = collector.published[:maxCollectedEventRecords]
 		}
-		return nil
+		if result != nil {
+			result.Set(nil, nil)
+		}
 	})
 	return collector
 }
 
-func (c *Collector) PublishedWorkorchEvents() []events.WorkorchEvent {
+func validObservedRecord(item eventstreamevents.EventRecordData) bool {
+	if !events.ValidateWorkorchEventVersion(item.Topic, item.Version) {
+		return false
+	}
+	payload := item.Payload.Map()
+	switch item.Topic {
+	case workspaceevents.TopicWorkspaceCreated, workspaceevents.TopicWorkspaceStateChanged:
+		_, ok := events.DecodeWorkspacePayload(payload)
+		return ok
+	case runevents.TopicRunCreated, runevents.TopicRunStateChanged:
+		_, ok := events.DecodeRunPayload(payload)
+		return ok
+	case runevents.TopicStepDispatched, runevents.TopicStepStateChanged:
+		_, ok := events.DecodeStepPayload(payload)
+		return ok
+	case decisionevents.TopicTicketResolved:
+		_, ok := events.DecodeDecisionResolutionPayload(payload)
+		return ok
+	case decisionevents.TopicTicketCreated, decisionevents.TopicTicketUpdated:
+		_, ok := events.DecodeDecisionTicketPayload(payload)
+		return ok
+	case approvalevents.TopicApprovalCreated, approvalevents.TopicApprovalResolved:
+		_, ok := events.DecodeApprovalPayload(payload)
+		return ok
+	default:
+		return false
+	}
+}
+
+func (c *Collector) PublishedEventRecords() []eventstreamevents.EventRecordData {
 	if c == nil {
 		return nil
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	out := make([]events.WorkorchEvent, 0, len(c.published))
+	out := make([]eventstreamevents.EventRecordData, 0, len(c.published))
 	for _, item := range c.published {
-		out = append(out, cloneWorkorchEvent(item))
+		out = append(out, cloneEventRecordData(item))
 	}
 	return out
 }
@@ -53,65 +108,44 @@ func (c *Collector) Close() {
 		return
 	}
 	c.mu.Lock()
-	unsubscribers := c.unsubscribers
-	c.unsubscribers = nil
+	observer := c.observer
+	c.observer = nil
 	c.mu.Unlock()
+	if observer != nil {
+		observer.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended)
+	}
+}
 
-	for _, unsubscribe := range unsubscribers {
-		if unsubscribe != nil {
-			unsubscribe()
+func cloneEventRecordData(item eventstreamevents.EventRecordData) eventstreamevents.EventRecordData {
+	item.Payload = cloneEventPayload(item.Payload)
+	item.PayloadSummary = cloneEventPayload(item.PayloadSummary)
+	return item
+}
+
+func cloneEventPayload(payload eventstreamevents.EventPayload) eventstreamevents.EventPayload {
+	if payload.Fields == nil {
+		return eventstreamevents.EventPayload{}
+	}
+	ret := eventstreamevents.EventPayload{Fields: make([]eventstreamevents.EventField, len(payload.Fields))}
+	for idx, field := range payload.Fields {
+		ret.Fields[idx] = eventstreamevents.EventField{Name: field.Name, Value: cloneEventValue(field.Value)}
+	}
+	return ret
+}
+
+func cloneEventValue(value eventstreamevents.EventValue) eventstreamevents.EventValue {
+	ret := value
+	if value.Object != nil {
+		ret.Object = make([]eventstreamevents.EventField, len(value.Object))
+		for idx, field := range value.Object {
+			ret.Object[idx] = eventstreamevents.EventField{Name: field.Name, Value: cloneEventValue(field.Value)}
 		}
 	}
-}
-
-func cloneEnvelope(item events.Envelope) events.Envelope {
-	cloned := item
-	if item.Payload != nil {
-		cloned.Payload = cloneEventMap(item.Payload)
+	if value.Array != nil {
+		ret.Array = make([]eventstreamevents.EventValue, len(value.Array))
+		for idx, item := range value.Array {
+			ret.Array[idx] = cloneEventValue(item)
+		}
 	}
-	return cloned
-}
-
-func cloneEventMap(item map[string]any) map[string]any {
-	if item == nil {
-		return nil
-	}
-	cloned := make(map[string]any, len(item))
-	for k, v := range item {
-		cloned[k] = cloneEventValue(v)
-	}
-	return cloned
-}
-
-func cloneEventSlice(items []any) []any {
-	if items == nil {
-		return nil
-	}
-	cloned := make([]any, len(items))
-	for i, item := range items {
-		cloned[i] = cloneEventValue(item)
-	}
-	return cloned
-}
-
-func cloneEventValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneEventMap(typed)
-	case []any:
-		return cloneEventSlice(typed)
-	default:
-		return typed
-	}
-}
-
-func cloneWorkorchEvent(item events.WorkorchEvent) events.WorkorchEvent {
-	if item == nil {
-		return nil
-	}
-	cloned, ok := events.DecodeWorkorchEvent(cloneEnvelope(item.Envelope()))
-	if !ok {
-		return nil
-	}
-	return cloned
+	return ret
 }

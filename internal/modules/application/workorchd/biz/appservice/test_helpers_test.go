@@ -10,17 +10,18 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governancemodule "github.com/muidea/workorch/internal/modules/kernel/governance"
-	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -61,97 +62,25 @@ func (testNoopSkillHubRunner) RunSkillHub(context.Context, string, ...string) ([
 
 var testSharedBackendSessionCleanup sync.Map
 
-func completeAppserviceTestExports(exports bootstrap.Exports) bootstrap.Exports {
-	if exports.Infrastructure.CommandHub == nil {
-		exports.Infrastructure.CommandHub = magicevent.NewHub(16)
+func completeAppserviceTestExports(value any) bootstrap.Exports {
+	var infrastructure bootstrap.InfrastructureExports
+	switch exports := value.(type) {
+	case bootstrap.Exports:
+		infrastructure = exports.Infrastructure
+	case testkit.Exports:
+		infrastructure = exports.Infrastructure
 	}
-	repositories := &exports.Repositories
-	if repositories.Souls == nil {
-		repositories.Souls = memory.NewSoulRepository()
+	if infrastructure.CommandHub == nil {
+		infrastructure.CommandHub = magicevent.NewHub(16)
 	}
-	if repositories.WorkspaceTemplates == nil {
-		repositories.WorkspaceTemplates = memory.NewWorkspaceTemplateRepository()
-	}
-	if repositories.MemoryItems == nil {
-		repositories.MemoryItems = memory.NewMemoryItemRepository()
-	}
-	if repositories.MemoryRecallTraces == nil {
-		repositories.MemoryRecallTraces = memory.NewMemoryRecallTraceRepository()
-	}
-	if repositories.AutoGovernanceTraces == nil {
-		repositories.AutoGovernanceTraces = memory.NewAutoGovernanceTraceRepository()
-	}
-	if repositories.Skills == nil {
-		repositories.Skills = memory.NewSkillRepository()
-	}
-	if repositories.MCPServers == nil {
-		repositories.MCPServers = memory.NewMCPServerRepository()
-	}
-	if repositories.MCPCapabilities == nil {
-		repositories.MCPCapabilities = memory.NewMCPCapabilityRepository()
-	}
-	if repositories.Results == nil {
-		repositories.Results = memory.NewResultRepository()
-	}
-	if repositories.Artifacts == nil {
-		repositories.Artifacts = memory.NewArtifactRepository()
-	}
-	if repositories.EventRecords == nil {
-		repositories.EventRecords = memory.NewEventRecordRepository()
-	}
-	if repositories.Workspaces == nil {
-		repositories.Workspaces = memory.NewWorkspaceRepository()
-	}
-	if repositories.Goals == nil {
-		repositories.Goals = memory.NewGoalRepository()
-	}
-	if repositories.DoDs == nil {
-		repositories.DoDs = memory.NewDoDRepository()
-	}
-	if repositories.Runs == nil {
-		repositories.Runs = memory.NewRunRepository()
-	}
-	if repositories.Steps == nil {
-		repositories.Steps = memory.NewStepRepository()
-	}
-	if repositories.ToolCalls == nil {
-		repositories.ToolCalls = memory.NewToolCallRepository()
-	}
-	if repositories.Patches == nil {
-		repositories.Patches = memory.NewPatchRepository()
-	}
-	if repositories.ValidationResults == nil {
-		repositories.ValidationResults = memory.NewValidationResultRepository()
-	}
-	if repositories.RuntimeCheckpoints == nil {
-		repositories.RuntimeCheckpoints = memory.NewRuntimeCheckpointRepository()
-	}
-	if repositories.EvidenceRecords == nil {
-		repositories.EvidenceRecords = memory.NewEvidenceRecordRepository()
-	}
-	if repositories.CoverageWorkItems == nil {
-		repositories.CoverageWorkItems = memory.NewCoverageWorkItemRepository()
-	}
-	if repositories.ArtifactContinuations == nil {
-		repositories.ArtifactContinuations = memory.NewArtifactContinuationRepository()
-	}
-	if repositories.Tickets == nil {
-		repositories.Tickets = memory.NewDecisionTicketRepository()
-	}
-	if repositories.Resolutions == nil {
-		repositories.Resolutions = memory.NewDecisionResolutionRepository()
-	}
-	if repositories.Approvals == nil {
-		repositories.Approvals = memory.NewApprovalRepository()
-	}
-	return exports
+	return bootstrap.Exports{Infrastructure: infrastructure}
 }
 
 func startFocusedGovernanceModule(t *testing.T, exports bootstrap.Exports, rawHub magicevent.Hub) {
 	t.Helper()
 	module := governancemodule.New()
 	if err := module.Configure(governancemodule.Dependencies{
-		AutoGovernanceTraces: exports.Repositories.AutoGovernanceTraces,
+		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
 		EventHub:             rawHub,
 		LoadConfig: func() (workorchconfig.Config, error) {
 			return workorchconfig.Config{}, nil
@@ -167,6 +96,14 @@ func startFocusedGovernanceModule(t *testing.T, exports bootstrap.Exports, rawHu
 			t.Errorf("stop focused governance module: %v", err)
 		}
 	})
+}
+
+func testRuntimeExports(runtime *bootstrap.Runtime) testkit.Exports {
+	return testkit.RuntimeExports(runtime)
+}
+
+func testSessionExports(session *RuntimeSession) (testkit.Exports, error) {
+	return testkit.SessionExports(session)
 }
 
 func newTestRuntimeSession(t *testing.T, backend string, dataRoot string) (*RuntimeSession, context.Context) {
@@ -390,12 +327,12 @@ func sendAppserviceTestCommand[Command any, Result any](ctx context.Context, hub
 	return result, nil
 }
 
-func createTestMCPServerWithExports(ctx context.Context, exports bootstrap.Exports, cmd mcpevents.CreateServerCommand) error {
+func createTestMCPServerWithExports(ctx context.Context, exports testkit.Exports, cmd mcpevents.CreateServerCommand) error {
 	_, err := sendAppserviceTestCommand[mcpevents.CreateServerCommand, mcpevents.MCPCommandResult](ctx, exports.Infrastructure.CommandHub, mcpevents.TopicMCPCommandCreateServer, mcpevents.CommandDestination, cmd)
 	return err
 }
 
-func updateTestMCPCapabilityWithExports(ctx context.Context, exports bootstrap.Exports, cmd mcpevents.UpdateCapabilityCommand) error {
+func updateTestMCPCapabilityWithExports(ctx context.Context, exports testkit.Exports, cmd mcpevents.UpdateCapabilityCommand) error {
 	_, err := sendAppserviceTestCommand[mcpevents.UpdateCapabilityCommand, mcpevents.MCPCommandResult](ctx, exports.Infrastructure.CommandHub, mcpevents.TopicMCPCommandUpdateCapability, mcpevents.CommandDestination, cmd)
 	return err
 }
@@ -448,7 +385,7 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 	ticketID := common.TicketID("ticket-" + runID + "-decision")
 	stepID := common.StepID(runID + "/decision")
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
@@ -495,7 +432,7 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 	approvalID := common.ApprovalID("approval-" + runID + "-approval")
 	stepID := common.StepID(runID + "/approval")
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
@@ -529,7 +466,7 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 
 func ensureTestWorkspace(t *testing.T, ctx context.Context, session *RuntimeSession, workspaceID string) {
 	t.Helper()
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}

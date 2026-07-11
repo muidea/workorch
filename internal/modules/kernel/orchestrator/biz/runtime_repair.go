@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"

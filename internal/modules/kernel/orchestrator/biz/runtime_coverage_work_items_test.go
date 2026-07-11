@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -3675,7 +3675,7 @@ func TestCoverageWorkItemsGovernanceOwnerSyncRespectsRequiredCounts(t *testing.T
 	}); err != nil {
 		t.Fatalf("seed approval: %v", err)
 	}
-	orch := NewRuntimeOrchestratorWithResolutions(nil, memory.NewRunRepository(), memory.NewStepRepository(), memory.NewWorkspaceRepository(), ticketRepo, resolutionRepo, approvalRepo, nil)
+	orch := NewRuntimeOrchestratorWithResolutions(nil, memory.NewRunRepository(), memory.NewStepRepository(), memory.NewWorkspaceRepository(), ticketRepo, resolutionRepo, approvalRepo)
 
 	changed, err := orch.ensureCoverageLedger(ctx, run)
 	if err != nil {

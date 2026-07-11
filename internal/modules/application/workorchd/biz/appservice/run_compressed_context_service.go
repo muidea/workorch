@@ -15,7 +15,6 @@ func compressedContextDependencies(deps readModelDependencies) runports.Compress
 		Approvals:     deps.approvals,
 		MemoryRecalls: deps.memoryRecalls,
 		CommandHub:    deps.commandHub,
-		EventHub:      deps.eventHub,
 		RecoverySnapshot: func(snapshotCtx context.Context, snapshotRunID common.RunID) (RunSnapshot, error) {
 			return readRunRecoverySnapshot(snapshotCtx, deps, snapshotRunID)
 		},

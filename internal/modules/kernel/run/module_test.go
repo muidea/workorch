@@ -10,13 +10,14 @@ import (
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
-func newRunModuleTestHub() (*events.MagicHub, magicevent.Hub) {
-	rawHub := magicevent.NewHub(16)
-	return events.NewMagicHubWithHub(rawHub), rawHub
+func newRunModuleTestHub(t *testing.T) magicevent.Hub {
+	t.Helper()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	return hub
 }
 
 func sendRunTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (runevents.RunCommandResult, error) {
@@ -50,7 +51,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.servicePtr != nil {
 		t.Fatal("new module service pointer is non-nil before Configure")
 	}
-	_, rawHub := newRunModuleTestHub()
+	rawHub := newRunModuleTestHub(t)
 	if err := module.Configure(Dependencies{
 		Runs:        memory.NewRunRepository(),
 		Steps:       memory.NewStepRepository(),
@@ -115,7 +116,7 @@ func TestModuleConfigureRequiresRunRepositoryAndEventHub(t *testing.T) {
 
 func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	_, rawHub := newRunModuleTestHub()
+	rawHub := newRunModuleTestHub(t)
 	runs := memory.NewRunRepository()
 	runID := common.RunID("run-scoped-get")
 	if err := runs.Create(ctx, &runmodel.Run{
@@ -181,7 +182,7 @@ func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 
 func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 	ctx := context.Background()
-	_, rawHub := newRunModuleTestHub()
+	rawHub := newRunModuleTestHub(t)
 	runs := memory.NewRunRepository()
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID:               "run-compact-running",
@@ -232,7 +233,7 @@ func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 
 func TestRunCommandDeleteHonorsWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	_, rawHub := newRunModuleTestHub()
+	rawHub := newRunModuleTestHub(t)
 	runs := memory.NewRunRepository()
 	runID := common.RunID("run-scoped-delete")
 	if err := runs.Create(ctx, &runmodel.Run{
@@ -281,7 +282,7 @@ func TestRunCommandDeleteHonorsWorkspaceScope(t *testing.T) {
 
 func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	_, rawHub := newRunModuleTestHub()
+	rawHub := newRunModuleTestHub(t)
 	runs := memory.NewRunRepository()
 	runID := common.RunID("run-write-scope")
 	if err := runs.Create(ctx, &runmodel.Run{
@@ -323,7 +324,7 @@ func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 
 func TestRunCreateCommandRequiresWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	_, rawHub := newRunModuleTestHub()
+	rawHub := newRunModuleTestHub(t)
 	runs := memory.NewRunRepository()
 	module := New()
 	if err := module.Configure(Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
@@ -348,7 +349,7 @@ func TestRunCreateCommandRequiresWorkspaceScope(t *testing.T) {
 
 func TestRunStepReadCommandsHonorWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	_, rawHub := newRunModuleTestHub()
+	rawHub := newRunModuleTestHub(t)
 	runs := memory.NewRunRepository()
 	steps := memory.NewStepRepository()
 	runID := common.RunID("run-step-read-scope")
@@ -414,7 +415,7 @@ func TestRunStepReadCommandsHonorWorkspaceScope(t *testing.T) {
 
 func TestRunCheckpointReadCommandsHonorWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	_, rawHub := newRunModuleTestHub()
+	rawHub := newRunModuleTestHub(t)
 	runs := memory.NewRunRepository()
 	checkpoints := memory.NewRuntimeCheckpointRepository()
 	runID := common.RunID("run-checkpoint-read-scope")

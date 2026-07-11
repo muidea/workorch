@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -55,22 +56,22 @@ func TestOwnerReadersBuildsSnapshotAndStatusReaderBundles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewOwnerReaders: %v", err)
 	}
-	publishedEvent, ok := events.DecodeWorkorchEvent(events.Envelope{
+	payload, err := eventstreamevents.EventPayloadFromMap(map[string]any{
+		events.PayloadKeyGoalID:             "goal-001",
+		events.PayloadKeyDoDID:              "dod-001",
+		events.PayloadKeyState:              string(common.RunStateActive),
+		events.PayloadKeyBlockingTicketID:   "",
+		events.PayloadKeyBlockingApprovalID: "",
+	})
+	if err != nil {
+		t.Fatalf("EventPayloadFromMap: %v", err)
+	}
+	published := []eventstreamevents.EventRecordData{{
 		Version: events.WorkorchEventVersion,
 		Topic:   runevents.TopicRunCreated,
-		RunID:   "run-001",
-		Payload: map[string]any{
-			events.PayloadKeyGoalID:             "goal-001",
-			events.PayloadKeyDoDID:              "dod-001",
-			events.PayloadKeyState:              string(common.RunStateActive),
-			events.PayloadKeyBlockingTicketID:   "",
-			events.PayloadKeyBlockingApprovalID: "",
-		},
-	})
-	if !ok {
-		t.Fatalf("DecodeWorkorchEvent returned !ok")
-	}
-	published := []events.WorkorchEvent{publishedEvent}
+		RunID:   common.RunID("run-001"),
+		Payload: payload,
+	}}
 
 	runReaders := readers.RunSnapshotReaders(published)
 	if runReaders.Workspaces != readers.Workspaces ||
@@ -92,7 +93,7 @@ func TestOwnerReadersBuildsSnapshotAndStatusReaderBundles(t *testing.T) {
 		runReaders.AutoGovernanceTraces != readers.AutoGovernanceTraces ||
 		runReaders.MCPCapabilities != readers.MCPCapabilities ||
 		len(runReaders.Published) != 1 ||
-		runReaders.Published[0].Topic() != runevents.TopicRunCreated {
+		runReaders.Published[0].Topic != runevents.TopicRunCreated {
 		t.Fatalf("RunSnapshotReaders did not preserve owner readers and published events")
 	}
 

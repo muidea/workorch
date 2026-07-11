@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

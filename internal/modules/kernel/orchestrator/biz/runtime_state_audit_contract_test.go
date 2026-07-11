@@ -4,11 +4,10 @@ import (
 	"context"
 	"testing"
 
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -82,9 +81,7 @@ func TestValidateAndCompleteRunPrevalidatesBeforeValidating(t *testing.T) {
 		memoryrepo.NewDecisionTicketRepository(),
 		nil,
 		memoryrepo.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo})
 
 	err := orch.validateAndCompleteRunWithWorkspace(ctx, run, "run-validation-preflight/step-1", workspace)
 	if err == nil {

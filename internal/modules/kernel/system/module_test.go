@@ -5,25 +5,17 @@ import (
 	"errors"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
+	mcpmodule "github.com/muidea/workorch/internal/modules/blocks/mcpregistry"
+	soulmodule "github.com/muidea/workorch/internal/modules/blocks/soul"
+	workspacemodule "github.com/muidea/workorch/internal/modules/blocks/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
-func TestSystemModuleConfigureRequiresCoreRepositories(t *testing.T) {
-	base := systemModuleContractDependencies()
-	tests := []struct {
-		name string
-		deps Dependencies
-	}{
-		{name: "missing souls", deps: func() Dependencies { d := base; d.Souls = nil; return d }()},
-		{name: "missing templates", deps: func() Dependencies { d := base; d.Templates = nil; return d }()},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if err := New().Configure(tc.deps); !errors.Is(err, common.ErrInvalidArgument) {
-				t.Fatalf("Configure err = %v, want invalid argument", err)
-			}
-		})
+func TestSystemModuleConfigureRequiresEventHub(t *testing.T) {
+	if err := New().Configure(Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("Configure err = %v, want invalid argument", err)
 	}
 }
 
@@ -36,37 +28,69 @@ func TestSystemModuleIdentityStartStopContract(t *testing.T) {
 	if err := module.Start(ctx); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Start before Configure err = %v, want invalid argument", err)
 	}
-	if err := module.Configure(systemModuleContractDependencies()); err != nil {
+	deps := systemModuleContractDependencies()
+	if err := module.Configure(deps); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.deps.Souls == nil || module.deps.Templates == nil {
-		t.Fatalf("module not fully configured: %+v", module.deps)
+	if module.eventHub == nil {
+		t.Fatal("module event hub is nil after Configure")
 	}
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.deps != (Dependencies{}) {
-		t.Fatalf("deps after Stop = %+v, want cleared", module.deps)
+	if module.eventHub != nil {
+		t.Fatal("event hub was not cleared after Stop")
 	}
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("second Stop: %v", err)
 	}
+	deps.EventHub.Terminate(ctx)
 }
 
-func TestSystemModuleStartEnsuresBuiltinDefaults(t *testing.T) {
+func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *testing.T) {
 	ctx := context.Background()
+	hub := magicevent.NewHub(64)
+	defer hub.Terminate(ctx)
 	souls := memoryrepo.NewSoulRepository()
 	templates := memoryrepo.NewWorkspaceTemplateRepository()
 	mcpServers := memoryrepo.NewMCPServerRepository()
 	mcpCapabilities := memoryrepo.NewMCPCapabilityRepository()
 
-	module := New()
-	if err := module.Configure(Dependencies{
-		Souls:           souls,
-		Templates:       templates,
-		MCPServers:      mcpServers,
-		MCPCapabilities: mcpCapabilities,
+	soulOwner := soulmodule.New()
+	if err := soulOwner.Configure(soulmodule.Dependencies{Souls: souls, EventHub: hub}); err != nil {
+		t.Fatalf("configure soul owner: %v", err)
+	}
+	workspaceOwner := workspacemodule.New()
+	if err := workspaceOwner.Configure(workspacemodule.Dependencies{
+		Workspaces: memoryrepo.NewWorkspaceRepository(),
+		Goals:      memoryrepo.NewGoalRepository(),
+		DoDs:       memoryrepo.NewDoDRepository(),
+		Templates:  templates,
+		EventHub:   hub,
 	}); err != nil {
+		t.Fatalf("configure workspace owner: %v", err)
+	}
+	mcpOwner := mcpmodule.New()
+	if err := mcpOwner.Configure(mcpmodule.Dependencies{Servers: mcpServers, Capabilities: mcpCapabilities, EventHub: hub}); err != nil {
+		t.Fatalf("configure MCP owner: %v", err)
+	}
+	for name, start := range map[string]func() error{
+		"soul":      soulOwner.Start,
+		"workspace": workspaceOwner.Start,
+		"mcp":       mcpOwner.Start,
+	} {
+		if err := start(); err != nil {
+			t.Fatalf("start %s owner: %v", name, err)
+		}
+	}
+	t.Cleanup(func() {
+		_ = mcpOwner.Stop(ctx)
+		_ = workspaceOwner.Stop(ctx)
+		_ = soulOwner.Stop(ctx)
+	})
+
+	module := New()
+	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
 		t.Fatalf("Configure error=%v", err)
 	}
 	if err := module.Start(ctx); err != nil {
@@ -78,13 +102,14 @@ func TestSystemModuleStartEnsuresBuiltinDefaults(t *testing.T) {
 	if got, err := templates.List(ctx); err != nil || len(got) == 0 {
 		t.Fatalf("templates after Start len=%d err=%v", len(got), err)
 	}
+	if got, err := mcpServers.List(ctx); err != nil || len(got) == 0 {
+		t.Fatalf("MCP servers after Start len=%d err=%v", len(got), err)
+	}
+	if got, err := mcpCapabilities.List(ctx); err != nil || len(got) == 0 {
+		t.Fatalf("MCP capabilities after Start len=%d err=%v", len(got), err)
+	}
 }
 
 func systemModuleContractDependencies() Dependencies {
-	return Dependencies{
-		Souls:           memoryrepo.NewSoulRepository(),
-		Templates:       memoryrepo.NewWorkspaceTemplateRepository(),
-		MCPServers:      memoryrepo.NewMCPServerRepository(),
-		MCPCapabilities: memoryrepo.NewMCPCapabilityRepository(),
-	}
+	return Dependencies{EventHub: magicevent.NewHub(16)}
 }

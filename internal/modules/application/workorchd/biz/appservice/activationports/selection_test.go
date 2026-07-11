@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
-	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -46,7 +46,7 @@ func TestSelectedWorkspaceMemoryItemsReadsExplicitIDsWithWorkspaceScope(t *testi
 	ctx := context.Background()
 	runtime := newOwnerRuntime()
 	defer runtime.Shutdown(ctx)
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	workspaceID := common.WorkspaceID("ws-memory-selection-scope")
 	if err := exports.Repositories.MemoryItems.Create(ctx, &memorymodel.MemoryItem{ID: "memory-selection-scope", WorkspaceID: workspaceID, Summary: "scoped memory", Visibility: "llm"}); err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestSelectWorkspaceExecutionSkillsAutoSelectsRepositorySkill(t *testing.T) 
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	if err := exports.Repositories.Skills.Create(ctx, &skillmodel.Skill{
 		ID:           "skill-auto-runports",
 		Name:         "Auto Runports Skill",
@@ -124,7 +124,7 @@ func TestSelectWorkspaceExecutionSkillsResolvesExplicitRepositorySkill(t *testin
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	if err := exports.Repositories.Skills.Create(ctx, &skillmodel.Skill{
 		ID:   "skill-explicit-runports",
 		Name: "Explicit Runports Skill",

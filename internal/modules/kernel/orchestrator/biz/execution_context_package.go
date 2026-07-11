@@ -8,14 +8,12 @@ import (
 	"sync"
 	"time"
 
-	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
-	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -2430,31 +2428,7 @@ func (o *RuntimeOrchestrator) recordLLMStepInputMemoryRecallTrace(ctx context.Co
 	if err := o.evidence.MemoryRecallTraces.Upsert(ctx, trace); err != nil {
 		return err
 	}
-	if o.eventHub == nil {
-		return nil
-	}
-	return events.PublishByContract(ctx, o.eventHub, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        memoryevents.TopicMemoryRecallRecorded,
-		OccurredAt:   trace.OccurredAt,
-		SourceModule: "kernel/orchestrator",
-		SubjectType:  "memory_recall",
-		SubjectID:    string(trace.ID),
-		WorkspaceID:  string(trace.WorkspaceID),
-		RunID:        string(trace.RunID),
-		StepID:       string(trace.StepID),
-		Payload: events.MemoryRecallPayload(
-			trace.ID,
-			trace.Stage,
-			trace.Source,
-			trace.Policy,
-			trace.Status,
-			trace.ProviderID,
-			trace.Operation,
-			trace.RetrievedMemoryIDs,
-			trace.Reason,
-		),
-	})
+	return nil
 }
 
 func memoryRecallTraceMapHasKey(input map[string]any, key string) bool {

@@ -15,7 +15,8 @@ type ListAutoGovernanceTracesCommand struct {
 }
 
 type GovernanceData struct {
-	Trace *governancemodel.AutoGovernanceTrace
+	Trace            governancemodel.AutoGovernanceTrace
+	EscalationReason string
 }
 
 type GovernanceCommandResult struct {

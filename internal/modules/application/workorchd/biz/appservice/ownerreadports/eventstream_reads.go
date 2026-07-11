@@ -19,5 +19,9 @@ func ListEventRecordsByOwnerCommand(ctx context.Context, hub magicevent.Hub, que
 	if err != nil {
 		return nil, err
 	}
-	return response.Events, nil
+	items := make([]*eventstreammodel.EventRecord, 0, len(response.Events))
+	for _, item := range response.Events {
+		items = append(items, item.Model())
+	}
+	return items, nil
 }

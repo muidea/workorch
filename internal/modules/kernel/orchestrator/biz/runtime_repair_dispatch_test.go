@@ -5,12 +5,11 @@ import (
 	"errors"
 	"testing"
 
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -884,9 +883,7 @@ func TestCloseRepairDispatchFailureForNonGraphStepLeavesUniqueExit(t *testing.T)
 				stepRepo,
 				workspaceRepo,
 				ticketRepo,
-				memory.NewApprovalRepository(),
-				events.NewMemoryHub(),
-			)
+				memory.NewApprovalRepository())
 
 			err := orch.closeRepairDispatchFailure(ctx, run, failedStep, errors.New("original failure"), runtimeDispatchRequestError{
 				Stage: stage,

@@ -118,20 +118,20 @@ live 验证只在上述三层通过后执行，用于确认真实 provider、真
 
 | Kind | ID / Component | Code path | Closure unit |
 | --- | --- | --- | --- |
-| initiator | `workorch/runtime` | `internal/initiators/workorchruntime` | Runtime Initiator |
+| initiator | `workorch/repositories` | `internal/initiators/workorchruntime` | Repository Initiator |
 | application module | `application/workorchd` | `internal/modules/application/workorchd` | Workorchd Application |
-| kernel module | `kernel/workspace` | `internal/modules/kernel/workspace` | Workspace |
+| stateful block | `blocks/workspace` | `internal/modules/blocks/workspace` | Workspace Block |
 | kernel module | `kernel/run` | `internal/modules/kernel/run` | Run |
 | kernel module | `kernel/orchestrator` | `internal/modules/kernel/orchestrator` | Orchestrator |
-| kernel module | `kernel/result` | `internal/modules/kernel/result` | Result |
-| kernel module | `kernel/decision` | `internal/modules/kernel/decision` | Decision |
-| kernel module | `kernel/approval` | `internal/modules/kernel/approval` | Approval |
+| stateful block | `blocks/result` | `internal/modules/blocks/result` | Result Block |
+| stateful block | `blocks/decision` | `internal/modules/blocks/decision` | Decision Block |
+| stateful block | `blocks/approval` | `internal/modules/blocks/approval` | Approval Block |
 | kernel module | `kernel/governance` | `internal/modules/kernel/governance` | Governance |
 | kernel module | `kernel/eventstream` | `internal/modules/kernel/eventstream` | Eventstream |
-| kernel module | `kernel/memory` | `internal/modules/kernel/memory` | Memory |
-| kernel module | `kernel/mcp` | `internal/modules/kernel/mcp` | MCP Registry |
-| kernel module | `kernel/skill` | `internal/modules/kernel/skill` | Skill Registry |
-| kernel module | `kernel/soul` | `internal/modules/kernel/soul` | Soul Registry |
+| stateful block | `blocks/memory` | `internal/modules/blocks/memory` | Memory Block |
+| stateful block | `blocks/mcp-registry` | `internal/modules/blocks/mcpregistry` | MCP Registry Block |
+| stateful block | `blocks/skill` | `internal/modules/blocks/skill` | Skill Registry Block |
+| stateful block | `blocks/soul` | `internal/modules/blocks/soul` | Soul Registry Block |
 | kernel module | `kernel/system` | `internal/modules/kernel/system` | System |
 | runtime block | `file` | `internal/modules/blocks/file` | File Block |
 | runtime block | `git` | `internal/modules/blocks/git` | Git Block |
@@ -150,18 +150,19 @@ Inventory rule:
 
 ## Module And Block Closure Inventory
 
-### 1. Runtime Initiator
+### 1. Repository Initiator
 
 - Owner: `internal/initiators/workorchruntime`
-- Owns: runtime wiring、EventHub ownership wrapper、runtime policy loading、application lifecycle entry。
+- Owns: 单一 repository provider/factory 基础设施能力。
 - InputContract:
   - 只能从 application entry 注册和启动。
-  - Setup 必须解析 EventHub、repository、runtime policy 等依赖。
+  - Setup 只负责构造并注册 owner repository provider handles。
 - OutputContract:
-  - 向后续 modules 提供统一 runtime policy 和 MagicHub owner identity。
+  - 向 owner module/block 提供按职责分组的 repository provider。
   - lifecycle Run/Teardown 可幂等执行。
 - StateInvariant:
   - initiator 不拥有 workspace/run/result 业务状态。
+  - 不导出 EventHub、CommandHub、runtime policy 或通用 service facade。
   - module/block/initiator 注册只能通过 `application/workorch` 按需引入。
 - Pairwise tests:
   - initiator -> workorchd/modules: dependencies available before module Run。
@@ -188,9 +189,9 @@ Inventory rule:
   - Web/TUI -> appservice: unsupported writes rejected。
   - config/context registry -> runtime: structured refs only, no business state patch。
 
-### 3. Workspace Module
+### 3. Workspace Stateful Block
 
-- Owner: `internal/modules/kernel/workspace`
+- Owner: `internal/modules/blocks/workspace`
 - Owns: Workspace、Goal、DoD、definition revision、workspace binding。
 - InputContract:
   - create/update command 必须携带 workspace scope 或创建上下文。
@@ -199,6 +200,7 @@ Inventory rule:
   - stable workspace definition snapshot。
   - latest effective Goal/DoD/revision。
 - StateInvariant:
+  - 只管理 workspace-definition 聚合自身状态，不承担跨组件编排。
   - active definition 不得被历史摘要替代。
   - cumulative latest 不得静默弱化旧约束。
 - Pairwise tests:
@@ -241,9 +243,9 @@ Inventory rule:
   - StagePacket -> LLM context: required fields preserved under context budget。
   - contract gate -> evidence ledger: rejected output has no side effect。
 
-### 6. Result Module
+### 6. Result Stateful Block
 
-- Owner: `internal/modules/kernel/result`
+- Owner: `internal/modules/blocks/result`
 - Owns: Result、Artifact、accepted outcome。
 - InputContract:
   - result acceptance requires current definition refs and accepted evidence refs。
@@ -251,15 +253,16 @@ Inventory rule:
   - accepted/rejected/superseded result state。
   - logical artifact refs。
 - StateInvariant:
+  - 只管理 Result/Artifact formal-outcome 聚合自身状态，不承担 completion gate 编排。
   - LLM self-claimed completion without evidence cannot create accepted Result。
   - artifact must not expose local absolute paths in product surface。
 - Pairwise tests:
   - completion gate -> result: all satisfied coverage creates accepted result。
   - result -> projection: outcome cites evidence refs。
 
-### 7. Decision Module
+### 7. Decision Stateful Block
 
-- Owner: `internal/modules/kernel/decision`
+- Owner: `internal/modules/blocks/decision`
 - Owns: DecisionTicket、Resolution。
 - InputContract:
   - ticket and resolution commands must be scoped by workspaceId/runId/stepId when related to runtime execution。
@@ -268,15 +271,16 @@ Inventory rule:
   - open/resolved/rejected decision state。
   - resolution record with lineage and scoped continuation intent。
 - StateInvariant:
+  - 只管理 Ticket/Resolution 聚合自身状态，不承担 continuation 编排。
   - decision is created only for real governance gaps。
   - resolution cannot overwrite original runtime stage contract。
 - Pairwise tests:
   - orchestrator/governance -> decision: ticket creation is scoped and idempotent。
   - decision -> continuation: resolved ticket triggers scoped continuation。
 
-### 8. Approval Module
+### 8. Approval Stateful Block
 
-- Owner: `internal/modules/kernel/approval`
+- Owner: `internal/modules/blocks/approval`
 - Owns: Approval、approval decision result。
 - InputContract:
   - approval command must be scoped by workspaceId/runId/stepId/action when runtime-related。
@@ -285,6 +289,7 @@ Inventory rule:
   - pending/approved/rejected approval state。
   - approval result event for continuation or terminal handling。
 - StateInvariant:
+  - 只管理 Approval 聚合自身状态，不承担授权后执行或 completion 编排。
   - approval cannot create accepted Result。
   - approval ID conflicts across workspaces require scoped lookup。
 - Pairwise tests:
@@ -325,24 +330,25 @@ Inventory rule:
   - owner -> eventstream: emitted events preserve source module, subject and scope。
   - eventstream -> projection/audit: query is bounded and scoped。
 
-### 11. Memory Module
+### 11. Memory Stateful Block
 
-- Owner: `internal/modules/kernel/memory`
+- Owner: `internal/modules/blocks/memory`
 - Owns: Memory、recall trace、selected context。
 - InputContract:
   - only high-value reusable information with provenance can be stored。
 - OutputContract:
   - selected/candidate/excluded recall trace。
 - StateInvariant:
+  - 只管理 MemoryItem/MemoryRecallTrace 聚合自身状态，不承担 runtime context 编排。
   - rejected diagnostic retry流水不能成为高价值长期 memory。
   - memory cannot override current Goal/DoD or StagePacket。
 - Pairwise tests:
   - memory -> context renderer: selected context is traceable and bounded。
   - rejected diagnostic -> memory: not persisted as accepted memory。
 
-### 12. MCP Registry Module
+### 12. MCP Registry Stateful Block
 
-- Owner: `internal/modules/kernel/mcp`
+- Owner: `internal/modules/blocks/mcpregistry`
 - Owns: MCPServer、MCPCapability registry、capability selection metadata。
 - InputContract:
   - server/capability commands are structured and scoped when workspace-bound。
@@ -350,14 +356,15 @@ Inventory rule:
 - OutputContract:
   - declared capability catalog and refs for runtime context。
 - StateInvariant:
+  - 只管理 MCPServer/MCPCapability registry 自身状态，不执行 MCP invocation。
   - core consumes capability kind/schema, not concrete business meaning。
 - Pairwise tests:
   - mcp registry -> activation/context: selected capability refs are traceable。
   - mcp registry -> mcp block: capability invocation contract remains structured。
 
-### 13. Skill Registry Module
+### 13. Skill Registry Stateful Block
 
-- Owner: `internal/modules/kernel/skill`
+- Owner: `internal/modules/blocks/skill`
 - Owns: Skill registry and selected skill metadata。
 - InputContract:
   - skill definitions are guidance/configuration, not runtime state transitions。
@@ -365,14 +372,15 @@ Inventory rule:
 - OutputContract:
   - selected skill refs and bounded instruction metadata。
 - StateInvariant:
+  - 只管理 Skill registry 自身状态，不承担 runtime context 或执行编排。
   - skill guidance cannot override current Goal/DoD, StagePacket or execution contract。
 - Pairwise tests:
   - skill -> activation/context: selected skills appear as refs with provenance。
   - skill -> orchestrator: core consumes structured refs, not template-specific branch。
 
-### 14. Soul Registry Module
+### 14. Soul Registry Stateful Block
 
-- Owner: `internal/modules/kernel/soul`
+- Owner: `internal/modules/blocks/soul`
 - Owns: Soul catalog、stage policy refs、capability and risk constraints。
 - InputContract:
   - Soul commands operate on catalog/binding metadata。
@@ -380,6 +388,7 @@ Inventory rule:
 - OutputContract:
   - selected stage policy refs and constraints。
 - StateInvariant:
+  - 只管理 Soul/stage-policy catalog 自身状态，不承担 runtime 调度或策略编排。
   - core does not branch on Soul ID or Soul display text。
 - Pairwise tests:
   - soul -> activation/context: stage policy is bound to run context。

@@ -8,7 +8,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 )

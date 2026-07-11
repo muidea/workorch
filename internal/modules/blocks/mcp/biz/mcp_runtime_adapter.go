@@ -19,7 +19,7 @@ import (
 	"time"
 
 	blockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagedconfig"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"

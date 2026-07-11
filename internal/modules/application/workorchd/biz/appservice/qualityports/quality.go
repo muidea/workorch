@@ -9,7 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitioncore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/qualitycore"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

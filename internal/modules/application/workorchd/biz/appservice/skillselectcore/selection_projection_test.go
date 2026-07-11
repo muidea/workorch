@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
-	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 )
 
 func TestSelectionInputProjectionCopiesModels(t *testing.T) {

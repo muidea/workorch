@@ -6,7 +6,6 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
@@ -110,7 +109,6 @@ type RuntimeOrchestrator struct {
 	resolutions         repository.DecisionResolutionRepository
 	approvals           repository.ApprovalRepository
 	evidence            RuntimeEvidenceRepositories
-	eventHub            events.Hub
 	commandHub          magicevent.Hub
 	eventDrivenDispatch bool
 	policyMu            sync.RWMutex
@@ -184,9 +182,8 @@ func NewRuntimeOrchestrator(
 	workspaceRepo repository.WorkspaceRepository,
 	ticketRepo repository.DecisionTicketRepository,
 	approvalRepo repository.ApprovalRepository,
-	eventHub events.Hub,
 ) *RuntimeOrchestrator {
-	return NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, nil, approvalRepo, eventHub)
+	return NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, nil, approvalRepo)
 }
 
 func NewRuntimeOrchestratorWithResolutions(
@@ -197,7 +194,6 @@ func NewRuntimeOrchestratorWithResolutions(
 	ticketRepo repository.DecisionTicketRepository,
 	resolutionRepo repository.DecisionResolutionRepository,
 	approvalRepo repository.ApprovalRepository,
-	eventHub events.Hub,
 ) *RuntimeOrchestrator {
 	return NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		runtime,
@@ -208,7 +204,6 @@ func NewRuntimeOrchestratorWithResolutions(
 		resolutionRepo,
 		approvalRepo,
 		RuntimeEvidenceRepositories{},
-		eventHub,
 	)
 }
 
@@ -221,12 +216,8 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 	resolutionRepo repository.DecisionResolutionRepository,
 	approvalRepo repository.ApprovalRepository,
 	evidence RuntimeEvidenceRepositories,
-	eventHub events.Hub,
 	policies ...RuntimePolicy,
 ) *RuntimeOrchestrator {
-	if eventHub == nil {
-		eventHub = events.NewMemoryHub()
-	}
 	policy := NormalizeRuntimePolicy(RuntimePolicy{})
 	if len(policies) > 0 {
 		policy = NormalizeRuntimePolicy(policies[0])
@@ -240,7 +231,6 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		resolutions: resolutionRepo,
 		approvals:   approvalRepo,
 		evidence:    evidence,
-		eventHub:    eventHub,
 		policy:      policy,
 		llmContext:  newLLMContextSubsystem(),
 		repair:      newRepairSubsystem(stepRepo, workspaceRepo),
@@ -251,9 +241,9 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		decision:    newDecisionResumeSubsystem(ticketRepo, resolutionRepo),
 	}
 	orchestrator.checkpoints = newCheckpointSubsystem(evidence, stepRepo)
-	orchestrator.eventer = newEventSubsystem(eventHub, orchestrator.checkpoints, orchestrator.llmContext)
+	orchestrator.eventer = newEventSubsystem(orchestrator.checkpoints, orchestrator.llmContext)
 	orchestrator.patches = newPatchSubsystem(evidence, approvalRepo, orchestrator.eventPublisher())
-	orchestrator.results = newResultSubsystem(evidence, stepRepo, orchestrator.eventPublisher())
+	orchestrator.results = newResultSubsystem(evidence, stepRepo)
 	return orchestrator
 }
 
@@ -269,10 +259,10 @@ func (o *RuntimeOrchestrator) checkpointManager() *checkpointSubsystem {
 
 func (o *RuntimeOrchestrator) eventPublisher() *eventSubsystem {
 	if o == nil {
-		return newEventSubsystem(nil, nil, nil)
+		return newEventSubsystem(nil, nil)
 	}
 	if o.eventer == nil {
-		o.eventer = newEventSubsystem(o.eventHub, o.checkpointManager(), o.llmContextManager())
+		o.eventer = newEventSubsystem(o.checkpointManager(), o.llmContextManager())
 	}
 	return o.eventer
 }
@@ -331,14 +321,13 @@ func (o *RuntimeOrchestrator) patchManager() *patchSubsystem {
 
 func (o *RuntimeOrchestrator) resultManager() *resultSubsystem {
 	if o == nil {
-		return newResultSubsystem(RuntimeEvidenceRepositories{}, nil, nil)
+		return newResultSubsystem(RuntimeEvidenceRepositories{}, nil)
 	}
 	if o.results == nil {
-		o.results = newResultSubsystem(o.evidence, o.steps, o.eventPublisher())
+		o.results = newResultSubsystem(o.evidence, o.steps)
 	} else {
 		o.results.evidence = o.evidence
 		o.results.steps = o.steps
-		o.results.events = o.eventPublisher()
 	}
 	return o.results
 }

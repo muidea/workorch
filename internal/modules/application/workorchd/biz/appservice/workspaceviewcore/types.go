@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const (
@@ -115,7 +115,7 @@ type Scheduler func(name string, fn func(context.Context)) bool
 
 type ManagerOptions struct {
 	Loader               Loader
-	Hub                  events.Hub
+	CommandHub           magicevent.Hub
 	Schedule             Scheduler
 	RebuildCoalesceDelay time.Duration
 }

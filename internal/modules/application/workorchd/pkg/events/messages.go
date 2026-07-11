@@ -47,8 +47,19 @@ type WorkspaceRunRequestedResult struct {
 }
 
 type WorkspaceProjectionChangedData struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
+	WorkspaceID             common.WorkspaceID
+	RunID                   common.RunID
+	GlobalRevision          int64
+	WorkspaceRevision       int64
+	SourceEventRevision     int64
+	ProjectedSourceRevision int64
+	WorkspaceTotal          int
+	ChangeKind              string
+	ProjectionState         string
+	UpdatedAt               string
+	RebuiltAt               string
+	StaleReason             string
+	Error                   string
 }
 
 type CLICommand struct {

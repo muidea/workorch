@@ -4,9 +4,9 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )

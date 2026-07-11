@@ -168,15 +168,15 @@ Additional scope closure:
   `go test ./internal/services/workorch/biz/backends ./internal/services/workorch/service/tui -count=1`;
   `go test ./internal/services/workorch/biz/backends ./internal/modules/application/workorchd/biz/appservice -run 'TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope|TestEventHubRunReadCommandsCarryWorkspaceScope|TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand|TestCLIWorkspaceObjectCommandsRequireMatchingWorkspaceScope|TestCLIRunCommandsRequireWorkspaceScope|TestCLIWorkspaceSnapshotCommandProjectsDetailView' -count=1`;
   `go test ./internal/modules/application/workorchd/biz/appservice/governanceports -run 'TestResolveApprovalView(ReadsApprovalWithExplicitScope|WithoutScopeResolvesUniquePendingApproval|WithoutScopeConflictsOnDuplicatePendingApprovals)|TestBatchResolveApprovalViewsApprovesPendingItems' -count=1`;
-  `go test ./internal/modules/kernel/approval -run 'TestApproval(MutationCommandsHonorWorkspaceScope|MutationCommandWithoutScopeResolvesUniquePendingApproval|MutationCommandWithoutScopeConflictsOnDuplicatePendingApprovals|CommandGetHonorsScope|CommandListByRunHonorsWorkspaceScope)' -count=1`;
-  `go test ./internal/modules/kernel/decision -run 'TestDecision(TicketCommandGetHonorsScope|TicketCommandListByRunHonorsWorkspaceScope|MutationCommandsHonorWorkspaceScope|ResolveCommandWithoutScopeResolvesUniqueOpenTicket|ResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets|DeleteCommandWithoutScopeDeletesUniqueOpenTicket|ResolutionCommandGetHonorsTicketScope|ResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets|ResolutionDeleteWithoutScopeDeletesUniqueTicketResolution)' -count=1`.
+  `go test ./internal/modules/blocks/approval -run 'TestApproval(MutationCommandsHonorWorkspaceScope|MutationCommandWithoutScopeResolvesUniquePendingApproval|MutationCommandWithoutScopeConflictsOnDuplicatePendingApprovals|CommandGetHonorsScope|CommandListByRunHonorsWorkspaceScope)' -count=1`;
+  `go test ./internal/modules/blocks/decision -run 'TestDecision(TicketCommandGetHonorsScope|TicketCommandListByRunHonorsWorkspaceScope|MutationCommandsHonorWorkspaceScope|ResolveCommandWithoutScopeResolvesUniqueOpenTicket|ResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets|DeleteCommandWithoutScopeDeletesUniqueOpenTicket|ResolutionCommandGetHonorsTicketScope|ResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets|ResolutionDeleteWithoutScopeDeletesUniqueTicketResolution)' -count=1`.
 
 ### Event Ownership Rule
 
 事件 topic 按被操作业务模型 owner 归属：
 
-- Decision ticket/resolution 写入 topic 归 `kernel/decision/pkg/events`。
-- Approval 写入 topic 归 `kernel/approval/pkg/events`。
+- Decision ticket/resolution 写入 topic 归 `blocks/decision/pkg/events`。
+- Approval 写入 topic 归 `blocks/approval/pkg/events`。
 - Run 正式状态写入 topic 归 `kernel/run/pkg/events`。
 - Run 编排推进 topic 归 `kernel/orchestrator/pkg/events`。
 - Workspace activation/restart 请求如果只是 facade/use-case command，归 `application/workorchd/pkg/events`；它不能成为 workspace owner 的正式状态。
@@ -416,7 +416,7 @@ Web/TUI
 - appservice run lifecycle facade 必须在进入 run owner read/start/resume 前已经绑定 workspace scope，不能先用裸 `runID` 全局解析后再补 scope。
 - run repository contract 已提供 `GetByWorkspaceID(workspaceID, runID)`；带 workspace scope 的 `/run/command/get`、run owner service 状态转换读取、orchestrator lifecycle/completion/close/resume/dispatch request run lookup、runtime progress/terminal event run lookup、governance auto-ticket/approval run read、appservice run repository helper 和 readmodelcore run reader helper 必须直接使用 scoped getter，避免同名 run 跨 workspace 后置过滤或为单个 run 读取扫描 workspace run list。
 
-### `internal/modules/kernel/decision` / `approval`
+### `internal/modules/blocks/decision` / `approval`
 
 需要核对：
 

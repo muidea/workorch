@@ -5,7 +5,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )

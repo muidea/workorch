@@ -47,8 +47,11 @@ workspace ViewModel 的完整设计以
 
 职责：
 
-- 提供 repository、event hub、runtime policy、shared services
-- 作为模块装配依赖源
+- 以 `workorch/repositories` ID 提供单一 repository provider
+- 只作为 kernel owner module 的 repository 装配依赖源
+
+application EventHub 直接来自 magicCommon framework application runtime；runtime policy
+由无状态配置能力读取，不再通过 initiator 聚合导出。
 
 ### `internal/modules/application/workorchd/biz/bootstrap`
 
@@ -58,23 +61,17 @@ workspace ViewModel 的完整设计以
 - 构造应用层 Runtime shell
 - 管理 request-scoped runtime module lifecycle
 
-典型 exports 分组应至少包括：
+生产 bootstrap exports 只允许暴露 application-owned infrastructure：
 
-- `Repositories`
-- `Services`
-- `Infrastructure`
-- `Runtime`
+- projection `EventHub`
+- framework `CommandHub`
+- `BackgroundRoutine`
+- 配置加载函数
 
-分组边界：
-
-- `Repositories`
-  - workspace/run/result/event/memory 等正式仓储访问面
-- `Services`
-  - appservice 可直接组合的高层 service / policy / query face
-- `Infrastructure`
-  - event hub、config、logger、provider client、raw opener 等非业务设施
-- `Runtime`
-  - request-scoped runtime session、runtime use-case shell、stage-aware helper
+Workspace、Run、Result、Decision、Approval、Memory 等 owner repositories 不属于
+application runtime exports。集成测试需要的 file/memory repository builder、owner
+module fixture 与 repository 直写能力统一放在 `biz/testkit`，不得进入生产
+bootstrap/session 类型。
 
 ### `internal/modules/application/workorchd/biz/appservice`
 
@@ -135,7 +132,7 @@ server 层可以接线 projection manager lifecycle，但不拥有 projection co
 
 稳定方向：
 
-- HTTP 请求进入后，应在 request scope 内绑定 runtime access / repositories / event hub / raw opener
+- HTTP 请求进入后，应在 request scope 内绑定 runtime access、EventHub 与 application-owned infrastructure
 - session 结束时只做资源释放，不做业务状态裁决
 - session 既不替代 workspace/run state，也不替代 repository 持久化 contract
 

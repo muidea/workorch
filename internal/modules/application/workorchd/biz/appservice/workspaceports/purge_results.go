@@ -5,9 +5,9 @@ import (
 	"errors"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
+	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

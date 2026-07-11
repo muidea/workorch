@@ -7,11 +7,14 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -19,7 +22,7 @@ import (
 
 type Manager struct {
 	loader               Loader
-	hub                  events.Hub
+	commandHub           magicevent.Hub
 	schedule             Scheduler
 	store                *Store
 	rebuildCoalesceDelay time.Duration
@@ -33,6 +36,8 @@ type Manager struct {
 	workspaceRebuilds  map[string]*workspaceRebuildState
 	metrics            managerMetrics
 }
+
+var managerObserverSequence atomic.Uint64
 
 type workspaceRebuildState struct {
 	inFlight         bool
@@ -59,7 +64,7 @@ type workspaceRebuildMetrics struct {
 func NewManager(options ManagerOptions) *Manager {
 	return &Manager{
 		loader:               options.Loader,
-		hub:                  options.Hub,
+		commandHub:           options.CommandHub,
 		schedule:             options.Schedule,
 		store:                NewStore(),
 		rebuildCoalesceDelay: options.RebuildCoalesceDelay,
@@ -85,9 +90,20 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	if !m.started {
 		m.started = true
-		if m.hub != nil {
-			m.unsubscribers = events.SubscribeWorkorch(m.hub, func(ctx context.Context, event events.WorkorchEvent) error {
-				return m.handleEvent(ctx, event.Envelope())
+		if m.commandHub != nil {
+			observerID := fmt.Sprintf("/eventstream/consumers/application/workorchd/workspace-view/%d", managerObserverSequence.Add(1))
+			observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, m.commandHub)
+			observer.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
+				data, ok := event.Data().(eventstreamevents.EventRecordAppendedData)
+				if ok {
+					_ = m.handleEventRecord(event.Context(), data.Record)
+				}
+				if result != nil {
+					result.Set(nil, nil)
+				}
+			})
+			m.unsubscribers = append(m.unsubscribers, func() {
+				observer.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended)
 			})
 		}
 	}
@@ -523,28 +539,29 @@ func (m *Manager) isClosed() bool {
 	return m.closed
 }
 
-func (m *Manager) handleEvent(_ context.Context, envelope events.Envelope) error {
+func (m *Manager) handleEventRecord(_ context.Context, record eventstreamevents.EventRecordData) error {
 	if m == nil {
 		return nil
 	}
-	if envelope.Topic == workorchdevents.TopicWorkspaceProjectionChanged {
+	if strings.TrimSpace(record.Topic) == "" || record.Topic == workorchdevents.TopicWorkspaceProjectionChanged {
 		return nil
 	}
-	if projectionEventIsRuntimeProgressOnly(envelope.Topic) {
-		return m.handleRuntimeProgressEvent(envelope)
+	if projectionEventIsRuntimeProgressOnly(record.Topic) {
+		return m.handleRuntimeProgressEvent(record)
 	}
-	if strings.TrimSpace(envelope.WorkspaceID) != "" {
-		m.store.MarkStale(envelope.WorkspaceID, envelope.Revision)
+	workspaceID := strings.TrimSpace(string(record.WorkspaceID))
+	if workspaceID != "" {
+		m.store.MarkStale(workspaceID, record.Revision)
 		if m.isRebuildAllInFlight() {
-			m.rememberPendingWorkspaceRebuild(envelope.WorkspaceID)
+			m.rememberPendingWorkspaceRebuild(workspaceID)
 			return nil
 		}
-		m.ScheduleRebuildWorkspace(envelope.WorkspaceID)
+		m.ScheduleRebuildWorkspace(workspaceID)
 		return nil
 	}
-	switch strings.TrimSpace(envelope.SubjectType) {
+	switch strings.TrimSpace(record.SubjectType) {
 	case "workspace":
-		m.store.MarkStale("", envelope.Revision)
+		m.store.MarkStale("", record.Revision)
 		m.ScheduleRebuildAll()
 	}
 	return nil
@@ -562,36 +579,37 @@ func projectionEventIsRuntimeProgressOnly(topic string) bool {
 	}
 }
 
-func (m *Manager) handleRuntimeProgressEvent(envelope events.Envelope) error {
+func (m *Manager) handleRuntimeProgressEvent(record eventstreamevents.EventRecordData) error {
 	if m == nil || m.store == nil {
 		return nil
 	}
-	progress, _ := events.DecodeLLMStreamProgressPayload(envelope.Payload)
-	workspaceID := strings.TrimSpace(firstNonEmptyString(envelope.WorkspaceID, string(progress.WorkspaceID), stringFromPayload(envelope.Payload, events.PayloadKeyWorkspaceID)))
+	payload := record.Payload.Map()
+	progress, _ := events.DecodeLLMStreamProgressPayload(payload)
+	workspaceID := strings.TrimSpace(firstNonEmptyString(string(record.WorkspaceID), string(progress.WorkspaceID), stringFromPayload(payload, events.PayloadKeyWorkspaceID)))
 	if workspaceID == "" {
 		return nil
 	}
 	update := RuntimeProgressUpdate{
 		WorkspaceID:   workspaceID,
-		RunID:         strings.TrimSpace(firstNonEmptyString(envelope.RunID, string(progress.RunID), stringFromPayload(envelope.Payload, events.PayloadKeyRunID))),
-		StepID:        strings.TrimSpace(firstNonEmptyString(envelope.StepID, string(progress.StepID), stringFromPayload(envelope.Payload, events.PayloadKeyStepID))),
-		StepKind:      strings.TrimSpace(stringFromPayload(envelope.Payload, events.PayloadKeyKind)),
-		StepState:     strings.TrimSpace(firstNonEmptyString(progress.Status, stringFromPayload(envelope.Payload, events.PayloadKeyState), stringFromPayload(envelope.Payload, events.PayloadKeyStatus))),
-		Topic:         envelope.Topic,
-		Revision:      envelope.Revision,
-		OccurredAt:    strings.TrimSpace(firstNonEmptyString(envelope.OccurredAt, stringFromPayload(envelope.Payload, "occurredAt"))),
-		Event:         runtimeProgressEventName(envelope.Topic),
-		Stage:         strings.TrimSpace(firstNonEmptyString(stringFromPayload(envelope.Payload, events.PayloadKeyStage), runtimeProgressStageName(envelope.Topic))),
-		Summary:       strings.TrimSpace(firstNonEmptyString(progress.Summary, stringFromPayload(envelope.Payload, events.PayloadKeySummary), runtimeProgressSummary(envelope.Topic))),
-		RequestID:     strings.TrimSpace(stringFromPayload(envelope.Payload, "requestId")),
-		QueueKey:      strings.TrimSpace(stringFromPayload(envelope.Payload, "queueKey")),
-		WorkerID:      strings.TrimSpace(stringFromPayload(envelope.Payload, "workerId")),
-		WorkerEventAt: strings.TrimSpace(firstNonEmptyString(stringFromPayload(envelope.Payload, "heartbeatAt"), stringFromPayload(envelope.Payload, "workerHeartbeatAt"))),
+		RunID:         strings.TrimSpace(firstNonEmptyString(string(record.RunID), string(progress.RunID), stringFromPayload(payload, events.PayloadKeyRunID))),
+		StepID:        strings.TrimSpace(firstNonEmptyString(string(record.StepID), string(progress.StepID), stringFromPayload(payload, events.PayloadKeyStepID))),
+		StepKind:      strings.TrimSpace(stringFromPayload(payload, events.PayloadKeyKind)),
+		StepState:     strings.TrimSpace(firstNonEmptyString(progress.Status, stringFromPayload(payload, events.PayloadKeyState), stringFromPayload(payload, events.PayloadKeyStatus))),
+		Topic:         record.Topic,
+		Revision:      record.Revision,
+		OccurredAt:    strings.TrimSpace(firstNonEmptyString(record.OccurredAt, stringFromPayload(payload, "occurredAt"))),
+		Event:         runtimeProgressEventName(record.Topic),
+		Stage:         strings.TrimSpace(firstNonEmptyString(stringFromPayload(payload, events.PayloadKeyStage), runtimeProgressStageName(record.Topic))),
+		Summary:       strings.TrimSpace(firstNonEmptyString(progress.Summary, stringFromPayload(payload, events.PayloadKeySummary), runtimeProgressSummary(record.Topic))),
+		RequestID:     strings.TrimSpace(stringFromPayload(payload, "requestId")),
+		QueueKey:      strings.TrimSpace(stringFromPayload(payload, "queueKey")),
+		WorkerID:      strings.TrimSpace(stringFromPayload(payload, "workerId")),
+		WorkerEventAt: strings.TrimSpace(firstNonEmptyString(stringFromPayload(payload, "heartbeatAt"), stringFromPayload(payload, "workerHeartbeatAt"))),
 	}
 	if m.store.ApplyRuntimeProgress(update) {
 		return nil
 	}
-	m.store.MarkStale(workspaceID, envelope.Revision)
+	m.store.MarkStale(workspaceID, record.Revision)
 	if m.isRebuildAllInFlight() {
 		m.rememberPendingWorkspaceRebuild(workspaceID)
 		return nil
@@ -735,46 +753,27 @@ func (m *Manager) isRebuildAllInFlight() bool {
 }
 
 func (m *Manager) publishProjectionChanged(ctx context.Context, workspaceID string, changeKind string) {
-	if m == nil || m.hub == nil || m.store == nil {
+	if m == nil || m.commandHub == nil || m.store == nil {
 		return
 	}
 	status := m.store.StatusForWorkspace(workspaceID)
-	payload := map[string]any{
-		"type":                    "workspace_projection_changed",
-		"workspaceId":             workspaceID,
-		"globalRevision":          status.GlobalRevision,
-		"workspaceRevision":       status.WorkspaceRevision,
-		"sourceEventRevision":     status.SourceEventRevision,
-		"projectedSourceRevision": status.ProjectedSourceRevision,
-		"workspaceTotal":          status.WorkspaceTotal,
-		"changeKind":              changeKind,
-		"projectionState":         status.State,
-		"updatedAt":               status.UpdatedAt,
-		"rebuiltAt":               status.RebuiltAt,
+	data := workorchdevents.WorkspaceProjectionChangedData{
+		WorkspaceID:             common.WorkspaceID(workspaceID),
+		GlobalRevision:          status.GlobalRevision,
+		WorkspaceRevision:       status.WorkspaceRevision,
+		SourceEventRevision:     status.SourceEventRevision,
+		ProjectedSourceRevision: status.ProjectedSourceRevision,
+		WorkspaceTotal:          status.WorkspaceTotal,
+		ChangeKind:              changeKind,
+		ProjectionState:         status.State,
+		UpdatedAt:               status.UpdatedAt,
+		RebuiltAt:               status.RebuiltAt,
+		StaleReason:             status.StaleReason,
+		Error:                   status.Error,
 	}
-	if status.StaleReason != "" {
-		payload["staleReason"] = status.StaleReason
-	}
-	if status.Error != "" {
-		payload["error"] = status.Error
-	}
-	envelope := events.Envelope{
-		Topic:        workorchdevents.TopicWorkspaceProjectionChanged,
-		SourceModule: "workorchd.workspace_projection",
-		SubjectType:  "workspace_projection",
-		SubjectID:    workspaceID,
-		WorkspaceID:  workspaceID,
-		Payload:      payload,
-	}
-	var err error
-	if asyncHub, ok := m.hub.(events.AsyncHub); ok {
-		err = asyncHub.PublishAsync(ctx, envelope)
-	} else {
-		err = m.hub.Publish(ctx, envelope)
-	}
-	if err != nil {
-		slog.Warn("workorch workspace projection change event publish failed", "workspaceID", workspaceID, "changeKind", changeKind, "err", err)
-	}
+	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkspaceProjectionChanged, "workorchd.workspace_projection", workorchdevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
+	event.BindLaneKey(events.EventHubLaneKeyFor(event.ID(), events.EventHubLaneScope{SubjectType: "workspace_projection", SubjectID: workspaceID, WorkspaceID: workspaceID}))
+	m.commandHub.Post(event)
 }
 
 func firstNonEmptyString(values ...string) string {

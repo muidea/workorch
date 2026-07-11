@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )

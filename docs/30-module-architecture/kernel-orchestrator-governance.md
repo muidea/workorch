@@ -24,7 +24,7 @@ Last Updated: 2026-05-30
 - evidence mapping
 - completion gate
 
-### `kernel/decision`
+### `blocks/decision`
 
 职责：
 
@@ -53,7 +53,7 @@ Last Updated: 2026-05-30
 它不替代：
 
 - `kernel/run` 的生命周期本体
-- `kernel/result` 的 accepted / rejected closeout
+- `blocks/result` 的 accepted / rejected closeout
 - product 层的 queue / drawer / form 交互
 
 ### Approval Boundary
@@ -93,7 +93,7 @@ approval 不应承担：
 | --- | --- |
 | step dispatch / follow-up / completion follow-up | `kernel/orchestrator` |
 | context gate fail-fast / read-required / blocker-required / replan-required routing | `kernel/orchestrator` |
-| decision ticket / resolution object | `kernel/decision` |
+| decision ticket / resolution object | `blocks/decision` |
 | duplicate failure / repair exhausted / auto-governance 协同 | `kernel/governance` |
 | approval formal state / recovery allow-deny input | governance-aligned kernel responsibility |
 

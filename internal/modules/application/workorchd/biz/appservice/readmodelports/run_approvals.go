@@ -6,7 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )

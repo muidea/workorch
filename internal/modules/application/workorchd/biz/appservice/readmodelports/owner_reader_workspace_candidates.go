@@ -1,8 +1,8 @@
 package readmodelports
 
-import "github.com/muidea/workorch/internal/pkg/events"
+import eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 
-func (c OwnerReaderCandidates) WorkspaceSnapshotReaders(owner OwnerReaders, published []events.WorkorchEvent) WorkspaceSnapshotReaders {
+func (c OwnerReaderCandidates) WorkspaceSnapshotReaders(owner OwnerReaders, published []eventstreamevents.EventRecordData) WorkspaceSnapshotReaders {
 	if c.Matches(owner) {
 		return owner.WorkspaceSnapshotReaders(published)
 	}

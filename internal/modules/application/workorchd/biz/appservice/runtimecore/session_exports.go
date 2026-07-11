@@ -6,7 +6,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
@@ -21,17 +20,6 @@ func (s *Session) Exports() (bootstrap.Exports, error) {
 		return s.exports, nil
 	}
 	return s.Bootstrap.Exports(), nil
-}
-
-func (s *Session) RequiredEventHub() (events.Hub, error) {
-	exports, err := s.Exports()
-	if err != nil {
-		return nil, err
-	}
-	if exports.Infrastructure.EventHub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	return exports.Infrastructure.EventHub, nil
 }
 
 func (s *Session) RequiredCommandHub() (magicevent.Hub, error) {
@@ -86,38 +74,10 @@ func HasRuntimeExports(exports bootstrap.Exports) bool {
 }
 
 func ValidateRuntimeExports(exports bootstrap.Exports) error {
-	repositories := exports.Repositories
 	required := []struct {
 		name  string
 		value any
 	}{
-		{"Repositories.Souls", repositories.Souls},
-		{"Repositories.WorkspaceTemplates", repositories.WorkspaceTemplates},
-		{"Repositories.MemoryItems", repositories.MemoryItems},
-		{"Repositories.MemoryRecallTraces", repositories.MemoryRecallTraces},
-		{"Repositories.AutoGovernanceTraces", repositories.AutoGovernanceTraces},
-		{"Repositories.Skills", repositories.Skills},
-		{"Repositories.MCPServers", repositories.MCPServers},
-		{"Repositories.MCPCapabilities", repositories.MCPCapabilities},
-		{"Repositories.Results", repositories.Results},
-		{"Repositories.Artifacts", repositories.Artifacts},
-		{"Repositories.EventRecords", repositories.EventRecords},
-		{"Repositories.Workspaces", repositories.Workspaces},
-		{"Repositories.Goals", repositories.Goals},
-		{"Repositories.DoDs", repositories.DoDs},
-		{"Repositories.Runs", repositories.Runs},
-		{"Repositories.Steps", repositories.Steps},
-		{"Repositories.ToolCalls", repositories.ToolCalls},
-		{"Repositories.Patches", repositories.Patches},
-		{"Repositories.ValidationResults", repositories.ValidationResults},
-		{"Repositories.RuntimeCheckpoints", repositories.RuntimeCheckpoints},
-		{"Repositories.EvidenceRecords", repositories.EvidenceRecords},
-		{"Repositories.CoverageWorkItems", repositories.CoverageWorkItems},
-		{"Repositories.ArtifactContinuations", repositories.ArtifactContinuations},
-		{"Repositories.Tickets", repositories.Tickets},
-		{"Repositories.Resolutions", repositories.Resolutions},
-		{"Repositories.Approvals", repositories.Approvals},
-		{"Infrastructure.EventHub", exports.Infrastructure.EventHub},
 		{"Infrastructure.CommandHub", exports.Infrastructure.CommandHub},
 	}
 	for _, item := range required {

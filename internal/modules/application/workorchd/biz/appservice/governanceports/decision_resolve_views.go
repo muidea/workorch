@@ -10,8 +10,8 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 )

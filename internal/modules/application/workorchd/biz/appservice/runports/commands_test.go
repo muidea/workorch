@@ -8,10 +8,9 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -23,7 +22,7 @@ func TestListRunsByWorkspaceFiltersOwnerReadResults(t *testing.T) {
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	for _, item := range []*runmodel.Run{
 		{ID: "run-list-a", WorkspaceID: "ws-list-a", State: common.RunStatePending},
 		{ID: "run-list-b", WorkspaceID: "ws-list-b", State: common.RunStatePending},
@@ -152,7 +151,7 @@ func TestValidateRunDefinitionsReadsDefinitionsWithWorkspaceScope(t *testing.T) 
 	ctx := context.Background()
 	runtime := newOwnerRuntime()
 	defer runtime.Shutdown(ctx)
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	workspaceID := common.WorkspaceID("ws-definition-validation-scope")
 	goalID := common.GoalID("goal-definition-validation")
 	dodID := common.DoDID("dod-definition-validation")
@@ -172,7 +171,6 @@ func TestValidateRunDefinitionsReadsDefinitionsWithWorkspaceScope(t *testing.T) 
 }
 
 type runportsMagicTestHub struct {
-	hub                  *events.MagicHub
 	rawHub               magicevent.Hub
 	orchestratorObserver magicevent.SimpleObserver
 }
@@ -180,14 +178,12 @@ type runportsMagicTestHub struct {
 func newRunportsMagicTestHub(t *testing.T) *runportsMagicTestHub {
 	t.Helper()
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHubOwner(rawHub, "runports/test")
 	ret := &runportsMagicTestHub{
-		hub:                  hub,
 		rawHub:               rawHub,
 		orchestratorObserver: magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub),
 	}
 	t.Cleanup(func() {
-		hub.Terminate(context.Background())
+		rawHub.Terminate(context.Background())
 	})
 	return ret
 }

@@ -7,26 +7,16 @@ import (
 	"github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
 	"github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/pkg/workorchdeps"
 )
 
 func init() {
 	pluginmodule.Register(New())
 }
 
-func (m *Module) Weight() int { return 19 }
+func (m *Module) Weight() int { return 29 }
 
-func (m *Module) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
-	repos, err := workorchdeps.ResolveSystemRepositories(ModuleID)
-	if err != nil {
-		return err
-	}
-	if setupErr := m.Configure(Dependencies{
-		Souls:           repos.Souls,
-		Templates:       repos.Templates,
-		MCPServers:      repos.MCPServers,
-		MCPCapabilities: repos.MCPCapabilities,
-	}); setupErr != nil {
+func (m *Module) Setup(_ context.Context, eventHub event.Hub, _ task.BackgroundRoutine) *cd.Error {
+	if setupErr := m.Configure(Dependencies{EventHub: eventHub}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}
 	return nil

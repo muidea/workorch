@@ -7,27 +7,26 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
+	decisionmodule "github.com/muidea/workorch/internal/modules/blocks/decision"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	gitmodule "github.com/muidea/workorch/internal/modules/blocks/git"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
+	mcpmodule "github.com/muidea/workorch/internal/modules/blocks/mcpregistry"
+	memorymodule "github.com/muidea/workorch/internal/modules/blocks/memory"
+	resultmodule "github.com/muidea/workorch/internal/modules/blocks/result"
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
+	skillmodule "github.com/muidea/workorch/internal/modules/blocks/skill"
+	soulmodule "github.com/muidea/workorch/internal/modules/blocks/soul"
 	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	webmodule "github.com/muidea/workorch/internal/modules/blocks/web"
-	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
-	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
+	workspacemodule "github.com/muidea/workorch/internal/modules/blocks/workspace"
 	eventstreammodule "github.com/muidea/workorch/internal/modules/kernel/eventstream"
 	governancemodule "github.com/muidea/workorch/internal/modules/kernel/governance"
-	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp"
-	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
 	orchestratormodule "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
-	resultmodule "github.com/muidea/workorch/internal/modules/kernel/result"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
-	skillmodule "github.com/muidea/workorch/internal/modules/kernel/skill"
-	soulmodule "github.com/muidea/workorch/internal/modules/kernel/soul"
 	systemmodule "github.com/muidea/workorch/internal/modules/kernel/system"
-	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
@@ -45,45 +44,24 @@ func (l contextLifecycle) Start() error                   { return l.start(conte
 func (l contextLifecycle) Stop(ctx context.Context) error { return l.stop(ctx) }
 
 type runtimeHub struct {
-	primary events.Hub
-	command magicevent.Hub
+	magicevent.Hub
+	repos   RepositoryExports
 	modules []lifecycle
-	unsub   func()
 	once    sync.Once
 }
 
-func newRuntimeHub(existing events.Hub, commandHub magicevent.Hub) *runtimeHub {
+func (h *runtimeHub) testRepositories() RepositoryExports {
+	if h == nil {
+		return RepositoryExports{}
+	}
+	return h.repos
+}
+
+func newRuntimeHub(commandHub magicevent.Hub) *runtimeHub {
 	if commandHub == nil {
 		commandHub = magicevent.NewHub(1024)
 	}
-	if existing == nil {
-		existing = events.NewMagicHubWithHubOwner(commandHub, "application/workorchd/testkit")
-	}
-	return &runtimeHub{primary: existing, command: commandHub}
-}
-
-func (h *runtimeHub) Publish(ctx context.Context, envelope events.Envelope) error {
-	return h.primary.Publish(ctx, envelope)
-}
-
-func (h *runtimeHub) PublishAsync(ctx context.Context, envelope events.Envelope) error {
-	if asyncHub, ok := h.primary.(interface {
-		PublishAsync(context.Context, events.Envelope) error
-	}); ok {
-		return asyncHub.PublishAsync(ctx, envelope)
-	}
-	return h.primary.Publish(ctx, envelope)
-}
-
-func (h *runtimeHub) Subscribe(topic string, handler events.Handler) func() {
-	return h.primary.Subscribe(topic, handler)
-}
-
-func (h *runtimeHub) Published() []events.Envelope {
-	if provider, ok := h.primary.(interface{ Published() []events.Envelope }); ok {
-		return provider.Published()
-	}
-	return nil
+	return &runtimeHub{Hub: commandHub}
 }
 
 func (h *runtimeHub) Terminate(ctx context.Context) {
@@ -92,14 +70,9 @@ func (h *runtimeHub) Terminate(ctx context.Context) {
 			_ = h.modules[idx].Stop(ctx)
 		}
 		h.modules = nil
-		if h.unsub != nil {
-			h.unsub()
-			h.unsub = nil
-		}
-		if terminator, ok := h.primary.(interface{ Terminate(context.Context) }); ok {
-			terminator.Terminate(ctx)
-		} else if h.command != nil {
-			h.command.Terminate(ctx)
+		h.repos = RepositoryExports{}
+		if h.Hub != nil {
+			h.Hub.Terminate(ctx)
 		}
 	})
 }
@@ -107,26 +80,27 @@ func (h *runtimeHub) Terminate(ctx context.Context) {
 // NewRuntime creates a repository runtime and explicitly starts all owner modules
 // required by application integration tests. Production bootstrap intentionally
 // remains repository-only and does not call this helper.
-func NewRuntime(backend string, dataRoot string, policy workorchruntimepolicy.RuntimePolicy, existing events.Hub, commandHub magicevent.Hub) *bootstrap.Runtime {
-	return newRuntime(backend, dataRoot, policy, existing, commandHub)
+func NewRuntime(backend string, dataRoot string, policy workorchruntimepolicy.RuntimePolicy, commandHub magicevent.Hub) *bootstrap.Runtime {
+	return newRuntime(backend, dataRoot, policy, commandHub)
 }
 
 // TryNewRuntime is the error-returning form used by tests that exercise invalid
 // bootstrap configuration.
-func TryNewRuntime(backend string, dataRoot string, policy workorchruntimepolicy.RuntimePolicy, existing events.Hub, commandHub magicevent.Hub) (runtime *bootstrap.Runtime, err error) {
+func TryNewRuntime(backend string, dataRoot string, policy workorchruntimepolicy.RuntimePolicy, commandHub magicevent.Hub) (runtime *bootstrap.Runtime, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("build application test runtime: %v", recovered)
 			runtime = nil
 		}
 	}()
-	return newRuntime(backend, dataRoot, policy, existing, commandHub), nil
+	return newRuntime(backend, dataRoot, policy, commandHub), nil
 }
 
-func newRuntime(backend string, dataRoot string, policy workorchruntimepolicy.RuntimePolicy, existing events.Hub, commandHub magicevent.Hub) *bootstrap.Runtime {
-	hub := newRuntimeHub(existing, commandHub)
-	runtime := bootstrap.NewWithBackendRuntimePolicyAndEventHubs(backend, dataRoot, policy, hub, hub.command)
-	modules, err := startOwnerModules(runtime.Exports(), policy, hub.command)
+func newRuntime(backend string, dataRoot string, policy workorchruntimepolicy.RuntimePolicy, commandHub magicevent.Hub) *bootstrap.Runtime {
+	hub := newRuntimeHub(commandHub)
+	hub.repos = buildRepositories(backend, dataRoot)
+	runtime := bootstrap.NewWithBackendRuntimePolicyAndCommandHub(backend, dataRoot, policy, hub)
+	modules, err := startOwnerModules(RuntimeExports(runtime), policy, hub)
 	if err != nil {
 		panic(fmt.Errorf("start application test owner modules: %w", err))
 	}
@@ -134,7 +108,7 @@ func newRuntime(backend string, dataRoot string, policy workorchruntimepolicy.Ru
 	return runtime
 }
 
-func startOwnerModules(exports bootstrap.Exports, policy workorchruntimepolicy.RuntimePolicy, rawHub magicevent.Hub) ([]lifecycle, error) {
+func startOwnerModules(exports Exports, policy workorchruntimepolicy.RuntimePolicy, rawHub magicevent.Hub) ([]lifecycle, error) {
 	background := exports.Infrastructure.BackgroundRoutine
 	repositories := exports.Repositories
 	configured := make([]lifecycle, 0, 21)
@@ -200,11 +174,11 @@ func startOwnerModules(exports bootstrap.Exports, policy workorchruntimepolicy.R
 		return nil, err
 	}
 	decisionModule := decisionmodule.New()
-	if err := configure(decisionModule, decisionModule.Configure(decisionmodule.Dependencies{Tickets: repositories.Tickets, Resolutions: repositories.Resolutions, EvidenceRecords: repositories.EvidenceRecords, EventHub: rawHub})); err != nil {
+	if err := configure(decisionModule, decisionModule.Configure(decisionmodule.Dependencies{Tickets: repositories.Tickets, Resolutions: repositories.Resolutions, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	approvalModule := approvalmodule.New()
-	if err := configure(approvalModule, approvalModule.Configure(approvalmodule.Dependencies{Approvals: repositories.Approvals, EvidenceRecords: repositories.EvidenceRecords, EventHub: rawHub})); err != nil {
+	if err := configure(approvalModule, approvalModule.Configure(approvalmodule.Dependencies{Approvals: repositories.Approvals, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	resultModule := resultmodule.New()
@@ -232,7 +206,7 @@ func startOwnerModules(exports bootstrap.Exports, policy workorchruntimepolicy.R
 		Patches: repositories.Patches, ValidationResults: repositories.ValidationResults,
 		RuntimeCheckpoints: repositories.RuntimeCheckpoints, EvidenceRecords: repositories.EvidenceRecords,
 		CoverageWorkItems: repositories.CoverageWorkItems, ArtifactContinuations: repositories.ArtifactContinuations,
-		RuntimePolicy: policy, EventHub: exports.Infrastructure.EventHub, CommandHub: rawHub, BackgroundRoutine: background,
+		RuntimePolicy: policy, CommandHub: rawHub, BackgroundRoutine: background,
 	})); err != nil {
 		return nil, err
 	}
@@ -245,7 +219,7 @@ func startOwnerModules(exports bootstrap.Exports, policy workorchruntimepolicy.R
 		return nil, err
 	}
 	systemModule := systemmodule.New()
-	if err := systemModule.Configure(systemmodule.Dependencies{Souls: repositories.Souls, Templates: repositories.WorkspaceTemplates, MCPServers: repositories.MCPServers, MCPCapabilities: repositories.MCPCapabilities}); err != nil {
+	if err := systemModule.Configure(systemmodule.Dependencies{EventHub: rawHub}); err != nil {
 		return nil, err
 	}
 	configured = append(configured, contextLifecycle{start: systemModule.Start, stop: systemModule.Stop})

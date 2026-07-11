@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	client "github.com/muidea/workorch/internal/pkg/workorchclient"
 )
 
@@ -1918,11 +1917,11 @@ func (b *remoteEventsBackend) dispatchSSEData(ctx context.Context, lines []strin
 	if len(lines) == 0 {
 		return
 	}
-	var envelope events.Envelope
+	var envelope backendEventData
 	if err := json.Unmarshal([]byte(strings.Join(lines, "\n")), &envelope); err != nil {
 		return
 	}
-	evt := convertEnvelope(envelope)
+	evt := convertBackendEvent(envelope)
 	if evt.Type == "" {
 		return
 	}

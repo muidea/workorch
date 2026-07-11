@@ -3,7 +3,7 @@ package contextregistrycore
 import (
 	"strings"
 
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 )
 
 func MergeMemoryUpdateCommand(existing *memorymodel.MemoryItem, cmd UpdateMemoryItemCommand) UpdateMemoryItemCommand {

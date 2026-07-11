@@ -12,7 +12,7 @@ import (
 	"time"
 
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -20,7 +20,7 @@ import (
 )
 
 func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
-	envelope := events.Envelope{
+	envelope := backendEventData{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-remote",
 		Payload:     events.WorkspacePayload("remote workspace", "", "/tmp/remote", "", common.WorkspaceStateActive, "run-remote"),
@@ -113,7 +113,7 @@ func TestRemoteSchedulerDiagnosticsPreservesContinuationReadback(t *testing.T) {
 
 func TestRemoteProjectionEventsBackendRequestsProjectionStreamView(t *testing.T) {
 	seenView := make(chan string, 1)
-	envelope := events.Envelope{
+	envelope := backendEventData{
 		Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
 		WorkspaceID: "ws-projection",
 		Payload: map[string]any{
@@ -218,8 +218,7 @@ func TestRemoteWorkspaceListPreservesWorkspaceProjection(t *testing.T) {
 
 func TestRemoteEventsBackendReconnectsAndSignalsWorkspaceListRefresh(t *testing.T) {
 	var requests atomic.Int32
-	envelope := events.Envelope{
-		Version:     events.WorkorchEventVersion,
+	envelope := backendEventData{
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-created-after-reconnect",
 		Payload:     events.WorkspacePayload("created after reconnect", "", "/tmp/reconnect", "", common.WorkspaceStateActive, ""),
@@ -289,13 +288,13 @@ func TestRemoteEventsBackendReconnectsAndSignalsWorkspaceListRefresh(t *testing.
 func TestRemoteEventsBackendReconnectsWithLastEventID(t *testing.T) {
 	var requests atomic.Int32
 	seenLastEventID := make(chan string, 2)
-	first := events.Envelope{
+	first := backendEventData{
 		ID:          "evt-first",
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-replay",
 		Payload:     events.WorkspacePayload("replay", "", "/tmp/replay", "", common.WorkspaceStateActive, "run-replay"),
 	}
-	second := events.Envelope{
+	second := backendEventData{
 		ID:          "evt-second",
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-replay",

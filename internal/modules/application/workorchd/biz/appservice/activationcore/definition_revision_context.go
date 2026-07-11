@@ -1,6 +1,6 @@
 package activationcore
 
-import workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+import workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 
 func CurrentWorkspaceDefinitionRevisionContext(effectiveGoal *workspacemodel.Goal, goalContexts []map[string]any, effectiveDoD *workspacemodel.DoD, doDContexts []map[string]any) map[string]any {
 	if effectiveGoal == nil || effectiveDoD == nil {

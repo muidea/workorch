@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
-	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

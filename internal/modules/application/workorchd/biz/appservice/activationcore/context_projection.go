@@ -2,7 +2,7 @@ package activationcore
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 )
 
 func GoalContext(item *workspacemodel.Goal) map[string]any {

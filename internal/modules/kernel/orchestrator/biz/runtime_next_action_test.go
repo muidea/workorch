@@ -4,12 +4,11 @@ import (
 	"context"
 	"testing"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -27,9 +26,7 @@ func TestNextActionForRunPendingApprovalRequestsApproval(t *testing.T) {
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		approvalRepo,
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
 
 	workspaceID := common.WorkspaceID("ws-next-action-approval")
 	runID := common.RunID("run-next-action-approval")
@@ -84,9 +81,7 @@ func TestNextActionForRunOpenDecisionRequestsDecision(t *testing.T) {
 		ticketRepo,
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
 
 	workspaceID := common.WorkspaceID("ws-next-action-decision")
 	runID := common.RunID("run-next-action-decision")
@@ -153,9 +148,7 @@ func TestNextActionForRunMissingGapBaselineRequestsAssessment(t *testing.T) {
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
 
 	workspaceID := common.WorkspaceID("ws-next-action-gap")
 	runID := common.RunID("run-next-action-gap")
@@ -198,9 +191,7 @@ func TestNextActionForRunEmptyCoverageLedgerRequestsGapRebuild(t *testing.T) {
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
 
 	workspaceID := common.WorkspaceID("ws-next-action-empty-ledger")
 	runID := common.RunID("run-next-action-empty-ledger")
@@ -276,9 +267,7 @@ func TestNextActionForRunMissingStateChangeRequestsStateChange(t *testing.T) {
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-state-change")
 	runID := common.RunID("run-next-action-state-change")
@@ -341,9 +330,7 @@ func TestNextActionForRunMissingStateChangeAcquiresTargetSnapshotFirst(t *testin
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-acquire-snapshot")
 	runID := common.RunID("run-next-action-acquire-snapshot")
@@ -458,9 +445,7 @@ func TestNextActionForRunStateChangeWithCurrentFailureTargetAcquiresSnapshotFirs
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-current-failure-target")
 	runID := common.RunID("run-next-action-current-failure-target")
@@ -529,9 +514,7 @@ func TestNextActionForRunHydratesAcceptedTargetSnapshotEvidenceBeforeStateChange
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo, EvidenceRecords: evidenceRepo, Patches: patchRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo, EvidenceRecords: evidenceRepo, Patches: patchRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-accepted-snapshot")
 	runID := common.RunID("run-next-action-accepted-snapshot")
@@ -637,9 +620,7 @@ func TestNextActionForRunIgnoresAcceptedTargetSnapshotAfterLaterAppliedPatch(t *
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo, EvidenceRecords: evidenceRepo, Patches: patchRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo, EvidenceRecords: evidenceRepo, Patches: patchRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-stale-snapshot")
 	runID := common.RunID("run-next-action-stale-snapshot")
@@ -817,9 +798,7 @@ func TestNextActionForRunMissingValidationRequestsValidation(t *testing.T) {
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
 
 	workspaceID := common.WorkspaceID("ws-next-action-validation")
 	runID := common.RunID("run-next-action-validation")
@@ -872,9 +851,7 @@ func TestNextActionForRunValidationPolicyDecisionDoesNotOverrideLedgerActionWith
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
 
 	workspaceID := common.WorkspaceID("ws-next-action-validation-policy-decision")
 	runID := common.RunID("run-next-action-validation-policy-decision")
@@ -932,9 +909,7 @@ func TestNextActionForRunValidationImplementationGapRequestsStateChange(t *testi
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-validation-implementation-gap")
 	runID := common.RunID("run-next-action-validation-implementation-gap")
@@ -1008,9 +983,7 @@ func TestNextActionForRunNoDeltaValidationLoopRequestsStateChange(t *testing.T) 
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-validation-no-delta")
 	runID := common.RunID("run-next-action-validation-no-delta")
@@ -1081,9 +1054,7 @@ func TestNextActionForRunRejectedValidationEvidenceLoopRequestsStateChange(t *te
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-rejected-validation-loop")
 	runID := common.RunID("run-next-action-rejected-validation-loop")
@@ -1156,9 +1127,7 @@ func TestNextActionForRunValidationLoopRoutesStateChangeDespiteLatestContractDia
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-validation-loop-latest-contract")
 	runID := common.RunID("run-next-action-validation-loop-latest-contract")
@@ -1246,9 +1215,7 @@ func TestNextActionForRunNoDeltaValidationLoopResetsAfterAcceptedStateChange(t *
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-validation-no-delta-reset")
 	runID := common.RunID("run-next-action-validation-no-delta-reset")
@@ -1326,9 +1293,7 @@ func TestNextActionForRunNoDeltaValidationLoopIgnoresUnboundAcceptedRuntimeEvide
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-validation-unbound-accepted")
 	runID := common.RunID("run-next-action-validation-unbound-accepted")
@@ -1425,9 +1390,7 @@ func TestNextActionForRunValidationContractRetryExhaustedFailsFast(t *testing.T)
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-validation-contract-exhausted")
 	runID := common.RunID("run-next-action-validation-contract-exhausted")
@@ -1500,9 +1463,7 @@ func TestNextActionForRunValidationCommandContractRetryExhaustsByClass(t *testin
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-validation-command-contract-exhausted")
 	runID := common.RunID("run-next-action-validation-command-contract-exhausted")
@@ -1626,9 +1587,7 @@ func TestNextActionForRunRecoverableDiagnosticRequestsRepair(t *testing.T) {
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-diagnostic")
 	runID := common.RunID("run-next-action-diagnostic")
@@ -1693,9 +1652,7 @@ func TestNextActionForRunEvidenceGapPreemptsRecoverableDiagnostic(t *testing.T) 
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-diagnostic-priority")
 	runID := common.RunID("run-next-action-diagnostic-priority")
@@ -1859,9 +1816,7 @@ func TestNextActionForRunAllSatisfiedRequestsComplete(t *testing.T) {
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
 
 	workspaceID := common.WorkspaceID("ws-next-action-complete")
 	runID := common.RunID("run-next-action-complete")
@@ -1921,9 +1876,7 @@ func TestNextActionForRunAllSatisfiedPreemptsRecoverableDiagnostic(t *testing.T)
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-complete-diagnostic")
 	runID := common.RunID("run-next-action-complete-diagnostic")
@@ -1980,9 +1933,7 @@ func TestNextActionForRunSatisfiedAcceptedItemSkipsAssessmentAndSelectsNextFocus
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
 
 	workspaceID := common.WorkspaceID("ws-next-action-satisfied-next-focus")
 	runID := common.RunID("run-next-action-satisfied-next-focus")
@@ -2041,9 +1992,7 @@ func TestNextActionForRunEvidenceReadyAcceptedBindingClosesDeterministically(t *
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-ready-binding")
 	runID := common.RunID("run-next-action-ready-binding")
@@ -2120,9 +2069,7 @@ func TestNextActionForRunEvidenceReadyWithoutBindingStillRequiresValidation(t *t
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{CoverageWorkItems: coverageRepo})
 
 	workspaceID := common.WorkspaceID("ws-next-action-ready-no-binding")
 	runID := common.RunID("run-next-action-ready-no-binding")

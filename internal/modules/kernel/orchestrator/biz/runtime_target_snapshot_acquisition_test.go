@@ -4,13 +4,14 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	filecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -434,7 +435,6 @@ func TestRuntimeManagedTargetSnapshotAcquisitionDispatchesReadOnlyGraphWithoutRo
 	runRepo := memory.NewRunRepository()
 	stepRepo := memory.NewStepRepository()
 	evidenceRepo := memory.NewEvidenceRecordRepository()
-	hub := events.NewMemoryHub()
 	deliverableDir := t.TempDir()
 	if err := os.WriteFile(deliverableDir+"/target.txt", []byte("current target content\n"), 0o644); err != nil {
 		t.Fatalf("seed target file: %v", err)
@@ -468,9 +468,10 @@ func TestRuntimeManagedTargetSnapshotAcquisitionDispatchesReadOnlyGraphWithoutRo
 		memory.NewDecisionTicketRepository(),
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
-		hub,
-	)
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo})
+
+	notifications := newRuntimeNotificationRecorder(t)
+	notifications.attach(orch)
 
 	workspaceID := common.WorkspaceID("ws-runtime-managed-target-snapshot")
 	runID := common.RunID("run-runtime-managed-target-snapshot")
@@ -575,8 +576,10 @@ func TestRuntimeManagedTargetSnapshotAcquisitionDispatchesReadOnlyGraphWithoutRo
 	if claims := stringSliceFromValue(snapshot["observedClaims"]); len(claims) == 0 {
 		t.Fatalf("materialized snapshot observedClaims = %+v, want observed claim", claims)
 	}
-	if !publishedStepState(hub.Published(), rootStepID, common.StepStateSucceeded) {
-		t.Fatalf("events = %+v, want completed root step event", hub.Published())
+	if _, ok := notifications.waitFor(time.Second, func(item runtimeNotificationRecord) bool {
+		return item.Topic == runevents.TopicStepStateChanged && item.StepID == string(rootStepID) && item.State == string(common.StepStateSucceeded)
+	}); !ok {
+		t.Fatalf("notifications = %+v, want completed root step event", notifications.snapshot())
 	}
 }
 
@@ -586,7 +589,6 @@ func TestRuntimeManagedTargetSnapshotAcquisitionOptionalMissingFileDoesNotAccept
 	runRepo := memory.NewRunRepository()
 	stepRepo := memory.NewStepRepository()
 	evidenceRepo := memory.NewEvidenceRecordRepository()
-	hub := events.NewMemoryHub()
 	deliverableDir := t.TempDir()
 
 	runtime := NewRuntimeAdapterRegistry()
@@ -605,9 +607,7 @@ func TestRuntimeManagedTargetSnapshotAcquisitionOptionalMissingFileDoesNotAccept
 		memory.NewDecisionTicketRepository(),
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo},
-		hub,
-	)
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo})
 
 	workspaceID := common.WorkspaceID("ws-runtime-managed-target-snapshot-missing")
 	runID := common.RunID("run-runtime-managed-target-snapshot-missing")

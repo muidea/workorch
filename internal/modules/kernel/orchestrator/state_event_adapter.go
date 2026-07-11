@@ -5,15 +5,15 @@ import (
 	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
-	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	memorycontracts "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/contracts"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -182,7 +182,11 @@ func (r memoryEventRepository) Update(ctx context.Context, item *memorymodel.Mem
 }
 
 func (r memoryEventRepository) Delete(ctx context.Context, id common.MemoryID) error {
-	_, err := sendMemoryEventCommand(ctx, r.hub, memoryevents.TopicMemoryCommandDelete, "memory", string(id), "", "", memoryevents.DeleteMemoryCommand{MemoryID: id})
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	if workspaceID == "" {
+		return common.ErrInvalidArgument
+	}
+	_, err := sendMemoryEventCommand(ctx, r.hub, memoryevents.TopicMemoryCommandDelete, "memory", string(id), workspaceID, "", memoryevents.DeleteMemoryCommand{WorkspaceID: workspaceID, MemoryID: id})
 	return err
 }
 

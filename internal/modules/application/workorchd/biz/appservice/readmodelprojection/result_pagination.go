@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 )
 
 func PageRunResults(items []*resultmodel.Result, query readmodelcore.ResultQuery) readmodelcore.ResultPage {

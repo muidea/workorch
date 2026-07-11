@@ -1,5 +1,7 @@
 package events
 
+const NotificationDestination = "/orchestrator/consumers/#"
+
 const (
 	TopicOrchestratorCommandStartRun                       = "/orchestrator/command/start-run"
 	TopicOrchestratorCommandBlockDecision                  = "/orchestrator/command/block-decision"
@@ -20,10 +22,6 @@ const (
 	TopicOrchestratorCommandListArtifactContinuationsByRun = "/orchestrator/command/list-artifact-continuations-by-run"
 
 	TopicOrchestratorDispatchStepRequested           = "/orchestrator/dispatch-step/requested"
-	TopicOrchestratorStageChanged                    = "/orchestrator/stage_changed"
-	TopicOrchestratorGraphDispatched                 = "/orchestrator/graph_dispatched"
-	TopicOrchestratorRepairStarted                   = "/orchestrator/repair_started"
-	TopicOrchestratorReplanTriggered                 = "/orchestrator/replan_triggered"
 	TopicOrchestratorContractViolation               = "/orchestrator/contract_violation"
 	TopicOrchestratorContractViolationRecorded       = "/orchestrator/contract_violation/recorded"
 	TopicOrchestratorContractViolationRetryRequested = "/orchestrator/contract_violation/retry_requested"

@@ -14,11 +14,12 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/magicCommon/task"
 	engine "github.com/muidea/magicEngine/http"
@@ -580,7 +581,6 @@ type updateWebSearchConfigurationFunc func(appservice.UpdateWebSearchConfigurati
 
 type serverState struct {
 	config                       Config
-	eventHub                     events.Hub
 	commandHub                   magicevent.Hub
 	schedulerHub                 magicevent.Hub
 	eventReplay                  *sseReplayBuffer
@@ -940,12 +940,12 @@ func normalizeConfig(config Config) Config {
 }
 
 func NewHTTPServer(config Config) *HTTPServer {
-	return NewHTTPServerWithEventHubsAndBackground(config, nil, nil, nil)
+	return NewHTTPServerWithCommandHubAndBackground(config, nil, nil)
 }
 
-func NewHTTPServerWithEventHubsAndBackground(config Config, eventHub events.Hub, commandHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) *HTTPServer {
+func NewHTTPServerWithCommandHubAndBackground(config Config, commandHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) *HTTPServer {
 	config = normalizeConfig(config)
-	state := newServerStateWithHubsAndBackground(config, eventHub, commandHub, backgroundRoutine)
+	state := newServerStateWithCommandHubAndBackground(config, commandHub, backgroundRoutine)
 	handler := newMuxWithStateNoStart(state)
 	return &HTTPServer{
 		config: config,
@@ -976,7 +976,7 @@ func (s *HTTPServer) Validate(ctx context.Context) error {
 	if s == nil {
 		return errors.New("http server is not configured")
 	}
-	ctx = appservice.ContextWithEventHubs(ctx, s.state.eventHub, s.state.commandHub)
+	ctx = appservice.ContextWithCommandHub(ctx, s.state.commandHub)
 	return s.state.validate(ctx, s.config.Backend, s.config.DataRoot)
 }
 
@@ -992,7 +992,7 @@ func (s *HTTPServer) Shutdown(ctx context.Context) error {
 }
 
 func newMux(config Config) http.Handler {
-	return newMuxWithState(newServerStateWithHubsAndBackground(normalizeConfig(config), nil, nil, nil))
+	return newMuxWithState(newServerStateWithCommandHubAndBackground(normalizeConfig(config), nil, nil))
 }
 
 func newMuxWithState(state *serverState) http.Handler {
@@ -1016,16 +1016,15 @@ func newMuxWithStateNoStart(state *serverState) http.Handler {
 	return handler
 }
 
-func newServerStateWithHubsAndBackground(config Config, eventHub events.Hub, commandHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) *serverState {
+func newServerStateWithCommandHubAndBackground(config Config, commandHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) *serverState {
 	if commandHub == nil {
 		commandHub = magicevent.NewHub(1024)
 	}
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
-	backgroundCtx = appservice.ContextWithEventHubs(backgroundCtx, eventHub, commandHub)
+	backgroundCtx = appservice.ContextWithCommandHub(backgroundCtx, commandHub)
 	diagnostics := newSchedulerDiagnosticsStore()
 	state := &serverState{
 		config:                       config,
-		eventHub:                     eventHub,
 		commandHub:                   commandHub,
 		schedulerHub:                 commandHub,
 		eventReplay:                  newSSEReplayBuffer(defaultSSEReplayLimit),
@@ -1138,9 +1137,9 @@ func (s *serverState) configureRuntimeSession() {
 	if s == nil || s.hasSharedSession() {
 		return
 	}
-	session, err := appservice.NewRuntimeSessionFromInitiator()
+	session, err := appservice.NewRuntimeSessionFromCommandHub(s.commandHub, s.backgroundRoutine)
 	if err != nil {
-		s.runtimeSessionErr = fmt.Errorf("workorch framework runtime session unavailable: %w", err)
+		s.runtimeSessionErr = fmt.Errorf("workorch injected EventHub runtime session unavailable: %w", err)
 		s.validate = func(context.Context, string, string) error {
 			return s.runtimeSessionErr
 		}
@@ -1153,16 +1152,11 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 	if s == nil || session == nil {
 		return
 	}
-	if s.eventHub == nil {
-		if exports, err := session.Exports(); err == nil {
-			s.eventHub = exports.Infrastructure.EventHub
-			s.commandHub = exports.Infrastructure.CommandHub
-			s.schedulerHub = exports.Infrastructure.CommandHub
-		}
+	if exports, err := session.Exports(); err == nil {
+		s.commandHub = exports.Infrastructure.CommandHub
+		s.schedulerHub = exports.Infrastructure.CommandHub
 	}
-	if s.eventHub != nil {
-		s.backgroundCtx = appservice.ContextWithEventHubs(s.backgroundContext(), s.eventHub, s.commandHub)
-	}
+	s.backgroundCtx = appservice.ContextWithCommandHub(s.backgroundContext(), s.commandHub)
 	s.runtimeSessionErr = nil
 	s.setSharedSession(session)
 	s.validate = func(ctx context.Context, _, _ string) error {
@@ -1902,10 +1896,10 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 }
 
 func (s *serverState) registerEventReplayRecorder() {
-	if s == nil || s.eventHub == nil || s.eventReplay == nil {
+	if s == nil || s.commandHub == nil || s.eventReplay == nil {
 		return
 	}
-	unsubscribers := subscribeServerStreamEvents(s.eventHub, eventStreamViewFull, func(_ context.Context, envelope events.Envelope) error {
+	unsubscribers := subscribeServerStreamEvents(s.commandHub, eventStreamViewFull, func(_ context.Context, envelope streamEvent) error {
 		s.eventReplay.Append(envelope)
 		return nil
 	})
@@ -1913,22 +1907,26 @@ func (s *serverState) registerEventReplayRecorder() {
 }
 
 func (s *serverState) registerRunStatusCacheInvalidationWatcher() {
-	if s == nil || s.eventHub == nil {
+	if s == nil || s.commandHub == nil {
 		return
 	}
-	unsubscribe := s.eventHub.Subscribe(runevents.TopicRunStateChanged, func(_ context.Context, envelope events.Envelope) error {
-		runID := strings.TrimSpace(envelope.RunID)
+	unsubscribe := subscribeEventRecordAppended(s.commandHub, "run-status-cache", func(_ context.Context, record eventstreamevents.EventRecordData) error {
+		if record.Topic != runevents.TopicRunStateChanged {
+			return nil
+		}
+		runID := strings.TrimSpace(string(record.RunID))
 		if runID == "" {
-			runID = strings.TrimSpace(envelope.SubjectID)
+			runID = strings.TrimSpace(record.SubjectID)
 		}
 		if runID == "" {
 			s.notifyRunStatusChanged()
 			return nil
 		}
+		payload := record.Payload.Map()
 		s.notifyRunStatusChangedForRun(appservice.Run{
 			ID:          runID,
-			WorkspaceID: strings.TrimSpace(envelope.WorkspaceID),
-			State:       schedulerStringValue(envelope.Payload, events.PayloadKeyState),
+			WorkspaceID: strings.TrimSpace(string(record.WorkspaceID)),
+			State:       schedulerStringValue(payload, events.PayloadKeyState),
 		})
 		return nil
 	})
@@ -1936,44 +1934,44 @@ func (s *serverState) registerRunStatusCacheInvalidationWatcher() {
 }
 
 func (s *serverState) registerGovernanceResolvedResumeWatcher() {
-	if s == nil || s.eventHub == nil {
+	if s == nil || s.commandHub == nil {
 		return
 	}
-	for _, topic := range []string{
-		governanceevents.TopicGovernanceAutoResolved,
-		decisionevents.TopicTicketResolved,
-		approvalevents.TopicApprovalResolved,
-	} {
-		topic := topic
-		unsubscribe := s.eventHub.Subscribe(topic, func(_ context.Context, envelope events.Envelope) error {
-			s.publishGovernanceContinuationFromResolvedEvent(envelope)
-			return nil
-		})
-		s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
-	}
+	unsubscribe := subscribeEventRecordAppended(s.commandHub, "governance-resume", func(_ context.Context, record eventstreamevents.EventRecordData) error {
+		switch record.Topic {
+		case governanceevents.TopicGovernanceAutoResolved, decisionevents.TopicTicketResolved, approvalevents.TopicApprovalResolved:
+			s.publishGovernanceContinuationFromResolvedEvent(record)
+		}
+		return nil
+	})
+	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
 }
 
-func (s *serverState) publishGovernanceContinuationFromResolvedEvent(envelope events.Envelope) {
-	workspaceID := strings.TrimSpace(envelope.WorkspaceID)
-	runID := strings.TrimSpace(envelope.RunID)
+func (s *serverState) publishGovernanceContinuationFromResolvedEvent(record eventstreamevents.EventRecordData) {
+	workspaceID := strings.TrimSpace(string(record.WorkspaceID))
+	runID := strings.TrimSpace(string(record.RunID))
 	if workspaceID == "" || runID == "" {
 		return
 	}
 	intent := "resume"
 	reason := "governance_resolved"
 	decisionID := ""
-	if envelope.Topic == decisionevents.TopicTicketResolved {
+	requestKind := "event"
+	payload := record.Payload.Map()
+	if record.Topic == decisionevents.TopicTicketResolved {
+		requestKind = "decision"
 		reason = "decision_resolved"
 		decisionID = firstNonEmptySchedulerString(
-			schedulerStringValue(envelope.Payload, events.PayloadKeyDecisionID),
-			schedulerStringValue(envelope.Payload, events.PayloadKeyBlockingTicketID),
-			envelope.SubjectID,
+			schedulerStringValue(payload, events.PayloadKeyDecisionID),
+			schedulerStringValue(payload, events.PayloadKeyBlockingTicketID),
+			record.SubjectID,
 		)
-		if strings.TrimSpace(schedulerStringValue(envelope.Payload, events.PayloadKeyType)) == "replan" {
+		if strings.TrimSpace(schedulerStringValue(payload, events.PayloadKeyType)) == "replan" {
 			intent = "replan"
 			reason = "decision_replan_resolved"
 		}
-	} else if envelope.Topic == approvalevents.TopicApprovalResolved {
+	} else if record.Topic == approvalevents.TopicApprovalResolved {
+		requestKind = "approval"
 		reason = "approval_resolved"
 	}
 	if err := s.publishGovernanceContinuationRequested(context.Background(), []governanceRunResumeRef{{
@@ -1981,10 +1979,10 @@ func (s *serverState) publishGovernanceContinuationFromResolvedEvent(envelope ev
 		RunID:       runID,
 		Intent:      intent,
 		Reason:      reason,
-		RequestID:   governanceRunResumeRequestID("event", envelope.SubjectID, intent),
+		RequestID:   governanceRunResumeRequestID(requestKind, record.SubjectID, intent),
 		DecisionID:  decisionID,
 	}}, 0); err != nil {
-		slog.Warn("workorch governance continuation command publish failed", "topic", envelope.Topic, "workspaceID", workspaceID, "runID", runID, "err", err)
+		slog.Warn("workorch governance continuation command publish failed", "topic", record.Topic, "workspaceID", workspaceID, "runID", runID, "err", err)
 	}
 }
 
@@ -1992,7 +1990,7 @@ func isMemoryBackend(backend string) bool {
 	return backend == "memory"
 }
 
-func enqueueEventStreamEnvelope(ch chan events.Envelope, envelope events.Envelope) {
+func enqueueEventStreamEnvelope(ch chan streamEvent, envelope streamEvent) {
 	if ch == nil {
 		return
 	}
@@ -2031,7 +2029,7 @@ func isEventStreamCriticalTopic(topic string) bool {
 	}
 }
 
-func writeSSEEnvelope(w http.ResponseWriter, flusher http.Flusher, envelope events.Envelope) bool {
+func writeSSEEnvelope(w http.ResponseWriter, flusher http.Flusher, envelope streamEvent) bool {
 	data, err := json.Marshal(enrichSSEEnvelope(envelope))
 	if err != nil {
 		return true
@@ -2165,10 +2163,10 @@ func (s *serverState) eventContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = s.backgroundContext()
 	}
-	if s == nil || s.eventHub == nil {
+	if s == nil || s.commandHub == nil {
 		return ctx
 	}
-	return appservice.ContextWithEventHubs(ctx, s.eventHub, s.commandHub)
+	return appservice.ContextWithCommandHub(ctx, s.commandHub)
 }
 
 func (s *serverState) scheduleWatchdog() {

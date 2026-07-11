@@ -9,11 +9,9 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/clicore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -21,7 +19,7 @@ func TestCLICommandDispatcherRunIsIdempotent(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
 	reader := &staticCLIWorkspaceViewReader{workspaces: []Workspace{{ID: "ws-cli-idempotent"}}}
-	dispatcher := NewCLICommandDispatcher(&RuntimeSession{}, nil, hub, reader)
+	dispatcher := NewCLICommandDispatcher(&RuntimeSession{}, hub, reader)
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
@@ -116,10 +114,6 @@ func TestCLIWorkspaceSnapshotCommandProjectsDetailView(t *testing.T) {
 
 func TestCLIDecisionResolvePublishesSchedulerContinuation(t *testing.T) {
 	session, tickets, _ := newCountingDecisionRuntimeSession(t)
-	hub, err := session.RequiredEventHub()
-	if err != nil {
-		t.Fatalf("session event hub: %v", err)
-	}
 	const workspaceID = common.WorkspaceID("ws-cli-governance-scheduler")
 	const runID = common.RunID("run-cli-governance-scheduler")
 	const ticketID = common.TicketID("ticket-cli-governance-scheduler")
@@ -145,7 +139,7 @@ func TestCLIDecisionResolvePublishesSchedulerContinuation(t *testing.T) {
 	})
 	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
 
-	dispatcher := NewCLICommandDispatcher(session, hub, commandHub, nil)
+	dispatcher := NewCLICommandDispatcher(session, commandHub, nil)
 	resource, _, err := dispatcher.handleGovernanceCommand(context.Background(), clicore.Command{
 		CommandID:   "cmd-cli-replan",
 		WorkspaceID: workspaceID,
@@ -162,13 +156,6 @@ func TestCLIDecisionResolvePublishesSchedulerContinuation(t *testing.T) {
 	}
 	if resource["id"] != string(ticketID) {
 		t.Fatalf("resource id = %v, want %s", resource["id"], ticketID)
-	}
-	if publishedHub, ok := hub.(interface{ Published() []events.Envelope }); ok {
-		for _, envelope := range publishedHub.Published() {
-			if envelope.Topic == orchestratorevents.TopicOrchestratorCommandResumeRun {
-				t.Fatal("CLI decision resolve published direct orchestrator resume; want scheduler command only")
-			}
-		}
 	}
 	if schedulerCommand.WorkspaceID != workspaceID || schedulerCommand.RunID != runID {
 		t.Fatalf("scheduler command scope = workspace:%q run:%q, want %s/%s", schedulerCommand.WorkspaceID, schedulerCommand.RunID, workspaceID, runID)

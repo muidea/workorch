@@ -6,21 +6,21 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
-	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -255,9 +255,7 @@ func TestRuntimeOrchestrator_ResumeRunClearsResolvedDecisionBeforeGapBaselineRef
 		workspaceRepo,
 		ticketRepo,
 		resolutionRepo,
-		approvalRepo,
-		events.NewMemoryHub(),
-	)
+		approvalRepo)
 
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateBlockedOnApproval, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -404,9 +402,7 @@ func TestRuntimeOrchestrator_ResumeContextGateResolutionRegeneratesRepairContext
 		workspaceRepo,
 		ticketRepo,
 		resolutionRepo,
-		approvalRepo,
-		events.NewMemoryHub(),
-	)
+		approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-context-gate-resume")
 	runID := common.RunID("run-context-gate-resume")
@@ -560,9 +556,7 @@ func TestRuntimeOrchestrator_ResumeRepairPlanRetryDispatchesRuntimeRepair(t *tes
 		workspaceRepo,
 		ticketRepo,
 		resolutionRepo,
-		approvalRepo,
-		events.NewMemoryHub(),
-	)
+		approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-repair-plan-retry")
 	runID := common.RunID("run-repair-plan-retry")
@@ -658,8 +652,9 @@ func TestRuntimeOrchestrator_ResumeRunRejectsDecisionWithoutDispatchingStep(t *t
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo)
+	notifications := newRuntimeNotificationRecorder(t)
+	notifications.attach(orch)
 
 	workspaceID := common.WorkspaceID("ws-decision-reject")
 	runID := common.RunID("run-decision-reject")
@@ -702,9 +697,10 @@ func TestRuntimeOrchestrator_ResumeRunRejectsDecisionWithoutDispatchingStep(t *t
 	if len(runtime.calls) != 0 {
 		t.Fatalf("runtime calls = %#v, want none", runtime.calls)
 	}
-	last := hub.Published()[len(hub.Published())-1]
-	if last.Topic != workspaceevents.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyActiveRunID] != "" {
-		t.Fatalf("last event = %#v, want workspace release event", last)
+	if _, ok := notifications.waitFor(time.Second, func(item runtimeNotificationRecord) bool {
+		return item.Topic == workspaceevents.TopicWorkspaceStateChanged && item.WorkspaceID == string(workspaceID) && item.ActiveRunID == ""
+	}); !ok {
+		t.Fatalf("notifications = %+v, want workspace release event", notifications.snapshot())
 	}
 }
 
@@ -729,7 +725,6 @@ func TestRuntimeOrchestrator_ResumeRunReplanSupersedesRun(t *testing.T) {
 			}},
 		},
 	}}
-	hub := events.NewMemoryHub()
 	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		runtime,
 		runRepo,
@@ -738,9 +733,10 @@ func TestRuntimeOrchestrator_ResumeRunReplanSupersedesRun(t *testing.T) {
 		ticketRepo,
 		resolutionRepo,
 		approvalRepo,
-		RuntimeEvidenceRepositories{Results: resultRepo},
-		hub,
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo})
+
+	notifications := newRuntimeNotificationRecorder(t)
+	notifications.attach(orch)
 
 	workspaceID := common.WorkspaceID("ws-decision-replan")
 	runID := common.RunID("run-decision-replan")
@@ -815,8 +811,10 @@ func TestRuntimeOrchestrator_ResumeRunReplanSupersedesRun(t *testing.T) {
 	if len(runtime.calls) != 1 || runtime.calls[0] != "run-decision-replan-replan-001/step-1" {
 		t.Fatalf("runtime calls = %#v, want successor step dispatched", runtime.calls)
 	}
-	if !publishedRunCreatedFor(hub.Published(), "run-decision-replan-replan-001") {
-		t.Fatalf("published events = %+v, want run-created event for successor", hub.Published())
+	if _, ok := notifications.waitFor(time.Second, func(item runtimeNotificationRecord) bool {
+		return item.Topic == runevents.TopicRunCreated && item.RunID == "run-decision-replan-replan-001"
+	}); !ok {
+		t.Fatalf("notifications = %+v, want run-created event for successor", notifications.snapshot())
 	}
 }
 
@@ -840,7 +838,7 @@ func TestRuntimeOrchestrator_ReplanSuccessorRecoversConcreteFailureFromAncestorL
 			}},
 		},
 	}}
-	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-replan-ancestor-primary")
 	rootRunID := common.RunID("run-root-primary")
@@ -948,7 +946,6 @@ func TestRuntimeOrchestrator_ResumeRunLegacyRepairResolutionPayloadReplans(t *te
 			}},
 		},
 	}}
-	hub := events.NewMemoryHub()
 	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		runtime,
 		runRepo,
@@ -957,9 +954,7 @@ func TestRuntimeOrchestrator_ResumeRunLegacyRepairResolutionPayloadReplans(t *te
 		ticketRepo,
 		resolutionRepo,
 		approvalRepo,
-		RuntimeEvidenceRepositories{Results: resultRepo},
-		hub,
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo})
 
 	workspaceID := common.WorkspaceID("ws-legacy-repair-replan")
 	runID := common.RunID("run-legacy-repair-replan")
@@ -1046,15 +1041,6 @@ func TestRuntimeOrchestrator_ResumeRunLegacyRepairResolutionPayloadReplans(t *te
 	}
 }
 
-func publishedRunCreatedFor(items []events.Envelope, runID common.RunID) bool {
-	for _, item := range items {
-		if item.Topic == runevents.TopicRunCreated && item.RunID == string(runID) {
-			return true
-		}
-	}
-	return false
-}
-
 func TestRuntimeOrchestrator_ResumeRunRequiresResolvedApproval(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -1063,8 +1049,7 @@ func TestRuntimeOrchestrator_ResumeRunRequiresResolvedApproval(t *testing.T) {
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-1")
 	runID := common.RunID("run-1")
@@ -1102,8 +1087,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectedApprovalFailsRun(t *testing.T) {
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-1")
 	runID := common.RunID("run-1")
@@ -1140,7 +1124,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsMissingBlockingReference(t *testing
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
-	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"status": "ok"}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, nil)
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"status": "ok"}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-missing-ref")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
@@ -1178,7 +1162,7 @@ func TestRuntimeOrchestrator_CompleteRunAndFailRun_ValidateArguments(t *testing.
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
-	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"status": "ok"}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, nil)
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"status": "ok"}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	if err := orch.CompleteRun(ctx, ""); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("complete empty run err = %v, want invalid argument", err)
@@ -1198,7 +1182,7 @@ func TestRuntimeOrchestrator_CompleteRunRejectsNonRunningState(t *testing.T) {
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
-	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"status": "ok"}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, nil)
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"status": "ok"}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-complete-conflict")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
@@ -1250,9 +1234,7 @@ func TestRuntimeOrchestrator_CompleteRunRequiresAcceptedResultForDoDGatedRun(t *
 		ticketRepo,
 		nil,
 		approvalRepo,
-		RuntimeEvidenceRepositories{Results: resultRepo, CoverageWorkItems: coverageRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo, CoverageWorkItems: coverageRepo})
 
 	workspaceID := common.WorkspaceID("ws-complete-result-gate")
 	runID := common.RunID("run-complete-result-gate")
@@ -1349,9 +1331,7 @@ func TestRuntimeOrchestrator_CompleteRunRejectsOpenCoverageLedger(t *testing.T) 
 		ticketRepo,
 		nil,
 		approvalRepo,
-		RuntimeEvidenceRepositories{Results: resultRepo, CoverageWorkItems: coverageRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo, CoverageWorkItems: coverageRepo})
 
 	workspaceID := common.WorkspaceID("ws-complete-coverage-gate")
 	runID := common.RunID("run-complete-coverage-gate")
@@ -1430,7 +1410,7 @@ func TestRuntimeOrchestrator_FailRunRejectsTerminalState(t *testing.T) {
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
-	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"status": "ok"}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, nil)
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"status": "ok"}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-fail-conflict")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {

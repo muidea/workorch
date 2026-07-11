@@ -3,10 +3,10 @@ package readmodelcore
 import (
 	"context"
 
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )

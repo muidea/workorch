@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -19,13 +19,13 @@ func TestCreateAndStartWorkspaceExecutionRunUsesEventHubOwnerCommands(t *testing
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	workspaceID := common.WorkspaceID("ws-activation-runports")
 	goalID := common.GoalID("goal-activation-runports")
 	dodID := common.DoDID("dod-activation-runports")
 	seedActivationDefinitions(t, ctx, exports, workspaceID, goalID, dodID)
 
-	runID, err := CreateAndStartWorkspaceExecutionRun(ctx, exports.Infrastructure.EventHub, exports.Infrastructure.CommandHub, CreateAndStartWorkspaceExecutionRunRequest{
+	runID, err := CreateAndStartWorkspaceExecutionRun(ctx, exports.Infrastructure.CommandHub, CreateAndStartWorkspaceExecutionRunRequest{
 		WorkspaceID:           workspaceID,
 		GoalID:                goalID,
 		DoDID:                 dodID,
@@ -67,7 +67,7 @@ func TestCreateAndStartWorkspaceExecutionRunContinuesWorkspaceRunSequence(t *tes
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	workspaceID := common.WorkspaceID("ws-activation-runports-sequence")
 	seedActivationDefinitions(t, ctx, exports, workspaceID, "goal-activation-runports-sequence", "dod-activation-runports-sequence")
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
@@ -78,7 +78,7 @@ func TestCreateAndStartWorkspaceExecutionRunContinuesWorkspaceRunSequence(t *tes
 		t.Fatalf("seed run: %v", err)
 	}
 
-	runID, err := CreateAndStartWorkspaceExecutionRun(ctx, exports.Infrastructure.EventHub, exports.Infrastructure.CommandHub, CreateAndStartWorkspaceExecutionRunRequest{
+	runID, err := CreateAndStartWorkspaceExecutionRun(ctx, exports.Infrastructure.CommandHub, CreateAndStartWorkspaceExecutionRunRequest{
 		WorkspaceID:           workspaceID,
 		GoalID:                "goal-activation-runports-sequence",
 		DoDID:                 "dod-activation-runports-sequence",
@@ -95,7 +95,7 @@ func TestCreateAndStartWorkspaceExecutionRunContinuesWorkspaceRunSequence(t *tes
 func TestRunObservableAfterStartConflictReadsRunWithContextWorkspaceScope(t *testing.T) {
 	runtime := newOwnerRuntime()
 	defer runtime.Shutdown(context.Background())
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	workspaceID := common.WorkspaceID("ws-start-conflict-scope")
 	runID := common.RunID("run-001")
 	if err := exports.Repositories.Runs.Create(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
@@ -119,7 +119,7 @@ func TestBuildWorkspaceExecutionContextForIDsUsesEventHubInputs(t *testing.T) {
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	workspaceID := common.WorkspaceID("ws-activation-context-runports")
 	goalID := common.GoalID("goal-activation-context-runports")
 	dodID := common.DoDID("dod-activation-context-runports")
@@ -146,7 +146,7 @@ func TestBuildWorkspaceExecutionContextForIDsUsesEventHubInputs(t *testing.T) {
 	}
 }
 
-func seedActivationDefinitions(t *testing.T, ctx context.Context, exports bootstrap.Exports, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID) {
+func seedActivationDefinitions(t *testing.T, ctx context.Context, exports testkit.Exports, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID) {
 	t.Helper()
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:    workspaceID,

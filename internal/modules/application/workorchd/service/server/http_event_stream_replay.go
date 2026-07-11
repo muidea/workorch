@@ -6,17 +6,16 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func (s *serverState) replayEventStreamEnvelopes(ctx context.Context, lastEventID string, workspaceID string, runID string, view string, filter func(events.Envelope) bool) []events.Envelope {
+func (s *serverState) replayEventStreamEnvelopes(ctx context.Context, lastEventID string, workspaceID string, runID string, view string, filter func(streamEvent) bool) []streamEvent {
 	lastEventID = strings.TrimSpace(lastEventID)
 	if s == nil || lastEventID == "" {
 		return nil
 	}
 	seen := map[string]struct{}{}
-	ret := []events.Envelope{}
-	appendEnvelope := func(envelope events.Envelope) {
+	ret := []streamEvent{}
+	appendEnvelope := func(envelope streamEvent) {
 		if filter != nil && !filter(envelope) {
 			return
 		}
@@ -47,7 +46,7 @@ func eventStreamReplayTopic(view string) string {
 	return ""
 }
 
-func (s *serverState) persistedReplayEnvelopes(ctx context.Context, lastEventID string, workspaceID string, runID string, topic string) []events.Envelope {
+func (s *serverState) persistedReplayEnvelopes(ctx context.Context, lastEventID string, workspaceID string, runID string, topic string) []streamEvent {
 	if s == nil || s.listEventRecords == nil || strings.TrimSpace(lastEventID) == "" {
 		return nil
 	}
@@ -62,7 +61,7 @@ func (s *serverState) persistedReplayEnvelopes(ctx context.Context, lastEventID 
 	if err != nil || len(items) == 0 {
 		return nil
 	}
-	ret := make([]events.Envelope, 0, len(items))
+	ret := make([]streamEvent, 0, len(items))
 	for _, item := range items {
 		if envelope := eventRecordSSEEnvelope(item); envelope.Topic != "" {
 			ret = append(ret, envelope)
@@ -75,8 +74,8 @@ func eventStreamReplayIncludePayload(topic string) bool {
 	return strings.TrimSpace(topic) == ""
 }
 
-func eventRecordSSEEnvelope(item appservice.EventRecord) events.Envelope {
-	return events.Envelope{
+func eventRecordSSEEnvelope(item appservice.EventRecord) streamEvent {
+	return streamEvent{
 		ID:           item.ID,
 		Version:      item.Version,
 		Topic:        item.Topic,

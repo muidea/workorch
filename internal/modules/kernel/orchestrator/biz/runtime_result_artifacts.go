@@ -6,54 +6,24 @@ import (
 	"sort"
 	"strings"
 
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type resultEventPublisher interface {
-	publishArtifactCreated(ctx context.Context, item *resultmodel.Artifact) error
-	publishResultEvent(ctx context.Context, item *resultmodel.Result) error
-	publishMemoryChanged(ctx context.Context, topic string, item *memorymodel.MemoryItem) error
-}
-
 type resultSubsystem struct {
 	evidence RuntimeEvidenceRepositories
 	steps    repository.StepRepository
-	events   resultEventPublisher
 }
 
-func newResultSubsystem(evidence RuntimeEvidenceRepositories, steps repository.StepRepository, events resultEventPublisher) *resultSubsystem {
+func newResultSubsystem(evidence RuntimeEvidenceRepositories, steps repository.StepRepository) *resultSubsystem {
 	return &resultSubsystem{
 		evidence: evidence,
 		steps:    steps,
-		events:   events,
 	}
-}
-
-func (r *resultSubsystem) publishArtifactCreated(ctx context.Context, item *resultmodel.Artifact) error {
-	if r == nil || r.events == nil {
-		return nil
-	}
-	return r.events.publishArtifactCreated(ctx, item)
-}
-
-func (r *resultSubsystem) publishResultEvent(ctx context.Context, item *resultmodel.Result) error {
-	if r == nil || r.events == nil {
-		return nil
-	}
-	return r.events.publishResultEvent(ctx, item)
-}
-
-func (r *resultSubsystem) publishMemoryChanged(ctx context.Context, topic string, item *memorymodel.MemoryItem) error {
-	if r == nil || r.events == nil {
-		return nil
-	}
-	return r.events.publishMemoryChanged(ctx, topic, item)
 }
 
 func (r *resultSubsystem) latestAcceptedResultContext(ctx context.Context, run *runModel.Run) map[string]any {
@@ -185,9 +155,9 @@ func (r *resultSubsystem) recordResultSummaryArtifact(
 		if err := r.evidence.Artifacts.Update(ctx, existing); err != nil {
 			return nil, err
 		}
-		return []common.ArtifactID{existing.ID}, r.publishArtifactCreated(ctx, existing)
+		return []common.ArtifactID{existing.ID}, nil
 	}
-	return []common.ArtifactID{item.ID}, r.publishArtifactCreated(ctx, item)
+	return []common.ArtifactID{item.ID}, nil
 }
 
 func (r *resultSubsystem) recordWorkspaceDeliverableManifestArtifact(
@@ -252,9 +222,9 @@ func (r *resultSubsystem) recordWorkspaceDeliverableManifestArtifact(
 		if err := r.evidence.Artifacts.Update(ctx, existing); err != nil {
 			return "", err
 		}
-		return existing.ID, r.publishArtifactCreated(ctx, existing)
+		return existing.ID, nil
 	}
-	return item.ID, r.publishArtifactCreated(ctx, item)
+	return item.ID, nil
 }
 
 func (r *resultSubsystem) recordPatchDiffArtifact(
@@ -334,9 +304,9 @@ func (r *resultSubsystem) recordPatchDiffArtifact(
 		if err := r.evidence.Artifacts.Update(ctx, existing); err != nil {
 			return nil, err
 		}
-		return []common.ArtifactID{existing.ID}, r.publishArtifactCreated(ctx, existing)
+		return []common.ArtifactID{existing.ID}, nil
 	}
-	return []common.ArtifactID{item.ID}, r.publishArtifactCreated(ctx, item)
+	return []common.ArtifactID{item.ID}, nil
 }
 
 func (r *resultSubsystem) recordWebSourceIndexArtifact(
@@ -401,9 +371,9 @@ func (r *resultSubsystem) recordWebSourceIndexArtifact(
 		if err := r.evidence.Artifacts.Update(ctx, existing); err != nil {
 			return "", err
 		}
-		return existing.ID, r.publishArtifactCreated(ctx, existing)
+		return existing.ID, nil
 	}
-	return item.ID, r.publishArtifactCreated(ctx, item)
+	return item.ID, nil
 }
 
 func (r *resultSubsystem) recordGitOperationIndexArtifact(
@@ -468,9 +438,9 @@ func (r *resultSubsystem) recordGitOperationIndexArtifact(
 		if err := r.evidence.Artifacts.Update(ctx, existing); err != nil {
 			return "", err
 		}
-		return existing.ID, r.publishArtifactCreated(ctx, existing)
+		return existing.ID, nil
 	}
-	return item.ID, r.publishArtifactCreated(ctx, item)
+	return item.ID, nil
 }
 
 func resultSummaryFromDoDAssessment(

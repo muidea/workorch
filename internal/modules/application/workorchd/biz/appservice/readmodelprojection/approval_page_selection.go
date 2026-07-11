@@ -1,6 +1,6 @@
 package readmodelprojection
 
-import approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+import approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 
 func selectApprovalPageWindow(items []*approvalmodel.Approval, limit int, cursorAfterID string) ([]*approvalmodel.Approval, string, bool) {
 	started := cursorAfterID == ""

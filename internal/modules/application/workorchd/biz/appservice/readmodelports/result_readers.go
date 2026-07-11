@@ -5,7 +5,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )

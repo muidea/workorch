@@ -11,7 +11,7 @@ import (
 
 func registerCatalogReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/souls", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.soulListRequests.Add(1)
 		items, err := state.listSouls(r.Context(), state.config.Backend, state.config.DataRoot)
 		if err != nil {
@@ -26,7 +26,7 @@ func registerCatalogReadRoutes(router engine.RouteRegistry, state *serverState) 
 		})
 	})
 	router.AddHandler("/api/v1/workorch/souls/:soulId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		soulID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/souls/")
 		if !ok {
 			http.NotFound(w, r)
@@ -46,7 +46,7 @@ func registerCatalogReadRoutes(router engine.RouteRegistry, state *serverState) 
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspace-templates", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		items, err := state.listWorkspaceTemplates(r.Context(), state.config.Backend, state.config.DataRoot)
 		if err != nil {
 			writeBusinessError(w, err)
@@ -60,7 +60,7 @@ func registerCatalogReadRoutes(router engine.RouteRegistry, state *serverState) 
 		})
 	})
 	router.AddHandler("/api/v1/workorch/skills", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.skillListRequests.Add(1)
 		query := appservice.SkillQuery{WorkspaceID: strings.TrimSpace(r.URL.Query().Get("workspaceId"))}
 		items, err := state.listSkills(r.Context(), state.config.Backend, state.config.DataRoot, query)
@@ -76,7 +76,7 @@ func registerCatalogReadRoutes(router engine.RouteRegistry, state *serverState) 
 		})
 	})
 	router.AddHandler("/api/v1/workorch/skills/:skillId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		skillID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/skills/")
 		if !ok {
 			http.NotFound(w, r)
@@ -100,7 +100,7 @@ func registerCatalogReadRoutes(router engine.RouteRegistry, state *serverState) 
 
 func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/souls", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.soulCreateRequests.Add(1)
 		var req createSoulRequest
 		if err := decodeJSON(r, &req); err != nil {
@@ -120,7 +120,7 @@ func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState)
 		})
 	})
 	router.AddHandler("/api/v1/workorch/souls/:soulId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		soulID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/souls/")
 		if !ok {
 			http.NotFound(w, r)
@@ -145,7 +145,7 @@ func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState)
 		})
 	})
 	router.AddHandler("/api/v1/workorch/souls/:soulId", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		soulID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/souls/")
 		if !ok {
 			http.NotFound(w, r)
@@ -159,7 +159,7 @@ func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState)
 		w.WriteHeader(http.StatusNoContent)
 	})
 	router.AddHandler("/api/v1/workorch/workspace-templates", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		var req createWorkspaceTemplateRequest
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
@@ -178,7 +178,7 @@ func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState)
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspace-templates/:templateId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		templateID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/workspace-templates/")
 		if !ok {
 			http.NotFound(w, r)
@@ -202,7 +202,7 @@ func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState)
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspace-templates/:templateId", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		templateID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/workspace-templates/")
 		if !ok {
 			http.NotFound(w, r)
@@ -215,7 +215,7 @@ func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState)
 		w.WriteHeader(http.StatusNoContent)
 	})
 	router.AddHandler("/api/v1/workorch/skills", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		state.metrics.skillCreateRequests.Add(1)
 		var req createSkillRequest
 		if err := decodeJSON(r, &req); err != nil {

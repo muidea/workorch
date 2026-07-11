@@ -38,7 +38,57 @@ type ListValidationResultsByRunCommand = ListRunEvidenceCommand
 type ListCoverageWorkItemsByRunCommand = ListRunEvidenceCommand
 type ListArtifactContinuationsByRunCommand = ListRunEvidenceCommand
 
-type OrchestratorData struct{}
+type PatchChangedData struct {
+	PatchID      common.PatchID
+	SubjectID    string
+	WorkspaceID  common.WorkspaceID
+	RunID        common.RunID
+	StepID       common.StepID
+	ToolCallID   common.ToolCallID
+	PatchType    string
+	TargetRef    string
+	Summary      string
+	State        common.PatchState
+	AddedLines   int
+	DeletedLines int
+	ContentHash  string
+	DiffHash     string
+	ApprovalID   common.ApprovalID
+	Risk         string
+	Error        string
+}
+
+type ArtifactContinuationChangedData struct {
+	ContinuationID    common.ArtifactContinuationID
+	WorkspaceID       common.WorkspaceID
+	RunID             common.RunID
+	StepID            common.StepID
+	ArtifactID        string
+	TargetRef         string
+	State             common.ArtifactContinuationState
+	ExpectedSequence  int
+	FinalReceived     bool
+	BytesWritten      int64
+	RollingHash       string
+	LastChunkHash     string
+	ReceivedSequences []int
+	CoverageTargets   []string
+	EvidenceRefs      []string
+	FailureReason     string
+}
+
+type ContractViolationData struct {
+	SubjectID    string
+	WorkspaceID  common.WorkspaceID
+	RunID        common.RunID
+	SourceStepID common.StepID
+	RetryStepID  common.StepID
+	TicketID     common.TicketID
+	Topic        string
+	Summary      string
+	Violation    StructuredPayload
+	Context      StructuredPayload
+}
 
 type OrchestratorCommandResult struct {
 	ToolCalls             []*runmodel.ToolCall
@@ -70,18 +120,17 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[DispatchStepCommand, OrchestratorCommandResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorDispatchStepRequested).MessageContract(),
 	}
 	for _, topic := range []string{
-		TopicOrchestratorStageChanged,
-		TopicOrchestratorGraphDispatched,
-		TopicOrchestratorRepairStarted,
-		TopicOrchestratorReplanTriggered,
 		TopicOrchestratorContractViolation,
 		TopicOrchestratorContractViolationRecorded,
 		TopicOrchestratorContractViolationRetryRequested,
 		TopicOrchestratorContractViolationEscalated,
-		TopicPatchPreviewed,
-		TopicPatchApplied,
-		TopicPatchFailed,
-		TopicPatchReverted,
+	} {
+		ret = append(ret, eventcontract.DataTopic[ContractViolationData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
+	}
+	for _, topic := range []string{TopicPatchPreviewed, TopicPatchApplied, TopicPatchFailed, TopicPatchReverted} {
+		ret = append(ret, eventcontract.DataTopic[PatchChangedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
+	}
+	for _, topic := range []string{
 		TopicArtifactContinuationCreated,
 		TopicArtifactContinuationChunkRecorded,
 		TopicArtifactContinuationChunkRejected,
@@ -89,7 +138,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		TopicArtifactContinuationApplied,
 		TopicArtifactContinuationFailed,
 	} {
-		ret = append(ret, eventcontract.DataTopic[OrchestratorData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
+		ret = append(ret, eventcontract.DataTopic[ArtifactContinuationChangedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
 	}
 	return ret
 }

@@ -5,7 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )

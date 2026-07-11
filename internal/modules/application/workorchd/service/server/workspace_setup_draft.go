@@ -30,7 +30,7 @@ type workspaceSetupDraftSession struct {
 
 func registerWorkspaceSetupDraftRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspace-setup-draft-sessions", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		var req createWorkspaceSetupDraftSessionRequest
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
@@ -49,7 +49,7 @@ func registerWorkspaceSetupDraftRoutes(router engine.RouteRegistry, state *serve
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspace-setup-draft-sessions/:draftSessionId/messages", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		sessionID, action, ok := workspaceSetupDraftSessionActionFromPath(r.URL.Path)
 		if !ok || action != "messages" {
 			http.NotFound(w, r)
@@ -73,7 +73,7 @@ func registerWorkspaceSetupDraftRoutes(router engine.RouteRegistry, state *serve
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspace-setup-draft-sessions/:draftSessionId/regenerate", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHubs(r.Context(), state.eventHub, state.commandHub))
+		r = r.WithContext(appservice.ContextWithCommandHub(r.Context(), state.commandHub))
 		sessionID, action, ok := workspaceSetupDraftSessionActionFromPath(r.URL.Path)
 		if !ok || action != "regenerate" {
 			http.NotFound(w, r)

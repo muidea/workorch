@@ -21,31 +21,30 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	magictask "github.com/muidea/magicCommon/task"
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	appserviceruntimecore "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -53,6 +52,10 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 	"github.com/muidea/workorch/web/consoleassets"
 )
+
+func testSessionExports(session *appservice.RuntimeSession) (testkit.Exports, error) {
+	return testkit.SessionExports(session)
+}
 
 func TestMain(m *testing.M) {
 	originalWD, err := os.Getwd()
@@ -105,10 +108,10 @@ func skipObsoleteSynchronousExecutionEndpointTest(t *testing.T) {
 	t.Skip("execution-driving REST endpoints are asynchronous EventHub scheduler commands and return accepted; final run state is verified through scheduler/projection tests")
 }
 
-func newTestServerState(t *testing.T, config Config, hub events.Hub) *serverState {
+func newTestServerState(t *testing.T, config Config) *serverState {
 	t.Helper()
 	routine := magictask.NewBackgroundRoutine(128)
-	state := newIsolatedTestServerStateWithBackground(config, hub, routine)
+	state := newIsolatedTestServerStateWithBackground(config, routine)
 	configureIsolatedTestSession(t, state, config)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -121,10 +124,15 @@ func newTestServerState(t *testing.T, config Config, hub events.Hub) *serverStat
 
 func configureIsolatedTestSession(t *testing.T, state *serverState, config Config) {
 	t.Helper()
-	if state == nil || state.sharedSession != nil {
+	if state == nil {
 		return
 	}
-	replaceSchedulerHub := state.eventHub == nil
+	existingCommandHub := state.commandHub
+	if state.sharedSession != nil {
+		_ = state.sharedSession.Close(context.Background())
+		state.sharedSession = nil
+	}
+	replaceSchedulerHub := existingCommandHub == nil
 	runtimeConfig, err := workorchconfig.Current()
 	if err != nil {
 		t.Fatalf("load test runtime config: %v", err)
@@ -133,9 +141,9 @@ func configureIsolatedTestSession(t *testing.T, state *serverState, config Confi
 		config.Backend,
 		config.DataRoot,
 		workorchruntimepolicy.FromConfig(runtimeConfig),
-		state.eventHub,
-		state.commandHub,
-	)
+
+		existingCommandHub)
+
 	if err != nil {
 		return
 	}
@@ -157,13 +165,13 @@ func configureIsolatedTestSession(t *testing.T, state *serverState, config Confi
 	state.registerWorkorchDSchedulerCommandWatcher()
 }
 
-func newOwnerRuntimeSession(t *testing.T, backend string, dataRoot string, existing events.Hub) *appservice.RuntimeSession {
+func newOwnerRuntimeSession(t *testing.T, backend string, dataRoot string) *appservice.RuntimeSession {
 	t.Helper()
 	runtimeConfig, err := workorchconfig.Current()
 	if err != nil {
 		t.Fatalf("load test runtime config: %v", err)
 	}
-	runtime, err := testkit.TryNewRuntime(backend, dataRoot, workorchruntimepolicy.FromConfig(runtimeConfig), existing, nil)
+	runtime, err := testkit.TryNewRuntime(backend, dataRoot, workorchruntimepolicy.FromConfig(runtimeConfig), nil)
 	if err != nil {
 		t.Fatalf("create owner-aware runtime: %v", err)
 	}
@@ -174,13 +182,13 @@ func newOwnerRuntimeSession(t *testing.T, backend string, dataRoot string, exist
 
 func newTestMux(t *testing.T, config Config) http.Handler {
 	t.Helper()
-	return newMuxWithState(newTestServerState(t, normalizeConfig(config), nil))
+	return newMuxWithState(newTestServerState(t, normalizeConfig(config)))
 }
 
 func newTestHTTPServer(t *testing.T, config Config) *HTTPServer {
 	t.Helper()
 	routine := magictask.NewBackgroundRoutine(128)
-	server := newIsolatedTestHTTPServerWithBackground(config, nil, routine)
+	server := newIsolatedTestHTTPServerWithBackground(config, routine)
 	configureIsolatedTestSession(t, server.state, normalizeConfig(config))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -243,7 +251,7 @@ func waitSSEConnected(t *testing.T, lines <-chan string, readErr <-chan error) {
 	}
 }
 
-func readSSEEnvelope(t *testing.T, lines <-chan string, readErr <-chan error) (string, events.Envelope) {
+func readSSEEnvelope(t *testing.T, lines <-chan string, readErr <-chan error) (string, streamEvent) {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
 	var id string
@@ -254,7 +262,7 @@ func readSSEEnvelope(t *testing.T, lines <-chan string, readErr <-chan error) (s
 			case strings.HasPrefix(line, "id:"):
 				id = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
 			case strings.HasPrefix(line, "data:"):
-				var envelope events.Envelope
+				var envelope streamEvent
 				if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &envelope); err != nil {
 					t.Fatalf("decode stream data %q: %v", line, err)
 				}
@@ -268,7 +276,7 @@ func readSSEEnvelope(t *testing.T, lines <-chan string, readErr <-chan error) (s
 	}
 }
 
-func waitWorkspaceCreatedSSE(t *testing.T, lines <-chan string, readErr <-chan error, title string) events.Envelope {
+func waitWorkspaceCreatedSSE(t *testing.T, lines <-chan string, readErr <-chan error, title string) streamEvent {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
 	for {
@@ -277,7 +285,7 @@ func waitWorkspaceCreatedSSE(t *testing.T, lines <-chan string, readErr <-chan e
 			if !strings.HasPrefix(line, "data:") {
 				continue
 			}
-			var envelope events.Envelope
+			var envelope streamEvent
 			if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &envelope); err != nil {
 				t.Fatalf("decode stream data %q: %v", line, err)
 			}
@@ -307,7 +315,7 @@ func numericTestValue(value any) int64 {
 
 func newFileMuxWithCleanup(t *testing.T, dataRoot string) http.Handler {
 	t.Helper()
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -426,10 +434,9 @@ func TestReadyzReturnsServiceUnavailableWhenBackendInvalid(t *testing.T) {
 }
 
 func TestReadyzNativeRouteInjectsEventHub(t *testing.T) {
-	hub := events.NewMagicHubWithOwner("server/scheduler-generated-request-test")
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.validate = func(ctx context.Context, _, _ string) error {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("event hub from context = %#v, want injected hub", got)
 		}
 		return nil
@@ -448,7 +455,7 @@ func TestReadyzNativeRouteInjectsEventHub(t *testing.T) {
 }
 
 func TestReadyzIncludesSchedulerDiagnostics(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), events.NewMemoryHub())
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.schedulerDiagnostics.recordWatchdogTimerRegistration()
 	state.schedulerDiagnostics.recordContinuation(schedulerDiagnosticInput{
 		WorkspaceID:    "ws-readyz-diagnostics",
@@ -493,7 +500,7 @@ func TestReadyzIncludesSchedulerDiagnostics(t *testing.T) {
 	}
 }
 
-func TestServerStateRequiresFrameworkInitiatorRuntimeSession(t *testing.T) {
+func TestServerStateCreatesRuntimeSessionFromOwnedCommandHub(t *testing.T) {
 	useWorkorchRuntimeTestConfig(t, "memory", "")
 	bg := magictask.NewBackgroundRoutine(128)
 	ctx := context.Background()
@@ -503,26 +510,25 @@ func TestServerStateRequiresFrameworkInitiatorRuntimeSession(t *testing.T) {
 		_ = bg.Shutdown(shutdownCtx)
 	})
 
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, bg)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), bg)
 	t.Cleanup(func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		_ = state.close(shutdownCtx)
 	})
-	if state.sharedSession != nil {
-		t.Fatal("server state must not create an owned bootstrap runtime when framework initiator is missing")
+	if state.commandHub == nil {
+		t.Fatal("server state command hub = nil, want owned magicCommon CommandHub")
 	}
-	err := state.validate(ctx, "", "")
-	if err == nil {
-		t.Fatal("validate error = nil, want missing framework runtime session error")
+	if state.sharedSession == nil {
+		t.Fatal("server state runtime session = nil, want session created from owned CommandHub")
 	}
-	if !strings.Contains(err.Error(), "framework runtime session unavailable") {
-		t.Fatalf("validate error = %v, want framework runtime session unavailable", err)
+	if err := state.validate(ctx, "", ""); err != nil {
+		t.Fatalf("validate owned CommandHub runtime session: %v", err)
 	}
 }
 
 func TestConfigurationEndpointReturnsRedactedLLMProviders(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.readConfiguration = func() (appservice.ServiceConfiguration, error) {
 		return appservice.ServiceConfiguration{
 			Server:     appservice.ServerConfiguration{Addr: ":8080", MaxConcurrentRuns: 1},
@@ -565,7 +571,7 @@ func TestConfigurationEndpointReturnsRedactedLLMProviders(t *testing.T) {
 }
 
 func TestUpdateLLMConfigurationEndpointReturnsRedactedConfiguration(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.updateLLMConfiguration = func(cmd appservice.UpdateLLMConfigurationCommand) (appservice.ServiceConfiguration, error) {
 		if cmd.DefaultProviderID == nil || *cmd.DefaultProviderID != "local" ||
 			cmd.Providers == nil || len(*cmd.Providers) != 1 ||
@@ -626,8 +632,7 @@ func TestUpdateRuntimeConfigurationEndpointSyncsOrchestratorPolicy(t *testing.T)
 		}
 		gotPolicy = cmd.Policy
 	}
-	hub := events.NewMagicHubWithHubOwner(rawHub, "server/runtime-policy-test")
-	state := newServerStateWithHubsAndBackground(normalizeConfig(Config{Backend: "file", DataRoot: t.TempDir()}), hub, rawHub, magictask.NewBackgroundRoutine(128))
+	state := newServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "file", DataRoot: t.TempDir()}), rawHub, magictask.NewBackgroundRoutine(128))
 	configureIsolatedTestSession(t, state, state.config)
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/configuration/runtime", strings.NewReader(`{
@@ -958,7 +963,7 @@ func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
 
 func TestWorkspaceExecutionActivationSchedulesReplanContinuationForSupersededRun(t *testing.T) {
 	skipObsoleteSynchronousExecutionEndpointTest(t)
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -1092,7 +1097,7 @@ disabled = false
 
 func TestAcceptedAPIRoutesAreRegisteredNatively(t *testing.T) {
 	router := engine.NewRouteRegistry()
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	registerSystemRoutes(router, state)
 	registerConfigurationRoutes(router, state)
 	registerReadRoutes(router, state)
@@ -1123,7 +1128,7 @@ func TestAcceptedAPIRoutesAreRegisteredNatively(t *testing.T) {
 
 func TestUnsupportedMutatingAPIRoutesAreNotRegisteredNatively(t *testing.T) {
 	router := engine.NewRouteRegistry()
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	registerSystemRoutes(router, state)
 	registerConfigurationRoutes(router, state)
 	registerReadRoutes(router, state)
@@ -1227,7 +1232,7 @@ func unsupportedMutatingAPINativeRouteSpecs() []routeSpec {
 }
 
 func TestMemoryRecallTraceEndpointsReturnFilteredTraces(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -1274,8 +1279,7 @@ func TestMemoryRecallTraceEndpointsReturnFilteredTraces(t *testing.T) {
 }
 
 func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
-	hub := events.NewMagicHubWithOwner("server/scheduler-run-scope-test")
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
 
@@ -1308,14 +1312,14 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 		readErr <- scanner.Err()
 	}()
 
-	if err := hub.Publish(context.Background(), events.Envelope{
+	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-other",
 		Payload:     events.WorkspacePayload("other", "", "/tmp/other", "", common.WorkspaceStateActive, ""),
 	}); err != nil {
 		t.Fatalf("publish nonmatching event: %v", err)
 	}
-	if err := hub.Publish(context.Background(), events.Envelope{
+	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-stream",
 		Payload:     events.WorkspacePayload("stream workspace", "", "/tmp/stream", "", common.WorkspaceStateActive, ""),
@@ -1330,7 +1334,7 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 			if !strings.HasPrefix(line, "data:") {
 				continue
 			}
-			var envelope events.Envelope
+			var envelope streamEvent
 			if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &envelope); err != nil {
 				t.Fatalf("decode stream data %q: %v", line, err)
 			}
@@ -1347,8 +1351,7 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 }
 
 func TestEventStreamDefaultProjectionViewPublishesOnlyProjectionEvents(t *testing.T) {
-	hub := events.NewMemoryHub()
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
 
@@ -1367,7 +1370,7 @@ func TestEventStreamDefaultProjectionViewPublishesOnlyProjectionEvents(t *testin
 	lines, readErr := readSSELines(resp.Body)
 	waitSSEConnected(t, lines, readErr)
 
-	if err := hub.Publish(context.Background(), events.Envelope{
+	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       runevents.TopicStepStateChanged,
 		WorkspaceID: "ws-projection",
 		RunID:       "run-heavy",
@@ -1390,18 +1393,6 @@ func TestEventStreamDefaultProjectionViewPublishesOnlyProjectionEvents(t *testin
 	case <-time.After(150 * time.Millisecond):
 	}
 
-	if err := hub.Publish(context.Background(), events.Envelope{
-		Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
-		WorkspaceID: "ws-projection",
-		Payload: map[string]any{
-			"type":              "workspace_projection_changed",
-			"workspaceId":       "ws-projection",
-			"workspaceRevision": 7,
-		},
-	}); err != nil {
-		t.Fatalf("publish projection event: %v", err)
-	}
-
 	_, envelope := readSSEEnvelope(t, lines, readErr)
 	if envelope.Topic != workorchdevents.TopicWorkspaceProjectionChanged || envelope.WorkspaceID != "ws-projection" {
 		t.Fatalf("projection envelope = %+v, want projection change for ws-projection", envelope)
@@ -1412,8 +1403,7 @@ func TestEventStreamDefaultProjectionViewPublishesOnlyProjectionEvents(t *testin
 }
 
 func TestEventStreamWritesIDRevisionAndStateSummary(t *testing.T) {
-	hub := events.NewMemoryHub()
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
 
@@ -1433,7 +1423,7 @@ func TestEventStreamWritesIDRevisionAndStateSummary(t *testing.T) {
 	lines, readErr := readSSELines(resp.Body)
 	waitSSEConnected(t, lines, readErr)
 
-	if err := hub.Publish(context.Background(), events.Envelope{
+	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-stream-summary",
 		Payload:     events.WorkspacePayload("summary", "", "/tmp/summary", "", common.WorkspaceStateActive, "run-001"),
@@ -1455,8 +1445,7 @@ func TestEventStreamWritesIDRevisionAndStateSummary(t *testing.T) {
 }
 
 func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
-	hub := events.NewMemoryHub()
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
 
@@ -1474,7 +1463,7 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 	lines, readErr := readSSELines(resp.Body)
 	waitSSEConnected(t, lines, readErr)
 
-	if err := hub.Publish(context.Background(), events.Envelope{
+	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-stream-replay",
 		Payload:     events.WorkspacePayload("first", "", "/tmp/first", "", common.WorkspaceStateActive, ""),
@@ -1485,7 +1474,7 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 	if firstID == "" || first.Topic != workspaceevents.TopicWorkspaceStateChanged {
 		t.Fatalf("first replay baseline = %q %+v", firstID, first)
 	}
-	if err := hub.Publish(context.Background(), events.Envelope{
+	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       runevents.TopicRunStateChanged,
 		WorkspaceID: "ws-stream-replay",
 		RunID:       "run-replay",
@@ -1515,8 +1504,7 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 }
 
 func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
-	hub := events.NewMemoryHub()
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
 
@@ -1534,7 +1522,7 @@ func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
 	lines, readErr := readSSELines(resp.Body)
 	waitSSEConnected(t, lines, readErr)
 
-	if err := hub.Publish(context.Background(), events.Envelope{
+	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-stream-query-replay",
 		Payload:     events.WorkspacePayload("first", "", "/tmp/first", "", common.WorkspaceStateActive, ""),
@@ -1545,7 +1533,7 @@ func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
 	if firstID == "" || first.Topic != workspaceevents.TopicWorkspaceStateChanged {
 		t.Fatalf("first replay baseline = %q %+v", firstID, first)
 	}
-	if err := hub.Publish(context.Background(), events.Envelope{
+	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       runevents.TopicRunStateChanged,
 		WorkspaceID: "ws-stream-query-replay",
 		RunID:       "run-query-replay",
@@ -1575,8 +1563,7 @@ func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
 }
 
 func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
-	hub := events.NewMemoryHub()
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.listEventRecords = func(_ context.Context, _, _ string, query appservice.EventRecordQuery) ([]appservice.EventRecord, error) {
 		if query.WorkspaceID != "ws-persist" || query.RunID != "run-persist" || query.CursorAfterID != "evt-old" {
 			t.Fatalf("query = %+v, want workspace/run cursor replay query", query)
@@ -1626,8 +1613,7 @@ func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
 }
 
 func TestEventStreamProjectionReplayUsesMetadataOnlyRecords(t *testing.T) {
-	hub := events.NewMemoryHub()
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.listEventRecords = func(_ context.Context, _, _ string, query appservice.EventRecordQuery) ([]appservice.EventRecord, error) {
 		if query.WorkspaceID != "ws-projection-persist" || query.RunID != "" || query.CursorAfterID != "evt-old-projection" {
 			t.Fatalf("query = %+v, want workspace-scoped projection replay query", query)
@@ -1690,9 +1676,8 @@ func TestEventStreamProjectionReplayUsesMetadataOnlyRecords(t *testing.T) {
 
 func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEvent(t *testing.T) {
 	rawHub := magicevent.NewHub(1024)
-	hub := events.NewMagicHubWithHub(rawHub)
-	defer hub.Terminate(context.Background())
-	state := newServerStateWithHubsAndBackground(normalizeConfig(Config{Backend: "memory"}), hub, rawHub, magictask.NewBackgroundRoutine(128))
+	defer rawHub.Terminate(context.Background())
+	state := newServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, magictask.NewBackgroundRoutine(128))
 	configureIsolatedTestSession(t, state, state.config)
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
@@ -1751,9 +1736,8 @@ func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEvent(t *testing.T) {
 
 func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEventToMultipleClients(t *testing.T) {
 	rawHub := magicevent.NewHub(1024)
-	hub := events.NewMagicHubWithHub(rawHub)
-	defer hub.Terminate(context.Background())
-	state := newServerStateWithHubsAndBackground(normalizeConfig(Config{Backend: "memory"}), hub, rawHub, magictask.NewBackgroundRoutine(128))
+	defer rawHub.Terminate(context.Background())
+	state := newServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, magictask.NewBackgroundRoutine(128))
 	configureIsolatedTestSession(t, state, state.config)
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
@@ -1828,7 +1812,7 @@ func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEventToMultipleClients(t 
 				if !strings.HasPrefix(line, "data:") {
 					continue
 				}
-				var envelope events.Envelope
+				var envelope streamEvent
 				if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &envelope); err != nil {
 					t.Fatalf("%s decode stream data %q: %v", name, line, err)
 				}
@@ -1847,9 +1831,9 @@ func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEventToMultipleClients(t 
 }
 
 func TestEnqueueEventStreamEnvelopeKeepsWorkspaceCreatedWhenChannelFull(t *testing.T) {
-	ch := make(chan events.Envelope, 1)
-	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: runevents.TopicStepStateChanged, WorkspaceID: "ws-a"})
-	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: workspaceevents.TopicWorkspaceCreated, WorkspaceID: "ws-b"})
+	ch := make(chan streamEvent, 1)
+	enqueueEventStreamEnvelope(ch, streamEvent{Topic: runevents.TopicStepStateChanged, WorkspaceID: "ws-a"})
+	enqueueEventStreamEnvelope(ch, streamEvent{Topic: workspaceevents.TopicWorkspaceCreated, WorkspaceID: "ws-b"})
 
 	got := <-ch
 	if got.Topic != workspaceevents.TopicWorkspaceCreated || got.WorkspaceID != "ws-b" {
@@ -1858,9 +1842,9 @@ func TestEnqueueEventStreamEnvelopeKeepsWorkspaceCreatedWhenChannelFull(t *testi
 }
 
 func TestEnqueueEventStreamEnvelopeDropsNonCriticalWhenChannelFull(t *testing.T) {
-	ch := make(chan events.Envelope, 1)
-	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: workspaceevents.TopicWorkspaceCreated, WorkspaceID: "ws-a"})
-	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: "/custom/non-critical", WorkspaceID: "ws-b"})
+	ch := make(chan streamEvent, 1)
+	enqueueEventStreamEnvelope(ch, streamEvent{Topic: workspaceevents.TopicWorkspaceCreated, WorkspaceID: "ws-a"})
+	enqueueEventStreamEnvelope(ch, streamEvent{Topic: "/custom/non-critical", WorkspaceID: "ws-b"})
 
 	got := <-ch
 	if got.Topic != workspaceevents.TopicWorkspaceCreated || got.WorkspaceID != "ws-a" {
@@ -1869,9 +1853,9 @@ func TestEnqueueEventStreamEnvelopeDropsNonCriticalWhenChannelFull(t *testing.T)
 }
 
 func TestEnqueueEventStreamEnvelopeKeepsStepStateWhenChannelFull(t *testing.T) {
-	ch := make(chan events.Envelope, 1)
-	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: runevents.TopicStepDispatched, WorkspaceID: "ws-a"})
-	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: runevents.TopicStepStateChanged, WorkspaceID: "ws-b"})
+	ch := make(chan streamEvent, 1)
+	enqueueEventStreamEnvelope(ch, streamEvent{Topic: runevents.TopicStepDispatched, WorkspaceID: "ws-a"})
+	enqueueEventStreamEnvelope(ch, streamEvent{Topic: runevents.TopicStepStateChanged, WorkspaceID: "ws-b"})
 
 	got := <-ch
 	if got.Topic != runevents.TopicStepStateChanged || got.WorkspaceID != "ws-b" {
@@ -1986,17 +1970,16 @@ func readEmbeddedConsoleJSAssets(t *testing.T, mux http.Handler) string {
 
 func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 	skipObsoleteSynchronousExecutionEndpointTest(t)
-	hub := events.NewMemoryHub()
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.validate = func(context.Context, string, string) error { return nil }
 	state.listWorkspaces = func(ctx context.Context, _, _ string) ([]appservice.Workspace, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("workspace list event hub = %#v, want injected hub", got)
 		}
 		return []appservice.Workspace{{ID: "ws-native-read", Title: "native read"}}, nil
 	}
 	state.listRuns = func(ctx context.Context, _, _, workspaceID string) ([]appservice.Run, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run list event hub = %#v, want injected hub", got)
 		}
 		if workspaceID != "ws-native-read" {
@@ -2005,7 +1988,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return []appservice.Run{{ID: "run-native-read", WorkspaceID: workspaceID, State: "created"}}, nil
 	}
 	state.readWorkspace = func(ctx context.Context, _, _, workspaceID string) (appservice.Workspace, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("workspace get event hub = %#v, want injected hub", got)
 		}
 		if workspaceID != "ws-native-read" {
@@ -2014,7 +1997,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.Workspace{ID: workspaceID, Title: "native read", State: "active"}, nil
 	}
 	state.readWorkspaceDetailSnapshot = func(ctx context.Context, _, _, workspaceID string) (appservice.WorkspaceSnapshot, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("workspace snapshot event hub = %#v, want injected hub", got)
 		}
 		if workspaceID != "ws-native-read" {
@@ -2023,7 +2006,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.WorkspaceSnapshot{Workspace: appservice.Workspace{ID: workspaceID}}, nil
 	}
 	state.readWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string) (appservice.WorkspaceSoulBindings, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("workspace soul bindings read event hub = %#v, want injected hub", got)
 		}
 		if workspaceID != "ws-native-read" {
@@ -2038,7 +2021,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}, nil
 	}
 	state.updateWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string, cmd appservice.WorkspaceSoulBindings) (appservice.WorkspaceSoulBindings, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("workspace soul bindings update event hub = %#v, want injected hub", got)
 		}
 		if workspaceID != "ws-native-read" || cmd.DefaultSoulID != "soul-native" || cmd.Bindings["execution"] != "soul-native-execution" {
@@ -2048,7 +2031,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return cmd, nil
 	}
 	state.checkGoalDoDQuality = func(ctx context.Context, _, _ string, cmd appservice.GoalDoDQualityCheckCommand) (appservice.GoalDoDQualityCheck, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("goal/dod quality check event hub = %#v, want injected hub", got)
 		}
 		if cmd.WorkspaceID != "ws-native-read" || cmd.GoalID != "goal-native" || cmd.DoDID != "dod-native" {
@@ -2066,7 +2049,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}, nil
 	}
 	state.readRun = func(ctx context.Context, _, _, runID string) (appservice.Run, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run get event hub = %#v, want injected hub", got)
 		}
 		if runID != "run-native-read" {
@@ -2076,8 +2059,8 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 	}
 	state.readRunSnapshot = func(ctx context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
 		if runID == "run-native-read" {
-			got := appservice.EventHubFromContext(ctx)
-			if got != nil && got != hub {
+			got := appservice.CommandHubFromContext(ctx)
+			if got != nil && got != state.commandHub {
 				t.Fatalf("run snapshot event hub = %#v, want injected hub", got)
 			}
 			state := "created"
@@ -2093,7 +2076,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.RunSnapshot{}, nil
 	}
 	state.listRunSteps = func(ctx context.Context, _, _ string, query appservice.StepQuery) (appservice.StepPage, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run steps event hub = %#v, want injected hub", got)
 		}
 		if query.RunID != "run-native-read" || query.CursorAfterID != "step-native-1" || query.Limit != 2 {
@@ -2108,7 +2091,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}, nil
 	}
 	state.listRunToolCalls = func(ctx context.Context, _, _ string, query appservice.ToolCallQuery) (appservice.ToolCallPage, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run tool calls event hub = %#v, want injected hub", got)
 		}
 		if query.RunID != "run-native-read" || query.CursorAfterID != "tool-native-1" || query.Limit != 2 {
@@ -2123,7 +2106,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}, nil
 	}
 	state.listRunRuntimeCheckpoints = func(ctx context.Context, _, _ string, query appservice.RuntimeCheckpointQuery) (appservice.RuntimeCheckpointPage, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run runtime checkpoints event hub = %#v, want injected hub", got)
 		}
 		if query.RunID != "run-native-read" || query.CursorAfterID != "checkpoint-native-1" || query.Limit != 2 {
@@ -2138,7 +2121,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}, nil
 	}
 	state.listRunResults = func(ctx context.Context, _, _ string, query appservice.ResultQuery) (appservice.ResultPage, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run results event hub = %#v, want injected hub", got)
 		}
 		if query.RunID != "run-native-read" || query.CursorAfterID != "result-native-1" || query.Limit != 2 {
@@ -2153,7 +2136,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}, nil
 	}
 	state.listRunPatches = func(ctx context.Context, _, _ string, query appservice.PatchQuery) (appservice.PatchPage, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run patches event hub = %#v, want injected hub", got)
 		}
 		if query.RunID != "run-native-read" || query.CursorAfterID != "patch-native-1" || query.Limit != 2 {
@@ -2168,7 +2151,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}, nil
 	}
 	state.listRunValidationResults = func(ctx context.Context, _, _ string, query appservice.ValidationResultQuery) (appservice.ValidationResultPage, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run validation results event hub = %#v, want injected hub", got)
 		}
 		if query.RunID != "run-native-read" || query.CursorAfterID != "validation-native-1" || query.Limit != 2 {
@@ -2183,7 +2166,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}, nil
 	}
 	state.listRunArtifacts = func(ctx context.Context, _, _ string, query appservice.ArtifactQuery) (appservice.ArtifactPage, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run artifacts event hub = %#v, want injected hub", got)
 		}
 		if query.RunID != "run-native-read" || query.CursorAfterID != "artifact-native-1" || query.Limit != 2 {
@@ -2198,7 +2181,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}, nil
 	}
 	state.readRunStatus = func(ctx context.Context, _, _, runID string) (appservice.RunStatus, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run status event hub = %#v, want injected hub", got)
 		}
 		if runID != "run-native-read" {
@@ -2207,7 +2190,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.RunStatus{ID: runID, WorkspaceID: "ws-native-read", State: "created"}, nil
 	}
 	state.readRunObservability = func(ctx context.Context, _, _, runID string) (appservice.RunObservability, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run observability event hub = %#v, want injected hub", got)
 		}
 		if runID != "run-native-read" {
@@ -2216,7 +2199,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.RunObservability{Run: appservice.Run{ID: runID, WorkspaceID: "ws-native-read", State: "created"}}, nil
 	}
 	state.readRunTaskProgress = func(ctx context.Context, _, _, runID string) (appservice.TaskProgress, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run task progress event hub = %#v, want injected hub", got)
 		}
 		if runID != "run-native-read" {
@@ -2225,7 +2208,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.TaskProgress{WorkspaceID: "ws-native-read", RunID: runID, State: "running", Recovery: appservice.RecoveryPlan{Mode: "resume"}}, nil
 	}
 	state.readRunContextBundle = func(ctx context.Context, _, _, runID string) (appservice.ContextBundle, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run context bundle event hub = %#v, want injected hub", got)
 		}
 		if runID != "run-native-read" {
@@ -2234,7 +2217,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.ContextBundle{WorkspaceID: "ws-native-read", RunID: runID, Mode: "run_recovery", Recovery: appservice.RecoveryPlan{Mode: "resume"}}, nil
 	}
 	state.readRunTaskDecompositions = func(ctx context.Context, _, _, runID string) ([]appservice.TaskDecomposition, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run task decomposition event hub = %#v, want injected hub", got)
 		}
 		if runID != "run-native-read" {
@@ -2243,7 +2226,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return []appservice.TaskDecomposition{{ID: "task-native", WorkspaceID: "ws-native-read", RunID: runID, State: "running"}}, nil
 	}
 	state.listDecisions = func(ctx context.Context, _, _, workspaceID, runID string) ([]appservice.Decision, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("decision list event hub = %#v, want injected hub", got)
 		}
 		if workspaceID != "ws-native-read" || runID != "run-native-read" {
@@ -2252,7 +2235,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return []appservice.Decision{{ID: "ticket-native-read", WorkspaceID: workspaceID, RunID: runID, State: "open"}}, nil
 	}
 	state.listDecisionPage = func(ctx context.Context, _, _ string, query appservice.DecisionQuery) (appservice.DecisionPage, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("decision page event hub = %#v, want injected hub", got)
 		}
 		if query.WorkspaceID != "ws-native-read" || query.RunID != "run-native-read" || query.CursorAfterID != "ticket-native-cursor" || query.Limit != 2 {
@@ -2268,7 +2251,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}, nil
 	}
 	state.readDecision = func(ctx context.Context, _, _, ticketID string) (appservice.Decision, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("decision get event hub = %#v, want injected hub", got)
 		}
 		if ticketID != "ticket-native-read" {
@@ -2277,7 +2260,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.Decision{ID: ticketID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "open"}, nil
 	}
 	state.listApprovals = func(ctx context.Context, _, _, workspaceID, runID string) ([]appservice.Approval, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("approval list event hub = %#v, want injected hub", got)
 		}
 		if workspaceID != "ws-native-read" || runID != "run-native-read" {
@@ -2286,7 +2269,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return []appservice.Approval{{ID: "approval-native-read", WorkspaceID: workspaceID, RunID: runID, State: "pending"}}, nil
 	}
 	state.listApprovalPage = func(ctx context.Context, _, _ string, query appservice.ApprovalQuery) (appservice.ApprovalPage, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("approval page event hub = %#v, want injected hub", got)
 		}
 		if query.WorkspaceID != "ws-native-read" || query.RunID != "run-native-read" || query.CursorAfterID != "approval-native-cursor" || query.Limit != 2 {
@@ -2302,7 +2285,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}, nil
 	}
 	state.readApproval = func(ctx context.Context, _, _, approvalID string) (appservice.Approval, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("approval get event hub = %#v, want injected hub", got)
 		}
 		if approvalID != "approval-native-read" {
@@ -2311,7 +2294,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "pending"}, nil
 	}
 	state.createWorkspace = func(ctx context.Context, _, _ string, cmd appservice.CreateWorkspaceCommand) (appservice.Workspace, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("workspace create event hub = %#v, want injected hub", got)
 		}
 		if cmd.Title != "native write" || cmd.Description != "native description" || cmd.DeliverableDirectory != "workspaces/native-write" || cmd.TemplateID != "template-native" {
@@ -2320,7 +2303,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.Workspace{ID: "ws-native-write", Title: cmd.Title, Description: cmd.Description, DeliverableDirectory: cmd.DeliverableDirectory, State: "active"}, nil
 	}
 	state.deleteWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appservice.DeleteWorkspaceCommand) error {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("workspace delete event hub = %#v, want injected hub", got)
 		}
 		if workspaceID != "ws-native-read" || !cmd.Purge {
@@ -2329,7 +2312,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return nil
 	}
 	state.createRun = func(ctx context.Context, _, _, workspaceID, runID, goalID, dodID string) (appservice.Run, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run create event hub = %#v, want injected hub", got)
 		}
 		if workspaceID != "ws-native-read" || runID != "run-native-write" || goalID != "goal-native" || dodID != "dod-native" {
@@ -2338,7 +2321,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: "created"}, nil
 	}
 	state.startRun = func(ctx context.Context, _, _, runID string) (appservice.Run, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run start event hub = %#v, want injected hub", got)
 		}
 		if runID != "run-native-read" {
@@ -2347,7 +2330,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}, nil
 	}
 	state.resumeRun = func(ctx context.Context, _, _, runID string, _ ...map[string]any) (appservice.Run, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("run resume event hub = %#v, want injected hub", got)
 		}
 		if runID != "run-native-read" {
@@ -2356,7 +2339,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}, nil
 	}
 	state.resumeWorkspaceExecution = func(ctx context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("workspace activation event hub = %#v, want injected hub", got)
 		}
 		if workspaceID != "ws-native-read" ||
@@ -2380,7 +2363,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}, nil
 	}
 	state.resolveDecision = func(ctx context.Context, _, _, ticketID string, cmd appservice.ResolveDecisionCommand) (appservice.Decision, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("decision resolve event hub = %#v, want injected hub", got)
 		}
 		if ticketID != "ticket-native-read" {
@@ -2389,7 +2372,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.Decision{ID: ticketID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "resolved", ResolutionType: cmd.ResolutionType}, nil
 	}
 	state.batchResolveDecisions = func(ctx context.Context, _, _ string, cmd appservice.BatchResolveDecisionCommand) ([]appservice.Decision, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("decision batch resolve event hub = %#v, want injected hub", got)
 		}
 		if !stringSliceEqual(cmd.TicketIDs, []string{"ticket-native-read"}) || cmd.ResolutionType != decisioncommon.ResolutionTypeReplan {
@@ -2398,7 +2381,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return []appservice.Decision{{ID: "ticket-native-read", WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "resolved", ResolutionType: cmd.ResolutionType}}, nil
 	}
 	state.approveApproval = func(ctx context.Context, _, _, approvalID string, cmd appservice.ResolveApprovalCommand) (appservice.Approval, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("approval approve event hub = %#v, want injected hub", got)
 		}
 		if approvalID != "approval-native-read" {
@@ -2410,7 +2393,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "approved"}, nil
 	}
 	state.rejectApproval = func(ctx context.Context, _, _, approvalID string, cmd appservice.ResolveApprovalCommand) (appservice.Approval, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("approval reject event hub = %#v, want injected hub", got)
 		}
 		if approvalID != "approval-native-read" {
@@ -2422,7 +2405,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		return appservice.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "rejected"}, nil
 	}
 	state.batchResolveApprovals = func(ctx context.Context, _, _ string, cmd appservice.BatchResolveApprovalCommand) ([]appservice.Approval, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
+		if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 			t.Fatalf("approval batch resolve event hub = %#v, want injected hub", got)
 		}
 		if !stringSliceEqual(cmd.ApprovalIDs, []string{"approval-native-read"}) || cmd.Action != "approve" {
@@ -2512,7 +2495,7 @@ func TestWorkspaceCreateEndpointReturnsCreatedWorkspace(t *testing.T) {
 }
 
 func TestWorkspaceSetupDraftSessionSupportsMultiTurnDraft(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.listWorkspaceTemplates = func(context.Context, string, string) ([]appservice.WorkspaceTemplate, error) {
 		return []appservice.WorkspaceTemplate{{
 			ID:       "generic-template",
@@ -2609,7 +2592,7 @@ func TestWorkspaceSetupDraftSessionSupportsMultiTurnDraft(t *testing.T) {
 }
 
 func TestWorkspaceSetupDraftMessageCanRestoreTemplateContext(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.listWorkspaceTemplates = func(context.Context, string, string) ([]appservice.WorkspaceTemplate, error) {
 		return []appservice.WorkspaceTemplate{{
 			ID:       "generic-template",
@@ -2705,9 +2688,9 @@ func TestArtifactContentEndpointReturnsStoredArtifactFile(t *testing.T) {
 	runID := common.RunID("run-http-artifact")
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
 	dataRoot := t.TempDir()
-	session := newOwnerRuntimeSession(t, "file", dataRoot, nil)
+	session := newOwnerRuntimeSession(t, "file", dataRoot)
 	var err error
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
@@ -2788,7 +2771,7 @@ func TestRuntimePayloadEndpointReturnsLLMRawRefContent(t *testing.T) {
 }
 
 func TestDetailContentEndpointsRequireExplicitRefsBeforeReading(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	var artifactReads atomic.Int32
 	var rawReads atomic.Int32
 	state.readArtifactContent = func(context.Context, string, string, string) (appservice.ArtifactContent, error) {
@@ -2837,8 +2820,8 @@ func TestArtifactContentEndpointReusesCachedRunSnapshotArtifacts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(artifactDir, "result-summary.txt"), []byte("cached HTTP artifact payload"), 0o600); err != nil {
 		t.Fatalf("write artifact file: %v", err)
 	}
-	session := newOwnerRuntimeSession(t, "file", dataRoot, nil)
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}), nil)
+	session := newOwnerRuntimeSession(t, "file", dataRoot)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}))
 	state.configureSessionBackedOperations(session)
 	state.cacheRunSnapshot(appservice.RunSnapshot{
 		Run: appservice.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateCompleted)},
@@ -2937,7 +2920,7 @@ func TestWorkspaceGetEndpointOverlaysProjectedViewModel(t *testing.T) {
 
 func TestWorkspaceGetEndpointDerivesPromptFromOwnerStateWhenProjectionIsStale(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-get-prompt-owner-state")
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	state.readWorkspace = func(context.Context, string, string, string) (appservice.Workspace, error) {
 		return appservice.Workspace{
@@ -3093,9 +3076,9 @@ func TestGoalAndDoDPathScopedEndpointsHandleDuplicateDefinitionIDs(t *testing.T)
 	workspaceA := createWorkspaceForHTTP(t, handler, "duplicate definition workspace a", "workspaces/dup-definition-a")
 	workspaceB := createWorkspaceForHTTP(t, handler, "duplicate definition workspace b", "workspaces/dup-definition-b")
 	ctx := context.Background()
-	session := newOwnerRuntimeSession(t, "file", dataRoot, nil)
+	session := newOwnerRuntimeSession(t, "file", dataRoot)
 	var err error
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
@@ -3167,8 +3150,8 @@ func TestGoalAndDoDPathScopedEndpointsHandleDuplicateDefinitionIDs(t *testing.T)
 		t.Fatalf("dod update body = %+v, want workspace B update", dodPutBody.DoD)
 	}
 
-	session = newOwnerRuntimeSession(t, "file", dataRoot, nil)
-	exports, err = session.Exports()
+	session = newOwnerRuntimeSession(t, "file", dataRoot)
+	exports, err = testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports #2: %v", err)
 	}
@@ -3653,7 +3636,7 @@ func TestRunStatusEndpointReturnsPersistedRunStatus(t *testing.T) {
 }
 
 func TestRunStatusEndpointCanWaitForTargetState(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	var calls atomic.Int32
 	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
 		call := calls.Add(1)
@@ -3685,7 +3668,7 @@ func TestRunStatusEndpointCanWaitForTargetState(t *testing.T) {
 }
 
 func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnOwnerRunStateEvent(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	var statusReads atomic.Int32
 	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
 		statusReads.Add(1)
@@ -3719,7 +3702,7 @@ func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnOwnerRunStateEvent(
 		t.Fatalf("cached status = %+v reads=%d, want cached completed state before owner event", cachedBody.Status, statusReads.Load())
 	}
 
-	if err := state.eventHub.Publish(context.Background(), events.Envelope{
+	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       runevents.TopicRunStateChanged,
 		WorkspaceID: "ws-status-owner-event",
 		RunID:       "run-status-owner-event",
@@ -3747,7 +3730,7 @@ func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnOwnerRunStateEvent(
 }
 
 func TestRunStatusWaitUsesStatusChangeNotification(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	var completed atomic.Bool
 	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
 		status := "running"
@@ -3792,7 +3775,7 @@ func TestRunStatusWaitUsesStatusChangeNotification(t *testing.T) {
 }
 
 func TestTerminalRunSnapshotCacheReusesSnapshotForSnapshotAndStatusOnly(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	var snapshotReads atomic.Int32
 	var observabilityReads atomic.Int32
 	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
@@ -3840,7 +3823,7 @@ func TestTerminalRunSnapshotCacheReusesSnapshotForSnapshotAndStatusOnly(t *testi
 }
 
 func TestRunSnapshotCacheByWorkspaceRequiresUniqueCachedRun(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.cacheRunSnapshot(appservice.RunSnapshot{
 		Workspace: appservice.Workspace{ID: "ws-cache-unique", State: string(common.WorkspaceStateActive)},
 		Run:       appservice.Run{ID: "run-cache-first", WorkspaceID: "ws-cache-unique", State: string(common.RunStateCompleted)},
@@ -3859,7 +3842,7 @@ func TestRunSnapshotCacheByWorkspaceRequiresUniqueCachedRun(t *testing.T) {
 }
 
 func TestRunStatusWaitWarmsTerminalRunSnapshotCache(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	var snapshotReads atomic.Int32
 	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
 		return appservice.RunStatus{ID: runID, WorkspaceID: "ws-status-warm-cache", State: string(common.RunStateCompleted)}, nil
@@ -3897,7 +3880,7 @@ func TestRunStatusWaitWarmsTerminalRunSnapshotCache(t *testing.T) {
 }
 
 func TestRunStatusNotificationForTerminalRunWarmsSnapshotCache(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	var snapshotReads atomic.Int32
 	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
 		snapshotReads.Add(1)
@@ -3931,7 +3914,7 @@ func TestRunStatusNotificationForTerminalRunWarmsSnapshotCache(t *testing.T) {
 }
 
 func TestRunSnapshotReadWaitsForTerminalStatusWarmupInflight(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	var snapshotReads atomic.Int32
 	releaseRead := make(chan struct{})
 	readStarted := make(chan struct{})
@@ -3987,7 +3970,7 @@ func TestRunSnapshotReadWaitsForTerminalStatusWarmupInflight(t *testing.T) {
 }
 
 func TestRunSnapshotCacheInvalidationPreservesInflightWarmup(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-inflight-clear")
 	runID := "run-inflight-clear"
 
@@ -4029,7 +4012,7 @@ func TestRunSnapshotCacheInvalidationPreservesInflightWarmup(t *testing.T) {
 }
 
 func TestRunObservabilityReadWaitsForTerminalStatusWarmupInflight(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	var snapshotReads atomic.Int32
 	var observabilityReads atomic.Int32
 	releaseRead := make(chan struct{})
@@ -4094,7 +4077,7 @@ func TestRunObservabilityReadWaitsForTerminalStatusWarmupInflight(t *testing.T) 
 
 func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.T) {
 	dataRoot := t.TempDir()
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}))
 	handler := newMuxWithState(state)
 
 	workspace := createWorkspaceForHTTP(t, handler, "workspace snapshot http", "workspaces/workspace-snapshot-http")
@@ -4151,7 +4134,7 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 	dataRoot := t.TempDir()
 	workspaceID := common.WorkspaceID("ws-compact-http")
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}))
 	ctx := context.Background()
 	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
 	if err := repos.Workspaces.Create(ctx, &workspacemodel.Workspace{
@@ -4266,7 +4249,7 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 
 func TestWorkspaceSnapshotEndpointDefaultUsesExplicitCompactDetail(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-explicit-compact-detail")
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	state.workspaceProjection.UpsertWorkspace(appservice.Workspace{
 		ID:          string(workspaceID),
@@ -4348,7 +4331,7 @@ func TestWorkspaceSnapshotEndpointDefaultUsesExplicitCompactDetail(t *testing.T)
 
 func TestWorkspaceSnapshotEndpointSummaryDoesNotHydrateDetail(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-summary-no-detail-hydrate")
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	state.workspaceProjection.UpsertWorkspace(appservice.Workspace{
 		ID:          string(workspaceID),
@@ -4393,7 +4376,7 @@ func TestWorkspaceSnapshotEndpointSummaryDoesNotHydrateDetail(t *testing.T) {
 
 func TestWorkspaceSnapshotEndpointDoesNotOverlayStalePromptMode(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-detail-prompt-same-source")
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	state.workspaceProjection.UpsertSnapshot(appservice.WorkspaceSnapshot{
 		Workspace: appservice.Workspace{
@@ -4449,7 +4432,7 @@ func TestWorkspaceSnapshotEndpointDoesNotOverlayStalePromptMode(t *testing.T) {
 
 func TestWorkspaceSnapshotEndpointObservabilityUsesExplicitFullRead(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-observability-full-read")
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.workspaceProjection.UpsertSnapshot(appservice.WorkspaceSnapshot{
 		Workspace: appservice.Workspace{
 			ID:          string(workspaceID),
@@ -4826,7 +4809,7 @@ func TestDecisionResolveEndpointRejectsInvalidMissingInfoAndKeepsTicketOpen(t *t
 			if files := resolutionFilesForHTTP(t, dataRoot); len(files) != 0 {
 				t.Fatalf("resolution files = %v, want none for invalid missing-info payload", files)
 			}
-			readSession := newOwnerRuntimeSession(t, "file", dataRoot, nil)
+			readSession := newOwnerRuntimeSession(t, "file", dataRoot)
 			ticket, err := appservice.ReadDecisionWithSession(context.Background(), readSession, started.BlockingTicketID)
 			_ = readSession.Close(context.Background())
 			if err != nil {
@@ -4843,7 +4826,7 @@ func TestDecisionResolveEndpointProjectsReplanRunCommand(t *testing.T) {
 	dataRoot := t.TempDir()
 	routine := &recordingBackgroundRoutine{}
 	config := normalizeConfig(Config{Backend: "file", DataRoot: dataRoot})
-	state := newIsolatedTestServerStateWithBackground(config, nil, routine)
+	state := newIsolatedTestServerStateWithBackground(config, routine)
 	configureIsolatedTestSession(t, state, config)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -5107,7 +5090,7 @@ func TestDecisionBatchResolveEndpointScopesDuplicateTicketIDsByWorkspace(t *test
 }
 
 func TestServerStateSchedulesReplanContinuationForSupersededReplanRun(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -5153,7 +5136,7 @@ func TestServerStateSchedulesReplanContinuationForSupersededReplanRun(t *testing
 }
 
 func TestServerStateSkipsReplanContinuationWhenRuntimeSuccessorExists(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -5196,7 +5179,7 @@ func TestServerStateSkipsReplanContinuationWhenRuntimeSuccessorExists(t *testing
 }
 
 func TestServerStateReplanContinuationIgnoresPrefixOnlySuccessor(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -5247,7 +5230,7 @@ func TestServerStateReplanContinuationIgnoresPrefixOnlySuccessor(t *testing.T) {
 }
 
 func TestServerStateReplanContinuationRetriesAfterActivationFailure(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -5318,7 +5301,7 @@ func TestServerStateReplanContinuationRetriesAfterActivationFailure(t *testing.T
 }
 
 func TestServerStateReplanContinuationWatcherDoesNotDuplicateRuntimeSuccessor(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -5326,8 +5309,8 @@ func TestServerStateReplanContinuationWatcherDoesNotDuplicateRuntimeSuccessor(t 
 			t.Fatalf("close server state: %v", err)
 		}
 	})
-	if state.eventHub == nil {
-		t.Fatalf("server state eventHub is nil, want shared session event hub")
+	if state.commandHub == nil {
+		t.Fatalf("server state commandHub is nil, want shared session command hub")
 	}
 	activated := make(chan struct{}, 1)
 	state.resumeWorkspaceExecution = func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
@@ -5335,7 +5318,7 @@ func TestServerStateReplanContinuationWatcherDoesNotDuplicateRuntimeSuccessor(t 
 		return appservice.WorkspaceExecutionActivation{}, nil
 	}
 
-	if err := state.eventHub.Publish(context.Background(), events.Envelope{
+	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       runevents.TopicRunStateChanged,
 		WorkspaceID: "ws-replan-watcher",
 		RunID:       "run-replan-watcher",
@@ -5353,7 +5336,7 @@ func TestServerStateReplanContinuationWatcherDoesNotDuplicateRuntimeSuccessor(t 
 }
 
 func TestServerStateAutoGovernanceResolvedSchedulesResumeAndReplanContinuation(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -5361,8 +5344,8 @@ func TestServerStateAutoGovernanceResolvedSchedulesResumeAndReplanContinuation(t
 			t.Fatalf("close server state: %v", err)
 		}
 	})
-	if state.eventHub == nil {
-		t.Fatalf("server state eventHub is nil, want shared session event hub")
+	if state.commandHub == nil {
+		t.Fatalf("server state commandHub is nil, want shared session command hub")
 	}
 	resumed := make(chan string, 1)
 	activated := make(chan appservice.ActivateWorkspaceExecutionCommand, 1)
@@ -5397,7 +5380,7 @@ func TestServerStateAutoGovernanceResolvedSchedulesResumeAndReplanContinuation(t
 		}, nil
 	}
 
-	if err := state.eventHub.Publish(context.Background(), events.Envelope{
+	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       governanceevents.TopicGovernanceAutoResolved,
 		WorkspaceID: "ws-auto-replan",
 		RunID:       "run-auto-replan",
@@ -5428,9 +5411,9 @@ func TestServerStateOwnerResolvedEventsScheduleGovernanceResume(t *testing.T) {
 		{name: "approval resolved", topic: approvalevents.TopicApprovalResolved},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
-			if state.eventHub == nil {
-				t.Fatalf("server state eventHub is nil, want shared session event hub")
+			state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
+			if state.commandHub == nil {
+				t.Fatalf("server state commandHub is nil, want shared session command hub")
 			}
 			resumed := make(chan string, 1)
 			state.resumeRun = func(_ context.Context, _, _, runID string, _ ...map[string]any) (appservice.Run, error) {
@@ -5441,7 +5424,7 @@ func TestServerStateOwnerResolvedEventsScheduleGovernanceResume(t *testing.T) {
 				return appservice.Run{ID: runID, WorkspaceID: "ws-owner-resolved", State: string(common.RunStateActive)}, nil
 			}
 
-			if err := state.eventHub.Publish(context.Background(), events.Envelope{
+			if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 				Topic:       tc.topic,
 				WorkspaceID: "ws-owner-resolved",
 				RunID:       "run-owner-resolved",
@@ -5461,14 +5444,14 @@ func TestServerStateOwnerResolvedEventsScheduleGovernanceResume(t *testing.T) {
 }
 
 func TestServerStateDecisionReplanResolvedEventProjectsReplanCommand(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	const workspaceID = "ws-owner-replan-resolved"
 	const runID = "run-owner-replan-resolved"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "waiting_decision", ActiveRunID: runID},
 	})
 
-	if err := state.eventHub.Publish(context.Background(), events.Envelope{
+	if err := publishServerTestEventRecord(context.Background(), state.commandHub, streamEvent{
 		Topic:       decisionevents.TopicTicketResolved,
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -5495,7 +5478,7 @@ func TestServerStateDecisionReplanResolvedEventProjectsReplanCommand(t *testing.
 }
 
 func TestServerStateRecoverReplanContinuationsSchedulesSupersededReplanRuns(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -5565,7 +5548,8 @@ func TestServerStateGovernanceRunResumeCoalescesDuplicateRunID(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
-	}), nil)
+	}))
+
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -5629,7 +5613,8 @@ func TestServerStateGovernanceRunResumeAllowsSameRunIDAcrossWorkspaces(t *testin
 	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 2,
-	}), nil)
+	}))
+
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -5683,7 +5668,8 @@ func TestServerStateGovernanceRunResumeUsesWorkspaceContext(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
-	}), nil)
+	}))
+
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -5720,7 +5706,7 @@ func TestServerStateGovernanceRunResumeRejectsMissingWorkspaceScope(t *testing.T
 	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
-	}), nil, routine)
+	}), routine)
 
 	if key := governanceRunResumeKey(governanceRunResumeRef{RunID: "run-missing-scope"}); key != "" {
 		t.Fatalf("governance resume key = %q, want empty for missing workspace scope", key)
@@ -5766,7 +5752,8 @@ func TestServerStateRecoversResolvedDecisionBlockedRun(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
-	}), nil)
+	}))
+
 	const workspaceID = "ws-resolved-decision-recovery"
 	const runID = "run-resolved-decision-recovery"
 	const ticketID = "ticket-resolved-decision-recovery"
@@ -5818,7 +5805,8 @@ func TestServerStateRecoversResolvedDecisionBlockedRunWithWorkspaceScope(t *test
 	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
-	}), nil)
+	}))
+
 	const runID = "run-001"
 	const workspaceA = "ws-resolved-decision-scope-a"
 	const workspaceB = "ws-resolved-decision-scope-b"
@@ -5906,7 +5894,7 @@ func TestServerStateRecoversResolvedDecisionBlockedRunWithWorkspaceScope(t *test
 
 func TestServerStateGovernanceResumeKeepsPendingAfterBackgroundSubmitFailure(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-governance-resume-pending"
 	const runID = "run-governance-resume-pending"
 
@@ -5963,7 +5951,7 @@ func TestServerStateGovernanceResumeKeepsPendingAfterBackgroundSubmitFailure(t *
 
 func TestServerStateGovernanceResumeDoesNotCompleteWhenReadbackStillBlockedOnResolvedDecision(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-governance-readback"
 	const runID = "run-governance-readback"
 	const ticketID = "ticket-governance-readback"
@@ -6020,7 +6008,7 @@ func TestServerStateGovernanceResumeDoesNotCompleteWhenReadbackStillBlockedOnRes
 
 func TestServerStateWorkspaceExecutionKeepsPendingAfterBackgroundSubmitFailure(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-workspace-execution-pending"
 	req := workspaceRestartRequest{
 		WorkspaceID: workspaceID,
@@ -6076,7 +6064,7 @@ func TestServerStateWorkspaceExecutionKeepsPendingAfterBackgroundSubmitFailure(t
 
 func TestServerStateRunContinuationKeepsPendingAfterBackgroundSubmitFailure(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-run-continuation-pending"
 	const runID = "run-continuation-pending"
 	req := runContinuationRequest{
@@ -6137,7 +6125,7 @@ func TestServerStateRunContinuationKeepsPendingAfterBackgroundSubmitFailure(t *t
 
 func TestServerStateRunContinuationDoesNotCompleteWhenReadbackStillBlockedOnResolvedDecision(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-run-continuation-readback"
 	const runID = "run-continuation-readback"
 	const ticketID = "ticket-run-continuation-readback"
@@ -6208,7 +6196,7 @@ func TestServerStateRunContinuationDoesNotCompleteWhenReadbackStillBlockedOnReso
 }
 
 func TestRunContinuationStillNeedsWorkForActiveExecutableNextActionWithoutCurrentStep(t *testing.T) {
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, &recordingBackgroundRoutine{})
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), &recordingBackgroundRoutine{})
 	const workspaceID = "ws-active-nextaction"
 	const runID = "run-active-nextaction"
 	req := runContinuationRequest{
@@ -6246,7 +6234,7 @@ func TestRunContinuationStillNeedsWorkForActiveExecutableNextActionWithoutCurren
 }
 
 func TestRunContinuationReadbackRejectsActiveExecutableNextActionWithoutCurrentStep(t *testing.T) {
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, &recordingBackgroundRoutine{})
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), &recordingBackgroundRoutine{})
 	const workspaceID = "ws-active-readback-nextaction"
 	const runID = "run-active-readback-nextaction"
 	req := runContinuationRequest{
@@ -6291,7 +6279,7 @@ func TestRunContinuationReadbackRejectsActiveExecutableNextActionWithoutCurrentS
 }
 
 func TestWorkspaceExecutionStillNeedsWorkForActiveRunExecutableNextActionWithoutCurrentStep(t *testing.T) {
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, &recordingBackgroundRoutine{})
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), &recordingBackgroundRoutine{})
 	const workspaceID = "ws-workspace-active-nextaction"
 	const runID = "run-workspace-active-nextaction"
 	req := workspaceRestartRequest{
@@ -6331,7 +6319,7 @@ func TestWorkspaceExecutionStillNeedsWorkForActiveRunExecutableNextActionWithout
 
 func TestWorkspaceExecutionDoesNotCompleteWhenActiveRunStillHasExecutableNextActionWithoutCurrentStep(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-workspace-readback-nextaction"
 	const runID = "run-workspace-readback-nextaction"
 	req := workspaceRestartRequest{
@@ -6397,8 +6385,7 @@ func TestWorkspaceExecutionDoesNotCompleteWhenActiveRunStillHasExecutableNextAct
 
 func TestWorkorchDSchedulerWorkspaceRunCommandEnqueuesRunContinuationByWorkspaceScope(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	hub := events.NewMagicHubWithOwner("server/scheduler-run-scope-test")
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-scheduler-run-command"
 	const runID = "run-001"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"}})
@@ -6422,8 +6409,7 @@ func TestWorkorchDSchedulerWorkspaceRunCommandEnqueuesRunContinuationByWorkspace
 
 func TestWorkorchDWorkspaceRunCommandResumeEnqueuesRunContinuation(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	hub := events.NewMagicHubWithOwner("server/scheduler-resume-test")
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-scheduler-workspace-run-resume"
 	const runID = "run-001"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
@@ -6459,8 +6445,7 @@ func TestWorkorchDWorkspaceRunCommandResumeEnqueuesRunContinuation(t *testing.T)
 
 func TestWorkorchDWorkspaceRunCommandResumeCoalescesDuplicateContinuation(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	hub := events.NewMagicHubWithOwner("server/scheduler-resume-idempotency-test")
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-scheduler-resume-idempotency"
 	const runID = "run-scheduler-resume-idempotency"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
@@ -6508,8 +6493,7 @@ func TestWorkorchDWorkspaceRunCommandResumeCoalescesDuplicateContinuation(t *tes
 
 func TestWorkorchDWorkspaceRunCommandGeneratesRequestIDWhenMissing(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	hub := events.NewMagicHubWithOwner("server/scheduler-generated-request-test")
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-scheduler-generated-request"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"},
@@ -6537,7 +6521,7 @@ func TestWorkorchDWorkspaceRunCommandGeneratesRequestIDWhenMissing(t *testing.T)
 }
 
 func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "activation request id", "workspaces/activation-request-id")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
@@ -6587,7 +6571,7 @@ func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
 }
 
 func TestWorkorchDRunResumeHTTPProjectsReplanIntent(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "run resume replan intent", "workspaces/run-resume-replan-intent")
 
@@ -6638,8 +6622,7 @@ func TestWorkorchDRunResumeHTTPProjectsReplanIntent(t *testing.T) {
 
 func TestWorkorchDWorkspaceRunCommandReplanUsesScopedIdempotencyKey(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	hub := events.NewMagicHubWithOwner("server/scheduler-recover-reject-test")
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-scheduler-replan-idempotency"
 	const runID = "run-scheduler-replan-idempotency"
 	const decisionID = "ticket-scheduler-replan-idempotency"
@@ -6685,7 +6668,7 @@ func TestWorkorchDWorkspaceRunCommandReplanUsesScopedIdempotencyKey(t *testing.T
 }
 
 func TestWorkorchDRunResumeHTTPReturnsGeneratedRequestID(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "run resume generated request id", "workspaces/run-resume-generated-request-id")
 
@@ -6712,7 +6695,7 @@ func TestWorkorchDRunResumeHTTPReturnsGeneratedRequestID(t *testing.T) {
 }
 
 func TestWorkorchDActivationHTTPRejectsRunScopedIntent(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "activation rejects replan", "workspaces/activation-rejects-replan")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
@@ -6732,7 +6715,7 @@ func TestWorkorchDActivationHTTPRejectsRunScopedIntent(t *testing.T) {
 }
 
 func TestWorkorchDActivationHTTPAcceptsScopedReplan(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "activation accepts scoped replan", "workspaces/activation-accepts-scoped-replan")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
@@ -6768,7 +6751,7 @@ func TestWorkorchDActivationHTTPAcceptsScopedReplan(t *testing.T) {
 }
 
 func TestWorkorchDRunResumeHTTPRejectsRestartIntent(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "run resume rejects restart intent", "workspaces/run-resume-rejects-restart")
 
@@ -6782,7 +6765,7 @@ func TestWorkorchDRunResumeHTTPRejectsRestartIntent(t *testing.T) {
 }
 
 func TestWorkorchDRunResumeHTTPRejectsRecoverIntent(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "run resume rejects recover intent", "workspaces/run-resume-rejects-recover")
 
@@ -6803,7 +6786,7 @@ func TestWorkorchDRunResumeHTTPRejectsRecoverIntent(t *testing.T) {
 }
 
 func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "workspace restart intent", "workspaces/workspace-restart-intent")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
@@ -6844,8 +6827,7 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
 
 func TestWorkorchDSchedulerWorkspaceRunCommandEnqueuesWorkspaceRestartByWorkspaceScope(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	hub := events.NewMagicHubWithOwner("server/scheduler-restart-scope-test")
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-scheduler-restart-command"
 
 	if err := publishHTTPTestWorkspaceRunCommand(context.Background(), state.commandHub, workorchdevents.WorkspaceRunRequestedCommand{
@@ -6876,8 +6858,7 @@ func TestWorkorchDSchedulerWorkspaceRunCommandEnqueuesWorkspaceRestartByWorkspac
 
 func TestWorkorchDWorkspaceRunCommandRestartEnqueuesWorkspaceRestart(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	hub := events.NewMagicHubWithOwner("server/scheduler-restart-idempotency-test")
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-scheduler-workspace-run-restart"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"},
@@ -6934,8 +6915,7 @@ func TestWorkorchDWorkspaceRunCommandRestartEnqueuesWorkspaceRestart(t *testing.
 
 func TestWorkorchDSchedulerCommandRejectsRestartRunScope(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	hub := events.NewMagicHubWithOwner("server/scheduler-restart-run-scope-test")
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 
 	err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: "ws-scheduler-restart-run-scope",
@@ -6962,8 +6942,7 @@ func TestWorkorchDSchedulerCommandRejectsRestartRunScope(t *testing.T) {
 
 func TestWorkorchDSchedulerCommandRejectsRecoverIntent(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	hub := events.NewMagicHubWithOwner("server/scheduler-recover-reject-test")
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-scheduler-reject-recover"
 	const runID = "run-scheduler-reject-recover"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
@@ -6999,8 +6978,7 @@ func TestWorkorchDSchedulerCommandRejectsRecoverIntent(t *testing.T) {
 
 func TestWorkorchDSchedulerCommandReturnsErrorWhenRunContinuationQueueFails(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
-	hub := events.NewMagicHubWithOwner("server/scheduler-queue-failure-test")
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-scheduler-run-command-fail"
 	const runID = "run-scheduler-command-fail"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
@@ -7050,7 +7028,7 @@ func TestWorkorchDSchedulerCommandReturnsErrorWhenRunContinuationQueueFails(t *t
 }
 
 func TestWorkorchDSchedulerCommandRequiresAcceptedResponse(t *testing.T) {
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), events.NewMagicHubWithOwner("server/scheduler-missing-response-test"), &recordingBackgroundRoutine{})
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), &recordingBackgroundRoutine{})
 	for _, unsubscribe := range state.eventUnsubscribes {
 		unsubscribe()
 	}
@@ -7067,7 +7045,7 @@ func TestWorkorchDSchedulerCommandRequiresAcceptedResponse(t *testing.T) {
 
 func TestWorkorchDRESTCommandsReturnConflictWhenSchedulerQueueFails(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), events.NewMagicHubWithOwner("server/rest-scheduler-queue-failure-test"), routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	handler := newMuxWithState(state)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -7102,7 +7080,7 @@ func TestWorkorchDRESTCommandsReturnConflictWhenSchedulerQueueFails(t *testing.T
 
 func TestWorkorchDGovernanceResolutionReturnsConflictWhenSchedulerQueueFails(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), events.NewMagicHubWithOwner("server/governance-scheduler-queue-failure-test"), routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	const workspaceID = "ws-governance-scheduler-fail"
 	const runID = "run-governance-scheduler-fail"
 	state.resolveDecision = func(context.Context, string, string, string, appservice.ResolveDecisionCommand) (appservice.Decision, error) {
@@ -7140,7 +7118,8 @@ func TestServerStateDoesNotRecoverOpenDecisionBlockedRun(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
-	}), nil)
+	}))
+
 	const workspaceID = "ws-open-decision-recovery"
 	const runID = "run-open-decision-recovery"
 	const ticketID = "ticket-open-decision-recovery"
@@ -7180,7 +7159,7 @@ func TestServerStateDoesNotRecoverOpenDecisionBlockedRun(t *testing.T) {
 }
 
 func TestServerStateRecoverReplanContinuationsSchedulesWaitingDecisionActiveSupersededRun(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -7246,7 +7225,7 @@ func TestServerStateRecoverReplanContinuationsSchedulesWaitingDecisionActiveSupe
 
 func TestServerStateWatchdogDoesNotRecoverReplanContinuations(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -7288,7 +7267,7 @@ func TestServerStateWatchdogDoesNotRecoverReplanContinuations(t *testing.T) {
 }
 
 func TestServerStateRecoverReplanContinuationsRetriesAfterActivationFailure(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -7705,7 +7684,7 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 }
 
 func TestMetricsEndpointReportsSchedulerDiagnostics(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), events.NewMemoryHub())
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.schedulerDiagnostics.recordCommand(schedulerKindRunContinuation, "accepted")
 	state.schedulerDiagnostics.recordCommandEnqueueFailure(schedulerKindRunContinuation, schedulerReasonEnqueueFailed)
 	state.schedulerDiagnostics.recordContinuation(schedulerDiagnosticInput{
@@ -7769,9 +7748,9 @@ func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing
 		t.Fatalf("run create status = %d, want 201, body=%s", runRec.Code, runRec.Body.String())
 	}
 
-	session := newOwnerRuntimeSession(t, "file", dataRoot, nil)
+	session := newOwnerRuntimeSession(t, "file", dataRoot)
 	var err error
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
@@ -7788,7 +7767,7 @@ func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing
 	}
 
 	routine := &recordingBackgroundRoutine{}
-	second := newIsolatedTestHTTPServerWithBackground(Config{Backend: "file", DataRoot: dataRoot}, nil, routine)
+	second := newIsolatedTestHTTPServerWithBackground(Config{Backend: "file", DataRoot: dataRoot}, routine)
 	configureIsolatedTestSession(t, second.state, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}))
 	t.Cleanup(func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -7879,7 +7858,7 @@ func TestServiceRunRecoveredWorkspaceResumeEnqueuesWorkspaceActivation(t *testin
 
 	routine := &recordingBackgroundRoutine{}
 	svc := &Service{
-		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "file", DataRoot: dataRoot}, nil, routine),
+		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "file", DataRoot: dataRoot}, routine),
 		backgroundRoutine: routine,
 		done:              make(chan error, 1),
 	}
@@ -7887,9 +7866,7 @@ func TestServiceRunRecoveredWorkspaceResumeEnqueuesWorkspaceActivation(t *testin
 	if err := svc.Run(ctx); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	readRuntime := bootstrap.NewWithBackend("file", dataRoot)
-	defer func() { _ = readRuntime.Shutdown(ctx) }()
-	recoveredWorkspaceRecord, err := readRuntime.Exports().Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	recoveredWorkspaceRecord, err := testkit.OpenRepositories("file", dataRoot).Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
 	if err != nil {
 		t.Fatalf("read recovered workspace: %v", err)
 	}
@@ -8391,9 +8368,7 @@ func resolutionFilesForHTTP(t *testing.T, dataRoot string) []string {
 
 func waitRunStateForHTTP(t *testing.T, dataRoot string, runID string, wantState string) appservice.Run {
 	t.Helper()
-	runtime := bootstrap.NewWithBackend("file", dataRoot)
-	defer func() { _ = runtime.Shutdown(context.Background()) }()
-	runs := runtime.Exports().Repositories.Runs
+	runs := testkit.OpenRepositories("file", dataRoot).Runs
 	deadline := time.Now().Add(time.Second)
 	var last appservice.Run
 	var lastErr error
@@ -8530,7 +8505,8 @@ func TestRunStartEndpointWaitsWhenConcurrentRunLimitReached(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
-	}), nil)
+	}))
+
 	state.validate = func(context.Context, string, string) error { return nil }
 	state.startRun = func(_ context.Context, _, _, runID string) (appservice.Run, error) {
 		started <- struct{}{}
@@ -8610,7 +8586,8 @@ func TestRunStartEndpointWaitsForAvailableExecutionSlot(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
-	}), nil)
+	}))
+
 	state.validate = func(context.Context, string, string) error { return nil }
 	state.startRun = func(ctx context.Context, backend string, dataRoot string, runID string) (appservice.Run, error) {
 		if runID == "run-1" {
@@ -8700,7 +8677,8 @@ func TestRunStartEndpointDispatchesHigherPriorityQueuedRunFirst(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
-	}), nil)
+	}))
+
 	state.validate = func(context.Context, string, string) error { return nil }
 	state.startRun = func(_ context.Context, _, _, runID string) (appservice.Run, error) {
 		switch runID {
@@ -8786,7 +8764,8 @@ func TestRunResumeEndpointReturnsRequestTimeoutWhenQueueWaitCanceled(t *testing.
 	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
-	}), nil)
+	}))
+
 	state.validate = func(context.Context, string, string) error { return nil }
 	state.resumeRun = func(ctx context.Context, backend string, dataRoot string, runID string, _ ...map[string]any) (appservice.Run, error) {
 		if runID == "run-held" {

@@ -72,7 +72,7 @@ func (s *runContinuationScheduler) schedulePeriodicStaleDispatchedRecovery() {
 		state.backgroundContext(),
 		backgroundFuncTask{fn: func() {
 			started := time.Now().UTC()
-			ctx := appservice.ContextWithEventHubs(state.backgroundContext(), state.eventHub, state.commandHub)
+			ctx := appservice.ContextWithCommandHub(state.backgroundContext(), state.commandHub)
 			err := s.recoverStaleDispatchedRuns(ctx)
 			if state.schedulerDiagnostics != nil {
 				state.schedulerDiagnostics.recordWatchdogTick(started, time.Since(started), err)
@@ -587,7 +587,7 @@ func (s *runContinuationScheduler) drainGovernanceResumeQueue(priority int) bool
 				}
 				state.notifyRunStatusChanged()
 			}()
-			ctx := appservice.ContextWithEventHubs(state.backgroundContext(), state.eventHub, state.commandHub)
+			ctx := appservice.ContextWithCommandHub(state.backgroundContext(), state.commandHub)
 			state.metrics.runResumeRequests.Add(1)
 			release, err := state.acquireRunSlotWithPriority(ctx, priority)
 			if err != nil {
@@ -724,7 +724,7 @@ func (s *runContinuationScheduler) scheduleReplanContinuationIfNeeded(ctx contex
 	}
 
 	if !state.scheduleBackground("replan_continuation", func(context.Context) {
-		runCtx := appservice.ContextWithEventHubs(state.backgroundContext(), state.eventHub, state.commandHub)
+		runCtx := appservice.ContextWithCommandHub(state.backgroundContext(), state.commandHub)
 		release, err := state.acquireRunSlotWithPriority(runCtx, priority)
 		if err != nil {
 			s.clearReplanContinuationStarted(key)
@@ -913,7 +913,7 @@ func (s *runContinuationScheduler) drainWorkspaceExecutionQueue() bool {
 		}
 		queued := state.scheduleBackground(taskName, func(context.Context) {
 			defer s.clearWorkspaceRestartStarted(key)
-			runCtx := appservice.ContextWithEventHubs(state.backgroundContext(), state.eventHub, state.commandHub)
+			runCtx := appservice.ContextWithCommandHub(state.backgroundContext(), state.commandHub)
 			runCtx = common.ContextWithRuntimeWorkspaceID(runCtx, common.WorkspaceID(req.WorkspaceID))
 			release, err := state.acquireRunSlotWithPriority(runCtx, req.Priority)
 			if err != nil {
@@ -1093,7 +1093,7 @@ func (s *runContinuationScheduler) drainRunContinuationQueue() bool {
 		}
 		queued := state.scheduleBackground("run_continuation", func(context.Context) {
 			defer s.clearRunContinuationStarted(key)
-			runCtx := appservice.ContextWithEventHubs(state.backgroundContext(), state.eventHub, state.commandHub)
+			runCtx := appservice.ContextWithCommandHub(state.backgroundContext(), state.commandHub)
 			runCtx = common.ContextWithRuntimeWorkspaceID(runCtx, common.WorkspaceID(req.WorkspaceID))
 			release, err := state.acquireRunSlotWithPriority(runCtx, req.Priority)
 			if err != nil {

@@ -7,7 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

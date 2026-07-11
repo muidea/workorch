@@ -11,21 +11,19 @@ import (
 	"testing"
 	"time"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
-	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
-	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -69,9 +67,7 @@ func TestRuntimeOrchestrator_LLMInputIncludesExecutionContextPackage(t *testing.
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
 			MemoryItems:        memory.NewMemoryItemRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	deliverableDirectory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(deliverableDirectory, "README.md"), []byte("workspace"), 0o644); err != nil {
@@ -1351,7 +1347,7 @@ func TestRuntimeOrchestrator_StartRunActiveWritesConcurrently(t *testing.T) {
 		release: release,
 	}
 	stepRepo := memory.NewStepRepository()
-	hub := events.NewMemoryHub()
+	notifications := newRuntimeNotificationRecorder(t)
 	workspaceID := common.WorkspaceID("ws-start-active-write-parallel")
 	runID := common.RunID("run-start-active-write-parallel")
 	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}
@@ -1367,8 +1363,8 @@ func TestRuntimeOrchestrator_StartRunActiveWritesConcurrently(t *testing.T) {
 		runs:       runRepo,
 		steps:      stepRepo,
 		workspaces: workspaceRepo,
-		eventHub:   hub,
 	}
+	notifications.attach(orch)
 
 	done := make(chan error, 1)
 	go func() {
@@ -1386,9 +1382,9 @@ func TestRuntimeOrchestrator_StartRunActiveWritesConcurrently(t *testing.T) {
 			t.Fatalf("timed out waiting for concurrent StartRun active writes, saw %+v: %v", seen, ctx.Err())
 		}
 	}
-	for _, item := range hub.Published() {
-		if item.Topic == runevents.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateActive) {
-			t.Fatalf("published running run event before active writes were released: %+v", hub.Published())
+	for _, item := range notifications.snapshot() {
+		if item.Topic == runevents.TopicRunStateChanged && item.State == string(common.RunStateActive) {
+			t.Fatalf("published running run event before active writes were released: %+v", notifications.snapshot())
 		}
 	}
 	close(release)
@@ -1400,14 +1396,14 @@ func TestRuntimeOrchestrator_StartRunActiveWritesConcurrently(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatalf("StartRun did not complete after releasing active writes: %v", ctx.Err())
 	}
-	published := hub.Published()
+	published := notifications.waitAtLeast(2, time.Second)
 	var runningRunIndex = -1
 	var runningWorkspaceIndex = -1
 	for idx, item := range published {
-		if item.Topic == runevents.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateActive) {
+		if runningRunIndex < 0 && item.Topic == runevents.TopicRunStateChanged && item.State == string(common.RunStateActive) {
 			runningRunIndex = idx
 		}
-		if item.Topic == workspaceevents.TopicWorkspaceStateChanged && item.Payload[events.PayloadKeyState] == string(common.WorkspaceStateActive) {
+		if runningWorkspaceIndex < 0 && item.Topic == workspaceevents.TopicWorkspaceStateChanged && item.State == string(common.WorkspaceStateActive) && item.ActiveRunID == string(runID) {
 			runningWorkspaceIndex = idx
 		}
 	}
@@ -1552,7 +1548,6 @@ func TestRuntimeOrchestrator_BlockCheckpointUsesProvidedStepID(t *testing.T) {
 		evidence: RuntimeEvidenceRepositories{
 			RuntimeCheckpoints: checkpointRepo,
 		},
-		eventHub: events.NewMemoryHub(),
 	}
 
 	if err := orch.blockOnDecisionAtStep(ctx, run, workspace, ticketID, stepID); err != nil {
@@ -1745,9 +1740,8 @@ func TestRuntimeOrchestrator_StartRunDispatchReusesLoadedRun(t *testing.T) {
 		stepRepo,
 		workspaceRepo,
 		memory.NewDecisionTicketRepository(),
-		memory.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memory.NewApprovalRepository())
+
 	workspaceID := common.WorkspaceID("ws-start-run-loaded-run-reuse")
 	runID := common.RunID("run-start-run-loaded-run-reuse")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
@@ -1780,9 +1774,8 @@ func TestRuntimeOrchestrator_StartRunDispatchReusesLoadedWorkspace(t *testing.T)
 		stepRepo,
 		workspaceRepo,
 		memory.NewDecisionTicketRepository(),
-		memory.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memory.NewApprovalRepository())
+
 	workspaceID := common.WorkspaceID("ws-start-run-loaded-workspace-reuse")
 	runID := common.RunID("run-start-run-loaded-workspace-reuse")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
@@ -1837,9 +1830,8 @@ func TestRuntimeOrchestrator_ResumeRunDispatchReusesSyncedWorkspace(t *testing.T
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
+
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
 		ID:                   workspaceID,
 		Title:                "ws",
@@ -1936,9 +1928,8 @@ func TestRuntimeOrchestrator_GraphBatchDispatchReusesLoadedWorkspace(t *testing.
 		stepRepo,
 		workspaceRepo,
 		memory.NewDecisionTicketRepository(),
-		memory.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memory.NewApprovalRepository())
+
 	workspaceID := common.WorkspaceID("ws-graph-batch-workspace-reuse")
 	runID := common.RunID("run-graph-batch-workspace-reuse")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
@@ -1978,9 +1969,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageIncludesRecentFailureSummary
 		ticketRepo,
 		nil,
 		approvalRepo,
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
 
 	workspaceID := common.WorkspaceID("ws-context-package-failure")
 	runID := common.RunID("run-context-package-failure")
@@ -2276,9 +2265,7 @@ func TestRuntimeOrchestrator_StepInputMemoryTraceRecordsExcludedProviderRetryMem
 	ctx := context.Background()
 	memoryRepo := memory.NewMemoryItemRepository()
 	traceRepo := memory.NewMemoryRecallTraceRepository()
-	hub := &recordingMemoryRecallNotificationHub{}
 	orch := &RuntimeOrchestrator{
-		eventHub: hub,
 		evidence: RuntimeEvidenceRepositories{
 			MemoryItems:        memoryRepo,
 			MemoryRecallTraces: traceRepo,
@@ -2339,34 +2326,6 @@ func TestRuntimeOrchestrator_StepInputMemoryTraceRecordsExcludedProviderRetryMem
 	if !strings.Contains(trace.SelectionScores[0].Reason, "excluded_low_value_process_memory") {
 		t.Fatalf("selection score reason = %q, want low-value process exclusion", trace.SelectionScores[0].Reason)
 	}
-	if len(hub.sync) != 0 {
-		t.Fatalf("sync publishes = %+v, want none for memory recall notification", hub.sync)
-	}
-	if len(hub.async) != 1 || hub.async[0].Topic != memoryevents.TopicMemoryRecallRecorded {
-		t.Fatalf("async publishes = %+v, want one memory recall recorded notification", hub.async)
-	}
-	if hub.async[0].WorkspaceID != string(workspaceID) || hub.async[0].RunID != string(runID) || hub.async[0].StepID != string(step.ID) {
-		t.Fatalf("async scope = workspace:%q run:%q step:%q", hub.async[0].WorkspaceID, hub.async[0].RunID, hub.async[0].StepID)
-	}
-}
-
-type recordingMemoryRecallNotificationHub struct {
-	sync  []events.Envelope
-	async []events.Envelope
-}
-
-func (h *recordingMemoryRecallNotificationHub) Publish(_ context.Context, envelope events.Envelope) error {
-	h.sync = append(h.sync, envelope)
-	return nil
-}
-
-func (h *recordingMemoryRecallNotificationHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
-	h.async = append(h.async, envelope)
-	return nil
-}
-
-func (h *recordingMemoryRecallNotificationHub) Subscribe(string, events.Handler) func() {
-	return func() {}
 }
 
 func TestRuntimeOrchestrator_StepInputMemoryTraceExcludesTransientDoDFeedback(t *testing.T) {
@@ -2510,9 +2469,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageSkipsInitialStepFailureHisto
 		ticketRepo,
 		nil,
 		approvalRepo,
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
 
 	workspaceID := common.WorkspaceID("ws-context-package-initial")
 	runID := common.RunID("run-context-package-initial")
@@ -2559,9 +2516,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageSkipsFailureHistoryForNormal
 		ticketRepo,
 		nil,
 		approvalRepo,
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
 
 	workspaceID := common.WorkspaceID("ws-context-package-normal-follow-up")
 	runID := common.RunID("run-context-package-normal-follow-up")

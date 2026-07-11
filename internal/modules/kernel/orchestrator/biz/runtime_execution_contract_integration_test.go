@@ -12,10 +12,9 @@ import (
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -320,9 +319,8 @@ func TestRuntimeOrchestrator_DispatchesConcreteGraphReturnedByExecutionLLMNode(t
 			Patches:            memory.NewPatchRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
+
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -2102,9 +2100,8 @@ func TestRuntimeOrchestrator_InvalidPatchGraphTargetRefRoutesToRuntimeRepair(t *
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
+
 	workspaceID := common.WorkspaceID("ws-invalid-patch-targetref-repair")
 	runID := common.RunID("run-invalid-patch-targetref-repair")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {

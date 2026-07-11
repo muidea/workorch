@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 )
 
 func PageDecisionTickets(items []*decisionmodel.Ticket, query appmodelcore.DecisionQuery) ([]*decisionmodel.Ticket, int, string, string, bool) {

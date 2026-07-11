@@ -4,9 +4,9 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

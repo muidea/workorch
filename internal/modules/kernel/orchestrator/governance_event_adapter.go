@@ -5,10 +5,10 @@ import (
 	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )

@@ -12,21 +12,21 @@ Last Updated: 2026-05-29
 
 ## Main Modules
 
-### `kernel/soul`
+### `blocks/soul`
 
 职责：
 
 - Soul model
 - capability allowlist / policy validation
 
-### `kernel/skill`
+### `blocks/skill`
 
 职责：
 
 - Skill metadata
 - trigger / selection related business contract
 
-### `kernel/mcp`
+### `blocks/mcp-registry`
 
 职责：
 
@@ -34,7 +34,7 @@ Last Updated: 2026-05-29
 - capability metadata
 - policy / selection contract
 
-### `kernel/memory`
+### `blocks/memory`
 
 职责：
 

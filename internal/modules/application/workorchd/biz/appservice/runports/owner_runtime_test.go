@@ -7,5 +7,9 @@ import (
 )
 
 func newOwnerRuntime() *bootstrap.Runtime {
-	return testkit.NewRuntime("memory", "", workorchruntimepolicy.RuntimePolicy{}, nil, nil)
+	return testkit.NewRuntime("memory", "", workorchruntimepolicy.RuntimePolicy{}, nil)
+}
+
+func testRuntimeExports(runtime *bootstrap.Runtime) testkit.Exports {
+	return testkit.RuntimeExports(runtime)
 }

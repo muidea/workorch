@@ -14,7 +14,6 @@ import (
 	frameworkservice "github.com/muidea/magicCommon/framework/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
-	"github.com/muidea/workorch/internal/pkg/workorchdeps"
 )
 
 const defaultApplicationShutdownTimeout = 30 * time.Second
@@ -104,11 +103,7 @@ func waitServer(ctx context.Context) error {
 }
 
 func queryServerDoneChannel(ctx context.Context) (<-chan error, error) {
-	runtime, err := workorchdeps.ResolveRuntimeHelper("application/workorch server done")
-	if err != nil {
-		return nil, err
-	}
-	hub := runtime.CommandHub()
+	hub := application.Get().EventHub()
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

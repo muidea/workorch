@@ -1,6 +1,6 @@
 package contextregistrycore
 
-import mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+import mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 
 func MapMCPServer(item *mcpmodel.Server) MCPServer {
 	if item == nil {

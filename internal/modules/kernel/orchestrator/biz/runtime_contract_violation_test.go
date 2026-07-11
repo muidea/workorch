@@ -5,13 +5,15 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -1998,6 +2000,24 @@ func TestContractViolationRecoveryPublishesRecordedRetryAndDispatchEvents(t *tes
 	stepRepo := memory.NewStepRepository()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	hub, _ := newRecordingDispatchMagicHub(t)
+	const observerID = "/orchestrator/consumers/kernel/orchestrator/contract-test"
+	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, hub.rawHub)
+	notifications := make(chan orchestratorevents.ContractViolationData, 2)
+	for _, topic := range []string{orchestratorevents.TopicOrchestratorContractViolationRecorded, orchestratorevents.TopicOrchestratorContractViolationRetryRequested} {
+		topic := topic
+		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
+			if data, ok := event.Data().(orchestratorevents.ContractViolationData); ok {
+				notifications <- data
+			}
+			if result != nil {
+				result.Set(nil, nil)
+			}
+		})
+	}
+	t.Cleanup(func() {
+		observer.Unsubscribe(orchestratorevents.TopicOrchestratorContractViolationRecorded)
+		observer.Unsubscribe(orchestratorevents.TopicOrchestratorContractViolationRetryRequested)
+	})
 	run := &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
@@ -2015,7 +2035,7 @@ func TestContractViolationRecoveryPublishesRecordedRetryAndDispatchEvents(t *tes
 	if err := stepRepo.Create(ctx, failed); err != nil {
 		t.Fatalf("seed failed step: %v", err)
 	}
-	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository(), hub)
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository())
 	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	if err := orch.eventPublisher().publishContractViolationRecorded(ctx, run, failed); err != nil {
@@ -2025,31 +2045,44 @@ func TestContractViolationRecoveryPublishesRecordedRetryAndDispatchEvents(t *tes
 		t.Fatalf("dispatchRuntimeRepairFollowUp: %v", err)
 	}
 
-	recorded := publishedTopic(hub.Published(), orchestratorevents.TopicOrchestratorContractViolationRecorded)
-	if recorded == nil {
-		t.Fatalf("published events = %+v, want contract violation recorded", hub.Published())
+	received := make([]orchestratorevents.ContractViolationData, 0, 2)
+	for len(received) < 2 {
+		select {
+		case data := <-notifications:
+			received = append(received, data)
+		case <-time.After(time.Second):
+			t.Fatalf("typed contract violation notifications = %+v", received)
+		}
 	}
-	assertContractViolationEventScope(t, *recorded, workspaceID, runID, failed.ID)
-	if got := stringFromMap(recorded.Payload, "violatedRule"); got != contractViolationRuleStateChangingRequiredMissing {
+	var recorded, retry *orchestratorevents.ContractViolationData
+	for idx := range received {
+		switch received[idx].Topic {
+		case orchestratorevents.TopicOrchestratorContractViolationRecorded:
+			recorded = &received[idx]
+		case orchestratorevents.TopicOrchestratorContractViolationRetryRequested:
+			retry = &received[idx]
+		}
+	}
+	if recorded == nil || recorded.WorkspaceID != workspaceID || recorded.RunID != runID || recorded.SourceStepID != failed.ID {
+		t.Fatalf("recorded notification = %+v", recorded)
+	}
+	recordedPayload := recorded.Violation.Map()
+	if got := stringFromMap(recordedPayload, "violatedRule"); got != contractViolationRuleStateChangingRequiredMissing {
 		t.Fatalf("recorded payload rule = %q, want %s", got, contractViolationRuleStateChangingRequiredMissing)
 	}
 
-	retry := publishedTopic(hub.Published(), orchestratorevents.TopicOrchestratorContractViolationRetryRequested)
-	if retry == nil {
-		t.Fatalf("published events = %+v, want contract violation retry requested", hub.Published())
+	if retry == nil || retry.WorkspaceID != workspaceID || retry.RunID != runID || retry.SourceStepID != failed.ID || retry.RetryStepID == "" {
+		t.Fatalf("retry notification = %+v", retry)
 	}
-	assertContractViolationEventScope(t, *retry, workspaceID, runID, failed.ID)
-	if retry.Payload["retryStepId"] == "" {
-		t.Fatalf("retry payload = %+v, want retryStepId", retry.Payload)
-	}
-	if got := intFromAny(retry.Payload["attempt"]); got != 1 {
+	retryPayload := retry.Violation.Map()
+	if got := intFromAny(retryPayload["attempt"]); got != 1 {
 		t.Fatalf("retry attempt = %d, want 1", got)
 	}
-	if got := stringFromMap(retry.Payload, "correctionProfileId"); got != "state_changing_required_output" {
-		t.Fatalf("retry correctionProfileId = %q, want state_changing_required_output; payload=%+v", got, retry.Payload)
+	if got := stringFromMap(retryPayload, "correctionProfileId"); got != "state_changing_required_output" {
+		t.Fatalf("retry correctionProfileId = %q, want state_changing_required_output; payload=%+v", got, retryPayload)
 	}
-	if got := stringFromMap(retry.Payload, "correctionMode"); got != contractViolationCorrectionModeTargeted {
-		t.Fatalf("retry correctionMode = %q, want targeted; payload=%+v", got, retry.Payload)
+	if got := stringFromMap(retryPayload, "correctionMode"); got != contractViolationCorrectionModeTargeted {
+		t.Fatalf("retry correctionMode = %q, want targeted; payload=%+v", got, retryPayload)
 	}
 
 	dispatches := hub.DispatchCommands()
@@ -2070,7 +2103,20 @@ func TestContractViolationEscalatedEventPayloadIsScoped(t *testing.T) {
 	failed := contractViolationFailedStep(runID, "failed-escalated")
 	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
 	hub, _ := newRecordingDispatchMagicHub(t)
-	publisher := newEventSubsystem(hub, nil, nil)
+	const observerID = "/orchestrator/consumers/kernel/orchestrator/escalated-test"
+	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, hub.rawHub)
+	received := make(chan orchestratorevents.ContractViolationData, 1)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorContractViolationEscalated, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(orchestratorevents.ContractViolationData); ok {
+			received <- data
+		}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorContractViolationEscalated) })
+	publisher := newEventSubsystem(nil, nil)
+	publisher.notificationHub = hub.rawHub
 	violation := contractViolationFromFailedOutput(failed)
 	context := map[string]any{"attempts": 2, "runAttempts": 3}
 
@@ -2078,23 +2124,53 @@ func TestContractViolationEscalatedEventPayloadIsScoped(t *testing.T) {
 		t.Fatalf("publish escalated: %v", err)
 	}
 
-	escalated := publishedTopic(hub.Published(), orchestratorevents.TopicOrchestratorContractViolationEscalated)
-	if escalated == nil {
-		t.Fatalf("published events = %+v, want contract violation escalated", hub.Published())
-	}
-	assertContractViolationEventScope(t, *escalated, workspaceID, runID, failed.ID)
-	if got := stringFromMap(escalated.Payload, "ticketId"); got != "ticket-contract-violation" {
-		t.Fatalf("escalated payload = %+v, want ticket id", escalated.Payload)
-	}
-	if got := intFromAny(mapFromValue(escalated.Payload["context"])["attempts"]); got != 2 {
-		t.Fatalf("escalated context = %+v, want attempts", escalated.Payload["context"])
+	select {
+	case escalated := <-received:
+		if escalated.WorkspaceID != workspaceID || escalated.RunID != runID || escalated.SourceStepID != failed.ID {
+			t.Fatalf("escalated scope = %+v", escalated)
+		}
+		if escalated.TicketID != "ticket-contract-violation" {
+			t.Fatalf("escalated ticket = %+v", escalated)
+		}
+		if got := intFromAny(escalated.Context.Map()["attempts"]); got != 2 {
+			t.Fatalf("escalated context = %+v, want attempts", escalated.Context.Map())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("typed contract violation escalated notification not received")
 	}
 }
 
-func TestEventSubsystemPublishesNotificationsThroughAsyncHub(t *testing.T) {
+func TestEventSubsystemPublishesTypedNotificationsThroughMagicCommonHub(t *testing.T) {
 	ctx := context.Background()
-	hub := &recordingOrchestratorAsyncHub{}
-	publisher := newEventSubsystem(hub, nil, nil)
+	hub, _ := newRecordingDispatchMagicHub(t)
+	const runObserverID = "/run/consumers/kernel/orchestrator/event-subsystem-test"
+	const violationObserverID = "/orchestrator/consumers/kernel/orchestrator/event-subsystem-test"
+	runObserver := magicevent.NewSimpleObserverWithMatchID(runObserverID, runObserverID, hub.rawHub)
+	violationObserver := magicevent.NewSimpleObserverWithMatchID(violationObserverID, violationObserverID, hub.rawHub)
+	runs := make(chan runevents.RunStateChangedData, 1)
+	violations := make(chan orchestratorevents.ContractViolationData, 1)
+	runObserver.Subscribe(runevents.TopicRunCreated, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(runevents.RunStateChangedData); ok {
+			runs <- data
+		}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	violationObserver.Subscribe(orchestratorevents.TopicOrchestratorContractViolationRecorded, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(orchestratorevents.ContractViolationData); ok {
+			violations <- data
+		}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	t.Cleanup(func() {
+		runObserver.Unsubscribe(runevents.TopicRunCreated)
+		violationObserver.Unsubscribe(orchestratorevents.TopicOrchestratorContractViolationRecorded)
+	})
+	publisher := newEventSubsystem(nil, nil)
+	publisher.notificationHub = hub.rawHub
 	run := &runmodel.Run{
 		ID:          "run-event-subsystem-async",
 		WorkspaceID: "ws-event-subsystem-async",
@@ -2110,13 +2186,21 @@ func TestEventSubsystemPublishesNotificationsThroughAsyncHub(t *testing.T) {
 		t.Fatalf("publish contract violation recorded: %v", err)
 	}
 
-	if hub.syncPublishes != 0 || hub.asyncPublishes != 2 {
-		t.Fatalf("publish counts = sync:%d async:%d, want async event subsystem notifications", hub.syncPublishes, hub.asyncPublishes)
+	select {
+	case data := <-runs:
+		if data.RunID != run.ID || data.WorkspaceID != run.WorkspaceID || data.State != run.State {
+			t.Fatalf("run notification = %+v", data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("typed run-created notification not received")
 	}
-	if len(hub.published) != 2 ||
-		hub.published[0].Topic == "" ||
-		hub.published[1].Topic != orchestratorevents.TopicOrchestratorContractViolationRecorded {
-		t.Fatalf("published = %+v, want run created and contract violation notifications", hub.published)
+	select {
+	case data := <-violations:
+		if data.RunID != run.ID || data.WorkspaceID != run.WorkspaceID || data.SourceStepID != failed.ID {
+			t.Fatalf("contract violation notification = %+v", data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("typed contract violation notification not received")
 	}
 }
 
@@ -2253,34 +2337,6 @@ func TestContractViolationEscalationCorrectionContextUsesLastRetryRecovery(t *te
 	}
 }
 
-func publishedTopic(items []events.Envelope, topic string) *events.Envelope {
-	for idx := range items {
-		if items[idx].Topic == topic {
-			return &items[idx]
-		}
-	}
-	return nil
-}
-
-func assertContractViolationEventScope(t *testing.T, envelope events.Envelope, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID) {
-	t.Helper()
-	if envelope.WorkspaceID != string(workspaceID) || envelope.RunID != string(runID) || envelope.StepID != string(stepID) {
-		t.Fatalf("event scope = %+v, want workspace=%s run=%s step=%s", envelope, workspaceID, runID, stepID)
-	}
-	if got := stringFromMap(envelope.Payload, "workspaceId"); got != string(workspaceID) {
-		t.Fatalf("payload workspaceId = %q, want %s", got, workspaceID)
-	}
-	if got := stringFromMap(envelope.Payload, "runId"); got != string(runID) {
-		t.Fatalf("payload runId = %q, want %s", got, runID)
-	}
-	if got := stringFromMap(envelope.Payload, "sourceStepId"); got != string(stepID) {
-		t.Fatalf("payload sourceStepId = %q, want %s", got, stepID)
-	}
-	if len(mapFromValue(envelope.Payload["contractViolation"])) == 0 {
-		t.Fatalf("payload = %+v, want nested contractViolation", envelope.Payload)
-	}
-}
-
 func contractViolationFailedStep(runID common.RunID, label string) *runmodel.Step {
 	step := &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/" + label),
@@ -2331,26 +2387,4 @@ func coverageAssessmentIncompleteFailedStep(runID common.RunID, label string) *r
 			stepOutputKeyDoDAssessment: map[string]any{"satisfied": false},
 		},
 	}
-}
-
-type recordingOrchestratorAsyncHub struct {
-	syncPublishes  int
-	asyncPublishes int
-	published      []events.Envelope
-}
-
-func (h *recordingOrchestratorAsyncHub) Publish(_ context.Context, envelope events.Envelope) error {
-	h.syncPublishes++
-	h.published = append(h.published, envelope)
-	return nil
-}
-
-func (h *recordingOrchestratorAsyncHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
-	h.asyncPublishes++
-	h.published = append(h.published, envelope)
-	return nil
-}
-
-func (h *recordingOrchestratorAsyncHub) Subscribe(string, events.Handler) func() {
-	return func() {}
 }

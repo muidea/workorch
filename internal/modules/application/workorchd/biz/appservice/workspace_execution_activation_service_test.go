@@ -17,12 +17,12 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
-	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
-	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
+	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
@@ -32,18 +32,18 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/skillselectcore"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
-	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
-	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory/service"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	mcpmodule "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/service"
+	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	memorymodule "github.com/muidea/workorch/internal/modules/blocks/memory/service"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -1334,7 +1334,7 @@ func TestActivateWorkspaceExecutionWithBackendCarriesResolvedDecisionHistory(t *
 	if err != nil {
 		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("session exports: %v", err)
 	}
@@ -1423,7 +1423,7 @@ func TestActivateWorkspaceExecutionWithBackendPromotesResolvedReplanHistoryToCon
 	if err != nil {
 		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("session exports: %v", err)
 	}
@@ -1553,7 +1553,7 @@ func TestActivationDefinitionChangeSuppressesPriorActionableContinuations(t *tes
 	if err != nil {
 		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("session exports: %v", err)
 	}
@@ -1657,7 +1657,7 @@ func TestActivationDefinitionChangeSuppressesPriorActionableContinuations(t *tes
 func TestBuildWorkspaceExecutionContextInjectsLatestRejectedResultContinuation(t *testing.T) {
 	ctx := context.Background()
 	session, _ := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-rejected-continuation",
 		Title: "rejected continuation workspace",
@@ -1865,7 +1865,7 @@ func TestWorkspaceGovernanceHistoryUsesWorkspaceScopedTicketRead(t *testing.T) {
 func TestActivationContextUsesSelectedGoalAndDoDWithoutReload(t *testing.T) {
 	ctx := context.Background()
 	session, _ := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-activation-definition-reuse",
 		Title: "activation definition reuse",
@@ -1920,7 +1920,7 @@ func TestActivationContextUsesSelectedGoalAndDoDWithoutReload(t *testing.T) {
 func TestActivationContextMergesOperatorInputPatchWithoutOverridingDefinitions(t *testing.T) {
 	ctx := context.Background()
 	session, _ := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-activation-operator-input",
 		Title: "activation operator input",
@@ -2015,7 +2015,7 @@ func TestActivationDefinitionSelectionReadsGoalAndDoDConcurrently(t *testing.T) 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	session, _ := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-activation-definition-parallel",
 		Title: "activation definition parallel",
@@ -2087,7 +2087,7 @@ func TestActivationResponseReusesRunSnapshotRun(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	session, _ := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-activation-run-snapshot-reuse",
 		Title: "activation run snapshot reuse",
@@ -2136,7 +2136,7 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	session, _ := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-activation-inline-compressed",
 		Title: "activation inline compressed",
@@ -2230,7 +2230,7 @@ func TestActivationResponseWorkspaceSnapshotReusesRunSnapshotWorkspace(t *testin
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	session, _ := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-activation-workspace-snapshot-reuse",
 		Title: "activation workspace snapshot reuse",
@@ -2290,7 +2290,7 @@ func TestBuildWorkspaceExecutionContextStartsIndependentReadsConcurrently(t *tes
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	session, _ := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspace := &workspacemodel.Workspace{
 		ID:            "ws-activation-context-parallel",
 		Title:         "activation context parallel",
@@ -2379,7 +2379,7 @@ func TestActivationContextReadsMCPServersAndCapabilitiesConcurrently(t *testing.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	session, _ := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspace := &workspacemodel.Workspace{
 		ID:    "ws-activation-mcp-parallel",
 		Title: "activation mcp parallel",
@@ -2535,7 +2535,7 @@ func TestWorkspaceSoulBindingsWithBackendRoutesExecutionSoulByStage(t *testing.T
 
 func TestActivateWorkspaceExecutionUsesInjectedConfigLoader(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
@@ -2780,7 +2780,7 @@ func TestActivateWorkspaceExecutionAppliesTemplateDefaultMCPContext(t *testing.T
 	if err != nil {
 		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
@@ -2919,7 +2919,7 @@ func TestActivateWorkspaceExecutionUsesUpdatedTemplateMCPDefaultWhenWorkspaceHas
 	if err != nil {
 		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
@@ -3012,7 +3012,7 @@ func TestActivateWorkspaceExecutionUsesWorkspaceMCPDefaultOverride(t *testing.T)
 	if err != nil {
 		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
@@ -3066,7 +3066,7 @@ func TestActivateWorkspaceExecutionUsesWorkspaceMCPDefaultOverride(t *testing.T)
 	if err != nil {
 		t.Fatalf("newRuntimeSessionWithBackend #2: %v", err)
 	}
-	exports, err = session.Exports()
+	exports, err = testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports #2: %v", err)
 	}
@@ -3222,7 +3222,7 @@ func TestActivationExecutionContractUsesWorkspaceTemplateIDBeforeSoulRouting(t *
 	if err != nil {
 		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
@@ -3242,7 +3242,7 @@ func TestActivationExecutionContractUsesWorkspaceTemplateIDBeforeSoulRouting(t *
 	if err != nil {
 		t.Fatalf("newRuntimeSessionWithBackend #2: %v", err)
 	}
-	exports, err = session.Exports()
+	exports, err = testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports #2: %v", err)
 	}
@@ -4043,7 +4043,7 @@ func TestActivateWorkspaceExecutionWithBackendReturnsActiveRun(t *testing.T) {
 		t.Fatalf("started run = %+v, want blocked_on_decision", started)
 	}
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
@@ -4089,7 +4089,7 @@ func TestActivateWorkspaceExecutionWithBackendStartsCreatedActiveRun(t *testing.
 		t.Fatalf("created run = %+v, want pending", created)
 	}
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
@@ -4143,7 +4143,7 @@ func TestActivateWorkspaceExecutionWithBackendRestartReplacesCreatedActiveRun(t 
 		t.Fatalf("UpdateDoDWithBackend: %v", err)
 	}
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
@@ -4243,7 +4243,7 @@ func TestActivateWorkspaceExecutionWithBackendIgnoresTerminalActiveRun(t *testin
 	}
 
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	oldRunID := common.RunID("run-activation-terminal-active-old")
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          oldRunID,
@@ -4302,7 +4302,7 @@ func TestActivateWorkspaceExecutionWithBackendContinuesRejectedTerminalResult(t 
 	}
 
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	oldRunID := common.RunID("run-activation-rejected-terminal-old")
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          oldRunID,
@@ -4393,7 +4393,7 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 	}
 
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	oldRunID := common.RunID("run-activation-replace-active-old")
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          oldRunID,

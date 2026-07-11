@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -285,9 +285,9 @@ func (r *resultSubsystem) recordRunResultFromValidatedDoDAssessment(
 		if err := r.evidence.Results.Update(ctx, existing); err != nil {
 			return err
 		}
-		return r.publishResultEvent(ctx, existing)
+		return nil
 	}
-	return r.publishResultEvent(ctx, item)
+	return nil
 }
 
 func (o *RuntimeOrchestrator) recordCoverageProgressFromCompletionAssessment(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any) error {
@@ -462,9 +462,9 @@ func (r *resultSubsystem) recordAcceptedSliceResult(
 		if err := r.evidence.Results.Update(ctx, existing); err != nil {
 			return err
 		}
-		return r.publishResultEvent(ctx, existing)
+		return nil
 	}
-	return r.publishResultEvent(ctx, item)
+	return nil
 }
 
 func acceptanceSliceResultIDPart(sliceID string) string {
@@ -538,9 +538,9 @@ func (r *resultSubsystem) recordRunResultFromRejectedDoDAssessment(
 		if err := r.evidence.Results.Update(ctx, existing); err != nil {
 			return err
 		}
-		return r.publishResultEvent(ctx, existing)
+		return nil
 	}
-	return r.publishResultEvent(ctx, item)
+	return nil
 }
 
 func rejectedResultSourceAndEvidenceRefs(step *runModel.Step, evidenceRefs []string) (string, []string) {

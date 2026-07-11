@@ -231,7 +231,7 @@ Out of scope:
   - `go test ./internal/modules/blocks/llm/biz -count=1`
   - `go test ./internal/modules/blocks/llm/biz -run 'TestContractViolationRecoveryRendersInCurrentActionOnly|TestPrompt|TestRuntimeAdapter' -count=1`
   - `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_RuntimeMemoryWriteRejectsContractViolationDiagnostic|TestRuntimeOrchestrator_ContractViolationRetryDoesNotCreateRepairLessonMemory|TestContractViolationRecovery' -count=1`
-  - `go test ./internal/modules/kernel/memory/... -count=1`
+  - `go test ./internal/modules/blocks/memory/... -count=1`
   - `go test ./... -count=1`
   - `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestResolveDecisionWithSession(InfersRepairExhaustionReplanFromContinueUnderPolicy|KeepsExplicitRepairExhaustionTerminateUnderReplanPolicy|MapsRepairExhaustionReplanAndTerminate)' -count=1`
   - `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_.*Governance|TestRuntimeOrchestrator_.*Localization|Test.*Repair.*Exhaust|Test.*ContractViolation' -count=1`

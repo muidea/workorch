@@ -67,7 +67,7 @@ the item is explicitly marked as design-only.
 
 Scope:
 
-- Add `internal/modules/kernel/soul`.
+- Add `internal/modules/blocks/soul`.
 - Define `Soul` business model with capability boundaries.
 - Add repository contracts for create, get, list, and update.
 - Add memory and file backend persistence.
@@ -84,14 +84,14 @@ Acceptance:
 Status:
 
 - completed
-- implementation: `internal/modules/kernel/soul`
+- implementation: `internal/modules/blocks/soul`
 - repository: `internal/pkg/repository.SoulRepository`
 - backends: `internal/pkg/repository/memory.NewSoulRepository`,
   `internal/pkg/repository/file.NewSoulRepository`
 - runtime loading: explicit `workorchd` import and `workorchruntime`
   `RepositorySet` / `SoulService` injection
 - verification:
-  `go test ./internal/modules/kernel/soul/... -count 1`,
+  `go test ./internal/modules/blocks/soul/... -count 1`,
   `go test ./internal/pkg/repository/... -count 1`,
   `go test ./internal/initiators/workorchruntime/... ./application/workorch -count 1`
 
@@ -99,7 +99,7 @@ Status:
 
 Scope:
 
-- Add `internal/modules/kernel/memory`.
+- Add `internal/modules/blocks/memory`.
 - Define `MemoryItem` with `workspaceId`, `runId`, `sourceType`,
   `sourceRef`, `memoryType`, `summary`, `tags`, `importance`,
   `confidence`, and `visibility`.
@@ -117,7 +117,7 @@ Acceptance:
 Status:
 
 - completed
-- implementation: `internal/modules/kernel/memory`
+- implementation: `internal/modules/blocks/memory`
 - repository: `internal/pkg/repository.MemoryItemRepository`
 - backends: `internal/pkg/repository/memory.NewMemoryItemRepository`,
   `internal/pkg/repository/file.NewMemoryItemRepository`
@@ -126,7 +126,7 @@ Status:
 - current boundary: Run summary write and second Run recall are implemented in
   L10 using this service
 - verification:
-  `go test ./internal/modules/kernel/memory/... -count 1`,
+  `go test ./internal/modules/blocks/memory/... -count 1`,
   `go test ./internal/pkg/repository/... -count 1`,
   `go test ./internal/initiators/workorchruntime/... ./application/workorch -count 1`
 
@@ -134,8 +134,8 @@ Status:
 
 Scope:
 
-- Add `internal/modules/kernel/skill`.
-- Add `internal/modules/kernel/mcp`.
+- Add `internal/modules/blocks/skill`.
+- Add `internal/modules/blocks/mcpregistry`.
 - Define Skill metadata and MCP server metadata.
 - Support minimal create, get, list, and policy validation.
 - MCP invocation is not required in this item.
@@ -150,8 +150,8 @@ Acceptance:
 Status:
 
 - completed
-- implementation: `internal/modules/kernel/skill`,
-  `internal/modules/kernel/mcp`
+- implementation: `internal/modules/blocks/skill`,
+  `internal/modules/blocks/mcpregistry`
 - repositories: `internal/pkg/repository.SkillRepository`,
   `internal/pkg/repository.MCPServerRepository`
 - backends: `internal/pkg/repository/memory.NewSkillRepository`,
@@ -163,7 +163,7 @@ Status:
 - current boundary: activation policy validation and context binding are
   implemented in L6; MCP invocation is outside L3
 - verification:
-  `go test ./internal/modules/kernel/skill/... ./internal/modules/kernel/mcp/... -count 1`,
+  `go test ./internal/modules/blocks/skill/... ./internal/modules/blocks/mcpregistry/... -count 1`,
   `go test ./internal/pkg/repository/... -count 1`,
   `go test ./internal/initiators/workorchruntime/... ./application/workorch -count 1`
 
@@ -610,7 +610,7 @@ Status:
 Scope:
 
 - Extend `internal/modules/blocks/mcp` without changing `kernel/orchestrator`
-  or `kernel/mcp` ownership.
+  or `blocks/mcp-registry` ownership.
 - Start the configured `MCPServer.endpoint` command as a local stdio
   subprocess when `transport=stdio`.
 - Exchange newline-delimited UTF-8 JSON-RPC messages over stdin/stdout.

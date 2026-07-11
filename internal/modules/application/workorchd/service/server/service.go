@@ -10,13 +10,12 @@ import (
 	"github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
-	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 )
 
 type Service struct {
 	config            Config
 	http              *HTTPServer
-	eventHub          event.Hub
+	commandHub        event.Hub
 	backgroundRoutine task.BackgroundRoutine
 	done              chan error
 	runStarted        atomic.Bool
@@ -26,22 +25,22 @@ func NewService(config Config) *Service {
 	return &Service{config: normalizeConfig(config)}
 }
 
-func (s *Service) Startup(ctx context.Context, serviceName string, eventHub event.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
+func (s *Service) Startup(ctx context.Context, serviceName string, commandHub event.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
 	if s == nil {
 		return cd.NewError(cd.IllegalParam, "workorch service is nil")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if eventHub == nil {
+	if commandHub == nil {
 		return cd.NewError(cd.IllegalParam, "workorch event hub is not configured")
 	}
 	if backgroundRoutine == nil {
 		return cd.NewError(cd.IllegalParam, "workorch background routine is not configured")
 	}
-	s.eventHub = eventHub
+	s.commandHub = commandHub
 	s.backgroundRoutine = backgroundRoutine
-	s.http = NewHTTPServerWithEventHubsAndBackground(s.config, workorchevents.NewMagicHubWithHubOwner(eventHub, "workorchd/http"), eventHub, backgroundRoutine)
+	s.http = NewHTTPServerWithCommandHubAndBackground(s.config, commandHub, backgroundRoutine)
 	s.done = make(chan error, 1)
 	s.runStarted.Store(false)
 	if err := s.http.Validate(ctx); err != nil {

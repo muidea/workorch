@@ -4,7 +4,7 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
+	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/pkg/common"

@@ -5,13 +5,12 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestApprovalsForQueryFiltersOwnerCommandResults(t *testing.T) {
@@ -261,7 +260,6 @@ func TestResolveApprovalItemPublishesScopedContractCommand(t *testing.T) {
 }
 
 type governanceMagicTestHub struct {
-	hub              *events.MagicHub
 	rawHub           magicevent.Hub
 	decisionObserver magicevent.SimpleObserver
 	approvalObserver magicevent.SimpleObserver
@@ -270,15 +268,13 @@ type governanceMagicTestHub struct {
 func newGovernanceMagicTestHub(t *testing.T) *governanceMagicTestHub {
 	t.Helper()
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHubOwner(rawHub, "governanceports/test")
 	ret := &governanceMagicTestHub{
-		hub:              hub,
 		rawHub:           rawHub,
 		decisionObserver: magicevent.NewSimpleObserver(decisionevents.CommandDestination, rawHub),
 		approvalObserver: magicevent.NewSimpleObserver(approvalevents.CommandDestination, rawHub),
 	}
 	t.Cleanup(func() {
-		hub.Terminate(context.Background())
+		rawHub.Terminate(context.Background())
 	})
 	return ret
 }

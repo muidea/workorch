@@ -7,17 +7,18 @@ import (
 	"strings"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
+	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/run/pkg/common"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-type Orchestrator interface {
+type orchestrator interface {
 	StartRun(context.Context, common.RunID) error
 	BlockOnDecision(context.Context, common.RunID, common.TicketID) error
 	BlockOnApproval(context.Context, common.RunID, common.ApprovalID) error
@@ -29,39 +30,39 @@ type Orchestrator interface {
 	FailRun(context.Context, common.RunID, string) error
 }
 
-type ExecutionContextPatchOrchestrator interface {
+type executionContextPatchOrchestrator interface {
 	ResumeRunWithExecutionContextPatch(context.Context, common.RunID, map[string]any) error
 }
 
-type LoadedRunExecutionContextPatchOrchestrator interface {
+type loadedRunExecutionContextPatchOrchestrator interface {
 	ResumeLoadedRunWithExecutionContextPatch(context.Context, *runModel.Run, map[string]any) error
 }
 
-type WorkspaceReader interface {
+type workspaceReader interface {
 	Get(context.Context, common.WorkspaceID) (*workspaceModel.Workspace, error)
-}
-
-type workspaceRepositoryReader struct {
-	repository.WorkspaceRepository
 }
 
 type Service struct {
 	runs         repository.RunRepository
-	workspaces   WorkspaceReader
-	orchestrator Orchestrator
-	eventHub     events.Hub
+	workspaces   workspaceReader
+	orchestrator orchestrator
+	notifier     runStateNotifier
 }
 
-func NewService(runs repository.RunRepository, workspaces repository.WorkspaceRepository, orchestrator Orchestrator, eventHub events.Hub) *Service {
-	var reader WorkspaceReader
-	if workspaces != nil {
-		reader = workspaceRepositoryReader{WorkspaceRepository: workspaces}
-	}
-	return NewServiceWithWorkspaceReader(runs, reader, orchestrator, eventHub)
+type runStateNotifier interface {
+	PublishRunState(context.Context, string, *runModel.Run) error
 }
 
-func NewServiceWithWorkspaceReader(runs repository.RunRepository, workspaces WorkspaceReader, orchestrator Orchestrator, eventHub events.Hub) *Service {
-	return &Service{runs: runs, workspaces: workspaces, orchestrator: orchestrator, eventHub: eventHub}
+type eventRunStateNotifier struct {
+	hub magicevent.Hub
+}
+
+func NewServiceWithEventHub(runs repository.RunRepository, commandHub magicevent.Hub) *Service {
+	return newServiceWithPorts(runs, workspaceEventReader{hub: commandHub}, eventOrchestrator{hub: commandHub}, eventRunStateNotifier{hub: commandHub})
+}
+
+func newServiceWithPorts(runs repository.RunRepository, workspaces workspaceReader, orchestrator orchestrator, notifier runStateNotifier) *Service {
+	return &Service{runs: runs, workspaces: workspaces, orchestrator: orchestrator, notifier: notifier}
 }
 
 func (s *Service) CreateRun(ctx context.Context, cmd runcontracts.CreateRunCommand) error {
@@ -208,7 +209,7 @@ func (s *Service) ResumeRun(ctx context.Context, cmd runcontracts.ResumeRunComma
 		if cmd.WorkspaceID != "" && cmd.LoadedRun.WorkspaceID != cmd.WorkspaceID {
 			return common.ErrNotFound
 		}
-		if patcher, ok := s.orchestrator.(LoadedRunExecutionContextPatchOrchestrator); ok {
+		if patcher, ok := s.orchestrator.(loadedRunExecutionContextPatchOrchestrator); ok {
 			return patcher.ResumeLoadedRunWithExecutionContextPatch(ctx, cmd.LoadedRun, cloneExecutionContext(cmd.ExecutionContextPatch))
 		}
 	} else if s.runs != nil {
@@ -219,12 +220,12 @@ func (s *Service) ResumeRun(ctx context.Context, cmd runcontracts.ResumeRunComma
 		if loaded.State == common.RunStateActive {
 			return common.ErrConflict
 		}
-		if patcher, ok := s.orchestrator.(LoadedRunExecutionContextPatchOrchestrator); ok {
+		if patcher, ok := s.orchestrator.(loadedRunExecutionContextPatchOrchestrator); ok {
 			return patcher.ResumeLoadedRunWithExecutionContextPatch(ctx, loaded, cloneExecutionContext(cmd.ExecutionContextPatch))
 		}
 	}
 	if len(cmd.ExecutionContextPatch) > 0 {
-		if patcher, ok := s.orchestrator.(ExecutionContextPatchOrchestrator); ok {
+		if patcher, ok := s.orchestrator.(executionContextPatchOrchestrator); ok {
 			return patcher.ResumeRunWithExecutionContextPatch(ctx, cmd.RunID, cloneExecutionContext(cmd.ExecutionContextPatch))
 		}
 	}
@@ -507,24 +508,23 @@ func runWorkspaceScope(ctx context.Context, explicitWorkspaceID common.Workspace
 }
 
 func (s *Service) publishRunEvent(ctx context.Context, topic string, run *runModel.Run) error {
-	if s.eventHub == nil || run == nil {
+	if s.notifier == nil || run == nil {
 		return nil
 	}
-	return events.PublishByContract(ctx, s.eventHub, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        topic,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "run",
-		SubjectID:    string(run.ID),
-		WorkspaceID:  string(run.WorkspaceID),
-		RunID:        string(run.ID),
-		Payload: events.RunPayload(
-			run.GoalID,
-			run.DoDID,
-			run.State,
-			run.BlockingTicketID,
-			run.BlockingApprovalID,
-			run.FailureReason,
-		),
-	})
+	return s.notifier.PublishRunState(ctx, topic, run)
+}
+
+func (n eventRunStateNotifier) PublishRunState(ctx context.Context, topic string, run *runModel.Run) error {
+	if n.hub == nil || run == nil {
+		return nil
+	}
+	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, runevents.RunStateChangedDataFromModel(run))
+	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
+		SubjectType: "run",
+		SubjectID:   string(run.ID),
+		WorkspaceID: string(run.WorkspaceID),
+		RunID:       string(run.ID),
+	}))
+	n.hub.Post(event)
+	return nil
 }

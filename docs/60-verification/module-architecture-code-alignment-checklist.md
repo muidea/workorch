@@ -109,21 +109,21 @@ Last Updated: 2026-05-30
 
 重点核对：
 
-- `kernel/workspace` 是否承接 formal Goal / DoD / workspace state。
+- `blocks/workspace` 是否承接 formal Goal / DoD / workspace state。
 - `kernel/run` 是否承接：
   - Run / Step / ToolCall / Patch / ValidationResult / RuntimeCheckpoint
   - run-scoped coverage ledger
   - run-scoped continuation
-- `kernel/result` 是否承接正式 Result / Artifact closeout。
+- `blocks/result` 是否承接正式 Result / Artifact closeout。
 - `kernel/eventstream` 是否承接 EventRecord append-only persistence/replay 输入。
 - `CoverageWorkItem` 和 `ArtifactContinuation` 是否已经在 kernel 有正式持有或等价责任点。
-- deliverable artifact 和 process evidence artifact 是否在 kernel/result 归属上被区分。
+- deliverable artifact 和 process evidence artifact 是否在 blocks/result 归属上被区分。
 
 常见偏差：
 
 - coverage ledger 只在 appservice/read-model 临时拼装
 - continuation 只在 orchestrator 内部临时结构存在
-- kernel/result 和 kernel/run 对 artifact ownership 边界不清
+- blocks/result 和 kernel/run 对 artifact ownership 边界不清
 
 ## 4. Kernel Orchestrator / Governance
 
@@ -137,7 +137,7 @@ Last Updated: 2026-05-30
   - context gate recovery routing
   - evidence mapping
   - completion gate
-- `kernel/decision` 是否只承接 Decision / Resolution 本体。
+- `blocks/decision` 是否只承接 Decision / Resolution 本体。
 - `kernel/governance` 是否承接 duplicate failure / repair exhausted / auto-governance 协同。
 - approval 正式状态与 recovery allow/deny 输入是否有明确 kernel 责任点。
 - decision / approval / governance 是否没有滑入产品交互层语义。
@@ -152,10 +152,10 @@ Last Updated: 2026-05-30
 
 重点核对：
 
-- `kernel/soul` 是否承接 Soul allowlist / policy validation。
-- `kernel/skill` 是否承接 Skill metadata / trigger / selection contract。
-- `kernel/mcp` 是否承接 registry / capability metadata / selection policy。
-- `kernel/memory` 是否承接：
+- `blocks/soul` 是否承接 Soul allowlist / policy validation。
+- `blocks/skill` 是否承接 Skill metadata / trigger / selection contract。
+- `blocks/mcp-registry` 是否承接 registry / capability metadata / selection policy。
+- `blocks/memory` 是否承接：
   - Memory CRUD
   - workspace-scoped recall/search
   - memory write policy
@@ -180,7 +180,7 @@ Last Updated: 2026-05-30
   - Goal / DoD formal definition
   - accepted Result 最终判定
 - `blocks/file` 是否区分 `file/*` 与 `patch/*` 的行为职责。
-- approval 是否不再作为 block adapter 存在，正式状态与 resolve 动作统一由 `kernel/approval` 承接。
+- approval 是否不再作为 block adapter 存在，正式状态与 resolve 动作统一由 `blocks/approval` 承接。
 - 所有 block 是否默认输出 structured metadata + bounded preview + raw ref。
 
 常见偏差：
@@ -238,7 +238,7 @@ Last Updated: 2026-05-30
 - orchestrator 的 recovery / completion gate 是否与 kernel/run/result/eventstream 的对象归属一致。
 - provider assembly 的 stage-contract 投影是否与 blocks/llm 的执行输入一致。
 - storage/read-model 的 metadata-first projection 是否与 service API / Web/TUI 一致。
-- kernel/memory 的 recall trace 是否被 appservice / product query 正式消费。
+- blocks/memory 的 recall trace 是否被 appservice / product query 正式消费。
 
 常见偏差：
 
@@ -263,7 +263,7 @@ Last Updated: 2026-05-30
 
 1. `kernel/run` 是否真实承接 run-scoped coverage ledger / continuation。
 2. `kernel/orchestrator` 是否真实承接 context gate recovery routing。
-3. `kernel/memory` 是否真实承接 `MemoryRecallTrace`。
+3. `blocks/memory` 是否真实承接 `MemoryRecallTrace`。
 4. `appservice` / observed / presenter 是否已经分层。
 5. `llm-provider-assembly` 是否真实承接 stage-contract projection 和 mode-specific schema。
 6. `storage-readmodel` 是否真实承接 metadata-first + raw/detail 分离。
@@ -276,7 +276,7 @@ Last Updated: 2026-05-30
 | application / workorchd | `internal/initiators/workorchruntime`, `internal/modules/application/workorchd/biz/bootstrap`, `biz/appservice`, `service/server` | pass | initiator 负责 repository/event hub/runtime policy 装配；bootstrap 输出 grouped exports；appservice 组合 activation/recovery/governance/read-model；server 层主要做请求解析、校验和响应包装。 |
 | observed / presenter / appservice split | `internal/modules/application/workorchd/pkg/observed`, `pkg/presenter`, `biz/appservice/read_model_service.go` | partial | observed/presenter 已有独立包和测试；旧 observable snapshot printer/builder 残留已从 `pkg/presenter` 移除，避免把 CLI/debug 输出职责混入 read-model mapper。但主 read-model 语义装配仍主要集中在 appservice，三层尚未完全覆盖所有 snapshot/detail/observability 入口，属于结构继续细化项。 |
 | kernel workspace / run / result | `internal/modules/kernel/{workspace,run,result,eventstream}`, `internal/pkg/workorchruntimecontract/coverage_work_item.go`, `internal/pkg/repository/coverage_work_item_repository.go` | pass | Workspace/Goal/DoD、Run/Step/evidence、Result/Artifact、EventRecord 均有正式模块；`ArtifactContinuation` 已有正式 internal state 与 repository。`CoverageWorkItem` 已有正式 runtime contract model、repository interface、memory/file/workspace-scoped backend 和 repository contract；`Run.ExecutionContext.coverageWorkItems` 仅作为 provider-facing/cache-stable 投影。 |
-| kernel orchestrator / governance | `internal/modules/kernel/orchestrator`, `internal/modules/kernel/decision`, `internal/modules/kernel/approval`, `internal/modules/kernel/governance` | pass | orchestrator 承接 run lifecycle、dispatch、repair/replan、context gate recovery、completion gate；decision、approval、governance 分别承接 ticket/resolution、approval formal state/resolve action、auto-governance 协同。Approval 已统一迁移至 `kernel/approval`。 |
+| kernel orchestrator / governance | `internal/modules/kernel/orchestrator`, `internal/modules/blocks/decision`, `internal/modules/blocks/approval`, `internal/modules/kernel/governance` | pass | orchestrator 承接 run lifecycle、dispatch、repair/replan、context gate recovery、completion gate；decision、approval、governance 分别承接 ticket/resolution、approval formal state/resolve action、auto-governance 协同。Approval 已统一迁移至 `blocks/approval`。 |
 | kernel context / capability / memory | `internal/modules/kernel/{soul,skill,mcp,memory}`, `internal/pkg/repository/memory_recall_trace_repository.go` | pass | Soul/Skill/MCP/Memory 模块职责清晰；`MemoryRecallTrace` 有正式 model/repository/query，并由 orchestrator step input recall 写入。 |
 | blocks / runtime adapters | `internal/modules/blocks/{llm,mcp,shell,file,git,web,ssh}` | pass | blocks 均按 step kind 承接外部动作/provider interaction；未发现 block 直接决定 run terminal state 或 accepted Result 的代码路径。approval 不再属于 block adapter。 |
 | llm provider assembly | `internal/modules/blocks/llm/biz`, `internal/modules/kernel/orchestrator/biz/runtime_output_mode_selector.go` | pass | provider request rendering、context budget、prompt sections、cache plan、provider audit 集中在 `blocks/llm`；output mode selector 和 artifact stage contract 由 orchestrator 选择并投影到 step input，再由 LLM block 渲染。`llm-provider-assembly.md` 已明确这是 orchestrator 选择 + provider assembly 渲染/audit 的双落点合同。 |
@@ -286,7 +286,7 @@ Last Updated: 2026-05-30
 ### Remaining Follow-Up
 
 - `CoverageWorkItem` 独立对象化已完成：正式 model/repository、orchestrator 写路径同步、read-model owner command 读路径和 dispatch/provider context 前 owner hydration 均已落地；后续修改 provider-facing 投影仍必须保持顺序稳定和 cache 稳定。
-- Approval 模型与 service 已迁移至 `internal/modules/kernel/approval`，旧 block 归属已移除；该项 `impl-drift` 已收口。
+- Approval 模型与 service 已迁移至 `internal/modules/blocks/approval`，旧 block 归属已移除；该项 `impl-drift` 已收口。
 - `observed` / `presenter` 已存在；`pkg/presenter` 中无外部调用的旧 observable snapshot `PrintBanner` / `PrintSnapshot` / `BuildSnapshot` 和配套输出 DTO 已清理。2026-06-22 已把共享 `StepView` / `ObservedView` DTO 上移到 `readmodelcore`，并把 step/observed projection mapper 下沉到 `readmodelprojection`；`pkg/presenter` 只保留 outward mapper 和 alias，且 `verify-boundary-contract.sh` 已防止 `readmodelcore` / `readmodelprojection` 再 import `pkg/presenter`。大部分 read-model assembly 仍集中在 appservice；后续可按 snapshot/detail/observability 分批迁移，不应在本轮做大范围搬迁。
 - `selectOutputMode` 目前由 orchestrator 基于 runtime policy 和 continuation state 决策，LLM block 负责 provider-facing 渲染/audit。`llm-provider-assembly.md` 已明确这是“orchestrator 选择 + provider assembly 渲染/audit”的双落点，而不是单模块独占。
 

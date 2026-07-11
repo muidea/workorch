@@ -5,10 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -23,9 +22,7 @@ func TestRuntimeOrchestratorRecordRuntimeStepProgressRequiresWorkspaceScope(t *t
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository()},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository()})
 
 	err := orch.RecordRuntimeStepProgress(ctx, runtimemodel.RuntimeStepExecutionProgressed{
 		RunID:  common.RunID("run-progress-missing-workspace"),
@@ -50,9 +47,8 @@ func TestRuntimeOrchestratorRecordRuntimeStepProgressUsesScopedRunLookup(t *test
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{RuntimeCheckpoints: checkpointRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{RuntimeCheckpoints: checkpointRepo})
+
 	workspaceID := common.WorkspaceID("ws-progress-scoped-lookup")
 	runID := common.RunID("run-progress-scoped-lookup")
 	stepID := common.StepID("run-progress-scoped-lookup/step-1")
@@ -104,9 +100,8 @@ func TestRuntimeOrchestratorTerminalResultUsesScopedRunLookup(t *testing.T) {
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{RuntimeCheckpoints: checkpointRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{RuntimeCheckpoints: checkpointRepo})
+
 	workspaceID := common.WorkspaceID("ws-terminal-scoped-lookup")
 	runID := common.RunID("run-terminal-scoped-lookup")
 	stepID := common.StepID("run-terminal-scoped-lookup/step-1")

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

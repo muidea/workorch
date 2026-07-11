@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
-	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -64,7 +63,6 @@ func (o *RuntimeOrchestrator) recordMemoryWrites(
 		}
 		refs[idx] = string(memoryID)
 		tasks = append(tasks, func() error {
-			topic := memoryevents.TopicMemoryCreated
 			if err := o.evidence.MemoryItems.Create(ctx, item); err != nil {
 				if err != common.ErrConflict {
 					return err
@@ -72,9 +70,8 @@ func (o *RuntimeOrchestrator) recordMemoryWrites(
 				if err := o.evidence.MemoryItems.Update(ctx, item); err != nil {
 					return err
 				}
-				topic = memoryevents.TopicMemoryUpdated
 			}
-			return o.eventPublisher().publishMemoryChanged(ctx, topic, item)
+			return nil
 		})
 	}
 	if err := runParallel(tasks...); err != nil {

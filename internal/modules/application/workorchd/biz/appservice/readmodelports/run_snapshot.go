@@ -5,8 +5,8 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type RunSnapshotReaders struct {
@@ -28,7 +28,7 @@ type RunSnapshotReaders struct {
 	Approvals             readmodelcore.ApprovalReader
 	AutoGovernanceTraces  readmodelcore.AutoGovernanceTraceReader
 	MCPCapabilities       readmodelcore.MCPCapabilityReader
-	Published             []events.WorkorchEvent
+	Published             []eventstreamevents.EventRecordData
 }
 
 func RunSnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) (readmodelcore.RunSnapshot, error) {

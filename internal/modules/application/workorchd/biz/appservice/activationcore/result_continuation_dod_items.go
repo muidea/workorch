@@ -3,7 +3,7 @@ package activationcore
 import (
 	"strings"
 
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 )
 
 func RejectedContinuationDoDItems(items []resultmodel.DoDAssessmentItem, satisfied bool) []map[string]any {

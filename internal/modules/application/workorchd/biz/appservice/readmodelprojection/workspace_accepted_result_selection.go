@@ -1,7 +1,7 @@
 package readmodelprojection
 
 import (
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )

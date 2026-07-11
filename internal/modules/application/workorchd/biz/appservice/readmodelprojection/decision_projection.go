@@ -5,7 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 )
 
 func MapDecision(item *decisionmodel.Ticket, resolution *decisionmodel.Resolution, autoGovernance *governancecore.AutoGovernanceSummary) readmodelcore.Decision {

@@ -7,8 +7,8 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 
 	"github.com/muidea/workorch/internal/pkg/common"

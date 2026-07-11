@@ -8,14 +8,13 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	orchestratorservice "github.com/muidea/workorch/internal/modules/kernel/orchestrator/service"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -30,10 +29,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 		t.Fatal("new module service pointer is non-nil before Configure")
 	}
 
-	rawHub := magicevent.NewHub(32)
-	defer rawHub.Terminate(context.Background())
 	deps := moduleContractDependencies()
-	deps.EventHub = events.NewMagicHubWithHubOwner(rawHub, ModuleID)
 	if err := module.Configure(deps); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -43,8 +39,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.bizPtr == nil {
 		t.Fatal("biz pointer is nil after Configure")
 	}
-	if module.eventHub == nil {
-		t.Fatal("event hub is nil after Configure")
+	if module.rawEventHub == nil {
+		t.Fatal("command hub is nil after Configure")
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -64,7 +60,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	}
 	if module.servicePtr != nil ||
 		module.bizPtr != nil ||
-		module.eventHub != nil ||
+		module.rawEventHub != nil ||
 		module.steps != nil ||
 		module.backgroundRoutine != nil ||
 		len(module.runtimeTopics) != 0 ||
@@ -91,7 +87,6 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 		{name: "missing evidence", deps: func() Dependencies { d := base; d.EvidenceRecords = nil; return d }()},
 		{name: "missing coverage", deps: func() Dependencies { d := base; d.CoverageWorkItems = nil; return d }()},
 		{name: "missing artifact continuations", deps: func() Dependencies { d := base; d.ArtifactContinuations = nil; return d }()},
-		{name: "missing event hub", deps: func() Dependencies { d := base; d.EventHub = nil; return d }()},
 		{name: "missing command hub", deps: func() Dependencies { d := base; d.CommandHub = nil; return d }()},
 	}
 	for _, tc := range tests {
@@ -110,7 +105,6 @@ func TestModuleStartRunCommandAcceptsStateAndSchedulesBackgroundDispatch(t *test
 	runRepo := memoryrepo.NewRunRepository()
 	stepRepo := memoryrepo.NewStepRepository()
 	workspaceRepo := memoryrepo.NewWorkspaceRepository()
-	hub := events.NewMemoryHub()
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -123,9 +117,8 @@ func TestModuleStartRunCommandAcceptsStateAndSchedulesBackgroundDispatch(t *test
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		hub,
-	)
+		memoryrepo.NewApprovalRepository())
+
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{
 		bizPtr:            orch,
@@ -179,9 +172,8 @@ func TestModuleResumeRunCommandSchedulesBackgroundDispatch(t *testing.T) {
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memoryrepo.NewApprovalRepository())
+
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{
 		bizPtr:            orch,
@@ -226,9 +218,8 @@ func TestModuleRecoverRuntimeGapCommandSchedulesBackgroundDispatch(t *testing.T)
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memoryrepo.NewApprovalRepository())
+
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{
 		bizPtr:            orch,
@@ -281,9 +272,8 @@ func TestModuleRecoverRuntimeGapCommandDeduplicatesInFlightIdempotencyKey(t *tes
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memoryrepo.NewApprovalRepository())
+
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{
 		bizPtr:            orch,
@@ -340,9 +330,8 @@ func TestModuleRecoverRuntimeGapCommandRejectsUnsafeDirectCommand(t *testing.T) 
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memoryrepo.NewApprovalRepository())
+
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{
 		bizPtr:            orch,
@@ -442,9 +431,8 @@ func TestModuleResumeRunCommandRejectsTerminalRunBeforeBackgroundDispatch(t *tes
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memoryrepo.NewApprovalRepository())
+
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{
 		bizPtr:            orch,
@@ -481,9 +469,8 @@ func TestModuleDispatchStepRequestedSchedulesBackgroundDispatch(t *testing.T) {
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memoryrepo.NewApprovalRepository())
+
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{bizPtr: orch, backgroundRoutine: bg}
 
@@ -547,9 +534,8 @@ func TestModuleRuntimeCompletedEventSchedulesFinalize(t *testing.T) {
 			ToolCalls:          toolCalls,
 			ValidationResults:  memoryrepo.NewValidationResultRepository(),
 			RuntimeCheckpoints: checkpoints,
-		},
-		events.NewMemoryHub(),
-	)
+		})
+
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{bizPtr: orch, backgroundRoutine: bg}
 
@@ -621,9 +607,8 @@ func TestModuleRuntimeFailedEventSchedulesFinalize(t *testing.T) {
 			ToolCalls:          toolCalls,
 			ValidationResults:  memoryrepo.NewValidationResultRepository(),
 			RuntimeCheckpoints: checkpoints,
-		},
-		events.NewMemoryHub(),
-	)
+		})
+
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{bizPtr: orch, backgroundRoutine: bg}
 
@@ -672,9 +657,7 @@ func TestModuleRuntimeResultEventRequiresWorkspaceScope(t *testing.T) {
 			memoryrepo.NewDecisionTicketRepository(),
 			nil,
 			memoryrepo.NewApprovalRepository(),
-			orchestratorbiz.RuntimeEvidenceRepositories{RuntimeCheckpoints: memoryrepo.NewRuntimeCheckpointRepository()},
-			events.NewMemoryHub(),
-		),
+			orchestratorbiz.RuntimeEvidenceRepositories{RuntimeCheckpoints: memoryrepo.NewRuntimeCheckpointRepository()}),
 	}
 
 	err := module.handleRuntimeResultData(ctx, runtimeevent.TopicRuntimeBlockExecuteCompleted, runtimeevent.CompletedData{
@@ -738,9 +721,8 @@ func TestModuleRuntimeProgressEventSchedulesCheckpoint(t *testing.T) {
 		memoryrepo.NewDecisionTicketRepository(),
 		nil,
 		memoryrepo.NewApprovalRepository(),
-		orchestratorbiz.RuntimeEvidenceRepositories{RuntimeCheckpoints: checkpoints},
-		events.NewMemoryHub(),
-	)
+		orchestratorbiz.RuntimeEvidenceRepositories{RuntimeCheckpoints: checkpoints})
+
 	bg := &recordingBackgroundRoutine{}
 	module := &Module{bizPtr: orch, backgroundRoutine: bg}
 
@@ -790,7 +772,6 @@ func moduleContractDependencies() Dependencies {
 		EvidenceRecords:       memoryrepo.NewEvidenceRecordRepository(),
 		CoverageWorkItems:     memoryrepo.NewCoverageWorkItemRepository(),
 		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),
-		EventHub:              events.NewMagicHubWithHubOwner(rawHub, ModuleID+"/test"),
 		CommandHub:            rawHub,
 	}
 }

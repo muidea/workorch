@@ -23,10 +23,10 @@ Last Updated: 2026-07-01
 
 | Object | Purpose | Owner | Key Relations |
 | --- | --- | --- | --- |
-| Workspace | 顶层业务容器，绑定交付目录、内部目录、当前 active run 和上下文 | kernel/workspace | has Goal, DoD, Run, Soul binding, Memory |
-| Goal | 当前要达成的目标正式定义 | kernel/workspace | belongs to Workspace, referenced by Run/Result/Coverage |
-| DoD | 完成定义和验收条目正式定义 | kernel/workspace | belongs to Workspace, referenced by Run/Result/Coverage |
-| DefinitionRevision | Goal/DoD 的有效版本边界 | kernel/workspace + run ledger | binds Run, CoverageWorkItem, StagePacket |
+| Workspace | 顶层业务容器，绑定交付目录、内部目录、当前 active run 和上下文 | blocks/workspace | has Goal, DoD, Run, Soul binding, Memory |
+| Goal | 当前要达成的目标正式定义 | blocks/workspace | belongs to Workspace, referenced by Run/Result/Coverage |
+| DoD | 完成定义和验收条目正式定义 | blocks/workspace | belongs to Workspace, referenced by Run/Result/Coverage |
+| DefinitionRevision | Goal/DoD 的有效版本边界 | blocks/workspace + run ledger | binds Run, CoverageWorkItem, StagePacket |
 
 合同：
 
@@ -57,8 +57,8 @@ Last Updated: 2026-07-01
 
 | Object | Purpose | Owner | Key Relations |
 | --- | --- | --- | --- |
-| Result | 正式业务结果 | kernel/result | references Workspace/Run/Goal/DoD/evidence/artifacts |
-| Artifact | 结构化产物或证据产物 | kernel/result + storage/read-model | may bind runId, stepId, resultId |
+| Result | 正式业务结果 | blocks/result | references Workspace/Run/Goal/DoD/evidence/artifacts |
+| Artifact | 结构化产物或证据产物 | blocks/result + storage/read-model | may bind runId, stepId, resultId |
 | Outcome | workspace/run 级读模型 outcome | read-model projection | derived from Result/Run/evidence |
 | TaskProgress | 当前进展与缺口投影 | read-model projection | derived from active run and coverage ledger |
 
@@ -72,9 +72,9 @@ Last Updated: 2026-07-01
 
 | Object | Purpose | Owner | Key Relations |
 | --- | --- | --- | --- |
-| Decision Ticket | runtime 无法自动推进时的结构化决策对象 | kernel/decision + governance | references Workspace/Run/Step |
-| Resolution | 对 Decision Ticket 的处理结果 | kernel/decision | maps to resume/replan/terminate |
-| Approval | 高风险或策略要求动作的审批对象 | kernel/approval/governance | references Workspace/Run/Step/action |
+| Decision Ticket | runtime 无法自动推进时的结构化决策对象 | blocks/decision + governance | references Workspace/Run/Step |
+| Resolution | 对 Decision Ticket 的处理结果 | blocks/decision | maps to resume/replan/terminate |
+| Approval | 高风险或策略要求动作的审批对象 | blocks/approval/governance | references Workspace/Run/Step/action |
 | AutoGovernance | duplicate failure / repair exhausted / policy gate 的治理建议 | kernel/governance | may create ticket/approval/resolution |
 
 合同：
@@ -87,12 +87,12 @@ Last Updated: 2026-07-01
 
 | Object | Purpose | Owner | Key Relations |
 | --- | --- | --- | --- |
-| Soul | 阶段约束、能力边界、风险策略 | kernel/soul + profile data | selected by Workspace/Run |
-| Skill | 可复用任务指导单元 | kernel/skill / skill-hub integration | selected into executionContext |
-| MCPServer | 外部能力提供者 | kernel/mcp | has capabilities |
-| MCPCapability | tool/resource/prompt 能力描述 | kernel/mcp | selected by Soul/profile/run |
-| Memory | 高价值可复用上下文 | kernel/memory | recalled into Run/Step context |
-| MemoryRecallTrace | recall 过程证据 | kernel/memory/run evidence | references selected/candidate/excluded memory |
+| Soul | 阶段约束、能力边界、风险策略 | blocks/soul + profile data | selected by Workspace/Run |
+| Skill | 可复用任务指导单元 | blocks/skill / skill-hub integration | selected into executionContext |
+| MCPServer | 外部能力提供者 | blocks/mcp-registry | has capabilities |
+| MCPCapability | tool/resource/prompt 能力描述 | blocks/mcp-registry | selected by Soul/profile/run |
+| Memory | 高价值可复用上下文 | blocks/memory | recalled into Run/Step context |
+| MemoryRecallTrace | recall 过程证据 | blocks/memory/run evidence | references selected/candidate/excluded memory |
 
 合同：
 
@@ -124,11 +124,11 @@ Last Updated: 2026-07-01
 | --- | --- | --- |
 | RuntimeStage | exploration, planning, execution, verification, acceptance, repair, replan, decision, approval | orchestrator stage contract |
 | RunState | pending, active, blocked_on_decision, blocked_on_approval, completed, failed, cancelled, superseded | kernel/run |
-| WorkspaceState | active, blocked_on_approval, superseded | kernel/workspace owner; projection may derive prompt/progress from active run |
+| WorkspaceState | active, blocked_on_approval, superseded | blocks/workspace owner; projection may derive prompt/progress from active run |
 | ConvergenceContract.State | need_evidence, need_state_change, need_validation, need_assessment, need_governance, blocked | orchestrator |
 | Completion | DeterministicComplete + CompletionReason | orchestrator |
 | StepState | pending, executing, succeeded, failed, skipped, cancelled | kernel/run |
-| ResultState | accepted/rejected/superseded-style outcome state | kernel/result |
+| ResultState | accepted/rejected/superseded-style outcome state | blocks/result |
 
 ### 3.2 State Bridge
 

@@ -34,7 +34,7 @@ func TestBackendSurfaceImportBoundary(t *testing.T) {
 				t.Fatalf("%s imports repository package %q; backend surface must use port/client/EventHub contracts only", name, imp)
 			case strings.Contains(imp, "/internal/modules/") && forbiddenBackendModuleImport(imp):
 				t.Fatalf("%s imports forbidden module implementation package %q; backend surface may use event DTO packages only", name, imp)
-			case strings.Contains(imp, "/internal/modules/blocks/"):
+			case isTechnicalRuntimeBlockImport(imp):
 				t.Fatalf("%s imports runtime block package %q; backend surface must use workorchport runtime DTO helpers", name, imp)
 			case strings.Contains(imp, "github.com/muidea/magicCommon/framework"):
 				t.Fatalf("%s imports framework package %q; backend surface must not own framework wiring", name, imp)
@@ -88,6 +88,16 @@ func forbiddenBackendModuleImport(path string) bool {
 		strings.Contains(path, "/repository") ||
 		strings.Contains(path, "/pkg/models") ||
 		strings.Contains(path, "/pkg/common")
+}
+
+func isTechnicalRuntimeBlockImport(path string) bool {
+	for _, block := range []string{"file", "git", "llm", "mcp", "shell", "ssh", "web"} {
+		root := "/internal/modules/blocks/" + block
+		if strings.HasSuffix(path, root) || strings.Contains(path, root+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func assertHasImport(t *testing.T, file string, imports []string, want string) {

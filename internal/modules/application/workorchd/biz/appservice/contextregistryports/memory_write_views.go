@@ -7,11 +7,10 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func CreateMemoryItemForWorkspace(ctx context.Context, commandHub magicevent.Hub, eventHub events.Hub, workspaceID string, cmd contextregistrycore.CreateMemoryItemCommand) (contextregistrycore.MemoryItem, error) {
-	if commandHub == nil || eventHub == nil {
+func CreateMemoryItemForWorkspace(ctx context.Context, commandHub magicevent.Hub, workspaceID string, cmd contextregistrycore.CreateMemoryItemCommand) (contextregistrycore.MemoryItem, error) {
+	if commandHub == nil {
 		return contextregistrycore.MemoryItem{}, common.ErrInvalidArgument
 	}
 	if err := EnsureWorkspaceExists(ctx, commandHub, workspaceID); err != nil {
@@ -21,15 +20,15 @@ func CreateMemoryItemForWorkspace(ctx context.Context, commandHub magicevent.Hub
 	if memoryID == "" {
 		memoryID = contextregistrycore.GenerateContextID("memory")
 	}
-	item, err := CreateMemoryItem(ctx, commandHub, eventHub, contextregistrycore.MemoryItemFromCommand(memoryID, workspaceID, cmd))
+	item, err := CreateMemoryItem(ctx, commandHub, contextregistrycore.MemoryItemFromCommand(memoryID, workspaceID, cmd))
 	if err != nil {
 		return contextregistrycore.MemoryItem{}, err
 	}
 	return contextregistrycore.MapMemoryItem(item), nil
 }
 
-func UpdateMemoryItemView(ctx context.Context, commandHub magicevent.Hub, eventHub events.Hub, memoryID string, cmd contextregistrycore.UpdateMemoryItemCommand) (contextregistrycore.MemoryItem, error) {
-	if commandHub == nil || eventHub == nil {
+func UpdateMemoryItemView(ctx context.Context, commandHub magicevent.Hub, memoryID string, cmd contextregistrycore.UpdateMemoryItemCommand) (contextregistrycore.MemoryItem, error) {
+	if commandHub == nil {
 		return contextregistrycore.MemoryItem{}, common.ErrInvalidArgument
 	}
 	memoryID = strings.TrimSpace(memoryID)
@@ -44,20 +43,24 @@ func UpdateMemoryItemView(ctx context.Context, commandHub magicevent.Hub, eventH
 		return contextregistrycore.MemoryItem{}, err
 	}
 	merged := contextregistrycore.MergeMemoryUpdateCommand(existing, cmd)
-	item, err := UpdateMemoryItem(ctx, commandHub, eventHub, contextregistrycore.MemoryItemFromMergedCommand(memoryID, existing.WorkspaceID, merged))
+	item, err := UpdateMemoryItem(ctx, commandHub, contextregistrycore.MemoryItemFromMergedCommand(memoryID, existing.WorkspaceID, merged))
 	if err != nil {
 		return contextregistrycore.MemoryItem{}, err
 	}
 	return contextregistrycore.MapMemoryItem(item), nil
 }
 
-func DeleteMemoryItemView(ctx context.Context, commandHub magicevent.Hub, eventHub events.Hub, memoryID string) error {
-	if commandHub == nil || eventHub == nil {
+func DeleteMemoryItemView(ctx context.Context, commandHub magicevent.Hub, memoryID string) error {
+	if commandHub == nil {
 		return common.ErrInvalidArgument
 	}
 	memoryID = strings.TrimSpace(memoryID)
 	if memoryID == "" {
 		return common.ErrInvalidArgument
 	}
-	return DeleteMemoryItemWithLifecycleEvent(ctx, commandHub, eventHub, memoryID)
+	existing, err := ReadMemoryItem(ctx, commandHub, memoryID)
+	if err != nil {
+		return err
+	}
+	return DeleteMemoryItem(common.ContextWithRuntimeWorkspaceID(ctx, existing.WorkspaceID), commandHub, memoryID)
 }

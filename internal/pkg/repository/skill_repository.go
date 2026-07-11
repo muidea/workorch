@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	skill "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
+	skill "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

@@ -4,10 +4,10 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
-	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
+	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )

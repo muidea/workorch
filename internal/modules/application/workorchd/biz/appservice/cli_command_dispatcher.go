@@ -6,7 +6,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/clicore"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 // CLICommandDispatcher owns the typed /cli/command contract for workorchd.
@@ -14,7 +13,6 @@ import (
 // owner state is read or changed here.
 type CLICommandDispatcher struct {
 	session    *RuntimeSession
-	eventHub   events.Hub
 	commandHub magicevent.Hub
 	viewReader WorkspaceViewReader
 	core       *clicore.Dispatcher
@@ -25,10 +23,10 @@ type WorkspaceViewReader interface {
 	ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (WorkspaceSnapshot, error)
 }
 
-func NewCLICommandDispatcher(session *RuntimeSession, eventHub events.Hub, commandHub magicevent.Hub, viewReader WorkspaceViewReader) *CLICommandDispatcher {
-	ret := &CLICommandDispatcher{session: session, eventHub: eventHub, commandHub: commandHub, viewReader: viewReader}
+func NewCLICommandDispatcher(session *RuntimeSession, commandHub magicevent.Hub, viewReader WorkspaceViewReader) *CLICommandDispatcher {
+	ret := &CLICommandDispatcher{session: session, commandHub: commandHub, viewReader: viewReader}
 	ret.core = clicore.NewDispatcher(commandHub, func(ctx context.Context, cmd clicore.Command) (map[string]any, []map[string]any, error) {
-		return ret.handleCommand(ContextWithEventHubs(ctx, eventHub, commandHub), cmd)
+		return ret.handleCommand(ContextWithCommandHub(ctx, commandHub), cmd)
 	})
 	return ret
 }

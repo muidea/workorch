@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 )
 
 func PageApprovals(items []*approvalmodel.Approval, query appmodelcore.ApprovalQuery) ([]*approvalmodel.Approval, int, string, string, bool) {

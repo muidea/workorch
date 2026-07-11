@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -17,7 +17,7 @@ func TestWorkspaceDefinitionContextPatchUsesEventHubOwnerReads(t *testing.T) {
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 
 	workspaceID := common.WorkspaceID("ws-runports-definition")
 	goalID := common.GoalID("goal-runports-definition")

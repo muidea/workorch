@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

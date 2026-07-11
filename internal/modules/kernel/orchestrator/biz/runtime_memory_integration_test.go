@@ -8,11 +8,10 @@ import (
 	"time"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
+	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -52,9 +51,7 @@ func TestRuntimeOrchestrator_StartRunPersistsRuntimeMemoryWrites(t *testing.T) {
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
 			MemoryItems:        memoryRepo,
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-memory-write")
 	runID := common.RunID("run-memory-write")
@@ -671,9 +668,7 @@ func TestRuntimeOrchestrator_FiltersDisallowedRuntimeMemoryWrites(t *testing.T) 
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
 			MemoryItems:        memoryRepo,
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-memory-filter")
 	runID := common.RunID("run-memory-filter")

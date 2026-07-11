@@ -11,13 +11,12 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
-	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
-	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
+	decisionmodule "github.com/muidea/workorch/internal/modules/blocks/decision"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -87,7 +86,7 @@ func newCountingDecisionRuntimeSession(t *testing.T) (*RuntimeSession, *counting
 	tickets := newCountingAppDecisionTicketRepository()
 	resolutions := newCountingAppDecisionResolutionRepository()
 	rawHub := magicevent.NewHub(16)
-	eventHub := events.NewMagicHubWithHubOwner(rawHub, "appservice/decision_service_test")
+	subscribeGovernanceEvidenceAcks(t, rawHub)
 	decisionModule := decisionmodule.New()
 	if err := decisionModule.Configure(decisionmodule.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("setup decision module: %v", err)
@@ -114,26 +113,7 @@ func newCountingDecisionRuntimeSession(t *testing.T) (*RuntimeSession, *counting
 	})
 
 	exports := completeAppserviceTestExports(bootstrap.Exports{
-		Repositories: bootstrap.RepositoryExports{
-			Workspaces:            memory.NewWorkspaceRepository(),
-			Runs:                  memory.NewRunRepository(),
-			Steps:                 memory.NewStepRepository(),
-			Results:               memory.NewResultRepository(),
-			Artifacts:             memory.NewArtifactRepository(),
-			ArtifactContinuations: memory.NewArtifactContinuationRepository(),
-			EventRecords:          memory.NewEventRecordRepository(),
-			MemoryRecallTraces:    memory.NewMemoryRecallTraceRepository(),
-			MCPCapabilities:       memory.NewMCPCapabilityRepository(),
-			ToolCalls:             memory.NewToolCallRepository(),
-			Patches:               memory.NewPatchRepository(),
-			ValidationResults:     memory.NewValidationResultRepository(),
-			RuntimeCheckpoints:    memory.NewRuntimeCheckpointRepository(),
-			Tickets:               tickets,
-			Resolutions:           resolutions,
-			Approvals:             memory.NewApprovalRepository(),
-		},
 		Infrastructure: bootstrap.InfrastructureExports{
-			EventHub:   eventHub,
 			CommandHub: rawHub,
 		},
 	})
@@ -195,7 +175,7 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
@@ -261,7 +241,7 @@ func TestListDecisionPageWithBackendScopesResolvedDuplicateTicketIDs(t *testing.
 	}
 
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
@@ -371,7 +351,7 @@ func TestReadDecisionWithBackendIncludesAutoGovernanceSummary(t *testing.T) {
 		t.Fatalf("new runtime session: %v", err)
 	}
 	ctx := context.Background()
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("session exports: %v", err)
 	}
@@ -434,7 +414,7 @@ func TestResolveDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 
 func TestResolveDecisionWithSessionWithoutScopePrefersOpenDuplicateFileTicket(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "file", t.TempDir())
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}

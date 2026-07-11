@@ -84,18 +84,18 @@ Last Updated: 2026-07-10
 
 | 模块 | 代码落点 | 核对内容 | 状态 |
 | --- | --- | --- | --- |
-| workspace | `internal/modules/kernel/workspace` | Workspace / Goal / DoD lifecycle 是否自洽；是否不混入 runtime adapter 逻辑 | reviewed |
+| workspace | `internal/modules/blocks/workspace` | Workspace / Goal / DoD lifecycle 是否自洽；是否不混入 runtime adapter 逻辑 | reviewed |
 | run | `internal/modules/kernel/run` | Run / Step / evidence primitives 是否权威；状态转换规则是否集中 | reviewed |
 | orchestrator | `internal/modules/kernel/orchestrator` | dispatch、repair、replan、completion gate 是否是唯一运行推进核心 | reviewed |
-| decision | `internal/modules/kernel/decision` | Ticket / Resolution lifecycle 是否独立；是否不承担 UI 交互 | reviewed |
-| approval | `internal/modules/kernel/approval` | pending / approved / rejected 转换是否权威；是否只作为恢复允许/拒绝输入 | reviewed |
+| decision | `internal/modules/blocks/decision` | Ticket / Resolution lifecycle 是否独立；是否不承担 UI 交互 | reviewed |
+| approval | `internal/modules/blocks/approval` | pending / approved / rejected 转换是否权威；是否只作为恢复允许/拒绝输入 | reviewed |
 | governance | `internal/modules/kernel/governance` | 自动治理、升级、resume 触发是否不阻塞 EventHub；是否不替代 Run 状态机 | reviewed |
-| result | `internal/modules/kernel/result` | Result / Artifact 是否只表达正式 outcome / deliverable；是否不被 block 直接裁决 | reviewed |
+| result | `internal/modules/blocks/result` | Result / Artifact 是否只表达正式 outcome / deliverable；是否不被 block 直接裁决 | reviewed |
 | eventstream | `internal/modules/kernel/eventstream` | 是否 append-only 记录事件；订阅是否在 `Stop` / `Teardown` 释放 | reviewed |
-| soul | `internal/modules/kernel/soul` | 是否只持有 Soul 正式对象；是否不写死业务 profile 行为 | reviewed |
-| skill | `internal/modules/kernel/skill` | 是否只持有 Skill 正式对象；是否不写死业务 profile 行为 | reviewed |
-| mcp catalog | `internal/modules/kernel/mcp` | 是否只持有 MCP server/capability 正式对象；是否不执行 MCP 调用 | reviewed |
-| memory | `internal/modules/kernel/memory` | 是否只持有 memory/recall trace 正式对象；是否不替代 runtime context assembly | reviewed |
+| soul | `internal/modules/blocks/soul` | 是否只持有 Soul 正式对象；是否不写死业务 profile 行为 | reviewed |
+| skill | `internal/modules/blocks/skill` | 是否只持有 Skill 正式对象；是否不写死业务 profile 行为 | reviewed |
+| mcp catalog | `internal/modules/blocks/mcpregistry` | 是否只持有 MCP server/capability 正式对象；是否不执行 MCP 调用 | reviewed |
+| memory | `internal/modules/blocks/memory` | 是否只持有 memory/recall trace 正式对象；是否不替代 runtime context assembly | reviewed |
 
 ## Blocks Runtime Adapter Layer
 
@@ -152,7 +152,7 @@ Last Updated: 2026-07-10
 1. `application/workorch`、`workorchd`、`workorchruntime`：确认框架生命周期和运行域。
 2. `bootstrap`、`RuntimeSession`、`events.MagicHub`：确认 EventHub / module assembly / request scope。
 3. `kernel/run`、`kernel/orchestrator`、`kernel/governance`：确认状态机权威边界。
-4. `kernel/decision`、`kernel/approval`、`kernel/result`、`kernel/eventstream`：确认治理与结果对象边界。
+4. `blocks/decision`、`blocks/approval`、`blocks/result`、`kernel/eventstream`：确认治理与结果对象边界。
 5. `appservice`、`server`、read model：确认 application use-case 与 HTTP surface 不越界。
 6. `blocks/*`：确认 adapter 只执行外部动作并产出证据。
 7. `repository`、workspace-scoped identity：确认 run id scope 和 snapshot/detail 查询一致。
@@ -178,7 +178,7 @@ Last Updated: 2026-07-10
 - MagicHub subscription/unsubscription against the underlying magicCommon hub now uses bounded waits and no longer holds the WorkOrch wrapper lock while subscribing. Wildcard subscriptions are intentionally wrapper-local, while concrete topic subscriptions still deliver across wrappers sharing the same underlying hub.
 - Governance notification observers no longer execute auto-governance synchronously inside the EventHub dispatch stack. Ticket/approval/run-state notifications enqueue lifecycle-managed governance work, so nested owner command `Send` calls do not block the original EventHub handler.
 - MCP catalog default capability derivation remains generic for arbitrary tools/resources/prompts, while built-in acceptance resource/prompt metadata is intentionally applied for the stdio e2e and user-facing catalog display.
-- Memory recall trace persistence is now owned by `kernel/memory`: appservice activation/recovery publish synchronous `TopicMemoryRecallTraceCommandUpsert`, the memory module handles trace repository writes, and `TopicMemoryRecallRecorded` remains the notification event consumed by observability/UI.
+- Memory recall trace persistence is now owned by `blocks/memory`: appservice activation/recovery publish synchronous `TopicMemoryRecallTraceCommandUpsert`, the memory module handles trace repository writes, and `TopicMemoryRecallRecorded` remains the notification event consumed by observability/UI.
 - Orchestrator production wiring no longer receives the `MemoryRecallTraceRepository` directly. Runtime memory recall trace create/upsert/get/list/delete operations from orchestrator now go through an EventHub-backed repository adapter that publishes memory owner command topics.
 - `workorchruntime` initiator no longer exposes kernel owner service getters/setters. Its helper surface is limited to `Repositories()`, `EventHub()`, and `RuntimePolicy()`, so framework plugin modules obtain only runtime infrastructure and must communicate cross-owner actions through EventHub command topics.
 - `workorchruntime` initiator no longer imports `internal/modules/application/workorchd/biz/bootstrap`. Shared repository backend/data-root helpers, workspace-scoped file repository construction, artifact storage repository, builtin defaults seeding, and runtime policy mapping now live under `internal/pkg/workorchrepo`, `internal/pkg/workorchdefaults`, and `internal/pkg/workorchruntimepolicy`.
@@ -273,7 +273,7 @@ Last Updated: 2026-07-10
   - `go test ./application/workorch -count=1` passed after the command response audit update.
   - `WORKORCH_BASE_URL=http://127.0.0.1:8080 make verify-ci-mvp-file` passed against a local file-backend service started by `make run-file` after the command response audit update. HTTP, workspace template/soul, LLM workspace execution, and MCP stdio workspace execution passed; MCP stdio completed `workspaceId=ws-2196db8036940a76`, `runId=run-001`, `runState=completed`, `steps=4`, `toolCalls=4`, `validations=4`, `runtimeCheckpoints=11`.
   - `git diff --check` passed after the command response audit update.
-  - `go test ./internal/modules/blocks/pkg/runtimeevent ./internal/modules/application/workorchd/biz/appservice ./internal/modules/kernel/result -count=1` passed after adding duplicate-`Run()` subscription guards and regression coverage for runtime executor, CLI dispatcher, and representative result owner module.
+  - `go test ./internal/modules/blocks/pkg/runtimeevent ./internal/modules/application/workorchd/biz/appservice ./internal/modules/blocks/result -count=1` passed after adding duplicate-`Run()` subscription guards and regression coverage for runtime executor, CLI dispatcher, and representative result owner module.
   - `go test ./internal/services/workorch/service/cli ./internal/services/workorch/biz/agent -count=1` passed after fixing CLI agent error propagation and adding regression coverage for backend failure before event emission.
   - `go test ./internal/services/workorch/biz/backends ./internal/modules/application/workorchd/biz/appservice ./internal/pkg/events -count=1` passed after removing the unmanaged CLI result fallback goroutine and rechecking EventHub command/result behavior.
   - `go test ./internal/services/workorch/biz/backends ./internal/modules/application/workorchd -count=1` passed after moving `/cli/command` handling from the workorch backend into the workorchd owner dispatcher.
@@ -303,7 +303,7 @@ Last Updated: 2026-07-10
   - `go test ./internal/modules/kernel/eventstream ./internal/modules/kernel/eventstream/biz -count=1 -timeout=120s` passed after adding EventStream duplicate start/stop regression coverage.
   - `go test ./internal/services/workorch/service/tui -count=1 -timeout=240s` passed after adding TUI active-workspace run scope regression coverage.
   - `go test ./internal/modules/kernel/governance/biz -count=1 -timeout=240s` passed after adding auto-governance event envelope scope contract coverage.
-  - `go test ./internal/modules/kernel/orchestrator ./internal/modules/kernel/result -count=1 -timeout=240s` passed after adding Result/Artifact EventHub adapter scope and missing-response contract coverage.
+  - `go test ./internal/modules/kernel/orchestrator ./internal/modules/blocks/result -count=1 -timeout=240s` passed after adding Result/Artifact EventHub adapter scope and missing-response contract coverage.
   - `go test ./internal/modules/kernel/orchestrator/biz -run 'CompleteRun|CompletesLLMRunWithSatisfiedDoDAssessment|CompletionGate' -count=1 -timeout=240s` passed after adding the direct CompleteRun accepted-result gate.
   - `go test ./internal/modules/blocks/web ./internal/modules/blocks/web/biz ./internal/modules/blocks/mcp ./internal/modules/blocks/mcp/biz -count=1 -timeout=240s` passed after adding Web approval owner command run-scope coverage.
   - `go test ./internal/modules/blocks/file ./internal/modules/blocks/file/biz ./internal/modules/blocks/git ./internal/modules/blocks/git/biz ./internal/modules/kernel/orchestrator/biz -run 'Patch|ArtifactContinuation|Git' -count=1 -timeout=300s` passed after patch/write boundary review.
@@ -439,7 +439,7 @@ Last Updated: 2026-07-10
 - Workspace scope check: run owner 具体 command 携带 workspace/run refs；workspace-sensitive run lookup 使用 repository `GetByWorkspaceID`。
 - Findings: `ResumeRun` 曾允许 `running` run 透传到 orchestrator recovery 分支，导致 public resume API 对非 blocked 状态返回成功；生产 module 还曾直接注入 Workspace repository 进行跨 owner 校验。
 - Required action: 已修复 public resume gate；已移除生产 Run module 对 Workspace repository 的直接注入，改为 `/workspace/command/get` EventHub reader。
-- Verification: `go test ./internal/modules/kernel/run/... -count=1`; `go test ./internal/modules/kernel/run ./internal/modules/kernel/workspace ./internal/modules/application/workorchd/biz/bootstrap -count=1`
+- Verification: `go test ./internal/modules/kernel/run/... -count=1`; `go test ./internal/modules/kernel/run ./internal/modules/blocks/workspace ./internal/modules/application/workorchd/biz/bootstrap -count=1`
 - Status: reviewed
 
 ### kernel/orchestrator execution state authority
@@ -455,7 +455,7 @@ Last Updated: 2026-07-10
 - Workspace scope check: EventHub command adapters 带 workspace/run refs；run id scope 后续在 repository 层继续核对。
 - Findings: 曾在生产 module 装配中直接注入 Run/Workspace/Memory、Result/Artifact 和 Decision/Approval owner repositories、直接注册 block runtime adapter；已改为 EventHub command adapter。appservice workspace purge 曾直接删除 run 证据仓储；本轮已改为发布 orchestrator owner 的 `/orchestrator/command/purge-run`。Artifact command adapter 曾统一写入 `SubjectType=result`，已修正为 Artifact create/get/update/delete 使用 `artifact` subject，list 命令使用其查询对象 subject。Direct `CompleteRun` 曾可用任意 accepted Result 将 DoD-gated run 标记为 completed，已收紧为正式 DoD assessment accepted result gate。
 - Required action: completion gate 与 `runtime-stage-contract.md` 中 accepted Result / DoD assessment / evidenceRefs 的核心完成门禁已核对并补回归测试；context-gate 完整 action 枚举已落地为 provider budget action，LLM adapter 只做 provider 前阻断，orchestrator 通过 context decision ticket 记录 `recommendedRecoveryAction` 与收窄后的 `allowedRecoveryActions`。`CoverageWorkItem` 已完成正式 model/repository 对象化，framework initiator/module/bootstrap 已接线，orchestrator 主路径已把 `Run.ExecutionContext` ledger 投影同步到独立 owner repository，read-model 列表已通过 EventHub owner command 读取 owner repository，dispatch/provider context 前会从 owner repository 水合 `Run.ExecutionContext` coverage 投影并生成 `coverageWorkItemContext` / gap baseline；后续修改 provider-facing 投影仍必须保持 EventHub owner 边界和 LLM context/cache 稳定性。当前执行证据 primitive 明确归属 orchestrator owner，如后续拆分独立 evidence module，仍必须经 EventHub command 接入。
-- Verification: `go test ./internal/modules/kernel/orchestrator/... -count=1`; `go test ./internal/modules/kernel/orchestrator ./internal/modules/kernel/result -count=1 -timeout=240s`; `go test ./internal/modules/kernel/orchestrator/biz -run 'CompleteRun|CompletesLLMRunWithSatisfiedDoDAssessment|CompletionGate|ReusesValidatedDoDAssessment' -count=1 -timeout=240s`; `go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=360s`; `go test ./internal/initiators/workorchruntime ./internal/modules/blocks/... ./internal/modules/kernel/... ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/biz/bootstrap -count=1`
+- Verification: `go test ./internal/modules/kernel/orchestrator/... -count=1`; `go test ./internal/modules/kernel/orchestrator ./internal/modules/blocks/result -count=1 -timeout=240s`; `go test ./internal/modules/kernel/orchestrator/biz -run 'CompleteRun|CompletesLLMRunWithSatisfiedDoDAssessment|CompletionGate|ReusesValidatedDoDAssessment' -count=1 -timeout=240s`; `go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=360s`; `go test ./internal/initiators/workorchruntime ./internal/modules/blocks/... ./internal/modules/kernel/... ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/biz/bootstrap -count=1`
 - Status: reviewed
 
 ### kernel/governance resume boundary
@@ -570,9 +570,9 @@ Last Updated: 2026-07-10
 - Verification: `go test ./internal/modules/application/workorchd/service/server -run 'Background|Recovery|Governance|Replan|Resume|RunQueue' -count=1 -timeout=300s`; `go test ./internal/modules/application/workorchd/service/server -run 'TestService(StartupRequiresFrameworkRuntime|RunUsesBackgroundRoutine|RunRequiresBackgroundRoutine|RunReturnsErrorWhenBackgroundSubmitFails|RunRecoversStartupInactiveRunningWorkspaceBeforeProjection)|TestHTTPServerStartupOnlySchedulesWatchdogTimer|TestServerStateScheduleBackgroundFailureReleasesWaitGroup' -count=1 -timeout=300s`; `go test ./internal/modules/application/workorchd/service/server -run 'TestWorkorchDScheduler(CommandRejects.*ScopeMismatch|CommandReturnsErrorWhenRunContinuationQueueFails|CommandRequiresAcceptedResponse)|TestWorkorchDWorkspaceRunCommandRestartEnqueuesWorkspaceRestart|TestWorkorchDSchedulerWorkspaceRunCommandEnqueuesWorkspaceRestartByWorkspaceScope|TestServerStateGovernanceRunResumeRejectsMissingWorkspaceScope' -count=1`; `go test ./internal/modules/application/workorchd/service/server -count=1 -timeout=300s`
 - Status: reviewed
 
-### kernel/decision ticket lifecycle
+### blocks/decision ticket lifecycle
 
-- Code: `internal/modules/kernel/decision`
+- Code: `internal/modules/blocks/decision`
 - Owner layer: Kernel governance formal state
 - Expected responsibility: 持有 Decision Ticket / Resolution 正式对象与 open -> resolved 状态转换，不承担 UI 交互或运行推进。
 - Current responsibility: plugin 通过 `workorchruntime` initiator 获取 repository/EventHub，biz service 创建 ticket、幂等 ensure、解析 resolution，并由 service facade 对外暴露窄接口。
@@ -583,12 +583,12 @@ Last Updated: 2026-07-10
 - Workspace scope check: `CreateTicket` / `EnsureTicket` 已要求 `TicketID`、`WorkspaceID`、`RunID`、`Reason` 非空，避免发布缺 workspace 的 run 相关治理事件；`GetTicket`、`ListTicketsByRun`、`EnsureResolved`、`DeleteTicket`、`GetResolution` 和 `DeleteResolution` command 在调用方传入 workspace/run/step scope 时由 decision owner 过滤或拒绝 wrong-scope 数据。`EnsureResolved` 的 scoped guard 位于 decision biz service 内，复用原本的 ticket read 并在写入前校验。无 scope `EnsureResolved` / `DeleteTicket` / `GetResolution` / `DeleteResolution` command 会先解析唯一 open / 唯一历史 ticket，重复跨 workspace ticket id 返回 conflict；resolve 会把解析出的 workspace/run/step scope 写回 command 后再进入正式状态转换，delete 和 resolution get/delete 会通过解析出的 workspace scope 访问对应 owner state。
 - Findings: ticket 创建曾允许空 `WorkspaceID`，与 workspace-scoped EventHub 规则不一致；ticket command get/list-by-run/resolve/delete 曾未在 owner module/service 内执行 workspace scope guard；resolution get/delete 曾可直接按 ticket id 访问 resolution，未显式继承所属 ticket scope；owner no-scope resolve/delete 曾依赖 repository `Get/Delete` 语义，缺少统一 open-first conflict 规则和 delete scope 注入。
 - Required action: 已修复并补参数校验、wrong-scope owner command get/list/mutation 回归；appservice owner read helper 会把 context runtime workspace scope 写入 Decision 具体 command；owner no-scope resolve/delete 已补唯一解析和 duplicate open conflict 回归；resolution get/delete 已补 ticket scope 继承、wrong-scope 和 duplicate ticket conflict 回归。
-- Verification: `go test ./internal/modules/kernel/decision/... -count=1`; `go test ./internal/modules/kernel/approval ./internal/modules/kernel/decision -count=1 -timeout=180s`; `go test ./internal/modules/kernel/decision -run 'TestDecision(TicketCommandGetHonorsScope|TicketCommandListByRunHonorsWorkspaceScope|MutationCommandsHonorWorkspaceScope|ResolveCommandWithoutScopeResolvesUniqueOpenTicket|ResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets|DeleteCommandWithoutScopeDeletesUniqueOpenTicket|ResolutionCommandGetHonorsTicketScope|ResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets|ResolutionDeleteWithoutScopeDeletesUniqueTicketResolution)' -count=1`
+- Verification: `go test ./internal/modules/blocks/decision/... -count=1`; `go test ./internal/modules/blocks/approval ./internal/modules/blocks/decision -count=1 -timeout=180s`; `go test ./internal/modules/blocks/decision -run 'TestDecision(TicketCommandGetHonorsScope|TicketCommandListByRunHonorsWorkspaceScope|MutationCommandsHonorWorkspaceScope|ResolveCommandWithoutScopeResolvesUniqueOpenTicket|ResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets|DeleteCommandWithoutScopeDeletesUniqueOpenTicket|ResolutionCommandGetHonorsTicketScope|ResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets|ResolutionDeleteWithoutScopeDeletesUniqueTicketResolution)' -count=1`
 - Status: reviewed
 
-### kernel/approval approval lifecycle
+### blocks/approval approval lifecycle
 
-- Code: `internal/modules/kernel/approval`
+- Code: `internal/modules/blocks/approval`
 - Owner layer: Kernel governance formal state
 - Expected responsibility: 持有 Approval 正式对象与 pending -> approved/rejected 终态转换，只作为恢复允许/拒绝输入。
 - Current responsibility: plugin 通过 `workorchruntime` initiator 获取 repository/EventHub，biz service 创建 approval、幂等 ensure、approve/reject，并由 service facade 对外暴露窄接口。
@@ -599,12 +599,12 @@ Last Updated: 2026-07-10
 - Workspace scope check: `CreateApproval` / `EnsureApproval` 已要求 `ApprovalID`、`WorkspaceID`、`RunID`、`Reason` 非空，避免发布缺 workspace 的 run 相关治理事件；`GetApproval`、`ListApprovalsByRun`、`EnsureApproved`、`EnsureRejected` 和 `DeleteApproval` command 在调用方传入 workspace/run/step scope 时由 approval owner module 过滤或拒绝 wrong-scope 数据。无 scope mutation command 会先解析唯一 pending / 唯一历史 approval，重复跨 workspace approval id 返回 conflict。
 - Findings: approval 创建曾允许空 `WorkspaceID`，与 workspace-scoped EventHub 规则不一致；approval command get/list-by-run/approve/reject/delete 曾未在 owner module 内执行 workspace scope guard；owner mutation command 的无 scope 路径曾依赖 repository `Get` 语义，缺少统一 pending-first conflict 规则。
 - Required action: 已修复并补参数校验、wrong-scope owner command get/list/mutation 回归；appservice owner read helper 会把 context runtime workspace scope 写入 Approval 具体 command；owner no-scope mutation 已补唯一解析和 duplicate pending conflict 回归。
-- Verification: `go test ./internal/modules/kernel/approval/... -count=1`; `go test ./internal/modules/kernel/approval ./internal/modules/kernel/decision -count=1 -timeout=180s`; `go test ./internal/modules/kernel/approval -run 'TestApproval(MutationCommandsHonorWorkspaceScope|MutationCommandWithoutScopeResolvesUniquePendingApproval|MutationCommandWithoutScopeConflictsOnDuplicatePendingApprovals|CommandGetHonorsScope|CommandListByRunHonorsWorkspaceScope)' -count=1`
+- Verification: `go test ./internal/modules/blocks/approval/... -count=1`; `go test ./internal/modules/blocks/approval ./internal/modules/blocks/decision -count=1 -timeout=180s`; `go test ./internal/modules/blocks/approval -run 'TestApproval(MutationCommandsHonorWorkspaceScope|MutationCommandWithoutScopeResolvesUniquePendingApproval|MutationCommandWithoutScopeConflictsOnDuplicatePendingApprovals|CommandGetHonorsScope|CommandListByRunHonorsWorkspaceScope)' -count=1`
 - Status: reviewed
 
-### kernel/result formal outcome module
+### blocks/result formal outcome module
 
-- Code: `internal/modules/kernel/result`
+- Code: `internal/modules/blocks/result`
 - Owner layer: Kernel formal result and artifact owner
 - Expected responsibility: 定义并维护 Result / Artifact / DoD assessment / deliverable manifest 等正式 outcome 对象，不由 block adapter 直接裁决业务结果。
 - Current responsibility: `module.go` / `plugin.go` 接入 framework lifecycle；`biz` 负责 Result/Artifact 基本校验与 repository owner 操作；`service` 暴露窄接口，orchestrator 生产路径和 appservice purge 管理路径均通过 EventHub command adapter 访问。
@@ -613,9 +613,9 @@ Last Updated: 2026-07-10
 - Background task check: 不启动后台任务。
 - State ownership check: Result/Artifact 只表达正式 outcome/deliverable 模型；blocks 只能产出 evidence/patch/artifact input，不能绕过 orchestrator 直接接受业务结果。
 - Workspace scope check: 模型包含 `WorkspaceID` / `RunID`；closeout create/update 具体 command 带 workspace/run scope，list-by-workspace/run/result 命令带对应查询 scope。memory/file repository contract 均已覆盖 result/artifact `ListByRun`：无 workspace scope 且同一 workspace-local `runID` 命中多个 workspace 时返回 conflict，context 带 workspace scope 时只返回对应 workspace 数据。
-- Findings: 原目录只有 `pkg/common` 和 `pkg/models`，不符合 kernel module 结构规范；已补齐 `biz/service/module/plugin` 并接入 bootstrap runtime、framework plugin runtime 和入口 side-effect import。按当前仓库分组，Result/Artifact 是 kernel formal state owner，保留在 `internal/modules/kernel/result` 符合 README 已固化的模块落点。file backend Result/Artifact `ListByRun` 曾忽略 runtime workspace context，已与 memory backend 和 repository contract 对齐。
+- Findings: 原目录只有 `pkg/common` 和 `pkg/models`，不符合 kernel module 结构规范；已补齐 `biz/service/module/plugin` 并接入 bootstrap runtime、framework plugin runtime 和入口 side-effect import。按当前仓库分组，Result/Artifact 是 kernel formal state owner，保留在 `internal/modules/blocks/result` 符合 README 已固化的模块落点。file backend Result/Artifact `ListByRun` 曾忽略 runtime workspace context，已与 memory backend 和 repository contract 对齐。
 - Required action: Result/Artifact owner command 边界已核对；direct completion gate 已要求正式 accepted DoD assessment result；repository `ListByRun` scope 一致性已补 contract 覆盖。若后续重新规划 formal outcome 分组，应先更新 README/architecture checklist，再迁移目录，避免只移动路径不改变职责。
-- Verification: `go test ./internal/modules/kernel/result/... -count=1`; `go test ./internal/modules/kernel/orchestrator ./internal/modules/kernel/result -count=1 -timeout=240s`; `go test ./internal/initiators/workorchruntime ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/application/workorchd/biz/appservice ./application/workorch -count=1`; `go test ./internal/pkg/repository/... -count=1 -timeout=300s`; `go test ./internal/pkg/workorchrepo -count=1 -timeout=300s`
+- Verification: `go test ./internal/modules/blocks/result/... -count=1`; `go test ./internal/modules/kernel/orchestrator ./internal/modules/blocks/result -count=1 -timeout=240s`; `go test ./internal/initiators/workorchruntime ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/application/workorchd/biz/appservice ./application/workorch -count=1`; `go test ./internal/pkg/repository/... -count=1 -timeout=300s`; `go test ./internal/pkg/workorchrepo -count=1 -timeout=300s`
 - Status: reviewed
 
 ### kernel/eventstream append-only projection
@@ -625,7 +625,7 @@ Last Updated: 2026-07-10
 - Expected responsibility: 订阅 WorkOrch 事件并 append-only 写入 event record repository，对外提供查询，不推进业务状态。
 - Current responsibility: module `Run` 调用 biz `Start` 订阅事件；biz 将有效 WorkOrch event envelope 转成 event record；service facade 暴露 `ListEvents` 和 owner-scoped `PurgeWorkspaceEvents`。appservice workspace purge 通过 `/eventstream/command/purge-workspace` 触发事件投影清理。
 - Lifecycle check: `Start` 对重复启动幂等；module `Run` 对重复启动幂等；`Stop` 调用所有 unsubscribe 并清空订阅；module `Teardown` 调用 `Stop` 后清空引用并释放 command subscriptions。
-- EventHub check: 通过统一 EventHub `SubscribeWorkorch` 订阅所有 WorkOrch contract topics；非 WorkOrch 事件被忽略；append 冲突按幂等处理。
+- EventHub check: Eventstream 通过 magicCommon EventHub 逐 topic 订阅投递组件定义的具体 data；不存在统一 Envelope/map 聚合订阅；append 冲突按幂等处理。
 - Background task check: 不启动后台任务，事件 handler 只做 append 操作。
 - State ownership check: eventstream 是只读投影和审计记录，不裁决 run/result/governance 状态。
 - Workspace scope check: event record 保留 envelope 中的 `WorkspaceID`、`RunID`、`StepID` 和 revision；事件生产方是否完整填充由对应模块继续核对。
@@ -634,9 +634,9 @@ Last Updated: 2026-07-10
 - Verification: `go test ./internal/modules/kernel/eventstream ./internal/modules/kernel/eventstream/biz -count=1 -timeout=120s`
 - Status: reviewed
 
-### kernel/workspace formal workspace definitions
+### blocks/workspace formal workspace definitions
 
-- Code: `internal/modules/kernel/workspace`
+- Code: `internal/modules/blocks/workspace`
 - Owner layer: Kernel formal workspace state
 - Expected responsibility: 持有 Workspace / Goal / DoD 正式对象和定义变更状态，不混入 runtime adapter 或执行推进。
 - Current responsibility: plugin 通过 `workorchruntime` initiator 获取 workspace/goal/dod repositories 与 EventHub；biz manager 创建/确保 workspace、定义/更新 goal 和 DoD，并发布 workspace/definition events。作为 workspace/goal/dod owner，module 订阅 workspace command topics，为 run/orchestrator/governance/appservice 提供同步 command response；删除 workspace 时由 workspace owner 级联清理 Goal/DoD。
@@ -647,12 +647,12 @@ Last Updated: 2026-07-10
 - Workspace scope check: Goal/DoD 定义要求显式 `WorkspaceID`；本轮收紧空白 title/deliverable/goal text/DoD item 校验，避免纯空定义进入正式对象。workspace owner command 入口现在统一校验 envelope、payload 和 typed command 中的 workspace scope，一旦不一致直接 conflict；`GetGoal` / `GetDoD` 等 repository 读取通过 runtime workspace context 消歧，避免跨 workspace 同名 definition 被错误读取。
 - Findings: 目标文本、DoD 条目和 workspace 基础字段曾只检查空字符串，纯空白可绕过正式定义校验；run/orchestrator/appservice 曾通过直接 repository 注入读取或更新 workspace owner state。appservice purge 曾直接删除 Goal/DoD 仓储。旧 Envelope command handler 曾存在 envelope/payload/command 三份 scope 的优先级问题；当前具体 command 只保留单一 scope 合同。
 - Required action: 已修复空白校验并补回归测试；已补 workspace command handlers，生产跨 module 访问改为 EventHub command；本轮将 workspace delete 级联 Goal/DoD 清理放回 workspace owner。Goal/DoD scoped lookup 已通过 command 入口 workspace context 和 repository conflict 语义收口，后续新增 workspace-scoped command 必须复用同一 scope guard。
-- Verification: `go test ./internal/modules/kernel/workspace/... -count=1`; `go test ./internal/modules/kernel/run ./internal/modules/kernel/workspace ./internal/modules/kernel/orchestrator ./internal/modules/application/workorchd/biz/bootstrap -count=1`
+- Verification: `go test ./internal/modules/blocks/workspace/... -count=1`; `go test ./internal/modules/kernel/run ./internal/modules/blocks/workspace ./internal/modules/kernel/orchestrator ./internal/modules/application/workorchd/biz/bootstrap -count=1`
 - Status: reviewed
 
-### kernel/soul catalog
+### blocks/soul catalog
 
-- Code: `internal/modules/kernel/soul`
+- Code: `internal/modules/blocks/soul`
 - Owner layer: Kernel formal catalog
 - Expected responsibility: 持有 Soul 正式对象和 capability selection 约束，不写死具体业务 profile 执行行为。
 - Current responsibility: plugin 通过 `workorchruntime` initiator 获取 soul repository 与 EventHub；biz service 负责 Soul CRUD 和 selection allow-list 校验。作为 soul owner，module 订阅 soul command topics，为 appservice/context registry 和 workorchd CLI dispatcher 写路径提供同步 command response。
@@ -663,12 +663,12 @@ Last Updated: 2026-07-10
 - Workspace scope check: Soul 是全局 catalog 对象，不绑定 workspace；workspace/profile 绑定在 appservice/template/selection 层继续核对。
 - Findings: 未发现需要本轮代码收口的问题。
 - Required action: 已核对 template/default soul seed 数据落点：内置 Soul/WorkspaceTemplate/MCP 默认资源由 `internal/pkg/workorchdefaults` 嵌入并通过 `EnsureBuiltinDefaults` 写入，`workorchd/biz/bootstrap` 只消费该默认资源包；Workspace 创建期应用 template 绑定；Run activation 只使用/校验 workspace/template contract，不重新写入 default soul 或 stage bindings。
-- Verification: `go test ./internal/modules/kernel/soul/... -count=1`
+- Verification: `go test ./internal/modules/blocks/soul/... -count=1`
 - Status: reviewed
 
-### kernel/skill catalog
+### blocks/skill catalog
 
-- Code: `internal/modules/kernel/skill`
+- Code: `internal/modules/blocks/skill`
 - Owner layer: Kernel formal catalog
 - Expected responsibility: 持有 Skill 正式对象和声明式需求，不写死业务 profile 行为。
 - Current responsibility: plugin 通过 `workorchruntime` initiator 获取 skill repository 与 EventHub；biz service 负责 Skill create/update/get/list。作为 skill owner，module 订阅 skill command topics，为 appservice/context registry 提供同步 command response。
@@ -679,12 +679,12 @@ Last Updated: 2026-07-10
 - Workspace scope check: Skill 是全局 catalog 对象，不绑定 workspace；workspace 选择和 matching 在 appservice/runtime context assembly 层继续核对。
 - Findings: skill 校验曾只拒绝空字符串，纯空白 name/version/instruction/list item 可进入正式 catalog。
 - Required action: 已修复为 `strings.TrimSpace` 校验并补回归测试。
-- Verification: `go test ./internal/modules/kernel/skill/... -count=1`
+- Verification: `go test ./internal/modules/blocks/skill/... -count=1`
 - Status: reviewed
 
-### kernel/mcp catalog
+### blocks/mcp-registry catalog
 
-- Code: `internal/modules/kernel/mcp`
+- Code: `internal/modules/blocks/mcpregistry`
 - Owner layer: Kernel formal catalog
 - Expected responsibility: 持有 MCP server/capability 正式目录对象，不执行 MCP tool/resource/prompt 调用。
 - Current responsibility: plugin 通过 `workorchruntime` initiator 获取 MCP server/capability repositories 与 EventHub；biz service 负责 server/capability CRUD、default capability 派生和目录过滤。作为 MCP catalog owner，module 订阅 MCP command topics，为 appservice/context registry 和 blocks/mcp runtime adapter 提供同步 command response。
@@ -695,12 +695,12 @@ Last Updated: 2026-07-10
 - Workspace scope check: MCP catalog 是全局对象；workspace 绑定与 capability selection 在 appservice/template/runtime context assembly 层继续核对。
 - Findings: default capability display name 曾对 `repo.summary`、`workspace://acceptance`、`workorch.acceptance` 混用特定业务硬编码；server name/transport 也只拒绝空字符串。
 - Required action: 已将任意 tool/resource/prompt 默认展示名改为按 capability kind 生成通用名称；仅对内置验收 resource `workspace://acceptance` 和 prompt `workorch.acceptance` 应用受控 metadata，以满足 stdio e2e 和用户可读目录展示；已收紧 server name/transport 空白校验并补回归测试。
-- Verification: `go test ./internal/modules/kernel/mcp/... -count=1`
+- Verification: `go test ./internal/modules/blocks/mcpregistry/... -count=1`
 - Status: reviewed
 
-### kernel/memory catalog and recall objects
+### blocks/memory catalog and recall objects
 
-- Code: `internal/modules/kernel/memory`
+- Code: `internal/modules/blocks/memory`
 - Owner layer: Kernel formal memory state
 - Expected responsibility: 持有 memory item / recall trace 正式对象，不替代 runtime context assembly 或 embedding/provider 执行。
 - Current responsibility: plugin 通过 `workorchruntime` initiator 获取 memory repository；biz service 负责 memory CRUD、workspace list 和 repository search。作为 memory owner，module 订阅 memory command topics，为 orchestrator/governance 提供同步 command response。
@@ -711,7 +711,7 @@ Last Updated: 2026-07-10
 - Workspace scope check: memory create/list/search 均要求 `WorkspaceID`；run/source refs 作为 source attribution 保存。
 - Findings: memory 校验曾只拒绝空字符串，纯空白 sourceRef/summary/tag 可进入正式 memory 对象；orchestrator 生产路径曾直接注入 MemoryItem repository。
 - Required action: 已修复为 `strings.TrimSpace` 校验并补回归测试；已补 memory command handlers，orchestrator 生产路径改为 EventHub-backed memory repository adapter。
-- Verification: `go test ./internal/modules/kernel/memory/... -count=1`; `go test ./internal/modules/kernel/memory ./internal/modules/kernel/orchestrator ./internal/modules/application/workorchd/biz/bootstrap -count=1`
+- Verification: `go test ./internal/modules/blocks/memory/... -count=1`; `go test ./internal/modules/blocks/memory ./internal/modules/kernel/orchestrator ./internal/modules/application/workorchd/biz/bootstrap -count=1`
 - Status: reviewed
 
 ### blocks/llm provider adapter

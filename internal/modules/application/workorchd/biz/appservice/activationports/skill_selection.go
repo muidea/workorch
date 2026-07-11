@@ -7,8 +7,8 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/skillselectcore"
-	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

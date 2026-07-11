@@ -7,14 +7,12 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHubOwner(rawHub, "workorchd/scheduler/test")
-	t.Cleanup(func() { hub.Terminate(context.Background()) })
-	state := newServerStateWithHubsAndBackground(normalizeConfig(Config{Backend: "memory"}), hub, rawHub, &recordingBackgroundRoutine{})
+	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
+	state := newServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, &recordingBackgroundRoutine{})
 	command := workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: "ws-typed-scheduler",
 		RunID:       "run-typed-scheduler",
@@ -50,9 +48,8 @@ func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {
 
 func TestWorkorchDSchedulerRejectsInvalidTypedWorkspaceRunCommand(t *testing.T) {
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHubOwner(rawHub, "workorchd/scheduler/test")
-	t.Cleanup(func() { hub.Terminate(context.Background()) })
-	_ = newServerStateWithHubsAndBackground(normalizeConfig(Config{Backend: "memory"}), hub, rawHub, &recordingBackgroundRoutine{})
+	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
+	_ = newServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, &recordingBackgroundRoutine{})
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "test", workorchdevents.CommandDestination, magicevent.NewHeader(), context.Background(), workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: common.WorkspaceID("ws-invalid-typed-scheduler"),
 	})

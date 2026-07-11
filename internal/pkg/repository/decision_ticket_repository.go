@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	decision "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	decision "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

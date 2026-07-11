@@ -3,7 +3,7 @@ package runtimeports
 import (
 	"context"
 
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )

@@ -3,7 +3,7 @@ package readmodelprojection
 import (
 	"testing"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

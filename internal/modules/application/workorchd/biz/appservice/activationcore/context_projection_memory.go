@@ -2,7 +2,7 @@ package activationcore
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 )
 
 func MemoryContexts(items []*memorymodel.MemoryItem) []map[string]any {

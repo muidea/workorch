@@ -4,7 +4,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
-	"github.com/muidea/workorch/internal/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
@@ -30,17 +30,12 @@ type readModelDependencies struct {
 	tickets               readmodelcore.DecisionTicketReader
 	resolutions           readmodelcore.DecisionResolutionReader
 	approvals             readmodelcore.ApprovalReader
-	eventHub              events.Hub
 	commandHub            magicevent.Hub
-	published             []events.WorkorchEvent
+	published             []eventstreamevents.EventRecordData
 	loadConfig            func() (workorchconfig.Config, error)
 }
 
 func readModelDependenciesFromSession(session *RuntimeSession) (readModelDependencies, error) {
-	eventHub, err := session.RequiredEventHub()
-	if err != nil {
-		return readModelDependencies{}, err
-	}
 	commandHub, err := session.RequiredCommandHub()
 	if err != nil {
 		return readModelDependencies{}, err
@@ -50,9 +45,9 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 		return readModelDependencies{}, err
 	}
 
-	var published []events.WorkorchEvent
+	var published []eventstreamevents.EventRecordData
 	if session.Runtime != nil {
-		published = session.Runtime.PublishedWorkorchEvents()
+		published = session.Runtime.PublishedEventRecords()
 	}
 
 	return readModelDependencies{
@@ -77,7 +72,6 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 		tickets:               readers.Tickets,
 		resolutions:           readers.Resolutions,
 		approvals:             readers.Approvals,
-		eventHub:              eventHub,
 		commandHub:            commandHub,
 		published:             published,
 		loadConfig:            session.ConfigLoader(),

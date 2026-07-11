@@ -64,24 +64,24 @@ Last Updated: 2026-07-01
 - 不绕过 EventHub/owner service 执行业务状态转换。
 - 不复制 orchestrator 收敛判断。
 
-### 3.3 Kernel Business Authority Level
+### 3.3 Business Authority Module / Stateful Block Level
 
 代码落点：
 
-- `internal/modules/kernel/workspace`
+- `internal/modules/blocks/workspace`
 - `internal/modules/kernel/run`
-- `internal/modules/kernel/result`
+- `internal/modules/blocks/result`
 - `internal/modules/kernel/orchestrator`
-- `internal/modules/kernel/decision`
-- `internal/modules/kernel/approval`
+- `internal/modules/blocks/decision`
+- `internal/modules/blocks/approval`
 - `internal/modules/kernel/governance`
-- `internal/modules/kernel/soul`
-- `internal/modules/kernel/skill`
-- `internal/modules/kernel/mcp`
-- `internal/modules/kernel/memory`
+- `internal/modules/blocks/soul`
+- `internal/modules/blocks/skill`
+- `internal/modules/blocks/mcpregistry`
+- `internal/modules/blocks/memory`
 - `internal/modules/kernel/eventstream`
 
-职责：
+其中 `internal/modules/blocks/workspace`、`result`、`decision`、`approval`、`memory`、`skill`、`soul` 与 `mcpregistry` 分别承载单一资源聚合 stateful block；`mcpregistry` 与 invocation 技术 block `blocks/mcp` 明确分离。其余目录按各自职责保留为 module。职责：
 
 - Workspace / Goal / DoD formal definition。
 - Run / Step lifecycle。

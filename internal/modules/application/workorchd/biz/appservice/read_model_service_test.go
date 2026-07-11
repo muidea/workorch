@@ -11,26 +11,27 @@ import (
 	"testing"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -348,7 +349,7 @@ func TestMapGitOperationTracesProjectsStructuredOutput(t *testing.T) {
 
 func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceID := common.WorkspaceID("ws-bounded-events")
 	runID := common.RunID("run-bounded-events")
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
@@ -571,7 +572,7 @@ func assertProjectedCollectionLength(t *testing.T, name string, got, want int) {
 func TestListRunStepsWithSessionPaginatesProjectedSteps(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceID := common.WorkspaceID("ws-step-page")
 	runID := common.RunID("run-step-page")
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "step page", State: common.WorkspaceStateActive}); err != nil {
@@ -625,7 +626,7 @@ func TestListRunStepsWithSessionPaginatesProjectedSteps(t *testing.T) {
 func TestListRunToolCallsWithSessionPaginatesProjectedToolCalls(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceID := common.WorkspaceID("ws-tool-page")
 	runID := common.RunID("run-tool-page")
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "tool page", State: common.WorkspaceStateActive}); err != nil {
@@ -674,7 +675,7 @@ func TestListRunToolCallsWithSessionPaginatesProjectedToolCalls(t *testing.T) {
 func TestListRunRuntimeCheckpointsWithSessionPaginatesProjectedCheckpoints(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceID := common.WorkspaceID("ws-checkpoint-page")
 	runID := common.RunID("run-checkpoint-page")
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "checkpoint page", State: common.WorkspaceStateActive}); err != nil {
@@ -722,7 +723,7 @@ func TestListRunRuntimeCheckpointsWithSessionPaginatesProjectedCheckpoints(t *te
 func TestListRunResultsWithSessionPaginatesProjectedResults(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceID := common.WorkspaceID("ws-result-page")
 	runID := common.RunID("run-result-page")
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "result page", State: common.WorkspaceStateActive}); err != nil {
@@ -778,7 +779,7 @@ func TestListRunResultsWithSessionPaginatesProjectedResults(t *testing.T) {
 func TestListRunPatchesWithSessionPaginatesProjectedPatches(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceID := common.WorkspaceID("ws-patch-page")
 	runID := common.RunID("run-patch-page")
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "patch page", State: common.WorkspaceStateActive}); err != nil {
@@ -827,7 +828,7 @@ func TestListRunPatchesWithSessionPaginatesProjectedPatches(t *testing.T) {
 func TestListRunValidationResultsWithSessionPaginatesProjectedValidationResults(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceID := common.WorkspaceID("ws-validation-page")
 	runID := common.RunID("run-validation-page")
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "validation page", State: common.WorkspaceStateActive}); err != nil {
@@ -879,7 +880,7 @@ func TestListRunValidationResultsWithSessionPaginatesProjectedValidationResults(
 func TestListRunArtifactsWithSessionPaginatesProjectedArtifacts(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceID := common.WorkspaceID("ws-artifact-page")
 	runID := common.RunID("run-artifact-page")
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "artifact page", State: common.WorkspaceStateActive}); err != nil {
@@ -957,7 +958,7 @@ func TestReadRunSnapshotWithBackendReturnsBlockedDecisionReadModel(t *testing.T)
 
 func TestReadRunSnapshotReadsDecisionResolutionsConcurrently(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-concurrent-resolution-read")
 	runID := common.RunID("run-concurrent-resolution-read")
@@ -1185,7 +1186,7 @@ func TestReadRunSnapshotScopesMemoryRecallTracesByWorkspace(t *testing.T) {
 func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-run-evidence-snapshot")
 	runID := common.RunID("run-evidence-snapshot")
@@ -1394,7 +1395,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 func TestReadRunSnapshotWithBackendReturnsSelectedAndUsedCapabilities(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-run-capability-snapshot")
 	runID := common.RunID("run-capability-snapshot")
@@ -2176,7 +2177,7 @@ func TestReadRunStatusWithBackendReturnsBlockedApprovalSummary(t *testing.T) {
 func TestReadRunStatusUsesLatestCheckpointStep(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "memory", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-status-current-step")
 	runID := common.RunID("run-status-current-step")
@@ -2218,7 +2219,7 @@ func TestReadRunStatusUsesLatestCheckpointStep(t *testing.T) {
 func TestReadRunStatusPrefersBlockingDecisionStepOverStaleCheckpoint(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-status-blocking-step")
 	runID := common.RunID("run-status-blocking-step")
@@ -2287,7 +2288,7 @@ func TestReadRunStatusPrefersBlockingDecisionStepOverStaleCheckpoint(t *testing.
 func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "memory", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-run-observability")
 	runID := common.RunID("run-observability")
@@ -2359,52 +2360,49 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 	}); err != nil {
 		t.Fatalf("create checkpoint: %v", err)
 	}
-	if err := exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        runevents.TopicRunStateChanged,
-		SourceModule: "test",
-		SubjectType:  "run",
-		SubjectID:    string(runID),
-		WorkspaceID:  string(workspaceID),
-		RunID:        string(runID),
-		Payload:      events.RunPayload("", "", common.RunStateCompleted, "", "", ""),
-	}); err != nil {
-		t.Fatalf("publish event: %v", err)
+	runStateEvent := magicevent.NewEventWithContext(
+		runevents.TopicRunStateChanged,
+		"test",
+		runevents.NotificationDestination,
+		magicevent.NewHeader(),
+		ctx,
+		runevents.RunStateChangedData{
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			State:       common.RunStateCompleted,
+		},
+	)
+	if result := exports.Infrastructure.CommandHub.Send(runStateEvent); result == nil || result.Error() != nil {
+		t.Fatalf("send run state event: %v", result)
 	}
-	if err := exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        runevents.TopicRunLLMStreamProgress,
-		SourceModule: "test",
-		SubjectType:  "llm_stream_progress",
-		SubjectID:    string(stepID),
-		WorkspaceID:  string(workspaceID),
-		RunID:        string(runID),
-		StepID:       string(stepID),
-		Payload: events.LLMStreamProgressPayload(
-			workspaceID,
-			runID,
-			stepID,
-			"provider-a",
-			"model-a",
-			2,
-			28,
-			0,
-			"completed",
-			"llm_execution_graph_plan - completed",
-		),
-	}); err != nil {
-		t.Fatalf("publish llm stream progress event: %v", err)
+	llmProgressEvent := magicevent.NewEventWithContext(
+		runevents.TopicRunLLMStreamProgress,
+		"test",
+		runevents.NotificationDestination,
+		magicevent.NewHeader(),
+		ctx,
+		runevents.LLMStreamProgressData{
+			WorkspaceID:   workspaceID,
+			RunID:         runID,
+			StepID:        stepID,
+			ProviderID:    "provider-a",
+			Model:         "model-a",
+			ChunkCount:    2,
+			ReceivedBytes: 28,
+			Status:        "completed",
+			Summary:       "llm_execution_graph_plan - completed",
+		},
+	)
+	if result := exports.Infrastructure.CommandHub.Send(llmProgressEvent); result == nil || result.Error() != nil {
+		t.Fatalf("send llm stream progress event: %v", result)
 	}
-	if err := exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        runevents.TopicRunLLMUsageRecorded,
-		SourceModule: "test",
-		SubjectType:  "llm_usage",
-		SubjectID:    string(stepID),
-		WorkspaceID:  string(workspaceID),
-		RunID:        string(runID),
-		StepID:       string(stepID),
-		Payload: events.LLMUsagePayload(events.LLMUsagePayloadData{
+	llmUsageEvent := magicevent.NewEventWithContext(
+		runevents.TopicRunLLMUsageRecorded,
+		"test",
+		runevents.NotificationDestination,
+		magicevent.NewHeader(),
+		ctx,
+		runevents.LLMUsageRecordedData{
 			WorkspaceID:   workspaceID,
 			RunID:         runID,
 			StepID:        stepID,
@@ -2423,9 +2421,10 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 			CompletedAt:   "2026-04-25T10:00:02Z",
 			DurationMs:    1000,
 			Status:        "completed",
-		}),
-	}); err != nil {
-		t.Fatalf("publish llm usage event: %v", err)
+		},
+	)
+	if result := exports.Infrastructure.CommandHub.Send(llmUsageEvent); result == nil || result.Error() != nil {
+		t.Fatalf("send llm usage event: %v", result)
 	}
 
 	item, err := ReadRunObservabilityWithSession(ctx, session, string(runID))
@@ -2626,7 +2625,7 @@ func TestRuntimeTimelineCompactsLargeStreamDeltaOutput(t *testing.T) {
 func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-task-progress-result")
 	runID := common.RunID("run-task-progress-result")
@@ -3017,7 +3016,7 @@ func TestSummarizeLLMUsageDoesNotMergeDifferentSurfacesOrProviderModes(t *testin
 func TestReadRunSnapshotWithBackendProjectsCompletedRunWithoutResultAsFailedOutcome(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-completed-without-result")
 	runID := common.RunID("run-completed-without-result")
@@ -3074,7 +3073,7 @@ func TestReadRunTaskProgressWithBackendReturnsDecisionRecovery(t *testing.T) {
 func TestReadRunTaskProgressSummaryCountsAppliedPatchesAsChangedFiles(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceID := common.WorkspaceID("ws-task-progress-patches")
 	runID := common.RunID("run-task-progress-patches")
 	stepID := common.StepID("run-task-progress-patches/graph-001/001-apply-main")
@@ -3423,7 +3422,7 @@ func TestReadWorkspaceTaskProgressWithBackendReturnsActiveRunProgress(t *testing
 func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCandidates(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-context-bundle")
 	runID := common.RunID("run-context-bundle")
@@ -3538,7 +3537,7 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-task-decomposition")
 	runID := common.RunID("run-task-decomposition")
@@ -3838,7 +3837,7 @@ func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *t
 	}
 
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
@@ -3952,7 +3951,7 @@ func TestReadWorkspaceSnapshotWithBackendSummarizesRunScopedLLMUsageRecords(t *t
 	}
 
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
@@ -4003,7 +4002,7 @@ func TestReadWorkspaceSnapshotWithBackendSummarizesRunScopedLLMUsageRecords(t *t
 func TestReadWorkspaceSnapshotProjectsWorkspaceStateFromRun(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-projection")
 	runID := common.RunID("run-projection")
@@ -4068,7 +4067,7 @@ func TestReadWorkspaceSnapshotProjectsWorkspaceStateFromRun(t *testing.T) {
 func TestReadWorkspaceSnapshotWithRunSnapshotReusesProjectionSections(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-cached-run-projection")
 	runID := common.RunID("run-cached-run-projection")
@@ -4121,7 +4120,7 @@ func TestReadWorkspaceSnapshotWithRunSnapshotReusesProjectionSections(t *testing
 
 func TestReadWorkspaceSnapshotWithRunSnapshotAvoidsProjectionRunStepRead(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-cached-run-no-step-read")
 	runID := common.RunID("run-cached-run-no-step-read")
@@ -4180,7 +4179,7 @@ func TestReadWorkspaceSnapshotWithRunSnapshotAvoidsProjectionRunStepRead(t *test
 
 func TestReadWorkspaceSnapshotProjectsActiveRunAndCurrentStep(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-active-run-current-step")
 	runID := common.RunID("run-active-run-current-step")
@@ -4236,7 +4235,7 @@ func TestReadWorkspaceSnapshotProjectsActiveRunAndCurrentStep(t *testing.T) {
 
 func TestReadWorkspaceSnapshotProjectsCoverageSummaryFromActiveRun(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-coverage-summary")
 	runID := common.RunID("run-coverage-summary")
@@ -4289,7 +4288,7 @@ func TestReadWorkspaceSnapshotProjectsCoverageSummaryFromActiveRun(t *testing.T)
 
 func TestReadWorkspaceSnapshotCanonicalizesWorkspacePlanCurrentStepKind(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-active-run-current-step-alias")
 	runID := common.RunID("run-active-run-current-step-alias")
@@ -4330,7 +4329,7 @@ func TestReadWorkspaceSnapshotCanonicalizesWorkspacePlanCurrentStepKind(t *testi
 
 func TestReadRunSnapshotIncludesArtifactContinuationMetadata(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceID := common.WorkspaceID("ws-artifact-continuation-read-model")
 	runID := common.RunID("run-artifact-continuation-read-model")
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
@@ -4381,7 +4380,7 @@ func TestReadRunSnapshotIncludesArtifactContinuationMetadata(t *testing.T) {
 
 func TestReadRunSnapshotReadsCoverageWorkItemsFromOwnerRepository(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceID := common.WorkspaceID("ws-coverage-work-item-read-model")
 	runID := common.RunID("run-coverage-work-item-read-model")
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
@@ -4558,7 +4557,7 @@ func TestReadWorkspaceSnapshotReadsWorkspaceAndWorkspaceScopedItemsConcurrently(
 func TestReadWorkspaceSnapshotBindsWorkspaceScopeForWorkspaceScopedRunIDs(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	firstWorkspaceID := common.WorkspaceID("ws-snapshot-run-scope-a")
 	secondWorkspaceID := common.WorkspaceID("ws-snapshot-run-scope-b")
@@ -4600,7 +4599,7 @@ func TestReadWorkspaceSnapshotBindsWorkspaceScopeForWorkspaceScopedRunIDs(t *tes
 func TestReadWorkspaceSnapshotProjectsAcceptedResultOverStaleTerminalActiveRun(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-stale-active-result")
 	staleRunID := common.RunID("run-stale-failed")
@@ -4660,7 +4659,7 @@ func TestReadWorkspaceSnapshotProjectsAcceptedResultOverStaleTerminalActiveRun(t
 func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResult(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-latest-failure-projection")
 	completedRunID := common.RunID("run-completed-with-result")
@@ -4748,7 +4747,7 @@ func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResu
 func TestReadWorkspaceSnapshotTaskProgressUsesLatestTerminalRejectedResult(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 
 	workspaceID := common.WorkspaceID("ws-terminal-rejected-progress")
 	oldRunID := common.RunID("run-old-failed")

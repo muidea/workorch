@@ -2,16 +2,64 @@ package server
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
+
+var serverTestEventSequence atomic.Uint64
+
+func publishServerTestEventRecord(ctx context.Context, hub magicevent.Hub, envelope streamEvent) error {
+	if envelope.ID == "" {
+		envelope.ID = fmt.Sprintf("eventstream-test-%d", serverTestEventSequence.Add(1))
+	}
+	if envelope.Version == "" {
+		envelope.Version = events.WorkorchEventVersion
+	}
+	if envelope.Revision == 0 {
+		envelope.Revision = 1
+	}
+	data, err := eventstreamevents.EventRecordDataFromModel(&eventstreammodel.EventRecord{
+		ID:           common.EventRecordID(envelope.ID),
+		Version:      envelope.Version,
+		Topic:        envelope.Topic,
+		OccurredAt:   envelope.OccurredAt,
+		SourceModule: envelope.SourceModule,
+		SubjectType:  envelope.SubjectType,
+		SubjectID:    envelope.SubjectID,
+		WorkspaceID:  common.WorkspaceID(envelope.WorkspaceID),
+		RunID:        common.RunID(envelope.RunID),
+		StepID:       common.StepID(envelope.StepID),
+		Revision:     envelope.Revision,
+		Payload:      envelope.Payload,
+	})
+	if err != nil {
+		return err
+	}
+	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamRecordAppended, "kernel/eventstream", eventstreamevents.NotificationDestination, magicevent.NewHeader(), ctx, eventstreamevents.EventRecordAppendedData{Record: data})
+	result := hub.Send(event)
+	if result == nil {
+		return fmt.Errorf("record appended event returned no result")
+	}
+	if resultErr := result.Error(); resultErr != nil {
+		if strings.Contains(resultErr.Message, "missing observer") {
+			return nil
+		}
+		return resultErr
+	}
+	return nil
+}
 
 func TestNormalizeEventStreamViewDefaultsToProjection(t *testing.T) {
 	if got := normalizeEventStreamView(""); got != eventStreamViewProjection {
@@ -30,22 +78,21 @@ func TestSubscribeServerStreamEventsReceivesProjectionAcrossHubWrappers(t *testi
 	rawHub := magicevent.NewHub(32)
 	defer rawHub.Terminate(ctx)
 
-	subscriber := events.NewMagicHubWithHubOwner(rawHub, "workorchd/sse")
-	publisher := events.NewMagicHubWithHubOwner(rawHub, "workorchd/projection")
-	received := make(chan events.Envelope, 1)
-	unsubscribers := subscribeServerStreamEvents(subscriber, eventStreamViewFull, func(_ context.Context, envelope events.Envelope) error {
+	received := make(chan streamEvent, 1)
+	unsubscribers := subscribeServerStreamEvents(rawHub, eventStreamViewFull, func(_ context.Context, envelope streamEvent) error {
 		received <- envelope
 		return nil
 	})
 	defer unsubscribeAll(unsubscribers)
 
-	if err := publisher.Publish(ctx, events.Envelope{
-		Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
-		WorkspaceID: "ws-projection",
-		Payload:     map[string]any{"changeKind": "detail"},
-	}); err != nil {
-		t.Fatalf("publish projection event: %v", err)
-	}
+	rawHub.Post(magicevent.NewEventWithContext(
+		workorchdevents.TopicWorkspaceProjectionChanged,
+		"workorchd/projection",
+		workorchdevents.NotificationDestination,
+		magicevent.NewHeader(),
+		ctx,
+		workorchdevents.WorkspaceProjectionChangedData{WorkspaceID: "ws-projection", ChangeKind: "detail"},
+	))
 
 	select {
 	case envelope := <-received:
@@ -62,16 +109,14 @@ func TestSubscribeServerStreamEventsReceivesOwnerEventAcrossHubWrappers(t *testi
 	rawHub := magicevent.NewHub(32)
 	defer rawHub.Terminate(ctx)
 
-	subscriber := events.NewMagicHubWithHubOwner(rawHub, "workorchd/sse")
-	publisher := events.NewMagicHubWithHubOwner(rawHub, "kernel/workspace")
-	received := make(chan events.Envelope, 1)
-	unsubscribers := subscribeServerStreamEvents(subscriber, eventStreamViewFull, func(_ context.Context, envelope events.Envelope) error {
+	received := make(chan streamEvent, 1)
+	unsubscribers := subscribeServerStreamEvents(rawHub, eventStreamViewFull, func(_ context.Context, envelope streamEvent) error {
 		received <- envelope
 		return nil
 	})
 	defer unsubscribeAll(unsubscribers)
 
-	if err := publisher.Publish(ctx, events.Envelope{
+	if err := publishServerTestEventRecord(ctx, rawHub, streamEvent{
 		Version:     events.WorkorchEventVersion,
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-owner",
@@ -95,16 +140,14 @@ func TestSubscribeServerStreamEventsReceivesTicketUpdatedAcrossHubWrappers(t *te
 	rawHub := magicevent.NewHub(32)
 	defer rawHub.Terminate(ctx)
 
-	subscriber := events.NewMagicHubWithHubOwner(rawHub, "workorchd/sse")
-	publisher := events.NewMagicHubWithHubOwner(rawHub, "kernel/decision")
-	received := make(chan events.Envelope, 1)
-	unsubscribers := subscribeServerStreamEvents(subscriber, eventStreamViewFull, func(_ context.Context, envelope events.Envelope) error {
+	received := make(chan streamEvent, 1)
+	unsubscribers := subscribeServerStreamEvents(rawHub, eventStreamViewFull, func(_ context.Context, envelope streamEvent) error {
 		received <- envelope
 		return nil
 	})
 	defer unsubscribeAll(unsubscribers)
 
-	if err := publisher.Publish(ctx, events.Envelope{
+	if err := publishServerTestEventRecord(ctx, rawHub, streamEvent{
 		Version:     events.WorkorchEventVersion,
 		Topic:       decisionevents.TopicTicketUpdated,
 		WorkspaceID: "ws-ticket-updated",
@@ -132,16 +175,14 @@ func TestSubscribeServerStreamEventsProjectionViewIgnoresOwnerEvents(t *testing.
 	rawHub := magicevent.NewHub(32)
 	defer rawHub.Terminate(ctx)
 
-	subscriber := events.NewMagicHubWithHubOwner(rawHub, "workorchd/sse")
-	publisher := events.NewMagicHubWithHubOwner(rawHub, "kernel/workspace")
-	received := make(chan events.Envelope, 1)
-	unsubscribers := subscribeServerStreamEvents(subscriber, eventStreamViewProjection, func(_ context.Context, envelope events.Envelope) error {
+	received := make(chan streamEvent, 1)
+	unsubscribers := subscribeServerStreamEvents(rawHub, eventStreamViewProjection, func(_ context.Context, envelope streamEvent) error {
 		received <- envelope
 		return nil
 	})
 	defer unsubscribeAll(unsubscribers)
 
-	if err := publisher.Publish(ctx, events.Envelope{
+	if err := publishServerTestEventRecord(ctx, rawHub, streamEvent{
 		Version:     events.WorkorchEventVersion,
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-owner",

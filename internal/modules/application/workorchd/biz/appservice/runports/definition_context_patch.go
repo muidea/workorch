@@ -4,15 +4,15 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

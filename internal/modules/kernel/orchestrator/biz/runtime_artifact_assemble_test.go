@@ -9,10 +9,9 @@ import (
 	"testing"
 
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -395,7 +394,6 @@ func TestHandleArtifactOutputContinuationCreatesPlanAndDispatchesChunk(t *testin
 		steps:      stepRepo,
 		workspaces: workspaceRepo,
 		evidence:   RuntimeEvidenceRepositories{ArtifactContinuations: continuations, Patches: memory.NewPatchRepository()},
-		eventHub:   events.NewMemoryHub(),
 	}
 	output := map[string]any{
 		"completionState": "continue",
@@ -488,7 +486,6 @@ func TestHandleArtifactOutputContinuationRecordsChunkAndDispatchesAssemble(t *te
 		steps:      stepRepo,
 		workspaces: workspaceRepo,
 		evidence:   RuntimeEvidenceRepositories{ArtifactContinuations: continuations, Patches: memory.NewPatchRepository()},
-		eventHub:   events.NewMemoryHub(),
 	}
 	content := "assembled content\n"
 	output := map[string]any{
@@ -606,7 +603,6 @@ func TestHandleArtifactOutputContinuationApplyUpdatesCoverageWorkItems(t *testin
 		steps:      stepRepo,
 		workspaces: workspaceRepo,
 		evidence:   RuntimeEvidenceRepositories{ArtifactContinuations: continuations, Patches: memory.NewPatchRepository()},
-		eventHub:   events.NewMemoryHub(),
 	}
 	content := "deliverable content\n"
 	output := map[string]any{
@@ -682,7 +678,6 @@ func TestHandleArtifactOutputContinuationCompletesStepAfterValidModeContract(t *
 			ToolCalls:             memory.NewToolCallRepository(),
 			ValidationResults:     memory.NewValidationResultRepository(),
 		},
-		eventHub: events.NewMemoryHub(),
 	}
 	output := map[string]any{
 		"completionState": "continue",
@@ -726,7 +721,6 @@ func TestPublishArtifactContinuationRejectedDoesNotAdvanceCursor(t *testing.T) {
 	}
 	orch := &RuntimeOrchestrator{
 		evidence: RuntimeEvidenceRepositories{ArtifactContinuations: continuations},
-		eventHub: events.NewMemoryHub(),
 	}
 	step := &runmodel.Step{
 		ID:    "run-assemble/002-chunk",
@@ -833,7 +827,6 @@ func TestResumeArtifactContinuationAfterContextGraphDispatchesNextChunk(t *testi
 		steps:      stepRepo,
 		workspaces: workspaceRepo,
 		evidence:   RuntimeEvidenceRepositories{ArtifactContinuations: continuations},
-		eventHub:   events.NewMemoryHub(),
 	}
 
 	handled, err := orch.resumeArtifactContinuationAfterContextGraph(ctx, run, graphStep, graphStep.Output, workspace)

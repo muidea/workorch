@@ -9,7 +9,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type CreateAndStartWorkspaceExecutionRunRequest struct {
@@ -23,8 +22,8 @@ type CreateAndStartWorkspaceExecutionRunRequest struct {
 	MaxAttempts           int
 }
 
-func CreateAndStartWorkspaceExecutionRun(ctx context.Context, eventHub events.Hub, commandHub magicevent.Hub, request CreateAndStartWorkspaceExecutionRunRequest) (common.RunID, error) {
-	if eventHub == nil || commandHub == nil || request.WorkspaceID == "" || request.GoalID == "" || request.DoDID == "" {
+func CreateAndStartWorkspaceExecutionRun(ctx context.Context, commandHub magicevent.Hub, request CreateAndStartWorkspaceExecutionRunRequest) (common.RunID, error) {
+	if commandHub == nil || request.WorkspaceID == "" || request.GoalID == "" || request.DoDID == "" {
 		return "", common.ErrInvalidArgument
 	}
 	maxAttempts := request.MaxAttempts
@@ -51,7 +50,7 @@ func CreateAndStartWorkspaceExecutionRun(ctx context.Context, eventHub events.Hu
 			}
 			return "", err
 		}
-		if err := RecordActivationMemoryRecallTrace(ctx, eventHub, commandHub, runID, request.WorkspaceID, createExecutionContext, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		if err := RecordActivationMemoryRecallTrace(ctx, commandHub, runID, request.WorkspaceID, createExecutionContext, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			return "", err
 		}
 		startCtx := common.ContextWithRuntimeWorkspaceID(common.ContextWithRuntimeLLMProviderID(ctx, request.LLMProviderID), request.WorkspaceID)

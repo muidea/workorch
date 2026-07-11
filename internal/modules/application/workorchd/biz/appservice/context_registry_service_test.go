@@ -33,7 +33,7 @@ func TestUpdateMCPServerPreservesEnvWhenEnvOmitted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestUpdateMCPServerAllowsExplicitEmptyEnvClear(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}

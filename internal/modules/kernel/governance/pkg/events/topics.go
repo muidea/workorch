@@ -1,5 +1,7 @@
 package events
 
+const NotificationDestination = "/governance/consumers/#"
+
 const (
 	TopicGovernanceAutoEvaluated         = "/governance/auto/evaluated"
 	TopicGovernanceAutoResolved          = "/governance/auto/resolved"

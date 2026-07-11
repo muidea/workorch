@@ -1,6 +1,6 @@
 package activationcore
 
-import memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+import memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 
 func MemoryItemIDs(items []*memorymodel.MemoryItem) []string {
 	ret := make([]string, 0, len(items))

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"

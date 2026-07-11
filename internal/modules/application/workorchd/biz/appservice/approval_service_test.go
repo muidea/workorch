@@ -8,11 +8,10 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
-	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -60,7 +59,7 @@ func TestListApprovalPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	first := prepareApprovalRun(t, dataRoot, "ws-approval-page-a", "run-approval-page-a")
 	second := prepareApprovalRun(t, dataRoot, "ws-approval-page-b", "run-approval-page-b")
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
@@ -181,7 +180,7 @@ func TestReadApprovalWithBackendIncludesAutoGovernanceSummary(t *testing.T) {
 		t.Fatalf("new runtime session: %v", err)
 	}
 	ctx := context.Background()
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("session exports: %v", err)
 	}
@@ -481,7 +480,7 @@ func newApprovalOnlySession(t *testing.T, repo *appserviceCountingApprovalReposi
 	t.Helper()
 
 	rawHub := magicevent.NewHub(16)
-	eventHub := events.NewMagicHubWithHubOwner(rawHub, "appservice/approval_service_test")
+	subscribeGovernanceEvidenceAcks(t, rawHub)
 	approvalModule := approvalmodule.New()
 	if err := approvalModule.Configure(approvalmodule.Dependencies{Approvals: repo, EventHub: rawHub}); err != nil {
 		t.Fatalf("setup approval module: %v", err)
@@ -495,26 +494,7 @@ func newApprovalOnlySession(t *testing.T, repo *appserviceCountingApprovalReposi
 		}
 	})
 	exports := bootstrap.Exports{
-		Repositories: bootstrap.RepositoryExports{
-			Workspaces:            memory.NewWorkspaceRepository(),
-			Runs:                  memory.NewRunRepository(),
-			Steps:                 memory.NewStepRepository(),
-			Results:               memory.NewResultRepository(),
-			Artifacts:             memory.NewArtifactRepository(),
-			ArtifactContinuations: memory.NewArtifactContinuationRepository(),
-			EventRecords:          memory.NewEventRecordRepository(),
-			MemoryRecallTraces:    memory.NewMemoryRecallTraceRepository(),
-			MCPCapabilities:       memory.NewMCPCapabilityRepository(),
-			ToolCalls:             memory.NewToolCallRepository(),
-			Patches:               memory.NewPatchRepository(),
-			ValidationResults:     memory.NewValidationResultRepository(),
-			RuntimeCheckpoints:    memory.NewRuntimeCheckpointRepository(),
-			Tickets:               memory.NewDecisionTicketRepository(),
-			Resolutions:           memory.NewDecisionResolutionRepository(),
-			Approvals:             repo,
-		},
 		Infrastructure: bootstrap.InfrastructureExports{
-			EventHub:   eventHub,
 			CommandHub: rawHub,
 		},
 	}

@@ -6,7 +6,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
-	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -22,7 +22,7 @@ func purgeWorkspaceMemoryItems(ctx context.Context, hub magicevent.Hub, workspac
 		if item == nil || item.WorkspaceID != workspaceID {
 			continue
 		}
-		if _, err := sendWorkspaceMagicCommand[memoryevents.DeleteMemoryCommand, memoryevents.MemoryCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, memoryevents.TopicMemoryCommandDelete, memoryevents.CommandDestination, "memory", string(item.ID), workspaceID, item.RunID, memoryevents.DeleteMemoryCommand{MemoryID: item.ID}); err != nil && !errors.Is(err, common.ErrNotFound) {
+		if _, err := sendWorkspaceMagicCommand[memoryevents.DeleteMemoryCommand, memoryevents.MemoryCommandResult](common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), hub, memoryevents.TopicMemoryCommandDelete, memoryevents.CommandDestination, "memory", string(item.ID), workspaceID, item.RunID, memoryevents.DeleteMemoryCommand{WorkspaceID: workspaceID, MemoryID: item.ID}); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
 	}

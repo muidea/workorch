@@ -8,12 +8,12 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -51,7 +51,7 @@ func TestHasContinuationCheckpointUsesLatestRecoveryCheckpoint(t *testing.T) {
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	runID := common.RunID("run-recovery-checkpoint")
 
 	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
@@ -103,7 +103,7 @@ func TestIsStuckRunningRunCandidateRequiresRunningUnblockedRunWithoutContinuatio
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 
 	candidate := &runmodel.Run{
 		ID:          "run-stuck-candidate",
@@ -152,7 +152,7 @@ func TestRecoveryCandidateReadsRunScopedItemsWithWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	runtime := newOwnerRuntime()
 	defer runtime.Shutdown(ctx)
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	workspaceID := common.WorkspaceID("ws-recovery-candidate-scope")
 	runID := common.RunID("run-recovery-candidate-scope")
 	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
@@ -183,7 +183,7 @@ func TestOrphanDispatchedTerminalStepReturnsDispatchedTerminalStep(t *testing.T)
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	runID := common.RunID("run-orphan-terminal-runports")
 	rootStepID := common.StepID("run-orphan-terminal-runports/root")
 	dispatchedStepID := common.StepID("run-orphan-terminal-runports/follow-up")
@@ -237,7 +237,7 @@ func TestRecoverOrphanDispatchedStepUsesInjectedResume(t *testing.T) {
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	runID := common.RunID("run-orphan-recover-runports")
 	workspaceID := common.WorkspaceID("ws-orphan-recover-runports")
 	rootStepID := common.StepID("run-orphan-recover-runports/root")
@@ -310,7 +310,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsRequestNotAcceptedGap(t *testing.T
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	runID := common.RunID("run-stale-orphan-recover-runports")
 	workspaceID := common.WorkspaceID("ws-stale-orphan-recover-runports")
 	stepID := common.StepID("run-stale-orphan-recover-runports/provider-retry-001")
@@ -374,7 +374,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesRuntimeTerminalResultAvailable(t
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	runID := common.RunID("run-stale-terminal-gap-runports")
 	workspaceID := common.WorkspaceID("ws-stale-terminal-gap-runports")
 	stepID := common.StepID("run-stale-terminal-gap-runports/provider-retry-001")
@@ -445,7 +445,7 @@ func TestRecoverStaleRuntimeGapRunViewsUsesGapSpecificRecovery(t *testing.T) {
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	runID := common.RunID("run-stale-gap-specific-runports")
 	workspaceID := common.WorkspaceID("ws-stale-gap-specific-runports")
 	stepID := common.StepID("run-stale-gap-specific-runports/provider-retry-001")
@@ -588,7 +588,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsRuntimeDoneWithoutTerminalResult(t
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	runID := common.RunID("run-stale-done-gap-runports")
 	workspaceID := common.WorkspaceID("ws-stale-done-gap-runports")
 	stepID := common.StepID("run-stale-done-gap-runports/provider-retry-001")
@@ -664,7 +664,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsAcceptedWithoutWorkerLostEvidence(
 					t.Errorf("shutdown runtime: %v", err)
 				}
 			})
-			exports := runtime.Exports()
+			exports := testRuntimeExports(runtime)
 			runID := common.RunID("run-stale-" + tc.name)
 			workspaceID := common.WorkspaceID("ws-stale-" + tc.name)
 			stepID := common.StepID(string(runID) + "/provider-retry-001")
@@ -743,7 +743,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsNonIdempotentRuntimeGap(t *testing
 					t.Errorf("shutdown runtime: %v", err)
 				}
 			})
-			exports := runtime.Exports()
+			exports := testRuntimeExports(runtime)
 			runID := common.RunID("run-stale-non-idempotent-" + tc.name)
 			workspaceID := common.WorkspaceID("ws-stale-non-idempotent-" + tc.name)
 			stepID := common.StepID(string(runID) + "/provider-retry-001")
@@ -838,7 +838,7 @@ func TestRecoverStaleOrphanDispatchedStepSkipsNonExternalRecoverablePolicy(t *te
 					t.Errorf("shutdown runtime: %v", err)
 				}
 			})
-			exports := runtime.Exports()
+			exports := testRuntimeExports(runtime)
 			runID := common.RunID("run-stale-non-external-" + tc.name)
 			workspaceID := common.WorkspaceID("ws-stale-non-external-" + tc.name)
 			stepID := common.StepID(string(runID) + "/provider-retry-001")
@@ -916,7 +916,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesWorkerLostGap(t *testing.T) {
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	runID := common.RunID("run-stale-worker-lost-runports")
 	workspaceID := common.WorkspaceID("ws-stale-worker-lost-runports")
 	stepID := common.StepID("run-stale-worker-lost-runports/provider-retry-001")
@@ -990,7 +990,7 @@ func TestRecoverStaleOrphanDispatchedStepResumesStaleWorkerHeartbeatGap(t *testi
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	runID := common.RunID("run-stale-worker-heartbeat-runports")
 	workspaceID := common.WorkspaceID("ws-stale-worker-heartbeat-runports")
 	stepID := common.StepID("run-stale-worker-heartbeat-runports/provider-retry-001")
@@ -1064,7 +1064,7 @@ func TestRecordRecoveryMemoryRecallTraceUsesEventHubOwnerCommand(t *testing.T) {
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	workspaceID := common.WorkspaceID("ws-recovery-memory-runports")
 	runID := common.RunID("run-recovery-memory-runports")
 	if err := exports.Repositories.MemoryRecallTraces.Create(ctx, &memorymodel.MemoryRecallTrace{
@@ -1090,7 +1090,7 @@ func TestRecordRecoveryMemoryRecallTraceUsesEventHubOwnerCommand(t *testing.T) {
 		t.Fatalf("seed other trace: %v", err)
 	}
 
-	err := RecordRecoveryMemoryRecallTrace(ctx, exports.Infrastructure.CommandHub, exports.Infrastructure.EventHub, readmodelports.MemoryRecallTraceReader{Hub: exports.Infrastructure.CommandHub}, &runmodel.Run{
+	err := RecordRecoveryMemoryRecallTrace(ctx, exports.Infrastructure.CommandHub, readmodelports.MemoryRecallTraceReader{Hub: exports.Infrastructure.CommandHub}, &runmodel.Run{
 		ID:          runID,
 		WorkspaceID: workspaceID,
 		State:       common.RunStateActive,
@@ -1120,7 +1120,7 @@ func TestAttachCompressedContextToRunUpdatesCreatedRunThroughEventHub(t *testing
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	runID := common.RunID("run-attach-compressed-runports")
 	workspaceID := common.WorkspaceID("ws-attach-compressed-runports")
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
@@ -1139,7 +1139,6 @@ func TestAttachCompressedContextToRunUpdatesCreatedRunThroughEventHub(t *testing
 		Runs:          readers.Runs,
 		MemoryRecalls: readers.MemoryRecalls,
 		CommandHub:    exports.Infrastructure.CommandHub,
-		EventHub:      exports.Infrastructure.EventHub,
 		RecoverySnapshot: func(context.Context, common.RunID) (readmodelcore.RunSnapshot, error) {
 			return readmodelcore.RunSnapshot{}, nil
 		},
@@ -1165,7 +1164,7 @@ func TestCompressedContextPatchForRunUsesRecoverySnapshotFallback(t *testing.T) 
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	runID := common.RunID("run-compressed-patch-runports")
 	workspaceID := common.WorkspaceID("ws-compressed-patch-runports")
 	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
@@ -1184,7 +1183,6 @@ func TestCompressedContextPatchForRunUsesRecoverySnapshotFallback(t *testing.T) 
 		Runs:          readers.Runs,
 		MemoryRecalls: readers.MemoryRecalls,
 		CommandHub:    exports.Infrastructure.CommandHub,
-		EventHub:      exports.Infrastructure.EventHub,
 		RecoverySnapshot: func(context.Context, common.RunID) (readmodelcore.RunSnapshot, error) {
 			snapshotCalls++
 			return readmodelcore.RunSnapshot{
@@ -1376,7 +1374,7 @@ func TestRecoverTerminalActiveWorkspacePointersClearsTerminalRun(t *testing.T) {
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	workspaceID := common.WorkspaceID("ws-terminal-active-runports")
 	runID := common.RunID("run-terminal-active-runports")
 
@@ -1417,7 +1415,7 @@ func TestFailRunAndRecoverActiveWorkspacePointerClearsActiveRun(t *testing.T) {
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	workspaceID := common.WorkspaceID("ws-fail-active-runports")
 	runID := common.RunID("run-fail-active-runports")
 
@@ -1466,7 +1464,7 @@ func TestRecoverStuckRunningRunViewsFailsRunningRunWithoutContinuation(t *testin
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	workspaceID := common.WorkspaceID("ws-recover-run-view")
 	runID := common.RunID("run-recover-run-view")
 
@@ -1509,7 +1507,7 @@ func TestRecoverStuckRunningRunViewsResumesRunningRunWithCompletedTerminalStep(t
 			t.Errorf("shutdown runtime: %v", err)
 		}
 	})
-	exports := runtime.Exports()
+	exports := testRuntimeExports(runtime)
 	workspaceID := common.WorkspaceID("ws-recover-completed-terminal")
 	runID := common.RunID("run-recover-completed-terminal")
 	stepID := common.StepID("run-recover-completed-terminal/graph-001/001-done")

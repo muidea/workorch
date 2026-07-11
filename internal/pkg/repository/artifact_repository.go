@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	result "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	result "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

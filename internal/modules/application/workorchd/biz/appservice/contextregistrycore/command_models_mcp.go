@@ -1,7 +1,7 @@
 package contextregistrycore
 
 import (
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

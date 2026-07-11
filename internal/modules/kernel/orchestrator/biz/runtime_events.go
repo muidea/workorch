@@ -8,29 +8,26 @@ import (
 	"fmt"
 	"strings"
 
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	magicevent "github.com/muidea/magicCommon/event"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
-	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type eventSubsystem struct {
-	hub         events.Hub
-	checkpoints *checkpointSubsystem
-	llmContext  *llmContextSubsystem
+	notificationHub magicevent.Hub
+	checkpoints     *checkpointSubsystem
+	llmContext      *llmContextSubsystem
 }
 
-func newEventSubsystem(hub events.Hub, checkpoints *checkpointSubsystem, llmContext *llmContextSubsystem) *eventSubsystem {
+func newEventSubsystem(checkpoints *checkpointSubsystem, llmContext *llmContextSubsystem) *eventSubsystem {
 	return &eventSubsystem{
-		hub:         hub,
 		checkpoints: checkpoints,
 		llmContext:  llmContext,
 	}
@@ -55,147 +52,41 @@ func (e *eventSubsystem) publishRunStateChanged(ctx context.Context, run *runMod
 }
 
 func (e *eventSubsystem) publishRunCreated(ctx context.Context, run *runModel.Run) error {
-	if e == nil || e.hub == nil || run == nil {
+	if e == nil || run == nil {
 		return nil
 	}
-	return events.PublishByContract(ctx, e.hub, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        runevents.TopicRunCreated,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "run",
-		SubjectID:    string(run.ID),
-		WorkspaceID:  string(run.WorkspaceID),
-		RunID:        string(run.ID),
-		Payload: events.RunPayload(
-			run.GoalID,
-			run.DoDID,
-			run.State,
-			run.BlockingTicketID,
-			run.BlockingApprovalID,
-			run.FailureReason,
-		),
-	})
+	return e.publishTypedRunState(ctx, runevents.TopicRunCreated, run)
 }
 
 func (e *eventSubsystem) publishRunStateChangedAtStep(ctx context.Context, run *runModel.Run, currentStepID common.StepID) error {
 	if err := e.checkpointManager().recordRunCheckpointAtStep(ctx, run, currentStepID); err != nil {
 		return err
 	}
-	if e == nil || e.hub == nil || run == nil {
+	if e == nil || run == nil {
 		return nil
 	}
-	return events.PublishByContract(ctx, e.hub, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        runevents.TopicRunStateChanged,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "run",
-		SubjectID:    string(run.ID),
-		WorkspaceID:  string(run.WorkspaceID),
-		RunID:        string(run.ID),
-		Payload: events.RunPayload(
-			run.GoalID,
-			run.DoDID,
-			run.State,
-			run.BlockingTicketID,
-			run.BlockingApprovalID,
-			run.FailureReason,
-		),
-	})
+	return e.publishTypedRunState(ctx, runevents.TopicRunStateChanged, run)
 }
 
-func (e *eventSubsystem) publishResultEvent(ctx context.Context, item *resultmodel.Result) error {
-	if e == nil || item == nil || e.hub == nil {
+func (e *eventSubsystem) publishTypedRunState(ctx context.Context, topic string, run *runModel.Run) error {
+	if e == nil || e.notificationHub == nil || run == nil {
 		return nil
 	}
-	artifactRefs := make([]string, 0, len(item.ArtifactRefs))
-	for _, ref := range item.ArtifactRefs {
-		if ref != "" {
-			artifactRefs = append(artifactRefs, string(ref))
-		}
-	}
-	return events.PublishByContract(ctx, e.hub, events.Envelope{
-		ID:           fmt.Sprintf("%s/event/%s", item.ID, resultEventStateSuffix(item.State)),
-		Version:      events.WorkorchEventVersion,
-		Topic:        resultEventTopic(item.State),
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "result",
-		SubjectID:    string(item.ID),
-		WorkspaceID:  string(item.WorkspaceID),
-		RunID:        string(item.RunID),
-		Payload: events.ResultPayload(
-			item.GoalID,
-			item.DoDID,
-			item.State,
-			item.Title,
-			item.Summary,
-			item.SourceType,
-			item.SourceRef,
-			item.EvidenceRefs,
-			artifactRefs,
-		),
-	})
+	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, runevents.RunStateChangedDataFromModel(run))
+	event.BindLaneKey(runtimeStateNotificationLaneKey(run.WorkspaceID, run.ID))
+	e.notificationHub.Post(event)
+	return nil
 }
 
-func resultEventTopic(state common.ResultState) string {
-	switch state {
-	case common.ResultStateRejected:
-		return resultevents.TopicResultRejected
-	case common.ResultStateSuperseded:
-		return resultevents.TopicResultSuperseded
-	default:
-		return resultevents.TopicResultAccepted
-	}
-}
-
-func resultEventStateSuffix(state common.ResultState) string {
-	switch state {
-	case common.ResultStateAccepted:
-		return "accepted"
-	case common.ResultStateRejected:
-		return "rejected"
-	case common.ResultStateSuperseded:
-		return "superseded"
-	default:
-		suffix := strings.TrimSpace(string(state))
-		if suffix == "" {
-			return "recorded"
-		}
-		return suffix
-	}
-}
-
-func (e *eventSubsystem) publishArtifactCreated(ctx context.Context, item *resultmodel.Artifact) error {
-	if item == nil || e.hub == nil {
-		return nil
-	}
-	return events.PublishByContract(ctx, e.hub, events.Envelope{
-		ID:           fmt.Sprintf("%s/event/created", item.ID),
-		Version:      events.WorkorchEventVersion,
-		Topic:        resultevents.TopicArtifactCreated,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "artifact",
-		SubjectID:    string(item.ID),
-		WorkspaceID:  string(item.WorkspaceID),
-		RunID:        string(item.RunID),
-		Payload: events.ArtifactPayload(
-			item.ResultID,
-			item.StepID,
-			item.ToolCallID,
-			item.PatchID,
-			item.ValidationResultID,
-			item.ArtifactType,
-			item.Name,
-			item.Summary,
-			item.URI,
-			item.ContentType,
-			item.State,
-			item.EvidenceRefs,
-		),
+func runtimeStateNotificationLaneKey(workspaceID common.WorkspaceID, runID common.RunID) string {
+	return events.EventHubLaneKeyFor(orchestratorevents.TopicOrchestratorCommandStartRun, events.EventHubLaneScope{
+		WorkspaceID: string(workspaceID),
+		RunID:       string(runID),
 	})
 }
 
 func (e *eventSubsystem) publishPatchChanged(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, patch *runModel.Patch, topic string, failure error) error {
-	if e.hub == nil || run == nil || patch == nil {
+	if e == nil || run == nil || patch == nil {
 		return nil
 	}
 	var stepID common.StepID
@@ -222,106 +113,46 @@ func (e *eventSubsystem) publishPatchChanged(ctx context.Context, run *runModel.
 	if failure != nil {
 		errText = failure.Error()
 	}
-	return events.PublishByContract(ctx, e.hub, events.Envelope{
-		ID:           fmt.Sprintf("%s/event/%s", patch.ID, patchEventName(topic)),
-		Version:      events.WorkorchEventVersion,
-		Topic:        topic,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "patch",
-		SubjectID:    string(patch.ID),
-		WorkspaceID:  string(patch.WorkspaceID),
-		RunID:        string(patch.RunID),
-		StepID:       string(stepID),
-		Payload: events.PatchPayload(
-			patch.ID,
-			stepID,
-			toolCallID,
-			patch.PatchType,
-			patch.TargetRef,
-			patch.Summary,
-			patch.State,
-			addedLines,
-			deletedLines,
-			contentHash,
-			diffHash,
-			approvalID,
-			patch.RiskLevel,
-			errText,
-		),
-	})
+	data := orchestratorevents.PatchChangedData{
+		PatchID: patch.ID, SubjectID: string(patch.ID), WorkspaceID: patch.WorkspaceID, RunID: patch.RunID,
+		StepID: stepID, ToolCallID: toolCallID, PatchType: patch.PatchType, TargetRef: patch.TargetRef,
+		Summary: patch.Summary, State: patch.State, AddedLines: addedLines, DeletedLines: deletedLines,
+		ContentHash: contentHash, DiffHash: diffHash, ApprovalID: approvalID, Risk: patch.RiskLevel, Error: errText,
+	}
+	return e.publishTypedPatch(ctx, topic, data)
 }
 
 func (e *eventSubsystem) publishArtifactContinuationChanged(ctx context.Context, run *runModel.Run, step *runModel.Step, item *orchestratormodel.ArtifactContinuation, topic string, failure error) error {
-	if e.hub == nil || run == nil || item == nil {
+	if e == nil || run == nil || item == nil {
 		return nil
-	}
-	payload := map[string]any{
-		"id":               string(item.ID),
-		"runId":            string(item.RunID),
-		"artifactId":       item.ArtifactID,
-		"targetRef":        item.TargetRef,
-		"state":            string(item.State),
-		"expectedSequence": item.ExpectedSequence,
-		"finalReceived":    item.FinalReceived,
-		"bytesWritten":     item.BytesWritten,
-	}
-	if item.RollingHash != "" {
-		payload["rollingHash"] = item.RollingHash
-	}
-	if item.LastChunkHash != "" {
-		payload["lastChunkHash"] = item.LastChunkHash
-	}
-	if len(item.ReceivedSequences) > 0 {
-		payload["receivedSequences"] = append([]int(nil), item.ReceivedSequences...)
-	}
-	if len(item.CoverageTargets) > 0 {
-		payload["coverageTargets"] = append([]string(nil), item.CoverageTargets...)
-	}
-	if len(item.EvidenceRefs) > 0 {
-		payload["evidenceRefs"] = append([]string(nil), item.EvidenceRefs...)
-	}
-	if failure != nil {
-		payload["failureReason"] = failure.Error()
 	}
 	stepID := common.StepID("")
 	if step != nil {
 		stepID = step.ID
 	}
-	return events.PublishByContract(ctx, e.hub, events.Envelope{
-		ID:           fmt.Sprintf("%s/event/%s", item.ID, artifactContinuationEventName(topic)),
-		Version:      events.WorkorchEventVersion,
-		Topic:        topic,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "artifact_continuation",
-		SubjectID:    string(item.ID),
-		WorkspaceID:  string(item.WorkspaceID),
-		RunID:        string(item.RunID),
-		StepID:       string(stepID),
-		Payload:      payload,
-	})
-}
-
-func artifactContinuationEventName(topic string) string {
-	switch topic {
-	case orchestratorevents.TopicArtifactContinuationCreated:
-		return "created"
-	case orchestratorevents.TopicArtifactContinuationChunkRecorded:
-		return "chunk-recorded"
-	case orchestratorevents.TopicArtifactContinuationChunkRejected:
-		return "chunk-rejected"
-	case orchestratorevents.TopicArtifactContinuationAssembled:
-		return "assembled"
-	case orchestratorevents.TopicArtifactContinuationApplied:
-		return "applied"
-	case orchestratorevents.TopicArtifactContinuationFailed:
-		return "failed"
-	default:
-		return "changed"
+	failureReason := ""
+	if failure != nil {
+		failureReason = failure.Error()
 	}
+	data := orchestratorevents.ArtifactContinuationChangedData{
+		ContinuationID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, StepID: stepID,
+		ArtifactID: item.ArtifactID, TargetRef: item.TargetRef, State: item.State,
+		ExpectedSequence: item.ExpectedSequence, FinalReceived: item.FinalReceived, BytesWritten: item.BytesWritten,
+		RollingHash: item.RollingHash, LastChunkHash: item.LastChunkHash,
+		ReceivedSequences: append([]int(nil), item.ReceivedSequences...), CoverageTargets: append([]string(nil), item.CoverageTargets...),
+		EvidenceRefs: append([]string(nil), item.EvidenceRefs...), FailureReason: failureReason,
+	}
+	if e.notificationHub == nil {
+		return nil
+	}
+	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, orchestratorevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
+	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{SubjectType: "artifact_continuation", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID), StepID: string(stepID)}))
+	e.notificationHub.Post(event)
+	return nil
 }
 
 func (e *eventSubsystem) publishPatchPreview(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, preview map[string]any) error {
-	if e.hub == nil || run == nil || step == nil || len(preview) == 0 {
+	if e == nil || run == nil || step == nil || len(preview) == 0 {
 		return nil
 	}
 	toolCallID := common.ToolCallID("")
@@ -331,41 +162,28 @@ func (e *eventSubsystem) publishPatchPreview(ctx context.Context, run *runModel.
 	targetRef := stringFromAny(preview["targetRef"])
 	patchType := stringFromAny(preview["patchType"])
 	subjectID := fmt.Sprintf("%s/patch-preview", step.ID)
-	return events.PublishByContract(ctx, e.hub, events.Envelope{
-		ID:           fmt.Sprintf("%s/event/patch-previewed", subjectID),
-		Version:      events.WorkorchEventVersion,
-		Topic:        orchestratorevents.TopicPatchPreviewed,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "patch",
-		SubjectID:    subjectID,
-		WorkspaceID:  string(run.WorkspaceID),
-		RunID:        string(run.ID),
-		StepID:       string(step.ID),
-		Payload: events.PatchPayload(
-			"",
-			step.ID,
-			toolCallID,
-			patchType,
-			targetRef,
-			stringFromAny(preview["summary"]),
-			common.PatchStatePreviewed,
-			intFromAny(preview["addedLines"]),
-			intFromAny(preview["deletedLines"]),
-			stringFromAny(preview["contentHash"]),
-			stringFromAny(preview["diffHash"]),
-			common.ApprovalID(stringFromAny(preview["approvalId"])),
-			stringFromAny(preview["risk"]),
-			"",
-		),
-	})
+	data := orchestratorevents.PatchChangedData{
+		SubjectID: subjectID, WorkspaceID: run.WorkspaceID, RunID: run.ID, StepID: step.ID, ToolCallID: toolCallID,
+		PatchType: patchType, TargetRef: targetRef, Summary: stringFromAny(preview["summary"]), State: common.PatchStatePreviewed,
+		AddedLines: intFromAny(preview["addedLines"]), DeletedLines: intFromAny(preview["deletedLines"]),
+		ContentHash: stringFromAny(preview["contentHash"]), DiffHash: stringFromAny(preview["diffHash"]),
+		ApprovalID: common.ApprovalID(stringFromAny(preview["approvalId"])), Risk: stringFromAny(preview["risk"]),
+	}
+	return e.publishTypedPatch(ctx, orchestratorevents.TopicPatchPreviewed, data)
 }
 
-func patchEventName(topic string) string {
-	topic = strings.TrimPrefix(strings.TrimSpace(topic), "/patch/")
-	if topic == "" {
-		return "changed"
+func (e *eventSubsystem) publishTypedPatch(ctx context.Context, topic string, data orchestratorevents.PatchChangedData) error {
+	if e == nil || e.notificationHub == nil {
+		return nil
 	}
-	return topic
+	subjectID := data.SubjectID
+	if subjectID == "" {
+		subjectID = string(data.PatchID)
+	}
+	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, orchestratorevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
+	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{SubjectType: "patch", SubjectID: subjectID, WorkspaceID: string(data.WorkspaceID), RunID: string(data.RunID), StepID: string(data.StepID)}))
+	e.notificationHub.Post(event)
+	return nil
 }
 
 func patchLineStats(patch *runModel.Patch) (int, int) {
@@ -431,68 +249,86 @@ func intFromAny(value any) int {
 	}
 }
 
-func (e *eventSubsystem) publishMemoryChanged(ctx context.Context, topic string, item *memorymodel.MemoryItem) error {
-	if item == nil || e.hub == nil {
-		return nil
-	}
-	return events.PublishByContract(ctx, e.hub, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        topic,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "memory",
-		SubjectID:    string(item.ID),
-		WorkspaceID:  string(item.WorkspaceID),
-		RunID:        string(item.RunID),
-		Payload:      events.MemoryPayload(item.MemoryType, item.Summary, item.Content, item.SourceType, item.SourceRef, item.Tags, item.Importance, item.Confidence, item.Visibility),
-	})
-}
-
 func (e *eventSubsystem) publishWorkspaceStateChanged(ctx context.Context, workspace *workspaceModel.Workspace, runID common.RunID) error {
-	if e.hub == nil || workspace == nil {
+	if e == nil || workspace == nil {
 		return nil
 	}
-	return events.PublishByContract(ctx, e.hub, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        workspaceevents.TopicWorkspaceStateChanged,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "workspace",
-		SubjectID:    string(workspace.ID),
-		WorkspaceID:  string(workspace.ID),
-		RunID:        string(runID),
-		Payload:      events.WorkspacePayload(workspace.Title, workspace.Description, workspace.DeliverableDirectory, workspace.InternalDirectory, workspace.State, workspace.ActiveRunID),
-	})
+	if e.notificationHub == nil {
+		return nil
+	}
+	data := workspaceevents.WorkspaceChangedData{
+		WorkspaceID:          workspace.ID,
+		Title:                workspace.Title,
+		Description:          workspace.Description,
+		DeliverableDirectory: workspace.DeliverableDirectory,
+		InternalDirectory:    workspace.InternalDirectory,
+		State:                workspace.State,
+		ActiveRunID:          workspace.ActiveRunID,
+		RunID:                runID,
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceStateChanged, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
+	event.BindLaneKey(runtimeStateNotificationLaneKey(workspace.ID, runID))
+	e.notificationHub.Post(event)
+	return nil
 }
 
 func (e *eventSubsystem) publishStepState(ctx context.Context, run *runModel.Run, step *runModel.Step, topic string) error {
-	if e.hub == nil || run == nil || step == nil {
+	if e == nil || run == nil || step == nil {
 		return nil
 	}
-	if err := events.PublishByContract(ctx, e.hub, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        topic,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "step",
-		SubjectID:    string(step.ID),
-		WorkspaceID:  string(run.WorkspaceID),
-		RunID:        string(run.ID),
-		StepID:       string(step.ID),
-		Payload:      events.StepPayload(step.Kind, step.State, runtimeStepEventInput(e.llmContextManager(), run, step), runtimeStepEventOutput(e.llmContextManager(), run, step)),
-	}); err != nil {
+	if e.notificationHub == nil {
+		return nil
+	}
+	input, err := typedStepSnapshot(runtimeStepEventInput(e.llmContextManager(), run, step))
+	if err != nil {
 		return err
 	}
+	output, err := typedStepSnapshot(runtimeStepEventOutput(e.llmContextManager(), run, step))
+	if err != nil {
+		return err
+	}
+	data := runevents.StepChangedData{
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		StepID:      step.ID,
+		Kind:        step.Kind,
+		State:       step.State,
+		Input:       input,
+		Output:      output,
+	}
+	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
+	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
+		SubjectType: "step",
+		SubjectID:   string(step.ID),
+		WorkspaceID: string(run.WorkspaceID),
+		RunID:       string(run.ID),
+		StepID:      string(step.ID),
+	}))
+	e.notificationHub.Post(event)
 	if topic == runevents.TopicStepStateChanged {
 		if err := e.publishLLMStreamProgressFromStep(ctx, run, step); err != nil {
 			return err
 		}
-		if err := e.publishLLMUsageFromStep(ctx, run, step); err != nil {
-			return err
-		}
+		return e.publishLLMUsageFromStep(ctx, run, step)
 	}
 	return nil
 }
 
+func typedStepSnapshot(payload map[string]any) (runevents.StepSnapshot, error) {
+	if len(payload) == 0 {
+		return runevents.StepSnapshot{}, nil
+	}
+	ref := firstNonEmptyString(stringFromMap(payload, "inputRef"), stringFromMap(payload, "outputRef"))
+	summary, _ := payload["summary"].(map[string]any)
+	typedSummary, err := runevents.NotificationPayloadFromMap(summary)
+	if err != nil {
+		return runevents.StepSnapshot{}, err
+	}
+	return runevents.StepSnapshot{Ref: ref, Summary: typedSummary}, nil
+}
+
 func (e *eventSubsystem) publishContractViolationRecorded(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
-	if e == nil || e.hub == nil || run == nil || step == nil {
+	if e == nil || run == nil || step == nil {
 		return nil
 	}
 	violation := contractViolationFromFailedOutput(step)
@@ -503,14 +339,14 @@ func (e *eventSubsystem) publishContractViolationRecorded(ctx context.Context, r
 }
 
 func (e *eventSubsystem) publishContractViolationRetryRequested(ctx context.Context, run *runModel.Run, sourceStep *runModel.Step, retryStepID common.StepID, violation map[string]any) error {
-	if e == nil || e.hub == nil || run == nil || sourceStep == nil || retryStepID == "" {
+	if e == nil || run == nil || sourceStep == nil || retryStepID == "" {
 		return nil
 	}
 	return e.publishContractViolationChanged(ctx, orchestratorevents.TopicOrchestratorContractViolationRetryRequested, run, sourceStep, retryStepID, "", violation, nil)
 }
 
 func (e *eventSubsystem) publishContractViolationEscalated(ctx context.Context, run *runModel.Run, sourceStep *runModel.Step, ticketID common.TicketID, violation map[string]any, context map[string]any) error {
-	if e == nil || e.hub == nil || run == nil || sourceStep == nil {
+	if e == nil || run == nil || sourceStep == nil {
 		return nil
 	}
 	return e.publishContractViolationChanged(ctx, orchestratorevents.TopicOrchestratorContractViolationEscalated, run, sourceStep, "", ticketID, violation, context)
@@ -526,38 +362,29 @@ func (e *eventSubsystem) publishContractViolationChanged(
 	violation map[string]any,
 	context map[string]any,
 ) error {
-	if e == nil || e.hub == nil || run == nil || sourceStep == nil || len(violation) == 0 {
+	if e == nil || run == nil || sourceStep == nil || len(violation) == 0 {
 		return nil
 	}
-	payload := cloneStepPayload(violation)
-	payload["contractViolation"] = cloneStepPayload(violation)
-	payload["workspaceId"] = string(run.WorkspaceID)
-	payload["runId"] = string(run.ID)
-	payload["sourceStepId"] = string(sourceStep.ID)
-	payload["stepId"] = string(sourceStep.ID)
-	payload["topic"] = topic
-	payload["summary"] = contractViolationEventSummary(topic, violation)
-	if retryStepID != "" {
-		payload["retryStepId"] = string(retryStepID)
+	if e.notificationHub == nil {
+		return nil
 	}
-	if ticketID != "" {
-		payload["ticketId"] = string(ticketID)
+	typedViolation, err := orchestratorevents.StructuredPayloadFromMap(violation)
+	if err != nil {
+		return err
 	}
-	if len(context) > 0 {
-		payload["context"] = cloneStepPayload(context)
+	typedContext, err := orchestratorevents.StructuredPayloadFromMap(context)
+	if err != nil {
+		return err
 	}
-	return events.PublishByContract(ctx, e.hub, events.Envelope{
-		ID:           contractViolationEventID(topic, run, sourceStep, retryStepID, ticketID, violation),
-		Version:      events.WorkorchEventVersion,
-		Topic:        topic,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "contract_violation",
-		SubjectID:    contractViolationSubjectID(sourceStep, violation),
-		WorkspaceID:  string(run.WorkspaceID),
-		RunID:        string(run.ID),
-		StepID:       string(sourceStep.ID),
-		Payload:      payload,
-	})
+	data := orchestratorevents.ContractViolationData{
+		SubjectID: contractViolationSubjectID(sourceStep, violation), WorkspaceID: run.WorkspaceID, RunID: run.ID,
+		SourceStepID: sourceStep.ID, RetryStepID: retryStepID, TicketID: ticketID, Topic: topic,
+		Summary: contractViolationEventSummary(topic, violation), Violation: typedViolation, Context: typedContext,
+	}
+	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, orchestratorevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
+	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{SubjectType: "contract_violation", SubjectID: data.SubjectID, WorkspaceID: string(run.WorkspaceID), RunID: string(run.ID), StepID: string(sourceStep.ID)}))
+	e.notificationHub.Post(event)
+	return nil
 }
 
 func contractViolationEventSummary(topic string, violation map[string]any) string {
@@ -582,26 +409,8 @@ func contractViolationSubjectID(sourceStep *runModel.Step, violation map[string]
 	return "contract-violation"
 }
 
-func contractViolationEventID(topic string, run *runModel.Run, sourceStep *runModel.Step, retryStepID common.StepID, ticketID common.TicketID, violation map[string]any) string {
-	subjectID := contractViolationSubjectID(sourceStep, violation)
-	suffix := strings.TrimPrefix(strings.TrimSpace(topic), "/orchestrator/contract_violation/")
-	if suffix == "" {
-		suffix = "changed"
-	}
-	switch {
-	case retryStepID != "":
-		return fmt.Sprintf("%s/event/%s/%s", subjectID, suffix, retryStepID)
-	case ticketID != "":
-		return fmt.Sprintf("%s/event/%s/%s", subjectID, suffix, ticketID)
-	case run != nil:
-		return fmt.Sprintf("%s/event/%s/%s", subjectID, suffix, run.ID)
-	default:
-		return fmt.Sprintf("%s/event/%s", subjectID, suffix)
-	}
-}
-
 func (e *eventSubsystem) publishRuntimeStepProgress(ctx context.Context, run *runModel.Run, step *runModel.Step, event string, data map[string]any) error {
-	if e.hub == nil || run == nil || step == nil {
+	if e == nil || run == nil || step == nil {
 		return nil
 	}
 	if !strings.HasPrefix(strings.TrimSpace(step.Kind), "llm/") {
@@ -623,27 +432,17 @@ func (e *eventSubsystem) publishRuntimeStepProgress(ctx context.Context, run *ru
 		status = "running"
 	}
 	summary := strings.TrimSpace(firstNonEmptyString(stringFromMap(data, "summary"), event))
-	return events.PublishByContract(ctx, e.hub, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        runevents.TopicRunLLMStreamProgress,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "llm_stream_progress",
-		SubjectID:    string(step.ID),
-		WorkspaceID:  string(run.WorkspaceID),
-		RunID:        string(run.ID),
-		StepID:       string(step.ID),
-		Payload: events.LLMStreamProgressPayload(
-			run.WorkspaceID,
-			run.ID,
-			step.ID,
-			providerID,
-			model,
-			chunkCount,
-			receivedBytes,
-			elapsedMs,
-			status,
-			summary,
-		),
+	return e.publishTypedLLMStreamProgress(ctx, runevents.LLMStreamProgressData{
+		WorkspaceID:   run.WorkspaceID,
+		RunID:         run.ID,
+		StepID:        step.ID,
+		ProviderID:    providerID,
+		Model:         model,
+		ChunkCount:    chunkCount,
+		ReceivedBytes: receivedBytes,
+		ElapsedMs:     elapsedMs,
+		Status:        status,
+		Summary:       summary,
 	})
 }
 
@@ -680,7 +479,7 @@ func runtimeStepEventOutput(llmContext *llmContextSubsystem, run *runModel.Run, 
 }
 
 func (e *eventSubsystem) publishLLMStreamProgressFromStep(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
-	if e.hub == nil || run == nil || step == nil || len(step.Output) == 0 {
+	if e == nil || run == nil || step == nil || len(step.Output) == 0 {
 		return nil
 	}
 	if !strings.HasPrefix(strings.TrimSpace(step.Kind), "llm/") {
@@ -720,29 +519,35 @@ func (e *eventSubsystem) publishLLMStreamProgressFromStep(ctx context.Context, r
 	if status == "" {
 		status = "completed"
 	}
-	return events.PublishByContract(ctx, e.hub, events.Envelope{
-		ID:           fmt.Sprintf("%s/event/llm-stream-progress", step.ID),
-		Version:      events.WorkorchEventVersion,
-		Topic:        runevents.TopicRunLLMStreamProgress,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "llm_stream_progress",
-		SubjectID:    string(step.ID),
-		WorkspaceID:  string(run.WorkspaceID),
-		RunID:        string(run.ID),
-		StepID:       string(step.ID),
-		Payload: events.LLMStreamProgressPayload(
-			run.WorkspaceID,
-			run.ID,
-			step.ID,
-			providerID,
-			model,
-			chunkCount,
-			receivedBytes,
-			elapsedMs,
-			status,
-			streamProgressSummary(step.Output),
-		),
-	})
+	data := runevents.LLMStreamProgressData{
+		WorkspaceID:   run.WorkspaceID,
+		RunID:         run.ID,
+		StepID:        step.ID,
+		ProviderID:    providerID,
+		Model:         model,
+		ChunkCount:    chunkCount,
+		ReceivedBytes: receivedBytes,
+		ElapsedMs:     elapsedMs,
+		Status:        status,
+		Summary:       streamProgressSummary(step.Output),
+	}
+	return e.publishTypedLLMStreamProgress(ctx, data)
+}
+
+func (e *eventSubsystem) publishTypedLLMStreamProgress(ctx context.Context, data runevents.LLMStreamProgressData) error {
+	if e == nil || e.notificationHub == nil {
+		return nil
+	}
+	event := magicevent.NewEventWithContext(runevents.TopicRunLLMStreamProgress, modulecommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
+	event.BindLaneKey(events.EventHubLaneKeyFor(runevents.TopicRunLLMStreamProgress, events.EventHubLaneScope{
+		SubjectType: "llm_stream_progress",
+		SubjectID:   string(data.StepID),
+		WorkspaceID: string(data.WorkspaceID),
+		RunID:       string(data.RunID),
+		StepID:      string(data.StepID),
+	}))
+	e.notificationHub.Post(event)
+	return nil
 }
 
 func streamEventMapSlice(raw any) []map[string]any {
@@ -798,7 +603,7 @@ func streamProgressSummary(output map[string]any) string {
 }
 
 func (e *eventSubsystem) publishLLMUsageFromStep(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
-	if e.hub == nil || run == nil || step == nil || len(step.Output) == 0 {
+	if e == nil || run == nil || step == nil || len(step.Output) == 0 {
 		return nil
 	}
 	if !strings.HasPrefix(strings.TrimSpace(step.Kind), "llm/") {
@@ -824,16 +629,55 @@ func (e *eventSubsystem) publishLLMUsageFromStep(ctx context.Context, run *runMo
 	if !ok {
 		return nil
 	}
-	return events.PublishByContract(ctx, e.hub, events.Envelope{
-		ID:           fmt.Sprintf("%s/event/llm-usage-recorded", step.ID),
-		Version:      events.WorkorchEventVersion,
-		Topic:        runevents.TopicRunLLMUsageRecorded,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "llm_usage",
-		SubjectID:    string(step.ID),
-		WorkspaceID:  string(run.WorkspaceID),
-		RunID:        string(run.ID),
-		StepID:       string(step.ID),
-		Payload:      events.LLMUsagePayload(usageData),
-	})
+	contextBudget, err := runevents.NotificationPayloadFromMap(usageData.ContextBudget)
+	if err != nil {
+		return err
+	}
+	cacheUsage, err := runevents.NotificationPayloadFromMap(usageData.CacheUsage)
+	if err != nil {
+		return err
+	}
+	cacheMarkers, err := runevents.NotificationPayloadFromMap(usageData.CacheMarkers)
+	if err != nil {
+		return err
+	}
+	typedData := runevents.LLMUsageRecordedData{
+		WorkspaceID:   usageData.WorkspaceID,
+		RunID:         usageData.RunID,
+		StepID:        usageData.StepID,
+		ProviderID:    usageData.ProviderID,
+		Provider:      usageData.Provider,
+		APISurface:    usageData.APISurface,
+		Model:         usageData.Model,
+		Operation:     usageData.Operation,
+		InputTokens:   usageData.InputTokens,
+		OutputTokens:  usageData.OutputTokens,
+		TotalTokens:   usageData.TotalTokens,
+		Estimated:     usageData.Estimated,
+		UsageSource:   usageData.UsageSource,
+		RequestBytes:  usageData.RequestBytes,
+		ResponseBytes: usageData.ResponseBytes,
+		Streaming:     usageData.Streaming,
+		ContextBudget: contextBudget,
+		CacheUsage:    cacheUsage,
+		CacheMarkers:  cacheMarkers,
+		StartedAt:     usageData.StartedAt,
+		CompletedAt:   usageData.CompletedAt,
+		DurationMs:    usageData.DurationMs,
+		Status:        usageData.Status,
+		FailureClass:  usageData.FailureClass,
+	}
+	if e.notificationHub == nil {
+		return nil
+	}
+	event := magicevent.NewEventWithContext(runevents.TopicRunLLMUsageRecorded, modulecommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, typedData)
+	event.BindLaneKey(events.EventHubLaneKeyFor(runevents.TopicRunLLMUsageRecorded, events.EventHubLaneScope{
+		SubjectType: "llm_usage",
+		SubjectID:   string(step.ID),
+		WorkspaceID: string(run.WorkspaceID),
+		RunID:       string(run.ID),
+		StepID:      string(step.ID),
+	}))
+	e.notificationHub.Post(event)
+	return nil
 }

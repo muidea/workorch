@@ -6,56 +6,40 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
+	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
-	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/workorchdeps"
 )
 
 // eventHubBackend extends the local backend with EventHub-driven progress
 // subscriptions, replacing fixed-interval polling with reactive events.
 type eventHubBackend struct {
-	eventHub   events.Hub
 	commandHub magicevent.Hub
 	evtImpl    *eventHubEventsBackend
 }
 
 // NewEventHub creates a Backend using EventHub for progress events.
-func NewEventHub(eventHub events.Hub, commandHub magicevent.Hub) Backend {
+func NewEventHub(commandHub magicevent.Hub) Backend {
 	b := &eventHubBackend{
-		eventHub:   eventHub,
 		commandHub: commandHub,
 	}
 	b.evtImpl = &eventHubEventsBackend{parent: b}
 	return b
-}
-
-// NewEmbeddedEventHub creates an EventHub-backed backend from the active
-// framework runtime initiator. CLI commands are handled by the workorchd module.
-func NewEmbeddedEventHub() (Backend, func(context.Context) error, error) {
-	runtime, err := workorchdeps.ResolveRuntimeHelper("application/workorch embedded backend")
-	if err != nil {
-		return nil, nil, fmt.Errorf("get workorch runtime initiator: %w", err)
-	}
-	eventHub := runtime.EventHub()
-	commandHub := runtime.CommandHub()
-	if eventHub == nil || commandHub == nil {
-		return nil, nil, common.ErrInvalidArgument
-	}
-	return NewEventHub(eventHub, commandHub), func(context.Context) error { return nil }, nil
 }
 
 func (b *eventHubBackend) Workspace() WorkspaceBackend { return &eventHubWorkspaceBackend{parent: b} }
@@ -194,30 +178,45 @@ type eventHubEventsBackend struct {
 	subs   []func()
 }
 
+var eventHubObserverSequence atomic.Uint64
+
 func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler EventHandler) (func(), error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	unsubscribers := []func(){
-		b.parent.eventHub.Subscribe(workorchdevents.TopicWorkspaceProjectionChanged, func(ctx context.Context, envelope events.Envelope) error {
-			evt := convertEnvelope(envelope)
-			if evt.Type == "" {
-				return nil
+	unsubscribers := make([]func(), 0, 2)
+	if b.parent.commandHub != nil {
+		projectionObserverID := fmt.Sprintf("/workorchd/consumers/services/workorch/backend/%d", eventHubObserverSequence.Add(1))
+		projectionObserver := magicevent.NewSimpleObserverWithMatchID(projectionObserverID, projectionObserverID, b.parent.commandHub)
+		projectionObserver.Subscribe(workorchdevents.TopicWorkspaceProjectionChanged, func(event magicevent.Event, result magicevent.Result) {
+			if data, ok := event.Data().(workorchdevents.WorkspaceProjectionChangedData); ok {
+				handler(event.Context(), convertBackendEvent(workspaceProjectionBackendEvent(data)))
 			}
-			handler(ctx, evt)
-			return nil
-		}),
-	}
-	for _, topic := range events.WorkorchTopics() {
-		topic := topic
-		unsubscribers = append(unsubscribers, b.parent.eventHub.Subscribe(topic, func(ctx context.Context, envelope events.Envelope) error {
-			evt := convertEnvelope(envelope)
-			if evt.Type == "" {
-				return nil
+			if result != nil {
+				result.Set(nil, nil)
 			}
-			handler(ctx, evt)
-			return nil
-		}))
+		})
+		unsubscribers = append(unsubscribers, func() {
+			projectionObserver.Unsubscribe(workorchdevents.TopicWorkspaceProjectionChanged)
+		})
+
+		observerID := fmt.Sprintf("/eventstream/consumers/services/workorch/backend/%d", eventHubObserverSequence.Add(1))
+		observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, b.parent.commandHub)
+		observer.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
+			data, ok := event.Data().(eventstreamevents.EventRecordAppendedData)
+			if ok {
+				evt := convertBackendEvent(eventRecordBackendEvent(data.Record))
+				if evt.Type != "" {
+					handler(event.Context(), evt)
+				}
+			}
+			if result != nil {
+				result.Set(nil, nil)
+			}
+		})
+		unsubscribers = append(unsubscribers, func() {
+			observer.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended)
+		})
 	}
 
 	unsub := func() {
@@ -231,7 +230,53 @@ func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler EventHand
 	return unsub, nil
 }
 
-func convertEnvelope(envelope events.Envelope) (ret Event) {
+type backendEventData struct {
+	ID          string         `json:"id"`
+	Topic       string         `json:"topic"`
+	SubjectID   string         `json:"subjectId,omitempty"`
+	WorkspaceID string         `json:"workspaceId,omitempty"`
+	RunID       string         `json:"runId,omitempty"`
+	Revision    int64          `json:"revision,omitempty"`
+	Payload     map[string]any `json:"payload,omitempty"`
+}
+
+func eventRecordBackendEvent(data eventstreamevents.EventRecordData) backendEventData {
+	return backendEventData{
+		ID:          string(data.ID),
+		Topic:       data.Topic,
+		SubjectID:   data.SubjectID,
+		WorkspaceID: string(data.WorkspaceID),
+		RunID:       string(data.RunID),
+		Revision:    data.Revision,
+		Payload:     data.Payload.Map(),
+	}
+}
+
+func workspaceProjectionBackendEvent(data workorchdevents.WorkspaceProjectionChangedData) backendEventData {
+	return backendEventData{
+		Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
+		WorkspaceID: string(data.WorkspaceID),
+		RunID:       string(data.RunID),
+		Revision:    data.GlobalRevision,
+		Payload: map[string]any{
+			"type":                    "workspace_projection_changed",
+			"workspaceId":             string(data.WorkspaceID),
+			"globalRevision":          data.GlobalRevision,
+			"workspaceRevision":       data.WorkspaceRevision,
+			"sourceEventRevision":     data.SourceEventRevision,
+			"projectedSourceRevision": data.ProjectedSourceRevision,
+			"workspaceTotal":          data.WorkspaceTotal,
+			"changeKind":              data.ChangeKind,
+			"projectionState":         data.ProjectionState,
+			"updatedAt":               data.UpdatedAt,
+			"rebuiltAt":               data.RebuiltAt,
+			"staleReason":             data.StaleReason,
+			"error":                   data.Error,
+		},
+	}
+}
+
+func convertBackendEvent(envelope backendEventData) (ret Event) {
 	defer func() {
 		if ret.Type != "" {
 			ret.ID = envelope.ID
@@ -404,7 +449,7 @@ func (b *eventHubDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID
 type eventHubRunBackend struct{ parent *eventHubBackend }
 
 func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunCommand) (*RunInfo, error) {
-	if b == nil || b.parent == nil || b.parent.eventHub == nil {
+	if b == nil || b.parent == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	intent, err := ValidateWorkspaceRunCommand(req)

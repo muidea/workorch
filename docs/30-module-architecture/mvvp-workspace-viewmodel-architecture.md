@@ -59,12 +59,12 @@ Model 层是正式业务状态权威。规则：
 
 典型 Model owner：
 
-- `internal/modules/kernel/workspace`
+- `internal/modules/blocks/workspace`
 - `internal/modules/kernel/run`
-- `internal/modules/kernel/decision`
-- `internal/modules/kernel/approval`
-- `internal/modules/kernel/result`
-- `internal/modules/kernel/memory`
+- `internal/modules/blocks/decision`
+- `internal/modules/blocks/approval`
+- `internal/modules/blocks/result`
+- `internal/modules/blocks/memory`
 - `internal/modules/kernel/eventstream`
 - `internal/modules/kernel/orchestrator`
 
@@ -107,8 +107,9 @@ Presenter 是适配层。规则：
 - `workorchd` 在 HTTP server 启动阶段创建 workspace projection manager。
 - projection manager 启动时全量加载 workspace baseline，并维护
   workspace overview/detail projection store。
-- projection manager 通过 `events.SubscribeWorkorch` 显式订阅 workspace/run/
-  decision/approval/result/runtime 等 WorkOrch 业务事件；不依赖通配符订阅。
+- projection manager 通过 magicCommon EventHub 逐 topic 订阅 workspace/run/
+  decision/approval/result/runtime 等投递组件定义的具体 data；不依赖通配符、
+  集中 topic 聚合 API 或 Envelope/map 转换。
 - projection rebuild 由 framework 注入的 `BackgroundRoutine` 调度；事件 observer
   只做轻量分类和 rebuild 调度。
 - `workorchd` HTTP server、startup projection scheduling、watchdog timer、governance continuation、snapshot cache
@@ -169,11 +170,11 @@ Presenter 是适配层。规则：
 
 | Object | Owner |
 | --- | --- |
-| Workspace formal state | `kernel/workspace` |
+| Workspace formal state | `blocks/workspace` |
 | Run formal state | `kernel/run` / `kernel/orchestrator` |
-| Decision formal state | `kernel/decision` |
-| Approval formal state | `kernel/approval` |
-| Result formal state | `kernel/result` |
+| Decision formal state | `blocks/decision` |
+| Approval formal state | `blocks/approval` |
+| Result formal state | `blocks/result` |
 | Event records | `kernel/eventstream` |
 | Workspace display state | `workorchd ViewModel projection manager` |
 | TUI cursor/input/viewport | TUI View |
@@ -236,17 +237,17 @@ internal/modules/application/workorchd/service/server
 
 | Path | Layer | Target responsibility | Current gap to check | Required closure |
 | --- | --- | --- | --- | --- |
-| `internal/modules/kernel/workspace` | Model owner | workspace 正式状态、workspace command topic、workspace notification topic | 确认所有 workspace create/update/delete/state transition 只由 owner command 完成 | 补齐 owner `pkg/events` topic，投影层只读或通过 command 读取 |
+| `internal/modules/blocks/workspace` | Model owner | workspace 正式状态、workspace command topic、workspace notification topic | 确认所有 workspace create/update/delete/state transition 只由 owner command 完成 | 补齐 owner `pkg/events` topic，投影层只读或通过 command 读取 |
 | `internal/modules/kernel/run` | Model owner | run 正式状态、run command/read topic、run state notification | 确认 run ID 读取有 workspace scope，避免跨 workspace `run-001` 串扰 | 所有 run get/list/status command payload 必须携带 workspace scope 或唯一 open 约束 |
 | `internal/modules/kernel/orchestrator` | Model/governance owner | run 编排、continuation、state-machine 推进 | 确认无状态执行能力不被绑定到全局串行 lane | 只对同一 workspace/run 使用 lane；长耗时 continuation 交给 BackgroundRoutine |
-| `internal/modules/kernel/decision` | Model owner | decision ticket/resolution 正式状态 | 确认 TUI/HTTP 不直接 resolve repository | resolve/list/read 只走 owner command，返回 `events.Response` |
-| `internal/modules/kernel/approval` | Model owner | approval 正式状态 | 同上 | 同上 |
-| `internal/modules/kernel/result` | Model owner | result/artifact/patch/validation 正式状态 | 确认目录规范、topic 归属和 scope | result/artifact event 归 owner `pkg/events`，投影只消费通知或 command read |
-| `internal/modules/kernel/memory` | Model owner | memory recall/index 状态 | 确认 ViewModel 只展示摘要 | heavy recall/evidence 只在 detail/evidence 级按需加载 |
+| `internal/modules/blocks/decision` | Model owner | decision ticket/resolution 正式状态 | 确认 TUI/HTTP 不直接 resolve repository | resolve/list/read 只走 owner command，返回 `events.Response` |
+| `internal/modules/blocks/approval` | Model owner | approval 正式状态 | 同上 | 同上 |
+| `internal/modules/blocks/result` | Model owner | result/artifact/patch/validation 正式状态 | 确认目录规范、topic 归属和 scope | result/artifact event 归 owner `pkg/events`，投影只消费通知或 command read |
+| `internal/modules/blocks/memory` | Model owner | memory recall/index 状态 | 确认 ViewModel 只展示摘要 | heavy recall/evidence 只在 detail/evidence 级按需加载 |
 | `internal/modules/kernel/eventstream` | Model owner | event record、revision、replay checkpoint | 确认 projection startup 有 replay/gap 策略 | 提供 projection baseline/replay 所需 command/read topic |
-| `internal/modules/kernel/soul` | Model owner | soul catalog/binding 正式状态 | 确认投影只读取展示字段 | owner events 定义 topic，appservice 只通过 command/read port |
-| `internal/modules/kernel/skill` | Model owner | skill catalog/selection 正式状态 | 同上 | 同上 |
-| `internal/modules/kernel/mcp` | Model owner | MCP server/capability 正式状态 | 同上 | 同上 |
+| `internal/modules/blocks/soul` | Model owner | soul catalog/binding 正式状态 | 确认投影只读取展示字段 | owner events 定义 topic，appservice 只通过 command/read port |
+| `internal/modules/blocks/skill` | Model owner | skill catalog/selection 正式状态 | 同上 | 同上 |
+| `internal/modules/blocks/mcpregistry` | Model owner | MCP server/capability 正式状态 | 同上 | 同上 |
 | `internal/modules/application/workorchd/module.go` | Application module bridge | 接入 framework plugin lifecycle，暴露 workorchd 进程级 done command | 不承载 ViewModel 业务实现 | 保持窄桥接，不新增跨 owner service registry |
 | `internal/modules/application/workorchd/biz/appservice/readmodelcore` | Appservice DTO | 现有 workspace/run snapshot/read-model DTO | DTO 与新 ViewModel contract 部分重叠 | 保留正式 read-model DTO，新增 projection DTO 时明确复用或替代关系 |
 | `internal/modules/application/workorchd/biz/appservice/readmodelprojection` | Pure projection functions | owner model 到 read-model DTO 的纯映射 | 已复用为 projection baseline/detail 映射 | 继续保持纯函数，不拥有 projection store/lifecycle |
@@ -302,13 +303,13 @@ internal/modules/application/workorchd/service/server
 
 | Owner | Command topic lives in | Notification topic lives in | Projection usage |
 | --- | --- | --- | --- |
-| Workspace | `kernel/workspace/pkg/events` | `kernel/workspace/pkg/events` | baseline/rebuild 使用 command read；created/updated/deleted 触发 overview patch/rebuild |
+| Workspace | `blocks/workspace/pkg/events` | `blocks/workspace/pkg/events` | baseline/rebuild 使用 command read；created/updated/deleted 触发 overview patch/rebuild |
 | Run | `kernel/run/pkg/events` | `kernel/run/pkg/events` | active run、run state、usage、progress 字段来自 command read 或 notification |
 | Orchestrator | `kernel/orchestrator/pkg/events` | `kernel/orchestrator/pkg/events` | continuation/progress 事件只更新对应 workspace/run lane |
-| Decision | `kernel/decision/pkg/events` | `kernel/decision/pkg/events` | unresolved/resolved blocker 更新 workspace blocker summary |
-| Approval | `kernel/approval/pkg/events` | `kernel/approval/pkg/events` | approval blocker summary 同上 |
-| Result | `kernel/result/pkg/events` | `kernel/result/pkg/events` | result/artifact/patch summary 更新 outcome |
-| Memory | `kernel/memory/pkg/events` | `kernel/memory/pkg/events` | memory recall count/summary 更新 detail |
+| Decision | `blocks/decision/pkg/events` | `blocks/decision/pkg/events` | unresolved/resolved blocker 更新 workspace blocker summary |
+| Approval | `blocks/approval/pkg/events` | `blocks/approval/pkg/events` | approval blocker summary 同上 |
+| Result | `blocks/result/pkg/events` | `blocks/result/pkg/events` | result/artifact/patch summary 更新 outcome |
+| Memory | `blocks/memory/pkg/events` | `blocks/memory/pkg/events` | memory recall count/summary 更新 detail |
 | EventStream | `kernel/eventstream/pkg/events` | `kernel/eventstream/pkg/events` | revision checkpoint、replay、gap repair |
 
 基础 `internal/pkg/events` 只允许保留 envelope、hub、response、payload key、helper

@@ -27,11 +27,11 @@ func GenerateWorkspaceSetupDraftWithBackend(ctx context.Context, backend string,
 }
 
 func GenerateWorkspaceSetupDraftWithSession(ctx context.Context, session *RuntimeSession, cmd WorkspaceSetupDraftGenerationCommand, generator WorkspaceSetupDraftGenerator) (ret WorkspaceSetupDraft, err error) {
-	return withEventHubsSession(ctx, session, func(ctx context.Context, hubs eventHubSessionDependencies) (WorkspaceSetupDraft, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (WorkspaceSetupDraft, error) {
 		if generator == nil {
-			generator = setupdraftports.EventHubGenerator{CommandHub: hubs.commandHub}
+			generator = setupdraftports.EventHubGenerator{CommandHub: hub}
 		}
-		request, err := setupdraftports.BuildGenerationRequest(ctx, hubs.commandHub, cmd)
+		request, err := setupdraftports.BuildGenerationRequest(ctx, hub, cmd)
 		if err != nil {
 			return WorkspaceSetupDraft{}, err
 		}

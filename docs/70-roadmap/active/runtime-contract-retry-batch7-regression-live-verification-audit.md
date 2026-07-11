@@ -589,17 +589,17 @@ For each workspace under verification, record only bounded summaries:
 - Commands run:
   - `go test ./internal/pkg/events -count=1`
   - `go test ./internal/modules/kernel/run/biz -count=1`
-  - `go test ./internal/modules/kernel/workspace/biz -count=1`
-  - `go test ./internal/modules/kernel/approval/biz -count=1`
-  - `go test ./internal/modules/kernel/decision/biz -count=1`
+  - `go test ./internal/modules/blocks/workspace/biz -count=1`
+  - `go test ./internal/modules/blocks/approval/biz -count=1`
+  - `go test ./internal/modules/blocks/decision/biz -count=1`
   - `go test ./internal/modules/kernel/governance/biz -count=1`
   - `go test ./internal/modules/kernel/orchestrator/biz -count=1`
 - Bounded output:
   - `ok github.com/muidea/workorch/internal/pkg/events`
   - `ok github.com/muidea/workorch/internal/modules/kernel/run/biz`
-  - `ok github.com/muidea/workorch/internal/modules/kernel/workspace/biz`
-  - `ok github.com/muidea/workorch/internal/modules/kernel/approval/biz`
-  - `ok github.com/muidea/workorch/internal/modules/kernel/decision/biz`
+  - `ok github.com/muidea/workorch/internal/modules/blocks/workspace/biz`
+  - `ok github.com/muidea/workorch/internal/modules/blocks/approval/biz`
+  - `ok github.com/muidea/workorch/internal/modules/blocks/decision/biz`
   - `ok github.com/muidea/workorch/internal/modules/kernel/governance/biz`
   - `ok github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz`
 - Regression evidence:

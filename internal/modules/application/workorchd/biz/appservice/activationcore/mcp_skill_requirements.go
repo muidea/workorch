@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 )
 
 func RequiredToolKinds(skills []contextregistrycore.Skill) []string {

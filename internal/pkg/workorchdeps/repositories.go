@@ -2,10 +2,10 @@ package workorchdeps
 
 import (
 	cd "github.com/muidea/magicCommon/def"
+	"github.com/muidea/magicCommon/framework/plugin/initiator"
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 )
 
-type SystemRepositories = runtimecommon.SystemRepositories
 type WorkspaceRepositories = runtimecommon.WorkspaceRepositories
 type DecisionRepositories = runtimecommon.DecisionRepositories
 type ApprovalRepositories = runtimecommon.ApprovalRepositories
@@ -18,14 +18,6 @@ type ResultRepositories = runtimecommon.ResultRepositories
 type RunRepositories = runtimecommon.RunRepositories
 type SkillRepositories = runtimecommon.SkillRepositories
 type SoulRepositories = runtimecommon.SoulRepositories
-
-func ResolveSystemRepositories(consumer string) (SystemRepositories, *cd.Error) {
-	provider, err := resolveRepositoryProvider(consumer)
-	if err != nil {
-		return SystemRepositories{}, err
-	}
-	return provider.System(), nil
-}
 
 func ResolveWorkspaceRepositories(consumer string) (WorkspaceRepositories, *cd.Error) {
 	provider, err := resolveRepositoryProvider(consumer)
@@ -124,7 +116,8 @@ func ResolveSoulRepositories(consumer string) (SoulRepositories, *cd.Error) {
 }
 
 func resolveRepositoryProvider(consumer string) (runtimecommon.RepositoryProvider, *cd.Error) {
-	runtime, err := ResolveRuntimeHelper(consumer)
+	var helper runtimecommon.Provider
+	runtime, err := initiator.GetEntity(runtimecommon.InitiatorID, helper)
 	if err != nil {
 		return nil, err
 	}

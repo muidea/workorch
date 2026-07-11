@@ -3,9 +3,14 @@ package appservice
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	magicevent "github.com/muidea/magicCommon/event"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
@@ -13,37 +18,66 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-type testHub struct {
-	subscribers map[string][]events.Handler
+type managedRuntimeRecordFixture struct {
+	ID           string
+	Version      string
+	Topic        string
+	OccurredAt   string
+	SourceModule string
+	SubjectType  string
+	SubjectID    string
+	WorkspaceID  string
+	RunID        string
+	StepID       string
+	Revision     int64
+	Payload      map[string]any
 }
 
-func newTestHub() *testHub {
-	return &testHub{subscribers: map[string][]events.Handler{}}
+func newManagedRuntimeTestCommandHub(t *testing.T) magicevent.Hub {
+	t.Helper()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	return hub
 }
 
-func (h *testHub) Publish(ctx context.Context, envelope events.Envelope) error {
-	for _, handler := range h.subscribers[envelope.Topic] {
-		if handler == nil {
-			continue
+func publishManagedRuntimeRecord(ctx context.Context, hub magicevent.Hub, record managedRuntimeRecordFixture) error {
+	data, err := eventstreamevents.EventRecordDataFromModel(&eventstreammodel.EventRecord{
+		ID:           common.EventRecordID(record.ID),
+		Version:      record.Version,
+		Topic:        record.Topic,
+		OccurredAt:   record.OccurredAt,
+		SourceModule: record.SourceModule,
+		SubjectType:  record.SubjectType,
+		SubjectID:    record.SubjectID,
+		WorkspaceID:  common.WorkspaceID(record.WorkspaceID),
+		RunID:        common.RunID(record.RunID),
+		StepID:       common.StepID(record.StepID),
+		Revision:     record.Revision,
+		Payload:      record.Payload,
+	})
+	if err != nil {
+		return err
+	}
+	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamRecordAppended, "kernel/eventstream", eventstreamevents.NotificationDestination, magicevent.NewHeader(), ctx, eventstreamevents.EventRecordAppendedData{Record: data})
+	result := hub.Send(event)
+	if result == nil {
+		return fmt.Errorf("record appended event returned no result")
+	}
+	if resultErr := result.Error(); resultErr != nil {
+		if strings.Contains(resultErr.Message, "missing observer") {
+			return nil
 		}
-		if err := handler(ctx, envelope); err != nil {
-			return err
-		}
+		return resultErr
 	}
 	return nil
 }
 
-func (h *testHub) Subscribe(topic string, handler events.Handler) func() {
-	h.subscribers[topic] = append(h.subscribers[topic], handler)
-	return func() {}
-}
-
-func TestManagedRuntimePublishedWorkorchEventsUsesCollectorRatherThanHubPublishedMethod(t *testing.T) {
-	hub := newTestHub()
-	runtime := runtimecore.NewManagedRuntime(runtimecore.NewAdapter(runtimecore.Dependencies{}), hub)
+func TestManagedRuntimePublishedEventRecordsUsesTypedCollector(t *testing.T) {
+	rawHub := newManagedRuntimeTestCommandHub(t)
+	runtime := runtimecore.NewManagedRuntime(runtimecore.NewAdapter(runtimecore.Dependencies{}), rawHub)
 	defer runtime.Close()
 
-	if err := hub.Publish(context.Background(), events.Envelope{
+	if err := publishManagedRuntimeRecord(context.Background(), rawHub, managedRuntimeRecordFixture{
 		Version:     events.WorkorchEventVersion,
 		Topic:       runevents.TopicRunStateChanged,
 		SubjectType: "run",
@@ -54,25 +88,25 @@ func TestManagedRuntimePublishedWorkorchEventsUsesCollectorRatherThanHubPublishe
 		t.Fatalf("publish run event: %v", err)
 	}
 
-	published := runtime.PublishedWorkorchEvents()
+	published := runtime.PublishedEventRecords()
 	if len(published) != 1 {
 		t.Fatalf("len(published) = %d, want 1", len(published))
 	}
-	if published[0].Topic() != runevents.TopicRunStateChanged {
-		t.Fatalf("topic = %s, want %s", published[0].Topic(), runevents.TopicRunStateChanged)
+	if published[0].Topic != runevents.TopicRunStateChanged {
+		t.Fatalf("topic = %s, want %s", published[0].Topic, runevents.TopicRunStateChanged)
 	}
-	if published[0].Envelope().Payload[events.PayloadKeyState] != "running" {
-		t.Fatalf("payload state = %v, want running", published[0].Envelope().Payload[events.PayloadKeyState])
+	if payload := published[0].Payload.Map(); payload[events.PayloadKeyState] != "running" {
+		t.Fatalf("payload state = %v, want running", payload[events.PayloadKeyState])
 	}
 }
 
 func TestManagedRuntimeCloseStopsFurtherCollection(t *testing.T) {
-	hub := newTestHub()
-	runtime := runtimecore.NewManagedRuntime(runtimecore.NewAdapter(runtimecore.Dependencies{}), hub)
+	rawHub := newManagedRuntimeTestCommandHub(t)
+	runtime := runtimecore.NewManagedRuntime(runtimecore.NewAdapter(runtimecore.Dependencies{}), rawHub)
 
 	runtime.Close()
 
-	if err := hub.Publish(context.Background(), events.Envelope{
+	if err := publishManagedRuntimeRecord(context.Background(), rawHub, managedRuntimeRecordFixture{
 		Version:     events.WorkorchEventVersion,
 		Topic:       approvalevents.TopicApprovalCreated,
 		SubjectType: "approval",
@@ -82,13 +116,14 @@ func TestManagedRuntimeCloseStopsFurtherCollection(t *testing.T) {
 		t.Fatalf("publish approval event: %v", err)
 	}
 
-	if published := runtime.PublishedWorkorchEvents(); len(published) != 0 {
+	if published := runtime.PublishedEventRecords(); len(published) != 0 {
 		t.Fatalf("len(published) = %d, want 0", len(published))
 	}
 }
 
 func TestNewManagedRuntimeReturnsNilWhenRuntimeMissing(t *testing.T) {
-	if runtime := runtimecore.NewManagedRuntime(nil, newTestHub()); runtime != nil {
+	rawHub := newManagedRuntimeTestCommandHub(t)
+	if runtime := runtimecore.NewManagedRuntime(nil, rawHub); runtime != nil {
 		t.Fatalf("runtime = %#v, want nil", runtime)
 	}
 }

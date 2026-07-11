@@ -4,10 +4,10 @@ import (
 	"errors"
 	"testing"
 
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
-	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )

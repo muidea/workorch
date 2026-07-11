@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"

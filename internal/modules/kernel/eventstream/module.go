@@ -10,7 +10,6 @@ import (
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	eventstreamservice "github.com/muidea/workorch/internal/modules/kernel/eventstream/service"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -39,7 +38,7 @@ func (m *Module) Configure(deps Dependencies) error {
 	if deps.EventRecords == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
 	}
-	m.bizPtr = eventstreambiz.NewService(deps.EventRecords, events.NewMagicHubWithHubOwner(deps.EventHub, ModuleID))
+	m.bizPtr = eventstreambiz.NewService(deps.EventRecords, deps.EventHub)
 	m.servicePtr = eventstreamservice.New(eventstreamservice.Dependencies{
 		ListEvents:           m.bizPtr.ListEvents,
 		PurgeWorkspaceEvents: m.bizPtr.PurgeWorkspaceEvents,
@@ -117,7 +116,15 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (ev
 		if err != nil {
 			return eventstreamevents.EventStreamCommandResult{}, err
 		}
-		return eventstreamevents.EventStreamCommandResult{Events: items}, nil
+		events := make([]eventstreamevents.EventRecordData, 0, len(items))
+		for _, item := range items {
+			converted, convertErr := eventstreamevents.EventRecordDataFromModel(item)
+			if convertErr != nil {
+				return eventstreamevents.EventStreamCommandResult{}, convertErr
+			}
+			events = append(events, converted)
+		}
+		return eventstreamevents.EventStreamCommandResult{Events: events}, nil
 	case eventstreamevents.TopicEventStreamCommandPurgeWorkspace:
 		cmd, ok := data.(eventstreamevents.PurgeWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" {

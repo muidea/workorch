@@ -10,24 +10,19 @@ import (
 	"github.com/muidea/magicCommon/framework/plugin/initiator"
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
-	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
-	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
 func init() {
 	initiator.Register(New())
 }
 
-type Runtime struct {
-	repositories  repositorySet
-	eventHub      workorchevents.Hub
-	commandHub    event.Hub
-	runtimePolicy workorchruntimepolicy.RuntimePolicy
+type RepositoryInitiator struct {
+	repositories repositorySet
 }
 
 type repositorySet struct {
@@ -59,19 +54,19 @@ type repositorySet struct {
 	Approvals             repository.ApprovalRepository
 }
 
-func New() *Runtime {
-	return &Runtime{}
+func New() *RepositoryInitiator {
+	return &RepositoryInitiator{}
 }
 
-func (r *Runtime) ID() string {
+func (r *RepositoryInitiator) ID() string {
 	return common.InitiatorID
 }
 
-func (r *Runtime) Weight() int {
+func (r *RepositoryInitiator) Weight() int {
 	return 10
 }
 
-func (r *Runtime) Setup(_ context.Context, eventHub event.Hub, _ task.BackgroundRoutine) *cd.Error {
+func (r *RepositoryInitiator) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 	cfg, err := workorchconfig.Current()
 	if err != nil {
 		return cd.NewError(cd.IllegalParam, "invalid argument: "+err.Error())
@@ -81,58 +76,22 @@ func (r *Runtime) Setup(_ context.Context, eventHub event.Hub, _ task.Background
 		return cd.NewError(cd.IllegalParam, "invalid argument: "+err.Error())
 	}
 	r.repositories = repositories
-	r.commandHub = eventHub
-	r.eventHub = workorchevents.NewMagicHubWithHubOwner(eventHub, common.InitiatorID)
-	r.runtimePolicy = workorchruntimepolicy.FromConfig(cfg)
 	return nil
 }
 
-func (r *Runtime) Run(_ context.Context) *cd.Error {
+func (r *RepositoryInitiator) Run(_ context.Context) *cd.Error {
 	return nil
 }
 
-func (r *Runtime) Teardown(_ context.Context) {
+func (r *RepositoryInitiator) Teardown(_ context.Context) {
 	r.repositories = repositorySet{}
-	r.eventHub = nil
-	r.commandHub = nil
-	r.runtimePolicy = workorchruntimepolicy.RuntimePolicy{}
 }
 
-func (r *Runtime) RepositoryProvider() common.RepositoryProvider {
+func (r *RepositoryInitiator) RepositoryProvider() common.RepositoryProvider {
 	if r == nil {
 		return nil
 	}
 	return r.repositories
-}
-
-func (r *Runtime) EventHub() workorchevents.Hub {
-	if r == nil {
-		return nil
-	}
-	return r.eventHub
-}
-
-func (r *Runtime) CommandHub() event.Hub {
-	if r == nil {
-		return nil
-	}
-	return r.commandHub
-}
-
-func (r *Runtime) RuntimePolicy() workorchruntimepolicy.RuntimePolicy {
-	if r == nil {
-		return workorchruntimepolicy.RuntimePolicy{}
-	}
-	return r.runtimePolicy
-}
-
-func (r repositorySet) System() common.SystemRepositories {
-	return common.SystemRepositories{
-		Souls:           r.Souls,
-		Templates:       r.WorkspaceTemplates,
-		MCPServers:      r.MCPServers,
-		MCPCapabilities: r.MCPCapabilities,
-	}
 }
 
 func (r repositorySet) Workspace() common.WorkspaceRepositories {
@@ -146,16 +105,14 @@ func (r repositorySet) Workspace() common.WorkspaceRepositories {
 
 func (r repositorySet) Decision() common.DecisionRepositories {
 	return common.DecisionRepositories{
-		Tickets:         r.Tickets,
-		Resolutions:     r.Resolutions,
-		EvidenceRecords: r.EvidenceRecords,
+		Tickets:     r.Tickets,
+		Resolutions: r.Resolutions,
 	}
 }
 
 func (r repositorySet) Approval() common.ApprovalRepositories {
 	return common.ApprovalRepositories{
-		Approvals:       r.Approvals,
-		EvidenceRecords: r.EvidenceRecords,
+		Approvals: r.Approvals,
 	}
 }
 

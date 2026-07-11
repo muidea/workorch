@@ -9,15 +9,14 @@ import (
 	"strings"
 	"testing"
 
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -303,9 +302,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchConflictDiagnosticsA
 			ValidationResults:  validationRepo,
 			RuntimeCheckpoints: checkpointRepo,
 			MemoryItems:        memory.NewMemoryItemRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	deliverableDirectory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(deliverableDirectory, "llm-proxy"), []byte("binary"), 0o755); err != nil {

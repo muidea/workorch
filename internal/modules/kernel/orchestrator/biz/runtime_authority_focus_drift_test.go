@@ -6,10 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -639,9 +638,7 @@ func TestDispatchNextStepPreparesInputFromCurrentAuthority(t *testing.T) {
 		stepRepo,
 		workspaceRepo,
 		memory.NewDecisionTicketRepository(),
-		memory.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memory.NewApprovalRepository())
 
 	if err := orch.DispatchNextStep(ctx, runID); err != nil {
 		t.Fatalf("DispatchNextStep: %v", err)
@@ -740,9 +737,7 @@ func TestStateChangeDispatchHydratesAcceptedTargetSnapshotsBeforeRebuild(t *test
 		memory.NewDecisionTicketRepository(),
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo, Patches: patchRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{EvidenceRecords: evidenceRepo, Patches: patchRepo})
 
 	if !dispatchRequiresStateChangeTargetSnapshotHydration(run, nil) {
 		t.Fatalf("dispatchRequiresStateChangeTargetSnapshotHydration = false; authority=%+v", run.ExecutionContext)
@@ -1085,7 +1080,7 @@ func TestBlockOnDecisionPersistsAuthorityNormalizedOwnerState(t *testing.T) {
 	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	orch := NewRuntimeOrchestrator(nil, runRepo, memory.NewStepRepository(), workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository(), events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(nil, runRepo, memory.NewStepRepository(), workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository())
 
 	if err := orch.blockOnDecisionAtStep(ctx, run, nil, ticketID, ""); err != nil {
 		t.Fatalf("blockOnDecisionAtStep: %v", err)
@@ -1924,7 +1919,7 @@ func TestDispatchPreCreateHardGateRejectsUnrebuildableFocusDriftBeforeRuntime(t 
 	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository(), events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository())
 
 	err := orch.dispatchStepWithWorkspace(ctx, run, stepID, llmWorkspaceExecutionStepKind, map[string]any{
 		convergenceAuthorityKey: map[string]any{

@@ -1,20 +1,10 @@
 package common
 
 import (
-	magicevent "github.com/muidea/magicCommon/event"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
-	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
-const InitiatorID = "workorch/runtime"
-
-type SystemRepositories struct {
-	Souls           repository.SoulRepository
-	Templates       repository.WorkspaceTemplateRepository
-	MCPServers      repository.MCPServerRepository
-	MCPCapabilities repository.MCPCapabilityRepository
-}
+const InitiatorID = "workorch/repositories"
 
 type WorkspaceRepositories struct {
 	Workspaces repository.WorkspaceRepository
@@ -24,14 +14,12 @@ type WorkspaceRepositories struct {
 }
 
 type DecisionRepositories struct {
-	Tickets         repository.DecisionTicketRepository
-	Resolutions     repository.DecisionResolutionRepository
-	EvidenceRecords repository.EvidenceRecordRepository
+	Tickets     repository.DecisionTicketRepository
+	Resolutions repository.DecisionResolutionRepository
 }
 
 type ApprovalRepositories struct {
-	Approvals       repository.ApprovalRepository
-	EvidenceRecords repository.EvidenceRecordRepository
+	Approvals repository.ApprovalRepository
 }
 
 type EventStreamRepositories struct {
@@ -83,7 +71,6 @@ type SoulRepositories struct {
 }
 
 type RepositoryProvider interface {
-	System() SystemRepositories
 	Workspace() WorkspaceRepositories
 	Decision() DecisionRepositories
 	Approval() ApprovalRepositories
@@ -98,9 +85,6 @@ type RepositoryProvider interface {
 	Soul() SoulRepositories
 }
 
-type Helper interface {
+type Provider interface {
 	RepositoryProvider() RepositoryProvider
-	EventHub() events.Hub
-	CommandHub() magicevent.Hub
-	RuntimePolicy() workorchruntimepolicy.RuntimePolicy
 }

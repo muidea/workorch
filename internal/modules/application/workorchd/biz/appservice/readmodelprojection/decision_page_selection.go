@@ -1,7 +1,7 @@
 package readmodelprojection
 
 import (
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 )
 
 func selectDecisionPageWindow(items []*decisionmodel.Ticket, limit int, cursorAfterID string) ([]*decisionmodel.Ticket, string, bool) {

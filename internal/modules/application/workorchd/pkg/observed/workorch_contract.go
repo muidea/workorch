@@ -3,10 +3,11 @@ package observed
 import (
 	"fmt"
 
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	workorchdcommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
@@ -34,39 +35,39 @@ type workorchSnapshotRef struct {
 
 type workorchSnapshotContract struct {
 	publishedTopics []string
-	matches         func(events.WorkorchEvent, workorchSnapshotRef) bool
-	normalize       func(events.WorkorchEvent, workorchSnapshotRef) (SnapshotItem, bool)
+	matches         func(eventstreamevents.EventRecordData, workorchSnapshotRef) bool
+	normalize       func(eventstreamevents.EventRecordData, workorchSnapshotRef) (SnapshotItem, bool)
 }
 
 var (
 	workorchWorkspaceSnapshotContract = workorchSnapshotContract{
 		publishedTopics: []string{workspaceevents.TopicWorkspaceCreated, workspaceevents.TopicWorkspaceStateChanged},
-		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
-			return item.Envelope().WorkspaceID == string(ref.workspaceID)
+		matches: func(item eventstreamevents.EventRecordData, ref workorchSnapshotRef) bool {
+			return item.WorkspaceID == ref.workspaceID
 		},
-		normalize: func(item events.WorkorchEvent, ref workorchSnapshotRef) (SnapshotItem, bool) {
-			event, ok := item.(events.WorkspaceEvent)
+		normalize: func(item eventstreamevents.EventRecordData, ref workorchSnapshotRef) (SnapshotItem, bool) {
+			data, ok := events.DecodeWorkspacePayload(item.Payload.Map())
 			if !ok {
 				return SnapshotItem{}, false
 			}
-			title := event.Data.Title
+			title := data.Title
 			if title == "" {
 				title = ref.title
 			}
-			description := event.Data.Description
+			description := data.Description
 			if description == "" {
 				description = ref.description
 			}
-			deliverableDirectory := event.Data.DeliverableDirectory
+			deliverableDirectory := data.DeliverableDirectory
 			if deliverableDirectory == "" {
 				deliverableDirectory = ref.deliverableDirectory
 			}
-			normalized := normalizePublishedSnapshot(event.Envelope(), topicWorkspaceSnapshot, "workspace", WorkspacePayload{
+			normalized := normalizePublishedSnapshot(item, topicWorkspaceSnapshot, "workspace", WorkspacePayload{
 				Title:                title,
 				Description:          description,
 				DeliverableDirectory: deliverableDirectory,
-				State:                string(event.Data.State),
-				ActiveRunID:          string(event.Data.ActiveRunID),
+				State:                string(data.State),
+				ActiveRunID:          string(data.ActiveRunID),
 			})
 			normalized.StepID = ""
 			if normalized.RunID == "" {
@@ -77,21 +78,21 @@ var (
 	}
 	workorchRunSnapshotContract = workorchSnapshotContract{
 		publishedTopics: []string{runevents.TopicRunCreated, runevents.TopicRunStateChanged},
-		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
-			return item.Envelope().RunID == string(ref.runID)
+		matches: func(item eventstreamevents.EventRecordData, ref workorchSnapshotRef) bool {
+			return item.RunID == ref.runID
 		},
-		normalize: func(item events.WorkorchEvent, _ workorchSnapshotRef) (SnapshotItem, bool) {
-			event, ok := item.(events.RunEvent)
+		normalize: func(item eventstreamevents.EventRecordData, _ workorchSnapshotRef) (SnapshotItem, bool) {
+			data, ok := events.DecodeRunPayload(item.Payload.Map())
 			if !ok {
 				return SnapshotItem{}, false
 			}
-			normalized := normalizePublishedSnapshot(event.Envelope(), topicRunSnapshot, "run", RunPayload{
-				GoalID:             string(event.Data.GoalID),
-				DoDID:              string(event.Data.DoDID),
-				State:              string(event.Data.State),
-				BlockingTicketID:   string(event.Data.BlockingTicketID),
-				BlockingApprovalID: string(event.Data.BlockingApprovalID),
-				FailureReason:      event.Data.FailureReason,
+			normalized := normalizePublishedSnapshot(item, topicRunSnapshot, "run", RunPayload{
+				GoalID:             string(data.GoalID),
+				DoDID:              string(data.DoDID),
+				State:              string(data.State),
+				BlockingTicketID:   string(data.BlockingTicketID),
+				BlockingApprovalID: string(data.BlockingApprovalID),
+				FailureReason:      data.FailureReason,
 			})
 			normalized.StepID = ""
 			return normalized, true
@@ -99,54 +100,42 @@ var (
 	}
 	workorchStepSnapshotContract = workorchSnapshotContract{
 		publishedTopics: []string{runevents.TopicStepDispatched, runevents.TopicStepStateChanged},
-		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
-			return item.Envelope().StepID == string(ref.stepID)
+		matches: func(item eventstreamevents.EventRecordData, ref workorchSnapshotRef) bool {
+			return item.StepID == ref.stepID
 		},
-		normalize: func(item events.WorkorchEvent, _ workorchSnapshotRef) (SnapshotItem, bool) {
-			event, ok := item.(events.StepEvent)
+		normalize: func(item eventstreamevents.EventRecordData, _ workorchSnapshotRef) (SnapshotItem, bool) {
+			data, ok := events.DecodeStepPayload(item.Payload.Map())
 			if !ok {
 				return SnapshotItem{}, false
 			}
-			return normalizePublishedSnapshot(event.Envelope(), topicStepSnapshot, "step", StepPayload{
-				Kind:   llmcommon.CanonicalRuntimeBlockKind(event.Data.Kind),
-				State:  string(event.Data.State),
-				Input:  cloneMap(event.Data.Input),
-				Output: cloneMap(event.Data.Output),
+			return normalizePublishedSnapshot(item, topicStepSnapshot, "step", StepPayload{
+				Kind:   llmcommon.CanonicalRuntimeBlockKind(data.Kind),
+				State:  string(data.State),
+				Input:  cloneMap(data.Input),
+				Output: cloneMap(data.Output),
 			}), true
 		},
 	}
 	workorchTicketSnapshotContract = workorchSnapshotContract{
 		publishedTopics: []string{decisionevents.TopicTicketCreated, decisionevents.TopicTicketResolved, decisionevents.TopicTicketUpdated},
-		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
-			return item.Envelope().SubjectID == ref.subjectID
+		matches: func(item eventstreamevents.EventRecordData, ref workorchSnapshotRef) bool {
+			return item.SubjectID == ref.subjectID
 		},
-		normalize: func(item events.WorkorchEvent, _ workorchSnapshotRef) (SnapshotItem, bool) {
-			event, ok := item.(events.DecisionTicketEvent)
-			if !ok {
-				return SnapshotItem{}, false
-			}
-			return normalizePublishedSnapshot(event.Envelope(), topicDecisionTicketSnapshot, "decision_ticket", DecisionTicketPayload{
-				Reason:            event.Data.Reason,
-				State:             string(event.Data.State),
-				ResolutionID:      string(event.ResolutionID),
-				ResolutionType:    event.ResolutionType,
-				ResolutionPayload: cloneMap(event.ResolutionPayload),
-			}), true
-		},
+		normalize: normalizeDecisionTicketSnapshot,
 	}
 	workorchApprovalSnapshotContract = workorchSnapshotContract{
 		publishedTopics: []string{approvalevents.TopicApprovalCreated, approvalevents.TopicApprovalResolved},
-		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
-			return item.Envelope().SubjectID == ref.subjectID
+		matches: func(item eventstreamevents.EventRecordData, ref workorchSnapshotRef) bool {
+			return item.SubjectID == ref.subjectID
 		},
-		normalize: func(item events.WorkorchEvent, _ workorchSnapshotRef) (SnapshotItem, bool) {
-			event, ok := item.(events.ApprovalEvent)
+		normalize: func(item eventstreamevents.EventRecordData, _ workorchSnapshotRef) (SnapshotItem, bool) {
+			data, ok := events.DecodeApprovalPayload(item.Payload.Map())
 			if !ok {
 				return SnapshotItem{}, false
 			}
-			return normalizePublishedSnapshot(event.Envelope(), topicApprovalSnapshot, "approval", ApprovalPayload{
-				Reason: event.Data.Reason,
-				State:  string(event.Data.State),
+			return normalizePublishedSnapshot(item, topicApprovalSnapshot, "approval", ApprovalPayload{
+				Reason: data.Reason,
+				State:  string(data.State),
 			}), true
 		},
 	}
@@ -159,14 +148,10 @@ var (
 	}
 )
 
-func workorchObservedTopics() []string {
-	return events.WorkorchTopics()
-}
-
-func latestPublishedSnapshot(contract workorchSnapshotContract, ref workorchSnapshotRef, published []events.WorkorchEvent) (SnapshotItem, bool) {
+func latestPublishedSnapshot(contract workorchSnapshotContract, ref workorchSnapshotRef, published []eventstreamevents.EventRecordData) (SnapshotItem, bool) {
 	for idx := len(published) - 1; idx >= 0; idx-- {
 		item := published[idx]
-		if item == nil || !contract.acceptsTopic(item.Topic()) {
+		if !contract.acceptsTopic(item.Topic) || !events.ValidateWorkorchEventVersion(item.Topic, item.Version) {
 			continue
 		}
 		if !contract.matches(item, ref) {
@@ -189,19 +174,43 @@ func (c workorchSnapshotContract) acceptsTopic(topic string) bool {
 	return false
 }
 
-func normalizePublishedSnapshot(item events.Envelope, snapshotTopic, subjectType string, payload SnapshotPayload) SnapshotItem {
-	envelope := cloneEnvelope(item)
+func normalizeDecisionTicketSnapshot(item eventstreamevents.EventRecordData, _ workorchSnapshotRef) (SnapshotItem, bool) {
+	payload := item.Payload.Map()
+	if item.Topic == decisionevents.TopicTicketResolved {
+		data, ok := events.DecodeDecisionResolutionPayload(payload)
+		if !ok {
+			return SnapshotItem{}, false
+		}
+		return normalizePublishedSnapshot(item, topicDecisionTicketSnapshot, "decision_ticket", DecisionTicketPayload{
+			Reason:            data.Reason,
+			State:             string(data.State),
+			ResolutionID:      string(data.ResolutionID),
+			ResolutionType:    data.Type,
+			ResolutionPayload: cloneMap(data.Payload),
+		}), true
+	}
+	data, ok := events.DecodeDecisionTicketPayload(payload)
+	if !ok {
+		return SnapshotItem{}, false
+	}
+	return normalizePublishedSnapshot(item, topicDecisionTicketSnapshot, "decision_ticket", DecisionTicketPayload{
+		Reason: data.Reason,
+		State:  string(data.State),
+	}), true
+}
+
+func normalizePublishedSnapshot(item eventstreamevents.EventRecordData, snapshotTopic, subjectType string, payload SnapshotPayload) SnapshotItem {
 	return SnapshotItem{
-		ID:           fmt.Sprintf("%s:%s", snapshotTopic, envelope.SubjectID),
-		Version:      events.WorkorchSnapshotVersion,
+		ID:           fmt.Sprintf("%s:%s", snapshotTopic, item.SubjectID),
+		Version:      SnapshotVersion,
 		Topic:        snapshotTopic,
-		OccurredAt:   envelope.OccurredAt,
+		OccurredAt:   item.OccurredAt,
 		SourceModule: workorchdcommon.EventSourceModuleID,
 		SubjectType:  subjectType,
-		SubjectID:    envelope.SubjectID,
-		WorkspaceID:  envelope.WorkspaceID,
-		RunID:        envelope.RunID,
-		StepID:       envelope.StepID,
+		SubjectID:    item.SubjectID,
+		WorkspaceID:  string(item.WorkspaceID),
+		RunID:        string(item.RunID),
+		StepID:       string(item.StepID),
 		Payload:      payload,
 	}
 }

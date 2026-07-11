@@ -1,6 +1,6 @@
 package setupdraftcore
 
-import soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
+import soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 
 func SoulFromRepository(item *soulmodel.Soul) Soul {
 	if item == nil {

@@ -1,8 +1,8 @@
 package contextregistrycore
 
 import (
-	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
-	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
+	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 )
 
 func MapSoul(item *soulmodel.Soul) Soul {

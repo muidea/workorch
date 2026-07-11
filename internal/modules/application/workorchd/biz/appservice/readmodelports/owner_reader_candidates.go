@@ -2,7 +2,7 @@ package readmodelports
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 )
 
 type OwnerReaderCandidates struct {
@@ -28,7 +28,7 @@ type OwnerReaderCandidates struct {
 	Approvals             readmodelcore.ApprovalReader
 }
 
-func (c OwnerReaderCandidates) RunSnapshotReaders(owner OwnerReaders, published []events.WorkorchEvent) RunSnapshotReaders {
+func (c OwnerReaderCandidates) RunSnapshotReaders(owner OwnerReaders, published []eventstreamevents.EventRecordData) RunSnapshotReaders {
 	if c.Matches(owner) {
 		return owner.RunSnapshotReaders(published)
 	}

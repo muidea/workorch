@@ -10,29 +10,15 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 const ModuleID = modulecommon.ModuleID
 
-type ResolveDecisionFunc = governancebiz.ResolveDecisionFunc
-type ResolveApprovalFunc = governancebiz.ResolveApprovalFunc
-type ResumeRunFunc = governancebiz.ResumeRunFunc
-
 type Dependencies struct {
 	AutoGovernanceTraces repository.AutoGovernanceTraceRepository
 	EventHub             magicevent.Hub
-	TicketReader         governancebiz.TicketReader
-	ResolutionReader     governancebiz.ResolutionReader
-	ApprovalReader       governancebiz.ApprovalReader
-	RunReader            governancebiz.RunReader
-	WorkspaceDefinitions governancebiz.WorkspaceDefinitionReader
-	MemoryReader         governancebiz.MemoryReader
-	ResolveDecision      ResolveDecisionFunc
-	ResolveApproval      ResolveApprovalFunc
-	ResumeRun            ResumeRunFunc
 	LoadConfig           func() (workorchconfig.Config, error)
 	BackgroundRoutine    magictask.BackgroundRoutine
 }
@@ -57,49 +43,12 @@ func (m *Module) Configure(deps Dependencies) error {
 	if deps.LoadConfig == nil {
 		deps.LoadConfig = workorchconfig.Current
 	}
-	eventHubBridge := events.NewMagicHubWithHubOwner(deps.EventHub, ModuleID)
-	if deps.ResolveDecision == nil {
-		deps.ResolveDecision = eventResolveDecision(deps.EventHub)
-	}
-	if deps.ResolveApproval == nil {
-		deps.ResolveApproval = eventResolveApproval(deps.EventHub)
-	}
-	if deps.ResumeRun == nil {
-		deps.ResumeRun = eventResumeRun(deps.EventHub)
-	}
-	if deps.TicketReader == nil {
-		deps.TicketReader = eventTicketReader{hub: deps.EventHub}
-	}
-	if deps.ResolutionReader == nil {
-		deps.ResolutionReader = eventResolutionReader{hub: deps.EventHub}
-	}
-	if deps.ApprovalReader == nil {
-		deps.ApprovalReader = eventApprovalReader{hub: deps.EventHub}
-	}
-	if deps.RunReader == nil {
-		deps.RunReader = eventRunReader{hub: deps.EventHub}
-	}
-	if deps.WorkspaceDefinitions == nil {
-		deps.WorkspaceDefinitions = eventWorkspaceReader{hub: deps.EventHub}
-	}
-	if deps.MemoryReader == nil {
-		deps.MemoryReader = eventMemoryReader{hub: deps.EventHub}
-	}
-	m.bizPtr = governancebiz.NewService(governancebiz.Dependencies{
-		Tickets:              deps.TicketReader,
-		Resolutions:          deps.ResolutionReader,
-		Approvals:            deps.ApprovalReader,
-		Runs:                 deps.RunReader,
-		WorkspaceDefinitions: deps.WorkspaceDefinitions,
-		MemoryItems:          deps.MemoryReader,
-		AutoGovernanceTraces: deps.AutoGovernanceTraces,
-		EventHub:             eventHubBridge,
-		ResolveDecision:      deps.ResolveDecision,
-		ResolveApproval:      deps.ResolveApproval,
-		ResumeRun:            deps.ResumeRun,
-		LoadConfig:           deps.LoadConfig,
-		BackgroundRoutine:    deps.BackgroundRoutine,
-	})
+	m.bizPtr = governancebiz.NewEventService(
+		deps.AutoGovernanceTraces,
+		deps.EventHub,
+		deps.LoadConfig,
+		deps.BackgroundRoutine,
+	)
 	m.traces = deps.AutoGovernanceTraces
 	m.eventHub = deps.EventHub
 	return nil

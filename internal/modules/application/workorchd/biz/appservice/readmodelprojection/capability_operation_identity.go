@@ -1,6 +1,6 @@
 package readmodelprojection
 
-import mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+import mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 
 func runtimeCapabilityKindAndName(operation string, source map[string]any) (string, string) {
 	switch operation {

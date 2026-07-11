@@ -2,7 +2,7 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 )
 
 func RuntimeCapabilityFromModel(item *mcpmodel.Capability) readmodelcore.RuntimeCapability {

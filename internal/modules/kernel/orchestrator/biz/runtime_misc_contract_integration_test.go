@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
-	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )

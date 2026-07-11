@@ -1,6 +1,7 @@
 package appservice
 
 import (
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
@@ -8,19 +9,21 @@ import (
 
 func installAppserviceOwnerModuleTestFactories() func() {
 	originalBackend := newBootstrapWithBackend
-	originalPolicyHub := newBootstrapWithBackendRuntimePolicyAndEventHubs
+	originalPolicyHub := newBootstrapWithBackendRuntimePolicyAndCommandHub
 	originalPolicy := newBootstrapWithBackendAndRuntimePolicy
 
 	newBootstrapWithBackend = func(backend string, dataRoot string) *bootstrap.Runtime {
-		return testkit.NewRuntime(backend, dataRoot, workorchruntimepolicy.RuntimePolicy{}, nil, nil)
+		return testkit.NewRuntime(backend, dataRoot, workorchruntimepolicy.RuntimePolicy{}, nil)
 	}
-	newBootstrapWithBackendRuntimePolicyAndEventHubs = testkit.NewRuntime
+	newBootstrapWithBackendRuntimePolicyAndCommandHub = func(backend string, dataRoot string, policy workorchruntimepolicy.RuntimePolicy, commandHub magicevent.Hub) *bootstrap.Runtime {
+		return testkit.NewRuntime(backend, dataRoot, policy, commandHub)
+	}
 	newBootstrapWithBackendAndRuntimePolicy = func(backend string, dataRoot string, policy workorchruntimepolicy.RuntimePolicy) *bootstrap.Runtime {
-		return testkit.NewRuntime(backend, dataRoot, policy, nil, nil)
+		return testkit.NewRuntime(backend, dataRoot, policy, nil)
 	}
 	return func() {
 		newBootstrapWithBackend = originalBackend
-		newBootstrapWithBackendRuntimePolicyAndEventHubs = originalPolicyHub
+		newBootstrapWithBackendRuntimePolicyAndCommandHub = originalPolicyHub
 		newBootstrapWithBackendAndRuntimePolicy = originalPolicy
 	}
 }

@@ -7,16 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
-
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -202,7 +199,7 @@ func TestRuntimeOrchestrator_DispatchNextBlocksProviderFailureAfterRetryBudget(t
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
-	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-dispatch-provider-retry-exhausted")
 	runID := common.RunID("run-dispatch-provider-retry-exhausted")
@@ -292,9 +289,7 @@ func TestRuntimeOrchestrator_ResumeResolvedProviderRetryExhaustionReblocksWithou
 		ticketRepo,
 		resolutionRepo,
 		approvalRepo,
-		RuntimeEvidenceRepositories{Results: resultRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo})
 
 	workspaceID := common.WorkspaceID("ws-resolved-provider-exhaustion-reblock")
 	runID := common.RunID("run-resolved-provider-exhaustion-reblock")
@@ -1557,9 +1552,8 @@ func TestRuntimeOrchestrator_ProviderUnavailableBlocksOnProviderDecisionWithoutR
 		ticketRepo,
 		nil,
 		nil,
-		RuntimeEvidenceRepositories{Results: resultRepo},
-		nil,
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo})
+
 	run := &runmodel.Run{
 		ID:              runID,
 		WorkspaceID:     workspaceID,
@@ -1732,9 +1726,7 @@ func TestRuntimeOrchestrator_DuplicateRuntimeFailureBelowScopedBudgetDispatchesR
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-duplicate-failure")
 	runID := common.RunID("run-duplicate-failure")
@@ -1819,9 +1811,7 @@ func TestRuntimeOrchestrator_DuplicateRuntimeFailureExhaustedScopeUsesRepairExha
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-duplicate-failure-exhausted")
 	runID := common.RunID("run-duplicate-failure-exhausted")
@@ -1970,9 +1960,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionFailsRun(t *testing.T) {
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-runtime-repair-exhausted")
 	runID := common.RunID("run-runtime-repair-exhausted")
@@ -2070,9 +2058,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionUsesCommandContractBlocker(t
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-command-contract-exhausted")
 	runID := common.RunID("run-command-contract-exhausted")
@@ -2160,9 +2146,8 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionKeepsExternalDependencyBlock
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
+
 	workspaceID := common.WorkspaceID("ws-external-dependency-exhausted")
 	runID := common.RunID("run-external-dependency-exhausted")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
@@ -2248,9 +2233,8 @@ func TestRuntimeOrchestrator_ResumeRunningFailedDoDCoverageRepairExhaustionBlock
 		ticketRepo,
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Results: resultRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo})
+
 	workspaceID := common.WorkspaceID("ws-running-dod-coverage-exhausted")
 	runID := common.RunID("run-running-dod-coverage-exhausted")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
@@ -2344,26 +2328,24 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionWritesRejectedResultBeforeTi
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resultRepo := memory.NewResultRepository()
-	hub := events.NewMemoryHub()
 	runID := common.RunID("run-repair-exhaustion-result-before-ticket")
 	resultID := common.ResultID(string(runID) + "/result/dod-assessment")
-	resultVisibleAtTicketEvent := false
-	hub.Subscribe(decisionevents.TopicTicketCreated, func(ctx context.Context, _ events.Envelope) error {
+	resultVisibleAtTicketCreate := false
+	ticketObserver := decisionOwnerObservingTicketRepository{delegate: ticketRepo}
+	ticketObserver.onCreated = func(ctx context.Context, _ *decisionmodel.Ticket) {
 		result, err := resultRepo.Get(ctx, resultID)
-		resultVisibleAtTicketEvent = err == nil && result != nil && result.State == common.ResultStateRejected
-		return nil
-	})
+		resultVisibleAtTicketCreate = err == nil && result != nil && result.State == common.ResultStateRejected
+	}
 	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		&stubRuntimeAdapter{},
 		runRepo,
 		stepRepo,
 		workspaceRepo,
-		decisionOwnerEventingTicketRepository{delegate: ticketRepo, hub: hub},
+		ticketObserver,
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Results: resultRepo},
-		hub,
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo})
+
 	workspaceID := common.WorkspaceID("ws-repair-exhaustion-result-before-ticket")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -2415,8 +2397,8 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionWritesRejectedResultBeforeTi
 	}, failedStep, errors.New("invalid argument: state-changing llm repair step returned read-only executionGraph without patch/apply")); err != nil {
 		t.Fatalf("repair exhaustion: %v", err)
 	}
-	if !resultVisibleAtTicketEvent {
-		t.Fatalf("rejected result was not visible when repair exhausted ticket event was published")
+	if !resultVisibleAtTicketCreate {
+		t.Fatalf("rejected result was not visible when repair exhausted ticket was created")
 	}
 }
 
@@ -2435,9 +2417,8 @@ func TestRuntimeOrchestrator_RejectedResultDoesNotPreemptRepairExhaustionBlocker
 		ticketRepo,
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Results: resultRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo})
+
 	workspaceID := common.WorkspaceID("ws-rejected-result-repair-exhaustion")
 	runID := common.RunID("run-rejected-result-repair-exhaustion")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
@@ -2499,54 +2480,44 @@ func TestRuntimeOrchestrator_RejectedResultDoesNotPreemptRepairExhaustionBlocker
 	}
 }
 
-type decisionOwnerEventingTicketRepository struct {
-	delegate repository.DecisionTicketRepository
-	hub      events.Hub
+type decisionOwnerObservingTicketRepository struct {
+	delegate  repository.DecisionTicketRepository
+	onCreated func(context.Context, *decisionmodel.Ticket)
 }
 
-func (r decisionOwnerEventingTicketRepository) Create(ctx context.Context, item *decisionmodel.Ticket) error {
+func (r decisionOwnerObservingTicketRepository) Create(ctx context.Context, item *decisionmodel.Ticket) error {
 	if r.delegate == nil || item == nil {
 		return common.ErrInvalidArgument
 	}
 	if err := r.delegate.Create(ctx, item); err != nil {
 		return err
 	}
-	if r.hub == nil {
-		return nil
+	if r.onCreated != nil {
+		r.onCreated(ctx, item)
 	}
-	return r.hub.Publish(ctx, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        decisionevents.TopicTicketCreated,
-		SourceModule: decisioncommon.ModuleID,
-		SubjectType:  "decision_ticket",
-		SubjectID:    string(item.ID),
-		WorkspaceID:  string(item.WorkspaceID),
-		RunID:        string(item.RunID),
-		StepID:       string(item.StepID),
-		Payload:      events.DecisionTicketPayload(item.Reason, item.State),
-	})
+	return nil
 }
 
-func (r decisionOwnerEventingTicketRepository) Get(ctx context.Context, id common.TicketID) (*decisionmodel.Ticket, error) {
+func (r decisionOwnerObservingTicketRepository) Get(ctx context.Context, id common.TicketID) (*decisionmodel.Ticket, error) {
 	return r.delegate.Get(ctx, id)
 }
 
-func (r decisionOwnerEventingTicketRepository) List(ctx context.Context) ([]*decisionmodel.Ticket, error) {
+func (r decisionOwnerObservingTicketRepository) List(ctx context.Context) ([]*decisionmodel.Ticket, error) {
 	return r.delegate.List(ctx)
 }
 
-func (r decisionOwnerEventingTicketRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*decisionmodel.Ticket, error) {
+func (r decisionOwnerObservingTicketRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*decisionmodel.Ticket, error) {
 	return r.delegate.ListByRunID(ctx, runID)
 }
 
-func (r decisionOwnerEventingTicketRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*decisionmodel.Ticket, error) {
+func (r decisionOwnerObservingTicketRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*decisionmodel.Ticket, error) {
 	return r.delegate.ListByWorkspaceID(ctx, workspaceID)
 }
 
-func (r decisionOwnerEventingTicketRepository) Update(ctx context.Context, item *decisionmodel.Ticket) error {
+func (r decisionOwnerObservingTicketRepository) Update(ctx context.Context, item *decisionmodel.Ticket) error {
 	return r.delegate.Update(ctx, item)
 }
 
-func (r decisionOwnerEventingTicketRepository) Delete(ctx context.Context, id common.TicketID) error {
+func (r decisionOwnerObservingTicketRepository) Delete(ctx context.Context, id common.TicketID) error {
 	return r.delegate.Delete(ctx, id)
 }

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -124,7 +124,7 @@ func TestDefineGoalWithBackendPreservesStructuredMarkdownGoalText(t *testing.T) 
 func TestDefineGoalWithBackendReopensCompletedWorkspaceAndInvalidatesOldOutcome(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-goal-reopen", "goal reopen workspace", "", "workspaces/goal-reopen")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)

@@ -6,7 +6,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
-	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

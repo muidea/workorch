@@ -35,7 +35,7 @@ type workspaceProjectionLoader struct {
 func newWorkspaceProjectionManager(state *serverState) *workspaceProjectionManager {
 	return workspaceviewcore.NewManager(workspaceviewcore.ManagerOptions{
 		Loader:               workspaceProjectionLoader{state: state},
-		Hub:                  state.eventHub,
+		CommandHub:           state.commandHub,
 		Schedule:             state.scheduleBackground,
 		RebuildCoalesceDelay: workspaceProjectionRebuildCoalesceDelay,
 	})
@@ -45,7 +45,7 @@ func (l workspaceProjectionLoader) ListWorkspaces(ctx context.Context) ([]appser
 	if l.state == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	ctx = appservice.ContextWithEventHubs(ctx, l.state.eventHub, l.state.commandHub)
+	ctx = appservice.ContextWithCommandHub(ctx, l.state.commandHub)
 	return l.state.listWorkspaces(ctx, l.state.config.Backend, l.state.config.DataRoot)
 }
 
@@ -53,7 +53,7 @@ func (l workspaceProjectionLoader) ReadWorkspace(ctx context.Context, workspaceI
 	if l.state == nil {
 		return appservice.Workspace{}, common.ErrInvalidArgument
 	}
-	ctx = appservice.ContextWithEventHubs(ctx, l.state.eventHub, l.state.commandHub)
+	ctx = appservice.ContextWithCommandHub(ctx, l.state.commandHub)
 	return l.state.readWorkspace(ctx, l.state.config.Backend, l.state.config.DataRoot, workspaceID)
 }
 
@@ -61,7 +61,7 @@ func (l workspaceProjectionLoader) ReadWorkspaceSnapshot(ctx context.Context, wo
 	if l.state == nil {
 		return appservice.WorkspaceSnapshot{}, common.ErrInvalidArgument
 	}
-	ctx = appservice.ContextWithEventHubs(ctx, l.state.eventHub, l.state.commandHub)
+	ctx = appservice.ContextWithCommandHub(ctx, l.state.commandHub)
 	return l.state.readProjectionSnapshot(ctx, l.state.config.Backend, l.state.config.DataRoot, workspaceID)
 }
 

@@ -3,10 +3,9 @@ package runtimecore
 import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-type ManagedRuntimeFactory func(events.Hub, magicevent.Hub) *ManagedRuntime
+type ManagedRuntimeFactory func(magicevent.Hub) *ManagedRuntime
 
 type Session struct {
 	Bootstrap         *bootstrap.Runtime

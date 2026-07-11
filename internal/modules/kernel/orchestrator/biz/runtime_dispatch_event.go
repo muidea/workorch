@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -55,6 +55,9 @@ func (o *RuntimeOrchestrator) EnableEventDrivenDispatch(commandHub ...magicevent
 	}
 	if len(commandHub) > 0 {
 		o.commandHub = commandHub[0]
+		if o.eventer != nil {
+			o.eventer.notificationHub = commandHub[0]
+		}
 	}
 	o.eventDrivenDispatch = true
 }

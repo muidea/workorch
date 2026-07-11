@@ -8,9 +8,9 @@ import (
 
 	"github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -75,7 +75,7 @@ func TestServiceStartupRequiresFrameworkRuntime(t *testing.T) {
 func TestServiceRunUsesBackgroundRoutine(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	svc := &Service{
-		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, nil, routine),
+		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, routine),
 		backgroundRoutine: routine,
 		done:              make(chan error, 1),
 	}
@@ -111,9 +111,9 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 	dataRoot := t.TempDir()
 	const workspaceID = "ws-service-startup-inactive"
 	const runID = "run-service-startup-inactive"
-	session := newOwnerRuntimeSession(t, "file", dataRoot, nil)
+	session := newOwnerRuntimeSession(t, "file", dataRoot)
 	var err error
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 
 	routine := &recordingBackgroundRoutine{}
 	svc := &Service{
-		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "file", DataRoot: dataRoot}, nil, routine),
+		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "file", DataRoot: dataRoot}, routine),
 		backgroundRoutine: routine,
 		done:              make(chan error, 1),
 	}
@@ -154,17 +154,15 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 		t.Fatalf("Run submitted %d timers, want watchdog timer only", routine.timerCalls)
 	}
 
-	readRuntime := bootstrap.NewWithBackend("file", dataRoot)
-	defer func() { _ = readRuntime.Shutdown(ctx) }()
-	readExports := readRuntime.Exports()
-	workspaceRecord, err := readExports.Repositories.Workspaces.Get(ctx, workspaceID)
+	readRepositories := testkit.OpenRepositories("file", dataRoot)
+	workspaceRecord, err := readRepositories.Workspaces.Get(ctx, workspaceID)
 	if err != nil {
 		t.Fatalf("read recovered workspace: %v", err)
 	}
 	if workspaceRecord.State != common.WorkspaceStateActive || workspaceRecord.ActiveRunID != "" {
 		t.Fatalf("workspace = %+v, want active without active run", workspaceRecord)
 	}
-	runRecord, err := readExports.Repositories.Runs.GetByWorkspaceID(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), workspaceID, runID)
+	runRecord, err := readRepositories.Runs.GetByWorkspaceID(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), workspaceID, runID)
 	if err != nil {
 		t.Fatalf("read recovered run: %v", err)
 	}
@@ -217,7 +215,7 @@ func TestServiceRunReturnsErrorWhenBackgroundSubmitFails(t *testing.T) {
 	submitErr := errors.New("background routine is closed")
 	routine := &recordingBackgroundRoutine{err: submitErr}
 	svc := &Service{
-		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, nil, routine),
+		http:              newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, routine),
 		backgroundRoutine: routine,
 		done:              make(chan error, 1),
 	}
@@ -236,7 +234,7 @@ func TestServiceRunReturnsErrorWhenBackgroundSubmitFails(t *testing.T) {
 
 func TestHTTPServerStartupOnlySchedulesWatchdogTimer(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
-	httpServer := newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, nil, routine)
+	httpServer := newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, routine)
 
 	httpServer.state.scheduleWatchdog()
 	httpServer.state.scheduleWatchdog()
@@ -255,7 +253,7 @@ func TestHTTPServerStartupOnlySchedulesWatchdogTimer(t *testing.T) {
 func TestServerStateScheduleBackgroundFailureReleasesWaitGroup(t *testing.T) {
 	submitErr := errors.New("background routine is closed")
 	routine := &recordingBackgroundRoutine{err: submitErr}
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 
 	if state.scheduleBackground("test", func(context.Context) {}) {
 		t.Fatal("scheduleBackground returned true after background submission failure")

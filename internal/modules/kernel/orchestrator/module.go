@@ -11,13 +11,14 @@ import (
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	orchestratorservice "github.com/muidea/workorch/internal/modules/kernel/orchestrator/service"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 )
@@ -43,7 +44,6 @@ type Dependencies struct {
 	CoverageWorkItems     repository.CoverageWorkItemRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository
 	RuntimePolicy         orchestratorbiz.RuntimePolicy
-	EventHub              events.Hub
 	CommandHub            magicevent.Hub
 	BackgroundRoutine     task.BackgroundRoutine
 }
@@ -52,7 +52,7 @@ type Module struct {
 	bizPtr            *orchestratorbiz.RuntimeOrchestrator
 	servicePtr        *orchestratorservice.Module
 	steps             repository.StepRepository
-	eventHub          events.Hub
+	evidenceRecords   repository.EvidenceRecordRepository
 	rawEventHub       magicevent.Hub
 	rawObserver       magicevent.SimpleObserver
 	rawTopics         []string
@@ -78,7 +78,6 @@ func (m *Module) Configure(deps Dependencies) error {
 		deps.EvidenceRecords == nil ||
 		deps.CoverageWorkItems == nil ||
 		deps.ArtifactContinuations == nil ||
-		deps.EventHub == nil ||
 		deps.CommandHub == nil {
 		return common.ErrInvalidArgument
 	}
@@ -103,9 +102,9 @@ func (m *Module) Configure(deps Dependencies) error {
 			MemoryItems:           memoryEventRepository{hub: deps.CommandHub},
 			MemoryRecallTraces:    memoryRecallTraceEventRepository{hub: deps.CommandHub},
 		},
-		deps.EventHub,
 		deps.RuntimePolicy,
 	)
+
 	m.servicePtr = orchestratorservice.New(orchestratorservice.Dependencies{
 		StartRun:         m.bizPtr.StartRun,
 		DispatchNextStep: m.bizPtr.DispatchNextStep,
@@ -121,14 +120,14 @@ func (m *Module) Configure(deps Dependencies) error {
 	})
 	m.bizPtr.EnableEventDrivenDispatch(deps.CommandHub)
 	m.steps = deps.Steps
-	m.eventHub = deps.EventHub
+	m.evidenceRecords = deps.EvidenceRecords
 	m.rawEventHub = deps.CommandHub
 	m.backgroundRoutine = deps.BackgroundRoutine
 	return nil
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.servicePtr == nil || m.eventHub == nil {
+	if m == nil || m.servicePtr == nil || m.rawEventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.rawObserver != nil || m.runtimeObserver != nil {
@@ -170,6 +169,12 @@ func (m *Module) Start() error {
 		for _, topic := range m.rawTopics {
 			m.rawObserver.Subscribe(topic, m.handleMagicCommand)
 		}
+		m.rawTopics = append(m.rawTopics,
+			decisionevents.TopicDecisionCommandRecordEvidence,
+			approvalevents.TopicApprovalCommandRecordEvidence,
+		)
+		m.rawObserver.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, m.handleDecisionEvidenceCommand)
+		m.rawObserver.Subscribe(approvalevents.TopicApprovalCommandRecordEvidence, m.handleApprovalEvidenceCommand)
 	}
 	return nil
 }
@@ -193,7 +198,7 @@ func (m *Module) Stop(ctx context.Context) error {
 	m.servicePtr = nil
 	m.bizPtr = nil
 	m.steps = nil
-	m.eventHub = nil
+	m.evidenceRecords = nil
 	m.rawEventHub = nil
 	m.backgroundRoutine = nil
 	return nil

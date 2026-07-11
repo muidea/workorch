@@ -6,11 +6,10 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestConsolidateWorkspaceDefinitionRejectsMissingCanonicalBeforePublishing(t *testing.T) {
@@ -248,7 +247,6 @@ func stringPayload(payload map[string]any, key string) string {
 }
 
 type definitionMagicTestHub struct {
-	hub      *events.MagicHub
 	rawHub   magicevent.Hub
 	observer magicevent.SimpleObserver
 }
@@ -256,14 +254,12 @@ type definitionMagicTestHub struct {
 func newDefinitionMagicTestHub(t *testing.T) *definitionMagicTestHub {
 	t.Helper()
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHubOwner(rawHub, "definitionports/test")
 	ret := &definitionMagicTestHub{
-		hub:      hub,
 		rawHub:   rawHub,
 		observer: magicevent.NewSimpleObserver(workspaceevents.CommandDestination, rawHub),
 	}
 	t.Cleanup(func() {
-		hub.Terminate(context.Background())
+		rawHub.Terminate(context.Background())
 	})
 	return ret
 }

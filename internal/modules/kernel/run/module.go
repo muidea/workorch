@@ -12,14 +12,12 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 const ModuleID = modulecommon.ModuleID
 
 type Service = runservice.Service
-type Orchestrator = runbiz.Orchestrator
 type CreateRunCommand = runcontracts.CreateRunCommand
 type StartRunCommand = runcontracts.StartRunCommand
 type ResumeRunCommand = runcontracts.ResumeRunCommand
@@ -33,12 +31,10 @@ type SupersedeRunCommand = runcontracts.SupersedeRunCommand
 type FailRunCommand = runcontracts.FailRunCommand
 
 type Dependencies struct {
-	Runs         repository.RunRepository
-	Steps        repository.StepRepository
-	Checkpoints  repository.RuntimeCheckpointRepository
-	Workspaces   runbiz.WorkspaceReader
-	Orchestrator runbiz.Orchestrator
-	EventHub     magicevent.Hub
+	Runs        repository.RunRepository
+	Steps       repository.StepRepository
+	Checkpoints repository.RuntimeCheckpointRepository
+	EventHub    magicevent.Hub
 }
 
 type Module struct {
@@ -63,16 +59,7 @@ func (m *Module) Configure(deps Dependencies) error {
 	m.runs = deps.Runs
 	m.steps = deps.Steps
 	m.checkpoints = deps.Checkpoints
-	eventHubBridge := events.NewMagicHubWithHubOwner(deps.EventHub, ModuleID)
-	workspaces := deps.Workspaces
-	if workspaces == nil {
-		workspaces = workspaceEventReader{hub: deps.EventHub}
-	}
-	orchestrator := deps.Orchestrator
-	if orchestrator == nil {
-		orchestrator = NewEventOrchestrator(deps.EventHub)
-	}
-	m.bizPtr = runbiz.NewServiceWithWorkspaceReader(deps.Runs, workspaces, orchestrator, eventHubBridge)
+	m.bizPtr = runbiz.NewServiceWithEventHub(deps.Runs, deps.EventHub)
 	m.servicePtr = runservice.New(runservice.Dependencies{
 		CreateRun:       m.bizPtr.CreateRun,
 		EnsureRun:       m.bizPtr.EnsureRun,

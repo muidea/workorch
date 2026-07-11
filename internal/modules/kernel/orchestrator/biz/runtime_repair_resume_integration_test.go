@@ -5,15 +5,14 @@ import (
 	"errors"
 	"testing"
 
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -100,9 +99,8 @@ func TestRuntimeOrchestrator_RunningResumeReplansFromResolvedDecisionOnFailedNon
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
+
 	workspaceID := common.WorkspaceID("ws-running-resolved-replan")
 	runID := common.RunID("run-running-resolved-replan")
 	ticketStepID := common.StepID(runID + "/provider-retry-001")
@@ -562,9 +560,8 @@ func TestRuntimeOrchestrator_BlockerAutoResumePolicyMatrix(t *testing.T) {
 					ToolCalls:          memory.NewToolCallRepository(),
 					ValidationResults:  memory.NewValidationResultRepository(),
 					RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-				},
-				events.NewMemoryHub(),
-			)
+				})
+
 			runID := tt.seed(ctx, t, orch, repos)
 
 			err := orch.ResumeRun(ctx, runID)

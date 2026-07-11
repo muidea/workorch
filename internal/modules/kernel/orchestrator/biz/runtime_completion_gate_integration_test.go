@@ -9,10 +9,9 @@ import (
 	"testing"
 
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -70,9 +69,7 @@ func TestRuntimeRepairInputForSatisfiedDoDCoverageMissingIsAssessmentOnly(t *tes
 		stepRepo,
 		memory.NewWorkspaceRepository(),
 		memory.NewDecisionTicketRepository(),
-		memory.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memory.NewApprovalRepository())
 
 	input := orch.runtimeRepairFollowUpStepInput(ctx, run, step, 1, errors.New("missing goal coverage"))
 
@@ -192,9 +189,8 @@ func TestRuntimeRepairInputIncludesLatestClosureEvidenceForCoverageCorrection(t 
 		stepRepo,
 		memory.NewWorkspaceRepository(),
 		memory.NewDecisionTicketRepository(),
-		memory.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memory.NewApprovalRepository())
+
 	orch.evidence.Patches = patchRepo
 	orch.evidence.ValidationResults = validationRepo
 
@@ -286,9 +282,7 @@ func TestRuntimeRepairInputTreatsGraphLimitAssessmentAsCoverageCorrection(t *tes
 		stepRepo,
 		memory.NewWorkspaceRepository(),
 		memory.NewDecisionTicketRepository(),
-		memory.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memory.NewApprovalRepository())
 
 	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedAssessment, 1, errors.New("coverage missing"))
 
@@ -365,9 +359,7 @@ func TestRuntimeRepairInputForMissingDeliverableCoverageIsAssessmentOnly(t *test
 		memory.NewStepRepository(),
 		memory.NewWorkspaceRepository(),
 		memory.NewDecisionTicketRepository(),
-		memory.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memory.NewApprovalRepository())
 
 	input := orch.runtimeRepairFollowUpStepInput(context.Background(), run, step, 1, errors.New("missing deliverable coverage"))
 
@@ -917,9 +909,8 @@ func TestRuntimeRepairFailedCompletionStateWithAssessmentUsesDoDGate(t *testing.
 		memory.NewDecisionTicketRepository(),
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Results: resultRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo})
+
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -1291,9 +1282,7 @@ func TestRuntimeOrchestrator_StateChangingProviderRetryViolationContinuesRecover
 			Results:            resultRepo,
 			ValidationResults:  validationRepo,
 			RuntimeCheckpoints: checkpointRepo,
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-state-changing-retry-closure")
 	runID := common.RunID("run-state-changing-retry-closure")

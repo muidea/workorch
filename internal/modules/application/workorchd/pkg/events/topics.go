@@ -1,5 +1,7 @@
 package events
 
+const NotificationDestination = "/workorchd/consumers/#"
+
 const (
 	TopicWorkorchDCommandDone                  = "/workorchd/command/done"
 	TopicWorkorchDCommandWorkspaceRunRequested = "/workorchd/command/workspace-run/requested"

@@ -30,8 +30,8 @@ Last Updated: 2026-05-30
 - `internal/modules/application/workorchd/biz/appservice/workspace_setup_draft_service.go`
 - `internal/modules/application/workorchd/biz/appservice/{contextregistrycore,contextregistryports}`
 - `internal/modules/application/workorchd/biz/appservice/{soul_service.go,skill_service.go,mcp_service.go,memory_service.go}`
-- `internal/modules/kernel/soul/*`
-- `internal/modules/kernel/mcp/*`
+- `internal/modules/blocks/soul/*`
+- `internal/modules/blocks/mcpregistry/*`
 - `internal/modules/blocks/{file,git,web,shell,mcp}/*`
 - `scripts/verify-workspace-template-soul.sh`
 - `scripts/verify-workorch-runtime-profile-software-dev.sh`

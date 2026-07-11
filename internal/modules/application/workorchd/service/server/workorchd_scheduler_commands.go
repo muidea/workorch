@@ -176,19 +176,6 @@ func schedulerAcceptedHTTPBody(config Config, action string, command workorchdev
 	return body
 }
 
-func validateWorkorchDSchedulerAcceptedResponse(topic string, response events.Envelope) error {
-	if strings.TrimSpace(response.Topic) != strings.TrimSpace(topic)+"/accepted" {
-		return fmt.Errorf("%w: scheduler command %s returned unexpected response topic %s", common.ErrConflict, topic, response.Topic)
-	}
-	if accepted, _ := response.Payload["accepted"].(bool); !accepted {
-		return fmt.Errorf("%w: scheduler command %s was not accepted", common.ErrConflict, topic)
-	}
-	if strings.TrimSpace(response.SourceModule) != "workorchd/scheduler" {
-		return fmt.Errorf("%w: scheduler command %s returned response from %s", common.ErrConflict, topic, response.SourceModule)
-	}
-	return nil
-}
-
 func schedulerSubjectType(topic string) string {
 	switch topic {
 	case workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested:

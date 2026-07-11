@@ -356,7 +356,7 @@ func TestReadAndListWorkspacesProjectActiveRunState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}

@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -49,7 +49,7 @@ func workspaceExecutionContext(ctx context.Context, request ActivateWorkspaceExe
 }
 
 func startWorkspaceExecutionRun(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any) (common.RunID, error) {
-	return CreateAndStartWorkspaceExecutionRun(ctx, request.EventHub, request.Hub, CreateAndStartWorkspaceExecutionRunRequest{
+	return CreateAndStartWorkspaceExecutionRun(ctx, request.Hub, CreateAndStartWorkspaceExecutionRunRequest{
 		WorkspaceID:           workspaceID,
 		GoalID:                goalID,
 		DoDID:                 dodID,

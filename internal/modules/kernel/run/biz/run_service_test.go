@@ -5,17 +5,18 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
-	approvalModel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisionModel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	approvalModel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisionModel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -24,6 +25,47 @@ type countingRunRepository struct {
 	base                  *memory.RunRepository
 	getCalls              atomic.Int32
 	getByWorkspaceIDCalls atomic.Int32
+}
+
+type recordedRunNotification struct {
+	topic string
+	data  runevents.RunStateChangedData
+}
+
+func newRunNotificationTestHub(t *testing.T, ctx context.Context) (magicevent.Hub, <-chan recordedRunNotification) {
+	t.Helper()
+	hub := magicevent.NewHub(16)
+	const observerID = "/run/consumers/kernel/run/biz-notification-test"
+	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, hub)
+	received := make(chan recordedRunNotification, 8)
+	for _, topic := range []string{runevents.TopicRunCreated, runevents.TopicRunStateChanged} {
+		topic := topic
+		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
+			if data, ok := event.Data().(runevents.RunStateChangedData); ok {
+				received <- recordedRunNotification{topic: topic, data: data}
+			}
+			if result != nil {
+				result.Set(nil, nil)
+			}
+		})
+	}
+	t.Cleanup(func() {
+		observer.Unsubscribe(runevents.TopicRunCreated)
+		observer.Unsubscribe(runevents.TopicRunStateChanged)
+		hub.Terminate(ctx)
+	})
+	return hub, received
+}
+
+func readRunNotification(t *testing.T, received <-chan recordedRunNotification) recordedRunNotification {
+	t.Helper()
+	select {
+	case notification := <-received:
+		return notification
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for typed run notification")
+		return recordedRunNotification{}
+	}
 }
 
 func newCountingRunRepository() *countingRunRepository {
@@ -73,9 +115,8 @@ func TestService_CreateRunStartRunCompleteRun_Mainline(t *testing.T) {
 		stepRepo,
 		workspaceRepo,
 		ticketRepo,
-		approvalRepo,
-		nil,
-	)
+		approvalRepo)
+
 	service := NewService(runRepo, workspaceRepo, orch, nil)
 
 	workspaceID := common.WorkspaceID("ws-1")
@@ -180,7 +221,7 @@ func TestService_CreateRun_PublishesRunCreatedEvent(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
-	hub := events.NewMemoryHub()
+	hub, notifications := newRunNotificationTestHub(t, ctx)
 	service := NewService(runRepo, workspaceRepo, nil, hub)
 
 	workspaceID := common.WorkspaceID("ws-created-event")
@@ -208,15 +249,50 @@ func TestService_CreateRun_PublishesRunCreatedEvent(t *testing.T) {
 		t.Fatalf("definitionRevision = %q, want effective goal/dod revision", created.DefinitionRevision)
 	}
 
-	published := hub.Published()
-	if len(published) != 1 {
-		t.Fatalf("published events = %d, want 1", len(published))
+	notification := readRunNotification(t, notifications)
+	if notification.topic != runevents.TopicRunCreated {
+		t.Fatalf("topic = %s, want %s", notification.topic, runevents.TopicRunCreated)
 	}
-	if published[0].Topic != runevents.TopicRunCreated {
-		t.Fatalf("topic = %s, want %s", published[0].Topic, runevents.TopicRunCreated)
+	if notification.data.GoalID != "goal-created-event" || notification.data.DoDID != "dod-created-event" {
+		t.Fatalf("data = %#v, want goalId/doDId", notification.data)
 	}
-	if published[0].Payload[events.PayloadKeyGoalID] != "goal-created-event" || published[0].Payload[events.PayloadKeyDoDID] != "dod-created-event" {
-		t.Fatalf("payload = %#v, want goalId/doDId", published[0].Payload)
+}
+
+func TestService_CreateRunPublishesConcreteRunStateNotification(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	rawHub := magicevent.NewHub(16)
+	t.Cleanup(func() { rawHub.Terminate(ctx) })
+	const observerID = "/run/consumers/kernel/run/biz-test"
+	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, rawHub)
+	received := make(chan runevents.RunStateChangedData, 1)
+	observer.Subscribe(runevents.TopicRunCreated, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(runevents.RunStateChangedData); ok {
+			received <- data
+		}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	t.Cleanup(func() { observer.Unsubscribe(runevents.TopicRunCreated) })
+
+	workspaceID := common.WorkspaceID("ws-created-typed")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	service := newServiceWithPorts(runRepo, testWorkspaceRepositoryReader{WorkspaceRepository: workspaceRepo}, nil, eventRunStateNotifier{hub: rawHub})
+	if err := service.CreateRun(ctx, runservice.CreateRunCommand{RunID: "run-created-typed", WorkspaceID: workspaceID, GoalID: "goal-created-typed", DoDID: "dod-created-typed"}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	select {
+	case data := <-received:
+		if data.RunID != "run-created-typed" || data.WorkspaceID != workspaceID || data.State != common.RunStatePending {
+			t.Fatalf("run notification = %+v", data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("typed run created notification not received")
 	}
 }
 
@@ -341,9 +417,8 @@ func TestService_EnsureRunLifecycleHonorsIdempotentAndTerminalSemantics(t *testi
 		stepRepo,
 		workspaceRepo,
 		ticketRepo,
-		approvalRepo,
-		nil,
-	)
+		approvalRepo)
+
 	service := NewService(runRepo, workspaceRepo, orch, nil)
 
 	workspaceID := common.WorkspaceID("ws-ensure-lifecycle")
@@ -404,9 +479,8 @@ func TestService_EnsureBlockedOnDecision_ReturnsConflictWhenBlockedByDifferentRe
 		stepRepo,
 		workspaceRepo,
 		ticketRepo,
-		approvalRepo,
-		nil,
-	)
+		approvalRepo)
+
 	service := NewService(runRepo, workspaceRepo, orch, nil)
 
 	workspaceID := common.WorkspaceID("ws-decision-block-conflict")
@@ -479,9 +553,8 @@ func TestService_EnsureBlockedOnApproval_ReturnsConflictWhenBlockedByDifferentRe
 		stepRepo,
 		workspaceRepo,
 		ticketRepo,
-		approvalRepo,
-		nil,
-	)
+		approvalRepo)
+
 	service := NewService(runRepo, workspaceRepo, orch, nil)
 
 	workspaceID := common.WorkspaceID("ws-approval-block-conflict")
@@ -576,9 +649,8 @@ func TestService_ResumeRun_FromBlockedStates_ReachesMinimalExecutionChain(t *tes
 				stepRepo,
 				workspaceRepo,
 				ticketRepo,
-				approvalRepo,
-				nil,
-			)
+				approvalRepo)
+
 			service := NewService(runRepo, workspaceRepo, orch, nil)
 
 			workspaceID := common.WorkspaceID("ws-" + tc.name)
@@ -695,9 +767,8 @@ func TestService_ResumeRun_RejectsNonBlockedStates(t *testing.T) {
 		stepRepo,
 		workspaceRepo,
 		ticketRepo,
-		approvalRepo,
-		nil,
-	)
+		approvalRepo)
+
 	service := NewService(runRepo, workspaceRepo, orch, nil)
 
 	workspaceID := common.WorkspaceID("ws-1")
@@ -740,9 +811,8 @@ func TestService_ResumeRunDelegatesStateReadToOrchestrator(t *testing.T) {
 		stepRepo,
 		workspaceRepo,
 		ticketRepo,
-		approvalRepo,
-		nil,
-	)
+		approvalRepo)
+
 	service := NewService(runRepo, workspaceRepo, orch, nil)
 
 	workspaceID := common.WorkspaceID("ws-resume-delegates-read")
@@ -775,9 +845,8 @@ func TestService_ResumeRunReusesLoadedRunForOrchestrator(t *testing.T) {
 		stepRepo,
 		workspaceRepo,
 		ticketRepo,
-		approvalRepo,
-		nil,
-	)
+		approvalRepo)
+
 	service := NewService(runRepo, workspaceRepo, orch, nil)
 
 	loaded := &runmodel.Run{
@@ -798,7 +867,7 @@ func TestService_CompleteRun_WithoutOrchestrator(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
-	hub := events.NewMemoryHub()
+	hub, notifications := newRunNotificationTestHub(t, ctx)
 	service := NewService(runRepo, workspaceRepo, nil, hub)
 
 	workspaceID := common.WorkspaceID("ws-1")
@@ -830,13 +899,10 @@ func TestService_CompleteRun_WithoutOrchestrator(t *testing.T) {
 		t.Fatalf("run state = %q, want completed", r.State)
 	}
 
-	published := hub.Published()
-	if len(published) != 2 {
-		t.Fatalf("published events = %d, want 2", len(published))
-	}
-	last := published[len(published)-1]
-	if last.Topic != runevents.TopicRunStateChanged || last.Payload[events.PayloadKeyState] != string(common.RunStateCompleted) {
-		t.Fatalf("last event = %#v, want run completed", last)
+	_ = readRunNotification(t, notifications)
+	last := readRunNotification(t, notifications)
+	if last.topic != runevents.TopicRunStateChanged || last.data.State != common.RunStateCompleted {
+		t.Fatalf("last notification = %#v, want run completed", last)
 	}
 }
 
@@ -864,30 +930,6 @@ func TestService_RunStateMutationUsesScopedGetterWhenWorkspaceContextExists(t *t
 	}
 	if runRepo.getByWorkspaceIDCalls.Load() != 1 {
 		t.Fatalf("GetByWorkspaceID calls = %d, want 1", runRepo.getByWorkspaceIDCalls.Load())
-	}
-}
-
-func TestService_PublishesRunNotificationsThroughAsyncHub(t *testing.T) {
-	ctx := context.Background()
-	workspaceRepo := memory.NewWorkspaceRepository()
-	runRepo := memory.NewRunRepository()
-	hub := &recordingRunAsyncHub{}
-	service := NewService(runRepo, workspaceRepo, nil, hub)
-
-	workspaceID := common.WorkspaceID("ws-async-run")
-	runID := common.RunID("run-async")
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
-		t.Fatalf("seed workspace: %v", err)
-	}
-	if err := service.CreateRun(ctx, runservice.CreateRunCommand{RunID: runID, WorkspaceID: workspaceID}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-
-	if hub.syncPublishes != 0 || hub.asyncPublishes != 1 {
-		t.Fatalf("publish counts = sync:%d async:%d, want async run notification", hub.syncPublishes, hub.asyncPublishes)
-	}
-	if len(hub.published) != 1 || hub.published[0].Topic != runevents.TopicRunCreated {
-		t.Fatalf("published = %+v, want run created notification", hub.published)
 	}
 }
 
@@ -1009,7 +1051,7 @@ func TestService_FailRun_WithoutOrchestrator(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
-	hub := events.NewMemoryHub()
+	hub, notifications := newRunNotificationTestHub(t, ctx)
 	service := NewService(runRepo, workspaceRepo, nil, hub)
 
 	workspaceID := common.WorkspaceID("ws-fail")
@@ -1050,13 +1092,10 @@ func TestService_FailRun_WithoutOrchestrator(t *testing.T) {
 		t.Fatalf("failureReason = %q, want manual fail", failed.FailureReason)
 	}
 
-	published := hub.Published()
-	if len(published) != 2 {
-		t.Fatalf("published events = %d, want 2", len(published))
-	}
-	last := published[len(published)-1]
-	if last.Topic != runevents.TopicRunStateChanged || last.Payload[events.PayloadKeyFailureReason] != "manual fail" {
-		t.Fatalf("last event = %#v, want failure reason", last)
+	_ = readRunNotification(t, notifications)
+	last := readRunNotification(t, notifications)
+	if last.topic != runevents.TopicRunStateChanged || last.data.FailureReason != "manual fail" {
+		t.Fatalf("last notification = %#v, want failure reason", last)
 	}
 }
 
@@ -1070,26 +1109,4 @@ func (s *serviceRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, _ runtimem
 		return runtimemodel.StepExecutionResult{}, s.err
 	}
 	return runtimemodel.StepExecutionResult{Output: s.output}, nil
-}
-
-type recordingRunAsyncHub struct {
-	syncPublishes  int
-	asyncPublishes int
-	published      []events.Envelope
-}
-
-func (h *recordingRunAsyncHub) Publish(_ context.Context, envelope events.Envelope) error {
-	h.syncPublishes++
-	h.published = append(h.published, envelope)
-	return nil
-}
-
-func (h *recordingRunAsyncHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
-	h.asyncPublishes++
-	h.published = append(h.published, envelope)
-	return nil
-}
-
-func (h *recordingRunAsyncHub) Subscribe(string, events.Handler) func() {
-	return func() {}
 }

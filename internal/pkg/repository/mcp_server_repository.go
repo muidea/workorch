@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	mcp "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+	mcp "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

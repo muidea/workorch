@@ -3,8 +3,8 @@ package activationports
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 )
 
 func appendSoulRoutingContext(contextData map[string]any, defaultSoul *soulmodel.Soul, soulRouting appmodelcore.SoulRouting) {

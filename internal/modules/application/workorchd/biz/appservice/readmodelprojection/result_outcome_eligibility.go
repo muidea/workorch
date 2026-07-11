@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )

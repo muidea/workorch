@@ -3,7 +3,7 @@ package runtimeports
 import (
 	"context"
 
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )

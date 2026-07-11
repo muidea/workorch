@@ -25,15 +25,15 @@ Last Updated: 2026-05-30
 
 本轮主要检查以下实现与映射证据：
 
-- `internal/modules/kernel/workspace/pkg/models/{goal,dod}.go`
-- `internal/modules/kernel/workspace/biz/goal_dod_manager.go`
+- `internal/modules/blocks/workspace/pkg/models/{goal,dod}.go`
+- `internal/modules/blocks/workspace/biz/goal_dod_manager.go`
 - `internal/modules/kernel/run/pkg/models/run.go`
-- `internal/modules/kernel/result/pkg/models`
+- `internal/modules/blocks/result/pkg/models`
 - `internal/pkg/workorchruntimecontract/artifact_continuation.go`
 - `internal/pkg/repository/artifact_continuation_repository.go`
 - `internal/modules/kernel/orchestrator/biz/runtime_coverage_work_items.go`
-- `internal/modules/kernel/decision/pkg/models`
-- `internal/modules/kernel/memory/pkg/models/memory_recall_trace.go`
+- `internal/modules/blocks/decision/pkg/models`
+- `internal/modules/blocks/memory/pkg/models/memory_recall_trace.go`
 - `internal/modules/kernel/eventstream/pkg/models/event_record.go`
 - `internal/modules/application/workorchd/biz/appservice/read_model_service.go`
 - `internal/modules/application/workorchd/biz/appservice/read_model_types.go`
@@ -46,7 +46,7 @@ Last Updated: 2026-05-30
 | --- | --- | --- | --- |
 | Workspace / Goal / DoD | workspace models + `GoalDoDManager` + tests | pass | `deliverableDirectory` / `internalDirectory`、definition revision、previous definition hash/id、lineage state 均有正式落点。 |
 | Run | `kernel/run/pkg/models/run.go` + activation/run service tests | pass | `Run.definitionRevision`、`goalId`、`doDId`、`blockingTicketId`、`blockingApprovalId` 均是正式字段。 |
-| Result / Artifact | `kernel/result/pkg/models` + read-model/repository tests | pass | Result / Artifact 是正式对象；Artifact 支持 run/step/result 归属，deliverable 与 process evidence 通过 category/owner/projection 分层。 |
+| Result / Artifact | `blocks/result/pkg/models` + read-model/repository tests | pass | Result / Artifact 是正式对象；Artifact 支持 run/step/result 归属，deliverable 与 process evidence 通过 category/owner/projection 分层。 |
 | CoverageWorkItem | `runtime_coverage_work_items.go` + `workorchruntimecontract.CoverageWorkItem` + repository contract | pass | 已新增正式 runtime contract model、repository interface、memory/file/workspace-scoped backend 和 repository contract；orchestrator coverage ledger 主路径已同步写入独立 `CoverageWorkItemRepository`，read-model 列表已通过 EventHub owner command 读取 owner repository；生产 dispatch/provider context 前会从 owner repository 水合 `Run.ExecutionContext.coverageWorkItems`，该字段仅作为 provider-facing/cache-stable 投影。 |
 | ArtifactContinuation | `artifact_continuation.go` + repositories + tests | pass | `currentStepId`、`outputMode`、sequence/hash/progress/coverage/state 等字段齐备；plan/chunk/assembled 与 metadata-first projection 成立。 |
 | Governance | decision/approval models + appservice tests | pass | Ticket/Approval/Resolution 是正式治理对象；`Resolution` 已将 `continuationAction`、`resumeRunId`、`successorRunId` 提升为顶层恢复引用字段，同时保留 `payload` 作为扩展数据。 |
@@ -142,7 +142,7 @@ Last Updated: 2026-05-30
   - 证明 coverage ledger、artifact continuation、context package、output mode、runtime verifier fixture 等对象相关主链仍通过。
 - `go test ./internal/pkg/repository ./internal/modules/application/workorchd/biz/appservice -run 'Test(ArtifactContinuation|MemoryRecallTrace|EventRecord|Decision|Approval|ReadRunSnapshotIncludesArtifactContinuation|ListDecision|ListApproval|ReadRunSnapshotWithBackendReturnsExecutionEvidence|ReadRunObservability|MapTaskProgress|MapResultQuality)' -count=1`
   - 证明 repository contract、read-model projection、Decision/Approval、MemoryRecallTrace、EventRecord、ArtifactContinuation 相关对象证据仍成立。
-- `go test ./internal/modules/kernel/decision/... ./internal/pkg/events ./internal/pkg/repository ./internal/modules/application/workorchd/biz/appservice/readmodelports ./internal/services/workorch/biz/backends ./internal/services/workorch/service/tui -count=1 -timeout=180s`
+- `go test ./internal/modules/blocks/decision/... ./internal/pkg/events ./internal/pkg/repository ./internal/modules/application/workorchd/biz/appservice/readmodelports ./internal/services/workorch/biz/backends ./internal/services/workorch/service/tui -count=1 -timeout=180s`
   - 证明 Resolution 顶层恢复引用字段在 decision model、EventHub payload、repository contract、read-model port、remote backend 与 TUI port 链路中保持一致。
 - `go test ./internal/modules/application/workorchd/biz/appservice/governanceports ./internal/modules/application/workorchd/biz/appservice/... ./internal/pkg/workorchclient ./internal/pkg/workorchport ./internal/services/workorch/... -count=1 -timeout=240s`
   - 证明 appservice governance command、read-model projection、client/port DTO 与 process service 消费链路保持一致。

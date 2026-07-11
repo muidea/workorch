@@ -1,12 +1,12 @@
 package orchestrator
 
 import (
+	"context"
 	"sync"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type dispatchCommandRecorder struct {
@@ -15,7 +15,6 @@ type dispatchCommandRecorder struct {
 }
 
 type recordingDispatchMagicHub struct {
-	*events.MagicHub
 	rawHub   magicevent.Hub
 	recorder *dispatchCommandRecorder
 }
@@ -25,7 +24,6 @@ func newRecordingDispatchMagicHub(t *testing.T) (*recordingDispatchMagicHub, *di
 	rawHub := magicevent.NewHub(32)
 	recorder := &dispatchCommandRecorder{}
 	hub := &recordingDispatchMagicHub{
-		MagicHub: events.NewMagicHubWithHubOwner(rawHub, "kernel/orchestrator/test"),
 		rawHub:   rawHub,
 		recorder: recorder,
 	}
@@ -42,6 +40,7 @@ func newRecordingDispatchMagicHub(t *testing.T) (*recordingDispatchMagicHub, *di
 	})
 	t.Cleanup(func() {
 		observer.Unsubscribe(orchestratorevents.TopicOrchestratorDispatchStepRequested)
+		rawHub.Terminate(context.Background())
 	})
 	return hub, recorder
 }

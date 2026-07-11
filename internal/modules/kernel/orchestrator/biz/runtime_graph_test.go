@@ -11,11 +11,10 @@ import (
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -40,9 +39,8 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchSerializesLLMDispatchRequests(
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		hub,
-	)
+		memoryrepo.NewApprovalRepository())
+
 	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	err := orch.dispatchGraphStepBatchWithWorkspace(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}, []stepDispatchSpec{
@@ -151,7 +149,7 @@ func TestRuntimeOrchestrator_CompletedGraphBatchDispatchesDependentValidation(t 
 	if err := stepRepo.Create(ctx, patch); err != nil {
 		t.Fatalf("seed patch step: %v", err)
 	}
-	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memoryrepo.NewDecisionTicketRepository(), memoryrepo.NewApprovalRepository(), hub)
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memoryrepo.NewDecisionTicketRepository(), memoryrepo.NewApprovalRepository())
 	orch.EnableEventDrivenDispatch(hub.rawHub)
 	steps, err := stepRepo.ListByRun(ctx, runID)
 	if err != nil {
@@ -203,9 +201,7 @@ func TestRuntimeOrchestrator_RuntimeDispatchRejectsKindOutsideRequiredOutput(t *
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memoryrepo.NewApprovalRepository())
 
 	err := orch.dispatchStepWithWorkspace(ctx, run, stepID, runtimemodel.StepKindMCPToolCall, input, workspace)
 	if err != nil {
@@ -469,9 +465,7 @@ func TestDispatchRequestedStepRejectsGraphLocalAuthorityDriftBeforeStepCreate(t 
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memoryrepo.NewApprovalRepository())
 
 	err := orch.DispatchRequestedStep(ctx, orchestratorcontracts.DispatchStepCommand{
 		WorkspaceID: workspaceID,
@@ -600,7 +594,7 @@ func TestContinueGraphBatchSkipsObsoleteGraphLocalAuthorityAndRequestsCurrentFol
 	if err := stepRepo.Create(ctx, patch); err != nil {
 		t.Fatalf("seed graph step: %v", err)
 	}
-	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memoryrepo.NewDecisionTicketRepository(), memoryrepo.NewApprovalRepository(), hub)
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memoryrepo.NewDecisionTicketRepository(), memoryrepo.NewApprovalRepository())
 	orch.EnableEventDrivenDispatch(hub.rawHub)
 	steps, err := stepRepo.ListByRun(ctx, runID)
 	if err != nil {
@@ -661,7 +655,7 @@ func TestFinalizeRootGraphSkipsObsoleteGraphLocalAuthorityAndRequestsCurrentFoll
 	}); err != nil {
 		t.Fatalf("seed root step: %v", err)
 	}
-	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memoryrepo.NewDecisionTicketRepository(), memoryrepo.NewApprovalRepository(), hub)
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, memoryrepo.NewDecisionTicketRepository(), memoryrepo.NewApprovalRepository())
 	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
@@ -812,9 +806,8 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchStepCompletionDispatchesNextNo
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		hub,
-	)
+		memoryrepo.NewApprovalRepository())
+
 	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	if err := orch.FinalizeRuntimeStepResult(ctx, runID, childStepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "completed"}}, nil); err != nil {
@@ -890,9 +883,8 @@ func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayContinuesNextNode(
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		hub,
-	)
+		memoryrepo.NewApprovalRepository())
+
 	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	if err := orch.FinalizeRuntimeStepResult(ctx, runID, childStepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "completed"}}, nil); err != nil {
@@ -979,9 +971,8 @@ func TestRuntimeOrchestrator_CompletedGraphBatchTerminalReplayDispatchesAuthorit
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		hub,
-	)
+		memoryrepo.NewApprovalRepository())
+
 	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	if err := orch.FinalizeRuntimeStepResult(ctx, runID, firstStepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "completed"}}, nil); err != nil {
@@ -1121,9 +1112,8 @@ func TestRuntimeOrchestrator_CompletedPatchGraphNodeContinuesDependentValidation
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		hub,
-	)
+		memoryrepo.NewApprovalRepository())
+
 	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	if err := orch.FinalizeRuntimeStepResult(ctx, runID, patchStepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "completed"}}, nil); err != nil {
@@ -1184,9 +1174,8 @@ func TestRuntimeOrchestrator_GraphBatchPatchApplyFailureDispatchesRuntimeRepair(
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		hub,
-	)
+		memoryrepo.NewApprovalRepository())
+
 	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	if err := orch.handleRuntimeStepFailure(ctx, run, step, nil, step.Output, "runtime patch application failed", errors.New("conflict: patch baseHash mismatch")); err != nil {
@@ -1246,9 +1235,8 @@ func TestRuntimeOrchestrator_EventDrivenDispatchPublishesAuthorityAlignedInput(t
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		hub,
-	)
+		memoryrepo.NewApprovalRepository())
+
 	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	err := orch.RequestUniqueDispatchStep(ctx, run, stepID, llmWorkspaceExecutionStepKind, map[string]any{
@@ -1362,9 +1350,7 @@ func TestRuntimeOrchestrator_DispatchRequestedStepSkipsSecondActiveLLMWorkspaceE
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memoryrepo.NewApprovalRepository())
 
 	secondStepID := common.StepID(runID + "/second-llm")
 	err := orch.DispatchRequestedStep(ctx, orchestratorcontracts.DispatchStepCommand{
@@ -1411,9 +1397,7 @@ func TestRuntimeOrchestrator_DispatchRequestedStepHydratesGapBaseline(t *testing
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memoryrepo.NewApprovalRepository())
 
 	if err := orch.DispatchRequestedStep(ctx, orchestratorcontracts.DispatchStepCommand{
 		WorkspaceID: workspaceID,
@@ -1464,9 +1448,7 @@ func TestRuntimeOrchestratorDispatchRequestedStepUsesScopedRunLookup(t *testing.
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memoryrepo.NewApprovalRepository())
 
 	if err := orch.DispatchRequestedStep(ctx, orchestratorcontracts.DispatchStepCommand{
 		WorkspaceID: workspaceID,
@@ -1564,9 +1546,7 @@ func TestRuntimeOrchestrator_DispatchRequestedStepHonorsGapBaselineWaitAction(t 
 		stepRepo,
 		workspaceRepo,
 		memoryrepo.NewDecisionTicketRepository(),
-		memoryrepo.NewApprovalRepository(),
-		events.NewMemoryHub(),
-	)
+		memoryrepo.NewApprovalRepository())
 
 	err := orch.DispatchRequestedStep(ctx, orchestratorcontracts.DispatchStepCommand{
 		WorkspaceID: workspaceID,

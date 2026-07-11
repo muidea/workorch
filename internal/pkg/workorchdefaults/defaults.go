@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"strings"
 
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
-	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -185,7 +185,19 @@ func EnsureBuiltinDefaults(ctx context.Context, soulRepo repository.SoulReposito
 	if soulRepo == nil || templateRepo == nil {
 		return nil
 	}
+	if err := EnsureBuiltinSoulDefaults(ctx, soulRepo); err != nil {
+		return err
+	}
+	if err := EnsureBuiltinWorkspaceTemplateDefaults(ctx, templateRepo); err != nil {
+		return err
+	}
+	return EnsureBuiltinMCPDefaults(ctx, mcpServerRepo, mcpCapabilityRepo)
+}
 
+func EnsureBuiltinSoulDefaults(ctx context.Context, soulRepo repository.SoulRepository) error {
+	if soulRepo == nil {
+		return nil
+	}
 	souls, err := loadEmbeddedSouls()
 	if err != nil {
 		return err
@@ -210,7 +222,13 @@ func EnsureBuiltinDefaults(ctx context.Context, soulRepo repository.SoulReposito
 			return err
 		}
 	}
+	return nil
+}
 
+func EnsureBuiltinWorkspaceTemplateDefaults(ctx context.Context, templateRepo repository.WorkspaceTemplateRepository) error {
+	if templateRepo == nil {
+		return nil
+	}
 	templates, err := loadEmbeddedTemplates()
 	if err != nil {
 		return err
@@ -223,6 +241,10 @@ func EnsureBuiltinDefaults(ctx context.Context, soulRepo repository.SoulReposito
 			return err
 		}
 	}
+	return nil
+}
+
+func EnsureBuiltinMCPDefaults(ctx context.Context, mcpServerRepo repository.MCPServerRepository, mcpCapabilityRepo repository.MCPCapabilityRepository) error {
 	if mcpServerRepo != nil {
 		servers, err := loadEmbeddedMCPServers()
 		if err != nil {

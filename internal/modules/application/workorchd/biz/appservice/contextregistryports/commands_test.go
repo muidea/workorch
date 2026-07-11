@@ -7,20 +7,19 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
-	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
-	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
-	skillevents "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/events"
-	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
+	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
+	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
-	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
-	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -113,49 +112,6 @@ func TestPublishMemoryItemPublishesScopedCommandEnvelope(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("PublishMemoryItem: %v", err)
 	}
-}
-
-func TestPublishMemoryEventPublishesNotificationThroughAsyncHub(t *testing.T) {
-	hub := &recordingMemoryEventAsyncHub{}
-	item := &memorymodel.MemoryItem{
-		ID:          "mem-notify-async",
-		WorkspaceID: "ws-notify-async",
-		RunID:       "run-notify-async",
-		MemoryType:  "working",
-		Summary:     "memory notification",
-	}
-
-	if err := PublishMemoryEvent(context.Background(), hub, memoryevents.TopicMemoryUpdated, item); err != nil {
-		t.Fatalf("PublishMemoryEvent: %v", err)
-	}
-	if len(hub.sync) != 0 {
-		t.Fatalf("sync publishes = %+v, want none for notification", hub.sync)
-	}
-	if len(hub.async) != 1 || hub.async[0].Topic != memoryevents.TopicMemoryUpdated {
-		t.Fatalf("async publishes = %+v, want one memory updated notification", hub.async)
-	}
-	if hub.async[0].WorkspaceID != string(item.WorkspaceID) || hub.async[0].RunID != string(item.RunID) {
-		t.Fatalf("async scope = workspace:%q run:%q", hub.async[0].WorkspaceID, hub.async[0].RunID)
-	}
-}
-
-type recordingMemoryEventAsyncHub struct {
-	sync  []events.Envelope
-	async []events.Envelope
-}
-
-func (h *recordingMemoryEventAsyncHub) Publish(_ context.Context, envelope events.Envelope) error {
-	h.sync = append(h.sync, envelope)
-	return nil
-}
-
-func (h *recordingMemoryEventAsyncHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
-	h.async = append(h.async, envelope)
-	return nil
-}
-
-func (h *recordingMemoryEventAsyncHub) Subscribe(string, events.Handler) func() {
-	return func() {}
 }
 
 func TestMemoryQueriesPublishScopedOwnerReadCommands(t *testing.T) {

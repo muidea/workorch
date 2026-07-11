@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 
-	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
+	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

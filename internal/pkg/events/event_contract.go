@@ -4,19 +4,19 @@ import (
 	"strings"
 
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
+	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
+	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
+	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
-	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
-	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	skillevents "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/events"
-	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	runtimeeventdefs "github.com/muidea/workorch/internal/pkg/runtimeevent/eventdefs"
 )
@@ -108,16 +108,6 @@ type EventHubLaneScope struct {
 	WorkspaceID string
 	RunID       string
 	StepID      string
-}
-
-func EventHubLaneKey(envelope Envelope) string {
-	return EventHubLaneKeyFor(envelope.Topic, EventHubLaneScope{
-		SubjectType: envelope.SubjectType,
-		SubjectID:   envelope.SubjectID,
-		WorkspaceID: envelope.WorkspaceID,
-		RunID:       envelope.RunID,
-		StepID:      envelope.StepID,
-	})
 }
 
 func EventHubLaneKeyFor(topic string, scope EventHubLaneScope) string {

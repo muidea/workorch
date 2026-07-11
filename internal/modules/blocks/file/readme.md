@@ -15,7 +15,7 @@
 - 接收 `kernel/orchestrator` 通过 runtimeevent 发来的 file execution request。
 - 与 `blocks/llm` 通过 execution graph 中的 step kind 间接协作。
 - 执行结果被 `kernel/orchestrator` 转换为 evidence、coverage 或 diagnostic。
-- 与 `kernel/approval` 间接关联：高风险写操作应由 orchestrator/policy 先完成准入或审批。
+- 与 `blocks/approval` 间接关联：高风险写操作应由 orchestrator/policy 先完成准入或审批。
 
 ## 组件交互合同
 

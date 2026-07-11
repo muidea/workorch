@@ -10,16 +10,15 @@ import (
 	"strings"
 	"testing"
 
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -120,9 +119,7 @@ func TestRuntimeOrchestrator_DispatchesLLMRepairAfterGraphNodeFailure(t *testing
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
 			MemoryItems:        memory.NewMemoryItemRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-runtime-repair")
 	runID := common.RunID("run-runtime-repair")
@@ -322,9 +319,7 @@ func TestRuntimeOrchestrator_SoftwareDevCodeAgentRepairsTestFailureAndDeliversDi
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
 			MemoryItems:        memoryRepo,
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-software-dev-code-agent")
 	runID := common.RunID("run-software-dev-code-agent")
@@ -434,9 +429,7 @@ func TestRuntimeOrchestrator_RetriesHTTPStatusProviderErrorBeforeBlocking(t *tes
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-llm-provider-error")
 	runID := common.RunID("run-llm-provider-error")
@@ -778,9 +771,7 @@ func TestRuntimeOrchestrator_RetriesLLMProviderTimeoutBeforeFailingRun(t *testin
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-llm-provider-timeout-retry")
 	runID := common.RunID("run-llm-provider-timeout-retry")
@@ -840,9 +831,7 @@ func TestRuntimeOrchestrator_BlocksOnDecisionAfterProviderTimeoutRetriesExhauste
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-llm-provider-timeout-block")
 	runID := common.RunID("run-llm-provider-timeout-block")
@@ -1408,9 +1397,8 @@ func TestRuntimeOrchestrator_ResumeClearsStaleRuntimeRepairExhaustionBlocker(t *
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
+
 	workspaceID := common.WorkspaceID("ws-stale-repair-blocker")
 	runID := common.RunID("run-stale-repair-blocker")
 	ticketID := common.TicketID("ticket-stale-repair-blocker")
@@ -1502,9 +1490,8 @@ func TestRuntimeOrchestrator_ResumeClearsRepairExhaustionWhenTargetWindowHasBudg
 		ticketRepo,
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Results: memory.NewResultRepository()},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Results: memory.NewResultRepository()})
+
 	workspaceID := common.WorkspaceID("ws-repair-window-resume")
 	runID := common.RunID("run-repair-window-resume")
 	failedStepID := common.StepID(runID + "/graph-009/006-build")
@@ -1682,9 +1669,8 @@ func TestRuntimeOrchestrator_ResumeClearsDuplicateFailureBlockerBelowScopedBudge
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
+
 	workspaceID := common.WorkspaceID("ws-stale-duplicate-blocker")
 	runID := common.RunID("run-stale-duplicate-blocker")
 	failedStepID := common.StepID(runID + "/block/verify")

@@ -4,11 +4,9 @@ import (
 	"context"
 	"testing"
 
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -33,9 +31,7 @@ func TestRuntimeOrchestratorBlocksOperatorMCPToolCallBeforeRuntimeExecution(t *t
 			Patches:            memory.NewPatchRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-mcp-approval")
 	runID := common.RunID("run-mcp-approval")
@@ -103,13 +99,11 @@ func TestRuntimeOrchestratorBlocksOperatorMCPToolCallBeforeRuntimeExecution(t *t
 	}
 }
 
-func TestRuntimeOrchestratorCreateApprovalPublishesNotificationThroughAsyncHub(t *testing.T) {
+func TestRuntimeOrchestratorCreateApprovalPersistsOwnerStateWithoutDuplicateNotification(t *testing.T) {
 	ctx := context.Background()
 	approvalRepo := memory.NewApprovalRepository()
-	hub := &recordingApprovalNotificationAsyncHub{}
 	orch := &RuntimeOrchestrator{
 		approvals: approvalRepo,
-		eventHub:  hub,
 	}
 	run := &runmodel.Run{
 		ID:          "run-create-approval-async",
@@ -132,32 +126,4 @@ func TestRuntimeOrchestratorCreateApprovalPublishesNotificationThroughAsyncHub(t
 		approval.AutoGovernance["operation"] != "test" {
 		t.Fatalf("approval auto governance = %+v, want orchestrator pending evaluation seed", approval.AutoGovernance)
 	}
-	if len(hub.sync) != 0 {
-		t.Fatalf("sync publishes = %+v, want none for approval notification", hub.sync)
-	}
-	if len(hub.async) != 1 || hub.async[0].Topic != approvalevents.TopicApprovalCreated {
-		t.Fatalf("async publishes = %+v, want one approval created notification", hub.async)
-	}
-	if hub.async[0].WorkspaceID != string(run.WorkspaceID) || hub.async[0].RunID != string(run.ID) || hub.async[0].StepID != string(step.ID) {
-		t.Fatalf("async scope = workspace:%q run:%q step:%q", hub.async[0].WorkspaceID, hub.async[0].RunID, hub.async[0].StepID)
-	}
-}
-
-type recordingApprovalNotificationAsyncHub struct {
-	sync  []events.Envelope
-	async []events.Envelope
-}
-
-func (h *recordingApprovalNotificationAsyncHub) Publish(_ context.Context, envelope events.Envelope) error {
-	h.sync = append(h.sync, envelope)
-	return nil
-}
-
-func (h *recordingApprovalNotificationAsyncHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
-	h.async = append(h.async, envelope)
-	return nil
-}
-
-func (h *recordingApprovalNotificationAsyncHub) Subscribe(string, events.Handler) func() {
-	return func() {}
 }

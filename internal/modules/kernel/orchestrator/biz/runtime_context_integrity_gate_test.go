@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
@@ -290,9 +290,7 @@ func TestBlockOnContextIntegrityGateRecordsRecommendedRecoveryAction(t *testing.
 		ticketRepo,
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{},
-		nil,
-	)
+		RuntimeEvidenceRepositories{})
 
 	if err := orch.blockOnContextIntegrityGate(ctx, run, failed, common.ErrInvalidArgument); err != nil {
 		t.Fatalf("block on context integrity gate: %v", err)

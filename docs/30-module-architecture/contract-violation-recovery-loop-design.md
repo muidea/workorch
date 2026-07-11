@@ -640,8 +640,8 @@ DTO 规则：
 | Path | Adjustment |
 | --- | --- |
 | `internal/modules/kernel/run/**` | 如 step model 需要记录 violation attempt / sourceStep lineage，补充中立字段或 executionContext patch。 |
-| `internal/modules/kernel/memory/**` | 防止 rejected diagnostic-only violation 被高权重召回；只允许当前 recovery 显式注入。 |
-| `internal/modules/kernel/result/**` | 确保 rejected output 不生成 accepted result/artifact。 |
+| `internal/modules/blocks/memory/**` | 防止 rejected diagnostic-only violation 被高权重召回；只允许当前 recovery 显式注入。 |
+| `internal/modules/blocks/result/**` | 确保 rejected output 不生成 accepted result/artifact。 |
 
 Memory 收口规则：
 
@@ -799,16 +799,23 @@ Memory 收口规则：
 - `./scripts/verify-boundary-contract.sh`
 - `go test ./... -count=1`
 
-本轮最终修正的主路径缺口是 `SubscribeWorkorch` 未解码 `/orchestrator/contract_violation/*` 事件，导致 eventstream 无法持久化 violation recorded / retry_requested / escalated。已新增中立 `OrchestratorContractViolationEvent` wrapper，只做版本校验和 payload 透传，不引入 template、语言、文件、命令或 provider 业务判断。
+本轮当时修正的主路径缺口是旧集中订阅链未解码
+`/orchestrator/contract_violation/*` 事件，导致 eventstream 无法持久化 violation
+recorded / retry_requested / escalated。该旧 wrapper/Envelope 链已于 2026-07-11
+删除；当前 eventstream 直接导入 orchestrator `pkg/events` 的具体 data 并逐 topic
+订阅，不引入 template、语言、文件、命令或 provider 业务判断。
 
-2026-06-22 追加核对发现 embedded EventHub backend 虽然订阅了
-`WorkorchTopics()`，但 `convertEnvelope` 未把
+2026-06-22 追加核对发现当时的 embedded EventHub backend 虽然订阅了集中 topic
+清单，但旧转换器未把
 `/orchestrator/contract_violation/*` 转换成端侧事件，导致本地 TUI 在
 violation recorded / retry requested / escalated 后无法自动刷新服务端
 projection。已按“workorchd 是 projection owner，TUI 只消费 projection”的
 边界收口：三类 contract violation 事件统一转换为
 `workspace/projection/changed`，端侧只触发重新读取服务端快照，不复制
 contract violation 状态机，也不自动发起 retry/replan/restart。
+
+2026-07-11 后，backend 与 projection consumer 均改为逐 topic typed 订阅；上述
+集中清单与 Envelope 转换路径不再属于当前实现。
 
 ## Review Checklist
 

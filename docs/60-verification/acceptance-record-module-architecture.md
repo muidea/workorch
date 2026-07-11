@@ -47,7 +47,7 @@ Last Updated: 2026-06-22
 | application / workorchd | initiator, bootstrap, appservice, server tests | pass | initiator 装配 repository/event hub/runtime policy；bootstrap 输出 grouped exports；appservice 组合 activation/recovery/governance/read-model；server 层主要做 parse/validation/response。 |
 | observed / presenter / appservice split | `pkg/observed`, `pkg/presenter`, `read_model_service.go` | partial | observed/presenter 已有独立包和测试；旧 observable snapshot printer/builder 残留已从 `pkg/presenter` 移除，避免把 CLI/debug 输出职责混入 read-model mapper。主 snapshot/detail/observability 语义装配仍主要集中在 appservice，后续可分批细化。 |
 | kernel workspace / run / result / eventstream | `internal/modules/kernel/{workspace,run,result,eventstream}` + `workorchruntimecontract.CoverageWorkItem` + repository contract | pass | Workspace/Goal/DoD、Run/Step/evidence、Result/Artifact、EventRecord 均有正式模块；`ArtifactContinuation` 已有正式 internal state；`CoverageWorkItem` 已有正式 runtime contract model、repository interface、memory/file/workspace-scoped backend 和 repository contract。 |
-| kernel orchestrator / governance | `kernel/orchestrator`, `kernel/decision`, `kernel/approval`, `kernel/governance` | pass | orchestrator 承接 lifecycle/dispatch/repair/replan/context gate/completion gate；decision、approval、governance 分别承接 ticket/resolution、approval formal state/resolve action、auto-governance 协同。 |
+| kernel orchestrator / governance | `kernel/orchestrator`, `blocks/decision`, `blocks/approval`, `kernel/governance` | pass | orchestrator 承接 lifecycle/dispatch/repair/replan/context gate/completion gate；decision、approval、governance 分别承接 ticket/resolution、approval formal state/resolve action、auto-governance 协同。 |
 | kernel context / capability / memory | `kernel/{soul,skill,mcp,memory}`, memory recall trace repository | pass | Soul/Skill/MCP/Memory 职责清晰；`MemoryRecallTrace` 有正式 model/repository/query；selectedContext provider-facing 组装不留在 kernel。 |
 | blocks / runtime adapters | `blocks/{llm,mcp,shell,file,git,web,ssh}` | pass | blocks 承接 step kind 的 side effect/provider interaction/normalization；未拥有 Run lifecycle、Goal/DoD definition 或 accepted Result 最终判定。approval 已不再作为 block adapter。 |
 | llm provider assembly | `blocks/llm/biz`, `runtime_output_mode_selector.go` | pass | LLM block 负责 request rendering、context budget、prompt sections、cache plan、provider audit；output mode selector 由 orchestrator 决策并投影，再由 LLM block 渲染/audit。架构文档已明确为双落点合同。 |
@@ -83,9 +83,9 @@ Last Updated: 2026-06-22
 
 已验收：
 
-- `kernel/workspace` 承接 formal Workspace / Goal / DoD。
+- `blocks/workspace` 承接 formal Workspace / Goal / DoD。
 - `kernel/run` 承接 Run / Step / ToolCall / Patch / ValidationResult / RuntimeCheckpoint。
-- `kernel/result` 承接 Result / Artifact closeout。
+- `blocks/result` 承接 Result / Artifact closeout。
 - `kernel/eventstream` 承接 EventRecord append-only persistence / replay input。
 - `ArtifactContinuation` 已是正式 run-scoped internal state。
 
@@ -103,7 +103,7 @@ Last Updated: 2026-06-22
 
 - orchestrator 承接 run lifecycle coordination、step dispatch、graph/follow-up、repair/replan、context gate recovery、evidence mapping 和 completion gate。
 - decision/approval/governance 没有滑入产品交互语义。
-- approval 正式状态与 resolve action 已统一迁移至 `kernel/approval`。
+- approval 正式状态与 resolve action 已统一迁移至 `blocks/approval`。
 
 ### 5. Kernel Context / Capability / Memory
 
@@ -111,7 +111,7 @@ Last Updated: 2026-06-22
 
 - Soul、Skill、MCP、Memory 各模块职责明确。
 - `MemoryRecallTrace` 有正式持久化与查询输入。
-- selectedContext 的 provider-facing 组装由 execution context package 与 LLM provider assembly 承接，不由 kernel/memory 直接渲染 prompt。
+- selectedContext 的 provider-facing 组装由 execution context package 与 LLM provider assembly 承接，不由 blocks/memory 直接渲染 prompt。
 
 ### 6. Blocks / Runtime Adapters
 
@@ -148,7 +148,7 @@ Last Updated: 2026-06-22
 本轮结论：
 
 - 模块层主干责任分配与代码实现一致。
-- 旧 `blocks/approval` 遗留已收口，正式 approval 位于 `kernel/approval`。
+- 旧 `blocks/approval` 遗留已收口，正式 approval 位于 `blocks/approval`。
 - 当前未发现需要立即修复的 `impl-drift`。
 - 保留项集中在：
   - observed/presenter 覆盖范围：`partial`
@@ -161,8 +161,8 @@ Last Updated: 2026-06-22
 
 - `make verify-boundary-contract`
   - 证明 application/kernel/blocks/Web 可复用层没有重新引入 software-dev、LSP、weather 等 profile/domain 语义。
-- `test ! -d internal/modules/blocks/approval && test -d internal/modules/kernel/approval`
-  - 证明 `blocks/approval` 已不在 active module tree，正式 Approval 模块位于 `kernel/approval`。
+- `test ! -d internal/modules/blocks/approval && test -d internal/modules/blocks/approval`
+  - 证明 `blocks/approval` 已不在 active module tree，正式 Approval 模块位于 `blocks/approval`。
 - `go test ./internal/modules/kernel/orchestrator/biz -run 'Test(CoverageWorkItems|CoverageWorkItem|RuntimeOrchestrator_.*Coverage|ApplyOutputModeSelection|SelectOutputMode|HandleArtifactOutput|ValidateArtifact|BuildExecutionContextPackage|ProviderContext|RuntimeOrchestrator_Context|VerifyWorkorchRuntime)' -count=1`
   - 证明 orchestrator、coverage ledger、output mode selector、artifact continuation、context package 等核心模块协作仍通过。
 - `go test ./internal/pkg/repository ./internal/pkg/workorchrepo -run 'TestCoverageWorkItemRepositoryContract|TestRepositoryBundleContract|TestWorkspaceScoped' -count=1`

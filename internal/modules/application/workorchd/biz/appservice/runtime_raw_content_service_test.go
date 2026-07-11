@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -85,7 +85,7 @@ func TestReadRuntimeRawContentWithBackendReturnsStepAndToolPayloadFiles(t *testi
 func TestReadRuntimeRawContentWithBackendReturnsVirtualCheckpointAndResultDetails(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceID := common.WorkspaceID("ws-raw-virtual")
 	runID := common.RunID("run-raw-virtual")
 	checkpointID := common.CheckpointID("run-raw-virtual/checkpoint-1")
@@ -144,7 +144,7 @@ func TestReadRuntimeRawContentWithBackendReturnsVirtualCheckpointAndResultDetail
 func TestReadRuntimeRawContentWithBackendScopesVirtualReadsByURIWorkspace(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
-	exports := session.Bootstrap.Exports()
+	exports := testRuntimeExports(session.Bootstrap)
 	workspaceA := common.WorkspaceID("ws-raw-scope-a")
 	workspaceB := common.WorkspaceID("ws-raw-scope-b")
 	runID := common.RunID("run-raw-scope")

@@ -7,12 +7,11 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
-	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	memorymodule "github.com/muidea/workorch/internal/modules/blocks/memory"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -123,7 +122,6 @@ func assertRunEvidenceCount[T any](t *testing.T, ctx context.Context, repo runEv
 func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
 	steps := memoryrepo.NewStepRepository()
 	runID := common.RunID("run-purge-contract")
 	if err := steps.Create(ctx, &runmodel.Step{ID: "step-purge-contract", RunID: runID}); err != nil {
@@ -157,7 +155,6 @@ func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 		EvidenceRecords:       memoryrepo.NewEvidenceRecordRepository(),
 		CoverageWorkItems:     memoryrepo.NewCoverageWorkItemRepository(),
 		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),
-		EventHub:              hub,
 		CommandHub:            rawHub,
 	}); err != nil {
 		t.Fatalf("configure orchestrator module: %v", err)
@@ -209,7 +206,6 @@ func TestPurgeRunCommandUsesWorkspaceScopeForDuplicateRunIDs(t *testing.T) {
 		t.Fatalf("seed step B: %v", err)
 	}
 	rawHub := magicevent.NewHub(16)
-	hub := events.NewMagicHubWithHub(rawHub)
 	memoryModule := memorymodule.New()
 	if err := memoryModule.Configure(memorymodule.Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
@@ -237,7 +233,6 @@ func TestPurgeRunCommandUsesWorkspaceScopeForDuplicateRunIDs(t *testing.T) {
 		EvidenceRecords:       memoryrepo.NewEvidenceRecordRepository(),
 		CoverageWorkItems:     memoryrepo.NewCoverageWorkItemRepository(),
 		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),
-		EventHub:              hub,
 		CommandHub:            rawHub,
 	}); err != nil {
 		t.Fatalf("configure orchestrator module: %v", err)

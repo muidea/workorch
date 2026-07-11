@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 )
 
 func TestDecisionResolutionEventRepositorySendsTypedOwnerCommand(t *testing.T) {

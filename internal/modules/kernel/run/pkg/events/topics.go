@@ -1,5 +1,7 @@
 package events
 
+const NotificationDestination = "/run/consumers/#"
+
 const (
 	TopicRunCreated           = "/run/created"
 	TopicRunStarted           = "/run/started"

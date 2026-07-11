@@ -10,12 +10,14 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
-	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
@@ -26,7 +28,7 @@ import (
 
 func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 	ctx := context.Background()
-	be, _, commandHub := newEventHubBackendWithDispatcher(t, ctx)
+	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{
 		Title:                "eventhub workspace",
@@ -58,7 +60,7 @@ func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 
 func TestEventHubBackendCLICommandUsesSynchronousTypedResult(t *testing.T) {
 	ctx := context.Background()
-	be, _, _ := newEventHubBackendWithDispatcher(t, ctx)
+	be, _ := newEventHubBackendWithDispatcher(t, ctx)
 
 	done := make(chan error, 1)
 	go func() {
@@ -84,9 +86,7 @@ func TestEventHubEventsBackendReceivesProjectionAcrossHubWrappers(t *testing.T) 
 	rawHub := magicevent.NewHub(32)
 	defer rawHub.Terminate(ctx)
 
-	subscriberHub := events.NewMagicHubWithHubOwner(rawHub, "workorch/tui")
-	publisherHub := events.NewMagicHubWithHubOwner(rawHub, "workorchd/projection")
-	be := NewEventHub(subscriberHub, rawHub)
+	be := NewEventHub(rawHub)
 	received := make(chan Event, 1)
 	unsubscribe, err := be.Events().Subscribe(ctx, func(_ context.Context, evt Event) {
 		if evt.Type == EventWorkspaceProjectionChanged {
@@ -98,13 +98,8 @@ func TestEventHubEventsBackendReceivesProjectionAcrossHubWrappers(t *testing.T) 
 	}
 	defer unsubscribe()
 
-	if err := publisherHub.Publish(ctx, events.Envelope{
-		Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
-		WorkspaceID: "ws-projection",
-		Payload:     map[string]any{"changeKind": "detail"},
-	}); err != nil {
-		t.Fatalf("publish projection event: %v", err)
-	}
+	projectionEvent := magicevent.NewEventWithContext(workorchdevents.TopicWorkspaceProjectionChanged, "workorchd/projection", workorchdevents.NotificationDestination, magicevent.NewHeader(), ctx, workorchdevents.WorkspaceProjectionChangedData{WorkspaceID: "ws-projection", ChangeKind: "detail"})
+	rawHub.Post(projectionEvent)
 
 	select {
 	case evt := <-received:
@@ -113,6 +108,59 @@ func TestEventHubEventsBackendReceivesProjectionAcrossHubWrappers(t *testing.T) 
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timed out waiting for projection event across hub wrappers")
+	}
+}
+
+func TestEventHubEventsBackendReceivesTypedEventStreamRecord(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(32)
+	defer rawHub.Terminate(ctx)
+
+	be := NewEventHub(rawHub)
+	received := make(chan Event, 1)
+	unsubscribe, err := be.Events().Subscribe(ctx, func(_ context.Context, evt Event) {
+		if evt.Type == EventWorkspaceCreated {
+			received <- evt
+		}
+	})
+	if err != nil {
+		t.Fatalf("subscribe events: %v", err)
+	}
+	defer unsubscribe()
+
+	data, err := eventstreamevents.EventRecordDataFromModel(&eventstreammodel.EventRecord{
+		ID:          "eventstream-workspace-created",
+		Version:     events.WorkorchEventVersion,
+		Topic:       workspaceevents.TopicWorkspaceCreated,
+		WorkspaceID: "ws-eventstream",
+		SubjectType: "workspace",
+		SubjectID:   "ws-eventstream",
+		Revision:    1,
+		Payload:     map[string]any{"title": "typed event stream"},
+	})
+	if err != nil {
+		t.Fatalf("build event record data: %v", err)
+	}
+	event := magicevent.NewEventWithContext(
+		eventstreamevents.TopicEventStreamRecordAppended,
+		"kernel/eventstream",
+		eventstreamevents.NotificationDestination,
+		magicevent.NewHeader(),
+		ctx,
+		eventstreamevents.EventRecordAppendedData{Record: data},
+	)
+	result := rawHub.Send(event)
+	if result == nil || result.Error() != nil {
+		t.Fatalf("publish typed event stream record: %v", result)
+	}
+
+	select {
+	case evt := <-received:
+		if evt.ID != "eventstream-workspace-created" || evt.WorkspaceID != "ws-eventstream" || evt.Payload["title"] != "typed event stream" {
+			t.Fatalf("event = %+v, want typed workspace event", evt)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for typed event stream record")
 	}
 }
 
@@ -202,7 +250,7 @@ func TestDecodeResultResourceUsesTypedPayloadBeforeJSONFallback(t *testing.T) {
 
 func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 	ctx := context.Background()
-	be, _, commandHub := newEventHubBackendWithDispatcher(t, ctx)
+	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 	var captured workorchdevents.WorkspaceRunRequestedCommand
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
 	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(event magicevent.Event, result magicevent.Result) {
@@ -283,12 +331,11 @@ func TestEventHubRunCommandRequiresSchedulerAcceptedResponse(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rawHub := magicevent.NewHub(16)
 			defer rawHub.Terminate(ctx)
-			hub := events.NewMagicHubWithHubOwner(rawHub, "workorch/backend/ack-test")
 			if tc.subscribe != nil {
 				unsubscribe := tc.subscribe(rawHub)
 				defer unsubscribe()
 			}
-			be := NewEventHub(hub, rawHub)
+			be := NewEventHub(rawHub)
 			_, err := be.Run().Command(ctx, WorkspaceRunCommand{
 				WorkspaceID: "ws-run-command-ack",
 				Intent:      RunCommandIntentResume,
@@ -310,7 +357,7 @@ func TestEventHubRunCommandRequiresSchedulerAcceptedResponse(t *testing.T) {
 
 func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 	ctx := context.Background()
-	be, _, commandHub := newEventHubBackendWithDispatcher(t, ctx)
+	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "snapshot workspace"})
 	if err != nil {
@@ -343,8 +390,7 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 }
 
 func TestEventHubRunCommandRejectsUnsupportedIntent(t *testing.T) {
-	hub := events.NewMemoryHub()
-	be := NewEventHub(hub, nil)
+	be := NewEventHub(nil)
 	_, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
 		WorkspaceID:   "ws-eventhub",
 		ExpectedRunID: "run-001",
@@ -352,9 +398,6 @@ func TestEventHubRunCommandRejectsUnsupportedIntent(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "unsupported run command intent") {
 		t.Fatalf("err = %v, want unsupported run command intent", err)
-	}
-	if len(hub.Published()) != 0 {
-		t.Fatalf("published = %+v, want no scheduler command for unsupported intent", hub.Published())
 	}
 }
 
@@ -380,14 +423,10 @@ func TestEventHubRunCommandRejectsInvalidIntentScopeBeforePublish(t *testing.T) 
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hub := events.NewMemoryHub()
-			be := NewEventHub(hub, nil)
+			be := NewEventHub(nil)
 			_, err := be.Run().Command(context.Background(), tc.req)
 			if !errors.Is(err, common.ErrInvalidArgument) {
 				t.Fatalf("err = %v, want invalid argument", err)
-			}
-			if len(hub.Published()) != 0 {
-				t.Fatalf("published = %+v, want no scheduler command for invalid intent scope", hub.Published())
 			}
 		})
 	}
@@ -450,14 +489,10 @@ func TestEventHubGovernanceObjectCommandsRequireWorkspaceScopeBeforePublish(t *t
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hub := events.NewMemoryHub()
-			be := NewEventHub(hub, nil)
+			be := NewEventHub(nil)
 			err := tc.call(be)
 			if !errors.Is(err, common.ErrInvalidArgument) {
 				t.Fatalf("err = %v, want invalid argument", err)
-			}
-			if len(hub.Published()) != 0 {
-				t.Fatalf("published = %+v, want no CLI command for invalid governance scope", hub.Published())
 			}
 		})
 	}
@@ -465,7 +500,7 @@ func TestEventHubGovernanceObjectCommandsRequireWorkspaceScopeBeforePublish(t *t
 
 func TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	be, _, commandHub := newEventHubBackendWithDispatcher(t, ctx)
+	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "workspace object scope"})
 	if err != nil {
@@ -493,7 +528,7 @@ func TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope(t *testing.T) {
 }
 
 func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
-	projectionEvent := convertEnvelope(events.Envelope{
+	projectionEvent := convertBackendEvent(backendEventData{
 		Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
 		WorkspaceID: "ws-1",
 		Payload: map[string]any{
@@ -506,7 +541,7 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 		t.Fatalf("projection event = %+v, want workspace projection changed", projectionEvent)
 	}
 
-	goalEvent := convertEnvelope(events.Envelope{
+	goalEvent := convertBackendEvent(backendEventData{
 		Topic:       workspaceevents.TopicGoalDefined,
 		SubjectID:   "goal-1",
 		WorkspaceID: "ws-1",
@@ -515,7 +550,7 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 	if goalEvent.Type != EventGoalDefined || goalEvent.WorkspaceID != "ws-1" || goalEvent.Payload["goalId"] != "goal-1" {
 		t.Fatalf("goal event = %+v, want converted goal definition event", goalEvent)
 	}
-	dodEvent := convertEnvelope(events.Envelope{
+	dodEvent := convertBackendEvent(backendEventData{
 		Topic:       workspaceevents.TopicDoDDefined,
 		SubjectID:   "dod-1",
 		WorkspaceID: "ws-1",
@@ -528,23 +563,29 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 
 func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 	ctx := context.Background()
-	be, eventHub, _ := newEventHubBackendWithDispatcher(t, ctx)
-	var sawUpdatedGoal, sawUpdatedDoD bool
-	unsubscribeGoal := eventHub.Subscribe(workspaceevents.TopicGoalDefined, func(_ context.Context, envelope events.Envelope) error {
-		if envelope.Payload[events.PayloadKeyText] == "- updated goal" {
-			sawUpdatedGoal = true
+	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
+	goalUpdated := make(chan struct{}, 1)
+	dodUpdated := make(chan struct{}, 1)
+	const observerID = "/workspace/consumers/workorch/backend-test"
+	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, commandHub)
+	observer.Subscribe(workspaceevents.TopicGoalDefined, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(workspaceevents.GoalDefinedData); ok && data.Text == "- updated goal" {
+			goalUpdated <- struct{}{}
 		}
-		return nil
-	})
-	defer unsubscribeGoal()
-	unsubscribeDoD := eventHub.Subscribe(workspaceevents.TopicDoDDefined, func(_ context.Context, envelope events.Envelope) error {
-		items, _ := envelope.Payload[events.PayloadKeyItems].([]string)
-		if len(items) == 1 && items[0] == "updated dod" {
-			sawUpdatedDoD = true
+		if result != nil {
+			result.Set(nil, nil)
 		}
-		return nil
 	})
-	defer unsubscribeDoD()
+	observer.Subscribe(workspaceevents.TopicDoDDefined, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(workspaceevents.DoDDefinedData); ok && len(data.Items) == 1 && data.Items[0] == "updated dod" {
+			dodUpdated <- struct{}{}
+		}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	defer observer.Unsubscribe(workspaceevents.TopicGoalDefined)
+	defer observer.Unsubscribe(workspaceevents.TopicDoDDefined)
 
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "definition refresh workspace"})
 	if err != nil {
@@ -565,14 +606,21 @@ func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 		t.Fatalf("update dod: %v", err)
 	}
 
-	if !sawUpdatedGoal || !sawUpdatedDoD {
-		t.Fatalf("published updated goal=%v dod=%v, want both definition update events", sawUpdatedGoal, sawUpdatedDoD)
+	select {
+	case <-goalUpdated:
+	case <-time.After(time.Second):
+		t.Fatal("updated goal notification not received")
+	}
+	select {
+	case <-dodUpdated:
+	case <-time.After(time.Second):
+		t.Fatal("updated DoD notification not received")
 	}
 }
 
 func TestEventHubGoalAndDoDGetUpdateCommandsCarryWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	be, _, commandHub := newEventHubBackendWithDispatcher(t, ctx)
+	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "definition scope workspace"})
 	if err != nil {
@@ -607,13 +655,12 @@ func TestEventHubGoalAndDoDGetUpdateCommandsCarryWorkspaceScope(t *testing.T) {
 
 func TestEventHubRunReadCommandsCarryWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
-	eventHub := events.NewMemoryHub()
 	rawHub := magicevent.NewHub(16)
 	t.Cleanup(func() { rawHub.Terminate(ctx) })
 	recordedHub := &recordingMagicHub{Hub: rawHub}
 	unsubscribe := subscribeRunReadCLIResponses(t, rawHub, "ws-run-read-scope", "run-read-scope")
 	defer unsubscribe()
-	be := NewEventHub(eventHub, recordedHub)
+	be := NewEventHub(recordedHub)
 
 	if _, err := be.Run().Get(ctx, "ws-run-read-scope", "run-read-scope"); err != nil {
 		t.Fatalf("get run: %v", err)
@@ -633,7 +680,6 @@ func TestEventHubRunReadCommandsCarryWorkspaceScope(t *testing.T) {
 func TestEventHubBackendWorkspaceListUsesProjectionViewReader(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(32)
-	eventHub := events.NewMagicHubWithHubOwner(rawHub, "workorchd/test")
 	reader := &projectionOnlyWorkspaceViewReader{
 		workspaces: []appservice.Workspace{{
 			ID:    "ws-projected-list",
@@ -641,12 +687,12 @@ func TestEventHubBackendWorkspaceListUsesProjectionViewReader(t *testing.T) {
 			State: string(common.WorkspaceStateActive),
 		}},
 	}
-	dispatcher := appservice.NewCLICommandDispatcher(&appservice.RuntimeSession{}, eventHub, rawHub, reader)
+	dispatcher := appservice.NewCLICommandDispatcher(&appservice.RuntimeSession{}, rawHub, reader)
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("run dispatcher: %v", err)
 	}
 	t.Cleanup(dispatcher.Close)
-	be := NewEventHub(eventHub, rawHub)
+	be := NewEventHub(rawHub)
 
 	items, err := be.Workspace().List(ctx)
 	if err != nil {
@@ -662,7 +708,27 @@ func TestEventHubBackendWorkspaceListUsesProjectionViewReader(t *testing.T) {
 
 func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	ctx := context.Background()
-	be, eventHub, _ := newEventHubBackendWithDispatcher(t, ctx)
+	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
+	const observerID = "/memory/consumers/workorch/backend-test"
+	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, commandHub)
+	notifications := make(chan string, 3)
+	memoryTopics := []string{memoryevents.TopicMemoryCreated, memoryevents.TopicMemoryUpdated, memoryevents.TopicMemoryDeleted}
+	for _, topic := range memoryTopics {
+		topic := topic
+		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
+			if _, ok := event.Data().(memoryevents.MemoryChangedData); ok {
+				notifications <- topic
+			}
+			if result != nil {
+				result.Set(nil, nil)
+			}
+		})
+	}
+	t.Cleanup(func() {
+		for _, topic := range memoryTopics {
+			observer.Unsubscribe(topic)
+		}
+	})
 
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{
 		Title:                "memory workspace",
@@ -727,13 +793,15 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 		t.Fatalf("list after delete = %+v, want empty", list)
 	}
 
-	publishedHub, ok := eventHub.(interface{ Published() []events.Envelope })
-	if !ok {
-		t.Fatal("event hub does not expose published envelopes")
-	}
 	var sawCreate, sawUpdate, sawDelete bool
-	for _, envelope := range publishedHub.Published() {
-		switch envelope.Topic {
+	for range memoryTopics {
+		var topic string
+		select {
+		case topic = <-notifications:
+		case <-time.After(time.Second):
+			t.Fatalf("memory notifications create=%v update=%v delete=%v", sawCreate, sawUpdate, sawDelete)
+		}
+		switch topic {
 		case memoryevents.TopicMemoryCreated:
 			sawCreate = true
 		case memoryevents.TopicMemoryUpdated:
@@ -747,23 +815,23 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	}
 }
 
-func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backend, events.Hub, magicevent.Hub) {
+func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backend, magicevent.Hub) {
 	t.Helper()
-	runtime := testkit.NewRuntime("memory", "", workorchruntimepolicy.RuntimePolicy{}, nil, nil)
+	runtime := testkit.NewRuntime("memory", "", workorchruntimepolicy.RuntimePolicy{}, nil)
 	session := appservice.NewRuntimeSession(runtime)
 	t.Cleanup(func() { _ = session.Close(ctx) })
 	var err error
-	exports, err := session.Exports()
+	exports, err := testkit.SessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
-	dispatcher := appservice.NewCLICommandDispatcher(session, exports.Infrastructure.EventHub, exports.Infrastructure.CommandHub, testWorkspaceViewReader{session: session})
+	dispatcher := appservice.NewCLICommandDispatcher(session, exports.Infrastructure.CommandHub, testWorkspaceViewReader{session: session})
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("run dispatcher: %v", err)
 	}
 	t.Cleanup(dispatcher.Close)
 	commandHub := &recordingMagicHub{Hub: exports.Infrastructure.CommandHub}
-	return NewEventHub(exports.Infrastructure.EventHub, commandHub), exports.Infrastructure.EventHub, commandHub
+	return NewEventHub(commandHub), commandHub
 }
 
 func subscribeWorkspaceRunResult(t *testing.T, hub magicevent.Hub, response any) func() {
@@ -872,8 +940,8 @@ func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceViewSnapshot(context.Co
 	return appservice.WorkspaceSnapshot{}, common.ErrInvalidArgument
 }
 
-func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
-	created := convertEnvelope(events.Envelope{
+func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
+	created := convertBackendEvent(backendEventData{
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-created",
 		Payload:     events.WorkspacePayload("created", "", "/tmp/created", "", "active", ""),
@@ -882,7 +950,7 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 		t.Fatalf("created event = %+v, want workspace created", created)
 	}
 
-	deleted := convertEnvelope(events.Envelope{
+	deleted := convertBackendEvent(backendEventData{
 		Topic:       workspaceevents.TopicWorkspaceDeleted,
 		WorkspaceID: "ws-deleted",
 		Payload:     events.WorkspacePayload("deleted", "", "/tmp/deleted", "", "active", ""),
@@ -891,7 +959,7 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 		t.Fatalf("deleted event = %+v, want workspace deleted", deleted)
 	}
 
-	decision := convertEnvelope(events.Envelope{
+	decision := convertBackendEvent(backendEventData{
 		Topic:       decisionevents.TopicTicketCreated,
 		SubjectID:   "ticket-1",
 		WorkspaceID: "ws-1",
@@ -902,7 +970,7 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 		t.Fatalf("decision event = %+v, want ticketId from subject", decision)
 	}
 
-	approval := convertEnvelope(events.Envelope{
+	approval := convertBackendEvent(backendEventData{
 		Topic:       approvalevents.TopicApprovalCreated,
 		SubjectID:   "approval-1",
 		WorkspaceID: "ws-1",
@@ -913,7 +981,7 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 		t.Fatalf("approval event = %+v, want approvalId from subject", approval)
 	}
 
-	governance := convertEnvelope(events.Envelope{
+	governance := convertBackendEvent(backendEventData{
 		Topic:       governanceevents.TopicGovernanceAutoResolved,
 		SubjectID:   "trace-1",
 		WorkspaceID: "ws-1",
@@ -929,7 +997,7 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 		t.Fatalf("governance event = %+v, want governance resolved with trace id", governance)
 	}
 
-	artifact := convertEnvelope(events.Envelope{
+	artifact := convertBackendEvent(backendEventData{
 		Topic:       orchestratorevents.TopicArtifactContinuationChunkRecorded,
 		SubjectID:   "artifact-continuation-1",
 		WorkspaceID: "ws-1",
@@ -944,18 +1012,17 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 	}
 }
 
-func TestConvertEnvelopeTreatsContractViolationAsProjectionChange(t *testing.T) {
+func TestConvertBackendEventTreatsContractViolationAsProjectionChange(t *testing.T) {
 	for _, topic := range []string{
 		orchestratorevents.TopicOrchestratorContractViolationRecorded,
 		orchestratorevents.TopicOrchestratorContractViolationRetryRequested,
 		orchestratorevents.TopicOrchestratorContractViolationEscalated,
 	} {
 		t.Run(topic, func(t *testing.T) {
-			evt := convertEnvelope(events.Envelope{
+			evt := convertBackendEvent(backendEventData{
 				Topic:       topic,
 				WorkspaceID: "ws-violation",
 				RunID:       "run-violation",
-				StepID:      "run-violation/step-1",
 				Payload: map[string]any{
 					"violatedRule":   "state_changing_required_missing",
 					"recoverability": "retry_same_contract",

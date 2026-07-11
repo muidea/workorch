@@ -13,19 +13,20 @@ import (
 	"sync"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -69,7 +70,7 @@ type MemoryReader interface {
 	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*memorymodel.MemoryItem, error)
 }
 
-type Dependencies struct {
+type servicePorts struct {
 	Tickets              TicketReader
 	Resolutions          ResolutionReader
 	Approvals            ApprovalReader
@@ -77,7 +78,7 @@ type Dependencies struct {
 	WorkspaceDefinitions WorkspaceDefinitionReader
 	MemoryItems          MemoryReader
 	AutoGovernanceTraces repository.AutoGovernanceTraceRepository
-	EventHub             events.Hub
+	NotificationHub      magicevent.Hub
 	ResolveDecision      ResolveDecisionFunc
 	ResolveApproval      ResolveApprovalFunc
 	ResumeRun            ResumeRunFunc
@@ -93,7 +94,7 @@ type Service struct {
 	workspaceDefs   WorkspaceDefinitionReader
 	memoryItems     MemoryReader
 	traces          repository.AutoGovernanceTraceRepository
-	eventHub        events.Hub
+	notificationHub magicevent.Hub
 	resolve         ResolveDecisionFunc
 	resolveApproval ResolveApprovalFunc
 	resume          ResumeRunFunc
@@ -111,7 +112,25 @@ type Service struct {
 
 type governanceWork func(context.Context)
 
-func NewService(deps Dependencies) *Service {
+func NewEventService(traces repository.AutoGovernanceTraceRepository, commandHub magicevent.Hub, loadConfig func() (workorchconfig.Config, error), background magictask.BackgroundRoutine) *Service {
+	return newServiceWithPorts(servicePorts{
+		Tickets:              eventTicketReader{hub: commandHub},
+		Resolutions:          eventResolutionReader{hub: commandHub},
+		Approvals:            eventApprovalReader{hub: commandHub},
+		Runs:                 eventRunReader{hub: commandHub},
+		WorkspaceDefinitions: eventWorkspaceReader{hub: commandHub},
+		MemoryItems:          eventMemoryReader{hub: commandHub},
+		AutoGovernanceTraces: traces,
+		NotificationHub:      commandHub,
+		ResolveDecision:      eventResolveDecision(commandHub),
+		ResolveApproval:      eventResolveApproval(commandHub),
+		ResumeRun:            eventResumeRun(commandHub),
+		LoadConfig:           loadConfig,
+		BackgroundRoutine:    background,
+	})
+}
+
+func newServiceWithPorts(deps servicePorts) *Service {
 	return &Service{
 		tickets:         deps.Tickets,
 		resolutions:     deps.Resolutions,
@@ -120,7 +139,7 @@ func NewService(deps Dependencies) *Service {
 		workspaceDefs:   deps.WorkspaceDefinitions,
 		memoryItems:     deps.MemoryItems,
 		traces:          deps.AutoGovernanceTraces,
-		eventHub:        deps.EventHub,
+		notificationHub: deps.NotificationHub,
 		resolve:         deps.ResolveDecision,
 		resolveApproval: deps.ResolveApproval,
 		resume:          deps.ResumeRun,
@@ -130,7 +149,7 @@ func NewService(deps Dependencies) *Service {
 }
 
 func (s *Service) Start() error {
-	if s == nil || s.eventHub == nil || s.tickets == nil || s.approvals == nil || s.runs == nil || s.workspaceDefs == nil || s.memoryItems == nil || s.traces == nil || s.resolve == nil || s.resolveApproval == nil || s.resume == nil {
+	if s == nil || s.notificationHub == nil || s.tickets == nil || s.approvals == nil || s.runs == nil || s.workspaceDefs == nil || s.memoryItems == nil || s.traces == nil || s.resolve == nil || s.resolveApproval == nil || s.resume == nil {
 		return common.ErrInvalidArgument
 	}
 	if s.loadConfig == nil {
@@ -156,24 +175,54 @@ func (s *Service) Start() error {
 		workCancel()
 		return err
 	}
-	unsubTicket := s.eventHub.Subscribe(decisionevents.TopicTicketCreated, func(ctx context.Context, envelope events.Envelope) error {
-		s.enqueueGovernanceWork(func(workCtx context.Context) {
-			s.processTicketCreated(workCtx, envelope)
+	var unsubTicket func()
+	if s.notificationHub != nil {
+		const observerID = "/decision/consumers/kernel/governance"
+		observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.notificationHub)
+		observer.Subscribe(decisionevents.TopicTicketCreated, func(event magicevent.Event, result magicevent.Result) {
+			if data, ok := event.Data().(decisionevents.TicketChangedData); ok {
+				s.enqueueGovernanceWork(func(workCtx context.Context) {
+					s.processTicketCreated(workCtx, data)
+				})
+			}
+			if result != nil {
+				result.Set(nil, nil)
+			}
 		})
-		return nil
-	})
-	unsubApproval := s.eventHub.Subscribe(approvalevents.TopicApprovalCreated, func(ctx context.Context, envelope events.Envelope) error {
-		s.enqueueGovernanceWork(func(workCtx context.Context) {
-			s.processApprovalCreated(workCtx, envelope)
+		unsubTicket = func() { observer.Unsubscribe(decisionevents.TopicTicketCreated) }
+	}
+	var unsubApproval func()
+	if s.notificationHub != nil {
+		const observerID = "/approval/consumers/kernel/governance"
+		observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.notificationHub)
+		observer.Subscribe(approvalevents.TopicApprovalCreated, func(event magicevent.Event, result magicevent.Result) {
+			if data, ok := event.Data().(approvalevents.ApprovalChangedData); ok {
+				s.enqueueGovernanceWork(func(workCtx context.Context) {
+					s.processApprovalCreated(workCtx, data)
+				})
+			}
+			if result != nil {
+				result.Set(nil, nil)
+			}
 		})
-		return nil
-	})
-	unsubRunState := s.eventHub.Subscribe(runevents.TopicRunStateChanged, func(ctx context.Context, envelope events.Envelope) error {
-		s.enqueueGovernanceWork(func(workCtx context.Context) {
-			s.processRunStateChanged(workCtx, envelope)
+		unsubApproval = func() { observer.Unsubscribe(approvalevents.TopicApprovalCreated) }
+	}
+	var unsubRunState func()
+	if s.notificationHub != nil {
+		const observerID = "/run/consumers/kernel/governance"
+		observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.notificationHub)
+		observer.Subscribe(runevents.TopicRunStateChanged, func(event magicevent.Event, result magicevent.Result) {
+			if data, ok := event.Data().(runevents.RunStateChangedData); ok {
+				s.enqueueGovernanceWork(func(workCtx context.Context) {
+					s.processRunStateChanged(workCtx, data)
+				})
+			}
+			if result != nil {
+				result.Set(nil, nil)
+			}
 		})
-		return nil
-	})
+		unsubRunState = func() { observer.Unsubscribe(runevents.TopicRunStateChanged) }
+	}
 	s.unsubscribes = []func(){unsubTicket, unsubApproval, unsubRunState}
 	if err := s.scheduleBlockedRunReconciliationLocked(); err != nil {
 		for _, unsub := range s.unsubscribes {
@@ -298,12 +347,12 @@ func (s *Service) scheduleBlockedRunReconciliationLocked() error {
 	return nil
 }
 
-func (s *Service) processTicketCreated(ctx context.Context, envelope events.Envelope) {
+func (s *Service) processTicketCreated(ctx context.Context, data decisionevents.TicketChangedData) {
 	cfg, err := s.loadConfig()
 	if err != nil || !isEnabled(cfg.Governance.AutoTicket.Enabled) {
 		return
 	}
-	ticketID := common.TicketID(strings.TrimSpace(envelope.SubjectID))
+	ticketID := common.TicketID(strings.TrimSpace(string(data.TicketID)))
 	if ticketID == "" {
 		return
 	}
@@ -410,12 +459,12 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 	_ = s.resume(scopedCtx, ticket.RunID)
 }
 
-func (s *Service) processApprovalCreated(ctx context.Context, envelope events.Envelope) {
+func (s *Service) processApprovalCreated(ctx context.Context, data approvalevents.ApprovalChangedData) {
 	cfg, err := s.loadConfig()
 	if err != nil || !isEnabled(cfg.Governance.AutoApproval.Enabled) {
 		return
 	}
-	approvalID := common.ApprovalID(strings.TrimSpace(envelope.SubjectID))
+	approvalID := common.ApprovalID(strings.TrimSpace(string(data.ApprovalID)))
 	if approvalID == "" {
 		return
 	}
@@ -501,11 +550,7 @@ func (s *Service) processPendingApproval(ctx context.Context, approvalID common.
 	_ = s.resume(scopedCtx, approval.RunID)
 }
 
-func (s *Service) processRunStateChanged(ctx context.Context, envelope events.Envelope) {
-	data, ok := events.DecodeRunPayload(envelope.Payload)
-	if !ok {
-		return
-	}
+func (s *Service) processRunStateChanged(ctx context.Context, data runevents.RunStateChangedData) {
 	if data.State == common.RunStateBlockedOnDecision && data.BlockingTicketID != "" {
 		ticket, err := s.tickets.Get(ctx, data.BlockingTicketID)
 		if err != nil || ticket == nil {
@@ -1966,38 +2011,28 @@ func (s *Service) loadMemoryItems(ctx context.Context, workspaceID common.Worksp
 }
 
 func (s *Service) publishGovernanceEvent(ctx context.Context, topic string, trace *governancemodel.AutoGovernanceTrace, escalationReason string) error {
-	if s == nil || s.eventHub == nil || trace == nil {
+	if s == nil || s.notificationHub == nil || trace == nil {
 		return nil
 	}
-	return events.PublishByContract(ctx, s.eventHub, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        topic,
-		SourceModule: "kernel/governance",
-		SubjectType:  "auto_governance_trace",
-		SubjectID:    string(trace.ID),
-		WorkspaceID:  string(trace.WorkspaceID),
-		RunID:        string(trace.RunID),
-		StepID:       string(trace.StepID),
-		Payload: events.AutoGovernancePayload(
-			trace.ID,
-			trace.ItemType,
-			trace.ItemID,
-			trace.Action,
-			trace.RiskLevel,
-			trace.Confidence,
-			trace.PolicyMatched,
-			trace.PolicyBlocked,
-			trace.BudgetBefore,
-			trace.BudgetAfter,
-			trace.LLMProviderID,
-			trace.LLMModel,
-			trace.LLMDecisionPreview,
-			trace.PromptFingerprint,
-			trace.Status,
-			trace.Reason,
-			escalationReason,
-		),
-	})
+	cloned := *trace
+	cloned.EvidenceRefs = append([]string(nil), trace.EvidenceRefs...)
+	event := magicevent.NewEventWithContext(
+		topic,
+		"kernel/governance",
+		governanceevents.NotificationDestination,
+		magicevent.NewHeader(),
+		ctx,
+		governanceevents.GovernanceData{Trace: cloned, EscalationReason: escalationReason},
+	)
+	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
+		SubjectType: "auto_governance_trace",
+		SubjectID:   string(trace.ID),
+		WorkspaceID: string(trace.WorkspaceID),
+		RunID:       string(trace.RunID),
+		StepID:      string(trace.StepID),
+	}))
+	s.notificationHub.Post(event)
+	return nil
 }
 
 func isEnabled(value *bool) bool {

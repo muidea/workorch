@@ -2,7 +2,7 @@ package runports
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 )
 
 func workspaceDefinitionContextPatchFromDefinitions(effectiveGoal *workspacemodel.Goal, workspaceGoals []map[string]any, goalRevisions []map[string]any, effectiveDoD *workspacemodel.DoD, workspaceDoDs []map[string]any, doDRevisions []map[string]any) map[string]any {

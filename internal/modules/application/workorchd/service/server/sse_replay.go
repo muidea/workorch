@@ -2,8 +2,6 @@ package server
 
 import (
 	"sync"
-
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const defaultSSEReplayLimit = 256
@@ -11,7 +9,7 @@ const defaultSSEReplayLimit = 256
 type sseReplayBuffer struct {
 	mu    sync.RWMutex
 	limit int
-	items []events.Envelope
+	items []streamEvent
 }
 
 func newSSEReplayBuffer(limit int) *sseReplayBuffer {
@@ -21,7 +19,7 @@ func newSSEReplayBuffer(limit int) *sseReplayBuffer {
 	return &sseReplayBuffer{limit: limit}
 }
 
-func (b *sseReplayBuffer) Append(envelope events.Envelope) {
+func (b *sseReplayBuffer) Append(envelope streamEvent) {
 	if b == nil || envelope.ID == "" {
 		return
 	}
@@ -35,7 +33,7 @@ func (b *sseReplayBuffer) Append(envelope events.Envelope) {
 	b.items = append(b.items, envelope)
 }
 
-func (b *sseReplayBuffer) After(lastID string, filter func(events.Envelope) bool) []events.Envelope {
+func (b *sseReplayBuffer) After(lastID string, filter func(streamEvent) bool) []streamEvent {
 	if b == nil || lastID == "" {
 		return nil
 	}
@@ -51,7 +49,7 @@ func (b *sseReplayBuffer) After(lastID string, filter func(events.Envelope) bool
 	if start < 0 || start >= len(b.items) {
 		return nil
 	}
-	out := make([]events.Envelope, 0, len(b.items)-start)
+	out := make([]streamEvent, 0, len(b.items)-start)
 	for _, item := range b.items[start:] {
 		if filter == nil || filter(item) {
 			out = append(out, item)

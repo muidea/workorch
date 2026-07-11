@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"

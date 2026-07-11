@@ -11,17 +11,16 @@ import (
 	"testing"
 	"time"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	filerepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -65,7 +64,7 @@ func TestRuntimeOrchestrator_DispatchRequestedStepRefreshesAuthoritySnapshot(t *
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository(), events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository())
 
 	err := orch.DispatchRequestedStep(ctx, orchestratorcontracts.DispatchStepCommand{
 		WorkspaceID: workspaceID,
@@ -166,9 +165,8 @@ func TestRequestDispatchStepRecordsEventPublishReadbackPending(t *testing.T) {
 		stepRepo,
 		workspaceRepo,
 		memory.NewDecisionTicketRepository(),
-		memory.NewApprovalRepository(),
-		hub,
-	)
+		memory.NewApprovalRepository())
+
 	orch.EnableEventDrivenDispatch(hub.rawHub)
 
 	err := orch.requestDispatchStep(ctx, runID, workspaceID, stepDispatchSpec{
@@ -288,9 +286,7 @@ func TestRuntimeOrchestrator_StartRunAppliesUnifiedDiffPatchEvidence(t *testing.
 			Patches:            patchRepo,
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-unified-diff")
 	runID := common.RunID("run-unified-diff")
@@ -365,9 +361,7 @@ func TestRuntimeOrchestrator_StartRunPersistsUnifiedDiffPatchEvidenceWithFileBac
 			Patches:            patchRepo,
 			ValidationResults:  filerepo.NewValidationResultRepository(filepath.Join(dataRoot, "validation_results.json")),
 			RuntimeCheckpoints: filerepo.NewRuntimeCheckpointRepository(filepath.Join(dataRoot, "runtime_checkpoints.json")),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-unified-diff-file")
 	runID := common.RunID("run-unified-diff-file")
@@ -427,9 +421,7 @@ func TestRuntimeOrchestrator_StartRunFailsInvalidUnifiedDiffPatch(t *testing.T) 
 			Patches:            patchRepo,
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	deliverableDirectory := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(deliverableDirectory, "docs"), 0o755); err != nil {
@@ -512,9 +504,7 @@ func TestRuntimeOrchestrator_StartRunFailsInvalidRuntimePatchTarget(t *testing.T
 			Patches:            patchRepo,
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-patch-invalid")
 	runID := common.RunID("run-patch-invalid")
@@ -559,8 +549,9 @@ func TestRuntimeOrchestrator_StartRunPublishesRunAndStepEvents(t *testing.T) {
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
-	hub, _ := newRecordingDispatchMagicHub(t)
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
+	notifications := newRuntimeNotificationRecorder(t)
+	notifications.attach(orch)
 
 	workspaceID := common.WorkspaceID("ws-evt")
 	runID := common.RunID("run-evt")
@@ -575,43 +566,29 @@ func TestRuntimeOrchestrator_StartRunPublishesRunAndStepEvents(t *testing.T) {
 		t.Fatalf("start run: %v", err)
 	}
 
-	published := hub.Published()
+	published := notifications.waitAtLeast(8, time.Second)
 	if len(published) < 7 {
 		t.Fatalf("published events = %d, want at least 7", len(published))
 	}
-	if published[0].Version != events.WorkorchEventVersion {
-		t.Fatalf("first event version = %s, want %s", published[0].Version, events.WorkorchEventVersion)
+	var runActive, workspaceBound, stepExecuting, stepSucceeded, runCompleted, workspaceReleased bool
+	for _, item := range published {
+		switch {
+		case item.Topic == runevents.TopicRunStateChanged && item.RunID == string(runID) && item.State == string(common.RunStateActive):
+			runActive = true
+		case item.Topic == workspaceevents.TopicWorkspaceStateChanged && item.WorkspaceID == string(workspaceID) && item.ActiveRunID == string(runID):
+			workspaceBound = true
+		case item.Topic == runevents.TopicStepDispatched && item.RunID == string(runID) && item.State == string(common.StepStateExecuting):
+			stepExecuting = true
+		case item.Topic == runevents.TopicStepStateChanged && item.RunID == string(runID) && item.State == string(common.StepStateSucceeded):
+			stepSucceeded = true
+		case item.Topic == runevents.TopicRunStateChanged && item.RunID == string(runID) && item.State == string(common.RunStateCompleted):
+			runCompleted = true
+		case item.Topic == workspaceevents.TopicWorkspaceStateChanged && item.WorkspaceID == string(workspaceID) && item.ActiveRunID == "":
+			workspaceReleased = true
+		}
 	}
-	if published[0].Topic != runevents.TopicRunStateChanged || published[0].Payload[events.PayloadKeyState] != string(common.RunStateActive) {
-		t.Fatalf("first event = %#v, want run running", published[0])
-	}
-	if published[1].Topic != workspaceevents.TopicWorkspaceStateChanged || published[1].Payload[events.PayloadKeyActiveRunID] != string(runID) {
-		t.Fatalf("second event = %#v, want workspace active run bound", published[1])
-	}
-	if published[1].Payload[events.PayloadKeyState] != string(common.WorkspaceStateActive) {
-		t.Fatalf("second event state = %v, want workspace running", published[1].Payload[events.PayloadKeyState])
-	}
-	if published[2].Topic != runevents.TopicStepDispatched || published[2].Payload[events.PayloadKeyState] != string(common.StepStateExecuting) {
-		t.Fatalf("third event = %#v, want step dispatched", published[2])
-	}
-	if published[3].Topic != runevents.TopicStepStateChanged || published[3].Payload[events.PayloadKeyState] != string(common.StepStateSucceeded) {
-		t.Fatalf("fourth event = %#v, want step completed", published[3])
-	}
-	if published[4].Topic != runevents.TopicRunStateChanged || published[4].Payload[events.PayloadKeyState] != string(common.RunStateActive) {
-		t.Fatalf("fifth event = %#v, want run validating", published[4])
-	}
-	if published[5].Topic != workspaceevents.TopicWorkspaceStateChanged || published[5].Payload[events.PayloadKeyState] != string(common.WorkspaceStateActive) {
-		t.Fatalf("sixth event = %#v, want workspace validating", published[5])
-	}
-	if published[6].Topic != runevents.TopicRunStateChanged || published[6].Payload[events.PayloadKeyState] != string(common.RunStateCompleted) {
-		t.Fatalf("seventh event = %#v, want run completed", published[6])
-	}
-	last := published[len(published)-1]
-	if last.Topic != workspaceevents.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyActiveRunID] != "" {
-		t.Fatalf("last event = %#v, want workspace active run cleared", last)
-	}
-	if last.Payload[events.PayloadKeyState] != string(common.WorkspaceStateActive) {
-		t.Fatalf("last event state = %v, want workspace completed", last.Payload[events.PayloadKeyState])
+	if !runActive || !workspaceBound || !stepExecuting || !stepSucceeded || !runCompleted || !workspaceReleased {
+		t.Fatalf("published events = %+v, want run/workspace/step typed lifecycle notifications", published)
 	}
 }
 
@@ -649,8 +626,9 @@ func TestRuntimeOrchestrator_StartRunPublishesLLMStreamProgressEvent(t *testing.
 			{"type": "done"},
 		},
 	}}
-	hub, _ := newRecordingDispatchMagicHub(t)
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
+	notifications := newRuntimeNotificationRecorder(t)
+	notifications.attach(orch)
 
 	workspaceID := common.WorkspaceID("ws-evt-stream")
 	runID := common.RunID("run-evt-stream")
@@ -670,9 +648,10 @@ func TestRuntimeOrchestrator_StartRunPublishesLLMStreamProgressEvent(t *testing.
 		t.Fatalf("start run: %v", err)
 	}
 
-	var streamProgress events.Envelope
+	records := notifications.waitAtLeast(10, time.Second)
+	var streamProgress runtimeNotificationRecord
 	found := false
-	for _, item := range hub.Published() {
+	for _, item := range records {
 		if item.Topic != runevents.TopicRunLLMStreamProgress {
 			continue
 		}
@@ -683,23 +662,19 @@ func TestRuntimeOrchestrator_StartRunPublishesLLMStreamProgressEvent(t *testing.
 	if !found {
 		t.Fatalf("published events missing %s", runevents.TopicRunLLMStreamProgress)
 	}
-	if streamProgress.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) ||
-		streamProgress.Payload[events.PayloadKeyRunID] != string(runID) {
-		t.Fatalf("stream payload workspace/run = %+v, want %s/%s", streamProgress.Payload, workspaceID, runID)
+	if streamProgress.WorkspaceID != string(workspaceID) || streamProgress.RunID != string(runID) {
+		t.Fatalf("stream payload workspace/run = %+v, want %s/%s", streamProgress, workspaceID, runID)
 	}
-	if streamProgress.Payload[events.PayloadKeyChunkCount] != 3 ||
-		streamProgress.Payload[events.PayloadKeyReceivedBytes] != 6 {
-		t.Fatalf("stream payload chunk/bytes = %+v, want 3/6", streamProgress.Payload)
+	if streamProgress.ChunkCount != 3 || streamProgress.ReceivedBytes != 6 {
+		t.Fatalf("stream payload chunk/bytes = %+v, want 3/6", streamProgress)
 	}
-	if streamProgress.Payload[events.PayloadKeyProviderID] != "provider-a" ||
-		streamProgress.Payload[events.PayloadKeyModel] != "model-a" ||
-		streamProgress.Payload[events.PayloadKeyStatus] != string(common.StepStateSucceeded) {
-		t.Fatalf("stream payload provider/model/status = %+v", streamProgress.Payload)
+	if streamProgress.ProviderID != "provider-a" || streamProgress.Model != "model-a" || streamProgress.State != string(common.StepStateSucceeded) {
+		t.Fatalf("stream payload provider/model/status = %+v", streamProgress)
 	}
 
-	var usageRecorded events.Envelope
+	var usageRecorded runtimeNotificationRecord
 	usageFound := false
-	for _, item := range hub.Published() {
+	for _, item := range records {
 		if item.Topic != runevents.TopicRunLLMUsageRecorded {
 			continue
 		}
@@ -710,18 +685,14 @@ func TestRuntimeOrchestrator_StartRunPublishesLLMStreamProgressEvent(t *testing.
 	if !usageFound {
 		t.Fatalf("published events missing %s", runevents.TopicRunLLMUsageRecorded)
 	}
-	if usageRecorded.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) ||
-		usageRecorded.Payload[events.PayloadKeyRunID] != string(runID) ||
-		usageRecorded.Payload[events.PayloadKeyStepID] == "" {
-		t.Fatalf("usage payload workspace/run/step = %+v", usageRecorded.Payload)
+	if usageRecorded.WorkspaceID != string(workspaceID) || usageRecorded.RunID != string(runID) || usageRecorded.StepID == "" {
+		t.Fatalf("usage payload workspace/run/step = %+v", usageRecorded)
 	}
-	if usageRecorded.Payload[events.PayloadKeyProviderID] != "provider-a" ||
-		usageRecorded.Payload[events.PayloadKeyModel] != "model-a" ||
-		usageRecorded.Payload[events.PayloadKeyStreaming] != true {
-		t.Fatalf("usage payload provider/model/streaming = %+v", usageRecorded.Payload)
+	if usageRecorded.ProviderID != "provider-a" || usageRecorded.Model != "model-a" || !usageRecorded.Streaming {
+		t.Fatalf("usage payload provider/model/streaming = %+v", usageRecorded)
 	}
-	if usageRecorded.Payload[events.PayloadKeyStatus] != "completed" || usageRecorded.Payload[events.PayloadKeyTotalTokens] == nil {
-		t.Fatalf("usage payload status/tokens = %+v", usageRecorded.Payload)
+	if usageRecorded.State != "completed" || usageRecorded.TotalTokens == 0 {
+		t.Fatalf("usage payload status/tokens = %+v", usageRecorded)
 	}
 }
 
@@ -732,8 +703,9 @@ func TestRuntimeOrchestrator_CompleteRunClearsStaleTerminalActiveRun(t *testing.
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
-	hub, _ := newRecordingDispatchMagicHub(t)
-	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"status": "ok"}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"status": "ok"}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
+	notifications := newRuntimeNotificationRecorder(t)
+	notifications.attach(orch)
 
 	workspaceID := common.WorkspaceID("ws-stale-active-complete")
 	staleRunID := common.RunID("run-stale-failed")
@@ -764,12 +736,14 @@ func TestRuntimeOrchestrator_CompleteRunClearsStaleTerminalActiveRun(t *testing.
 	if ws.State != common.WorkspaceStateActive || ws.ActiveRunID != "" {
 		t.Fatalf("workspace = %+v, want completed with no active run", ws)
 	}
-	last := hub.Published()[len(hub.Published())-1]
-	if last.Topic != workspaceevents.TopicWorkspaceStateChanged ||
-		last.RunID != string(completedRunID) ||
-		last.Payload[events.PayloadKeyState] != string(common.WorkspaceStateActive) ||
-		last.Payload[events.PayloadKeyActiveRunID] != "" {
-		t.Fatalf("last event = %#v, want completed workspace release for new run", last)
+	_, ok := notifications.waitFor(time.Second, func(item runtimeNotificationRecord) bool {
+		return item.Topic == workspaceevents.TopicWorkspaceStateChanged &&
+			item.RunID == string(completedRunID) &&
+			item.State == string(common.WorkspaceStateActive) &&
+			item.ActiveRunID == ""
+	})
+	if !ok {
+		t.Fatalf("notifications = %+v, want completed workspace release for new run", notifications.snapshot())
 	}
 }
 
@@ -800,8 +774,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesMultipleStepsWhenRuntimeRequestsN
 			}
 		},
 	}
-	hub, _ := newRecordingDispatchMagicHub(t)
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-multi")
 	runID := common.RunID("run-multi")
@@ -893,9 +866,7 @@ func TestRuntimeOrchestrator_StartRunExecutesBlockExecutionGraphBranch(t *testin
 			Patches:            memory.NewPatchRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: checkpointRepo,
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-graph-branch")
 	runID := common.RunID("run-graph-branch")
@@ -1009,9 +980,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesIndependentGraphNodesConcurrently
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
 			MemoryItems:        memory.NewMemoryItemRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-graph-concurrent")
 	runID := common.RunID("run-graph-concurrent")
@@ -1160,9 +1129,7 @@ func TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterDecision(
 			Patches:            memory.NewPatchRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-graph-decision")
 	runID := common.RunID("run-graph-decision")

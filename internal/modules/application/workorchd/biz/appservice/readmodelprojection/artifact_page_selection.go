@@ -2,7 +2,7 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 )
 
 func selectArtifactPage(items []*resultmodel.Artifact, limit int, cursorAfterID string) ([]readmodelcore.Artifact, string, bool) {

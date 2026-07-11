@@ -8,7 +8,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type RecoverySnapshotFunc func(context.Context, common.RunID) (readmodelcore.RunSnapshot, error)
@@ -20,7 +19,6 @@ type CompressedContextDependencies struct {
 	Approvals        readmodelcore.ApprovalReader
 	MemoryRecalls    readmodelcore.MemoryRecallTraceReader
 	CommandHub       magicevent.Hub
-	EventHub         events.Hub
 	RecoverySnapshot RecoverySnapshotFunc
 	DefaultLanguage  string
 }
@@ -44,7 +42,7 @@ func CompressedContextPatchForRun(ctx context.Context, deps CompressedContextDep
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := RecordRecoveryMemoryRecallTrace(ctx, deps.CommandHub, deps.EventHub, deps.MemoryRecalls, item, compressed); err != nil {
+	if err := RecordRecoveryMemoryRecallTrace(ctx, deps.CommandHub, deps.MemoryRecalls, item, compressed); err != nil {
 		return nil, nil, err
 	}
 	patch, err := WorkspaceDefinitionContextPatch(ctx, deps.CommandHub, item)

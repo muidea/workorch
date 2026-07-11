@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/muidea/workorch/internal/pkg/events"
+	magicevent "github.com/muidea/magicCommon/event"
 )
 
 var sharedBackendSessions sync.Map
@@ -81,11 +81,11 @@ func sharedBackendSessionKey(ctx context.Context, backend string, dataRoot strin
 		strings.ToLower(strings.TrimSpace(backend)),
 		strings.TrimSpace(dataRoot),
 		strings.TrimSpace(configDir),
-		eventHubIdentity(EventHubFromContext(ctx)),
+		commandHubIdentity(CommandHubFromContext(ctx)),
 	}, "|")
 }
 
-func eventHubIdentity(hub events.Hub) string {
+func commandHubIdentity(hub magicevent.Hub) string {
 	if hub == nil {
 		return ""
 	}

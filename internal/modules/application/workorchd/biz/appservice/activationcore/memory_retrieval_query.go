@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 )
 
 func MemoryRetrievalQueryText(goal *workspacemodel.Goal, dod *workspacemodel.DoD) string {

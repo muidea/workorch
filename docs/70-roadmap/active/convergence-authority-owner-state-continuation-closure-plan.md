@@ -206,7 +206,7 @@ Likely code areas:
 - `internal/pkg/workorchport/**`
 - `internal/pkg/workorchclient/**`
 - `internal/modules/application/workorchd/service/server/**`
-- `internal/modules/kernel/decision/**`
+- `internal/modules/blocks/decision/**`
 
 Acceptance:
 

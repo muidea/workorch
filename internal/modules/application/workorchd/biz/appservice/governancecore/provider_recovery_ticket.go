@@ -3,7 +3,7 @@ package governancecore
 import (
 	"strings"
 
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 )
 
 func IsWorkorchRuntimeLLMProviderRecoveryTicket(ticket *decisionmodel.Ticket) bool {

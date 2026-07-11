@@ -13,13 +13,13 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	filecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -37,7 +37,6 @@ func runportsCompressedContextPatchForRun(ctx context.Context, session *RuntimeS
 		Approvals:     deps.approvals,
 		MemoryRecalls: deps.memoryRecalls,
 		CommandHub:    deps.commandHub,
-		EventHub:      deps.eventHub,
 		RecoverySnapshot: func(snapshotCtx context.Context, snapshotRunID common.RunID) (RunSnapshot, error) {
 			return readRunRecoverySnapshot(snapshotCtx, deps, snapshotRunID)
 		},
@@ -207,7 +206,7 @@ func TestRecoverStuckRunningRunsWithDuplicateRunIDsUsesWorkspaceScope(t *testing
 		}
 	}
 	session, sessionCtx := newTestRuntimeSession(t, "file", dataRoot)
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
@@ -377,7 +376,7 @@ func TestCompressedContextPatchRecordsRecoveryMemoryRecallTrace(t *testing.T) {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
 	defer session.Close(ctx)
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
@@ -446,7 +445,7 @@ func TestCompressedContextPatchForRunRefreshesCumulativeGoalAndDoD(t *testing.T)
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
 	defer session.Close(ctx)
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
@@ -808,7 +807,7 @@ func TestRecoverStuckRunningRunsWithBackendFailsRunningRunWithoutContinuationChe
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
@@ -872,7 +871,7 @@ func TestRecoverStartupInactiveRunningWorkspacesWithBackendResetsWorkspaceToIdle
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
@@ -946,7 +945,7 @@ func TestRecoverStartupInactiveRunningWorkspacesPreservesGovernanceBlockedRun(t 
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
@@ -1013,7 +1012,7 @@ func TestRecoverStartupInactiveRunningWorkspacesReconcilesWaitingDecisionRun(t *
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
@@ -1089,7 +1088,7 @@ func TestRecoverStartupInactiveRunningWorkspacesReconcilesApprovalBlockedRun(t *
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
@@ -1162,7 +1161,7 @@ func TestRecoverStuckRunningRunsWithBackendClearsTerminalActiveWorkspaceRun(t *t
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
@@ -1217,7 +1216,7 @@ func TestRecoverStuckRunningRunsWithBackendRedispatchesOrphanDispatchedStep(t *t
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
@@ -1266,7 +1265,7 @@ func TestRecoverStuckRunningRunsWithBackendRedispatchesOrphanDispatchedStep(t *t
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend verify: %v", err)
 	}
-	verifyExports, err := verifySession.Exports()
+	verifyExports, err := testSessionExports(verifySession)
 	if err != nil {
 		t.Fatalf("Exports verify: %v", err)
 	}
@@ -1305,7 +1304,7 @@ func TestRecoverStaleDispatchedRunsWithBackendFinalizesDurableRuntimeResult(t *t
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
@@ -1382,7 +1381,7 @@ func TestRecoverStaleDispatchedRunsWithBackendFinalizesDurableRuntimeResult(t *t
 	_ = waitRunStateWithBackend(t, "file", dataRoot, string(runID), string(common.RunStateCompleted))
 
 	verifySession, verifyCtx := newTestRuntimeSession(t, "file", dataRoot)
-	verifyExports, err := verifySession.Exports()
+	verifyExports, err := testSessionExports(verifySession)
 	if err != nil {
 		t.Fatalf("verify exports: %v", err)
 	}
@@ -1413,7 +1412,7 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanLLMStepOnProviderMissing(
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
@@ -1467,7 +1466,7 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanLLMStepOnProviderMissing(
 		t.Fatalf("run after = %+v, want provider recovery decision ticket", runAfter)
 	}
 	verifySession, verifyCtx := newTestRuntimeSession(t, "file", dataRoot)
-	verifyExports, err := verifySession.Exports()
+	verifyExports, err := testSessionExports(verifySession)
 	if err != nil {
 		t.Fatalf("verify exports: %v", err)
 	}
@@ -1495,7 +1494,7 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanProviderRetryOnProviderMi
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
@@ -1574,7 +1573,7 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanProviderRetryOnProviderMi
 		t.Fatalf("run after = %+v, want provider recovery decision ticket", runAfter)
 	}
 	verifySession, verifyCtx := newTestRuntimeSession(t, "file", dataRoot)
-	verifyExports, err := verifySession.Exports()
+	verifyExports, err := testSessionExports(verifySession)
 	if err != nil {
 		t.Fatalf("verify exports: %v", err)
 	}
@@ -1589,7 +1588,7 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanProviderRetryOnProviderMi
 
 func TestReadRunWithSessionReturnsFailureReason(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
@@ -1618,7 +1617,7 @@ func TestReadRunWithSessionReturnsFailureReason(t *testing.T) {
 
 func TestListRunsWithSessionHydratesActiveCurrentStepOnly(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}

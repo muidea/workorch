@@ -53,16 +53,16 @@ WorkOrch 可以继续保留自身更严格的 owner-state command/response 规�
 - Hub 不应长期保留基于 topic 字符串包含关系的业务推断，例如 `contains("/command/get")`。
 - Hub 可以提供 lane policy registry 或 contract resolver，但 policy 应来自明确注册的事件契约。
 - 缺失契约时可以采用保守 fallback，但 fallback 只能作为迁移期保护，不能作为长期业务规则来源。
-- `internal/pkg/events` 只保留通用 EventHub wrapper、Envelope、Response、通用 payload helper 和 contract registry 聚合；业务 topic 不再由该包定义。
+- `internal/pkg/events` 只保留 projection/notification EventHub wrapper、Envelope 与 contract registry 聚合；跨组件 command/result 不使用通用 Response、map/any payload 或 JSON/reflect 类型桥。
 
 ### Module / Block
 
-- 每个 owner module 在 module 内部订阅自己的 command topic，并在 `Teardown` / `Stop` 释放订阅。
-- event command topic、notification topic、command DTO、query DTO、response/data view DTO 必须由业务模型 owner module/block 的 `pkg` 包定义。
+- 每个 owner module/block 在组件内部订阅自己的 command topic，并在 `Teardown` / `Stop` 释放订阅。
+- event command topic、notification topic、command DTO、query DTO、result/data view DTO 必须由业务模型 owner module/block 的 `pkg` 包定义为具体类型。
 - 每个 command topic 只表达一个清晰意图，例如 get/list/create/update/transition/execute/notify。
-- 跨 owner 读写正式状态必须走同步 EventHub command，并要求返回 `events.Response`。
-- owner module 在 handler 内把公开 payload 翻译为自身 service/repository 操作；调用方不能直接注入另一个 owner service 或 repository。
-- block 只执行 runtime 技术能力或外部系统交互，不拥有正式 WorkOrch 状态。
+- 跨 owner 读写正式状态必须走 magicCommon EventHub 同步 command，并取得投递方 `pkg/events` 定义的具体 result；缺失 result 是装配或 lifecycle 错误。
+- owner module/block 在 handler 内把公开 command 翻译为自身 service/repository 操作；调用方不能直接注入另一个 owner service 或 repository。
+- stateful block 只拥有单一资源聚合的正式状态；技术 block 只执行单一 runtime 技术能力或外部系统交互。
 - 无状态 block/module 执行不应因为携带 `RunID` 就进入 run 状态 lane。
 - 只有状态 owner 写入、状态机转换、formal evidence 接受/拒绝、同一资源互斥操作等需要严格串行。
 
@@ -72,24 +72,24 @@ WorkOrch 可以继续保留自身更严格的 owner-state command/response 规�
 
 | 业务模型 / 能力 | owner | topic / command / view 定义落点 |
 | --- | --- | --- |
-| Workspace / Goal / DoD / WorkspaceTemplate | `kernel/workspace` | `internal/modules/kernel/workspace/pkg/events` + `pkg/contracts` + `pkg/models` |
+| Workspace / Goal / DoD / WorkspaceTemplate | `blocks/workspace` | `internal/modules/blocks/workspace/pkg/events` + `pkg/contracts` + `pkg/models` |
 | Run / Step / RuntimeCheckpoint | `kernel/run` | `internal/modules/kernel/run/pkg/events` + `pkg/contracts` + `pkg/models` |
-| Result / Artifact | `kernel/result` | `internal/modules/kernel/result/pkg/events` + `pkg/contracts` + `pkg/models` |
-| Decision Ticket / Resolution | `kernel/decision` | `internal/modules/kernel/decision/pkg/events` + `pkg/contracts` + `pkg/models` |
-| Approval | `kernel/approval` | `internal/modules/kernel/approval/pkg/events` + `pkg/contracts` + `pkg/models` |
-| Memory / MemoryRecallTrace | `kernel/memory` | `internal/modules/kernel/memory/pkg/events` + `pkg/contracts` + `pkg/models` |
-| Soul / Skill / MCP catalog | `kernel/soul`, `kernel/skill`, `kernel/mcp` | 各 owner 的 `pkg/events` + `pkg/contracts` + `pkg/models` |
+| Result / Artifact | `blocks/result` | `internal/modules/blocks/result/pkg/events` + `pkg/contracts` + `pkg/models` |
+| Decision Ticket / Resolution | `blocks/decision` | `internal/modules/blocks/decision/pkg/events` + `pkg/contracts` + `pkg/models` |
+| Approval | `blocks/approval` | `internal/modules/blocks/approval/pkg/events` + `pkg/contracts` + `pkg/models` |
+| Memory / MemoryRecallTrace | `blocks/memory` | `internal/modules/blocks/memory/pkg/events` + `pkg/contracts` + `pkg/models` |
+| Soul / Skill / MCP catalog | `blocks/soul`, `blocks/skill`, `blocks/mcp-registry` | 各 owner 的 `pkg/events` + `pkg/contracts` + `pkg/models` |
 | EventStream / Governance / Orchestrator evidence | 对应 kernel owner | 各 owner 的 `pkg/events` + `pkg/contracts` / `pkg/models` |
-| Runtime block execute | `blocks/pkg/runtimeevent` and each block | `internal/modules/blocks/pkg/runtimeevent` + block `pkg` |
+| Runtime block execute | `internal/pkg/runtimeevent` and each block | `internal/pkg/runtimeevent` + block `pkg` |
 | LLM provider command | `blocks/llm` | `internal/modules/blocks/llm/pkg/events` + `pkg/models` |
 | CLI/TUI facade | `application/workorchd` or process port | `internal/modules/application/workorchd/pkg/events` or `internal/pkg/workorchport` |
 
 数据视图规则：
 
-- owner module 的 `pkg/models` 定义正式业务模型和 read view。
-- owner module 的 `pkg/contracts` 定义 command DTO、query DTO、response DTO。
-- owner module 的 `pkg/events` 定义 topic 常量、event contract metadata、owner 专属 payload helper。
-- 通用 `Envelope`、`Response`、`PayloadKeyCommand`、`PayloadKeyItems` 等机制字段可以留在 `internal/pkg/events`。
+- owner module/block 的 `pkg/models` 定义正式业务模型和 read view。
+- owner module/block 的 `pkg/contracts` 定义 command DTO、query DTO、result DTO。
+- owner module/block 的 `pkg/events` 定义 topic 常量、event contract metadata、owner 专属 data helper。
+- 通用 `Envelope` 只用于 projection/notification；跨组件 command/data/result 禁止退回 `Response`、`PayloadKeyCommand`、`PayloadKeyItems` 或 `map[string]any` 传输。
 - 跨 owner 聚合 view 应落在聚合 owner 或 application read model focused package，不能反向塞回 EventHub 基础包。
 
 ### Sync / Async
@@ -192,8 +192,8 @@ TopicOrchestratorCommandStartRun
 
 - 写入/状态机 helper 使用 state lane contract。
 - read/list/search helper 使用 query lane contract。
-- helper 应检查 `events.Response`，缺失 response 视为 lifecycle wiring failure。
-- helper 不导入 owner service command 类型作为跨 module payload。
+- helper 应校验投递方定义的具体 result，缺失或类型不匹配视为 lifecycle wiring failure。
+- helper 不导入 owner service command 类型，也不使用 map/any 作为跨 module payload。
 
 ### Runtime Block Execution
 
@@ -215,17 +215,17 @@ TopicOrchestratorCommandStartRun
 涉及：
 
 - `internal/modules/kernel/run`
-- `internal/modules/kernel/workspace`
-- `internal/modules/kernel/result`
-- `internal/modules/kernel/decision`
-- `internal/modules/kernel/approval`
+- `internal/modules/blocks/workspace`
+- `internal/modules/blocks/result`
+- `internal/modules/blocks/decision`
+- `internal/modules/blocks/approval`
 - `internal/modules/kernel/governance`
 - `internal/modules/kernel/orchestrator`
 - `internal/modules/kernel/eventstream`
-- `internal/modules/kernel/soul`
-- `internal/modules/kernel/skill`
-- `internal/modules/kernel/mcp`
-- `internal/modules/kernel/memory`
+- `internal/modules/blocks/soul`
+- `internal/modules/blocks/skill`
+- `internal/modules/blocks/mcpregistry`
+- `internal/modules/blocks/memory`
 
 要求：
 
@@ -348,13 +348,13 @@ make verify-managed-full
 - 将 `internal/pkg/events/topics_*.go` 中的业务 topic 常量移动到 owner `pkg/events`。
 - owner `pkg/events` 暴露自身 topic contract 列表，供 `internal/pkg/events` 聚合注册。
 - 发布方逐步改为 import owner event package，例如 `runevents.TopicCommandGet`、`workspaceevents.TopicCommandCreate`。
-- `internal/pkg/events` 最终只保留 Hub/Envelope/Response 和 contract registry 聚合，不再承载业务 topic 定义。
+- `internal/pkg/events` 最终只保留 projection Hub/Envelope 和 contract registry 聚合，不再承载业务 command/result 或业务 topic 定义。
 
 验收：
 
 - 新增业务 command/topic 时只能在 owner module/block 的 `pkg/events` 中定义。
 - `rg "Topic[A-Za-z].*=\\s*\\\"/" internal/pkg/events -g 'topics_*.go'` 不再出现 owner 业务 topic 定义。
-- owner module 的 topic、command DTO、read view DTO 在同一 owner `pkg` 族内可追踪。
+- owner module/block 的 topic、command DTO、result/read view DTO 在同一 owner `pkg` 族内可追踪。
 - appservice、blocks、orchestrator 等调用方 import 业务 owner `pkg/events`，不再通过 `internal/pkg/events` 获取业务 topic。
 
 ## Initial Closure Checklist
@@ -424,15 +424,15 @@ go test ./internal/pkg/events ./internal/modules/blocks/pkg/runtimeevent -count=
 已完成：
 
 - 为业务模型 owner 建立 `pkg/events/topics.go`：
-  - `kernel/workspace`
+  - `blocks/workspace`
   - `kernel/run`
-  - `kernel/result`
-  - `kernel/decision`
-  - `kernel/approval`
-  - `kernel/memory`
-  - `kernel/soul`
-  - `kernel/skill`
-  - `kernel/mcp`
+  - `blocks/result`
+  - `blocks/decision`
+  - `blocks/approval`
+  - `blocks/memory`
+  - `blocks/soul`
+  - `blocks/skill`
+  - `blocks/mcp-registry`
   - `kernel/eventstream`
   - `kernel/governance`
   - `kernel/orchestrator`
@@ -492,18 +492,12 @@ rg -n "Topic[A-Za-z0-9]+\\s*=\\s*\\\"/" internal/pkg/events -g '*.go'
 - `internal/pkg/events` 不再定义或 alias 业务 topic。
 - `go-application-event-runtime` 与 `go-multi-module-dev` 已补充 owner-owned event definition、基础 events 包不得承载业务 topic、runtime block execute topic 归属等规则。
 
-### 2026-06-22 WorkOrch Event Version Matrix Guard
+### 2026-06-22 WorkOrch Event Version Matrix Guard（历史机制）
 
-已完成：
-
-- `internal/pkg/events` 中公开 WorkOrch event topic 清单收敛为单一来源：
-  - `workorchEventTopics` 是 `WorkorchTopics()` 与 `WorkorchEventContract()` 的共同来源。
-  - `workorchEventContracts` 由该清单构建，避免 parser subscription 清单与版本矩阵分叉。
-- 新增 `TestWorkorchTopicsAreVersionedByTopicMatrix`，确保：
-  - `WorkorchTopics()` 不返回空 topic。
-  - topic 清单不存在重复项。
-  - 每个公开 WorkOrch event topic 都能通过 `ValidateWorkorchEventVersion(topic, WorkorchEventVersion)`。
-  - 版本矩阵不存在未被 `WorkorchTopics()` 暴露的孤儿 topic。
+当时曾通过 `internal/pkg/events` 的集中 topic 清单约束事件版本矩阵。该机制已在
+2026-07-11 的组件 EventHub typed 收口中删除：当前由各投递组件 `pkg/events`
+分别定义 topic 与具体 data，消费组件逐 topic 导入和订阅，不再维护跨组件公开
+topic 聚合 API。事件版本兼容模型仅保留给内部历史投影读取，不作为组件交互合同。
 
 直接核对：
 

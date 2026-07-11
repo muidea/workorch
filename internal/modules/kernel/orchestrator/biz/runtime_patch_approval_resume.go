@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"

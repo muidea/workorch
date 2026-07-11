@@ -46,7 +46,7 @@ block 不拥有：
 - `git/*` -> `blocks/git`
 - `web/*` -> `blocks/web`
 - `ssh/command` -> `blocks/ssh`
-- approval 正式状态与治理动作 -> `kernel/approval`
+- approval 正式状态与治理动作 -> `blocks/approval`
 
 ## Step Kind Registration Matrix
 
@@ -146,7 +146,7 @@ LLM block 输出应保持为：
   - 只负责 provider-facing request / response，不直接执行 side effect
 - `blocks/mcp` / `blocks/shell` / `blocks/file` / `blocks/git` / `blocks/web` / `blocks/ssh`
   - 负责外部动作执行，但不拥有 Run 终态与 accepted closeout 决策
-- approval 不属于 block adapter。Approval 正式状态、resolve 动作和治理关联由 `kernel/approval`
+- approval 不属于 block adapter。Approval 正式状态、resolve 动作和治理关联由 `blocks/approval`
   承接，并由 orchestrator/governance 选择恢复路径。
 
 ## Source Documents

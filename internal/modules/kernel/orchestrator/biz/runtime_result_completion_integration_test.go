@@ -10,20 +10,19 @@ import (
 	"testing"
 	"time"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
-	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -66,9 +65,7 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 			Artifacts:         artifactRepo,
 			ValidationResults: validationRepo,
 			MemoryItems:       memoryRepo,
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-dod-gate-complete")
 	runID := common.RunID("run-dod-gate-complete")
@@ -307,9 +304,7 @@ func TestRuntimeOrchestratorRecordsSliceResultBeforeFinalCompletionGate(t *testi
 			ToolCalls:          toolCallRepo,
 			Results:            resultRepo,
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-partial-slice-mainline")
 	runID := common.RunID("run-partial-slice-mainline")
@@ -1255,7 +1250,6 @@ func TestRuntimeOrchestrator_FinalRunAndWorkspaceCompletionWritesConcurrently(t 
 	approvalRepo := memory.NewApprovalRepository()
 	resultRepo := memory.NewResultRepository()
 	artifactRepo := memory.NewArtifactRepository()
-	hub := events.NewMemoryHub()
 	runtime := &stubRuntimeAdapter{output: map[string]any{
 		"status": "completed",
 		"dodAssessment": map[string]any{
@@ -1281,9 +1275,10 @@ func TestRuntimeOrchestrator_FinalRunAndWorkspaceCompletionWritesConcurrently(t 
 		RuntimeEvidenceRepositories{
 			Results:   resultRepo,
 			Artifacts: artifactRepo,
-		},
-		hub,
-	)
+		})
+
+	notifications := newRuntimeNotificationRecorder(t)
+	notifications.attach(orch)
 
 	workspaceID := common.WorkspaceID("ws-terminal-write-concurrent")
 	runID := common.RunID("run-terminal-write-concurrent")
@@ -1316,9 +1311,9 @@ func TestRuntimeOrchestrator_FinalRunAndWorkspaceCompletionWritesConcurrently(t 
 			t.Fatalf("timed out waiting for concurrent terminal writes, saw %+v: %v", seen, ctx.Err())
 		}
 	}
-	publishedBeforeRelease := hub.Published()
+	publishedBeforeRelease := notifications.snapshot()
 	for _, item := range publishedBeforeRelease {
-		if item.Topic == runevents.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateCompleted) {
+		if item.Topic == runevents.TopicRunStateChanged && item.State == string(common.RunStateCompleted) {
 			t.Fatalf("published completed run event before terminal writes were released: %+v", publishedBeforeRelease)
 		}
 	}
@@ -1331,19 +1326,29 @@ func TestRuntimeOrchestrator_FinalRunAndWorkspaceCompletionWritesConcurrently(t 
 	case <-ctx.Done():
 		t.Fatalf("StartRun did not complete after releasing terminal writes: %v", ctx.Err())
 	}
-	published := hub.Published()
-	var completedRunIndex = -1
-	var completedWorkspaceIndex = -1
-	for idx, item := range published {
-		if item.Topic == runevents.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateCompleted) {
-			completedRunIndex = idx
+	if _, ok := notifications.waitFor(time.Second, func(item runtimeNotificationRecord) bool {
+		return item.Topic == workspaceevents.TopicWorkspaceStateChanged && item.WorkspaceID == string(workspaceID) && item.ActiveRunID == ""
+	}); !ok {
+		t.Fatalf("notifications = %+v, want workspace terminal release", notifications.snapshot())
+	}
+	if _, ok := notifications.waitFor(time.Second, func(item runtimeNotificationRecord) bool {
+		return item.Topic == runevents.TopicRunStateChanged && item.RunID == string(runID) && item.State == string(common.RunStateCompleted)
+	}); !ok {
+		t.Fatalf("notifications = %+v, want run completed notification", notifications.snapshot())
+	}
+	published := notifications.snapshot()
+	var completedRunFound bool
+	var completedWorkspaceFound bool
+	for _, item := range published {
+		if item.Topic == runevents.TopicRunStateChanged && item.State == string(common.RunStateCompleted) {
+			completedRunFound = true
 		}
-		if item.Topic == workspaceevents.TopicWorkspaceStateChanged && item.Payload[events.PayloadKeyState] == string(common.WorkspaceStateActive) {
-			completedWorkspaceIndex = idx
+		if item.Topic == workspaceevents.TopicWorkspaceStateChanged && item.State == string(common.WorkspaceStateActive) && item.ActiveRunID == "" {
+			completedWorkspaceFound = true
 		}
 	}
-	if completedRunIndex < 0 || completedWorkspaceIndex < 0 || completedRunIndex > completedWorkspaceIndex {
-		t.Fatalf("published events = %+v, want run completed before workspace completed", published)
+	if !completedRunFound || !completedWorkspaceFound {
+		t.Fatalf("published events = %+v, want run and workspace completion notifications", published)
 	}
 	runItem, err := runRepo.Get(ctx, runID)
 	if err != nil {

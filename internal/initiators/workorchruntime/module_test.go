@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
 func TestRuntimeInitiatorIdentityAndZeroStateContract(t *testing.T) {
@@ -17,21 +16,8 @@ func TestRuntimeInitiatorIdentityAndZeroStateContract(t *testing.T) {
 	if runtime.Weight() != 10 {
 		t.Fatalf("Weight = %d, want 10", runtime.Weight())
 	}
-	if runtime.EventHub() != nil {
-		t.Fatal("new runtime EventHub is non-nil before Setup")
-	}
-	if got := runtime.RuntimePolicy(); got != (workorchruntimepolicy.RuntimePolicy{}) {
-		t.Fatalf("new runtime policy = %+v, want zero policy before Setup", got)
-	}
-
-	if ((*Runtime)(nil)).RepositoryProvider() != nil {
+	if ((*RepositoryInitiator)(nil)).RepositoryProvider() != nil {
 		t.Fatal("nil runtime RepositoryProvider is non-nil")
-	}
-	if ((*Runtime)(nil)).EventHub() != nil {
-		t.Fatal("nil runtime EventHub is non-nil")
-	}
-	if got := ((*Runtime)(nil)).RuntimePolicy(); got != (workorchruntimepolicy.RuntimePolicy{}) {
-		t.Fatalf("nil runtime policy = %+v, want zero policy", got)
 	}
 }
 
@@ -42,22 +28,12 @@ func TestRuntimeInitiatorTeardownClearsRuntimeResources(t *testing.T) {
 	}
 	runtime := New()
 	runtime.repositories = repositories
-	runtime.runtimePolicy = workorchruntimepolicy.NormalizeRuntimePolicy(workorchruntimepolicy.RuntimePolicy{})
 
 	runtime.Teardown(context.Background())
-	if runtime.EventHub() != nil {
-		t.Fatal("EventHub is non-nil after Teardown")
-	}
-	if got := runtime.RuntimePolicy(); got != (workorchruntimepolicy.RuntimePolicy{}) {
-		t.Fatalf("runtime policy after Teardown = %+v, want zero policy", got)
-	}
 	teardownRepos := runtime.RepositoryProvider().(repositorySet)
 	assertRepositorySetEmpty(t, teardownRepos)
 
 	runtime.Teardown(context.Background())
-	if runtime.EventHub() != nil {
-		t.Fatal("EventHub is non-nil after repeated Teardown")
-	}
 }
 
 func TestRuntimeInitiatorMemoryRepositoriesCoverModuleContracts(t *testing.T) {
@@ -66,11 +42,6 @@ func TestRuntimeInitiatorMemoryRepositoriesCoverModuleContracts(t *testing.T) {
 		t.Fatalf("build memory repositories: %v", err)
 	}
 
-	requireNotNil(t, "system souls", repositories.System().Souls)
-	requireNotNil(t, "system templates", repositories.System().Templates)
-	requireNotNil(t, "system mcp servers", repositories.System().MCPServers)
-	requireNotNil(t, "system mcp capabilities", repositories.System().MCPCapabilities)
-
 	requireNotNil(t, "workspace workspaces", repositories.Workspace().Workspaces)
 	requireNotNil(t, "workspace goals", repositories.Workspace().Goals)
 	requireNotNil(t, "workspace dods", repositories.Workspace().DoDs)
@@ -78,9 +49,7 @@ func TestRuntimeInitiatorMemoryRepositoriesCoverModuleContracts(t *testing.T) {
 
 	requireNotNil(t, "decision tickets", repositories.Decision().Tickets)
 	requireNotNil(t, "decision resolutions", repositories.Decision().Resolutions)
-	requireNotNil(t, "decision evidence", repositories.Decision().EvidenceRecords)
 	requireNotNil(t, "approval approvals", repositories.Approval().Approvals)
-	requireNotNil(t, "approval evidence", repositories.Approval().EvidenceRecords)
 	requireNotNil(t, "eventstream records", repositories.EventStream().EventRecords)
 	requireNotNil(t, "governance traces", repositories.Governance().AutoGovernanceTraces)
 	requireNotNil(t, "mcp servers", repositories.MCP().Servers)

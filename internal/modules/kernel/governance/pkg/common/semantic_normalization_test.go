@@ -3,7 +3,7 @@ package common
 import (
 	"testing"
 
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 )
 
 func TestNormalizeDecisionResolutionInfersFromText(t *testing.T) {

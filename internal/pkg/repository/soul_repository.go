@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	soul "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
+	soul "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

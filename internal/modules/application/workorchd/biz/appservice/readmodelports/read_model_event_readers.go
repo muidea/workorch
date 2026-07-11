@@ -1,7 +1,7 @@
 package readmodelports
 
 import (
-	"github.com/muidea/workorch/internal/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 )
 
 type OwnerReaders struct {
@@ -27,7 +27,7 @@ type OwnerReaders struct {
 	Approvals             ApprovalReader
 }
 
-func (r OwnerReaders) RunSnapshotReaders(published []events.WorkorchEvent) RunSnapshotReaders {
+func (r OwnerReaders) RunSnapshotReaders(published []eventstreamevents.EventRecordData) RunSnapshotReaders {
 	return RunSnapshotReaders{
 		Workspaces:            r.Workspaces,
 		Runs:                  r.Runs,
@@ -51,7 +51,7 @@ func (r OwnerReaders) RunSnapshotReaders(published []events.WorkorchEvent) RunSn
 	}
 }
 
-func (r OwnerReaders) WorkspaceSnapshotReaders(published []events.WorkorchEvent) WorkspaceSnapshotReaders {
+func (r OwnerReaders) WorkspaceSnapshotReaders(published []eventstreamevents.EventRecordData) WorkspaceSnapshotReaders {
 	return WorkspaceSnapshotReaders{
 		Workspaces:            r.Workspaces,
 		Goals:                 r.Goals,

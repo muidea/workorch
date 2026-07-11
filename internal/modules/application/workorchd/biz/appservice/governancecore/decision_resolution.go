@@ -1,8 +1,8 @@
 package governancecore
 
 import (
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 )
 
 func NormalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, payload map[string]any, resolutionType string) (map[string]any, string) {

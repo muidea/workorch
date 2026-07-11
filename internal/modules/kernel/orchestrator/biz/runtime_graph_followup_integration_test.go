@@ -10,14 +10,13 @@ import (
 	"strings"
 	"testing"
 
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -352,7 +351,7 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterExecutionGraphCompletes(t
 			}
 		},
 	}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-graph-follow-up")
 	runID := common.RunID("run-graph-follow-up")
@@ -456,7 +455,7 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterLLMPlannedShellLeaf(t *te
 			}
 		},
 	}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-shell-follow-up")
 	runID := common.RunID("run-shell-follow-up")
@@ -577,9 +576,7 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterLLMPatchSideEffect(t *tes
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
 			MemoryItems:        memory.NewMemoryItemRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-patch-follow-up")
 	runID := common.RunID("run-patch-follow-up")
@@ -670,7 +667,7 @@ func TestRuntimeOrchestrator_GraphFollowUpIncludesAllCompletedParallelEvidence(t
 			}
 		},
 	}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-graph-parallel-follow-up")
 	runID := common.RunID("run-graph-parallel-follow-up")
@@ -1527,7 +1524,6 @@ func TestRuntimeOrchestrator_DispatchStepGraphFollowUpReusesLoadedStepsForEviden
 			Results:            resultRepo,
 			Artifacts:          artifactRepo,
 		},
-		eventHub: events.NewMemoryHub(),
 	}
 	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive, ActiveRunID: runID}
 	run := &runmodel.Run{
@@ -1653,7 +1649,7 @@ func TestRuntimeOrchestrator_DispatchesRepeatedGraphNodeIDInNewGraphScope(t *tes
 			}
 		},
 	}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-graph-repeat")
 	runID := common.RunID("run-graph-repeat")
@@ -1753,7 +1749,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitRoutesToAssessmentOnly(t
 			}, nil
 		},
 	}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-graph-expansion-limit")
 	runID := common.RunID("run-graph-expansion-limit")
@@ -1797,7 +1793,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAllowsConcreteValidation
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
-	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	runID := common.RunID("run-graph-limit-validation-evidence")
 	run := &runmodel.Run{
@@ -1883,7 +1879,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToRepeatedConcret
 			return map[string]any{"status": "completed"}, nil
 		},
 	}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-graph-limit-repeated-validation-evidence")
 	runID := common.RunID("run-graph-limit-repeated-validation-evidence")
@@ -1989,7 +1985,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToConcreteFailure
 			return map[string]any{"status": "completed"}, nil
 		},
 	}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-graph-limit-concrete-failure-evidence")
 	runID := common.RunID("run-graph-limit-concrete-failure-evidence")
@@ -2076,7 +2072,7 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAllowsContractedStateCha
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
-	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	runID := common.RunID("run-graph-limit-state-change")
 	run := &runmodel.Run{
@@ -2413,7 +2409,7 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationDispatchesOneRetry(t
 			}, nil
 		},
 	}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-assessment-only-rejects-graph")
 	runID := common.RunID("run-assessment-only-rejects-graph")
@@ -2632,9 +2628,7 @@ func TestRuntimeOrchestrator_AssessmentOnlyExecutableOutputRetriesWithoutSideEff
 		ticketRepo,
 		memory.NewDecisionResolutionRepository(),
 		approvalRepo,
-		RuntimeEvidenceRepositories{MemoryItems: memoryRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{MemoryItems: memoryRepo})
 
 	workspaceID := common.WorkspaceID("ws-assessment-only-ignores-graph-with-assessment")
 	runID := common.RunID("run-assessment-only-ignores-graph-with-assessment")
@@ -2748,7 +2742,7 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationEscalatesRepeatedGra
 			}, nil
 		},
 	}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-assessment-only-rejects-repeated-graph")
 	runID := common.RunID("run-assessment-only-rejects-repeated-graph")
@@ -2844,9 +2838,7 @@ func TestRuntimeOrchestrator_AssessmentOnlyDecisionForContinuableCandidateRoutes
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-assessment-only-decision-repair")
 	runID := common.RunID("run-assessment-only-decision-repair")
@@ -2992,9 +2984,7 @@ func TestRuntimeOrchestrator_FailedAssessmentDecisionWithActionableCoverageRoute
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-failed-assessment-decision-repair")
 	runID := common.RunID("run-failed-assessment-decision-repair")
@@ -3102,9 +3092,7 @@ func TestRuntimeOrchestrator_ContinuableDecisionRoutesToRepair(t *testing.T) {
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-continuable-decision-repair")
 	runID := common.RunID("run-continuable-decision-repair")
@@ -3217,9 +3205,7 @@ func TestRuntimeOrchestrator_KnownActionableDecisionRoutesToRepair(t *testing.T)
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-known-actionable-decision")
 	runID := common.RunID("run-known-actionable-decision")
@@ -3329,9 +3315,7 @@ func TestRuntimeOrchestrator_ReadableResourceDecisionRoutesToRepairWithHumanFiel
 			ToolCalls:          memory.NewToolCallRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	deliverableDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(deliverableDir, "pkg", "lsp"), 0o755); err != nil {
@@ -3471,7 +3455,7 @@ func TestRuntimeOrchestrator_FailsLLMRunCompletionWithoutDoDSummary(t *testing.T
 			},
 		},
 	}}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-dod-summary-missing")
 	runID := common.RunID("run-dod-summary-missing")

@@ -30,6 +30,7 @@
 
 - 当前盘点未发现 Web block 职责缺失；provider/network failure 与 contract violation 的分类需要持续回归。
 - 当前未发现与 orchestrator 的 runtime execute 交互合同缺失。
+- Approval 校验由 block 内部 EventHub getter 完成，只导入 `blocks/approval/pkg/events` 与其公开模型，不注入 Approval service/repository。
 
 ## 边界约束
 

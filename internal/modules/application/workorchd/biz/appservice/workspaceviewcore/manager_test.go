@@ -10,13 +10,76 @@ import (
 	"testing"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
+
+type managerEventRecordFixture struct {
+	ID           string
+	Version      string
+	Topic        string
+	OccurredAt   string
+	SourceModule string
+	SubjectType  string
+	SubjectID    string
+	WorkspaceID  string
+	RunID        string
+	StepID       string
+	Revision     int64
+	Payload      map[string]any
+}
+
+func publishManagerEventRecord(ctx context.Context, hub magicevent.Hub, record managerEventRecordFixture) error {
+	if record.ID == "" {
+		record.ID = fmt.Sprintf("workspace-view-event-%d", time.Now().UnixNano())
+	}
+	if record.Version == "" {
+		record.Version = events.WorkorchEventVersion
+	}
+	if record.Revision == 0 {
+		record.Revision = 1
+	}
+	data, err := eventstreamevents.EventRecordDataFromModel(&eventstreammodel.EventRecord{
+		ID:           common.EventRecordID(record.ID),
+		Version:      record.Version,
+		Topic:        record.Topic,
+		OccurredAt:   record.OccurredAt,
+		SourceModule: record.SourceModule,
+		SubjectType:  record.SubjectType,
+		SubjectID:    record.SubjectID,
+		WorkspaceID:  common.WorkspaceID(record.WorkspaceID),
+		RunID:        common.RunID(record.RunID),
+		StepID:       common.StepID(record.StepID),
+		Revision:     record.Revision,
+		Payload:      record.Payload,
+	})
+	if err != nil {
+		return err
+	}
+	event := magicevent.NewEventWithContext(
+		eventstreamevents.TopicEventStreamRecordAppended,
+		"kernel/eventstream",
+		eventstreamevents.NotificationDestination,
+		magicevent.NewHeader(),
+		ctx,
+		eventstreamevents.EventRecordAppendedData{Record: data},
+	)
+	result := hub.Send(event)
+	if result == nil {
+		return fmt.Errorf("record appended event returned no result")
+	}
+	if resultErr := result.Error(); resultErr != nil {
+		return resultErr
+	}
+	return nil
+}
 
 func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 	store := NewStore()
@@ -815,7 +878,9 @@ func TestStoreRunHeartbeatMetricsCountsActiveProblemSignals(t *testing.T) {
 
 func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	commandHub := magicevent.NewHub(32)
+	t.Cleanup(func() { commandHub.Terminate(ctx) })
+	projectionEvents := subscribeProjectionNotifications(t, commandHub)
 	scheduled := map[string]int{}
 	scheduledFuncs := map[string][]func(context.Context){}
 	manager := NewManager(ManagerOptions{
@@ -825,7 +890,7 @@ func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 				"ws-a": {Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running"}},
 			},
 		},
-		Hub: hub,
+		CommandHub: commandHub,
 		Schedule: func(name string, fn func(context.Context)) bool {
 			scheduled[name]++
 			scheduledFuncs[name] = append(scheduledFuncs[name], fn)
@@ -849,20 +914,14 @@ func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 	if scheduled["workspace_projection_rebuild"] != baselineWorkspaceRebuilds {
 		t.Fatalf("scheduled own projection event rebuild count = %d, want unchanged %d", scheduled["workspace_projection_rebuild"], baselineWorkspaceRebuilds)
 	}
-	var found events.Envelope
-	for _, item := range hub.Published() {
-		if item.Topic == workorchdevents.TopicWorkspaceProjectionChanged && item.WorkspaceID == "ws-a" {
-			found = item
-		}
-	}
-	if found.Topic == "" {
-		t.Fatalf("published events = %+v, want workspace projection changed for ws-a", hub.Published())
-	}
-	if found.Payload["changeKind"] != "detail" || found.Payload["projectionState"] != StateReady {
-		t.Fatalf("projection payload = %+v, want detail ready", found.Payload)
+	found := waitProjectionNotification(t, projectionEvents, func(data workorchdevents.WorkspaceProjectionChangedData) bool {
+		return data.WorkspaceID == "ws-a" && data.ChangeKind == "detail"
+	})
+	if found.ProjectionState != StateReady {
+		t.Fatalf("projection data = %+v, want detail ready", found)
 	}
 
-	if err := hub.Publish(ctx, events.Envelope{
+	if err := publishManagerEventRecord(ctx, commandHub, managerEventRecordFixture{
 		ID:          "run-a/state",
 		Version:     events.WorkorchEventVersion,
 		Topic:       runevents.TopicRunStateChanged,
@@ -885,31 +944,32 @@ func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 
 func TestManagerPublishesProjectionChangedThroughAsyncHub(t *testing.T) {
 	ctx := context.Background()
-	hub := &recordingAsyncProjectionHub{}
-	manager := NewManager(ManagerOptions{Hub: hub})
+	commandHub := magicevent.NewHub(16)
+	t.Cleanup(func() { commandHub.Terminate(ctx) })
+	projectionEvents := subscribeProjectionNotifications(t, commandHub)
+	manager := NewManager(ManagerOptions{CommandHub: commandHub})
 	manager.store.UpsertWorkspace(appmodelcore.Workspace{ID: "ws-a", State: "active"})
 
 	manager.publishProjectionChanged(ctx, "ws-a", "detail")
 
-	if hub.asyncCalls != 1 || hub.syncCalls != 0 {
-		t.Fatalf("publish calls = async:%d sync:%d, want projection notification through async hub", hub.asyncCalls, hub.syncCalls)
-	}
-	if hub.last.Topic != workorchdevents.TopicWorkspaceProjectionChanged || hub.last.WorkspaceID != "ws-a" || hub.last.Payload["changeKind"] != "detail" {
-		t.Fatalf("projection event = %+v, want workspace projection changed detail", hub.last)
-	}
+	data := waitProjectionNotification(t, projectionEvents, func(data workorchdevents.WorkspaceProjectionChangedData) bool {
+		return data.WorkspaceID == "ws-a" && data.ChangeKind == "detail"
+	})
 	status := manager.store.StatusForWorkspace("ws-a")
-	if hub.last.Payload["workspaceRevision"] != status.WorkspaceRevision ||
-		hub.last.Payload["globalRevision"] != status.GlobalRevision ||
-		hub.last.Payload["sourceEventRevision"] != status.SourceEventRevision ||
-		hub.last.Payload["projectedSourceRevision"] != status.ProjectedSourceRevision ||
-		hub.last.Payload["projectionState"] != status.State {
-		t.Fatalf("projection event payload = %+v, want owner projection status %+v", hub.last.Payload, status)
+	if data.WorkspaceRevision != status.WorkspaceRevision ||
+		data.GlobalRevision != status.GlobalRevision ||
+		data.SourceEventRevision != status.SourceEventRevision ||
+		data.ProjectedSourceRevision != status.ProjectedSourceRevision ||
+		data.ProjectionState != status.State {
+		t.Fatalf("projection data = %+v, want owner projection status %+v", data, status)
 	}
 }
 
 func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuildOrProjectionFanout(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	commandHub := magicevent.NewHub(32)
+	t.Cleanup(func() { commandHub.Terminate(ctx) })
+	projectionEvents := subscribeProjectionNotifications(t, commandHub)
 	scheduled := map[string]int{}
 	scheduledFuncs := map[string][]func(context.Context){}
 	manager := NewManager(ManagerOptions{
@@ -922,7 +982,7 @@ func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuildOrProjectionFanout(
 				},
 			},
 		},
-		Hub: hub,
+		CommandHub: commandHub,
 		Schedule: func(name string, fn func(context.Context)) bool {
 			scheduled[name]++
 			scheduledFuncs[name] = append(scheduledFuncs[name], fn)
@@ -936,9 +996,10 @@ func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuildOrProjectionFanout(
 	if err := manager.RebuildWorkspace(ctx, "ws-a"); err != nil {
 		t.Fatalf("rebuild workspace detail: %v", err)
 	}
+	drainProjectionNotifications(projectionEvents)
 	baselineWorkspaceRebuilds := scheduled["workspace_projection_rebuild"]
 
-	if err := hub.Publish(ctx, events.Envelope{
+	if err := publishManagerEventRecord(ctx, commandHub, managerEventRecordFixture{
 		Version:     events.WorkorchEventVersion,
 		Topic:       runevents.TopicRunLLMStreamProgress,
 		WorkspaceID: "ws-a",
@@ -981,20 +1042,19 @@ func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuildOrProjectionFanout(
 		!snapshot.RuntimeExecution.Pending {
 		t.Fatalf("runtime execution after progress = %+v", snapshot.RuntimeExecution)
 	}
-	var progressProjectionCount int
-	for _, item := range hub.Published() {
-		if item.Topic == workorchdevents.TopicWorkspaceProjectionChanged && item.Payload["changeKind"] == "runtime_progress" {
-			progressProjectionCount++
+	select {
+	case item := <-projectionEvents:
+		if item.ChangeKind == "runtime_progress" {
+			t.Fatalf("projection data = %+v, want no runtime_progress fanout", item)
 		}
-	}
-	if progressProjectionCount != 0 {
-		t.Fatalf("published runtime_progress projection events = %d, want none; events=%+v", progressProjectionCount, hub.Published())
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
 func TestManagerAppliesStepEventsWithoutFullWorkspaceRebuild(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
+	commandHub := magicevent.NewHub(32)
+	t.Cleanup(func() { commandHub.Terminate(ctx) })
 	scheduled := map[string]int{}
 	scheduledFuncs := map[string][]func(context.Context){}
 	manager := NewManager(ManagerOptions{
@@ -1007,7 +1067,7 @@ func TestManagerAppliesStepEventsWithoutFullWorkspaceRebuild(t *testing.T) {
 				},
 			},
 		},
-		Hub: hub,
+		CommandHub: commandHub,
 		Schedule: func(name string, fn func(context.Context)) bool {
 			scheduled[name]++
 			scheduledFuncs[name] = append(scheduledFuncs[name], fn)
@@ -1023,7 +1083,7 @@ func TestManagerAppliesStepEventsWithoutFullWorkspaceRebuild(t *testing.T) {
 	}
 	baselineWorkspaceRebuilds := scheduled["workspace_projection_rebuild"]
 
-	if err := hub.Publish(ctx, events.Envelope{
+	if err := publishManagerEventRecord(ctx, commandHub, managerEventRecordFixture{
 		Version:     events.WorkorchEventVersion,
 		Topic:       runevents.TopicStepDispatched,
 		WorkspaceID: "ws-a",
@@ -1033,7 +1093,7 @@ func TestManagerAppliesStepEventsWithoutFullWorkspaceRebuild(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish step dispatched event: %v", err)
 	}
-	if err := hub.Publish(ctx, events.Envelope{
+	if err := publishManagerEventRecord(ctx, commandHub, managerEventRecordFixture{
 		Version:     events.WorkorchEventVersion,
 		Topic:       runevents.TopicStepStateChanged,
 		WorkspaceID: "ws-a",
@@ -1583,9 +1643,9 @@ func TestManagerSchedulesWorkspaceRebuildAfterWorkspaceEventDuringFullRebuild(t 
 	}()
 	<-loader.started
 
-	if err := manager.handleEvent(ctx, events.Envelope{
+	if err := manager.handleEventRecord(ctx, eventstreamevents.EventRecordData{
 		Topic:       runevents.TopicRunStateChanged,
-		WorkspaceID: "ws-a",
+		WorkspaceID: common.WorkspaceID("ws-a"),
 		SubjectType: "run",
 		SubjectID:   "run-a",
 		Revision:    7,
@@ -1642,7 +1702,7 @@ func TestManagerSchedulesFullRebuildAfterGlobalWorkspaceEventDuringFullRebuild(t
 	}()
 	<-loader.started
 
-	if err := manager.handleEvent(ctx, events.Envelope{
+	if err := manager.handleEventRecord(ctx, eventstreamevents.EventRecordData{
 		Topic:       runevents.TopicRunStateChanged,
 		SubjectType: "workspace",
 		SubjectID:   "ws-a",
@@ -1723,9 +1783,9 @@ func TestManagerMetricsTracksPendingWorkspaceRebuilds(t *testing.T) {
 		done <- manager.RebuildAll(ctx)
 	}()
 	<-loader.started
-	if err := manager.handleEvent(ctx, events.Envelope{
+	if err := manager.handleEventRecord(ctx, eventstreamevents.EventRecordData{
 		Topic:       runevents.TopicRunStateChanged,
-		WorkspaceID: "ws-a",
+		WorkspaceID: common.WorkspaceID("ws-a"),
 		SubjectType: "run",
 		SubjectID:   "run-a",
 		Revision:    9,
@@ -1746,26 +1806,47 @@ type scheduledProjectionTask struct {
 	fn   func(context.Context)
 }
 
-type recordingAsyncProjectionHub struct {
-	syncCalls  int
-	asyncCalls int
-	last       events.Envelope
+func subscribeProjectionNotifications(t *testing.T, hub magicevent.Hub) <-chan workorchdevents.WorkspaceProjectionChangedData {
+	t.Helper()
+	const observerID = "/workorchd/consumers/application/workorchd/workspace-view-test"
+	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, hub)
+	ret := make(chan workorchdevents.WorkspaceProjectionChangedData, 16)
+	observer.Subscribe(workorchdevents.TopicWorkspaceProjectionChanged, func(event magicevent.Event, result magicevent.Result) {
+		if data, ok := event.Data().(workorchdevents.WorkspaceProjectionChangedData); ok {
+			ret <- data
+		}
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkspaceProjectionChanged) })
+	return ret
 }
 
-func (h *recordingAsyncProjectionHub) Publish(_ context.Context, envelope events.Envelope) error {
-	h.syncCalls++
-	h.last = envelope
-	return nil
+func waitProjectionNotification(t *testing.T, items <-chan workorchdevents.WorkspaceProjectionChangedData, match func(workorchdevents.WorkspaceProjectionChangedData) bool) workorchdevents.WorkspaceProjectionChangedData {
+	t.Helper()
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case item := <-items:
+			if match(item) {
+				return item
+			}
+		case <-timer.C:
+			t.Fatal("typed workspace projection notification not received")
+		}
+	}
 }
 
-func (h *recordingAsyncProjectionHub) PublishAsync(_ context.Context, envelope events.Envelope) error {
-	h.asyncCalls++
-	h.last = envelope
-	return nil
-}
-
-func (h *recordingAsyncProjectionHub) Subscribe(string, events.Handler) func() {
-	return func() {}
+func drainProjectionNotifications(items <-chan workorchdevents.WorkspaceProjectionChangedData) {
+	for {
+		select {
+		case <-items:
+		default:
+			return
+		}
+	}
 }
 
 type fakeProjectionLoader struct {

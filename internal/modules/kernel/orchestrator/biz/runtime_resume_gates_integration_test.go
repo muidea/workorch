@@ -7,13 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -42,9 +41,8 @@ func TestRuntimeOrchestrator_ResumeRunFinalizesDurableRuntimeTerminalResult(t *t
 			ToolCalls:          toolCallRepo,
 			ValidationResults:  validationRepo,
 			RuntimeCheckpoints: checkpointRepo,
-		},
-		hub,
-	)
+		})
+
 	orch.EnableEventDrivenDispatch(hub.rawHub)
 	workspaceID := common.WorkspaceID("ws-resume-terminal-result")
 	runID := common.RunID("run-resume-terminal-result")
@@ -137,9 +135,7 @@ func TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval(
 			Patches:            memory.NewPatchRepository(),
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
-		},
-		events.NewMemoryHub(),
-	)
+		})
 
 	workspaceID := common.WorkspaceID("ws-graph-approval")
 	runID := common.RunID("run-graph-approval")
@@ -230,8 +226,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesConditionalBranchStep(t *testing.
 			}
 		},
 	}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-branch")
 	runID := common.RunID("run-branch")
@@ -305,8 +300,7 @@ func TestRuntimeOrchestrator_StartRunDispatchesConditionalReviewStep(t *testing.
 			}
 		},
 	}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-branch-review")
 	runID := common.RunID("run-branch-review")
@@ -368,8 +362,7 @@ func TestRuntimeOrchestrator_StartRunBlocksOnDecisionWhenRuntimeRequestsDecision
 			stepOutputKeyNextKind:              "runtime/test",
 		},
 	}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-runtime-block")
 	runID := common.RunID("run-runtime-block")
@@ -448,8 +441,7 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeDecisionR
 			}
 		},
 	}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-runtime-resume")
 	runID := common.RunID("run-runtime-resume")
@@ -537,7 +529,7 @@ func TestRuntimeOrchestrator_ResumeRunResolvedDecisionUsesRunScopedTicketRead(t 
 			}, nil
 		},
 	}
-	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, nil)
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-runtime-ticket-scope")
 	runID := common.RunID("run-runtime-ticket-scope")
@@ -639,8 +631,7 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromFailedStepAfterRepairDecision
 			}, nil
 		},
 	}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-repair-decision-resume")
 	runID := common.RunID("run-repair-decision-resume")
@@ -746,7 +737,7 @@ func TestRuntimeOrchestrator_ResumeRunRecoversRunningRunWithResolvedFailedStepDe
 			}, nil
 		},
 	}
-	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-running-recovery")
 	runID := common.RunID("run-running-recovery")
@@ -854,7 +845,7 @@ func TestRuntimeOrchestrator_ResumeRunCreatesUniqueStepForMultiRoundDecision(t *
 			}
 		},
 	}
-	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-runtime-multi-decision")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
@@ -954,8 +945,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsRuntimeDecisionWithoutDispatchingNe
 			}
 		},
 	}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-runtime-decision-reject")
 	runID := common.RunID("run-runtime-decision-reject")
@@ -1042,8 +1032,7 @@ func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeApprovalA
 			}
 		},
 	}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-runtime-approval")
 	runID := common.RunID("run-runtime-approval")
@@ -1143,8 +1132,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsRuntimeApprovalWithoutDispatchingNe
 			}
 		},
 	}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-runtime-approval-reject")
 	runID := common.RunID("run-runtime-approval-reject")
@@ -1230,8 +1218,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsMultipleDecisionGates(t *testing.T
 			}
 		},
 	}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-multi-gate")
 	runID := common.RunID("run-multi-gate")
@@ -1339,8 +1326,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsSecondDecisionGateWithoutDispatchin
 			}
 		},
 	}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-multi-gate-reject")
 	runID := common.RunID("run-multi-gate-reject")
@@ -1452,8 +1438,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsDecisionThenApprovalGates(t *testi
 			}
 		},
 	}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-mixed-gate")
 	runID := common.RunID("run-mixed-gate")
@@ -1578,7 +1563,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsLLMNamedDecisionThenApprovalGates(
 			}
 		},
 	}
-	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-llm-mixed")
 	runID := common.RunID("run-llm-mixed")
@@ -1709,8 +1694,7 @@ func TestRuntimeOrchestrator_ResumeRunSupportsDecisionThenRejectedApproval(t *te
 			}
 		},
 	}
-	hub := events.NewMemoryHub()
-	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, hub)
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo)
 
 	workspaceID := common.WorkspaceID("ws-mixed-gate-reject")
 	runID := common.RunID("run-mixed-gate-reject")

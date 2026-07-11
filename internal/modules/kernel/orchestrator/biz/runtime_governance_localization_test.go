@@ -9,10 +9,9 @@ import (
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -58,9 +57,8 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionUsesDialogLanguage(t *testin
 		ticketRepo,
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
+
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(fmt.Sprintf("%s/block/run-tests", runID)),
 		RunID: runID,
@@ -128,9 +126,8 @@ func TestRuntimeOrchestrator_ConvergenceBudgetExhaustionUsesBudgetCounters(t *te
 		ticketRepo,
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
+
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(fmt.Sprintf("%s/block/validate", runID)),
 		RunID: runID,
@@ -193,9 +190,8 @@ func TestRuntimeOrchestrator_DuplicateRuntimeFailureUsesDialogLanguage(t *testin
 		ticketRepo,
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
+
 	failedStep := &runmodel.Step{
 		ID:    common.StepID(fmt.Sprintf("%s/block/run-tests", runID)),
 		RunID: runID,
@@ -242,9 +238,7 @@ func TestRuntimeOrchestrator_PatchApprovalUsesDialogLanguage(t *testing.T) {
 		memory.NewDecisionTicketRepository(),
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{})
 
 	spec, err := orch.patchManager().approvalBlockSpec(ctx, "run-patch-localized", "zh-CN", map[string]any{
 		stepOutputKeyPatches: []map[string]any{{

@@ -4,14 +4,11 @@ import (
 	"context"
 	"strings"
 
-	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
-	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const (
@@ -797,20 +794,7 @@ func (o *RuntimeOrchestrator) createApproval(
 	if err := o.approvals.Create(ctx, approval); err != nil {
 		return err
 	}
-	if o.eventHub == nil {
-		return nil
-	}
-	return events.PublishByContract(ctx, o.eventHub, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        approvalevents.TopicApprovalCreated,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "approval",
-		SubjectID:    string(approval.ID),
-		WorkspaceID:  string(approval.WorkspaceID),
-		RunID:        string(approval.RunID),
-		StepID:       string(approval.StepID),
-		Payload:      events.ApprovalPayload(approval.Reason, approval.Action, approval.Context, approval.State),
-	})
+	return nil
 }
 
 func approvalAutoGovernanceSeed(run *runModel.Run, step *runModel.Step, approvalContext map[string]any) map[string]any {

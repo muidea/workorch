@@ -3,20 +3,20 @@ package appservice
 import (
 	"context"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 )
 
 func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, cmd ActivateWorkspaceExecutionCommand) (ret WorkspaceExecutionActivation, err error) {
 	ctx = configcore.ContextWithLoader(ctx, session.ConfigLoader())
-	return withEventHubsSession(ctx, session, func(ctx context.Context, hubs eventHubSessionDependencies) (WorkspaceExecutionActivation, error) {
-		defaults, err := workspaceExecutionDefaultsFromContext(ctx, hubs.commandHub)
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (WorkspaceExecutionActivation, error) {
+		defaults, err := workspaceExecutionDefaultsFromContext(ctx, hub)
 		if err != nil {
 			return WorkspaceExecutionActivation{}, err
 		}
 		return activationports.ActivateWorkspaceExecutionView(ctx, activationports.ActivateWorkspaceExecutionViewRequest{
-			Hub:                            hubs.commandHub,
-			EventHub:                       hubs.eventHub,
+			Hub:                            hub,
 			WorkspaceID:                    workspaceID,
 			Command:                        cmd,
 			SystemDefaultSoulID:            defaults.systemDefaultSoulID,

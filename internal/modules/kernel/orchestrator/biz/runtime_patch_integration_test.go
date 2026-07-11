@@ -7,16 +7,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -465,9 +465,8 @@ func TestPatchApplyPreflightApprovalBlocksBeforeRuntimeSideEffect(t *testing.T) 
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		approvalRepo,
-		RuntimeEvidenceRepositories{Patches: memory.NewPatchRepository()},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Patches: memory.NewPatchRepository()})
+
 	input := map[string]any{
 		"patchType": "file_write",
 		"targetRef": ".env",
@@ -506,9 +505,7 @@ func TestPatchPreviewApprovalRequiredUsesBlockRiskContext(t *testing.T) {
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Patches: memory.NewPatchRepository()},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Patches: memory.NewPatchRepository()})
 
 	spec, err := orch.patchManager().approvalBlockSpec(ctx, "run-preview-risk", "", map[string]any{
 		"status":           "completed",
@@ -547,7 +544,6 @@ func TestPatchPreviewApprovalRequiredUsesBlockRiskContext(t *testing.T) {
 
 func TestRuntimeOrchestratorPublishesPatchPreviewEvent(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
 	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		&stubRuntimeAdapter{},
 		memory.NewRunRepository(),
@@ -556,9 +552,10 @@ func TestRuntimeOrchestratorPublishesPatchPreviewEvent(t *testing.T) {
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Patches: memory.NewPatchRepository()},
-		hub,
-	)
+		RuntimeEvidenceRepositories{Patches: memory.NewPatchRepository()})
+
+	notifications := newRuntimeNotificationRecorder(t)
+	notifications.attach(orch)
 	run := &runmodel.Run{ID: "run-patch-preview-event", WorkspaceID: "ws-patch-preview-event"}
 	step := &runmodel.Step{ID: "run-patch-preview-event/step-1", RunID: run.ID}
 	toolCall := &runmodel.ToolCall{ID: "run-patch-preview-event/step-1/tool-call"}
@@ -575,9 +572,10 @@ func TestRuntimeOrchestratorPublishesPatchPreviewEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("publish patch preview: %v", err)
 	}
-	published := hub.Published()
-	if len(published) != 1 || published[0].Topic != orchestratorevents.TopicPatchPreviewed || published[0].Payload[events.PayloadKeyTargetRef] != "preview.txt" {
-		t.Fatalf("published = %+v, want patch preview event", published)
+	if _, ok := notifications.waitFor(time.Second, func(item runtimeNotificationRecord) bool {
+		return item.Topic == orchestratorevents.TopicPatchPreviewed && item.TargetRef == "preview.txt"
+	}); !ok {
+		t.Fatalf("notifications = %+v, want patch preview event", notifications.snapshot())
 	}
 }
 
@@ -590,7 +588,6 @@ func TestRuntimeOrchestratorAdmitsBlockPatchResultAndRejectsDirectPatchSideEffec
 	if err := os.WriteFile(filepath.Join(deliverableDirectory, "applied.txt"), []byte("applied\n"), 0o644); err != nil {
 		t.Fatalf("seed applied block result target: %v", err)
 	}
-	hub := events.NewMemoryHub()
 	patchRepo := memory.NewPatchRepository()
 	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		&stubRuntimeAdapter{},
@@ -600,9 +597,10 @@ func TestRuntimeOrchestratorAdmitsBlockPatchResultAndRejectsDirectPatchSideEffec
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Patches: patchRepo},
-		hub,
-	)
+		RuntimeEvidenceRepositories{Patches: patchRepo})
+
+	notifications := newRuntimeNotificationRecorder(t)
+	notifications.attach(orch)
 	run := &runmodel.Run{ID: "run-patch-event", WorkspaceID: "ws-patch-event"}
 	step := &runmodel.Step{
 		ID:    "run-patch-event/step-1",
@@ -628,8 +626,10 @@ func TestRuntimeOrchestratorAdmitsBlockPatchResultAndRejectsDirectPatchSideEffec
 	}, deliverableDirectory); err != nil {
 		t.Fatalf("admit block patch result: %v", err)
 	}
-	if !publishedTopicForTarget(hub.Published(), orchestratorevents.TopicPatchApplied, "applied.txt") {
-		t.Fatalf("published = %+v, want patch applied event", hub.Published())
+	if _, ok := notifications.waitFor(time.Second, func(item runtimeNotificationRecord) bool {
+		return item.Topic == orchestratorevents.TopicPatchApplied && item.TargetRef == "applied.txt"
+	}); !ok {
+		t.Fatalf("notifications = %+v, want patch applied event", notifications.snapshot())
 	}
 
 	failedStep := &runmodel.Step{ID: "run-patch-event/step-2", RunID: run.ID}
@@ -644,8 +644,10 @@ func TestRuntimeOrchestratorAdmitsBlockPatchResultAndRejectsDirectPatchSideEffec
 	if err == nil {
 		t.Fatalf("direct patch output should be rejected before orchestrator side effect")
 	}
-	if publishedTopicForTarget(hub.Published(), orchestratorevents.TopicPatchFailed, "main.go") {
-		t.Fatalf("published = %+v, want no patch event for rejected direct side-effect path", hub.Published())
+	for _, item := range notifications.snapshot() {
+		if item.Topic == orchestratorevents.TopicPatchFailed && item.TargetRef == "main.go" {
+			t.Fatalf("notifications = %+v, want no patch event for rejected direct side-effect path", notifications.snapshot())
+		}
 	}
 }
 
@@ -655,7 +657,6 @@ func TestRuntimeOrchestratorApplyRuntimePatchRecordsAcceptedStateChangeEvidence(
 	if err := os.WriteFile(filepath.Join(deliverableDirectory, "accepted.txt"), []byte("accepted\n"), 0o644); err != nil {
 		t.Fatalf("seed accepted.txt: %v", err)
 	}
-	hub := events.NewMemoryHub()
 	patchRepo := memory.NewPatchRepository()
 	evidenceRepo := memory.NewEvidenceRecordRepository()
 	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
@@ -666,9 +667,8 @@ func TestRuntimeOrchestratorApplyRuntimePatchRecordsAcceptedStateChangeEvidence(
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Patches: patchRepo, EvidenceRecords: evidenceRepo},
-		hub,
-	)
+		RuntimeEvidenceRepositories{Patches: patchRepo, EvidenceRecords: evidenceRepo})
+
 	run := &runmodel.Run{ID: "run-patch-evidence", WorkspaceID: "ws-patch-evidence", DefinitionRevision: "rev-patch-evidence"}
 	step := &runmodel.Step{
 		ID:    "run-patch-evidence/step-1",
@@ -744,8 +744,9 @@ func TestRuntimeOrchestratorApplyRuntimePatchRecordsAcceptedStateChangeEvidence(
 
 func TestRuntimeOrchestratorPublishesArtifactContinuationMetadataEvent(t *testing.T) {
 	ctx := context.Background()
-	hub := events.NewMemoryHub()
-	orch := &RuntimeOrchestrator{eventHub: hub}
+	orch := &RuntimeOrchestrator{}
+	notifications := newRuntimeNotificationRecorder(t)
+	notifications.attach(orch)
 	run := &runmodel.Run{ID: "run-artifact-continuation-event", WorkspaceID: "ws-artifact-continuation-event"}
 	step := &runmodel.Step{ID: "run-artifact-continuation-event/artifact-assemble-001", RunID: run.ID}
 	item := &orchestratormodel.ArtifactContinuation{
@@ -764,16 +765,14 @@ func TestRuntimeOrchestratorPublishesArtifactContinuationMetadataEvent(t *testin
 	if err := orch.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, orchestratorevents.TopicArtifactContinuationAssembled, nil); err != nil {
 		t.Fatalf("publish artifact continuation event: %v", err)
 	}
-	published := hub.Published()
-	if len(published) != 1 || published[0].Topic != orchestratorevents.TopicArtifactContinuationAssembled {
-		t.Fatalf("published = %+v, want artifact continuation assembled event", published)
+	recorded, ok := notifications.waitFor(time.Second, func(record runtimeNotificationRecord) bool {
+		return record.Topic == orchestratorevents.TopicArtifactContinuationAssembled && record.ContinuationID == string(item.ID)
+	})
+	if !ok {
+		t.Fatalf("notifications = %+v, want artifact continuation assembled event", notifications.snapshot())
 	}
-	payload := published[0].Payload
-	if payload["targetRef"] != item.TargetRef || payload["rollingHash"] != item.RollingHash {
-		t.Fatalf("payload = %+v, want metadata", payload)
-	}
-	if payload["content"] != nil || payload["body"] != nil || payload["diff"] != nil || payload["metadata"] != nil {
-		t.Fatalf("payload = %+v, want no body content or raw metadata", payload)
+	if recorded.TargetRef != item.TargetRef || recorded.ArtifactID != item.ArtifactID || recorded.State != string(item.State) {
+		t.Fatalf("notification = %+v, want typed continuation metadata", recorded)
 	}
 }
 
@@ -783,7 +782,6 @@ func TestRuntimeOrchestratorRevertIsPhaseGatedWithoutBlockReverseMaterial(t *tes
 	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte("after\n"), 0o644); err != nil {
 		t.Fatalf("seed main.go: %v", err)
 	}
-	hub := events.NewMemoryHub()
 	patchRepo := memory.NewPatchRepository()
 	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		&stubRuntimeAdapter{},
@@ -793,9 +791,10 @@ func TestRuntimeOrchestratorRevertIsPhaseGatedWithoutBlockReverseMaterial(t *tes
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Patches: patchRepo},
-		hub,
-	)
+		RuntimeEvidenceRepositories{Patches: patchRepo})
+
+	notifications := newRuntimeNotificationRecorder(t)
+	notifications.attach(orch)
 	run := &runmodel.Run{ID: "run-patch-revert", WorkspaceID: "ws-patch-revert"}
 	step := &runmodel.Step{ID: "run-patch-revert/step-1", RunID: run.ID}
 	toolCall := &runmodel.ToolCall{ID: "run-patch-revert/step-1/tool-call"}
@@ -835,8 +834,10 @@ func TestRuntimeOrchestratorRevertIsPhaseGatedWithoutBlockReverseMaterial(t *tes
 	if patch.State != common.PatchStateApplied || patch.RevertedAt != "" {
 		t.Fatalf("patch = %+v, want unchanged applied patch", patch)
 	}
-	if publishedTopicForTarget(hub.Published(), orchestratorevents.TopicPatchReverted, "main.go") {
-		t.Fatalf("published = %+v, want no reverted event for phase-gated path", hub.Published())
+	for _, item := range notifications.snapshot() {
+		if item.Topic == orchestratorevents.TopicPatchReverted && item.TargetRef == "main.go" {
+			t.Fatalf("notifications = %+v, want no reverted event for phase-gated path", notifications.snapshot())
+		}
 	}
 }
 
@@ -855,9 +856,8 @@ func TestRuntimeOrchestratorRevertDoesNotInspectOrMutateDriftedTarget(t *testing
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Patches: patchRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Patches: patchRepo})
+
 	run := &runmodel.Run{ID: "run-patch-revert-conflict", WorkspaceID: "ws-patch-revert-conflict"}
 	step := &runmodel.Step{ID: "run-patch-revert-conflict/step-1", RunID: run.ID}
 	toolCall := &runmodel.ToolCall{ID: "run-patch-revert-conflict/step-1/tool-call"}
@@ -931,9 +931,7 @@ func TestRuntimeOrchestratorBlocksSensitivePatchUntilApproval(t *testing.T) {
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		approvalRepo,
-		RuntimeEvidenceRepositories{Patches: patchRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Patches: patchRepo})
 
 	if err := orch.StartRun(ctx, runID); err != nil {
 		t.Fatalf("start run: %v", err)
@@ -1011,9 +1009,7 @@ func TestRuntimeOrchestratorAppliesApprovedPendingPatchOnResume(t *testing.T) {
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		approvalRepo,
-		RuntimeEvidenceRepositories{Patches: patchRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Patches: patchRepo})
 
 	if err := orch.StartRun(ctx, runID); err != nil {
 		t.Fatalf("start run: %v", err)
@@ -1105,9 +1101,7 @@ func TestRuntimeOrchestratorAllowsSensitivePatchWithApprovedApprovalID(t *testin
 		memory.NewDecisionTicketRepository(),
 		memory.NewDecisionResolutionRepository(),
 		approvalRepo,
-		RuntimeEvidenceRepositories{Patches: memory.NewPatchRepository()},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Patches: memory.NewPatchRepository()})
 
 	spec, err := orch.patchManager().approvalBlockSpec(ctx, runID, "", map[string]any{
 		stepOutputKeyPatches: []map[string]any{{
@@ -1123,15 +1117,6 @@ func TestRuntimeOrchestratorAllowsSensitivePatchWithApprovedApprovalID(t *testin
 	if spec.Reason != "" {
 		t.Fatalf("approval spec = %+v, want no block with approved approval id", spec)
 	}
-}
-
-func publishedTopicForTarget(items []events.Envelope, topic string, targetRef string) bool {
-	for _, item := range items {
-		if item.Topic == topic && item.Payload[events.PayloadKeyTargetRef] == targetRef {
-			return true
-		}
-	}
-	return false
 }
 
 func TestWorkspaceTargetPathRejectsSymlinkEscape(t *testing.T) {

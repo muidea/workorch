@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	frameworkapplication "github.com/muidea/magicCommon/framework/application"
 	frameworkservice "github.com/muidea/magicCommon/framework/service"
 	backend "github.com/muidea/workorch/internal/services/workorch/biz/backends"
 	"github.com/muidea/workorch/internal/services/workorch/biz/session"
@@ -120,12 +121,13 @@ func (s *interactiveService) Run(ctx context.Context) error {
 	if err := s.framework.Run(ctx); err != nil {
 		return err
 	}
-	be, closeBackend, err := backend.NewEmbeddedEventHub()
-	if err != nil {
-		return err
+	commandHub := frameworkapplication.Get().EventHub()
+	if commandHub == nil {
+		return fmt.Errorf("framework event hub is unavailable")
 	}
+	be := backend.NewEventHub(commandHub)
 	s.be = be
-	s.closeBackend = closeBackend
+	s.closeBackend = func(context.Context) error { return nil }
 	defaultWS := resolveDefaultWorkspace(context.Background(), be, s.args.CobraArgs)
 	return withArgs(s.programName, s.args.CobraArgs, func() error {
 		return cli.ExecuteWithBackend(be, defaultWS)

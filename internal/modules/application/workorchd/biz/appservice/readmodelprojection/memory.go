@@ -2,7 +2,7 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 )
 
 func MapMemoryRecallTraces(items []*memorymodel.MemoryRecallTrace) []readmodelcore.MemoryRecallTrace {

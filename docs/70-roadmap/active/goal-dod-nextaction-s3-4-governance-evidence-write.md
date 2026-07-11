@@ -69,7 +69,7 @@ EvidenceRecord IDs are deterministic and file-repository-safe. If a record alrea
 
 ## Verification
 
-- `go test ./internal/modules/kernel/decision/biz ./internal/modules/kernel/approval/biz -count=1`
-- `go test ./internal/modules/kernel/decision ./internal/modules/kernel/approval ./internal/modules/application/workorchd/biz/bootstrap ./internal/initiators/workorchruntime -count=1`
+- `go test ./internal/modules/blocks/decision/biz ./internal/modules/blocks/approval/biz -count=1`
+- `go test ./internal/modules/blocks/decision ./internal/modules/blocks/approval ./internal/modules/application/workorchd/biz/bootstrap ./internal/initiators/workorchruntime -count=1`
 - `go test ./internal/pkg/repository ./internal/pkg/workorchruntimecontract -count=1`
 - `go test ./internal/modules/kernel/... -count=1`

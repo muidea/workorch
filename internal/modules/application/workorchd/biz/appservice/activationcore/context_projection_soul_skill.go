@@ -2,7 +2,7 @@ package activationcore
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
-	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 )
 
 func SoulContext(item *soulmodel.Soul) map[string]any {

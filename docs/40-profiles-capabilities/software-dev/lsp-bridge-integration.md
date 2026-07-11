@@ -123,7 +123,7 @@ LSP 类故障应保持为辅助能力降级，而不是默认 blocker：
 - adapter
   - `blocks/mcp`
 - registry / policy
-  - `kernel/mcp`
+  - `blocks/mcp-registry`
 - 读模型承接
   - `tool-calls`
   - `run observability`

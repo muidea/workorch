@@ -174,7 +174,7 @@ Closure evidence:
 - Workspace detail/list projection normalizes stale resolved/missing blockers out of normal prompt-driving fields.
 - Scheduler governance continuation uses owner readback before recording completion.
 - Targeted tests passed:
-  - `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/kernel/decision/biz ./internal/modules/application/workorchd/service/server ./internal/modules/application/workorchd/biz/appservice/readmodelprojection ./internal/modules/application/workorchd/biz/appservice/workspaceviewcore -count=1`
+  - `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/decision/biz ./internal/modules/application/workorchd/service/server ./internal/modules/application/workorchd/biz/appservice/readmodelprojection ./internal/modules/application/workorchd/biz/appservice/workspaceviewcore -count=1`
   - `go test ./internal/services/workorch/service/tui ./internal/services/workorch/biz/backends ./internal/pkg/workorchport ./internal/pkg/workorchclient -count=1`
 
 ### P0: Resolved Blocker Reconciliation on Startup and Rebuild
@@ -243,7 +243,7 @@ Likely code areas:
 
 - `internal/pkg/workorchport/governance.go`
 - `internal/pkg/workorchclient/decision.go`
-- `internal/modules/kernel/decision/biz/decision_service.go`
+- `internal/modules/blocks/decision/biz/decision_service.go`
 - `internal/modules/application/workorchd/biz/appservice/governanceports/decision_resolve_views.go`
 - `internal/modules/application/workorchd/biz/appservice/governanceports/decision_batch_resolve_views.go`
 
@@ -474,7 +474,7 @@ Targeted tests:
 ```bash
 GOCACHE=/tmp/workorch-go-build go test \
   ./internal/modules/kernel/orchestrator/biz \
-  ./internal/modules/kernel/decision/biz \
+  ./internal/modules/blocks/decision/biz \
   ./internal/modules/application/workorchd/service/server \
   ./internal/modules/application/workorchd/biz/appservice/readmodelprojection \
   ./internal/modules/application/workorchd/biz/appservice/workspaceviewcore \

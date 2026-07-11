@@ -1,6 +1,6 @@
 package readmodelprojection
 
-import resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+import resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 
 func dodCoverageArtifactRefs(item resultmodel.DoDCoverageItem) []string {
 	artifactRefs := make([]string, 0, len(item.ArtifactRefs))

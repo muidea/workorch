@@ -1,6 +1,6 @@
 package contextregistrycore
 
-import memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+import memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 
 func MapMemoryItem(item *memorymodel.MemoryItem) MemoryItem {
 	if item == nil {

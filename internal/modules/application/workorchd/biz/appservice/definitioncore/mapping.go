@@ -2,7 +2,7 @@ package definitioncore
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 )
 
 func MapGoal(item *workspacemodel.Goal) appmodelcore.Goal {

@@ -66,7 +66,7 @@ Related:
 
 | Product goal | Runtime contract | Primary owner | Main code/doc area | Acceptance evidence |
 | --- | --- | --- | --- | --- |
-| Goal/DoD driven delivery | activation binds latest definition revision and coverage baseline | workspace/run/orchestrator | `kernel/workspace`, `kernel/run`, `kernel/orchestrator` | activation test proves Goal/DoD/revision available to first StagePacket |
+| Goal/DoD driven delivery | activation binds latest definition revision and coverage baseline | workspace/run/orchestrator | `blocks/workspace`, `kernel/run`, `kernel/orchestrator` | activation test proves Goal/DoD/revision available to first StagePacket |
 | Long-running execution | resume/replan/restart/repair all enter same scoped continuation loop | appservice/EventHub/orchestrator | `workorchd appservice`, `runtime scheduler`, `orchestrator` | dual workspace continuation test and restart live check |
 | Deterministic runtime authority | ledger derives unique NextAction; old derived fields are diagnostic-only | orchestrator convergence authority | `runtime_next_action`, `runtime_convergence`, StagePacket builder | unit test rejects stale requiredOutput/focus drift |
 | Evidence-based acceptance | accepted Result requires current definition and accepted evidence refs | evidence/coverage/result owners | evidence recorder, coverage ledger, result gate | test proves self-claimed completion without evidence cannot complete |

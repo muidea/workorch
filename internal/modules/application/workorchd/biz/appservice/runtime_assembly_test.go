@@ -9,15 +9,15 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func TestManagedRuntimeFromEventHubBuildsRuntimeWithEventCollector(t *testing.T) {
+func TestManagedRuntimeFromCommandHubBuildsRuntimeWithEventCollector(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
-	runtime := runtimeports.NewManagedRuntimeFromEventHub(exports.Infrastructure.EventHub, exports.Infrastructure.CommandHub)
+	exports := testRuntimeExports(session.Bootstrap)
+	runtime := runtimeports.NewManagedRuntimeFromCommandHub(exports.Infrastructure.CommandHub)
 	if runtime == nil {
 		t.Fatal("expected runtime")
 	}
 
-	if err := exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
+	if err := publishManagedRuntimeRecord(ctx, exports.Infrastructure.CommandHub, managedRuntimeRecordFixture{
 		Version:     events.WorkorchEventVersion,
 		Topic:       runevents.TopicRunStateChanged,
 		SubjectType: "run",
@@ -25,20 +25,20 @@ func TestManagedRuntimeFromEventHubBuildsRuntimeWithEventCollector(t *testing.T)
 		RunID:       "run-assembly",
 		Payload:     map[string]any{events.PayloadKeyState: "running"},
 	}); err != nil {
-		t.Fatalf("publish event: %v", err)
+		t.Fatalf("publish event record: %v", err)
 	}
 
-	published := runtime.PublishedWorkorchEvents()
+	published := runtime.PublishedEventRecords()
 	if len(published) != 1 {
 		t.Fatalf("len(published) = %d, want 1", len(published))
 	}
-	if published[0].Topic() != runevents.TopicRunStateChanged {
-		t.Fatalf("topic = %s, want %s", published[0].Topic(), runevents.TopicRunStateChanged)
+	if published[0].Topic != runevents.TopicRunStateChanged {
+		t.Fatalf("topic = %s, want %s", published[0].Topic, runevents.TopicRunStateChanged)
 	}
 }
 
-func TestManagedRuntimeFromEventHubReturnsNilWhenRequiredHubMissing(t *testing.T) {
-	runtime := runtimeports.NewManagedRuntimeFromEventHub(nil, nil)
+func TestManagedRuntimeFromCommandHubReturnsNilWhenRequiredHubMissing(t *testing.T) {
+	runtime := runtimeports.NewManagedRuntimeFromCommandHub(nil)
 	if runtime != nil {
 		t.Fatalf("runtime = %#v, want nil", runtime)
 	}

@@ -60,10 +60,86 @@ type ListRuntimeCheckpointsByRunCommand struct {
 	RunID       common.RunID
 }
 
-type RunData struct {
-	Run        *runmodel.Run
-	Step       *runmodel.Step
-	Checkpoint *runmodel.RuntimeCheckpoint
+type RunStateChangedData struct {
+	RunID              common.RunID
+	WorkspaceID        common.WorkspaceID
+	GoalID             common.GoalID
+	DoDID              common.DoDID
+	State              common.RunState
+	BlockingTicketID   common.TicketID
+	BlockingApprovalID common.ApprovalID
+	FailureReason      string
+}
+
+type StepSnapshot struct {
+	Ref     string
+	Summary NotificationPayload
+}
+
+type StepChangedData struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	StepID      common.StepID
+	Kind        string
+	State       common.StepState
+	Input       StepSnapshot
+	Output      StepSnapshot
+}
+
+type LLMStreamProgressData struct {
+	WorkspaceID   common.WorkspaceID
+	RunID         common.RunID
+	StepID        common.StepID
+	ProviderID    string
+	Model         string
+	ChunkCount    int
+	ReceivedBytes int
+	ElapsedMs     int
+	Status        string
+	Summary       string
+}
+
+type LLMUsageRecordedData struct {
+	WorkspaceID   common.WorkspaceID
+	RunID         common.RunID
+	StepID        common.StepID
+	ProviderID    string
+	Provider      string
+	APISurface    string
+	Model         string
+	Operation     string
+	InputTokens   int
+	OutputTokens  int
+	TotalTokens   int
+	Estimated     bool
+	UsageSource   string
+	RequestBytes  int
+	ResponseBytes int
+	Streaming     bool
+	ContextBudget NotificationPayload
+	CacheUsage    NotificationPayload
+	CacheMarkers  NotificationPayload
+	StartedAt     string
+	CompletedAt   string
+	DurationMs    int
+	Status        string
+	FailureClass  string
+}
+
+func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
+	if run == nil {
+		return RunStateChangedData{}
+	}
+	return RunStateChangedData{
+		RunID:              run.ID,
+		WorkspaceID:        run.WorkspaceID,
+		GoalID:             run.GoalID,
+		DoDID:              run.DoDID,
+		State:              run.State,
+		BlockingTicketID:   run.BlockingTicketID,
+		BlockingApprovalID: run.BlockingApprovalID,
+		FailureReason:      run.FailureReason,
+	}
 }
 
 type RunCommandResult struct {
@@ -101,8 +177,14 @@ func MessageContracts() []eventcontract.MessageContract {
 		TopicRunCancelled,
 		TopicRunSuperseded,
 		TopicRunStateChanged,
-		TopicRunLLMStreamProgress,
-		TopicRunLLMUsageRecorded,
+	} {
+		ret = append(ret, eventcontract.DataTopic[RunStateChangedData]("run", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
+	}
+	ret = append(ret,
+		eventcontract.DataTopic[LLMStreamProgressData]("run", definitionPackage, eventcontract.LanePolicyState, TopicRunLLMStreamProgress).MessageContract(),
+		eventcontract.DataTopic[LLMUsageRecordedData]("run", definitionPackage, eventcontract.LanePolicyState, TopicRunLLMUsageRecorded).MessageContract(),
+	)
+	for _, topic := range []string{
 		TopicStepCreated,
 		TopicStepDispatched,
 		TopicStepSucceeded,
@@ -110,7 +192,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		TopicStepSkipped,
 		TopicStepStateChanged,
 	} {
-		ret = append(ret, eventcontract.DataTopic[RunData]("run", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
+		ret = append(ret, eventcontract.DataTopic[StepChangedData]("run", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
 	}
 	return ret
 }

@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	skillevents "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/events"
+	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/pkg/common"

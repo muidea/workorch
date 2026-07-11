@@ -8,13 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
-	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
-	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -106,7 +105,6 @@ func TestRuntimeOrchestrator_FailRunPrefersUnsatisfiedDoDSummary(t *testing.T) {
 			},
 		},
 	}
-
 	if err := orch.failRunWithRejectedCompletionResult(ctx, run, step, "invalid argument: completionState failed has no actionable continuation"); err != nil {
 		t.Fatalf("failRunWithRejectedCompletionResult: %v", err)
 	}
@@ -160,51 +158,6 @@ func TestRuntimeOrchestrator_RecordsRejectedResultForWeakSatisfiedDoDAssessment(
 	}
 	if !strings.Contains(result.Summary, "DoD assessment rejected") {
 		t.Fatalf("result summary = %q, want rejected weak evidence summary", result.Summary)
-	}
-}
-
-func TestRuntimeOrchestrator_RejectedResultPublishesRejectedEventID(t *testing.T) {
-	ctx := context.Background()
-	resultRepo := memory.NewResultRepository()
-	eventHub := events.NewMemoryHub()
-	orch := &RuntimeOrchestrator{
-		eventHub: eventHub,
-		evidence: RuntimeEvidenceRepositories{
-			Results: resultRepo,
-		},
-	}
-	runID := common.RunID("run-rejected-event-id")
-	run := &runmodel.Run{
-		ID:              runID,
-		WorkspaceID:     "ws-rejected-event-id",
-		GoalID:          "goal-rejected-event-id",
-		DoDID:           "dod-rejected-event-id",
-		InitialStepKind: llmWorkspaceExecutionStepKind,
-	}
-	step := &runmodel.Step{ID: common.StepID(string(runID) + "/assessment"), RunID: runID}
-
-	if err := orch.resultManager().recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
-		stepOutputKeyDoDAssessment: map[string]any{
-			"satisfied": false,
-			"summary":   "not satisfied",
-			"items": []map[string]any{{
-				"item":  "required outcome",
-				"state": "failed",
-			}},
-		},
-	}); err != nil {
-		t.Fatalf("record rejected result: %v", err)
-	}
-
-	published := eventHub.Published()
-	if len(published) != 1 {
-		t.Fatalf("published events = %+v, want one result event", published)
-	}
-	if !strings.HasSuffix(published[0].ID, "/event/rejected") {
-		t.Fatalf("event ID = %q, want rejected suffix", published[0].ID)
-	}
-	if strings.HasSuffix(published[0].ID, "/event/accepted") {
-		t.Fatalf("event ID = %q, rejected result must not use accepted marker", published[0].ID)
 	}
 }
 
@@ -364,9 +317,7 @@ func TestRuntimeOrchestrator_DispatchNextDoesNotPromoteRejectedResultToTerminalS
 		memory.NewDecisionTicketRepository(),
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Results: resultRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo})
 
 	workspaceID := common.WorkspaceID("ws-rejected-result-boundary")
 	runID := common.RunID("run-rejected-result-boundary")
@@ -437,9 +388,8 @@ func TestRuntimeOrchestrator_RejectedResultSupersededByRecoveryProgress(t *testi
 		memory.NewDecisionTicketRepository(),
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Results: resultRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo})
+
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod", State: common.RunStateActive, InitialStepKind: llmWorkspaceExecutionStepKind}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -502,9 +452,8 @@ func TestRuntimeOrchestrator_RejectedResultFromConvertedDecisionIsDiagnosticOnly
 		memory.NewDecisionTicketRepository(),
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Results: resultRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo})
+
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod", State: common.RunStateActive, InitialStepKind: llmWorkspaceExecutionStepKind}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -565,9 +514,8 @@ func TestRuntimeOrchestrator_RejectedResultEvidenceRefDiagnosticOnly(t *testing.
 		memory.NewDecisionTicketRepository(),
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Results: resultRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo})
+
 	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod", State: common.RunStateActive, InitialStepKind: llmWorkspaceExecutionStepKind}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -665,9 +613,8 @@ func TestRuntimeOrchestrator_DispatchStepRejectsActiveRejectedResult(t *testing.
 		memory.NewDecisionTicketRepository(),
 		nil,
 		memory.NewApprovalRepository(),
-		RuntimeEvidenceRepositories{Results: resultRepo},
-		events.NewMemoryHub(),
-	)
+		RuntimeEvidenceRepositories{Results: resultRepo})
+
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
 		ID:                   workspaceID,
 		State:                common.WorkspaceStateActive,
