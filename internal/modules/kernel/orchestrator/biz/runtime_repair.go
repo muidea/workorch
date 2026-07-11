@@ -1272,30 +1272,71 @@ func (o *RuntimeOrchestrator) failRunWithRejectedCompletionResult(ctx context.Co
 	if reason == "" {
 		reason = "runtime step failed"
 	}
+	recoveryTerminationReason := reason
+	directFailureReason := ""
 	if requiresDoDAssessmentCompletionGate(run) && step != nil {
-		_ = o.resultManager().recordRejectedCompletionDoDAssessment(ctx, run, step, step.Output)
-		reason = rejectedCompletionFailureReason(step, reason)
+		resultOutput, directReason := terminalRejectedCompletionOutput(step, recoveryTerminationReason)
+		_ = o.resultManager().recordRejectedCompletionDoDAssessment(ctx, run, step, resultOutput)
+		directFailureReason = directReason
+		reason = terminalRunFailureReason(directFailureReason, recoveryTerminationReason)
 	}
-	return o.FailRun(ctx, run.ID, reason)
+	if run.ExecutionContext == nil {
+		run.ExecutionContext = map[string]any{}
+	}
+	terminalOutcome := map[string]any{
+		"state": string(common.RunStateFailed),
+	}
+	if directFailureReason != "" {
+		terminalOutcome["directFailureReason"] = directFailureReason
+	}
+	if recoveryTerminationReason != "" {
+		terminalOutcome["recoveryTerminationReason"] = recoveryTerminationReason
+	}
+	if step != nil && step.ID != "" {
+		terminalOutcome["sourceStepId"] = string(step.ID)
+		terminalOutcome["evidenceRefs"] = []string{string(step.ID)}
+	}
+	run.ExecutionContext["terminalOutcome"] = terminalOutcome
+	return o.closeLoadedRun(ctx, run, common.RunStateFailed, reason)
 }
 
-func rejectedCompletionFailureReason(step *runModel.Step, fallback string) string {
-	fallback = strings.TrimSpace(fallback)
+func terminalRunFailureReason(directFailureReason string, recoveryTerminationReason string) string {
+	directFailureReason = strings.TrimSpace(directFailureReason)
+	recoveryTerminationReason = strings.TrimSpace(recoveryTerminationReason)
+	switch {
+	case directFailureReason == "":
+		return recoveryTerminationReason
+	case recoveryTerminationReason == "" || recoveryTerminationReason == directFailureReason:
+		return directFailureReason
+	default:
+		return directFailureReason + " (recovery termination: " + recoveryTerminationReason + ")"
+	}
+}
+
+func terminalRejectedCompletionOutput(step *runModel.Step, recoveryTerminationReason string) (map[string]any, string) {
 	if step == nil {
-		return fallback
+		return nil, ""
 	}
-	assessment := doDAssessmentFromOutput(step.Output)
+	output := cloneStepPayload(step.Output)
+	if output == nil {
+		output = map[string]any{}
+	}
+	assessment := cloneStepPayload(doDAssessmentFromOutput(output))
 	if assessment == nil {
-		return fallback
+		assessment = syntheticRejectedDoDAssessment(nil, step, output)
 	}
-	if satisfied, _ := assessment["satisfied"].(bool); satisfied {
-		return fallback
+	directFailureReason := strings.TrimSpace(stringFromMap(assessment, "summary"))
+	if directFailureReason == "" {
+		directFailureReason = syntheticRejectedDoDReason(step, output)
 	}
-	summary := strings.TrimSpace(stringFromMap(assessment, "summary"))
-	if summary == "" {
-		return fallback
+	if directFailureReason != "" {
+		assessment["directFailureReason"] = directFailureReason
 	}
-	return summary
+	if recoveryTerminationReason = strings.TrimSpace(recoveryTerminationReason); recoveryTerminationReason != "" && recoveryTerminationReason != directFailureReason {
+		assessment["recoveryTerminationReason"] = recoveryTerminationReason
+	}
+	output[stepOutputKeyDoDAssessment] = assessment
+	return output, directFailureReason
 }
 
 func shouldEscalateRuntimeRepairExhaustion(ctx context.Context, repair *repairSubsystem, policy RuntimePolicy, canCreateDecisionTicket bool, run *runModel.Run, failedStep *runModel.Step) bool {

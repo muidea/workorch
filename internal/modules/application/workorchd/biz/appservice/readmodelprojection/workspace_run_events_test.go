@@ -3,12 +3,41 @@ package readmodelprojection
 import (
 	"testing"
 
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
+
+func TestSelectWorkspaceProjectionRunUsesLatestTerminalRunWhenWorkspaceHasNoActiveRun(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-terminal-successor")
+	oldRunID := common.RunID("run-001")
+	latestRunID := common.RunID("run-002")
+	workspace := &workspacemodel.Workspace{
+		ID:          workspaceID,
+		State:       common.WorkspaceStateActive,
+		ActiveRunID: "",
+	}
+	runs := []*runmodel.Run{
+		{ID: oldRunID, WorkspaceID: workspaceID, State: common.RunStateSuperseded},
+		{ID: latestRunID, WorkspaceID: workspaceID, State: common.RunStateFailed},
+	}
+	eventRecords := []*eventstreammodel.EventRecord{{
+		ID:          "evt-latest-failed",
+		Topic:       runevents.TopicRunStateChanged,
+		OccurredAt:  "2026-07-11T07:36:31Z",
+		WorkspaceID: workspaceID,
+		RunID:       latestRunID,
+		Payload:     map[string]any{events.PayloadKeyState: string(common.RunStateFailed)},
+	}}
+
+	selected := SelectWorkspaceProjectionRun(workspace, runs, nil, eventRecords)
+	if selected == nil || selected.ID != latestRunID {
+		t.Fatalf("selected run = %+v, want latest failed successor %s", selected, latestRunID)
+	}
+}
 
 func TestSelectLatestRunEventPrefersReplacementRunOverNewerSupersededMarker(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-replan")

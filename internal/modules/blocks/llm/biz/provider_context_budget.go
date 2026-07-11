@@ -1387,8 +1387,29 @@ func captureProtectedProviderStagePacket(input map[string]any) protectedProvider
 	if len(packet) == 0 {
 		return ret
 	}
+	if providerInputHasCurrentActionContract(input) {
+		ret.Packet = compactProtectedProviderStagePacketForCurrentAction(packet)
+		return ret
+	}
 	ret.Packet = compactProtectedProviderStagePacket(packet)
 	return ret
+}
+
+func compactProtectedProviderStagePacketForCurrentAction(packet map[string]any) map[string]any {
+	if len(packet) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{"schemaVersion", "workspaceId", "runId", "stepId", "idempotencyKey"} {
+		copyMapValue(out, key, packet[key])
+	}
+	if snapshots := compactProtectedProviderStagePacketSnapshots(mapSliceFromAny(packet["targetSnapshots"])); len(snapshots) > 0 {
+		out["targetSnapshots"] = snapshots
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func compactProtectedProviderStagePacket(packet map[string]any) map[string]any {

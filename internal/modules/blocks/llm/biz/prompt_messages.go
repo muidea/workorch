@@ -607,6 +607,8 @@ func currentActionContractPromptSection(input map[string]any, snapshotBudget pro
 	for _, key := range []string{
 		"nextAction",
 		"currentFocus",
+		"outputDecisionContract",
+		"targetSnapshots",
 		"latestRejectedDiagnostic",
 	} {
 		if value, ok := contract[key]; ok {

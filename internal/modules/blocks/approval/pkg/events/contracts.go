@@ -24,6 +24,7 @@ func Contracts() []eventcontract.Contract {
 		TopicApprovalCommandDelete,
 		TopicApprovalCommandEnsureApproved,
 		TopicApprovalCommandEnsureRejected,
+		TopicApprovalCommandRecordEvidence,
 	)...)
 	return ret
 }

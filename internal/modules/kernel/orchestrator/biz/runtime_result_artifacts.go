@@ -487,7 +487,7 @@ func compactResultSummaryDiagnostics(assessment map[string]any) map[string]any {
 	if diagnostics := mapFromValue(assessment["runtimeDiagnostics"]); len(diagnostics) > 0 {
 		ret["runtimeDiagnostics"] = compactLLMContextMap(diagnostics, 1)
 	}
-	for _, key := range []string{"sourceSummary", "rejectionReason", "gateFailureReason"} {
+	for _, key := range []string{"sourceSummary", "rejectionReason", "gateFailureReason", "directFailureReason", "recoveryTerminationReason"} {
 		if value := strings.TrimSpace(stringFromMap(assessment, key)); value != "" {
 			ret[key] = truncateLLMContextString(value)
 		}

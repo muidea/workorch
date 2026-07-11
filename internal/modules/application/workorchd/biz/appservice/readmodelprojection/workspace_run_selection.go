@@ -14,9 +14,6 @@ func SelectWorkspaceProjectionRun(workspace *workspacemodel.Workspace, runs []*r
 	if workspace == nil || len(runs) == 0 {
 		return nil
 	}
-	if workspace.State == common.WorkspaceStateActive && strings.TrimSpace(string(workspace.ActiveRunID)) == "" {
-		return nil
-	}
 	candidates := workspaceProjectionRunCandidates(workspace, runs)
 	if candidates.active != nil && !IsTerminalProjectionRunState(candidates.active.State) {
 		return candidates.active
@@ -33,6 +30,9 @@ func SelectWorkspaceProjectionRun(workspace *workspacemodel.Workspace, runs []*r
 	}
 	if candidates.active != nil {
 		return candidates.active
+	}
+	if workspace.State == common.WorkspaceStateActive && strings.TrimSpace(string(workspace.ActiveRunID)) == "" {
+		return nil
 	}
 	return candidates.latest
 }

@@ -986,6 +986,66 @@ func TestEnforceProviderRequestBudgetAdaptiveShrinkForStreamIncompleteRetry(t *t
 	}
 }
 
+func TestEnforceProviderRequestBudgetCurrentActionKeepsOnlyStagePacketSnapshotTransport(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-current-action",
+		RunID:       "run-current-action",
+		StepID:      "run-current-action/step-1",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"currentActionContract": map[string]any{
+				"nextAction": map[string]any{"kind": "validate"},
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence": true,
+					"acceptedKinds":                         []string{"shell/command"},
+				},
+			},
+			"stagePacket": map[string]any{
+				"schemaVersion": "workorch.stage_packet.v1",
+				"workspaceId":   "ws-current-action",
+				"runId":         "run-current-action",
+				"stepId":        "run-current-action/old-step",
+				"nextAction":    map[string]any{"kind": "state_change"},
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply"},
+				},
+				"targetSnapshots": []map[string]any{{
+					"targetRef":             "target-a",
+					"content":               "complete target content",
+					"contentComplete":       true,
+					"safeForFileWrite":      true,
+					"safeForExactFileWrite": true,
+					"integrityState":        "full",
+				}},
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{ContextProfile: llmmodels.ProviderContextProfile{
+			ContextWindowTokens:    8192,
+			MaxInputTokens:         4096,
+			ReservedOutputTokens:   1024,
+			BytesHardLimit:         256 * 1024,
+			EstimatedTokensPerByte: 0.25,
+		}},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	packet := recordFromAny(got.Input["stagePacket"])
+	if len(mapSliceFromAny(packet["targetSnapshots"])) != 1 {
+		t.Fatalf("stagePacket = %+v, want target snapshot transport preserved", packet)
+	}
+	for _, key := range []string{"nextAction", "requiredOutput", "activeFocus", "currentFailure", "currentGap"} {
+		if _, ok := packet[key]; ok {
+			t.Fatalf("stagePacket = %+v, want legacy current-action field %q removed", packet, key)
+		}
+	}
+	if got.ContextBudget == nil || len(got.ContextBudget.IntegrityWarnings) != 0 {
+		t.Fatalf("contextBudget = %+v, want current-action stage transport without integrity warning", got.ContextBudget)
+	}
+}
+
 func TestEnforceProviderRequestBudgetDoesNotHalveContextRetryBudget(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-context-retry",

@@ -63,6 +63,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[DeleteApprovalCommand, ApprovalCommandResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicApprovalCommandDelete).MessageContract(),
 		eventcontract.CommandTopic[EnsureApprovedCommand, ApprovalCommandResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicApprovalCommandEnsureApproved).MessageContract(),
 		eventcontract.CommandTopic[EnsureRejectedCommand, ApprovalCommandResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicApprovalCommandEnsureRejected).MessageContract(),
+		eventcontract.CommandTopic[RecordApprovalEvidenceCommand, RecordApprovalEvidenceResult]("approval", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicApprovalCommandRecordEvidence).MessageContract(),
 	}
 	for _, topic := range []string{
 		TopicApprovalCreated,

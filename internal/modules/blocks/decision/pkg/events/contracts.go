@@ -28,6 +28,7 @@ func Contracts() []eventcontract.Contract {
 		TopicDecisionCommandCreateResolution,
 		TopicDecisionCommandDeleteResolution,
 		TopicDecisionCommandEnsureResolved,
+		TopicDecisionCommandRecordEvidence,
 	)...)
 	return ret
 }

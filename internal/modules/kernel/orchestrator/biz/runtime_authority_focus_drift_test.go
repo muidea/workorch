@@ -1284,6 +1284,75 @@ func TestValidateConvergenceDispatchInputRejectsRequiredOutputMirrorMismatch(t *
 	}
 }
 
+func TestSynchronizeCurrentRequiredOutputMirrorsRebuildsDerivedMirrorsWithoutStaleDiagnostics(t *testing.T) {
+	required := map[string]any{
+		"mustProduceConcreteValidationEvidence": true,
+		"mustIncludeStateChangingNode":          false,
+		"acceptedKinds":                         []string{"shell/command"},
+		"forbiddenKinds":                        []string{"patch/apply"},
+	}
+	stale := map[string]any{
+		"mustIncludeStateChangingNode": true,
+		"acceptedKinds":                []string{"patch/apply"},
+	}
+	input := map[string]any{
+		"convergenceContract": map[string]any{"state": convergenceStateNeedValidation},
+		"repairActionPackage": map[string]any{"requiredOutput": cloneStepPayload(required)},
+		"requiredOutput":      cloneStepPayload(stale),
+		stepInputKeyStagePacket: map[string]any{
+			"requiredOutput": cloneStepPayload(stale),
+			"nextAction": map[string]any{
+				"kind":           runtimemodel.NextActionTypeValidate,
+				"requiredOutput": cloneStepPayload(stale),
+			},
+		},
+		"executionContext": map[string]any{
+			"requiredOutput": cloneStepPayload(stale),
+			stepInputKeyStagePacket: map[string]any{
+				"requiredOutput": cloneStepPayload(stale),
+				"nextAction": map[string]any{
+					"requiredOutput": cloneStepPayload(stale),
+				},
+			},
+		},
+	}
+
+	got := synchronizeCurrentRequiredOutputMirrors(input)
+	canonical := mapFromValue(got["requiredOutput"])
+	if len(canonical) == 0 {
+		t.Fatal("requiredOutput is empty after mirror synchronization")
+	}
+	wantJSON := stableCoverageJSON(canonical)
+	executionContext := mapFromValue(got["executionContext"])
+	for label, mirror := range map[string]map[string]any{
+		"repairActionPackage.requiredOutput":                     mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":                             mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["requiredOutput"]),
+		"stagePacket.nextAction.requiredOutput":                  mapFromValue(mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+		"executionContext.requiredOutput":                        mapFromValue(executionContext["requiredOutput"]),
+		"executionContext.stagePacket.requiredOutput":            mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["requiredOutput"]),
+		"executionContext.stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+	} {
+		if stableCoverageJSON(mirror) != wantJSON {
+			t.Fatalf("%s = %+v, want canonical requiredOutput %+v", label, mirror, canonical)
+		}
+	}
+	if diagnostics := mapSliceFromValue(got["authorityDiagnostics"]); len(diagnostics) != 0 {
+		t.Fatalf("authorityDiagnostics = %+v, want derived mirror rebuild without stale diagnostic noise", diagnostics)
+	}
+}
+
+func TestAppendAuthorityDiagnosticDeduplicatesExactDiagnostic(t *testing.T) {
+	input := map[string]any{"seed": true}
+	appendAuthorityDiagnostic(input, "contract_mismatch", "error", "internal_authority_mismatch", "requiredOutput", "contract mismatch")
+	appendAuthorityDiagnostic(input, "contract_mismatch", "error", "internal_authority_mismatch", "requiredOutput", "contract mismatch")
+	appendAuthorityDiagnostic(input, "contract_mismatch", "error", "internal_authority_mismatch", "stagePacket", "contract mismatch")
+
+	diagnostics := mapSliceFromValue(input["authorityDiagnostics"])
+	if len(diagnostics) != 2 {
+		t.Fatalf("authorityDiagnostics = %+v, want exact duplicates collapsed while distinct sources remain", diagnostics)
+	}
+}
+
 func TestValidateConvergenceDispatchInputRejectsValidationRequiredOutputAcceptsPatchApply(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{

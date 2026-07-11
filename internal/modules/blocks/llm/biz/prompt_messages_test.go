@@ -757,6 +757,11 @@ func TestCurrentActionContractSuppressesLegacyActiveContractSections(t *testing.
 				"stateChangingOutputRequired": true,
 				"nextAction":                  map[string]any{"kind": "state_change", "reason": "current focus requires state change"},
 				"currentFocus":                map[string]any{"id": "cwi-001", "coverageWorkItemIds": []any{"cwi-001"}},
+				"outputDecisionContract": map[string]any{
+					"requiredMode":     "execution_graph",
+					"allowedOutputs":   []string{"executionGraph"},
+					"forbiddenOutputs": []string{"dodAssessment"},
+				},
 				"requiredOutput": map[string]any{
 					"mustIncludeStateChangingNode": true,
 					"acceptedKinds":                []any{"patch/apply"},
@@ -780,7 +785,7 @@ func TestCurrentActionContractSuppressesLegacyActiveContractSections(t *testing.
 	if !ok {
 		t.Fatalf("missing C3.current-action-contract; sections=%+v", promptContextSectionIDsForTest(context))
 	}
-	for _, want := range []string{"Current Action Contract", "state_change", "mustIncludeStateChangingNode", "cwi-001"} {
+	for _, want := range []string{"Current Action Contract", "state_change", "mustIncludeStateChangingNode", "cwi-001", "execution_graph", "executionGraph"} {
 		if !strings.Contains(current.Content, want) {
 			t.Fatalf("current action contract missing %q: %s", want, current.Content)
 		}

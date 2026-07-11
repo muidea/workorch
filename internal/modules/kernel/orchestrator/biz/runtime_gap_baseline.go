@@ -731,7 +731,6 @@ func synchronizeCurrentRequiredOutputMirrors(input map[string]any) map[string]an
 		return input
 	}
 	required = cloneStepPayload(required)
-	appendRequiredOutputMirrorReboundDiagnostics(input, required)
 	input["requiredOutput"] = cloneStepPayload(required)
 	input["currentAuthorityRequiredOutputMirrorsCanonical"] = true
 	pkg := mapFromValue(input["repairActionPackage"])
@@ -779,43 +778,9 @@ func synchronizeCurrentStagePacketMirror(input map[string]any) map[string]any {
 	if len(executionContext) == 0 {
 		return input
 	}
-	existing := mapFromValue(executionContext[stepInputKeyStagePacket])
-	if len(existing) > 0 && stableCoverageJSON(existing) != stableCoverageJSON(packet) {
-		appendAuthorityDiagnostic(input, "stale_stage_packet_mirror_rebound", "warning", "diagnostic_lineage", "executionContext.stagePacket", "stale stagePacket mirror was rebound from current convergence authority before dispatch")
-	}
 	executionContext[stepInputKeyStagePacket] = cloneStepPayload(packet)
 	input["executionContext"] = executionContext
 	return input
-}
-
-func appendRequiredOutputMirrorReboundDiagnostics(input map[string]any, required map[string]any) {
-	if len(input) == 0 || len(required) == 0 {
-		return
-	}
-	expected := stableCoverageJSON(required)
-	for label, existing := range map[string]map[string]any{
-		"requiredOutput":                        mapFromValue(input["requiredOutput"]),
-		"currentActionContract.requiredOutput":  mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
-		"stagePacket.requiredOutput":            mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
-		"stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
-	} {
-		if len(existing) == 0 || stableCoverageJSON(existing) == expected {
-			continue
-		}
-		appendAuthorityDiagnostic(input, "stale_required_output_mirror_rebound", "warning", "diagnostic_lineage", label, "stale requiredOutput mirror was rebound from current convergence authority before dispatch")
-	}
-	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
-		for label, existing := range map[string]map[string]any{
-			"executionContext.requiredOutput":                        mapFromValue(executionContext["requiredOutput"]),
-			"executionContext.stagePacket.requiredOutput":            mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["requiredOutput"]),
-			"executionContext.stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
-		} {
-			if len(existing) == 0 || stableCoverageJSON(existing) == expected {
-				continue
-			}
-			appendAuthorityDiagnostic(input, "stale_required_output_mirror_rebound", "warning", "diagnostic_lineage", label, "stale requiredOutput mirror was rebound from current convergence authority before dispatch")
-		}
-	}
 }
 
 func currentAuthorityRenderedRequiredOutput(input map[string]any) map[string]any {
@@ -2195,6 +2160,12 @@ func appendAuthorityDiagnostic(input map[string]any, code string, severity strin
 		return
 	}
 	diagnostics := mapSliceFromValue(input["authorityDiagnostics"])
+	itemJSON := stableCoverageJSON(item)
+	for _, existing := range diagnostics {
+		if stableCoverageJSON(existing) == itemJSON {
+			return
+		}
+	}
 	diagnostics = append(diagnostics, item)
 	input["authorityDiagnostics"] = diagnostics
 }

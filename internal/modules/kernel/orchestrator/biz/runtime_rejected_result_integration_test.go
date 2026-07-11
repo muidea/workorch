@@ -112,8 +112,23 @@ func TestRuntimeOrchestrator_FailRunPrefersUnsatisfiedDoDSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if closed.State != common.RunStateFailed || closed.FailureReason != summary {
-		t.Fatalf("run = %+v, want failed with DoD summary reason %q", closed, summary)
+	if closed.State != common.RunStateFailed ||
+		!strings.Contains(closed.FailureReason, summary) ||
+		!strings.Contains(closed.FailureReason, "completionState failed has no actionable continuation") {
+		t.Fatalf("run = %+v, want failed with direct DoD and recovery termination reasons", closed)
+	}
+	terminalOutcome := mapFromValue(closed.ExecutionContext["terminalOutcome"])
+	if stringFromMap(terminalOutcome, "directFailureReason") != summary ||
+		stringFromMap(terminalOutcome, "recoveryTerminationReason") != "invalid argument: completionState failed has no actionable continuation" {
+		t.Fatalf("terminalOutcome = %+v, want direct failure and recovery termination reasons", terminalOutcome)
+	}
+	result, err := resultRepo.Get(ctx, common.ResultID(string(runID)+"/result/dod-assessment"))
+	if err != nil {
+		t.Fatalf("get rejected result: %v", err)
+	}
+	if result.SummaryDetail.Diagnostics["directFailureReason"] != summary ||
+		result.SummaryDetail.Diagnostics["recoveryTerminationReason"] != "invalid argument: completionState failed has no actionable continuation" {
+		t.Fatalf("result diagnostics = %+v, want direct failure and recovery termination reasons", result.SummaryDetail.Diagnostics)
 	}
 }
 
