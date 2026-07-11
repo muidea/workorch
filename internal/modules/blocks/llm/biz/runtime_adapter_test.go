@@ -288,8 +288,8 @@ func TestRuntimeAdapterBlocksProviderCallWhenCompactedRequestStillOverBudget(t *
 	if provider.request.StepID != "" {
 		t.Fatalf("provider was called with request = %+v, want fail-fast before provider invocation", provider.request)
 	}
-	if result.Output["stage"] != "llm_provider_request_too_large" {
-		t.Fatalf("output = %+v, want request too large stage", result.Output)
+	if result.Output["stage"] != "llm_runtime_request_budget_overflow" {
+		t.Fatalf("output = %+v, want local request budget overflow stage", result.Output)
 	}
 	budget := recordFromAny(result.Output["contextBudget"])
 	if !boolValue(budget["overBudget"]) {
@@ -297,6 +297,9 @@ func TestRuntimeAdapterBlocksProviderCallWhenCompactedRequestStillOverBudget(t *
 	}
 	if boolValue(budget["p0Overflow"]) {
 		t.Fatalf("contextBudget = %+v, want generic overBudget without p0 overflow", budget)
+	}
+	if boolValue(budget["providerSubmitted"]) {
+		t.Fatalf("contextBudget = %+v, provider must not be marked submitted for local budget overflow", budget)
 	}
 }
 

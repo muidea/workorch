@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -45,6 +46,36 @@ func TestRuntimeContextIntegrityGateFailureIsNotStateChangingRepair(t *testing.T
 	orch := &RuntimeOrchestrator{}
 	if action := runtimeRecoveryActionForFailedStepForTest(t.Context(), orch, run, step); action != runtimeRecoveryActionContextIntegrityBlocked {
 		t.Fatalf("recoveryActionForFailedStep = %q, want %q", action, runtimeRecoveryActionContextIntegrityBlocked)
+	}
+}
+
+func TestRuntimeRequestBudgetFailureUsesContextGateInsteadOfProviderRetry(t *testing.T) {
+	step := &runModel.Step{
+		ID:    common.StepID("run-budget/step-1"),
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage":               "llm_protected_context_floor_exceeded",
+			failureOutputKeyClass: failureClassProtectedContextFloor,
+			"contextBudget": map[string]any{
+				"contextGateAction":            "fail_fast",
+				"contextGateReason":            "P0 contract exceeds provider context budget",
+				"minimumProtectedRequestBytes": 63952,
+				"maxBytes":                     61178,
+			},
+		},
+	}
+	run := &runModel.Run{ID: "run-budget", InitialStepKind: llmWorkspaceExecutionStepKind, State: common.RunStateActive}
+	orch := &RuntimeOrchestrator{}
+	if !runtimeContextIntegrityGateFailure(step) {
+		t.Fatal("runtimeContextIntegrityGateFailure = false, want true")
+	}
+	if action := runtimeRecoveryActionForFailedStepForTest(t.Context(), orch, run, step); action != runtimeRecoveryActionContextIntegrityBlocked {
+		t.Fatalf("recovery action = %q, want context integrity blocked", action)
+	}
+	question := localizedRequestBudgetGateQuestion("zh-CN")
+	if strings.Contains(question, "修复或切换 runtime LLM provider") || !strings.Contains(question, "本地请求预算") {
+		t.Fatalf("localized request budget question = %q, want local budget guidance without provider configuration remediation", question)
 	}
 }
 

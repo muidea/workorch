@@ -60,6 +60,7 @@ type ProviderContextBudget struct {
 	EstimatedInputTokens  int                    `json:"estimatedInputTokens,omitempty"`
 	EstimatedOutputTokens int                    `json:"estimatedOutputTokens,omitempty"`
 	ActualTokens          int                    `json:"actualTokens,omitempty"`
+	MinimumProtectedBytes int                    `json:"minimumProtectedRequestBytes,omitempty"`
 	ShrinkLevel           int                    `json:"shrinkLevel,omitempty"`
 	Truncated             bool                   `json:"truncated"`
 	Rules                 []string               `json:"rules,omitempty"`
@@ -86,6 +87,8 @@ type ProviderContextBudget struct {
 	IntegrityWarnings     []string               `json:"integrityWarnings,omitempty"`
 	ContextGateAction     string                 `json:"contextGateAction,omitempty"`
 	ContextGateReason     string                 `json:"contextGateReason,omitempty"`
+	BudgetFailureClass    string                 `json:"budgetFailureClass,omitempty"`
+	ProviderSubmitted     bool                   `json:"providerSubmitted"`
 	CachePlan             *ProviderCachePlan     `json:"cachePlan,omitempty"`
 	Profile               ProviderContextProfile `json:"profile,omitempty"`
 }

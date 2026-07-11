@@ -243,6 +243,7 @@ func providerRetryStepInputWithMaxAttempts(failedStep *runModel.Step, attempt in
 		input = map[string]any{}
 	}
 	sanitizeProviderRetryBaseInput(input)
+	applyRecoveryRequestBudgetProjection(input, failedStep)
 	delete(input, stepInputKeyRuntimeRepairFollowUp)
 	delete(input, stepInputKeyRuntimeRepairAttempt)
 	rootStepID := providerRetryRootStepID(failedStep)
@@ -253,7 +254,24 @@ func providerRetryStepInputWithMaxAttempts(failedStep *runModel.Step, attempt in
 	input[stepInputKeyRecoveryAction] = string(runtimeRecoveryActionProviderRetry)
 	input[stepInputKeyRecoveryRootStepID] = string(rootStepID)
 	input[stepInputKeyRecoveryLineageType] = "provider_retry"
-	input[stepInputKeyRecoveryBudgetScope] = recoveryBudgetScope("provider_retry", rootStepID, stringFromMap(failedStep.Output, failureOutputKeyClass), stringFromMap(failedStep.Output, failureOutputKeySignature))
+	budgetScope := cloneStepPayload(mapFromValue(failedStep.Input[stepInputKeyRecoveryBudgetScope]))
+	if budgetScope == nil {
+		budgetScope = map[string]any{}
+	}
+	if parentLineage := strings.TrimSpace(stringFromMap(budgetScope, "lineageType")); parentLineage != "" {
+		budgetScope["parentLineageType"] = parentLineage
+	}
+	for key, value := range recoveryBudgetScope("provider_retry", rootStepID, stringFromMap(failedStep.Output, failureOutputKeyClass), stringFromMap(failedStep.Output, failureOutputKeySignature)) {
+		if key == "rootStepId" && strings.TrimSpace(stringFromMap(budgetScope, key)) != "" {
+			budgetScope["providerRetryRootStepId"] = value
+			continue
+		}
+		budgetScope[key] = value
+	}
+	budgetScope["attempt"] = attempt
+	budgetScope["providerRetryAttempt"] = attempt
+	budgetScope["maxAttempts"] = maxAttempts
+	input[stepInputKeyRecoveryBudgetScope] = budgetScope
 	input["maxProviderRetryAttempts"] = maxAttempts
 	input["failedStepId"] = string(rootStepID)
 	input["failedStepKind"] = failedStep.Kind
@@ -279,6 +297,46 @@ func providerRetryStepInputWithMaxAttempts(failedStep *runModel.Step, attempt in
 		delete(input, "previousStepOutput")
 	}
 	return input
+}
+
+func applyRecoveryRequestBudgetProjection(input map[string]any, failedStep *runModel.Step) {
+	if input == nil || failedStep == nil {
+		return
+	}
+	previousBytes := intFromValue(failedStep.Input["previousSubmittedRequestBytes"])
+	maxBytes := intFromValue(failedStep.Input["maxRecoveryRequestBytes"])
+	minimumProtectedBytes := intFromValue(failedStep.Input["minimumProtectedRequestBytes"])
+	parentShrinkLevel := intFromValue(failedStep.Input["parentShrinkLevel"])
+	if budget := mapFromValue(failedStep.Output["contextBudget"]); len(budget) > 0 {
+		providerSubmitted := true
+		if submitted, exists := budget["providerSubmitted"]; exists {
+			providerSubmitted = boolValue(submitted)
+		}
+		if actual := intFromValue(budget["actualBytes"]); providerSubmitted && actual > 0 {
+			previousBytes = actual
+			if maxBytes <= 0 || actual < maxBytes {
+				maxBytes = actual
+			}
+		}
+		if shrink := intFromValue(budget["shrinkLevel"]); shrink > parentShrinkLevel {
+			parentShrinkLevel = shrink
+		}
+		if minimum := intFromValue(budget["minimumProtectedRequestBytes"]); minimum > 0 {
+			minimumProtectedBytes = minimum
+		}
+	}
+	if previousBytes > 0 {
+		input["previousSubmittedRequestBytes"] = previousBytes
+	}
+	if maxBytes > 0 {
+		input["maxRecoveryRequestBytes"] = maxBytes
+	}
+	if parentShrinkLevel > 0 {
+		input["parentShrinkLevel"] = parentShrinkLevel
+	}
+	if minimumProtectedBytes > 0 {
+		input["minimumProtectedRequestBytes"] = minimumProtectedBytes
+	}
 }
 
 func providerRetryPreservesStateChangingContract(input map[string]any) bool {

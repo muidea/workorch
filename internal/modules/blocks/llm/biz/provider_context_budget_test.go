@@ -2272,6 +2272,72 @@ func TestEnforceProviderRequestBudgetContractRetryTailIsBoundedAndMonotonic(t *t
 	}
 }
 
+func TestEnforceProviderRequestBudgetRecoveryCeilingAndParentShrinkAreInherited(t *testing.T) {
+	previousBytes := 90 * 1024
+	for attempt := 1; attempt <= 4; attempt++ {
+		req := providerContractRetryBudgetFixture(89, attempt)
+		req.Input["previousSubmittedRequestBytes"] = previousBytes
+		req.Input["maxRecoveryRequestBytes"] = previousBytes
+		req.Input["parentShrinkLevel"] = 4
+
+		got := enforceProviderRequestBudget(req)
+		if got.ContextBudget == nil {
+			t.Fatal("contextBudget = nil")
+		}
+		if got.ContextBudget.MaxBytes != previousBytes {
+			t.Fatalf("attempt %d maxBytes = %d, want inherited ceiling %d", attempt, got.ContextBudget.MaxBytes, previousBytes)
+		}
+		if got.ContextBudget.ShrinkLevel < 4 {
+			t.Fatalf("attempt %d shrinkLevel = %d, want parent shrink >= 4", attempt, got.ContextBudget.ShrinkLevel)
+		}
+		if got.ContextBudget.ActualBytes > previousBytes {
+			t.Fatalf("attempt %d actualBytes = %d, want <= previous %d", attempt, got.ContextBudget.ActualBytes, previousBytes)
+		}
+		previousBytes = got.ContextBudget.ActualBytes
+	}
+}
+
+func TestEnforceProviderRequestBudgetFocusCorrectionStaysBelowLiveParentCeiling(t *testing.T) {
+	const liveParentCeiling = 61178
+	previousBytes := liveParentCeiling
+	actualBytes := make([]int, 0, 4)
+	for attempt := 1; attempt <= 4; attempt++ {
+		req := providerContractRetryBudgetFixture(89, attempt)
+		req.Input["previousSubmittedRequestBytes"] = previousBytes
+		req.Input["maxRecoveryRequestBytes"] = liveParentCeiling
+		req.Input["parentShrinkLevel"] = 4
+		req.Input["providerRetryFollowUp"] = true
+		req.Input["providerRetryAttempt"] = attempt
+		req.Input["failureReason"] = strings.Repeat(fmt.Sprintf("attempt-%d volatile local overflow ", attempt), 500)
+		req.Input["failureSignature"] = strings.Repeat(fmt.Sprintf("provider-retry-%d ", attempt), 500)
+		req.Input["authorityDiagnostics"] = repeatedBudgetItems(100)
+
+		got := enforceProviderRequestBudget(req)
+		if got.ContextBudget == nil {
+			t.Fatal("contextBudget = nil")
+		}
+		if got.ContextBudget.P0Overflow || got.ContextBudget.OverBudget {
+			t.Fatalf("attempt %d contextBudget = %+v, want request within inherited ceiling", attempt, got.ContextBudget)
+		}
+		if got.ContextBudget.ActualBytes > liveParentCeiling || got.ContextBudget.ActualBytes > previousBytes {
+			t.Fatalf("attempt %d actualBytes = %d, want <= previous %d and ceiling %d", attempt, got.ContextBudget.ActualBytes, previousBytes, liveParentCeiling)
+		}
+		if _, ok := got.Input["authorityDiagnostics"]; ok {
+			t.Fatalf("attempt %d retained authorityDiagnostics in shrink level 4 input", attempt)
+		}
+		if recovery := recordFromAny(got.Input["contractViolationRecovery"]); len(recordFromAny(recovery["actualOutputSummary"])) > 5 {
+			t.Fatalf("attempt %d contractViolationRecovery retained verbose actual output: %+v", attempt, recovery)
+		}
+		actualBytes = append(actualBytes, got.ContextBudget.ActualBytes)
+		previousBytes = got.ContextBudget.ActualBytes
+	}
+	for idx := 1; idx < len(actualBytes); idx++ {
+		if actualBytes[idx] > actualBytes[idx-1] {
+			t.Fatalf("provider retry bytes = %+v, want monotonic non-increasing", actualBytes)
+		}
+	}
+}
+
 func providerContractRetryBudgetFixture(itemCount int, attempt int) llmmodels.ProviderRequest {
 	focus := map[string]any{
 		"id":                           "cwi-001",

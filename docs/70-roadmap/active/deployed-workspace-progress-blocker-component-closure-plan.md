@@ -416,6 +416,648 @@ git diff --check
 - [ ] active outcome、terminal Run/Result、focus、runtime execution 与资源释放继续一致。
 - [ ] CC06 完成后才允许把本文状态改为 `completed`。
 
+## Third Deployment Live Verification and Reopened Closure Plan
+
+本节记录提交 `b5db0766` 部署后的第三次 live 验证结果，并作为下一轮逐项代码收口入口。此前 RC01-RC03 的 focused fixture 继续有效，但真实运行链证明其覆盖面不足，因此相关 live 项重新打开；不得仅依据单元测试勾选结果把本文改为 `completed`。
+
+### 部署与服务状态
+
+- 部署进程：PID `2329918`，启动时间 `2026-07-11 21:33:48 +08:00`。
+- 服务监听：`127.0.0.1:8080`。
+- `/readyz`：`ready`。
+- 全局 source/projected revision：`2686 / 2686`。
+- LSP workspace source/projected revision：`2244 / 2244`。
+- 网关 workspace source/projected revision：`2686 / 2686`。
+- 两个 terminal Run 均已释放 `activeRunId`，runtime resources 均为 released。
+
+### Live Run 结果
+
+| Workspace | Run | 结果 | Focus 进展 | 最终失败 |
+| --- | --- | --- | --- | --- |
+| `ws-5cfc9874cebda0b8`，LSP-Bridge MVP | `run-004` | `failed` | 从 `cwi-036` 前移到 `cwi-039`，但未连续完成多个 focus | `validation_static_only` 后 repair dispatch 出现 `contractState=need_state_change requires state-changing requiredOutput` |
+| `ws-609ce9149734ebb7`，轻量级 LLM 本地代理网关 | `run-005` | `failed` | 停留在 `cwi-085` | build validation failure 后 runtime repair 实际 `0` 次即出现相同 state/requiredOutput 冲突 |
+
+### 已通过的 live 子项
+
+- [x] 服务 readiness 与 projection revision 对齐。
+- [x] active outcome 指向当前 Run，terminal outcome/Run/Result 指向一致。
+- [x] terminal Run 已释放 `activeRunId`。
+- [x] LSP `run-004` 的 37 个 runtime resources 全部 released。
+- [x] 网关 `run-005` 的 runtime resources 全部 released。
+- [x] contract retry 请求 `60,344 bytes`，低于 96 KiB。
+- [x] runtime repair attempt 已真实递增，attempt 2/3/4+ 分别进入 shrinkLevel 3/4。
+- [x] 两个 workspace 的非空 `stablePrefixHash` 与 `renderedStablePrefixHash` 各自保持单值。
+
+### 重新打开的 live 子项
+
+- [ ] `validation_static_only` 必须生成真实 managed-validation correction profile，而不是 generic correction。
+- [ ] forced-narrow validation correction 不得被仍缺 `state_change` 的 owner focus 覆盖。
+- [ ] state、nextAction、runtime stage、repair objective 与 requiredOutput 必须在 dispatch 构造阶段原子切换。
+- [ ] 首次 contract violation 的 budget scope 必须包含 `violatedRule`、`correctionProfileId` 与 attempt。
+- [ ] provider retry 不得从父 contract/runtime retry 的压缩结果重新膨胀。
+- [ ] 同一 recovery scope 的 request bytes/tokens 必须单调不增。
+- [ ] authority diagnostics 不得按每轮 dispatch 重复累积。
+- [ ] 至少一个 workspace 连续完成两个以上 coverage focus 前移。
+
+## Reopened Closure Execution Plan
+
+必须严格按 RC05 → RC06 → RC07 → RC08 → RC09 顺序执行。RC05-RC07 属于 `kernel/orchestrator` owner 语义；RC08 属于 `blocks/llm` 请求预算。不得把 convergence 判断、focus 裁决或 correction profile 选择下沉到 LLM block。
+
+### RC05：收口 validation violation correction profile
+
+#### Live 根因
+
+`validation_static_only` 虽被 `contractViolationRuleRequiresManagedValidationNarrow` 标记为 forced-narrow，但 `contractViolationCorrectionProfileForStep` 的 validation correction switch 未包含该 rule，真实输出仍为：
+
+```text
+correctionProfileId=contract_correction_generic
+correctionMode=targeted
+requiredOutputShape=expected_contract_compliant_output
+```
+
+因此 focused test 中手工注入的 `managed_validation_evidence` 没有覆盖真实 correction profile 生成链路。
+
+#### 必须修改
+
+- 将 `validation_static_only` 纳入 validation correction profile 分支。
+- validation scratch/process-control/detached/shell-safety/static-only/managed-required 使用同一结构化 rule 集合，避免 recoverability、retry hint 与 correction profile 三处列表漂移。
+- forced-narrow 时必须生成：
+
+  ```text
+  correctionProfileId=managed_validation_evidence
+  correctionMode=forced_narrow
+  requiredOutputShape=managed_validation_evidence
+  validationRoute=managed_harness
+  requiredOutput=validation/managed_session only
+  ```
+
+- generic correction 不得处理已知 validation contract rule。
+
+#### 目标文件
+
+- `internal/modules/kernel/orchestrator/biz/runtime_contract_violation.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_execution_contract.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair.go`
+
+#### 回归测试
+
+- [ ] 使用真实 `attachContractViolationDiagnostics` 生成 `validation_static_only` violation。
+- [ ] 使用真实 `contractViolationCorrectionProfileForStep`，禁止手工注入 correction contract。
+- [ ] attempt 1 即产生 managed-validation forced-narrow profile。
+- [ ] recovery input、budget scope、CurrentActionContract 和 requiredOutput mirrors 均使用同一 profile。
+
+### RC06：收口 forced-narrow correction 与 owner authority 优先级
+
+#### Live 根因
+
+`dispatchInputShouldPreserveLocalRepairAuthority` 当前在 focus 仍缺 `state_change` 时拒绝 local validation authority，并持续写入：
+
+```text
+local_validation_repair_authority_rejected
+```
+
+LSP `run-004` 最终累计 43 条 authority diagnostics。该规则把“当前 validation action 的合同修正”误当成“覆盖 owner 最终 convergence focus”，导致 forced-narrow validation correction 被旧 state-change authority 覆盖。
+
+#### 必须修改
+
+- 区分两类 local validation authority：
+  - 普通 validation repair authority。
+  - 当前 action 的 contract correction authority。
+- 当前失败为 validation contract violation 时，必须先完成当前 validation action correction；focus 同时缺少 `state_change` 不能覆盖该 correction。
+- correction 成功并获得有效 validation evidence 后，再由 owner coverage ledger 决定是否进入 state-change。
+- 只有最新失败自身包含 admissible file target、line refs、patch repair context、failure target snapshot 或等价 implementation diagnostic 时，才允许直接切换 state-change。
+- `cwi-*`、`source_change`、deliverable scope、coverage target refs 等抽象引用不能单独作为 implementation target evidence。
+- 删除或降级重复 `local_validation_repair_authority_rejected`，同一 authority snapshot/focus/code 只保留一条。
+
+#### 目标文件
+
+- `internal/modules/kernel/orchestrator/biz/runtime_gap_baseline.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_convergence.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair_policy.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair_action_package.go`
+
+#### 回归测试
+
+- [ ] focus 同时缺 validation/state_change，最新失败为 `validation_static_only` 时保持 validation correction。
+- [ ] build validation failure仅携带 coverage refs 时不得进入 state-change。
+- [ ] build validation failure携带真实 file/line/snapshot evidence 时允许进入 state-change。
+- [ ] correction 成功后由 owner authority 再次计算下一 convergence state。
+- [ ] 同一 authority warning 不重复累积。
+
+### RC07：建立唯一原子 dispatch contract builder
+
+#### Live 根因
+
+当前 dispatch 构造依次执行 authority injection、Build/Apply、requiredOutput seed restore、StagePacket attach、CurrentActionContract attach、mirror sync、再次 attach 与 semantic validation。中间态仍可能出现：
+
+```text
+state=need_state_change
+requiredOutput=validation-only
+```
+
+网关 `run-005` 在 runtime repair 实际 `0` 次时即在该中间阶段失败；终态持久化 mirrors 已经一致，证明错误发生在 dispatch 构造而非 application projection。
+
+#### 必须修改
+
+建立唯一原子入口，顺序固定为：
+
+```text
+resolve effective owner/correction authority
+→ BuildConvergenceContract
+→ derive canonical requiredOutput from selected state
+→ derive nextAction/runtime stage/repair objective
+→ build CurrentActionContract
+→ build StagePacket from CurrentActionContract
+→ synchronize all mirrors
+→ seal authority lineage
+→ single semantic preflight
+```
+
+- StagePacket 不得在 canonical CurrentActionContract 之前构造。
+- 不再通过旧 requiredOutput seed 恢复与 selected state 相反的合同。
+- `attachCurrentActionContractToInput` 不得在同一次 render 中重复调用。
+- `need_state_change` 原子清理 validation-only 字段。
+- `need_validation` 原子清理 state-changing-only 字段和旧 patch package。
+- semantic preflight 只在完整 canonical input 上执行一次。
+
+#### 目标文件
+
+- `internal/modules/kernel/orchestrator/biz/runtime_gap_baseline.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_current_action_contract.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_convergence.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair.go`
+
+#### 回归测试
+
+- [ ] 网关 live 形态：build validation failure → runtime repair dispatch 完整链路。
+- [ ] LSP live 形态：validation static-only → forced-narrow → next dispatch 完整链路。
+- [ ] 任意中间旧 mirror 不参与 canonical contract 计算。
+- [ ] provider dispatch 前所有 requiredOutput mirrors 完全一致。
+- [ ] 不再出现 `contractState=need_state_change requires state-changing requiredOutput`。
+
+### RC08：统一 recovery scope、request ceiling 与 dynamic tail
+
+#### Live 根因
+
+- 首次 projected `retryBudgetScope` 仍未完整展示 `violatedRule/correctionProfileId/attempt`。
+- LSP contract retry 为 `60,344 bytes`，其 provider retry 膨胀至 `122,868 bytes`。
+- 网关 runtime repair 为 `59,620 bytes`，provider retry 膨胀至 `110,952 bytes`。
+- 同一 LSP convergence focus 的 shrinkLevel 4 请求仍出现 `61,786 → 62,472 → 66,491 bytes` 增长。
+- authority diagnostics 与重复 lineage 持续增长，重新进入 protected/dynamic context。
+
+#### Orchestrator 必须修改
+
+- 首次创建 ContractViolation 时即持久化完整 scope：
+
+  ```text
+  workspaceId
+  runId
+  rootStepId
+  focusId
+  violatedRule
+  correctionProfileId
+  attempt
+  maxAttempts
+  ```
+
+- recovery input 增加中立请求预算合同：
+
+  ```text
+  previousSubmittedRequestBytes
+  maxRecoveryRequestBytes
+  parentShrinkLevel
+  ```
+
+- provider retry 继承父 contract/runtime retry 的 scope、attempt lineage 与 request ceiling。
+- 只有实际提交 provider 的请求才更新 previousSubmittedRequestBytes。
+- authority diagnostics 按 `authoritySnapshotId + focusId + code + source` 去重，历史项只保留 count/refs。
+
+#### LLM block 必须修改
+
+- `blocks/llm` 只消费请求预算合同，不判断 convergence state。
+- provider retry 的 shrinkLevel 不得低于 parentShrinkLevel。
+- provider retry 不得恢复父请求已删除的 historical context。
+- 当前 request ceiling：
+
+  ```text
+  min(configuredLimit, maxRecoveryRequestBytes, previousSubmittedRequestBytes)
+  ```
+
+- attempt 3+ 即使同为 shrinkLevel 4，也必须受上一有效 request bytes 上限约束。
+- Goal/DoD/current action/current focus/requiredOutput/必要 target evidence 继续受保护。
+- retry 变化仍只能影响 C3-C5，稳定前缀不变。
+
+#### 目标文件
+
+- `internal/modules/kernel/orchestrator/biz/runtime_contract_violation.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair_budget.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair_input.go`
+- `internal/pkg/repository/file/file.go`
+- `internal/pkg/repository/memory/memory.go`
+- `internal/modules/blocks/llm/biz/provider_context_budget.go`
+- `internal/modules/blocks/llm/biz/runtime_adapter.go`
+
+#### 回归测试
+
+- [ ] contract retry → provider retry 不增长且均低于 96 KiB。
+- [ ] runtime repair → provider retry 不增长且均低于 96 KiB。
+- [ ] attempt 1/2/3/4 请求 bytes/tokens 单调不增。
+- [ ] 同一 scope 的 step ID、input、budget、audit attempt 完全一致。
+- [ ] scope 变化后 request ceiling 和 attempt 正确重置。
+- [ ] stable prefix 两类 hash 保持单值。
+- [ ] diagnostics 数量在重复 retry 中保持有界。
+
+### RC09：重新部署与双 workspace live closure
+
+#### 执行顺序
+
+1. 完成 RC05 correction profile。
+2. 完成 RC06 authority priority。
+3. 完成 RC07 atomic dispatch builder。
+4. 完成 RC08 scoped request ceiling。
+5. 运行 focused tests。
+6. 运行全量测试和边界门禁。
+7. `make build` 并部署最新服务。
+8. 启动 LSP 与网关两个全新 Run。
+9. 执行最终 live gate。
+
+#### Focused Tests
+
+```bash
+go test ./internal/modules/kernel/orchestrator/biz -count=1
+go test ./internal/modules/blocks/llm/biz -count=1
+go test ./internal/pkg/repository/... -count=1
+```
+
+#### Full Gates
+
+```bash
+go test -p 1 ./internal/modules/... -count=1
+go test ./... -count=1
+make fmt-check
+make vet
+make verify-boundary-contract
+git diff --check
+```
+
+#### Final Live Gate
+
+- [ ] 两个新 Run 均不再出现 state/requiredOutput semantic conflict。
+- [ ] `validation_static_only` 使用真实 managed-validation forced-narrow correction。
+- [ ] forced-narrow correction 后能够继续 provider dispatch，而不是实际 0/1 次即终止。
+- [ ] contract/runtime/provider retry attempt 连续且 scope 字段完整。
+- [ ] contract/runtime/provider retry request bytes/tokens 单调不增。
+- [ ] 所有 recovery request 不超过 96 KiB live 门禁。
+- [ ] stable prefix hash 保持稳定。
+- [ ] authority diagnostics 不再随 retry 线性增长。
+- [ ] 至少一个 workspace 连续完成两个以上 coverage focus 前移。
+- [ ] Run/Result/outcome、activeRunId、runtime execution、projection revision 和资源释放继续一致。
+- [ ] 全部通过后才允许将本文状态改为 `completed`。
+
+### RC05-RC08 代码收口执行记录（2026-07-11）
+
+当前代码收口已按 RC05 → RC06 → RC07 → RC08 顺序完成；RC09 已执行重新部署与双 workspace live gate，但未通过 request budget 单调性和 protected floor 门禁，因此本文继续保持 `active` 并进入 RC10。
+
+| 收口项 | 状态 | 已完成内容 |
+| --- | --- | --- |
+| RC05 | 代码完成 | `validation_static_only` 首轮直接进入 `managed_validation_evidence` forced-narrow correction；真实 diagnostics → repair input → dispatch preflight 链路已覆盖。 |
+| RC06 | 代码完成 | 区分普通 validation repair 与当前 validation contract correction；抽象 state-change coverage gap 不再覆盖正在执行的 correction，普通 local validation authority 仍服从 owner authority。 |
+| RC07 | 代码完成 | 删除旧 requiredOutput seed 反向恢复和重复 render；固定为 owner/correction authority → convergence contract → CurrentActionContract → StagePacket → mirrors → seal → preflight。 |
+| RC08 | 代码完成 | recovery scope 补齐 workspace/run/root/focus/rule/profile/attempt；provider retry 继承父请求 bytes ceiling 与 shrink level；authority diagnostics 聚合去重并限制为 32 条。 |
+| RC09 | live 未通过 | 最新服务已重新部署并创建两个全新 Run；LSP 能连续推进多个 focus，但网关 recovery request 出现 protected P0 overflow 和 provider retry bytes 反向增长，需要继续执行 RC10。 |
+
+本轮新增或强化的关键回归包括：
+
+- 真实 `validation_static_only` correction profile 生成，不再由测试手工注入。
+- validation correction 与抽象 state-change gap 的 authority 优先级。
+- stale requiredOutput mirrors 不得参与 canonical dispatch contract 计算。
+- contract/runtime retry 到 provider retry 的请求 bytes ceiling 与 parent shrink 继承。
+- recovery request 在同一 scope 内 bytes 单调不增。
+- authority diagnostics 按 authority snapshot、focus、code、source 聚合并保持有界。
+
+已通过门禁：
+
+```text
+go test ./internal/modules/kernel/orchestrator/biz -count=1
+go test ./internal/modules/blocks/llm/biz -count=1
+go test ./internal/pkg/repository/... -count=1
+go test -p 1 ./internal/modules/... -count=1
+go test ./... -count=1
+make fmt-check
+make vet
+make verify-boundary-contract
+```
+
+其中首次并行执行 `go test ./... -count=1` 时，`workorchd/service/server` 出现一次后台 routine 关闭时序失败；该包单独复跑通过，随后完整 `go test ./... -count=1` 复跑通过。未据此修改与本轮收口无关的 server 代码。
+
+## Fourth Deployment Live Verification and RC10 Closure Plan
+
+核对时间：2026-07-11 23:09 至 23:14。
+
+部署进程：
+
+```text
+PID=2365563
+startedAt=2026-07-11 23:09:06 +08:00
+/readyz=ready
+global source/projected revision=2753/2753
+```
+
+本轮使用部署后新建的两个 Run：
+
+- LSP：`ws-5cfc9874cebda0b8/run-005`
+- 网关：`ws-609ce9149734ebb7/run-006`
+
+### Live 正向证据
+
+#### LSP Run
+
+- current focus 连续前移：
+
+  ```text
+  cwi-036 → cwi-039 → cwi-001
+  ```
+
+- 已成功执行真实状态变更：
+  - `patch/apply` 创建或更新实现文件。
+  - `git/write` add。
+  - `git/write` commit。
+- 未再出现：
+
+  ```text
+  contractState=need_state_change requires state-changing requiredOutput
+  currentActionContract requiredOutput does not match active required output
+  ```
+
+- 两组 contract retry 均正确继承父请求 ceiling 并缩小：
+
+  ```text
+  88,407 → 80,946 bytes
+  91,600 → 81,609 bytes
+  ```
+
+- recovery scope 已包含 workspace/run/root/focus/rule/profile/attempt。
+- `stablePrefixHash` 和 `renderedStablePrefixHash` 在当前 workspace 内均保持单值。
+- authority diagnostics 未再出现旧部署中的 43 条线性增长；历史 warning 当前保持有界。
+
+#### 网关 Run
+
+- 初始 schema violation 正确生成：
+
+  ```text
+  violatedRule=unparseable_output
+  correctionProfileId=json_output_shape
+  correctionMode=targeted
+  ```
+
+- 后续 focus-binding violation 正确生成：
+
+  ```text
+  violatedRule=focus_binding_mismatch
+  correctionProfileId=focus_binding_contract
+  focusId=cwi-085
+  ```
+
+- contract/provider retry 的 scope、attempt、parent shrink 和 request ceiling 均已持久化。
+- stable prefix 两类 hash 均保持单值。
+- Run 阻塞后 runtime resources 已释放。
+
+### Live 未通过证据
+
+网关请求序列：
+
+```text
+initial                         100,587 bytes
+contract retry 1                61,178 bytes
+contract retry 2                63,952 bytes (ceiling=61,178)
+provider retry 1                62,759 bytes (ceiling=61,178)
+provider retry 2                62,847 bytes (ceiling=61,178)
+```
+
+失败表现：
+
+```text
+llm provider request too large:
+p0 overflow with protected goal/dod contract
+```
+
+结论：
+
+- request ceiling 已正确继承，但 protected P0 的实际最小渲染尺寸超过 ceiling。
+- provider retry attempt 2 比 attempt 1 增长 88 bytes，未满足同 scope 单调不增。
+- 当前失败发生在本地 request rendering/budget gate，不是 provider 配置或网络故障。
+- 生成的 decision ticket 却要求用户修复或切换 provider，failure classification 与治理提示错误。
+- `validation_static_only` 本轮未再次触发，因此 RC05 仍缺新部署后的真实 managed-validation live 证据。
+- LSP Run 仍为 active，尚不能核对 terminal activeRunId、Result/outcome 和最终资源释放。
+
+### RC10：收口 protected request floor、deterministic retry 与 budget failure classification
+
+必须严格按 RC10.1 → RC10.2 → RC10.3 → RC10.4 → RC10.5 顺序执行。
+
+#### RC10.1：收缩 LLM protected P0
+
+目标：保护当前动作语义，不保护重复诊断正文。
+
+必须保留：
+
+- Goal/DoD 原始定义与 effective contract。
+- current focus。
+- current action。
+- canonical requiredOutput。
+- 当前 correction 的 rule/profile/mode/requiredOutputShape。
+- 当前动作必要 target evidence。
+
+必须移出 P0 或压缩为结构化引用：
+
+- `contractViolationRecovery.actualOutputSummary` 全量内容。
+- 重复 failure signature 和自然语言 error/reason。
+- 历史 repair guidance。
+- 旧 authority diagnostics 正文。
+- 旧 expected contract、repair package 和 stage packet mirrors。
+- 非当前 scope 的 rejected output/history。
+
+详细诊断只能进入 bounded C4/C5 summary 或 evidence refs，不得与当前 correction contract 并列成为 protected instruction。
+
+目标文件：
+
+- `internal/modules/blocks/llm/biz/provider_context_budget.go`
+- `internal/modules/blocks/llm/biz/prompt_messages.go`
+- `internal/modules/blocks/llm/biz/runtime_adapter.go`
+
+#### RC10.2：建立 protected floor 与 request ceiling 合同
+
+保留三个独立字段：
+
+```text
+previousSubmittedRequestBytes
+maxRecoveryRequestBytes
+minimumProtectedRequestBytes
+```
+
+有效 ceiling：
+
+```text
+effectiveCeiling = min(configuredLimit, maxRecoveryRequestBytes)
+targetBytes = min(previousSubmittedRequestBytes, effectiveCeiling)
+```
+
+若 `minimumProtectedRequestBytes > targetBytes`：
+
+1. 压缩 diagnostic lineage。
+2. 移除非当前 scope 的 C3-C5 context。
+3. 移除父请求已删除的历史内容。
+4. 重新计算 protected floor。
+5. 仍超过 ceiling 时返回本地结构化 blocker，禁止调用 provider。
+
+不得通过提高或忽略 inherited ceiling 掩盖问题。
+
+#### RC10.3：provider retry 复用父请求压缩结果
+
+- provider retry 必须从父步骤实际提交的 normalized provider input 派生。
+- 不得从更完整的原始 Step input 恢复历史 context。
+- retry 只允许修改 attempt、当前 failure reason 和必要 audit lineage。
+- 同一 scope、相同 shrink level 的序列化结果必须确定。
+- attempt 1-4 的 bytes/tokens 必须单调不增。
+- provider retry 的 `maxRecoveryRequestBytes` 不得被当前失败请求的超限 `actualBytes` 放大。
+
+目标文件：
+
+- `internal/modules/kernel/orchestrator/biz/runtime_repair_budget.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair_input.go`
+- `internal/modules/blocks/llm/biz/provider_context_budget.go`
+- `internal/modules/blocks/llm/biz/runtime_adapter.go`
+
+#### RC10.4：拆分本地 budget failure 与 provider failure
+
+至少拆分以下 failure class：
+
+```text
+provider_context_too_large
+runtime_request_budget_overflow
+protected_context_floor_exceeded
+```
+
+- `provider_context_too_large`：provider 明确拒绝实际提交的请求。
+- `runtime_request_budget_overflow`：本地最终 request 超过 effective ceiling，尚未调用 provider。
+- `protected_context_floor_exceeded`：必要保护合同经最小化后仍超过 ceiling。
+
+后两类属于 runtime/LLM rendering contract failure：
+
+- 不得计为 provider timeout/configuration retry。
+- 不得生成“修复或切换 provider”的 decision question。
+- 应进入明确的 runtime budget blocker、bounded re-render 或内部治理分支。
+
+目标文件：
+
+- `internal/modules/kernel/orchestrator/biz/failure_classification.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair_budget.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_governance_localization.go`
+
+#### RC10.5：回归与重新部署门禁
+
+必须增加以下 fixture：
+
+- focus-binding correction 的父请求为 `61,178 bytes`。
+- 新 correction 加入后仍不超过父请求和 96 KiB。
+- provider retry attempt 1-4 bytes/tokens 单调不增。
+- shrink level 4 连续 retry 的 normalized input 和 request bytes 确定一致或持续缩小。
+- stable prefix 两类 hash 保持单值。
+- Goal/DoD/current focus/current action/requiredOutput 无语义丢失。
+- protected floor 无法满足 ceiling 时不调用 provider。
+- 本地 budget blocker 不生成 provider configuration decision。
+- scope 变化时 ceiling、attempt 和 normalized parent input 正确重置。
+
+Focused tests：
+
+```bash
+go test ./internal/modules/blocks/llm/biz -count=1
+go test ./internal/modules/kernel/orchestrator/biz -count=1
+go test ./internal/modules/application/workorchd/biz/appservice/readmodelports -count=1
+```
+
+Full gates：
+
+```bash
+go test -p 1 ./internal/modules/... -count=1
+go test ./... -count=1
+make fmt-check
+make vet
+make verify-boundary-contract
+git diff --check
+```
+
+重新部署后必须创建两个全新 Run，并满足：
+
+- LSP 连续完成两个以上 focus 前移。
+- `validation_static_only` 若触发，必须使用真实 managed-validation forced-narrow correction。
+- 网关所有 contract/runtime/provider recovery request 均低于 96 KiB。
+- 同一 recovery scope request bytes/tokens 单调不增。
+- protected floor overflow 不调用 provider且不误报 provider 配置问题。
+- stable prefix 两类 hash 保持单值。
+- terminal Run 的 activeRunId、runtime resources、Run/Result/outcome 和 projection revision 一致。
+
+RC10 完成并通过重新部署 live gate 前，本文不得标记为 `completed`。
+
+### RC10 代码收口执行记录（2026-07-11）
+
+RC10.1 至 RC10.5 的代码侧收口与门禁已完成，等待重新部署后的双 workspace live 验证。本文继续保持 `active`。
+
+已完成：
+
+- shrink level 2+ 不再保护完整 `lastFailureDiagnostics`、`previousRejectedOutputSummary`、旧 expected contract 和 strategy reassessment。
+- `contractViolationRecovery.actualOutputSummary` 收缩为 status/stage/failureClass/violationType/rejectedOutputRef 等结构化最小摘要。
+- shrink level 4 删除 failure reason/signature、failed step input/output、repair guidance、authority diagnostics 和旧 current-action rejected diagnostic。
+- context budget 新增：
+
+  ```text
+  minimumProtectedRequestBytes
+  budgetFailureClass
+  providerSubmitted
+  ```
+
+- 只有实际进入 provider 调用的请求才设置 `providerSubmitted=true`。
+- 本地 overflow 不再使用其超限 `actualBytes` 更新 `previousSubmittedRequestBytes` 或放大 recovery ceiling。
+- provider retry 保留父 recovery root，并单独记录 `providerRetryRootStepId`、`parentLineageType` 和 `providerRetryAttempt`。
+- 新增本地 failure class/stage：
+
+  ```text
+  runtime_request_budget_overflow
+  protected_context_floor_exceeded
+  llm_runtime_request_budget_overflow
+  llm_protected_context_floor_exceeded
+  ```
+
+- 两类本地 budget failure 不再属于 provider failure，不触发 provider retry/failover/provider configuration ticket。
+- 本地 budget failure 进入 context-budget gate，并明确提示该问题属于 runtime request rendering，而不是 provider 配置。
+
+新增 live 形态回归：
+
+- 以 `61,178 bytes` 作为 inherited parent ceiling。
+- provider retry attempt 1-4 均不超过 parent ceiling，且 bytes 单调不增。
+- shrink level 4 不恢复 verbose authority diagnostics 和 rejected output。
+- local overflow 在 `providerSubmitted=false` 时保留上一实际提交请求 `61,178 bytes`，不使用本地计算的 `63,952 bytes` 更新 ceiling。
+- 本地 budget/floor failure 由 orchestrator 识别为 context gate，不进入 provider retry。
+- governance question 不再要求修复或切换 runtime LLM provider。
+
+已通过：
+
+```text
+go test ./internal/modules/blocks/llm/biz -count=1
+go test ./internal/modules/kernel/orchestrator/biz -count=1
+go test ./internal/modules/application/workorchd/biz/appservice/readmodelports -count=1
+go test -p 1 ./internal/modules/... -count=1
+go test ./... -count=1
+make fmt-check
+make vet
+make verify-boundary-contract
+make build
+git diff --check
+```
+
+下一步必须重新部署当前构建，并使用两个全新 Run 执行 RC10 live gate；未通过 live gate 前不得将 RC10 或本文标记为 `completed`。
+
 ### Architecture Boundary
 
 本轮收口不得改变以下边界：

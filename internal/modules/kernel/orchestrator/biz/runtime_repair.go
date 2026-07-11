@@ -1617,11 +1617,18 @@ func (o *RuntimeOrchestrator) blockOnContextIntegrityGate(
 			errorString(execErr),
 		)
 	}
+	failureClass := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass))
+	reason := localizedContextIntegrityGateReason(language, gateAction, gateReason, execErr)
+	question := localizedContextIntegrityGateQuestion(language)
+	if failureClass == failureClassRequestBudgetOverflow || failureClass == failureClassProtectedContextFloor {
+		reason = localizedRequestBudgetGateReason(language, failureClass, budget, execErr)
+		question = localizedRequestBudgetGateQuestion(language)
+	}
 	spec := runtimeDecisionBlockSpec{
 		TicketID:     common.TicketID(runtimeChildID(failedStep.ID, "context-integrity-decision")),
-		Reason:       localizedContextIntegrityGateReason(language, gateAction, gateReason, execErr),
+		Reason:       reason,
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
-		Question:     localizedContextIntegrityGateQuestion(language),
+		Question:     question,
 		Context: map[string]any{
 			decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
 			decisionContextKeyDependency:     decisionContextDependencyContextGate,
@@ -1631,7 +1638,7 @@ func (o *RuntimeOrchestrator) blockOnContextIntegrityGate(
 			"recommendedRecoveryAction":      contextGateRecommendedRecoveryAction(gateAction),
 			"contextGateAction":              gateAction,
 			"contextGateReason":              gateReason,
-			"failureClass":                   stringFromMap(failedStep.Output, failureOutputKeyClass),
+			"failureClass":                   failureClass,
 			"failureSignature":               stringFromMap(failedStep.Output, failureOutputKeySignature),
 			"failedStepId":                   string(failedStep.ID),
 			"failedStepKind":                 failedStep.Kind,

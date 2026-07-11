@@ -72,6 +72,14 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	if maxBytes <= 0 {
 		maxBytes = defaultProviderRequestBudgetBytes
 	}
+	for _, ceiling := range []int{
+		intValue(request.Input["maxRecoveryRequestBytes"]),
+		intValue(request.Input["previousSubmittedRequestBytes"]),
+	} {
+		if ceiling > 0 && ceiling < maxBytes {
+			maxBytes = ceiling
+		}
+	}
 	maxTokens := profile.MaxInputTokens
 	rules := []string{"preserve identifiers, schema, config, runtime capabilities, goal, DoD, and governance decisions"}
 	sourceRefs := []string{}
@@ -82,9 +90,9 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	protectedFields := providerProtectedContextFields(request.Input)
 	request.ContextBudget = nil
 	shrinkLevel := 0
-	adaptiveLevel := adaptiveShrinkLevelFromInput(request.Input)
+	adaptiveLevel := max(adaptiveShrinkLevelFromInput(request.Input), intValue(request.Input["parentShrinkLevel"]))
 	protected := captureProtectedGoalDoD(request.Input)
-	protectedRepairTargets := captureProtectedProviderRepairTargets(request.Input)
+	protectedRepairTargets := captureProtectedProviderRepairTargets(request.Input, adaptiveLevel)
 	protectedRuntimeContract := captureProtectedProviderRuntimeContract(request.Input, adaptiveLevel)
 	protectedCoverageWorkItemContext := captureProtectedProviderCoverageWorkItemContext(request.Input, adaptiveLevel)
 	protectedStagePacket := captureProtectedProviderStagePacket(request.Input)
@@ -159,6 +167,12 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	if p0Overflow {
 		rules = append(rules, "p0 overflow: goal/dod contract preserved without compression")
 	}
+	budgetFailureClass := ""
+	if p0Overflow {
+		budgetFailureClass = "protected_context_floor_exceeded"
+	} else if overBudget {
+		budgetFailureClass = "runtime_request_budget_overflow"
+	}
 	integrityWarnings := providerContextIntegrityWarnings(request.Input, protected, protectedRepairTargets, protectedRuntimeContract, protectedCoverageWorkItemContext, protectedStagePacket, profile, overBudget)
 	contextGateAction, contextGateReason := providerContextGateDecision(goalDoDCompressed, overBudget, p0Overflow, integrityWarnings)
 	truncated := len(rules) > 1 || overBudget
@@ -169,6 +183,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		EstimatedInputTokens:  estimatedInputTokens,
 		EstimatedOutputTokens: estimatedOutputTokens,
 		ActualTokens:          actualTokens,
+		MinimumProtectedBytes: actual,
 		ShrinkLevel:           shrinkLevel,
 		Truncated:             truncated,
 		Rules:                 rules,
@@ -193,6 +208,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		IntegrityWarnings:     uniqueStrings(integrityWarnings),
 		ContextGateAction:     contextGateAction,
 		ContextGateReason:     contextGateReason,
+		BudgetFailureClass:    budgetFailureClass,
 		Profile:               profile,
 	}
 	return request
@@ -1491,7 +1507,7 @@ func compactProtectedProviderStagePacketSnapshots(items []map[string]any) []map[
 	return ret
 }
 
-func captureProtectedProviderRepairTargets(input map[string]any) protectedProviderRepairTargets {
+func captureProtectedProviderRepairTargets(input map[string]any, adaptiveLevel int) protectedProviderRepairTargets {
 	ret := protectedProviderRepairTargets{}
 	if len(input) == 0 {
 		return ret
@@ -1504,7 +1520,11 @@ func captureProtectedProviderRepairTargets(input map[string]any) protectedProvid
 	}
 	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
 		pkgOut := map[string]any{}
-		for _, key := range []string{"requiredOutput", "outputDecisionContract", "lastRejectedOutputContract", "coverageRepairRequired", "coverageTargetSet", "currentExecutionProgress", "currentFailure", "lastFailureDiagnostics", "structuredFailureSignals", "patchRepairSuggestions", "previousRejectedOutputSummary", "strategyReassessment"} {
+		protectedKeys := []string{"requiredOutput", "outputDecisionContract", "coverageRepairRequired", "coverageTargetSet", "currentExecutionProgress", "currentFailure", "structuredFailureSignals", "patchRepairSuggestions"}
+		if adaptiveLevel < 2 {
+			protectedKeys = append(protectedKeys, "lastRejectedOutputContract", "lastFailureDiagnostics", "previousRejectedOutputSummary", "strategyReassessment")
+		}
+		for _, key := range protectedKeys {
 			if value, ok := pkg[key]; ok {
 				pkgOut[key] = budgetProviderValue(value, 0, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
 			}
@@ -1512,6 +1532,9 @@ func captureProtectedProviderRepairTargets(input map[string]any) protectedProvid
 		if targets := providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"]); len(targets) > 0 {
 			pkgOut["targetSnapshots"] = targets
 			ret.RepairActionTargetSnapshots = targets
+		}
+		if adaptiveLevel >= 2 {
+			pkgOut = compactProviderRepairActionPackageForAdaptiveRetry(pkgOut, adaptiveLevel)
 		}
 		if len(pkgOut) > 0 {
 			ret.RepairActionPackage = pkgOut
@@ -1583,10 +1606,24 @@ func compactProviderContractViolationRecovery(recovery map[string]any, adaptiveL
 	for _, key := range []string{
 		"id", "sourceStepId", "stepId", "violationType", "violatedRule", "recoverability",
 		"retryHint", "correctionProfileId", "correctionMode", "targetScope", "attempt", "maxAttempts",
-		"signatureRepeatCount", "budgetScope", "actualOutputSummary", "correctionContract",
+		"signatureRepeatCount", "budgetScope", "correctionContract",
 	} {
 		if value, ok := recovery[key]; ok {
 			out[key] = budgetProviderValue(value, 0, providerBudgetAggressiveBytes, providerBudgetAggressiveItems, providerBudgetAggressiveEntries, 3)
+		}
+	}
+	if actual := recordFromAny(recovery["actualOutputSummary"]); len(actual) > 0 {
+		summary := map[string]any{}
+		for _, key := range []string{"status", "stage", "failureClass", "contractViolationType"} {
+			if value, ok := actual[key]; ok {
+				summary[key] = value
+			}
+		}
+		if value, ok := recovery["rejectedOutputRef"]; ok {
+			summary["rejectedOutputRef"] = value
+		}
+		if len(summary) > 0 {
+			out["actualOutputSummary"] = summary
 		}
 	}
 	if adaptiveLevel == 2 {
@@ -1620,6 +1657,22 @@ func normalizeAdaptiveProviderRecoveryTail(input map[string]any, adaptiveLevel i
 	}
 	for _, key := range []string{"processEvidenceTimeline", "evidenceLedger", "failedExecutionGraph", "graphEvidence", "previousResults"} {
 		delete(input, key)
+	}
+	if adaptiveLevel >= 4 {
+		for _, key := range []string{
+			"failureReason", "failureSignature", "failedStepInput", "failedStepOutput",
+			"previousStepOutput", "repairGuidance", "authorityDiagnostics",
+		} {
+			delete(input, key)
+		}
+		if current := recordFromAny(input["currentActionContract"]); len(current) > 0 {
+			delete(current, "latestRejectedDiagnostic")
+			input["currentActionContract"] = current
+		}
+		if packet := recordFromAny(input["stagePacket"]); len(packet) > 0 {
+			delete(packet, "processEvidenceTimeline")
+			input["stagePacket"] = packet
+		}
 	}
 	return input
 }

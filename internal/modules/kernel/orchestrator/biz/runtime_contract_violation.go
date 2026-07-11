@@ -140,6 +140,19 @@ func contractViolationFromFailedStep(run *runModel.Run, step *runModel.Step, exe
 	recoverability := contractViolationRecoverabilityForRule(rule)
 	correction := contractViolationCorrectionProfileForStep(step, rule, attempt, signatureRepeatCount)
 	budgetScope := contractViolationRecoveryBudgetScope(step.Input, step)
+	if attempt <= 0 {
+		attempt = 1
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = maxProviderRetryAttempts
+	}
+	budgetScope["workspaceId"] = string(run.WorkspaceID)
+	budgetScope["runId"] = string(run.ID)
+	budgetScope["rootStepId"] = string(runtimeRepairRootStepID(step))
+	budgetScope["violatedRule"] = rule
+	budgetScope["correctionProfileId"] = stringFromMap(correction, "profileId")
+	budgetScope["attempt"] = attempt
+	budgetScope["maxAttempts"] = maxAttempts
 	violation := runtimemodel.ContractViolation{
 		ID:                   fmt.Sprintf("%s/%s/contract-violation", run.ID, step.ID),
 		WorkspaceID:          run.WorkspaceID,
@@ -713,6 +726,14 @@ func contractViolationRecoveryBudgetScope(input map[string]any, failedStep *runM
 		stringFromMap(failedStep.Output, failureOutputKeyClass),
 		stringFromMap(failedStep.Output, failureOutputKeySignature),
 	)
+	for key, value := range map[string]string{
+		"workspaceId": firstNonEmptyString(stringFromMap(input, "workspaceId"), stringFromMap(mapFromValue(input[convergenceAuthorityKey]), "workspaceId")),
+		"runId":       firstNonEmptyString(stringFromMap(input, "runId"), stringFromMap(mapFromValue(input[convergenceAuthorityKey]), "runId")),
+	} {
+		if strings.TrimSpace(value) != "" {
+			scope[key] = value
+		}
+	}
 	focus := dispatchAuthorityCurrentFocus(input)
 	if len(focus) == 0 {
 		focus = mapFromValue(input[coverageFocusKey])
@@ -1270,6 +1291,7 @@ func contractViolationCorrectionProfileForStep(step *runModel.Step, rule string,
 		contractViolationRuleValidationProcessControlForbidden,
 		contractViolationRuleValidationDetachedProcessForbidden,
 		contractViolationRuleValidationShellSafetyUnproven,
+		contractViolationRuleValidationStaticOnly,
 		contractViolationRuleManagedValidationRequired:
 		if profile, ok := contractViolationRequiredOutputCorrectionProfile(step, contract); ok {
 			profileID = profile
@@ -1454,6 +1476,7 @@ func contractViolationRuleRequiresManagedValidationNarrow(rule string) bool {
 		contractViolationRuleValidationProcessControlForbidden,
 		contractViolationRuleValidationDetachedProcessForbidden,
 		contractViolationRuleValidationShellSafetyUnproven,
+		contractViolationRuleValidationStaticOnly,
 		contractViolationRuleManagedValidationRequired:
 		return true
 	default:

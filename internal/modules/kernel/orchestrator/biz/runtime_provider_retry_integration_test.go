@@ -783,6 +783,10 @@ func TestProviderRetryStepInputNarrowsStateChangingProviderTimeout(t *testing.T)
 		input["providerTimeoutStateChangingRetry"] != true {
 		t.Fatalf("provider retry input = %+v, want direct state-changing recovery mode", input)
 	}
+	if input["previousSubmittedRequestBytes"] != 9999 ||
+		input["maxRecoveryRequestBytes"] != 9999 {
+		t.Fatalf("provider retry request budget = previous:%v max:%v, want inherited submitted bytes", input["previousSubmittedRequestBytes"], input["maxRecoveryRequestBytes"])
+	}
 	for _, key := range []string{"failedExecutionGraph", stepInputKeyGraphEvidence, stepInputKeyWorkspaceFileManifest, "previousStepOutput"} {
 		if _, ok := input[key]; ok {
 			t.Fatalf("provider retry input retained %s: %+v", key, input[key])
@@ -798,6 +802,50 @@ func TestProviderRetryStepInputNarrowsStateChangingProviderTimeout(t *testing.T)
 	forbidden := stringSliceFromValue(input["forbiddenRecoveryOutputs"])
 	if !containsString(forbidden, "run_snapshot_graph") || !containsString(forbidden, "context_rehydration_graph") {
 		t.Fatalf("forbiddenRecoveryOutputs = %+v, want self-inspection outputs forbidden", forbidden)
+	}
+}
+
+func TestProviderRetryStepInputDoesNotPromoteUnsubmittedOverflowBytes(t *testing.T) {
+	failedStep := &runmodel.Step{
+		ID:    "run-local-budget/contract-retry-001",
+		RunID: "run-local-budget",
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"previousSubmittedRequestBytes": 61178,
+			"maxRecoveryRequestBytes":       61178,
+			"parentShrinkLevel":             2,
+			stepInputKeyRecoveryBudgetScope: map[string]any{
+				"lineageType": "contract_violation_retry",
+				"rootStepId":  "run-local-budget/step-1",
+				"focusId":     "cwi-085",
+			},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_protected_context_floor_exceeded",
+			failureOutputKeyClass:     failureClassProtectedContextFloor,
+			failureOutputKeySignature: "class=protected_context_floor_exceeded",
+			"contextBudget": map[string]any{
+				"actualBytes":                  63952,
+				"minimumProtectedRequestBytes": 63952,
+				"maxBytes":                     61178,
+				"shrinkLevel":                  4,
+				"providerSubmitted":            false,
+			},
+		},
+	}
+
+	input := providerRetryStepInput(failedStep, 1, common.ErrInvalidArgument)
+	if input["previousSubmittedRequestBytes"] != 61178 || input["maxRecoveryRequestBytes"] != 61178 {
+		t.Fatalf("provider retry bytes = previous:%v max:%v, want retained submitted ceiling", input["previousSubmittedRequestBytes"], input["maxRecoveryRequestBytes"])
+	}
+	if input["minimumProtectedRequestBytes"] != 63952 || input["parentShrinkLevel"] != 4 {
+		t.Fatalf("provider retry floor/shrink = %v/%v, want 63952/4", input["minimumProtectedRequestBytes"], input["parentShrinkLevel"])
+	}
+	scope := mapFromValue(input[stepInputKeyRecoveryBudgetScope])
+	if stringFromMap(scope, "rootStepId") != "run-local-budget/step-1" ||
+		stringFromMap(scope, "providerRetryRootStepId") != string(failedStep.ID) {
+		t.Fatalf("provider retry scope = %+v, want parent root plus provider retry root", scope)
 	}
 }
 

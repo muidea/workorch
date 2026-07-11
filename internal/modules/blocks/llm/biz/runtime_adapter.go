@@ -402,6 +402,8 @@ const (
 	providerFailureClassStreamIncomplete = "provider_stream_incomplete"
 	providerFailureClassUnavailable      = "provider_unavailable"
 	providerFailureClassContextIntegrity = "context_integrity_failed"
+	providerFailureClassRequestBudget    = "runtime_request_budget_overflow"
+	providerFailureClassProtectedFloor   = "protected_context_floor_exceeded"
 	providerFailureClassProtocolInvalid  = "provider_protocol_invalid"
 	providerFailureClassResponseSchema   = "provider_response_schema_invalid"
 )
@@ -720,6 +722,10 @@ func classifyProviderInvocationFailure(err error) string {
 	}
 	httpStatus := providerInvocationHTTPStatus(text)
 	switch {
+	case strings.Contains(text, "protected_context_floor_exceeded"):
+		return providerFailureClassProtectedFloor
+	case strings.Contains(text, "runtime_request_budget_overflow"):
+		return providerFailureClassRequestBudget
 	case strings.Contains(text, "context length"),
 		strings.Contains(text, "maximum context"),
 		strings.Contains(text, "context window"),
@@ -793,6 +799,10 @@ func providerFailureStage(failureClass string, stream bool) string {
 		return "llm_provider_stream_incomplete"
 	case providerFailureClassContextIntegrity:
 		return "llm_context_integrity_failed"
+	case providerFailureClassRequestBudget:
+		return "llm_runtime_request_budget_overflow"
+	case providerFailureClassProtectedFloor:
+		return "llm_protected_context_floor_exceeded"
 	case providerFailureClassProtocolInvalid:
 		return "llm_provider_protocol_invalid"
 	case providerFailureClassResponseSchema:
@@ -813,14 +823,17 @@ func providerFailureStage(failureClass string, stream bool) string {
 func completeProvider(ctx context.Context, runtime ProviderRuntime, request llmmodels.ProviderRequest, progress runtimemodel.StepExecutionProgressFunc) ([]byte, *llmmodels.ProviderUsage, []llmmodels.ProviderStreamEvent, error) {
 	if request.ContextBudget != nil {
 		if request.ContextBudget.P0Overflow {
-			return nil, nil, nil, fmt.Errorf("%w: llm provider request too large: p0 overflow with protected goal/dod contract", common.ErrInvalidArgument)
+			return nil, nil, nil, fmt.Errorf("%w: protected_context_floor_exceeded: minimum protected request bytes %d exceed effective ceiling %d", common.ErrInvalidArgument, request.ContextBudget.MinimumProtectedBytes, request.ContextBudget.MaxBytes)
 		}
 		if request.ContextBudget.OverBudget {
-			return nil, nil, nil, fmt.Errorf("%w: llm provider request too large after context budget compaction", common.ErrInvalidArgument)
+			return nil, nil, nil, fmt.Errorf("%w: runtime_request_budget_overflow: request bytes %d exceed effective ceiling %d", common.ErrInvalidArgument, request.ContextBudget.ActualBytes, request.ContextBudget.MaxBytes)
 		}
 		if err := validateProviderContextGate(request.ContextBudget); err != nil {
 			return nil, nil, nil, err
 		}
+	}
+	if request.ContextBudget != nil {
+		request.ContextBudget.ProviderSubmitted = true
 	}
 	if runtime.Config.Capabilities.Streaming {
 		streaming, ok := runtime.Provider.(StreamingProvider)
@@ -1281,38 +1294,41 @@ func providerContextBudgetOutput(budget *llmmodels.ProviderContextBudget, provid
 	_ = providerID
 	_ = model
 	item := map[string]any{
-		"maxBytes":                budget.MaxBytes,
-		"actualBytes":             budget.ActualBytes,
-		"maxTokens":               budget.MaxTokens,
-		"estimatedInputTokens":    budget.EstimatedInputTokens,
-		"estimatedOutputTokens":   budget.EstimatedOutputTokens,
-		"actualTokens":            budget.ActualTokens,
-		"shrinkLevel":             budget.ShrinkLevel,
-		"truncated":               budget.Truncated,
-		"rules":                   append([]string(nil), budget.Rules...),
-		"sourceRefs":              append([]string(nil), budget.SourceRefs...),
-		"includedSections":        append([]string(nil), budget.IncludedSections...),
-		"normalizedSections":      append([]string(nil), budget.NormalizedSections...),
-		"compressedSections":      append([]string(nil), budget.CompressedSections...),
-		"omittedSections":         append([]string(nil), budget.OmittedSections...),
-		"goalDoDCompressed":       budget.GoalDoDCompressed,
-		"overBudget":              budget.OverBudget,
-		"p0Overflow":              budget.P0Overflow,
-		"profileMode":             budget.ProfileMode,
-		"capabilitySource":        budget.CapabilitySource,
-		"contextUtilizationRatio": budget.ContextUtilization,
-		"maxRequestBytes":         budget.MaxRequestBytes,
-		"stageBudgetRatio":        budget.StageBudgetRatio,
-		"stageBudgetSource":       budget.StageBudgetSource,
-		"tracePolicy":             budget.TracePolicy,
-		"promptCaptured":          budget.PromptCaptured,
-		"estimator":               budget.Estimator,
-		"redactionApplied":        budget.RedactionApplied,
-		"redactedPaths":           append([]string(nil), budget.RedactedPaths...),
-		"protectedFields":         append([]string(nil), budget.ProtectedFields...),
-		"integrityWarnings":       append([]string(nil), budget.IntegrityWarnings...),
-		"contextGateAction":       budget.ContextGateAction,
-		"contextGateReason":       budget.ContextGateReason,
+		"maxBytes":                     budget.MaxBytes,
+		"actualBytes":                  budget.ActualBytes,
+		"maxTokens":                    budget.MaxTokens,
+		"estimatedInputTokens":         budget.EstimatedInputTokens,
+		"estimatedOutputTokens":        budget.EstimatedOutputTokens,
+		"actualTokens":                 budget.ActualTokens,
+		"minimumProtectedRequestBytes": budget.MinimumProtectedBytes,
+		"shrinkLevel":                  budget.ShrinkLevel,
+		"truncated":                    budget.Truncated,
+		"rules":                        append([]string(nil), budget.Rules...),
+		"sourceRefs":                   append([]string(nil), budget.SourceRefs...),
+		"includedSections":             append([]string(nil), budget.IncludedSections...),
+		"normalizedSections":           append([]string(nil), budget.NormalizedSections...),
+		"compressedSections":           append([]string(nil), budget.CompressedSections...),
+		"omittedSections":              append([]string(nil), budget.OmittedSections...),
+		"goalDoDCompressed":            budget.GoalDoDCompressed,
+		"overBudget":                   budget.OverBudget,
+		"p0Overflow":                   budget.P0Overflow,
+		"profileMode":                  budget.ProfileMode,
+		"capabilitySource":             budget.CapabilitySource,
+		"contextUtilizationRatio":      budget.ContextUtilization,
+		"maxRequestBytes":              budget.MaxRequestBytes,
+		"stageBudgetRatio":             budget.StageBudgetRatio,
+		"stageBudgetSource":            budget.StageBudgetSource,
+		"tracePolicy":                  budget.TracePolicy,
+		"promptCaptured":               budget.PromptCaptured,
+		"estimator":                    budget.Estimator,
+		"redactionApplied":             budget.RedactionApplied,
+		"redactedPaths":                append([]string(nil), budget.RedactedPaths...),
+		"protectedFields":              append([]string(nil), budget.ProtectedFields...),
+		"integrityWarnings":            append([]string(nil), budget.IntegrityWarnings...),
+		"contextGateAction":            budget.ContextGateAction,
+		"contextGateReason":            budget.ContextGateReason,
+		"budgetFailureClass":           budget.BudgetFailureClass,
+		"providerSubmitted":            budget.ProviderSubmitted,
 	}
 	if budget.CachePlan != nil {
 		item["cachePlan"] = providerCachePlanOutput(budget.CachePlan)

@@ -19,6 +19,8 @@ const (
 	failureClassProviderProtocolInvalid  = "provider_protocol_invalid"
 	failureClassProviderTimeout          = "provider_timeout"
 	failureClassContextTooLarge          = "context_too_large"
+	failureClassRequestBudgetOverflow    = "runtime_request_budget_overflow"
+	failureClassProtectedContextFloor    = "protected_context_floor_exceeded"
 	failureClassRateLimited              = "rate_limited"
 	failureClassAuthOrConfigError        = "auth_or_config_error"
 	failureClassProviderStreamIncomplete = "provider_stream_incomplete"
@@ -56,7 +58,11 @@ func classifyRuntimeFailure(step *runModel.Step, output map[string]any, summary 
 	class := failureClassRuntime
 	lowerStage := strings.ToLower(stage)
 	lowerSummary := strings.ToLower(strings.TrimSpace(summary))
-	if isLLMProviderTimeoutFailure(lowerStage, execErr, output) {
+	if lowerStage == "llm_runtime_request_budget_overflow" {
+		class = failureClassRequestBudgetOverflow
+	} else if lowerStage == "llm_protected_context_floor_exceeded" {
+		class = failureClassProtectedContextFloor
+	} else if isLLMProviderTimeoutFailure(lowerStage, execErr, output) {
 		class = failureClassProviderTimeout
 	} else if isLLMContextTooLargeFailure(lowerStage, execErr, output) {
 		class = failureClassContextTooLarge

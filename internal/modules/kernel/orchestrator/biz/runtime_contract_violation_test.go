@@ -582,6 +582,19 @@ func TestRuntimeRepairInputIncludesContractViolationRecovery(t *testing.T) {
 		!stringSliceContains(stringSliceFromValue(budgetScope["coverageWorkItemIds"]), "cwi-contract-retry") {
 		t.Fatalf("recoveryBudgetScope = %+v, want contract violation retry scoped to current authority focus", budgetScope)
 	}
+	for key, want := range map[string]any{
+		"workspaceId":         string(run.WorkspaceID),
+		"runId":               string(run.ID),
+		"rootStepId":          string(runtimeRepairRootStepID(failed)),
+		"violatedRule":        contractViolationRuleStateChangingRequiredMissing,
+		"correctionProfileId": "state_changing_required_output",
+		"attempt":             1,
+		"maxAttempts":         NormalizeRuntimePolicy(RuntimePolicy{}).MaxContractViolationRetriesPerStep,
+	} {
+		if budgetScope[key] != want {
+			t.Fatalf("recoveryBudgetScope[%s] = %v, want %v; scope=%+v", key, budgetScope[key], want, budgetScope)
+		}
+	}
 	recoveryBudget := mapFromValue(recovery["budgetScope"])
 	if stableCoverageJSON(recoveryBudget) != stableCoverageJSON(budgetScope) {
 		t.Fatalf("contractViolationRecovery.budgetScope = %+v, want recoveryBudgetScope %+v", recoveryBudget, budgetScope)

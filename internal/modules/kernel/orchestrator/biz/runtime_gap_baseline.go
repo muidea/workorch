@@ -344,12 +344,9 @@ func refreshCurrentAuthorityDerivedSnapshot(run *runModel.Run, stepID common.Ste
 		input = renderCurrentAuthorityDispatchInput(run, stepID, input)
 		return input, validateConvergenceDispatchInput(input)
 	}
-	requiredSeed := stateChangingRequiredOutputSeedForAuthorityRefresh(input)
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
 	input = ApplyConvergenceContract(input, contract)
-	input = restoreStateChangingRequiredOutputSeed(input, requiredSeed)
 	input = enforceStateChangingContractRequiredOutput(input)
-	input = renderCurrentAuthorityDispatchInput(run, stepID, input)
 	input = enforceCurrentAuthorityDerivedConsistency(run, stepID, input)
 	input = renderCurrentAuthorityDispatchInput(run, stepID, input)
 	if err := validateConvergenceDispatchInput(input); err != nil {
@@ -363,65 +360,11 @@ func renderCurrentAuthorityDispatchInput(run *runModel.Run, stepID common.StepID
 		input = map[string]any{}
 	}
 	input = normalizeDispatchInputAuthorityFocus(input)
+	input = attachCurrentActionContractToInput(run, stepID, input)
 	input = attachStagePacketToStepInput(run, stepID, input)
-	input = attachCurrentActionContractToInput(run, stepID, input)
 	input = synchronizeCurrentRequiredOutputMirrors(input)
-	input = attachCurrentActionContractToInput(run, stepID, input)
 	input = sealCurrentAuthoritySnapshotLineage(input)
 	return scrubConvergenceDispatchDiagnosticAdvice(input)
-}
-
-func stateChangingRequiredOutputSeedForAuthorityRefresh(input map[string]any) map[string]any {
-	if len(input) == 0 {
-		return nil
-	}
-	for _, required := range []map[string]any{
-		mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
-		mapFromValue(input["requiredOutput"]),
-		mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
-		mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
-	} {
-		if requiredOutputRequiresStateChanging(required) {
-			return cloneStepPayload(required)
-		}
-	}
-	return nil
-}
-
-func restoreStateChangingRequiredOutputSeed(input map[string]any, seed map[string]any) map[string]any {
-	if len(input) == 0 || len(seed) == 0 || !requiredOutputRequiresStateChanging(seed) {
-		return input
-	}
-	if strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind")) != runtimemodel.NextActionTypeStateChange {
-		return input
-	}
-	if targetSnapshotPrerequisiteActive(input) {
-		return input
-	}
-	contract := mapFromValue(input["convergenceContract"])
-	if strings.TrimSpace(stringFromMap(contract, "state")) != convergenceStateNeedStateChange {
-		return input
-	}
-	current := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
-	merged := cloneStepPayload(current)
-	if len(merged) == 0 {
-		merged = map[string]any{}
-	}
-	for key, value := range seed {
-		if _, ok := merged[key]; ok {
-			continue
-		}
-		merged[key] = cloneStepInputValue(value)
-	}
-	merged["mustIncludeStateChangingNode"] = true
-	pkg := mapFromValue(input["repairActionPackage"])
-	if len(pkg) == 0 {
-		pkg = map[string]any{}
-	}
-	pkg["requiredOutput"] = merged
-	input["repairActionPackage"] = pkg
-	input["requiredOutput"] = cloneStepPayload(merged)
-	return input
 }
 
 func enforceStateChangingContractRequiredOutput(input map[string]any) map[string]any {
@@ -610,6 +553,10 @@ func dispatchInputShouldPreserveLocalRepairAuthority(run *runModel.Run, input ma
 	contract := mapFromValue(input["convergenceContract"])
 	if localKind == runtimemodel.NextActionTypeValidate &&
 		strings.TrimSpace(stringFromMap(contract, "state")) == convergenceStateNeedValidation {
+		if dispatchInputHasActiveValidationContractCorrection(input) {
+			appendAuthorityDiagnostic(input, "local_validation_contract_correction_preserved", "warning", "contract_correction", "contractViolationRecovery", "active validation contract correction is preserved before coverage owner authority selects the next convergence state")
+			return true
+		}
 		if localRepairAuthorityFocusMissingStateChange(input, localAuthority) || runAuthorityFocusMissingStateChange(run) {
 			appendAuthorityDiagnostic(input, "local_validation_repair_authority_rejected", "warning", "internal_authority_mismatch", "convergenceAuthority", "local validation repair authority cannot override a focus that is still missing state_change evidence")
 			return false
@@ -618,6 +565,23 @@ func dispatchInputShouldPreserveLocalRepairAuthority(run *runModel.Run, input ma
 		return true
 	}
 	return false
+}
+
+func dispatchInputHasActiveValidationContractCorrection(input map[string]any) bool {
+	if len(input) == 0 || !boolValue(input["contractViolationRetry"]) {
+		return false
+	}
+	recovery := mapFromValue(input[stepInputKeyContractViolationRecovery])
+	if len(recovery) == 0 {
+		return false
+	}
+	shape := strings.TrimSpace(stringFromMap(mapFromValue(recovery["correctionContract"]), "requiredOutputShape"))
+	switch shape {
+	case "bounded_validation_evidence", "managed_validation_evidence":
+		return true
+	default:
+		return false
+	}
 }
 
 func runAuthorityFocusMissingStateChange(run *runModel.Run) bool {
@@ -701,6 +665,10 @@ func synchronizeCurrentRequiredOutputMirrors(input map[string]any) map[string]an
 	if len(required) == 0 {
 		delete(input, "requiredOutput")
 		input["currentAuthorityRequiredOutputMirrorsCanonical"] = true
+		if current := mapFromValue(input[currentActionContractKey]); len(current) > 0 {
+			delete(current, "requiredOutput")
+			input[currentActionContractKey] = current
+		}
 		if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
 			delete(pkg, "requiredOutput")
 			input["repairActionPackage"] = pkg
@@ -734,6 +702,10 @@ func synchronizeCurrentRequiredOutputMirrors(input map[string]any) map[string]an
 	required = cloneStepPayload(required)
 	input["requiredOutput"] = cloneStepPayload(required)
 	input["currentAuthorityRequiredOutputMirrorsCanonical"] = true
+	if current := mapFromValue(input[currentActionContractKey]); len(current) > 0 {
+		current["requiredOutput"] = cloneStepPayload(required)
+		input[currentActionContractKey] = current
+	}
 	pkg := mapFromValue(input["repairActionPackage"])
 	if len(pkg) == 0 {
 		pkg = map[string]any{}
@@ -956,7 +928,7 @@ func enforceCurrentAuthorityDerivedConsistency(run *runModel.Run, stepID common.
 		"reason": firstNonEmptyString(stringFromMap(currentActionNextActionFromInput(input), "reason"), "current convergence authority requires state-changing output"),
 	}
 	currentActionSetNextAction(input, action)
-	return renderCurrentAuthorityDispatchInput(run, stepID, input)
+	return input
 }
 
 func validateConvergenceDispatchInput(input map[string]any) error {
@@ -2152,6 +2124,12 @@ func appendAuthorityDiagnostic(input map[string]any, code string, severity strin
 		"source":   strings.TrimSpace(source),
 		"message":  strings.TrimSpace(message),
 	}
+	if snapshotID := strings.TrimSpace(stringFromMap(input, "authoritySnapshotId")); snapshotID != "" {
+		item["authoritySnapshotId"] = snapshotID
+	}
+	if focusID := strings.TrimSpace(stringFromMap(dispatchAuthorityCurrentFocus(input), "id")); focusID != "" {
+		item["focusId"] = focusID
+	}
 	for key, value := range item {
 		if strings.TrimSpace(stringFromAny(value)) == "" {
 			delete(item, key)
@@ -2161,13 +2139,30 @@ func appendAuthorityDiagnostic(input map[string]any, code string, severity strin
 		return
 	}
 	diagnostics := mapSliceFromValue(input["authorityDiagnostics"])
-	itemJSON := stableCoverageJSON(item)
+	dedupeKey := stableCoverageJSON(map[string]any{
+		"authoritySnapshotId": item["authoritySnapshotId"],
+		"focusId":             item["focusId"],
+		"code":                item["code"],
+		"source":              item["source"],
+	})
 	for _, existing := range diagnostics {
-		if stableCoverageJSON(existing) == itemJSON {
+		existingKey := stableCoverageJSON(map[string]any{
+			"authoritySnapshotId": existing["authoritySnapshotId"],
+			"focusId":             existing["focusId"],
+			"code":                existing["code"],
+			"source":              existing["source"],
+		})
+		if existingKey == dedupeKey {
+			existing["count"] = max(1, intFromValue(existing["count"])) + 1
+			input["authorityDiagnostics"] = diagnostics
 			return
 		}
 	}
 	diagnostics = append(diagnostics, item)
+	const maxAuthorityDiagnostics = 32
+	if len(diagnostics) > maxAuthorityDiagnostics {
+		diagnostics = append([]map[string]any(nil), diagnostics[len(diagnostics)-maxAuthorityDiagnostics:]...)
+	}
 	input["authorityDiagnostics"] = diagnostics
 }
 

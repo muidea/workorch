@@ -117,7 +117,11 @@ func runtimeContextIntegrityGateFailure(step *runModel.Step) bool {
 	if strings.TrimSpace(step.Kind) != llmWorkspaceExecutionStepKind {
 		return false
 	}
-	if strings.TrimSpace(stringFromMap(step.Output, "stage")) != "llm_context_integrity_failed" {
+	switch strings.TrimSpace(stringFromMap(step.Output, "stage")) {
+	case "llm_context_integrity_failed",
+		"llm_runtime_request_budget_overflow",
+		"llm_protected_context_floor_exceeded":
+	default:
 		return false
 	}
 	budget := mapFromValue(step.Output["contextBudget"])

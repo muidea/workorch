@@ -140,6 +140,29 @@ func localizedContextIntegrityGateQuestion(language string) string {
 	return "WorkOrch runtime cannot build an LLM context that satisfies the gate. Provide the missing information, choose replan, or terminate the path; do not fix this runtime context issue through a normal state-changing output."
 }
 
+func localizedRequestBudgetGateReason(language string, failureClass string, budget map[string]any, err error) string {
+	minimum := int64FromValue(budget["minimumProtectedRequestBytes"])
+	ceiling := int64FromValue(budget["maxBytes"])
+	reason := fmt.Sprintf("runtime request budget contract failed (%s): protected/request bytes %d exceed effective ceiling %d", failureClass, minimum, ceiling)
+	if prefersChinese(language) {
+		reason = fmt.Sprintf("runtime 请求预算合同失败（%s）：受保护请求大小 %d 超过有效上限 %d", failureClass, minimum, ceiling)
+	}
+	if err == nil {
+		return reason
+	}
+	if prefersChinese(language) {
+		return fmt.Sprintf("%s：%s", reason, err.Error())
+	}
+	return fmt.Sprintf("%s: %s", reason, err.Error())
+}
+
+func localizedRequestBudgetGateQuestion(language string) string {
+	if prefersChinese(language) {
+		return "WorkOrch runtime 无法在继承的请求上限内渲染当前受保护合同。请选择重新规划或终止当前路径；该问题属于本地请求预算与上下文渲染，不需要修改或切换 LLM provider 配置。"
+	}
+	return "WorkOrch runtime cannot render the current protected contract within the inherited request ceiling. Choose replan or terminate; this is a local request-budget and context-rendering issue and does not require changing the LLM provider configuration."
+}
+
 func localizedPatchApprovalReason(language string) string {
 	if prefersChinese(language) {
 		return "修改工作区文件前需要审批补丁。"

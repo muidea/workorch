@@ -1009,20 +1009,22 @@ func compactPromptContextBudget(budget *llmmodels.ProviderContextBudget) map[str
 		return nil
 	}
 	out := map[string]any{
-		"maxBytes":              budget.MaxBytes,
-		"actualBytes":           budget.ActualBytes,
-		"maxTokens":             budget.MaxTokens,
-		"estimatedInputTokens":  budget.EstimatedInputTokens,
-		"estimatedOutputTokens": budget.EstimatedOutputTokens,
-		"shrinkLevel":           budget.ShrinkLevel,
-		"truncated":             budget.Truncated,
-		"overBudget":            budget.OverBudget,
-		"p0Overflow":            budget.P0Overflow,
-		"contextGateAction":     budget.ContextGateAction,
-		"contextGateReason":     budget.ContextGateReason,
-		"stageBudgetRatio":      budget.StageBudgetRatio,
-		"stageBudgetSource":     budget.StageBudgetSource,
-		"tracePolicy":           budget.TracePolicy,
+		"maxBytes":                     budget.MaxBytes,
+		"actualBytes":                  budget.ActualBytes,
+		"minimumProtectedRequestBytes": budget.MinimumProtectedBytes,
+		"maxTokens":                    budget.MaxTokens,
+		"estimatedInputTokens":         budget.EstimatedInputTokens,
+		"estimatedOutputTokens":        budget.EstimatedOutputTokens,
+		"shrinkLevel":                  budget.ShrinkLevel,
+		"truncated":                    budget.Truncated,
+		"overBudget":                   budget.OverBudget,
+		"p0Overflow":                   budget.P0Overflow,
+		"contextGateAction":            budget.ContextGateAction,
+		"contextGateReason":            budget.ContextGateReason,
+		"budgetFailureClass":           budget.BudgetFailureClass,
+		"stageBudgetRatio":             budget.StageBudgetRatio,
+		"stageBudgetSource":            budget.StageBudgetSource,
+		"tracePolicy":                  budget.TracePolicy,
 	}
 	if len(budget.Rules) > 0 {
 		out["rules"] = limitedStringSlice(budget.Rules, 6)

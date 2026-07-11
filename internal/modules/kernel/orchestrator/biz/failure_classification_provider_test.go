@@ -25,6 +25,37 @@ func TestClassifyRuntimeFailureProviderContextTooLarge(t *testing.T) {
 	}
 }
 
+func TestClassifyRuntimeFailureLocalRequestBudgetFailuresAreNotProviderFailures(t *testing.T) {
+	tests := []struct {
+		stage string
+		class string
+	}{
+		{stage: "llm_runtime_request_budget_overflow", class: failureClassRequestBudgetOverflow},
+		{stage: "llm_protected_context_floor_exceeded", class: failureClassProtectedContextFloor},
+	}
+	for _, tt := range tests {
+		t.Run(tt.class, func(t *testing.T) {
+			step := &runModel.Step{
+				ID:    common.StepID("run-budget/step-1"),
+				Kind:  llmWorkspaceExecutionStepKind,
+				State: common.StepStateFailed,
+				Output: map[string]any{
+					"stage": tt.stage,
+					"error": tt.class,
+				},
+			}
+			classification := classifyRuntimeFailure(step, step.Output, "runtime step failed", errors.New(tt.class))
+			if classification.Class != tt.class {
+				t.Fatalf("classification = %+v, want %s", classification, tt.class)
+			}
+			step.Output[failureOutputKeyClass] = classification.Class
+			if isProviderFailureClass(classification.Class) || isLLMProviderFailureStage(tt.stage) {
+				t.Fatalf("local budget failure classified as provider failure: %+v", classification)
+			}
+		})
+	}
+}
+
 func TestDoDCoverageMissingFailureSignatureUsesStableStructuralFields(t *testing.T) {
 	step := &runModel.Step{
 		ID:    common.StepID("run-x/step-coverage"),

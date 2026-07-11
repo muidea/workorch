@@ -1118,6 +1118,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if failedStep == nil {
 		return input
 	}
+	applyRecoveryRequestBudgetProjection(input, failedStep)
 	rootStepID := runtimeRepairRootStepID(failedStep)
 	if runtimeRepairShouldReturnToRejectedResultContinuation(run, failedStep) {
 		input = resetRuntimeRepairInputToRejectedResultContinuation(input, run, failedStep)
@@ -1217,6 +1218,13 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	}
 	applyRuntimeRepairStrategyReassessmentProjection(input, repairStrategyReassessmentFromInput(input))
 	budgetScope := recoveryBudgetScope("runtime_repair", rootStepID, class, signature)
+	budgetScope["workspaceId"] = string(run.WorkspaceID)
+	budgetScope["runId"] = string(run.ID)
+	budgetScope["attempt"] = attempt
+	budgetScope["maxAttempts"] = policy.MaxRuntimeRepairAttempts
+	if focusID := strings.TrimSpace(stringFromMap(dispatchAuthorityCurrentFocus(input), "id")); focusID != "" {
+		budgetScope["focusId"] = focusID
+	}
 	if targetScope != "" {
 		budgetScope["failureTargetScope"] = targetScope
 	}

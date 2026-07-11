@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -2146,5 +2147,29 @@ func assertValidationEvidenceFocusForTest(t *testing.T, evidence map[string]any,
 	}
 	if refs := stringSliceFromValue(evidence["targetRefs"]); !stringSliceContains(refs, "goal.leaves[4]") || stringSliceContains(refs, "dod.items[19]") {
 		t.Fatalf("validationEvidence.targetRefs = %+v, want current target refs", refs)
+	}
+}
+
+func TestAppendAuthorityDiagnosticDeduplicatesPerSnapshotAndBoundsHistory(t *testing.T) {
+	input := map[string]any{
+		"authoritySnapshotId": "snapshot-current",
+		convergenceAuthorityKey: map[string]any{
+			"schemaVersion": convergenceAuthoritySchema,
+			"currentFocus":  map[string]any{"id": "cwi-current"},
+		},
+	}
+	for idx := 0; idx < 50; idx++ {
+		appendAuthorityDiagnostic(input, "same_code", "warning", "contract", "same_source", "repeated warning")
+	}
+	diagnostics := mapSliceFromValue(input["authorityDiagnostics"])
+	if len(diagnostics) != 1 || intFromValue(diagnostics[0]["count"]) != 50 {
+		t.Fatalf("authorityDiagnostics = %+v, want one diagnostic with count 50", diagnostics)
+	}
+	for idx := 0; idx < 40; idx++ {
+		appendAuthorityDiagnostic(input, fmt.Sprintf("code-%02d", idx), "warning", "contract", "source", "bounded warning")
+	}
+	diagnostics = mapSliceFromValue(input["authorityDiagnostics"])
+	if len(diagnostics) != 32 {
+		t.Fatalf("authorityDiagnostics length = %d, want bounded 32", len(diagnostics))
 	}
 }
