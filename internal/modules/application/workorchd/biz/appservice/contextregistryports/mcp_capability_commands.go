@@ -15,7 +15,11 @@ func CreateMCPCapability(ctx context.Context, hub magicevent.Hub, cmd contextreg
 	if hub == nil {
 		return contextregistrycore.MCPCapability{}, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[mcpevents.CreateCapabilityCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandCreateCapability, mcpevents.CommandDestination, "mcp_capability", cmd.ID, mcpevents.CreateCapabilityCommand(mcpCapabilityCommandFromView(cmd)))
+	command, err := mcpCapabilityCommandFromView(cmd)
+	if err != nil {
+		return contextregistrycore.MCPCapability{}, err
+	}
+	result, err := sendMagicCommand[mcpevents.CreateCapabilityCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandCreateCapability, mcpevents.CommandDestination, "mcp_capability", cmd.ID, command)
 	if err != nil {
 		return contextregistrycore.MCPCapability{}, err
 	}
@@ -26,7 +30,11 @@ func UpdateMCPCapability(ctx context.Context, hub magicevent.Hub, cmd contextreg
 	if hub == nil {
 		return contextregistrycore.MCPCapability{}, common.ErrInvalidArgument
 	}
-	result, err := sendMagicCommand[mcpevents.UpdateCapabilityCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandUpdateCapability, mcpevents.CommandDestination, "mcp_capability", cmd.ID, mcpevents.UpdateCapabilityCommand(mcpCapabilityCommandFromView(cmd)))
+	command, err := mcpCapabilityCommandFromView(cmd)
+	if err != nil {
+		return contextregistrycore.MCPCapability{}, err
+	}
+	result, err := sendMagicCommand[mcpevents.UpdateCapabilityCommand, mcpevents.MCPCommandResult](ctx, hub, mcpevents.TopicMCPCommandUpdateCapability, mcpevents.CommandDestination, "mcp_capability", cmd.ID, mcpevents.UpdateCapabilityCommand(command))
 	if err != nil {
 		return contextregistrycore.MCPCapability{}, err
 	}

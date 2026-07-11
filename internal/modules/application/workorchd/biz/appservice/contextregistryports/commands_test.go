@@ -189,10 +189,11 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 		result.Set(mcpevents.MCPCommandResult{Server: &mcpmodel.Server{ID: cmd.ServerID, Name: cmd.Name, Command: cmd.Command, Env: cmd.Env}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandCreateCapability, mcpevents.CommandDestination, func(cmd mcpevents.CreateCapabilityCommand, result magicevent.Result) {
-		if cmd.ID != "cap-contract" || cmd.ServerID != "mcp-contract" || cmd.Schema["type"] != "object" {
+		schema := cmd.Schema.Map()
+		if cmd.ID != "cap-contract" || cmd.ServerID != "mcp-contract" || schema["type"] != "object" {
 			t.Fatalf("capability command = %+v", cmd)
 		}
-		result.Set(mcpevents.MCPCommandResult{Capability: &mcpmodel.Capability{ID: cmd.ID, ServerID: cmd.ServerID, Name: cmd.Name, Schema: cmd.Schema}}, nil)
+		result.Set(mcpevents.MCPCommandResult{Capability: &mcpmodel.Capability{ID: cmd.ID, ServerID: cmd.ServerID, Name: cmd.Name, Schema: schema}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandListCapabilities, mcpevents.CommandDestination, func(cmd mcpevents.ListCapabilitiesCommand, result magicevent.Result) {
 		query := cmd.Query

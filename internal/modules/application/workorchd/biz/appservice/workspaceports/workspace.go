@@ -2,6 +2,7 @@ package workspaceports
 
 import (
 	"context"
+	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -9,6 +10,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 func ReadWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) (*workspacemodel.Workspace, error) {
@@ -34,7 +36,15 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := sendWorkspaceMagicCommand[workspaceevents.UpdateWorkspaceCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandUpdate, workspaceevents.CommandDestination, "workspace", string(item.ID), item.ID, item.ActiveRunID, workspaceevents.UpdateWorkspaceCommand{
+	contextHints, err := eventvalue.FromMap(item.ContextHints)
+	if err != nil {
+		return fmt.Errorf("invalid workspace context hints: %w", err)
+	}
+	evidencePolicies, err := eventvalue.FromMapSlice(item.EvidencePolicies)
+	if err != nil {
+		return fmt.Errorf("invalid workspace evidence policies: %w", err)
+	}
+	_, err = sendWorkspaceMagicCommand[workspaceevents.UpdateWorkspaceCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceCommandUpdate, workspaceevents.CommandDestination, "workspace", string(item.ID), item.ID, item.ActiveRunID, workspaceevents.UpdateWorkspaceCommand{
 		WorkspaceID:          item.ID,
 		Title:                item.Title,
 		Description:          item.Description,
@@ -46,8 +56,8 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 		ProfileID:            item.ProfileID,
 		DefaultSoulID:        item.DefaultSoulID,
 		SoulBindings:         cloneSoulBindingMap(item.SoulBindings),
-		ContextHints:         cloneMap(item.ContextHints),
-		EvidencePolicies:     cloneMapSlice(item.EvidencePolicies),
+		ContextHints:         contextHints,
+		EvidencePolicies:     evidencePolicies,
 	})
 	return err
 }

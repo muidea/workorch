@@ -2,13 +2,14 @@ package workspaceports
 
 import (
 	"context"
+	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
-	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -24,7 +25,11 @@ func CreateWorkspaceTemplateRecord(ctx context.Context, hub magicevent.Hub, item
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := sendWorkspaceMagicCommand[workspaceevents.CreateWorkspaceTemplateCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandCreate, workspaceevents.CommandDestination, "workspace_template", item.ID, "", "", workspaceTemplateCommandFromRepository(item))
+	command, err := workspaceTemplateCommandFromRepository(item)
+	if err != nil {
+		return err
+	}
+	_, err = sendWorkspaceMagicCommand[workspaceevents.CreateWorkspaceTemplateCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandCreate, workspaceevents.CommandDestination, "workspace_template", item.ID, "", "", command)
 	return err
 }
 
@@ -32,7 +37,11 @@ func UpdateWorkspaceTemplateRecord(ctx context.Context, hub magicevent.Hub, item
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := sendWorkspaceMagicCommand[workspaceevents.UpdateWorkspaceTemplateCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandUpdate, workspaceevents.CommandDestination, "workspace_template", item.ID, "", "", workspaceevents.UpdateWorkspaceTemplateCommand(workspaceTemplateCommandFromRepository(item)))
+	command, err := workspaceTemplateCommandFromRepository(item)
+	if err != nil {
+		return err
+	}
+	_, err = sendWorkspaceMagicCommand[workspaceevents.UpdateWorkspaceTemplateCommand, workspaceevents.WorkspaceCommandResult](ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandUpdate, workspaceevents.CommandDestination, "workspace_template", item.ID, "", "", workspaceevents.UpdateWorkspaceTemplateCommand(command))
 	return err
 }
 
@@ -44,11 +53,19 @@ func DeleteWorkspaceTemplateRecord(ctx context.Context, hub magicevent.Hub, temp
 	return err
 }
 
-func workspaceTemplateCommandFromRepository(item *repository.WorkspaceTemplate) workspacecontracts.CreateWorkspaceTemplateCommand {
+func workspaceTemplateCommandFromRepository(item *repository.WorkspaceTemplate) (workspaceevents.CreateWorkspaceTemplateCommand, error) {
 	if item == nil {
-		return workspacecontracts.CreateWorkspaceTemplateCommand{}
+		return workspaceevents.CreateWorkspaceTemplateCommand{}, common.ErrInvalidArgument
 	}
-	return workspacecontracts.CreateWorkspaceTemplateCommand{
+	contextHints, err := eventvalue.FromMap(item.ContextHints)
+	if err != nil {
+		return workspaceevents.CreateWorkspaceTemplateCommand{}, fmt.Errorf("invalid workspace template context hints: %w", err)
+	}
+	evidencePolicies, err := eventvalue.FromMapSlice(item.EvidencePolicies)
+	if err != nil {
+		return workspaceevents.CreateWorkspaceTemplateCommand{}, fmt.Errorf("invalid workspace template evidence policies: %w", err)
+	}
+	return workspaceevents.CreateWorkspaceTemplateCommand{
 		TemplateID:       item.ID,
 		Name:             item.Name,
 		Description:      item.Description,
@@ -56,7 +73,7 @@ func workspaceTemplateCommandFromRepository(item *repository.WorkspaceTemplate) 
 		DoDItems:         append([]string(nil), item.DoDItems...),
 		DefaultSoulID:    item.DefaultSoulID,
 		SoulBindings:     cloneStringMap(item.SoulBindings),
-		ContextHints:     cloneMap(item.ContextHints),
-		EvidencePolicies: cloneMapSlice(item.EvidencePolicies),
-	}
+		ContextHints:     contextHints,
+		EvidencePolicies: evidencePolicies,
+	}, nil
 }

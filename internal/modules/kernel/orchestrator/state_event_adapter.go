@@ -16,6 +16,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -125,7 +126,11 @@ func (r workspaceEventRepository) Update(ctx context.Context, item *workspacemod
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := sendWorkspaceEventCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandUpdate, "workspace", string(item.ID), item.ID, item.ActiveRunID, workspaceevents.UpdateWorkspaceCommand(updateWorkspaceCommandFromModel(item)))
+	command, err := updateWorkspaceCommandFromModel(item)
+	if err != nil {
+		return err
+	}
+	_, err = sendWorkspaceEventCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandUpdate, "workspace", string(item.ID), item.ID, item.ActiveRunID, command)
 	return err
 }
 
@@ -360,11 +365,19 @@ func createWorkspaceCommandFromModel(item *workspacemodel.Workspace) workspaceco
 	}
 }
 
-func updateWorkspaceCommandFromModel(item *workspacemodel.Workspace) workspacecontracts.UpdateWorkspaceCommand {
+func updateWorkspaceCommandFromModel(item *workspacemodel.Workspace) (workspaceevents.UpdateWorkspaceCommand, error) {
 	if item == nil {
-		return workspacecontracts.UpdateWorkspaceCommand{}
+		return workspaceevents.UpdateWorkspaceCommand{}, common.ErrInvalidArgument
 	}
-	return workspacecontracts.UpdateWorkspaceCommand{
+	contextHints, err := eventvalue.FromMap(item.ContextHints)
+	if err != nil {
+		return workspaceevents.UpdateWorkspaceCommand{}, fmt.Errorf("invalid workspace context hints: %w", err)
+	}
+	evidencePolicies, err := eventvalue.FromMapSlice(item.EvidencePolicies)
+	if err != nil {
+		return workspaceevents.UpdateWorkspaceCommand{}, fmt.Errorf("invalid workspace evidence policies: %w", err)
+	}
+	return workspaceevents.UpdateWorkspaceCommand{
 		WorkspaceID:          item.ID,
 		Title:                item.Title,
 		Description:          item.Description,
@@ -376,9 +389,9 @@ func updateWorkspaceCommandFromModel(item *workspacemodel.Workspace) workspaceco
 		ProfileID:            item.ProfileID,
 		DefaultSoulID:        item.DefaultSoulID,
 		SoulBindings:         cloneSoulBindingMap(item.SoulBindings),
-		ContextHints:         cloneMap(item.ContextHints),
-		EvidencePolicies:     cloneMapSlice(item.EvidencePolicies),
-	}
+		ContextHints:         contextHints,
+		EvidencePolicies:     evidencePolicies,
+	}, nil
 }
 
 func memoryCommandFromModel(item *memorymodel.MemoryItem) memorycontracts.CreateMemoryItemCommand {

@@ -1,42 +1,20 @@
 # Governance Module
 
-## 功能定位
+## 功能说明
 
-`kernel/governance` 是 AutoGovernance trace、policy gate 和治理建议的 owner module。它负责把结构化 failure/retry/policy signal 转成 bounded governance recommendation 和审计轨迹。
+`kernel/governance` 组合 Decision、Approval、Run、Workspace、Memory 和 Orchestrator 合同执行自动治理评估、自动解决、升级和阻塞，并管理 AutoGovernanceTrace 协调状态。
 
-## 拥有边界
+## 组件交互及合同
 
-- 拥有 AutoGovernanceTrace 与治理建议记录。
-- 可以建议 decision、approval、terminal 或 runtime recovery，但不直接拥有 Run/Result 状态。
-- 不解析业务文本、模板 ID、语言或命令输出作为核心策略权威。
+- 通过 EventHub 读取 DecisionTicket、Approval、Run、Workspace 与 Memory 的权威状态。
+- 自动解决时通过 Decision 或 Approval owner 的具体 resolve command 写入治理结果；需要继续执行时通过 Orchestrator command 恢复 Run。
+- `pkg/events.GovernanceData` 发布 evaluated、resolved、escalated、blocked 通知；`ListAutoGovernanceTracesCommand` / `GovernanceCommandResult` 提供 trace 查询。
+- application 和 Eventstream 按需导入 `kernel/governance/pkg/events` 消费治理 trace 与通知。
+- AutoGovernanceTrace 只记录治理协调过程，不替代 Decision、Approval 或 Run 的正式状态。
 
-## 主要交互
+## 相关约束
 
-- 从 `kernel/orchestrator` 接收 failure/retry/policy 信号。
-- 与 `blocks/decision`、`blocks/approval` 协作创建治理对象。
-- 向 `application/workorchd` 提供治理摘要与审计信息。
-- 与 `kernel/eventstream` 协作保留治理事件。
-
-## 组件交互合同
-
-- Input contract: 只消费结构化 failure class、retry state、policy signal、source refs 和 scope。
-- Output contract: 输出 decision/approval/terminal/runtime-action recommendation 与 AutoGovernanceTrace。
-- Decision/Approval contract: 创建治理对象时必须携带 workspace/run/step/action scope 和幂等键。
-- Orchestrator contract: recoverable runtime gap 应返回 runtime recovery action，而不是直接阻塞。
-- Projection contract: application 只能展示治理摘要与 trace，不把治理摘要当 owner state。
-- EventHub contract: owner command/read adapter 直接持有 framework 提供的 magicCommon `event.Hub`；禁止先包装为 `MagicHub` 再通过 `RawHub()` 反向取回。
-- Notification contract: AutoGovernance 通知通过 `/governance/consumers/#` 投递 `GovernanceData`；Decision/Approval 输入分别订阅投递方的 `TicketChangedData` 与 `ApprovalChangedData`，不使用 Envelope 或 map 作为跨组件合同。
-- Eventstream contract: Eventstream 逐 topic 导入 Governance 的 `pkg/events` 定义，并仅在自身审计投影边界构造 payload。
-- Assembly contract: 生产 `Dependencies` 只接收 AutoGovernanceTrace repository、magicCommon EventHub、配置加载和 BackgroundRoutine；biz 不再接收或保存 legacy projection Hub，不接受 owner reader、resolve/resume callback 或跨组件 adapter。fake ports 仅存在于 `_test.go`。
-
-## 已知缺口
-
-- C09 生产旁路已关闭：六类 owner reader 与 resolve/resume callbacks 已从 module `Dependencies` 删除，EventHub adapters 下沉到 governance biz，fake port assembly 仅存在于 `_test.go`。后续仍需验证 repeated failure escalation 的幂等边界。
-- Governance module 已删除只用于非空校验的 MagicHub bridge 与 legacy `events.Hub` 字段；订阅、owner command 和通知发布统一使用同一个 framework EventHub。
-- Governance 输出以及 Decision、Approval、Run state 输入的 Envelope notification 已清理；三类输入均直接订阅投递方具体 data。
-
-## 边界约束
-
-- 只有真实 governance gap 才能阻塞 Run。
-- 可恢复 runtime gap 应返回 runtime action，不默认升级为人工决策。
-- 治理建议必须可追溯到 source refs。
+- 生产依赖只能包含 Governance 自身 repository 与 EventHub，不得注入其他 owner reader、resolver、resume callback、service 或 repository。
+- 自动治理必须保留 workspace/run/ticket/approval scope、决策依据和幂等键。
+- 无法满足策略或权限时必须升级或阻塞，不得静默修改 owner 状态。
+- Governance 不得绕过 Orchestrator 的 stage、evidence、coverage 和 requiredOutput 合同。

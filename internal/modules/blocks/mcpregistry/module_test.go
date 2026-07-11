@@ -8,6 +8,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -167,7 +168,7 @@ func TestModuleMCPCapabilityCommandsUseStructuredRegistryContract(t *testing.T) 
 			OutputSummary:  "bounded summary",
 			StageHints:     []string{"planning", "validation"},
 			RiskLevel:      "read_only",
-			Schema:         map[string]any{"type": "object", "required": []string{"path"}},
+			Schema:         mustMCPPayload(t, map[string]any{"type": "object", "required": []string{"path"}}),
 			Enabled:        true,
 			ApprovalPolicy: "read_only",
 			Status:         "active",
@@ -199,6 +200,15 @@ func TestModuleMCPCapabilityCommandsUseStructuredRegistryContract(t *testing.T) 
 	if len(listCapabilityResult.Capabilities) != 1 || listCapabilityResult.Capabilities[0].ID != capability.ID {
 		t.Fatalf("capabilities = %+v, want structured filtered capability", listCapabilityResult.Capabilities)
 	}
+}
+
+func mustMCPPayload(t *testing.T, input map[string]any) eventvalue.Payload {
+	t.Helper()
+	payload, err := eventvalue.FromMap(input)
+	if err != nil {
+		t.Fatalf("eventvalue.FromMap: %v", err)
+	}
+	return payload
 }
 
 func mcpModuleContractDependencies() Dependencies {

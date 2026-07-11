@@ -291,7 +291,7 @@ func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 	if captured.WorkspaceID != "ws-restart-unified" || captured.Intent != string(RunCommandIntentRestart) || captured.RequestID != "request-restart-unified" || captured.Reason != "test_restart_unified" || captured.Source != "test" || captured.DefinitionRevision != "rev-restart-unified" || captured.DecisionID != "ticket-restart-unified" || captured.Priority != 7 || captured.GoalID != "goal-restart-unified" || captured.DoDID != "dod-restart-unified" || captured.LLMProviderID != "provider-restart-unified" || captured.SoulID != "soul-restart-unified" {
 		t.Fatalf("workspace run restart command = %+v", captured)
 	}
-	if captured.SoulBindings["validation"] != "soul-validation-restart-unified" || len(captured.SkillIDs) != 1 || len(captured.MCPServerIDs) != 1 || len(captured.CapabilityIDs) != 1 || len(captured.MemoryIDs) != 1 || captured.ExecutionContextPatch == nil {
+	if captured.SoulBindings["validation"] != "soul-validation-restart-unified" || len(captured.SkillIDs) != 1 || len(captured.MCPServerIDs) != 1 || len(captured.CapabilityIDs) != 1 || len(captured.MemoryIDs) != 1 || len(captured.ExecutionContextPatch.Fields) == 0 {
 		t.Fatalf("workspace run activation contract = %+v", captured)
 	}
 }

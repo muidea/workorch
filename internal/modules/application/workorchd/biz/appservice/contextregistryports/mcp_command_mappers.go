@@ -1,11 +1,13 @@
 package contextregistryports
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 func mcpServerCommandFromView(cmd contextregistrycore.MCPServer) mcpevents.CreateServerCommand {
@@ -27,7 +29,11 @@ func mcpServerCommandFromView(cmd contextregistrycore.MCPServer) mcpevents.Creat
 	}
 }
 
-func mcpCapabilityCommandFromView(cmd contextregistrycore.MCPCapability) mcpevents.CreateCapabilityCommand {
+func mcpCapabilityCommandFromView(cmd contextregistrycore.MCPCapability) (mcpevents.CreateCapabilityCommand, error) {
+	schema, err := eventvalue.FromMap(cmd.Schema)
+	if err != nil {
+		return mcpevents.CreateCapabilityCommand{}, fmt.Errorf("invalid mcp capability schema: %w", err)
+	}
 	return mcpevents.CreateCapabilityCommand{
 		ID:             common.MCPCapabilityID(strings.TrimSpace(cmd.ID)),
 		ServerID:       common.MCPServerID(strings.TrimSpace(cmd.ServerID)),
@@ -42,12 +48,12 @@ func mcpCapabilityCommandFromView(cmd contextregistrycore.MCPCapability) mcpeven
 		OutputSummary:  cmd.OutputSummary,
 		StageHints:     contextregistrycore.CloneStrings(cmd.StageHints),
 		RiskLevel:      cmd.RiskLevel,
-		Schema:         cloneMap(cmd.Schema),
+		Schema:         schema,
 		URI:            cmd.URI,
 		Enabled:        cmd.Enabled,
 		ApprovalPolicy: cmd.ApprovalPolicy,
 		Status:         cmd.Status,
-	}
+	}, nil
 }
 
 func mcpCapabilityQueryFromView(query contextregistrycore.MCPCapabilityQuery) mcpevents.CapabilityQuery {

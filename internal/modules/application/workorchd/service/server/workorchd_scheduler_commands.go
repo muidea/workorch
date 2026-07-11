@@ -416,6 +416,7 @@ func schedulerCommandQueueError(topic string) error {
 }
 
 func workspaceRunRequestFromCommand(command workorchdevents.WorkspaceRunRequestedCommand) workspaceRunRequest {
+	executionContextPatch := command.ExecutionContextPatch.Map()
 	cmd := appservice.ActivateWorkspaceExecutionCommand{
 		GoalID:                string(command.GoalID),
 		DoDID:                 string(command.DoDID),
@@ -428,7 +429,7 @@ func workspaceRunRequestFromCommand(command workorchdevents.WorkspaceRunRequeste
 		MemoryIDs:             schedulerIDStrings(command.MemoryIDs),
 		DialogLanguage:        command.DialogLanguage,
 		Priority:              command.Priority,
-		ExecutionContextPatch: command.ExecutionContextPatch,
+		ExecutionContextPatch: executionContextPatch,
 	}
 	return workspaceRunRequest{
 		WorkspaceID:           string(command.WorkspaceID),
@@ -440,7 +441,7 @@ func workspaceRunRequestFromCommand(command workorchdevents.WorkspaceRunRequeste
 		DefinitionRevision:    command.DefinitionRevision,
 		DecisionID:            command.DecisionID,
 		Priority:              command.Priority,
-		ExecutionContextPatch: command.ExecutionContextPatch,
+		ExecutionContextPatch: executionContextPatch,
 		Command:               cmd,
 	}
 }

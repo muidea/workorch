@@ -1,38 +1,19 @@
 # Skill Registry Stateful Block
 
-## 功能定位
+## 功能说明
 
-`blocks/skill` 是 Skill registry 与 selected skill metadata 的单一资源聚合 block。它管理 Skill 定义、查询、注册和可追溯引用，但不承担 runtime state transition 或上下文编排。
+`blocks/skill` 管理 Skill registry，负责 Skill 的创建、查询、列表、更新以及指令内容、metadata、binding 和 provenance 的正式状态。
 
-## 拥有边界
+## 组件交互及合同
 
-- 拥有 Skill 记录与 owner command/query。
-- 只访问自身 Skill repository，不持有其他 module/block 的 service、repository 或 adapter。
-- Skill 是指导/配置/能力引用，不是 runtime state transition。
-- 不覆盖 Goal/DoD、StagePacket、execution contract 或 owner state。
+- Skill command/query 由 `blocks/skill/pkg/events` 定义，并返回 `SkillCommandResult`。
+- `application/workorchd` 通过 EventHub 管理 Skill；`kernel/orchestrator` 通过 EventHub 获取选择后的 Skill refs 和有界 metadata。
+- LLM 只接收 Orchestrator 组织后的 Skill 指令，不直接调用 Skill repository 或 service。
+- Workspace/profile 只保存 Skill 引用或选择结果，不复制 Skill owner 状态。
 
-## 主要交互
+## 相关约束
 
-- 被 `kernel/orchestrator` 和 LLM context assembly 作为 selected skill refs 使用。
-- 被 `application/workorchd` context registry、Web/API 读写。
-- 与 `kernel/eventstream` 协作发布 skill 事件。
-- 可与 `blocks/soul`、workspace template/profile metadata 一起参与 stage context。
-
-## 组件交互合同
-
-- Command contract：调用方导入 `blocks/skill/pkg/events`，通过 magicCommon EventHub 投递具体 Skill command/query，并接收 `SkillCommandResult`。
-- Input contract：skill command 必须使用结构化 skillId、content/ref、metadata 和 workspace/run binding 信息。
-- Output contract：selected skill result 必须提供 bounded instruction metadata 与 provenance。
-- Orchestrator contract：orchestrator 只通过 EventHub 消费 selected skill refs 和结构化 metadata，不按 skill 文本写死流程。
-- LLM contract：skill 指令进入 prompt 前必须经过 context budget 与引用裁剪；LLM block 不直接调用 Skill 实现。
-- Application contract：context registry 修改 Skill 只影响指导层，不直接改变 Run/Result owner state。
-
-## 已知缺口
-
-- 当前盘点未发现 Skill block 职责、状态所有权或 EventHub 合同缺失；后续需要继续验证 skill guidance 不覆盖 requiredOutput。
-
-## 边界约束
-
-- skill 指令必须以可追溯 ref 进入 context。
-- core runtime 不根据 skill ID 或说明文本写死业务分支。
-- Skill block 不执行工具调用，也不创建 Result。
+- 本 block 只访问 Skill repository，不执行工具调用、不创建 Result、不修改 Run 状态。
+- Skill 内容进入 prompt 前必须有 provenance、引用边界和 context budget 裁剪。
+- core runtime 不得按 Skill ID、名称或说明文本写死业务分支。
+- Skill guidance 不得覆盖 Goal、DoD、stage contract 或 requiredOutput。

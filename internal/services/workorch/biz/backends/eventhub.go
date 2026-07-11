@@ -24,6 +24,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 // eventHubBackend extends the local backend with EventHub-driven progress
@@ -461,6 +462,10 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 	if b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
+	executionContextPatch, err := eventvalue.FromMap(activation.ExecutionContextPatch)
+	if err != nil {
+		return nil, fmt.Errorf("invalid execution context patch: %w", err)
+	}
 	command := workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID:           req.WorkspaceID,
 		RunID:                 req.ExpectedRunID,
@@ -481,7 +486,7 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 		CapabilityIDs:         append([]common.MCPCapabilityID(nil), activation.CapabilityIDs...),
 		MemoryIDs:             append([]common.MemoryID(nil), activation.MemoryIDs...),
 		DialogLanguage:        activation.DialogLanguage,
-		ExecutionContextPatch: activation.ExecutionContextPatch,
+		ExecutionContextPatch: executionContextPatch,
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "workorch/"+source, workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	event.BindLaneKey(events.EventHubLaneKeyFor(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, events.EventHubLaneScope{

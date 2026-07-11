@@ -2796,7 +2796,7 @@ func TestActivateWorkspaceExecutionAppliesTemplateDefaultMCPContext(t *testing.T
 	}); err != nil {
 		t.Fatalf("CreateServer: %v", err)
 	}
-	if err := updateTestMCPCapabilityWithExports(ctx, exports, mcpmodule.UpdateCapabilityCommand{
+	if err := updateTestMCPCapabilityWithExports(ctx, exports, mcpevents.UpdateCapabilityCommand{
 		ID:        common.MCPCapabilityID("mcp-template-default:tool:tool.lookup"),
 		ServerID:  common.MCPServerID("mcp-template-default"),
 		Kind:      "tool",
@@ -2934,7 +2934,7 @@ func TestActivateWorkspaceExecutionUsesUpdatedTemplateMCPDefaultWhenWorkspaceHas
 		}); err != nil {
 			t.Fatalf("CreateServer %s: %v", id, err)
 		}
-		if err := updateTestMCPCapabilityWithExports(ctx, exports, mcpmodule.UpdateCapabilityCommand{
+		if err := updateTestMCPCapabilityWithExports(ctx, exports, mcpevents.UpdateCapabilityCommand{
 			ID:        common.MCPCapabilityID(id + ":tool:tool.lookup"),
 			ServerID:  common.MCPServerID(id),
 			Kind:      "tool",
@@ -3027,7 +3027,7 @@ func TestActivateWorkspaceExecutionUsesWorkspaceMCPDefaultOverride(t *testing.T)
 		}); err != nil {
 			t.Fatalf("CreateServer %s: %v", id, err)
 		}
-		if err := updateTestMCPCapabilityWithExports(ctx, exports, mcpmodule.UpdateCapabilityCommand{
+		if err := updateTestMCPCapabilityWithExports(ctx, exports, mcpevents.UpdateCapabilityCommand{
 			ID:        common.MCPCapabilityID(id + ":tool:tool.lookup"),
 			ServerID:  common.MCPServerID(id),
 			Kind:      "tool",

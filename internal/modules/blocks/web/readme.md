@@ -1,39 +1,19 @@
 # Web Block
 
-## 功能定位
+## 功能说明
 
-`blocks/web` 是 runtime web/search/fetch block。它负责受控的外部搜索和网页获取，并返回规范化 web result、source refs、truncation flags 与错误分类。
+`blocks/web` 提供受控的外部搜索和网页获取能力，并返回规范化内容摘要、source refs、truncation flags、provider diagnostic、错误和 raw ref。
 
-## 拥有边界
+## 组件交互及合同
 
-- 拥有 web provider config、search/fetch adapter 与 runtimeevent executor。
-- 只处理外部信息获取能力。
-- 不拥有 Memory、Result、Run 或业务完成状态。
+- `kernel/orchestrator` 使用 `internal/pkg/runtimeevent.ExecuteCommand` 派发 Web search/fetch，并接收 `ExecuteCommandResult`。
+- 本 block 通过 runtimeevent 发布 Accepted、Progress、Completed 或 Failed 具体通知。
+- 需要校验外部访问授权时，本 block 导入 `blocks/approval/pkg/events`，通过 EventHub 查询 Approval；不注入 Approval service/repository。
+- request 必须携带 workspace/run/step scope、operation、provider/ref 和有界 query/url；result 返回 source refs、摘要、truncation、provider diagnostic、错误和 raw ref。
 
-## 主要交互
+## 相关约束
 
-- 接收 `kernel/orchestrator` 派发的 `web/search`、`web/fetch` execution request。
-- `blocks/llm` 可在 execution graph 中声明 web step。
-- Web 输出由 `kernel/orchestrator` 作为外部 evidence candidate、context material 或 diagnostic 处理。
-- 外部访问风险通过 runtime policy、governance 与 approval 流程控制。
-
-## 组件交互合同
-
-- Input contract: request 必须包含 search/fetch operation、provider/ref、bounded query/url、workspace/run/step scope。
-- Output contract: 返回 normalized web result/error、source refs、summary、raw ref、truncation flags 和 provider diagnostic。
-- Orchestrator contract: web content 是 context/evidence candidate；accepted evidence/result 由 orchestrator gate 判定。
-- Approval contract: 外部访问风险或敏感 URL 必须受 runtime policy 和 approval flow 控制。
-- LLM contract: LLM 只能声明 web candidate，不能把外部内容直接写成 owner state。
-- EventHub contract: 直接订阅 `/runtime/block` 下 web search/fetch topic 的 `runtimeevent.ExecuteCommand`，返回 `ExecuteCommandResult`，并向 `/runtime/orchestrator` 投递具体的 accepted/progress/completed/failed data；顶层载荷禁止使用 Envelope/map/JSON 转换。
-
-## 已知缺口
-
-- 当前盘点未发现 Web block 职责缺失；provider/network failure 与 contract violation 的分类需要持续回归。
-- 当前未发现与 orchestrator 的 runtime execute 交互合同缺失。
-- Approval 校验由 block 内部 EventHub getter 完成，只导入 `blocks/approval/pkg/events` 与其公开模型，不注入 Approval service/repository。
-
-## 边界约束
-
-- request 必须 bounded，并区分 provider/network failure 与 contract violation。
-- 大内容必须使用 summary/raw ref。
-- Web 内容不能直接成为 accepted Result。
+- query、URL、响应大小和执行时间必须有界，并区分 provider/network failure 与 contract violation。
+- 大内容只能通过摘要和 raw ref 传递。
+- 本 block 不拥有 Memory、Result、Run 或业务完成状态。
+- Web 内容只作为 context/evidence candidate，不能直接写入 owner 状态或形成 accepted Result。

@@ -6,6 +6,7 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -39,7 +40,7 @@ type WorkspaceRunRequestedCommand struct {
 	CapabilityIDs         []common.MCPCapabilityID
 	MemoryIDs             []common.MemoryID
 	DialogLanguage        string
-	ExecutionContextPatch map[string]any
+	ExecutionContextPatch eventvalue.Payload
 }
 
 type WorkspaceRunRequestedResult struct {

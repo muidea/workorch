@@ -6,6 +6,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -14,7 +15,21 @@ const CommandDestination = modulecommon.ModuleID
 
 type CreateWorkspaceCommand = workspacecontracts.CreateWorkspaceCommand
 type EnsureWorkspaceCommand = workspacecontracts.EnsureWorkspaceCommand
-type UpdateWorkspaceCommand = workspacecontracts.UpdateWorkspaceCommand
+type UpdateWorkspaceCommand struct {
+	WorkspaceID          common.WorkspaceID
+	Title                string
+	Description          string
+	DeliverableDirectory string
+	InternalDirectory    string
+	State                common.WorkspaceState
+	ActiveRunID          common.RunID
+	TemplateID           string
+	ProfileID            string
+	DefaultSoulID        common.SoulID
+	SoulBindings         map[string]common.SoulID
+	ContextHints         eventvalue.Payload
+	EvidencePolicies     []eventvalue.Payload
+}
 type DeleteWorkspaceCommand = workspacecontracts.DeleteWorkspaceCommand
 type PurgeWorkspaceCommand = workspacecontracts.DeleteWorkspaceCommand
 type DefineGoalCommand = workspacecontracts.DefineGoalCommand
@@ -23,8 +38,19 @@ type DeleteGoalCommand = workspacecontracts.DeleteGoalCommand
 type DefineDoDCommand = workspacecontracts.DefineDoDCommand
 type UpdateDoDCommand = workspacecontracts.UpdateDoDCommand
 type DeleteDoDCommand = workspacecontracts.DeleteDoDCommand
-type CreateWorkspaceTemplateCommand = workspacecontracts.CreateWorkspaceTemplateCommand
-type UpdateWorkspaceTemplateCommand = workspacecontracts.UpdateWorkspaceTemplateCommand
+type CreateWorkspaceTemplateCommand struct {
+	TemplateID       string
+	Name             string
+	Description      string
+	GoalText         string
+	DoDItems         []string
+	DefaultSoulID    string
+	SoulBindings     map[string]string
+	ContextHints     eventvalue.Payload
+	EvidencePolicies []eventvalue.Payload
+}
+
+type UpdateWorkspaceTemplateCommand = CreateWorkspaceTemplateCommand
 type DeleteWorkspaceTemplateCommand = workspacecontracts.DeleteWorkspaceTemplateCommand
 
 type GetWorkspaceCommand struct {

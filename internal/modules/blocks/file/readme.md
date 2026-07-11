@@ -1,38 +1,19 @@
 # File Block
 
-## 功能定位
+## 功能说明
 
-`blocks/file` 是 runtime 文件能力 block。它负责 bounded file list/read/edit 以及 patch apply/preview/revert 等文件系统侧效果，并返回规范化 runtime execution result。
+`blocks/file` 提供受 workspace 路径边界约束的文件 list、read、write、edit、patch preview/apply/revert 等运行时能力，并返回规范化执行结果。
 
-## 拥有边界
+## 组件交互及合同
 
-- 拥有文件类 runtime adapter 与 runtimeevent executor。
-- 只执行被 runtime contract 准入的文件操作。
-- 不拥有 Workspace/Run/Result 状态，不决定 coverage 或 DoD 是否满足。
+- `kernel/orchestrator` 使用 `internal/pkg/runtimeevent.ExecuteCommand` 派发 File step，并同步接收 `ExecuteCommandResult`。
+- 本 block 通过 runtimeevent 发布 Accepted、Progress、Completed 或 Failed 具体通知。
+- request 必须携带 workspace/run/step scope、step kind、operation、path/ref 和有界输入；result 返回状态、摘要、target refs、side-effect metadata 和 raw ref。
+- Orchestrator 负责 state-changing admission、approval、evidence quality、coverage binding 和 next action。
 
-## 主要交互
+## 相关约束
 
-- 接收 `kernel/orchestrator` 通过 runtimeevent 发来的 file execution request。
-- 与 `blocks/llm` 通过 execution graph 中的 step kind 间接协作。
-- 执行结果被 `kernel/orchestrator` 转换为 evidence、coverage 或 diagnostic。
-- 与 `blocks/approval` 间接关联：高风险写操作应由 orchestrator/policy 先完成准入或审批。
-
-## 组件交互合同
-
-- Input contract: request 必须包含 step kind、workspace/run/step scope、operation payload 和 path/ref。
-- Output contract: 返回 normalized result/error、target refs、summary、raw ref 和 side-effect metadata。
-- Orchestrator contract: orchestrator 负责 state-changing admission、evidence quality 和 coverage binding。
-- Approval contract: 写入或 patch 操作的风险审批必须在进入 block 前完成或由 block 返回 structured blocker。
-- LLM contract: LLM 只能声明 file step candidate，不能绕过 orchestrator 直接调用文件写入。
-- EventHub contract: 直接订阅 `/runtime/block` 下对应 file step kind 的 `runtimeevent.ExecuteCommand`，返回 `ExecuteCommandResult`，并向 `/runtime/orchestrator` 投递 `AcceptedData`、`ProgressData`、`CompletedData` 或 `FailedData`；顶层载荷禁止使用 Envelope/map/JSON 转换。
-
-## 已知缺口
-
-- 当前盘点未发现 File block 职责缺失；路径 scope、raw ref 和 large content 截断仍需持续回归。
-- 当前未发现与 orchestrator 的 runtime execute 交互合同缺失。
-
-## 边界约束
-
-- 路径必须受 workspace/internal/deliverable scope 约束。
-- 大内容应使用 summary/raw ref，不默认塞入投影。
-- 文件写入成功不等于业务完成。
+- 所有路径必须限定在 workspace internal/deliverable 允许范围内，并防止路径逃逸。
+- 大内容必须使用摘要和 raw ref，不能进入默认事件或投影。
+- 本 block 不访问其他组件 service/repository，不拥有 Run、Result、Memory 或 coverage 状态。
+- 文件写入成功只表示技术动作成功，不等于业务完成。

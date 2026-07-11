@@ -1,6 +1,17 @@
 # Module / Block / Initiator Inventory Audit
 
-Status: completed
+Status: active
+
+## 2026-07-11 组件代码与 README 再核验
+
+Status: active
+
+- 22 个组件根目录 `readme.md` 已统一只保留“功能说明、组件交互及合同、相关约束”三个章节；迁移过程、完成状态、已知缺口和兼容层清理历史不再放入组件 README。
+- 22 个组件基线串行测试已通过，module/block 生产代码未发现跨组件 `biz`、`service` 或 owner repository 直接注入。
+- `application/workorchd` 的 scheduler command 已将 `ExecutionContextPatch map[string]any` 改为无 JSON/reflect 的递归具体值，并只在 application 消费边界恢复内部 execution context。
+- `blocks/workspace` 的 update/template command 已将 context hints 与 evidence policies 改为无 JSON/reflect 的递归具体值，并只在 Workspace owner 边界恢复内部模型。
+- `blocks/mcpregistry` 的 capability command 已将 `Schema map[string]any` 改为无 JSON/reflect 的递归具体值，并只在 registry owner 边界恢复内部模型。
+- 再核验仍发现 Decision context/payload、Approval context、Run execution context 和 Orchestrator dispatch input 的 EventHub command 继续通过 contract alias 暴露 `map[string]any`；这些项必须完成具体值迁移并通过组件回归后，本轮再核验才能重新标记 `completed`。
 
 ## 2026-07-10 组件粒度与职责重新审计
 

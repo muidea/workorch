@@ -6,6 +6,7 @@ import (
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
@@ -13,8 +14,28 @@ const CommandDestination = modulecommon.ModuleID
 
 type CreateServerCommand = mcpcontracts.CreateServerCommand
 type UpdateServerCommand = mcpcontracts.UpdateServerCommand
-type CreateCapabilityCommand = mcpcontracts.CreateCapabilityCommand
-type UpdateCapabilityCommand = mcpcontracts.UpdateCapabilityCommand
+type CreateCapabilityCommand struct {
+	ID             common.MCPCapabilityID
+	ServerID       common.MCPServerID
+	Kind           string
+	Name           string
+	DisplayName    string
+	Description    string
+	Category       string
+	Tags           []string
+	UsageHint      string
+	InputSummary   string
+	OutputSummary  string
+	StageHints     []string
+	RiskLevel      string
+	Schema         eventvalue.Payload
+	URI            string
+	Enabled        bool
+	ApprovalPolicy string
+	Status         string
+}
+
+type UpdateCapabilityCommand = CreateCapabilityCommand
 type CapabilityQuery = mcpcontracts.CapabilityQuery
 
 type GetServerCommand struct {

@@ -1,38 +1,19 @@
 # Shell Block
 
-## 功能定位
+## 功能说明
 
-`blocks/shell` 是 runtime shell command execution block。它负责在受控策略下执行本地 shell 命令，并返回 exit code、stdout/stderr 摘要、raw ref 和错误分类。
+`blocks/shell` 在受控工作目录、超时和资源策略下执行本地 shell command，并返回 exit code、stdout/stderr 摘要、错误分类、耗时和 raw ref。
 
-## 拥有边界
+## 组件交互及合同
 
-- 拥有 shell runtime adapter、timeout/resource guard 与 runtimeevent executor。
-- 只执行 runtime contract 和 policy 准入的命令。
-- 不拥有 Run/Result/Memory 状态，不从 shell 文本直接推导业务完成。
+- `kernel/orchestrator` 使用 `internal/pkg/runtimeevent.ExecuteCommand` 派发 Shell step，并接收 `ExecuteCommandResult`。
+- 本 block 通过 runtimeevent 发布 Accepted、Progress、Completed 或 Failed 具体通知。
+- request 必须携带 workspace/run/step scope、command、working directory/ref、timeout 和 policy；result 返回 exit code、有界输出、duration、error class 和 raw ref。
+- Orchestrator 与 Approval 流程在高风险命令进入本 block 前完成准入，或根据本 block 返回的 blocker 进入治理。
 
-## 主要交互
+## 相关约束
 
-- 接收 `kernel/orchestrator` 派发的 `shell/command` execution request。
-- `blocks/llm` 可在 execution graph 中声明 shell step。
-- 输出由 `kernel/orchestrator` 作为 validation evidence、diagnostic 或 blocker 处理。
-- 高风险命令应通过 `blocks/approval` 或 governance flow 完成授权。
-
-## 组件交互合同
-
-- Input contract: request 必须包含 command、working directory/ref、timeout/policy、workspace/run/step scope。
-- Output contract: 返回 exit code、stdout/stderr bounded summary、raw ref、duration 和 error class。
-- Orchestrator contract: shell output 只作为 evidence input；evidence accepted/rejected 由 orchestrator 判定。
-- Approval contract: destructive/background/unbounded command 必须由 policy 拒绝或 approval-gated。
-- LLM contract: LLM 只能声明 shell candidate，不能把 shell 文本直接标记为 DoD satisfied。
-- EventHub contract: 直接订阅 `/runtime/block` 下 shell command topic 的 `runtimeevent.ExecuteCommand`，返回 `ExecuteCommandResult`，并向 `/runtime/orchestrator` 投递具体的 accepted/progress/completed/failed data；顶层载荷禁止使用 Envelope/map/JSON 转换。
-
-## 已知缺口
-
-- 当前盘点未发现 Shell block 职责缺失；long-running command 和 zero-work evidence policy 仍需要持续回归。
-- 当前未发现与 orchestrator 的 runtime execute 交互合同缺失。
-
-## 边界约束
-
-- 命令必须 bounded，不能默认后台长期运行。
-- stdout/stderr 是 evidence input，不是直接业务真相。
-- shell block 不能创建 accepted Result 或长期 memory。
+- command、工作目录、运行时间和输出大小必须有界，不能默认启动后台长期任务。
+- destructive、unbounded 或不符合 policy 的命令必须拒绝。
+- 本 block 不访问其他组件 service/repository，不拥有 Run、Result 或 Memory 状态。
+- stdout/stderr 只是 evidence input，不能直接判定业务完成。

@@ -192,7 +192,7 @@ func (m *Module) executeMCPCommand(ctx context.Context, topic string, data any) 
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
-		item, err := m.servicePtr.CreateCapability(ctx, cmd)
+		item, err := m.servicePtr.CreateCapability(ctx, mcpCapabilityContractCommand(cmd))
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
@@ -222,13 +222,23 @@ func (m *Module) executeMCPCommand(ctx context.Context, topic string, data any) 
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
-		item, err := m.servicePtr.UpdateCapability(ctx, cmd)
+		item, err := m.servicePtr.UpdateCapability(ctx, mcpCapabilityContractCommand(cmd))
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
 		return mcpevents.MCPCommandResult{Capability: item}, nil
 	default:
 		return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
+	}
+}
+
+func mcpCapabilityContractCommand(cmd mcpevents.CreateCapabilityCommand) mcpcontracts.CreateCapabilityCommand {
+	return mcpcontracts.CreateCapabilityCommand{
+		ID: cmd.ID, ServerID: cmd.ServerID, Kind: cmd.Kind, Name: cmd.Name, DisplayName: cmd.DisplayName,
+		Description: cmd.Description, Category: cmd.Category, Tags: append([]string(nil), cmd.Tags...),
+		UsageHint: cmd.UsageHint, InputSummary: cmd.InputSummary, OutputSummary: cmd.OutputSummary,
+		StageHints: append([]string(nil), cmd.StageHints...), RiskLevel: cmd.RiskLevel, Schema: cmd.Schema.Map(),
+		URI: cmd.URI, Enabled: cmd.Enabled, ApprovalPolicy: cmd.ApprovalPolicy, Status: cmd.Status,
 	}
 }
 

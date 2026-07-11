@@ -11,6 +11,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 func registerRunReadRoutes(router engine.RouteRegistry, state *serverState) {
@@ -340,10 +341,15 @@ func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *htt
 			return
 		}
 		priority := runPriorityFromRequest(r, 0)
+		executionContextPatch, patchErr := eventvalue.FromMap(req.ExecutionContextPatch)
+		if patchErr != nil {
+			writeBusinessError(w, fmt.Errorf("invalid execution context patch: %w", patchErr))
+			return
+		}
 		command := prepareHTTPSchedulerCommand(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
 			WorkspaceID: common.WorkspaceID(workspaceID), RunID: common.RunID(runID), Intent: intent, Action: "resume",
 			Reason: req.Reason, Source: req.Source, RequestID: req.RequestID, DefinitionRevision: req.DefinitionRevision,
-			DecisionID: req.DecisionID, Priority: priority, ExecutionContextPatch: req.ExecutionContextPatch,
+			DecisionID: req.DecisionID, Priority: priority, ExecutionContextPatch: executionContextPatch,
 		})
 		if err := s.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); err != nil {
 			writeBusinessError(w, err)

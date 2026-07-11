@@ -1,38 +1,19 @@
 # SSH Block
 
-## 功能定位
+## 功能说明
 
-`blocks/ssh` 是 runtime remote command/session block。它负责通过结构化 target/session/credential refs 执行远程命令，并返回规范化 SSH result。
+`blocks/ssh` 使用结构化 target、session 和 credential refs 执行受控远程命令，并返回规范化远程执行结果。
 
-## 拥有边界
+## 组件交互及合同
 
-- 拥有 SSH runtime adapter、timeout/resource guard 与 runtimeevent executor。
-- 只处理远程执行技术能力。
-- 不拥有远程环境业务状态、Run 状态或 Result 判断。
+- `kernel/orchestrator` 使用 `internal/pkg/runtimeevent.ExecuteCommand` 派发 SSH step，并接收 `ExecuteCommandResult`。
+- 本 block 通过 runtimeevent 发布 Accepted、Progress、Completed 或 Failed 具体通知。
+- request 必须携带 workspace/run/step scope、target/session/credential refs、command、timeout 和 policy；result 返回远程 exit status、有界输出、target ref、错误分类和 raw ref。
+- runtime policy、Governance 和 Approval 在远程副作用执行前完成准入。
 
-## 主要交互
+## 相关约束
 
-- 接收 `kernel/orchestrator` 派发的 `ssh/command` execution request。
-- `blocks/llm` 可在 execution graph 中声明 SSH step。
-- SSH 输出由 `kernel/orchestrator` 分类为 evidence candidate、diagnostic 或 blocker。
-- 远程高风险副作用应通过 runtime policy、governance 与 approval 流程准入。
-
-## 组件交互合同
-
-- Input contract: request 必须包含 target/session/credential refs、command、timeout/policy、workspace/run/step scope。
-- Output contract: 返回 normalized remote exit status、stdout/stderr summary、raw ref、target ref 和 error class。
-- Orchestrator contract: SSH result 只作为 evidence candidate 或 blocker；coverage/result 由 orchestrator gate 判定。
-- Approval contract: remote side effect 需要明确准入，缺 credential/permission 应返回 structured blocker。
-- LLM contract: LLM 只能声明 SSH candidate，不能把远程输出直接变成 accepted Result。
-- EventHub contract: 直接订阅 `/runtime/block` 下 SSH command topic 的 `runtimeevent.ExecuteCommand`，返回 `ExecuteCommandResult`，并向 `/runtime/orchestrator` 投递具体的 accepted/progress/completed/failed data；顶层载荷禁止使用 Envelope/map/JSON 转换。
-
-## 已知缺口
-
-- 当前盘点未发现 SSH block 职责缺失；credential/permission blocker 与 remote side-effect policy 需要持续 pairwise 验证。
-- 当前未发现与 orchestrator 的 runtime execute 交互合同缺失。
-
-## 边界约束
-
-- target、session、credential 必须使用结构化引用。
-- remote side effect 必须有明确 stage contract admission。
+- target、session 和 credential 必须使用结构化引用；secret 不得进入事件、投影或日志。
+- 远程副作用必须有明确 stage contract admission，权限缺失必须返回 structured blocker。
+- 本 block 不拥有远程业务状态、Run 状态或 Result 状态。
 - 远程输出必须经过 evidence binding 才能用于 coverage。

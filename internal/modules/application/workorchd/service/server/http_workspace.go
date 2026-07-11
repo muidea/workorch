@@ -14,6 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState) {
@@ -448,7 +449,11 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			writeBusinessError(w, fmt.Errorf("%w: workspace execution command supports resume, restart or scoped replan intent, got %q", common.ErrInvalidArgument, intent))
 			return
 		}
-		command := workspaceExecutionCommandSchedulerCommand(workspaceID, req, priority)
+		command, commandErr := workspaceExecutionCommandSchedulerCommand(workspaceID, req, priority)
+		if commandErr != nil {
+			writeBusinessError(w, commandErr)
+			return
+		}
 		command.Intent = intent
 		command = prepareHTTPSchedulerCommand(topic, command)
 		if err := state.publishWorkorchDSchedulerCommand(r.Context(), topic, command); err != nil {
@@ -640,7 +645,11 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 	})
 }
 
-func workspaceExecutionCommandSchedulerCommand(workspaceID string, req workspaceExecutionCommandRequest, priority int) workorchdevents.WorkspaceRunRequestedCommand {
+func workspaceExecutionCommandSchedulerCommand(workspaceID string, req workspaceExecutionCommandRequest, priority int) (workorchdevents.WorkspaceRunRequestedCommand, error) {
+	executionContextPatch, err := eventvalue.FromMap(req.ExecutionContextPatch)
+	if err != nil {
+		return workorchdevents.WorkspaceRunRequestedCommand{}, fmt.Errorf("invalid execution context patch: %w", err)
+	}
 	return workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID:           common.WorkspaceID(workspaceID),
 		RunID:                 common.RunID(strings.TrimSpace(req.RunID)),
@@ -660,6 +669,6 @@ func workspaceExecutionCommandSchedulerCommand(workspaceID string, req workspace
 		DefinitionRevision:    req.DefinitionRevision,
 		DecisionID:            req.DecisionID,
 		Priority:              priority,
-		ExecutionContextPatch: req.ExecutionContextPatch,
-	}
+		ExecutionContextPatch: executionContextPatch,
+	}, nil
 }

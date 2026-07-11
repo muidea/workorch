@@ -13,6 +13,7 @@ import (
 	workspaceservice "github.com/muidea/workorch/internal/modules/blocks/workspace/service"
 	systemevents "github.com/muidea/workorch/internal/modules/kernel/system/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
 )
@@ -448,7 +449,7 @@ func setWorkspaceMagicResult(result magicevent.Result, data workspaceevents.Work
 	result.Set(data, nil)
 }
 
-func workspaceTemplateFromCommand(cmd workspacecontracts.CreateWorkspaceTemplateCommand) (*repository.WorkspaceTemplate, error) {
+func workspaceTemplateFromCommand(cmd workspaceevents.CreateWorkspaceTemplateCommand) (*repository.WorkspaceTemplate, error) {
 	if cmd.TemplateID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -460,12 +461,12 @@ func workspaceTemplateFromCommand(cmd workspacecontracts.CreateWorkspaceTemplate
 		DoDItems:         append([]string(nil), cmd.DoDItems...),
 		DefaultSoulID:    cmd.DefaultSoulID,
 		SoulBindings:     cloneStringMap(cmd.SoulBindings),
-		ContextHints:     cloneMap(cmd.ContextHints),
-		EvidencePolicies: cloneMapSlice(cmd.EvidencePolicies),
+		ContextHints:     cmd.ContextHints.Map(),
+		EvidencePolicies: eventvalue.MapSlice(cmd.EvidencePolicies),
 	}, nil
 }
 
-func workspaceFromUpdateCommand(cmd workspacecontracts.UpdateWorkspaceCommand) *workspacemodel.Workspace {
+func workspaceFromUpdateCommand(cmd workspaceevents.UpdateWorkspaceCommand) *workspacemodel.Workspace {
 	return &workspacemodel.Workspace{
 		ID:                   cmd.WorkspaceID,
 		Title:                cmd.Title,
@@ -478,8 +479,8 @@ func workspaceFromUpdateCommand(cmd workspacecontracts.UpdateWorkspaceCommand) *
 		ProfileID:            cmd.ProfileID,
 		DefaultSoulID:        cmd.DefaultSoulID,
 		SoulBindings:         cloneSoulBindingMap(cmd.SoulBindings),
-		ContextHints:         cloneMap(cmd.ContextHints),
-		EvidencePolicies:     cloneMapSlice(cmd.EvidencePolicies),
+		ContextHints:         cmd.ContextHints.Map(),
+		EvidencePolicies:     eventvalue.MapSlice(cmd.EvidencePolicies),
 	}
 }
 
