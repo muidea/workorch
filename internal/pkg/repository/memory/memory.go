@@ -2982,6 +2982,8 @@ func compactSummaryObject(input map[string]any, depth int) map[string]any {
 
 var stepSummaryNestedKeys = []string{
 	"id",
+	"workspaceId",
+	"runId",
 	"item",
 	"kind",
 	"state",
@@ -2997,6 +2999,13 @@ var stepSummaryNestedKeys = []string{
 	"failureClass",
 	"failureSignature",
 	"violatedRule",
+	"correctionProfileId",
+	"budgetScope",
+	"lineageType",
+	"rootStepId",
+	"focusId",
+	"attempt",
+	"maxAttempts",
 	"recoverability",
 	"violationType",
 	"signature",

@@ -220,6 +220,7 @@ func (o *RuntimeOrchestrator) closeLoadedRun(ctx context.Context, r *runModel.Ru
 	if err := o.dismissOpenDecisionBlocker(ctx, r); err != nil {
 		return err
 	}
+	normalizeRunConvergenceOwnerState(r)
 	r.State = state
 	if state == common.RunStateSuperseded && (strings.TrimSpace(r.Lineage.LineageState) == "" || r.Lineage.LineageState == "active") {
 		r.Lineage.LineageState = "superseded"

@@ -1372,7 +1372,8 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 	}
 	language := runDialogLanguage(run)
 	maxAttempts := o.repairManager().effectiveMaxRuntimeRepairAttempts(ctx, o.RuntimePolicy(), run, failedStep)
-	reason := localizedRuntimeRepairExhaustionReason(language, maxAttempts, execErr)
+	attempts := o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep)
+	reason := localizedRuntimeRepairExhaustionReason(language, attempts, maxAttempts, execErr)
 	diagnostics := runtimeFailureDecisionDiagnostics(failedStep, execErr)
 	if diagnostics == nil {
 		diagnostics = map[string]any{}
@@ -1436,7 +1437,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		"allowedRecoveryActions":         allowedRecoveryActions,
 		"preferredRecoveryActions":       preferredRecoveryActions,
 		"blockerKind":                    blockerKind,
-		"attempts":                       o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep),
+		"attempts":                       attempts,
 		"maxAttempts":                    maxAttempts,
 		"runLevelIneffectiveConvergence": map[string]any{
 			"totalSteps":          runLevelStats.TotalSteps,

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1199,6 +1200,108 @@ func TestContractViolationRetryUsesForcedNarrowAfterRepeatedRule(t *testing.T) {
 	if contract["forcedNarrow"] != true ||
 		!strings.Contains(stringFromMap(contract, "forcedNarrowRule"), "same-rule or same-target") {
 		t.Fatalf("correctionContract = %+v, want forced narrow rule", contract)
+	}
+}
+
+func TestContractViolationRetryAttemptCountUsesStableRecoveryScope(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-scoped-attempt")
+	rootStepID := common.StepID(string(runID) + "/root-validation")
+	repo := memory.NewStepRepository()
+	newRetry := func(attempt int, focusID string, rule string, profileID string) *runmodel.Step {
+		budgetScope := map[string]any{
+			"lineageType":         "contract_violation_retry",
+			"rootStepId":          string(rootStepID),
+			"focusId":             focusID,
+			"violatedRule":        rule,
+			"correctionProfileId": profileID,
+		}
+		return &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/contract-retry-%03d", runID, attempt)),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  attempt,
+				stepInputKeyRecoveryBudgetScope:   cloneStepPayload(budgetScope),
+				stepInputKeyContractViolationRecovery: map[string]any{
+					"attempt":             attempt,
+					"violatedRule":        rule,
+					"correctionProfileId": profileID,
+					"budgetScope":         cloneStepPayload(budgetScope),
+				},
+			},
+			Output: map[string]any{
+				failureOutputKeyClass:     failureClassRuntime,
+				failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|rule=" + rule,
+				"contractViolationRule":   rule,
+				stepOutputKeyContractViolation: map[string]any{
+					"violatedRule":        rule,
+					"correctionProfileId": profileID,
+					"budgetScope":         cloneStepPayload(budgetScope),
+				},
+			},
+		}
+	}
+	first := newRetry(1, "cwi-001", contractViolationRuleValidationStaticOnly, "managed_validation_evidence")
+	second := newRetry(2, "cwi-001", contractViolationRuleValidationStaticOnly, "managed_validation_evidence")
+	for _, step := range []*runmodel.Step{first, second} {
+		if err := repo.Create(ctx, step); err != nil {
+			t.Fatalf("seed retry %s: %v", step.ID, err)
+		}
+	}
+	pending := newRetry(3, "cwi-001", contractViolationRuleValidationStaticOnly, "managed_validation_evidence")
+	pending.State = common.StepStatePending
+	if err := repo.Create(ctx, pending); err != nil {
+		t.Fatalf("seed unsubmitted retry %s: %v", pending.ID, err)
+	}
+	repair := newRepairSubsystem(repo, nil)
+	if got := contractViolationRetryAttemptCount(ctx, repair, runID, second); got != 2 {
+		steps, _ := repo.ListByRunSummary(ctx, runID)
+		t.Fatalf("contractViolationRetryAttemptCount = %d, want 2; expected=%+v actual0=%+v actual1=%+v", got, contractViolationRetryScopeFromFailedStep(second), contractViolationRetryScopeFromRecoveryStep(steps[0]), contractViolationRetryScopeFromRecoveryStep(steps[1]))
+	}
+
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-scoped-attempt", InitialStepKind: llmWorkspaceExecutionStepKind}
+	spec, ok, err := repair.recoveryDispatchSpec(
+		ctx,
+		run,
+		second,
+		common.ErrInvalidArgument,
+		runtimeRecoveryActionContractViolationRetry,
+		maxProviderRetryAttempts,
+		repairDispatchInputBuilderFunc(func(_ context.Context, _ *runmodel.Run, _ *runmodel.Step, attempt int, _ error) map[string]any {
+			return map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  attempt,
+				stepInputKeyContractViolationRecovery: map[string]any{
+					"attempt": attempt,
+				},
+			}
+		}),
+		false,
+	)
+	if err != nil || !ok {
+		t.Fatalf("recoveryDispatchSpec ok/err = %v/%v, want attempt 3 dispatch", ok, err)
+	}
+	if got := intFromAny(spec.Input[stepInputKeyRuntimeRepairAttempt]); got != 3 {
+		t.Fatalf("runtimeRepairAttempt = %d, want 3", got)
+	}
+	if got := intFromAny(mapFromValue(spec.Input[stepInputKeyContractViolationRecovery])["attempt"]); got != 3 {
+		t.Fatalf("contractViolationRecovery.attempt = %d, want 3", got)
+	}
+	if !strings.Contains(string(spec.ID), "contract-retry-003-") {
+		t.Fatalf("step ID = %q, want contract-retry-003", spec.ID)
+	}
+
+	for label, changed := range map[string]*runmodel.Step{
+		"focus":   newRetry(3, "cwi-002", contractViolationRuleValidationStaticOnly, "managed_validation_evidence"),
+		"rule":    newRetry(3, "cwi-001", contractViolationRuleValidationScratchEscape, "managed_validation_evidence"),
+		"profile": newRetry(3, "cwi-001", contractViolationRuleValidationStaticOnly, "concrete_validation_evidence"),
+	} {
+		if got := contractViolationRetryAttemptCount(ctx, repair, runID, changed); got != 0 {
+			t.Fatalf("%s changed scope attempt count = %d, want 0", label, got)
+		}
 	}
 }
 

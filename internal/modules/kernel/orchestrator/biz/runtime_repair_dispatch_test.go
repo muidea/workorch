@@ -24,6 +24,12 @@ func (repairDispatchSpecBuilderStub) runtimeRepairFollowUpStepInput(_ context.Co
 	}
 }
 
+type repairDispatchInputBuilderFunc func(context.Context, *runmodel.Run, *runmodel.Step, int, error) map[string]any
+
+func (fn repairDispatchInputBuilderFunc) runtimeRepairFollowUpStepInput(ctx context.Context, run *runmodel.Run, step *runmodel.Step, attempt int, execErr error) map[string]any {
+	return fn(ctx, run, step, attempt, execErr)
+}
+
 type repairDispatchStaleForcedNarrowBuilder struct{}
 
 func (repairDispatchStaleForcedNarrowBuilder) runtimeRepairFollowUpStepInput(_ context.Context, _ *runmodel.Run, _ *runmodel.Step, attempt int, execErr error) map[string]any {
@@ -533,6 +539,154 @@ func TestRepairSubsystemRecoveryDispatchSpecRebuildsStaleValidationMirrorFromSta
 			stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") ||
 			boolValue(required["mustProduceConcreteValidationEvidence"]) {
 			t.Fatalf("%s = %+v, want state-changing requiredOutput", label, required)
+		}
+	}
+	if err := validateConvergenceDispatchInput(spec.Input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, spec.Input)
+	}
+}
+
+func TestRepairSubsystemContractViolationRetrySynchronizesForcedNarrowExecutionContextMirror(t *testing.T) {
+	ctx := context.Background()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeValidate)
+	run.InitialStepKind = llmcommon.StepKindWorkspaceExecution
+	stepRepo := memory.NewStepRepository()
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/graph-003/001-validate"),
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|stage=runtime_contract_failed|rule=validation_process_control",
+		},
+	}
+	staleRequired := map[string]any{
+		"mustProduceConcreteValidationEvidence": true,
+		"acceptedKinds":                         []any{"shell/command"},
+	}
+	builder := repairDispatchStaleForcedNarrowBuilder{}
+	input := builder.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, common.ErrInvalidArgument)
+	input["executionContext"] = map[string]any{
+		"requiredOutput": cloneStepPayload(staleRequired),
+		"repairActionPackage": map[string]any{
+			"requiredOutput": cloneStepPayload(staleRequired),
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"requiredOutput": cloneStepPayload(staleRequired),
+			"nextAction": map[string]any{
+				"kind":           runtimemodel.NextActionTypeValidate,
+				"requiredOutput": cloneStepPayload(staleRequired),
+			},
+		},
+	}
+
+	spec, ok, err := newRepairSubsystem(stepRepo, nil).recoveryDispatchSpec(ctx, run, failedStep, common.ErrInvalidArgument, runtimeRecoveryActionContractViolationRetry, maxProviderRetryAttempts, repairDispatchInputBuilderFunc(func(context.Context, *runmodel.Run, *runmodel.Step, int, error) map[string]any {
+		return input
+	}), false)
+	if err != nil || !ok {
+		t.Fatalf("recoveryDispatchSpec ok/err = %v/%v, want forced-narrow retry spec", ok, err)
+	}
+	executionContext := mapFromValue(spec.Input["executionContext"])
+	for label, required := range map[string]map[string]any{
+		"requiredOutput":                                      mapFromValue(spec.Input["requiredOutput"]),
+		"repairActionPackage.requiredOutput":                  mapFromValue(mapFromValue(spec.Input["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":                          mapFromValue(mapFromValue(spec.Input[stepInputKeyStagePacket])["requiredOutput"]),
+		"currentActionContract.requiredOutput":                mapFromValue(mapFromValue(spec.Input[currentActionContractKey])["requiredOutput"]),
+		"executionContext.requiredOutput":                     mapFromValue(executionContext["requiredOutput"]),
+		"executionContext.repairActionPackage.requiredOutput": mapFromValue(mapFromValue(executionContext["repairActionPackage"])["requiredOutput"]),
+		"executionContext.stagePacket.requiredOutput":         mapFromValue(mapFromValue(executionContext[stepInputKeyStagePacket])["requiredOutput"]),
+	} {
+		if !requiredOutputIsManagedValidationOnly(required) {
+			t.Fatalf("%s = %+v, want managed validation only", label, required)
+		}
+	}
+	if err := validateConvergenceDispatchInput(spec.Input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, spec.Input)
+	}
+}
+
+func TestRepairSubsystemValidationStaticOnlyRetryKeepsValidationContractDespiteHistoricalTargets(t *testing.T) {
+	ctx := context.Background()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeValidate)
+	run.InitialStepKind = llmcommon.StepKindWorkspaceExecution
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/contract-validation-static-only"),
+		RunID: run.ID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageVerification,
+		},
+		Output: map[string]any{
+			"status":                       "failed",
+			"stage":                        "llm_execution_graph_plan",
+			"contractViolationRule":        contractViolationRuleValidationStaticOnly,
+			outputKeyContractViolationType: contractViolationValidationEvidenceRequired,
+			failureOutputKeyClass:          failureClassRuntime,
+			failureOutputKeySignature:      "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|rule=validation_static_only",
+			stepOutputKeyContractViolation: map[string]any{
+				"violatedRule": contractViolationRuleValidationStaticOnly,
+			},
+		},
+	}
+	builder := repairDispatchInputBuilderFunc(func(ctx context.Context, run *runmodel.Run, step *runmodel.Step, attempt int, execErr error) map[string]any {
+		input := repairDispatchValidationAuthorityBuilder{}.runtimeRepairFollowUpStepInput(ctx, run, step, attempt, execErr)
+		input["contractViolationRetry"] = true
+		input[stepInputKeyContractViolationRecovery] = map[string]any{
+			"sourceStepId":        string(step.ID),
+			"violatedRule":        contractViolationRuleValidationStaticOnly,
+			"correctionMode":      contractViolationCorrectionModeForcedNarrow,
+			"correctionProfileId": "managed_validation_evidence",
+			"correctionContract": map[string]any{
+				"violatedRule":        contractViolationRuleValidationStaticOnly,
+				"requiredOutputShape": "managed_validation_evidence",
+				"validationRoute":     runtimemodel.ValidationRouteManagedHarness,
+				"forcedNarrow":        true,
+			},
+		}
+		// These are stale lineage fields from the prior repair and must not
+		// promote a validation contract violation into state-changing repair.
+		input["failureTargetScope"] = "failureTargets=historical.go"
+		input["failureTargetRepairContext"] = []map[string]any{{"targetRef": "historical.go"}}
+		pkg := mapFromValue(input["repairActionPackage"])
+		pkg["patchRepairContext"] = []map[string]any{{"targetRef": "historical.go"}}
+		pkg["repairTargetSet"] = []string{"historical.go"}
+		input["repairActionPackage"] = pkg
+		return input
+	})
+
+	spec, ok, err := newRepairSubsystem(memory.NewStepRepository(), nil).recoveryDispatchSpec(
+		ctx,
+		run,
+		failedStep,
+		common.ErrInvalidArgument,
+		runtimeRecoveryActionContractViolationRetry,
+		maxProviderRetryAttempts,
+		builder,
+		false,
+	)
+	if err != nil || !ok {
+		t.Fatalf("recoveryDispatchSpec ok/err = %v/%v, want validation retry spec", ok, err)
+	}
+	contract := mapFromValue(spec.Input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedValidation ||
+		stringFromMap(contract, "runtimeStage") != runtimeStageVerification {
+		t.Fatalf("convergenceContract = %+v, want need_validation verification", contract)
+	}
+	if boolValue(spec.Input["stateChangingOutputRequired"]) ||
+		stringFromMap(spec.Input, "repairObjective") != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("dispatch input = %+v, want validation-only objective", spec.Input)
+	}
+	for label, required := range map[string]map[string]any{
+		"requiredOutput":                        mapFromValue(spec.Input["requiredOutput"]),
+		"repairActionPackage.requiredOutput":    mapFromValue(mapFromValue(spec.Input["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":            mapFromValue(mapFromValue(spec.Input[stepInputKeyStagePacket])["requiredOutput"]),
+		"stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(mapFromValue(spec.Input[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+		"currentActionContract.requiredOutput":  mapFromValue(mapFromValue(spec.Input[currentActionContractKey])["requiredOutput"]),
+	} {
+		if !requiredOutputIsManagedValidationOnly(required) {
+			t.Fatalf("%s = %+v, want managed validation only", label, required)
 		}
 	}
 	if err := validateConvergenceDispatchInput(spec.Input); err != nil {

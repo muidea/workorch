@@ -224,6 +224,10 @@ func applyContractViolationRecoveryProjection(input map[string]any, failedStep *
 	}
 	budgetScope := contractViolationRecoveryBudgetScope(input, failedStep)
 	if len(budgetScope) > 0 {
+		budgetScope["violatedRule"] = stringFromMap(violation, "violatedRule")
+		budgetScope["correctionProfileId"] = stringFromMap(violation, "correctionProfileId")
+		budgetScope["attempt"] = attempt
+		budgetScope["maxAttempts"] = maxAttempts
 		input[stepInputKeyRecoveryBudgetScope] = budgetScope
 		violation["budgetScope"] = cloneStepPayload(budgetScope)
 	}
@@ -588,7 +592,29 @@ func currentActionSetRequiredOutput(input map[string]any, required map[string]an
 	input["requiredOutput"] = cloneStepPayload(nextRequired)
 	if packet := mapFromValue(input[stepInputKeyStagePacket]); len(packet) > 0 {
 		packet["requiredOutput"] = cloneStepPayload(nextRequired)
+		if nextAction := mapFromValue(packet["nextAction"]); len(nextAction) > 0 {
+			nextAction["requiredOutput"] = cloneStepPayload(nextRequired)
+			packet["nextAction"] = nextAction
+		}
 		input[stepInputKeyStagePacket] = packet
+	}
+	if executionContext := mapFromValue(input["executionContext"]); len(executionContext) > 0 {
+		executionContext["requiredOutput"] = cloneStepPayload(nextRequired)
+		contextPkg := mapFromValue(executionContext["repairActionPackage"])
+		if len(contextPkg) == 0 {
+			contextPkg = map[string]any{}
+		}
+		contextPkg["requiredOutput"] = cloneStepPayload(nextRequired)
+		executionContext["repairActionPackage"] = contextPkg
+		if contextPacket := mapFromValue(executionContext[stepInputKeyStagePacket]); len(contextPacket) > 0 {
+			contextPacket["requiredOutput"] = cloneStepPayload(nextRequired)
+			if nextAction := mapFromValue(contextPacket["nextAction"]); len(nextAction) > 0 {
+				nextAction["requiredOutput"] = cloneStepPayload(nextRequired)
+				contextPacket["nextAction"] = nextAction
+			}
+			executionContext[stepInputKeyStagePacket] = contextPacket
+		}
+		input["executionContext"] = executionContext
 	}
 }
 
@@ -706,6 +732,15 @@ func contractViolationRecoveryBudgetScope(input map[string]any, failedStep *runM
 	if ids := dispatchFocusWorkItemIDs(focus); len(ids) > 0 {
 		scope["coverageWorkItemIds"] = ids
 	}
+	authority := mapFromValue(input[convergenceAuthorityKey])
+	if workspaceID := strings.TrimSpace(firstNonEmptyString(stringFromMap(authority, "workspaceId"), stringFromMap(input, "workspaceId"))); workspaceID != "" {
+		scope["workspaceId"] = workspaceID
+	}
+	if runID := strings.TrimSpace(stringFromMap(authority, "runId")); runID != "" {
+		scope["runId"] = runID
+	} else if failedStep.RunID != "" {
+		scope["runId"] = string(failedStep.RunID)
+	}
 	return scope
 }
 
@@ -760,22 +795,132 @@ func contractViolationRetryAttemptCount(ctx context.Context, repair *repairSubsy
 	if err != nil {
 		return 0
 	}
-	sourceStepID := string(failedStep.ID)
+	scope := contractViolationRetryScopeFromFailedStep(failedStep)
 	count := 0
 	for _, step := range steps {
 		if step == nil || step.RunID != runID || strings.TrimSpace(step.Kind) != llmWorkspaceExecutionStepKind {
+			continue
+		}
+		if step.State == common.StepStatePending || step.State == common.StepStateSkipped || step.State == common.StepStateCancelled {
 			continue
 		}
 		recovery := mapFromValue(step.Input[stepInputKeyContractViolationRecovery])
 		if len(recovery) == 0 {
 			continue
 		}
-		if strings.TrimSpace(stringFromMap(recovery, "sourceStepId")) == sourceStepID ||
-			strings.TrimSpace(stringFromMap(recovery, "stepId")) == sourceStepID {
+		if contractViolationRetryScopeMatches(scope, contractViolationRetryScopeFromRecoveryStep(step)) ||
+			contractViolationLegacyRetryMatchesFailedStep(recovery, failedStep) {
 			count++
 		}
 	}
 	return count
+}
+
+func contractViolationLegacyRetryMatchesFailedStep(recovery map[string]any, failedStep *runModel.Step) bool {
+	if len(recovery) == 0 || failedStep == nil || len(mapFromValue(recovery["budgetScope"])) > 0 {
+		return false
+	}
+	sourceStepID := string(failedStep.ID)
+	return strings.TrimSpace(stringFromMap(recovery, "sourceStepId")) == sourceStepID ||
+		strings.TrimSpace(stringFromMap(recovery, "stepId")) == sourceStepID
+}
+
+type contractViolationRetryScope struct {
+	workspaceID         string
+	runID               string
+	rootStepID          string
+	focusID             string
+	violatedRule        string
+	correctionProfileID string
+}
+
+func contractViolationRetryScopeFromFailedStep(step *runModel.Step) contractViolationRetryScope {
+	if step == nil {
+		return contractViolationRetryScope{}
+	}
+	violation := mapFromValue(step.Output[stepOutputKeyContractViolation])
+	recovery := mapFromValue(step.Input[stepInputKeyContractViolationRecovery])
+	budget := mapFromValue(violation["budgetScope"])
+	if len(budget) == 0 {
+		budget = mapFromValue(step.Input[stepInputKeyRecoveryBudgetScope])
+	}
+	if len(budget) == 0 {
+		budget = mapFromValue(recovery["budgetScope"])
+	}
+	rule := firstNonEmptyString(
+		stringFromMap(step.Output, "contractViolationRule"),
+		stringFromMap(violation, "violatedRule"),
+		stringFromMap(recovery, "violatedRule"),
+		stringFromMap(budget, "violatedRule"),
+	)
+	profileID := firstNonEmptyString(
+		stringFromMap(violation, "correctionProfileId"),
+		stringFromMap(recovery, "correctionProfileId"),
+		stringFromMap(budget, "correctionProfileId"),
+	)
+	if profileID == "" && rule != "" {
+		profileID = stringFromMap(contractViolationCorrectionProfileForStep(step, rule, 1, 0), "profileId")
+	}
+	rootStepID := firstNonEmptyString(stringFromMap(budget, "rootStepId"), string(runtimeRepairRootStepID(step)))
+	return contractViolationRetryScope{
+		workspaceID:         strings.TrimSpace(stringFromMap(budget, "workspaceId")),
+		runID:               strings.TrimSpace(firstNonEmptyString(stringFromMap(budget, "runId"), string(step.RunID))),
+		rootStepID:          strings.TrimSpace(rootStepID),
+		focusID:             strings.TrimSpace(stringFromMap(budget, "focusId")),
+		violatedRule:        strings.TrimSpace(rule),
+		correctionProfileID: strings.TrimSpace(profileID),
+	}
+}
+
+func contractViolationRetryScopeFromRecoveryStep(step *runModel.Step) contractViolationRetryScope {
+	if step == nil {
+		return contractViolationRetryScope{}
+	}
+	recovery := mapFromValue(step.Input[stepInputKeyContractViolationRecovery])
+	budget := mapFromValue(step.Input[stepInputKeyRecoveryBudgetScope])
+	if len(budget) == 0 {
+		budget = mapFromValue(recovery["budgetScope"])
+	}
+	focus := mapFromValue(mapFromValue(step.Input[convergenceAuthorityKey])["currentFocus"])
+	return contractViolationRetryScope{
+		workspaceID: strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(budget, "workspaceId"),
+			stringFromMap(step.Input, "workspaceId"),
+		)),
+		runID: strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(budget, "runId"),
+			string(step.RunID),
+		)),
+		rootStepID: strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(budget, "rootStepId"),
+			stringFromMap(step.Input, stepInputKeyRepairOfRootStepID),
+		)),
+		focusID: strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(budget, "focusId"),
+			stringFromMap(focus, "id"),
+		)),
+		violatedRule: strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(budget, "violatedRule"),
+			stringFromMap(recovery, "violatedRule"),
+		)),
+		correctionProfileID: strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(budget, "correctionProfileId"),
+			stringFromMap(recovery, "correctionProfileId"),
+		)),
+	}
+}
+
+func contractViolationRetryScopeMatches(expected contractViolationRetryScope, actual contractViolationRetryScope) bool {
+	return (expected.workspaceID == "" || expected.workspaceID == actual.workspaceID) &&
+		expected.runID != "" &&
+		expected.runID == actual.runID &&
+		expected.rootStepID != "" &&
+		expected.rootStepID == actual.rootStepID &&
+		expected.focusID == actual.focusID &&
+		expected.violatedRule != "" &&
+		expected.violatedRule == actual.violatedRule &&
+		expected.correctionProfileID != "" &&
+		expected.correctionProfileID == actual.correctionProfileID
 }
 
 func contractViolationRunRetryCount(ctx context.Context, repair *repairSubsystem, runID common.RunID) int {

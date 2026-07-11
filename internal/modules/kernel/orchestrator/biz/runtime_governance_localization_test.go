@@ -87,6 +87,18 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionUsesDialogLanguage(t *testin
 	}
 }
 
+func TestLocalizedRuntimeRepairExhaustionReasonDistinguishesActualAndMaximumAttempts(t *testing.T) {
+	reason := localizedRuntimeRepairExhaustionReason("zh-CN", 1, 10, errors.New("provider timeout"))
+	if !strings.Contains(reason, "实际 1 次，上限 10 次") || strings.Contains(reason, "共 10 次") {
+		t.Fatalf("reason = %q, want actual/max attempts without reporting configured maximum as actual", reason)
+	}
+
+	exhausted := localizedRuntimeRepairExhaustionReason("zh-CN", 10, 10, nil)
+	if !strings.Contains(exhausted, "尝试已耗尽（共 10 次）") {
+		t.Fatalf("reason = %q, want true exhaustion wording", exhausted)
+	}
+}
+
 func TestRuntimeOrchestrator_ConvergenceBudgetExhaustionUsesBudgetCounters(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

@@ -5,10 +5,16 @@ import (
 	"strings"
 )
 
-func localizedRuntimeRepairExhaustionReason(language string, attempts int, err error) string {
-	reason := fmt.Sprintf("runtime repair attempts exhausted after %d attempts", attempts)
+func localizedRuntimeRepairExhaustionReason(language string, attempts int, maxAttempts int, err error) string {
+	reason := fmt.Sprintf("runtime repair stopped after %d attempts (configured maximum %d)", attempts, maxAttempts)
+	if attempts >= maxAttempts && maxAttempts > 0 {
+		reason = fmt.Sprintf("runtime repair attempts exhausted after %d attempts", attempts)
+	}
 	if prefersChinese(language) {
-		reason = fmt.Sprintf("runtime 自动修复尝试已耗尽（共 %d 次）", attempts)
+		reason = fmt.Sprintf("runtime 自动修复无法继续（实际 %d 次，上限 %d 次）", attempts, maxAttempts)
+		if attempts >= maxAttempts && maxAttempts > 0 {
+			reason = fmt.Sprintf("runtime 自动修复尝试已耗尽（共 %d 次）", attempts)
+		}
 	}
 	if err == nil {
 		return reason

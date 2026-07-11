@@ -82,43 +82,40 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	protectedFields := providerProtectedContextFields(request.Input)
 	request.ContextBudget = nil
 	shrinkLevel := 0
+	adaptiveLevel := adaptiveShrinkLevelFromInput(request.Input)
 	protected := captureProtectedGoalDoD(request.Input)
 	protectedRepairTargets := captureProtectedProviderRepairTargets(request.Input)
-	protectedRuntimeContract := captureProtectedProviderRuntimeContract(request.Input)
-	protectedCoverageWorkItemContext := captureProtectedProviderCoverageWorkItemContext(request.Input)
+	protectedRuntimeContract := captureProtectedProviderRuntimeContract(request.Input, adaptiveLevel)
+	protectedCoverageWorkItemContext := captureProtectedProviderCoverageWorkItemContext(request.Input, adaptiveLevel)
 	protectedStagePacket := captureProtectedProviderStagePacket(request.Input)
+	restoreProtected := func(input map[string]any) map[string]any {
+		input = restoreProtectedGoalDoD(input, protected)
+		input = restoreProtectedProviderRepairTargets(input, protectedRepairTargets)
+		input = restoreProtectedProviderRuntimeContract(input, protectedRuntimeContract)
+		input = restoreProtectedProviderCoverageWorkItemContext(input, protectedCoverageWorkItemContext)
+		input = restoreProtectedProviderStagePacket(input, protectedStagePacket)
+		return normalizeAdaptiveProviderRecoveryTail(input, adaptiveLevel)
+	}
 	if providerInputHasCurrentActionContract(request.Input) {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = narrowProviderInputToCurrentAction(request.Input)
-		request.Input = restoreProtectedGoalDoD(request.Input, protected)
-		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
-		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
-		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
-		request.Input = restoreProtectedProviderStagePacket(request.Input, protectedStagePacket)
+		request.Input = restoreProtected(request.Input)
 		rules = append(rules, "narrow provider input to current action contract")
 		compressedSections = append(compressedSections, "current_action")
 		shrinkLevel = max(shrinkLevel, 1)
 	}
-	if adaptiveLevel := adaptiveShrinkLevelFromInput(request.Input); adaptiveLevel > 0 {
+	if adaptiveLevel > 0 {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = applyAdaptiveShrinkLevel(request.Input, adaptiveLevel)
-		request.Input = restoreProtectedGoalDoD(request.Input, protected)
-		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
-		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
-		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
-		request.Input = restoreProtectedProviderStagePacket(request.Input, protectedStagePacket)
-		rules = append(rules, "adaptive shrink based on provider retry")
+		request.Input = restoreProtected(request.Input)
+		rules = append(rules, adaptiveShrinkRuleFromInput(request.Input))
 		compressedSections = append(compressedSections, "adaptive")
 		shrinkLevel = adaptiveLevel
 	}
 	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = budgetProviderInput(request.Input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
-		request.Input = restoreProtectedGoalDoD(request.Input, protected)
-		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
-		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
-		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
-		request.Input = restoreProtectedProviderStagePacket(request.Input, protectedStagePacket)
+		request.Input = restoreProtected(request.Input)
 		rules = append(rules, "compact provider input")
 		compressedSections = append(compressedSections, "p2")
 		shrinkLevel = max(shrinkLevel, 1)
@@ -126,11 +123,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = compactProviderExecutionContext(request.Input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries)
-		request.Input = restoreProtectedGoalDoD(request.Input, protected)
-		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
-		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
-		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
-		request.Input = restoreProtectedProviderStagePacket(request.Input, protectedStagePacket)
+		request.Input = restoreProtected(request.Input)
 		rules = append(rules, "summarize execution context transport fields")
 		compressedSections = append(compressedSections, "p1")
 		shrinkLevel = max(shrinkLevel, 2)
@@ -138,11 +131,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = prioritizedProviderInput(request.Input, true)
-		request.Input = restoreProtectedGoalDoD(request.Input, protected)
-		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
-		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
-		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
-		request.Input = restoreProtectedProviderStagePacket(request.Input, protectedStagePacket)
+		request.Input = restoreProtected(request.Input)
 		rules = append(rules, "apply priority compaction (P0/P1/P2)")
 		compressedSections = append(compressedSections, "p1", "p2")
 		shrinkLevel = max(shrinkLevel, 3)
@@ -150,11 +139,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	if exceedsProviderBudget(request, maxBytes, maxTokens, profile.EstimatedTokensPerByte) {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = minimalProviderInput(request.Input)
-		request.Input = restoreProtectedGoalDoD(request.Input, protected)
-		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
-		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
-		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
-		request.Input = restoreProtectedProviderStagePacket(request.Input, protectedStagePacket)
+		request.Input = restoreProtected(request.Input)
 		rules = append(rules, "fallback to stage-aware minimal provider input (P0/P1)")
 		compressedSections = append(compressedSections, "p2", "older_p1")
 		shrinkLevel = max(shrinkLevel, 4)
@@ -295,21 +280,43 @@ func adaptiveShrinkLevelFromInput(input map[string]any) int {
 		strings.TrimSpace(stringValue(input["stateChangingRecoveryMode"])) == "direct_state_change" {
 		return 4
 	}
-	if !boolValue(input["providerRetryFollowUp"]) {
+	if boolValue(input["providerRetryFollowUp"]) {
+		if !providerRetryFailureClassNeedsAdaptiveShrink(strings.TrimSpace(stringValue(input["failureClass"]))) {
+			return 0
+		}
+		attempt := intValue(input["providerRetryAttempt"])
+		switch {
+		case attempt >= 2:
+			return 4
+		case attempt == 1:
+			return 3
+		default:
+			return 0
+		}
+	}
+	if !boolValue(input["runtimeRepairFollowUp"]) &&
+		!boolValue(input["contractViolationRetry"]) &&
+		len(recordFromAny(input["contractViolationRecovery"])) == 0 {
 		return 0
 	}
-	if !providerRetryFailureClassNeedsAdaptiveShrink(strings.TrimSpace(stringValue(input["failureClass"]))) {
-		return 0
-	}
-	attempt := intValue(input["providerRetryAttempt"])
+	attempt := intValue(input["runtimeRepairAttempt"])
 	switch {
-	case attempt >= 2:
+	case attempt >= 3:
 		return 4
-	case attempt == 1:
+	case attempt == 2:
 		return 3
+	case attempt == 1:
+		return 2
 	default:
 		return 0
 	}
+}
+
+func adaptiveShrinkRuleFromInput(input map[string]any) string {
+	if boolValue(input["providerRetryFollowUp"]) {
+		return "adaptive shrink based on provider retry"
+	}
+	return "adaptive shrink based on runtime recovery lineage"
 }
 
 func providerRetryFailureClassNeedsAdaptiveShrink(failureClass string) bool {
@@ -1355,9 +1362,15 @@ func captureProtectedGoalDoD(input map[string]any) protectedGoalDoD {
 	return ret
 }
 
-func captureProtectedProviderCoverageWorkItemContext(input map[string]any) protectedProviderCoverageWorkItemContext {
+func captureProtectedProviderCoverageWorkItemContext(input map[string]any, adaptiveLevel int) protectedProviderCoverageWorkItemContext {
 	ret := protectedProviderCoverageWorkItemContext{}
 	if len(input) == 0 {
+		return ret
+	}
+	if adaptiveLevel >= 2 {
+		if context := coverageWorkItemContextFromProviderInput(input); len(context) > 0 {
+			ret.TopLevel = compactProviderCoverageWorkItemContextForAdaptiveRetry(context, adaptiveLevel)
+		}
 		return ret
 	}
 	if context := recordFromAny(input["coverageWorkItemContext"]); len(context) > 0 {
@@ -1507,7 +1520,7 @@ func captureProtectedProviderRepairTargets(input map[string]any) protectedProvid
 	return ret
 }
 
-func captureProtectedProviderRuntimeContract(input map[string]any) protectedProviderRuntimeContract {
+func captureProtectedProviderRuntimeContract(input map[string]any, adaptiveLevel int) protectedProviderRuntimeContract {
 	ret := protectedProviderRuntimeContract{TopLevel: map[string]any{}}
 	if len(input) == 0 {
 		return ret
@@ -1521,12 +1534,152 @@ func captureProtectedProviderRuntimeContract(input map[string]any) protectedProv
 		"currentActionContract",
 	} {
 		if value, ok := input[key]; ok {
+			if key == "contractViolationRecovery" && adaptiveLevel >= 2 {
+				value = compactProviderContractViolationRecovery(recordFromAny(value), adaptiveLevel)
+			}
 			if cloned, success := cloneAny(value); success {
 				ret.TopLevel[key] = cloned
 			}
 		}
 	}
 	return ret
+}
+
+func compactProviderCoverageWorkItemContextForAdaptiveRetry(context map[string]any, adaptiveLevel int) map[string]any {
+	out := compactProviderCoverageWorkItemContext(context)
+	if len(out) == 0 {
+		return nil
+	}
+	adjacentLimit := 2
+	ledgerLimit := 3
+	if adaptiveLevel >= 3 {
+		adjacentLimit = 1
+		ledgerLimit = 1
+	}
+	if adaptiveLevel >= 4 {
+		adjacentLimit = 0
+		ledgerLimit = 0
+	}
+	if adjacentLimit == 0 {
+		delete(out, "currentFocusItems")
+		delete(out, "unresolvedItems")
+	} else {
+		out["currentFocusItems"] = compactProviderCoverageWorkItemFocuses(mapSliceFromAny(out["currentFocusItems"]), adjacentLimit)
+		out["unresolvedItems"] = compactProviderCoverageWorkItemSummaries(mapSliceFromAny(out["unresolvedItems"]), adjacentLimit)
+	}
+	if ledgerLimit == 0 {
+		delete(out, "ledgerSummary")
+	} else {
+		out["ledgerSummary"] = compactProviderCoverageWorkItemSummaries(mapSliceFromAny(out["ledgerSummary"]), ledgerLimit)
+	}
+	return out
+}
+
+func compactProviderContractViolationRecovery(recovery map[string]any, adaptiveLevel int) map[string]any {
+	if len(recovery) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{
+		"id", "sourceStepId", "stepId", "violationType", "violatedRule", "recoverability",
+		"retryHint", "correctionProfileId", "correctionMode", "targetScope", "attempt", "maxAttempts",
+		"signatureRepeatCount", "budgetScope", "actualOutputSummary", "correctionContract",
+	} {
+		if value, ok := recovery[key]; ok {
+			out[key] = budgetProviderValue(value, 0, providerBudgetAggressiveBytes, providerBudgetAggressiveItems, providerBudgetAggressiveEntries, 3)
+		}
+	}
+	if adaptiveLevel == 2 {
+		if value, ok := recovery["rejectedOutputRef"]; ok {
+			out["rejectedOutputRef"] = value
+		}
+	}
+	return out
+}
+
+func normalizeAdaptiveProviderRecoveryTail(input map[string]any, adaptiveLevel int) map[string]any {
+	if len(input) == 0 || adaptiveLevel < 2 {
+		return input
+	}
+	if context := coverageWorkItemContextFromProviderInput(input); len(context) > 0 {
+		input["coverageWorkItemContext"] = compactProviderCoverageWorkItemContextForAdaptiveRetry(context, adaptiveLevel)
+	}
+	for _, containerKey := range []string{"executionContext", "executionContextPackage"} {
+		container := recordFromAny(input[containerKey])
+		if len(container) == 0 {
+			continue
+		}
+		delete(container, "coverageWorkItemContext")
+		input[containerKey] = container
+	}
+	if recovery := recordFromAny(input["contractViolationRecovery"]); len(recovery) > 0 {
+		input["contractViolationRecovery"] = compactProviderContractViolationRecovery(recovery, adaptiveLevel)
+	}
+	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
+		input["repairActionPackage"] = compactProviderRepairActionPackageForAdaptiveRetry(pkg, adaptiveLevel)
+	}
+	for _, key := range []string{"processEvidenceTimeline", "evidenceLedger", "failedExecutionGraph", "graphEvidence", "previousResults"} {
+		delete(input, key)
+	}
+	return input
+}
+
+func compactProviderRepairActionPackageForAdaptiveRetry(pkg map[string]any, adaptiveLevel int) map[string]any {
+	if len(pkg) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{
+		"repairObjective", "requiredOutput", "outputDecisionContract", "coverageRepairRequired",
+		"currentFailure", "structuredFailureSignals", "targetSnapshots", "repairTargetSet",
+		"evidenceAcquisitionRequired", "boundedValidationRequired", "validationRoute",
+	} {
+		if value, ok := pkg[key]; ok {
+			out[key] = value
+		}
+	}
+	coverageLimit := 3
+	if adaptiveLevel >= 3 {
+		coverageLimit = 2
+	}
+	if adaptiveLevel >= 4 {
+		coverageLimit = 1
+	}
+	if targets := compactProviderCoverageWorkItemSummaries(mapSliceFromAny(pkg["coverageTargetSet"]), coverageLimit); len(targets) > 0 {
+		out["coverageTargetSet"] = targets
+	}
+	if progress := compactProviderCurrentProgressForAdaptiveRetry(recordFromAny(pkg["currentExecutionProgress"]), adaptiveLevel); len(progress) > 0 {
+		out["currentExecutionProgress"] = progress
+	}
+	if adaptiveLevel == 2 {
+		for _, key := range []string{"previousRejectedOutputSummary", "strategyReassessment"} {
+			if value, ok := pkg[key]; ok {
+				out[key] = budgetProviderValue(value, 0, providerBudgetAggressiveBytes, 2, providerBudgetAggressiveEntries, 2)
+			}
+		}
+	}
+	return out
+}
+
+func compactProviderCurrentProgressForAdaptiveRetry(progress map[string]any, adaptiveLevel int) map[string]any {
+	if len(progress) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{"failureReason", "failureClass", "failureSignature", "currentGap", "currentFailure", "lastObservedFailure"} {
+		if value, ok := progress[key]; ok {
+			out[key] = budgetProviderValue(value, 0, providerBudgetAggressiveBytes, 2, providerBudgetAggressiveEntries, 2)
+		}
+	}
+	if adaptiveLevel <= 3 {
+		for _, key := range []string{"latestActionEvidence", "completedGraphEvidence"} {
+			items := mapSliceFromAny(progress[key])
+			if len(items) > 0 {
+				out[key] = budgetProviderValue(items[:1], 0, providerBudgetAggressiveBytes, 1, providerBudgetAggressiveEntries, 2)
+			}
+		}
+	}
+	return out
 }
 
 func restoreProtectedProviderRepairTargets(input map[string]any, protected protectedProviderRepairTargets) map[string]any {
@@ -1695,7 +1848,7 @@ func isProtectedProviderRuntimeContractEqual(input map[string]any, protected pro
 	if len(protected.TopLevel) == 0 {
 		return true
 	}
-	current := captureProtectedProviderRuntimeContract(input)
+	current := captureProtectedProviderRuntimeContract(input, 0)
 	return valuesEqual(current.TopLevel, protected.TopLevel)
 }
 
@@ -1706,7 +1859,7 @@ func isProtectedProviderCoverageWorkItemContextEqual(input map[string]any, prote
 		len(protected.RepairPackage) == 0 {
 		return true
 	}
-	current := captureProtectedProviderCoverageWorkItemContext(input)
+	current := captureProtectedProviderCoverageWorkItemContext(input, 0)
 	if len(protected.TopLevel) > 0 {
 		return valuesEqual(current.TopLevel, protected.TopLevel)
 	}

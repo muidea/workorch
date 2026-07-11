@@ -364,6 +364,7 @@ func renderCurrentAuthorityDispatchInput(run *runModel.Run, stepID common.StepID
 	}
 	input = normalizeDispatchInputAuthorityFocus(input)
 	input = attachStagePacketToStepInput(run, stepID, input)
+	input = attachCurrentActionContractToInput(run, stepID, input)
 	input = synchronizeCurrentRequiredOutputMirrors(input)
 	input = attachCurrentActionContractToInput(run, stepID, input)
 	input = sealCurrentAuthoritySnapshotLineage(input)

@@ -4891,6 +4891,52 @@ func TestMapWorkspaceOutcomePrefersLatestTerminalRunOverStaleTaskProgress(t *tes
 	}
 }
 
+func TestMapWorkspaceOutcomePrefersActiveEffectiveRunOverHistoricalTerminalOutcome(t *testing.T) {
+	snapshot := WorkspaceSnapshot{
+		Workspace: Workspace{
+			ID:          "ws-active-effective-outcome",
+			State:       string(common.WorkspaceStateActive),
+			ActiveRunID: "run-active",
+		},
+		Run: &Run{
+			ID:          "run-active",
+			WorkspaceID: "ws-active-effective-outcome",
+			State:       string(common.RunStateActive),
+		},
+		Runs: []Run{
+			{ID: "run-historical", WorkspaceID: "ws-active-effective-outcome", State: string(common.RunStateFailed), FailureReason: "historical failure"},
+			{ID: "run-active", WorkspaceID: "ws-active-effective-outcome", State: string(common.RunStateActive)},
+		},
+		Results: []Result{
+			{
+				ID:          "run-historical/result/dod-assessment",
+				WorkspaceID: "ws-active-effective-outcome",
+				RunID:       "run-historical",
+				State:       string(common.ResultStateRejected),
+				Summary:     "historical rejected result",
+				CreatedAt:   "2026-07-11T08:00:00Z",
+			},
+		},
+		EventRecords: []EventRecord{
+			{
+				ID:          "evt-historical",
+				Topic:       runevents.TopicRunStateChanged,
+				OccurredAt:  "2026-07-11T08:00:00Z",
+				WorkspaceID: "ws-active-effective-outcome",
+				RunID:       "run-historical",
+			},
+		},
+	}
+
+	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	if outcome.RunID != "run-active" || outcome.State != string(common.RunStateActive) || outcome.Terminal || outcome.Accepted {
+		t.Fatalf("outcome = %+v, want active effective run instead of historical terminal outcome", outcome)
+	}
+	if outcome.ResultID != "" || outcome.Reason == "historical failure" || outcome.Summary == "historical rejected result" {
+		t.Fatalf("outcome = %+v, want no historical terminal result leakage", outcome)
+	}
+}
+
 func TestMapWorkspaceOutcomeDoesNotReuseAcceptedResultAfterDefinitionsReopenWorkspace(t *testing.T) {
 	snapshot := WorkspaceSnapshot{
 		Workspace: Workspace{

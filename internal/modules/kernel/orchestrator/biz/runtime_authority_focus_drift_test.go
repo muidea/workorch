@@ -1100,6 +1100,43 @@ func TestBlockOnDecisionPersistsAuthorityNormalizedOwnerState(t *testing.T) {
 	}
 }
 
+func TestCloseLoadedRunPersistsAuthorityNormalizedOwnerState(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-terminal-normalized-authority")
+	workspaceID := common.WorkspaceID("ws-terminal-normalized-authority")
+	run := runWithAuthorityFocusForTest("validate")
+	run.ID = runID
+	run.WorkspaceID = workspaceID
+	run.State = common.RunStateActive
+	run.ExecutionContext[coverageFocusKey] = map[string]any{
+		"id":                  "focus-cwi-stale",
+		"coverageWorkItemIds": []string{"cwi-stale"},
+	}
+	updateAuthorityScopeForTest(run, workspaceID, runID)
+
+	runRepo := memory.NewRunRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(nil, runRepo, memory.NewStepRepository(), workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository())
+
+	if err := orch.closeLoadedRun(ctx, run, common.RunStateFailed, "terminal failure"); err != nil {
+		t.Fatalf("closeLoadedRun: %v", err)
+	}
+	persisted, err := runRepo.GetByWorkspaceID(ctx, workspaceID, runID)
+	if err != nil {
+		t.Fatalf("load persisted run: %v", err)
+	}
+	if persisted.State != common.RunStateFailed {
+		t.Fatalf("persisted state = %s, want failed", persisted.State)
+	}
+	assertFocusIDForTest(t, mapFromValue(persisted.ExecutionContext[coverageFocusKey]), "focus-cwi-current")
+}
+
 func TestValidateConvergenceDispatchInputRejectsFocusDrift(t *testing.T) {
 	input := map[string]any{
 		convergenceAuthorityKey: map[string]any{

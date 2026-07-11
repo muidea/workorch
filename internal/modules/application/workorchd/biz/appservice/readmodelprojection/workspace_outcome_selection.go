@@ -5,6 +5,14 @@ import (
 )
 
 func selectWorkspaceOutcomeRun(snapshot readmodelcore.WorkspaceSnapshot) *readmodelcore.Run {
+	if snapshot.Workspace.ActiveRunID != "" {
+		if activeRun := workspaceRunByID(snapshot, snapshot.Workspace.ActiveRunID); activeRun != nil && !IsTerminalRunState(activeRun.State) {
+			return activeRun
+		}
+	}
+	if snapshot.Run != nil && !IsTerminalRunState(snapshot.Run.State) {
+		return snapshot.Run
+	}
 	selectedRun := latestWorkspaceRunForOutcome(snapshot)
 	if selectedRun == nil && snapshot.TaskProgress.RunID != "" {
 		selectedRun = workspaceRunByID(snapshot, snapshot.TaskProgress.RunID)

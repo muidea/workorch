@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -409,7 +410,7 @@ func TestProtectedCoverageWorkItemContextUsesTopLevelAuthority(t *testing.T) {
 		"repairActionPackage": map[string]any{
 			"coverageWorkItemContext": providerBudgetCoverageWorkItemContextForTest("cwi-repair", "repair mirror"),
 		},
-	})
+	}, 0)
 	input := map[string]any{
 		"coverageWorkItemContext": compactProviderCoverageWorkItemContext(topLevel),
 		"executionContextPackage": map[string]any{
@@ -430,7 +431,7 @@ func TestProtectedCoverageWorkItemContextFallsBackToNestedMirrorsWithoutTopLevel
 		"executionContextPackage": map[string]any{
 			"coverageWorkItemContext": providerBudgetCoverageWorkItemContextForTest("cwi-package", "package mirror"),
 		},
-	})
+	}, 0)
 	input := map[string]any{
 		"executionContextPackage": map[string]any{
 			"coverageWorkItemContext": providerBudgetCoverageWorkItemContextForTest("cwi-package-drift", "changed package mirror"),
@@ -983,6 +984,62 @@ func TestEnforceProviderRequestBudgetAdaptiveShrinkForStreamIncompleteRetry(t *t
 	}
 	if got.ContextBudget.ShrinkLevel < 4 {
 		t.Fatalf("contextBudget = %+v, want adaptive shrink level >=4 on stream incomplete retry attempt 2", got.ContextBudget)
+	}
+}
+
+func TestEnforceProviderRequestBudgetAdaptiveShrinkForContractViolationRetry(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-contract-retry",
+		RunID:       "run-contract-retry",
+		StepID:      "run-contract-retry/contract-retry-003",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"currentSoulStage":       "validation",
+			"runtimeRepairFollowUp":  true,
+			"runtimeRepairAttempt":   3,
+			"contractViolationRetry": true,
+			"contractViolationRecovery": map[string]any{
+				"correctionMode": "forced_narrow",
+			},
+			"failedExecutionGraph":  repeatedBudgetItems(120),
+			"workspaceFileManifest": repeatedBudgetItems(120),
+			"repairActionPackage": map[string]any{
+				"recentRepairAttempts": repeatedBudgetItems(40),
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence": true,
+					"acceptedKinds":                         []string{"validation/managed_session"},
+				},
+			},
+			"executionContext": map[string]any{
+				"goal": strings.Repeat("goal ", 200),
+				"dod":  strings.Repeat("dod ", 200),
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    32768,
+				MaxInputTokens:         21504,
+				ReservedOutputTokens:   4096,
+				BytesHardLimit:         256 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil || got.ContextBudget.ShrinkLevel < 4 {
+		t.Fatalf("contextBudget = %+v, want aggressive shrink on repeated contract retry", got.ContextBudget)
+	}
+	if !stringSliceContains(got.ContextBudget.Rules, "adaptive shrink based on runtime recovery lineage") {
+		t.Fatalf("contextBudget rules = %+v, want runtime recovery adaptive shrink rule", got.ContextBudget.Rules)
+	}
+	if got.ContextBudget.ActualBytes >= defaultProviderRequestBudgetBytes {
+		t.Fatalf("contextBudget actualBytes = %d, want repeated contract retry below default dynamic request budget", got.ContextBudget.ActualBytes)
+	}
+	if _, ok := got.Input["failedExecutionGraph"]; ok {
+		t.Fatalf("input retained failedExecutionGraph after repeated contract retry shrink")
 	}
 }
 
@@ -2174,6 +2231,168 @@ func TestEnforceProviderRequestBudgetNarrowsCurrentActionInputBeforeHardLimit(t 
 	}
 	if _, ok := got.Input["processEvidenceTimeline"]; ok {
 		t.Fatalf("input retained processEvidenceTimeline under current-action narrowing: %+v", got.Input["processEvidenceTimeline"])
+	}
+}
+
+func TestEnforceProviderRequestBudgetContractRetryTailIsBoundedAndMonotonic(t *testing.T) {
+	for _, itemCount := range []int{40, 89} {
+		t.Run(fmt.Sprintf("coverage-%d", itemCount), func(t *testing.T) {
+			actualBytes := make([]int, 0, 3)
+			for attempt := 1; attempt <= 3; attempt++ {
+				req := providerContractRetryBudgetFixture(itemCount, attempt)
+				got := enforceProviderRequestBudget(req)
+				if got.ContextBudget == nil {
+					t.Fatal("contextBudget = nil")
+				}
+				wantShrink := attempt + 1
+				if got.ContextBudget.ShrinkLevel < wantShrink {
+					t.Fatalf("attempt %d shrinkLevel = %d, want >= %d", attempt, got.ContextBudget.ShrinkLevel, wantShrink)
+				}
+				if got.ContextBudget.ActualBytes > defaultProviderRequestBudgetBytes || got.ContextBudget.OverBudget {
+					t.Fatalf("attempt %d budget = %+v, want <= %d bytes", attempt, got.ContextBudget, defaultProviderRequestBudgetBytes)
+				}
+				if got.ContextBudget.ContextGateAction != providerContextGatePass || len(got.ContextBudget.IntegrityWarnings) > 0 {
+					t.Fatalf("attempt %d context gate = %s warnings=%+v", attempt, got.ContextBudget.ContextGateAction, got.ContextBudget.IntegrityWarnings)
+				}
+				contract := recordFromAny(got.Input["currentActionContract"])
+				if stringValue(recordFromAny(contract["currentFocus"])["id"]) != "cwi-001" ||
+					!boolValue(recordFromAny(contract["requiredOutput"])["mustProduceConcreteValidationEvidence"]) {
+					t.Fatalf("attempt %d currentActionContract = %+v, want protected focus/requiredOutput", attempt, contract)
+				}
+				if stringValue(recordFromAny(got.Input["goal"])["id"]) != "goal-live" ||
+					stringValue(recordFromAny(got.Input["dod"])["id"]) != "dod-live" {
+					t.Fatalf("attempt %d goal/dod changed: goal=%+v dod=%+v", attempt, got.Input["goal"], got.Input["dod"])
+				}
+				actualBytes = append(actualBytes, got.ContextBudget.ActualBytes)
+			}
+			if actualBytes[1] > actualBytes[0] || actualBytes[2] > actualBytes[1] {
+				t.Fatalf("retry bytes = %+v, want monotonic non-increasing", actualBytes)
+			}
+		})
+	}
+}
+
+func providerContractRetryBudgetFixture(itemCount int, attempt int) llmmodels.ProviderRequest {
+	focus := map[string]any{
+		"id":                           "cwi-001",
+		"definitionRevision":           "definition-live",
+		"sourceScope":                  "dod",
+		"sourceRequirementId":          "dod-001",
+		"targetText":                   "validate current behavior",
+		"currentGap":                   "concrete validation evidence is missing",
+		"status":                       "in_progress",
+		"requiredEvidenceKinds":        []string{"validation"},
+		"missingEvidenceKinds":         []string{"validation"},
+		"acceptedEvidenceRefs":         []string{},
+		"rejectedEvidenceRefs":         []string{"rejected-validation-001"},
+		"nextAllowedConvergenceStates": []string{"need_validation", "need_assessment"},
+	}
+	items := make([]map[string]any, 0, itemCount)
+	for idx := 0; idx < itemCount; idx++ {
+		items = append(items, map[string]any{
+			"id":                   fmt.Sprintf("cwi-%03d", idx+1),
+			"definitionRevision":   "definition-live",
+			"sourceScope":          "dod",
+			"sourceRequirementId":  fmt.Sprintf("dod-%03d", idx+1),
+			"targetText":           strings.Repeat(fmt.Sprintf("coverage item %03d ", idx+1), 40),
+			"currentGap":           strings.Repeat("missing concrete evidence ", 30),
+			"status":               "open",
+			"missingEvidenceKinds": []string{"validation"},
+		})
+	}
+	coverageContext := map[string]any{
+		"definitionRevision": "definition-live",
+		"currentFocus":       focus,
+		"currentFocusItems":  items,
+		"unresolvedItems":    items,
+		"ledgerSummary":      items,
+		"summary":            map[string]any{"open": itemCount, "in_progress": 1},
+		"fullLedgerRef":      "evidence://coverage/full-ledger",
+	}
+	required := map[string]any{
+		"mustProduceConcreteValidationEvidence": true,
+		"mustDeclareValidationEvidenceMode":     true,
+		"acceptedKinds":                         []string{"validation/managed_session"},
+		"forbiddenKinds":                        []string{"patch/apply", "file/write", "git/write"},
+	}
+	progress := map[string]any{
+		"failureReason":    "validation_static_only",
+		"failureClass":     "runtime_failed",
+		"failureSignature": "class=runtime_failed|rule=validation_static_only",
+		"currentFailure": map[string]any{
+			"stage":               "llm_execution_graph_plan",
+			"violatedRule":        "validation_static_only",
+			"actualOutputSummary": strings.Repeat("static validation output ", 200),
+		},
+		"lastObservedFailure":    map[string]any{"reason": strings.Repeat("same rejected validation shape ", 200)},
+		"latestActionEvidence":   repeatedBudgetItems(itemCount),
+		"completedGraphEvidence": repeatedBudgetItems(itemCount),
+	}
+	return llmmodels.ProviderRequest{
+		WorkspaceID: "ws-live",
+		RunID:       "run-live",
+		StepID:      fmt.Sprintf("run-live/contract-retry-%03d", attempt),
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"workspaceId":            "ws-live",
+			"runtimeRepairFollowUp":  true,
+			"runtimeRepairAttempt":   attempt,
+			"contractViolationRetry": true,
+			"runtimeStage":           "verification",
+			"repairObjective":        "produce_concrete_validation_evidence",
+			"goal":                   map[string]any{"id": "goal-live", "content": strings.Repeat("stable goal ", 100)},
+			"dod":                    map[string]any{"id": "dod-live", "content": strings.Repeat("stable dod ", 100)},
+			"currentActionContract": map[string]any{
+				"schemaVersion":  "workorch.current_action_contract.v1",
+				"nextAction":     map[string]any{"kind": "validate"},
+				"currentFocus":   focus,
+				"requiredOutput": required,
+			},
+			"coverageWorkItemContext": coverageContext,
+			"contractViolationRecovery": map[string]any{
+				"violatedRule":        "validation_static_only",
+				"attempt":             attempt,
+				"maxAttempts":         10,
+				"correctionProfileId": "managed_validation_evidence",
+				"correctionMode":      "forced_narrow",
+				"expectedContract":    map[string]any{"historical": strings.Repeat("old expected contract ", 2000)},
+				"actualOutputSummary": map[string]any{"summary": strings.Repeat("rejected output ", 2000)},
+				"correctionContract":  map[string]any{"requiredOutputShape": "managed_validation_evidence"},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput":                required,
+				"coverageRepairRequired":        true,
+				"coverageTargetSet":             items,
+				"coverageWorkItemContext":       coverageContext,
+				"currentFailure":                progress["currentFailure"],
+				"currentExecutionProgress":      progress,
+				"lastFailureDiagnostics":        map[string]any{"details": strings.Repeat("historical diagnostics ", 2000)},
+				"previousRejectedOutputSummary": map[string]any{"content": strings.Repeat("old rejected output ", 2000)},
+			},
+			"stagePacket": map[string]any{
+				"schemaVersion":           "workorch.stage_packet.v1",
+				"workspaceId":             "ws-live",
+				"runId":                   "run-live",
+				"stepId":                  fmt.Sprintf("run-live/contract-retry-%03d", attempt),
+				"activeStage":             "verification",
+				"activeFocus":             focus,
+				"requiredOutput":          required,
+				"processEvidenceTimeline": repeatedBudgetItems(itemCount),
+			},
+			"processEvidenceTimeline": repeatedBudgetItems(itemCount),
+			"evidenceLedger":          repeatedBudgetItems(itemCount),
+			"failedExecutionGraph":    repeatedBudgetItems(itemCount),
+			"graphEvidence":           repeatedBudgetItems(itemCount),
+		},
+		Config: llmmodels.RedactedProviderConfig{ContextProfile: llmmodels.ProviderContextProfile{
+			ContextWindowTokens:    128000,
+			MaxInputTokens:         24576,
+			ReservedOutputTokens:   4096,
+			BytesHardLimit:         defaultProviderRequestBudgetBytes,
+			EstimatedTokensPerByte: 0.25,
+		}},
 	}
 }
 

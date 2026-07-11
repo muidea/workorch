@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -1310,6 +1311,9 @@ func concreteValidationFailureCanDriveStateChange(input map[string]any, pkg map[
 }
 
 func validationContractFailureMustRemainValidation(input map[string]any, pkg map[string]any, failedStep *runModel.Step) bool {
+	if validationContractViolationMustRemainValidation(input, pkg, failedStep) {
+		return true
+	}
 	if validationOnlyFocusPreemptsStateChangingRepair(input, pkg, failedStep) {
 		return true
 	}
@@ -1329,6 +1333,98 @@ func validationContractFailureMustRemainValidation(input map[string]any, pkg map
 		strings.Contains(text, "not accepted by current requiredoutput.acceptedkinds") ||
 		strings.Contains(text, "validation runtime dispatch requires validationevidence") ||
 		strings.Contains(text, "validation runtime dispatch requires concrete validationevidence")
+}
+
+func validationContractViolationMustRemainValidation(input map[string]any, pkg map[string]any, failedStep *runModel.Step) bool {
+	if !convergenceCurrentFocusNeedsValidationWithoutStateChange(input) {
+		return false
+	}
+	if latestFailedStepHasConcreteImplementationTargetEvidence(failedStep) {
+		return false
+	}
+	for _, rule := range validationContractViolationRuleCandidates(input, pkg, failedStep) {
+		if validationContractViolationRuleMustRemainValidation(rule) {
+			return true
+		}
+	}
+	return false
+}
+
+func latestFailedStepHasConcreteImplementationTargetEvidence(failedStep *runModel.Step) bool {
+	if failedStep == nil || failedStep.State != common.StepStateFailed {
+		return false
+	}
+	if validationFailureWithConcreteTargetRequiresStateChangingRepair(failedStep) {
+		return true
+	}
+	if !repairHasImplementationTargetEvidence(failedStep.Output, mapFromValue(failedStep.Output["repairActionPackage"])) {
+		return false
+	}
+	for _, diagnostic := range validationFailureDiagnosticCandidates(failedStep.Output, nil, nil) {
+		if allowedValidationDiagnosticClass(stringFromMap(diagnostic, "class")) == runtimemodel.ValidationDiagnosticImplementationGap ||
+			boolValue(diagnostic["stateChangingEvidenceNeeded"]) ||
+			boolValue(diagnostic["implementationGap"]) {
+			return true
+		}
+	}
+	return false
+}
+
+func validationContractViolationRuleCandidates(input map[string]any, pkg map[string]any, failedStep *runModel.Step) []string {
+	seen := map[string]bool{}
+	rules := make([]string, 0, 4)
+	addRule := func(rule string) {
+		rule = strings.TrimSpace(rule)
+		if rule == "" || seen[rule] {
+			return
+		}
+		seen[rule] = true
+		rules = append(rules, rule)
+	}
+	var addSource func(map[string]any)
+	addSource = func(source map[string]any) {
+		if len(source) == 0 {
+			return
+		}
+		addRule(stringFromMap(source, "contractViolationRule"))
+		addRule(stringFromMap(source, "violatedRule"))
+		if violation := mapFromValue(source[stepOutputKeyContractViolation]); len(violation) > 0 {
+			addRule(stringFromMap(violation, "violatedRule"))
+		}
+		if recovery := mapFromValue(source[stepInputKeyContractViolationRecovery]); len(recovery) > 0 {
+			addRule(stringFromMap(recovery, "violatedRule"))
+			addSource(mapFromValue(recovery["correctionContract"]))
+		}
+	}
+	if failedStep != nil {
+		addSource(failedStep.Output)
+		addSource(failedStep.Input)
+	}
+	addSource(input)
+	addSource(pkg)
+	for _, key := range []string{"failedStepOutput", "currentFailure", "lastFailureDiagnostics"} {
+		addSource(mapFromValue(input[key]))
+		addSource(mapFromValue(pkg[key]))
+	}
+	return rules
+}
+
+func validationContractViolationRuleMustRemainValidation(rule string) bool {
+	switch strings.TrimSpace(rule) {
+	case contractViolationRuleConcreteValidationMissing,
+		contractViolationRuleValidationEvidenceMetadataMissing,
+		contractViolationRuleValidationScratchRequired,
+		contractViolationRuleValidationScratchEscape,
+		contractViolationRuleValidationProcessControlForbidden,
+		contractViolationRuleValidationDetachedProcessForbidden,
+		contractViolationRuleValidationShellSafetyUnproven,
+		contractViolationRuleValidationStaticOnly,
+		contractViolationRuleManagedValidationRequired,
+		contractViolationRuleValidationRequiredOutputCapabilityMismatch:
+		return true
+	default:
+		return false
+	}
 }
 
 func validationRequiredOutputCapabilityMismatch(input map[string]any, pkg map[string]any, failedStep *runModel.Step) bool {
