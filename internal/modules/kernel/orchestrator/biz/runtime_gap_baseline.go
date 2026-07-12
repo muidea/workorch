@@ -661,7 +661,7 @@ func synchronizeCurrentRequiredOutputMirrors(input map[string]any) map[string]an
 		return input
 	}
 	input = synchronizeCurrentStagePacketMirror(input)
-	required := activeRequiredOutputForCurrentAction(input)
+	required := canonicalCurrentActionRequiredOutput(input)
 	if len(required) == 0 {
 		delete(input, "requiredOutput")
 		input["currentAuthorityRequiredOutputMirrorsCanonical"] = true
@@ -737,6 +737,19 @@ func synchronizeCurrentRequiredOutputMirrors(input map[string]any) map[string]an
 		input["executionContext"] = executionContext
 	}
 	return input
+}
+
+func canonicalCurrentActionRequiredOutput(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	state := strings.TrimSpace(stringFromMap(mapFromValue(input["convergenceContract"]), "state"))
+	nextAction := strings.TrimSpace(stringFromMap(currentActionNextActionFromInput(input), "kind"))
+	current := mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"])
+	if len(current) > 0 && currentAuthorityRenderedRequiredOutputMatchesState(input, current, state, nextAction) {
+		return normalizeCurrentAuthorityRequiredOutput(input, current)
+	}
+	return activeRequiredOutputForCurrentAction(input)
 }
 
 func synchronizeCurrentStagePacketMirror(input map[string]any) map[string]any {
@@ -2168,15 +2181,15 @@ func appendAuthorityDiagnostic(input map[string]any, code string, severity strin
 
 func firstRequiredOutputForSemantics(sources map[string]map[string]any) map[string]any {
 	for _, label := range []string{
+		"currentActionContract.requiredOutput",
+		"requiredOutput",
 		"repairActionPackage.requiredOutput",
 		"stagePacket.requiredOutput",
 		"stagePacket.nextAction.requiredOutput",
-		"currentActionContract.requiredOutput",
-		"requiredOutput",
+		"executionContext.requiredOutput",
 		"executionContext.repairActionPackage.requiredOutput",
 		"executionContext.stagePacket.requiredOutput",
 		"executionContext.stagePacket.nextAction.requiredOutput",
-		"executionContext.requiredOutput",
 	} {
 		if required := sources[label]; len(required) > 0 {
 			return required

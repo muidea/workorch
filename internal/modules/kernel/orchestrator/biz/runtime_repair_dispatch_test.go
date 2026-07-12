@@ -1164,6 +1164,79 @@ func TestRepairSubsystemFailRunReasonFromFailedStep(t *testing.T) {
 	}
 }
 
+func TestRepairSubsystemCoverageAssessmentRecomputeDispatchesCanonicalStateChange(t *testing.T) {
+	ctx := context.Background()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	run.ID = "run-coverage-recompute-state-change"
+	run.WorkspaceID = "ws-coverage-recompute-state-change"
+	run.InitialStepKind = llmcommon.StepKindWorkspaceExecution
+	updateAuthorityScopeForTest(run, run.WorkspaceID, run.ID)
+	stateChangeFocusForRepairDispatchTest(run)
+	staleValidation := map[string]any{
+		"mustProduceConcreteValidationEvidence": true,
+		"acceptedKinds":                         []string{"shell/command", managedValidationSessionNodeKind},
+		"forbiddenKinds":                        []string{"patch/apply", "git/write"},
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/step-1"),
+		RunID: run.ID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageRepair,
+			"repairObjective":        "complete_dod_goal_coverage_assessment",
+			"requiredOutput":         cloneStepPayload(staleValidation),
+			"repairActionPackage": map[string]any{
+				"requiredOutput": cloneStepPayload(staleValidation),
+			},
+			currentActionContractKey: map[string]any{
+				"nextAction":     map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+				"requiredOutput": cloneStepPayload(staleValidation),
+			},
+		},
+		Output: map[string]any{
+			"status":                       "failed",
+			"stage":                        "llm_decision_required",
+			"error":                        "decision requests a continuable candidate choice",
+			failureOutputKeyClass:          failureClassDoDCoverageMissing,
+			failureOutputKeySignature:      "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_decision_required",
+			"contractViolationRule":        contractViolationRuleCoverageAssessmentIncomplete,
+			outputKeyContractViolationType: contractViolationDoDAssessmentEvidenceMissing,
+		},
+	}
+	attachContractViolationDiagnostics(run, failedStep, common.ErrInvalidArgument)
+	violation := mapFromValue(failedStep.Output[stepOutputKeyContractViolation])
+	if stringFromMap(violation, "recoverability") != runtimemodel.ContractViolationRecoverabilityRecomputeAuthority {
+		t.Fatalf("contractViolation = %+v, want recompute_authority", violation)
+	}
+
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps:  stepRepo,
+		policy: NormalizeRuntimePolicy(RuntimePolicy{}),
+	}
+	spec, ok, err := newRepairSubsystem(stepRepo, nil).recoveryDispatchSpec(
+		ctx,
+		run,
+		failedStep,
+		common.ErrInvalidArgument,
+		runtimeRecoveryActionContractViolationRetry,
+		maxProviderRetryAttempts,
+		orch,
+		false,
+	)
+	if err != nil || !ok {
+		t.Fatalf("recoveryDispatchSpec ok/err = %v/%v, want first canonical recovery step", ok, err)
+	}
+	assertStateChangingAuthorityDispatchForTest(t, spec.Input)
+	if attempt := intFromValue(mapFromValue(spec.Input[stepInputKeyRecoveryBudgetScope])["attempt"]); attempt != 1 {
+		t.Fatalf("recoveryBudgetScope.attempt = %d, want 1", attempt)
+	}
+	if err := validateConvergenceDispatchInput(spec.Input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput() error = %v; input=%+v", err, spec.Input)
+	}
+}
+
 func stateChangeFocusForRepairDispatchTest(run *runmodel.Run) {
 	if run == nil || run.ExecutionContext == nil {
 		return

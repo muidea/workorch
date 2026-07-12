@@ -635,3 +635,93 @@ func TestRuntimeManagedTargetSnapshotAbstractRefsFailFast(t *testing.T) {
 		t.Fatalf("executionGraph = %+v, want no read-only graph for abstract refs", graph)
 	}
 }
+
+func TestSynchronizeCurrentRequiredOutputMirrorsUsesCurrentActionCanonicalContract(t *testing.T) {
+	canonical := stateChangingRepairRequiredOutput()
+	staleValidation := map[string]any{
+		"mustProduceConcreteValidationEvidence": true,
+		"acceptedKinds":                         []string{"shell/command", managedValidationSessionNodeKind},
+		"forbiddenKinds":                        []string{"patch/apply", "git/write"},
+	}
+	input := map[string]any{
+		"convergenceContract": map[string]any{
+			"state":                       convergenceStateNeedStateChange,
+			"stateChangingOutputRequired": true,
+		},
+		"stateChangingOutputRequired": true,
+		currentActionContractKey: map[string]any{
+			"nextAction":     map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+			"requiredOutput": cloneStepPayload(canonical),
+		},
+		"requiredOutput": cloneStepPayload(staleValidation),
+		"repairActionPackage": map[string]any{
+			"requiredOutput": cloneStepPayload(staleValidation),
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"nextAction": map[string]any{
+				"kind":           runtimemodel.NextActionTypeStateChange,
+				"requiredOutput": cloneStepPayload(staleValidation),
+			},
+			"requiredOutput": cloneStepPayload(staleValidation),
+		},
+	}
+
+	got := synchronizeCurrentRequiredOutputMirrors(input)
+	for label, required := range map[string]map[string]any{
+		"requiredOutput":                        mapFromValue(got["requiredOutput"]),
+		"repairActionPackage.requiredOutput":    mapFromValue(mapFromValue(got["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":            mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["requiredOutput"]),
+		"stagePacket.nextAction.requiredOutput": mapFromValue(mapFromValue(mapFromValue(got[stepInputKeyStagePacket])["nextAction"])["requiredOutput"]),
+		"currentActionContract.requiredOutput":  mapFromValue(mapFromValue(got[currentActionContractKey])["requiredOutput"]),
+	} {
+		if !requiredOutputRequiresStateChanging(required) ||
+			!requiredOutputHasAllowedStateChangingKind(required) ||
+			boolValue(required["mustProduceConcreteValidationEvidence"]) {
+			t.Fatalf("%s = %+v, want current-action canonical state-changing requiredOutput", label, required)
+		}
+	}
+}
+
+func TestConvergenceDispatchSemanticsPrefersCurrentActionRequiredOutput(t *testing.T) {
+	canonical := stateChangingRepairRequiredOutput()
+	staleValidation := map[string]any{
+		"mustProduceConcreteValidationEvidence": true,
+		"acceptedKinds":                         []string{"shell/command", managedValidationSessionNodeKind},
+		"forbiddenKinds":                        []string{"patch/apply", "git/write"},
+	}
+	input := map[string]any{
+		"convergenceContract": map[string]any{
+			"state":                       convergenceStateNeedStateChange,
+			"stateChangingOutputRequired": true,
+		},
+		"stateChangingOutputRequired": true,
+		currentActionContractKey: map[string]any{
+			"nextAction":     map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+			"requiredOutput": cloneStepPayload(canonical),
+		},
+		"repairActionPackage": map[string]any{
+			"repairObjective": repairObjectiveStateChangingOutput,
+			"requiredOutput":  cloneStepPayload(staleValidation),
+		},
+		stepInputKeyStagePacket: map[string]any{
+			"nextAction":     map[string]any{"kind": runtimemodel.NextActionTypeStateChange},
+			"requiredOutput": cloneStepPayload(staleValidation),
+		},
+		"requiredOutput": cloneStepPayload(staleValidation),
+	}
+
+	sources := map[string]map[string]any{
+		"currentActionContract.requiredOutput": mapFromValue(mapFromValue(input[currentActionContractKey])["requiredOutput"]),
+		"repairActionPackage.requiredOutput":   mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"]),
+		"stagePacket.requiredOutput":           mapFromValue(mapFromValue(input[stepInputKeyStagePacket])["requiredOutput"]),
+		"requiredOutput":                       mapFromValue(input["requiredOutput"]),
+	}
+	if selected := firstRequiredOutputForSemantics(sources); !requiredOutputRequiresStateChanging(selected) {
+		t.Fatalf("firstRequiredOutputForSemantics() = %+v, want current-action state-changing contract", selected)
+	}
+
+	input = synchronizeCurrentRequiredOutputMirrors(input)
+	if err := validateConvergenceDispatchRequiredOutputSemantics(input); err != nil {
+		t.Fatalf("validateConvergenceDispatchRequiredOutputSemantics() error = %v after canonical synchronization; input=%+v", err, input)
+	}
+}

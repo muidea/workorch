@@ -1043,6 +1043,123 @@ func TestEnforceProviderRequestBudgetAdaptiveShrinkForContractViolationRetry(t *
 	}
 }
 
+func TestCompactProviderContractViolationRecoveryIsIdempotent(t *testing.T) {
+	recovery := map[string]any{
+		"id":                   "contract-violation-live",
+		"sourceStepId":         "run-live/verify-static",
+		"stepId":               "run-live/verify-static",
+		"violationType":        "validation_evidence_required",
+		"violatedRule":         "validation_static_only",
+		"recoverability":       "narrow_contract",
+		"retryHint":            strings.Repeat("return managed validation evidence ", 200),
+		"correctionProfileId":  "managed_validation_evidence",
+		"correctionMode":       "forced_narrow",
+		"targetScope":          "focus=cwi-001",
+		"attempt":              1,
+		"maxAttempts":          2,
+		"signatureRepeatCount": 0,
+		"rejectedOutputRef":    "run-live/verify-static/rejected-output",
+		"budgetScope": map[string]any{
+			"workspaceId": "ws-live",
+			"runId":       "run-live",
+			"rootStepId":  "run-live/root",
+			"focusId":     "cwi-001",
+		},
+		"correctionContract": map[string]any{
+			"mode":                "forced_narrow",
+			"requiredOutputShape": "managed_validation_evidence",
+			"allowedOutputs":      repeatedBudgetItems(20),
+			"forbiddenOutputs":    repeatedBudgetItems(20),
+			"managedValidation": map[string]any{
+				"scratchRequired": true,
+				"timeoutRequired": true,
+			},
+		},
+		"actualOutputSummary": map[string]any{
+			"status":                "failed",
+			"stage":                 "llm_execution_graph_plan",
+			"failureClass":          "runtime_failed",
+			"contractViolationType": "validation_evidence_required",
+			"error":                 strings.Repeat("static validation output ", 200),
+		},
+	}
+
+	for _, adaptiveLevel := range []int{2, 3, 4} {
+		t.Run(fmt.Sprintf("level-%d", adaptiveLevel), func(t *testing.T) {
+			once := compactProviderContractViolationRecovery(recovery, adaptiveLevel)
+			twice := compactProviderContractViolationRecovery(once, adaptiveLevel)
+			if !valuesEqual(once, twice) {
+				t.Fatalf("compact recovery is not idempotent at level %d:\nonce=%+v\ntwice=%+v", adaptiveLevel, once, twice)
+			}
+		})
+	}
+}
+
+func TestProtectedProviderRuntimeContractUsesCaptureLevelAndOriginalFields(t *testing.T) {
+	input := map[string]any{
+		"runtimeStage":     "verification",
+		"runtimeStageMode": "strict_convergence",
+		"contractViolationRecovery": map[string]any{
+			"violatedRule":        "validation_static_only",
+			"correctionProfileId": "managed_validation_evidence",
+			"correctionMode":      "forced_narrow",
+			"rejectedOutputRef":   "run-live/verify-static/rejected-output",
+			"actualOutputSummary": map[string]any{
+				"status":       "failed",
+				"stage":        "llm_execution_graph_plan",
+				"failureClass": "runtime_failed",
+				"error":        strings.Repeat("static output ", 100),
+			},
+		},
+	}
+	protected := captureProtectedProviderRuntimeContract(input, 2)
+
+	current, ok := cloneAny(input)
+	if !ok {
+		t.Fatal("clone input failed")
+	}
+	currentInput := current.(map[string]any)
+	currentInput["contractViolationRecovery"] = compactProviderContractViolationRecovery(recordFromAny(currentInput["contractViolationRecovery"]), 2)
+	currentInput["currentRuntimeStage"] = "verification"
+	currentInput["currentRuntimeStageMode"] = "strict_convergence"
+	currentInput["currentSoulStage"] = "validation"
+	if !isProtectedProviderRuntimeContractEqual(currentInput, protected) {
+		t.Fatalf("derived runtime fields or same-level recovery compaction changed protected contract: %+v", currentInput)
+	}
+
+	currentInput["runtimeStage"] = "repair"
+	if isProtectedProviderRuntimeContractEqual(currentInput, protected) {
+		t.Fatal("runtimeStage mutation was not detected")
+	}
+}
+
+func TestEnforceProviderRequestBudgetPreservesProtectedEmptyCollections(t *testing.T) {
+	req := providerContractRetryBudgetFixture(40, 1)
+	currentAction := recordFromAny(req.Input["currentActionContract"])
+	currentFocus := recordFromAny(currentAction["currentFocus"])
+	currentFocus["acceptedEvidenceBindingByKind"] = map[string]any{}
+	currentFocus["acceptedEvidenceByKind"] = map[string]any{}
+	currentFocus["rejectedEvidenceByKind"] = map[string]any{}
+	currentAction["currentFocus"] = currentFocus
+	req.Input["currentActionContract"] = currentAction
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil || stringSliceContains(got.ContextBudget.IntegrityWarnings, "protected_runtime_contract_changed_after_context_budget") {
+		t.Fatalf("contextBudget = %+v, want protected current action without runtime drift warning", got.ContextBudget)
+	}
+	gotFocus := recordFromAny(recordFromAny(got.Input["currentActionContract"])["currentFocus"])
+	for _, key := range []string{"acceptedEvidenceBindingByKind", "acceptedEvidenceByKind", "rejectedEvidenceByKind"} {
+		value, ok := gotFocus[key]
+		if !ok {
+			t.Fatalf("currentFocus = %+v, missing protected empty collection %s", gotFocus, key)
+		}
+		mapped, ok := value.(map[string]any)
+		if !ok || mapped == nil || len(mapped) != 0 {
+			t.Fatalf("currentFocus.%s = %#v, want non-nil empty map", key, value)
+		}
+	}
+}
+
 func TestEnforceProviderRequestBudgetCurrentActionKeepsOnlyStagePacketSnapshotTransport(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-current-action",

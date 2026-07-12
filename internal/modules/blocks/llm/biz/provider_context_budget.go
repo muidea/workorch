@@ -389,18 +389,25 @@ func budgetProviderValue(value any, depth int, stringLimit, itemLimit, entryLimi
 		}
 		keys := make([]string, 0, len(typed))
 		for key := range typed {
+			if key == "_truncatedEntryCount" {
+				continue
+			}
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
-		out := make(map[string]any, min(len(keys), entryLimit))
+		out := make(map[string]any, min(len(keys), entryLimit)+1)
 		for _, key := range keys {
 			if len(out) >= entryLimit {
 				break
 			}
 			out[key] = budgetProviderValue(typed[key], depth+1, stringLimit, itemLimit, entryLimit, maxDepth)
 		}
+		truncatedEntryCount := max(0, intValue(typed["_truncatedEntryCount"]))
 		if len(keys) > entryLimit {
-			out["_truncatedEntryCount"] = len(keys) - entryLimit
+			truncatedEntryCount += len(keys) - entryLimit
+		}
+		if truncatedEntryCount > 0 {
+			out["_truncatedEntryCount"] = truncatedEntryCount
 		}
 		return out
 	case []map[string]any:
@@ -1332,7 +1339,8 @@ type protectedProviderRepairTargets struct {
 }
 
 type protectedProviderRuntimeContract struct {
-	TopLevel map[string]any
+	TopLevel      map[string]any
+	AdaptiveLevel int
 }
 
 type protectedProviderCoverageWorkItemContext struct {
@@ -1544,7 +1552,10 @@ func captureProtectedProviderRepairTargets(input map[string]any, adaptiveLevel i
 }
 
 func captureProtectedProviderRuntimeContract(input map[string]any, adaptiveLevel int) protectedProviderRuntimeContract {
-	ret := protectedProviderRuntimeContract{TopLevel: map[string]any{}}
+	ret := protectedProviderRuntimeContract{
+		TopLevel:      map[string]any{},
+		AdaptiveLevel: adaptiveLevel,
+	}
 	if len(input) == 0 {
 		return ret
 	}
@@ -1614,13 +1625,16 @@ func compactProviderContractViolationRecovery(recovery map[string]any, adaptiveL
 	}
 	if actual := recordFromAny(recovery["actualOutputSummary"]); len(actual) > 0 {
 		summary := map[string]any{}
-		for _, key := range []string{"status", "stage", "failureClass", "contractViolationType"} {
+		for _, key := range []string{"status", "stage", "failureClass", "contractViolationType", "rejectedOutputRef"} {
 			if value, ok := actual[key]; ok {
 				summary[key] = value
 			}
 		}
-		if value, ok := recovery["rejectedOutputRef"]; ok {
-			summary["rejectedOutputRef"] = value
+		if _, ok := summary["rejectedOutputRef"]; !ok {
+			value, ok := recovery["rejectedOutputRef"]
+			if ok {
+				summary["rejectedOutputRef"] = value
+			}
 		}
 		if len(summary) > 0 {
 			out["actualOutputSummary"] = summary
@@ -1901,8 +1915,16 @@ func isProtectedProviderRuntimeContractEqual(input map[string]any, protected pro
 	if len(protected.TopLevel) == 0 {
 		return true
 	}
-	current := captureProtectedProviderRuntimeContract(input, 0)
-	return valuesEqual(current.TopLevel, protected.TopLevel)
+	current := captureProtectedProviderRuntimeContract(input, protected.AdaptiveLevel)
+	currentProtectedFields := make(map[string]any, len(protected.TopLevel))
+	for key := range protected.TopLevel {
+		value, ok := current.TopLevel[key]
+		if !ok {
+			return false
+		}
+		currentProtectedFields[key] = value
+	}
+	return valuesEqual(currentProtectedFields, protected.TopLevel)
 }
 
 func isProtectedProviderCoverageWorkItemContextEqual(input map[string]any, protected protectedProviderCoverageWorkItemContext) bool {

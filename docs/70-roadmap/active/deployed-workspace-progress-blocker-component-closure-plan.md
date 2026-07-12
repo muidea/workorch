@@ -4,7 +4,7 @@ Status: active
 
 Type: closure-plan
 
-Last Updated: 2026-07-11
+Last Updated: 2026-07-12
 
 Related:
 
@@ -1057,6 +1057,287 @@ git diff --check
 ```
 
 下一步必须重新部署当前构建，并使用两个全新 Run 执行 RC10 live gate；未通过 live gate 前不得将 RC10 或本文标记为 `completed`。
+
+## Fifth Deployment Live Verification and Reopened Closure Plan
+
+核对时间：2026-07-11 23:54 至 2026-07-12 00:03。
+
+部署版本：
+
+```text
+commit=88d9ef2c1854cf8914b695c48050f7f3cdf33e0b
+PID=2388486
+startedAt=2026-07-11 23:54:42 +08:00
+/readyz=ready
+global source/projected revision=2783/2783
+workspaceTotal=2
+```
+
+本轮部署后有效 Run：
+
+- LSP：`ws-5cfc9874cebda0b8/run-005-replan-001`
+- 网关：`ws-609ce9149734ebb7/run-006-replan-001`
+
+### RC10 Live 已通过子项
+
+LSP Run 已产生 RC10 所需的真实 managed-validation correction profile：
+
+```text
+violatedRule=validation_static_only
+correctionProfileId=managed_validation_evidence
+previousSubmittedRequestBytes=110940
+recoveryRequestBytes=90574
+maxRecoveryRequestBytes=110940
+minimumProtectedRequestBytes=90574
+shrinkLevel=2
+providerSubmitted=false
+```
+
+已确认：
+
+- `validation_static_only` 已真实映射到 `managed_validation_evidence`，RC05 长期缺失的 live profile 证据已出现。
+- recovery request 从 `110,940` 收缩至 `90,574 bytes`，低于 96 KiB 且满足 inherited ceiling。
+- recovery 的 workspace、run、root step、focus、rule、profile、attempt 和 max attempts scope 均完整。
+- 本地 context gate 失败未进入 provider retry；`providerSubmitted=false` 符合 RC10 failure classification。
+- `stablePrefixHash` 与 `renderedStablePrefixHash` 在父请求和 recovery 中保持稳定。
+- 当前失败不是 P0 overflow、provider timeout、provider configuration 或 projection lag。
+
+### Live 新阻塞一：protected runtime contract 完整性误判
+
+LSP contract retry 在请求已低于预算后被以下本地 gate 拦截：
+
+```text
+stage=llm_context_integrity_failed
+contextGateAction=fail_fast
+contextGateReason=protected_runtime_contract_changed_after_context_budget
+providerSubmitted=false
+```
+
+Decision ticket 明确将依赖标记为 `runtime_context_gate`，允许动作仅为 `terminate` 或 `replan`。这说明当前阻塞发生在 `blocks/llm` 的本地 request rendering/integrity 判断，不是用户需要补充的信息或外部 provider 问题。
+
+已定位的实现级原因：
+
+1. `captureProtectedProviderRuntimeContract(input, adaptiveLevel)` 按 level 2 保存 compact recovery contract，但 `isProtectedProviderRuntimeContractEqual` 固定以 level 0 重捕获当前值，比较双方不处于同一 normalization level。
+2. `restoreProtectedProviderRuntimeContract` 恢复后，`normalizeAdaptiveProviderRecoveryTail` 再次压缩 `contractViolationRecovery`；当前 `compactProviderContractViolationRecovery` 对已压缩输入不完全幂等，第二次压缩仍会删减字段或加入截断摘要。
+3. `currentActionContract.currentFocus` 中空 evidence binding map 在预算处理后从 `{}` 变为 `null`，精确合同比较将该 transport normalization 判定为语义变化。
+4. budget/rendering 阶段可能补充派生 runtime stage mirror；完整性检查若比较整个重捕获 map，会把原输入不存在的派生字段误判为受保护合同被修改。
+
+因此 RC10 的 request ceiling、failure classification 和 provider submission gate 已部分通过，但 protected contract integrity 尚未闭环。
+
+### Live 新阻塞二：authority recompute 选取陈旧 requiredOutput
+
+网关初始 LLM Step 返回 continuable candidate decision，runtime 正确记录：
+
+```text
+violatedRule=coverage_assessment_incomplete
+recoverability=recompute_authority
+correctionProfileId=state_changing_required_output
+focusId=cwi-085
+```
+
+但没有形成 contract retry 或 runtime repair Step，Run 以实际 0 次 retry 直接失败：
+
+```text
+runtime repair dispatch failed:
+runtime_internal_contract_misalignment:
+contractState=need_state_change requires state-changing requiredOutput
+```
+
+当前 snapshot 中 convergence authority、stage packet 和 current action 已包含 state-changing accepted kinds，但 dispatch semantic preflight 通过 `firstRequiredOutputForSemantics` 选取到的生效 requiredOutput 仍不具备 state-changing 语义。说明 diagnostic lineage、旧 assessment contract 或并列 requiredOutput mirror 仍可能先于 canonical current action 被选为 dispatch 权威。
+
+该失败不是 contract violation 不可恢复：`coverage_assessment_incomplete` 已正确分类为 `recompute_authority`。真正问题是 authority recompute 完成后，current action、convergence contract 和 dispatch semantic requiredOutput 没有以同一个 canonical snapshot 原子提交。
+
+### RC11：收口 adaptive protected runtime contract
+
+#### Owner 与边界
+
+- Owner：`blocks/llm`。
+- 只负责 provider request rendering、budget normalization、protected contract restore 与 integrity gate。
+- 不得在 LLM block 内修改 convergence state、coverage authority 或 recovery policy。
+
+#### 必须修改
+
+1. 在 `protectedProviderRuntimeContract` 中保存捕获时的 adaptive level 或等价 normalization profile。
+2. `isProtectedProviderRuntimeContractEqual` 必须使用与 protected snapshot 相同的 normalization level，禁止固定以 level 0 比较 level 2+ snapshot。
+3. `compactProviderContractViolationRecovery` 必须满足幂等合同：
+
+   ```text
+   compact(compact(x, level), level) == compact(x, level)
+   ```
+
+4. restore 与 adaptive normalization 只能形成一次确定性转换；不得在每个 budget 阶段重复压缩同一 protected contract。
+5. 完整性检查只比较原始输入中实际受保护的字段；预算阶段新增的派生 mirror 不得被视为原合同字段变化。
+6. 统一空集合语义。受保护合同中的空 map、空 slice 与 `null` 不得因 transport compaction 互换；如确需 canonicalization，捕获与比较必须使用相同 canonical representation。
+7. 保持当前完整性门禁强度：Goal、DoD、current focus、current action、requiredOutput、runtime stage 和 correction contract 的真实删除、弱化或替换仍必须 fail fast。
+
+#### 目标文件
+
+- `internal/modules/blocks/llm/biz/provider_context_budget.go`
+- `internal/modules/blocks/llm/biz/provider_context_budget_test.go`
+- 与 recovery live fixture 直接相关的 LLM budget/cache tests。
+
+#### 回归测试
+
+- level 2、3、4 的 contract violation recovery 连续压缩两次结果完全一致。
+- `validation_static_only -> managed_validation_evidence` fixture 在 96 KiB ceiling 下无 integrity warning。
+- recovery request 不高于 `previousSubmittedRequestBytes` 与 `maxRecoveryRequestBytes`。
+- `providerSubmitted` 仅在通过 context gate 并实际调用 provider 后变为 true。
+- `{}`、`[]` 和 `null` 在 protected current action contract 中保持既定 canonical 语义。
+- 删除 Goal/DoD、requiredOutput 或 correction required fields 时仍产生对应 integrity warning。
+- stable prefix 两类 hash 不因 adaptive retry level 漂移。
+
+### RC12：收口 recompute authority 的 canonical requiredOutput
+
+#### Owner 与边界
+
+- Owner：`kernel/orchestrator`。
+- Orchestrator 继续作为 convergence、authority recompute、recovery 和 dispatch owner。
+- 不修改 Run owner、Result owner、projection owner 或 EventHub 交互方向。
+
+#### 必须修改
+
+1. `coverage_assessment_incomplete + recompute_authority` 完成后，以 `currentActionContract.requiredOutput` 作为唯一 canonical 当前动作合同。
+2. 从 canonical requiredOutput 同步重建以下 mirror：
+
+   - 顶层 `requiredOutput`；
+   - `repairActionPackage.requiredOutput`；
+   - `stagePacket.requiredOutput`；
+   - `stagePacket.nextAction.requiredOutput`；
+   - `convergenceContract.state`、`repairObjective` 与 `stateChangingOutputRequired`。
+
+3. `need_state_change` 必须同时满足：
+
+   ```text
+   stateChangingOutputRequired=true
+   mustIncludeStateChangingNode=true
+   acceptedKinds contains at least one allowed state-changing kind
+   repairObjective=produce_state_changing_output
+   ```
+
+4. authority recompute 切换到 state change 时，清除 assessment-only、validation-only、failure-evidence acquisition 等不再生效的旧动作状态。
+5. `firstRequiredOutputForSemantics` 或其替代实现必须优先读取 canonical current action；diagnostic lineage、violation expected contract、rejected output 和旧 repair package 只能用于诊断，不得参与当前 dispatch authority 选择。
+6. authority finalization 与 mirror rebuild 必须作为一个原子 builder 输出；dispatch preflight 不得看到 state 已更新但 requiredOutput 尚未更新的中间态。
+7. 真正无法形成合法 current action 时继续返回 `runtime_internal_contract_misalignment`，不得通过跳过 preflight 掩盖内部冲突。
+
+#### 目标文件
+
+- `internal/modules/kernel/orchestrator/biz/runtime_gap_baseline.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair_input.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_contract_violation.go`
+- authority/current-action/repair dispatch 相关测试文件。
+
+#### 回归测试
+
+- `coverage_assessment_incomplete + recompute_authority + need_state_change` 能成功创建第一个 recovery Step。
+- retry attempt 从 0 进入 1，不因 dispatch semantic preflight 直接终止 Run。
+- canonical current action 与全部 requiredOutput mirror 完全一致。
+- 陈旧 assessment requiredOutput 不得覆盖 state-changing requiredOutput。
+- state-changing accepted kinds 与当前 runtime capabilities 相容。
+- 真正的 authority state/requiredOutput 冲突仍被 fail fast 拦截。
+
+### RC13：验证与重新部署顺序
+
+必须按以下顺序执行，避免在错误 authority contract 上验证 request rendering：
+
+1. 完成 RC11 的 adaptive protected contract 幂等性和同级完整性比较。
+2. 完成 RC12 的 canonical requiredOutput 原子构建与 semantic selection。
+3. 运行 focused tests。
+4. 运行全量组件、格式、vet 和 boundary gates。
+5. 重新部署当前 commit 构建的新二进制。
+6. 创建或恢复能够触发对应场景的新 Run，重新执行双 workspace live gate。
+
+Focused tests：
+
+```bash
+go test ./internal/modules/blocks/llm/biz -count=1
+go test ./internal/modules/kernel/orchestrator/biz -count=1
+```
+
+Full gates：
+
+```bash
+go test -p 1 ./internal/modules/... -count=1
+go test ./... -count=1
+make fmt-check
+make vet
+make verify-boundary-contract
+git diff --check
+```
+
+### RC11-RC13 最终 Live Gate
+
+LSP 必须满足：
+
+- 再次触发 `validation_static_only` 并生成 `managed_validation_evidence` recovery。
+- recovery request 小于 96 KiB，且不高于上一实际提交请求。
+- 不再出现 `protected_runtime_contract_changed_after_context_budget`。
+- context gate 通过后 recovery 实际提交 provider，并生成 `validation/managed_session` 或合同允许的真实治理 blocker。
+- stable prefix 两类 hash 保持稳定。
+
+网关必须满足：
+
+- `coverage_assessment_incomplete` 进入 authority recompute。
+- 至少生成一次 contract/runtime recovery Step，不再以实际 0 次 retry 终止。
+- 不再出现 `contractState=need_state_change requires state-changing requiredOutput`。
+- state-changing Step 明确绑定 `cwi-085` 或 runtime 当时的 canonical current focus。
+- Run 正向进入验证、下一 coverage focus，或仅在真实外部依赖存在时进入治理阻塞。
+
+公共门禁：
+
+- `/readyz=ready`，source/projected revision 对齐。
+- recovery request bytes/tokens 在同 scope 内单调不增。
+- 本地 context/budget failure 不进入 provider retry，也不生成 provider configuration 提示。
+- terminal Run 的 activeRunId、runtime resources、Run/Result/outcome 与 projection 一致。
+
+RC11 至 RC13 和上述双 workspace live gate 全部通过前，RC10 只能标记为 `partially live verified`，CC01、CC02 与 CC06 继续保持 reopened/failed，本文不得标记为 `completed`。
+
+### RC11-RC13 代码收口执行记录（2026-07-12）
+
+RC11、RC12 的代码侧收口和 RC13 静态/测试门禁已完成，等待重新部署后的双 workspace live 验证。本文继续保持 `active`。
+
+RC11 已完成：
+
+- `protectedProviderRuntimeContract` 记录捕获时的 adaptive level，完整性比较使用相同 normalization level，不再固定回到 level 0。
+- runtime contract equality 只比较原输入实际受保护的字段；budget/rendering 阶段新增的派生 stage mirror 不再被误判为原合同变化。
+- `budgetProviderValue` 对已有 `_truncatedEntryCount` 采用累计且幂等的处理方式，不再把截断元数据作为普通 entry 重复截断。
+- `compactProviderContractViolationRecovery` 保留已压缩 `actualOutputSummary.rejectedOutputRef`，level 2、3、4 连续压缩满足幂等合同。
+- protected current action 中的非 nil 空 map 在 adaptive budget 后保持空 map，不再静默归一化为 `null`。
+- Goal/DoD、runtime stage、current action 和 correction contract 的真实变化仍由 integrity gate 拦截。
+
+RC12 已完成：
+
+- requiredOutput mirror 同步优先读取已经生成的 `currentActionContract.requiredOutput`，并验证其与当前 convergence state/next action 语义一致。
+- current action 缺失或与当前 state 不相容时，才回退到现有 authority-derived requiredOutput builder。
+- semantic preflight 的首选 requiredOutput 改为 current action，其次才是顶层和其它 mirror；diagnostic lineage 或陈旧 repair package 不再优先于 canonical current action。
+- mirror synchronization 继续覆盖顶层、repair package、stage packet、stage packet next action 和 execution context；真正未同步的 mirror 仍会 fail fast。
+- 新增 `coverage_assessment_incomplete + recompute_authority + need_state_change` recovery dispatch 回归，确认第一个 retry attempt 能生成 canonical state-changing Step，而不是以实际 0 次 retry 终止。
+
+新增或扩展的关键回归：
+
+- adaptive level 2/3/4 contract violation recovery 幂等压缩。
+- protected runtime contract 同级比较与派生字段隔离。
+- protected current action 空集合保持。
+- current action 覆盖 stale validation requiredOutput mirrors。
+- semantic preflight 优先使用 canonical current action，同时继续检查全部 mirror 一致性。
+- coverage assessment authority recompute 生成 attempt 1 state-changing recovery Step。
+
+已通过：
+
+```text
+go test ./internal/modules/blocks/llm/biz -count=1
+go test ./internal/modules/kernel/orchestrator/biz -count=1
+go test -p 1 ./internal/modules/... -count=1
+go test -p 1 ./... -count=1
+make fmt-check
+make vet
+make verify-boundary-contract
+git diff --check
+```
+
+并行执行 `go test ./... -count=1` 时，`internal/modules/application/workorchd/biz/appservice/TestReadApprovalWithBackendIncludesAutoGovernanceSummary` 曾在 `mcpregistry.Module.Start -> Hub.Subscribe` 触发一次 10 分钟测试超时。该测试单独复跑和 `appservice` 整包复跑均通过，随后串行 `go test -p 1 ./... -count=1` 全量通过。当前没有证据表明该 EventHub 测试夹具启动竞争由 RC11/RC12 修改引入。
+
+下一步必须重新部署包含本轮修改的新二进制，并执行 RC11-RC13 最终 Live Gate。live 验证通过前，不得关闭 CC01、CC02、CC06 或将本文标记为 `completed`。
 
 ### Architecture Boundary
 
