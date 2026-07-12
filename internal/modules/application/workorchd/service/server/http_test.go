@@ -5961,7 +5961,9 @@ func TestServerStateGovernanceResumeDoesNotCompleteWhenReadbackStillBlockedOnRes
 		State:            string(common.RunStateBlockedOnDecision),
 		BlockingTicketID: ticketID,
 	}
+	resumeCalls := 0
 	state.resumeRun = func(context.Context, string, string, string, ...map[string]any) (appservice.Run, error) {
+		resumeCalls++
 		return staleRun, nil
 	}
 	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
@@ -5989,8 +5991,8 @@ func TestServerStateGovernanceResumeDoesNotCompleteWhenReadbackStillBlockedOnRes
 	state.runContinuations.governanceMu.Lock()
 	_, pending := state.runContinuations.governancePending[pendingKey]
 	state.runContinuations.governanceMu.Unlock()
-	if !pending {
-		t.Fatalf("governance resume pending entry was cleared despite unresolved owner readback")
+	if pending {
+		t.Fatalf("governance resume pending entry remained after the resolution-scoped owner attempt")
 	}
 	diagnostics := state.schedulerDiagnostics.snapshot(workspaceID, runID)
 	if diagnostics == nil || diagnostics.LatestContinuation == nil {
@@ -6003,6 +6005,17 @@ func TestServerStateGovernanceResumeDoesNotCompleteWhenReadbackStillBlockedOnRes
 		latest.Readback == nil ||
 		latest.Readback.Reason != "blocked_on_resolved_decision" {
 		t.Fatalf("latest continuation = %+v, want governance readback failure", latest)
+	}
+	if resumeCalls != 1 {
+		t.Fatalf("resume calls = %d, want one owner attempt", resumeCalls)
+	}
+	routine.function = nil
+	state.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+	}}, 0)
+	if routine.function != nil || resumeCalls != 1 {
+		t.Fatalf("duplicate resolution scheduled another owner attempt: function=%v calls=%d", routine.function != nil, resumeCalls)
 	}
 }
 

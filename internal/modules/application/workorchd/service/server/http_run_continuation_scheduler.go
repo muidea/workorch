@@ -35,21 +35,23 @@ type runContinuationScheduler struct {
 	runStarted map[string]struct{}
 	runPending map[string]runContinuationRequest
 
-	governanceMu      sync.Mutex
-	governanceStarted map[string]struct{}
-	governancePending map[string]governanceRunResumeRef
+	governanceMu        sync.Mutex
+	governanceStarted   map[string]struct{}
+	governancePending   map[string]governanceRunResumeRef
+	governanceAttempted map[string]struct{}
 }
 
 func newRunContinuationScheduler(state *serverState) *runContinuationScheduler {
 	return &runContinuationScheduler{
-		state:             state,
-		replanStarted:     map[string]struct{}{},
-		restartStarted:    map[string]struct{}{},
-		restartPending:    map[string]workspaceRestartRequest{},
-		runStarted:        map[string]struct{}{},
-		runPending:        map[string]runContinuationRequest{},
-		governanceStarted: map[string]struct{}{},
-		governancePending: map[string]governanceRunResumeRef{},
+		state:               state,
+		replanStarted:       map[string]struct{}{},
+		restartStarted:      map[string]struct{}{},
+		restartPending:      map[string]workspaceRestartRequest{},
+		runStarted:          map[string]struct{}{},
+		runPending:          map[string]runContinuationRequest{},
+		governanceStarted:   map[string]struct{}{},
+		governancePending:   map[string]governanceRunResumeRef{},
+		governanceAttempted: map[string]struct{}{},
 	}
 }
 
@@ -281,11 +283,19 @@ func (s *runContinuationScheduler) resolvedGovernanceResumeRefForRun(ctx context
 	if workspaceID == "" || runID == "" {
 		return governanceRunResumeRef{}, false
 	}
+	ref := governanceRunResumeRef{WorkspaceID: workspaceID, RunID: runID, Intent: "resume", Reason: "governance_recovery"}
 	switch common.RunState(run.State) {
 	case common.RunStateBlockedOnDecision:
-		if strings.TrimSpace(run.BlockingTicketID) == "" || !s.runHasResolvedDecision(ctx, workspaceID, runID, run.BlockingTicketID) {
+		decision, ok := s.resolvedDecisionForRun(ctx, workspaceID, runID, run.BlockingTicketID)
+		if !ok {
 			return governanceRunResumeRef{}, false
 		}
+		ref.DecisionID = decision.ID
+		ref.ResolutionID = decision.ResolutionID
+		ref.AuthoritySnapshotID = firstNonEmptyServerValue(
+			stringFromServerMap(decision.Context, "currentAuthoritySnapshotId"),
+			stringFromServerMap(decision.Context, "authoritySnapshotId"),
+		)
 	case common.RunStateBlockedOnApproval:
 		if strings.TrimSpace(run.BlockingApprovalID) == "" || !s.runHasResolvedApproval(ctx, workspaceID, runID, run.BlockingApprovalID) {
 			return governanceRunResumeRef{}, false
@@ -293,7 +303,32 @@ func (s *runContinuationScheduler) resolvedGovernanceResumeRefForRun(ctx context
 	default:
 		return governanceRunResumeRef{}, false
 	}
-	return governanceRunResumeRef{WorkspaceID: workspaceID, RunID: runID, Intent: "resume", Reason: "governance_recovery"}, true
+	return ref, true
+}
+
+func (s *runContinuationScheduler) resolvedDecisionForRun(ctx context.Context, workspaceID string, runID string, ticketID string) (appservice.Decision, bool) {
+	if s == nil || s.state == nil || s.state.listDecisions == nil || strings.TrimSpace(ticketID) == "" {
+		return appservice.Decision{}, false
+	}
+	items, err := s.state.listDecisions(ctx, s.state.config.Backend, s.state.config.DataRoot, workspaceID, runID)
+	if err != nil {
+		slog.Warn("workorch governance blocked run recovery decision lookup failed", "workspaceID", workspaceID, "runID", runID, "ticketID", ticketID, "err", err)
+		return appservice.Decision{}, false
+	}
+	for _, item := range items {
+		if item.ID == ticketID && item.WorkspaceID == workspaceID && item.RunID == runID && item.State == string(common.DecisionTicketStateResolved) {
+			return item, true
+		}
+	}
+	return appservice.Decision{}, false
+}
+
+func stringFromServerMap(value map[string]any, key string) string {
+	if value == nil {
+		return ""
+	}
+	text, _ := value[key].(string)
+	return strings.TrimSpace(text)
 }
 
 func (s *runContinuationScheduler) runHasResolvedDecision(ctx context.Context, workspaceID string, runID string, ticketID string) bool {
@@ -556,6 +591,9 @@ func (s *runContinuationScheduler) enqueueGovernanceResumeRefs(refs []governance
 		if key == "" {
 			continue
 		}
+		if _, attempted := s.governanceAttempted[key]; attempted {
+			continue
+		}
 		s.governancePending[key] = ref
 	}
 }
@@ -600,6 +638,8 @@ func (s *runContinuationScheduler) drainGovernanceResumeQueue(priority int) bool
 			if resumeRef.WorkspaceID != "" {
 				ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(resumeRef.WorkspaceID))
 			}
+			s.markGovernanceResumeAttempted(resumeKey)
+			completePending = true
 			item, err := state.resumeRun(ctx, state.config.Backend, state.config.DataRoot, resumeRef.RunID)
 			if err != nil {
 				if !s.governanceResumeRefStillNeedsWork(ctx, resumeRef) {
@@ -611,7 +651,6 @@ func (s *runContinuationScheduler) drainGovernanceResumeQueue(priority int) bool
 				slog.Warn("workorch governance resume failed", "workspaceID", resumeRef.WorkspaceID, "runID", resumeRef.RunID, "err", err)
 				return
 			}
-			completePending = true
 			state.metrics.observeRunOutcome(item)
 			ok, detail, readback := s.runContinuationConfirmedAdvanced(ctx, runContinuationRequest{
 				WorkspaceID: resumeRef.WorkspaceID,
@@ -620,7 +659,6 @@ func (s *runContinuationScheduler) drainGovernanceResumeQueue(priority int) bool
 				Priority:    priority,
 			}, item)
 			if !ok {
-				completePending = false
 				s.recordContinuationFailed(resumeRef.WorkspaceID, resumeRef.RunID, schedulerKindGovernanceContinuation, schedulerReasonOwnerReadbackNotAdvanced, fmt.Errorf("%s", detail), readback)
 				slog.Warn("workorch governance resume owner readback did not advance", "workspaceID", resumeRef.WorkspaceID, "runID", resumeRef.RunID, "detail", detail)
 				return
@@ -636,6 +674,18 @@ func (s *runContinuationScheduler) drainGovernanceResumeQueue(priority int) bool
 			return false
 		}
 	}
+}
+
+func (s *runContinuationScheduler) markGovernanceResumeAttempted(key string) {
+	if s == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+	s.governanceMu.Lock()
+	defer s.governanceMu.Unlock()
+	if s.governanceAttempted == nil {
+		s.governanceAttempted = map[string]struct{}{}
+	}
+	s.governanceAttempted[key] = struct{}{}
 }
 
 func (s *runContinuationScheduler) nextPendingGovernanceResume() (string, governanceRunResumeRef, bool) {

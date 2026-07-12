@@ -12,6 +12,7 @@ import (
 	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) error {
@@ -452,6 +453,12 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 		resumeInput,
 	)
 	if err != nil {
+		if errors.Is(err, common.ErrBlocked) && deterministicContextGateResumeBlocked(ctx, o.steps, resumeAfterStepID, resumeInput) {
+			if reopenErr := o.reopenDeterministicContextGateDecision(ctx, r, resumeAfterStepID, resumeInput); reopenErr != nil {
+				return errors.Join(err, reopenErr)
+			}
+			return common.ErrBlocked
+		}
 		return o.failResolvedDecisionResume(ctx, r, originalResumeState, executionContextPatch, err)
 	}
 	resumeRun.State = common.RunStateActive
@@ -478,6 +485,50 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 		return errors.Join(o.failRunningResume(ctx, r.ID, err), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 	}
 	return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
+}
+
+func deterministicContextGateResumeBlocked(ctx context.Context, steps repository.StepRepository, stepID common.StepID, resumeInput map[string]any) bool {
+	if steps == nil || stepID == "" || !contextGateDecisionResumeInput(resumeInput) {
+		return false
+	}
+	step, err := steps.Get(ctx, stepID)
+	return err == nil && deterministicProtectedContextFloorFailure(step) && !contextIntegrityResolutionChangesRequestScope(step, resumeInput)
+}
+
+func (o *RuntimeOrchestrator) reopenDeterministicContextGateDecision(ctx context.Context, run *runModel.Run, stepID common.StepID, resumeInput map[string]any) error {
+	if o == nil || run == nil || o.tickets == nil {
+		return common.ErrInvalidArgument
+	}
+	resolution := mapFromValue(resumeInput["decisionResolution"])
+	ticketID := common.TicketID(strings.TrimSpace(stringFromMap(resolution, "ticketId")))
+	if ticketID == "" {
+		return common.ErrInvalidArgument
+	}
+	ticket, err := o.tickets.Get(ctx, ticketID)
+	if err != nil {
+		return err
+	}
+	if ticket == nil || ticket.RunID != run.ID || ticket.WorkspaceID != run.WorkspaceID || ticket.StepID != stepID {
+		return common.ErrConflict
+	}
+	if o.resolutions != nil {
+		if err := o.resolutions.DeleteByTicketID(ctx, ticketID); err != nil && !errors.Is(err, common.ErrNotFound) {
+			return err
+		}
+	}
+	ticket.State = common.DecisionTicketStateOpen
+	ticket.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := o.tickets.Update(ctx, ticket); err != nil {
+		return err
+	}
+	if run.State == common.RunStateBlockedOnDecision {
+		run.BlockingTicketID = ticketID
+		run.BlockingApprovalID = ""
+		return nil
+	}
+	run.State = common.RunStateActive
+	run.BlockingTicketID = ""
+	return o.blockOnDecisionAtStep(ctx, run, nil, ticketID, stepID)
 }
 
 type runResumeStateSnapshot struct {

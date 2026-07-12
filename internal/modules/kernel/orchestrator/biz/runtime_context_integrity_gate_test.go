@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -340,5 +342,93 @@ func TestBlockOnContextIntegrityGateRecordsRecommendedRecoveryAction(t *testing.
 	allowed, ok := ticket.Context["allowedRecoveryActions"].([]string)
 	if !ok || len(allowed) != 3 || allowed[0] != "replan" || allowed[1] != "provide_information" || allowed[2] != "terminate" {
 		t.Fatalf("ticket context allowedRecoveryActions = %#v, want [replan provide_information terminate]", ticket.Context["allowedRecoveryActions"])
+	}
+}
+
+func TestResumeDeterministicProtectedFloorReopensResolvedTicketWithoutRetry(t *testing.T) {
+	ctx := t.Context()
+	workspaceID := common.WorkspaceID("ws-protected-floor-dedupe")
+	runID := common.RunID("run-protected-floor-dedupe")
+	stepID := common.StepID("run-protected-floor-dedupe/llm")
+	runRepo := memory.NewRunRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	stepRepo := memory.NewStepRepository()
+	if err := workspaceRepo.Create(ctx, &workspaceModel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	run := &runModel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	failed := &runModel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage":                   "llm_protected_context_floor_exceeded",
+			failureOutputKeyClass:     failureClassProtectedContextFloor,
+			failureOutputKeySignature: "class=protected_context_floor_exceeded",
+			"contextBudget": map[string]any{
+				"contextGateAction":            "fail_fast",
+				"contextGateReason":            "P0 contract exceeds provider context budget",
+				"shrinkLevel":                  4,
+				"p0Overflow":                   true,
+				"minimumProtectedRequestBytes": 90515,
+				"maxBytes":                     81018,
+				"stablePrefixHash":             "stable-prefix",
+			},
+		},
+	}
+	if err := stepRepo.Create(ctx, failed); err != nil {
+		t.Fatalf("create failed step: %v", err)
+	}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo,
+		memory.NewApprovalRepository(), RuntimeEvidenceRepositories{})
+	if err := orch.blockOnContextIntegrityGate(ctx, run, failed, common.ErrInvalidArgument); err != nil {
+		t.Fatalf("first block: %v", err)
+	}
+	blocked, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get blocked run: %v", err)
+	}
+	ticketID := blocked.BlockingTicketID
+	ticket, err := ticketRepo.Get(ctx, ticketID)
+	if err != nil {
+		t.Fatalf("get ticket: %v", err)
+	}
+	ticket.State = common.DecisionTicketStateResolved
+	if err := ticketRepo.Update(ctx, ticket); err != nil {
+		t.Fatalf("resolve ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{ID: "resolution-floor", TicketID: ticketID, Type: decisioncommon.ResolutionTypeProvideMissingInfo}); err != nil {
+		t.Fatalf("create resolution: %v", err)
+	}
+	if err := orch.ResumeRun(ctx, runID); !errors.Is(err, common.ErrBlocked) {
+		t.Fatalf("ResumeRun error = %v, want deterministic blocked result", err)
+	}
+	reblocked, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get reblocked run: %v", err)
+	}
+	if reblocked.BlockingTicketID != ticketID {
+		t.Fatalf("blocking ticket = %q, want reused %q", reblocked.BlockingTicketID, ticketID)
+	}
+	if reblocked.State != common.RunStateBlockedOnDecision {
+		t.Fatalf("run state = %q, want blocked_on_decision", reblocked.State)
+	}
+	if _, err := resolutionRepo.GetByTicketID(ctx, ticketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("resolution lookup error = %v, want deleted stale resolution", err)
+	}
+	reused, err := ticketRepo.Get(ctx, ticketID)
+	if err != nil || reused.State != common.DecisionTicketStateOpen {
+		t.Fatalf("reused ticket = %+v err=%v, want open", reused, err)
+	}
+	steps, err := stepRepo.ListByRun(ctx, runID)
+	if err != nil || len(steps) != 1 || steps[0].ID != stepID {
+		t.Fatalf("steps = %+v err=%v, want no context-gate retry", steps, err)
 	}
 }

@@ -461,6 +461,47 @@ func TestResolvedDecisionContextIntegritySpecFinalizesCurrentAuthority(t *testin
 	}
 }
 
+func TestResolvedDecisionDeterministicProtectedFloorDoesNotCreateContextGateRetry(t *testing.T) {
+	ctx := context.Background()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeValidate)
+	stepRepo := memory.NewStepRepository()
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/protected-floor"),
+		RunID: run.ID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage":                   "llm_protected_context_floor_exceeded",
+			failureOutputKeyClass:     failureClassProtectedContextFloor,
+			failureOutputKeySignature: "class=protected_context_floor_exceeded",
+			"contextBudget": map[string]any{
+				"contextGateAction":            "fail_fast",
+				"contextGateReason":            "P0 contract exceeds provider context budget",
+				"shrinkLevel":                  4,
+				"p0Overflow":                   true,
+				"minimumProtectedRequestBytes": 90515,
+				"maxBytes":                     81018,
+			},
+		},
+	}
+	if err := stepRepo.Create(ctx, failedStep); err != nil {
+		t.Fatalf("seed protected floor step: %v", err)
+	}
+	resumeInput := map[string]any{
+		"ticketContext": map[string]any{
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyContext,
+		},
+		"decisionResolution": map[string]any{
+			"resolutionPayload": map[string]any{"answer": "继续处理", "recoveryAction": "retry_same_step"},
+		},
+	}
+
+	specs, ok, err := contextIntegritySpecsAfterResolvedDecision(ctx, stepRepo, run, failedStep.ID, resumeInput)
+	if !errors.Is(err, common.ErrBlocked) || !ok || len(specs) != 0 {
+		t.Fatalf("contextIntegritySpecsAfterResolvedDecision specs/ok/err = %d/%v/%v, want deterministic block without retry", len(specs), ok, err)
+	}
+}
+
 func TestRepairSubsystemRecoveryDispatchSpecRebuildsStaleForcedNarrowFromStateChangeAuthority(t *testing.T) {
 	ctx := context.Background()
 	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
@@ -621,6 +662,7 @@ func TestRepairSubsystemValidationStaticOnlyRetryKeepsValidationContractDespiteH
 		Output: map[string]any{
 			"status":                       "failed",
 			"stage":                        "llm_execution_graph_plan",
+			"missingDoDItems":              []map[string]any{{"id": "dod-runtime-validation", "state": "failed"}},
 			"contractViolationRule":        contractViolationRuleValidationStaticOnly,
 			outputKeyContractViolationType: contractViolationValidationEvidenceRequired,
 			failureOutputKeyClass:          failureClassRuntime,
@@ -695,6 +737,143 @@ func TestRepairSubsystemValidationStaticOnlyRetryKeepsValidationContractDespiteH
 		if !requiredOutputIsManagedValidationOnly(required) {
 			t.Fatalf("%s = %+v, want managed validation only", label, required)
 		}
+	}
+	if err := validateConvergenceDispatchInput(spec.Input); err != nil {
+		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, spec.Input)
+	}
+}
+
+func TestRepairSubsystemRepeatedValidationStaticOnlyRetryPreservesCurrentValidationAuthority(t *testing.T) {
+	ctx := context.Background()
+	run := runWithAuthorityFocusForTest(runtimemodel.NextActionTypeStateChange)
+	run.ID = "run-repeated-validation-static-only"
+	run.WorkspaceID = "ws-repeated-validation-static-only"
+	run.InitialStepKind = llmcommon.StepKindWorkspaceExecution
+	updateAuthorityScopeForTest(run, run.WorkspaceID, run.ID)
+
+	focus := map[string]any{
+		"id":                    "cwi-validation-only",
+		"missingEvidenceKinds":  []string{runtimemodel.EvidenceKindValidation},
+		"requiredEvidenceKinds": []string{runtimemodel.EvidenceKindStateChange, runtimemodel.EvidenceKindValidation},
+		"acceptedEvidenceKinds": []string{runtimemodel.EvidenceKindStateChange},
+		"status":                "in_progress",
+	}
+	for _, key := range []string{convergenceAuthorityKey, gapBaselineKey} {
+		authority := mapFromValue(run.ExecutionContext[key])
+		authority["currentFocus"] = cloneStepPayload(focus)
+		run.ExecutionContext[key] = authority
+	}
+	run.ExecutionContext[coverageWorkItemContextKey] = map[string]any{"currentFocus": cloneStepPayload(focus)}
+
+	required := managedValidationEvidenceRequiredOutputWithScratch(map[string]any{
+		"coverageWorkItemIds": []string{"cwi-validation-only"},
+	}, nil, nil)
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/contract-retry-001"),
+		RunID: run.ID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageVerification,
+			stepInputKeyRepairOfStepID:        string(common.StepID(string(run.ID) + "/validate")),
+			stepInputKeyRepairOfRootStepID:    string(common.StepID(string(run.ID) + "/validate")),
+			"contractViolationRetry":          true,
+			"repairObjective":                 repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired":       true,
+			"maxRecoveryRequestBytes":         113066,
+			"previousSubmittedRequestBytes":   91488,
+			"parentShrinkLevel":               2,
+			convergenceAuthorityKey: map[string]any{
+				"schemaVersion": convergenceAuthoritySchema,
+				"workspaceId":   string(run.WorkspaceID),
+				"runId":         string(run.ID),
+				"currentFocus":  cloneStepPayload(focus),
+				"nextAction":    map[string]any{"kind": runtimemodel.NextActionTypeValidate},
+			},
+			"convergenceContract": map[string]any{
+				"state":           convergenceStateNeedValidation,
+				"runtimeStage":    runtimeStageVerification,
+				"repairObjective": repairObjectiveConcreteValidationEvidence,
+			},
+			"repairActionPackage": map[string]any{"requiredOutput": cloneStepPayload(required)},
+			"requiredOutput":      cloneStepPayload(required),
+			stepInputKeyContractViolationRecovery: map[string]any{
+				"violatedRule":        contractViolationRuleValidationStaticOnly,
+				"correctionMode":      contractViolationCorrectionModeForcedNarrow,
+				"correctionProfileId": "managed_validation_evidence",
+				"correctionContract": map[string]any{
+					"requiredOutputShape":   "managed_validation_evidence",
+					"validationRoute":       runtimemodel.ValidationRouteManagedHarness,
+					"mustUseManagedHarness": true,
+				},
+				"budgetScope": map[string]any{
+					"workspaceId":         string(run.WorkspaceID),
+					"runId":               string(run.ID),
+					"rootStepId":          string(common.StepID(string(run.ID) + "/validate")),
+					"focusId":             "cwi-validation-only",
+					"violatedRule":        contractViolationRuleValidationStaticOnly,
+					"correctionProfileId": "managed_validation_evidence",
+				},
+			},
+			stepInputKeyRecoveryBudgetScope: map[string]any{
+				"workspaceId":         string(run.WorkspaceID),
+				"runId":               string(run.ID),
+				"rootStepId":          string(common.StepID(string(run.ID) + "/validate")),
+				"focusId":             "cwi-validation-only",
+				"violatedRule":        contractViolationRuleValidationStaticOnly,
+				"correctionProfileId": "managed_validation_evidence",
+				"attempt":             1,
+			},
+		},
+		Output: map[string]any{
+			"status":                       "failed",
+			"stage":                        "llm_execution_graph_plan",
+			"contractViolationRule":        contractViolationRuleValidationStaticOnly,
+			outputKeyContractViolationType: contractViolationValidationEvidenceRequired,
+			failureOutputKeyClass:          failureClassRuntime,
+			failureOutputKeySignature:      "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|rule=validation_static_only",
+		},
+	}
+	attachContractViolationDiagnostics(run, failedStep, common.ErrInvalidArgument)
+	stepRepo := memory.NewStepRepository()
+	if err := stepRepo.Create(ctx, failedStep); err != nil {
+		t.Fatalf("seed failed retry: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		steps:  stepRepo,
+		policy: NormalizeRuntimePolicy(RuntimePolicy{}),
+	}
+
+	spec, ok, err := newRepairSubsystem(stepRepo, nil).recoveryDispatchSpec(
+		ctx,
+		run,
+		failedStep,
+		common.ErrInvalidArgument,
+		runtimeRecoveryActionContractViolationRetry,
+		maxProviderRetryAttempts,
+		orch,
+		false,
+	)
+	if err != nil || !ok {
+		t.Fatalf("recoveryDispatchSpec ok/err = %v/%v, want second managed-validation retry", ok, err)
+	}
+	if got := stringFromMap(mapFromValue(spec.Input["convergenceContract"]), "state"); got != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract.state = %q, want need_validation; input=%+v", got, spec.Input)
+	}
+	if got := canonicalDispatchNextActionKind(stringFromMap(mapFromValue(mapFromValue(spec.Input[currentActionContractKey])["nextAction"]), "kind")); got != runtimemodel.NextActionTypeValidate {
+		t.Fatalf("currentAction.nextAction = %q, want validate; input=%+v", got, spec.Input)
+	}
+	if boolValue(spec.Input["stateChangingOutputRequired"]) || !requiredOutputIsManagedValidationOnly(mapFromValue(spec.Input["requiredOutput"])) {
+		t.Fatalf("dispatch input = %+v, want managed validation only", spec.Input)
+	}
+	recovery := mapFromValue(spec.Input[stepInputKeyContractViolationRecovery])
+	if intFromValue(recovery["attempt"]) != 2 || stringFromMap(recovery, "correctionProfileId") != "managed_validation_evidence" {
+		t.Fatalf("contractViolationRecovery = %+v, want managed-validation attempt 2", recovery)
+	}
+	budget := mapFromValue(spec.Input[stepInputKeyRecoveryBudgetScope])
+	if intFromValue(budget["attempt"]) != 2 || intFromValue(spec.Input["maxRecoveryRequestBytes"]) != 113066 || intFromValue(spec.Input["previousSubmittedRequestBytes"]) != 91488 {
+		t.Fatalf("budget/input = %+v / %+v, want inherited ceiling and attempt 2", budget, spec.Input)
 	}
 	if err := validateConvergenceDispatchInput(spec.Input); err != nil {
 		t.Fatalf("validateConvergenceDispatchInput: %v; input=%+v", err, spec.Input)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
@@ -1597,6 +1598,33 @@ func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
 	return o.blockOnDecisionAtStep(ctx, run, nil, ticketID, failedStep.ID)
 }
 
+func deterministicContextFloorScopeSignature(run *runModel.Run, step *runModel.Step) string {
+	if run == nil || step == nil || !deterministicProtectedContextFloorFailure(step) {
+		return ""
+	}
+	budget := mapFromValue(step.Output["contextBudget"])
+	focus := mapFromValue(mapFromValue(step.Input[convergenceAuthorityKey])["currentFocus"])
+	return stableCoverageJSON(map[string]any{
+		"workspaceId":                  string(run.WorkspaceID),
+		"runId":                        string(run.ID),
+		"recoveryRootStepId":           string(runtimeRepairRootStepID(step)),
+		"focusId":                      stringFromMap(focus, "id"),
+		"effectiveCeiling":             firstNonZeroInt(intFromValue(budget["maxBytes"]), intFromValue(budget["effectiveCeiling"]), intFromValue(step.Input["maxRecoveryRequestBytes"])),
+		"minimumProtectedRequestBytes": intFromValue(budget["minimumProtectedRequestBytes"]),
+		"stablePrefixHash":             stringFromMap(budget, "stablePrefixHash"),
+		"correctionProfileId":          stringFromMap(mapFromValue(step.Input[stepInputKeyContractViolationRecovery]), "correctionProfileId"),
+	})
+}
+
+func firstNonZeroInt(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
 func (o *RuntimeOrchestrator) blockOnContextIntegrityGate(
 	ctx context.Context,
 	run *runModel.Run,
@@ -1646,6 +1674,9 @@ func (o *RuntimeOrchestrator) blockOnContextIntegrityGate(
 			"failedStepInput":                o.llmContextManager().compactStepInput(failedStep.Input),
 			"failedStepOutput":               o.llmContextManager().compactStepOutput(failedStep.Output),
 		},
+	}
+	if signature := deterministicContextFloorScopeSignature(run, failedStep); signature != "" {
+		spec.Context["deterministicContextFloorScopeSignature"] = signature
 	}
 	ticketID, err := o.createOrReuseRuntimeBlockerTicket(ctx, run, failedStep, spec)
 	if err != nil {
@@ -1708,6 +1739,24 @@ func (o *RuntimeOrchestrator) createOrReuseRuntimeBlockerTicket(
 		existing.RunID == run.ID &&
 		existing.StepID == failedStep.ID &&
 		existing.State != common.DecisionTicketStateResolved {
+		return existing.ID, nil
+	}
+	if existing != nil &&
+		existing.RunID == run.ID &&
+		existing.StepID == failedStep.ID &&
+		existing.State == common.DecisionTicketStateResolved &&
+		strings.TrimSpace(stringFromMap(existing.Context, "deterministicContextFloorScopeSignature")) != "" &&
+		strings.TrimSpace(stringFromMap(existing.Context, "deterministicContextFloorScopeSignature")) == strings.TrimSpace(stringFromMap(spec.Context, "deterministicContextFloorScopeSignature")) {
+		if o.resolutions != nil {
+			if err := o.resolutions.DeleteByTicketID(ctx, existing.ID); err != nil && !errors.Is(err, common.ErrNotFound) {
+				return "", err
+			}
+		}
+		existing.State = common.DecisionTicketStateOpen
+		existing.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		if err := o.tickets.Update(ctx, existing); err != nil {
+			return "", err
+		}
 		return existing.ID, nil
 	}
 

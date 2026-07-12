@@ -1339,6 +1339,356 @@ git diff --check
 
 下一步必须重新部署包含本轮修改的新二进制，并执行 RC11-RC13 最终 Live Gate。live 验证通过前，不得关闭 CC01、CC02、CC06 或将本文标记为 `completed`。
 
+## Sixth Deployment Live Verification and RC14-RC16 Closure Plan
+
+核对时间：2026-07-12 09:05 至 09:09。
+
+部署版本：
+
+```text
+commit=c7c4186c274553b758dccc7f267888214f9b24dd
+PID=2507953
+startedAt=2026-07-12 09:05:31 +08:00
+/readyz=ready
+global source/projected revision=2998/2998
+```
+
+本轮有效 Run：
+
+- LSP：`ws-5cfc9874cebda0b8/run-005-replan-001-replan-001`
+- 网关：`ws-609ce9149734ebb7/run-007`
+
+### Live 已通过子项
+
+RC11 protected runtime contract 已通过真实 managed-validation recovery：
+
+```text
+workspace=LSP
+violatedRule=validation_static_only
+correctionProfileId=managed_validation_evidence
+requestBytes=91488
+maxBytes=113066
+shrinkLevel=2
+providerSubmitted=true
+contextGateAction=pass
+integrityWarnings=[]
+```
+
+已确认不再出现：
+
+```text
+protected_runtime_contract_changed_after_context_budget
+```
+
+Goal/DoD、current action、managed-validation requiredOutput 和 stable prefix 均保持完整。LSP recovery 已实际提交 provider，因此 RC11 可标记为 `live verified`。
+
+网关 authority recompute 首段也已通过：
+
+```text
+initial=100609 bytes
+contract retry 1=81871 bytes
+contract retry 2=62222 bytes
+```
+
+- `coverage_assessment_incomplete` 正确进入 `recompute_authority`。
+- 不再以实际 0 次 retry 直接终止。
+- 两次 recovery request 单调下降、均提交 provider、无 integrity warning。
+- 后续成功生成并执行绑定 `cwi-085` 的 `patch/apply`。
+- `stablePrefixHash` 与 `renderedStablePrefixHash` 在当前 workspace 内保持稳定。
+
+### Live 未通过子项一：重复 validation violation 再次切换为 state change
+
+LSP managed-validation contract retry 的持久化输入完全一致：
+
+```text
+convergenceState=need_validation
+nextAction=validate
+repairObjective=produce_concrete_validation_evidence
+stateChangingOutputRequired=false
+acceptedKinds=[validation/managed_session]
+```
+
+顶层、repair package、stage packet、stage packet next action 和 current action requiredOutput 均为同一 managed-validation contract。但 provider 再次返回 `validation_static_only` 后，构建下一 recovery dispatch 时仍失败：
+
+```text
+contractState=need_state_change requires state-changing requiredOutput
+```
+
+因此当前问题不再是已持久化 Step input 的 mirror 不一致，而是“重复 validation violation -> 下一 recovery authority”生成路径重新应用通用 state-change policy，覆盖了当前 forced-narrow validation correction。
+
+LSP Run 最终状态：
+
+- Run：`failed`
+- Workspace `ActiveRunID`：已清空。
+- direct failure：第二次 static-only validation output。
+- recovery termination：下一 recovery dispatch 内部 authority misalignment。
+
+### Live 未通过子项二：protected floor 递归 context-gate retry
+
+网关后续 managed-validation recovery 的 inherited ceiling 为 `81,018 bytes`，首次本地 floor failure：
+
+```text
+requestBytes=90515
+minimumProtectedRequestBytes=90515
+maxBytes=81018
+failureClass=protected_context_floor_exceeded
+providerSubmitted=false
+shrinkLevel=4
+p0Overflow=true
+```
+
+本地 failure classification、provider 隔离和 ticket 文案均正确：没有调用 provider，也没有提示用户修复 provider 配置。但 runtime 继续生成嵌套 context-gate retry：
+
+```text
+90515 -> 92002 -> 92173 -> 92345 -> 92516 -> 92687 bytes
+```
+
+全部请求均满足：
+
+```text
+providerSubmitted=false
+contextGateAction=fail_fast
+failureClass=protected_context_floor_exceeded
+```
+
+说明同一不可满足的 protected floor scope 被重复渲染，且 decision/governance lineage 使 request bytes 每轮增加约 171 bytes，违反同 scope 确定性和单调不增合同。
+
+网关最终进入 `blocked_on_decision`，validation scratch resources 已释放；Workspace `ActiveRunID=run-007` 符合阻塞态 owner 语义。
+
+### Live 未通过子项三：resolved Decision continuation 未原子推进
+
+网关进入预算 Decision 后，scheduler 多次报告：
+
+```text
+owner_readback_not_advanced
+blocked_on_resolved_decision
+```
+
+说明 Decision resolution 已存在，但 Run 仍保留原 `BlockingTicketID`，owner continuation 没有原子完成“消费 resolution、清理 blocker、创建下一动作或新 blocker”的状态迁移。该问题不是 projection lag；最终 source/projected revision 已对齐。
+
+### RC14：重复 validation violation 保持 validation authority
+
+#### Owner 与边界
+
+- Owner：`kernel/orchestrator`。
+- Orchestrator 负责 correction、convergence authority 和 recovery dispatch。
+- `blocks/llm` 只返回结构化 violation，不得决定下一 convergence state。
+
+#### 必须修改
+
+1. 当前 violation 同时满足以下条件时，下一 recovery 必须继续保持 validation authority：
+
+   ```text
+   recoverability=narrow_contract
+   correctionProfileId=managed_validation_evidence
+   requiredOutputShape=managed_validation_evidence
+   current focus missingEvidenceKinds excludes state_change
+   ```
+
+2. forced-narrow validation correction 的优先级必须高于：
+   - 通用 `stateChangingRepairRequired`；
+   - workspace execution contract 的 state-change policy；
+   - 历史 failure targets、repair target 和 state-changing evidence；
+   - rejected output diagnostic lineage。
+3. `BuildConvergenceContract` 或 authority refresh 后再次应用当前 correction contract，并原子重建 current action 与全部 requiredOutput mirrors。
+4. state-change evidence 已接受、当前只缺 validation 时，不得重新打开 state change。
+5. 只有 coverage ledger 明确重新出现 `state_change` 缺口，才允许切换到 `need_state_change`。
+6. 同一 correction scope 的重复 static-only violation 应增加 contract retry attempt，而不是转为普通 runtime repair。
+
+#### 目标文件
+
+- `internal/modules/kernel/orchestrator/biz/runtime_repair_policy.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair_input.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_contract_violation.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_convergence.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_gap_baseline.go`
+
+#### 回归测试
+
+- 连续两次 `validation_static_only` 均生成 managed-validation recovery。
+- 第二次 violation 后仍为 `need_validation/validate`。
+- state-change 已接受且只缺 validation 时，不出现 state-changing requiredOutput。
+- coverage ledger 真实重新缺少 state_change 时允许切换。
+- 重复 contract retry 的 attempt、budget scope 和 request ceiling 正确递增/继承。
+
+### RC15：protected floor 首次失败后确定性阻塞
+
+#### Owner 与边界
+
+- Owner：`kernel/orchestrator`、`blocks/llm`。
+- LLM block 负责确定 floor 与 rendering audit。
+- Orchestrator 负责判定该 failure 是否仍可重渲染以及创建唯一治理 blocker。
+
+#### 必须修改
+
+1. `protected_context_floor_exceeded` 在 authority、definition、focus 和 ceiling 不变时属于确定性 request-scope 终态。
+2. `shrinkLevel=4 && p0Overflow=true` 时直接停止重渲染，禁止生成 `context-gate-retry`。
+3. 首次 floor failure 后创建或复用一个 runtime budget Decision；不得创建新的 LLM Step。
+4. 建立稳定 dedupe signature，至少包含：
+
+   ```text
+   workspaceId
+   runId
+   recoveryRootStepId
+   focusId
+   effectiveCeiling
+   minimumProtectedRequestBytes
+   stablePrefixHash
+   correctionProfileId
+   ```
+
+5. 相同 signature 再次出现时复用既有 ticket，不新增 Step、ticket、repair attempt 或 rejected evidence。
+6. context-gate retry 仅允许用于仍存在可删除非保护字段且能够证明下一 normalized request 会缩小的场景。
+7. 如需重新渲染，只能从首次 normalized provider input 派生；不得重新注入完整 failed step、decision resolution 或不断增长的 governance history。
+8. 相同 scope 下 `minimumProtectedRequestBytes` 和 serialized request bytes 必须确定性稳定，不能每轮增加。
+
+#### 目标文件
+
+- `internal/modules/blocks/llm/biz/provider_context_budget.go`
+- `internal/modules/blocks/llm/biz/runtime_adapter.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair_budget.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair_policy.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_governance_localization.go`
+
+#### 回归测试
+
+- 第一次 floor overflow 后只产生一个 failed Step 和一个 ticket。
+- 不出现嵌套 `/context-gate-retry/context-gate-retry`。
+- floor overflow 后 provider 调用次数不增加。
+- 同 scope request bytes/floor 不增长。
+- 本地 ticket 继续说明 runtime rendering failure，不提示 provider 配置。
+- authority、definition、focus 或 ceiling 真实变化后才允许建立新 recovery scope。
+
+### RC16：resolved Decision 与 blocked Run 原子 continuation
+
+#### Owner 与边界
+
+- 状态 owner：`kernel/orchestrator`。
+- 调度触发与只读核对：`application/workorchd` scheduler。
+- scheduler 不得直接修补 Run/Decision owner state。
+
+#### 必须修改
+
+1. Decision resolve 后由 orchestrator owner 原子执行：
+   - 验证 workspace/run/ticket scope；
+   - 消费 resolution；
+   - 清除旧 `BlockingTicketID`；
+   - 创建唯一 continuation、新 blocker 或明确 terminal outcome；
+   - 更新 Run state 并发布正式事件。
+2. continuation dedupe key 必须包含 resolution ID 和 owner authority snapshot ID。
+3. scheduler 对同一 resolved ticket 最多触发一次 resume command。
+4. owner readback 未推进时只记录一次 durable diagnostic；不得反复触发相同 resume。
+5. Run 仍需外部治理时必须创建新的 open ticket，不能继续引用已 resolved ticket。
+
+#### 目标文件
+
+- `internal/modules/kernel/orchestrator/biz/runtime_blocks.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_repair.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_governance_continuation.go`
+- `internal/modules/application/workorchd/biz/appservice` 中 scheduler continuation/readback 实现。
+
+#### 回归测试
+
+- resolved Decision 后旧 blocker 被清除并只创建一个 continuation。
+- 同一 resolution 重放保持幂等。
+- 无法继续时创建新的 open ticket，而不是引用 resolved ticket。
+- scheduler 不产生重复 `owner_readback_not_advanced`。
+- restart/projection rebuild 后 continuation 状态不漂移。
+
+### RC14-RC16 执行顺序与门禁
+
+必须按以下顺序执行：
+
+1. RC14：先关闭重复 validation violation 的 authority 优先级。
+2. RC15：再阻断 protected floor context-gate retry 递归。
+3. RC16：最后收口 resolved Decision continuation。
+4. focused tests。
+5. 串行全量、格式、vet、boundary gates。
+6. 重新部署并执行双 workspace live gate。
+
+Focused tests：
+
+```bash
+go test ./internal/modules/kernel/orchestrator/biz -count=1
+go test ./internal/modules/blocks/llm/biz -count=1
+go test ./internal/modules/application/workorchd/biz/appservice -count=1
+```
+
+Full gates：
+
+```bash
+go test -p 1 ./internal/modules/... -count=1
+go test -p 1 ./... -count=1
+make fmt-check
+make vet
+make verify-boundary-contract
+git diff --check
+```
+
+最终 live gate：
+
+- LSP 第二次 `validation_static_only` 仍进入 managed validation，不再出现 state-change requiredOutput 冲突。
+- 网关第一次 floor overflow 后只产生一个本地失败 Step 和一个 Decision。
+- floor overflow 后 provider 调用数不增加。
+- 不存在嵌套 `context-gate-retry`。
+- stable prefix 不漂移，同 scope request bytes/floor 不增长。
+- resolved Decision 不再产生重复 `owner_readback_not_advanced`。
+- `/readyz=ready`，source/projected revision 对齐。
+- blocked/terminal Run 的 runtime 与 validation resources 全部释放。
+- Run、Workspace、Result/outcome 和 `ActiveRunID` 符合 owner 状态。
+
+RC14 至 RC16 和上述 live gate 全部通过前，CC01、CC02、CC06 继续保持 reopened/failed，本文不得标记为 `completed`。
+
+### RC14-RC16 代码收口执行记录（2026-07-12）
+
+本轮已按 RC14 → RC15 → RC16 顺序完成代码收口，live gate 保持待重新部署验证。
+
+#### RC14 执行结果
+
+- 增加连续第二次 `validation_static_only` 的 live 形态回归：失败 Step 本身已是 managed-validation retry，历史 Run nextAction 仍为 state_change，但当前 coverage focus 已接受 state-change 且只缺 validation。
+- 已确认下一 recovery 继续保持 `need_validation/validate`，所有 requiredOutput mirror 只接受 `validation/managed_session`。
+- 已确认 contract retry attempt 从 1 递增到 2，并继承 `maxRecoveryRequestBytes`、`previousSubmittedRequestBytes` 和 shrink lineage。
+- 当前实现已满足该形态，无需新增跨 owner 覆盖逻辑；本轮以回归测试锁定，防止后续 authority refresh 回退。
+
+#### RC15 执行结果
+
+- 新增确定性 protected floor 判定：`protected_context_floor_exceeded + shrinkLevel>=4 + p0Overflow=true + minimumProtectedRequestBytes>effective ceiling`。
+- 相同 request scope 的 resolved Decision 不再生成 `context-gate-retry`；owner 直接保持 governed wait。
+- request-scope 签名包含 workspace、run、recovery root Step、focus、effective ceiling、minimum protected bytes、stable prefix hash 和 correction profile。
+- 相同签名复用并重新打开原 ticket，同时删除已失效 resolution；不新增 LLM Step、ticket 或 provider 调用。
+- 只有 resolution 明确改变 authority、definition、focus、ceiling、stable prefix 或 correction profile 时，才允许建立新的 context rendering scope。
+
+#### RC16 执行结果
+
+- orchestrator 在确定性 floor resolution 无法改变 request scope 时，原子恢复为“原 Run 继续 blocked_on_decision + 原 ticket 重新 open + resolution 已消费”，不会留下 resolved ticket blocker。
+- scheduler governance resume ref 增加 resolution ID 与 authority snapshot ID，并纳入 resume dedupe key。
+- scheduler 对同一 resolution/authority scope 只执行一次 owner resume；owner readback 未推进时记录一次 durable diagnostic 并清除可重复执行的 pending 项。
+- replan continuation 的既有 idempotency key 保持不变。
+
+#### 已通过测试
+
+```bash
+go test ./internal/modules/kernel/orchestrator/biz -count=1
+go test ./internal/modules/blocks/llm/biz -count=1
+go test ./internal/modules/application/workorchd/biz/appservice -count=1
+go test ./internal/modules/application/workorchd/service/server -count=1
+go test -p 1 ./internal/modules/... -count=1
+go test -p 1 ./... -count=1
+make fmt-check
+make vet
+make verify-boundary-contract
+git diff --check
+```
+
+#### 待执行 live gate
+
+- 重新部署后验证 LSP 第二次 static-only violation 仍进入 managed validation。
+- 重新部署后验证网关 floor overflow 只保留一个 failed Step 和一个 open Decision，且 provider 调用数不增加。
+- 验证不存在嵌套 `context-gate-retry`，同 scope request bytes/floor 与 stable prefix 不增长。
+- 验证 resolved Decision 不再重复产生 `owner_readback_not_advanced`。
+- live gate 通过前，CC01、CC02、CC06 状态继续保持 reopened/failed。
+
 ### Architecture Boundary
 
 本轮收口不得改变以下边界：

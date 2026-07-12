@@ -384,6 +384,9 @@ func contextIntegritySpecsAfterResolvedDecision(
 	if step == nil || step.State != common.StepStateFailed || !runtimeContextIntegrityGateFailure(step) {
 		return nil, false, nil
 	}
+	if deterministicProtectedContextFloorFailure(step) && !contextIntegrityResolutionChangesRequestScope(step, resumeInput) {
+		return nil, true, common.ErrBlocked
+	}
 	input := contextIntegrityRetryInput(step, resumeInput)
 	if contextIntegrityRetryStillMissingRequiredRepairContext(input) {
 		return nil, true, common.ErrConflict
@@ -402,6 +405,46 @@ func contextIntegritySpecsAfterResolvedDecision(
 		Kind:  step.Kind,
 		Input: input,
 	}}, true, nil
+}
+
+func contextIntegrityResolutionChangesRequestScope(step *runModel.Step, resumeInput map[string]any) bool {
+	if step == nil || len(resumeInput) == 0 {
+		return false
+	}
+	payload := mapFromValue(mapFromValue(resumeInput["decisionResolution"])["resolutionPayload"])
+	if boolValue(payload["contextScopeChanged"]) || boolValue(payload["authorityChanged"]) || boolValue(payload["definitionChanged"]) || boolValue(payload["focusChanged"]) || boolValue(payload["requestCeilingChanged"]) {
+		return true
+	}
+	budget := mapFromValue(step.Output["contextBudget"])
+	for _, candidate := range []struct {
+		key     string
+		current string
+	}{
+		{"authoritySnapshotId", firstNonEmptyString(stringFromMap(step.Input, "currentAuthoritySnapshotId"), stringFromMap(step.Input, "authoritySnapshotId"))},
+		{"definitionSnapshotId", stringFromMap(step.Input, "definitionSnapshotId")},
+		{"focusId", stringFromMap(mapFromValue(mapFromValue(step.Input[convergenceAuthorityKey])["currentFocus"]), "id")},
+		{"stablePrefixHash", stringFromMap(budget, "stablePrefixHash")},
+		{"correctionProfileId", stringFromMap(mapFromValue(step.Input[stepInputKeyContractViolationRecovery]), "correctionProfileId")},
+	} {
+		next := strings.TrimSpace(stringFromMap(payload, candidate.key))
+		if next != "" && next != strings.TrimSpace(candidate.current) {
+			return true
+		}
+	}
+	for _, key := range []string{"effectiveCeiling", "maxBytes", "maxRecoveryRequestBytes"} {
+		next := intFromValue(payload[key])
+		if next <= 0 {
+			continue
+		}
+		current := intFromValue(budget["maxBytes"])
+		if current <= 0 {
+			current = intFromValue(step.Input["maxRecoveryRequestBytes"])
+		}
+		if next != current {
+			return true
+		}
+	}
+	return false
 }
 
 func contextIntegrityRetryInput(step *runModel.Step, resumeInput map[string]any) map[string]any {

@@ -136,6 +136,26 @@ func runtimeContextIntegrityGateFailure(step *runModel.Step) bool {
 	return strings.Contains(text, "llm context gate")
 }
 
+func deterministicProtectedContextFloorFailure(step *runModel.Step) bool {
+	if step == nil || !runtimeContextIntegrityGateFailure(step) {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)) != failureClassProtectedContextFloor &&
+		strings.TrimSpace(stringFromMap(step.Output, "stage")) != "llm_protected_context_floor_exceeded" {
+		return false
+	}
+	budget := mapFromValue(step.Output["contextBudget"])
+	if intFromValue(budget["shrinkLevel"]) < 4 || !boolValue(budget["p0Overflow"]) {
+		return false
+	}
+	minimum := intFromValue(budget["minimumProtectedRequestBytes"])
+	ceiling := intFromValue(budget["maxBytes"])
+	if ceiling <= 0 {
+		ceiling = intFromValue(budget["effectiveCeiling"])
+	}
+	return minimum > 0 && ceiling > 0 && minimum > ceiling
+}
+
 func contextGateActionBlocksProvider(action string) bool {
 	switch strings.TrimSpace(action) {
 	case "read_required",

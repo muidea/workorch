@@ -527,12 +527,14 @@ func durationFromMillisQuery(values url.Values, key string, fallback time.Durati
 }
 
 type governanceRunResumeRef struct {
-	WorkspaceID string
-	RunID       string
-	Intent      string
-	Reason      string
-	RequestID   string
-	DecisionID  string
+	WorkspaceID         string
+	RunID               string
+	Intent              string
+	Reason              string
+	RequestID           string
+	DecisionID          string
+	ResolutionID        string
+	AuthoritySnapshotID string
 }
 
 func (s *serverState) scheduleGovernanceRunResumeRefs(refs []governanceRunResumeRef, priority int) bool {
@@ -658,6 +660,8 @@ func uniqueGovernanceRunResumeRefs(items []governanceRunResumeRef) []governanceR
 		item.Reason = strings.TrimSpace(item.Reason)
 		item.RequestID = strings.TrimSpace(item.RequestID)
 		item.DecisionID = strings.TrimSpace(item.DecisionID)
+		item.ResolutionID = strings.TrimSpace(item.ResolutionID)
+		item.AuthoritySnapshotID = strings.TrimSpace(item.AuthoritySnapshotID)
 		if item.Intent == "" {
 			item.Intent = "resume"
 		}
@@ -685,10 +689,22 @@ func governanceRunResumeKey(item governanceRunResumeRef) string {
 		return ""
 	}
 	decisionID := strings.TrimSpace(item.DecisionID)
+	resolutionID := strings.TrimSpace(item.ResolutionID)
+	authoritySnapshotID := strings.TrimSpace(item.AuthoritySnapshotID)
+	if intent == "resume" && (decisionID != "" || resolutionID != "" || authoritySnapshotID != "") {
+		return strings.Join([]string{intent, workspaceID, runID, firstNonEmptyServerValue(decisionID, "decision-unknown"), firstNonEmptyServerValue(resolutionID, "resolution-unknown"), firstNonEmptyServerValue(authoritySnapshotID, "authority-unknown")}, "/")
+	}
 	if decisionID != "" {
 		return intent + "/" + workspaceID + "/" + runID + "/" + decisionID
 	}
 	return intent + "/" + workspaceID + "/" + runID
+}
+
+func firstNonEmptyServerValue(value string, fallback string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func uniqueNonEmptyStrings(items []string) []string {
