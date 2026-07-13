@@ -72,7 +72,7 @@ type AcquireProviderCeilingCommand struct {
 	AuthoritySnapshotID string
 	PrerequisiteID      string
 	ProviderID          string
-	InheritedMaxBytes   int
+	MinimumBytes        int
 }
 
 type AcquireProviderCeilingResult struct {

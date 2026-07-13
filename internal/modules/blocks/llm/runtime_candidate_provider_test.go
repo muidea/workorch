@@ -13,11 +13,17 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
-		Resources: runtimecontract.RuntimeResourceFacts{ProviderCeiling: &runtimecontract.ProviderCeiling{ProviderID: "provider-1", MaxBytes: 1 << 20, Revision: "config-1"}, TargetSnapshots: []runtimecontract.TargetSnapshot{{
+		Resources: runtimecontract.RuntimeResourceFacts{ProviderCeiling: &runtimecontract.ProviderCeiling{ProviderID: "provider-1", MaxBytes: 96 * 1024, Revision: "config-1"}, TargetSnapshots: []runtimecontract.TargetSnapshot{{
 			TargetRef: "main.go", Content: "package main", ContentHash: "hash-1", ContentState: runtimecontract.SnapshotContentStateComplete,
 		}}},
 		Activation: runtimecontract.RuntimeActivationContext{
-			DialogLanguage: "zh-CN", Skills: []runtimecontract.RuntimeSkillContext{{ID: "skill-1", Instruction: "typed skill instructions"}},
+			DialogLanguage: "zh-CN",
+			DefaultSoul:    &runtimecontract.RuntimeSoulContext{ID: "soul-default", Instructions: "default-only-soul" + strings.Repeat("d", 22*1024)},
+			StageSoulBindings: []runtimecontract.RuntimeStageSoulBinding{
+				{Stage: "execution", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-execution", Instructions: "execution-only-soul" + strings.Repeat("e", 22*1024)}},
+				{Stage: "validation", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-validation", Instructions: "validation-only-soul" + strings.Repeat("v", 13*1024)}},
+			},
+			Skills: []runtimecontract.RuntimeSkillContext{{ID: "skill-1", Instruction: "typed skill instructions"}},
 			Continuation: runtimecontract.RuntimeContinuationContext{
 				Replan: &runtimecontract.RuntimeReplanContinuation{
 					PredecessorRunID: "run-old", TicketID: "ticket-old", ResolutionID: "resolution-old", ResolutionType: "replan", RecoveryAction: "replan",
@@ -68,6 +74,9 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		request.ContextBudget.CachePlan.RenderedStablePrefixHash != prefix || len(request.PromptContext.Sections) != 4 {
 		t.Fatalf("provider request cache plan = %+v prompt=%+v", request.ContextBudget, request.PromptContext)
 	}
+	if request.ContextBudget.ActualBytes <= 0 || request.ContextBudget.ActualBytes >= 96*1024 {
+		t.Fatalf("provider request actual bytes = %d, want current-stage projection below 96 KiB", request.ContextBudget.ActualBytes)
+	}
 	if request.PromptContext.Sections[3].Content == "" || request.Schema == "" {
 		t.Fatalf("provider request lost dynamic context: %+v", request)
 	}
@@ -75,7 +84,9 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		t.Fatalf("provider request lost typed definition change impact: %s", request.PromptContext.Sections[1].Content)
 	}
 	if !strings.Contains(request.PromptContext.Sections[3].Content, "typed skill instructions") || !strings.Contains(request.PromptContext.Sections[3].Content, "zh-CN") ||
-		!strings.Contains(request.PromptContext.Sections[3].Content, "must_produce_state_change") || !strings.Contains(request.PromptContext.Sections[3].Content, "lsp_diagnostics") ||
+		!strings.Contains(request.PromptContext.Sections[3].Content, "execution-only-soul") || strings.Contains(request.PromptContext.Sections[3].Content, "validation-only-soul") ||
+		strings.Contains(request.PromptContext.Sections[3].Content, "default-only-soul") || strings.Contains(request.PromptContext.Sections[3].Content, "must_produce_state_change") ||
+		strings.Contains(request.PromptContext.Sections[3].Content, "lsp_diagnostics") ||
 		!strings.Contains(request.PromptContext.Sections[3].Content, "signature-old") || !strings.Contains(request.PromptContext.Sections[3].Content, "target-old") {
 		t.Fatalf("provider request lost typed activation context: %s", request.PromptContext.Sections[3].Content)
 	}
@@ -83,7 +94,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	if strings.Contains(capabilitySection, "signature-old") || strings.Contains(capabilitySection, "target-old") {
 		t.Fatalf("volatile continuation leaked into C2 stable prefix: %s", capabilitySection)
 	}
-	for _, value := range []string{"runtime_entrypoint", "version_control_snapshot", "git/write", "commit", "workorch.template_stage_policy.v1", "state_change"} {
+	for _, value := range []string{"must_produce_state_change", "lsp_diagnostics", "runtime_entrypoint", "version_control_snapshot", "git/write", "commit", "workorch.template_stage_policy.v1", "state_change"} {
 		if !strings.Contains(capabilitySection, value) {
 			t.Fatalf("provider request lost typed profile contract %q: %s", value, capabilitySection)
 		}

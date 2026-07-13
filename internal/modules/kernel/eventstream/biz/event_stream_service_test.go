@@ -26,6 +26,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type countingEventRecordRepository struct {
@@ -250,13 +251,18 @@ func TestServicePersistsTypedRunStateNotifications(t *testing.T) {
 	defer service.Stop()
 
 	data := runevents.RunStateChangedData{
-		RunID:            "run-event-stream-state",
-		WorkspaceID:      "ws-event-stream-state",
-		GoalID:           "goal-event-stream-state",
-		DoDID:            "dod-event-stream-state",
-		State:            common.RunStateBlockedOnDecision,
-		BlockingTicketID: "ticket-event-stream-state",
-		FailureReason:    "waiting for decision",
+		RunID:                   "run-event-stream-state",
+		WorkspaceID:             "ws-event-stream-state",
+		GoalID:                  "goal-event-stream-state",
+		DoDID:                   "dod-event-stream-state",
+		State:                   common.RunStateBlockedOnDecision,
+		BlockingTicketID:        "ticket-event-stream-state",
+		FailureReason:           "waiting for decision",
+		RuntimeStateRevision:    7,
+		RuntimeConvergenceState: runtimecontract.ConvergenceStateNeedGovernance,
+		RuntimeAction:           runtimecontract.RuntimeActionRequestGovernance,
+		RuntimeFocusID:          "focus-003",
+		AuthoritySnapshotID:     "authority-003",
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunStateChanged, "kernel/orchestrator", runevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	if result := rawHub.Send(event); result == nil || result.Error() != nil {
@@ -272,6 +278,13 @@ func TestServicePersistsTypedRunStateNotifications(t *testing.T) {
 	}
 	if records[0].Payload[events.PayloadKeyState] != string(data.State) || records[0].Payload[events.PayloadKeyBlockingTicketID] != string(data.BlockingTicketID) {
 		t.Fatalf("run payload = %+v", records[0].Payload)
+	}
+	if records[0].Payload[events.PayloadKeyRuntimeStateRevision] != int(data.RuntimeStateRevision) ||
+		records[0].Payload[events.PayloadKeyRuntimeState] != string(data.RuntimeConvergenceState) ||
+		records[0].Payload[events.PayloadKeyRuntimeAction] != string(data.RuntimeAction) ||
+		records[0].Payload[events.PayloadKeyRuntimeFocusID] != data.RuntimeFocusID ||
+		records[0].Payload[events.PayloadKeyAuthoritySnapshotID] != data.AuthoritySnapshotID {
+		t.Fatalf("run runtime payload = %+v", records[0].Payload)
 	}
 }
 

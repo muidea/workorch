@@ -180,6 +180,11 @@ const (
 	PayloadKeyCapabilities           = "capabilities"
 	PayloadKeyCapabilityQuery        = "capabilityQuery"
 	PayloadKeyPriority               = "priority"
+	PayloadKeyRuntimeStateRevision   = "runtimeStateRevision"
+	PayloadKeyRuntimeState           = "runtimeState"
+	PayloadKeyRuntimeAction          = "runtimeAction"
+	PayloadKeyRuntimeFocusID         = "runtimeFocusId"
+	PayloadKeyAuthoritySnapshotID    = "authoritySnapshotId"
 )
 
 type WorkspacePayloadData struct {
@@ -192,12 +197,17 @@ type WorkspacePayloadData struct {
 }
 
 type RunPayloadData struct {
-	GoalID             common.GoalID
-	DoDID              common.DoDID
-	State              common.RunState
-	BlockingTicketID   common.TicketID
-	BlockingApprovalID common.ApprovalID
-	FailureReason      string
+	GoalID                  common.GoalID
+	DoDID                   common.DoDID
+	State                   common.RunState
+	BlockingTicketID        common.TicketID
+	BlockingApprovalID      common.ApprovalID
+	FailureReason           string
+	RuntimeStateRevision    int
+	RuntimeConvergenceState string
+	RuntimeAction           string
+	RuntimeFocusID          string
+	AuthoritySnapshotID     string
 }
 
 type GoalPayloadData struct {
@@ -393,6 +403,7 @@ func RunPayload(
 	blockingTicketID common.TicketID,
 	blockingApprovalID common.ApprovalID,
 	failureReason string,
+	refs ...RunPayloadData,
 ) map[string]any {
 	payload := map[string]any{
 		PayloadKeyState:              string(common.CanonicalRunState(state)),
@@ -407,6 +418,24 @@ func RunPayload(
 	}
 	if failureReason != "" {
 		payload[PayloadKeyFailureReason] = failureReason
+	}
+	if len(refs) > 0 {
+		ref := refs[0]
+		if ref.RuntimeStateRevision > 0 {
+			payload[PayloadKeyRuntimeStateRevision] = ref.RuntimeStateRevision
+		}
+		if ref.RuntimeConvergenceState != "" {
+			payload[PayloadKeyRuntimeState] = ref.RuntimeConvergenceState
+		}
+		if ref.RuntimeAction != "" {
+			payload[PayloadKeyRuntimeAction] = ref.RuntimeAction
+		}
+		if ref.RuntimeFocusID != "" {
+			payload[PayloadKeyRuntimeFocusID] = ref.RuntimeFocusID
+		}
+		if ref.AuthoritySnapshotID != "" {
+			payload[PayloadKeyAuthoritySnapshotID] = ref.AuthoritySnapshotID
+		}
 	}
 	return payload
 }
@@ -733,13 +762,23 @@ func DecodeRunPayload(payload map[string]any) (RunPayloadData, bool) {
 	if !ok {
 		return RunPayloadData{}, false
 	}
+	runtimeStateRevision, _ := optionalIntField(payload, PayloadKeyRuntimeStateRevision)
+	runtimeState, _ := optionalStringField(payload, PayloadKeyRuntimeState)
+	runtimeAction, _ := optionalStringField(payload, PayloadKeyRuntimeAction)
+	runtimeFocusID, _ := optionalStringField(payload, PayloadKeyRuntimeFocusID)
+	authoritySnapshotID, _ := optionalStringField(payload, PayloadKeyAuthoritySnapshotID)
 	return RunPayloadData{
-		GoalID:             common.GoalID(goalID),
-		DoDID:              common.DoDID(dodID),
-		State:              common.CanonicalRunState(common.RunState(state)),
-		BlockingTicketID:   common.TicketID(blockingTicketID),
-		BlockingApprovalID: common.ApprovalID(blockingApprovalID),
-		FailureReason:      failureReason,
+		GoalID:                  common.GoalID(goalID),
+		DoDID:                   common.DoDID(dodID),
+		State:                   common.CanonicalRunState(common.RunState(state)),
+		BlockingTicketID:        common.TicketID(blockingTicketID),
+		BlockingApprovalID:      common.ApprovalID(blockingApprovalID),
+		FailureReason:           failureReason,
+		RuntimeStateRevision:    runtimeStateRevision,
+		RuntimeConvergenceState: runtimeState,
+		RuntimeAction:           runtimeAction,
+		RuntimeFocusID:          runtimeFocusID,
+		AuthoritySnapshotID:     authoritySnapshotID,
 	}, true
 }
 

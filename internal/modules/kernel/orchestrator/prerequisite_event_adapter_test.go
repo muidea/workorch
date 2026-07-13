@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -105,7 +106,7 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 			})
 		case runtimecontract.PrerequisiteKindProviderCeiling:
 			facts, err = AcquireAndCommitProviderCeilingPrerequisite(ctx, hub, facts, orchestratorevents.AcquireProviderCeilingCommand{
-				WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", PrerequisiteID: item.ID, InheritedMaxBytes: 64 * 1024,
+				WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", PrerequisiteID: item.ID, MinimumBytes: 64 * 1024,
 			})
 		case runtimecontract.PrerequisiteKindCapability:
 			facts, err = AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx, hub, facts, orchestratorevents.AcquireRuntimeCapabilitiesCommand{
@@ -120,11 +121,46 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 	if facts.Resources.Manifest == nil || facts.Resources.Manifest.Revision == "" || len(facts.Resources.Manifest.TargetRefs) != 1 || facts.Resources.Manifest.TargetRefs[0] != "go.mod" {
 		t.Fatalf("manifest = %+v", facts.Resources.Manifest)
 	}
-	if facts.Resources.ProviderCeiling == nil || facts.Resources.ProviderCeiling.MaxBytes != 64*1024 || facts.Resources.ProviderCeiling.ProviderID == "" {
+	if facts.Resources.ProviderCeiling == nil || facts.Resources.ProviderCeiling.MaxBytes != 4*1024*1024 || facts.Resources.ProviderCeiling.ProviderID == "" {
 		t.Fatalf("provider ceiling = %+v", facts.Resources.ProviderCeiling)
 	}
 	if len(facts.Capabilities.StateChangeKinds) != 1 || facts.Capabilities.StateChangeKinds[0] != filemodule.StepKindPatchApply {
 		t.Fatalf("runtime capabilities = %+v", facts.Capabilities)
+	}
+}
+
+func TestProviderCeilingPrerequisiteRejectsProviderBelowRequiredMinimum(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	defer hub.Terminate(ctx)
+	llm := llmmodule.New()
+	if err := llm.Configure(llmmodule.Dependencies{
+		EventHub: hub,
+		ProviderConfigLoader: func() (string, map[string]llmmodels.ProviderConfig, error) {
+			return "provider-1", map[string]llmmodels.ProviderConfig{
+				"provider-1": {ID: "provider-1", ContextProfile: llmmodels.ProviderContextProfile{MaxRequestBytes: 16 * 1024}},
+			}, nil
+		},
+		ProviderConfigRevision: func() uint64 { return 1 },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := llm.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer llm.Stop(ctx)
+
+	facts := runtimev2.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
+		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
+		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
+	}, []runtimev2.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindProviderCeiling, MinimumBytes: 32 * 1024}})
+	item := facts.Prerequisites.Pending[0]
+	_, err := AcquireAndCommitProviderCeilingPrerequisite(ctx, hub, facts, orchestratorevents.AcquireProviderCeilingCommand{
+		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1",
+		PrerequisiteID: item.ID, MinimumBytes: item.MinimumBytes,
+	})
+	if err == nil || !strings.Contains(err.Error(), "below required minimum") {
+		t.Fatalf("provider ceiling error = %v, want minimum admission failure", err)
 	}
 }
 

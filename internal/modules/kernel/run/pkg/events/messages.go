@@ -6,6 +6,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
@@ -61,21 +62,26 @@ type ListRuntimeCheckpointsByRunCommand struct {
 }
 
 type RunStateChangedData struct {
-	RunID              common.RunID
-	WorkspaceID        common.WorkspaceID
-	GoalID             common.GoalID
-	DoDID              common.DoDID
-	State              common.RunState
-	BlockingTicketID   common.TicketID
-	BlockingApprovalID common.ApprovalID
-	FailureReason      string
+	RunID                   common.RunID
+	WorkspaceID             common.WorkspaceID
+	GoalID                  common.GoalID
+	DoDID                   common.DoDID
+	State                   common.RunState
+	BlockingTicketID        common.TicketID
+	BlockingApprovalID      common.ApprovalID
+	FailureReason           string
+	RuntimeStateRevision    uint64
+	RuntimeConvergenceState runtimecontract.ConvergenceState
+	RuntimeAction           runtimecontract.RuntimeAction
+	RuntimeFocusID          string
+	AuthoritySnapshotID     string
 }
 
 func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 	if run == nil {
 		return RunStateChangedData{}
 	}
-	return RunStateChangedData{
+	ret := RunStateChangedData{
 		RunID:              run.ID,
 		WorkspaceID:        run.WorkspaceID,
 		GoalID:             run.GoalID,
@@ -85,6 +91,14 @@ func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 		BlockingApprovalID: run.BlockingApprovalID,
 		FailureReason:      run.FailureReason,
 	}
+	if run.RuntimeState != nil {
+		ret.RuntimeStateRevision = run.RuntimeState.StateRevision
+		ret.RuntimeConvergenceState = run.RuntimeState.Decision.State
+		ret.RuntimeAction = run.RuntimeState.Decision.Action
+		ret.RuntimeFocusID = run.RuntimeState.Facts.Focus.ID
+		ret.AuthoritySnapshotID = run.RuntimeState.Decision.AuthoritySnapshot.ID
+	}
+	return ret
 }
 
 type RunCommandResult struct {

@@ -163,11 +163,12 @@ func (m *Module) handleProviderCeilingPrerequisite(event magicevent.Event, resul
 		return
 	}
 	maxBytes := config.ContextProfile.MaxRequestBytes
-	if command.InheritedMaxBytes > 0 && (maxBytes <= 0 || command.InheritedMaxBytes < maxBytes) {
-		maxBytes = command.InheritedMaxBytes
-	}
 	if maxBytes <= 0 {
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
+		return
+	}
+	if command.MinimumBytes > 0 && maxBytes < command.MinimumBytes {
+		setPrerequisiteMagicError(result, fmt.Errorf("provider %q request ceiling %d is below required minimum %d", providerID, maxBytes, command.MinimumBytes))
 		return
 	}
 	result.Set(orchestratorevents.AcquireProviderCeilingResult{

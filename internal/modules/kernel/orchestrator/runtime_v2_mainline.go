@@ -89,7 +89,7 @@ func (m *Module) resolveRuntimeV2Prerequisite(
 	case runtimecontract.PrerequisiteKindProviderCeiling:
 		facts, err := AcquireAndCommitProviderCeilingPrerequisite(ctx, m.rawEventHub, aggregate.Facts, events.AcquireProviderCeilingCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
-			PrerequisiteID: prerequisite.ID, ProviderID: prerequisite.SubjectRef, InheritedMaxBytes: prerequisite.MinimumBytes,
+			PrerequisiteID: prerequisite.ID, ProviderID: prerequisite.SubjectRef, MinimumBytes: prerequisite.MinimumBytes,
 		})
 		if err != nil {
 			return runtimev2.PrerequisiteResult{}, err
