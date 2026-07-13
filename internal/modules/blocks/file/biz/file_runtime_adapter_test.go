@@ -194,6 +194,31 @@ func TestRuntimeAdapterListNonRecursiveSkipsIgnoredDirectoriesWithoutFailing(t *
 	}
 }
 
+func TestAcquireWorkspaceManifestRevisionTracksContent(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "go.mod")
+	if err := os.WriteFile(path, []byte("module example.com/one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.TargetRefs) != 1 || first.TargetRefs[0] != "go.mod" || first.Revision == "" {
+		t.Fatalf("first manifest = %+v", first)
+	}
+	if err := os.WriteFile(path, []byte("module example.com/two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Revision == first.Revision {
+		t.Fatalf("manifest revision did not change with content: first=%+v second=%+v", first, second)
+	}
+}
+
 func TestRuntimeAdapterRejectsPathEscape(t *testing.T) {
 	workspace := t.TempDir()
 	_, err := NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{

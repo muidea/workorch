@@ -6,18 +6,13 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	magictask "github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
-	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestLLMModuleIdentityConfigureStartStopContract(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
 	defer rawHub.Terminate(ctx)
-	background := magictask.NewBackgroundRoutine(1)
-	defer background.Shutdown(ctx)
 
 	module := New()
 	if module.ID() != ModuleID {
@@ -26,84 +21,40 @@ func TestLLMModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Start before Configure err = %v, want invalid argument", err)
 	}
-	if err := module.Configure(Dependencies{EventHub: rawHub, Background: background}); err != nil {
+	if err := module.Configure(Dependencies{EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.runtimeAdapter == nil || module.eventHub == nil || module.background == nil {
+	if module.providerConfigLoader == nil || module.rawEventHub == nil {
 		t.Fatalf("module not fully configured: %+v", module)
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstExecutor := module.executor
+	firstObserver := module.observer
 	firstSubscriptionCount := len(module.topics)
-	if firstExecutor == nil || module.observer == nil || firstSubscriptionCount == 0 {
-		t.Fatalf("executor=%v observer=%v subscriptions=%d, want runtime executor and provider command subscriptions", firstExecutor != nil, module.observer != nil, firstSubscriptionCount)
+	if firstObserver == nil || firstSubscriptionCount == 0 {
+		t.Fatalf("observer=%v subscriptions=%d, want provider/runtime V2 subscriptions", firstObserver != nil, firstSubscriptionCount)
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if module.executor != firstExecutor || len(module.topics) != firstSubscriptionCount {
-		t.Fatalf("second Start changed executor/subscriptions: executor changed=%v subscriptions=%d want %d", module.executor != firstExecutor, len(module.topics), firstSubscriptionCount)
+	if module.observer != firstObserver || len(module.topics) != firstSubscriptionCount {
+		t.Fatalf("second Start changed observer/subscriptions: observer changed=%v subscriptions=%d want %d", module.observer != firstObserver, len(module.topics), firstSubscriptionCount)
 	}
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.executor != nil ||
-		module.runtimeAdapter != nil ||
-		module.eventHub != nil ||
-		module.rawEventHub != nil ||
-		module.background != nil ||
-		module.observer != nil ||
-		len(module.topics) != 0 {
+	if module.rawEventHub != nil || module.observer != nil || module.prerequisiteObserver != nil || len(module.topics) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
-	}
-	if err := module.Stop(ctx); err != nil {
-		t.Fatalf("second Stop: %v", err)
 	}
 }
 
-func TestLLMModuleStartRequiresRuntimeDependencies(t *testing.T) {
+func TestLLMModuleStartRequiresEventHub(t *testing.T) {
 	module := New()
 	if err := module.Configure(Dependencies{}); err != nil {
 		t.Fatalf("Configure with empty dependencies: %v", err)
 	}
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("Start without EventHub/Background err = %v, want invalid argument", err)
-	}
-}
-
-func TestLLMModuleQueuesRuntimeExecution(t *testing.T) {
-	ctx := context.Background()
-	rawHub := magicevent.NewHub(16)
-	defer rawHub.Terminate(ctx)
-	background := magictask.NewBackgroundRoutine(2)
-	defer background.Shutdown(ctx)
-
-	module := New()
-	if err := module.Configure(Dependencies{EventHub: rawHub, Background: background}); err != nil {
-		t.Fatalf("Configure: %v", err)
-	}
-	if err := module.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer module.Stop(ctx)
-
-	result := rawHub.Send(magicevent.NewEventWithContext(
-		runtimeevent.RuntimeBlockExecuteTopic(StepKindWorkspaceExecution), ModuleID, runtimeevent.CommandDestination, magicevent.NewHeader(), ctx,
-		runtimeevent.ExecuteCommand{RequestID: "llm-queue-request", Request: runtimemodel.StepExecutionRequest{
-			WorkspaceID: "ws-llm-queue",
-			RunID:       "run-llm-queue",
-			StepID:      "run-llm-queue/step-1",
-			Kind:        StepKindWorkspaceExecution,
-			Input:       map[string]any{"workspaceId": "ws-llm-queue"},
-		}},
-	))
-	if err := result.Error(); err != nil {
-		t.Fatalf("runtime command err = %v", err)
-	}
-	data, err := result.Get()
-	if _, ok := data.(runtimeevent.ExecuteCommandResult); err != nil || !ok {
-		t.Fatalf("accepted result = %T, err=%v", data, err)
+		t.Fatalf("Start without EventHub err = %v, want invalid argument", err)
 	}
 }

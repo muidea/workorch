@@ -7,29 +7,30 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
-	magictask "github.com/muidea/magicCommon/task"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
+	llmruntimev2 "github.com/muidea/workorch/internal/modules/blocks/llm/biz/runtimev2"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	llmproviderconfig "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/providerconfig"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = modulecommon.ModuleID
 const StepKindWorkspaceExecution = modulecommon.StepKindWorkspaceExecution
 
 type Module struct {
-	runtimeAdapter *llmbiz.RuntimeAdapter
-	executor       *runtimeevent.Executor
-	eventHub       magicevent.Hub
-	rawEventHub    magicevent.Hub
-	background     magictask.BackgroundRoutine
-	observer       magicevent.SimpleObserver
-	topics         []string
+	rawEventHub            magicevent.Hub
+	observer               magicevent.SimpleObserver
+	prerequisiteObserver   magicevent.SimpleObserver
+	providerConfigLoader   llmbiz.ProviderConfigLoader
+	providerConfigRevision llmbiz.ProviderConfigRevision
+	candidateProvider      llmruntimev2.CandidateProvider
+	topics                 []string
 }
 
 func New() *Module { return &Module{} }
@@ -37,30 +38,37 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 type Dependencies struct {
-	EventHub   magicevent.Hub
-	Background magictask.BackgroundRoutine
+	EventHub               magicevent.Hub
+	ProviderConfigLoader   llmbiz.ProviderConfigLoader
+	ProviderConfigRevision llmbiz.ProviderConfigRevision
+	CandidateProvider      llmruntimev2.CandidateProvider
 }
 
 func (m *Module) Configure(deps ...Dependencies) error {
 	if len(deps) > 0 {
 		m.rawEventHub = deps[0].EventHub
-		m.eventHub = deps[0].EventHub
-		m.background = deps[0].Background
+		m.providerConfigLoader = deps[0].ProviderConfigLoader
+		m.providerConfigRevision = deps[0].ProviderConfigRevision
+		m.candidateProvider = deps[0].CandidateProvider
 	}
-	m.runtimeAdapter = llmbiz.NewRuntimeAdapterFromConfigLoaderWithRevision(loadProviderConfigsFromWorkorchConfig, workorchconfig.Revision)
+	if m.providerConfigLoader == nil {
+		m.providerConfigLoader = loadProviderConfigsFromWorkorchConfig
+	}
+	if m.providerConfigRevision == nil {
+		m.providerConfigRevision = workorchconfig.Revision
+	}
+	if m.candidateProvider == nil {
+		m.candidateProvider = m
+	}
 	return nil
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.runtimeAdapter == nil || m.eventHub == nil || m.rawEventHub == nil || m.background == nil {
+	if m == nil || m.providerConfigLoader == nil || m.rawEventHub == nil {
 		return common.ErrInvalidArgument
 	}
-	if m.executor != nil || m.observer != nil {
+	if m.observer != nil {
 		return nil
-	}
-	m.executor = runtimeevent.NewExecutor(ModuleID, m.eventHub, m.background, m.runtimeAdapter, StepKindWorkspaceExecution)
-	if err := m.executor.Run(); err != nil {
-		return err
 	}
 	m.observer = magicevent.NewSimpleObserver(ModuleID, m.rawEventHub)
 	m.topics = []string{
@@ -70,7 +78,29 @@ func (m *Module) Start() error {
 	for _, topic := range m.topics {
 		m.observer.Subscribe(topic, m.handleCommand)
 	}
+	m.observer.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
+	m.topics = append(m.topics, orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
+	if m.candidateProvider != nil {
+		m.observer.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, m.handleRuntimeCandidate)
+		m.topics = append(m.topics, orchestratorevents.TopicOrchestratorRequestRuntimeCandidate)
+	}
+	m.prerequisiteObserver = magicevent.NewSimpleObserverWithMatchID(ModuleID+"/prerequisite", orchestratorevents.PrerequisiteCommandDestination, m.rawEventHub)
+	m.prerequisiteObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireProviderCeiling, m.handleProviderCeilingPrerequisite)
 	return nil
+}
+
+func (m *Module) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.AcquireRuntimeCapabilitiesCommand)
+	if !ok {
+		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
+		return
+	}
+	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, StepKindWorkspaceExecution)
+	if err != nil {
+		setPrerequisiteMagicError(result, err)
+		return
+	}
+	result.Set(response, nil)
 }
 
 func (m *Module) Stop(ctx context.Context) error {
@@ -82,15 +112,79 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	m.topics = nil
 	m.observer = nil
-	if m.executor != nil {
-		m.executor.Teardown()
+	if m.prerequisiteObserver != nil {
+		m.prerequisiteObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireProviderCeiling)
 	}
-	m.executor = nil
-	m.runtimeAdapter = nil
-	m.eventHub = nil
+	m.prerequisiteObserver = nil
 	m.rawEventHub = nil
-	m.background = nil
+	m.providerConfigLoader = nil
+	m.providerConfigRevision = nil
+	m.candidateProvider = nil
 	return nil
+}
+
+func (m *Module) handleRuntimeCandidate(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+	if !ok || command.WorkspaceID == "" || command.RunID == "" || m.candidateProvider == nil ||
+		command.Decision.AuthoritySnapshot.WorkspaceID != command.WorkspaceID || command.Decision.AuthoritySnapshot.RunID != command.RunID {
+		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
+		return
+	}
+	response, err := llmruntimev2.RequestCandidate(event.Context(), m.candidateProvider, llmmodels.RuntimeCandidateRequest{
+		Decision:          command.Decision,
+		Transaction:       command.Transaction,
+		CandidateAttempt:  command.CandidateAttempt,
+		StablePrefixHash:  command.StablePrefixHash,
+		DefinitionContext: command.DefinitionContext,
+		CandidateContext:  command.CandidateContext,
+	})
+	if err != nil {
+		failure := llmruntimev2.CandidateFailureFromError(err)
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, Failure: &failure}, nil)
+		return
+	}
+	result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: response.Transaction, Candidate: response.Candidate}, nil)
+}
+
+func (m *Module) handleProviderCeilingPrerequisite(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.AcquireProviderCeilingCommand)
+	if !ok || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" {
+		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
+		return
+	}
+	defaultProviderID, configs, err := m.providerConfigLoader()
+	if err != nil {
+		setPrerequisiteMagicError(result, err)
+		return
+	}
+	config, providerID, err := selectProviderConfig(strings.TrimSpace(command.ProviderID), defaultProviderID, configs)
+	if err != nil {
+		setPrerequisiteMagicError(result, err)
+		return
+	}
+	maxBytes := config.ContextProfile.MaxRequestBytes
+	if command.InheritedMaxBytes > 0 && (maxBytes <= 0 || command.InheritedMaxBytes < maxBytes) {
+		maxBytes = command.InheritedMaxBytes
+	}
+	if maxBytes <= 0 {
+		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
+		return
+	}
+	result.Set(orchestratorevents.AcquireProviderCeilingResult{
+		PrerequisiteID: command.PrerequisiteID,
+		Ceiling: runtimecontract.ProviderCeiling{
+			ProviderID: providerID,
+			MaxBytes:   maxBytes,
+			Revision:   fmt.Sprintf("config-%d", m.providerConfigRevision()),
+		},
+	}, nil)
+}
+
+func setPrerequisiteMagicError(result magicevent.Result, err error) {
+	if result == nil {
+		return
+	}
+	result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 }
 
 func (m *Module) handleCommand(ev magicevent.Event, result magicevent.Result) {
@@ -140,7 +234,10 @@ func setLLMMagicResult(result magicevent.Result, data llmevents.LLMCommandResult
 }
 
 func (m *Module) completeProvider(ctx context.Context, requestedProviderID string, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, string, string, error) {
-	defaultProviderID, configs, err := loadProviderConfigsFromWorkorchConfig()
+	if m == nil || m.providerConfigLoader == nil {
+		return llmmodels.ProviderCompletionResult{}, "", "", common.ErrInvalidArgument
+	}
+	defaultProviderID, configs, err := m.providerConfigLoader()
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, "", "", err
 	}
@@ -190,12 +287,18 @@ func (m *Module) generateEmbedding(ctx context.Context, providerID string, input
 	if providerID == "" || input == "" {
 		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
 	}
-	defaultProviderID, configs, err := loadProviderConfigsFromWorkorchConfig()
+	if m == nil || m.providerConfigLoader == nil {
+		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
+	}
+	defaultProviderID, configs, err := m.providerConfigLoader()
 	if err != nil {
 		return llmmodels.ProviderEmbeddingResult{}, err
 	}
-	adapter := llmbiz.NewRuntimeAdapterFromConfigs(defaultProviderID, configs)
-	return adapter.GenerateEmbedding(ctx, providerID, input)
+	config, selectedProviderID, err := selectProviderConfig(providerID, defaultProviderID, configs)
+	if err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	return llmbiz.GenerateEmbedding(ctx, selectedProviderID, config, input)
 }
 
 func loadProviderConfigsFromWorkorchConfig() (string, map[string]llmmodels.ProviderConfig, error) {

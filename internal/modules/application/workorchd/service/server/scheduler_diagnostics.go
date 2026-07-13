@@ -12,16 +12,15 @@ import (
 )
 
 const (
+	runWatchdogInterval       = time.Duration(0)
 	schedulerDiagnosticSource = "workorchd/scheduler"
 	schedulerDiagnosticLimit  = 64
 	schedulerDetailLimit      = 512
 
-	schedulerKindWorkspaceActivation    = "workspace_activation"
-	schedulerKindWorkspaceRun           = "workspace_run"
-	schedulerKindWorkspaceRestart       = "workspace_restart"
-	schedulerKindRunContinuation        = "run_continuation"
-	schedulerKindGovernanceContinuation = "governance_continuation"
-	schedulerKindReplanContinuation     = "replan_continuation"
+	schedulerKindWorkspaceActivation = "workspace_activation"
+	schedulerKindWorkspaceRun        = "workspace_run"
+	schedulerKindWorkspaceRestart    = "workspace_restart"
+	schedulerKindRunContinuation     = "run_continuation"
 
 	schedulerDiagnosticStateNotScheduled   = "not_scheduled"
 	schedulerDiagnosticStateAccepted       = "accepted"
@@ -38,7 +37,6 @@ const (
 	schedulerReasonWorkspaceNotEligible                    = "workspace_not_eligible"
 	schedulerReasonRunNotEligible                          = "run_not_eligible"
 	schedulerReasonOwnerReadbackNotAdvanced                = "owner_readback_not_advanced"
-	schedulerReasonReplanSuccessorExists                   = "replan_successor_exists"
 	schedulerReasonServiceRestartedPendingWorkNotRecovered = "service_restarted_pending_scheduler_work_not_recovered"
 
 	schedulerRecoverabilityManualRetry = "manual_retry_required"
@@ -382,9 +380,9 @@ func schedulerRecommendedActions(kind, reason, recoverability string) []string {
 	switch kind {
 	case schedulerKindWorkspaceRestart:
 		return []string{"workspace_restart"}
-	case schedulerKindWorkspaceActivation, schedulerKindReplanContinuation:
+	case schedulerKindWorkspaceActivation:
 		return []string{"run_resume"}
-	case schedulerKindRunContinuation, schedulerKindGovernanceContinuation:
+	case schedulerKindRunContinuation:
 		return []string{"run_resume"}
 	default:
 		if reason == schedulerReasonRunSlotUnavailable || reason == schedulerReasonServiceShuttingDown {
@@ -399,7 +397,7 @@ func schedulerRecoverabilityFor(state, reason string) string {
 		return schedulerRecoverabilityNoAction
 	}
 	switch reason {
-	case schedulerReasonWorkspaceNotEligible, schedulerReasonRunNotEligible, schedulerReasonReplanSuccessorExists:
+	case schedulerReasonWorkspaceNotEligible, schedulerReasonRunNotEligible:
 		return schedulerRecoverabilityNoAction
 	case schedulerReasonOwnerCommandFailed, schedulerReasonBackgroundFailed, schedulerReasonOwnerReadbackNotAdvanced:
 		return schedulerRecoverabilityInspect

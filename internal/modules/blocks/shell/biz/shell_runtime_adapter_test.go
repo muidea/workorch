@@ -733,18 +733,12 @@ func TestRuntimeAdapterAppliesConfiguredZeroWorkEvidencePolicy(t *testing.T) {
 		Input: map[string]any{
 			"command": "sh",
 			"args":    []any{"-c", "printf 'testing: warning: no tests to run\\nPASS\\n'"},
-			"evidencePolicies": []map[string]any{
-				{
-					"appliesTo":         "shell/command",
-					"commandName":       "sh",
-					"argsContain":       []string{"-c"},
-					"zeroWorkMarkers":   []string{"no tests to run"},
-					"qualityOnZeroWork": string(common.EvidenceQualityInconclusive),
-					"evidenceReason":    "configured zero-work marker matched",
-					"evidenceTags":      []string{"test", "zero_work"},
-				},
-			},
 		},
+		EvidencePolicies: []runtimemodel.RuntimeEvidencePolicy{{
+			ID: "test-zero-work", AppliesTo: "shell/command", CommandName: "sh", ArgsContain: []string{"-c"},
+			ZeroWorkMarkers: []string{"no tests to run"}, QualityOnZeroWork: string(common.EvidenceQualityInconclusive),
+			EvidenceReason: "configured zero-work marker matched", EvidenceTags: []string{"test", "zero_work"},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteRuntimeStep: %v", err)
@@ -765,19 +759,13 @@ func TestRuntimeAdapterPrefersWorkEvidenceMarkersOverZeroWorkMarkers(t *testing.
 		Input: map[string]any{
 			"command": "sh",
 			"args":    []any{"-c", "printf '? pkg [no test files]\\n=== RUN   TestExample\\n--- PASS: TestExample (0.00s)\\nok  pkg 0.001s\\n'"},
-			"evidencePolicies": []map[string]any{
-				{
-					"appliesTo":           "shell/command",
-					"commandName":         "sh",
-					"argsContain":         []string{"-c"},
-					"zeroWorkMarkers":     []string{"[no test files]"},
-					"workEvidenceMarkers": []string{"=== RUN", "--- PASS:", "ok  "},
-					"qualityOnZeroWork":   string(common.EvidenceQualityInconclusive),
-					"evidenceReason":      "configured zero-work marker matched",
-					"evidenceTags":        []string{"test", "zero_work"},
-				},
-			},
 		},
+		EvidencePolicies: []runtimemodel.RuntimeEvidencePolicy{{
+			ID: "test-work-wins", AppliesTo: "shell/command", CommandName: "sh", ArgsContain: []string{"-c"},
+			ZeroWorkMarkers: []string{"[no test files]"}, WorkEvidenceMarkers: []string{"=== RUN", "--- PASS:", "ok  "},
+			QualityOnZeroWork: string(common.EvidenceQualityInconclusive), EvidenceReason: "configured zero-work marker matched",
+			EvidenceTags: []string{"test", "zero_work"},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteRuntimeStep: %v", err)

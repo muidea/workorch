@@ -10,6 +10,7 @@
 - Result create/update 持久化成功后，由本 block 单点发布 `ResultChangedData`；topic 按 draft、accepted、rejected、superseded 状态选择。
 - Artifact create 成功后，由本 block 单点发布 `ArtifactCreatedData`。
 - `kernel/orchestrator` 只有通过 evidence 和 coverage gate 后才能发送 Result/Artifact command。
+- Runtime V2 accepted/rejected Result 由 Orchestrator 在 typed assessment ledger 完成后构造，并通过本 block 的 `CreateResultCommand` 持久化；结果 ID 同时包含 workspace/run scope，重复 terminal 投影必须幂等。
 - `application/workorchd`、Eventstream 和 projection 按需导入本 block 的事件合同查询或订阅。
 
 ## 相关约束

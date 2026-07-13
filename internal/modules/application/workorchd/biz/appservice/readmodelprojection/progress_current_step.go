@@ -30,18 +30,12 @@ func currentActionLabelFromRunSnapshot(snapshot readmodelcore.RunSnapshot) strin
 	if snapshot.GapBaseline != nil {
 		action = strings.TrimSpace(snapshot.GapBaseline.NextAction.Kind)
 	}
-	if action == "" {
-		action = strings.TrimSpace(stringValue(MapValue(MapValue(snapshot.Run.ExecutionContext["convergenceAuthority"])["nextAction"]), "kind"))
-	}
 	focus := ""
 	if snapshot.Acceptance.CurrentFocus != nil {
 		focus = strings.TrimSpace(snapshot.Acceptance.CurrentFocus.ID)
 	}
 	if focus == "" && snapshot.GapBaseline != nil {
 		focus = strings.TrimSpace(stringValue(snapshot.GapBaseline.CurrentFocus, "id"))
-	}
-	if focus == "" {
-		focus = strings.TrimSpace(stringValue(MapValue(snapshot.Run.ExecutionContext["coverageFocus"]), "id"))
 	}
 	switch {
 	case action != "" && focus != "":

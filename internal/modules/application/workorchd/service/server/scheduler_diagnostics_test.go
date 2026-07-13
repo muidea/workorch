@@ -21,12 +21,6 @@ func TestSchedulerRecommendedActionsUseResumeTerminology(t *testing.T) {
 			want:           []string{"run_resume"},
 		},
 		{
-			name:           "governance continuation",
-			kind:           schedulerKindGovernanceContinuation,
-			recoverability: schedulerRecoverabilityManualRetry,
-			want:           []string{"run_resume"},
-		},
-		{
 			name:           "workspace activation",
 			kind:           schedulerKindWorkspaceActivation,
 			recoverability: schedulerRecoverabilityManualRetry,

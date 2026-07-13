@@ -6,7 +6,6 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -95,7 +94,7 @@ func TestRunObservabilityUsesCompleteEventTimeline(t *testing.T) {
 		t.Fatalf("event reader queries = %d, want observability event query", len(events.queries))
 	}
 	if len(events.queries[0].ExcludeTopics) != 0 {
-		t.Fatalf("observability exclude topics = %+v, want complete event timeline including %s", events.queries[0].ExcludeTopics, runevents.TopicRunLLMStreamProgress)
+		t.Fatalf("observability exclude topics = %+v, want complete event timeline including %s", events.queries[0].ExcludeTopics, "/run/llm_stream/progress")
 	}
 	if !events.queries[0].IncludePayload {
 		t.Fatalf("observability include payload = false, want true")
@@ -135,7 +134,7 @@ func TestRunSnapshotProjectionUsesCompactEventTimeline(t *testing.T) {
 	if events.queries[0].IncludePayload {
 		t.Fatalf("projection include payload = true, want compact metadata-only query")
 	}
-	if len(events.queries[0].ExcludeTopics) != 1 || events.queries[0].ExcludeTopics[0] != runevents.TopicRunLLMStreamProgress {
+	if len(events.queries[0].ExcludeTopics) != 1 || events.queries[0].ExcludeTopics[0] != "/run/llm_stream/progress" {
 		t.Fatalf("projection exclude topics = %+v, want stream progress excluded", events.queries[0].ExcludeTopics)
 	}
 }

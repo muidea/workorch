@@ -18,6 +18,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type runEventRepository struct {
@@ -327,7 +328,7 @@ func createRunCommandFromModel(item *runmodel.Run) runcontracts.CreateRunCommand
 		DoDID:              item.DoDID,
 		DefinitionRevision: item.DefinitionRevision,
 		InitialStepKind:    item.InitialStepKind,
-		ExecutionContext:   cloneMap(item.ExecutionContext),
+		RuntimeBootstrap:   cloneRuntimeBootstrap(item.RuntimeBootstrap),
 		Priority:           item.Priority,
 	}
 }
@@ -337,19 +338,37 @@ func updateRunCommandFromModel(item *runmodel.Run) runcontracts.UpdateRunCommand
 		return runcontracts.UpdateRunCommand{}
 	}
 	return runcontracts.UpdateRunCommand{
-		RunID:              item.ID,
-		WorkspaceID:        item.WorkspaceID,
-		GoalID:             item.GoalID,
-		DoDID:              item.DoDID,
-		DefinitionRevision: item.DefinitionRevision,
-		InitialStepKind:    item.InitialStepKind,
-		ExecutionContext:   cloneMap(item.ExecutionContext),
-		State:              item.State,
-		Priority:           item.Priority,
-		BlockingTicketID:   item.BlockingTicketID,
-		BlockingApprovalID: item.BlockingApprovalID,
-		FailureReason:      item.FailureReason,
+		RunID:                  item.ID,
+		WorkspaceID:            item.WorkspaceID,
+		GoalID:                 item.GoalID,
+		DoDID:                  item.DoDID,
+		DefinitionRevision:     item.DefinitionRevision,
+		InitialStepKind:        item.InitialStepKind,
+		RuntimeBootstrap:       cloneRuntimeBootstrap(item.RuntimeBootstrap),
+		RuntimeContractVersion: item.RuntimeContractVersion,
+		RuntimeState:           cloneRuntimeStateRecord(item.RuntimeState),
+		State:                  item.State,
+		Priority:               item.Priority,
+		BlockingTicketID:       item.BlockingTicketID,
+		BlockingApprovalID:     item.BlockingApprovalID,
+		FailureReason:          item.FailureReason,
 	}
+}
+
+func cloneRuntimeStateRecord(value *runtimecontract.RuntimeStateRecord) *runtimecontract.RuntimeStateRecord {
+	if value == nil {
+		return nil
+	}
+	cloned := value.Clone()
+	return &cloned
+}
+
+func cloneRuntimeBootstrap(value *runtimecontract.RuntimeBootstrap) *runtimecontract.RuntimeBootstrap {
+	if value == nil {
+		return nil
+	}
+	cloned := value.Clone()
+	return &cloned
 }
 
 func createWorkspaceCommandFromModel(item *workspacemodel.Workspace) workspacecontracts.CreateWorkspaceCommand {
@@ -486,17 +505,6 @@ func memoryRecallHitCommands(items []memorymodel.MemoryRecallHit) []memorycontra
 	return ret
 }
 
-func cloneMap(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]any, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
-}
-
 func cloneStringIntMap(input map[string]int) map[string]int {
 	if input == nil {
 		return nil
@@ -515,17 +523,6 @@ func cloneSoulBindingMap(input map[string]common.SoulID) map[string]common.SoulI
 	ret := make(map[string]common.SoulID, len(input))
 	for key, value := range input {
 		ret[key] = value
-	}
-	return ret
-}
-
-func cloneMapSlice(input []map[string]any) []map[string]any {
-	if input == nil {
-		return nil
-	}
-	ret := make([]map[string]any, 0, len(input))
-	for _, item := range input {
-		ret = append(ret, cloneMap(item))
 	}
 	return ret
 }

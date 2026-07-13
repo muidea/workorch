@@ -21,6 +21,7 @@ type WorkspaceSoulRoutingRequest struct {
 
 type WorkspaceSoulRoutingResult struct {
 	DefaultSoul      *soulmodel.Soul
+	StageSouls       map[string]*soulmodel.Soul
 	Routing          appmodelcore.SoulRouting
 	EffectiveSoulIDs []common.SoulID
 }
@@ -49,6 +50,7 @@ func ResolveWorkspaceSoulRouting(ctx context.Context, request WorkspaceSoulRouti
 	}
 
 	bindings := map[string]appmodelcore.SoulRoutingBinding{}
+	stageSouls := map[string]*soulmodel.Soul{}
 	effectiveSoulIDs := make([]common.SoulID, 0, len(appmodelcore.SoulBindingStages())+1)
 	for _, stage := range appmodelcore.SoulBindingStages() {
 		soulID, source := appmodelcore.StageSoulBinding(stage, runStageBindings, workspace.SoulBindings, defaults.defaultSoulID, defaults.defaultSource)
@@ -64,6 +66,7 @@ func ResolveWorkspaceSoulRouting(ctx context.Context, request WorkspaceSoulRouti
 			Source: source,
 			Soul:   activationcore.SoulContext(soul),
 		}
+		stageSouls[stage] = soul
 		effectiveSoulIDs = appmodelcore.AppendSoulIDOnce(effectiveSoulIDs, soulID)
 	}
 	if defaults.defaultSoulID != "" {
@@ -74,6 +77,7 @@ func ResolveWorkspaceSoulRouting(ctx context.Context, request WorkspaceSoulRouti
 	}
 	return WorkspaceSoulRoutingResult{
 		DefaultSoul: defaultSoul,
+		StageSouls:  stageSouls,
 		Routing: appmodelcore.SoulRouting{
 			Status:                 "resolved",
 			PriorityPolicy:         appmodelcore.SoulRoutingPriorityPolicy(),

@@ -1,11 +1,9 @@
 package readmodelprojection
 
-import (
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-)
+import ()
 
 func timelineStepIDFromObservedEvent(item ObservedView) (string, bool) {
-	if item.Topic != runevents.TopicStepDispatched && item.Topic != runevents.TopicStepStateChanged && item.SubjectType != "step" {
+	if item.Topic != "/step/dispatched" && item.Topic != "/step/state/changed" && item.SubjectType != "step" {
 		return "", false
 	}
 	stepID := item.StepID

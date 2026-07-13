@@ -17,7 +17,6 @@ func RunSnapshotFromModels(input RunSnapshotModelInput) readmodelcore.RunSnapsho
 	observedItems := observed.BuildWorkorchSnapshot(
 		input.Workspace,
 		input.Run,
-		input.Steps,
 		input.SelectedTicket,
 		input.SelectedResolution,
 		input.SelectedApproval,

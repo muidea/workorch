@@ -6,13 +6,21 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {
 	rawHub := magicevent.NewHub(16)
 	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
-	state := newServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, &recordingBackgroundRoutine{})
+	var captured orchestratorevents.ResumeRunCommand
+	owner := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, rawHub)
+	owner.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(event magicevent.Event, result magicevent.Result) {
+		captured, _ = event.Data().(orchestratorevents.ResumeRunCommand)
+		result.Set(orchestratorevents.OrchestratorCommandResult{}, nil)
+	})
+	t.Cleanup(func() { owner.Unsubscribe(orchestratorevents.TopicOrchestratorCommandResumeRun) })
+	_ = newServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, &recordingBackgroundRoutine{})
 	command := workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: "ws-typed-scheduler",
 		RunID:       "run-typed-scheduler",
@@ -38,11 +46,8 @@ func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {
 		t.Fatalf("scheduler result = %#v, want accepted typed result", data)
 	}
 
-	state.runContinuations.runMu.Lock()
-	pending, exists := state.runContinuations.runPending["ws-typed-scheduler/run-typed-scheduler/resume"]
-	state.runContinuations.runMu.Unlock()
-	if !exists || pending.Priority != 7 || pending.Action != "resume" {
-		t.Fatalf("pending continuation = %+v exists=%v", pending, exists)
+	if captured.WorkspaceID != command.WorkspaceID || captured.RunID != command.RunID {
+		t.Fatalf("orchestrator resume command = %+v, want direct typed Runtime V2 owner command", captured)
 	}
 }
 

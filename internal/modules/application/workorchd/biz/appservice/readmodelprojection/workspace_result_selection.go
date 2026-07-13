@@ -40,7 +40,7 @@ func isTerminalOutcomeEligibleModelResult(item *resultmodel.Result, run *runmode
 	}
 	switch item.State {
 	case common.ResultStateAccepted:
-		return run.State == common.RunStateCompleted && !runHasActiveCoverageWorkItems(run.ExecutionContext)
+		return run.State == common.RunStateCompleted
 	case common.ResultStateRejected:
 		return IsTerminalProjectionRunState(run.State) && run.State != common.RunStateSuperseded
 	default:

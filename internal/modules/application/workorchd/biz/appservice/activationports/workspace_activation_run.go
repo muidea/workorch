@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -12,29 +13,29 @@ func createReplacementWorkspaceExecutionRun(ctx context.Context, request Activat
 	if workspace == nil || goal == nil || dod == nil || oldRunID == "" {
 		return "", common.ErrInvalidArgument
 	}
-	executionContext, err := workspaceExecutionContext(ctx, request, workspace, goal, dod)
+	activationBuild, err := workspaceRuntimeActivation(ctx, request, workspace, goal, dod)
 	if err != nil {
 		return "", err
 	}
 	if err := SupersedeRun(ctx, request.Hub, workspace.ID, oldRunID); err != nil {
 		return "", err
 	}
-	return startWorkspaceExecutionRun(ctx, request, workspace.ID, goal.ID, dod.ID, executionContext)
+	return startWorkspaceExecutionRun(ctx, request, workspace, goal, dod, activationBuild)
 }
 
 func createWorkspaceExecutionRun(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (common.RunID, error) {
 	if workspace == nil || goal == nil || dod == nil {
 		return "", common.ErrInvalidArgument
 	}
-	executionContext, err := workspaceExecutionContext(ctx, request, workspace, goal, dod)
+	activationBuild, err := workspaceRuntimeActivation(ctx, request, workspace, goal, dod)
 	if err != nil {
 		return "", err
 	}
-	return startWorkspaceExecutionRun(ctx, request, workspace.ID, goal.ID, dod.ID, executionContext)
+	return startWorkspaceExecutionRun(ctx, request, workspace, goal, dod, activationBuild)
 }
 
-func workspaceExecutionContext(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (map[string]any, error) {
-	return BuildWorkspaceExecutionContext(ctx, WorkspaceExecutionContextRequest{
+func workspaceRuntimeActivation(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (WorkspaceRuntimeActivationBuild, error) {
+	return BuildWorkspaceRuntimeActivation(ctx, WorkspaceRuntimeActivationRequest{
 		Hub: request.Hub,
 
 		Workspace:                      workspace,
@@ -48,14 +49,27 @@ func workspaceExecutionContext(ctx context.Context, request ActivateWorkspaceExe
 	})
 }
 
-func startWorkspaceExecutionRun(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any) (common.RunID, error) {
+func startWorkspaceExecutionRun(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD, activationBuild WorkspaceRuntimeActivationBuild) (common.RunID, error) {
+	if workspace == nil || goal == nil || dod == nil || activationBuild.EffectiveGoal == nil || activationBuild.EffectiveDoD == nil {
+		return "", common.ErrInvalidArgument
+	}
+	bootstrap, err := activationcore.RuntimeV2Bootstrap(
+		activationBuild.EffectiveGoal,
+		activationBuild.EffectiveDoD,
+		activationBuild.DefinitionRevision,
+		activationBuild.DefinitionChangeImpact,
+		activationBuild.RuntimeActivation,
+	)
+	if err != nil {
+		return "", err
+	}
 	return CreateAndStartWorkspaceExecutionRun(ctx, request.Hub, CreateAndStartWorkspaceExecutionRunRequest{
-		WorkspaceID:           workspaceID,
-		GoalID:                goalID,
-		DoDID:                 dodID,
-		ExecutionContext:      executionContext,
-		Priority:              request.Command.Priority,
-		LLMProviderID:         request.Command.LLMProviderID,
-		DefaultDialogLanguage: strings.TrimSpace(request.DefaultDialogLanguage),
+		WorkspaceID:        workspace.ID,
+		GoalID:             goal.ID,
+		DoDID:              dod.ID,
+		DefinitionRevision: bootstrap.Definition.Revision,
+		Priority:           request.Command.Priority,
+		LLMProviderID:      request.Command.LLMProviderID,
+		RuntimeBootstrap:   bootstrap,
 	})
 }

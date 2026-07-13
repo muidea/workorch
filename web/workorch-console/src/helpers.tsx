@@ -2268,11 +2268,7 @@ export function checkpointTypeLabel(type?: string) {
 
 export function runPriority(item: Run) {
   const direct = item.priority;
-  if (direct !== undefined && direct !== null) {
-    return direct;
-  }
-  const contextPriority = item.executionContext?.priority;
-  return typeof contextPriority === 'number' ? contextPriority : '-';
+  return direct !== undefined && direct !== null ? direct : '-';
 }
 
 export function llmConfigurationFormValues(configuration: ServiceConfiguration): UpdateLLMConfigurationRequest {

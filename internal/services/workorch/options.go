@@ -36,15 +36,19 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+	handled, err := prepareRuntimeV1RetirementMaintenance(parsed)
+	if err != nil || handled {
+		return err
+	}
 	svc, err := NewService(opts.ProgramName, parsed)
 	if err != nil {
-		return err
+		return runtimeV1RetirementRestoreHint(err)
 	}
 	if err := svc.Startup(ctx); err != nil {
-		return err
+		return runtimeV1RetirementRestoreHint(err)
 	}
 	runErr := svc.Run(ctx)
-	return errors.Join(runErr, svc.Shutdown(context.Background()))
+	return runtimeV1RetirementRestoreHint(errors.Join(runErr, svc.Shutdown(context.Background())))
 }
 
 func ParseStartupArgs(args []string, forceServer bool) (StartupArgs, error) {

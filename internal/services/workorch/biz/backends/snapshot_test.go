@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestAssertTypedSnapshotInfoAcceptsTypedValue(t *testing.T) {
@@ -20,18 +19,7 @@ func TestAssertTypedSnapshotInfoAcceptsTypedValue(t *testing.T) {
 			ID:          "run-a",
 			WorkspaceID: "ws-a",
 			State:       "running",
-			ExecutionContext: map[string]any{
-				"goal": map[string]any{"text": "first goal\nsecond goal"},
-			},
 		}},
-		RuntimeExecution: &RuntimeExecutionInfo{
-			StepID: "step-a",
-			ContractViolation: &runtimemodel.ContractViolation{
-				ID:             "violation-a",
-				ViolatedRule:   "state_changing_required_missing",
-				Recoverability: runtimemodel.ContractViolationRecoverabilityRetrySameContract,
-			},
-		},
 		GapBaseline: &GapBaselineInfo{
 			AcceptedEvidenceRefs: []string{"evidence-accepted"},
 			RejectedEvidenceRefs: []string{"evidence-rejected"},
@@ -44,12 +32,6 @@ func TestAssertTypedSnapshotInfoAcceptsTypedValue(t *testing.T) {
 	}
 	if snapshot == nil || snapshot.Workspace.ID != "ws-a" || snapshot.ViewModel.Revision != 7 {
 		t.Fatalf("snapshot = %+v, want typed DTO fields preserved", snapshot)
-	}
-	if snapshot.Runs[0].ExecutionContext["goal"].(map[string]any)["text"] != "first goal\nsecond goal" {
-		t.Fatalf("executionContext = %+v, want typed context preserved", snapshot.Runs[0].ExecutionContext)
-	}
-	if snapshot.RuntimeExecution.ContractViolation.Recoverability != runtimemodel.ContractViolationRecoverabilityRetrySameContract {
-		t.Fatalf("contractViolation = %+v, want typed violation preserved", snapshot.RuntimeExecution.ContractViolation)
 	}
 	if snapshot.GapBaseline.AcceptedEvidenceRefs[0] != "evidence-accepted" {
 		t.Fatalf("gapBaseline = %+v, want evidence refs preserved", snapshot.GapBaseline)

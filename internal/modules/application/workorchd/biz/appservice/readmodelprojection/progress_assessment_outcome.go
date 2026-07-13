@@ -8,14 +8,14 @@ import (
 )
 
 func TaskProgressAssessmentOutcome(snapshot readmodelcore.RunSnapshot) readmodelcore.AssessmentOutcome {
-	return assessmentOutcomeFromResults(RunScopedResults(snapshot), snapshot.CoverageWorkItems, snapshot.Run.ExecutionContext)
+	return assessmentOutcomeFromResults(RunScopedResults(snapshot), snapshot.CoverageWorkItems)
 }
 
 func WorkspaceTaskProgressAssessmentOutcome(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.AssessmentOutcome {
-	return assessmentOutcomeFromResults(snapshot.Results, nil, nil)
+	return assessmentOutcomeFromResults(snapshot.Results, nil)
 }
 
-func assessmentOutcomeFromResults(results []readmodelcore.Result, coverageItems []map[string]any, executionContext map[string]any) readmodelcore.AssessmentOutcome {
+func assessmentOutcomeFromResults(results []readmodelcore.Result, coverageItems []map[string]any) readmodelcore.AssessmentOutcome {
 	var ret readmodelcore.AssessmentOutcome
 	for idx := range results {
 		item := results[idx]
@@ -39,12 +39,8 @@ func assessmentOutcomeFromResults(results []readmodelcore.Result, coverageItems 
 		}
 	}
 	counts := coverageSummaryStatusCounts(coverageItems)
-	if len(counts) == 0 {
-		counts = coverageSummaryStatusCounts(MapSliceValue(executionContext["coverageWorkItems"]))
-	}
 	ret.SatisfiedCoverageCount = counts["satisfied"]
 	ret.RemainingCoverageCount = counts["open"] + counts["blocked"]
-	ret.NewlySatisfiedCoverageCount = coverageDeltaSatisfiedCount(executionContext)
 	switch {
 	case ret.AcceptedSlices > 0 && ret.RejectedGlobalAssessments > 0:
 		ret.State = "partial_progress_accepted_global_assessment_rejected"

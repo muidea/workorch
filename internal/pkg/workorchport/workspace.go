@@ -161,7 +161,6 @@ type WorkspaceSnapshotInfo struct {
 	Outcome                 WorkspaceOutcomeInfo
 	TaskProgress            TaskProgressInfo
 	RunHeartbeat            RunHeartbeatInfo
-	RuntimeExecution        *RuntimeExecutionInfo
 	ConvergenceStatus       *ConvergenceStatusInfo
 	RunCommand              *RunCommandStatusInfo
 	SchedulerDiagnostics    *SchedulerDiagnosticsInfo

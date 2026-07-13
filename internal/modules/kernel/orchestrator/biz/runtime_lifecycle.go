@@ -3,25 +3,11 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strings"
-	"time"
 
-	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
-	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
-
-func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) error {
-	r, ws, err := o.acceptRunStart(ctx, runID)
-	if err != nil {
-		return err
-	}
-	return o.dispatchAcceptedRun(ctx, r, ws)
-}
 
 func (o *RuntimeOrchestrator) AcceptRunStart(ctx context.Context, runID common.RunID) error {
 	_, _, err := o.acceptRunStart(ctx, runID)
@@ -32,7 +18,6 @@ func (o *RuntimeOrchestrator) acceptRunStart(ctx context.Context, runID common.R
 	if runID == "" {
 		return nil, nil, common.ErrInvalidArgument
 	}
-
 	r, err := o.runtimeEventRun(ctx, runID)
 	if err != nil {
 		return nil, nil, err
@@ -44,53 +29,13 @@ func (o *RuntimeOrchestrator) acceptRunStart(ctx context.Context, runID common.R
 	if err != nil {
 		return nil, nil, err
 	}
-
 	r.State = common.RunStateActive
 	r.FailureReason = ""
 	ws, err = o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateActive, ws)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := o.eventPublisher().publishRunStateChanged(ctx, r); err != nil {
-		return nil, nil, err
-	}
-	if err := o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, runID); err != nil {
-		return nil, nil, err
-	}
 	return r, ws, nil
-}
-
-func (o *RuntimeOrchestrator) dispatchAcceptedRun(ctx context.Context, r *runModel.Run, ws *workspaceModel.Workspace) error {
-	if r == nil || r.ID == "" {
-		return common.ErrInvalidArgument
-	}
-	specs, err := o.nextDispatchSpecs(ctx, r)
-	if err != nil {
-		return errors.Join(o.failRunningResume(ctx, r.ID, err), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
-	}
-	if err := o.dispatchPreparedStepSpecsWithWorkspace(ctx, r, specs, ws); err != nil {
-		return errors.Join(o.failRunningResume(ctx, r.ID, err), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
-	}
-	return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
-}
-
-func (o *RuntimeOrchestrator) DispatchNextStep(ctx context.Context, runID common.RunID) error {
-	if runID == "" {
-		return common.ErrInvalidArgument
-	}
-	if o.runtime == nil {
-		return common.ErrInvalidArgument
-	}
-
-	r, err := o.runtimeEventRun(ctx, runID)
-	if err != nil {
-		return err
-	}
-	specs, err := o.nextDispatchSpecs(ctx, r)
-	if err != nil {
-		return err
-	}
-	return o.dispatchPreparedStepSpecsWithWorkspace(ctx, r, specs, nil)
 }
 
 func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.RunID, ticketID common.TicketID) error {
@@ -108,8 +53,7 @@ func (o *RuntimeOrchestrator) blockOnDecisionAtStep(ctx context.Context, r *runM
 	if r == nil || r.ID == "" || ticketID == "" {
 		return common.ErrInvalidArgument
 	}
-	if (r.State != common.RunStatePending && r.State != common.RunStateActive) ||
-		!common.RunStateCanTransition(r.State, common.RunStateBlockedOnDecision) {
+	if (r.State != common.RunStatePending && r.State != common.RunStateActive) || !common.RunStateCanTransition(r.State, common.RunStateBlockedOnDecision) {
 		return common.ErrConflict
 	}
 	if err := o.finalizeManagedValidationResourcesForGovernedWait(ctx, r, currentStepID, "released", "run_blocked_on_decision"); err != nil {
@@ -123,10 +67,7 @@ func (o *RuntimeOrchestrator) blockOnDecisionAtStep(ctx context.Context, r *runM
 	if err != nil {
 		return err
 	}
-	if err := o.eventPublisher().publishRunStateChangedAtStep(ctx, r, currentStepID); err != nil {
-		return err
-	}
-	return o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID)
+	return nil
 }
 
 func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.RunID, approvalID common.ApprovalID) error {
@@ -144,8 +85,7 @@ func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runM
 	if r == nil || r.ID == "" || approvalID == "" {
 		return common.ErrInvalidArgument
 	}
-	if (r.State != common.RunStatePending && r.State != common.RunStateActive) ||
-		!common.RunStateCanTransition(r.State, common.RunStateBlockedOnApproval) {
+	if (r.State != common.RunStatePending && r.State != common.RunStateActive) || !common.RunStateCanTransition(r.State, common.RunStateBlockedOnApproval) {
 		return common.ErrConflict
 	}
 	if err := o.finalizeManagedValidationResourcesForGovernedWait(ctx, r, currentStepID, "released", "run_blocked_on_approval"); err != nil {
@@ -159,10 +99,7 @@ func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runM
 	if err != nil {
 		return err
 	}
-	if err := o.eventPublisher().publishRunStateChangedAtStep(ctx, r, currentStepID); err != nil {
-		return err
-	}
-	return o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID)
+	return nil
 }
 
 func (o *RuntimeOrchestrator) finalizeManagedValidationResourcesForGovernedWait(ctx context.Context, r *runModel.Run, currentStepID common.StepID, finalStatus string, finalizedBy string) error {
@@ -186,10 +123,6 @@ func (o *RuntimeOrchestrator) finalizeManagedValidationResourcesForGovernedWait(
 		return nil
 	}
 	return o.steps.Update(ctx, step)
-}
-
-func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID) error {
-	return o.ResumeRunWithExecutionContextPatch(ctx, runID, nil)
 }
 
 func (o *RuntimeOrchestrator) CanResumeRun(ctx context.Context, runID common.RunID) error {
@@ -231,392 +164,4 @@ func (o *RuntimeOrchestrator) CanResumeRun(ctx context.Context, runID common.Run
 	default:
 		return common.ErrConflict
 	}
-}
-
-func (o *RuntimeOrchestrator) ResumeRunWithExecutionContextPatch(ctx context.Context, runID common.RunID, executionContextPatch map[string]any) error {
-	if runID == "" {
-		return common.ErrInvalidArgument
-	}
-	r, err := o.runtimeEventRun(ctx, runID)
-	if err != nil {
-		return err
-	}
-	return o.ResumeLoadedRunWithExecutionContextPatch(ctx, r, executionContextPatch)
-}
-
-func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx context.Context, r *runModel.Run, executionContextPatch map[string]any) error {
-	if r == nil || r.ID == "" {
-		return common.ErrInvalidArgument
-	}
-	originalResumeState := runResumeStateSnapshotFromRun(r)
-	var resumeAfterStepID common.StepID
-	var resumeInput map[string]any
-	switch r.State {
-	case common.RunStateBlockedOnDecision:
-		if r.BlockingTicketID == "" || o.tickets == nil {
-			return common.ErrConflict
-		}
-		ticket, err := o.tickets.Get(ctx, r.BlockingTicketID)
-		if err != nil {
-			return err
-		}
-		if ticket.State != common.DecisionTicketStateResolved {
-			eligibility := o.evaluateDecisionEligibility(ctx, r, ticket)
-			if eligibility.Action == decisionEligibilityBlocked {
-				return common.ErrBlocked
-			}
-			if eligibility.SupersedeTicket {
-				ticket.State = common.DecisionTicketStateSuperseded
-				if err := o.tickets.Update(ctx, ticket); err != nil {
-					return err
-				}
-			}
-			if eligibility.ResumeAfterStepID != "" {
-				resumeAfterStepID = eligibility.ResumeAfterStepID
-			}
-			if len(eligibility.ResumeInput) > 0 {
-				resumeInput = eligibility.ResumeInput
-			}
-			if eligibility.ClearBlocker {
-				r.BlockingTicketID = ""
-			}
-			break
-		}
-		resumeAfterStepID = ticket.StepID
-		if o.resolutions != nil {
-			resolution, err := o.resolutions.GetByTicketID(ctx, r.BlockingTicketID)
-			if err != nil {
-				return err
-			}
-			switch effectiveDecisionResolutionType(ticket, resolution) {
-			case decisioncommon.ResolutionTypeProvideMissingInfo:
-				if configOnlyDependencyResolutionStillBlocked(ticket, resolution) {
-					if err := o.reopenConfigOnlyDependencyTicket(ctx, ticket); err != nil {
-						return err
-					}
-					return common.ErrBlocked
-				}
-				resumeInput = decisionResolutionInput(ticket, resolution)
-				r.BlockingTicketID = ""
-			case decisioncommon.ResolutionTypeRejectCurrentPath:
-				mergeRunExecutionContextPatch(r, executionContextPatch)
-				return o.closeLoadedRun(ctx, r, common.RunStateFailed, fmt.Sprintf("decision ticket %s rejected", ticket.ID))
-			case decisioncommon.ResolutionTypeReplan:
-				if configOnlyDependencyResolutionStillBlocked(ticket, resolution) {
-					if err := o.reopenConfigOnlyDependencyTicket(ctx, ticket); err != nil {
-						return err
-					}
-					return common.ErrBlocked
-				}
-				mergeRunExecutionContextPatch(r, executionContextPatch)
-				return o.replanLoadedRun(ctx, r, ticket, resolution)
-			default:
-				return common.ErrInvalidArgument
-			}
-		} else {
-			r.BlockingTicketID = ""
-		}
-	case common.RunStateBlockedOnApproval:
-		if r.BlockingApprovalID == "" || o.approvals == nil {
-			return common.ErrConflict
-		}
-		scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, r.WorkspaceID)
-		approval, err := o.approvals.Get(scopedCtx, r.BlockingApprovalID)
-		if err != nil {
-			return err
-		}
-		switch approval.State {
-		case common.ApprovalStateApproved:
-			patchApplication, err := o.applyApprovedPendingPatchApproval(ctx, r, approval)
-			if err != nil {
-				if errors.Is(err, errApprovedPatchApplyFailureHandled) {
-					r.State = common.RunStateActive
-					r.FailureReason = ""
-					r.BlockingApprovalID = ""
-					mergeRunExecutionContextPatch(r, executionContextPatch)
-					workspace, syncErr := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateActive, nil)
-					if syncErr != nil {
-						return syncErr
-					}
-					if publishErr := o.eventPublisher().publishRunStateChanged(ctx, r); publishErr != nil {
-						return publishErr
-					}
-					if publishErr := o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID); publishErr != nil {
-						return publishErr
-					}
-					return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
-				}
-				return o.failResolvedDecisionResume(ctx, r, originalResumeState, executionContextPatch, err)
-			}
-			resumeAfterStepID = approval.StepID
-			resumeInput = approvalResolutionInput(approval)
-			if len(patchApplication) > 0 {
-				resumeInput["approvedPatchApplication"] = patchApplication
-			}
-			r.BlockingApprovalID = ""
-		case common.ApprovalStateRejected:
-			mergeRunExecutionContextPatch(r, executionContextPatch)
-			return o.closeLoadedRun(ctx, r, common.RunStateFailed, fmt.Sprintf("approval %s rejected", approval.ID))
-		default:
-			return common.ErrBlocked
-		}
-	case common.RunStateActive:
-		if recovered, err := o.recoverRuntimeTerminalResultForRunningRun(ctx, r); err != nil || recovered {
-			return err
-		}
-		recoverStepID, recoverInput, err := o.runningDecisionRecoveryContext(ctx, r)
-		if err != nil {
-			if !errors.Is(err, common.ErrConflict) {
-				return err
-			}
-			specs, specErr := runningTerminalStepRecoverySpecs(
-				ctx,
-				o.steps,
-				func(ctx context.Context, run *runModel.Run) ([]stepDispatchSpec, bool, error) {
-					return artifactContinuationRecoverySpecs(ctx, o.steps, o.evidence.ArtifactContinuations, run)
-				},
-				o.nextDispatchSpecsFromStep,
-				r,
-			)
-			if specErr != nil {
-				return specErr
-			}
-			if len(specs) == 0 {
-				specs, specErr = runningInitialDispatchRecoverySpecs(ctx, o.steps, o.nextDispatchSpecs, r)
-				if specErr != nil {
-					return errors.Join(o.failRunningResume(ctx, r.ID, specErr), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
-				}
-				if len(specs) == 0 {
-					cause := fmt.Errorf("%w: running run has no recoverable active step or continuation", common.ErrConflict)
-					return errors.Join(o.failRunningResume(ctx, r.ID, cause), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
-				}
-			}
-			r.State = common.RunStateActive
-			r.FailureReason = ""
-			mergeRunExecutionContextPatch(r, executionContextPatch)
-			workspace, syncErr := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateActive, nil)
-			if syncErr != nil {
-				return syncErr
-			}
-			if publishErr := o.eventPublisher().publishRunStateChanged(ctx, r); publishErr != nil {
-				return publishErr
-			}
-			if publishErr := o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID); publishErr != nil {
-				return publishErr
-			}
-			if dispatchErr := o.dispatchPreparedStepSpecsWithWorkspace(ctx, r, specs, workspace); dispatchErr != nil {
-				return errors.Join(o.failRunningResume(ctx, r.ID, dispatchErr), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
-			}
-			return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
-		}
-		if recoverStepID == "" {
-			if len(executionContextPatch) > 0 {
-				mergeRunExecutionContextPatch(r, executionContextPatch)
-				workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateActive, nil)
-				if err != nil {
-					return err
-				}
-				if err := o.eventPublisher().publishRunStateChanged(ctx, r); err != nil {
-					return err
-				}
-				return o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID)
-			}
-			return nil
-		}
-		resumeAfterStepID = recoverStepID
-		resumeInput = recoverInput
-	default:
-		return common.ErrConflict
-	}
-
-	resumeRun := cloneRunForResume(r)
-	resumeRun.State = common.RunStateActive
-	resumeRun.FailureReason = ""
-	mergeRunExecutionContextPatch(resumeRun, executionContextPatch)
-	specs, err := nextDispatchSpecsAfterResolvedDecision(
-		ctx,
-		func(ctx context.Context, run *runModel.Run, stepID common.StepID) ([]stepDispatchSpec, bool, error) {
-			return knownReadableDecisionRepairSpecs(ctx, o.steps, o.workspaces, o.repairManager(), o, run, stepID)
-		},
-		func(ctx context.Context, run *runModel.Run, stepID common.StepID) ([]stepDispatchSpec, bool, error) {
-			return providerRetrySpecsAfterResolvedDecision(ctx, o.steps, o.repairManager(), o.RuntimePolicy(), run, stepID)
-		},
-		func(ctx context.Context, run *runModel.Run, stepID common.StepID) ([]stepDispatchSpec, bool, error) {
-			return runtimeRepairSpecsAfterResolvedDecision(ctx, o.steps, o.repairManager(), o, run, stepID)
-		},
-		func(ctx context.Context, run *runModel.Run, stepID common.StepID, input map[string]any) ([]stepDispatchSpec, bool, error) {
-			return contextIntegritySpecsAfterResolvedDecision(ctx, o.steps, run, stepID, input)
-		},
-		o.nextDispatchSpecsAfterStep,
-		resumeRun,
-		resumeAfterStepID,
-		resumeInput,
-	)
-	if err != nil {
-		if errors.Is(err, common.ErrBlocked) && deterministicContextGateResumeBlocked(ctx, o.steps, resumeAfterStepID, resumeInput) {
-			if reopenErr := o.reopenDeterministicContextGateDecision(ctx, r, resumeAfterStepID, resumeInput); reopenErr != nil {
-				return errors.Join(err, reopenErr)
-			}
-			return common.ErrBlocked
-		}
-		return o.failResolvedDecisionResume(ctx, r, originalResumeState, executionContextPatch, err)
-	}
-	resumeRun.State = common.RunStateActive
-	resumeRun.FailureReason = ""
-	resumeRun.BlockingTicketID = ""
-	resumeRun.BlockingApprovalID = ""
-	mergeResumeInput(specs, resumeInput)
-	r.State = resumeRun.State
-	r.FailureReason = resumeRun.FailureReason
-	r.BlockingTicketID = resumeRun.BlockingTicketID
-	r.BlockingApprovalID = resumeRun.BlockingApprovalID
-	r.ExecutionContext = cloneStepPayload(resumeRun.ExecutionContext)
-	workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateActive, nil)
-	if err != nil {
-		return err
-	}
-	if err := o.eventPublisher().publishRunStateChanged(ctx, r); err != nil {
-		return err
-	}
-	if err := o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID); err != nil {
-		return err
-	}
-	if err := o.dispatchPreparedStepSpecsWithWorkspace(ctx, r, specs, workspace); err != nil {
-		return errors.Join(o.failRunningResume(ctx, r.ID, err), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
-	}
-	return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
-}
-
-func deterministicContextGateResumeBlocked(ctx context.Context, steps repository.StepRepository, stepID common.StepID, resumeInput map[string]any) bool {
-	if steps == nil || stepID == "" || !contextGateDecisionResumeInput(resumeInput) {
-		return false
-	}
-	step, err := steps.Get(ctx, stepID)
-	return err == nil && deterministicProtectedContextFloorFailure(step) && !contextIntegrityResolutionChangesRequestScope(step, resumeInput)
-}
-
-func (o *RuntimeOrchestrator) reopenDeterministicContextGateDecision(ctx context.Context, run *runModel.Run, stepID common.StepID, resumeInput map[string]any) error {
-	if o == nil || run == nil || o.tickets == nil {
-		return common.ErrInvalidArgument
-	}
-	resolution := mapFromValue(resumeInput["decisionResolution"])
-	ticketID := common.TicketID(strings.TrimSpace(stringFromMap(resolution, "ticketId")))
-	if ticketID == "" {
-		return common.ErrInvalidArgument
-	}
-	ticket, err := o.tickets.Get(ctx, ticketID)
-	if err != nil {
-		return err
-	}
-	if ticket == nil || ticket.RunID != run.ID || ticket.WorkspaceID != run.WorkspaceID || ticket.StepID != stepID {
-		return common.ErrConflict
-	}
-	if o.resolutions != nil {
-		if err := o.resolutions.DeleteByTicketID(ctx, ticketID); err != nil && !errors.Is(err, common.ErrNotFound) {
-			return err
-		}
-	}
-	ticket.State = common.DecisionTicketStateOpen
-	ticket.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	if err := o.tickets.Update(ctx, ticket); err != nil {
-		return err
-	}
-	if run.State == common.RunStateBlockedOnDecision {
-		run.BlockingTicketID = ticketID
-		run.BlockingApprovalID = ""
-		return nil
-	}
-	run.State = common.RunStateActive
-	run.BlockingTicketID = ""
-	return o.blockOnDecisionAtStep(ctx, run, nil, ticketID, stepID)
-}
-
-type runResumeStateSnapshot struct {
-	state              common.RunState
-	blockingTicketID   common.TicketID
-	blockingApprovalID common.ApprovalID
-}
-
-func runResumeStateSnapshotFromRun(run *runModel.Run) runResumeStateSnapshot {
-	if run == nil {
-		return runResumeStateSnapshot{}
-	}
-	return runResumeStateSnapshot{
-		state:              run.State,
-		blockingTicketID:   run.BlockingTicketID,
-		blockingApprovalID: run.BlockingApprovalID,
-	}
-}
-
-func (s runResumeStateSnapshot) matches(run *runModel.Run) bool {
-	return run != nil &&
-		run.State == s.state &&
-		run.BlockingTicketID == s.blockingTicketID &&
-		run.BlockingApprovalID == s.blockingApprovalID
-}
-
-func cloneRunForResume(run *runModel.Run) *runModel.Run {
-	if run == nil {
-		return nil
-	}
-	cloned := *run
-	cloned.ExecutionContext = cloneStepPayload(run.ExecutionContext)
-	return &cloned
-}
-
-func configOnlyDependencyResolutionStillBlocked(ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) bool {
-	if ticket == nil || resolution == nil {
-		return false
-	}
-	if strings.TrimSpace(resolution.Type) == decisioncommon.ResolutionTypeReplan {
-		return false
-	}
-	if strings.TrimSpace(stringFromMap(ticket.Context, decisionContextKeyRecoveryPolicy)) != decisionContextRecoveryPolicyConfigOnly {
-		return false
-	}
-	payload := resolution.Payload
-	if boolValue(payload["externalDependencyRecovered"]) ||
-		boolValue(payload["systemConfigChanged"]) ||
-		boolValue(payload["runtimeDependencyRecovered"]) {
-		return false
-	}
-	return true
-}
-
-func (o *RuntimeOrchestrator) reopenConfigOnlyDependencyTicket(ctx context.Context, ticket *decisionmodel.Ticket) error {
-	if o == nil || ticket == nil || ticket.ID == "" || o.tickets == nil {
-		return common.ErrInvalidArgument
-	}
-	if o.resolutions != nil {
-		if err := o.resolutions.DeleteByTicketID(ctx, ticket.ID); err != nil && !errors.Is(err, common.ErrNotFound) {
-			return err
-		}
-	}
-	ticket.State = common.DecisionTicketStateOpen
-	ticket.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	return o.tickets.Update(ctx, ticket)
-}
-
-func (o *RuntimeOrchestrator) failResolvedDecisionResume(ctx context.Context, run *runModel.Run, original runResumeStateSnapshot, executionContextPatch map[string]any, cause error) error {
-	if cause == nil {
-		return nil
-	}
-	if o == nil || run == nil || run.ID == "" || o.runs == nil {
-		return cause
-	}
-	if errors.Is(cause, common.ErrBlocked) {
-		return cause
-	}
-	current, err := o.runtimeEventRun(common.ContextWithRuntimeWorkspaceID(ctx, run.WorkspaceID), run.ID)
-	if err != nil {
-		return errors.Join(cause, err)
-	}
-	if !original.matches(current) {
-		return cause
-	}
-	mergeRunExecutionContextPatch(current, executionContextPatch)
-	if err := o.closeLoadedRun(ctx, current, common.RunStateFailed, cause.Error()); err != nil {
-		return errors.Join(cause, err)
-	}
-	return nil
 }

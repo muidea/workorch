@@ -2,6 +2,7 @@ package setupdraftports
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -23,17 +24,29 @@ func (g EventHubGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, requ
 	if g.CommandHub == nil {
 		return setupdraftcore.Draft{}, common.ErrInvalidArgument
 	}
-	payload := map[string]any{
-		"instructions": setupdraftcore.Instructions(),
-		"request":      request,
-		"outputSchema": setupdraftcore.OutputSchema(),
+	contractPayload, err := json.Marshal(struct {
+		Instructions []string       `json:"instructions"`
+		OutputSchema map[string]any `json:"outputSchema"`
+	}{
+		Instructions: setupdraftcore.Instructions(),
+		OutputSchema: setupdraftcore.OutputSchema(),
+	})
+	if err != nil {
+		return setupdraftcore.Draft{}, err
+	}
+	requestPayload, err := json.Marshal(request)
+	if err != nil {
+		return setupdraftcore.Draft{}, err
 	}
 	ev := magicevent.NewEventWithContext(llmevents.TopicLLMCommandCompleteProvider, "application/workorchd/appservice", llmevents.CommandDestination, magicevent.NewHeader(), ctx, llmevents.CompleteProviderCommand{
 		Request: llmmodels.ProviderRequest{
 			Kind:           "workspace/setup_draft",
 			Schema:         WorkspaceSetupDraftSchemaName,
 			DialogLanguage: request.DialogLanguage,
-			Input:          payload,
+			PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.workspace_setup_prompt.v1", Sections: []llmmodels.PromptSection{
+				{ID: "C0.workspace-setup-contract", Name: "Workspace setup contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: string(contractPayload)},
+				{ID: "C3.workspace-setup-request", Name: "Workspace setup request", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: string(requestPayload)},
+			}},
 			TraceRefs: map[string]string{
 				"templateId": request.Template.ID,
 			},

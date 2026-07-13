@@ -2,106 +2,14 @@ package orchestrator
 
 import (
 	"context"
-	"sync"
 
-	magicevent "github.com/muidea/magicCommon/event"
+	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
-	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
-
-type RuntimeAdapter interface {
-	ExecuteRuntimeStep(context.Context, runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error)
-}
-
-type RuntimeExecutionRequester interface {
-	RequestRuntimeStepExecution(context.Context, runtimemodel.StepExecutionRequest) (runtimemodel.RuntimeStepExecutionAccepted, error)
-}
-
-const (
-	stepOutputKeyNextStep               = "nextStep"
-	stepOutputKeyNextKind               = "nextKind"
-	stepOutputKeyNextInput              = "nextInput"
-	stepOutputKeyPatches                = "patches"
-	stepOutputKeyMemoryWrites           = "memoryWrites"
-	stepOutputKeyMemoryRefs             = "memoryRefs"
-	stepOutputKeyDoDAssessment          = "dodAssessment"
-	stepOutputKeyLLMDecision            = "llmDecision"
-	stepOutputKeyExecutionGraph         = "executionGraph"
-	stepOutputKeyGraphBranch            = "graphBranch"
-	stepInputKeyGraphNodeID             = "graphNodeId"
-	stepInputKeyGraphRootStepID         = "graphRootStepId"
-	stepInputKeyGraphPreviousNodeID     = "graphPreviousNodeId"
-	stepInputKeyGraphCompletedNodes     = "graphCompletedNodes"
-	stepInputKeyGraphBatch              = "graphBatch"
-	stepInputKeyGraphBatchRootStepID    = "batchRootStepId"
-	stepInputKeyGraphEvidence           = "graphEvidence"
-	stepInputKeyRunEvidenceSummary      = "runEvidenceSummary"
-	stepInputKeyProcessEvidenceTimeline = "processEvidenceTimeline"
-	stepInputKeyCurrentProgressDigest   = "currentProgressDigest"
-	stepInputKeyWorkspaceFileManifest   = "workspaceFileManifest"
-	stepInputKeySoulStage               = "soulStage"
-	stepInputKeyRuntimeRepairFollowUp   = "runtimeRepairFollowUp"
-	stepInputKeyRuntimeRepairAttempt    = "runtimeRepairAttempt"
-	stepInputKeyRepairOfStepID          = "repairOfStepId"
-	stepInputKeyRepairOfRootStepID      = "repairOfRootStepId"
-	stepInputKeyRepairOfFailureClass    = "repairOfFailureClass"
-	stepInputKeyRepairOfFailureSig      = "repairOfFailureSignature"
-	stepInputKeyProviderRetryFollowUp   = "providerRetryFollowUp"
-	stepInputKeyProviderRetryAttempt    = "providerRetryAttempt"
-	stepInputKeyProviderRetryRootStep   = "providerRetryRootStepId"
-	stepInputKeyRecoveryAction          = "recoveryAction"
-	stepInputKeyRecoveryRootStepID      = "recoveryRootStepId"
-	stepInputKeyRecoveryLineageType     = "recoveryLineageType"
-	stepInputKeyRecoveryBudgetScope     = "recoveryBudgetScope"
-	stepInputKeyNoActionableFollowUp    = "noActionableContinuationFollowUp"
-	stepInputKeyAssessmentOnly          = "assessmentOnly"
-	stepInputKeyGraphLimitFollowUp      = "graphExpansionLimitFollowUp"
-	artifactAssembleStepKind            = "artifact/assemble"
-	artifactApplyStepKind               = "artifact/apply"
-	stepOutputKeyBlockDecisionReason    = "blockDecisionReason"
-	stepOutputKeyBlockDecisionTicketID  = "blockDecisionTicketId"
-	stepOutputKeyBlockDecisionKind      = "blockDecisionKind"
-	stepOutputKeyBlockDecisionQuestion  = "blockDecisionQuestion"
-	stepOutputKeyBlockDecisionContext   = "blockDecisionContext"
-	stepOutputKeyBlockApprovalReason    = "blockApprovalReason"
-	stepOutputKeyBlockApprovalID        = "blockApprovalId"
-	stepOutputKeyBlockApprovalAction    = "blockApprovalAction"
-	stepOutputKeyBlockApprovalContext   = "blockApprovalContext"
-	llmWorkspaceExecutionStepKind       = "llm/workspace_execution"
-	defaultInitialStepKind              = llmWorkspaceExecutionStepKind
-	soulStagePlanning                   = "planning"
-	soulStageExecution                  = "execution"
-	soulStageDecision                   = "decision"
-	soulStageApproval                   = "approval"
-	soulStageValidation                 = "validation"
-	defaultMaxRuntimeRepairAttempts     = 10
-	maxProviderRetryAttempts            = 10
-	defaultMaxPatchContentBytes         = 65536
-	defaultMaxGraphBytes                = 131072
-	defaultMaxGraphFileWrites           = 3
-	defaultSchemaInvalidPreviewBytes    = 32768
-	defaultMaxArtifactChunkBytes        = 16384
-	defaultPreviousChunkTailBytes       = 300
-	defaultMaxChunkRetryAttempts        = 3
-	defaultMaxArtifactPlanAttempts      = 2
-	defaultMaxArtifactReplanAttempts    = 2
-	maxGraphFollowUpExpansionAttempts   = 2
-)
-
-const maxProviderRetryAttemptsBeforeStateChange = 2
-
-const (
-	minIneffectiveConvergenceRecoverySteps    = 8
-	minIneffectiveConvergenceContractFailures = 3
-)
-
-type RuntimePolicy = workorchruntimepolicy.RuntimePolicy
-type LLMOutputRuntimePolicy = workorchruntimepolicy.LLMOutputRuntimePolicy
 
 type RuntimeOrchestrator struct {
-	runtime             RuntimeAdapter
 	runs                repository.RunRepository
 	steps               repository.StepRepository
 	workspaces          repository.WorkspaceRepository
@@ -109,42 +17,101 @@ type RuntimeOrchestrator struct {
 	resolutions         repository.DecisionResolutionRepository
 	approvals           repository.ApprovalRepository
 	evidence            RuntimeEvidenceRepositories
-	commandHub          magicevent.Hub
-	eventDrivenDispatch bool
-	policyMu            sync.RWMutex
-	policy              RuntimePolicy
-	checkpoints         *checkpointSubsystem
-	eventer             *eventSubsystem
-	llmContext          *llmContextSubsystem
-	repair              *repairSubsystem
-	graph               *graphSubsystem
-	convergence         *convergenceSubsystem
-	coverage            *coverageSubsystem
-	patches             *patchSubsystem
-	results             *resultSubsystem
 	runState            *runStateSubsystem
-	decision            *decisionResumeSubsystem
-	finalizeMu          sync.Map
-	llmDispatchMu       sync.Map
+	runtimeV2Controller *runtimev2.RuntimeController
 }
 
-func (o *RuntimeOrchestrator) RuntimePolicy() RuntimePolicy {
-	if o == nil {
-		return NormalizeRuntimePolicy(RuntimePolicy{})
-	}
-	o.policyMu.RLock()
-	defer o.policyMu.RUnlock()
-	return NormalizeRuntimePolicy(o.policy)
-}
-
-func (o *RuntimeOrchestrator) UpdateRuntimePolicy(policy RuntimePolicy) error {
-	if o == nil {
+func (o *RuntimeOrchestrator) ConfigureRuntimeV2Repository(repository runtimev2.RuntimeStateRepository) error {
+	if o == nil || repository == nil {
 		return common.ErrInvalidArgument
 	}
-	o.policyMu.Lock()
-	defer o.policyMu.Unlock()
-	o.policy = NormalizeRuntimePolicy(policy)
+	controller, err := runtimev2.NewRuntimeController(repository)
+	if err != nil {
+		return err
+	}
+	o.runtimeV2Controller = controller
 	return nil
+}
+
+func (o *RuntimeOrchestrator) RuntimeV2RepositoryConfigured() bool {
+	return o != nil && o.runtimeV2Controller != nil
+}
+
+func (o *RuntimeOrchestrator) InitializeRuntimeV2(ctx context.Context, facts runtimemodel.RuntimeFacts, definition runtimemodel.RuntimeDefinitionContext, requirements []runtimev2.RuntimeRequirement) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.Initialize(ctx, facts, definition, requirements)
+}
+
+func (o *RuntimeOrchestrator) LoadRuntimeV2(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.Load(ctx, workspaceID, runID)
+}
+
+func (o *RuntimeOrchestrator) CommitRuntimeV2Prerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, result runtimev2.PrerequisiteResult) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.CommitPrerequisite(ctx, workspaceID, runID, result)
+}
+
+func (o *RuntimeOrchestrator) BeginRuntimeV2CandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.BeginCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash)
+}
+
+func (o *RuntimeOrchestrator) AcceptRuntimeV2CandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.AcceptCandidateAttempt(ctx, workspaceID, runID, attempt, candidate)
+}
+
+func (o *RuntimeOrchestrator) FailRuntimeV2CandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, failure runtimemodel.RuntimeCandidateFailure) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.FailCandidateAttempt(ctx, workspaceID, runID, attempt, failure)
+}
+
+func (o *RuntimeOrchestrator) CommitRuntimeV2Evidence(ctx context.Context, evidence runtimev2.ExecutionEvidence) (runtimev2.EvidenceCommitResult, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.EvidenceCommitResult{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.CommitEvidence(ctx, evidence)
+}
+
+func (o *RuntimeOrchestrator) CommitRuntimeV2Assessment(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.CommitAssessment(ctx, workspaceID, runID)
+}
+
+func (o *RuntimeOrchestrator) CommitRuntimeV2GovernanceResolution(ctx context.Context, resolution runtimemodel.RuntimeGovernanceResolution) (runtimev2.EvidenceCommitResult, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.EvidenceCommitResult{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.CommitGovernanceResolution(ctx, resolution)
+}
+
+func (o *RuntimeOrchestrator) BindRuntimeV2GovernanceRequest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, request runtimemodel.RuntimeGovernanceRequestRecord) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.BindGovernanceRequest(ctx, workspaceID, runID, request)
+}
+
+func (o *RuntimeOrchestrator) ExecuteRuntimeV2Dispatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, executor runtimev2.RuntimeOperationExecutor) (runtimev2.RuntimeAggregate, error) {
+	if o == nil || o.runtimeV2Controller == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return o.runtimeV2Controller.ExecuteActiveDispatch(ctx, workspaceID, runID, executor)
 }
 
 type RuntimeEvidenceRepositories struct {
@@ -169,46 +136,17 @@ func (o *RuntimeOrchestrator) EvidenceRepositories() RuntimeEvidenceRepositories
 	return o.evidence
 }
 
-type stepDispatchSpec struct {
-	ID    common.StepID
-	Kind  string
-	Input map[string]any
-}
-
 func NewRuntimeOrchestrator(
-	runtime RuntimeAdapter,
 	runRepo repository.RunRepository,
 	stepRepo repository.StepRepository,
 	workspaceRepo repository.WorkspaceRepository,
 	ticketRepo repository.DecisionTicketRepository,
 	approvalRepo repository.ApprovalRepository,
 ) *RuntimeOrchestrator {
-	return NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, nil, approvalRepo)
-}
-
-func NewRuntimeOrchestratorWithResolutions(
-	runtime RuntimeAdapter,
-	runRepo repository.RunRepository,
-	stepRepo repository.StepRepository,
-	workspaceRepo repository.WorkspaceRepository,
-	ticketRepo repository.DecisionTicketRepository,
-	resolutionRepo repository.DecisionResolutionRepository,
-	approvalRepo repository.ApprovalRepository,
-) *RuntimeOrchestrator {
-	return NewRuntimeOrchestratorWithResolutionsAndEvidence(
-		runtime,
-		runRepo,
-		stepRepo,
-		workspaceRepo,
-		ticketRepo,
-		resolutionRepo,
-		approvalRepo,
-		RuntimeEvidenceRepositories{},
-	)
+	return NewRuntimeOrchestratorWithResolutionsAndEvidence(runRepo, stepRepo, workspaceRepo, ticketRepo, nil, approvalRepo, RuntimeEvidenceRepositories{})
 }
 
 func NewRuntimeOrchestratorWithResolutionsAndEvidence(
-	runtime RuntimeAdapter,
 	runRepo repository.RunRepository,
 	stepRepo repository.StepRepository,
 	workspaceRepo repository.WorkspaceRepository,
@@ -216,14 +154,8 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 	resolutionRepo repository.DecisionResolutionRepository,
 	approvalRepo repository.ApprovalRepository,
 	evidence RuntimeEvidenceRepositories,
-	policies ...RuntimePolicy,
 ) *RuntimeOrchestrator {
-	policy := NormalizeRuntimePolicy(RuntimePolicy{})
-	if len(policies) > 0 {
-		policy = NormalizeRuntimePolicy(policies[0])
-	}
-	orchestrator := &RuntimeOrchestrator{
-		runtime:     runtime,
+	return &RuntimeOrchestrator{
 		runs:        runRepo,
 		steps:       stepRepo,
 		workspaces:  workspaceRepo,
@@ -231,105 +163,8 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		resolutions: resolutionRepo,
 		approvals:   approvalRepo,
 		evidence:    evidence,
-		policy:      policy,
-		llmContext:  newLLMContextSubsystem(),
-		repair:      newRepairSubsystem(stepRepo, workspaceRepo),
-		graph:       newGraphSubsystem(stepRepo, evidence),
-		convergence: newConvergenceSubsystem(),
-		coverage:    newCoverageSubsystem(evidence.CoverageWorkItems),
 		runState:    newRunStateSubsystem(runRepo, workspaceRepo),
-		decision:    newDecisionResumeSubsystem(ticketRepo, resolutionRepo),
 	}
-	orchestrator.checkpoints = newCheckpointSubsystem(evidence, stepRepo)
-	orchestrator.eventer = newEventSubsystem(orchestrator.checkpoints, orchestrator.llmContext)
-	orchestrator.patches = newPatchSubsystem(evidence, approvalRepo, orchestrator.eventPublisher())
-	orchestrator.results = newResultSubsystem(evidence, stepRepo)
-	return orchestrator
-}
-
-func (o *RuntimeOrchestrator) checkpointManager() *checkpointSubsystem {
-	if o == nil {
-		return newCheckpointSubsystem(RuntimeEvidenceRepositories{}, nil)
-	}
-	if o.checkpoints == nil {
-		o.checkpoints = newCheckpointSubsystem(o.evidence, o.steps)
-	}
-	return o.checkpoints
-}
-
-func (o *RuntimeOrchestrator) eventPublisher() *eventSubsystem {
-	if o == nil {
-		return newEventSubsystem(nil, nil)
-	}
-	if o.eventer == nil {
-		o.eventer = newEventSubsystem(o.checkpointManager(), o.llmContextManager())
-	}
-	return o.eventer
-}
-
-func (o *RuntimeOrchestrator) graphManager() *graphSubsystem {
-	if o == nil {
-		return newGraphSubsystem(nil, RuntimeEvidenceRepositories{})
-	}
-	if o.graph == nil {
-		o.graph = newGraphSubsystem(o.steps, o.evidence)
-	}
-	return o.graph
-}
-
-func (o *RuntimeOrchestrator) llmContextManager() *llmContextSubsystem {
-	if o == nil || o.llmContext == nil {
-		return newLLMContextSubsystem()
-	}
-	return o.llmContext
-}
-
-func (o *RuntimeOrchestrator) repairManager() *repairSubsystem {
-	if o == nil {
-		return newRepairSubsystem(nil, nil)
-	}
-	if o.repair == nil {
-		o.repair = newRepairSubsystem(o.steps, o.workspaces)
-	}
-	return o.repair
-}
-
-func (o *RuntimeOrchestrator) convergenceManager() *convergenceSubsystem {
-	if o == nil || o.convergence == nil {
-		return newConvergenceSubsystem()
-	}
-	return o.convergence
-}
-
-func (o *RuntimeOrchestrator) coverageLedger() *coverageSubsystem {
-	if o == nil || o.coverage == nil {
-		return newCoverageSubsystem(nil)
-	}
-	o.coverage.items = o.evidence.CoverageWorkItems
-	return o.coverage
-}
-
-func (o *RuntimeOrchestrator) patchManager() *patchSubsystem {
-	if o == nil {
-		return newPatchSubsystem(RuntimeEvidenceRepositories{}, nil, nil)
-	}
-	if o.patches == nil {
-		o.patches = newPatchSubsystem(o.evidence, o.approvals, o.eventPublisher())
-	}
-	return o.patches
-}
-
-func (o *RuntimeOrchestrator) resultManager() *resultSubsystem {
-	if o == nil {
-		return newResultSubsystem(RuntimeEvidenceRepositories{}, nil)
-	}
-	if o.results == nil {
-		o.results = newResultSubsystem(o.evidence, o.steps)
-	} else {
-		o.results.evidence = o.evidence
-		o.results.steps = o.steps
-	}
-	return o.results
 }
 
 func (o *RuntimeOrchestrator) runStateManager() *runStateSubsystem {
@@ -343,43 +178,4 @@ func (o *RuntimeOrchestrator) runStateManager() *runStateSubsystem {
 		o.runState.workspaces = o.workspaces
 	}
 	return o.runState
-}
-
-func (o *RuntimeOrchestrator) decisionResumeManager() *decisionResumeSubsystem {
-	if o == nil {
-		return newDecisionResumeSubsystem(nil, nil)
-	}
-	if o.decision == nil {
-		o.decision = newDecisionResumeSubsystem(o.tickets, o.resolutions)
-	} else {
-		o.decision.tickets = o.tickets
-		o.decision.resolutions = o.resolutions
-	}
-	return o.decision
-}
-
-func NormalizeRuntimePolicy(policy RuntimePolicy) RuntimePolicy {
-	return workorchruntimepolicy.NormalizeRuntimePolicy(policy)
-}
-
-func NormalizeLLMOutputRuntimePolicy(policy LLMOutputRuntimePolicy) LLMOutputRuntimePolicy {
-	return workorchruntimepolicy.NormalizeLLMOutputRuntimePolicy(policy)
-}
-
-func llmOutputPolicyValues(policy RuntimePolicy) map[string]any {
-	return policy.LLMOutput.Values()
-}
-
-func maxRuntimeRepairAttemptsForPolicy(policy RuntimePolicy) int {
-	if policy.MaxRuntimeRepairAttempts <= 0 {
-		return defaultMaxRuntimeRepairAttempts
-	}
-	return policy.MaxRuntimeRepairAttempts
-}
-
-func maxProviderRetryAttemptsForPolicy(policy RuntimePolicy) int {
-	if policy.MaxProviderRetryAttempts <= 0 {
-		return maxProviderRetryAttempts
-	}
-	return policy.MaxProviderRetryAttempts
 }

@@ -71,7 +71,6 @@ func CanonicalRuntimeBlockKind(kind string) string {
 }
 
 type RunStatusInfo = port.RunStatusInfo
-type RuntimeExecutionInfo = port.RuntimeExecutionInfo
 type ConvergenceStatusInfo = port.ConvergenceStatusInfo
 type RunHeartbeatInfo = port.RunHeartbeatInfo
 type RunCommandStatusInfo = port.RunCommandStatusInfo
@@ -117,8 +116,6 @@ const (
 	EventGoalDefined                 = port.EventGoalDefined
 	EventDoDDefined                  = port.EventDoDDefined
 	EventRunStateChanged             = port.EventRunStateChanged
-	EventStepDispatched              = port.EventStepDispatched
-	EventStepCompleted               = port.EventStepCompleted
 	EventDecisionCreated             = port.EventDecisionCreated
 	EventDecisionResolved            = port.EventDecisionResolved
 	EventApprovalCreated             = port.EventApprovalCreated
@@ -128,8 +125,6 @@ const (
 	EventMemoryUpdated               = port.EventMemoryUpdated
 	EventMemoryDeleted               = port.EventMemoryDeleted
 	EventMemoryRecallRecorded        = port.EventMemoryRecallRecorded
-	EventLLMStreamProgress           = port.EventLLMStreamProgress
-	EventLLMUsageRecorded            = port.EventLLMUsageRecorded
 	EventPatchPreviewed              = port.EventPatchPreviewed
 	EventPatchApplied                = port.EventPatchApplied
 	EventPatchFailed                 = port.EventPatchFailed

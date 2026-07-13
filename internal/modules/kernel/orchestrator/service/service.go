@@ -7,75 +7,37 @@ import (
 )
 
 type Service interface {
-	StartRun(context.Context, common.RunID) error
-	DispatchNextStep(context.Context, common.RunID) error
 	BlockOnDecision(context.Context, common.RunID, common.TicketID) error
 	BlockOnApproval(context.Context, common.RunID, common.ApprovalID) error
-	ResumeRun(context.Context, common.RunID) error
-	ResumeRunWithExecutionContextPatch(context.Context, common.RunID, map[string]any) error
-	ValidateRun(context.Context, common.RunID) error
-	CompleteRun(context.Context, common.RunID) error
 	CancelRun(context.Context, common.RunID) error
 	SupersedeRun(context.Context, common.RunID) error
 	FailRun(context.Context, common.RunID, string) error
 }
 
 type Module struct {
-	startRun         func(context.Context, common.RunID) error
-	dispatchNextStep func(context.Context, common.RunID) error
-	blockOnDecision  func(context.Context, common.RunID, common.TicketID) error
-	blockOnApproval  func(context.Context, common.RunID, common.ApprovalID) error
-	resumeRun        func(context.Context, common.RunID) error
-	resumeRunPatch   func(context.Context, common.RunID, map[string]any) error
-	validateRun      func(context.Context, common.RunID) error
-	completeRun      func(context.Context, common.RunID) error
-	cancelRun        func(context.Context, common.RunID) error
-	supersedeRun     func(context.Context, common.RunID) error
-	failRun          func(context.Context, common.RunID, string) error
+	blockOnDecision func(context.Context, common.RunID, common.TicketID) error
+	blockOnApproval func(context.Context, common.RunID, common.ApprovalID) error
+	cancelRun       func(context.Context, common.RunID) error
+	supersedeRun    func(context.Context, common.RunID) error
+	failRun         func(context.Context, common.RunID, string) error
 }
 
 type Dependencies struct {
-	StartRun         func(context.Context, common.RunID) error
-	DispatchNextStep func(context.Context, common.RunID) error
-	BlockOnDecision  func(context.Context, common.RunID, common.TicketID) error
-	BlockOnApproval  func(context.Context, common.RunID, common.ApprovalID) error
-	ResumeRun        func(context.Context, common.RunID) error
-	ResumeRunPatch   func(context.Context, common.RunID, map[string]any) error
-	ValidateRun      func(context.Context, common.RunID) error
-	CompleteRun      func(context.Context, common.RunID) error
-	CancelRun        func(context.Context, common.RunID) error
-	SupersedeRun     func(context.Context, common.RunID) error
-	FailRun          func(context.Context, common.RunID, string) error
+	BlockOnDecision func(context.Context, common.RunID, common.TicketID) error
+	BlockOnApproval func(context.Context, common.RunID, common.ApprovalID) error
+	CancelRun       func(context.Context, common.RunID) error
+	SupersedeRun    func(context.Context, common.RunID) error
+	FailRun         func(context.Context, common.RunID, string) error
 }
 
 func New(deps Dependencies) *Module {
 	return &Module{
-		startRun:         deps.StartRun,
-		dispatchNextStep: deps.DispatchNextStep,
-		blockOnDecision:  deps.BlockOnDecision,
-		blockOnApproval:  deps.BlockOnApproval,
-		resumeRun:        deps.ResumeRun,
-		resumeRunPatch:   deps.ResumeRunPatch,
-		validateRun:      deps.ValidateRun,
-		completeRun:      deps.CompleteRun,
-		cancelRun:        deps.CancelRun,
-		supersedeRun:     deps.SupersedeRun,
-		failRun:          deps.FailRun,
+		blockOnDecision: deps.BlockOnDecision,
+		blockOnApproval: deps.BlockOnApproval,
+		cancelRun:       deps.CancelRun,
+		supersedeRun:    deps.SupersedeRun,
+		failRun:         deps.FailRun,
 	}
-}
-
-func (m *Module) StartRun(ctx context.Context, runID common.RunID) error {
-	if m == nil || m.startRun == nil {
-		return common.ErrInvalidArgument
-	}
-	return m.startRun(ctx, runID)
-}
-
-func (m *Module) DispatchNextStep(ctx context.Context, runID common.RunID) error {
-	if m == nil || m.dispatchNextStep == nil {
-		return common.ErrInvalidArgument
-	}
-	return m.dispatchNextStep(ctx, runID)
 }
 
 func (m *Module) BlockOnDecision(ctx context.Context, runID common.RunID, ticketID common.TicketID) error {
@@ -90,34 +52,6 @@ func (m *Module) BlockOnApproval(ctx context.Context, runID common.RunID, approv
 		return common.ErrInvalidArgument
 	}
 	return m.blockOnApproval(ctx, runID, approvalID)
-}
-
-func (m *Module) ResumeRun(ctx context.Context, runID common.RunID) error {
-	if m == nil || m.resumeRun == nil {
-		return common.ErrInvalidArgument
-	}
-	return m.resumeRun(ctx, runID)
-}
-
-func (m *Module) ResumeRunWithExecutionContextPatch(ctx context.Context, runID common.RunID, executionContextPatch map[string]any) error {
-	if m == nil || m.resumeRunPatch == nil {
-		return common.ErrInvalidArgument
-	}
-	return m.resumeRunPatch(ctx, runID, executionContextPatch)
-}
-
-func (m *Module) CompleteRun(ctx context.Context, runID common.RunID) error {
-	if m == nil || m.completeRun == nil {
-		return common.ErrInvalidArgument
-	}
-	return m.completeRun(ctx, runID)
-}
-
-func (m *Module) ValidateRun(ctx context.Context, runID common.RunID) error {
-	if m == nil || m.validateRun == nil {
-		return common.ErrInvalidArgument
-	}
-	return m.validateRun(ctx, runID)
 }
 
 func (m *Module) CancelRun(ctx context.Context, runID common.RunID) error {

@@ -11,8 +11,6 @@ type taskLifecycleMetadata struct {
 	sourceOutputState string
 	retryOf           string
 	retryAttempt      int
-	violationType     string
-	violatedRule      string
 	failureClass      string
 	failureSignature  string
 	targetScope       string
@@ -23,26 +21,15 @@ type taskLifecycleMetadata struct {
 func taskLifecycleMetadataFromStep(step StepView) taskLifecycleMetadata {
 	output := taskMapValue(step.Output)
 	input := taskMapValue(step.Input)
-	recovery := taskMapValue(input["contractViolationRecovery"])
-	violation := firstNonEmptyMap(
-		taskMapValue(output["contractViolation"]),
-		recovery,
-		taskMapValue(taskMapValue(output["runtimeDiagnostics"])["contractViolation"]),
-	)
 	ret := taskLifecycleMetadata{
-		sourceOutputState: sourceOutputStateFromStep(step, violation),
-		retryOf:           firstNonEmptyString(readModelStringValue(input["retryOf"]), readModelStringValue(input["sourceStepId"]), readModelStringValue(recovery["sourceStepId"]), readModelStringValue(recovery["stepId"])),
-		retryAttempt:      readModelIntValue(firstNonNilValue(input["retryAttempt"], violation["attempt"])),
-		violationType:     firstNonEmptyString(readModelStringValue(output["contractViolationType"]), readModelStringValue(violation["violationType"])),
-		violatedRule:      firstNonEmptyString(readModelStringValue(output["contractViolationRule"]), readModelStringValue(violation["violatedRule"])),
-		failureClass:      firstNonEmptyString(readModelStringValue(output["failureClass"]), readModelStringValue(violation["failureClass"])),
-		failureSignature:  firstNonEmptyString(readModelStringValue(output["failureSignature"]), readModelStringValue(violation["failureSignature"])),
-		targetScope:       firstNonEmptyString(readModelStringValue(output["targetScope"]), readModelStringValue(violation["targetScope"])),
+		sourceOutputState: sourceOutputStateFromStep(step),
+		retryOf:           firstNonEmptyString(readModelStringValue(input["retryOf"]), readModelStringValue(input["sourceStepId"])),
+		retryAttempt:      readModelIntValue(input["retryAttempt"]),
+		failureClass:      readModelStringValue(output["failureClass"]),
+		failureSignature:  readModelStringValue(output["failureSignature"]),
+		targetScope:       readModelStringValue(output["targetScope"]),
 		blockingTicketID:  readModelStringValue(output["blockingTicketId"]),
 		evidenceRefs:      compactUniqueStrings([]string{step.ID}),
-	}
-	if ret.violationType == "" && ret.violatedRule != "" {
-		ret.violationType = ret.violatedRule
 	}
 	if ret.retryOf == "" {
 		ret.retryOf = firstNonEmptyString(readModelStringValue(input["repairOfStepId"]), readModelStringValue(input["repairOfStepID"]))
@@ -53,23 +40,11 @@ func taskLifecycleMetadataFromStep(step StepView) taskLifecycleMetadata {
 	if refs := readModelStringSliceValue(output["evidenceRefs"]); len(refs) > 0 {
 		ret.evidenceRefs = append(ret.evidenceRefs, refs...)
 	}
-	if refs := readModelStringSliceValue(violation["sourceRefs"]); len(refs) > 0 {
-		ret.evidenceRefs = append(ret.evidenceRefs, refs...)
-	}
 	ret.evidenceRefs = compactUniqueStrings(ret.evidenceRefs)
 	return ret
 }
 
-func sourceOutputStateFromStep(step StepView, violation map[string]any) string {
-	if len(violation) > 0 {
-		if step.State == string(common.StepStateFailed) {
-			return "rejected"
-		}
-		return "retrying"
-	}
-	if len(taskMapValue(taskMapValue(step.Input)["contractViolationRecovery"])) > 0 {
-		return "retrying"
-	}
+func sourceOutputStateFromStep(step StepView) string {
 	switch strings.TrimSpace(step.State) {
 	case string(common.StepStateSucceeded):
 		return "accepted"
@@ -104,12 +79,6 @@ func applyTaskLifecycleToNode(node *readmodelcore.TaskDecompositionNode, meta ta
 	if meta.retryAttempt > 0 {
 		node.RetryAttempt = meta.retryAttempt
 	}
-	if meta.violationType != "" {
-		node.ViolationType = meta.violationType
-	}
-	if meta.violatedRule != "" {
-		node.ViolatedRule = meta.violatedRule
-	}
 	if meta.failureClass != "" {
 		node.FailureClass = meta.failureClass
 	}
@@ -143,12 +112,6 @@ func applyTaskLifecycleToPlan(plan *readmodelcore.TaskPlan, meta taskLifecycleMe
 	}
 	if meta.retryAttempt > 0 {
 		plan.RetryAttempt = meta.retryAttempt
-	}
-	if meta.violationType != "" {
-		plan.ViolationType = meta.violationType
-	}
-	if meta.violatedRule != "" {
-		plan.ViolatedRule = meta.violatedRule
 	}
 	if meta.failureClass != "" {
 		plan.FailureClass = meta.failureClass

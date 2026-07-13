@@ -3,15 +3,6 @@ package readmodelprojection
 import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 
 func appendCompressedContextDynamicSourceSections(sections []readmodelcore.ContextSection, snapshot readmodelcore.RunSnapshot, recentEvidence []readmodelcore.ContextEvidence) []readmodelcore.ContextSection {
-	if len(readModelMapValue(snapshot.Run.ExecutionContext["goal"])) > 0 {
-		sections = append(sections, readmodelcore.ContextSection{ID: "goal", Priority: 95})
-	}
-	if len(readModelMapValue(snapshot.Run.ExecutionContext["dod"])) > 0 {
-		sections = append(sections, readmodelcore.ContextSection{ID: "dod", Priority: 95})
-	}
-	if HasNonDefinitionExecutionContext(snapshot.Run.ExecutionContext) {
-		sections = append(sections, readmodelcore.ContextSection{ID: "execution_context", Priority: 85})
-	}
 	sections = append(sections, readmodelcore.ContextSection{ID: "task_progress", Priority: 90})
 	if len(snapshot.TaskDecompositions) > 0 {
 		sections = append(sections, readmodelcore.ContextSection{ID: "task_decomposition", Priority: 85})

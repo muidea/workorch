@@ -1,7 +1,5 @@
 package workorchclient
 
-import runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
-
 // Workspace resource types (matches workorchd HTTP JSON format with lowercase camelCase tags).
 type Workspace struct {
 	ID                   string             `json:"id"`
@@ -62,21 +60,20 @@ type DoD struct {
 
 // Run resource types.
 type Run struct {
-	ID                 string         `json:"id"`
-	WorkspaceID        string         `json:"workspaceId"`
-	GoalID             string         `json:"goalId,omitempty"`
-	DoDID              string         `json:"doDId,omitempty"`
-	DefinitionRevision string         `json:"definitionRevision,omitempty"`
-	InitialStepKind    string         `json:"initialStepKind,omitempty"`
-	ExecutionContext   map[string]any `json:"executionContext,omitempty"`
-	State              string         `json:"state"`
-	CurrentStepID      string         `json:"currentStepId,omitempty"`
-	CurrentStepKind    string         `json:"currentStepKind,omitempty"`
-	CurrentStepState   string         `json:"currentStepState,omitempty"`
-	Priority           int            `json:"priority,omitempty"`
-	BlockingTicketID   string         `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID string         `json:"blockingApprovalId,omitempty"`
-	FailureReason      string         `json:"failureReason,omitempty"`
+	ID                 string `json:"id"`
+	WorkspaceID        string `json:"workspaceId"`
+	GoalID             string `json:"goalId,omitempty"`
+	DoDID              string `json:"doDId,omitempty"`
+	DefinitionRevision string `json:"definitionRevision,omitempty"`
+	InitialStepKind    string `json:"initialStepKind,omitempty"`
+	State              string `json:"state"`
+	CurrentStepID      string `json:"currentStepId,omitempty"`
+	CurrentStepKind    string `json:"currentStepKind,omitempty"`
+	CurrentStepState   string `json:"currentStepState,omitempty"`
+	Priority           int    `json:"priority,omitempty"`
+	BlockingTicketID   string `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID string `json:"blockingApprovalId,omitempty"`
+	FailureReason      string `json:"failureReason,omitempty"`
 }
 
 type AcceptanceSlice struct {
@@ -430,59 +427,24 @@ type RunStatus struct {
 	BlockingTicketID     string                `json:"blockingTicketId,omitempty"`
 	BlockingApprovalID   string                `json:"blockingApprovalId,omitempty"`
 	FailureReason        string                `json:"failureReason,omitempty"`
-	RuntimeExecution     *RuntimeExecution     `json:"runtimeExecution,omitempty"`
 	ConvergenceStatus    *ConvergenceStatus    `json:"convergenceStatus,omitempty"`
 	SchedulerDiagnostics *SchedulerDiagnostics `json:"schedulerDiagnostics,omitempty"`
 }
 
 type ConvergenceStatus struct {
-	WorkspaceID                 string         `json:"workspaceId,omitempty"`
-	RunID                       string         `json:"runId,omitempty"`
-	RunState                    string         `json:"runState,omitempty"`
-	CurrentFocusID              string         `json:"currentFocusId,omitempty"`
-	NextActionKind              string         `json:"nextActionKind,omitempty"`
-	CurrentGap                  string         `json:"currentGap,omitempty"`
-	MissingEvidenceKinds        []string       `json:"missingEvidenceKinds,omitempty"`
-	AcceptedEvidenceCount       int            `json:"acceptedEvidenceCount,omitempty"`
-	RejectedEvidenceCount       int            `json:"rejectedEvidenceCount,omitempty"`
-	LatestEffectiveProgressAt   string         `json:"latestEffectiveProgressAt,omitempty"`
-	LatestContractViolationRule string         `json:"latestContractViolationRule,omitempty"`
-	LatestRecovery              string         `json:"latestRecovery,omitempty"`
-	LatestRejectedDiagnosticRef string         `json:"latestRejectedDiagnosticRef,omitempty"`
-	DecisionCause               string         `json:"decisionCause,omitempty"`
-	RetryAttempt                int            `json:"retryAttempt,omitempty"`
-	RetryMaxAttempts            int            `json:"retryMaxAttempts,omitempty"`
-	RetrySignatureRepeatCount   int            `json:"retrySignatureRepeatCount,omitempty"`
-	RetryBudgetScope            map[string]any `json:"retryBudgetScope,omitempty"`
-	NarrowedRetryAttempted      bool           `json:"narrowedRetryAttempted,omitempty"`
-	ManagedValidationAvailable  bool           `json:"managedValidationAvailable,omitempty"`
-	Stalled                     bool           `json:"stalled,omitempty"`
-	IneffectiveRetry            bool           `json:"ineffectiveRetry,omitempty"`
-}
-
-type RuntimeExecution struct {
-	StepID              string                          `json:"stepId,omitempty"`
-	StepKind            string                          `json:"stepKind,omitempty"`
-	StepState           string                          `json:"stepState,omitempty"`
-	RequestID           string                          `json:"requestId,omitempty"`
-	QueueKey            string                          `json:"queueKey,omitempty"`
-	ContractViolation   *runtimemodel.ContractViolation `json:"contractViolation,omitempty"`
-	AcceptedAt          string                          `json:"acceptedAt,omitempty"`
-	LastProgressAt      string                          `json:"lastProgressAt,omitempty"`
-	LastProgressEvent   string                          `json:"lastProgressEvent,omitempty"`
-	LastProgressStage   string                          `json:"lastProgressStage,omitempty"`
-	LastProgressSummary string                          `json:"lastProgressSummary,omitempty"`
-	WorkerID            string                          `json:"workerId,omitempty"`
-	WorkerStartedAt     string                          `json:"workerStartedAt,omitempty"`
-	WorkerHeartbeatAt   string                          `json:"workerHeartbeatAt,omitempty"`
-	WorkerStoppedAt     string                          `json:"workerStoppedAt,omitempty"`
-	WorkerLostAt        string                          `json:"workerLostAt,omitempty"`
-	DoneAt              string                          `json:"doneAt,omitempty"`
-	FailedAt            string                          `json:"failedAt,omitempty"`
-	FinalizedAt         string                          `json:"finalizedAt,omitempty"`
-	FinalizeEvent       string                          `json:"finalizeEvent,omitempty"`
-	Pending             bool                            `json:"pending,omitempty"`
-	Gap                 string                          `json:"gap,omitempty"`
+	WorkspaceID               string   `json:"workspaceId,omitempty"`
+	RunID                     string   `json:"runId,omitempty"`
+	RunState                  string   `json:"runState,omitempty"`
+	CurrentFocusID            string   `json:"currentFocusId,omitempty"`
+	NextActionKind            string   `json:"nextActionKind,omitempty"`
+	CurrentGap                string   `json:"currentGap,omitempty"`
+	MissingEvidenceKinds      []string `json:"missingEvidenceKinds,omitempty"`
+	AcceptedEvidenceCount     int      `json:"acceptedEvidenceCount,omitempty"`
+	RejectedEvidenceCount     int      `json:"rejectedEvidenceCount,omitempty"`
+	LatestEffectiveProgressAt string   `json:"latestEffectiveProgressAt,omitempty"`
+	DecisionCause             string   `json:"decisionCause,omitempty"`
+	Stalled                   bool     `json:"stalled,omitempty"`
+	IneffectiveRetry          bool     `json:"ineffectiveRetry,omitempty"`
 }
 
 type GapBaseline struct {
@@ -823,8 +785,6 @@ type TaskDecompositionNode struct {
 	StepState        string         `json:"stepState,omitempty"`
 	RetryOf          string         `json:"retryOf,omitempty"`
 	RetryAttempt     int            `json:"retryAttempt,omitempty"`
-	ViolationType    string         `json:"violationType,omitempty"`
-	ViolatedRule     string         `json:"violatedRule,omitempty"`
 	FailureClass     string         `json:"failureClass,omitempty"`
 	FailureSignature string         `json:"failureSignature,omitempty"`
 	TargetScope      string         `json:"targetScope,omitempty"`
@@ -869,8 +829,6 @@ type TaskPlan struct {
 	Nodes             []TaskDecompositionNode `json:"nodes,omitempty"`
 	RetryOf           string                  `json:"retryOf,omitempty"`
 	RetryAttempt      int                     `json:"retryAttempt,omitempty"`
-	ViolationType     string                  `json:"violationType,omitempty"`
-	ViolatedRule      string                  `json:"violatedRule,omitempty"`
 	FailureClass      string                  `json:"failureClass,omitempty"`
 	FailureSignature  string                  `json:"failureSignature,omitempty"`
 	TargetScope       string                  `json:"targetScope,omitempty"`
@@ -887,7 +845,6 @@ type WorkspaceSnapshot struct {
 	Outcome                 RunOutcome              `json:"outcome"`
 	TaskProgress            TaskProgress            `json:"taskProgress"`
 	RunHeartbeat            RunHeartbeat            `json:"runHeartbeat,omitempty"`
-	RuntimeExecution        *RuntimeExecution       `json:"runtimeExecution,omitempty"`
 	ConvergenceStatus       *ConvergenceStatus      `json:"convergenceStatus,omitempty"`
 	RunCommand              *RunCommandStatus       `json:"runCommand,omitempty"`
 	SchedulerDiagnostics    *SchedulerDiagnostics   `json:"schedulerDiagnostics,omitempty"`
@@ -991,7 +948,6 @@ type RunSnapshot struct {
 	RepairLoop              RepairLoop              `json:"repairLoop"`
 	TaskDecompositions      []TaskDecomposition     `json:"taskDecompositions,omitempty"`
 	TaskPlans               []TaskPlan              `json:"taskPlans,omitempty"`
-	RuntimeExecution        *RuntimeExecution       `json:"runtimeExecution,omitempty"`
 	ConvergenceStatus       *ConvergenceStatus      `json:"convergenceStatus,omitempty"`
 	SchedulerDiagnostics    *SchedulerDiagnostics   `json:"schedulerDiagnostics,omitempty"`
 	Steps                   []Step                  `json:"steps,omitempty"`

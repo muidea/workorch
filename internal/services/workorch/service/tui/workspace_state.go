@@ -27,7 +27,6 @@ type workspaceDisplayState struct {
 	LLMContext            map[string]any
 	Acceptance            backend.AcceptanceProjectionInfo
 	RunHeartbeat          backend.RunHeartbeatInfo
-	RuntimeExecution      *backend.RuntimeExecutionInfo
 	ConvergenceStatus     *backend.ConvergenceStatusInfo
 	RuntimeEvents         []string
 	Progress              progressState
@@ -748,7 +747,6 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.applyWorkspaceProgress(msg.Workspace.State)
 		if msg.Snapshot != nil {
 			m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
-			m.applyRuntimeExecution(msg.Snapshot.RuntimeExecution)
 			m.applyConvergenceStatus(msg.Snapshot.ConvergenceStatus)
 			m.applyRunCommandStatus(msg.Snapshot.RunCommand)
 			m.applySchedulerDiagnostics(msg.Snapshot.SchedulerDiagnostics)
@@ -799,7 +797,6 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.llmContext = latestLLMContextBudget(msg.Snapshot.LLMContextBudgets, msg.Snapshot.LLMUsageTraces)
 		m.acceptance = msg.Snapshot.Acceptance
 		m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
-		m.applyRuntimeExecution(msg.Snapshot.RuntimeExecution)
 		m.applyConvergenceStatus(msg.Snapshot.ConvergenceStatus)
 		m.applyRunCommandStatus(msg.Snapshot.RunCommand)
 		m.applySchedulerDiagnostics(msg.Snapshot.SchedulerDiagnostics)
@@ -830,7 +827,6 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.progressText = stepProgressText("Working", msg.Status.CurrentStepKind, "Working; waiting for final result")
 	}
 	if msg.Status != nil {
-		m.applyRuntimeExecution(msg.Status.RuntimeExecution)
 		m.applyConvergenceStatus(msg.Status.ConvergenceStatus)
 		if msg.Status.SchedulerDiagnostics != nil {
 			m.applySchedulerDiagnostics(msg.Status.SchedulerDiagnostics)
@@ -875,7 +871,6 @@ func (m *AppModel) clearRunProjectionState() {
 	m.llmContext = nil
 	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runHeartbeat = backend.RunHeartbeatInfo{}
-	m.runtimeExecution = nil
 	m.runCommand = nil
 	m.repairLoop = ""
 	m.failureReason = ""
@@ -917,69 +912,21 @@ func workspaceStateIsLive(state common.WorkspaceState) bool {
 }
 
 func effectiveGoalText(run *backend.RunInfo) string {
-	if run == nil {
-		return ""
-	}
-	goal := payloadMap(run.ExecutionContext, "goal")
-	if goal == nil {
-		return ""
-	}
-	return strings.TrimSpace(firstPayloadString(goal, "text", "Text"))
+	return ""
 }
 
 func effectiveGoalTranscript(run *backend.RunInfo, fallback string) []transcriptItem {
 	if run == nil {
 		return initialTranscript(fallback)
 	}
-	goals := contextGoalMaps(run.ExecutionContext["goals"])
-	if len(goals) == 0 {
-		return initialTranscript(fallback)
-	}
-	items := make([]transcriptItem, 0, len(goals))
-	seen := map[string]struct{}{}
-	for _, goal := range goals {
-		text := strings.TrimSpace(firstPayloadString(goal, "text", "Text"))
-		if text == "" {
-			continue
-		}
-		if _, ok := seen[text]; ok {
-			continue
-		}
-		seen[text] = struct{}{}
-		items = append(items, transcriptItem{Kind: "Goal", Text: text})
-	}
-	if len(items) == 0 {
-		return initialTranscript(fallback)
-	}
-	return items
+	return initialTranscript(fallback)
 }
 
 func effectiveDoDItems(run *backend.RunInfo) []string {
 	if run == nil {
 		return nil
 	}
-	dod := payloadMap(run.ExecutionContext, "dod")
-	if dod == nil {
-		return nil
-	}
-	return payloadStringSliceValue(dod, "items", "Items")
-}
-
-func contextGoalMaps(value any) []map[string]any {
-	switch typed := value.(type) {
-	case []map[string]any:
-		return typed
-	case []any:
-		ret := make([]map[string]any, 0, len(typed))
-		for _, item := range typed {
-			if goal, ok := item.(map[string]any); ok {
-				ret = append(ret, goal)
-			}
-		}
-		return ret
-	default:
-		return nil
-	}
+	return nil
 }
 
 func (m *AppModel) resetWorkspaceView() {
@@ -999,7 +946,6 @@ func (m *AppModel) resetWorkspaceView() {
 	m.llmContext = nil
 	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runHeartbeat = backend.RunHeartbeatInfo{}
-	m.runtimeExecution = nil
 	m.schedulerDiagnostics = nil
 	m.runtimeEvents = nil
 	m.repairLoop = ""
@@ -1042,7 +988,6 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 		LLMContext:            clonePayloadMap(m.llmContext),
 		Acceptance:            m.acceptance,
 		RunHeartbeat:          m.runHeartbeat,
-		RuntimeExecution:      cloneRuntimeExecutionInfoPtr(m.runtimeExecution),
 		ConvergenceStatus:     cloneConvergenceStatusInfoPtr(m.convergenceStatus),
 		RuntimeEvents:         append([]string(nil), m.runtimeEvents...),
 		RepairLoop:            m.repairLoop,
@@ -1075,7 +1020,6 @@ func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
 	m.llmContext = clonePayloadMap(cached.LLMContext)
 	m.acceptance = cached.Acceptance
 	m.runHeartbeat = cached.RunHeartbeat
-	m.runtimeExecution = cloneRuntimeExecutionInfoPtr(cached.RuntimeExecution)
 	m.convergenceStatus = cloneConvergenceStatusInfoPtr(cached.ConvergenceStatus)
 	m.schedulerDiagnostics = nil
 	m.runtimeEvents = append([]string(nil), cached.RuntimeEvents...)
@@ -1120,29 +1064,12 @@ func cloneApprovalPtr(input *backend.ApprovalInfo) *backend.ApprovalInfo {
 	return &ret
 }
 
-func cloneRuntimeExecutionInfoPtr(input *backend.RuntimeExecutionInfo) *backend.RuntimeExecutionInfo {
-	if input == nil {
-		return nil
-	}
-	ret := *input
-	if input.ContractViolation != nil {
-		violation := *input.ContractViolation
-		violation.ExpectedContract = clonePayloadMap(input.ContractViolation.ExpectedContract)
-		violation.ActualOutputSummary = clonePayloadMap(input.ContractViolation.ActualOutputSummary)
-		violation.ForbiddenRepeat = append([]string(nil), input.ContractViolation.ForbiddenRepeat...)
-		violation.SourceRefs = append([]string(nil), input.ContractViolation.SourceRefs...)
-		ret.ContractViolation = &violation
-	}
-	return &ret
-}
-
 func cloneConvergenceStatusInfoPtr(input *backend.ConvergenceStatusInfo) *backend.ConvergenceStatusInfo {
 	if input == nil {
 		return nil
 	}
 	ret := *input
 	ret.MissingEvidenceKinds = append([]string(nil), input.MissingEvidenceKinds...)
-	ret.RetryBudgetScope = clonePayloadMap(input.RetryBudgetScope)
 	return &ret
 }
 
@@ -1184,14 +1111,6 @@ func (m *AppModel) applyRunHeartbeat(item backend.RunHeartbeatInfo) {
 			m.progressText = nonEmpty(item.Summary, string(item.ActivityState))
 		}
 	}
-}
-
-func (m *AppModel) applyRuntimeExecution(item *backend.RuntimeExecutionInfo) {
-	if item == nil {
-		m.runtimeExecution = nil
-		return
-	}
-	m.runtimeExecution = cloneRuntimeExecutionInfoPtr(item)
 }
 
 func (m *AppModel) applyConvergenceStatus(item *backend.ConvergenceStatusInfo) {

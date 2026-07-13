@@ -128,9 +128,6 @@ func runResourceMap(run readmodelcore.Run) map[string]any {
 		"blockingApprovalId": run.BlockingApprovalID,
 		"failureReason":      run.FailureReason,
 	}
-	if contextMap := CompactExecutionContext(run.ExecutionContext); len(contextMap) > 0 {
-		resource["executionContext"] = contextMap
-	}
 	return typedResourceMap(resource, readmodelports.PortRunInfo(run))
 }
 
@@ -267,7 +264,6 @@ func runStatusResourceMap(item readmodelcore.RunStatus) map[string]any {
 		"blockingTicketId":     item.BlockingTicketID,
 		"blockingApprovalId":   item.BlockingApprovalID,
 		"failureReason":        item.FailureReason,
-		"runtimeExecution":     item.RuntimeExecution,
 		"convergenceStatus":    item.ConvergenceStatus,
 		"schedulerDiagnostics": item.SchedulerDiagnostics,
 	}

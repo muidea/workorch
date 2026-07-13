@@ -10,7 +10,6 @@ import (
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
-	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -29,12 +28,6 @@ func TestBuildWorkorchSnapshotIncludesExpectedPublishedTopics(t *testing.T) {
 		WorkspaceID: ws.ID,
 		State:       common.RunStateCompleted,
 	}
-	step := &runmodel.Step{
-		ID:    common.StepID("run-observed/step-1"),
-		RunID: run.ID,
-		Kind:  "llm/workspace_execution",
-		State: common.StepStateSucceeded,
-	}
 	ticket := &decisionmodel.Ticket{
 		ID:          common.TicketID("ticket-observed"),
 		WorkspaceID: ws.ID,
@@ -52,7 +45,7 @@ func TestBuildWorkorchSnapshotIncludesExpectedPublishedTopics(t *testing.T) {
 		State:       common.ApprovalStateApproved,
 	}
 
-	items := BuildWorkorchSnapshot(ws, run, []*runmodel.Step{step}, ticket, nil, approval, []eventstreamevents.EventRecordData{
+	items := BuildWorkorchSnapshot(ws, run, ticket, nil, approval, []eventstreamevents.EventRecordData{
 		mustEventRecordData(t, eventRecordFixture{
 			Version:      events.WorkorchEventVersion,
 			Topic:        workspaceevents.TopicWorkspaceStateChanged,
@@ -78,21 +71,6 @@ func TestBuildWorkorchSnapshotIncludesExpectedPublishedTopics(t *testing.T) {
 			RunID:        string(run.ID),
 			Payload: map[string]any{
 				events.PayloadKeyState: string(run.State),
-			},
-		}),
-		mustEventRecordData(t, eventRecordFixture{
-			Version:      events.WorkorchEventVersion,
-			Topic:        runevents.TopicStepStateChanged,
-			OccurredAt:   "2026-04-21T08:00:02Z",
-			SourceModule: "kernel/orchestrator",
-			SubjectType:  "step",
-			SubjectID:    string(step.ID),
-			WorkspaceID:  string(ws.ID),
-			RunID:        string(run.ID),
-			StepID:       string(step.ID),
-			Payload: map[string]any{
-				events.PayloadKeyKind:  step.Kind,
-				events.PayloadKeyState: string(step.State),
 			},
 		}),
 		mustEventRecordData(t, eventRecordFixture{
@@ -126,13 +104,12 @@ func TestBuildWorkorchSnapshotIncludesExpectedPublishedTopics(t *testing.T) {
 			},
 		}),
 	})
-	if len(items) != 5 {
-		t.Fatalf("len(items) = %d, want 5", len(items))
+	if len(items) != 4 {
+		t.Fatalf("len(items) = %d, want 4", len(items))
 	}
 
 	assertTopic(t, items, "/workspace/snapshot")
 	assertTopic(t, items, "/run/snapshot")
-	assertTopic(t, items, "/step/snapshot")
 	assertTopic(t, items, "/decision/ticket/snapshot")
 	assertTopic(t, items, "/approval/snapshot")
 }
@@ -148,63 +125,15 @@ func TestBuildWorkorchSnapshotRequiresPublishedEvents(t *testing.T) {
 		State:       common.RunStateFailed,
 	}
 
-	items := BuildWorkorchSnapshot(ws, run, nil, nil, nil, nil, nil)
+	items := BuildWorkorchSnapshot(ws, run, nil, nil, nil, nil)
 	if len(items) != 0 {
 		t.Fatalf("len(items) = %d, want 0", len(items))
 	}
 
 	assertTopicAbsent(t, items, "/workspace/snapshot")
 	assertTopicAbsent(t, items, "/run/snapshot")
-	assertTopicAbsent(t, items, "/step/snapshot")
 	assertTopicAbsent(t, items, "/decision/ticket/snapshot")
 	assertTopicAbsent(t, items, "/approval/snapshot")
-}
-
-func TestBuildWorkorchSnapshotCanonicalizesWorkspacePlanStepKind(t *testing.T) {
-	ws := &workspacemodel.Workspace{
-		ID:    common.WorkspaceID("ws-observed-alias"),
-		State: common.WorkspaceStateActive,
-	}
-	run := &runmodel.Run{
-		ID:          common.RunID("run-observed-alias"),
-		WorkspaceID: ws.ID,
-		State:       common.RunStateActive,
-	}
-	step := &runmodel.Step{
-		ID:    common.StepID("run-observed-alias/step-1"),
-		RunID: run.ID,
-		Kind:  llmcommon.StepKindWorkspacePlan,
-		State: common.StepStateSucceeded,
-	}
-
-	items := BuildWorkorchSnapshot(ws, run, []*runmodel.Step{step}, nil, nil, nil, []eventstreamevents.EventRecordData{
-		mustEventRecordData(t, eventRecordFixture{
-			Version:      events.WorkorchEventVersion,
-			Topic:        runevents.TopicStepStateChanged,
-			OccurredAt:   "2026-04-21T08:00:02Z",
-			SourceModule: "kernel/orchestrator",
-			SubjectType:  "step",
-			SubjectID:    string(step.ID),
-			WorkspaceID:  string(ws.ID),
-			RunID:        string(run.ID),
-			StepID:       string(step.ID),
-			Payload: map[string]any{
-				events.PayloadKeyKind:  step.Kind,
-				events.PayloadKeyState: string(step.State),
-			},
-		}),
-	})
-
-	if len(items) != 1 {
-		t.Fatalf("len(items) = %d, want 1", len(items))
-	}
-	payload, ok := items[0].Payload.(StepPayload)
-	if !ok {
-		t.Fatalf("payload = %#v, want StepPayload", items[0].Payload)
-	}
-	if payload.Kind != llmcommon.StepKindWorkspaceExecution {
-		t.Fatalf("payload.Kind = %q, want %q", payload.Kind, llmcommon.StepKindWorkspaceExecution)
-	}
 }
 
 func TestBuildWorkorchSnapshotPublishedTicketIncludesResolvedTicketResolution(t *testing.T) {
@@ -232,7 +161,7 @@ func TestBuildWorkorchSnapshotPublishedTicketIncludesResolvedTicketResolution(t 
 		Payload:  map[string]any{"operator": "workorch"},
 	}
 
-	items := BuildWorkorchSnapshot(ws, run, nil, ticket, resolution, nil, []eventstreamevents.EventRecordData{
+	items := BuildWorkorchSnapshot(ws, run, ticket, resolution, nil, []eventstreamevents.EventRecordData{
 		mustEventRecordData(t, eventRecordFixture{
 			Version:      events.WorkorchEventVersion,
 			Topic:        decisionevents.TopicTicketResolved,
@@ -269,7 +198,7 @@ func TestBuildWorkorchSnapshotPublishedTicketIncludesResolvedTicketResolution(t 
 	}
 }
 
-func TestBuildWorkorchSnapshotPrefersPublishedRunAndStepEvents(t *testing.T) {
+func TestBuildWorkorchSnapshotPrefersPublishedRunEvent(t *testing.T) {
 	ws := &workspacemodel.Workspace{
 		ID:    common.WorkspaceID("ws-published"),
 		State: common.WorkspaceStateActive,
@@ -283,14 +212,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunAndStepEvents(t *testing.T) {
 		BlockingTicketID:   common.TicketID("ticket-stale"),
 		BlockingApprovalID: common.ApprovalID("approval-stale"),
 	}
-	step := &runmodel.Step{
-		ID:    common.StepID("run-published/step-1"),
-		RunID: run.ID,
-		Kind:  "llm/workspace_execution",
-		State: common.StepStateSucceeded,
-	}
-
-	items := BuildWorkorchSnapshot(ws, run, []*runmodel.Step{step}, nil, nil, nil, []eventstreamevents.EventRecordData{
+	items := BuildWorkorchSnapshot(ws, run, nil, nil, nil, []eventstreamevents.EventRecordData{
 		mustEventRecordData(t, eventRecordFixture{
 			Version:      events.WorkorchEventVersion,
 			Topic:        runevents.TopicRunStateChanged,
@@ -306,22 +228,6 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunAndStepEvents(t *testing.T) {
 				"state":                 string(common.RunStateCompleted),
 				"blockingTicketId":      "",
 				"blockingApprovalId":    "",
-			},
-		}),
-		mustEventRecordData(t, eventRecordFixture{
-			Version:      events.WorkorchEventVersion,
-			Topic:        runevents.TopicStepStateChanged,
-			OccurredAt:   "2026-04-21T09:00:01Z",
-			SourceModule: "kernel/orchestrator",
-			SubjectType:  "step",
-			SubjectID:    string(step.ID),
-			WorkspaceID:  string(ws.ID),
-			RunID:        string(run.ID),
-			StepID:       string(step.ID),
-			Payload: map[string]any{
-				"kind":   step.Kind,
-				"state":  string(common.StepStateSucceeded),
-				"output": map[string]any{"status": "completed"},
 			},
 		}),
 	})
@@ -340,18 +246,6 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunAndStepEvents(t *testing.T) {
 	if runItem.OccurredAt != "2026-04-21T09:00:00Z" {
 		t.Fatalf("run item occurredAt = %s, want published timestamp", runItem.OccurredAt)
 	}
-
-	stepItem := topicItem(t, items, "/step/snapshot")
-	stepPayload, ok := stepItem.Payload.(StepPayload)
-	if !ok {
-		t.Fatalf("step payload type = %T, want StepPayload", stepItem.Payload)
-	}
-	if stepPayload.State != string(common.StepStateSucceeded) {
-		t.Fatalf("step payload state = %v, want completed", stepPayload.State)
-	}
-	if stepItem.OccurredAt != "2026-04-21T09:00:01Z" {
-		t.Fatalf("step item occurredAt = %s, want published timestamp", stepItem.OccurredAt)
-	}
 }
 
 func TestBuildWorkorchSnapshotPrefersPublishedRunCreatedAndFailureReason(t *testing.T) {
@@ -368,7 +262,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunCreatedAndFailureReason(t *test
 		FailureReason: "manual fail",
 	}
 
-	items := BuildWorkorchSnapshot(ws, run, nil, nil, nil, nil, []eventstreamevents.EventRecordData{
+	items := BuildWorkorchSnapshot(ws, run, nil, nil, nil, []eventstreamevents.EventRecordData{
 		mustEventRecordData(t, eventRecordFixture{
 			Version:      events.WorkorchEventVersion,
 			Topic:        runevents.TopicRunCreated,
@@ -450,7 +344,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedWorkspaceTicketAndApprovalEvents(t
 		State:       common.ApprovalStatePending,
 	}
 
-	items := BuildWorkorchSnapshot(ws, run, nil, ticket, nil, approval, []eventstreamevents.EventRecordData{
+	items := BuildWorkorchSnapshot(ws, run, ticket, nil, approval, []eventstreamevents.EventRecordData{
 		mustEventRecordData(t, eventRecordFixture{
 			Version:      events.WorkorchEventVersion,
 			Topic:        workspaceevents.TopicWorkspaceCreated,
@@ -551,7 +445,7 @@ func TestBuildWorkorchSnapshotPrefersLatestWorkspaceStateChangedEvent(t *testing
 		State:       common.RunStateCompleted,
 	}
 
-	items := BuildWorkorchSnapshot(ws, run, nil, nil, nil, nil, []eventstreamevents.EventRecordData{
+	items := BuildWorkorchSnapshot(ws, run, nil, nil, nil, []eventstreamevents.EventRecordData{
 		mustEventRecordData(t, eventRecordFixture{
 			Version:      events.WorkorchEventVersion,
 			Topic:        workspaceevents.TopicWorkspaceCreated,
@@ -610,15 +504,7 @@ func TestBuildWorkorchSnapshotIgnoresPublishedEventsThatDoNotMatchCurrentObjects
 		BlockingTicketID:   common.TicketID("ticket-unmatched"),
 		BlockingApprovalID: common.ApprovalID("approval-unmatched"),
 	}
-	step := &runmodel.Step{
-		ID:     common.StepID("run-unmatched-published/step-1"),
-		RunID:  run.ID,
-		Kind:   "llm/workspace_execution",
-		State:  common.StepStateSucceeded,
-		Output: map[string]any{"status": "unmatched"},
-	}
-
-	items := BuildWorkorchSnapshot(ws, run, []*runmodel.Step{step}, nil, nil, nil, []eventstreamevents.EventRecordData{
+	items := BuildWorkorchSnapshot(ws, run, nil, nil, nil, []eventstreamevents.EventRecordData{
 		mustEventRecordData(t, eventRecordFixture{
 			Version:      events.WorkorchEventVersion,
 			Topic:        runevents.TopicRunStateChanged,
@@ -632,29 +518,12 @@ func TestBuildWorkorchSnapshotIgnoresPublishedEventsThatDoNotMatchCurrentObjects
 				events.PayloadKeyState: string(common.RunStateActive),
 			},
 		}),
-		mustEventRecordData(t, eventRecordFixture{
-			Version:      events.WorkorchEventVersion,
-			Topic:        runevents.TopicStepStateChanged,
-			OccurredAt:   "2026-04-21T09:30:01Z",
-			SourceModule: "kernel/orchestrator",
-			SubjectType:  "step",
-			SubjectID:    "run-other/step-1",
-			WorkspaceID:  string(ws.ID),
-			RunID:        "run-other",
-			StepID:       "run-other/step-1",
-			Payload: map[string]any{
-				events.PayloadKeyKind:   step.Kind,
-				events.PayloadKeyState:  string(common.StepStateSucceeded),
-				events.PayloadKeyOutput: map[string]any{"status": "other"},
-			},
-		}),
 	})
 
 	if len(items) != 0 {
 		t.Fatalf("len(items) = %d, want 0", len(items))
 	}
 	assertTopicAbsent(t, items, "/run/snapshot")
-	assertTopicAbsent(t, items, "/step/snapshot")
 }
 
 func assertTopic(t *testing.T, items []SnapshotItem, topic string) {

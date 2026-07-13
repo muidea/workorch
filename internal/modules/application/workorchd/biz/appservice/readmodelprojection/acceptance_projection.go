@@ -7,25 +7,7 @@ import (
 )
 
 func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProjection {
-	context := run.ExecutionContext
-	if len(context) == 0 {
-		return emptyAcceptanceProjection()
-	}
-	source := context
-	if nested := mapValue(context, "acceptance"); len(nested) > 0 {
-		source = mergeAcceptanceProjectionSource(context, nested)
-	}
-	ret := readmodelcore.AcceptanceProjection{
-		ActiveSliceID: stringValue(source, "activeSliceId", "activeSliceID"),
-		Slices:        decodeAcceptanceSlices(valueByKey(source, "slices", "acceptanceSlices")),
-		CurrentFocus:  decodeCoverageFocusPtr(valueByKey(source, "currentFocus", "coverageFocus")),
-		Budget:        decodeConvergenceBudgetPtr(valueByKey(source, "budget", "convergenceBudget")),
-	}
-	if ret.ActiveSliceID == "" && ret.CurrentFocus != nil {
-		ret.ActiveSliceID = strings.TrimSpace(ret.CurrentFocus.SliceID)
-	}
-	ret.Summary = summarizeAcceptanceSlices(ret.Slices)
-	return ret
+	return emptyAcceptanceProjection()
 }
 
 func MapWorkspaceAcceptanceProjection(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.AcceptanceProjection {

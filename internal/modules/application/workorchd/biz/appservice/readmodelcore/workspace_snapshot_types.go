@@ -9,7 +9,6 @@ type WorkspaceSnapshot struct {
 	Outcome                 WorkspaceOutcome        `json:"outcome"`
 	TaskProgress            TaskProgress            `json:"taskProgress"`
 	RunHeartbeat            RunHeartbeat            `json:"runHeartbeat,omitempty"`
-	RuntimeExecution        *RuntimeExecutionState  `json:"runtimeExecution,omitempty"`
 	ConvergenceStatus       *ConvergenceStatus      `json:"convergenceStatus,omitempty"`
 	RunCommand              *RunCommandStatus       `json:"runCommand,omitempty"`
 	SchedulerDiagnostics    *SchedulerDiagnostics   `json:"schedulerDiagnostics,omitempty"`

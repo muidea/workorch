@@ -3,10 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
-	"strings"
-	"sync"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -17,24 +14,16 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	orchestratorservice "github.com/muidea/workorch/internal/modules/kernel/orchestrator/service"
-	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = modulecommon.ModuleID
 
 type Service = orchestratorservice.Service
-type RuntimeAdapter = orchestratorbiz.RuntimeAdapter
-type RuntimeAdapterRegistry = orchestratorbiz.RuntimeAdapterRegistry
-
-func NewRuntimeAdapterRegistry() *RuntimeAdapterRegistry {
-	return orchestratorbiz.NewRuntimeAdapterRegistry()
-}
 
 type Dependencies struct {
-	Runtime               orchestratorbiz.RuntimeAdapter
 	Steps                 repository.StepRepository
 	ToolCalls             repository.ToolCallRepository
 	Patches               repository.PatchRepository
@@ -43,7 +32,6 @@ type Dependencies struct {
 	EvidenceRecords       repository.EvidenceRecordRepository
 	CoverageWorkItems     repository.CoverageWorkItemRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository
-	RuntimePolicy         orchestratorbiz.RuntimePolicy
 	CommandHub            magicevent.Hub
 	BackgroundRoutine     task.BackgroundRoutine
 }
@@ -56,12 +44,7 @@ type Module struct {
 	rawEventHub       magicevent.Hub
 	rawObserver       magicevent.SimpleObserver
 	rawTopics         []string
-	runtimeObserver   magicevent.SimpleObserver
-	runtimeTopics     []string
 	backgroundRoutine task.BackgroundRoutine
-
-	recoveryMu       sync.Mutex
-	recoveryInFlight map[string]struct{}
 }
 
 func New() *Module { return &Module{} }
@@ -69,8 +52,7 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 func (m *Module) Configure(deps Dependencies) error {
-	if deps.Runtime == nil ||
-		deps.Steps == nil ||
+	if deps.Steps == nil ||
 		deps.ToolCalls == nil ||
 		deps.Patches == nil ||
 		deps.ValidationResults == nil ||
@@ -82,7 +64,6 @@ func (m *Module) Configure(deps Dependencies) error {
 		return common.ErrInvalidArgument
 	}
 	m.bizPtr = orchestratorbiz.NewRuntimeOrchestratorWithResolutionsAndEvidence(
-		deps.Runtime,
 		runEventRepository{hub: deps.CommandHub},
 		deps.Steps,
 		workspaceEventRepository{hub: deps.CommandHub},
@@ -102,23 +83,18 @@ func (m *Module) Configure(deps Dependencies) error {
 			MemoryItems:           memoryEventRepository{hub: deps.CommandHub},
 			MemoryRecallTraces:    memoryRecallTraceEventRepository{hub: deps.CommandHub},
 		},
-		deps.RuntimePolicy,
 	)
 
 	m.servicePtr = orchestratorservice.New(orchestratorservice.Dependencies{
-		StartRun:         m.bizPtr.StartRun,
-		DispatchNextStep: m.bizPtr.DispatchNextStep,
-		BlockOnDecision:  m.bizPtr.BlockOnDecision,
-		BlockOnApproval:  m.bizPtr.BlockOnApproval,
-		ResumeRun:        m.bizPtr.ResumeRun,
-		ResumeRunPatch:   m.bizPtr.ResumeRunWithExecutionContextPatch,
-		ValidateRun:      m.bizPtr.ValidateRun,
-		CompleteRun:      m.bizPtr.CompleteRun,
-		CancelRun:        m.bizPtr.CancelRun,
-		SupersedeRun:     m.bizPtr.SupersedeRun,
-		FailRun:          m.bizPtr.FailRun,
+		BlockOnDecision: m.bizPtr.BlockOnDecision,
+		BlockOnApproval: m.bizPtr.BlockOnApproval,
+		CancelRun:       m.bizPtr.CancelRun,
+		SupersedeRun:    m.bizPtr.SupersedeRun,
+		FailRun:         m.bizPtr.FailRun,
 	})
-	m.bizPtr.EnableEventDrivenDispatch(deps.CommandHub)
+	if err := m.bizPtr.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: deps.CommandHub}); err != nil {
+		return err
+	}
 	m.steps = deps.Steps
 	m.evidenceRecords = deps.EvidenceRecords
 	m.rawEventHub = deps.CommandHub
@@ -130,19 +106,8 @@ func (m *Module) Start() error {
 	if m == nil || m.servicePtr == nil || m.rawEventHub == nil {
 		return common.ErrInvalidArgument
 	}
-	if m.rawObserver != nil || m.runtimeObserver != nil {
+	if m.rawObserver != nil {
 		return nil
-	}
-	if m.rawEventHub != nil {
-		m.runtimeObserver = magicevent.NewSimpleObserverWithMatchID(ModuleID+"/runtime", runtimeevent.NotificationDestination, m.rawEventHub)
-		m.runtimeTopics = []string{
-			runtimeevent.TopicRuntimeBlockExecuteProgress,
-			runtimeevent.TopicRuntimeBlockExecuteCompleted,
-			runtimeevent.TopicRuntimeBlockExecuteFailed,
-		}
-		m.runtimeObserver.Subscribe(runtimeevent.TopicRuntimeBlockExecuteProgress, m.handleRuntimeProgressEvent)
-		m.runtimeObserver.Subscribe(runtimeevent.TopicRuntimeBlockExecuteCompleted, m.handleRuntimeResultEvent)
-		m.runtimeObserver.Subscribe(runtimeevent.TopicRuntimeBlockExecuteFailed, m.handleRuntimeResultEvent)
 	}
 	if m.rawEventHub != nil && m.rawObserver == nil {
 		m.rawObserver = magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, m.rawEventHub)
@@ -151,43 +116,64 @@ func (m *Module) Start() error {
 			orchestratorevents.TopicOrchestratorCommandBlockDecision,
 			orchestratorevents.TopicOrchestratorCommandBlockApproval,
 			orchestratorevents.TopicOrchestratorCommandResumeRun,
-			orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap,
-			orchestratorevents.TopicOrchestratorCommandValidateRun,
-			orchestratorevents.TopicOrchestratorCommandCompleteRun,
 			orchestratorevents.TopicOrchestratorCommandCancelRun,
 			orchestratorevents.TopicOrchestratorCommandSupersedeRun,
 			orchestratorevents.TopicOrchestratorCommandFailRun,
 			orchestratorevents.TopicOrchestratorCommandPurgeRun,
-			orchestratorevents.TopicOrchestratorCommandUpdateRuntimePolicy,
 			orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,
 			orchestratorevents.TopicOrchestratorCommandListPatchesByRun,
 			orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun,
 			orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun,
 			orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun,
-			orchestratorevents.TopicOrchestratorDispatchStepRequested,
 		}
 		for _, topic := range m.rawTopics {
 			m.rawObserver.Subscribe(topic, m.handleMagicCommand)
 		}
 		m.rawTopics = append(m.rawTopics,
+			orchestratorevents.TopicOrchestratorCommandReleaseRuntimeV1Resources,
+			orchestratorevents.TopicOrchestratorDriveRuntimeV2,
+			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
+			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
 			decisionevents.TopicDecisionCommandRecordEvidence,
 			approvalevents.TopicApprovalCommandRecordEvidence,
 		)
+		m.rawObserver.Subscribe(orchestratorevents.TopicOrchestratorCommandReleaseRuntimeV1Resources, m.handleReleaseRuntimeV1Resources)
+		m.rawObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, m.handleRuntimeV2Drive)
+		m.rawObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, m.handleRuntimeV2GovernanceResolution)
+		m.rawObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, m.handleRuntimeV2GovernanceTicketResolution)
 		m.rawObserver.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, m.handleDecisionEvidenceCommand)
 		m.rawObserver.Subscribe(approvalevents.TopicApprovalCommandRecordEvidence, m.handleApprovalEvidenceCommand)
 	}
 	return nil
 }
 
+func (m *Module) handleReleaseRuntimeV1Resources(ev magicevent.Event, result magicevent.Result) {
+	cmd, ok := ev.Data().(orchestratorevents.ReleaseRuntimeV1ResourcesCommand)
+	if !ok || m == nil || m.bizPtr == nil || cmd.WorkspaceID == "" || cmd.RunID == "" {
+		setRuntimeV1ResourceReleaseResult(result, orchestratorevents.ReleaseRuntimeV1ResourcesResult{}, common.ErrInvalidArgument)
+		return
+	}
+	released, err := m.bizPtr.ReleaseRuntimeV1Resources(ev.Context(), cmd.WorkspaceID, cmd.RunID)
+	setRuntimeV1ResourceReleaseResult(result, orchestratorevents.ReleaseRuntimeV1ResourcesResult{
+		ReleasedValidationResources: released.ReleasedValidationResources,
+		ClosedSteps:                 released.ClosedSteps, ClosedToolCalls: released.ClosedToolCalls,
+		ClosedArtifactContinuations: released.ClosedArtifactContinuations, ReleasedTotal: released.Total(),
+	}, err)
+}
+
+func setRuntimeV1ResourceReleaseResult(result magicevent.Result, response orchestratorevents.ReleaseRuntimeV1ResourcesResult, err error) {
+	if result == nil {
+		return
+	}
+	if err != nil {
+		result.Set(nil, cd.NewError(cd.Unexpected, err.Error()))
+		return
+	}
+	result.Set(response, nil)
+}
+
 func (m *Module) Stop(ctx context.Context) error {
 	_ = ctx
-	if m.runtimeObserver != nil {
-		for idx := len(m.runtimeTopics) - 1; idx >= 0; idx-- {
-			m.runtimeObserver.Unsubscribe(m.runtimeTopics[idx])
-		}
-	}
-	m.runtimeObserver = nil
-	m.runtimeTopics = nil
 	if m.rawObserver != nil {
 		for idx := len(m.rawTopics) - 1; idx >= 0; idx-- {
 			m.rawObserver.Unsubscribe(m.rawTopics[idx])
@@ -242,24 +228,6 @@ func (m *Module) executeMagicCommand(ctx context.Context, topic string, data any
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		return orchestratorevents.OrchestratorCommandResult{}, m.resumeRunMagicCommand(ctx, cmd)
-	case orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap:
-		cmd, ok := data.(orchestratorevents.RecoverRuntimeGapCommand)
-		if !ok {
-			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
-		}
-		return orchestratorevents.OrchestratorCommandResult{}, m.recoverRuntimeGapMagicCommand(ctx, cmd)
-	case orchestratorevents.TopicOrchestratorCommandValidateRun:
-		cmd, ok := data.(orchestratorevents.ValidateRunCommand)
-		if !ok || cmd.RunID == "" {
-			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
-		}
-		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.ValidateRun(ctx, cmd.RunID)
-	case orchestratorevents.TopicOrchestratorCommandCompleteRun:
-		cmd, ok := data.(orchestratorevents.CompleteRunCommand)
-		if !ok || cmd.RunID == "" {
-			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
-		}
-		return orchestratorevents.OrchestratorCommandResult{}, m.servicePtr.CompleteRun(ctx, cmd.RunID)
 	case orchestratorevents.TopicOrchestratorCommandCancelRun:
 		cmd, ok := data.(orchestratorevents.CancelRunCommand)
 		if !ok || cmd.RunID == "" {
@@ -285,24 +253,12 @@ func (m *Module) executeMagicCommand(ctx context.Context, topic string, data any
 		}
 		_, err := purgeRunEvidence(ctx, m.steps, m.bizPtr.EvidenceRepositories(), cmd.RunID)
 		return orchestratorevents.OrchestratorCommandResult{}, err
-	case orchestratorevents.TopicOrchestratorCommandUpdateRuntimePolicy:
-		cmd, ok := data.(orchestratorevents.UpdateRuntimePolicyCommand)
-		if !ok {
-			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
-		}
-		return orchestratorevents.OrchestratorCommandResult{}, m.bizPtr.UpdateRuntimePolicy(cmd.Policy)
 	case orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,
 		orchestratorevents.TopicOrchestratorCommandListPatchesByRun,
 		orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun,
 		orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun,
 		orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun:
 		return m.readEvidenceMagicCommand(ctx, topic, data)
-	case orchestratorevents.TopicOrchestratorDispatchStepRequested:
-		cmd, ok := data.(orchestratorevents.DispatchStepCommand)
-		if !ok || cmd.RunID == "" || cmd.StepID == "" || cmd.Kind == "" {
-			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
-		}
-		return orchestratorevents.OrchestratorCommandResult{}, m.dispatchRequestedStepCommand(ctx, cmd)
 	default:
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
@@ -331,224 +287,47 @@ func setOrchestratorAck(result magicevent.Result, err error) {
 }
 
 func (m *Module) handleStartRunCommand(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) error {
-	if m == nil || m.bizPtr == nil || m.servicePtr == nil {
+	if m == nil || m.bizPtr == nil || workspaceID == "" || runID == "" {
 		return common.ErrInvalidArgument
-	}
-	if m.backgroundRoutine == nil {
-		return m.servicePtr.StartRun(ctx, runID)
 	}
 	if err := m.bizPtr.AcceptRunStart(ctx, runID); err != nil {
 		return err
 	}
-	bgCtx := orchestratorBackgroundContext(ctx, workspaceID)
-	if err := m.backgroundRoutine.AsyncFunction(func() {
-		if err := m.servicePtr.ResumeRun(bgCtx, runID); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return
-			}
-			slog.Warn("workorch orchestrator background start dispatch failed", "workspaceID", workspaceID, "runID", runID, "err", err)
-			_ = m.servicePtr.FailRun(bgCtx, runID, fmt.Sprintf("background start dispatch failed: %v", err))
-		}
-	}); err != nil {
-		_ = m.servicePtr.FailRun(bgCtx, runID, fmt.Sprintf("background start dispatch scheduling failed: %v", err))
-		return err
-	}
-	return nil
+	return m.scheduleRuntimeV2Drive(ctx, workspaceID, runID, "start")
 }
 
 func (m *Module) resumeRunMagicCommand(ctx context.Context, cmd orchestratorevents.ResumeRunCommand) error {
-	if m == nil || m.bizPtr == nil || m.servicePtr == nil || cmd.RunID == "" {
+	if m == nil || m.bizPtr == nil || cmd.WorkspaceID == "" || cmd.RunID == "" {
 		return common.ErrInvalidArgument
-	}
-	patch := cloneCommandPatch(cmd.ExecutionContextPatch)
-	if m.backgroundRoutine == nil {
-		if len(patch) > 0 {
-			return m.servicePtr.ResumeRunWithExecutionContextPatch(ctx, cmd.RunID, patch)
-		}
-		return m.servicePtr.ResumeRun(ctx, cmd.RunID)
 	}
 	if err := m.bizPtr.CanResumeRun(ctx, cmd.RunID); err != nil {
 		return err
 	}
-	bgCtx := orchestratorBackgroundContext(ctx, cmd.WorkspaceID)
-	return m.backgroundRoutine.AsyncFunction(func() {
-		var err error
-		if len(patch) > 0 {
-			err = m.servicePtr.ResumeRunWithExecutionContextPatch(bgCtx, cmd.RunID, patch)
-		} else {
-			err = m.servicePtr.ResumeRun(bgCtx, cmd.RunID)
-		}
-		if err == nil || errors.Is(err, context.Canceled) {
-			return
-		}
-		slog.Warn("workorch orchestrator background resume failed", "workspaceID", cmd.WorkspaceID, "runID", cmd.RunID, "err", err)
-	})
-}
-
-func (m *Module) recoverRuntimeGapMagicCommand(ctx context.Context, cmd orchestratorevents.RecoverRuntimeGapCommand) error {
-	if m == nil || m.bizPtr == nil || m.servicePtr == nil {
-		return common.ErrInvalidArgument
-	}
-	if cmd.RunID == "" || cmd.WorkspaceID == "" || cmd.StepID == "" || cmd.Gap == "" {
-		return common.ErrInvalidArgument
-	}
-	if cmd.IdempotencyKey == "" {
-		cmd.IdempotencyKey = runtimeGapRecoveryCommandIdempotencyKey(cmd)
-	}
-	if !recoverRuntimeGapCommandAllowed(cmd) {
-		return common.ErrInvalidArgument
-	}
-	patch := runtimeGapRecoveryPatch(cmd)
-	if m.backgroundRoutine == nil {
-		return m.servicePtr.ResumeRunWithExecutionContextPatch(ctx, cmd.RunID, patch)
-	}
-	if err := m.bizPtr.CanResumeRun(ctx, cmd.RunID); err != nil {
+	if err := m.bizPtr.ActivateRuntimeV2Run(ctx, cmd.WorkspaceID, cmd.RunID); err != nil {
 		return err
 	}
-	if !m.markRuntimeGapRecoveryInFlight(cmd.IdempotencyKey) {
+	return m.scheduleRuntimeV2Drive(ctx, cmd.WorkspaceID, cmd.RunID, "resume")
+}
+
+func (m *Module) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string) error {
+	if m == nil || m.bizPtr == nil || workspaceID == "" || runID == "" {
+		return common.ErrInvalidArgument
+	}
+	drive := func(driveCtx context.Context) {
+		if err := m.driveAndProjectRuntimeV2(driveCtx, workspaceID, runID); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("workorch Runtime V2 drive failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
+			terminal := &runtimecontract.TerminalOutcome{Code: "runtime_v2_drive_failed", Summary: err.Error()}
+			if projectErr := m.bizPtr.ProjectRuntimeV2Terminal(driveCtx, workspaceID, runID, runtimecontract.RuntimeActionFail, terminal); projectErr != nil {
+				slog.Warn("workorch Runtime V2 drive failure projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", projectErr)
+			}
+		}
+	}
+	bgCtx := orchestratorBackgroundContext(ctx, workspaceID)
+	if m.backgroundRoutine == nil {
+		drive(bgCtx)
 		return nil
 	}
-	bgCtx := orchestratorBackgroundContext(ctx, cmd.WorkspaceID)
-	if err := m.backgroundRoutine.AsyncFunction(func() {
-		defer m.clearRuntimeGapRecoveryInFlight(cmd.IdempotencyKey)
-		err := m.servicePtr.ResumeRunWithExecutionContextPatch(bgCtx, cmd.RunID, patch)
-		if err == nil || errors.Is(err, context.Canceled) {
-			return
-		}
-		slog.Warn("workorch orchestrator background runtime gap recovery failed", "workspaceID", cmd.WorkspaceID, "runID", cmd.RunID, "stepID", cmd.StepID, "gap", cmd.Gap, "err", err)
-	}); err != nil {
-		m.clearRuntimeGapRecoveryInFlight(cmd.IdempotencyKey)
-		return err
-	}
-	return nil
-}
-
-func recoverRuntimeGapCommandAllowed(cmd runcontracts.RecoverRuntimeGapCommand) bool {
-	switch strings.TrimSpace(cmd.Gap) {
-	case "runtime_terminal_not_finalized":
-		return strings.TrimSpace(cmd.RecoverySafety) == "terminal_result_evidence"
-	case "worker_lost", "accepted_no_progress", "accepted_in_progress":
-		return cmd.RecoveryPolicy.Normalized().AllowsWatchdogExternalRetry()
-	default:
-		return false
-	}
-}
-
-func runtimeGapRecoveryPatch(cmd runcontracts.RecoverRuntimeGapCommand) map[string]any {
-	patch := cloneCommandPatch(cmd.ExecutionContextPatch)
-	if patch == nil {
-		patch = map[string]any{}
-	}
-	recovery := map[string]any{
-		"mode":        "runtime_gap_recovery",
-		"nextAction":  "resume_run",
-		"workspaceId": string(cmd.WorkspaceID),
-		"runId":       string(cmd.RunID),
-		"stepId":      string(cmd.StepID),
-		"gap":         cmd.Gap,
-	}
-	if cmd.IdempotencyKey != "" {
-		recovery["idempotencyKey"] = cmd.IdempotencyKey
-	}
-	if cmd.StepKind != "" {
-		recovery["stepKind"] = cmd.StepKind
-	}
-	if cmd.RequestID != "" {
-		recovery["requestId"] = cmd.RequestID
-	}
-	if cmd.QueueKey != "" {
-		recovery["queueKey"] = cmd.QueueKey
-	}
-	if cmd.LatestStepTime != "" {
-		recovery["latestStepTime"] = cmd.LatestStepTime
-	}
-	if policy := cmd.RecoveryPolicy.Normalized(); len(policy.ToMap()) > 0 {
-		recovery["runtimeRecoveryPolicy"] = policy.ToMap()
-	}
-	if cmd.RecoverySafety != "" {
-		recovery["recoverySafety"] = cmd.RecoverySafety
-	}
-	if cmd.Reason != "" {
-		recovery["reason"] = cmd.Reason
-	}
-	patch["runtimeGapRecovery"] = recovery
-	return patch
-}
-
-func runtimeGapRecoveryCommandIdempotencyKey(cmd runcontracts.RecoverRuntimeGapCommand) string {
-	return "runtime-gap-recovery|" +
-		recoveryKeyComponent(string(cmd.WorkspaceID)) + "|" +
-		recoveryKeyComponent(string(cmd.RunID)) + "|" +
-		recoveryKeyComponent(string(cmd.StepID)) + "|" +
-		recoveryKeyComponent(cmd.Gap) + "|" +
-		recoveryKeyComponent(cmd.RequestID) + "|" +
-		recoveryKeyComponent(cmd.QueueKey)
-}
-
-func recoveryKeyComponent(value string) string {
-	if value == "" {
-		return "-"
-	}
-	return value
-}
-
-func (m *Module) markRuntimeGapRecoveryInFlight(key string) bool {
-	if key == "" {
-		return true
-	}
-	m.recoveryMu.Lock()
-	defer m.recoveryMu.Unlock()
-	if m.recoveryInFlight == nil {
-		m.recoveryInFlight = map[string]struct{}{}
-	}
-	if _, ok := m.recoveryInFlight[key]; ok {
-		return false
-	}
-	m.recoveryInFlight[key] = struct{}{}
-	return true
-}
-
-func (m *Module) clearRuntimeGapRecoveryInFlight(key string) {
-	if key == "" {
-		return
-	}
-	m.recoveryMu.Lock()
-	defer m.recoveryMu.Unlock()
-	delete(m.recoveryInFlight, key)
-}
-
-func cloneCommandPatch(input map[string]any) map[string]any {
-	if len(input) == 0 {
-		return nil
-	}
-	ret := make(map[string]any, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
-}
-
-func (m *Module) dispatchRequestedStepCommand(ctx context.Context, cmd orchestratorevents.DispatchStepCommand) error {
-	if m == nil || m.bizPtr == nil {
-		return common.ErrInvalidArgument
-	}
-	if m.backgroundRoutine == nil {
-		return m.bizPtr.DispatchRequestedStep(ctx, cmd)
-	}
-	bgCtx := orchestratorBackgroundContext(ctx, cmd.WorkspaceID)
-	if err := m.backgroundRoutine.AsyncFunction(func() {
-		if err := m.bizPtr.DispatchRequestedStep(bgCtx, cmd); err != nil && !errors.Is(err, context.Canceled) {
-			slog.Warn("workorch orchestrator dispatch requested step failed",
-				"workspaceID", cmd.WorkspaceID,
-				"runID", cmd.RunID,
-				"stepID", cmd.StepID,
-				"err", err,
-			)
-		}
-	}); err != nil {
-		return err
-	}
-	return nil
+	return m.backgroundRoutine.AsyncFunction(func() { drive(bgCtx) })
 }
 
 func orchestratorBackgroundContext(ctx context.Context, workspaceID common.WorkspaceID) context.Context {
@@ -562,55 +341,6 @@ func orchestratorBackgroundContext(ctx context.Context, workspaceID common.Works
 		bgCtx = common.ContextWithRuntimeLLMProviderID(bgCtx, providerID)
 	}
 	return bgCtx
-}
-
-func (m *Module) handleRuntimeResultEvent(event magicevent.Event, result magicevent.Result) {
-	setOrchestratorAck(result, m.handleRuntimeResultData(event.Context(), event.ID(), event.Data()))
-}
-
-func (m *Module) handleRuntimeResultData(ctx context.Context, topic string, data any) error {
-	if m == nil || m.bizPtr == nil {
-		return common.ErrInvalidArgument
-	}
-	if m.backgroundRoutine == nil {
-		return m.finalizeRuntimeResult(ctx, topic, data)
-	}
-	bgCtx := runtimeEventBackgroundContext(ctx, data)
-	return m.backgroundRoutine.AsyncFunction(func() {
-		if err := m.finalizeRuntimeResult(bgCtx, topic, data); err != nil && !errors.Is(err, context.Canceled) {
-			slog.Warn("workorch orchestrator runtime result finalize failed",
-				"topic", topic,
-				"err", err,
-			)
-		}
-	})
-}
-
-func (m *Module) handleRuntimeProgressEvent(event magicevent.Event, result magicevent.Result) {
-	data, ok := event.Data().(runtimeevent.ProgressData)
-	if !ok {
-		setOrchestratorAck(result, common.ErrInvalidArgument)
-		return
-	}
-	setOrchestratorAck(result, m.handleRuntimeProgressData(event.Context(), event.ID(), data))
-}
-
-func (m *Module) handleRuntimeProgressData(ctx context.Context, topic string, data runtimeevent.ProgressData) error {
-	if m == nil || m.bizPtr == nil {
-		return common.ErrInvalidArgument
-	}
-	if m.backgroundRoutine == nil {
-		return m.recordRuntimeProgress(ctx, data)
-	}
-	bgCtx := runtimeEventBackgroundContext(ctx, data)
-	return m.backgroundRoutine.AsyncFunction(func() {
-		if err := m.recordRuntimeProgress(bgCtx, data); err != nil && !errors.Is(err, context.Canceled) {
-			slog.Warn("workorch orchestrator runtime progress record failed",
-				"topic", topic,
-				"err", err,
-			)
-		}
-	})
 }
 
 func (m *Module) readEvidenceMagicCommand(ctx context.Context, topic string, data any) (orchestratorevents.OrchestratorCommandResult, error) {

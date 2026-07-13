@@ -64,27 +64,11 @@ func coverageSummaryStatusCounts(items []map[string]any) map[string]int {
 }
 
 func GapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *readmodelcore.GapBaseline {
-	derived := derivedGapBaselineFromRunSnapshot(snapshot)
-	if persisted := gapBaselineFromMap(MapValue(snapshot.Run.ExecutionContext["gapBaseline"])); persisted != nil {
-		if persisted.WorkspaceID == "" {
-			persisted.WorkspaceID = snapshot.Workspace.ID
-		}
-		if persisted.RunID == "" {
-			persisted.RunID = snapshot.Run.ID
-		}
-		normalizePersistedGapBaselineProjection(persisted, derived)
-		return persisted
-	}
-	return derived
+	return derivedGapBaselineFromRunSnapshot(snapshot)
 }
 
 func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []readmodelcore.GapDiagnostic {
-	context := snapshot.Run.ExecutionContext
-	authority := MapValue(context["convergenceAuthority"])
-	authorityFocus := MapValue(authority["currentFocus"])
 	var ret []readmodelcore.GapDiagnostic
-	ret = append(ret, authorityDiagnosticsFromRaw("run.executionContext.authorityDiagnostics", context["authorityDiagnostics"])...)
-	ret = append(ret, targetSnapshotAuthorityDiagnostics(authority)...)
 	for idx := range snapshot.Steps {
 		source := "step.input.authorityDiagnostics"
 		if snapshot.Steps[idx].ID != "" {
@@ -94,87 +78,7 @@ func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []r
 	}
 	ret = append(ret, completionGateDriftDiagnosticsFromRunSnapshot(snapshot)...)
 	ret = append(ret, staleValidationResourceDiagnosticsFromRunSnapshot(snapshot)...)
-	if len(authorityFocus) == 0 {
-		return ret
-	}
-	addFocusDiagnostic := func(label string, focus map[string]any) {
-		if len(focus) == 0 || readModelFocusAligned(authorityFocus, focus) {
-			return
-		}
-		ret = append(ret, readmodelcore.GapDiagnostic{
-			Code:             "authority_focus_drift",
-			Severity:         "warning",
-			Kind:             "stale_persisted_derived_field",
-			Source:           label,
-			Candidate:        readModelFocusDebugToken(focus),
-			CurrentAuthority: readModelFocusDebugToken(authorityFocus),
-			Message:          fmt.Sprintf("%s focus %q differs from convergenceAuthority current focus %q", label, readModelFocusDebugToken(focus), readModelFocusDebugToken(authorityFocus)),
-		})
-	}
-	addRequiredDiagnostic := func(label string, required map[string]any) {
-		if len(required) == 0 {
-			return
-		}
-		if focusID := strings.TrimSpace(stringValue(required, "coverageFocusId", "focusId")); focusID != "" {
-			if !readModelFocusAligned(authorityFocus, map[string]any{"id": focusID}) {
-				ret = append(ret, readmodelcore.GapDiagnostic{
-					Code:             "authority_focus_drift",
-					Severity:         "warning",
-					Kind:             "stale_persisted_derived_field",
-					Source:           label,
-					Candidate:        focusID,
-					CurrentAuthority: readModelFocusDebugToken(authorityFocus),
-					Message:          fmt.Sprintf("%s coverageFocusId %q differs from convergenceAuthority current focus %q", label, focusID, readModelFocusDebugToken(authorityFocus)),
-				})
-			}
-		}
-		if ids := readModelStringSliceValue(required["coverageWorkItemIds"]); len(ids) > 0 && !readModelFocusAligned(authorityFocus, map[string]any{"coverageWorkItemIds": ids}) {
-			ret = append(ret, readmodelcore.GapDiagnostic{
-				Code:             "authority_focus_drift",
-				Severity:         "warning",
-				Kind:             "stale_persisted_derived_field",
-				Source:           label,
-				Candidate:        strings.Join(ids, ","),
-				CurrentAuthority: readModelFocusDebugToken(authorityFocus),
-				Message:          fmt.Sprintf("%s coverageWorkItemIds %q differ from convergenceAuthority current focus %q", label, strings.Join(ids, ","), readModelFocusDebugToken(authorityFocus)),
-			})
-		}
-	}
-	addFocusDiagnostic("gapBaseline.currentFocus", MapValue(MapValue(context["gapBaseline"])["currentFocus"]))
-	addFocusDiagnostic("coverageFocus", MapValue(context["coverageFocus"]))
-	addFocusDiagnostic("acceptance.currentFocus", MapValue(MapValue(context["acceptance"])["currentFocus"]))
-	addFocusDiagnostic("stagePacket.activeFocus", MapValue(MapValue(context["stagePacket"])["activeFocus"]))
-	addRequiredDiagnostic("repairActionPackage.requiredOutput", MapValue(MapValue(context["repairActionPackage"])["requiredOutput"]))
-	addRequiredDiagnostic("stagePacket.requiredOutput", MapValue(MapValue(context["stagePacket"])["requiredOutput"]))
 	return ret
-}
-
-func targetSnapshotAuthorityDiagnostics(authority map[string]any) []readmodelcore.GapDiagnostic {
-	if len(authority) == 0 {
-		return nil
-	}
-	status := strings.TrimSpace(stringValue(authority, "targetSnapshotStatus"))
-	if status != "missing" {
-		return nil
-	}
-	nextAction := MapValue(authority["nextAction"])
-	kind := strings.TrimSpace(stringValue(nextAction, "kind"))
-	if kind != "state_change" && kind != "acquire_target_snapshot" {
-		return nil
-	}
-	reason := strings.TrimSpace(stringValue(authority, "snapshotRequiredReason"))
-	if reason == "" {
-		reason = "state_change requires current target snapshot before patch/apply"
-	}
-	return []readmodelcore.GapDiagnostic{{
-		Code:             "target_snapshot_missing_before_state_change",
-		Severity:         "info",
-		Kind:             "authority_snapshot",
-		Source:           "run.executionContext.convergenceAuthority",
-		Candidate:        "targetSnapshotStatus=missing",
-		CurrentAuthority: kind,
-		Message:          reason,
-	}}
 }
 
 func completionGateDriftDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []readmodelcore.GapDiagnostic {
@@ -241,6 +145,17 @@ func staleValidationResourceDiagnosticsFromRunSnapshot(snapshot readmodelcore.Ru
 	return ret
 }
 
+func validationResourceStatusIssue(status string, ownerTerminal bool) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "released", "skipped", "removed", "cleanup_skipped", "failed", "timeout":
+		return false
+	case "pending", "active":
+		return ownerTerminal
+	default:
+		return true
+	}
+}
+
 func readModelStepStateTerminal(state string) bool {
 	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "completed", "failed", "cancelled", "canceled", "superseded":
@@ -282,7 +197,7 @@ func authorityDiagnosticsFromRaw(defaultSource string, value any) []readmodelcor
 
 func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *readmodelcore.GapBaseline {
 	ctx := snapshot.CoverageWorkItemContext
-	authority := MapValue(snapshot.Run.ExecutionContext["convergenceAuthority"])
+	authority := map[string]any{}
 	if len(ctx) == 0 {
 		ctx = MapValue(authority["coverageWorkItemContext"])
 	}

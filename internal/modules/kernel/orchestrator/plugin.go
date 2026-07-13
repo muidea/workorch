@@ -7,9 +7,7 @@ import (
 	"github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
 	"github.com/muidea/magicCommon/task"
-	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	"github.com/muidea/workorch/internal/pkg/workorchdeps"
-	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
 func init() {
@@ -26,17 +24,7 @@ func (m *Module) Setup(_ context.Context, rawEventHub event.Hub, backgroundRouti
 	if err != nil {
 		return err
 	}
-	runtimePolicy, policyErr := workorchruntimepolicy.Current()
-	if policyErr != nil {
-		return cd.NewError(cd.IllegalParam, policyErr.Error())
-	}
-	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry()
-	eventAdapter := NewEventRuntimeAdapter(rawEventHub)
-	if err := registerRuntimeStepKinds(runtimeRegistry, eventAdapter); err != nil {
-		return cd.NewError(cd.Unexpected, err.Error())
-	}
 	if setupErr := m.Configure(Dependencies{
-		Runtime:               runtimeRegistry,
 		Steps:                 repos.Steps,
 		ToolCalls:             repos.ToolCalls,
 		Patches:               repos.Patches,
@@ -45,7 +33,6 @@ func (m *Module) Setup(_ context.Context, rawEventHub event.Hub, backgroundRouti
 		EvidenceRecords:       repos.EvidenceRecords,
 		CoverageWorkItems:     repos.CoverageWorkItems,
 		ArtifactContinuations: repos.ArtifactContinuations,
-		RuntimePolicy:         runtimePolicy,
 		CommandHub:            rawEventHub,
 		BackgroundRoutine:     backgroundRoutine,
 	}); setupErr != nil {

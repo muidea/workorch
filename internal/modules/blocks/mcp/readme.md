@@ -1,4 +1,4 @@
-# MCP Block
+# MCP 能力组件
 
 ## 功能说明
 
@@ -6,8 +6,9 @@
 
 ## 组件交互及合同
 
-- `kernel/orchestrator` 使用 `internal/pkg/runtimeevent.ExecuteCommand` 派发 tool_call、resource_read 或 prompt_get，并接收 `ExecuteCommandResult`。
-- 本 block 通过 runtimeevent 发布 Accepted、Progress、Completed 或 Failed 具体通知。
+- `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递 tool_call、resource_read 或 prompt_get；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 V1 执行通知。
+- Runtime V2 capability preflight 通过 Orchestrator 定义的 typed EventHub command 查询本 block 实际提供的 tool、resource 和 prompt kinds。
+- Runtime V2 MCP operation 不会通过 Envelope 或 `map[string]any` 传递跨组件结果。
 - 本 block 导入 `blocks/mcpregistry/pkg/events`，通过 EventHub 查询 MCP Server 和 Capability；不注入 registry service/repository。
 - request 必须携带 workspace/run/step scope、server/capability ref 和结构化参数；result 返回状态、source refs、摘要、truncation metadata、错误和 raw ref。
 

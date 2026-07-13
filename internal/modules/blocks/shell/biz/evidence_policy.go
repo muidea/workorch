@@ -5,21 +5,22 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func applyShellEvidencePolicies(input map[string]any, command string, args []string, output map[string]any) {
-	if input == nil || output == nil {
+func applyShellEvidencePolicies(policies []runtimecontract.RuntimeEvidencePolicy, command string, args []string, output map[string]any) {
+	if output == nil {
 		return
 	}
-	for _, policy := range evidencePolicyMaps(input["evidencePolicies"]) {
+	for _, policy := range runtimecontract.NormalizeRuntimeEvidencePolicies(policies) {
 		if !shellEvidencePolicyApplies(policy, command, args) {
 			continue
 		}
 		if shellEvidencePolicyZeroWork(policy, output) {
-			output["evidenceQuality"] = firstNonEmptyEvidencePolicyValue(policy, "qualityOnZeroWork", string(common.EvidenceQualityInconclusive))
-			output["evidenceReason"] = firstNonEmptyEvidencePolicyValue(policy, "evidenceReason", "command completed without producing required evidence")
+			output["evidenceQuality"] = firstNonEmptyEvidencePolicyValue(policy.QualityOnZeroWork, string(common.EvidenceQualityInconclusive))
+			output["evidenceReason"] = firstNonEmptyEvidencePolicyValue(policy.EvidenceReason, "command completed without producing required evidence")
 			output["zeroWork"] = true
-			if tags := evidencePolicyStringSlice(policy["evidenceTags"]); len(tags) > 0 {
+			if tags := policy.EvidenceTags; len(tags) > 0 {
 				output["evidenceTags"] = tags
 			}
 			return
@@ -27,18 +28,18 @@ func applyShellEvidencePolicies(input map[string]any, command string, args []str
 	}
 }
 
-func shellEvidencePolicyApplies(policy map[string]any, command string, args []string) bool {
-	appliesTo := strings.TrimSpace(stringFromEvidencePolicy(policy["appliesTo"]))
+func shellEvidencePolicyApplies(policy runtimecontract.RuntimeEvidencePolicy, command string, args []string) bool {
+	appliesTo := strings.TrimSpace(policy.AppliesTo)
 	if appliesTo != "" && appliesTo != "shell/command" {
 		return false
 	}
-	if expected := strings.TrimSpace(stringFromEvidencePolicy(policy["commandName"])); expected != "" {
+	if expected := strings.TrimSpace(policy.CommandName); expected != "" {
 		base := strings.ToLower(filepath.Base(strings.TrimSpace(command)))
 		if base != strings.ToLower(expected) && base != strings.ToLower(expected)+".exe" {
 			return false
 		}
 	}
-	for _, required := range evidencePolicyStringSlice(policy["argsContain"]) {
+	for _, required := range policy.ArgsContain {
 		found := false
 		for _, arg := range args {
 			if strings.TrimSpace(arg) == required {
@@ -53,7 +54,7 @@ func shellEvidencePolicyApplies(policy map[string]any, command string, args []st
 	return true
 }
 
-func shellEvidencePolicyZeroWork(policy map[string]any, output map[string]any) bool {
+func shellEvidencePolicyZeroWork(policy runtimecontract.RuntimeEvidencePolicy, output map[string]any) bool {
 	text := strings.ToLower(strings.Join([]string{
 		stringFromEvidencePolicy(output["stdout"]),
 		stringFromEvidencePolicy(output["stderr"]),
@@ -61,12 +62,12 @@ func shellEvidencePolicyZeroWork(policy map[string]any, output map[string]any) b
 	if strings.TrimSpace(text) == "" {
 		return false
 	}
-	for _, marker := range evidencePolicyStringSlice(policy["workEvidenceMarkers"]) {
+	for _, marker := range policy.WorkEvidenceMarkers {
 		if marker != "" && strings.Contains(text, strings.ToLower(marker)) {
 			return false
 		}
 	}
-	for _, marker := range evidencePolicyStringSlice(policy["zeroWorkMarkers"]) {
+	for _, marker := range policy.ZeroWorkMarkers {
 		if marker != "" && strings.Contains(text, strings.ToLower(marker)) {
 			return true
 		}
@@ -74,52 +75,8 @@ func shellEvidencePolicyZeroWork(policy map[string]any, output map[string]any) b
 	return false
 }
 
-func evidencePolicyMaps(value any) []map[string]any {
-	switch typed := value.(type) {
-	case []map[string]any:
-		return typed
-	case []any:
-		ret := make([]map[string]any, 0, len(typed))
-		for _, item := range typed {
-			mapped, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			ret = append(ret, mapped)
-		}
-		return ret
-	default:
-		return nil
-	}
-}
-
-func evidencePolicyStringSlice(value any) []string {
-	switch typed := value.(type) {
-	case []string:
-		ret := make([]string, 0, len(typed))
-		for _, item := range typed {
-			item = strings.TrimSpace(item)
-			if item != "" {
-				ret = append(ret, item)
-			}
-		}
-		return ret
-	case []any:
-		ret := make([]string, 0, len(typed))
-		for _, item := range typed {
-			text := strings.TrimSpace(stringFromEvidencePolicy(item))
-			if text != "" {
-				ret = append(ret, text)
-			}
-		}
-		return ret
-	default:
-		return nil
-	}
-}
-
-func firstNonEmptyEvidencePolicyValue(policy map[string]any, key string, fallback string) string {
-	if value := strings.TrimSpace(stringFromEvidencePolicy(policy[key])); value != "" {
+func firstNonEmptyEvidencePolicyValue(value string, fallback string) string {
+	if value = strings.TrimSpace(value); value != "" {
 		return value
 	}
 	return fallback

@@ -1,4 +1,4 @@
-# SSH Block
+# SSH 能力组件
 
 ## 功能说明
 
@@ -6,8 +6,9 @@
 
 ## 组件交互及合同
 
-- `kernel/orchestrator` 使用 `internal/pkg/runtimeevent.ExecuteCommand` 派发 SSH step，并接收 `ExecuteCommandResult`。
-- 本 block 通过 runtimeevent 发布 Accepted、Progress、Completed 或 Failed 具体通知。
+- `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递 SSH 操作；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 V1 执行通知。
+- Runtime V2 capability preflight 通过 Orchestrator 定义的 typed EventHub command 确认 SSH command capability 当前在线。
+- 远端输出只形成有界 typed evidence，不作为跨组件 map 返回。
 - request 必须携带 workspace/run/step scope、target/session/credential refs、command、timeout 和 policy；result 返回远程 exit status、有界输出、target ref、错误分类和 raw ref。
 - runtime policy、Governance 和 Approval 在远程副作用执行前完成准入。
 

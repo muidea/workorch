@@ -14,7 +14,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState) {
@@ -440,13 +439,8 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 				writeBusinessError(w, fmt.Errorf("%w: workspace restart must not target runId", common.ErrInvalidArgument))
 				return
 			}
-		case "replan":
-			if runID == "" {
-				writeBusinessError(w, fmt.Errorf("%w: workspace replan requires runId", common.ErrInvalidArgument))
-				return
-			}
 		default:
-			writeBusinessError(w, fmt.Errorf("%w: workspace execution command supports resume, restart or scoped replan intent, got %q", common.ErrInvalidArgument, intent))
+			writeBusinessError(w, fmt.Errorf("%w: workspace execution command supports resume or restart intent, got %q", common.ErrInvalidArgument, intent))
 			return
 		}
 		command, commandErr := workspaceExecutionCommandSchedulerCommand(workspaceID, req, priority)
@@ -646,29 +640,24 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 }
 
 func workspaceExecutionCommandSchedulerCommand(workspaceID string, req workspaceExecutionCommandRequest, priority int) (workorchdevents.WorkspaceRunRequestedCommand, error) {
-	executionContextPatch, err := eventvalue.FromMap(req.ExecutionContextPatch)
-	if err != nil {
-		return workorchdevents.WorkspaceRunRequestedCommand{}, fmt.Errorf("invalid execution context patch: %w", err)
-	}
 	return workorchdevents.WorkspaceRunRequestedCommand{
-		WorkspaceID:           common.WorkspaceID(workspaceID),
-		RunID:                 common.RunID(strings.TrimSpace(req.RunID)),
-		GoalID:                common.GoalID(req.GoalID),
-		DoDID:                 common.DoDID(req.DoDID),
-		LLMProviderID:         req.LLMProviderID,
-		SoulID:                common.SoulID(req.SoulID),
-		SoulBindings:          req.SoulBindings,
-		SkillIDs:              schedulerIDs[common.SkillID](req.SkillIDs),
-		MCPServerIDs:          schedulerIDs[common.MCPServerID](req.MCPServerIDs),
-		CapabilityIDs:         schedulerIDs[common.MCPCapabilityID](req.CapabilityIDs),
-		MemoryIDs:             schedulerIDs[common.MemoryID](req.MemoryIDs),
-		DialogLanguage:        req.DialogLanguage,
-		Reason:                req.Reason,
-		Source:                schedulerCommandSource(req.Source, "http"),
-		RequestID:             req.RequestID,
-		DefinitionRevision:    req.DefinitionRevision,
-		DecisionID:            req.DecisionID,
-		Priority:              priority,
-		ExecutionContextPatch: executionContextPatch,
+		WorkspaceID:        common.WorkspaceID(workspaceID),
+		RunID:              common.RunID(strings.TrimSpace(req.RunID)),
+		GoalID:             common.GoalID(req.GoalID),
+		DoDID:              common.DoDID(req.DoDID),
+		LLMProviderID:      req.LLMProviderID,
+		SoulID:             common.SoulID(req.SoulID),
+		SoulBindings:       req.SoulBindings,
+		SkillIDs:           schedulerIDs[common.SkillID](req.SkillIDs),
+		MCPServerIDs:       schedulerIDs[common.MCPServerID](req.MCPServerIDs),
+		CapabilityIDs:      schedulerIDs[common.MCPCapabilityID](req.CapabilityIDs),
+		MemoryIDs:          schedulerIDs[common.MemoryID](req.MemoryIDs),
+		DialogLanguage:     req.DialogLanguage,
+		Reason:             req.Reason,
+		Source:             schedulerCommandSource(req.Source, "http"),
+		RequestID:          req.RequestID,
+		DefinitionRevision: req.DefinitionRevision,
+		DecisionID:         req.DecisionID,
+		Priority:           priority,
 	}, nil
 }

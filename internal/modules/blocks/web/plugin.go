@@ -15,8 +15,8 @@ func init() {
 
 func (m *Module) Weight() int { return 18 }
 
-func (m *Module) Setup(_ context.Context, eventHub event.Hub, background task.BackgroundRoutine) *cd.Error {
-	if setupErr := m.Configure(Dependencies{EventHub: eventHub, Background: background}); setupErr != nil {
+func (m *Module) Setup(_ context.Context, eventHub event.Hub, _ task.BackgroundRoutine) *cd.Error {
+	if setupErr := m.Configure(Dependencies{EventHub: eventHub}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}
 	return nil

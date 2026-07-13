@@ -27,6 +27,105 @@ func NewRuntimeAdapter() *RuntimeAdapter {
 	return &RuntimeAdapter{}
 }
 
+func (a *RuntimeAdapter) AcquireTargetSnapshot(ctx context.Context, workspaceDirectory, targetRef string, maxBytes int) (runtimemodel.TargetSnapshot, error) {
+	result, err := a.read(runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: workspaceDirectory,
+		Kind:                          "file/read",
+		Input: map[string]any{
+			"path":     targetRef,
+			"maxBytes": maxBytes,
+		},
+	})
+	if err != nil {
+		return runtimemodel.TargetSnapshot{}, err
+	}
+	output := result.Output
+	snapshot := runtimemodel.TargetSnapshot{
+		TargetRef:   strings.TrimSpace(fmt.Sprint(output["targetRef"])),
+		Content:     fmt.Sprint(output["content"]),
+		ContentHash: strings.TrimSpace(fmt.Sprint(output["contentHash"])),
+		Size:        int64Value(output["size"]),
+		LineCount:   intValue(output["lineCount"]),
+	}
+	switch {
+	case output["exists"] == false:
+		snapshot.ContentState = runtimemodel.SnapshotContentStateMissing
+	case output["isBinary"] == true:
+		snapshot.ContentState = runtimemodel.SnapshotContentStateBinary
+	case output["redacted"] == true:
+		snapshot.ContentState = runtimemodel.SnapshotContentStateRedacted
+	case output["truncated"] == true:
+		snapshot.ContentState = runtimemodel.SnapshotContentStateTruncated
+	case output["contentComplete"] == true:
+		snapshot.ContentState = runtimemodel.SnapshotContentStateComplete
+	}
+	if !snapshot.Complete() {
+		return snapshot, fmt.Errorf("%w: target snapshot %q is not complete (%s)", common.ErrInvalidArgument, snapshot.TargetRef, snapshot.ContentState)
+	}
+	return snapshot, nil
+}
+
+func (a *RuntimeAdapter) AcquireWorkspaceManifest(workspaceDirectory string) (runtimemodel.WorkspaceManifest, error) {
+	result, err := a.list(runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: workspaceDirectory,
+		Kind:                          "file/list",
+		Input:                         map[string]any{"path": ".", "recursive": true},
+	})
+	if err != nil {
+		return runtimemodel.WorkspaceManifest{}, err
+	}
+	if result.Output["truncated"] == true {
+		return runtimemodel.WorkspaceManifest{}, fmt.Errorf("%w: workspace manifest exceeds bounded file listing", common.ErrInvalidArgument)
+	}
+	entries, ok := result.Output["entries"].([]map[string]any)
+	if !ok && result.Output["entries"] != nil {
+		return runtimemodel.WorkspaceManifest{}, common.ErrInvalidArgument
+	}
+	targetRefs := make([]string, 0, len(entries))
+	h := sha256.New()
+	for _, entry := range entries {
+		if strings.TrimSpace(fmt.Sprint(entry["kind"])) != "file" {
+			continue
+		}
+		ref := strings.TrimSpace(fmt.Sprint(entry["path"]))
+		if ref == "" {
+			continue
+		}
+		targetRefs = append(targetRefs, ref)
+		_, _ = fmt.Fprintf(h, "%d:%s|%s|%v|%v;", len(ref), ref, strings.TrimSpace(fmt.Sprint(entry["contentHash"])), entry["size"], entry["mtime"])
+	}
+	return runtimemodel.WorkspaceManifest{
+		Revision:   hex.EncodeToString(h.Sum(nil)),
+		TargetRefs: targetRefs,
+	}, nil
+}
+
+func int64Value(value any) int64 {
+	switch item := value.(type) {
+	case int64:
+		return item
+	case int:
+		return int64(item)
+	case float64:
+		return int64(item)
+	default:
+		return 0
+	}
+}
+
+func intValue(value any) int {
+	switch item := value.(type) {
+	case int:
+		return item
+	case int64:
+		return int(item)
+	case float64:
+		return int(item)
+	default:
+		return 0
+	}
+}
+
 func (a *RuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
 	switch strings.TrimSpace(request.Kind) {
 	case "file/list":
@@ -83,7 +182,7 @@ func (a *RuntimeAdapter) list(request runtimemodel.StepExecutionRequest) (runtim
 		if err != nil {
 			return nil
 		}
-		resolved, _, relEntry, err := guardedWorkspacePath(root, relInput, true)
+		_, resolved, relEntry, err := guardedWorkspacePath(root, relInput, true)
 		if err != nil {
 			if d.IsDir() {
 				return filepath.SkipDir

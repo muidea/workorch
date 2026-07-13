@@ -9,7 +9,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
-	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func PortWorkspaceSnapshotInfo(snapshot readmodelcore.WorkspaceSnapshot) port.WorkspaceSnapshotInfo {
@@ -20,7 +19,6 @@ func PortWorkspaceSnapshotInfo(snapshot readmodelcore.WorkspaceSnapshot) port.Wo
 		Outcome:                 portWorkspaceOutcomeInfo(snapshot.Outcome),
 		TaskProgress:            portTaskProgressInfo(snapshot.TaskProgress),
 		RunHeartbeat:            portRunHeartbeatInfo(snapshot.RunHeartbeat),
-		RuntimeExecution:        portRuntimeExecutionInfo(snapshot.RuntimeExecution),
 		ConvergenceStatus:       portConvergenceStatusInfo(snapshot.ConvergenceStatus),
 		RunCommand:              portRunCommandStatusInfo(snapshot.RunCommand),
 		SchedulerDiagnostics:    PortSchedulerDiagnosticsInfo(snapshot.SchedulerDiagnostics),
@@ -116,7 +114,6 @@ func PortRunInfo(item appmodelcore.Run) port.RunInfo {
 		GoalID:             common.GoalID(item.GoalID),
 		DoDID:              common.DoDID(item.DoDID),
 		DefinitionRevision: item.DefinitionRevision,
-		ExecutionContext:   cloneDTOMap(item.ExecutionContext),
 		State:              common.RunState(item.State),
 		Priority:           item.Priority,
 		BlockingTicketID:   common.TicketID(item.BlockingTicketID),
@@ -195,7 +192,6 @@ func PortRunStatusInfo(item readmodelcore.RunStatus) port.RunStatusInfo {
 		BlockingTicketID:     common.TicketID(item.BlockingTicketID),
 		BlockingApprovalID:   common.ApprovalID(item.BlockingApprovalID),
 		FailureReason:        item.FailureReason,
-		RuntimeExecution:     portRuntimeExecutionInfo(item.RuntimeExecution),
 		ConvergenceStatus:    portConvergenceStatusInfo(item.ConvergenceStatus),
 		SchedulerDiagnostics: PortSchedulerDiagnosticsInfo(item.SchedulerDiagnostics),
 	}
@@ -538,63 +534,24 @@ func portRunHeartbeatInfo(item readmodelcore.RunHeartbeat) port.RunHeartbeatInfo
 	}
 }
 
-func portRuntimeExecutionInfo(item *readmodelcore.RuntimeExecutionState) *port.RuntimeExecutionInfo {
-	if item == nil {
-		return nil
-	}
-	return &port.RuntimeExecutionInfo{
-		StepID:              common.StepID(item.StepID),
-		StepKind:            item.StepKind,
-		StepState:           common.StepState(item.StepState),
-		RequestID:           item.RequestID,
-		QueueKey:            item.QueueKey,
-		ContractViolation:   cloneContractViolation(item.ContractViolation),
-		AcceptedAt:          item.AcceptedAt,
-		LastProgressAt:      item.LastProgressAt,
-		LastProgressEvent:   item.LastProgressEvent,
-		LastProgressStage:   item.LastProgressStage,
-		LastProgressSummary: item.LastProgressSummary,
-		WorkerID:            item.WorkerID,
-		WorkerStartedAt:     item.WorkerStartedAt,
-		WorkerHeartbeatAt:   item.WorkerHeartbeatAt,
-		WorkerStoppedAt:     item.WorkerStoppedAt,
-		WorkerLostAt:        item.WorkerLostAt,
-		DoneAt:              item.DoneAt,
-		FailedAt:            item.FailedAt,
-		FinalizedAt:         item.FinalizedAt,
-		FinalizeEvent:       item.FinalizeEvent,
-		Pending:             item.Pending,
-		Gap:                 item.Gap,
-	}
-}
-
 func portConvergenceStatusInfo(item *readmodelcore.ConvergenceStatus) *port.ConvergenceStatusInfo {
 	if item == nil {
 		return nil
 	}
 	return &port.ConvergenceStatusInfo{
-		WorkspaceID:                 common.WorkspaceID(item.WorkspaceID),
-		RunID:                       common.RunID(item.RunID),
-		RunState:                    common.RunState(item.RunState),
-		CurrentFocusID:              item.CurrentFocusID,
-		NextActionKind:              item.NextActionKind,
-		CurrentGap:                  item.CurrentGap,
-		MissingEvidenceKinds:        cloneStrings(item.MissingEvidenceKinds),
-		AcceptedEvidenceCount:       item.AcceptedEvidenceCount,
-		RejectedEvidenceCount:       item.RejectedEvidenceCount,
-		LatestEffectiveProgressAt:   item.LatestEffectiveProgressAt,
-		LatestContractViolationRule: item.LatestContractViolationRule,
-		LatestRecovery:              item.LatestRecovery,
-		LatestRejectedDiagnosticRef: item.LatestRejectedDiagnosticRef,
-		DecisionCause:               item.DecisionCause,
-		RetryAttempt:                item.RetryAttempt,
-		RetryMaxAttempts:            item.RetryMaxAttempts,
-		RetrySignatureRepeatCount:   item.RetrySignatureRepeatCount,
-		RetryBudgetScope:            cloneDTOMap(item.RetryBudgetScope),
-		NarrowedRetryAttempted:      item.NarrowedRetryAttempted,
-		ManagedValidationAvailable:  item.ManagedValidationAvailable,
-		Stalled:                     item.Stalled,
-		IneffectiveRetry:            item.IneffectiveRetry,
+		WorkspaceID:               common.WorkspaceID(item.WorkspaceID),
+		RunID:                     common.RunID(item.RunID),
+		RunState:                  common.RunState(item.RunState),
+		CurrentFocusID:            item.CurrentFocusID,
+		NextActionKind:            item.NextActionKind,
+		CurrentGap:                item.CurrentGap,
+		MissingEvidenceKinds:      cloneStrings(item.MissingEvidenceKinds),
+		AcceptedEvidenceCount:     item.AcceptedEvidenceCount,
+		RejectedEvidenceCount:     item.RejectedEvidenceCount,
+		LatestEffectiveProgressAt: item.LatestEffectiveProgressAt,
+		DecisionCause:             item.DecisionCause,
+		Stalled:                   item.Stalled,
+		IneffectiveRetry:          item.IneffectiveRetry,
 	}
 }
 
@@ -820,8 +777,6 @@ func portTaskPlanInfos(items []readmodelcore.TaskPlan) []port.TaskPlanInfo {
 			Nodes:             portTaskDecompositionNodeInfos(item.Nodes),
 			RetryOf:           item.RetryOf,
 			RetryAttempt:      item.RetryAttempt,
-			ViolationType:     item.ViolationType,
-			ViolatedRule:      item.ViolatedRule,
 			FailureClass:      item.FailureClass,
 			FailureSignature:  item.FailureSignature,
 			TargetScope:       item.TargetScope,
@@ -848,8 +803,6 @@ func portTaskDecompositionNodeInfos(items []readmodelcore.TaskDecompositionNode)
 			StepState:        item.StepState,
 			RetryOf:          item.RetryOf,
 			RetryAttempt:     item.RetryAttempt,
-			ViolationType:    item.ViolationType,
-			ViolatedRule:     item.ViolatedRule,
 			FailureClass:     item.FailureClass,
 			FailureSignature: item.FailureSignature,
 			TargetScope:      item.TargetScope,
@@ -1342,20 +1295,6 @@ func portSoulBindings(input map[string]string) map[string]common.SoulID {
 		ret[key] = common.SoulID(value)
 	}
 	return ret
-}
-
-func cloneContractViolation(item *runtimemodel.ContractViolation) *runtimemodel.ContractViolation {
-	if item == nil {
-		return nil
-	}
-	ret := *item
-	ret.ExpectedContract = cloneDTOMap(item.ExpectedContract)
-	ret.ActualOutputSummary = cloneDTOMap(item.ActualOutputSummary)
-	ret.ForbiddenRepeat = cloneStrings(item.ForbiddenRepeat)
-	ret.CorrectionContract = cloneDTOMap(item.CorrectionContract)
-	ret.BudgetScope = cloneDTOMap(item.BudgetScope)
-	ret.SourceRefs = cloneStrings(item.SourceRefs)
-	return &ret
 }
 
 func memoryIDs(values []string) []common.MemoryID {

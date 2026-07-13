@@ -16,7 +16,6 @@ type RunSnapshot struct {
 	WebSources              []WebSourceTrace        `json:"webSources,omitempty"`
 	ValidationResults       []ValidationResult      `json:"validationResults,omitempty"`
 	RuntimeCheckpoints      []RuntimeCheckpoint     `json:"runtimeCheckpoints,omitempty"`
-	RuntimeExecution        *RuntimeExecutionState  `json:"runtimeExecution,omitempty"`
 	ConvergenceStatus       *ConvergenceStatus      `json:"convergenceStatus,omitempty"`
 	SchedulerDiagnostics    *SchedulerDiagnostics   `json:"schedulerDiagnostics,omitempty"`
 	Results                 []Result                `json:"results,omitempty"`

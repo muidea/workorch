@@ -35,7 +35,7 @@ func TestDecisionResolutionEventRepositorySendsTypedOwnerCommand(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if got.ResolutionID != "resolution-command-payload" || got.TicketID != "ticket-command-payload" || got.Payload["answer"] != "ok" {
+	if got.ResolutionID != "resolution-command-payload" || got.TicketID != "ticket-command-payload" || got.Payload.Map()["answer"] != "ok" {
 		t.Fatalf("command = %+v, want populated resolution command", got)
 	}
 }

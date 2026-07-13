@@ -15,10 +15,9 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 	runs := make([]readmodelcore.Run, 0, 12)
 	for idx := 0; idx < 12; idx++ {
 		runs = append(runs, readmodelcore.Run{
-			ID:               "run-" + strconv.Itoa(idx),
-			WorkspaceID:      "ws-compact",
-			State:            "running",
-			ExecutionContext: map[string]any{"large": "context"},
+			ID:          "run-" + strconv.Itoa(idx),
+			WorkspaceID: "ws-compact",
+			State:       "running",
 		})
 	}
 	traces := make([]readmodelcore.LLMUsageTrace, 0, workspaceSnapshotDetailLLMTraceLimit+3)
@@ -49,19 +48,14 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 	if got.Workspace.ContextHints != nil || got.Workspace.EvidencePolicies != nil {
 		t.Fatalf("workspace heavy fields were not compacted: %+v", got.Workspace)
 	}
-	if got.Run == nil || got.Run.ExecutionContext != nil {
-		t.Fatalf("active run execution context = %+v, want compact run", got.Run)
+	if got.Run == nil {
+		t.Fatalf("active run = %+v, want compact run", got.Run)
 	}
 	if len(got.Runs) != workspaceSnapshotDetailRunLimit+1 {
 		t.Fatalf("runs = %d, want active plus latest %d", len(got.Runs), workspaceSnapshotDetailRunLimit)
 	}
 	if got.Runs[0].ID != "run-0" {
 		t.Fatalf("first run = %q, want active run preserved", got.Runs[0].ID)
-	}
-	for _, item := range got.Runs {
-		if item.ExecutionContext != nil {
-			t.Fatalf("run %s execution context = %+v, want compact run", item.ID, item.ExecutionContext)
-		}
 	}
 	if len(got.LLMUsageTraces) != workspaceSnapshotDetailLLMTraceLimit {
 		t.Fatalf("llm usage traces = %d, want %d", len(got.LLMUsageTraces), workspaceSnapshotDetailLLMTraceLimit)
@@ -86,10 +80,9 @@ func TestProjectWorkspaceSnapshotSummaryOmitsPollingHeavyRuntimeFields(t *testin
 	got := ProjectWorkspaceSnapshotSummary(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: "ws-summary-compact", ActiveRunID: "run-summary-compact"},
 		Run: &readmodelcore.Run{
-			ID:               "run-summary-compact",
-			WorkspaceID:      "ws-summary-compact",
-			State:            "running",
-			ExecutionContext: map[string]any{"large": strings.Repeat("x", workspaceSnapshotTraceStringLimit*4)},
+			ID:          "run-summary-compact",
+			WorkspaceID: "ws-summary-compact",
+			State:       "running",
 		},
 		Step: &readmodelcore.StepView{
 			ID:    "run-summary-compact/step-1",
@@ -103,10 +96,6 @@ func TestProjectWorkspaceSnapshotSummaryOmitsPollingHeavyRuntimeFields(t *testin
 					}},
 				},
 			},
-		},
-		RuntimeExecution: &readmodelcore.RuntimeExecutionState{
-			StepID:         "run-summary-compact/step-1",
-			ResourceHealth: map[string]any{"full": strings.Repeat("resource", 2000)},
 		},
 		ContextBundle: &readmodelcore.ContextBundle{
 			WorkspaceID: "ws-summary-compact",
@@ -125,8 +114,8 @@ func TestProjectWorkspaceSnapshotSummaryOmitsPollingHeavyRuntimeFields(t *testin
 		}},
 	})
 
-	if got.Run != nil || got.Step != nil || got.RuntimeExecution != nil || got.ContextBundle != nil {
-		t.Fatalf("summary retained heavy runtime fields: run=%+v step=%+v runtime=%+v context=%+v", got.Run, got.Step, got.RuntimeExecution, got.ContextBundle)
+	if got.Run != nil || got.Step != nil || got.ContextBundle != nil {
+		t.Fatalf("summary retained heavy runtime fields: run=%+v step=%+v context=%+v", got.Run, got.Step, got.ContextBundle)
 	}
 	if len(got.ExecutionSections) != 0 || len(got.LLMUsageTraces) != 0 || len(got.EventRecords) != 0 {
 		t.Fatalf("summary retained polling-heavy slices: execution=%d usage=%d events=%d", len(got.ExecutionSections), len(got.LLMUsageTraces), len(got.EventRecords))
@@ -253,7 +242,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testin
 			ImplementationSummary: strings.Repeat("implementation", 200),
 			Diagnostics: map[string]any{
 				"runtimeDiagnostics": map[string]any{
-					"contractViolation": map[string]any{
+					"candidateFailure": map[string]any{
 						"actualOutputSummary": map[string]any{"error": strings.Repeat("diagnostic", 2000)},
 					},
 				},

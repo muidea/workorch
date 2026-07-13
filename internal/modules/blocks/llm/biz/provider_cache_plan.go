@@ -56,12 +56,6 @@ func buildProviderCachePlan(request llmmodels.ProviderRequest) llmmodels.Provide
 			})
 		}
 	}
-	if definitionChangeImpactChanged(request.Input) {
-		breakers = append(breakers, llmmodels.ProviderCacheBreaker{
-			SectionID: "C1",
-			Reason:    "definition_change_impact",
-		})
-	}
 	stablePrefixHash := cacheGroupHash("C0", groupHashes["C0"])
 	workspaceDefinitionHash := cacheGroupHash("C1", groupHashes["C1"])
 	capabilityContractHash := cacheGroupHash("C2", groupHashes["C2"])

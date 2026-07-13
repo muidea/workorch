@@ -272,8 +272,6 @@ type TaskDecompositionNodeInfo struct {
 	StepState        string
 	RetryOf          string
 	RetryAttempt     int
-	ViolationType    string
-	ViolatedRule     string
 	FailureClass     string
 	FailureSignature string
 	TargetScope      string
@@ -318,8 +316,6 @@ type TaskPlanInfo struct {
 	Nodes             []TaskDecompositionNodeInfo
 	RetryOf           string
 	RetryAttempt      int
-	ViolationType     string
-	ViolatedRule      string
 	FailureClass      string
 	FailureSignature  string
 	TargetScope       string

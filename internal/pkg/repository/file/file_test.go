@@ -269,8 +269,8 @@ func TestStepRepositoryListByRunUsesSequenceScope(t *testing.T) {
 			Kind:  "shell",
 			State: common.StepStateSucceeded,
 			Input: map[string]any{
-				"workspaceId":             "ws-a",
-				"executionContextPackage": strings.Repeat("x", 8192),
+				"workspaceId":         "ws-a",
+				"largeRuntimePayload": strings.Repeat("x", 8192),
 			},
 			Output: map[string]any{
 				"status": "completed",
@@ -320,8 +320,8 @@ func TestStepRepositoryListByRunUsesSequenceScope(t *testing.T) {
 	if summaries[0].Input["workspaceId"] != "ws-a" {
 		t.Fatalf("summary input workspaceId = %v, want ws-a", summaries[0].Input["workspaceId"])
 	}
-	if _, ok := summaries[0].Input["executionContextPackage"]; ok {
-		t.Fatalf("summary retained executionContextPackage, want omitted")
+	if _, ok := summaries[0].Input["largeRuntimePayload"]; ok {
+		t.Fatalf("summary retained largeRuntimePayload, want omitted")
 	}
 	if summaries[0].Output["status"] != "completed" {
 		t.Fatalf("summary output status = %v, want completed", summaries[0].Output["status"])
@@ -419,9 +419,9 @@ func TestStepRepositoryListByRunSummaryRebuildsLegacySummary(t *testing.T) {
 		Kind:  "llm/workspace_execution",
 		State: common.StepStateSucceeded,
 		Input: map[string]any{
-			"workspaceId":             "ws-legacy",
-			"runtimeRepairFollowUp":   true,
-			"executionContextPackage": strings.Repeat("x", 8192),
+			"workspaceId":           "ws-legacy",
+			"runtimeRepairFollowUp": true,
+			"largeRuntimePayload":   strings.Repeat("x", 8192),
 		},
 		Output: map[string]any{
 			"status":           "completed",
@@ -439,7 +439,7 @@ func TestStepRepositoryListByRunSummaryRebuildsLegacySummary(t *testing.T) {
 		"RunID":"run-legacy",
 		"Kind":"llm/workspace_execution",
 		"State":"completed",
-		"Input":{"workspaceId":"ws-legacy","executionContextPackage":"` + strings.Repeat("z", 4096) + `"},
+		"Input":{"workspaceId":"ws-legacy","largeRuntimePayload":"` + strings.Repeat("z", 4096) + `"},
 		"Output":{"status":"completed","rawResponse":"` + strings.Repeat("r", 4096) + `"}
 	}`
 	if err := os.WriteFile(filepath.Join(itemDir, "summary.json"), []byte(legacySummary), 0o644); err != nil {
@@ -459,8 +459,8 @@ func TestStepRepositoryListByRunSummaryRebuildsLegacySummary(t *testing.T) {
 	if summaries[0].Input["workspaceId"] != "ws-legacy" || summaries[0].Input["runtimeRepairFollowUp"] != true {
 		t.Fatalf("summary retained input = %+v, want workspace and repair flags", summaries[0].Input)
 	}
-	if _, ok := summaries[0].Input["executionContextPackage"]; ok {
-		t.Fatalf("summary retained executionContextPackage, want omitted")
+	if _, ok := summaries[0].Input["largeRuntimePayload"]; ok {
+		t.Fatalf("summary retained largeRuntimePayload, want omitted")
 	}
 	if summaries[0].Output["failureSignature"] != "class=runtime_failed|targetRef=main.go" {
 		t.Fatalf("summary failureSignature = %v, want retained", summaries[0].Output["failureSignature"])
@@ -480,8 +480,8 @@ func TestStepRepositoryListByRunSummaryRebuildsLegacySummary(t *testing.T) {
 	if rewritten.Input["_summarySchemaVersion"] != stepSummarySchemaVersion {
 		t.Fatalf("rewritten summary schema = %v, want %s", rewritten.Input["_summarySchemaVersion"], stepSummarySchemaVersion)
 	}
-	if _, ok := rewritten.Input["executionContextPackage"]; ok {
-		t.Fatalf("rewritten summary retained executionContextPackage, want omitted")
+	if _, ok := rewritten.Input["largeRuntimePayload"]; ok {
+		t.Fatalf("rewritten summary retained largeRuntimePayload, want omitted")
 	}
 	if _, ok := rewritten.Output["rawResponse"]; ok {
 		t.Fatalf("rewritten summary retained rawResponse, want omitted")

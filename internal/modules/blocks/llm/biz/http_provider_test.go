@@ -60,7 +60,7 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	if gotAuthorization != "Bearer secret-value" {
 		t.Fatalf("authorization = %q, want bearer secret", gotAuthorization)
 	}
-	if gotPayload.Model != "test-model" || len(gotPayload.Messages) < 3 || gotPayload.ResponseFormat["type"] != "json_object" {
+	if gotPayload.Model != "test-model" || len(gotPayload.Messages) != 2 || gotPayload.ResponseFormat["type"] != "json_object" {
 		t.Fatalf("payload = %+v, want chat completion json request", gotPayload)
 	}
 	if gotPayload.MaxCompletionTokens != 65536 ||
@@ -77,48 +77,19 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 		joined += "\n" + message.Content
 	}
 	if gotPayload.Messages[0].Role != "system" ||
-		!strings.Contains(gotPayload.Messages[0].Content, "C0.system") ||
-		!strings.Contains(gotPayload.Messages[0].Content, "C2.runtime-capability-summary") {
+		!strings.Contains(gotPayload.Messages[0].Content, "C0.runtime-candidate-contract") ||
+		!strings.Contains(gotPayload.Messages[0].Content, "C1.goal-dod") {
 		t.Fatalf("first message = %+v, want stable provider prefix", gotPayload.Messages[0])
 	}
-	if strings.Contains(gotPayload.Messages[0].Content, "C3.workspace-run") ||
-		strings.Contains(gotPayload.Messages[0].Content, "C4.current-action") {
+	if strings.Contains(gotPayload.Messages[0].Content, "C3.runtime-authority") {
 		t.Fatalf("first message leaked dynamic sections: %s", gotPayload.Messages[0].Content)
 	}
-	if !strings.Contains(joined, "C3.workspace-run") || !strings.Contains(joined, "C4.current-action") {
+	if !strings.Contains(joined, "C3.runtime-authority") {
 		t.Fatalf("messages = %+v, want dynamic tail after stable prefix", gotPayload.Messages)
 	}
-	if !strings.Contains(gotPayload.Messages[0].Content, "Do not invent a workorch CLI") ||
-		!strings.Contains(gotPayload.Messages[0].Content, "runtimeCapabilities") ||
-		!strings.Contains(gotPayload.Messages[0].Content, "dialogLanguage") ||
-		!strings.Contains(joined, "Do not use a command named workorch") ||
-		!strings.Contains(joined, "runtimeCapabilities.shellPolicy.unavailableCommands") ||
-		!strings.Contains(joined, "runtimeCapabilities.serviceAPIs") ||
-		!strings.Contains(joined, "workspace-owned local service endpoints") ||
-		!strings.Contains(joined, "Do not assume remote host access credentials") ||
-		!strings.Contains(joined, "ssh/command") ||
-		!strings.Contains(joined, "timeoutMillis") ||
-		!strings.Contains(joined, "Conversation language: Chinese (Simplified)") ||
-		!strings.Contains(joined, "DoD summaries") ||
-		!strings.Contains(joined, "complete, concrete, and directly applicable") ||
-		!strings.Contains(joined, "text_replace") ||
-		!strings.Contains(joined, "Do not represent deletion as file_write with empty content") ||
-		!strings.Contains(joined, "patch/preview or patch/apply failure") ||
-		!strings.Contains(joined, "assessmentOnly") ||
-		!strings.Contains(joined, "Graph follow-up is a closure step") ||
-		!strings.Contains(joined, "strict-convergence graph follow-up") ||
-		!strings.Contains(joined, "bounded executable continuation graph") ||
-		!strings.Contains(joined, "runtimeCapabilities") {
-		t.Fatalf("messages = %+v, want runtime capability boundary", gotPayload.Messages)
-	}
-	if strings.Contains(joined, "An empty workspace file listing is not by itself missing source code") ||
-		strings.Contains(joined, "new-work initialization case") ||
-		strings.Contains(joined, "A test command that reports no tests") ||
-		strings.Contains(joined, "implements the project") ||
-		strings.Contains(joined, "go test ./...") ||
-		strings.Contains(joined, "affected files") ||
-		strings.Contains(joined, "implementation path") {
-		t.Fatalf("messages = %+v, should not include software-dev template guidance in the core prompt", gotPayload.Messages)
+	if !strings.Contains(joined, `"goal":"goal-1"`) ||
+		!strings.Contains(joined, `"action":"produce_assessment"`) {
+		t.Fatalf("messages = %+v, want typed Runtime V2 prompt sections", gotPayload.Messages)
 	}
 	if !strings.Contains(string(result.Payload), `"completionState":"completed"`) {
 		t.Fatalf("payload = %s, want decision json", result.Payload)
@@ -189,7 +160,7 @@ func TestHTTPProviderCompleteUsesAnthropicMessagesShapeAndDeclaredCacheControl(t
 		t.Fatalf("system block = %+v, want declared anthropic cache_control", firstSystem)
 	}
 	messages, _ := json.Marshal(gotPayload["messages"])
-	if !strings.Contains(string(messages), "C3.workspace-run") || !strings.Contains(string(messages), "C4.current-action") {
+	if !strings.Contains(string(messages), "C3.runtime-authority") {
 		t.Fatalf("messages = %s, want dynamic tail after stable prefix", messages)
 	}
 	if !strings.Contains(string(result.Payload), `"summary":"anthropic http done"`) {
@@ -402,107 +373,6 @@ func TestHTTPProviderCompleteParsesNonStreamingUsage(t *testing.T) {
 		result.Usage.CacheReadTokens != 5 ||
 		result.Usage.CacheWriteTokens != 6 {
 		t.Fatalf("usage = %+v, want parsed non-stream usage", result.Usage)
-	}
-}
-
-func TestHTTPProviderAssessmentOnlyPromptHidesExecutionGraphContract(t *testing.T) {
-	var gotPayload chatCompletionRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"choices":[{"message":{"content":"{\"completionState\":\"failed\",\"dodAssessment\":{\"satisfied\":false,\"summary\":\"needs more evidence\",\"goalOutcome\":\"incomplete\",\"items\":[{\"item\":\"done\",\"state\":\"failed\",\"reason\":\"missing evidence\"}]}}"}}]
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL + "/v1",
-		APIKey:   "secret-value",
-		Model:    "test-model",
-		Timeout:  5 * time.Second,
-	})
-	request := llmProviderRequest()
-	request.Input["assessmentOnly"] = true
-
-	_, err := provider.Complete(context.Background(), request)
-	if err != nil {
-		t.Fatalf("complete: %v", err)
-	}
-	joined := ""
-	for _, message := range gotPayload.Messages {
-		joined += "\n" + message.Content
-	}
-	if !strings.Contains(joined, "Assessment-only mode is active") ||
-		!strings.Contains(joined, "Do not return executionGraph") ||
-		!strings.Contains(joined, "Before returning blocked_on_decision") ||
-		!strings.Contains(joined, "decision/planning/execution/validation bindings") ||
-		!strings.Contains(joined, "later runtime repair or replan") ||
-		!strings.Contains(joined, `"type":"assess_only"`) {
-		t.Fatalf("messages = %+v, want assessment-only contract", gotPayload.Messages)
-	}
-	if !strings.Contains(joined, "When input.assessmentOnly is true") ||
-		!strings.Contains(joined, "Do not return executionGraph; do not include shellCommands, patchRequests, mcpToolCalls, memoryWrites, nextAction, or executable work") {
-		t.Fatalf("messages = %+v, assessment-only prompt must carry mode restriction in volatile action context", gotPayload.Messages)
-	}
-}
-
-func TestHTTPProviderCompleteIncludesRepairAPIMismatchPriorityContract(t *testing.T) {
-	var gotPayload chatCompletionRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"choices":[{"message":{"content":"{\"completionState\":\"failed\",\"dodAssessment\":{\"satisfied\":false,\"summary\":\"failed\",\"goalOutcome\":\"incomplete\",\"items\":[]}}"}}]
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL + "/v1",
-		APIKey:   "secret-value",
-		Model:    "test-model",
-		Timeout:  5 * time.Second,
-	})
-	request := llmProviderRequest()
-	request.Input["runtimeRepairFollowUp"] = true
-	request.Input["failureTargetRepairContext"] = []map[string]any{{
-		"targetRef":        "target_test.go",
-		"content":          "package main\n",
-		"contentHash":      "hash",
-		"contentComplete":  true,
-		"safeForFileWrite": true,
-		"redacted":         false,
-		"truncated":        false,
-	}}
-	request.Input["failedStepOutput"] = map[string]any{
-		"stderr": "./target_test.go:10:3: unknown field Port in struct literal of type Config\n./target_test.go:11:7: undefined: newGatewayHandler\n",
-	}
-
-	_, err := provider.Complete(context.Background(), request)
-	if err != nil {
-		t.Fatalf("complete: %v", err)
-	}
-	joined := ""
-	for _, message := range gotPayload.Messages {
-		joined += "\n" + message.Content
-	}
-	for _, want := range []string{
-		"undefined identifiers",
-		"unknown fields",
-		"cannot-use type mismatches",
-		"resolve those reported blockers",
-		"reconcile the target against current visible API/resource definitions first",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("messages = %+v, want repair API mismatch contract %q", gotPayload.Messages, want)
-		}
 	}
 }
 
@@ -833,15 +703,18 @@ func TestChatCompletionsURLAcceptsFullEndpoint(t *testing.T) {
 
 func llmProviderRequest() llmmodels.ProviderRequest {
 	return llmmodels.ProviderRequest{
-		WorkspaceID:         "workspace-1",
-		RunID:               "run-1",
-		StepID:              "run-1/step-1",
-		Kind:                llmcommon.StepKindWorkspaceExecution,
-		Model:               "test-model",
-		SystemLocale:        "zh_CN.UTF-8",
-		DialogLanguage:      "Chinese (Simplified)",
-		Input:               map[string]any{"goalId": "goal-1", "doDId": "dod-1"},
-		Schema:              decisionSchemaName,
-		RuntimeCapabilities: declaredRuntimeCapabilities(),
+		WorkspaceID:    "workspace-1",
+		RunID:          "run-1",
+		StepID:         "run-1/step-1",
+		Kind:           "runtime_v2_candidate",
+		Model:          "test-model",
+		SystemLocale:   "zh_CN.UTF-8",
+		DialogLanguage: "Chinese (Simplified)",
+		Schema:         "workorch.runtime_candidate.test.v1",
+		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt.v1", Sections: []llmmodels.PromptSection{
+			{ID: "C0.runtime-candidate-contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: "Return one JSON object."},
+			{ID: "C1.goal-dod", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, Content: `{"goal":"goal-1","dod":"dod-1"}`},
+			{ID: "C3.runtime-authority", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: `{"action":"produce_assessment"}`},
+		}},
 	}
 }

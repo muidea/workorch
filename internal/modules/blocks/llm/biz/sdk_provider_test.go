@@ -72,16 +72,15 @@ func TestOpenAIProviderCompleteUsesOfficialSDKChatCompletions(t *testing.T) {
 	}
 	firstContent, _ := firstMessage["content"].(string)
 	if firstMessage["role"] != "system" ||
-		!strings.Contains(firstContent, "C0.system") ||
-		!strings.Contains(firstContent, "C2.runtime-capability-summary") {
+		!strings.Contains(firstContent, "C0.runtime-candidate-contract") ||
+		!strings.Contains(firstContent, "C1.goal-dod") {
 		t.Fatalf("first message = %+v, want stable provider prefix", firstMessage)
 	}
-	if strings.Contains(firstContent, "C3.workspace-run") || strings.Contains(firstContent, "C4.current-action") {
+	if strings.Contains(firstContent, "C3.runtime-authority") {
 		t.Fatalf("first message leaked dynamic sections: %s", firstContent)
 	}
 	encodedMessages, _ := json.Marshal(messages)
-	if !strings.Contains(string(encodedMessages), "C3.workspace-run") ||
-		!strings.Contains(string(encodedMessages), "C4.current-action") {
+	if !strings.Contains(string(encodedMessages), "C3.runtime-authority") {
 		t.Fatalf("messages = %s, want dynamic tail after stable prefix", encodedMessages)
 	}
 	if !strings.Contains(string(result.Payload), `"summary":"openai sdk done"`) {
@@ -198,16 +197,15 @@ func TestAnthropicProviderCompleteUsesOfficialSDKMessages(t *testing.T) {
 	if !ok || cacheControl["type"] != "ephemeral" {
 		t.Fatalf("system block = %+v, want Anthropic cache_control on stable prefix", firstSystem)
 	}
-	if !strings.Contains(systemText, "C0.system") ||
-		!strings.Contains(systemText, "C2.runtime-capability-summary") {
+	if !strings.Contains(systemText, "C0.runtime-candidate-contract") ||
+		!strings.Contains(systemText, "C1.goal-dod") {
 		t.Fatalf("system text = %s, want stable provider prefix", systemText)
 	}
-	if strings.Contains(systemText, "C3.workspace-run") || strings.Contains(systemText, "C4.current-action") {
+	if strings.Contains(systemText, "C3.runtime-authority") {
 		t.Fatalf("system text leaked dynamic sections: %s", systemText)
 	}
 	anthropicMessages, _ := json.Marshal(gotPayload["messages"])
-	if !strings.Contains(string(anthropicMessages), "C3.workspace-run") ||
-		!strings.Contains(string(anthropicMessages), "C4.current-action") {
+	if !strings.Contains(string(anthropicMessages), "C3.runtime-authority") {
 		t.Fatalf("messages = %s, want dynamic tail after cached system prefix", anthropicMessages)
 	}
 	thinking, _ := gotPayload["thinking"].(map[string]any)

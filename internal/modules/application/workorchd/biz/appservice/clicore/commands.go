@@ -17,19 +17,18 @@ func CreateWorkspaceCommandFromPayload(payload map[string]any) appmodelcore.Crea
 
 func ActivateWorkspaceExecutionCommandFromPayload(payload map[string]any) appmodelcore.ActivateWorkspaceExecutionCommand {
 	return appmodelcore.ActivateWorkspaceExecutionCommand{
-		GoalID:                StringValue(payload, "goalId"),
-		DoDID:                 StringValue(payload, "doDId"),
-		LLMProviderID:         StringValue(payload, "llmProviderId"),
-		DialogLanguage:        StringValue(payload, "dialogLanguage"),
-		SoulID:                StringValue(payload, "soulId"),
-		SoulBindings:          StringMapValue(payload, "soulBindings"),
-		SkillIDs:              StringSliceValue(payload, "skillIds"),
-		MCPServerIDs:          StringSliceValue(payload, "mcpServerIds"),
-		CapabilityIDs:         StringSliceValue(payload, "capabilityIds"),
-		MemoryIDs:             StringSliceValue(payload, "memoryIds"),
-		Priority:              IntValue(payload, "priority"),
-		Restart:               BoolValue(payload, "restart"),
-		ExecutionContextPatch: MapValue(payload, "executionContextPatch"),
+		GoalID:         StringValue(payload, "goalId"),
+		DoDID:          StringValue(payload, "doDId"),
+		LLMProviderID:  StringValue(payload, "llmProviderId"),
+		DialogLanguage: StringValue(payload, "dialogLanguage"),
+		SoulID:         StringValue(payload, "soulId"),
+		SoulBindings:   StringMapValue(payload, "soulBindings"),
+		SkillIDs:       StringSliceValue(payload, "skillIds"),
+		MCPServerIDs:   StringSliceValue(payload, "mcpServerIds"),
+		CapabilityIDs:  StringSliceValue(payload, "capabilityIds"),
+		MemoryIDs:      StringSliceValue(payload, "memoryIds"),
+		Priority:       IntValue(payload, "priority"),
+		Restart:        BoolValue(payload, "restart"),
 	}
 }
 

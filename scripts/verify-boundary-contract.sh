@@ -101,7 +101,8 @@ fi
 
 if matches="$(
   rg -n --hidden -S "$orchestrator_repair_target_snapshot_read_pattern" \
-    internal/modules/kernel/orchestrator/biz/runtime_repair_context_material.go \
+    internal/modules/kernel/orchestrator \
+    -g '!**/*_test.go' \
     -g '!**/.git/**'
 )"; then
   cat >&2 <<EOF

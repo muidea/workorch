@@ -7,16 +7,14 @@ import (
 )
 
 type ManagedRuntime struct {
-	Runtime
 	collector *observed.Collector
 }
 
-func NewManagedRuntime(runtime Runtime, commandHub magicevent.Hub) *ManagedRuntime {
-	if runtime == nil {
+func NewManagedRuntime(commandHub magicevent.Hub) *ManagedRuntime {
+	if commandHub == nil {
 		return nil
 	}
 	return &ManagedRuntime{
-		Runtime:   runtime,
 		collector: observed.NewCollector(commandHub),
 	}
 }

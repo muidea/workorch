@@ -130,7 +130,7 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 		if cmd.Type != "provide_missing_info" {
 			t.Fatalf("resolution type = %q, want provide_missing_info", cmd.Type)
 		}
-		if cmd.Payload["answer"] != "resume" {
+		if cmd.Payload.Map()["answer"] != "resume" {
 			t.Fatalf("payload = %#v, want answer resume", cmd.Payload)
 		}
 		return decisionevents.DecisionCommandResult{
@@ -144,7 +144,7 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 				ID:       "resolution-001",
 				TicketID: "ticket-001",
 				Type:     cmd.Type,
-				Payload:  cmd.Payload,
+				Payload:  cmd.Payload.Map(),
 			},
 		}
 	})
@@ -291,7 +291,7 @@ func TestResolveDecisionViewWithoutScopePrefersOpenDuplicateTicket(t *testing.T)
 			t.Fatalf("command scope = workspace:%q ticket:%q, want current open ticket", cmd.WorkspaceID, cmd.TicketID)
 		}
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
-		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload}
+		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload.Map()}
 		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
 	})
 
@@ -342,7 +342,7 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 			t.Fatalf("decision command scope = workspace:%q run:%q, want %s/run-001", cmd.WorkspaceID, cmd.RunID, workspaceID)
 		}
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
-		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload}
+		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload.Map()}
 		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
 	})
 	resumeObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
@@ -533,9 +533,10 @@ func TestResolveApprovalViewWithCommandPublishesGovernanceSemanticContext(t *tes
 		if !ok {
 			t.Fatalf("command payload type = %T, want EnsureApprovedCommand", data)
 		}
-		semantic, ok := cmd.Context["governanceSemantic"].(map[string]any)
+		contextPayload := cmd.Context.Map()
+		semantic, ok := contextPayload["governanceSemantic"].(map[string]any)
 		if !ok {
-			t.Fatalf("governanceSemantic = %#v, want map", cmd.Context["governanceSemantic"])
+			t.Fatalf("governanceSemantic = %#v, want map", contextPayload["governanceSemantic"])
 		}
 		if semantic["intent"] != "approve_execution" || semantic["rawInput"] != "同意继续" || semantic["source"] != "tui" {
 			t.Fatalf("governanceSemantic = %#v, want approve rawInput/source", semantic)
@@ -546,7 +547,7 @@ func TestResolveApprovalViewWithCommandPublishesGovernanceSemanticContext(t *tes
 				WorkspaceID: cmd.WorkspaceID,
 				RunID:       cmd.RunID,
 				State:       common.ApprovalStateApproved,
-				Context:     cmd.Context,
+				Context:     contextPayload,
 			},
 		}
 	})

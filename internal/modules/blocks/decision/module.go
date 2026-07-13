@@ -2,6 +2,7 @@ package decision
 
 import (
 	"context"
+	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -11,9 +12,11 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	decisionservice "github.com/muidea/workorch/internal/modules/blocks/decision/service"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -86,7 +89,68 @@ func (m *Module) Start() error {
 	for _, topic := range m.topics {
 		m.observer.Subscribe(topic, m.handleCommand)
 	}
+	m.topics = append(m.topics, orchestratorevents.TopicOrchestratorOpenRuntimeGovernanceRequest)
+	m.observer.Subscribe(orchestratorevents.TopicOrchestratorOpenRuntimeGovernanceRequest, m.handleRuntimeGovernanceRequest)
+	m.topics = append(m.topics, orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
+	m.observer.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	return nil
+}
+
+func (m *Module) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.AcquireRuntimeCapabilitiesCommand)
+	if !ok {
+		setDecisionRuntimeCapabilityResult(result, orchestratorevents.AcquireRuntimeCapabilitiesResult{}, common.ErrInvalidArgument)
+		return
+	}
+	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, runtimecontract.RuntimeBlockKindDecisionRequest)
+	setDecisionRuntimeCapabilityResult(result, response, err)
+}
+
+func setDecisionRuntimeCapabilityResult(result magicevent.Result, response orchestratorevents.AcquireRuntimeCapabilitiesResult, err error) {
+	if result == nil {
+		return
+	}
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	result.Set(response, nil)
+}
+
+func (m *Module) handleRuntimeGovernanceRequest(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.OpenRuntimeGovernanceRequestCommand)
+	if !ok || m == nil || m.servicePtr == nil || command.TicketID == "" || command.WorkspaceID == "" || command.RunID == "" ||
+		command.DispatchID == "" || command.Transaction.AuthoritySnapshotID == "" || command.Dependency.Kind == "" || command.Dependency.Reason == "" ||
+		!modulecommon.IsSupportedResolutionType(command.ContinueResolutionType) || !modulecommon.IsSupportedResolutionType(command.FailResolutionType) {
+		setRuntimeGovernanceRequestResult(result, orchestratorevents.OpenRuntimeGovernanceRequestResult{}, common.ErrInvalidArgument)
+		return
+	}
+	err := m.servicePtr.EnsureTicket(event.Context(), decisioncontracts.CreateTicketCommand{
+		TicketID: command.TicketID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+		StepID: common.StepID("runtime-v2/" + command.DispatchID), Reason: command.Dependency.Reason,
+		DecisionKind: "runtime_v2_governance", Question: command.Dependency.Reason,
+		FailureClass: "governance_dependency", FailureSignature: command.Dependency.Kind + ":" + command.Dependency.SubjectRef,
+		AllowedRecoveryActions: []string{command.ContinueResolutionType, command.FailResolutionType},
+	})
+	if err != nil {
+		setRuntimeGovernanceRequestResult(result, orchestratorevents.OpenRuntimeGovernanceRequestResult{}, err)
+		return
+	}
+	setRuntimeGovernanceRequestResult(result, orchestratorevents.OpenRuntimeGovernanceRequestResult{
+		TicketID: command.TicketID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+		DispatchID: command.DispatchID, AuthoritySnapshotID: command.Transaction.AuthoritySnapshotID,
+	}, nil)
+}
+
+func setRuntimeGovernanceRequestResult(result magicevent.Result, response orchestratorevents.OpenRuntimeGovernanceRequestResult, err error) {
+	if result == nil {
+		return
+	}
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	result.Set(response, nil)
 }
 
 func (m *Module) Stop(ctx context.Context) error {
@@ -141,8 +205,11 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (de
 			cmd.StepID = ticket.StepID
 			ctx = common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID)
 		}
-		ticket, resolution, err := m.servicePtr.EnsureResolvedTicketAndReturn(ctx, cmd)
+		ticket, resolution, err := m.servicePtr.EnsureResolvedTicketAndReturn(ctx, resolveTicketContract(cmd))
 		if err != nil {
+			return decisionevents.DecisionCommandResult{}, err
+		}
+		if err := m.commitRuntimeV2GovernanceTicketResolution(ctx, ticket, resolution); err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
 		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}, nil
@@ -151,7 +218,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (de
 		if !ok {
 			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.EnsureTicket(ctx, cmd); err != nil {
+		if err := m.servicePtr.EnsureTicket(ctx, createTicketContract(cmd)); err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
 		return decisionevents.DecisionCommandResult{}, nil
@@ -160,7 +227,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (de
 		if !ok {
 			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.CreateTicket(ctx, cmd); err != nil {
+		if err := m.servicePtr.CreateTicket(ctx, createTicketContract(cmd)); err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
 		return decisionevents.DecisionCommandResult{}, nil
@@ -291,6 +358,60 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (de
 	}
 }
 
+func (m *Module) commitRuntimeV2GovernanceTicketResolution(ctx context.Context, ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) error {
+	if ticket == nil || resolution == nil || ticket.DecisionKind != "runtime_v2_governance" {
+		return nil
+	}
+	outcome := runtimecontract.RuntimeGovernanceResolutionOutcome("")
+	switch resolution.Type {
+	case modulecommon.ResolutionTypeProvideMissingInfo:
+		outcome = runtimecontract.RuntimeGovernanceResolutionOutcomeContinue
+	case modulecommon.ResolutionTypeRejectCurrentPath:
+		outcome = runtimecontract.RuntimeGovernanceResolutionOutcomeFail
+	default:
+		return common.ErrInvalidArgument
+	}
+	result := m.eventHub.Send(magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
+		ModuleID,
+		orchestratorevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		orchestratorevents.CommitRuntimeGovernanceTicketResolutionCommand{
+			ResolutionID: resolution.ID, TicketID: ticket.ID,
+			WorkspaceID: ticket.WorkspaceID, RunID: ticket.RunID,
+			Outcome: outcome, Summary: runtimeV2GovernanceResolutionSummary(ticket, resolution),
+		},
+	))
+	if result == nil {
+		return common.ErrInvalidArgument
+	}
+	if err := result.Error(); err != nil {
+		return err
+	}
+	data, err := result.Get()
+	if err != nil {
+		return err
+	}
+	response, ok := data.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
+	if !ok || response.ResolutionID != resolution.ID {
+		return common.ErrInvalidArgument
+	}
+	return nil
+}
+
+func runtimeV2GovernanceResolutionSummary(ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) string {
+	if resolution != nil {
+		if value, ok := resolution.Payload["summary"].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	if ticket != nil && strings.TrimSpace(ticket.Reason) != "" {
+		return strings.TrimSpace(ticket.Reason)
+	}
+	return "runtime governance resolution committed"
+}
+
 func setDecisionMagicResult(result magicevent.Result, data decisionevents.DecisionCommandResult, err error) {
 	if result == nil {
 		return
@@ -306,8 +427,12 @@ func (m *Module) publishTicketUpdated(ctx context.Context, item *decisionmodel.T
 	if m == nil || m.eventHub == nil || item == nil {
 		return nil
 	}
+	topic := decisionevents.TopicTicketUpdated
+	if item.State == common.DecisionTicketStateSuperseded {
+		topic = decisionevents.TopicTicketSuperseded
+	}
 	event := magicevent.NewEventWithContext(
-		decisionevents.TopicTicketUpdated,
+		topic,
 		modulecommon.ModuleID,
 		decisionevents.NotificationDestination,
 		magicevent.NewHeader(),
@@ -402,7 +527,39 @@ func filterTicketsByDecisionScope(items []*decisionmodel.Ticket, scope decisionC
 	return ret
 }
 
-func ticketFromUpdateCommand(cmd decisioncontracts.UpdateTicketCommand) *decisionmodel.Ticket {
+func createTicketContract(cmd decisionevents.CreateTicketCommand) decisioncontracts.CreateTicketCommand {
+	return decisioncontracts.CreateTicketCommand{
+		TicketID:               cmd.TicketID,
+		WorkspaceID:            cmd.WorkspaceID,
+		RunID:                  cmd.RunID,
+		StepID:                 cmd.StepID,
+		Reason:                 cmd.Reason,
+		DecisionKind:           cmd.DecisionKind,
+		Question:               cmd.Question,
+		Context:                cmd.Context.Map(),
+		AutoGovernance:         cmd.AutoGovernance.Map(),
+		FailureClass:           cmd.FailureClass,
+		FailureSignature:       cmd.FailureSignature,
+		AllowedRecoveryActions: append([]string(nil), cmd.AllowedRecoveryActions...),
+	}
+}
+
+func resolveTicketContract(cmd decisionevents.EnsureResolvedCommand) decisioncontracts.ResolveTicketCommand {
+	return decisioncontracts.ResolveTicketCommand{
+		ResolutionID:       cmd.ResolutionID,
+		TicketID:           cmd.TicketID,
+		WorkspaceID:        cmd.WorkspaceID,
+		RunID:              cmd.RunID,
+		StepID:             cmd.StepID,
+		Type:               cmd.Type,
+		Payload:            cmd.Payload.Map(),
+		ContinuationAction: cmd.ContinuationAction,
+		ResumeRunID:        cmd.ResumeRunID,
+		SuccessorRunID:     cmd.SuccessorRunID,
+	}
+}
+
+func ticketFromUpdateCommand(cmd decisionevents.UpdateTicketCommand) *decisionmodel.Ticket {
 	return &decisionmodel.Ticket{
 		ID:                     cmd.TicketID,
 		WorkspaceID:            cmd.WorkspaceID,
@@ -411,9 +568,9 @@ func ticketFromUpdateCommand(cmd decisioncontracts.UpdateTicketCommand) *decisio
 		Reason:                 cmd.Reason,
 		DecisionKind:           cmd.DecisionKind,
 		Question:               cmd.Question,
-		Context:                cloneMap(cmd.Context),
+		Context:                cmd.Context.Map(),
 		State:                  cmd.State,
-		AutoGovernance:         cloneMap(cmd.AutoGovernance),
+		AutoGovernance:         cmd.AutoGovernance.Map(),
 		FailureClass:           cmd.FailureClass,
 		FailureSignature:       cmd.FailureSignature,
 		AllowedRecoveryActions: append([]string(nil), cmd.AllowedRecoveryActions...),
@@ -518,14 +675,15 @@ func resolutionFromCreateCommand(cmd decisionevents.CreateResolutionCommand) (*d
 	if !modulecommon.IsSupportedResolutionType(cmd.Type) {
 		return nil, common.ErrInvalidArgument
 	}
+	payload := cmd.Payload.Map()
 	return &decisionmodel.Resolution{
 		ID:                 cmd.ResolutionID,
 		TicketID:           cmd.TicketID,
 		Type:               cmd.Type,
-		Payload:            cloneMap(cmd.Payload),
-		ContinuationAction: nonEmptyString(cmd.ContinuationAction, stringPayloadValue(cmd.Payload, "continuationAction")),
-		ResumeRunID:        nonEmptyRunID(cmd.ResumeRunID, common.RunID(stringPayloadValue(cmd.Payload, "resumeRunId"))),
-		SuccessorRunID:     nonEmptyRunID(cmd.SuccessorRunID, common.RunID(stringPayloadValue(cmd.Payload, "successorRunId"))),
+		Payload:            payload,
+		ContinuationAction: nonEmptyString(cmd.ContinuationAction, stringPayloadValue(payload, "continuationAction")),
+		ResumeRunID:        nonEmptyRunID(cmd.ResumeRunID, common.RunID(stringPayloadValue(payload, "resumeRunId"))),
+		SuccessorRunID:     nonEmptyRunID(cmd.SuccessorRunID, common.RunID(stringPayloadValue(payload, "successorRunId"))),
 	}, nil
 }
 

@@ -5,7 +5,6 @@ import (
 	magictask "github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
-	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
 func NewFromEnv() *Runtime {
@@ -13,35 +12,21 @@ func NewFromEnv() *Runtime {
 	if err != nil {
 		panic("load workorch config: " + err.Error())
 	}
-	return newWithBackendRuntimePolicyAndCommandHub(
-		cfg.Repository.Backend,
-		cfg.Repository.DataDir,
-		workorchruntimepolicy.FromConfig(cfg),
-		nil,
-	)
+	return newWithBackendAndCommandHub(cfg.Repository.Backend, cfg.Repository.DataDir, nil)
 }
 
 func NewWithBackend(backend string, dataRoot string) *Runtime {
-	return newWithBackendRuntimePolicyAndCommandHub(backend, dataRoot, workorchruntimepolicy.RuntimePolicy{}, nil)
-}
-
-func NewWithBackendAndRuntimePolicy(backend string, dataRoot string, runtimePolicy workorchruntimepolicy.RuntimePolicy) *Runtime {
-	return newWithBackendRuntimePolicyAndCommandHub(backend, dataRoot, runtimePolicy, nil)
+	return newWithBackendAndCommandHub(backend, dataRoot, nil)
 }
 
 func NewWithBackendAndCommandHub(backend string, dataRoot string, commandHub magicevent.Hub) *Runtime {
-	return newWithBackendRuntimePolicyAndCommandHub(backend, dataRoot, workorchruntimepolicy.RuntimePolicy{}, commandHub)
+	return newWithBackendAndCommandHub(backend, dataRoot, commandHub)
 }
 
-func NewWithBackendRuntimePolicyAndCommandHub(backend string, dataRoot string, runtimePolicy workorchruntimepolicy.RuntimePolicy, commandHub magicevent.Hub) *Runtime {
-	return newWithBackendRuntimePolicyAndCommandHub(backend, dataRoot, runtimePolicy, commandHub)
-}
-
-// newWithBackendRuntimePolicyAndCommandHub builds application-owned runtime
+// newWithBackendAndCommandHub builds application-owned runtime
 // infrastructure only. Owner repositories and module fixtures belong to the
 // framework runtime or the application testkit, never to production exports.
-func newWithBackendRuntimePolicyAndCommandHub(backend string, dataRoot string, runtimePolicy workorchruntimepolicy.RuntimePolicy, commandHub magicevent.Hub) *Runtime {
-	_ = runtimePolicy
+func newWithBackendAndCommandHub(backend string, dataRoot string, commandHub magicevent.Hub) *Runtime {
 	_ = dataRoot
 	backend = workorchrepo.NormalizeRepositoryBackend(backend)
 	if backend != "memory" && backend != "file" {

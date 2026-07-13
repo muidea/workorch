@@ -9,7 +9,7 @@ import (
 
 func taskRetryPlanFromStep(snapshot readmodelcore.RunSnapshot, step StepView, occurrences map[string]string, knownAnchors map[string]bool) (readmodelcore.TaskPlan, bool) {
 	meta := taskLifecycleMetadataFromStep(step)
-	if meta.retryOf == "" && len(taskMapValue(taskMapValue(step.Input)["contractViolationRecovery"])) == 0 {
+	if meta.retryOf == "" {
 		return readmodelcore.TaskPlan{}, false
 	}
 	anchor := strings.TrimSpace(meta.retryOf)
@@ -41,15 +41,13 @@ func taskRetryPlanFromStep(snapshot readmodelcore.RunSnapshot, step StepView, oc
 		Summary:           TimelineStepSummary(step.Output),
 		RetryOf:           anchor,
 		RetryAttempt:      meta.retryAttempt,
-		ViolationType:     meta.violationType,
-		ViolatedRule:      meta.violatedRule,
 		FailureClass:      meta.failureClass,
 		FailureSignature:  meta.failureSignature,
 		TargetScope:       meta.targetScope,
 		BlockingTicketID:  meta.blockingTicketID,
 		EvidenceRefs:      compactUniqueStrings(append([]string{step.ID}, meta.evidenceRefs...)),
 		OccurredAt:        strings.TrimSpace(occurrences[step.ID]),
-		SourceProjection:  "contract_violation_retry",
+		SourceProjection:  "retry",
 	}
 	if plan.BlockingTicketID == "" && state == "blocked_on_decision" {
 		plan.BlockingTicketID = snapshot.Run.BlockingTicketID

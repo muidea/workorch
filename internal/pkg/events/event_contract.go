@@ -18,7 +18,6 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
-	runtimeeventdefs "github.com/muidea/workorch/internal/pkg/runtimeevent/eventdefs"
 )
 
 type EventCommandClass = eventcontract.CommandClass
@@ -60,29 +59,12 @@ var eventHubMessageContracts = buildEventHubMessageContracts()
 
 func ResolveEventHubContract(topic string) (EventHubContract, bool) {
 	topic = strings.TrimSpace(topic)
-	if strings.HasPrefix(topic, runtimeeventdefs.TopicRuntimeBlockCommandExecutePrefix) {
-		return EventHubContract{
-			Topic:        topic,
-			Owner:        runtimeBlockKindFromTopic(topic),
-			CommandClass: EventCommandClassExecute,
-			LanePolicy:   EventLanePolicyExecute,
-		}, true
-	}
 	contract, ok := eventHubContracts[topic]
 	return contract, ok
 }
 
 func ResolveEventHubMessageContract(topic string) (eventcontract.MessageContract, bool) {
 	topic = strings.TrimSpace(topic)
-	if strings.HasPrefix(topic, runtimeeventdefs.TopicRuntimeBlockCommandExecutePrefix) {
-		return eventcontract.CommandTopic[RuntimeBlockExecuteCommand, RuntimeBlockExecuteResult](
-			runtimeBlockKindFromTopic(topic),
-			"github.com/muidea/workorch/internal/pkg/events",
-			eventcontract.CommandClassExecute,
-			eventcontract.LanePolicyExecute,
-			topic,
-		).MessageContract(), true
-	}
 	contract, ok := eventHubMessageContracts[topic]
 	return contract, ok
 }
@@ -112,12 +94,6 @@ type EventHubLaneScope struct {
 
 func EventHubLaneKeyFor(topic string, scope EventHubLaneScope) string {
 	topic = strings.TrimSpace(topic)
-	if runtimeBlockExecuteAcceptedTopic(topic) {
-		return runtimeExecutionStateLaneKey(scope)
-	}
-	if runtimeBlockExecuteResultTopic(topic) {
-		return stateLaneKey("orchestrator", scope)
-	}
 	if contract, ok := ResolveEventHubContract(topic); ok {
 		return contract.LaneKey(scope)
 	}
@@ -146,7 +122,6 @@ func buildEventHubContracts() map[string]EventHubContract {
 	for _, source := range [][]eventcontract.Contract{
 		workorchdevents.Contracts(),
 		llmevents.Contracts(),
-		runtimeeventdefs.Contracts(),
 		approvalevents.Contracts(),
 		decisionevents.Contracts(),
 		eventstreamevents.Contracts(),
@@ -181,7 +156,6 @@ func buildEventHubMessageContracts() map[string]eventcontract.MessageContract {
 	for _, source := range [][]eventcontract.MessageContract{
 		workorchdevents.MessageContracts(),
 		llmevents.MessageContracts(),
-		runtimeeventdefs.MessageContracts(),
 		approvalevents.MessageContracts(),
 		decisionevents.MessageContracts(),
 		eventstreamevents.MessageContracts(),
@@ -290,7 +264,7 @@ func stateLaneKey(owner string, scope EventHubLaneScope) string {
 }
 
 func executeLaneKey(contract EventHubContract, scope EventHubLaneScope) string {
-	kind := lanePart(runtimeBlockKindFromTopic(contract.Topic), "")
+	kind := lanePart(executionKindFromTopic(contract.Topic), "")
 	if kind == "" {
 		kind = lanePart(contract.Owner, "unknown")
 	}
@@ -319,48 +293,12 @@ func executeLaneKey(contract EventHubContract, scope EventHubLaneScope) string {
 	return "exec/block/" + kind
 }
 
-func runtimeExecutionStateLaneKey(scope EventHubLaneScope) string {
-	workspaceID := strings.TrimSpace(scope.WorkspaceID)
-	runID := strings.TrimSpace(scope.RunID)
-	stepID := strings.TrimSpace(scope.StepID)
-	if workspaceID != "" && runID != "" && stepID != "" {
-		return "state/runtime-exec/workspace/" + workspaceID + "/run/" + runID + "/step/" + stepID
-	}
-	if workspaceID != "" && runID != "" {
-		return "state/runtime-exec/workspace/" + workspaceID + "/run/" + runID
-	}
-	if workspaceID != "" {
-		return "state/runtime-exec/workspace/" + workspaceID
-	}
-	if stepID != "" {
-		return "state/runtime-exec/step/" + stepID
-	}
-	return "state/runtime-exec"
-}
-
-func runtimeBlockExecuteAcceptedTopic(topic string) bool {
-	return topic == runtimeeventdefs.TopicRuntimeBlockExecuteAccepted
-}
-
-func runtimeBlockExecuteResultTopic(topic string) bool {
-	switch topic {
-	case runtimeeventdefs.TopicRuntimeBlockExecuteCompleted,
-		runtimeeventdefs.TopicRuntimeBlockExecuteFailed:
-		return true
-	default:
-		return false
-	}
-}
-
 func globalLaneKey(owner string) string {
 	return "global/" + lanePart(owner, "owner")
 }
 
-func runtimeBlockKindFromTopic(topic string) string {
+func executionKindFromTopic(topic string) string {
 	topic = strings.TrimSpace(topic)
-	if strings.HasPrefix(topic, runtimeeventdefs.TopicRuntimeBlockCommandExecutePrefix) {
-		return strings.TrimSpace(strings.TrimPrefix(topic, runtimeeventdefs.TopicRuntimeBlockCommandExecutePrefix))
-	}
 	switch topic {
 	case llmevents.TopicLLMCommandCompleteProvider:
 		return "llm-provider-completion"

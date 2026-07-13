@@ -8,7 +8,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-type WorkspaceExecutionContextRequest struct {
+type WorkspaceRuntimeActivationRequest struct {
 	Hub                            magicevent.Hub
 	Workspace                      *workspacemodel.Workspace
 	Goal                           *workspacemodel.Goal
@@ -20,7 +20,7 @@ type WorkspaceExecutionContextRequest struct {
 	SkillHubCatalog                contextregistrycore.SkillHubSkillCatalog
 }
 
-type WorkspaceExecutionContextByIDRequest struct {
+type WorkspaceRuntimeActivationByIDRequest struct {
 	Hub                            magicevent.Hub
 	WorkspaceID                    common.WorkspaceID
 	GoalID                         common.GoalID

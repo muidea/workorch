@@ -6,17 +6,74 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
-type CreateTicketCommand = decisioncontracts.CreateTicketCommand
-type EnsureTicketCommand = decisioncontracts.CreateTicketCommand
-type UpdateTicketCommand = decisioncontracts.UpdateTicketCommand
+type CreateTicketCommand struct {
+	TicketID               common.TicketID
+	WorkspaceID            common.WorkspaceID
+	RunID                  common.RunID
+	StepID                 common.StepID
+	Reason                 string
+	DecisionKind           string
+	Question               string
+	Context                eventvalue.Payload
+	AutoGovernance         eventvalue.Payload
+	FailureClass           string
+	FailureSignature       string
+	AllowedRecoveryActions []string
+}
+
+type EnsureTicketCommand = CreateTicketCommand
+
+type UpdateTicketCommand struct {
+	TicketID               common.TicketID
+	WorkspaceID            common.WorkspaceID
+	RunID                  common.RunID
+	StepID                 common.StepID
+	Reason                 string
+	DecisionKind           string
+	Question               string
+	Context                eventvalue.Payload
+	State                  common.DecisionTicketState
+	AutoGovernance         eventvalue.Payload
+	FailureClass           string
+	FailureSignature       string
+	AllowedRecoveryActions []string
+	ResolvedAt             string
+	ResolvedBy             string
+	CreatedAt              string
+	UpdatedAt              string
+}
 type DeleteTicketCommand = decisioncontracts.DeleteTicketCommand
-type CreateResolutionCommand = decisioncontracts.CreateResolutionCommand
-type EnsureResolvedCommand = decisioncontracts.ResolveTicketCommand
+type CreateResolutionCommand struct {
+	ResolutionID       common.ResolutionID
+	TicketID           common.TicketID
+	WorkspaceID        common.WorkspaceID
+	RunID              common.RunID
+	StepID             common.StepID
+	Type               string
+	Payload            eventvalue.Payload
+	ContinuationAction string
+	ResumeRunID        common.RunID
+	SuccessorRunID     common.RunID
+}
+
+type EnsureResolvedCommand struct {
+	ResolutionID       common.ResolutionID
+	TicketID           common.TicketID
+	WorkspaceID        common.WorkspaceID
+	RunID              common.RunID
+	StepID             common.StepID
+	Type               string
+	Payload            eventvalue.Payload
+	ContinuationAction string
+	ResumeRunID        common.RunID
+	SuccessorRunID     common.RunID
+}
 type DeleteResolutionCommand = decisioncontracts.DeleteResolutionCommand
 
 type GetTicketCommand struct {
@@ -44,12 +101,13 @@ type GetResolutionCommand struct {
 }
 
 type TicketChangedData struct {
-	TicketID    common.TicketID
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	StepID      common.StepID
-	Reason      string
-	State       common.DecisionTicketState
+	TicketID     common.TicketID
+	WorkspaceID  common.WorkspaceID
+	RunID        common.RunID
+	StepID       common.StepID
+	Reason       string
+	DecisionKind string
+	State        common.DecisionTicketState
 }
 
 type TicketResolvedData struct {

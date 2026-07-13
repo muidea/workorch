@@ -4,7 +4,7 @@ Status: active
 
 Type: closure-plan
 
-Last Updated: 2026-07-12
+Last Updated: 2026-07-13
 
 Related:
 
@@ -1688,6 +1688,1106 @@ git diff --check
 - 验证不存在嵌套 `context-gate-retry`，同 scope request bytes/floor 与 stable prefix 不增长。
 - 验证 resolved Decision 不再重复产生 `owner_readback_not_advanced`。
 - live gate 通过前，CC01、CC02、CC06 状态继续保持 reopened/failed。
+
+## Runtime V2 Deterministic Convergence Closure Plan
+
+核对时间：2026-07-12 10:07 至 10:11。
+
+### 第七次部署 Live 核对结论
+
+部署进程监听 `127.0.0.1:8080`，最终核对时：
+
+```text
+/readyz=ready
+global source/projected revision=3071/3071
+LSP workspace source/projected revision=2869/2869
+gateway workspace source/projected revision=3071/3071
+```
+
+部署二进制构建时间为 `2026-07-12 10:07:14 +08:00`，提交 `9c8f6dca` 时间为 `2026-07-12 10:07:28 +08:00`。二进制 build info 为：
+
+```text
+vcs.revision=c7c4186c274553b758dccc7f267888214f9b24dd
+vcs.modified=true
+```
+
+该二进制包含提交前工作树修改，但不是提交后的 clean build。后续最终 live gate 必须使用 `vcs.revision` 等于目标提交且 `vcs.modified=false` 的可复现构建。
+
+本轮新 Run：
+
+- LSP：`ws-5cfc9874cebda0b8/run-006`。
+- 网关：`ws-609ce9149734ebb7/run-007-replan-001`。
+
+两个 Run 均完成了真实 provider 调用、状态变更或验证动作，但最终都在构造下一 recovery dispatch 时失败：
+
+```text
+contractState=need_state_change requires state-changing requiredOutput
+```
+
+LSP 失败前的持久化合同是正确的：
+
+```text
+state=need_validation
+nextAction=validate
+focus=cwi-036
+missingEvidenceKinds=[validation]
+acceptedEvidenceKinds=[state_change]
+acceptedKinds=[shell/command,validation/managed_session]
+mustIncludeStateChangingNode=false
+```
+
+`go vet` 返回真实、可定位诊断：
+
+```text
+server.go:29:6: main redeclared in this block
+```
+
+该验证失败应使 coverage ledger 重新打开 state-change，并原子生成 state-changing authority；当前实现只完成了部分切换，最终 authority 与 requiredOutput 分裂。
+
+网关失败前的持久化合同同样正确：
+
+```text
+state=need_state_change
+nextAction=state_change
+focus=cwi-085
+missingEvidenceKinds=[state_change]
+acceptedEvidenceKinds=[validation]
+mustIncludeStateChangingNode=true
+```
+
+LLM 返回 continuable Decision 后，`coverage_assessment_incomplete` 被识别为 `recompute_authority`，但 targeted correction 没有原子重建 state-changing requiredOutput，下一 dispatch 仍发生相同内部合同错位。
+
+本轮没有产生新的 protected floor，最大 shrink level 为 `2`，所有相关 provider request 均实际提交，因此 RC15 只能标记为“本轮未复现”，不能标记为 live verified。历史 `owner_readback_not_advanced` 在多个 watchdog 周期内计数保持为 `1`，未重复增长，但本轮没有形成新的 resolved floor Decision 闭环，RC16 只能标记为部分通过。
+
+两个 terminal Run 均已清空 Workspace `ActiveRunID`，source/projected revision 对齐，validation resource lifecycle 显示已释放。当前阻塞点已经收敛为 orchestrator 内部 authority 推导存在多个写入口，而不是 provider、projection、EventHub 或资源释放问题。
+
+### 架构收口决策
+
+从本节开始停止继续为 V1 recovery 增加单点条件和专用分支。RC14 至 RC16 保留为问题证据和回归样本，不再通过增加新的 mirror 修复、retry 类型或 correction 特例扩大 V1 状态空间。
+
+本次明确不保证 V1 Run、旧 recovery lineage、旧 checkpoint 和旧事件重放的运行兼容性，因此不再采用旁路双栈。Runtime V2 将一次性成为唯一正式主链：
+
+1. 不增加 V1/V2 运行期路由，不维护两套 authority、recovery 或 scheduler continuation。
+2. `runtimeContractVersion=v2` 只作为持久化审计标识，不参与生产路径分支。
+3. 新主链完整并通过静态测试后，在维护窗口内一次性停止 V1、执行运行态退役迁移并切换到 V2。
+4. 所有未终态 V1 Run 统一标记为 `superseded`，原因固定为 `runtime_contract_v1_retired`，不再恢复或 replan。
+5. Workspace、Goal、DoD、Profile、交付目录、已完成 Result/Artifact 和可验证 evidence 保留；V1 authority、retry、checkpoint、open blocker 只保留只读审计或被 supersede。
+6. V2 使用单一 reducer、有限动作、sealed authority transaction 和最多一次同合同 LLM retry。
+7. V2 主链切换完成后立即删除 V1 recovery authority、自愈、嵌套 retry 和兼容 continuation，不设置长期观察期。
+8. 实施过程可以拆分为多个编译通过的提交，但生产运行时只允许一次主链切换，禁止长期双栈。
+
+### V2 不变量
+
+以下规则必须转化为具体类型、单元测试和 dispatch preflight，不能只作为文档约定：
+
+1. 一个 authority snapshot 只对应一个 convergence state、一个 focus、一个 action 和一个 requiredOutput hash。
+2. reducer 完成后，任何 helper 不得单独修改 state、focus、action、requiredOutput 或 state-changing requirement。
+3. `need_state_change` 只能配 state-changing requiredOutput。
+4. `need_validation` 只能配 validation requiredOutput。
+5. 缺少 snapshot、manifest、failure target 或 capability 时只能进入 deterministic prerequisite，不得要求 LLM 自行读取或请求 continuable Decision。
+6. LLM 输出只能提交到它收到的 authority snapshot；snapshot 已变化时，旧输出只能作为 diagnostic evidence。
+7. 相同 authority snapshot 的 LLM 合同错误最多重试一次。
+8. 每次 transition 必须增加 evidence revision、改变 focus、改变 authority snapshot、进入 governed wait 或进入 terminal；否则视为无进展并停止自动执行。
+9. 相同 failure signature 在同一 focus 下不得生成第三个 LLM Step。
+10. `runtime_internal_contract_misalignment` 属于 orchestrator 缺陷，不得再次交给 LLM repair。
+
+### V2 Canonical Contract
+
+V2 直接替换现有共享运行合同，不创建长期 `/v1`、`/v2` 双包。正式落点：
+
+```text
+internal/pkg/workorchruntimecontract
+```
+
+核心类型至少包括：
+
+```go
+type RuntimeFacts struct {
+    WorkspaceID       common.WorkspaceID
+    RunID             common.RunID
+    DefinitionRevision string
+    EvidenceRevision   string
+    Focus              CoverageFocus
+    Evidence           EvidenceLedger
+    Failure            *FailureFact
+    Prerequisites      PrerequisiteState
+}
+
+type RuntimeDecision struct {
+    State             ConvergenceState
+    Action            RuntimeAction
+    Focus             CoverageFocus
+    RequiredOutput    RequiredOutputContract
+    Prerequisites     []RuntimePrerequisite
+    AuthoritySnapshot AuthoritySnapshot
+    Terminal          *TerminalOutcome
+}
+
+type AuthorityTransaction struct {
+    AuthoritySnapshotID string
+    FocusID              string
+    Action               RuntimeAction
+    RequiredOutputHash   string
+    DefinitionRevision   string
+    EvidenceRevision     string
+    Attempt              int
+}
+```
+
+V2 跨 module/block EventHub command、data、result 继续使用具体类型，由投递组件定义；禁止使用跨组件 `map[string]any`、JSON bridge、reflect contract 或 Envelope。内部 provider JSON 仅允许存在于 LLM adapter 边界。
+
+### V2 有限动作集合
+
+V2 初期只允许：
+
+```text
+AcquirePrerequisite
+ProduceStateChange
+ProduceValidation
+RequestGovernance
+Complete
+Fail
+```
+
+以下概念只能作为 reason、failure class 或 attempt metadata，不能再成为独立 authority：
+
+- runtime repair；
+- contract retry；
+- provider retry；
+- context-gate retry；
+- assessment-only repair；
+- correction-specific next action；
+- mirror recovery state。
+
+### RV2-01：建立唯一 typed canonical contract
+
+Owner：`internal/pkg/workorchruntimecontract`。
+
+必须完成：
+
+1. 定义 `RuntimeFacts`、`RuntimeDecision`、`RuntimeAction`、`RequiredOutputContract`、`AuthoritySnapshot` 和 `AuthorityTransaction`。
+2. 类型必须表达互斥状态，避免使用布尔字段组合表达 action。
+3. requiredOutput hash 只能由 canonical typed contract 计算。
+4. 提供纯函数 normalization、hash 和 invariant validation。
+5. 不依赖 orchestrator repository、service 或业务 profile 实现。
+6. 直接替换生产运行合同；不新增长期 V1/V2 facade、adapter 或 runtime version switch。
+7. 旧合同只允许在迁移脚本或 fixture 中读取，不能继续被生产 orchestrator、LLM block 或 scheduler import。
+
+完成门禁：
+
+- 所有 action/state 组合都有表驱动测试。
+- 非法组合无法通过 invariant validation。
+- hash 对字段顺序稳定，对语义变化敏感。
+- 生产依赖扫描中不存在并行 V1/V2 runtime contract。
+
+### RV2-02：实现单一 Runtime Reducer
+
+Owner：`kernel/orchestrator`。
+
+正式入口：
+
+```text
+RuntimeFacts + PreviousAuthority -> ReduceRuntimeState -> RuntimeDecision
+```
+
+必须完成：
+
+1. reducer 为纯函数，不访问 repository、EventHub、provider 或全局配置。
+2. reducer 是 state、focus、action 和 requiredOutput 的唯一推导入口。
+3. validation success、validation failure、state-change success、execution failure、missing prerequisite 和 governance dependency 均转化为 typed facts 后进入同一 reducer。
+4. LSP build failure 必须从 validation facts 原子生成 `ProduceStateChange`。
+5. 网关 `coverage_assessment_incomplete` 必须从 coverage facts 原子生成 `ProduceStateChange`，不依赖 targeted correction 后处理。
+6. reducer 返回后不再调用 V1 `stateChangingRepairRequired`、correction authority 或 mirror normalization。
+
+建议新增 focused package：
+
+```text
+internal/modules/kernel/orchestrator/biz/runtimev2
+```
+
+完成门禁：
+
+- LSP live facts fixture 归约为 state-change decision。
+- 网关 live facts fixture 归约为 state-change decision。
+- 相同 facts 始终生成相同 decision、snapshot 和 requiredOutput hash。
+
+### RV2-03：runtime-managed Prerequisite Engine
+
+Owner：`kernel/orchestrator`；资源 owner：`blocks/workspace`、capability owner module。
+
+必须完成：
+
+1. 在 LLM dispatch 前检查 manifest、target snapshot、failure target、capability、validation scratch 和 provider ceiling。
+2. 缺失项生成 `AcquirePrerequisite`，由 orchestrator 通过 EventHub 调用资源 owner。
+3. `file/list`、`file/read` 等 prerequisite 不属于 LLM state-changing requiredOutput accepted kinds。
+4. snapshot 完整时禁止重复 list/read。
+5. prerequisite result 写入 typed facts，再次调用 reducer。
+6. module/block 间只通过 EventHub，不允许 orchestrator 直接访问 workspace repository/service。
+
+完成门禁：
+
+- 网关缺少 `go.mod`/source snapshot 时先执行 deterministic preflight。
+- preflight 后 state-change LLM request 携带完整、安全 snapshot。
+- 同一 snapshot 不重复读取。
+
+### RV2-04：LLM Candidate Boundary
+
+Owner：`blocks/llm`；authority owner 仍为 `kernel/orchestrator`。
+
+LLM 只返回当前 action 对应的候选类型：
+
+```go
+type StateChangeCandidate struct {
+    Operations []StateChangingOperation
+}
+
+type ValidationCandidate struct {
+    Operations []ValidationOperation
+}
+
+type GovernanceCandidate struct {
+    ExternalDependency ExternalDependency
+}
+```
+
+必须完成：
+
+1. LLM block 不返回或修改 convergence state、focus、authority 或 repair objective。
+2. provider request 只渲染 sealed `RuntimeDecision`。
+3. 第一次候选不符合合同，只允许使用完全相同的 authority transaction 重试一次。
+4. 第二次仍无效时进入 governed wait 或 terminal，不重新解释 output 并生成新 recovery authority。
+5. provider/schema/contract failure 不得隐式切换 action。
+
+完成门禁：
+
+- 相同 snapshot 两次请求的 stable prefix 和 requiredOutput hash 一致。
+- 第二次无效输出后不存在第三个 LLM Step。
+- LLM block 测试中不存在 convergence state 推导。
+
+### RV2-05：sealed dispatch 与 evidence commit
+
+Owner：`kernel/orchestrator`。
+
+执行链固定为：
+
+```text
+Reduce
+  -> PreparePrerequisites
+  -> SealAuthorityTransaction
+  -> Dispatch
+  -> ValidateCandidate
+  -> Execute
+  -> CommitEvidence(snapshotId)
+  -> Reduce
+```
+
+必须完成：
+
+1. Step input 持久化完整 authority transaction。
+2. candidate 和 execution evidence 必须携带 snapshot ID。
+3. commit 前核对当前 authority snapshot；旧 snapshot 结果只能进入 diagnostic lineage。
+4. evidence commit 成功后递增 evidence revision，再调用 reducer。
+5. 同一 transaction 的重复 event/result 保持幂等。
+6. scheduler 只触发 owner command，不直接修改 Run、authority 或 evidence。
+
+完成门禁：
+
+- stale output 不覆盖新 focus。
+- duplicate event 不产生重复 transition。
+- restart 后可从 persisted facts/transaction 恢复，不依赖进程内 map。
+
+### RV2-06：一次性切换 orchestrator 主链
+
+Owner：`kernel/orchestrator`、`kernel/run`、`application/workorchd` 装配层。
+
+正式执行链必须替换为：
+
+```text
+LoadFacts
+  -> Reduce
+  -> PreparePrerequisites
+  -> SealAuthorityTransaction
+  -> DispatchCandidate
+  -> ValidateCandidate
+  -> Execute
+  -> CommitEvidence
+  -> Reduce
+```
+
+必须完成：
+
+1. Start、Resume、Step completion、governance resolution 和 restart recovery 全部进入同一 V2 主链。
+2. 不保留基于 `runtimeContractVersion` 的 V1/V2 分支。
+3. Run 持久化 `runtimeContractVersion=v2` 仅用于审计。
+4. `runtime_internal_contract_misalignment` 直接生成 typed internal terminal outcome，不进入 LLM repair。
+5. scheduler 只投递 typed owner command 并读取 owner 结果，不维护独立 recovery state。
+6. 生产入口切换提交必须同时关闭 V1 dispatch 注册和旧 scheduler continuation 入口。
+
+主要目标文件：
+
+- `internal/modules/kernel/orchestrator/biz/runtime_lifecycle.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_dispatch_execution.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_blocks.go`
+- `internal/modules/kernel/run/pkg/models`
+- `internal/modules/application/workorchd/service/server/http_run_continuation_scheduler.go`
+- Orchestrator、Run、WorkorchD EventHub typed command/data/result 合同。
+
+完成门禁：
+
+- 所有生产 Start/Resume/Recovery 调用链只进入 V2。
+- `rg` 扫描不存在生产 V1 dispatch 路由。
+- restart 后通过 persisted facts/transaction 恢复。
+
+### RV2-07：实现 V1 运行态退役迁移工具
+
+Owner：`kernel/orchestrator`、`kernel/run`、`blocks/decision`、`blocks/approval`、projection owner。
+
+本项只实现、测试 migration，并在生产数据副本上完成 dry-run；正式迁移在 RV2-08 维护窗口内执行。必须提供显式、幂等的 migration：
+
+```text
+runtime-v1-retirement
+```
+
+迁移规则：
+
+1. 所有 V1 pending/active/blocked Run 标记为：
+
+   ```text
+   state=superseded
+   reason=runtime_contract_v1_retired
+   ```
+
+2. 清理对应 Workspace `ActiveRunID`、`BlockingTicketID` 和 `BlockingApprovalID`。
+3. 所有 V1 open Decision/Approval 标记为 superseded，不再触发 continuation。
+4. 删除或关闭 V1 resolution resume pending、recovery checkpoint、provider retry 和 context-gate pending work。
+5. 释放 validation、prerequisite、provider session、background routine 等运行资源。
+6. Workspace、Goal、DoD、Profile、交付目录、completed Result/Artifact 和可验证 evidence 保留。
+7. 历史 Run、Step、event、rejected evidence 保留只读审计，不参与 V2 facts 构造，除非通过明确 evidence import policy 接受。
+8. 发布正式 Run/Workspace/governance 状态事件，并执行全量 projection rebuild。
+9. migration 重复执行不得产生新事件风暴、重复 terminal result 或重复 supersede。
+
+迁移输出至少包含：
+
+- scanned V1 Run 数量；
+- superseded Run 数量；
+- 清理的 ActiveRunID 数量；
+- superseded ticket/approval 数量；
+- 释放的资源数量；
+- projection rebuild revision；
+- 无法迁移对象及原因。
+
+完成门禁：
+
+- production data copy dry-run 能完整列出所有待退役对象。
+- fixture 正式迁移后不存在非终态 V1 Run、V1 open blocker 或 stale pointer。
+- fixture migration 二次执行无状态变化。
+- migration 输出、备份和失败恢复流程已有测试。
+
+### RV2-08：删除 V1、执行一次性切换并完成双 workspace 验证
+
+V2 主链实现完成且 migration 工具验证通过后立即删除 V1，不等待长期双栈观察；随后在维护窗口内执行正式迁移并启动 V2-only 服务。
+
+RV2-08 首批兼容面删除记录（2026-07-12）：
+
+- `ResumeRunCommand` 已删除 `ExecutionContextPatch map[string]any` 与 loaded Run payload，只保留具体 workspace/run scope；Orchestrator module 不再保留“接收后拒绝 patch”的伪兼容字段。
+- Run owner event adapter、Orchestrator service facade、application run port/session/backend facade、embedded CLI 和 server session 已同步删除 patch resume 入口，不再把 compressed execution context 或 operator input map 注入 Resume。
+- application activation event、HTTP/client DTO、embedded/remote backend port、CLI/TUI command 和 Web TypeScript surface 已进一步物理删除 `executionContextPatch` 字段及 merge helper；非空 patch 不再被接受、转码、拒绝或静默保留，新的 Runtime V2 Run 只由 typed bootstrap 建立定义与收敛状态。
+- application bootstrap、runtime session 和 testkit 已删除无效的 RuntimePolicy 构造参数及 `NewWithBackend*RuntimePolicy*` facade；旧 policy 在生产构造链中此前仅被 `_ = runtimePolicy` 丢弃，现不再形成“策略已注入”的伪权威，配置管理读模型仍可从 canonical config 生成展示值。
+- Run owner仍执行自身状态准入，但向 Orchestrator 只发送投递组件定义的 typed Resume command；workspace activation/restart 继续通过新的 typed RuntimeBootstrap 创建独立 V2 Run，不复用 Resume patch。
+- application scheduler 对历史 `WorkspaceRunRequestedCommand` 中的非空 resume patch fail-fast；该 application 内部 activation payload 后续单独收口，不能重新映射到 Orchestrator command。
+- 删除只验证 loaded Run/patch 兼容转发的测试，保留并更新 owner scope、状态准入与 typed scheduler command 回归测试。
+- Orchestrator service facade 已删除无生产调用方、无 EventHub 正式合同的 `DispatchNextStep`；外部 module 无法再直接触发 V1 Step dispatch，Runtime V2 只允许通过 persisted drive/reducer 推进 operation。
+- Orchestrator service facade 已继续删除 Start/Resume；正式 Start/Resume EventHub handler 直接执行 Runtime V2 owner projection和 persisted drive，不再向外暴露可调用 V1 lifecycle 的 service 方法。
+- 已删除 Run service 到 Orchestrator 的 ValidateRun/CompleteRun 失效命令链，包括 Run DTO/service/adapter、Orchestrator topic/message/delivery contract、module subscription 与 facade；Runtime V2 validation 只接受 sealed operation evidence，Complete 只接受 reducer terminal projection。
+- Run module service wrapper 已收窄为仅处理正式 EventHub Create/Ensure handler；Start/Resume/Block/Cancel/Supersede/Fail 不再通过 module `Service()` 暴露，防止组件绕过 owner EventHub 合同调用状态机。
+- Run biz 已删除 Run→Orchestrator event adapter及不可达的 Start/Resume/Block/Cancel/Supersede/Fail lifecycle 方法，近千行对应 V1 fixture 改为精简的 Create/Ensure owner 持久化、幂等、scope 与 typed notification 测试；Run service 中无引用的生命周期 DTO alias和 test-only constructor 同步删除。
+- Orchestrator biz 已物理删除 V1 `StartRun`、`dispatchAcceptedRun`、`DispatchNextStep`、`ResumeRun`、execution-context-patch resume 及其 running recovery helper；生产只保留 `AcceptRunStart`、`CanResumeRun` 和 V2 drive 使用的 blocker/resource/terminal 投影。
+- 已删除 V1 resolution resume 自动 replan successor 子图与 `compressedContext.v1` 恢复摘要，不再由 resolved decision 启动旧 successor dispatch；Runtime V2 需要新目标时只接受新的 typed activation/bootstrap。
+- 所有直接启动 V1 dispatch/resume/replan 主链的大型 integration fixtures 已删除；仍被窄算法测试复用的 authority/target-snapshot fixture 已收拢到独立 test support，不恢复任何生产兼容方法。
+- 已删除 V1 runtime progress checkpoint、terminal-result checkpoint、`runtime_step_result_available` restart replay 与对应测试；Runtime V2 restart 只从 persisted aggregate/facts 恢复，不再把旧 Step output map 重新送入 finalize 主链。
+- 已删除无调用方的 Orchestrator biz `CompleteRun/ValidateRun`、decision resume subsystem、approval patch resume 和 replan lineage ID/继承 helper；治理 resolution 不再触发旧 Step retry、patch apply 或 successor Run。
+- 已清理仅服务 V1 replan 的 derived action contract strip、actionable replan continuation probe，以及无生产调用的旧 context Step ID 排序；保留 evidence 明确序号排序，避免影响历史 evidence/query 的确定性。
+- Orchestrator plugin 与 application testkit 已停止构造 RuntimeAdapter registry 和 EventHub runtime adapter，`Dependencies.Runtime` 已删除；生产启动不再维护 Step kind registration matrix，Runtime V2 operation 只走组件 typed EventHub command/result。
+- 已删除 Orchestrator module 对 RuntimeAdapter/registry 的公共 facade 和旧 registration matrix；Run/Workspace 状态通知不再隐式生成 V1 runtime checkpoint，历史 checkpoint repository 只服务 retirement、purge 和只读审计。
+- 已删除无生产调用方的 V1 `NextActionForRun` 与整套直接测试 fixture；Runtime V2 next action 只由 persisted typed reducer 输出，不再从 Run execution-context map 动态推导。
+- 已删除 `UpdateRuntimePolicyCommand` topic、DTO、EventHub contract、Orchestrator handler 与 HTTP 推送链；配置更新后 Runtime V2 从 canonical `workorchconfig` 派生当前策略，不维护 Orchestrator 进程内动态 policy 副本。
+- 已删除 V1 completion gate、target-snapshot acquisition、repair dispatch/policy 与 governance localization 专属测试入口；仍被其他窄测试复用的 builder 仅保留在 test support，后续随对应生产闭包删除。
+- 已物理删除 Orchestrator V1 dispatch、graph、repair、acceptance、convergence、coverage、patch、result assemble、LLM context、checkpoint/replay 主闭包及其专用测试；Orchestrator biz 生产主体已收窄为 Runtime V2 controller、owner projection、retirement resource release 和必要的终态资源清理。
+- 已删除 Orchestrator `RuntimeAdapterRegistry`、EventRuntimeAdapter、Step kind registration matrix 及 application testkit registry fixture；Runtime V2 operation 不再经过集中 adapter facade。
+- 已删除 Orchestrator 内部 V1 event subsystem；Run/Workspace 状态通知由各自 owner EventHub repository update 单一发布，避免双权威和重复投影。
+- File、Git、Shell、SSH、MCP、Web、LLM 七个 block 已停止启动通用 `runtimeevent.Executor`，并删除 V1 Accepted/Progress/Completed/Failed 生产通知、worker 状态 map、heartbeat、发布失败指标和动态 execute topic contract；所有执行只保留组件直接订阅的 Runtime V2 typed EventHub command/result。
+- `internal/pkg/runtimeevent` 已物理删除，HTTP 不再暴露恒为零的 V1 runtime event publish/heartbeat 指标，组件 README 已同步刷新为 Runtime V2 交互合同。
+- application `runtimecore.ManagedRuntime` 已收窄为纯 Eventstream typed record collector，只保留 `PublishedEventRecords` 观测能力；已删除无生产调用方的 generic runtime adapter、依赖聚合、Workspace/Run/Decision/Approval action facade 和 snapshot read facade，以及整个 `runtimeports` 兼容层。
+- application owner 相关测试 fixture 已改为测试专用 repository fixture或投递 owner 定义的具体 typed EventHub command；生产代码与测试均不再通过 runtime action/snapshot facade 绕过 owner 合同。
+- Runtime V2 typed activation context 随 `RuntimeBootstrap -> RuntimeFacts -> RuntimeCandidateContext` 持久化和投递 dialog language、默认及 stage Soul 内容快照、Skill 指令、MCP server/capability 选择、Memory 内容和 evidence policy；LLM candidate provider 直接消费这些具体字段，不再从 `Run.ExecutionContext` 提取对应输入。
+- evidence policy 已定义为具体 `RuntimeEvidencePolicy` / `RuntimeCoverageEvidenceRequirement`；Orchestrator 随 `ExecuteRuntimeOperationCommand` 投递，Shell block 直接从 typed `StepExecutionRequest.EvidencePolicies` 执行 zero-work/work-marker 判定，删除该 Runtime V2 路径对 `input["evidencePolicies"]` 的 map 解析。
+- execution contract 第一阶段已定义为具体 `RuntimeExecutionContract` / `RuntimeCapabilityUsagePolicy`，保存 `stateChangePolicy` 与 capability usage guidance；LLM provider 将其放入 C2 capability contract，stable prefix hash 对 execution contract 变化敏感。
+- profile acceptance contract 已定义为具体 `RuntimeProfileContract`、`RuntimeAcceptanceDimension`、`RuntimeDeliverableExpectation` 与 `RuntimeProfileEvidenceRequirement`；application 只在 activation 边界把 workspace/template 配置 map 转成 typed snapshot，随后经 `RuntimeBootstrap -> RuntimeFacts -> RuntimeCandidateContext` 持久化并进入 LLM C2 capability contract。stable prefix hash 覆盖 acceptance、deliverable、evidence role、accepted/rejected step kinds 与 accepted operations，不使用 JSON/reflect 做组件间类型桥。
+- focus requirement 已扩展为 typed evidence role、accepted/rejected step kinds 和 accepted operations；reducer 只在 owner-confirmed capability kinds 中执行交集与排除，并把 accepted operations 封入 `RequiredOutputContract` 和 stable hash。candidate contract 在声明 accepted operations 时要求至少一个 operation 参数命中允许值，因此 `git/write add` 可作为依赖动作，但不能在缺少 `git/write commit` 时满足只接受 `commit` 的 focus。
+- profile required acceptance dimension/deliverable expectation 已由 application activation 层按 `scope + id` 确定性生成 focus；primary state-change focus 优先，supplemental focus 按 canonical ID 稳定排序。无显式 executable evidence requirement 的 item 生成 assessment-only focus；声明 accepted step kind/operation 的 item 同步生成对应 owner capability prerequisite。
+- template stage policy 已定义为具体 `RuntimeTemplateStagePolicy` 及 stage、entry、required output、completion、governance、policy refs 子类型；application 在 activation 边界把 `executionContract.templateStagePolicies` 配置 map 转成 typed snapshot，随后持久化并进入 LLM C2。stable prefix hash 覆盖完整 stage policy；core 不按 template ID、Soul ID、语言或业务名称解释其内容。
+- definition change impact 已定义为具体 `RuntimeDefinitionChangeImpact`、`RuntimeDefinitionChangeSet` 与 `RuntimeDefinitionRevision`；application 在 activation 边界把 cumulative Goal/DoD impact map 转成 typed definition snapshot，随 bootstrap 持久化并进入 LLM C1。stable prefix hash 覆盖 effective/latest/previous/all identity、原位修订 lineage、pre-execution assessment 标记和 strategy requirements。
+- `requiredPreExecutionAssessment=true` 已由 typed `need_assessment` authority、assessment candidate、assessment ledger、completeness gate 和 Result owner 投影闭环执行；不再依赖或回退 V1 assessment map 主链。
+- Runtime V2 已新增 typed `need_assessment` authority、`AssessmentCandidate`、assessment ledger 和 current-run evidence ref gate；显式 `RequireAssessment` 的 focus 在 evidence 齐备后必须完成 assessment，assessment-only focus 可引用当前 Run 前序 accepted evidence，但不能引用历史/raw payload。
+- 最终 assessment 关闭后，Orchestrator 使用 Result owner 的 typed EventHub create command写入 workspace/run scoped accepted/rejected DoD Result，再投影 Run/Workspace terminal；Result block 不参与 evidence quality 或 acceptance 裁决。
+- Runtime V2 bootstrap 不再无条件要求 state-change：`must_produce_state_change` focus 要求 state-change + validation，`allowed_but_not_required` focus 初始只要求 validation，后续仅在 typed failure/evidence 证明需要变更时由 reducer 转入 state-change。
+- `Run.ExecutionContext` 已从 owner model、command、repository、API、Web DTO、CLI/TUI 和 read-model 物理删除；activation 只构造 typed `RuntimeBootstrap`，governance history、rejected-result 与 continuation 已迁入具体 Runtime V2 owner contract，不保留 map 迁移源、JSON/reflect bridge、Envelope 或双栈兼容。
+- LLM block 已删除 Runtime V1 `RuntimeAdapter`、execution decision/repair/capability DTO、execution-context prompt/budget/redaction 主链和长 prompt 死代码；provider 直接渲染 typed `PromptContext`，C0/C1/C2 为稳定前缀，C3+ 为动态消息，并在提交前执行具体 provider ceiling fail-fast。
+- `workorchruntimecontract` 已删除无生产引用的 V1 `StagePacket`、`NextAction`、BlockExecutionGraph 和 RuntimeStep Accepted/Progress/Completed/Failed 通用事件结构；消费 block 内部 `StepExecutionRequest/Result` map 仅作为技术 adapter 边界，不进入 EventHub command/result、facts、candidate、dispatch 或 evidence。
+- Run/Orchestrator 已删除无生产发布方的 Step/LLM usage/contract-violation 通用 notification data contract、动态值包装和 Eventstream typed subscription；历史 EventRecord 仍可作为通用只读审计数据读取，但不再注册为当前生产消息合同。
+
+删除范围至少包括：
+
+- V1 runtime repair authority 推导；
+- `stateChangingRepairRequired` 与 correction-specific authority 推导；
+- context-gate retry Step 生成；
+- requiredOutput mirror 自愈和 rebound；
+- 多层嵌套 recovery Step ID；
+- exhausted contract violation 转普通 runtime repair；
+- LLM 输出驱动 convergence state 的兼容路径；
+- V1 scheduler continuation、resume compatibility 和版本路由；
+- 仅为 V1 服务的 tests、fixtures、DTO 和文档说明。
+
+删除后保留：
+
+- provider request rendering/budget/cache；
+- deterministic protected floor；
+- typed governance blocker；
+- EventHub owner 边界；
+- evidence、projection 和 resource release；
+- 历史数据只读查询与审计能力。
+
+V1 删除、full gates 和 clean build 完成后，按“全面切换维护窗口”执行正式 V1 retirement migration、启动 V2-only 服务并开放新 Run。不得先在生产数据执行迁移、随后继续运行 V1 binary。
+
+LSP live gate：
+
+- 真实 `go vet` failure 重新打开 state-change。
+- target snapshot 自动准备。
+- patch 后重新验证。
+- 连续推进至少三个 focus。
+
+网关 live gate：
+
+- 缺 source snapshot 时先执行 prerequisite。
+- 不再因 `file/list` 不在 state-change accepted kinds 而失败。
+- continuable candidate choice 不创建伪外部 Decision。
+- 连续完成 state-change 和 validation，并推进至少三个 focus。
+
+### V2 Step ID 与 retry budget
+
+V2 Step ID 只使用稳定序号：
+
+```text
+run-xxx/action-001
+run-xxx/action-002
+```
+
+禁止：
+
+```text
+.../context-gate-retry/context-gate-retry
+.../repair-001-of-contract-retry-...
+```
+
+每个 authority snapshot 的预算：
+
+- LLM candidate attempt：最多 `2` 次。
+- deterministic prerequisite：每个 prerequisite key 最多一次成功提交；失败后进入 governed wait 或 terminal。
+- governance resolution：每个 resolution ID + authority snapshot ID 最多消费一次。
+- Runtime V2 不提供自动 V1-compatible replan；需要重新定义目标时创建新的独立 V2 Run。
+
+### 全面切换维护窗口
+
+正式切换必须按以下顺序执行，禁止边运行 V1 边迁移：
+
+1. 停止接收新的 Start/Resume/governance continuation。
+2. 等待当前 owner command 退出有界 finalize 窗口。
+3. 备份 `.workorch-data`、配置和 workspace projection 数据。
+4. 执行 `runtime-v1-retirement --dry-run` 并核对对象数量。
+5. 执行正式 V1 retirement migration。
+6. 部署只包含 V2 主链的 clean build。
+7. 执行 projection full rebuild。
+8. 核对无 V1 active/blocked Run、无 V1 open blocker、无 stale `ActiveRunID`。
+9. 恢复 Start/Resume 接口。
+10. 创建全新 LSP、网关 V2 Run 执行 live gate。
+
+任一步失败必须停止开放流量并恢复备份，不允许临时重新启用 V1 production dispatch 绕过问题。
+
+### V2 验证门禁
+
+Focused：
+
+```bash
+go test ./internal/pkg/workorchruntimecontract -count=1
+go test ./internal/modules/kernel/orchestrator/biz/runtimev2 -count=1
+go test ./internal/modules/kernel/orchestrator/biz -count=1
+go test ./internal/modules/blocks/llm/biz -count=1
+go test ./internal/modules/application/workorchd/biz/appservice -count=1
+go test ./internal/modules/application/workorchd/service/server -count=1
+```
+
+Full：
+
+```bash
+go test -p 1 ./internal/modules/... -count=1
+go test -p 1 ./... -count=1
+make fmt-check
+make vet
+make verify-boundary-contract
+git diff --check
+```
+
+Final live gate：
+
+- clean build：`vcs.revision=<target commit>`、`vcs.modified=false`。
+- migration 后非终态 V1 Run、V1 open blocker 和 stale V1 `ActiveRunID` 均为 `0`。
+- production dependency scan 不存在 V1 dispatch/recovery/version routing。
+- 至少连续十个 V2 Run 中 `runtime_internal_contract_misalignment=0`。
+- 每个 focus 最多一个普通 LLM dispatch 和一个 same-contract retry。
+- 相同 failure signature 不产生第三个 LLM Step。
+- 不存在嵌套 retry Step ID。
+- 每次 transition 都能证明 evidence/focus/authority/governance/terminal 至少一项推进。
+- provider 未提交时，同 scope request bytes 和 protected floor 不增长。
+- resolved governance 对同一 resolution/authority snapshot 只消费一次。
+- LSP 和网关均连续推进至少三个 focus。
+- blocked/terminal Run 的 runtime、validation 和 prerequisite resources 全部释放。
+- Run、Workspace、Result/outcome、projection 和 `ActiveRunID` 符合 owner 状态。
+
+### 执行顺序与状态
+
+| 顺序 | 收口项 | 当前状态 | 进入下一项条件 |
+|---|---|---|---|
+| 1 | RV2-01 唯一 typed canonical contract | complete：typed core 已成为生产唯一合同，V1 StagePacket/NextAction 已删除 | 类型、invariant 和依赖扫描通过 |
+| 2 | RV2-02 单一 reducer | complete：生产 drive 只使用 persisted typed reducer | 两个 live facts fixture 确定性通过 |
+| 3 | RV2-03 prerequisite engine | complete：snapshot/capability/validation/provider ceiling 已接入唯一主链 | snapshot/capability preflight 闭环 |
+| 4 | RV2-04 LLM candidate boundary | complete：typed PromptContext 与 same-contract retry 已接入生产 | same-contract 最多一次 retry |
+| 5 | RV2-05 sealed dispatch/evidence commit | complete：repository、dispatch 和 evidence commit 已接入唯一主链 | stale/duplicate/restart tests 通过 |
+| 6 | RV2-06 一次性主链切换 | implementation complete：Start/Resume/governance/restart 生产入口只进入 V2 | 所有生产入口只进入 V2 |
+| 7 | RV2-07 V1 retirement migration 工具 | complete：typed migration、数据副本 dry-run/apply、幂等、备份与恢复校验全部通过 | data copy dry-run、幂等和恢复测试通过 |
+| 8 | RV2-08 删除 V1、正式迁移并双 workspace live | code/live complete：V1 主闭包及兼容层已删除，fresh file-backend 连续 10 个 V2 Run 与有界 provider failure live gate 已通过；等待目标提交 clean build 与真实生产目录维护窗口正式 apply | clean build、正式 migration 与切换后复核通过 |
+
+执行期间不得跳过 RV2-01/RV2-02 直接修复某个 live failure；新的异常必须先归类为 facts、reducer、prerequisite、candidate validation 或 evidence commit 问题，再在对应唯一 owner 内处理。生产切换前可以分提交实现，但不得启用任何临时双栈 production routing。
+
+### RV2-01/RV2-02 代码收口记录（2026-07-12）
+
+本轮已在正式共享合同包 `internal/pkg/workorchruntimecontract` 直接建立 Runtime V2 typed canonical contract，没有创建 `/v1`、`/v2` 子包、facade 或运行期版本分支：
+
+- 新增 `RuntimeFacts`、`RuntimeDecision`、`ConvergenceState`、`RuntimeAction`、`CoverageFocus`、`EvidenceLedger`、`FailureFact`、`PrerequisiteState`、`RequiredOutputContract`、`AuthoritySnapshot`、`AuthorityTransaction` 和 `TerminalOutcome`。
+- authority action 收敛为 `AcquirePrerequisite`、`ProduceStateChange`、`ProduceValidation`、`RequestGovernance`、`Complete`、`Fail` 六类；state/action/requiredOutput kind 使用固定一一映射，不再依赖布尔字段组合表达 authority。
+- `RequiredOutputContract` 只包含具体 typed 字段；normalization 对集合去空、去重并排序，stable hash 使用长度前缀的确定性二进制输入计算，不使用 JSON marshal/unmarshal。
+- `SealRuntimeDecision` 原子生成 requiredOutput hash、authority snapshot ID、审计版本和 transaction；snapshot 中任一 state、action、focus、revision、attempt 或 requiredOutput hash 漂移都会被 invariant validation 拒绝。
+- 新增 action/state 全组合、非法 requiredOutput、terminal、snapshot mutation、hash 顺序稳定和语义变化敏感测试。
+
+本轮同时新增 `internal/modules/kernel/orchestrator/biz/runtimev2.ReduceRuntimeState` 纯 reducer：
+
+- reducer 只依赖 typed `RuntimeFacts`，不访问 repository、EventHub、provider、profile 或全局配置。
+- pending prerequisite、state-change gap、validation gap、validation failure、governance dependency、complete 和 runtime internal defect 均从同一入口生成 sealed `RuntimeDecision`。
+- 相同 facts 生成相同 decision、snapshot 和 requiredOutput hash；只有同 focus、同 definition revision、同 evidence revision 的再次归约才增加 attempt，evidence 推进后 attempt 重置。
+- LSP fixture `ws-5cfc9874cebda0b8/run-006` 将 `server.go:29:6: main redeclared in this block` 的 rejected validation evidence 原子归约为 `ProduceStateChange`。
+- 网关 fixture `ws-609ce9149734ebb7/run-007-replan-001` 将 `coverage_assessment_incomplete` 和 `cwi-085` state-change gap 原子归约为 `ProduceStateChange`。
+
+静态扫描确认本轮 V2 新代码中不存在 `map[string]any`、JSON bridge、reflect contract、`workorchruntimecontract/v1`、`workorchruntimecontract/v2` 或 runtime contract version switch。
+
+本轮已通过：
+
+```text
+go test ./internal/pkg/workorchruntimecontract ./internal/modules/kernel/orchestrator/biz/runtimev2 -count=1
+go test -p 1 ./internal/modules/... -count=1
+go test -p 1 ./... -count=1
+make fmt-check
+make vet
+make verify-boundary-contract
+git diff --check
+```
+
+当前没有启用 V2 production routing。现有 V1 `NextAction`、`StagePacket`、convergence mirror 和 recovery 生产依赖必须在 RV2-06 一次性主链切换及 RV2-08 删除阶段退役；在此之前 RV2-01 状态只能标记为 typed core complete，不能宣称 production dependency retirement 已完成。
+
+### RV2-03 prerequisite engine 收口记录（2026-07-12）
+
+本轮已建立 Runtime V2 deterministic prerequisite engine 的 typed 核心：
+
+- `RuntimeFacts` 新增 manifest、target snapshots、failure target、capabilities、validation scratch 和 provider ceiling 资源事实；snapshot 使用 `complete`、`missing`、`truncated`、`binary`、`redacted` 互斥状态，不用多个布尔字段组合表达安全性。
+- `PreflightRuntimeFacts` 在 reducer 前统一检查六类 prerequisite，生成去重、稳定排序的 `AcquirePrerequisite` 输入；已满足 prerequisite 不会再次调度。
+- `CommitPrerequisiteResult` 只接受当前 pending prerequisite 的具体 typed result；重复 result、未知 ID、不完整 snapshot、缺失 capability、无效 scratch 和不足 provider ceiling 均被拒绝。
+- prerequisite result 提交后写回 typed facts，再次调用同一 reducer；网关 fixture 在缺少 `go.mod` 和 source snapshot 时先进入 deterministic preflight，两个完整 snapshot 提交后原子进入 `ProduceStateChange`。
+- `file/list`、`file/read` 只属于 runtime-managed prerequisite acquisition，不会进入 state-change `RequiredOutputContract.AcceptedKinds`。
+
+target snapshot 的跨组件路径已完成：
+
+- command/result 由投递方 Orchestrator 在 `kernel/orchestrator/pkg/events` 定义为 `AcquireTargetSnapshotCommand` / `AcquireTargetSnapshotResult`。
+- File block 导入投递方合同并直接订阅 magicCommon EventHub，返回具体 `TargetSnapshot`；交互不使用 `map[string]any`、Envelope、JSON bridge、reflect 或 service injection。
+- Orchestrator 的 EventHub adapter 校验 authority snapshot ID、prerequisite ID 和完整 snapshot，并原子提交回 typed facts。
+- File block 只接受完整、非 binary、非 truncated、非 redacted 且具备 content hash 的 snapshot；不安全结果不能进入 patch authority。
+
+本轮后续已完成全部 prerequisite owner adapter：
+
+- workspace manifest 由 File block 通过 typed EventHub command 获取；revision 对路径和内容 hash 变化敏感，超过有界 listing 时 fail fast。
+- provider ceiling 由 LLM block 通过 typed EventHub command 返回，取当前 provider context profile 与 inherited ceiling 的较小值；未配置或不可用 provider 不会伪造 ceiling。
+- runtime capability 由 File、Git、Shell、MCP、Web、SSH 和 LLM block 分别订阅 Orchestrator 定义的 typed command，并只返回自身实际支持的 kinds；Orchestrator 不再用本地注册矩阵代替 capability owner 在线应答。
+- failure target 来自 Orchestrator 自有 typed failure facts，validation scratch 由 Orchestrator 在受控临时根目录创建；二者属于同一 owner 内部资源，不经过跨模块 service 或伪 EventHub 调用。
+
+因此 RV2-03 的代码实现和 owner adapter 已完成，但当前仍不启用 V2 production routing；正式调用只允许在 RV2-06 一次性主链切换时接入。
+
+实现 manifest revision 时同时修复了 File block `file/list` 的既有路径解包错误：旧实现把 workspace root 当成 entry resolved path，导致文件 `contentHash` 为空并使同路径同大小内容变化无法反映到 manifest revision；当前已改为读取受路径保护的实际 entry path，并增加内容变化回归。
+
+本轮新增 prerequisite focused tests、typed EventHub integration test、message/delivery contract test，并再次通过串行 modules/full tests、fmt、vet、boundary contract 和 diff check。
+
+### RV2-04 LLM candidate boundary 收口记录（2026-07-12）
+
+本轮已建立独立于 V1 `LLMExecutionDecision` 的 Runtime V2 typed candidate 协议：
+
+- 共享合同只允许 `StateChangeCandidate`、`ValidationCandidate` 和 `GovernanceCandidate` 三类互斥 candidate。
+- state-change/validation operation 使用具体 `RuntimeOperation`、coverage IDs、target refs 和 typed parameter union；不使用 `map[string]any` 传递组件合同。
+- candidate 必须与 sealed `RuntimeDecision.Action` 一致，operation kind 必须属于当前 `RequiredOutputContract.AcceptedKinds`，并绑定当前 coverage focus；重复 operation ID、未知 dependency、重复 parameter 或多值 parameter 都会被拒绝。
+- `Complete`、`Fail` 和 `AcquirePrerequisite` action 不能进入 LLM candidate boundary。
+
+LLM adapter 边界已实现严格 JSON 解码：
+
+- provider JSON 只在 `blocks/llm/biz/runtimev2` adapter 边界解码，并启用 unknown-field rejection。
+- provider 返回 `convergenceState`、`nextAction`、`focus`、`authority`、`repairObjective` 或任何非 candidate schema 字段时直接判定 schema failure，不能影响 Orchestrator authority。
+- LLM block 收到的 typed provider request 只包含 sealed decision/transaction、Goal/DoD definition context、capability contract、candidate attempt 和 stable prefix hash；不再接收另一套可修改 authority。
+- LLM block 将 candidate 自动绑定请求 transaction，provider 无权自行声明 snapshot ID。
+
+same-contract retry 已收敛为有限状态：
+
+- candidate attempt 只允许 `0` 或 `1`。
+- attempt 0 的 schema/provider/contract failure 只能生成一次 `retry_same_contract`。
+- retry 必须保持完全相同的 authority transaction、authority snapshot ID、requiredOutput hash、action 和 stable prefix hash，只允许 candidate attempt 从 0 变为 1。
+- attempt 1 再次失败进入 `request_governance`；内部 transaction mismatch 直接 terminal，不允许第三个 candidate request。
+- provider、schema 或 candidate contract failure 不会隐式切换 action。
+
+跨组件路径使用 Orchestrator 定义的 `RequestRuntimeCandidateCommand` / `RequestRuntimeCandidateResult`，LLM block 导入投递方合同并直接订阅 EventHub。当前 RV2-04 实现不会启用 production routing；V1 宽输出和 convergence parsing 只在 RV2-06 一次性切换、RV2-08 删除阶段退出生产依赖。
+
+### RV2-05 sealed dispatch/evidence commit 收口记录（2026-07-12）
+
+本轮已实现 Runtime V2 可持久化 dispatch aggregate 和 evidence commit coordinator：
+
+- `SealDispatch` 在执行前校验 candidate 与当前 decision，封存完整 `AuthorityTransaction`、candidate hash、workspace/run scope 和 candidate 本体。
+- `DispatchStepInput` 直接包含 dispatch ID、完整 transaction、candidate hash 和 typed candidate，后续 Step persistence 不需要从 stage packet、mirror 或 map 重建 authority。
+- 相同 snapshot/candidate 重复 seal 返回同一 dispatch；同 snapshot 出现不同 active dispatch 时 fail fast。
+- candidate hash 使用 deterministic typed hashing，不通过 JSON marshal/unmarshal。
+
+evidence commit 固定执行：
+
+```text
+Load persisted aggregate
+  -> verify event/scope/snapshot/dispatch/operation
+  -> append accepted or rejected typed evidence fact
+  -> increment evidence sequence/revision
+  -> mark dispatch committed
+  -> ReduceRuntimeState
+  -> CAS save aggregate
+```
+
+约束已经转化为代码和测试：
+
+- execution evidence 必须携带 event ID、workspace/run、dispatch ID、authority snapshot ID、operation ID、evidence kind 和 accepted/rejected status。
+- snapshot 与当前 authority 不一致时只追加 `DiagnosticEvidence`，不修改 focus、facts evidence、evidence revision 或 decision。
+- 相同 event ID 由 persisted `ProcessedEventIDs` 幂等拦截，duplicate 不增加 revision、不重复 evidence、不再次 reducer。
+- snapshot 相同但 dispatch 或 operation 不属于当前 sealed candidate 时按 internal mismatch 拒绝。
+- accepted evidence 原子更新 ledger 并进入下一 reducer；rejected validation evidence 携带 typed failure fact，可直接从 `ProduceValidation` 原子回到 `ProduceStateChange`。
+- aggregate repository 使用 load + expected revision CAS save；coordinator 不保存进程内 dispatch/evidence map。
+- restart fixture 在第一个 coordinator 持久化 dispatch 后销毁实例，第二个 coordinator 仅从 repository aggregate 恢复并成功提交 evidence。
+
+当前实现提供 `RuntimeStateRepository` owner port，正式 repository adapter 和生产 dispatch/commit 入口只在 RV2-06 一次性主链切换时装配；在此之前不启用并行 V2 production routing。
+
+### RV2-06 正式持久化接入记录（2026-07-12）
+
+已完成一次性主链切换的第一项生产依赖：
+
+- 在共享 runtime contract 中新增 typed `RuntimeStateRecord`、`RuntimeDispatchRecord` 和 `RuntimeDiagnosticRecord`，完整保存 facts、decision、sealed dispatch、processed event 与 diagnostic lineage；未使用 JSON bridge、reflect、Envelope 或跨组件 `map[string]any`。
+- Run owner model 新增 `runtimeContractVersion` 与 typed runtime state；file/memory repository clone 路径同步执行深复制，避免进程内引用共享破坏持久化快照。
+- Run update command 新增 expected runtime state revision。Run owner 在 EventHub command lane 内校验 canonical invariant、workspace/run scope 和 expected revision；stale update 返回 conflict。
+- Orchestrator 新增正式 `RuntimeStateRepository` EventHub adapter，并在 module Configure 时装配 `DispatchCoordinator`。Load/Save 均通过 Run owner command，不直接访问 Run repository/service。
+- repository adapter 已覆盖首次保存、重启读取与 stale CAS rejection；focused orchestrator/run/repository/runtime-contract tests 通过。
+
+当前尚未切换 Start、Resume、Step completion、governance resolution 和 restart recovery 的生产入口，因此 RV2-06 保持 `in progress`。下一步必须在同一主链 coordinator 中完成 typed facts 初始化、prerequisite、candidate、execute 和 evidence commit，再一次性关闭 V1 dispatch 与 scheduler continuation；不得把当前 repository 装配解释为并行 V2 production routing。
+
+后续已继续完成统一 controller 与主链前半段：
+
+- 新增 `RuntimeController`，统一暴露 initialize、load、prerequisite commit、candidate seal 和 evidence commit；`RuntimeOrchestrator` 不再分别持有可绕过主链的 repository/coordinator 操作入口。
+- initialize 固定执行 `Normalize Facts -> Preflight -> Reduce -> CAS Save`。相同 Run 的 Start/Resume/restart 只幂等读取既有 aggregate，不重复 reducer；definition revision 或 focus identity 漂移直接返回 conflict。
+- prerequisite result 通过 controller 加载当前 aggregate、校验当前 action、提交 typed result、再次 reducer，并使用 expected revision 原子保存。
+- reducer attempt 判定已改为比较最终 state、action、requiredOutput hash、focus 和 revision；manifest/snapshot/capability 等事实推进后 attempt 重置，不再被误记为同合同 LLM retry。
+- `RuntimeRequirement` 已提升到共享 typed contract，并携带 prerequisite owner module；capability acquisition 可按 File、Shell 等实际 owner 投递 EventHub command。
+- 修复多个 capability prerequisite 顺序提交时后一个结果覆盖前一个结果的问题；state-change、validation 和 governance capability 现在按具体类型合并。
+- module mainline 已接通 deterministic prerequisite acquisition 和 typed candidate request/seal：workspace manifest、target snapshot、failure target、validation scratch、provider ceiling 和 capability 均在 LLM 前完成；candidate 必须绑定当前 authority transaction 后才能持久化 active dispatch。
+- integration tests 已覆盖 `Initialize -> local prerequisite -> Reduce -> persisted reload` 以及 `Initialize -> typed LLM candidate -> sealed dispatch -> persisted reload`。
+
+当前主链已完成：
+
+```text
+Initialize/Load
+  -> PreparePrerequisites
+  -> Reduce
+  -> RequestCandidate
+  -> Seal/PersistDispatch
+```
+
+上一阶段尚未接入 typed operation executor 和 runtime block evidence 转换，因此当时未注册 V2 production routing。
+
+后续已完成 typed operation executor 与 evidence commit 闭环：
+
+- 修复 RV2-05 多 operation dispatch 的提前完成缺陷。当前每个 operation 独立记录 `CompletedOperationIDs`；全部 operation 成功，或任一 operation rejected 后，dispatch 才转为 committed 并再次 reducer。
+- `RuntimeController.ExecuteActiveDispatch` 对 candidate operation dependency graph 执行确定性拓扑排序；同层 operation 按 ID 排序，未知 dependency 和 cycle fail fast。
+- operation executor 输入包含 workspace/run、dispatch、完整 authority transaction、具体 `RuntimeOperation` 和 evidence kind；结果使用具体 event ID、operation ID、accepted/rejected status、source ref 和 typed failure facts。
+- Orchestrator 新增 `ExecuteRuntimeOperationCommand/Result`，并按 operation kind 将 EventHub command 投递给 File、Git、Shell、MCP、Web 或 SSH block。所有 command/data/result 均为具体类型，不包含跨组件 `map[string]any`。
+- 六个 capability block 已直接订阅 typed runtime operation command。既有 block adapter 所需的 map 只在消费组件内部由 typed parameter union 转换，不进入 EventHub、candidate、dispatch、facts 或 evidence。
+- block 执行失败转换为 typed `execution_failure`，validation rejection 可由 reducer 原子回到 state-change；transport/internal error 保留 active dispatch，供重启后从 persisted `CompletedOperationIDs` 继续。
+- 新增多 operation 全成功、首 operation rejected、typed command 本地适配、EventHub owner routing，以及 `Candidate -> Seal -> Execute -> Evidence -> Reduce -> persisted reload` 集成测试。
+
+当前主链已推进为：
+
+```text
+Initialize/Load
+  -> PreparePrerequisites
+  -> Reduce
+  -> RequestCandidate
+  -> Seal/PersistDispatch
+  -> ExecuteTypedOperations
+  -> CommitEvidence
+  -> Reduce
+```
+
+RV2-06 剩余关键工作为：same-contract candidate retry/governance terminal 收口、typed bootstrap/definition 输入持久化，以及 Start/Resume/Step completion/governance resolution/restart recovery 的唯一入口切换与 V1 scheduler continuation 关闭。
+
+后续已完成 same-contract candidate retry 与失败收口：
+
+- `RuntimeStateRecord` 新增 typed `RuntimeCandidateAttemptRecord`，持久化完整 transaction、attempt、stable prefix、pending/failed/accepted 状态和 typed failure。
+- attempt 0 的 pending replay 幂等，不重复保存或生成新请求；attempt 1 只有在 attempt 0 已 failed、transaction 与 stable prefix 完全一致时才可开始。
+- LLM block 将 provider、schema、candidate contract 和 internal failure 作为具体 `RuntimeCandidateFailure` 返回，不再把可治理失败压成普通 EventHub error。
+- candidate accepted 与 sealed dispatch 使用同一次 CAS 原子保存；accepted attempt 必须能关联 active/completed dispatch，不能留下无 dispatch 的成功记录。
+- attempt 0 非 internal 失败保持原 authority 不变并允许一次 same-contract retry；internal failure 立即生成 `runtime_contract_defect` terminal。
+- attempt 1 再次失败时，有 governance capability 则原子进入 `RequestGovernance`；没有 governance capability 则生成 `candidate_retry_exhausted` terminal。
+- invariant validation 拒绝第三次请求、attempt 1 缺 failed attempt 0、stable prefix 漂移、accepted 后重试、重复 attempt 和无 sealed dispatch 的 accepted 状态。
+- integration tests 已覆盖 provider typed failure、attempt 0 schema failure 后 attempt 1 成功、连续两次 provider failure 后 terminal，以及 pending attempt 的重复调用幂等。
+
+当前 Runtime V2 LLM 请求预算已经固定为每个 authority snapshot 最多两次，不再依赖 V1 nested retry Step、repair lineage 或进程内计数器。
+
+后续已完成 typed bootstrap/definition 输入持久化：
+
+- 共享 runtime contract 新增 `RuntimeDefinitionContext`，具体保存 definition revision、Goal/DoD identity、完整定义正文和 capability contract；normalization、validation、clone 与 equality 均使用 typed 字段，不使用 JSON、reflect 或 map bridge。
+- `RuntimeStateRecord` 与 `RuntimeAggregate` 直接持久化 definition context，并强制其 revision 与 `RuntimeFacts.DefinitionRevision` 一致。
+- `RuntimeController.Initialize` 在首次初始化时封存 definition；重复 Start/Resume/restart 只有完整 definition context 相同才幂等返回，identity、正文、revision 或 capability contract 漂移均返回 conflict。
+- candidate mainline 不再接收调用方临时传入的 definition DTO；Orchestrator 从 persisted aggregate 读取定义，并通过自身定义的 typed EventHub command 投递给 LLM block。
+- 删除 Orchestrator events 与 LLM model 中重复的 definition context 类型，双方直接使用共享 canonical type，避免 DTO 转换产生定义漂移。
+- repository、controller、candidate request 和 definition drift 测试已覆盖重启读取、Run owner 持久化、revision mismatch 与正文漂移拒绝。
+
+后续已完成 governance resolution typed facts/evidence 核心闭环：
+
+- 新增 typed `RuntimeGovernanceResolution`、continue/fail outcome 和持久化 consumption record；合同包含 workspace/run、resolution、authority snapshot、dispatch、dependency、summary 和 evidence refs，不使用 map、JSON bridge 或 reflect。
+- governance candidate 继续作为 sealed dispatch 保存；resolution 只能提交到当前 `RequestGovernance` authority 和匹配的 governed dispatch，dependency kind/subject 漂移返回 conflict。
+- continue outcome 写入 accepted governance evidence、递增 evidence revision、清除 governance failure，并通过同一 reducer 回到原 state-change/validation evidence gap。
+- fail outcome 写入 rejected governance evidence，并由 reducer 生成 `governance_rejected` typed terminal；不再进入 LLM repair。
+- stale resolution 只追加 diagnostic，不改变 authority、dispatch 或 evidence revision；同一 resolution ID + authority snapshot 的重复提交在重启后仍幂等。
+- Orchestrator 新增 `CommitRuntimeGovernanceResolutionCommand/Result` typed EventHub owner command，返回 disposition、state/evidence revision、next action 与 terminal；外部 continuation 不再需要直接修改 Run 或 runtime facts。
+- invariant validation 要求每个已消费 governance resolution 都关联 completed governed dispatch；Run owner CAS persistence、restart duplicate 和 EventHub integration tests 已覆盖。
+
+后续已完成 typed governance ticket/request binding：
+
+- Orchestrator 新增 `OpenRuntimeGovernanceRequestCommand/Result`，command 具体携带 workspace/run、ticket、dispatch、完整 authority transaction、external dependency 和允许的 resolution type；Decision block 导入投递方合同并直接订阅 EventHub。
+- Decision owner 将 typed command 转换为自身 `EnsureTicket` 操作，不通过跨组件 `map[string]any` 传递 runtime snapshot、dispatch 或 dependency。
+- ticket ID 从 sealed dispatch 确定性生成；重复请求由 Decision `EnsureTicket` 与 Orchestrator binding CAS 双重保证幂等。
+- `RuntimeStateRecord` 新增 governance request binding，具体保存 ticket ID、authority snapshot ID、dispatch ID、dependency kind 和 subject ref；restart 后不需要 scheduler 扫描或猜测 ticket 对应 authority。
+- resolution 必须携带并匹配已绑定 ticket；缺少 binding、同一 dispatch 绑定不同 ticket、dependency 漂移或 ticket 漂移均返回 conflict。
+- invariant validation 要求每个 request binding 关联 active/completed governed dispatch，每个 consumed resolution 同时关联 request binding 和 completed governed dispatch。
+- integration test 已覆盖 typed LLM governance candidate、Decision ticket 创建、Run owner binding 持久化、restart replay、typed resolution commit 和 reducer continuation。
+
+RV2-06 剩余工作收敛为生产 Start/Resume/Step completion/governance resolution/restart recovery 唯一入口切换，以及 V1 scheduler continuation 关闭。
+
+生产入口切换审计随后发现并补齐多 focus 推进缺口：
+
+- 原 Runtime V2 facts 只有单个 `Focus`，accepted evidence 也没有 coverage binding；首个 focus 满足后 reducer 会直接 Complete，无法满足连续推进多个 coverage focus 的 live gate，因此不得直接切换生产 Start。
+- `RuntimeFacts` 现新增有序 remaining focus queue；顺序属于 bootstrap contract，不在 reducer 内重新排序。
+- `EvidenceFact` 新增具体 coverage work item IDs，并从 sealed operation 原子复制；LLM 或 block 不能在 execution result 中重新声明 coverage。
+- missing evidence 与 rejected validation 只读取绑定当前 focus 的 evidence；前序 focus evidence 不得满足后续 focus。
+- dispatch 完成后，若当前 focus 已满足且仍有 remaining focus，controller 原子切换 facts current focus、缩短 queue，再调用同一 reducer；只有最后一个 focus 满足后才生成 Complete。
+- regression test 已覆盖 focus-1 state-change evidence 提交后进入 focus-2 `ProduceStateChange`，而不是错误 terminal，并验证 evidence 保持 `cwi-1` 绑定。
+
+RV2-06 下一步为在 Run 创建时持久化完整 typed bootstrap（definition、focus queue、requirements），随后建立唯一 V2 drive command，才能安全切换生产 Start/Resume/Recovery。
+
+后续已完成 Run 创建阶段 typed bootstrap 持久化：
+
+- 共享 runtime contract 新增 `RuntimeBootstrap`，具体包含 `RuntimeDefinitionContext`、ordered coverage focus queue 和 typed prerequisite requirements；提供 normalization、validation、clone、equality 与 `InitialFacts`。
+- Workorch activation profile 使用 cumulative effective Goal/DoD 构造 definition context，避免只保存最新单条定义导致 C1 正文与 definition revision 漂移。
+- 每个有效 DoD item 按声明顺序生成一个 focus/cwi，并要求 state-change 与 validation evidence；该 profile 映射位于 application activation 层，不进入 kernel reducer。
+- activation profile 当前声明 File state-change、Shell validation、Decision governance，以及 manifest、validation scratch、provider ceiling prerequisite；跨组件仍由各 owner 在线确认 capability。
+- Run create/update command、Run model、file/memory repository clone 与 EventHub adapter 均保存 typed bootstrap；bootstrap definition identity/revision 与 Run GoalID、DoDID、DefinitionRevision 不一致时返回 conflict。
+- Decision block 已订阅 typed runtime capability prerequisite并声明 `decision/request`，避免 governance bootstrap 在 owner preflight 阶段缺失 capability responder。
+- Orchestrator 新增 `InitializeRuntimeV2FromRun`，只从 Run owner bootstrap 生成 initial facts 并调用统一 controller，不读取 V1 execution context map。
+- tests 已覆盖三 DoD focus 顺序、bootstrap clone/drift、initial facts、Run owner 持久化及从 persisted Run 初始化 aggregate。
+
+后续已完成正式 candidate context 与 provider 接线：
+
+- `RequestRuntimeCandidateCommand` 新增 typed `RuntimeCandidateContext`，由 persisted RuntimeFacts 确定性构造 workspace/run scope、definition/evidence revision、current focus、accepted/rejected evidence、failure、capabilities 与 prerequisite resources。
+- Orchestrator 和 LLM block 同时校验 candidate context、decision 与 sealed authority transaction 一致；LLM 不再依赖 V1 execution context map 猜测当前事实。
+- LLM Module 默认使用自身 `GenerateCandidate` 作为正式 `CandidateProvider`，通过现有 provider adapter 请求 typed operation/governance candidate；JSON marshal 只存在于 provider adapter 边界。
+- provider-facing prompt 固定按 C0 Runtime V2 candidate contract、C1 Goal/DoD、C2 capability contract、C3 current authority/context 组织，并使用 definition 派生的 canonical stable prefix hash。
+
+后续已完成唯一 Runtime V2 drive owner command/mainline loop：
+
+- Orchestrator 新增 `DriveRuntimeV2Command/Result` 与 `/orchestrator/runtime-v2/drive` typed EventHub topic，不复用 legacy `OrchestratorCommandResult`。
+- drive 从 Run owner 读取 typed bootstrap/state，并按唯一有界循环执行 `Initialize/Load -> prerequisite -> candidate -> seal -> typed operation -> evidence -> reducer`。
+- executable dispatch 从 persisted `CompletedOperationIDs` 继续；governance dispatch 确定性绑定 Decision ticket 后返回 `governed_wait`；Complete/Fail 返回 typed terminal。
+- 每个继续循环的 transition 必须增加 persisted state revision；无进展或超过 1024 次 transition 立即 fail-fast，禁止单次调用无界空转。
+- 重复 drive 和新 Orchestrator 实例重启均返回同一 persisted terminal，不重复请求 candidate 或执行 operation；governed wait 重放返回同一 ticket 与 revision。
+- integration tests 已覆盖完整 typed EventHub 路径、terminal replay、restart replay 和 persisted governance wait。
+
+RV2-06 下一步收敛为生产 Start/Resume/governance resolution/restart recovery 的一次性入口切换，并在同一提交关闭 V1 dispatch 与 application scheduler continuation；不得增加 runtime version switch 或 V1/V2 双栈。
+
+生产入口切换预检已补齐 Run/Workspace 投影能力：
+
+- 新增 `ActivateRuntimeV2Run`，只执行 blocker→active owner 投影并清除 blocker，不创建 V1 Step。
+- 新增 `ProjectRuntimeV2Terminal`，使 typed reducer Complete/Fail 可直接更新 Run/Workspace owner；Complete 不经过 V1 Result/DoD completion gate，重复 terminal 投影幂等。
+- tests 已覆盖 blocker→active 不创建 legacy Step、V2 Complete 绕过 legacy gate和 terminal replay。
+
+尝试直接切换 Module Start/Resume/recovery 后，全量 application server 测试证明大量启动、恢复、approval/replan 和 watchdog fixture 仍创建无 typed bootstrap 的 V1 Run。V2 正确地以 invalid argument 拒绝这些 Run；如果按 `RuntimeBootstrap == nil` 回退 V1，会形成本文禁止的运行期双栈。因此入口切换未保留该中间态，当前顺序调整为：先迁移或删除 application server 的 V1 Run fixtures、governance/replan continuation 与 watchdog recovery，再在同一原子变更中关闭 `EnableEventDrivenDispatch` 并切换 Start/Resume/governance/restart。不得为保持旧测试增加 compatibility switch。
+
+后续已完成 Runtime V2 governance production continuation 闭环：
+
+- Orchestrator 新增 `CommitRuntimeGovernanceTicketResolutionCommand` typed EventHub 合同，Decision 只提交 resolution/ticket/workspace/run/outcome/summary，不需要访问 Runtime V2 state。
+- Orchestrator 从 Run owner persisted aggregate 查找 ticket binding，补齐 authority snapshot、dispatch、dependency kind 与 subject ref，再复用唯一 governance resolution commit。
+- Decision owner 在 `runtime_v2_governance` ticket `EnsureResolved` 成功后直接调用该 command；continue/fail outcome 由 resolution type 确定，不使用 application map bridge。
+- committed resolution 由 Orchestrator 自行投影 terminal 或调度 Runtime V2 drive continuation；重复 resolution 继续由 persisted consumption record 幂等拦截。
+- Decision resolved notification 新增具体 `DecisionKind`；application HTTP continuation helper 和 resolved-event watcher对 `runtime_v2_governance` 跳过，防止同一 resolution 再进入 V1 Resume scheduler。
+- integration test 已覆盖 `Decision EnsureResolved -> typed ticket resolution -> Orchestrator binding lookup -> governance evidence -> reducer -> V2 continuation scheduled`。
+
+因此 application governance scheduler 已不再负责 Runtime V2 Decision continuation。下一步继续删除 V1 approval/replan、stale Step watchdog 与 run continuation 队列，并迁移其 fixture。
+
+后续已解除 application server 生命周期中的 V1 自动恢复接线：
+
+- `Service.Run` 不再调用 `recoverStartupInactiveRunningWorkspaces`；服务重启不会把历史 active Run 自动取消、释放 activeRunId 或生成 restart diagnostic。
+- `Service.Run` 不再调用 `scheduleWatchdog`；生产启动不再注册周期 stale-dispatched Step recovery timer。
+- workspace projection 仍按 owner snapshot 启动，但不承担修复 owner 状态或决定 continuation 的职责。
+- 删除“启动恢复旧 Run 后再触发 workspace activation”的 V1 fixture；新的回归测试要求 legacy active Run 在迁移前保持原样，且启动过程不提交 recovery background function、watchdog timer 或 scheduler diagnostic。
+- 后续收口已物理删除 `http_run_continuation_scheduler.go` 及其显式 V1 recovery、run/workspace continuation queue 和局部 fixtures，不得重新接回 `Service.Run`。
+
+后续已完成 application governance continuation 生产链删除：
+
+- Decision/Approval HTTP resolve handler 只写入对应 owner 并刷新 projection，不再发布 `WorkspaceRunRequestedCommand`。
+- 删除 Eventstream 上 Decision/Approval/Governance resolved watcher；application 不再根据 resolved notification 推断 Resume 或 replan。
+- 删除 governance pending/started/attempted queue、resolved blocked Run recovery scan、governance continuation diagnostic kind 和全部对应 V1 fixtures。
+- `WorkspaceRunRequestedCommand` 不再接受 `replan` intent；Runtime V2 需要改变目标时创建新的独立 V2 Run。
+- Runtime V2 Decision continuation 继续由 Decision owner 直接发送 Orchestrator 的 typed ticket-resolution command，不经过 application scheduler。
+
+后续已删除 application V1 replan continuation：
+
+- 不再扫描 superseded Run 或 resolved replan Decision 来自动创建 successor Run。
+- workspace activation、Start 和 Resume 完成后不再派生 `replan_continuation` 后台任务。
+- 删除 replan started dedupe、successor readback、recovery scan、diagnostic kind/reason 和对应 fixtures。
+- HTTP/scheduler 已拒绝 `replan` intent；重新定义目标必须创建新的独立 Runtime V2 Run。
+
+后续已完成 Start/Resume Runtime V2 生产入口切换与 application run continuation queue 删除：
+
+- Orchestrator module 不再调用 `EnableEventDrivenDispatch`；V1 Step/runtime notification 不再拥有生产 dispatch 权。
+- Start command 执行 `AcceptRunStart -> schedule Runtime V2 drive`，Resume command执行 `CanResumeRun -> ActivateRuntimeV2Run -> schedule Runtime V2 drive`。
+- drive 只调用唯一 typed mainline；失败投影 `runtime_v2_drive_failed` typed terminal，不回退 V1 service dispatch。
+- application event、HTTP/client、backend port、CLI/TUI 和 Web surface 已物理删除 `executionContextPatch`；scheduler 不再保留“接收后拒绝”的兼容字段，Runtime V2 activation/bootstrap 不从任意 map patch 合并 operator input 或恢复 authority。
+- workorchd run-scoped scheduler 分支直接发送 Orchestrator 的具体 Start/Resume command；删除 `runPending`、`runStarted`、readback retry 和 background queue fixtures。
+- 删除 appservice 中依赖无 typed bootstrap、V1 provider blocker、approval/replan Resume、orphan Step redispatch 和 V1 Step evidence 的集成 fixtures；activationcore、typed bootstrap、owner command 与 read-model纯投影测试继续保留。
+
+后续已物理删除 application stale Step/watchdog recovery helper：
+
+- 删除 watchdog timer 注册、周期 tick、stale dispatched recovery、stuck Run recovery 与 startup inactive Run recovery。
+- 删除进程内 recovery mutex/running 标记、timer task wrapper 和仅验证自动恢复的 fixtures。
+- 服务启动与 `Validate` 均不会注册 recovery timer；历史 active Run 只保留审计，不由 application 修改。
+- watchdog interval metric 保留为退役审计字段并固定为 `0`，不得作为重新接线依据。
+
+后续已完成 workspace activation/restart queue 删除：
+
+- workorchd scheduler command 不再写入 `restartPending/restartStarted`，不提交 application background function。
+- activation/restart 在 workspace lane 内同步执行 activation 用例，并由用例直接发送 Workspace、Run、Orchestrator 的 typed command。
+- 新 Run 创建时必须携带 typed Runtime V2 bootstrap；Orchestrator Start 只调度唯一 Runtime V2 drive。
+- 删除 owner readback、NextAction compatibility 判定、pending retry、enqueue failure compensation 和对应 fixtures。
+- `http_run_continuation_scheduler.go` 已整体删除；application 不再拥有 execution scheduler 状态。
+
+后续已完成 Orchestrator V1 event-driven Step dispatch、runtime notification continuation 与 runtime-gap recovery 删除：
+
+- 删除 `DispatchStepRequested` topic、command、contract、订阅处理器、publish readback、idempotency helper 和 `eventDrivenDispatch` 运行期开关；graph/repair 遗留内部调用固定为直接执行语义，不再经过第二条 EventHub Step owner 链。
+- 删除 runtime block Progress/Completed/Failed 订阅、旧 runtime result handler 与 terminal notification continuation；Runtime V2 operation 只接受同步 typed `ExecuteRuntimeOperationCommand/Result` 回执，并由 Orchestrator 提交 evidence。
+- 删除 `RecoverRuntimeGap` owner command、module handler、application sender，以及 orphan Step、stale dispatched Run、startup inactive Run、stuck Run 等 application recovery API/queue/watchdog。
+- 删除只验证上述 V1 command、notification、readback 和 event-driven graph dispatch 的测试，不恢复 no-op facade 或双栈 helper；保留的 Runtime V2、typed notification 和直接执行测试均通过。
+- Start/Resume、Decision resolution 与 workspace activation/restart 已只进入 Runtime V2 bootstrap/aggregate/drive；application 不再拥有 continuation scheduler。
+
+RV2-06 的生产入口和 V1 dispatch/scheduler compatibility 删除已完成。下一步进入 RV2-07：实现一次性 V1 retirement migration、历史资源释放和 projection rebuild dry-run；不得重新引入 runtime-gap 自动恢复或 V1/V2 路由开关。
+
+### RV2-07 retirement planner 收口记录（2026-07-12）
+
+已先建立 migration 的确定性 typed planner，作为 dry-run 与正式 apply 共用的唯一动作来源：
+
+- `retirementcore.BuildRuntimeV1RetirementPlan` 只把没有 typed Runtime V2 bootstrap/state、且未声明 V2 contract 的 Run 识别为 V1；带 V2 bootstrap 但尚未初始化 aggregate 的 pending Run 不得被误退役。
+- planner 对 V1 Run、stale Workspace `ActiveRunID`、open DecisionTicket 和 pending Approval 生成稳定排序的具体动作，并固定终态原因 `runtime_contract_v1_retired`。
+- report 已包含 scanned V1 Run、待 supersede Run、待清理 ActiveRunID、待 supersede ticket/approval、待释放 resource scope 和无法迁移对象原因。
+- 同一 inventory 重复规划结果完全一致；模拟 apply 后再次规划时不再产生 supersede/clear 动作，锁定 migration 幂等基础语义。
+- planner 是 application focused package，不访问 owner repository，也不发布事件；下一步由 application migration coordinator 通过各 owner EventHub command 执行动作，并在成功后调用 projection full rebuild。
+- `retirementports.LoadRuntimeV1Inventory` 已通过 Run、Workspace、Decision、Approval owner 的具体 typed list command 采集 planner 输入；缺失 owner response 或返回错误类型时 fail-fast，不允许回退 repository export。
+- `retirementports.ApplyRuntimeV1RetirementPlan` 已按 Decision、Approval、Run、Workspace 顺序发送具体 typed owner update：先关闭 continuation blocker，再 supersede Run，最后清理 Workspace pointer。
+- Run update contract 已补齐 lineage 与 created/started/ended 时间字段，migration 不会因 owner update 丢失历史身份；Run 写入固定 `runtime_contract_v1_retired` reason 并清空 blocker refs。
+- Run、Workspace、Decision、Approval owner 对 migration update 发布正式 typed 状态通知；Decision/Approval supersede 不复用 resolved/approved/rejected 语义。
+- 真实 memory owner fixture 已验证 apply 后不存在非终态 V1 Run、open ticket、pending approval 或 stale `ActiveRunID`，再次 inventory/plan 不产生任何动作。
+- application 已定义具体 `RuntimeV1RetirementCommand/Result`：dry-run 返回 typed report，不执行 owner mutation 或 projection rebuild；apply 在成功后返回 projection full rebuild revision。
+- resource report 已区分 `ResourceScopesToRelease` 与 `ReleasedResourceScopes`；计划 scope 数量不再冒充真实释放数量。
+- Orchestrator 已定义 `ReleaseRuntimeV1ResourcesCommand/Result`，按 workspace/run scope 关闭 pending/executing Step、ToolCall、ArtifactContinuation，并释放 managed validation resource；命令拒绝 Runtime V2 Run，重复调用返回零变化。
+- application 在任何 owner supersede/clear 之前逐 Run 同步发送 resource release command并累计具体回执；任一 release 失败时不执行后续 owner apply 和 projection rebuild。
+- coordinator 测试已覆盖完整 `inventory -> release -> owner apply -> re-inventory -> zero-action audit -> projection rebuild revision` 顺序。
+- 已提供本地 embedded `runtime-v1-retirement` CLI；无参数和 `--dry-run` 均执行只读盘点，只有显式 `--apply` 才执行正式迁移，两个 flag 同时出现时拒绝执行。
+- CLI 通过窄 `RuntimeV1RetirementBackend` 发送 application typed command；remote backend 不实现该维护 port，禁止通过在线 HTTP 服务误执行维护迁移。
+- projection owner 已提供同步 full rebuild 入口并返回 global revision；migration 只有在 apply 后重新 inventory/plan 确认零遗留动作时才允许调用。
+- maintenance process 已在 framework/module/EventHub 启动前建立强制备份与恢复入口：`--apply` 仅允许 file repository，先备份 repository data 和 config directory，备份成功后才启动 owner migration；dry-run 不创建备份。
+- `--backup-dir` 只允许与 `--apply` 组合；`--restore-from` 与 apply/dry-run/backup-dir 互斥，并在 framework 与 owner repository 打开前完成恢复后直接退出。
+- backup manifest 保存绝对 source、snapshot 与 backup directory；创建时拒绝 data/config 重叠、backup 位于任一 source 内部、缺失 config snapshot 或覆盖现有 destination。
+- restore 在替换任何目标前完整校验 data/config 两份 snapshot，并通过同文件系统 staging、previous rename 与回滚流程完成双目录事务恢复；大目录复制不累计打开文件句柄。
+- 从备份成功到 migration、framework shutdown 结束之间的任一失败均返回具体 `--restore-from` 命令；测试已覆盖 create/restore、缺失 snapshot 不产生半恢复、参数互斥、dry-run 零备份、apply 前备份和备份失败阻止启动。
+
+RV2-07 当前状态为 `complete`。typed migration command、资源释放 owner command/回执、owner apply command、projection rebuild revision、本地维护 CLI、强制备份和启动前事务恢复已完成，并已在本机现有 file-backend 数据的隔离副本上完成 dry-run、apply、二次 dry-run 和 restore 全流程验证。真实生产目录的正式 apply 仍只允许在 RV2-08 维护窗口执行。
+
+### RV2-07 数据副本验证记录（2026-07-13）
+
+验证使用隔离副本：
+
+```text
+/tmp/workorch-rv2-closure-audit.pLuWZm
+```
+
+原始 `.workorch-data` 与 `.workorch-workspaces` 未被修改。副本 dry-run：
+
+```json
+{
+  "DryRun": true,
+  "Report": {
+    "ScannedV1Runs": 24,
+    "SupersededRuns": 0,
+    "ClearedActiveRunIDs": 0,
+    "SupersededTickets": 0,
+    "SupersededApprovals": 0,
+    "ResourceScopesToRelease": 0,
+    "ReleasedResourceScopes": 0,
+    "ProjectionRebuildRevision": 0,
+    "Failures": []
+  }
+}
+```
+
+副本 apply：
+
+```json
+{
+  "DryRun": false,
+  "BackupDirectory": "/tmp/workorch-rv2-closure-audit.pLuWZm/retirement-backup",
+  "Report": {
+    "ScannedV1Runs": 24,
+    "SupersededRuns": 0,
+    "ClearedActiveRunIDs": 0,
+    "SupersededTickets": 0,
+    "SupersededApprovals": 0,
+    "ResourceScopesToRelease": 0,
+    "ReleasedResourceScopes": 0,
+    "ProjectionRebuildRevision": 2,
+    "Failures": []
+  }
+}
+```
+
+apply 后再次 dry-run 保持零动作，确认 migration 幂等。随后执行 restore，并对 data/config 全目录重新计算 hash：
+
+```text
+data before/after restore:
+c2ea531645144d05da6cb5ebdbe7b539401fe09f380fe2c1da552145b3424330
+
+config before/after restore:
+4a35a07e93bc6a3dc98b4a92f939c2a32bf8cce489a566d86a210985eb126aaf
+```
+
+两组 before/after hash 完全一致，备份恢复链闭环通过。
+
+### RV2-08 fresh Runtime V2 live 验证记录（2026-07-13）
+
+验证使用全新隔离 file-backend，服务监听 `127.0.0.1:18080`，mock OpenAI-compatible provider 监听 `127.0.0.1:19090`。两个 workspace：
+
+- LSP：`ws-bfe81d5d1f25fb67`。
+- Gateway：`ws-9a668efb16798b53`。
+
+每个 workspace 定义一个 Goal 和三个 DoD item；每个 DoD item 对应一个独立 focus，并依次执行 `produce_validation -> produce_assessment`。两个 workspace 各连续创建 5 个 Run，共 10 个 Runtime V2 Run。
+
+成功路径核对结果：
+
+```text
+workspaceCount=2
+runCount=10
+completedRunCount=10
+acceptedResultCount=10
+providerRequestCount=60
+provider candidateAttempt 0=60
+provider candidateAttempt 1=0
+projection ready=2/2
+activeRunId empty=2/2
+runtime_internal_contract_misalignment=0
+```
+
+每个 Run 的 persisted aggregate 均满足：
+
+```text
+RuntimeContractVersion=v2
+Decision.Action=complete
+Terminal.Code=coverage_satisfied
+AcceptedEvidence=3
+RejectedEvidence=0
+Assessments=3
+RemainingFocuses=0
+CandidateAttempts=6，全部 attempt=0/state=accepted
+CompletedDispatches=6
+ActiveDispatch=nil
+GovernanceRequests=0
+Result.State=accepted
+Result.DoDAssessment.Satisfied=true
+Result.EvidenceRefs=3
+```
+
+验证期间先用一个协议解析错误的 mock 暴露了真实 P0 缺陷：candidate attempt 1 失败后，因为 governance capability 存在，controller 把 failure 重新归约为 `request_governance`，而 governance candidate 又依赖同一失效 provider，导致 authority attempt 持续增长并最终命中 1024 transition 上限。该问题不是 mock 专属；任意 provider 连续失败都可触发递归。
+
+收口修改限定在 `kernel/orchestrator` candidate owner：
+
+- candidate attempt 1 的非 internal failure 统一写入 typed `FailureClassCandidateExhausted`。
+- reducer 直接生成 terminal `candidate_retry_exhausted`。
+- 不再把 provider/schema/contract exhaustion 重新解释为新的 LLM governance candidate。
+- 显式业务 `FailureClassGovernanceDependency` 仍保留原有 governed wait 主链，不受影响。
+
+修复后增加强制 provider 503 live Run：`ws-fdef8e39455b48b4/run-001`。持久化结果：
+
+```text
+Run.State=failed
+Decision.Action=fail
+Terminal.Code=candidate_retry_exhausted
+CandidateAttempts=2
+attempts=[0,1]
+两个 attempt 使用同一 AuthoritySnapshotID
+provider request count=2
+ActiveDispatch=nil
+Workspace.ActiveRunID=""
+```
+
+该 live failure gate 证明同一 authority 只允许一次普通请求和一次 same-contract retry，不再产生第三次 provider 调用、governance 递归或嵌套 retry。
+
+当前 RV2-08 代码侧与 fresh live gate 已通过，但本文仍保持 `active`，原因仅剩正式切换维护条件：
+
+1. 当前验证 binary 来自未提交工作树，不能满足 `vcs.revision=<target commit>`、`vcs.modified=false`。
+2. 真实生产目录尚未执行正式 `runtime-v1-retirement --apply`；本轮只在隔离副本执行 apply/restore。
+3. 目标提交完成后，必须使用 clean build 按“全面切换维护窗口”执行正式 migration，并复核非终态 V1 Run、open blocker、stale `ActiveRunID` 均为 `0`。
+
+### 旧 CC 收口项处置
+
+本文后续现有 CC01 至 CC06 内容保留为历史问题、测试证据和删除检查清单，不再作为可独立执行的 V1 修补计划。正式实施只以 RV2-01 至 RV2-08 为准：
+
+| 历史项 | V2 归属 | 处置 |
+|---|---|---|
+| CC01 Orchestrator authority/retry | RV2-01、RV2-02、RV2-05、RV2-06 | 由 typed contract、single reducer 和 sealed transaction 替换，不继续修补 V1 |
+| CC02 LLM request/contract | RV2-04 | 收口为 candidate boundary，删除 LLM convergence 推导 |
+| CC03 projection/read model | RV2-07、RV2-08 | 服务于 retirement migration、projection rebuild 和 V2 readback |
+| CC04 runtime/validation resource | RV2-03、RV2-05、RV2-07 | 纳入 prerequisite ownership、evidence commit 和 retirement resource release |
+| CC05 terminal reason | RV2-01、RV2-02、RV2-05 | 由 typed `TerminalOutcome` 单源生成 |
+| CC06 application scheduler | RV2-06、RV2-07 | 删除 V1 continuation，scheduler 仅触发 V2 owner command |
+
+如果后续 CC 条目与本节 Runtime V2 决策冲突，以本节为准。V1-specific Required Changes 只能用于确认删除是否完整，不能据此新增兼容代码。
 
 ### Architecture Boundary
 

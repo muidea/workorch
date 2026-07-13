@@ -160,7 +160,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		output["stderrBytes"] = stderr.TotalBytes()
 		output["maxOutputBytes"] = MaxCommandOutputBytes
 	}
-	applyShellEvidencePolicies(request.Input, command, args, output)
+	applyShellEvidencePolicies(request.EvidencePolicies, command, args, output)
 	if runCtx.Err() == context.DeadlineExceeded {
 		output["status"] = "timeout"
 		output["stage"] = "shell_command_timeout"

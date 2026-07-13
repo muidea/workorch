@@ -1,0 +1,86 @@
+package workorchruntimecontract
+
+import (
+	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+)
+
+func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *testing.T) {
+	activation := RuntimeActivationContext{
+		DialogLanguage:    "zh-CN",
+		DefaultSoul:       &RuntimeSoulContext{ID: "soul-default", Name: "默认 Soul", Instructions: "遵守当前阶段合同", AllowedToolKinds: []string{"shell/command"}},
+		StageSoulBindings: []RuntimeStageSoulBinding{{Stage: "execution", Source: "workspace_stage_binding", Soul: RuntimeSoulContext{ID: "soul-execution", Instructions: "执行阶段指令"}}},
+		Skills:            []RuntimeSkillContext{{ID: "skill-go", Name: "Go", Instruction: "执行 Go 验证", RequiredToolKinds: []string{"shell/command"}}},
+		MCPServerIDs:      []common.MCPServerID{"mcp-main"},
+		MCPCapabilities:   []RuntimeMCPCapabilityContext{{ID: "cap-read", ServerID: "mcp-main", Kind: "tool", Name: "read", Enabled: true}},
+		Memories:          []RuntimeMemoryContext{{ID: "memory-1", MemoryType: "fact", Summary: "历史约束", Content: "保持 typed contract"}},
+		EvidencePolicies:  []RuntimeEvidencePolicy{{ID: "policy-1", AppliesTo: "shell/command", ZeroWorkMarkers: []string{"no tests"}, QualityOnZeroWork: "inconclusive"}},
+		Continuation: RuntimeContinuationContext{
+			GovernanceHistory: []RuntimeGovernanceHistoryEntry{{
+				TicketID: "ticket-1", RunID: "run-old", StepID: "step-old", ResolutionID: "resolution-1", ResolutionType: "replan", RecoveryAction: "replan",
+				Failure: &RuntimeContinuationFailure{Class: "validation", Signature: "sig-1", TargetRefs: []string{"target-a"}},
+			}},
+			Replan: &RuntimeReplanContinuation{PredecessorRunID: "run-old", TicketID: "ticket-1", ResolutionID: "resolution-1", ResolutionType: "replan", RecoveryAction: "replan"},
+		},
+		ExecutionContract: RuntimeExecutionContract{
+			StateChangePolicy:       RuntimeStateChangeMustProduce,
+			CapabilityUsagePolicies: []RuntimeCapabilityUsagePolicy{{ID: "usage-1", PreferredTools: []string{"lsp_diagnostics"}}},
+			ProfileContracts: []RuntimeProfileContract{{
+				ID:                      "software-dev",
+				AcceptanceDimensions:    []RuntimeAcceptanceDimension{{ID: "runtime_entrypoint", Required: true}},
+				DeliverableExpectations: []RuntimeDeliverableExpectation{{ID: "version_control_snapshot", Required: true, EvidenceRole: "supplemental_evidence"}},
+				EvidenceRequirements:    []RuntimeProfileEvidenceRequirement{{ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write"}, AcceptedOperations: []string{"commit"}}},
+			}},
+			TemplateStagePolicy: &RuntimeTemplateStagePolicy{SchemaVersion: RuntimeTemplateStagePolicySchemaV1, Stages: []RuntimeTemplateStage{{
+				ID: "execution", SoulBinding: "execution", Entry: RuntimeTemplateStageEntry{NextAction: "state_change", RequiresDefinitionRevision: true},
+				RequiredOutputs: []RuntimeTemplateStageRequiredOutput{{Kind: "state_change", EvidenceKinds: []string{"state_change"}}},
+			}}},
+		},
+	}
+	if err := activation.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	cloned := activation.Clone()
+	if !SameRuntimeActivationContext(activation, cloned) {
+		t.Fatalf("activation clone drifted: source=%+v clone=%+v", activation, cloned)
+	}
+	cloned.Skills[0].Instruction = "mutated"
+	if SameRuntimeActivationContext(activation, cloned) {
+		t.Fatal("skill instruction drift was not detected")
+	}
+	cloned = activation.Clone()
+	cloned.ExecutionContract.CapabilityUsagePolicies[0].UsageMode = "required"
+	if SameRuntimeActivationContext(activation, cloned) {
+		t.Fatal("execution contract drift was not detected")
+	}
+	cloned = activation.Clone()
+	cloned.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].AcceptedOperations[0] = "push"
+	if SameRuntimeActivationContext(activation, cloned) {
+		t.Fatal("profile contract drift was not detected")
+	}
+	cloned = activation.Clone()
+	cloned.ExecutionContract.TemplateStagePolicy.Stages[0].Entry.NextAction = "validate"
+	if SameRuntimeActivationContext(activation, cloned) {
+		t.Fatal("template stage policy drift was not detected")
+	}
+	cloned = activation.Clone()
+	cloned.Continuation.GovernanceHistory[0].Failure.TargetRefs[0] = "mutated"
+	if SameRuntimeActivationContext(activation, cloned) {
+		t.Fatal("continuation drift was not detected")
+	}
+}
+
+func TestRuntimeContinuationContextSuppressesActionableHistoryAfterDefinitionChange(t *testing.T) {
+	context := RuntimeContinuationContext{
+		DefinitionChangeSupersedesPrior: true,
+		GovernanceHistory: []RuntimeGovernanceHistoryEntry{{
+			TicketID: "ticket-1", RunID: "run-old", ResolutionID: "resolution-1", ResolutionType: "replan",
+		}},
+		Replan:         &RuntimeReplanContinuation{PredecessorRunID: "run-old", TicketID: "ticket-1", ResolutionID: "resolution-1"},
+		RejectedResult: &RuntimeRejectedResultContinuation{PredecessorRunID: "run-old", ResultID: "result-old", ResultState: common.ResultStateRejected},
+	}.Normalized()
+	if len(context.GovernanceHistory) != 1 || context.Replan != nil || context.RejectedResult != nil {
+		t.Fatalf("continuation = %+v, want historical governance retained and actionable continuation suppressed", context)
+	}
+}

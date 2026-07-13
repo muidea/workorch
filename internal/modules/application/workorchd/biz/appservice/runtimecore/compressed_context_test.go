@@ -5,34 +5,8 @@ import (
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
-
-func TestCreatedRunCompressedContext(t *testing.T) {
-	compressed := CreatedRunCompressedContext(&runmodel.Run{
-		ID:          "run-core-created",
-		WorkspaceID: "ws-core-created",
-		State:       common.RunStatePending,
-	}, "en-US")
-	if compressed == nil {
-		t.Fatal("compressed context nil, want created-run projection")
-	}
-	if compressed["version"] != "workorch.compressedContext.v1" ||
-		compressed["mode"] != "deterministic_recovery_summary" ||
-		compressed["runId"] != "run-core-created" ||
-		compressed["workspaceId"] != "ws-core-created" {
-		t.Fatalf("compressed = %+v, want created run identity", compressed)
-	}
-	if compressed["currentMilestone"] != "execution_steps" {
-		t.Fatalf("currentMilestone = %v, want execution_steps", compressed["currentMilestone"])
-	}
-	if running := CreatedRunCompressedContext(&runmodel.Run{
-		ID:          "run-core-running",
-		WorkspaceID: "ws-core-running",
-		State:       common.RunStateActive,
-	}, "en-US"); running != nil {
-		t.Fatalf("running compressed = %+v, want nil", running)
-	}
-}
 
 func TestBlockedRunResumeCompressedContext(t *testing.T) {
 	item := &runmodel.Run{
@@ -57,11 +31,9 @@ func TestBlockedRunResumeCompressedContext(t *testing.T) {
 	}
 }
 
-func TestRunDialogLanguageUsesExecutionContext(t *testing.T) {
+func TestRunDialogLanguageUsesRuntimeBootstrap(t *testing.T) {
 	item := &runmodel.Run{
-		ExecutionContext: map[string]any{
-			"dialogLanguage": "zh-CN",
-		},
+		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{DialogLanguage: "zh-CN"}},
 	}
 	if got := RunDialogLanguage(item, "en-US"); got != "zh-CN" {
 		t.Fatalf("language = %q, want zh-CN", got)

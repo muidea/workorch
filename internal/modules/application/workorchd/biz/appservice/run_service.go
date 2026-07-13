@@ -31,11 +31,7 @@ func CreateRunFromEnv(ctx context.Context, workspaceID string, runID string, goa
 
 func StartRunWithSession(ctx context.Context, session *RuntimeSession, runID string) (ret Run, err error) {
 	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Run, error) {
-		ctx, deps, err := runCompressedContextDependencies(ctx, session)
-		if err != nil {
-			return Run{}, err
-		}
-		return runports.StartRunView(ctx, hub, compressedContextDependencies(deps), runID)
+		return runports.StartRunView(ctx, hub, runID)
 	})
 }
 
@@ -51,19 +47,15 @@ func StartRunFromEnv(ctx context.Context, runID string) (Run, error) {
 	})
 }
 
-func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID string, executionContextPatch ...map[string]any) (ret Run, err error) {
+func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID string) (ret Run, err error) {
 	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (Run, error) {
-		ctx, deps, err := runCompressedContextDependencies(ctx, session)
-		if err != nil {
-			return Run{}, err
-		}
-		return runports.ResumeRunView(ctx, hub, compressedContextDependencies(deps), runID, executionContextPatch...)
+		return runports.ResumeRunView(ctx, hub, runID)
 	})
 }
 
-func ResumeRunWithBackend(ctx context.Context, backend string, dataRoot string, runID string, executionContextPatch ...map[string]any) (Run, error) {
+func ResumeRunWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (Run, error) {
 	return withSharedBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (Run, error) {
-		return ResumeRunWithSession(ctx, session, runID, executionContextPatch...)
+		return ResumeRunWithSession(ctx, session, runID)
 	})
 }
 

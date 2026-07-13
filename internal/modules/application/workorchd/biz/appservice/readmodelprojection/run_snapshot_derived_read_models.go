@@ -9,15 +9,11 @@ func applyRunSnapshotDerivedReadModels(ret *readmodelcore.RunSnapshot, input Run
 	ret.GitOperations = MapGitOperationTraces(stepViews)
 	ret.WebSources = MapWebSourceTraces(stepViews)
 	ret.CoverageWorkItems = MapCoverageWorkItems(input.CoverageWorkItems)
-	if len(ret.CoverageWorkItems) == 0 {
-		ret.CoverageWorkItems = MapSliceValue(input.Run.ExecutionContext["coverageWorkItems"])
-	}
-	ret.CoverageWorkItemContext = CloneMap(MapValue(input.Run.ExecutionContext["coverageWorkItemContext"]))
 	ret.GapBaseline = GapBaselineFromRunSnapshot(*ret)
 	ret.AuthorityDiagnostics = AuthorityDiagnosticsFromRunSnapshot(*ret)
 	ret.Observed = MapObserved(observedItems)
-	capabilityCatalog := RuntimeCapabilityCatalogFromItems(ret.Run.ExecutionContext, ret.ToolCalls, input.MCPCapabilities)
-	ret.SelectedCapabilities = SelectedRuntimeCapabilities(ret.Run.ExecutionContext, capabilityCatalog)
+	capabilityCatalog := RuntimeCapabilityCatalogFromItems(input.MCPCapabilities)
+	ret.SelectedCapabilities = SelectedRuntimeCapabilitiesFromRun(input.Run, capabilityCatalog)
 	ret.UsedCapabilities = UsedRuntimeCapabilities(*ret, capabilityCatalog)
 	ret.TaskProgress = MapLocalizedTaskProgress(*ret)
 	ret.RepairLoop = ret.TaskProgress.RepairLoop

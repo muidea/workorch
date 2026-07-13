@@ -6,6 +6,7 @@ const EvidenceRecordSchema = "workorch.evidence_record.v1"
 
 const (
 	EvidenceKindStateChange    = "state_change"
+	EvidenceKindGovernance     = "governance"
 	EvidenceKindValidation     = "validation"
 	EvidenceKindAssessment     = "assessment"
 	EvidenceKindArtifact       = "artifact"

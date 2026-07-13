@@ -324,7 +324,6 @@ func compactWorkspaceSnapshotRuns(items []readmodelcore.Run, activeRunID string,
 }
 
 func compactWorkspaceSnapshotRun(item readmodelcore.Run) readmodelcore.Run {
-	item.ExecutionContext = nil
 	return item
 }
 
@@ -582,7 +581,6 @@ func compactTaskPlanTraceValues(items []readmodelcore.TaskPlan, depth int) []any
 			"nodeRunning":      item.NodeRunning,
 			"retryOf":          item.RetryOf,
 			"retryAttempt":     item.RetryAttempt,
-			"violatedRule":     item.ViolatedRule,
 			"failureClass":     item.FailureClass,
 			"failureSignature": item.FailureSignature,
 			"evidenceRefs":     item.EvidenceRefs,

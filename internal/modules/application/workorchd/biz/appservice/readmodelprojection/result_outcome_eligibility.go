@@ -33,7 +33,7 @@ func isTerminalOutcomeEligibleResult(item readmodelcore.Result, run readmodelcor
 	}
 	switch common.ResultState(item.State) {
 	case common.ResultStateAccepted:
-		return common.RunState(run.State) == common.RunStateCompleted && !runHasActiveCoverageWorkItems(run.ExecutionContext)
+		return common.RunState(run.State) == common.RunStateCompleted
 	case common.ResultStateRejected:
 		return IsTerminalRunState(run.State) && common.RunState(run.State) != common.RunStateSuperseded
 	default:
@@ -59,14 +59,7 @@ func snapshotHasActiveCoverageWorkItems(snapshot readmodelcore.RunSnapshot) bool
 	if coverageWorkItemsHaveActive(snapshot.CoverageWorkItems) {
 		return true
 	}
-	return runHasActiveCoverageWorkItems(snapshot.Run.ExecutionContext)
-}
-
-func runHasActiveCoverageWorkItems(context map[string]any) bool {
-	if len(context) == 0 {
-		return false
-	}
-	return coverageWorkItemsHaveActive(MapSliceValue(context["coverageWorkItems"]))
+	return false
 }
 
 func coverageWorkItemsHaveActive(items []map[string]any) bool {

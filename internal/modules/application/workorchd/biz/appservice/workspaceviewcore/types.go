@@ -58,24 +58,6 @@ type WorkspaceRebuildMetrics struct {
 	DurationMsTotal int64
 }
 
-type RuntimeProgressUpdate struct {
-	WorkspaceID   string
-	RunID         string
-	StepID        string
-	StepKind      string
-	StepState     string
-	Topic         string
-	Revision      int64
-	OccurredAt    string
-	Event         string
-	Stage         string
-	Summary       string
-	RequestID     string
-	QueueKey      string
-	WorkerID      string
-	WorkerEventAt string
-}
-
 type RunCommandAcceptedUpdate struct {
 	WorkspaceID        string
 	RunID              string

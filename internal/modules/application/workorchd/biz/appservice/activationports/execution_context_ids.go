@@ -2,12 +2,12 @@ package activationports
 
 import "context"
 
-func BuildWorkspaceExecutionContextForIDs(ctx context.Context, request WorkspaceExecutionContextByIDRequest) (map[string]any, error) {
-	inputs, err := ReadWorkspaceExecutionContextInputs(ctx, request.Hub, request.WorkspaceID, request.GoalID, request.DoDID)
+func BuildWorkspaceRuntimeActivationForIDs(ctx context.Context, request WorkspaceRuntimeActivationByIDRequest) (WorkspaceRuntimeActivationBuild, error) {
+	inputs, err := ReadWorkspaceRuntimeActivationInputs(ctx, request.Hub, request.WorkspaceID, request.GoalID, request.DoDID)
 	if err != nil {
-		return nil, err
+		return WorkspaceRuntimeActivationBuild{}, err
 	}
-	return BuildWorkspaceExecutionContext(ctx, WorkspaceExecutionContextRequest{
+	return BuildWorkspaceRuntimeActivation(ctx, WorkspaceRuntimeActivationRequest{
 		Hub: request.Hub,
 
 		Workspace:                      inputs.Workspace,

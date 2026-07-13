@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,10 +24,9 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/localizationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/skillselectcore"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
@@ -47,12 +43,81 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type workspaceScopedDecisionTicketRepository struct {
 	items                 []*decisionmodel.Ticket
 	listCalled            bool
 	listByWorkspaceCalled bool
+}
+
+func runtimeV2OwnerRunWithBackend(t *testing.T, ctx context.Context, backend string, dataRoot string, workspaceID string, runID string) *runmodel.Run {
+	t.Helper()
+	session, err := sharedBackendSession(ctx, backend, dataRoot)
+	if err != nil {
+		t.Fatalf("sharedBackendSession: %v", err)
+	}
+	hub, err := session.RequiredCommandHub()
+	if err != nil {
+		t.Fatalf("RequiredCommandHub: %v", err)
+	}
+	item, err := runports.ReadRun(ctx, hub, common.RunID(runID))
+	if err != nil {
+		t.Fatalf("ReadRun: %v", err)
+	}
+	if item.WorkspaceID != common.WorkspaceID(workspaceID) || item.RuntimeBootstrap == nil {
+		t.Fatalf("owner run = %+v, want workspace-scoped Runtime V2 bootstrap", item)
+	}
+	return item
+}
+
+func runtimeV2StageSoulBinding(t *testing.T, activation runtimecontract.RuntimeActivationContext, stage string) runtimecontract.RuntimeStageSoulBinding {
+	t.Helper()
+	for _, binding := range activation.StageSoulBindings {
+		if binding.Stage == stage {
+			return binding
+		}
+	}
+	t.Fatalf("stage soul binding %q missing from %+v", stage, activation.StageSoulBindings)
+	return runtimecontract.RuntimeStageSoulBinding{}
+}
+
+func assertRuntimeV2StageSoulBinding(t *testing.T, activation runtimecontract.RuntimeActivationContext, stage string, soulID string, source string) {
+	t.Helper()
+	binding := runtimeV2StageSoulBinding(t, activation, stage)
+	if string(binding.Soul.ID) != soulID || binding.Source != source {
+		t.Fatalf("stage binding %q = %+v, want soul %q source %q", stage, binding, soulID, source)
+	}
+}
+
+func runtimeV2ProfileContract(t *testing.T, contract runtimecontract.RuntimeExecutionContract, id string) runtimecontract.RuntimeProfileContract {
+	t.Helper()
+	for _, profile := range contract.ProfileContracts {
+		if profile.ID == id {
+			return profile
+		}
+	}
+	t.Fatalf("profile contract %q missing from %+v", id, contract.ProfileContracts)
+	return runtimecontract.RuntimeProfileContract{}
+}
+
+func runtimeV2HasMCPServer(activation runtimecontract.RuntimeActivationContext, id string) bool {
+	for _, item := range activation.MCPServerIDs {
+		if string(item) == id {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeV2HasSkill(activation runtimecontract.RuntimeActivationContext, id string) bool {
+	for _, item := range activation.Skills {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *workspaceScopedDecisionTicketRepository) Create(context.Context, *decisionmodel.Ticket) error {
@@ -202,16 +267,16 @@ func workspaceGovernanceHistory(
 	return ret
 }
 
-func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session *RuntimeSession, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD, cmd ActivateWorkspaceExecutionCommand) (map[string]any, error) {
+func buildWorkspaceRuntimeActivationWithDefinitions(ctx context.Context, session *RuntimeSession, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD, cmd ActivateWorkspaceExecutionCommand) (activationports.WorkspaceRuntimeActivationBuild, error) {
 	hub, err := session.RequiredCommandHub()
 	if err != nil {
-		return nil, err
+		return activationports.WorkspaceRuntimeActivationBuild{}, err
 	}
 	cfg, err := configcore.LoadFromContext(ctx)
 	if err != nil {
-		return nil, err
+		return activationports.WorkspaceRuntimeActivationBuild{}, err
 	}
-	return activationports.BuildWorkspaceExecutionContext(ctx, activationports.WorkspaceExecutionContextRequest{
+	return activationports.BuildWorkspaceRuntimeActivation(ctx, activationports.WorkspaceRuntimeActivationRequest{
 		Hub:                   hub,
 		Workspace:             workspace,
 		Goal:                  goal,
@@ -240,13 +305,9 @@ type countingRunService struct {
 
 func (s *countingRunService) CreateRun(ctx context.Context, cmd runmodule.CreateRunCommand) error {
 	s.createCommands = append(s.createCommands, runmodule.CreateRunCommand{
-		RunID:            cmd.RunID,
-		WorkspaceID:      cmd.WorkspaceID,
-		GoalID:           cmd.GoalID,
-		DoDID:            cmd.DoDID,
-		InitialStepKind:  cmd.InitialStepKind,
-		ExecutionContext: runtimecore.CloneContextMap(cmd.ExecutionContext),
-		Priority:         cmd.Priority,
+		RunID: cmd.RunID, WorkspaceID: cmd.WorkspaceID, GoalID: cmd.GoalID, DoDID: cmd.DoDID,
+		DefinitionRevision: cmd.DefinitionRevision, InitialStepKind: cmd.InitialStepKind,
+		RuntimeBootstrap: cmd.RuntimeBootstrap, Priority: cmd.Priority,
 	})
 	return s.Service.CreateRun(ctx, cmd)
 }
@@ -254,12 +315,9 @@ func (s *countingRunService) CreateRun(ctx context.Context, cmd runmodule.Create
 func (r *countingRunRepository) Create(ctx context.Context, item *runmodel.Run) error {
 	if item != nil {
 		r.createRuns = append(r.createRuns, &runmodel.Run{
-			ID:                 item.ID,
-			WorkspaceID:        item.WorkspaceID,
-			GoalID:             item.GoalID,
-			DoDID:              item.DoDID,
-			InitialStepKind:    item.InitialStepKind,
-			ExecutionContext:   runtimecore.CloneContextMap(item.ExecutionContext),
+			ID: item.ID, WorkspaceID: item.WorkspaceID, GoalID: item.GoalID, DoDID: item.DoDID,
+			DefinitionRevision: item.DefinitionRevision, InitialStepKind: item.InitialStepKind,
+			RuntimeBootstrap:   item.RuntimeBootstrap,
 			State:              item.State,
 			Priority:           item.Priority,
 			BlockingTicketID:   item.BlockingTicketID,
@@ -776,86 +834,6 @@ func TestActivateWorkspaceExecutionWithSessionReturnsInvalidArgumentWhenSessionM
 	}
 }
 
-func TestActivateWorkspaceExecutionWithBackendCreatesAndStartsRun(t *testing.T) {
-	useUnavailableLLMProvider(t)
-	dataRoot := t.TempDir()
-	cleanupSharedBackendSession(t, "file", dataRoot)
-	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-start", "activation start workspace", "", "workspaces/activation-start")
-	if err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	goal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "activation goal")
-	if err != nil {
-		t.Fatalf("DefineGoalWithBackend: %v", err)
-	}
-	dod, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"activation dod"})
-	if err != nil {
-		t.Fatalf("DefineDoDWithBackend: %v", err)
-	}
-
-	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
-		ExecutionContextPatch: map[string]any{
-			"latestOperatorInput": map[string]any{
-				"source":  "tui",
-				"content": "start existing created run",
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
-	}
-	if !strings.HasPrefix(item.Run.ID, "run-") ||
-		item.Run.WorkspaceID != workspace.ID ||
-		item.Run.GoalID != goal.ID ||
-		item.Run.DoDID != dod.ID ||
-		item.Run.State != string(common.RunStateActive) {
-		t.Fatalf("activation run = %+v, want generated active run with goal/dod", item.Run)
-	}
-	if item.Snapshot.Workspace.ID != workspace.ID || len(item.Snapshot.Runs) != 1 {
-		t.Fatalf("activation snapshot = %+v, want workspace with one run", item.Snapshot)
-	}
-	compressed := runCompressedContext(t, item.Run)
-	if compressed["version"] != "workorch.compressedContext.v1" || compressed["mode"] != "deterministic_recovery_summary" {
-		t.Fatalf("compressedContext = %+v, want deterministic recovery summary", compressed)
-	}
-	if compressed["runId"] != item.Run.ID || compressed["workspaceId"] != workspace.ID {
-		t.Fatalf("compressedContext identity = %+v, want activation run/workspace", compressed)
-	}
-	blocked := waitRunStateWithBackend(t, "file", dataRoot, item.Run.ID, "blocked_on_decision")
-	if blocked.BlockingTicketID == "" {
-		t.Fatalf("run = %+v, want provider decision ticket", blocked)
-	}
-	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
-		return len(snapshot.Steps) == 1 &&
-			snapshot.Steps[0].Kind == llmcommon.StepKindWorkspaceExecution &&
-			len(snapshot.ToolCalls) == 1 &&
-			len(snapshot.ValidationResults) == 1 &&
-			len(snapshot.RuntimeCheckpoints) > 0
-	})
-	if len(runSnapshot.Steps) != 1 || runSnapshot.Steps[0].Kind != llmcommon.StepKindWorkspaceExecution {
-		t.Fatalf("steps = %+v, want first llm workspace execution step", runSnapshot.Steps)
-	}
-	stepContext, _ := runSnapshot.Steps[0].Input["executionContext"].(map[string]any)
-	if _, ok := stepContext["compressedContext"].(map[string]any); !ok {
-		t.Fatalf("first step input = %+v, want compressed execution context propagated", runSnapshot.Steps[0].Input)
-	}
-	if stage, _ := runSnapshot.Steps[0].Output["stage"].(string); stage != "llm_provider_unavailable" {
-		t.Fatalf("step output = %+v, want llm provider unavailable stage", runSnapshot.Steps[0].Output)
-	}
-	if len(runSnapshot.ToolCalls) != 1 || runSnapshot.ToolCalls[0].State != "failed" {
-		t.Fatalf("toolCalls = %+v, want failed runtime evidence", runSnapshot.ToolCalls)
-	}
-	if len(runSnapshot.ValidationResults) != 1 || runSnapshot.ValidationResults[0].State != "failed" {
-		t.Fatalf("validationResults = %+v, want failed runtime evidence", runSnapshot.ValidationResults)
-	}
-	if len(runSnapshot.RuntimeCheckpoints) == 0 {
-		t.Fatalf("runtimeCheckpoints empty, want runtime checkpoints")
-	}
-	if len(runSnapshot.Patches) != 0 {
-		t.Fatalf("patches = %+v, want no patch evidence until a real patch is applied", runSnapshot.Patches)
-	}
-}
-
 func TestActivationObservableRunState(t *testing.T) {
 	for _, state := range []common.RunState{
 		common.RunStateActive,
@@ -1050,21 +1028,17 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestGoalAndDoDDefinitions(t 
 	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != string(common.RunStateActive) {
 		t.Fatalf("activation run = %+v, want latest goal/dod active", item.Run)
 	}
-	if item.Run.ExecutionContext["goalId"] != secondGoal.ID {
-		t.Fatalf("executionContext goalId = %+v, want latest goal", item.Run.ExecutionContext["goalId"])
+	ownerRun := runtimeV2OwnerRunWithBackend(t, context.Background(), "file", dataRoot, workspace.ID, item.Run.ID)
+	definition := ownerRun.RuntimeBootstrap.Definition
+	if string(definition.GoalID) != secondGoal.ID || string(definition.DoDID) != secondDoD.ID {
+		t.Fatalf("runtime definition = %+v, want latest goal/dod", definition)
 	}
-	if item.Run.ExecutionContext["doDId"] != secondDoD.ID {
-		t.Fatalf("executionContext doDId = %+v, want latest dod", item.Run.ExecutionContext["doDId"])
-	}
-	goalContext, _ := item.Run.ExecutionContext["goal"].(map[string]any)
-	goalText, _ := goalContext["text"].(string)
+	goalText := definition.GoalDefinition
 	if !strings.Contains(goalText, "first activation goal") || !strings.Contains(goalText, "second activation goal") {
 		t.Fatalf("effective goal text = %q, want cumulative workspace goals", goalText)
 	}
-	dodContext, _ := item.Run.ExecutionContext["dod"].(map[string]any)
-	dodItems, _ := dodContext["items"].([]string)
-	if !stringSliceContains(dodItems, "first activation dod") || !stringSliceContains(dodItems, "second activation dod") {
-		t.Fatalf("effective dod items = %+v, want cumulative workspace dods", dodItems)
+	if !strings.Contains(definition.DoDDefinition, "first activation dod") || !strings.Contains(definition.DoDDefinition, "second activation dod") {
+		t.Fatalf("effective dod definition = %q, want cumulative workspace dods", definition.DoDDefinition)
 	}
 
 	item, err = ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
@@ -1128,533 +1102,41 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestDefinitionRevisionWithou
 	if item.Run.DefinitionRevision != "goal:"+updatedGoal.ID+"|dod:"+updatedDoD.ID {
 		t.Fatalf("activation run definitionRevision = %q, want latest definition revision", item.Run.DefinitionRevision)
 	}
-	revision, _ := item.Run.ExecutionContext["definitionRevision"].(map[string]any)
-	if revision["effectiveGoalId"] != updatedGoal.ID || revision["effectiveDoDId"] != updatedDoD.ID {
-		t.Fatalf("execution definitionRevision = %+v, want latest goal/dod", revision)
+	ownerRun := runtimeV2OwnerRunWithBackend(t, context.Background(), "file", dataRoot, workspace.ID, item.Run.ID)
+	definition := ownerRun.RuntimeBootstrap.Definition
+	if string(definition.GoalID) != updatedGoal.ID || string(definition.DoDID) != updatedDoD.ID {
+		t.Fatalf("runtime definition = %+v, want latest goal/dod", definition)
 	}
-	goalContext, _ := item.Run.ExecutionContext["goal"].(map[string]any)
-	if text, _ := goalContext["text"].(string); text != "- first activation goal revised" {
-		t.Fatalf("effective goal text = %q, want revised canonical goal only", text)
+	if definition.GoalDefinition != "- first activation goal revised" {
+		t.Fatalf("effective goal text = %q, want revised canonical goal only", definition.GoalDefinition)
 	}
-	dodContext, _ := item.Run.ExecutionContext["dod"].(map[string]any)
-	dodItems, _ := dodContext["items"].([]string)
-	if len(dodItems) != 1 || !stringSliceContains(dodItems, "first activation dod revised") {
-		t.Fatalf("effective dod items = %+v, want revised canonical dod only", dodItems)
+	if !strings.Contains(definition.DoDDefinition, "first activation dod revised") {
+		t.Fatalf("effective dod definition = %q, want revised canonical dod only", definition.DoDDefinition)
 	}
-	impact, _ := item.Run.ExecutionContext["definitionChangeImpact"].(map[string]any)
-	if len(impact) == 0 {
+	impact := definition.ChangeImpact
+	if impact == nil {
 		t.Fatalf("definitionChangeImpact missing")
 	}
-	goalChange, _ := impact["goalChange"].(map[string]any)
-	doDChange, _ := impact["doDChange"].(map[string]any)
-	if goalChange["effectiveGoalId"] != updatedGoal.ID || doDChange["effectiveDoDId"] != updatedDoD.ID {
+	goalChange := impact.GoalChange
+	doDChange := impact.DoDChange
+	if goalChange.EffectiveDefinitionID != updatedGoal.ID || doDChange.EffectiveDefinitionID != updatedDoD.ID {
 		t.Fatalf("definitionChangeImpact = %+v, want revised effective goal/dod", impact)
 	}
-	if got := runtimecore.StringSliceFromAny(goalChange["allGoalIds"]); len(got) != 1 || got[0] != updatedGoal.ID {
+	if got := goalChange.AllDefinitionIDs; len(got) != 1 || got[0] != updatedGoal.ID {
 		t.Fatalf("allGoalIds = %+v, want canonical revised Goal only", got)
 	}
-	if got := runtimecore.StringSliceFromAny(doDChange["allDoDIds"]); len(got) != 1 || got[0] != updatedDoD.ID {
+	if got := doDChange.AllDefinitionIDs; len(got) != 1 || got[0] != updatedDoD.ID {
 		t.Fatalf("allDoDIds = %+v, want canonical revised DoD only", got)
 	}
-	if goalChange["changedInPlace"] != true || doDChange["changedInPlace"] != true {
+	if !goalChange.ChangedInPlace || !doDChange.ChangedInPlace {
 		t.Fatalf("definitionChangeImpact = %+v, want changedInPlace for updated definitions", impact)
 	}
-	if len(contextMapSliceFromValue(t, goalChange["definitionRevisions"])) != 1 || len(contextMapSliceFromValue(t, doDChange["definitionRevisions"])) != 1 {
+	if len(goalChange.DefinitionRevisions) != 1 || len(doDChange.DefinitionRevisions) != 1 {
 		t.Fatalf("definitionChangeImpact = %+v, want one goal and one DoD revision record", impact)
 	}
 }
 
-func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T) {
-	useUnavailableLLMProvider(t)
-	ctx := context.Background()
-	dataRoot := t.TempDir()
-	cleanupSharedBackendSession(t, "file", dataRoot)
-	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-context", "activation context workspace", "", "workspaces/activation-context")
-	if err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "activation context goal")
-	if err != nil {
-		t.Fatalf("DefineGoalWithBackend: %v", err)
-	}
-	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"activation context dod"})
-	if err != nil {
-		t.Fatalf("DefineDoDWithBackend: %v", err)
-	}
-	if _, err := CreateMCPServerWithBackend(ctx, "file", dataRoot, CreateMCPServerCommand{
-		ID:           "mcp-activation-context",
-		Name:         "Activation Context MCP",
-		Transport:    "stdio",
-		Command:      "repo-context",
-		Args:         []string{"--stdio"},
-		Env:          map[string]string{"LSP_BRIDGE_CONFIG": "/secret/workspace/mcp-config.json", "EMPTY_VALUE": ""},
-		Enabled:      true,
-		AllowedTools: []string{"repo.summary"},
-	}); err != nil {
-		t.Fatalf("CreateMCPServerWithBackend: %v", err)
-	}
-	if _, err := CreateSkillWithBackend(ctx, "file", dataRoot, CreateSkillCommand{
-		ID:                    "skill-activation-context",
-		Name:                  "Activation Context Skill",
-		Version:               "1.0.0",
-		Instruction:           "Use local repository evidence.",
-		RequiredToolKinds:     []string{"shell/command"},
-		RequiredMCPServerRefs: []string{"mcp-activation-context"},
-	}); err != nil {
-		t.Fatalf("CreateSkillWithBackend: %v", err)
-	}
-	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
-		ID:                    "soul-activation-context",
-		Name:                  "Activation Context Soul",
-		SoulMD:                "# Activation Context Soul\n\nExecute workspace goals with evidence.\n",
-		AllowedSkillRefs:      []string{"skill-activation-context"},
-		AllowedMCPServerRefs:  []string{"mcp-activation-context"},
-		AllowedCapabilityRefs: []string{"mcp-activation-context:tool:repo.summary"},
-		AllowedToolKinds:      []string{"shell/command"},
-	}); err != nil {
-		t.Fatalf("CreateSoulWithBackend: %v", err)
-	}
-	memory, err := CreateMemoryItemWithBackend(ctx, "file", dataRoot, workspace.ID, CreateMemoryItemCommand{
-		MemoryID:   "memory-activation-context",
-		SourceType: memorycommon.MemorySourceUser,
-		MemoryType: memorycommon.MemoryTypeProjectContext,
-		Summary:    "workspace should use LLM activation context",
-		Content:    "Use selected soul, skill, MCP server, and memory as planning context.",
-	})
-	if err != nil {
-		t.Fatalf("CreateMemoryItemWithBackend: %v", err)
-	}
-
-	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
-		GoalID:         goal.ID,
-		DoDID:          dod.ID,
-		SoulID:         "soul-activation-context",
-		SkillIDs:       []string{"skill-activation-context"},
-		MCPServerIDs:   []string{"mcp-activation-context"},
-		CapabilityIDs:  []string{"mcp-activation-context:tool:repo.summary"},
-		MemoryIDs:      []string{memory.ID},
-		LLMProviderID:  "selected-runtime-provider",
-		DialogLanguage: "zh-CN",
-		Priority:       7,
-	})
-	if err != nil {
-		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
-	}
-	if item.Run.Priority != 7 {
-		t.Fatalf("run priority = %d, want 7", item.Run.Priority)
-	}
-	executionContext := item.Run.ExecutionContext
-	if executionContext["soulId"] != "soul-activation-context" {
-		t.Fatalf("executionContext = %+v, want selected soul", executionContext)
-	}
-	if executionContext[llmcommon.ExecutionContextLLMProviderID] != nil {
-		t.Fatalf("executionContext = %+v, want no persisted llm provider binding", executionContext)
-	}
-	if executionContext["dialogLanguage"] != "zh-CN" {
-		t.Fatalf("executionContext = %+v, want dialog language", executionContext)
-	}
-	goalContext, _ := executionContext["goal"].(map[string]any)
-	if goalContext["text"] != "- activation context goal" {
-		t.Fatalf("goal context = %+v, want goal text", executionContext["goal"])
-	}
-	dodContext, _ := executionContext["dod"].(map[string]any)
-	if !contextStringSliceContains(dodContext["items"], "activation context dod") {
-		t.Fatalf("dod context = %+v, want DoD items", executionContext["dod"])
-	}
-	if !contextStringSliceContains(executionContext["skillIds"], "skill-activation-context") {
-		t.Fatalf("skillIds = %+v, want selected skill", executionContext["skillIds"])
-	}
-	if !contextStringSliceContains(executionContext["mcpServerIds"], "mcp-activation-context") {
-		t.Fatalf("mcpServerIds = %+v, want selected MCP server", executionContext["mcpServerIds"])
-	}
-	mcpServers := contextMapSliceFromValue(t, executionContext["mcpServers"])
-	if len(mcpServers) != 1 {
-		t.Fatalf("mcpServers = %+v, want selected MCP server context", executionContext["mcpServers"])
-	}
-	if mcpServers[0]["command"] != "repo-context" {
-		t.Fatalf("mcp server context = %+v, want command", mcpServers[0])
-	}
-	envContext, _ := mcpServers[0]["env"].(map[string]any)
-	if fmt.Sprint(envContext["LSP_BRIDGE_CONFIG"]) == "/secret/workspace/mcp-config.json" ||
-		!strings.Contains(fmt.Sprint(envContext["LSP_BRIDGE_CONFIG"]), "redacted") {
-		t.Fatalf("mcp server env context = %+v, want redacted secret value", envContext)
-	}
-	if fmt.Sprint(envContext["EMPTY_VALUE"]) == "redacted" {
-		t.Fatalf("mcp server env context = %+v, want empty value not marked redacted", envContext)
-	}
-	if !contextStringSliceContains(executionContext["capabilityIds"], "mcp-activation-context:tool:repo.summary") {
-		t.Fatalf("capabilityIds = %+v, want selected MCP capability", executionContext["capabilityIds"])
-	}
-	if !contextStringSliceContains(executionContext["memoryIds"], memory.ID) {
-		t.Fatalf("memoryIds = %+v, want selected memory", executionContext["memoryIds"])
-	}
-
-	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
-		if len(snapshot.Steps) == 0 {
-			return false
-		}
-		stepContext, _ := snapshot.Steps[0].Input["executionContext"].(map[string]any)
-		return stepContext["soulId"] == "soul-activation-context" &&
-			snapshot.Steps[0].Input[llmcommon.ExecutionContextLLMProviderID] == "selected-runtime-provider"
-	})
-	stepContext, _ := runSnapshot.Steps[0].Input["executionContext"].(map[string]any)
-	if stepContext["soulId"] != "soul-activation-context" {
-		t.Fatalf("first step input = %+v, want execution context propagated", runSnapshot.Steps[0].Input)
-	}
-	if stepContext[llmcommon.ExecutionContextLLMProviderID] != nil {
-		t.Fatalf("first step input = %+v, want no persisted llm provider binding", runSnapshot.Steps[0].Input)
-	}
-	if runSnapshot.Steps[0].Input[llmcommon.ExecutionContextLLMProviderID] != "selected-runtime-provider" {
-		t.Fatalf("first step input = %+v, want runtime-only llm provider binding", runSnapshot.Steps[0].Input)
-	}
-	if stepContext["dialogLanguage"] != "zh-CN" {
-		t.Fatalf("first step input = %+v, want dialog language propagated", runSnapshot.Steps[0].Input)
-	}
-}
-
-func TestActivateWorkspaceExecutionWithBackendCarriesResolvedDecisionHistory(t *testing.T) {
-	useUnavailableLLMProvider(t)
-	ctx := context.Background()
-	dataRoot := t.TempDir()
-	cleanupSharedBackendSession(t, "file", dataRoot)
-	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-governance-history", "activation governance history", "", "workspaces/activation-governance-history")
-	if err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "build a new proxy project")
-	if err != nil {
-		t.Fatalf("DefineGoalWithBackend: %v", err)
-	}
-	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"proxy project is implemented"})
-	if err != nil {
-		t.Fatalf("DefineDoDWithBackend: %v", err)
-	}
-
-	session, err := newRuntimeSessionWithBackend(ctx, "file", dataRoot)
-	if err != nil {
-		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
-	}
-	exports, err := testSessionExports(session)
-	if err != nil {
-		t.Fatalf("session exports: %v", err)
-	}
-	priorRunID := common.RunID("run-prior-governance-history")
-	priorTicketID := common.TicketID("ticket-prior-governance-history")
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
-		ID:          priorRunID,
-		WorkspaceID: common.WorkspaceID(workspace.ID),
-		GoalID:      common.GoalID(goal.ID),
-		DoDID:       common.DoDID(dod.ID),
-		State:       common.RunStateFailed,
-	}); err != nil {
-		t.Fatalf("create prior run: %v", err)
-	}
-	if err := exports.Repositories.Tickets.Create(ctx, &decisionmodel.Ticket{
-		ID:           priorTicketID,
-		WorkspaceID:  common.WorkspaceID(workspace.ID),
-		RunID:        priorRunID,
-		StepID:       "run-prior-governance-history/step-1",
-		Reason:       "workspace is empty",
-		DecisionKind: "provide_missing_info",
-		Question:     "Should we start from scratch?",
-		State:        common.DecisionTicketStateResolved,
-	}); err != nil {
-		t.Fatalf("create prior ticket: %v", err)
-	}
-	if err := exports.Repositories.Resolutions.Create(ctx, &decisionmodel.Resolution{
-		ID:       "resolution-prior-governance-history",
-		TicketID: priorTicketID,
-		Type:     "provide_missing_info",
-		Payload: map[string]any{
-			"resumeInstruction": "Start from scratch and implement the MVP artifacts in this workspace.",
-		},
-	}); err != nil {
-		t.Fatalf("create prior resolution: %v", err)
-	}
-	_ = session.Close(ctx)
-
-	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
-		GoalID: goal.ID,
-		DoDID:  dod.ID,
-	})
-	if err != nil {
-		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
-	}
-	history := contextMapSliceFromValue(t, item.Run.ExecutionContext["governanceHistory"])
-	if len(history) != 1 {
-		t.Fatalf("governanceHistory = %#v, want one resolved decision", item.Run.ExecutionContext["governanceHistory"])
-	}
-	if history[0]["ticketId"] != string(priorTicketID) || history[0]["resolutionType"] != "provide_missing_info" {
-		t.Fatalf("governanceHistory[0] = %+v, want prior resolved ticket", history[0])
-	}
-	payload := contextMapFromValue(t, history[0]["resolutionPayload"])
-	if payload["resumeInstruction"] != "Start from scratch and implement the MVP artifacts in this workspace." {
-		t.Fatalf("resolutionPayload = %+v, want resume instruction", payload)
-	}
-	_ = waitRunStateWithBackend(t, "file", dataRoot, item.Run.ID, "blocked_on_decision")
-	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
-		return len(snapshot.Steps) > 0
-	})
-	stepContext := contextMapFromValue(t, runSnapshot.Steps[0].Input["executionContext"])
-	if len(contextMapSliceFromValue(t, stepContext["governanceHistory"])) != 1 {
-		t.Fatalf("first step input = %+v, want governance history propagated", runSnapshot.Steps[0].Input)
-	}
-}
-
-func TestActivateWorkspaceExecutionWithBackendPromotesResolvedReplanHistoryToContinuation(t *testing.T) {
-	useUnavailableLLMProvider(t)
-	ctx := context.Background()
-	dataRoot := t.TempDir()
-	cleanupSharedBackendSession(t, "file", dataRoot)
-	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-replan-continuation", "activation replan continuation", "", "workspaces/activation-replan-continuation")
-	if err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "produce a state-changing deliverable")
-	if err != nil {
-		t.Fatalf("DefineGoalWithBackend: %v", err)
-	}
-	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"deliverable state changed"})
-	if err != nil {
-		t.Fatalf("DefineDoDWithBackend: %v", err)
-	}
-
-	session, err := newRuntimeSessionWithBackend(ctx, "file", dataRoot)
-	if err != nil {
-		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
-	}
-	exports, err := testSessionExports(session)
-	if err != nil {
-		t.Fatalf("session exports: %v", err)
-	}
-	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
-	if err != nil {
-		t.Fatalf("get workspace: %v", err)
-	}
-	workspaceItem.ContextHints = map[string]any{"stateChangePolicy": "must_produce_state_change"}
-	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
-		t.Fatalf("update workspace context hints: %v", err)
-	}
-	priorRunID := common.RunID("run-prior-replan-continuation")
-	priorTicketID := common.TicketID("ticket-prior-replan-continuation")
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
-		ID:          priorRunID,
-		WorkspaceID: common.WorkspaceID(workspace.ID),
-		GoalID:      common.GoalID(goal.ID),
-		DoDID:       common.DoDID(dod.ID),
-		State:       common.RunStateFailed,
-	}); err != nil {
-		t.Fatalf("create prior run: %v", err)
-	}
-	if err := exports.Repositories.Tickets.Create(ctx, &decisionmodel.Ticket{
-		ID:           priorTicketID,
-		WorkspaceID:  common.WorkspaceID(workspace.ID),
-		RunID:        priorRunID,
-		StepID:       "run-prior-replan-continuation/repair-003-of-planning-001",
-		Reason:       "runtime repair attempts exhausted",
-		DecisionKind: "provide_missing_info",
-		Question:     "Choose recovery strategy",
-		State:        common.DecisionTicketStateResolved,
-		Context: map[string]any{
-			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyRepairPlan,
-			"failureClass":                          "runtime_failed",
-			"failureSignature":                      "class=runtime_failed|kind=llm/workspace_execution|failureTargets=target-a",
-			"failureTargetScope":                    "target-a",
-			"failedStepOutput":                      map[string]any{"error": "state-changing output was not produced"},
-			llmcommon.ExecutionContextLLMProviderID: "must-not-persist",
-		},
-	}); err != nil {
-		t.Fatalf("create prior ticket: %v", err)
-	}
-	if err := exports.Repositories.Resolutions.Create(ctx, &decisionmodel.Resolution{
-		ID:       "resolution-prior-replan-continuation",
-		TicketID: priorTicketID,
-		Type:     "replan",
-		Payload: map[string]any{
-			"recoveryAction":                        "replan",
-			llmcommon.ExecutionContextLLMProviderID: "must-not-persist",
-		},
-	}); err != nil {
-		t.Fatalf("create prior resolution: %v", err)
-	}
-	_ = session.Close(ctx)
-
-	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
-		GoalID:        goal.ID,
-		DoDID:         dod.ID,
-		LLMProviderID: "runtime-only-provider",
-	})
-	if err != nil {
-		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
-	}
-	replan := contextMapFromValue(t, item.Run.ExecutionContext["replanContinuation"])
-	if replan["predecessorRunId"] != string(priorRunID) ||
-		replan["ticketId"] != string(priorTicketID) ||
-		replan["reason"] != "resolved_governance_replan" {
-		t.Fatalf("replanContinuation = %+v, want prior replan lineage", replan)
-	}
-	failure := contextMapFromValue(t, replan["failureContext"])
-	if failure["failureClass"] != "runtime_failed" ||
-		failure["failureTargetScope"] != "target-a" ||
-		failure[llmcommon.ExecutionContextLLMProviderID] != nil {
-		t.Fatalf("failureContext = %+v, want neutral failure context without runtime llm binding", failure)
-	}
-	if replan[llmcommon.ExecutionContextLLMProviderID] != nil {
-		t.Fatalf("replanContinuation = %+v, want no runtime llm binding", replan)
-	}
-	_ = waitRunStateWithBackend(t, "file", dataRoot, item.Run.ID, "blocked_on_decision")
-
-	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
-		return len(snapshot.Steps) == 1
-	})
-	step := runSnapshot.Steps[0]
-	if step.Input["runtimeStage"] != "verification" ||
-		step.Input["soulStage"] != "validation" ||
-		step.Input["repairObjective"] != "produce_concrete_validation_evidence" ||
-		step.Input["boundedValidationRequired"] != true ||
-		step.Input["replanStateChangingContinuation"] != nil {
-		t.Fatalf("first step input = %+v, want authority-selected validation with replan lineage downgraded to diagnostics", step.Input)
-	}
-	actionPackage := contextMapFromValue(t, step.Input["repairActionPackage"])
-	requiredOutput := contextMapFromValue(t, actionPackage["requiredOutput"])
-	if actionPackage["evidenceAcquisitionRequired"] != nil ||
-		requiredOutput["mustProduceConcreteValidationEvidence"] != true ||
-		requiredOutput["mustIncludeStateChangingNode"] != false {
-		t.Fatalf("repairActionPackage = %+v, want validation required output from current authority", actionPackage)
-	}
-	stepContext := contextMapFromValue(t, step.Input["executionContext"])
-	if len(contextMapFromValue(t, stepContext["replanContinuation"])) == 0 {
-		t.Fatalf("first step executionContext = %+v, want compact replan continuation", stepContext)
-	}
-	if step.Input[llmcommon.ExecutionContextLLMProviderID] != "runtime-only-provider" {
-		t.Fatalf("first step input = %+v, want runtime-only llm provider binding", step.Input)
-	}
-}
-
-func TestActivationDefinitionChangeSuppressesPriorActionableContinuations(t *testing.T) {
-	useUnavailableLLMProvider(t)
-	ctx := context.Background()
-	dataRoot := t.TempDir()
-	cleanupSharedBackendSession(t, "file", dataRoot)
-	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-definition-change-new-run", "definition change new run", "", "workspaces/definition-change-new-run")
-	if err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "initial goal")
-	if err != nil {
-		t.Fatalf("DefineGoalWithBackend initial: %v", err)
-	}
-	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"initial dod"})
-	if err != nil {
-		t.Fatalf("DefineDoDWithBackend: %v", err)
-	}
-
-	session, err := newRuntimeSessionWithBackend(ctx, "file", dataRoot)
-	if err != nil {
-		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
-	}
-	exports, err := testSessionExports(session)
-	if err != nil {
-		t.Fatalf("session exports: %v", err)
-	}
-	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
-	if err != nil {
-		t.Fatalf("get workspace: %v", err)
-	}
-	workspaceItem.ContextHints = map[string]any{"stateChangePolicy": "must_produce_state_change"}
-	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
-		t.Fatalf("update workspace context hints: %v", err)
-	}
-	priorRunID := common.RunID("run-definition-change-prior")
-	priorTicketID := common.TicketID("ticket-definition-change-prior")
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
-		ID:          priorRunID,
-		WorkspaceID: common.WorkspaceID(workspace.ID),
-		GoalID:      common.GoalID(goal.ID),
-		DoDID:       common.DoDID(dod.ID),
-		State:       common.RunStateFailed,
-	}); err != nil {
-		t.Fatalf("create prior run: %v", err)
-	}
-	if err := exports.Repositories.Tickets.Create(ctx, &decisionmodel.Ticket{
-		ID:           priorTicketID,
-		WorkspaceID:  common.WorkspaceID(workspace.ID),
-		RunID:        priorRunID,
-		StepID:       "run-definition-change-prior/repair-001",
-		Reason:       "prior repair exhausted",
-		DecisionKind: "provide_missing_info",
-		Question:     "Choose recovery strategy",
-		State:        common.DecisionTicketStateResolved,
-		Context: map[string]any{
-			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyRepairPlan,
-			"failureClass":       "runtime_failed",
-			"failureSignature":   "class=runtime_failed|kind=llm/workspace_execution|failureTargets=old-target",
-			"failureTargetScope": "old-target",
-			"failedStepOutput":   map[string]any{"error": "old target failed"},
-		},
-	}); err != nil {
-		t.Fatalf("create prior ticket: %v", err)
-	}
-	if err := exports.Repositories.Resolutions.Create(ctx, &decisionmodel.Resolution{
-		ID:       "resolution-definition-change-prior",
-		TicketID: priorTicketID,
-		Type:     "replan",
-		Payload:  map[string]any{"recoveryAction": "replan"},
-	}); err != nil {
-		t.Fatalf("create prior resolution: %v", err)
-	}
-	if _, err := UpdateGoalWithSession(ctx, session, goal.ID, "initial goal\nnew requirement added through tui goal command"); err != nil {
-		t.Fatalf("UpdateGoalWithSession: %v", err)
-	}
-	_ = session.Close(ctx)
-
-	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
-		GoalID: goal.ID,
-		DoDID:  dod.ID,
-	})
-	if err != nil {
-		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
-	}
-	if len(contextMapSliceFromValue(t, item.Run.ExecutionContext["governanceHistory"])) != 1 {
-		t.Fatalf("governanceHistory = %#v, want prior governance retained as history", item.Run.ExecutionContext["governanceHistory"])
-	}
-	if replan := contextMapFromValue(t, item.Run.ExecutionContext["replanContinuation"]); len(replan) != 0 {
-		t.Fatalf("replanContinuation = %+v, want suppressed after definition change", replan)
-	}
-	if rejected := contextMapFromValue(t, item.Run.ExecutionContext["rejectedResultContinuation"]); len(rejected) != 0 {
-		t.Fatalf("rejectedResultContinuation = %+v, want suppressed after definition change", rejected)
-	}
-	impact := contextMapFromValue(t, item.Run.ExecutionContext["definitionChangeImpact"])
-	if impact["changed"] != true {
-		t.Fatalf("definitionChangeImpact = %+v, want changed=true", impact)
-	}
-	if item.Run.ExecutionContext["definitionChangeContinuationPolicy"] != "definition_change_supersedes_prior_actionable_continuation" {
-		t.Fatalf("definitionChangeContinuationPolicy = %v, want supersede policy", item.Run.ExecutionContext["definitionChangeContinuationPolicy"])
-	}
-	_ = waitRunStateWithBackend(t, "file", dataRoot, item.Run.ID, "blocked_on_decision")
-	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
-		return len(snapshot.Steps) == 1
-	})
-	step := runSnapshot.Steps[0]
-	if step.Input["runtimeStage"] != "verification" ||
-		step.Input["soulStage"] != "validation" ||
-		step.Input["repairObjective"] != "produce_concrete_validation_evidence" ||
-		step.Input["boundedValidationRequired"] != true ||
-		step.Input["replanStateChangingContinuation"] == true {
-		t.Fatalf("first step input = %+v, want definition-change run to use current authority without prior continuation", step.Input)
-	}
-	authority := contextMapFromValue(t, step.Input["convergenceAuthority"])
-	nextAction := contextMapFromValue(t, authority["nextAction"])
-	if got := nextAction["kind"]; got != "validate" {
-		t.Fatalf("convergenceAuthority = %+v, want validate next action", step.Input["convergenceAuthority"])
-	}
-	stepContext := contextMapFromValue(t, step.Input["executionContextPackage"])
-	if impact := contextMapFromValue(t, stepContext["definitionChangeImpact"]); impact["changed"] != true {
-		t.Fatalf("step executionContextPackage = %+v, want definition change impact", stepContext)
-	}
-}
-
-func TestBuildWorkspaceExecutionContextInjectsLatestRejectedResultContinuation(t *testing.T) {
+func TestBuildWorkspaceRuntimeActivationInjectsLatestRejectedResultContinuation(t *testing.T) {
 	ctx := context.Background()
 	session, _ := newTestRuntimeSession(t, "memory", "")
 	exports := testRuntimeExports(session.Bootstrap)
@@ -1756,54 +1238,39 @@ func TestBuildWorkspaceExecutionContextInjectsLatestRejectedResultContinuation(t
 		t.Fatalf("create other result: %v", err)
 	}
 
-	contextData, err := buildWorkspaceExecutionContextWithDefinitions(ctx, session, workspace, goal, dod, ActivateWorkspaceExecutionCommand{
+	build, err := buildWorkspaceRuntimeActivationWithDefinitions(ctx, session, workspace, goal, dod, ActivateWorkspaceExecutionCommand{
 		LLMProviderID: "runtime-only-provider",
-		ExecutionContextPatch: map[string]any{
-			"rejectedResultContinuation": map[string]any{"resultId": "operator-override"},
-		},
 	})
 	if err != nil {
-		t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
+		t.Fatalf("buildWorkspaceRuntimeActivationWithDefinitions: %v", err)
 	}
-	continuation := contextMapFromValue(t, contextData["rejectedResultContinuation"])
-	if continuation["resultId"] != "run-latest/result/dod-assessment" ||
-		continuation["predecessorRunId"] != "run-latest" ||
-		continuation["resultState"] != "rejected" ||
-		continuation[llmcommon.ExecutionContextLLMProviderID] != nil {
+	continuation := build.RuntimeActivation.Continuation.RejectedResult
+	if continuation == nil || continuation.ResultID != "run-latest/result/dod-assessment" ||
+		continuation.PredecessorRunID != "run-latest" ||
+		continuation.ResultState != common.ResultStateRejected {
 		t.Fatalf("rejectedResultContinuation = %+v, want latest neutral rejected result without runtime llm binding", continuation)
 	}
-	satisfied := contextMapSliceFromValue(t, continuation["satisfiedDoDItems"])
-	if len(satisfied) != 1 || satisfied[0]["item"] != "completed DoD" {
-		t.Fatalf("satisfiedDoDItems = %+v, want completed DoD", satisfied)
+	if len(continuation.SatisfiedDoDItems) != 1 || continuation.SatisfiedDoDItems[0].Item != "completed DoD" {
+		t.Fatalf("satisfiedDoDItems = %+v, want completed DoD", continuation.SatisfiedDoDItems)
 	}
-	unsatisfied := contextMapSliceFromValue(t, continuation["unsatisfiedDoDItems"])
-	if len(unsatisfied) != 1 || unsatisfied[0]["item"] != "missing DoD" || unsatisfied[0]["reason"] != "missing neutral evidence" {
-		t.Fatalf("unsatisfiedDoDItems = %+v, want missing DoD reason", unsatisfied)
+	if len(continuation.UnsatisfiedDoDItems) != 1 || continuation.UnsatisfiedDoDItems[0].Item != "missing DoD" || continuation.UnsatisfiedDoDItems[0].Reason != "missing neutral evidence" {
+		t.Fatalf("unsatisfiedDoDItems = %+v, want missing DoD reason", continuation.UnsatisfiedDoDItems)
 	}
-	diagnostics := contextMapFromValue(t, continuation["diagnostics"])
-	if diagnostics["gateFailureReason"] == nil {
-		t.Fatalf("diagnostics = %+v, want gate failure reason propagated", diagnostics)
+	if continuation.GateFailureReason == "" {
+		t.Fatalf("gateFailureReason = %q, want propagated", continuation.GateFailureReason)
 	}
-	gaps := contextMapFromValue(t, continuation["coverageGaps"])
-	missingGoal := contextMapSliceFromValue(t, gaps["missingGoalCoverage"])
-	if len(missingGoal) != 1 || missingGoal[0]["id"] != "goal-1" {
-		t.Fatalf("missingGoalCoverage = %+v, want only failed goal item", missingGoal)
+	gapIDs := map[string]string{}
+	for _, gap := range continuation.CoverageGaps {
+		gapIDs[gap.Scope] = gap.ID
 	}
-	missingAcceptance := contextMapSliceFromValue(t, gaps["missingAcceptanceDimensions"])
-	if len(missingAcceptance) != 1 || missingAcceptance[0]["id"] != "neutral_dimension" {
-		t.Fatalf("missingAcceptanceDimensions = %+v, want satisfied-without-evidence gap", missingAcceptance)
+	if gapIDs["goal"] != "goal-1" || gapIDs["acceptance"] != "neutral_dimension" || gapIDs["deliverable"] != "required_deliverable" {
+		t.Fatalf("coverageGaps = %+v, want typed goal/acceptance/deliverable gaps", continuation.CoverageGaps)
 	}
-	missingDeliverable := contextMapSliceFromValue(t, gaps["missingDeliverableCoverage"])
-	if len(missingDeliverable) != 1 || missingDeliverable[0]["id"] != "required_deliverable" {
-		t.Fatalf("missingDeliverableCoverage = %+v, want satisfied-without-ref gap", missingDeliverable)
+	if len(continuation.RequiredEvidence) != 3 {
+		t.Fatalf("requiredEvidence = %#v, want next actions, residual risks, known limitations", continuation.RequiredEvidence)
 	}
-	requiredEvidence, ok := continuation["requiredEvidence"].([]any)
-	if !ok || len(requiredEvidence) != 3 {
-		t.Fatalf("requiredEvidence = %#v, want next actions, residual risks, known limitations", continuation["requiredEvidence"])
-	}
-	refs, ok := continuation["resultEvidenceRefs"].([]any)
-	if !ok || len(refs) != 1 || refs[0] != "run-latest/assessment" {
-		t.Fatalf("resultEvidenceRefs = %#v, want compact unique refs", continuation["resultEvidenceRefs"])
+	if len(continuation.EvidenceRefs) != 2 || continuation.EvidenceRefs[0] != "run-latest/assessment" || continuation.EvidenceRefs[1] != "run-latest/summary-evidence" {
+		t.Fatalf("evidenceRefs = %#v, want compact unique result and summary refs", continuation.EvidenceRefs)
 	}
 }
 
@@ -1902,8 +1369,8 @@ func TestActivationContextUsesSelectedGoalAndDoDWithoutReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("activationports.SelectWorkspaceExecutionDefinitions: %v", err)
 	}
-	if _, err := buildWorkspaceExecutionContextWithDefinitions(ctx, borrowed, workspace, selectedGoal, selectedDoD, ActivateWorkspaceExecutionCommand{}); err != nil {
-		t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
+	if _, err := buildWorkspaceRuntimeActivationWithDefinitions(ctx, borrowed, workspace, selectedGoal, selectedDoD, ActivateWorkspaceExecutionCommand{}); err != nil {
+		t.Fatalf("buildWorkspaceRuntimeActivationWithDefinitions: %v", err)
 	}
 	if countingHub.Count(workspaceevents.TopicWorkspaceCommandListGoalsByWS) != 2 || countingHub.Count(workspaceevents.TopicWorkspaceCommandListDoDsByWS) != 2 {
 		t.Fatalf("definition list commands goals=%d dods=%d, want selection plus effective definition lists",
@@ -1964,50 +1431,24 @@ func TestActivationContextMergesOperatorInputPatchWithoutOverridingDefinitions(t
 		t.Fatalf("create next dod: %v", err)
 	}
 
-	contextData, err := buildWorkspaceExecutionContextWithDefinitions(ctx, session, workspace, goal, dod, ActivateWorkspaceExecutionCommand{
-		ExecutionContextPatch: map[string]any{
-			"goalId": "malicious-goal-override",
-			"definitionChangeImpact": map[string]any{
-				"changed": false,
-				"policy":  "operator_override",
-			},
-			"operatorInputQueue": []map[string]any{{
-				"source":  "tui",
-				"content": "继续执行并纳入新的对话信息",
-			}},
-			"latestOperatorInput": map[string]any{
-				"source":  "tui",
-				"content": "继续执行并纳入新的对话信息",
-			},
-		},
-	})
+	build, err := buildWorkspaceRuntimeActivationWithDefinitions(ctx, session, workspace, goal, dod, ActivateWorkspaceExecutionCommand{})
 	if err != nil {
-		t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
+		t.Fatalf("buildWorkspaceRuntimeActivationWithDefinitions: %v", err)
 	}
-	if contextData["goalId"] != string(nextGoal.ID) {
-		t.Fatalf("goalId = %v, want protected latest goal", contextData["goalId"])
+	if build.EffectiveGoal == nil || build.EffectiveGoal.ID != nextGoal.ID {
+		t.Fatalf("effective goal = %+v, want protected latest goal", build.EffectiveGoal)
 	}
-	impact := contextMapFromValue(t, contextData["definitionChangeImpact"])
-	if impact["changed"] != true || impact["policy"] != "workspace_goal_dod_cumulative_latest_refines_previous" {
+	impact := build.DefinitionChangeImpact
+	if impact == nil || !impact.Changed || impact.Policy != "workspace_goal_dod_cumulative_latest_refines_previous" {
 		t.Fatalf("definitionChangeImpact = %+v, want runtime-generated cumulative impact", impact)
 	}
-	goalChange := contextMapFromValue(t, impact["goalChange"])
-	previousGoalIDs := runtimecore.StringSliceFromAny(goalChange["previousGoalIds"])
-	if goalChange["effectiveGoalId"] != string(nextGoal.ID) || !stringSliceContains(previousGoalIDs, string(goal.ID)) {
+	goalChange := impact.GoalChange
+	if goalChange.EffectiveDefinitionID != string(nextGoal.ID) || !stringSliceContains(goalChange.PreviousDefinitionIDs, string(goal.ID)) {
 		t.Fatalf("goalChange = %+v, want latest goal with previous goal ids", goalChange)
 	}
-	doDChange := contextMapFromValue(t, impact["doDChange"])
-	previousDoDIDs := runtimecore.StringSliceFromAny(doDChange["previousDoDIds"])
-	if doDChange["effectiveDoDId"] != string(nextDoD.ID) || !stringSliceContains(previousDoDIDs, string(dod.ID)) {
+	doDChange := impact.DoDChange
+	if doDChange.EffectiveDefinitionID != string(nextDoD.ID) || !stringSliceContains(doDChange.PreviousDefinitionIDs, string(dod.ID)) {
 		t.Fatalf("doDChange = %+v, want latest DoD with previous DoD ids", doDChange)
-	}
-	queue, ok := contextData["operatorInputQueue"].([]map[string]any)
-	if !ok || len(queue) != 1 || queue[0]["content"] != "继续执行并纳入新的对话信息" {
-		t.Fatalf("operatorInputQueue = %#v, want merged operator input", contextData["operatorInputQueue"])
-	}
-	latest, ok := contextData["latestOperatorInput"].(map[string]any)
-	if !ok || latest["content"] != "继续执行并纳入新的对话信息" {
-		t.Fatalf("latestOperatorInput = %#v, want merged latest input", contextData["latestOperatorInput"])
 	}
 }
 
@@ -2132,7 +1573,7 @@ func TestActivationResponseReusesRunSnapshotRun(t *testing.T) {
 	}
 }
 
-func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *testing.T) {
+func TestActivateWorkspaceExecutionCreatesRunWithTypedRuntimeBootstrap(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	session, _ := newTestRuntimeSession(t, "memory", "")
@@ -2178,7 +1619,7 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 				DoDID:              cmd.DoDID,
 				DefinitionRevision: cmd.DefinitionRevision,
 				InitialStepKind:    cmd.InitialStepKind,
-				ExecutionContext:   runtimecore.CloneContextMap(cmd.ExecutionContext),
+				RuntimeBootstrap:   cmd.RuntimeBootstrap,
 				State:              common.RunStatePending,
 				Priority:           cmd.Priority,
 			})
@@ -2191,7 +1632,7 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
 	}
 
-	item, err := ActivateWorkspaceExecutionWithSession(ctx, borrowed, string(workspace.ID), ActivateWorkspaceExecutionCommand{Priority: 7})
+	_, err = ActivateWorkspaceExecutionWithSession(ctx, borrowed, string(workspace.ID), ActivateWorkspaceExecutionCommand{Priority: 7})
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithSession: %v", err)
 	}
@@ -2199,15 +1640,8 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 		t.Fatalf("created run events = %d, want one activation run payload", len(createdRuns))
 	}
 	createdRun := createdRuns[0]
-	compressed, ok := createdRun.ExecutionContext["compressedContext"].(map[string]any)
-	if !ok {
-		t.Fatalf("create executionContext = %+v, want inline compressedContext", createdRun.ExecutionContext)
-	}
-	if compressed["runId"] != string(createdRun.ID) ||
-		compressed["runId"] != item.Run.ID ||
-		compressed["workspaceId"] != string(workspace.ID) ||
-		compressed["mode"] != "deterministic_recovery_summary" {
-		t.Fatalf("create compressedContext = %+v, want created activation run identity", compressed)
+	if createdRun.RuntimeBootstrap == nil || createdRun.RuntimeBootstrap.Definition.Revision != "goal:"+string(goal.ID)+"|dod:"+string(dod.ID) {
+		t.Fatalf("created run runtime bootstrap = %+v, want typed bootstrap", createdRun.RuntimeBootstrap)
 	}
 	if createdRun.GoalID != goal.ID || createdRun.DoDID != dod.ID {
 		t.Fatalf("created run goal/dod = %s/%s, want activation definitions", createdRun.GoalID, createdRun.DoDID)
@@ -2219,9 +1653,9 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 		t.Fatalf("create priority = %d, want activation priority", createdRun.Priority)
 	}
 	if len(countingRuns.createRuns) > 0 {
-		runCompressed := runCompressedContext(t, runtimecore.MapRun(countingRuns.createRuns[0]))
-		if runCompressed["runId"] != item.Run.ID || runCompressed["mode"] != "deterministic_recovery_summary" {
-			t.Fatalf("repository create compressedContext = %+v, want created run context", runCompressed)
+		persisted := countingRuns.createRuns[0]
+		if persisted.RuntimeBootstrap == nil || persisted.RuntimeBootstrap.Definition.Revision != createdRun.DefinitionRevision {
+			t.Fatalf("repository create runtime bootstrap = %+v, want typed bootstrap", persisted.RuntimeBootstrap)
 		}
 	}
 }
@@ -2285,7 +1719,7 @@ func TestActivationResponseWorkspaceSnapshotReusesRunSnapshotWorkspace(t *testin
 	}
 }
 
-func TestBuildWorkspaceExecutionContextStartsIndependentReadsConcurrently(t *testing.T) {
+func TestBuildWorkspaceRuntimeActivationStartsIndependentReadsConcurrently(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -2346,7 +1780,7 @@ func TestBuildWorkspaceExecutionContextStartsIndependentReadsConcurrently(t *tes
 	var completed atomic.Bool
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := buildWorkspaceExecutionContextWithDefinitions(ctx, borrowed, workspace, goal, dod, ActivateWorkspaceExecutionCommand{})
+		_, err := buildWorkspaceRuntimeActivationWithDefinitions(ctx, borrowed, workspace, goal, dod, ActivateWorkspaceExecutionCommand{})
 		completed.Store(true)
 		errCh <- err
 	}()
@@ -2367,7 +1801,7 @@ func TestBuildWorkspaceExecutionContextStartsIndependentReadsConcurrently(t *tes
 	select {
 	case err := <-errCh:
 		if err != nil {
-			t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
+			t.Fatalf("buildWorkspaceRuntimeActivationWithDefinitions: %v", err)
 		}
 	case <-ctx.Done():
 		t.Fatalf("activation context did not complete after release: %v", ctx.Err())
@@ -2433,7 +1867,7 @@ func TestActivationContextReadsMCPServersAndCapabilitiesConcurrently(t *testing.
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := buildWorkspaceExecutionContextWithDefinitions(ctx, borrowed, workspace, goal, dod, ActivateWorkspaceExecutionCommand{
+		_, err := buildWorkspaceRuntimeActivationWithDefinitions(ctx, borrowed, workspace, goal, dod, ActivateWorkspaceExecutionCommand{
 			MCPServerIDs:  []string{"mcp-activation-mcp-parallel"},
 			CapabilityIDs: []string{"mcp-activation-mcp-parallel:tool:repo.summary"},
 		})
@@ -2446,7 +1880,7 @@ func TestActivationContextReadsMCPServersAndCapabilitiesConcurrently(t *testing.
 		case name := <-started:
 			seen[name] = true
 		case err := <-errCh:
-			t.Fatalf("buildWorkspaceExecutionContextWithDefinitions returned before both MCP reads started: %v", err)
+			t.Fatalf("buildWorkspaceRuntimeActivationWithDefinitions returned before both MCP reads started: %v", err)
 		case <-ctx.Done():
 			t.Fatalf("started reads = %+v, want mcp-server and mcp-capability before release: %v", seen, ctx.Err())
 		}
@@ -2455,7 +1889,7 @@ func TestActivationContextReadsMCPServersAndCapabilitiesConcurrently(t *testing.
 	select {
 	case err := <-errCh:
 		if err != nil {
-			t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
+			t.Fatalf("buildWorkspaceRuntimeActivationWithDefinitions: %v", err)
 		}
 	case <-ctx.Done():
 		t.Fatalf("activation context did not complete after release: %v", ctx.Err())
@@ -2522,15 +1956,14 @@ func TestWorkspaceSoulBindingsWithBackendRoutesExecutionSoulByStage(t *testing.T
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
-	routing := contextMapFromValue(t, item.Run.ExecutionContext["soulRouting"])
-	if routing["status"] != "resolved" || routing["effectiveDefaultSoulId"] != "soul-default" {
-		t.Fatalf("soulRouting = %+v, want resolved workspace default", routing)
+	activation := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Activation
+	if activation.DefaultSoul == nil || string(activation.DefaultSoul.ID) != "soul-default" {
+		t.Fatalf("runtime activation default soul = %+v, want workspace default", activation.DefaultSoul)
 	}
-	routingBindings := contextMapFromValue(t, routing["bindings"])
-	assertSoulRoutingBinding(t, routingBindings, SoulBindingStagePlanning, "soul-default", "workspace_default")
-	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageExecution, "soul-execution", "workspace_stage_binding")
-	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageDecision, "soul-decision", "workspace_stage_binding")
-	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageValidation, "soul-validation", "run_stage_override")
+	assertRuntimeV2StageSoulBinding(t, activation, SoulBindingStagePlanning, "soul-default", "workspace_default")
+	assertRuntimeV2StageSoulBinding(t, activation, SoulBindingStageExecution, "soul-execution", "workspace_stage_binding")
+	assertRuntimeV2StageSoulBinding(t, activation, SoulBindingStageDecision, "soul-decision", "workspace_stage_binding")
+	assertRuntimeV2StageSoulBinding(t, activation, SoulBindingStageValidation, "soul-validation", "run_stage_override")
 }
 
 func TestActivateWorkspaceExecutionUsesInjectedConfigLoader(t *testing.T) {
@@ -2581,6 +2014,10 @@ func TestActivateWorkspaceExecutionUsesInjectedConfigLoader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
 	}
+	hub, err := borrowed.RequiredCommandHub()
+	if err != nil {
+		t.Fatalf("RequiredCommandHub: %v", err)
+	}
 
 	item, err := ActivateWorkspaceExecutionWithSession(ctx, borrowed, string(workspaceID), ActivateWorkspaceExecutionCommand{
 		GoalID: string(goalID),
@@ -2589,12 +2026,16 @@ func TestActivateWorkspaceExecutionUsesInjectedConfigLoader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithSession: %v", err)
 	}
-	if item.Run.ExecutionContext["dialogLanguage"] != "zh-CN" {
-		t.Fatalf("dialogLanguage = %q, want zh-CN", item.Run.ExecutionContext["dialogLanguage"])
+	ownerRun, err := runports.ReadRun(ctx, hub, common.RunID(item.Run.ID))
+	if err != nil {
+		t.Fatalf("ReadRun: %v", err)
 	}
-	routing := contextMapFromValue(t, item.Run.ExecutionContext["soulRouting"])
-	if routing["effectiveDefaultSoulId"] != "soul-injected-default" {
-		t.Fatalf("soulRouting = %+v, want injected default soul", routing)
+	activation := ownerRun.RuntimeBootstrap.Activation
+	if activation.DialogLanguage != "zh-CN" {
+		t.Fatalf("dialogLanguage = %q, want zh-CN", activation.DialogLanguage)
+	}
+	if activation.DefaultSoul == nil || string(activation.DefaultSoul.ID) != "soul-injected-default" {
+		t.Fatalf("runtime activation default soul = %+v, want injected default soul", activation.DefaultSoul)
 	}
 }
 
@@ -2657,9 +2098,9 @@ func TestActivateWorkspaceExecutionWithBackendAddsWorkspaceBoundEvidencePolicy(t
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
-	policies := contextMapSliceFromValue(t, item.Run.ExecutionContext["evidencePolicies"])
-	if len(policies) != 1 || policies[0]["profile"] != "template-defined" || policies[0]["rule"] != "zero_work_is_inconclusive" {
-		t.Fatalf("evidencePolicies = %+v, want template-bound zero-work policy", item.Run.ExecutionContext["evidencePolicies"])
+	policies := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Activation.EvidencePolicies
+	if len(policies) != 1 || policies[0].Profile != "template-defined" || policies[0].Rule != "zero_work_is_inconclusive" {
+		t.Fatalf("evidencePolicies = %+v, want template-bound zero-work policy", policies)
 	}
 }
 
@@ -2747,27 +2188,25 @@ func TestActivateWorkspaceExecutionWithBackendAddsExecutionContractFromWorkspace
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
-	contract := contextMapFromValue(t, item.Run.ExecutionContext["executionContract"])
-	if contract["stateChangePolicy"] != "must_produce_state_change" {
+	contract := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Activation.ExecutionContract
+	if contract.StateChangePolicy != runtimecontract.RuntimeStateChangeMustProduce {
 		t.Fatalf("executionContract = %+v, want must_produce_state_change", contract)
 	}
-	policies := contextMapSliceFromValue(t, contract["capabilityUsagePolicies"])
-	if len(policies) != 1 || policies[0]["id"] != "software-dev-code-semantics-guidance" {
-		t.Fatalf("capabilityUsagePolicies = %+v, want software-dev code semantics policy", contract["capabilityUsagePolicies"])
+	policies := contract.CapabilityUsagePolicies
+	if len(policies) != 1 || policies[0].ID != "software-dev-code-semantics-guidance" {
+		t.Fatalf("capabilityUsagePolicies = %+v, want software-dev code semantics policy", policies)
 	}
-	profileContracts := contextMapFromValue(t, contract["profileContracts"])
-	softwareDev := contextMapFromValue(t, profileContracts["software-dev"])
-	dimensions := contextMapSliceFromValue(t, softwareDev["acceptanceDimensions"])
-	if len(dimensions) != 1 || dimensions[0]["id"] != "runtime_entrypoint" || dimensions[0]["required"] != true {
+	softwareDev := runtimeV2ProfileContract(t, contract, "software-dev")
+	dimensions := softwareDev.AcceptanceDimensions
+	if len(dimensions) != 1 || dimensions[0].ID != "runtime_entrypoint" || !dimensions[0].Required {
 		t.Fatalf("profile contract dimensions = %+v, want runtime_entrypoint required", dimensions)
 	}
-	stagePolicy := contextMapFromValue(t, contract["templateStagePolicies"])
-	if stagePolicy["schemaVersion"] != "workorch.template_stage_policy.v1" {
+	stagePolicy := contract.TemplateStagePolicy
+	if stagePolicy == nil || stagePolicy.SchemaVersion != "workorch.template_stage_policy.v1" {
 		t.Fatalf("templateStagePolicies = %+v, want schema v1", stagePolicy)
 	}
-	stages := contextMapSliceFromValue(t, stagePolicy["stages"])
-	if len(stages) != 1 || stages[0]["id"] != "execution" {
-		t.Fatalf("templateStagePolicies.stages = %+v, want execution stage", stagePolicy["stages"])
+	if len(stagePolicy.Stages) != 1 || stagePolicy.Stages[0].ID != "execution" {
+		t.Fatalf("templateStagePolicies.stages = %+v, want execution stage", stagePolicy.Stages)
 	}
 }
 
@@ -2847,20 +2286,12 @@ func TestActivateWorkspaceExecutionAppliesTemplateDefaultMCPContext(t *testing.T
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
-	selection := contextMapFromValue(t, item.Run.ExecutionContext["mcpSelection"])
-	assertAnyStringListContains(t, selection["defaultMCPServerIds"], "mcp-template-default")
-	assertAnyStringListContains(t, selection["selectedMCPServerIds"], "mcp-template-default")
-	servers := contextMapSliceFromValue(t, item.Run.ExecutionContext["mcpServers"])
-	if len(servers) != 1 || servers[0]["id"] != "mcp-template-default" {
-		t.Fatalf("mcpServers = %+v, want template default server", servers)
+	activation := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Activation
+	if !runtimeV2HasMCPServer(activation, "mcp-template-default") {
+		t.Fatalf("runtime MCP server IDs = %+v, want template default server", activation.MCPServerIDs)
 	}
-	env := contextMapFromValue(t, servers[0]["env"])
-	config := contextMapFromValue(t, env["CONFIG_PATH"])
-	if config["present"] != true || config["redacted"] != true {
-		t.Fatalf("mcp env context = %+v, want redacted present config", env)
-	}
-	if strings.Contains(fmt.Sprint(servers[0]), workspace.InternalDirectory) {
-		t.Fatalf("mcp server context leaked workspace internal directory: %+v", servers[0])
+	if len(activation.MCPCapabilities) != 1 || string(activation.MCPCapabilities[0].ServerID) != "mcp-template-default" {
+		t.Fatalf("runtime MCP capabilities = %+v, want template default capability", activation.MCPCapabilities)
 	}
 }
 
@@ -2898,15 +2329,9 @@ func TestActivateWorkspaceExecutionDoesNotSelectMCPWithoutTemplateOrWorkspaceDef
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
-	selection := contextMapFromValue(t, item.Run.ExecutionContext["mcpSelection"])
-	for _, key := range []string{"defaultMCPServerIds", "selectedMCPServerIds", "defaultCapabilityIds", "selectedCapabilityIds"} {
-		if contextStringSliceContains(selection[key], "mcp-lsp-bridge") || contextStringSliceContains(selection[key], "mcp-lsp-bridge:tool:lsp_status") {
-			t.Fatalf("mcpSelection %s = %+v, want no implicit LSP bridge selection", key, selection[key])
-		}
-	}
-	servers := contextMapSliceFromValue(t, item.Run.ExecutionContext["mcpServers"])
-	if len(servers) != 0 {
-		t.Fatalf("mcpServers = %+v, want no selected MCP servers", servers)
+	activation := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Activation
+	if len(activation.MCPServerIDs) != 0 || len(activation.MCPCapabilities) != 0 {
+		t.Fatalf("runtime MCP selection = %+v/%+v, want no selected MCP", activation.MCPServerIDs, activation.MCPCapabilities)
 	}
 }
 
@@ -2996,10 +2421,9 @@ func TestActivateWorkspaceExecutionUsesUpdatedTemplateMCPDefaultWhenWorkspaceHas
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
-	selection := contextMapFromValue(t, item.Run.ExecutionContext["mcpSelection"])
-	assertAnyStringListContains(t, selection["defaultMCPServerIds"], "mcp-template-refreshed")
-	if contextStringSliceContains(selection["defaultMCPServerIds"], "mcp-template-original") {
-		t.Fatalf("mcpSelection = %+v, want refreshed template default without stale workspace copy", selection)
+	activation := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Activation
+	if !runtimeV2HasMCPServer(activation, "mcp-template-refreshed") || runtimeV2HasMCPServer(activation, "mcp-template-original") {
+		t.Fatalf("runtime MCP server IDs = %+v, want refreshed template default without stale workspace copy", activation.MCPServerIDs)
 	}
 }
 
@@ -3102,10 +2526,9 @@ func TestActivateWorkspaceExecutionUsesWorkspaceMCPDefaultOverride(t *testing.T)
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
-	selection := contextMapFromValue(t, item.Run.ExecutionContext["mcpSelection"])
-	assertAnyStringListContains(t, selection["defaultMCPServerIds"], "mcp-workspace-override")
-	if contextStringSliceContains(selection["defaultMCPServerIds"], "mcp-template-common") {
-		t.Fatalf("mcpSelection = %+v, want workspace override without template default", selection)
+	activation := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Activation
+	if !runtimeV2HasMCPServer(activation, "mcp-workspace-override") || runtimeV2HasMCPServer(activation, "mcp-template-common") {
+		t.Fatalf("runtime MCP server IDs = %+v, want workspace override without template default", activation.MCPServerIDs)
 	}
 }
 
@@ -3351,61 +2774,15 @@ func TestActivateWorkspaceExecutionWithBackendRefreshesExecutionContractFromMatc
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
 
-	contract := contextMapFromValue(t, item.Run.ExecutionContext["executionContract"])
-	profileContracts := contextMapFromValue(t, contract["profileContracts"])
-	profile := contextMapFromValue(t, profileContracts["neutral-profile"])
-	deliverables := contextMapSliceFromValue(t, profile["deliverableExpectations"])
-	if len(deliverables) != 1 || deliverables[0]["id"] != "source_change" || deliverables[0]["required"] != true {
-		t.Fatalf("deliverableExpectations = %+v, want refreshed required=true contract", profile["deliverableExpectations"])
+	contract := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Activation.ExecutionContract
+	profile := runtimeV2ProfileContract(t, contract, "neutral-profile")
+	deliverables := profile.DeliverableExpectations
+	if len(deliverables) != 1 || deliverables[0].ID != "source_change" || !deliverables[0].Required {
+		t.Fatalf("deliverableExpectations = %+v, want refreshed required=true contract", deliverables)
 	}
-	requirements := contextMapSliceFromValue(t, profile["evidenceRequirements"])
-	if len(requirements) != 1 || requirements[0]["id"] != "state_change_evidence" {
-		t.Fatalf("evidenceRequirements = %+v, want refreshed evidence requirements", profile["evidenceRequirements"])
-	}
-}
-
-func TestActivateSoftwareDevWorkspaceBindsValidationEnvironmentPolicy(t *testing.T) {
-	useUnavailableLLMProvider(t)
-	ctx := context.Background()
-	dataRoot := t.TempDir()
-	cleanupSharedBackendSession(t, "file", dataRoot)
-	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
-		Title:      "software dev validation policy workspace",
-		TemplateID: "software-dev",
-	})
-	if err != nil {
-		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
-	}
-	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "implement a bounded software change")
-	if err != nil {
-		t.Fatalf("DefineGoalWithBackend: %v", err)
-	}
-	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"software validation policy is visible"})
-	if err != nil {
-		t.Fatalf("DefineDoDWithBackend: %v", err)
-	}
-	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
-		GoalID: goal.ID,
-		DoDID:  dod.ID,
-	})
-	if err != nil {
-		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
-	}
-
-	contract := contextMapFromValue(t, item.Run.ExecutionContext["executionContract"])
-	profileContracts := contextMapFromValue(t, contract["profileContracts"])
-	softwareDev := contextMapFromValue(t, profileContracts["software-dev"])
-	policy := contextMapFromValue(t, softwareDev["validationEnvironmentPolicy"])
-	if policy["schemaVersion"] != "workorch.software_dev.validation_environment.v1" ||
-		policy["scratchIsolationRequired"] != true ||
-		policy["boundedForegroundOnly"] != true {
-		t.Fatalf("validationEnvironmentPolicy = %+v, want software-dev validation policy bound into executionContract", policy)
-	}
-	languageProfiles := contextMapFromValue(t, policy["languageProfiles"])
-	goProfile := contextMapFromValue(t, languageProfiles["go"])
-	env := contextMapFromValue(t, goProfile["scratchBuildEnv"])
-	if env["GOFLAGS"] != "-buildvcs=false" {
-		t.Fatalf("go scratchBuildEnv = %+v, want GOFLAGS=-buildvcs=false", env)
+	requirements := profile.EvidenceRequirements
+	if len(requirements) != 1 || requirements[0].ID != "state_change_evidence" {
+		t.Fatalf("evidenceRequirements = %+v, want refreshed evidence requirements", requirements)
 	}
 }
 
@@ -3437,38 +2814,18 @@ func TestActivateGenericGovernedWorkspaceDoesNotInheritSoftwareDevStrategy(t *te
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
 
-	contract := contextMapFromValue(t, item.Run.ExecutionContext["executionContract"])
-	if contract["stateChangePolicy"] != "allowed_but_not_required" {
-		t.Fatalf("generic-governed stateChangePolicy = %v, want neutral allowed_but_not_required", contract["stateChangePolicy"])
+	activation := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Activation
+	contract := activation.ExecutionContract
+	if contract.StateChangePolicy != runtimecontract.RuntimeStateChangeAllowedButNotRequired {
+		t.Fatalf("generic-governed stateChangePolicy = %v, want neutral allowed_but_not_required", contract.StateChangePolicy)
 	}
-	for _, key := range []string{
-		"runtimeRepair",
-		"versionControl",
-		"semanticCodeNavigation",
-		"managedWorkspaceConfigs",
-		"acceptanceSlicePolicy",
-		"capabilityUsagePolicies",
-	} {
-		if _, ok := contract[key]; ok {
-			t.Fatalf("generic-governed executionContract unexpectedly includes software-dev strategy key %q: %+v", key, contract[key])
+	for _, profile := range contract.ProfileContracts {
+		if profile.ID == "software-dev" {
+			t.Fatalf("generic-governed profileContracts unexpectedly include software-dev: %+v", contract.ProfileContracts)
 		}
 	}
-	profileContracts := contextMapFromValue(t, contract["profileContracts"])
-	if _, ok := profileContracts["software-dev"]; ok {
-		t.Fatalf("generic-governed profileContracts unexpectedly include software-dev: %+v", profileContracts)
-	}
-	if policies := contextMapSliceFromValue(t, item.Run.ExecutionContext["evidencePolicies"]); len(policies) != 0 {
-		t.Fatalf("generic-governed evidencePolicies = %+v, want none", policies)
-	}
-	selection := contextMapFromValue(t, item.Run.ExecutionContext["mcpSelection"])
-	for _, key := range []string{"defaultMCPServerIds", "selectedMCPServerIds", "defaultCapabilityIds", "selectedCapabilityIds"} {
-		if contextStringSliceContains(selection[key], "mcp-lsp-bridge") ||
-			contextStringSliceContains(selection[key], "mcp-lsp-bridge:tool:lsp_status") {
-			t.Fatalf("generic-governed mcpSelection %s = %+v, want no software-dev LSP bridge selection", key, selection[key])
-		}
-	}
-	if servers := contextMapSliceFromValue(t, item.Run.ExecutionContext["mcpServers"]); len(servers) != 0 {
-		t.Fatalf("generic-governed mcpServers = %+v, want no selected MCP servers", servers)
+	if len(activation.EvidencePolicies) != 0 || len(activation.MCPServerIDs) != 0 || len(activation.MCPCapabilities) != 0 {
+		t.Fatalf("generic-governed activation = %+v, want no software-dev evidence or MCP defaults", activation)
 	}
 }
 
@@ -3505,16 +2862,12 @@ func TestActivateWorkspaceExecutionWithBackendUsesSystemDefaultSoul(t *testing.T
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
-	if item.Run.ExecutionContext["soulId"] != "soul-system-default" {
-		t.Fatalf("executionContext = %+v, want system default soul id", item.Run.ExecutionContext)
+	activation := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Activation
+	if activation.DefaultSoul == nil || string(activation.DefaultSoul.ID) != "soul-system-default" {
+		t.Fatalf("runtime activation default soul = %+v, want system default soul", activation.DefaultSoul)
 	}
-	routing := contextMapFromValue(t, item.Run.ExecutionContext["soulRouting"])
-	if routing["effectiveDefaultSoulId"] != "soul-system-default" {
-		t.Fatalf("soulRouting = %+v, want system default soul", routing)
-	}
-	routingBindings := contextMapFromValue(t, routing["bindings"])
-	assertSoulRoutingBinding(t, routingBindings, SoulBindingStagePlanning, "soul-system-default", "system_default")
-	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageValidation, "soul-system-default", "system_default")
+	assertRuntimeV2StageSoulBinding(t, activation, SoulBindingStagePlanning, "soul-system-default", "system_default")
+	assertRuntimeV2StageSoulBinding(t, activation, SoulBindingStageValidation, "soul-system-default", "system_default")
 }
 
 func TestActivateWorkspaceExecutionWithBackendDoesNotInjectSystemDefaultSoulWhenStageBindingsExist(t *testing.T) {
@@ -3573,17 +2926,10 @@ func TestActivateWorkspaceExecutionWithBackendDoesNotInjectSystemDefaultSoulWhen
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
-	if item.Run.ExecutionContext["soulId"] != nil || item.Run.ExecutionContext["soul"] != nil {
-		t.Fatalf("executionContext default soul = %v/%v, want no system default top-level soul when stage bindings exist", item.Run.ExecutionContext["soulId"], item.Run.ExecutionContext["soul"])
-	}
-	routing := contextMapFromValue(t, item.Run.ExecutionContext["soulRouting"])
-	if routing["effectiveDefaultSoulId"] != "soul-system-default" {
-		t.Fatalf("soulRouting = %+v, want system default retained for missing-stage fallback metadata", routing)
-	}
-	routingBindings := contextMapFromValue(t, routing["bindings"])
-	assertSoulRoutingBinding(t, routingBindings, SoulBindingStagePlanning, "soul-stage-planning", "workspace_stage_binding")
-	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageExecution, "soul-stage-execution", "workspace_stage_binding")
-	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageValidation, "soul-stage-validation", "workspace_stage_binding")
+	activation := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Activation
+	assertRuntimeV2StageSoulBinding(t, activation, SoulBindingStagePlanning, "soul-stage-planning", "workspace_stage_binding")
+	assertRuntimeV2StageSoulBinding(t, activation, SoulBindingStageExecution, "soul-stage-execution", "workspace_stage_binding")
+	assertRuntimeV2StageSoulBinding(t, activation, SoulBindingStageValidation, "soul-stage-validation", "workspace_stage_binding")
 }
 
 func TestActivateWorkspaceExecutionWithBackendValidatesExecutionSoulOnly(t *testing.T) {
@@ -3645,10 +2991,9 @@ func TestActivateWorkspaceExecutionWithBackendValidatesExecutionSoulOnly(t *test
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
-	routing := contextMapFromValue(t, item.Run.ExecutionContext["soulRouting"])
-	bindings := contextMapFromValue(t, routing["bindings"])
-	assertSoulRoutingBinding(t, bindings, SoulBindingStagePlanning, "soul-stage-planning", "workspace_stage_binding")
-	assertSoulRoutingBinding(t, bindings, SoulBindingStageExecution, "soul-stage-execution", "workspace_stage_binding")
+	activation := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Activation
+	assertRuntimeV2StageSoulBinding(t, activation, SoulBindingStagePlanning, "soul-stage-planning", "workspace_stage_binding")
+	assertRuntimeV2StageSoulBinding(t, activation, SoulBindingStageExecution, "soul-stage-execution", "workspace_stage_binding")
 }
 
 func TestWorkspaceSoulBindingsWithBackendRejectsInvalidBinding(t *testing.T) {
@@ -3718,184 +3063,12 @@ func TestActivateWorkspaceExecutionWithBackendAutoSelectsSkillAndBindsRequiredMC
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
-	executionContext := item.Run.ExecutionContext
-	if !contextStringSliceContains(executionContext["skillIds"], "skill-auto-delivery") {
-		t.Fatalf("skillIds = %+v, want auto selected skill", executionContext["skillIds"])
+	activation := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Activation
+	if !runtimeV2HasSkill(activation, "skill-auto-delivery") {
+		t.Fatalf("runtime skills = %+v, want auto selected skill", activation.Skills)
 	}
-	if !contextStringSliceContains(executionContext["mcpServerIds"], "mcp-auto-skill") {
-		t.Fatalf("mcpServerIds = %+v, want required MCP auto bound", executionContext["mcpServerIds"])
-	}
-	selectionPolicy, selectionStatus := skillSelectionPolicyAndStatus(executionContext["skillSelection"])
-	if selectionPolicy != "goal_dod_auto_match" || selectionStatus != "selected" {
-		t.Fatalf("skillSelection = %+v, want auto selected evidence", executionContext["skillSelection"])
-	}
-	mcpSelection, _ := executionContext["mcpSelection"].(map[string]any)
-	if !contextStringSliceContains(mcpSelection["autoBoundMCPServerIds"], "mcp-auto-skill") {
-		t.Fatalf("mcpSelection = %+v, want auto bound MCP evidence", mcpSelection)
-	}
-}
-
-func TestActivateWorkspaceExecutionWithBackendUsesSemanticMemoryRecall(t *testing.T) {
-	ctx := context.Background()
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/embeddings":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"data":[{"embedding":[1,0,0]}]}`))
-		case "/v1/chat/completions":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"items\":[{\"item\":\"semantic memory selected\",\"state\":\"satisfied\",\"evidenceRefs\":[\"memory-semantic-match\"]}]}}"}}]}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer provider.Close()
-	useActivationLLMConfig(t, provider.URL+"/v1", "local")
-	dataRoot := t.TempDir()
-	cleanupSharedBackendSession(t, "file", dataRoot)
-	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-semantic-memory", "semantic memory workspace", "", "workspaces/activation-semantic-memory")
-	if err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "use semantic project context")
-	if err != nil {
-		t.Fatalf("DefineGoalWithBackend: %v", err)
-	}
-	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"semantic memory selected"})
-	if err != nil {
-		t.Fatalf("DefineDoDWithBackend: %v", err)
-	}
-	if _, err := CreateMemoryItemWithBackend(ctx, "file", dataRoot, workspace.ID, CreateMemoryItemCommand{
-		MemoryID:            "memory-semantic-match",
-		SourceType:          memorycommon.MemorySourceUser,
-		MemoryType:          memorycommon.MemoryTypeProjectContext,
-		Summary:             "matching semantic project context",
-		Content:             "This memory should be retrieved by vector similarity.",
-		EmbeddingProviderID: "local",
-		EmbeddingModel:      "embedding-model",
-		EmbeddingText:       "matching semantic project context",
-		Vector:              []float64{1, 0, 0},
-	}); err != nil {
-		t.Fatalf("CreateMemoryItemWithBackend match: %v", err)
-	}
-	if _, err := CreateMemoryItemWithBackend(ctx, "file", dataRoot, workspace.ID, CreateMemoryItemCommand{
-		MemoryID:            "memory-semantic-other",
-		SourceType:          memorycommon.MemorySourceUser,
-		MemoryType:          memorycommon.MemoryTypeProjectContext,
-		Summary:             "unrelated semantic project context",
-		Content:             "This memory should not pass the vector score threshold.",
-		EmbeddingProviderID: "local",
-		EmbeddingModel:      "embedding-model",
-		EmbeddingText:       "unrelated semantic project context",
-		Vector:              []float64{0, 1, 0},
-	}); err != nil {
-		t.Fatalf("CreateMemoryItemWithBackend other: %v", err)
-	}
-
-	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
-		GoalID: goal.ID,
-		DoDID:  dod.ID,
-	})
-	if err != nil {
-		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
-	}
-	if !contextStringSliceContains(item.Run.ExecutionContext["memoryIds"], "memory-semantic-match") ||
-		contextStringSliceContains(item.Run.ExecutionContext["memoryIds"], "memory-semantic-other") {
-		t.Fatalf("memoryIds = %+v, want only semantic match", item.Run.ExecutionContext["memoryIds"])
-	}
-	retrieval, _ := item.Run.ExecutionContext["memoryRetrieval"].(map[string]any)
-	if retrieval["policy"] != "semantic_vector_search" ||
-		retrieval["status"] != "selected" ||
-		retrieval["providerId"] != "local" ||
-		!contextNumericEquals(retrieval["vectorDimension"], 3) {
-		t.Fatalf("memoryRetrieval = %+v, want semantic evidence", retrieval)
-	}
-	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
-		return memoryRecallTraceBySource(snapshot.MemoryRecallTraces, "step_input") != nil
-	})
-	activationTrace := memoryRecallTraceBySource(runSnapshot.MemoryRecallTraces, "activation")
-	stepInputTrace := memoryRecallTraceBySource(runSnapshot.MemoryRecallTraces, "step_input")
-	if activationTrace == nil ||
-		activationTrace.Status != "selected" ||
-		len(activationTrace.RetrievedMemoryIDs) != 1 ||
-		activationTrace.RetrievedMemoryIDs[0] != "memory-semantic-match" {
-		t.Fatalf("memory recall traces = %+v, want selected activation trace", runSnapshot.MemoryRecallTraces)
-	}
-	if stepInputTrace == nil ||
-		stepInputTrace.Status != "selected" ||
-		stepInputTrace.StepID == "" ||
-		stepInputTrace.Policy != "step_input_dynamic_workspace_memory" ||
-		!memoryRecallTraceContainsID(stepInputTrace, "memory-semantic-match") {
-		t.Fatalf("memory recall traces = %+v, want dynamic step input trace with semantic match refreshed", runSnapshot.MemoryRecallTraces)
-	}
-}
-
-func TestActivateWorkspaceExecutionWithBackendReportsSemanticMemoryDegradation(t *testing.T) {
-	ctx := context.Background()
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"completionState\":\"continue\"}"}}]}`))
-	}))
-	defer provider.Close()
-	useActivationLLMConfig(t, provider.URL+"/v1", "missing-embedding")
-	dataRoot := t.TempDir()
-	cleanupSharedBackendSession(t, "file", dataRoot)
-	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-semantic-degraded", "semantic degradation workspace", "", "workspaces/activation-semantic-degraded")
-	if err != nil {
-		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
-	}
-	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "use semantic memory degradation")
-	if err != nil {
-		t.Fatalf("DefineGoalWithBackend: %v", err)
-	}
-	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"semantic degradation visible"})
-	if err != nil {
-		t.Fatalf("DefineDoDWithBackend: %v", err)
-	}
-	if _, err := CreateMemoryItemWithBackend(ctx, "file", dataRoot, workspace.ID, CreateMemoryItemCommand{
-		MemoryID:   "memory-degraded-fallback-should-not-select",
-		SourceType: memorycommon.MemorySourceUser,
-		MemoryType: memorycommon.MemoryTypeProjectContext,
-		Summary:    "available deterministic fallback",
-		Content:    "Configured semantic recall is degraded, so this must not be silently selected.",
-	}); err != nil {
-		t.Fatalf("CreateMemoryItemWithBackend: %v", err)
-	}
-
-	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
-		GoalID: goal.ID,
-		DoDID:  dod.ID,
-	})
-	if err != nil {
-		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
-	}
-	if item.Run.ExecutionContext["memoryIds"] != nil {
-		t.Fatalf("memoryIds = %+v, want no silent fallback when semantic recall degrades", item.Run.ExecutionContext["memoryIds"])
-	}
-	retrieval, _ := item.Run.ExecutionContext["memoryRetrieval"].(map[string]any)
-	if retrieval["policy"] != "semantic_vector_search" || retrieval["status"] != "degraded" || retrieval["reason"] == "" {
-		t.Fatalf("memoryRetrieval = %+v, want explicit degradation evidence", retrieval)
-	}
-	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
-		return memoryRecallTraceBySource(snapshot.MemoryRecallTraces, "step_input") != nil
-	})
-	activationTrace := memoryRecallTraceBySource(runSnapshot.MemoryRecallTraces, "activation")
-	stepInputTrace := memoryRecallTraceBySource(runSnapshot.MemoryRecallTraces, "step_input")
-	if activationTrace == nil ||
-		activationTrace.Status != "degraded" ||
-		activationTrace.Reason == "" {
-		t.Fatalf("memory recall traces = %+v, want degraded activation trace", runSnapshot.MemoryRecallTraces)
-	}
-	if stepInputTrace == nil ||
-		stepInputTrace.Status != "selected" ||
-		stepInputTrace.StepID == "" ||
-		stepInputTrace.Policy != "step_input_dynamic_workspace_memory" ||
-		!memoryRecallTraceContainsID(stepInputTrace, "memory-degraded-fallback-should-not-select") {
-		t.Fatalf("memory recall traces = %+v, want dynamic step input fallback trace after activation degradation", runSnapshot.MemoryRecallTraces)
+	if !runtimeV2HasMCPServer(activation, "mcp-auto-skill") {
+		t.Fatalf("runtime MCP server IDs = %+v, want required MCP auto bound", activation.MCPServerIDs)
 	}
 }
 
@@ -4152,23 +3325,9 @@ func TestActivateWorkspaceExecutionWithBackendRestartReplacesCreatedActiveRun(t 
 	if err != nil {
 		t.Fatalf("get created run: %v", err)
 	}
-	createdRun.ExecutionContext = map[string]any{
-		"definitionRevision": "stale-restart-definition",
-		"coverageWorkItems": []map[string]any{{
-			"id":                 "cwi-stale-restart",
-			"definitionRevision": "stale-restart-definition",
-			"acceptedEvidenceRefs": []string{
-				"run-activation-restart-created-active/stale-evidence",
-			},
-			"targetText": "stale restart target",
-		}},
-		"gapBaseline": map[string]any{
-			"definitionRevision": "stale-restart-definition",
-			"baselineRevision":   "stale-restart-baseline",
-			"acceptedEvidenceRefs": []string{
-				"run-activation-restart-created-active/stale-evidence",
-			},
-		},
+	createdRun.DefinitionRevision = "stale-restart-definition"
+	if createdRun.RuntimeBootstrap != nil {
+		createdRun.RuntimeBootstrap.Definition.Revision = "stale-restart-definition"
 	}
 	if err := exports.Repositories.Runs.Update(ctx, createdRun); err != nil {
 		t.Fatalf("update created run stale context: %v", err)
@@ -4191,23 +3350,13 @@ func TestActivateWorkspaceExecutionWithBackendRestartReplacesCreatedActiveRun(t 
 	if item.Run.DefinitionRevision != "goal:"+updatedGoal.ID+"|dod:"+updatedDoD.ID {
 		t.Fatalf("replacement definitionRevision = %q, want latest revision", item.Run.DefinitionRevision)
 	}
-	if contextStringSliceContains(item.Run.ExecutionContext["acceptedEvidenceRefs"], "run-activation-restart-created-active/stale-evidence") {
-		t.Fatalf("replacement executionContext acceptedEvidenceRefs reused stale evidence: %+v", item.Run.ExecutionContext)
+	ownerRun := runtimeV2OwnerRunWithBackend(t, context.Background(), "file", dataRoot, workspace.ID, item.Run.ID)
+	if ownerRun.RuntimeBootstrap.Definition.Revision == "stale-restart-definition" {
+		t.Fatalf("replacement runtime definition reused stale revision: %+v", ownerRun.RuntimeBootstrap.Definition)
 	}
-	if items := contextMapSliceFromValue(t, item.Run.ExecutionContext["coverageWorkItems"]); len(items) > 0 {
-		for _, coverageItem := range items {
-			if coverageItem["id"] == "cwi-stale-restart" ||
-				coverageItem["definitionRevision"] == "stale-restart-definition" ||
-				contextStringSliceContains(coverageItem["acceptedEvidenceRefs"], "run-activation-restart-created-active/stale-evidence") {
-				t.Fatalf("replacement coverageWorkItems reused stale old run item: %+v", items)
-			}
-		}
-	}
-	if baseline := contextMapFromValue(t, item.Run.ExecutionContext["gapBaseline"]); len(baseline) > 0 {
-		if baseline["definitionRevision"] == "stale-restart-definition" ||
-			baseline["baselineRevision"] == "stale-restart-baseline" ||
-			contextStringSliceContains(baseline["acceptedEvidenceRefs"], "run-activation-restart-created-active/stale-evidence") {
-			t.Fatalf("replacement gapBaseline reused stale old run baseline: %+v", baseline)
+	for _, focus := range ownerRun.RuntimeBootstrap.Focuses {
+		if focus.ID == "cwi-stale-restart" || stringSliceContains(focus.TargetRefs, "run-activation-restart-created-active/stale-evidence") {
+			t.Fatalf("replacement runtime focus reused stale old run evidence: %+v", focus)
 		}
 	}
 	if item.Run.State == "created" {
@@ -4360,15 +3509,21 @@ func TestActivateWorkspaceExecutionWithBackendContinuesRejectedTerminalResult(t 
 	if item.Run.ID == string(oldRunID) || item.Run.GoalID != goal.ID || item.Run.DoDID != dod.ID {
 		t.Fatalf("activation run = %+v, want successor run using current definitions", item.Run)
 	}
-	continuation := contextMapFromValue(t, item.Run.ExecutionContext["rejectedResultContinuation"])
-	if continuation["predecessorRunId"] != string(oldRunID) ||
-		continuation["resultId"] != string(oldRunID)+"/result/dod-assessment" ||
-		continuation["resultState"] != "rejected" {
+	createdRun, err := testRuntimeExports(session.Bootstrap).Repositories.Runs.Get(ctx, common.RunID(item.Run.ID))
+	if err != nil {
+		t.Fatalf("get successor run: %v", err)
+	}
+	if createdRun.RuntimeBootstrap == nil {
+		t.Fatal("successor run runtime bootstrap is missing")
+	}
+	continuation := createdRun.RuntimeBootstrap.Activation.Continuation.RejectedResult
+	if continuation == nil || continuation.PredecessorRunID != oldRunID ||
+		continuation.ResultID != common.ResultID(string(oldRunID)+"/result/dod-assessment") ||
+		continuation.ResultState != common.ResultStateRejected {
 		t.Fatalf("rejectedResultContinuation = %+v, want predecessor rejected result context", continuation)
 	}
-	unsatisfied := contextMapSliceFromValue(t, continuation["unsatisfiedDoDItems"])
-	if len(unsatisfied) != 1 || unsatisfied[0]["item"] != "missing evidence is closed" {
-		t.Fatalf("unsatisfiedDoDItems = %+v, want rejected DoD gap", unsatisfied)
+	if len(continuation.UnsatisfiedDoDItems) != 1 || continuation.UnsatisfiedDoDItems[0].Item != "missing evidence is closed" {
+		t.Fatalf("unsatisfiedDoDItems = %+v, want rejected DoD gap", continuation.UnsatisfiedDoDItems)
 	}
 	if item.Snapshot.Workspace.ActiveRunID != item.Run.ID {
 		t.Fatalf("snapshot activeRunId = %q, want successor run %q", item.Snapshot.Workspace.ActiveRunID, item.Run.ID)
@@ -4401,21 +3556,6 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 		GoalID:      common.GoalID(oldGoal.ID),
 		DoDID:       common.DoDID(oldDoD.ID),
 		State:       common.RunStateActive,
-		ExecutionContext: map[string]any{
-			"goalId": oldGoal.ID,
-			"goal": map[string]any{
-				"id":          oldGoal.ID,
-				"workspaceId": workspace.ID,
-				"text":        oldGoal.Text,
-			},
-			"doDId": oldDoD.ID,
-			"dod": map[string]any{
-				"id":          oldDoD.ID,
-				"workspaceId": workspace.ID,
-				"items":       []string{"old activation dod"},
-				"state":       oldDoD.State,
-			},
-		},
 	}); err != nil {
 		t.Fatalf("CreateRun old active: %v", err)
 	}
@@ -4452,13 +3592,12 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 	if item.Run.ID == string(oldRunID) || item.Run.GoalID != newGoal.ID || item.Run.DoDID != newDoD.ID {
 		t.Fatalf("activation run = %+v, want replacement run with updated canonical goal/dod", item.Run)
 	}
-	goalContext, _ := item.Run.ExecutionContext["goal"].(map[string]any)
-	if text, _ := goalContext["text"].(string); text != "- new activation goal" {
-		t.Fatalf("replacement goal text = %q, want updated canonical goal", text)
+	definition := runtimeV2OwnerRunWithBackend(t, context.Background(), "file", dataRoot, workspace.ID, item.Run.ID).RuntimeBootstrap.Definition
+	if definition.GoalDefinition != "- new activation goal" {
+		t.Fatalf("replacement goal text = %q, want updated canonical goal", definition.GoalDefinition)
 	}
-	dodContext, _ := item.Run.ExecutionContext["dod"].(map[string]any)
-	if items, _ := dodContext["items"].([]string); len(items) != 1 || items[0] != "new activation dod" {
-		t.Fatalf("replacement dod items = %+v, want updated canonical dod", dodContext["items"])
+	if !strings.Contains(definition.DoDDefinition, "new activation dod") {
+		t.Fatalf("replacement dod definition = %q, want updated canonical dod", definition.DoDDefinition)
 	}
 	replaced, err := exports.Repositories.Runs.Get(ctx, oldRunID)
 	if err != nil {

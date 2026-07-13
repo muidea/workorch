@@ -39,13 +39,6 @@ type RunPayload struct {
 	FailureReason      string
 }
 
-type StepPayload struct {
-	Kind   string
-	State  string
-	Input  map[string]any
-	Output map[string]any
-}
-
 type DecisionTicketPayload struct {
 	Reason            string
 	State             string
@@ -96,20 +89,6 @@ func (p RunPayload) PayloadMap() map[string]any {
 	}
 	if p.FailureReason != "" {
 		payload[events.PayloadKeyFailureReason] = p.FailureReason
-	}
-	return payload
-}
-
-func (p StepPayload) PayloadMap() map[string]any {
-	payload := map[string]any{
-		events.PayloadKeyKind:  p.Kind,
-		events.PayloadKeyState: p.State,
-	}
-	if p.Input != nil {
-		payload[events.PayloadKeyInput] = cloneSnapshotMap(p.Input)
-	}
-	if p.Output != nil {
-		payload[events.PayloadKeyOutput] = cloneSnapshotMap(p.Output)
 	}
 	return payload
 }

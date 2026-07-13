@@ -24,7 +24,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
+	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 // eventHubBackend extends the local backend with EventHub-driven progress
@@ -58,6 +58,40 @@ func (b *eventHubBackend) Config() ConfigBackend       { return &eventHubConfigB
 
 // Events overrides the stub to provide EventHub-driven subscriptions.
 func (b *eventHubBackend) Events() EventsBackend { return b.evtImpl }
+
+func (b *eventHubBackend) RetireRuntimeV1(ctx context.Context, options workorchport.RuntimeV1RetirementOptions) (workorchport.RuntimeV1RetirementResult, error) {
+	if b == nil || b.commandHub == nil {
+		return workorchport.RuntimeV1RetirementResult{}, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandRuntimeV1Retirement, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.RuntimeV1RetirementCommand{DryRun: options.DryRun})
+	event.BindLaneKey(events.EventHubLaneKeyFor(event.ID(), events.EventHubLaneScope{SubjectType: "runtime_v1_retirement", SubjectID: "global"}))
+	response := b.commandHub.Send(event)
+	if response == nil {
+		return workorchport.RuntimeV1RetirementResult{}, fmt.Errorf("%w: Runtime V1 retirement returned no response", common.ErrConflict)
+	}
+	if err := cd.ToStdError(response.Error()); err != nil {
+		return workorchport.RuntimeV1RetirementResult{}, err
+	}
+	data, resultErr := response.Get()
+	if err := cd.ToStdError(resultErr); err != nil {
+		return workorchport.RuntimeV1RetirementResult{}, err
+	}
+	result, ok := data.(workorchdevents.RuntimeV1RetirementResult)
+	if !ok {
+		return workorchport.RuntimeV1RetirementResult{}, fmt.Errorf("%w: Runtime V1 retirement returned %T", common.ErrInvalidArgument, data)
+	}
+	failures := make([]workorchport.RuntimeV1RetirementFailure, 0, len(result.Report.Failures))
+	for _, failure := range result.Report.Failures {
+		failures = append(failures, workorchport.RuntimeV1RetirementFailure{SubjectType: failure.SubjectType, SubjectID: failure.SubjectID, Reason: failure.Reason})
+	}
+	return workorchport.RuntimeV1RetirementResult{DryRun: result.DryRun, Report: workorchport.RuntimeV1RetirementReport{
+		ScannedV1Runs: result.Report.ScannedV1Runs, SupersededRuns: result.Report.SupersededRuns,
+		ClearedActiveRunIDs: result.Report.ClearedActiveRunIDs, SupersededTickets: result.Report.SupersededTickets,
+		SupersededApprovals: result.Report.SupersededApprovals, ResourceScopesToRelease: result.Report.ResourceScopesToRelease,
+		ReleasedResourceScopes: result.Report.ReleasedResourceScopes, ProjectionRebuildRevision: result.Report.ProjectionRebuildRevision,
+		Failures: failures,
+	}}, nil
+}
 
 func (b *eventHubBackend) sendCommand(ctx context.Context, command workorchdevents.CLICommand) (workorchdevents.CLIResult, error) {
 	if b == nil || b.commandHub == nil {
@@ -299,10 +333,6 @@ func convertBackendEvent(envelope backendEventData) (ret Event) {
 		return Event{Type: EventDoDDefined, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: enrichSubjectPayload(envelope.Payload, "doDId", envelope.SubjectID)}
 	case runevents.TopicRunCreated, runevents.TopicRunStateChanged:
 		return Event{Type: EventRunStateChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
-	case runevents.TopicStepDispatched:
-		return Event{Type: EventStepDispatched, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
-	case runevents.TopicStepStateChanged:
-		return Event{Type: EventStepCompleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
 	case decisionevents.TopicTicketCreated:
 		return Event{Type: EventDecisionCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "ticketId", envelope.SubjectID)}
 	case decisionevents.TopicTicketResolved:
@@ -321,10 +351,6 @@ func convertBackendEvent(envelope backendEventData) (ret Event) {
 		return Event{Type: EventMemoryDeleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
 	case memoryevents.TopicMemoryRecallRecorded:
 		return Event{Type: EventMemoryRecallRecorded, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
-	case runevents.TopicRunLLMUsageRecorded:
-		return Event{Type: EventLLMUsageRecorded, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
-	case runevents.TopicRunLLMStreamProgress:
-		return Event{Type: EventLLMStreamProgress, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
 	case orchestratorevents.TopicPatchPreviewed:
 		return Event{Type: EventPatchPreviewed, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
 	case orchestratorevents.TopicPatchApplied:
@@ -333,10 +359,6 @@ func convertBackendEvent(envelope backendEventData) (ret Event) {
 		return Event{Type: EventPatchFailed, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
 	case orchestratorevents.TopicPatchReverted:
 		return Event{Type: EventPatchReverted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
-	case orchestratorevents.TopicOrchestratorContractViolationRecorded,
-		orchestratorevents.TopicOrchestratorContractViolationRetryRequested,
-		orchestratorevents.TopicOrchestratorContractViolationEscalated:
-		return Event{Type: EventWorkspaceProjectionChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
 	case orchestratorevents.TopicArtifactContinuationCreated,
 		orchestratorevents.TopicArtifactContinuationChunkRecorded,
 		orchestratorevents.TopicArtifactContinuationChunkRejected,
@@ -462,31 +484,26 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 	if b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	executionContextPatch, err := eventvalue.FromMap(activation.ExecutionContextPatch)
-	if err != nil {
-		return nil, fmt.Errorf("invalid execution context patch: %w", err)
-	}
 	command := workorchdevents.WorkspaceRunRequestedCommand{
-		WorkspaceID:           req.WorkspaceID,
-		RunID:                 req.ExpectedRunID,
-		Intent:                string(intent),
-		Reason:                req.Reason,
-		RequestID:             req.RequestID,
-		Source:                source,
-		DefinitionRevision:    firstNonEmptyBackendString(req.DefinitionRevision, activation.DefinitionRevision),
-		DecisionID:            firstNonEmptyBackendString(string(req.DecisionID), string(activation.DecisionID)),
-		Priority:              req.Priority,
-		GoalID:                activation.GoalID,
-		DoDID:                 activation.DoDID,
-		LLMProviderID:         activation.LLMProviderID,
-		SoulID:                activation.SoulID,
-		SoulBindings:          commonSoulBindingStrings(activation.SoulBindings),
-		SkillIDs:              append([]common.SkillID(nil), activation.SkillIDs...),
-		MCPServerIDs:          append([]common.MCPServerID(nil), activation.MCPServerIDs...),
-		CapabilityIDs:         append([]common.MCPCapabilityID(nil), activation.CapabilityIDs...),
-		MemoryIDs:             append([]common.MemoryID(nil), activation.MemoryIDs...),
-		DialogLanguage:        activation.DialogLanguage,
-		ExecutionContextPatch: executionContextPatch,
+		WorkspaceID:        req.WorkspaceID,
+		RunID:              req.ExpectedRunID,
+		Intent:             string(intent),
+		Reason:             req.Reason,
+		RequestID:          req.RequestID,
+		Source:             source,
+		DefinitionRevision: firstNonEmptyBackendString(req.DefinitionRevision, activation.DefinitionRevision),
+		DecisionID:         firstNonEmptyBackendString(string(req.DecisionID), string(activation.DecisionID)),
+		Priority:           req.Priority,
+		GoalID:             activation.GoalID,
+		DoDID:              activation.DoDID,
+		LLMProviderID:      activation.LLMProviderID,
+		SoulID:             activation.SoulID,
+		SoulBindings:       commonSoulBindingStrings(activation.SoulBindings),
+		SkillIDs:           append([]common.SkillID(nil), activation.SkillIDs...),
+		MCPServerIDs:       append([]common.MCPServerID(nil), activation.MCPServerIDs...),
+		CapabilityIDs:      append([]common.MCPCapabilityID(nil), activation.CapabilityIDs...),
+		MemoryIDs:          append([]common.MemoryID(nil), activation.MemoryIDs...),
+		DialogLanguage:     activation.DialogLanguage,
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "workorch/"+source, workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	event.BindLaneKey(events.EventHubLaneKeyFor(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, events.EventHubLaneScope{
@@ -851,7 +868,6 @@ func runInfoResourceMap(run RunInfo) map[string]any {
 		"GoalID":             string(run.GoalID),
 		"DoDID":              string(run.DoDID),
 		"DefinitionRevision": run.DefinitionRevision,
-		"ExecutionContext":   compactRunExecutionContext(run.ExecutionContext),
 		"State":              string(run.State),
 		"Priority":           run.Priority,
 		"BlockingTicketID":   string(run.BlockingTicketID),
@@ -889,7 +905,6 @@ func workspaceSnapshotResourceMap(snapshot WorkspaceSnapshotInfo) map[string]any
 		"Outcome":                 snapshot.Outcome,
 		"TaskProgress":            snapshot.TaskProgress,
 		"RunHeartbeat":            snapshot.RunHeartbeat,
-		"RuntimeExecution":        snapshot.RuntimeExecution,
 		"ConvergenceStatus":       snapshot.ConvergenceStatus,
 		"RunCommand":              snapshot.RunCommand,
 		"CoverageSummary":         cloneCLIResultValue(snapshot.CoverageSummary, 0),
@@ -988,29 +1003,6 @@ func templateInfoResourceMap(item TemplateInfo) map[string]any {
 		"soulBindings":     cloneStringMap(item.SoulBindings),
 		"evidencePolicies": cloneCLIResultValue(item.EvidencePolicies, 0),
 	}
-}
-
-func compactRunExecutionContext(context map[string]any) map[string]any {
-	if len(context) == 0 {
-		return nil
-	}
-	ret := map[string]any{}
-	for _, key := range []string{
-		"goal",
-		"goals",
-		"dod",
-		"dods",
-		"operatorInputQueue",
-		"latestOperatorInput",
-	} {
-		if value, ok := context[key]; ok {
-			ret[key] = cloneCLIResultValue(value, 0)
-		}
-	}
-	if len(ret) == 0 {
-		return nil
-	}
-	return ret
 }
 
 func cloneCLIResultValue(value any, depth int) any {

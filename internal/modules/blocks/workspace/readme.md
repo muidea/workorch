@@ -10,6 +10,7 @@
 - Workspace 创建、状态变化、删除以及 Goal/DoD 定义变化由本 block 发布具体通知。
 - `kernel/run` 和 `kernel/orchestrator` 通过 EventHub 读取 workspace definition、Goal、DoD、template 和 definition revision。
 - `application/workorchd` 通过 owner command/read port 管理和展示 workspace definition。
+- Runtime V1 retirement apply 通过 typed update command 清理指向 V1 Run 的 `ActiveRunID`，保留 Workspace definition 与交付目录，并发布 Workspace 状态通知。
 - `kernel/system` 发送 `EnsureWorkspaceTemplateDefaultsCommand`；本 block 在自己的 repository 内幂等初始化默认模板并返回具体 result。
 
 ## 相关约束
@@ -18,3 +19,4 @@
 - 所有对象操作必须携带 WorkspaceID 或可唯一解析的对象 scope。
 - definition revision 必须单调、可比较；激活绑定变化必须使旧定义选择可检测为 stale。
 - Workspace block 不启动 Run、不判定 Result、不执行治理恢复。
+- retirement 只能清理已由 planner 确认的 V1 Run 指针；不得清理指向 Runtime V2 Run 的 active binding。

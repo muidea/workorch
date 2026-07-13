@@ -188,7 +188,6 @@ func runStatusFromWorkspaceSnapshot(snapshot *backend.WorkspaceSnapshotInfo, run
 		BlockingTicketID:   run.BlockingTicketID,
 		BlockingApprovalID: run.BlockingApprovalID,
 		FailureReason:      run.FailureReason,
-		RuntimeExecution:   cloneRuntimeExecutionInfoPtr(snapshot.RuntimeExecution),
 		ConvergenceStatus:  cloneConvergenceStatusInfoPtr(snapshot.ConvergenceStatus),
 	}
 	if snapshot.TaskProgress.RunID == "" || snapshot.TaskProgress.RunID == run.ID {
@@ -394,8 +393,6 @@ func PersistDoD(be backend.Backend, workspaceID string, items []string) tea.Cmd 
 	}
 }
 
-const maxOperatorInputQueueItems = 20
-
 func ResumeRun(be backend.Backend, workspaceID string, runID string, operatorInput string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -431,12 +428,11 @@ func ResumeRun(be backend.Backend, workspaceID string, runID string, operatorInp
 				expectedRunID = displayRun.ID
 			}
 			resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
-				WorkspaceID:           wsID,
-				ExpectedRunID:         expectedRunID,
-				Intent:                backend.RunCommandIntentResume,
-				Reason:                "user_requested",
-				Source:                "tui",
-				ExecutionContextPatch: operatorInputPatch(displayRun, operatorInput),
+				WorkspaceID:   wsID,
+				ExpectedRunID: expectedRunID,
+				Intent:        backend.RunCommandIntentResume,
+				Reason:        "user_requested",
+				Source:        "tui",
 			})
 			if err != nil {
 				return RunControlMsg{Run: displayRun, WorkspaceID: workspaceID, Error: err}
@@ -446,12 +442,11 @@ func ResumeRun(be backend.Backend, workspaceID string, runID string, operatorInp
 		switch run.State {
 		case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
 			resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
-				WorkspaceID:           wsID,
-				ExpectedRunID:         run.ID,
-				Intent:                backend.RunCommandIntentResume,
-				Reason:                "user_requested",
-				Source:                "tui",
-				ExecutionContextPatch: operatorInputPatch(run, operatorInput),
+				WorkspaceID:   wsID,
+				ExpectedRunID: run.ID,
+				Intent:        backend.RunCommandIntentResume,
+				Reason:        "user_requested",
+				Source:        "tui",
 			})
 			if err != nil {
 				return RunControlMsg{Run: run, WorkspaceID: workspaceID, Error: err}
@@ -465,12 +460,11 @@ func ResumeRun(be backend.Backend, workspaceID string, runID string, operatorInp
 			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is waiting for approval; resolve the approval before resuming."}
 		case common.RunStatePending:
 			resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
-				WorkspaceID:           wsID,
-				ExpectedRunID:         run.ID,
-				Intent:                backend.RunCommandIntentResume,
-				Reason:                "user_requested",
-				Source:                "tui",
-				ExecutionContextPatch: operatorInputPatch(run, operatorInput),
+				WorkspaceID:   wsID,
+				ExpectedRunID: run.ID,
+				Intent:        backend.RunCommandIntentResume,
+				Reason:        "user_requested",
+				Source:        "tui",
 			})
 			if err != nil {
 				return RunControlMsg{Run: run, WorkspaceID: workspaceID, Error: err}
@@ -478,12 +472,11 @@ func ResumeRun(be backend.Backend, workspaceID string, runID string, operatorInp
 			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Resuming workspace execution"}
 		default:
 			resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
-				WorkspaceID:           wsID,
-				ExpectedRunID:         run.ID,
-				Intent:                backend.RunCommandIntentResume,
-				Reason:                "user_requested",
-				Source:                "tui",
-				ExecutionContextPatch: operatorInputPatch(run, operatorInput),
+				WorkspaceID:   wsID,
+				ExpectedRunID: run.ID,
+				Intent:        backend.RunCommandIntentResume,
+				Reason:        "user_requested",
+				Source:        "tui",
 			})
 			if err != nil {
 				return RunControlMsg{Run: run, WorkspaceID: workspaceID, Error: err}
@@ -564,10 +557,8 @@ func restartWorkspaceRun(ctx context.Context, be backend.Backend, workspaceID co
 		Reason:      "user_requested",
 		Source:      "tui",
 		Activation: backend.ActivateRunRequest{
-			Source:                "tui",
-			ExecutionContextPatch: operatorInputPatch(nil, operatorInput),
+			Source: "tui",
 		},
-		ExecutionContextPatch: operatorInputPatch(nil, operatorInput),
 	})
 	if err != nil {
 		return RunControlMsg{Run: run, WorkspaceID: string(workspaceID), Error: err}
@@ -586,72 +577,13 @@ func activateWorkspaceRunWithMessage(ctx context.Context, be backend.Backend, wo
 		Reason:      "user_requested",
 		Source:      "tui",
 		Activation: backend.ActivateRunRequest{
-			Source:                "tui",
-			ExecutionContextPatch: operatorInputPatch(run, operatorInput),
+			Source: "tui",
 		},
-		ExecutionContextPatch: operatorInputPatch(run, operatorInput),
 	})
 	if err != nil {
 		return RunControlMsg{Run: run, WorkspaceID: string(workspaceID), Error: err}
 	}
 	return RunControlMsg{Run: activated, WorkspaceID: string(workspaceID), Message: message}
-}
-
-func operatorInputPatch(run *backend.RunInfo, value string) map[string]any {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	queue := operatorInputQueueFromRun(run)
-	queue = append(queue, map[string]any{
-		"source":      "tui",
-		"content":     value,
-		"submittedAt": time.Now().UTC().Format(time.RFC3339Nano),
-	})
-	if len(queue) > maxOperatorInputQueueItems {
-		queue = append([]map[string]any(nil), queue[len(queue)-maxOperatorInputQueueItems:]...)
-	}
-	return map[string]any{
-		"operatorInputQueue": queue,
-		"latestOperatorInput": map[string]any{
-			"source":  "tui",
-			"content": value,
-		},
-	}
-}
-
-func operatorInputQueueFromRun(run *backend.RunInfo) []map[string]any {
-	if run == nil || len(run.ExecutionContext) == 0 {
-		return nil
-	}
-	rawItems, ok := run.ExecutionContext["operatorInputQueue"].([]any)
-	if ok {
-		ret := make([]map[string]any, 0, len(rawItems))
-		for _, raw := range rawItems {
-			if item, ok := raw.(map[string]any); ok && strings.TrimSpace(stringValueFromMap(item, "content")) != "" {
-				ret = append(ret, item)
-			}
-		}
-		return ret
-	}
-	if items, ok := run.ExecutionContext["operatorInputQueue"].([]map[string]any); ok {
-		ret := make([]map[string]any, 0, len(items))
-		for _, item := range items {
-			if strings.TrimSpace(stringValueFromMap(item, "content")) != "" {
-				ret = append(ret, item)
-			}
-		}
-		return ret
-	}
-	return nil
-}
-
-func stringValueFromMap(input map[string]any, key string) string {
-	if input == nil {
-		return ""
-	}
-	value, _ := input[key].(string)
-	return value
 }
 
 func ResolveDecision(be backend.Backend, workspaceID string, ticketID string, answer string) tea.Cmd {

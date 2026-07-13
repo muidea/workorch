@@ -27,8 +27,6 @@ type TaskDecompositionNode struct {
 	StepState        string         `json:"stepState,omitempty"`
 	RetryOf          string         `json:"retryOf,omitempty"`
 	RetryAttempt     int            `json:"retryAttempt,omitempty"`
-	ViolationType    string         `json:"violationType,omitempty"`
-	ViolatedRule     string         `json:"violatedRule,omitempty"`
 	FailureClass     string         `json:"failureClass,omitempty"`
 	FailureSignature string         `json:"failureSignature,omitempty"`
 	TargetScope      string         `json:"targetScope,omitempty"`
@@ -57,8 +55,6 @@ type TaskPlan struct {
 	Nodes             []TaskDecompositionNode `json:"nodes,omitempty"`
 	RetryOf           string                  `json:"retryOf,omitempty"`
 	RetryAttempt      int                     `json:"retryAttempt,omitempty"`
-	ViolationType     string                  `json:"violationType,omitempty"`
-	ViolatedRule      string                  `json:"violatedRule,omitempty"`
 	FailureClass      string                  `json:"failureClass,omitempty"`
 	FailureSignature  string                  `json:"failureSignature,omitempty"`
 	TargetScope       string                  `json:"targetScope,omitempty"`

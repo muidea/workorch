@@ -3,8 +3,6 @@ package readmodelcore
 import (
 	"strings"
 
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -45,13 +43,13 @@ func RunObservabilityEventRecordRepositoryQuery(runID common.RunID, limit int) r
 
 func RunProjectionEventRecordRepositoryQuery(runID common.RunID, limit int) repository.EventRecordQuery {
 	query := RunEventRecordRepositoryQuery(runID, limit)
-	query.ExcludeTopics = []string{runevents.TopicRunLLMStreamProgress}
+	query.ExcludeTopics = []string{"/run/llm_stream/progress"}
 	return query
 }
 
 func RunLLMUsageEventRecordRepositoryQuery(runID common.RunID, limit int) repository.EventRecordQuery {
 	query := RunEventRecordRepositoryQuery(runID, limit)
-	query.Topic = runevents.TopicRunLLMUsageRecorded
+	query.Topic = "/run/llm_usage/recorded"
 	query.IncludePayload = true
 	return query
 }
@@ -65,7 +63,7 @@ func WorkspaceEventRecordRepositoryQuery(workspaceID common.WorkspaceID, limit i
 
 func WorkspaceLLMUsageEventRecordRepositoryQuery(workspaceID common.WorkspaceID, limit int) repository.EventRecordQuery {
 	query := WorkspaceEventRecordRepositoryQuery(workspaceID, limit)
-	query.Topic = runevents.TopicRunLLMUsageRecorded
+	query.Topic = "/run/llm_usage/recorded"
 	query.IncludePayload = true
 	return query
 }

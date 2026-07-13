@@ -72,9 +72,6 @@ func validObservedRecord(item eventstreamevents.EventRecordData) bool {
 	case runevents.TopicRunCreated, runevents.TopicRunStateChanged:
 		_, ok := events.DecodeRunPayload(payload)
 		return ok
-	case runevents.TopicStepDispatched, runevents.TopicStepStateChanged:
-		_, ok := events.DecodeStepPayload(payload)
-		return ok
 	case decisionevents.TopicTicketResolved:
 		_, ok := events.DecodeDecisionResolutionPayload(payload)
 		return ok

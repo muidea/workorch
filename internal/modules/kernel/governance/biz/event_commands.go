@@ -10,6 +10,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 func eventResolveDecision(hub magicevent.Hub) ResolveDecisionFunc {
@@ -20,14 +21,18 @@ func eventResolveDecision(hub magicevent.Hub) ResolveDecisionFunc {
 		workspaceID := stringFromPayload(payload, events.PayloadKeyWorkspaceID)
 		runID := stringFromPayload(payload, events.PayloadKeyRunID)
 		stepID := stringFromPayload(payload, events.PayloadKeyStepID)
-		_, err := sendOwnerMagicCommand[decisionevents.EnsureResolvedCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandEnsureResolved, decisionevents.CommandDestination, "decision_ticket", string(ticketID), common.WorkspaceID(workspaceID), common.RunID(runID), common.StepID(stepID), decisionevents.EnsureResolvedCommand{
+		resolutionPayload, err := eventvalue.FromMap(payload)
+		if err != nil {
+			return err
+		}
+		_, err = sendOwnerMagicCommand[decisionevents.EnsureResolvedCommand, decisionevents.DecisionCommandResult](ctx, hub, decisionevents.TopicDecisionCommandEnsureResolved, decisionevents.CommandDestination, "decision_ticket", string(ticketID), common.WorkspaceID(workspaceID), common.RunID(runID), common.StepID(stepID), decisionevents.EnsureResolvedCommand{
 			ResolutionID: common.ResolutionID("resolution-" + string(ticketID) + "-auto-governance"),
 			TicketID:     ticketID,
 			WorkspaceID:  common.WorkspaceID(workspaceID),
 			RunID:        common.RunID(runID),
 			StepID:       common.StepID(stepID),
 			Type:         resolutionType,
-			Payload:      payload,
+			Payload:      resolutionPayload,
 		})
 		return err
 	}

@@ -11,109 +11,27 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	magictask "github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
-	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
-	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
-	gitmodule "github.com/muidea/workorch/internal/modules/blocks/git"
-	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
-	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
-	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
-	webmodule "github.com/muidea/workorch/internal/modules/blocks/web"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	orchestratormodule "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
-	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
-	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
-type echoRuntimeAdapter struct{}
-
-func (a echoRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
-	return runtimemodel.StepExecutionResult{
-		Output: map[string]any{
-			"status": "completed",
-			"kind":   request.Kind,
-		},
-	}, nil
-}
-
 func newRuntimeWithBackend(backend string, dataRoot string) *bootstrap.Runtime {
-	return NewRuntime(backend, dataRoot, workorchruntimepolicy.RuntimePolicy{}, nil)
-}
-
-func buildRuntimeAdapterRegistry(eventHub magicevent.Hub) (*orchestratormodule.RuntimeAdapterRegistry, error) {
-	runtimeRegistry := orchestratormodule.NewRuntimeAdapterRegistry()
-	eventAdapter := orchestratormodule.NewEventRuntimeAdapter(eventHub)
-	for _, stepKind := range []string{
-		filemodule.StepKindList,
-		filemodule.StepKindRead,
-		filemodule.StepKindEdit,
-	} {
-		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
-			return nil, err
-		}
-	}
-	for _, stepKind := range []string{
-		gitmodule.StepKindRead,
-		gitmodule.StepKindWrite,
-	} {
-		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
-			return nil, err
-		}
-	}
-	if err := runtimeRegistry.Register(shellmodule.StepKindCommand, eventAdapter); err != nil {
-		return nil, err
-	}
-	if err := runtimeRegistry.Register(sshmodule.StepKindCommand, eventAdapter); err != nil {
-		return nil, err
-	}
-	for _, stepKind := range []string{
-		webmodule.StepKindSearch,
-		webmodule.StepKindFetch,
-	} {
-		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
-			return nil, err
-		}
-	}
-	for _, stepKind := range []string{
-		mcpblockmodule.StepKindToolCall,
-		mcpblockmodule.StepKindResourceRead,
-		mcpblockmodule.StepKindPromptGet,
-	} {
-		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
-			return nil, err
-		}
-	}
-	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchApply, eventAdapter); err != nil {
-		return nil, err
-	}
-	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchPreview, eventAdapter); err != nil {
-		return nil, err
-	}
-	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchRevert, eventAdapter); err != nil {
-		return nil, err
-	}
-	if err := runtimeRegistry.Register(llmmodule.StepKindWorkspaceExecution, eventAdapter); err != nil {
-		return nil, err
-	}
-	return runtimeRegistry, nil
+	return NewRuntime(backend, dataRoot, nil)
 }
 
 func createTestWorkspace(ctx context.Context, exports Exports, workspaceID common.WorkspaceID, title string, internalDirectory string) error {
@@ -181,127 +99,6 @@ func TestRuntimeStartsSystemDefaultsModule(t *testing.T) {
 	}
 	if _, err := exports.Repositories.WorkspaceTemplates.Get(ctx, "software-dev"); err != nil {
 		t.Fatalf("software-dev template err = %v, want system default", err)
-	}
-}
-
-func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T) {
-	rawHub := magicevent.NewHub(32)
-	defer rawHub.Terminate(context.Background())
-	background := magictask.NewBackgroundRoutine(32)
-	defer background.Shutdown(context.Background())
-	executor := runtimeevent.NewExecutor("test/block", rawHub, background, echoRuntimeAdapter{},
-		filemodule.StepKindList,
-		filemodule.StepKindRead,
-		filemodule.StepKindEdit,
-		gitmodule.StepKindRead,
-		gitmodule.StepKindWrite,
-		shellmodule.StepKindCommand,
-		sshmodule.StepKindCommand,
-		webmodule.StepKindSearch,
-		webmodule.StepKindFetch,
-		mcpblockmodule.StepKindToolCall,
-		mcpblockmodule.StepKindResourceRead,
-		mcpblockmodule.StepKindPromptGet,
-		llmmodule.StepKindWorkspaceExecution,
-	)
-	if err := executor.Run(); err != nil {
-		t.Fatalf("run echo executor: %v", err)
-	}
-	defer executor.Teardown()
-	patchExecutor := runtimeevent.NewExecutor("test/patch", rawHub, background, filebiz.NewRuntimeAdapter(),
-		llmcommon.RuntimeBlockKindPatchApply,
-		llmcommon.RuntimeBlockKindPatchPreview,
-		llmcommon.RuntimeBlockKindPatchRevert,
-	)
-	if err := patchExecutor.Run(); err != nil {
-		t.Fatalf("run patch executor: %v", err)
-	}
-	defer patchExecutor.Teardown()
-	registry, err := buildRuntimeAdapterRegistry(rawHub)
-	if err != nil {
-		t.Fatalf("build registry: %v", err)
-	}
-
-	for _, kind := range []string{
-		filemodule.StepKindList,
-		filemodule.StepKindRead,
-		filemodule.StepKindEdit,
-		gitmodule.StepKindRead,
-		gitmodule.StepKindWrite,
-		shellmodule.StepKindCommand,
-		sshmodule.StepKindCommand,
-		webmodule.StepKindSearch,
-		webmodule.StepKindFetch,
-		mcpblockmodule.StepKindToolCall,
-		mcpblockmodule.StepKindResourceRead,
-		mcpblockmodule.StepKindPromptGet,
-		llmmodule.StepKindWorkspaceExecution,
-	} {
-		result, err := registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-			WorkspaceID: "ws-runtime-test",
-			RunID:       "run-001",
-			StepID:      common.StepID("run-001-step-" + kind),
-			Kind:        kind,
-		})
-		if err != nil {
-			t.Fatalf("execute registered kind %s: %v", kind, err)
-		}
-		if result.Output["kind"] != kind {
-			t.Fatalf("registered kind %s output = %+v", kind, result.Output)
-		}
-	}
-
-	result, err := registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceID:                   "ws-runtime-test",
-		RunID:                         "run-001",
-		StepID:                        "run-001-step-patch-apply",
-		Kind:                          llmcommon.RuntimeBlockKindPatchApply,
-		WorkspaceDeliverableDirectory: t.TempDir(),
-		Input: map[string]any{
-			"patchType": "file_write",
-			"targetRef": "result.txt",
-			"content":   "ready\n",
-		},
-	})
-	if err != nil {
-		t.Fatalf("execute patch/apply: %v", err)
-	}
-	if result.Output["stage"] != "patch_apply" {
-		t.Fatalf("patch/apply output = %+v, want patch_apply stage", result.Output)
-	}
-	result, err = registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceID:                   "ws-runtime-test",
-		RunID:                         "run-001",
-		StepID:                        "run-001-step-patch-preview",
-		Kind:                          llmcommon.RuntimeBlockKindPatchPreview,
-		WorkspaceDeliverableDirectory: t.TempDir(),
-		Input: map[string]any{
-			"patchType": "file_write",
-			"targetRef": "result.txt",
-			"content":   "ready\n",
-		},
-	})
-	if err != nil {
-		t.Fatalf("execute patch/preview: %v", err)
-	}
-	if result.Output["stage"] != "patch_preview" {
-		t.Fatalf("patch/preview output = %+v, want patch_preview stage", result.Output)
-	}
-	result, err = registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		WorkspaceID:                   "ws-runtime-test",
-		RunID:                         "run-001",
-		StepID:                        "run-001-step-patch-revert",
-		Kind:                          llmcommon.RuntimeBlockKindPatchRevert,
-		WorkspaceDeliverableDirectory: t.TempDir(),
-		Input: map[string]any{
-			"patchId": "run-1/step-1/patch/1",
-		},
-	})
-	if err == nil {
-		t.Fatalf("execute patch/revert err = nil, want phase-gated failure")
-	}
-	if result.Output["stage"] != "patch_revert" {
-		t.Fatalf("patch/revert output = %+v, want patch_revert stage", result.Output)
 	}
 }
 

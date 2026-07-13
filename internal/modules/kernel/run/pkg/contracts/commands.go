@@ -13,48 +13,37 @@ type CreateRunCommand struct {
 	DoDID              common.DoDID
 	DefinitionRevision string
 	InitialStepKind    string
-	ExecutionContext   map[string]any
+	RuntimeBootstrap   *runtimemodel.RuntimeBootstrap
 	Priority           int
 }
 
 type StartRunCommand struct{ RunID common.RunID }
 
 type ResumeRunCommand struct {
-	WorkspaceID           common.WorkspaceID
-	RunID                 common.RunID
-	LoadedRun             *runmodel.Run
-	ExecutionContextPatch map[string]any
-}
-
-type RecoverRuntimeGapCommand struct {
-	WorkspaceID           common.WorkspaceID
-	RunID                 common.RunID
-	StepID                common.StepID
-	StepKind              string
-	Gap                   string
-	IdempotencyKey        string
-	RequestID             string
-	QueueKey              string
-	LatestStepTime        string
-	RecoveryPolicy        runtimemodel.RuntimeRecoveryPolicy
-	RecoverySafety        string
-	Reason                string
-	ExecutionContextPatch map[string]any
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
 }
 
 type UpdateRunCommand struct {
-	RunID              common.RunID
-	WorkspaceID        common.WorkspaceID
-	GoalID             common.GoalID
-	DoDID              common.DoDID
-	DefinitionRevision string
-	InitialStepKind    string
-	ExecutionContext   map[string]any
-	State              common.RunState
-	Priority           int
-	BlockingTicketID   common.TicketID
-	BlockingApprovalID common.ApprovalID
-	FailureReason      string
+	RunID                        common.RunID
+	WorkspaceID                  common.WorkspaceID
+	GoalID                       common.GoalID
+	DoDID                        common.DoDID
+	Lineage                      runmodel.RunLineage
+	DefinitionRevision           string
+	InitialStepKind              string
+	RuntimeBootstrap             *runtimemodel.RuntimeBootstrap
+	RuntimeContractVersion       string
+	RuntimeState                 *runtimemodel.RuntimeStateRecord
+	ExpectedRuntimeStateRevision *uint64
+	State                        common.RunState
+	Priority                     int
+	BlockingTicketID             common.TicketID
+	BlockingApprovalID           common.ApprovalID
+	FailureReason                string
+	CreatedAt                    string
+	StartedAt                    string
+	EndedAt                      string
 }
 
 type BlockOnDecisionCommand struct {
@@ -67,8 +56,6 @@ type BlockOnApprovalCommand struct {
 	ApprovalID common.ApprovalID
 }
 
-type CompleteRunCommand struct{ RunID common.RunID }
-type ValidateRunCommand struct{ RunID common.RunID }
 type CancelRunCommand struct{ RunID common.RunID }
 type SupersedeRunCommand struct{ RunID common.RunID }
 type DeleteRunCommand struct{ RunID common.RunID }

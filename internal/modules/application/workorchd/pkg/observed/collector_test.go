@@ -138,24 +138,21 @@ func TestCollectorPublishedEventRecordsReturnsDeepClonedPayloads(t *testing.T) {
 
 	if err := hub.Publish(context.Background(), eventRecordFixture{
 		Version:     events.WorkorchEventVersion,
-		Topic:       runevents.TopicStepStateChanged,
-		SubjectType: "step",
-		SubjectID:   "run-1/step-1",
+		Topic:       approvalevents.TopicApprovalCreated,
+		SubjectType: "approval",
+		SubjectID:   "approval-1",
 		RunID:       "run-1",
-		StepID:      "run-1/step-1",
-		Payload: events.StepPayload(
-			"llm/workspace_execution",
-			"completed",
+		Payload: events.ApprovalPayload(
+			"manual approval",
+			"approve",
 			map[string]any{
 				"workspaceId": "ws-1",
 				"items":       []any{"first", map[string]any{"nested": "original"}},
 			},
-			map[string]any{
-				"status": "completed",
-			},
+			"pending",
 		),
 	}); err != nil {
-		t.Fatalf("publish step event: %v", err)
+		t.Fatalf("publish approval event: %v", err)
 	}
 
 	first := collector.PublishedEventRecords()
@@ -163,33 +160,27 @@ func TestCollectorPublishedEventRecordsReturnsDeepClonedPayloads(t *testing.T) {
 		t.Fatalf("len(first) = %d, want 1", len(first))
 	}
 
-	input := first[0].Payload.Map()[events.PayloadKeyInput].(map[string]any)
-	input["workspaceId"] = "ws-mutated"
-	items := input["items"].([]any)
+	approvalContext := first[0].Payload.Map()[events.PayloadKeyContext].(map[string]any)
+	approvalContext["workspaceId"] = "ws-mutated"
+	items := approvalContext["items"].([]any)
 	items[0] = "changed"
 	items[1].(map[string]any)["nested"] = "mutated"
-	output := first[0].Payload.Map()[events.PayloadKeyOutput].(map[string]any)
-	output["status"] = "failed"
 
 	second := collector.PublishedEventRecords()
 	if len(second) != 1 {
 		t.Fatalf("len(second) = %d, want 1", len(second))
 	}
 
-	secondInput := second[0].Payload.Map()[events.PayloadKeyInput].(map[string]any)
-	if secondInput["workspaceId"] != "ws-1" {
-		t.Fatalf("workspaceId = %v, want ws-1", secondInput["workspaceId"])
+	secondContext := second[0].Payload.Map()[events.PayloadKeyContext].(map[string]any)
+	if secondContext["workspaceId"] != "ws-1" {
+		t.Fatalf("workspaceId = %v, want ws-1", secondContext["workspaceId"])
 	}
-	secondItems := secondInput["items"].([]any)
+	secondItems := secondContext["items"].([]any)
 	if secondItems[0] != "first" {
 		t.Fatalf("items[0] = %v, want first", secondItems[0])
 	}
 	if secondItems[1].(map[string]any)["nested"] != "original" {
 		t.Fatalf("nested item = %v, want original", secondItems[1].(map[string]any)["nested"])
-	}
-	secondOutput := second[0].Payload.Map()[events.PayloadKeyOutput].(map[string]any)
-	if secondOutput["status"] != "completed" {
-		t.Fatalf("status = %v, want completed", secondOutput["status"])
 	}
 }
 

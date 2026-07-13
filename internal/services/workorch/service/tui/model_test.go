@@ -488,8 +488,8 @@ func TestModelPlainInputWithActiveRunningRunDoesNotResume(t *testing.T) {
 	if be.lastSnapshotWorkspace != "ws-1" || be.lastGetWorkspace != "" || be.lastListWorkspace != "" || be.lastResumeWorkspace != "" {
 		t.Fatalf("snapshot/get/list/resume workspace scope = %q/%q/%q/%q, want ws-1/empty/empty/empty", be.lastSnapshotWorkspace, be.lastGetWorkspace, be.lastListWorkspace, be.lastResumeWorkspace)
 	}
-	if len(be.resumes) != 0 || len(be.resumePatches) != 0 {
-		t.Fatalf("resumes/patches = %v/%v, want no resume for already-running run", be.resumes, be.resumePatches)
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want no resume for already-running run", be.resumes)
 	}
 	runMsg, ok := msg.(RunControlMsg)
 	if !ok || runMsg.Run == nil || runMsg.Run.State != common.RunStateActive {
@@ -641,8 +641,8 @@ func TestModelRunResumeCommandDoesNotResumeAlreadyRunningRun(t *testing.T) {
 	if len(be.goals) != 0 {
 		t.Fatalf("goals = %v, want no goal for active-run operator input", be.goals)
 	}
-	if len(be.resumes) != 0 || len(be.resumePatches) != 0 {
-		t.Fatalf("resumes/patches = %v/%v, want no resume for already-running run", be.resumes, be.resumePatches)
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want no resume for already-running run", be.resumes)
 	}
 	if len(be.activations) != 0 {
 		t.Fatalf("activations = %d, want no activation for already-running run", len(be.activations))
@@ -802,10 +802,6 @@ func TestModelRunRestartCommandRestartsWorkspaceWithOperatorInput(t *testing.T) 
 		be.runCommands[0].Source != "tui" {
 		t.Fatalf("runCommands = %+v, want scoped TUI restart command", be.runCommands)
 	}
-	queue, ok := be.restarts[0].ExecutionContextPatch["operatorInputQueue"].([]map[string]any)
-	if !ok || len(queue) != 1 || queue[0]["content"] != "补充信息：继续基于现有目标修复" {
-		t.Fatalf("operatorInputQueue = %#v, want queued restart input", be.restarts[0].ExecutionContextPatch["operatorInputQueue"])
-	}
 	if m.activeRunID != "run-new" || !m.running {
 		t.Fatalf("run state = %q/%v, want restarted run-new/running", m.activeRunID, m.running)
 	}
@@ -839,10 +835,6 @@ func TestModelRunRestartSlashCommandActivatesWorkspaceWithoutCreatingGoal(t *tes
 	}
 	if len(be.restarts) != 1 {
 		t.Fatalf("restarts = %d, want one restart", len(be.restarts))
-	}
-	latest, ok := be.restarts[0].ExecutionContextPatch["latestOperatorInput"].(map[string]any)
-	if !ok || latest["content"] != "重新执行并纳入刚补充的信息" {
-		t.Fatalf("latestOperatorInput = %#v, want restart dialog input", be.restarts[0].ExecutionContextPatch["latestOperatorInput"])
 	}
 }
 
@@ -933,106 +925,11 @@ func TestModelClearRunDisplayStateSyncsViewportHeightAfterResultClear(t *testing
 	}
 }
 
-func TestModelRunStartedDoesNotOverwriteStepProgress(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventStepDispatched,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload:     map[string]any{"kind": "llm/workspace-plan"},
-	})
-	next, _ := m.Update(RunStartedMsg{Run: &backend.RunInfo{ID: "run-1", State: common.RunStateActive}})
-	m = asModel(next)
-	if m.progressText != "Working: llm/workspace_execution" {
-		t.Fatalf("progress text = %q, want step progress preserved", m.progressText)
-	}
-}
-
-func TestModelStepProgressShowsPathCommandAndMCPDetails(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.width = 120
-	m.height = 18
-
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventStepDispatched,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"kind": "file/read",
-			"input": map[string]any{
-				"summary": map[string]any{"path": "stats.go"},
-			},
-		},
-	})
-	if m.progressText != "Working: file/read stats.go" {
-		t.Fatalf("file/read progress = %q", m.progressText)
-	}
-
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventStepDispatched,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"kind": "shell/command",
-			"input": map[string]any{
-				"summary": map[string]any{
-					"command": "go",
-					"args":    []string{"test", "./..."},
-				},
-			},
-		},
-	})
-	if m.progressText != "Working: shell/command go test ./..." {
-		t.Fatalf("shell progress = %q", m.progressText)
-	}
-
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventStepDispatched,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"kind": "mcp/tool_call",
-			"input": map[string]any{
-				"summary": map[string]any{
-					"serverId": "mcp-lsp-bridge",
-					"toolName": "textDocument/definition",
-				},
-			},
-		},
-	})
-	if m.progressText != "Working: mcp/tool_call mcp-lsp-bridge:textDocument/definition" {
-		t.Fatalf("mcp progress = %q", m.progressText)
-	}
-}
-
-func TestModelStepProgressAppendsRuntimeEvents(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.width = 120
-	m.height = 16
-
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventStepDispatched,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"kind": "mcp/tool_call",
-			"input": map[string]any{
-				"summary": map[string]any{"serverId": "mcp-lsp-bridge", "toolName": "textDocument/references"},
-			},
-		},
-	})
-
-	view := stripANSI(m.View())
-	if !strings.Contains(view, "Runtime Events") || !strings.Contains(view, "Working: mcp/tool_call mcp-lsp-bridge:textDocument/references") {
-		t.Fatalf("view missing runtime event log:\n%s", view)
-	}
-}
-
-func TestModelPatchMemoryAndLLMUsageEventsUpdateIncrementally(t *testing.T) {
+func TestModelPatchAndMemoryEventsUpdateIncrementally(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.activeWorkspaceID = "ws-1"
 	m.activeRunID = "run-1"
-	entry := m.ensureWorkspaceRuntimeState("ws-1")
+	m.ensureWorkspaceRuntimeState("ws-1")
 
 	if cmd := m.applyBackendEvent(backend.Event{
 		Type:        backend.EventPatchApplied,
@@ -1071,28 +968,6 @@ func TestModelPatchMemoryAndLLMUsageEventsUpdateIncrementally(t *testing.T) {
 		t.Fatalf("memoryRecalls = %+v, want incremental recall", m.memoryRecalls)
 	}
 
-	entry.ContextInFlight = false
-	entry.ContextPending = false
-	if cmd := m.applyBackendEvent(backend.Event{
-		Type:        backend.EventLLMUsageRecorded,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"providerId":   "provider-a",
-			"model":        "model-a",
-			"inputTokens":  10,
-			"outputTokens": 5,
-			"totalTokens":  15,
-			"contextBudget": map[string]any{
-				"maxTokens": 2048,
-			},
-		},
-	}); cmd == nil {
-		t.Fatal("llm usage event should refresh workspace context after incremental update")
-	}
-	if m.llmUsage.EntryTotal != 1 || m.llmUsage.TotalTokens != 15 || m.llmContext["maxTokens"] != 2048 {
-		t.Fatalf("llm usage/context = %+v/%+v, want incremental usage", m.llmUsage, m.llmContext)
-	}
 }
 
 func TestModelBlockedWorkspaceInputRefreshesBlockerInsteadOfContinuing(t *testing.T) {
@@ -1193,9 +1068,6 @@ func TestResumeRunActivatesWorkspaceWhenNoActiveRun(t *testing.T) {
 	if len(be.resumes) != 0 {
 		t.Fatalf("resumes = %v, want activation path", be.resumes)
 	}
-	if got := latestOperatorInputFromPatch(be.activations[0].ExecutionContextPatch); got != "resume from tui" {
-		t.Fatalf("operator input = %q, want resume text", got)
-	}
 }
 
 func TestResumeRunActivatesCreatedRun(t *testing.T) {
@@ -1217,18 +1089,6 @@ func TestResumeRunActivatesCreatedRun(t *testing.T) {
 	if len(be.resumes) != 1 || be.resumes[0] != "run-resume" {
 		t.Fatalf("resumes = %v, want created run resume", be.resumes)
 	}
-	if got := latestOperatorInputFromPatch(be.resumePatches[0]); got != "start created run" {
-		t.Fatalf("operator input = %q, want created run input", got)
-	}
-}
-
-func latestOperatorInputFromPatch(patch map[string]any) string {
-	if len(patch) == 0 {
-		return ""
-	}
-	latest, _ := patch["latestOperatorInput"].(map[string]any)
-	content, _ := latest["content"].(string)
-	return content
 }
 
 func TestModelInspectCommandsRenderCurrentState(t *testing.T) {
@@ -1320,14 +1180,13 @@ func TestModelStepProgressAutoScrollsToLatest(t *testing.T) {
 	}
 	before := m.mainViewport.YOffset
 	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventStepDispatched,
+		Type:        backend.EventPatchApplied,
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
 		Payload: map[string]any{
-			"kind": "shell/command",
-			"input": map[string]any{
-				"summary": map[string]any{"command": "go", "args": []string{"test", "./..."}},
-			},
+			"patchId":   "patch-scroll",
+			"state":     string(common.PatchStateApplied),
+			"targetRef": "main.go",
 		},
 	})
 	_ = m.View()
@@ -1357,14 +1216,13 @@ func TestModelRuntimeUpdateDoesNotStealManuallyScrolledViewport(t *testing.T) {
 	}
 
 	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventStepDispatched,
+		Type:        backend.EventPatchApplied,
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
 		Payload: map[string]any{
-			"kind": "shell/command",
-			"input": map[string]any{
-				"summary": map[string]any{"command": "go", "args": []string{"test", "./..."}},
-			},
+			"patchId":   "patch-manual-scroll",
+			"state":     string(common.PatchStateApplied),
+			"targetRef": "main.go",
 		},
 	})
 	_ = m.View()
@@ -1429,40 +1287,6 @@ func TestModelBackendRunCompletionCallback(t *testing.T) {
 	}
 }
 
-func TestModelRunFailurePrefersActionableHintOverTimeout(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	m.activeWorkspaceID = "ws-1"
-	m.activeRunID = "run-1"
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventStepCompleted,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"state": "failed",
-			"kind":  "llm/workspace_execution",
-			"output": map[string]any{
-				"reason": "invalid argument: ssh/command requires password or privateKey/privateKeyPath",
-			},
-		},
-	})
-	next, _ := m.Update(BackendEventMsg{Event: backend.Event{
-		Type:        backend.EventRunStateChanged,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"state":         string(common.RunStateFailed),
-			"failureReason": "context deadline exceeded (Client.Timeout or context cancellation while reading body)",
-		},
-	}})
-	m = asModel(next)
-	if strings.Contains(strings.ToLower(m.failureReason), "context deadline exceeded") {
-		t.Fatalf("failure reason should hide timeout noise:\n%s", m.failureReason)
-	}
-	if !strings.Contains(m.failureReason, "SSH 命令缺少 password 或 privateKey/privateKeyPath") {
-		t.Fatalf("failure reason should surface actionable hint, got %q", m.failureReason)
-	}
-}
-
 func TestModelViewIsResultFirstAndSuppressesEventNoise(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
@@ -1471,12 +1295,6 @@ func TestModelViewIsResultFirstAndSuppressesEventNoise(t *testing.T) {
 	m = asModel(next)
 	m.width = 100
 	m.height = 24
-	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventStepDispatched,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload:     map[string]any{"kind": "llm/workspace_execution"},
-	})
 	m.applyBackendEvent(backend.Event{
 		Type:        backend.EventResultAccepted,
 		WorkspaceID: "ws-1",
@@ -3074,33 +2892,17 @@ func TestModelInspectStatusIncludesRunHeartbeat(t *testing.T) {
 		LatestEffectiveProgressAt: "2026-06-10T00:00:00Z",
 		Stalled:                   true,
 	}
-	m.runtimeExecution = &backend.RuntimeExecutionInfo{
-		StepID:              "step-a",
-		StepKind:            "llm/workspace_execution",
-		StepState:           "running",
-		RequestID:           "request-a",
-		Pending:             true,
-		Gap:                 "worker_lost",
-		LastProgressSummary: "worker heartbeat lost",
-	}
 	m.convergenceStatus = &backend.ConvergenceStatusInfo{
-		WorkspaceID:                 "ws-a",
-		RunID:                       "run-a",
-		RunState:                    common.RunStateActive,
-		CurrentFocusID:              "focus-a",
-		NextActionKind:              "validate",
-		CurrentGap:                  "missing accepted evidence",
-		MissingEvidenceKinds:        []string{"validation"},
-		AcceptedEvidenceCount:       2,
-		RejectedEvidenceCount:       1,
-		LatestContractViolationRule: "coverage_assessment_incomplete",
-		LatestRecovery:              "recompute_authority",
-		LatestRejectedDiagnosticRef: "run-a/step-a/rejected-output",
-		DecisionCause:               "retry_exhaustion",
-		RetryAttempt:                2,
-		RetryMaxAttempts:            2,
-		NarrowedRetryAttempted:      true,
-		ManagedValidationAvailable:  true,
+		WorkspaceID:           "ws-a",
+		RunID:                 "run-a",
+		RunState:              common.RunStateActive,
+		CurrentFocusID:        "focus-a",
+		NextActionKind:        "validate",
+		CurrentGap:            "missing accepted evidence",
+		MissingEvidenceKinds:  []string{"validation"},
+		AcceptedEvidenceCount: 2,
+		RejectedEvidenceCount: 1,
+		DecisionCause:         "governance_required",
 	}
 
 	got := m.renderInspectStatus()
@@ -3108,9 +2910,7 @@ func TestModelInspectStatusIncludesRunHeartbeat(t *testing.T) {
 		"stream revision: last 42, gaps 2, latest gap 3",
 		"activity: no_activity - no effective progress evidence yet",
 		"latest progress: 2026-06-10T00:00:00Z",
-		"runtime execution: runtime pending | gap worker_lost | step step-a llm/workspace_execution running",
-		"runtime progress: worker heartbeat lost",
-		"convergence: focus focus-a | next validate | gap missing accepted evidence | evidence missing validation accepted 2 rejected 1 | violation coverage_assessment_incomplete recompute_authority | decision retry_exhaustion | retry 2/2 narrowed managedValidation rejected run-a/step-a/rejected-output",
+		"convergence: focus focus-a | next validate | gap missing accepted evidence | evidence missing validation accepted 2 rejected 1 | decision governance_required",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status = %q, missing %q", got, want)
@@ -3454,46 +3254,6 @@ func TestModelWorkspaceContextDoesNotRestoreOldRunBlockersForLiveRun(t *testing.
 	}
 	if m.blockingDecision != nil || m.blockingApproval != nil {
 		t.Fatalf("old blockers restored for live run: decision=%+v approval=%+v", m.blockingDecision, m.blockingApproval)
-	}
-}
-
-func TestModelWorkspaceContextUsesEffectiveGoalAndDoDFromRunContext(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-a", "")
-	next, _ := m.Update(WorkspaceContextMsg{
-		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive, ActiveRunID: "run-a"},
-		ActiveRun: &backend.RunInfo{
-			ID:          "run-a",
-			WorkspaceID: "ws-a",
-			GoalID:      "goal-latest",
-			DoDID:       "dod-latest",
-			State:       common.RunStateActive,
-			ExecutionContext: map[string]any{
-				"goal": map[string]any{
-					"id":   "goal-latest",
-					"text": "完成目标 A\n补充约束 B",
-				},
-				"goals": []any{
-					map[string]any{"id": "goal-base", "text": "完成目标 A"},
-					map[string]any{"id": "goal-latest", "text": "补充约束 B"},
-				},
-				"dod": map[string]any{
-					"id":    "dod-latest",
-					"items": []any{"验收项一满足", "验收项二满足"},
-				},
-			},
-		},
-		Goal: &backend.GoalInfo{ID: "goal-latest", Text: "补充约束 B"},
-		DoD:  &backend.DoDInfo{ID: "dod-latest", Items: []string{"验收项二满足"}},
-	})
-	m = asModel(next)
-	if m.currentTask != "完成目标 A\n补充约束 B" {
-		t.Fatalf("current task = %q, want effective cumulative goal", m.currentTask)
-	}
-	if len(m.transcript) != 2 || m.transcript[0].Text != "完成目标 A" || m.transcript[1].Text != "补充约束 B" {
-		t.Fatalf("transcript = %+v, want individual cumulative goals", m.transcript)
-	}
-	if len(m.dodItems) != 2 || m.dodItems[0] != "验收项一满足" || m.dodItems[1] != "验收项二满足" {
-		t.Fatalf("dod items = %+v, want effective cumulative DoD", m.dodItems)
 	}
 }
 
@@ -4050,12 +3810,12 @@ func TestModelStaleWorkspaceEventIgnoredByMainView(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.activeRunID = "run-1"
 	m.applyBackendEvent(backend.Event{
-		Type:        backend.EventStepDispatched,
+		Type:        backend.EventWorkspaceStateChanged,
 		WorkspaceID: "ws-other",
 		RunID:       "run-other",
-		Payload:     map[string]any{"kind": "other-step"},
+		Payload:     map[string]any{"state": string(common.WorkspaceStateActive)},
 	})
-	if m.progressText == "other-step" {
+	if m.progressText != "" {
 		t.Fatal("stale workspace event updated active progress")
 	}
 	if len(m.workspaces) != 1 || m.workspaces[0].ID != "ws-other" {
@@ -4072,9 +3832,9 @@ func TestModelUnscopedRunEventIgnoredDuringWorkspaceSwitch(t *testing.T) {
 	m.runtimeEvents = nil
 
 	cmd := m.applyBackendEvent(backend.Event{
-		Type:    backend.EventStepDispatched,
+		Type:    backend.EventRunStateChanged,
 		RunID:   "run-from-previous-workspace",
-		Payload: map[string]any{"kind": "old workspace step"},
+		Payload: map[string]any{"state": string(common.RunStateActive)},
 	})
 	if cmd != nil {
 		t.Fatal("unscoped stale run event should not trigger refresh command")
@@ -4124,8 +3884,6 @@ func TestShouldConsumeBackendSubscriptionEventMatchesHandledEvents(t *testing.T)
 		backend.EventGoalDefined,
 		backend.EventDoDDefined,
 		backend.EventRunStateChanged,
-		backend.EventStepDispatched,
-		backend.EventStepCompleted,
 		backend.EventDecisionCreated,
 		backend.EventDecisionResolved,
 		backend.EventApprovalCreated,
@@ -4135,8 +3893,6 @@ func TestShouldConsumeBackendSubscriptionEventMatchesHandledEvents(t *testing.T)
 		backend.EventMemoryUpdated,
 		backend.EventMemoryDeleted,
 		backend.EventMemoryRecallRecorded,
-		backend.EventLLMStreamProgress,
-		backend.EventLLMUsageRecorded,
 		backend.EventPatchPreviewed,
 		backend.EventPatchApplied,
 		backend.EventPatchFailed,
@@ -4161,7 +3917,7 @@ func TestShouldConsumeBackendSubscriptionEventMatchesHandledEvents(t *testing.T)
 	}
 }
 
-func TestModelSubscriptionQueuesRunProgressEvents(t *testing.T) {
+func TestModelSubscriptionQueuesHandledEvents(t *testing.T) {
 	events := &subscriptionCaptureEvents{}
 	m := NewAppModel(&subscriptionCaptureBE{fakeBE: newFake(t), events: events}, "ws-a", "")
 	if events.handler == nil {
@@ -4169,18 +3925,18 @@ func TestModelSubscriptionQueuesRunProgressEvents(t *testing.T) {
 	}
 
 	events.handler(context.Background(), backend.Event{
-		Type:        backend.EventStepDispatched,
+		Type:        backend.EventPatchApplied,
 		WorkspaceID: "ws-a",
 		RunID:       "run-a",
-		Payload:     map[string]any{"kind": "shell/command"},
+		Payload:     map[string]any{"patchId": "patch-a", "state": string(common.PatchStateApplied)},
 	})
 	select {
 	case got := <-m.eventCh:
-		if got.Type != backend.EventStepDispatched || got.WorkspaceID != "ws-a" || got.RunID != "run-a" {
-			t.Fatalf("queued event = %+v, want active step event", got)
+		if got.Type != backend.EventPatchApplied || got.WorkspaceID != "ws-a" || got.RunID != "run-a" {
+			t.Fatalf("queued event = %+v, want handled patch event", got)
 		}
 	default:
-		t.Fatal("step event was filtered before reaching the TUI model queue")
+		t.Fatal("handled event was filtered before reaching the TUI model queue")
 	}
 
 	events.handler(context.Background(), backend.Event{Type: backend.EventType("custom/non-critical")})
@@ -4203,7 +3959,7 @@ func TestModelAllowsBackendWithoutEvents(t *testing.T) {
 
 func TestEnqueueBackendEventKeepsWorkspaceCreatedWhenChannelFull(t *testing.T) {
 	ch := make(chan backend.Event, 1)
-	enqueueBackendEvent(ch, backend.Event{Type: backend.EventStepCompleted, WorkspaceID: "ws-a"})
+	enqueueBackendEvent(ch, backend.Event{Type: backend.EventPatchApplied, WorkspaceID: "ws-a"})
 	enqueueBackendEvent(ch, backend.Event{Type: backend.EventWorkspaceCreated, WorkspaceID: "ws-b"})
 
 	got := <-ch
@@ -4223,14 +3979,14 @@ func TestEnqueueBackendEventDropsNonCriticalWhenChannelFull(t *testing.T) {
 	}
 }
 
-func TestEnqueueBackendEventKeepsStepWhenChannelFull(t *testing.T) {
+func TestEnqueueBackendEventKeepsLatestCriticalEventWhenChannelFull(t *testing.T) {
 	ch := make(chan backend.Event, 1)
-	enqueueBackendEvent(ch, backend.Event{Type: backend.EventStepDispatched, WorkspaceID: "ws-a"})
-	enqueueBackendEvent(ch, backend.Event{Type: backend.EventStepCompleted, WorkspaceID: "ws-b"})
+	enqueueBackendEvent(ch, backend.Event{Type: backend.EventPatchApplied, WorkspaceID: "ws-a"})
+	enqueueBackendEvent(ch, backend.Event{Type: backend.EventDecisionCreated, WorkspaceID: "ws-b"})
 
 	got := <-ch
-	if got.Type != backend.EventStepCompleted || got.WorkspaceID != "ws-b" {
-		t.Fatalf("event = %+v, want latest critical step event", got)
+	if got.Type != backend.EventDecisionCreated || got.WorkspaceID != "ws-b" {
+		t.Fatalf("event = %+v, want latest critical event", got)
 	}
 }
 
@@ -4664,9 +4420,6 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 			ID:          "run-a",
 			WorkspaceID: "ws-a",
 			State:       common.RunStateFailed,
-			ExecutionContext: map[string]any{
-				"goal": map[string]any{"text": "stale task-a"},
-			},
 		},
 	})
 	m = asModel(next)
@@ -4683,10 +4436,6 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 			ID:          "run-b",
 			WorkspaceID: "ws-b",
 			State:       common.RunStateActive,
-			ExecutionContext: map[string]any{
-				"goal": map[string]any{"text": "build workspace B"},
-				"dod":  map[string]any{"items": []any{"B result accepted"}},
-			},
 		},
 		Status: &backend.RunStatusInfo{
 			ID:              "run-b",
@@ -4694,6 +4443,7 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 			State:           common.RunStateActive,
 			CurrentStepKind: "llm/workspace_execution",
 		},
+		Goal: &backend.GoalInfo{ID: "goal-b", WorkspaceID: "ws-b", Text: "build workspace B"},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
 			Workspace:    backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive, ActiveRunID: "run-b"},
 			TaskProgress: backend.TaskProgressInfo{WorkspaceID: "ws-b", RunID: "run-b", State: "running", Summary: "B is making progress"},
@@ -4796,10 +4546,6 @@ func TestTUIE2EWorkspaceSwitchProjectionRefreshVisualSnapshot(t *testing.T) {
 			ID:          "run-b",
 			WorkspaceID: "ws-b",
 			State:       common.RunStateActive,
-			ExecutionContext: map[string]any{
-				"goal": map[string]any{"text": "build workspace B"},
-				"dod":  map[string]any{"items": []any{"B result accepted"}},
-			},
 		},
 		Status: &backend.RunStatusInfo{
 			ID:              "run-b",
@@ -4807,6 +4553,7 @@ func TestTUIE2EWorkspaceSwitchProjectionRefreshVisualSnapshot(t *testing.T) {
 			State:           common.RunStateActive,
 			CurrentStepKind: "llm/workspace_execution",
 		},
+		Goal: &backend.GoalInfo{ID: "goal-b", WorkspaceID: "ws-b", Text: "build workspace B"},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
 			Workspace:    backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive, ActiveRunID: "run-b"},
 			TaskProgress: backend.TaskProgressInfo{WorkspaceID: "ws-b", RunID: "run-b", State: "running", Summary: "B is making progress"},
@@ -4818,7 +4565,7 @@ func TestTUIE2EWorkspaceSwitchProjectionRefreshVisualSnapshot(t *testing.T) {
 	writeOptionalTUIViewSnapshot(t, "03-after-projection-refresh.txt", m)
 	view := stripANSI(m.View())
 	status := stripANSI(m.renderRuntimeStatusBar(120))
-	for _, want := range []string{"build workspace B", "B result accepted"} {
+	for _, want := range []string{"build workspace B"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("refreshed main view missing %q:\n%s", want, view)
 		}
@@ -4908,9 +4655,6 @@ func TestModelRejectsWorkspaceContextOlderThanOverviewRevision(t *testing.T) {
 			ID:          "run-old",
 			WorkspaceID: "ws-a",
 			State:       common.RunStateActive,
-			ExecutionContext: map[string]any{
-				"goal": map[string]any{"text": "old task"},
-			},
 		},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
 			Workspace: backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateActive, ActiveRunID: "run-old", Projection: backend.ProjectionInfo{WorkspaceRevision: 3}},
@@ -4938,10 +4682,8 @@ func TestModelRejectsWorkspaceContextOlderThanOverviewRevision(t *testing.T) {
 			ID:          "run-current",
 			WorkspaceID: "ws-a",
 			State:       common.RunStateActive,
-			ExecutionContext: map[string]any{
-				"goal": map[string]any{"text": "current task"},
-			},
 		},
+		Goal: &backend.GoalInfo{ID: "goal-current", WorkspaceID: "ws-a", Text: "current task"},
 		Snapshot: &backend.WorkspaceSnapshotInfo{
 			Workspace: backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateActive, ActiveRunID: "run-current", Projection: backend.ProjectionInfo{WorkspaceRevision: 5}},
 			ViewModel: backend.WorkspaceViewModelInfo{WorkspaceID: "ws-a", Revision: 5, WorkspaceRevision: 5},
@@ -5206,11 +4948,11 @@ func TestModelTracksEventRevisionPerWorkspace(t *testing.T) {
 		t.Fatal("inactive workspace revision should not refresh active context")
 	}
 	cmd = m.applyBackendEvent(backend.Event{
-		Type:        backend.EventStepDispatched,
+		Type:        backend.EventPatchApplied,
 		WorkspaceID: "ws-a",
 		RunID:       "run-a",
 		Revision:    2,
-		Payload:     map[string]any{"kind": "shell/command"},
+		Payload:     map[string]any{"patchId": "patch-2", "state": string(common.PatchStateApplied)},
 	})
 	if cmd != nil {
 		t.Fatal("active workspace first revision should not be compared against inactive workspace revision")
@@ -5222,11 +4964,11 @@ func TestModelTracksEventRevisionPerWorkspace(t *testing.T) {
 	}
 
 	cmd = m.applyBackendEvent(backend.Event{
-		Type:        backend.EventStepDispatched,
+		Type:        backend.EventPatchApplied,
 		WorkspaceID: "ws-a",
 		RunID:       "run-a",
 		Revision:    4,
-		Payload:     map[string]any{"kind": "shell/command"},
+		Payload:     map[string]any{"patchId": "patch-4", "state": string(common.PatchStateApplied)},
 	})
 	if cmd == nil || !strings.Contains(m.progressText, "revision gap") {
 		t.Fatalf("active workspace revision gap should refresh context: cmd=%v progress=%q", cmd != nil, m.progressText)
@@ -5248,32 +4990,6 @@ func TestModelTracksEventRevisionPerWorkspace(t *testing.T) {
 	wsBState = m.workspaceRuntimeState("ws-b")
 	if wsBState == nil || wsBState.RevisionGapCount != 1 || wsBState.LastRevisionGap != 2 {
 		t.Fatalf("ws-b revision gap state = %+v, want count=1 latest=2", wsBState)
-	}
-}
-
-func TestModelLLMStreamProgressUpdatesStatus(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-a", "")
-	m.activeWorkspaceID = "ws-a"
-	m.activeRunID = "run-a"
-
-	cmd := m.applyBackendEvent(backend.Event{
-		Type:        backend.EventLLMStreamProgress,
-		WorkspaceID: "ws-a",
-		RunID:       "run-a",
-		Revision:    1,
-		Payload: map[string]any{
-			backend.PayloadKeyProviderID:    "local",
-			backend.PayloadKeyModel:         "verify-model",
-			backend.PayloadKeyStatus:        "streaming",
-			backend.PayloadKeyChunkCount:    3,
-			backend.PayloadKeyReceivedBytes: 128,
-		},
-	})
-	if cmd != nil {
-		t.Fatal("llm stream progress should not fetch context")
-	}
-	if m.progress != progressRunning || !strings.Contains(m.progressText, "LLM streaming") || len(m.runtimeEvents) != 1 {
-		t.Fatalf("stream progress not applied: progress=%s text=%q events=%v", m.progress, m.progressText, m.runtimeEvents)
 	}
 }
 
@@ -5925,7 +5641,6 @@ type recordingBE struct {
 	restarts              []backend.ActivateRunRequest
 	resumes               []common.RunID
 	runCommands           []backend.WorkspaceRunCommand
-	resumePatches         []map[string]any
 	lastGetWorkspace      common.WorkspaceID
 	lastListWorkspace     common.WorkspaceID
 	lastSnapshotWorkspace common.WorkspaceID
@@ -6027,19 +5742,11 @@ func (f *recordingRun) Command(ctx context.Context, req backend.WorkspaceRunComm
 	switch req.Intent {
 	case "", backend.RunCommandIntentResume:
 		if req.ExpectedRunID == "" {
-			activation := req.Activation
-			if len(req.ExecutionContextPatch) > 0 {
-				activation.ExecutionContextPatch = req.ExecutionContextPatch
-			}
-			return f.Activate(ctx, req.WorkspaceID, activation)
+			return f.Activate(ctx, req.WorkspaceID, req.Activation)
 		}
-		return f.Resume(ctx, req.WorkspaceID, req.ExpectedRunID, req.ExecutionContextPatch)
+		return f.Resume(ctx, req.WorkspaceID, req.ExpectedRunID)
 	case backend.RunCommandIntentRestart:
-		activation := req.Activation
-		if len(req.ExecutionContextPatch) > 0 {
-			activation.ExecutionContextPatch = req.ExecutionContextPatch
-		}
-		return f.Restart(ctx, req.WorkspaceID, activation)
+		return f.Restart(ctx, req.WorkspaceID, req.Activation)
 	default:
 		return nil, common.ErrInvalidArgument
 	}
@@ -6053,12 +5760,9 @@ func (f *recordingRun) Restart(ctx context.Context, wsID common.WorkspaceID, req
 	f.parent.restarts = append(f.parent.restarts, req)
 	return &backend.RunInfo{ID: "run-new", WorkspaceID: wsID, GoalID: req.GoalID, DoDID: req.DoDID, State: common.RunStateActive}, nil
 }
-func (f *recordingRun) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, executionContextPatch ...map[string]any) (*backend.RunInfo, error) {
+func (f *recordingRun) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunInfo, error) {
 	f.parent.resumes = append(f.parent.resumes, id)
 	f.parent.lastResumeWorkspace = wsID
-	if len(executionContextPatch) > 0 {
-		f.parent.resumePatches = append(f.parent.resumePatches, executionContextPatch[0])
-	}
 	workspaceID := wsID
 	if workspaceID == "" {
 		workspaceID = "ws-1"
@@ -6153,7 +5857,7 @@ type conflictRunBackend struct{ parent *conflictApprovalBE }
 func (f *conflictRunBackend) Command(ctx context.Context, req backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
 	switch req.Intent {
 	case "", backend.RunCommandIntentResume:
-		return f.Resume(ctx, req.WorkspaceID, req.ExpectedRunID, req.ExecutionContextPatch)
+		return f.Resume(ctx, req.WorkspaceID, req.ExpectedRunID)
 	case backend.RunCommandIntentRestart:
 		return f.Restart(ctx, req.WorkspaceID, req.Activation)
 	default:
@@ -6319,7 +6023,7 @@ func (f *fakeR) Command(ctx context.Context, req backend.WorkspaceRunCommand) (*
 		if req.ExpectedRunID == "" {
 			return f.Activate(ctx, req.WorkspaceID, req.Activation)
 		}
-		return f.Resume(ctx, req.WorkspaceID, req.ExpectedRunID, req.ExecutionContextPatch)
+		return f.Resume(ctx, req.WorkspaceID, req.ExpectedRunID)
 	case backend.RunCommandIntentRestart:
 		return f.Restart(ctx, req.WorkspaceID, req.Activation)
 	default:

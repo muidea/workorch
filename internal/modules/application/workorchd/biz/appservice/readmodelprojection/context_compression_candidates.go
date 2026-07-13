@@ -22,9 +22,6 @@ func ContextCompressionCandidates(bundle readmodelcore.ContextBundle) []readmode
 			SuggestedMode: "milestone_summary",
 		})
 	}
-	if candidate, ok := executionContextCompressionCandidate(bundle.Sections); ok {
-		ret = append(ret, candidate)
-	}
 	if len(ret) == 0 {
 		return nil
 	}

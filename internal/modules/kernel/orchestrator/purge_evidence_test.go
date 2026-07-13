@@ -146,7 +146,6 @@ func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 
 	module := New()
 	if err := module.Configure(Dependencies{
-		Runtime:               NewRuntimeAdapterRegistry(),
 		Steps:                 steps,
 		ToolCalls:             memoryrepo.NewToolCallRepository(),
 		Patches:               memoryrepo.NewPatchRepository(),
@@ -224,7 +223,6 @@ func TestPurgeRunCommandUsesWorkspaceScopeForDuplicateRunIDs(t *testing.T) {
 	})
 	module := New()
 	if err := module.Configure(Dependencies{
-		Runtime:               NewRuntimeAdapterRegistry(),
 		Steps:                 steps,
 		ToolCalls:             memoryrepo.NewToolCallRepository(),
 		Patches:               memoryrepo.NewPatchRepository(),

@@ -480,9 +480,6 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 		Source:             "test",
 		DefinitionRevision: "rev-remote-resume",
 		DecisionID:         "ticket-remote-resume",
-		ExecutionContextPatch: map[string]any{
-			"latestOperatorInput": map[string]any{"content": "resume"},
-		},
 	})
 	if err != nil {
 		t.Fatalf("remote run command: %v", err)
@@ -500,9 +497,6 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 			body["definitionRevision"] != "rev-remote-resume" ||
 			body["decisionId"] != "ticket-remote-resume" {
 			t.Fatalf("request body = %+v, want request id, reason, source, definition revision, and decision id", body)
-		}
-		if patch, _ := body["executionContextPatch"].(map[string]any); len(patch) == 0 {
-			t.Fatalf("request body = %+v, want execution context patch", body)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("remote server did not receive resume request")
@@ -600,9 +594,6 @@ func TestRemoteRunCommandRestartSendsWorkspaceRestartCommandMetadata(t *testing.
 		Priority:           6,
 		DefinitionRevision: "rev-remote-restart",
 		DecisionID:         "ticket-remote-restart",
-		ExecutionContextPatch: map[string]any{
-			"latestOperatorInput": map[string]any{"source": "tui", "content": "restart"},
-		},
 		Activation: ActivateRunRequest{
 			GoalID:        "goal-remote-restart",
 			DoDID:         "dod-remote-restart",
@@ -644,9 +635,6 @@ func TestRemoteRunCommandRestartSendsWorkspaceRestartCommandMetadata(t *testing.
 		assertRemoteBodyStringSlice(t, body, "mcpServerIds", "mcp-remote-restart")
 		assertRemoteBodyStringSlice(t, body, "capabilityIds", "mcp-remote-restart:tool:validate")
 		assertRemoteBodyStringSlice(t, body, "memoryIds", "memory-remote-restart")
-		if patch, _ := body["executionContextPatch"].(map[string]any); len(patch) == 0 {
-			t.Fatalf("request body = %+v, want execution context patch", body)
-		}
 	case <-time.After(time.Second):
 		t.Fatal("remote server did not receive restart request")
 	}

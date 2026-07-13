@@ -6,7 +6,6 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -19,32 +18,58 @@ type DoneCommandResult struct {
 }
 
 type WorkspaceRunRequestedCommand struct {
-	WorkspaceID           common.WorkspaceID
-	RunID                 common.RunID
-	Intent                string
-	Action                string
-	Reason                string
-	RequestID             string
-	IdempotencyKey        string
-	Source                string
-	DefinitionRevision    string
-	DecisionID            string
-	Priority              int
-	GoalID                common.GoalID
-	DoDID                 common.DoDID
-	LLMProviderID         string
-	SoulID                common.SoulID
-	SoulBindings          map[string]string
-	SkillIDs              []common.SkillID
-	MCPServerIDs          []common.MCPServerID
-	CapabilityIDs         []common.MCPCapabilityID
-	MemoryIDs             []common.MemoryID
-	DialogLanguage        string
-	ExecutionContextPatch eventvalue.Payload
+	WorkspaceID        common.WorkspaceID
+	RunID              common.RunID
+	Intent             string
+	Action             string
+	Reason             string
+	RequestID          string
+	IdempotencyKey     string
+	Source             string
+	DefinitionRevision string
+	DecisionID         string
+	Priority           int
+	GoalID             common.GoalID
+	DoDID              common.DoDID
+	LLMProviderID      string
+	SoulID             common.SoulID
+	SoulBindings       map[string]string
+	SkillIDs           []common.SkillID
+	MCPServerIDs       []common.MCPServerID
+	CapabilityIDs      []common.MCPCapabilityID
+	MemoryIDs          []common.MemoryID
+	DialogLanguage     string
 }
 
 type WorkspaceRunRequestedResult struct {
 	Accepted bool
+}
+
+type RuntimeV1RetirementCommand struct {
+	DryRun bool
+}
+
+type RuntimeV1RetirementFailure struct {
+	SubjectType string
+	SubjectID   string
+	Reason      string
+}
+
+type RuntimeV1RetirementReport struct {
+	ScannedV1Runs             int
+	SupersededRuns            int
+	ClearedActiveRunIDs       int
+	SupersededTickets         int
+	SupersededApprovals       int
+	ResourceScopesToRelease   int
+	ReleasedResourceScopes    int
+	ProjectionRebuildRevision int64
+	Failures                  []RuntimeV1RetirementFailure
+}
+
+type RuntimeV1RetirementResult struct {
+	DryRun bool
+	Report RuntimeV1RetirementReport
 }
 
 type WorkspaceProjectionChangedData struct {
@@ -160,6 +185,7 @@ func MessageContracts() []eventcontract.MessageContract {
 	return eventcontract.MessageContracts(
 		eventcontract.FacadeTopic[DoneCommand, DoneCommandResult]("workorchd", definitionPackage, TopicWorkorchDCommandDone),
 		eventcontract.CommandTopic[WorkspaceRunRequestedCommand, WorkspaceRunRequestedResult]("workorchd.scheduler", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkorchDCommandWorkspaceRunRequested),
+		eventcontract.CommandTopic[RuntimeV1RetirementCommand, RuntimeV1RetirementResult]("workorchd.runtime_v1_retirement", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkorchDCommandRuntimeV1Retirement),
 		eventcontract.DataTopic[WorkspaceProjectionChangedData]("workorchd.workspace_projection", definitionPackage, eventcontract.LanePolicyState, TopicWorkspaceProjectionChanged),
 		eventcontract.FacadeTopic[CLICommand, CLIResult]("cli", definitionPackage, TopicCLICommand),
 		eventcontract.DataTopic[CLIProgress]("cli", definitionPackage, eventcontract.LanePolicyTopic, TopicCLIProgress),

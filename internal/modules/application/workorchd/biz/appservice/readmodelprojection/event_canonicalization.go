@@ -3,8 +3,6 @@ package readmodelprojection
 import (
 	"strings"
 
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -13,8 +11,8 @@ func canonicalizeEventRecordPayload(topic string, subjectType string, payload ma
 	if len(payload) == 0 {
 		return payload
 	}
-	if strings.TrimSpace(topic) != runevents.TopicStepDispatched &&
-		strings.TrimSpace(topic) != runevents.TopicStepStateChanged &&
+	if strings.TrimSpace(topic) != "/step/dispatched" &&
+		strings.TrimSpace(topic) != "/step/state/changed" &&
 		strings.TrimSpace(subjectType) != "step" {
 		return payload
 	}

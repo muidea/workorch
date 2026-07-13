@@ -823,16 +823,17 @@ func (s *Service) autoReplanLineageDepth(ctx context.Context, run *runmodel.Run)
 	seen := map[common.RunID]bool{}
 	for current := run; current != nil && current.ID != "" && !seen[current.ID]; {
 		seen[current.ID] = true
-		replan := mapFromMap(current.ExecutionContext, "replanContinuation")
-		if len(replan) == 0 {
+		if current.RuntimeBootstrap == nil {
 			return depth
 		}
-		payload := mapFromMap(replan, "resolutionPayload")
-		if strings.EqualFold(stringFromMap(replan, "resolutionType"), decisioncommon.ResolutionTypeReplan) ||
-			strings.EqualFold(stringFromMap(payload, "recoveryAction"), "replan") {
+		replan := current.RuntimeBootstrap.Activation.Continuation.Normalized().Replan
+		if replan == nil {
+			return depth
+		}
+		if strings.EqualFold(replan.ResolutionType, decisioncommon.ResolutionTypeReplan) || strings.EqualFold(replan.RecoveryAction, "replan") {
 			depth++
 		}
-		predecessorID := common.RunID(strings.TrimSpace(stringFromMap(replan, "predecessorRunId")))
+		predecessorID := replan.PredecessorRunID
 		if predecessorID == "" {
 			return depth
 		}

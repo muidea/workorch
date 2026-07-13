@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
-	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -526,63 +524,6 @@ func durationFromMillisQuery(values url.Values, key string, fallback time.Durati
 	return ret
 }
 
-type governanceRunResumeRef struct {
-	WorkspaceID         string
-	RunID               string
-	Intent              string
-	Reason              string
-	RequestID           string
-	DecisionID          string
-	ResolutionID        string
-	AuthoritySnapshotID string
-}
-
-func (s *serverState) scheduleGovernanceRunResumeRefs(refs []governanceRunResumeRef, priority int) bool {
-	if s == nil || s.runContinuations == nil {
-		return false
-	}
-	return s.runContinuations.scheduleGovernanceRunResumeRefs(refs, priority)
-}
-
-func (s *serverState) scheduleReplanContinuationIfNeeded(ctx context.Context, workspaceID string, runID string, priority int) bool {
-	if s == nil || s.runContinuations == nil {
-		return false
-	}
-	return s.runContinuations.scheduleReplanContinuationIfNeeded(ctx, workspaceID, runID, priority)
-}
-
-func runIsReplanSuccessorOf(item appservice.Run, predecessorRunID string) bool {
-	predecessorRunID = strings.TrimSpace(predecessorRunID)
-	if predecessorRunID == "" {
-		return false
-	}
-	if replan, _ := item.ExecutionContext["replanContinuation"].(map[string]any); len(replan) > 0 {
-		if predecessor, _ := replan["predecessorRunId"].(string); strings.TrimSpace(predecessor) == predecessorRunID {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *serverState) runHasResolvedReplanDecision(ctx context.Context, workspaceID string, runID string) bool {
-	if s == nil || s.listDecisions == nil {
-		return false
-	}
-	items, err := s.listDecisions(ctx, s.config.Backend, s.config.DataRoot, workspaceID, runID)
-	if err != nil {
-		slog.Warn("workorch replan continuation decision lookup failed", "workspaceID", workspaceID, "runID", runID, "err", err)
-		return false
-	}
-	for _, item := range items {
-		if item.RunID == runID &&
-			item.State == string(common.DecisionTicketStateResolved) &&
-			item.ResolutionType == decisioncommon.ResolutionTypeReplan {
-			return true
-		}
-	}
-	return false
-}
-
 func runIDsFromDecisions(items []appservice.Decision) []string {
 	ret := make([]string, 0, len(items))
 	for _, item := range items {
@@ -597,114 +538,6 @@ func runIDsFromApprovals(items []appservice.Approval) []string {
 		ret = append(ret, item.RunID)
 	}
 	return ret
-}
-
-func runResumeRefsFromDecisions(items []appservice.Decision) []governanceRunResumeRef {
-	ret := make([]governanceRunResumeRef, 0, len(items))
-	for _, item := range items {
-		workspaceID := strings.TrimSpace(item.WorkspaceID)
-		runID := strings.TrimSpace(item.RunID)
-		decisionID := strings.TrimSpace(item.ID)
-		if workspaceID == "" || runID == "" || decisionID == "" {
-			continue
-		}
-		intent := "resume"
-		reason := "decision_resolved"
-		if strings.TrimSpace(item.ResolutionType) == decisioncommon.ResolutionTypeReplan {
-			intent = "replan"
-			reason = "decision_replan_resolved"
-		}
-		ret = append(ret, governanceRunResumeRef{
-			WorkspaceID: workspaceID,
-			RunID:       runID,
-			Intent:      intent,
-			Reason:      reason,
-			RequestID:   governanceRunResumeRequestID("decision", decisionID, intent),
-			DecisionID:  decisionID,
-		})
-	}
-	return ret
-}
-
-func runResumeRefsFromApprovals(items []appservice.Approval) []governanceRunResumeRef {
-	ret := make([]governanceRunResumeRef, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, governanceRunResumeRef{
-			WorkspaceID: item.WorkspaceID,
-			RunID:       item.RunID,
-			Intent:      "resume",
-			Reason:      "approval_resolved",
-			RequestID:   governanceRunResumeRequestID("approval", item.ID, "resume"),
-		})
-	}
-	return ret
-}
-
-func governanceRunResumeRequestID(kind string, id string, intent string) string {
-	parts := []string{"governance", strings.TrimSpace(kind), strings.TrimSpace(id), strings.TrimSpace(intent)}
-	for idx, part := range parts {
-		if part == "" {
-			parts[idx] = "none"
-		}
-	}
-	return strings.Join(parts, "-")
-}
-
-func uniqueGovernanceRunResumeRefs(items []governanceRunResumeRef) []governanceRunResumeRef {
-	seen := map[string]struct{}{}
-	ret := make([]governanceRunResumeRef, 0, len(items))
-	for _, item := range items {
-		item.WorkspaceID = strings.TrimSpace(item.WorkspaceID)
-		item.RunID = strings.TrimSpace(item.RunID)
-		item.Intent = strings.TrimSpace(item.Intent)
-		item.Reason = strings.TrimSpace(item.Reason)
-		item.RequestID = strings.TrimSpace(item.RequestID)
-		item.DecisionID = strings.TrimSpace(item.DecisionID)
-		item.ResolutionID = strings.TrimSpace(item.ResolutionID)
-		item.AuthoritySnapshotID = strings.TrimSpace(item.AuthoritySnapshotID)
-		if item.Intent == "" {
-			item.Intent = "resume"
-		}
-		if item.WorkspaceID == "" || item.RunID == "" {
-			continue
-		}
-		key := governanceRunResumeKey(item)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		ret = append(ret, item)
-	}
-	return ret
-}
-
-func governanceRunResumeKey(item governanceRunResumeRef) string {
-	intent := strings.TrimSpace(item.Intent)
-	if intent == "" {
-		intent = "resume"
-	}
-	workspaceID := strings.TrimSpace(item.WorkspaceID)
-	runID := strings.TrimSpace(item.RunID)
-	if workspaceID == "" || runID == "" {
-		return ""
-	}
-	decisionID := strings.TrimSpace(item.DecisionID)
-	resolutionID := strings.TrimSpace(item.ResolutionID)
-	authoritySnapshotID := strings.TrimSpace(item.AuthoritySnapshotID)
-	if intent == "resume" && (decisionID != "" || resolutionID != "" || authoritySnapshotID != "") {
-		return strings.Join([]string{intent, workspaceID, runID, firstNonEmptyServerValue(decisionID, "decision-unknown"), firstNonEmptyServerValue(resolutionID, "resolution-unknown"), firstNonEmptyServerValue(authoritySnapshotID, "authority-unknown")}, "/")
-	}
-	if decisionID != "" {
-		return intent + "/" + workspaceID + "/" + runID + "/" + decisionID
-	}
-	return intent + "/" + workspaceID + "/" + runID
-}
-
-func firstNonEmptyServerValue(value string, fallback string) string {
-	if value = strings.TrimSpace(value); value != "" {
-		return value
-	}
-	return fallback
 }
 
 func uniqueNonEmptyStrings(items []string) []string {

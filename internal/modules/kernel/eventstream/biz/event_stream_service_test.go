@@ -275,66 +275,6 @@ func TestServicePersistsTypedRunStateNotifications(t *testing.T) {
 	}
 }
 
-func TestServicePersistsTypedRunStepAndLLMNotifications(t *testing.T) {
-	ctx := context.Background()
-	repo := memory.NewEventRecordRepository()
-	service, rawHub := newEventStreamTestService(t, repo)
-	if err := service.Start(); err != nil {
-		t.Fatalf("start event stream service: %v", err)
-	}
-	defer service.Stop()
-
-	workspaceID := common.WorkspaceID("ws-event-stream-run-detail")
-	runID := common.RunID("run-event-stream-run-detail")
-	stepID := common.StepID("run-event-stream-run-detail/llm")
-	typedSummary, err := runevents.NotificationPayloadFromMap(map[string]any{"stage": "execution", "attempt": 2})
-	if err != nil {
-		t.Fatalf("build typed summary: %v", err)
-	}
-	items := []struct {
-		topic string
-		data  any
-	}{
-		{runevents.TopicStepStateChanged, runevents.StepChangedData{
-			WorkspaceID: workspaceID,
-			RunID:       runID,
-			StepID:      stepID,
-			Kind:        "llm/workspace_execution",
-			State:       common.StepStateSucceeded,
-			Output:      runevents.StepSnapshot{Ref: "workspace://step/output.json", Summary: typedSummary},
-		}},
-		{runevents.TopicRunLLMStreamProgress, runevents.LLMStreamProgressData{
-			WorkspaceID: workspaceID, RunID: runID, StepID: stepID, ProviderID: "provider-a", Model: "model-a", ChunkCount: 3, ReceivedBytes: 42, Status: "completed",
-		}},
-		{runevents.TopicRunLLMUsageRecorded, runevents.LLMUsageRecordedData{
-			WorkspaceID: workspaceID, RunID: runID, StepID: stepID, ProviderID: "provider-a", Model: "model-a", InputTokens: 10, OutputTokens: 2, TotalTokens: 12, Status: "completed",
-		}},
-	}
-	for _, item := range items {
-		event := magicevent.NewEventWithContext(item.topic, "kernel/orchestrator", runevents.NotificationDestination, magicevent.NewHeader(), ctx, item.data)
-		if result := rawHub.Send(event); result == nil || result.Error() != nil {
-			t.Fatalf("send typed %s: %v", item.topic, result)
-		}
-	}
-
-	records, err := repo.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true})
-	if err != nil {
-		t.Fatalf("list typed run detail records: %v", err)
-	}
-	if len(records) != 3 {
-		t.Fatalf("records = %+v, want step/progress/usage", records)
-	}
-	if records[0].Topic != runevents.TopicStepStateChanged || records[0].Payload[events.PayloadKeyState] != string(common.StepStateSucceeded) {
-		t.Fatalf("step record = %+v", records[0])
-	}
-	if records[1].Topic != runevents.TopicRunLLMStreamProgress || records[1].Payload[events.PayloadKeyChunkCount] != 3 {
-		t.Fatalf("stream record = %+v", records[1])
-	}
-	if records[2].Topic != runevents.TopicRunLLMUsageRecorded || records[2].Payload[events.PayloadKeyTotalTokens] != 12 {
-		t.Fatalf("usage record = %+v", records[2])
-	}
-}
-
 func TestServicePersistsTypedWorkspaceNotifications(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewEventRecordRepository()
@@ -517,40 +457,6 @@ func TestServicePersistsTypedOrchestratorDetailNotifications(t *testing.T) {
 	}
 	if records[0].Payload[events.PayloadKeyTargetRef] != "result.txt" || records[1].Payload["bytesWritten"] != int64(42) {
 		t.Fatalf("detail payloads = %+v / %+v", records[0].Payload, records[1].Payload)
-	}
-}
-
-func TestServicePersistsTypedContractViolationNotification(t *testing.T) {
-	ctx := context.Background()
-	repo := memory.NewEventRecordRepository()
-	service, rawHub := newEventStreamTestService(t, repo)
-	if err := service.Start(); err != nil {
-		t.Fatalf("start event stream service: %v", err)
-	}
-	defer service.Stop()
-	violation, err := orchestratorevents.StructuredPayloadFromMap(map[string]any{"violatedRule": "state_change_required", "attempt": 1})
-	if err != nil {
-		t.Fatalf("build violation payload: %v", err)
-	}
-	contextPayload, err := orchestratorevents.StructuredPayloadFromMap(map[string]any{"runAttempts": 2})
-	if err != nil {
-		t.Fatalf("build context payload: %v", err)
-	}
-	data := orchestratorevents.ContractViolationData{
-		SubjectID: "violation-001", WorkspaceID: "ws-contract-typed", RunID: "run-contract-typed", SourceStepID: "step-contract-typed",
-		TicketID: "ticket-contract-typed", Topic: orchestratorevents.TopicOrchestratorContractViolationEscalated,
-		Summary: "contract violation escalated", Violation: violation, Context: contextPayload,
-	}
-	event := magicevent.NewEventWithContext(data.Topic, "kernel/orchestrator", orchestratorevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	if result := rawHub.Send(event); result == nil || result.Error() != nil {
-		t.Fatalf("send typed contract violation: %v", result)
-	}
-	records, err := repo.List(ctx, repository.EventRecordQuery{WorkspaceID: data.WorkspaceID, IncludePayload: true})
-	if err != nil {
-		t.Fatalf("list contract violation records: %v", err)
-	}
-	if len(records) != 1 || records[0].Topic != data.Topic || records[0].Payload["violatedRule"] != "state_change_required" || records[0].Payload["ticketId"] != string(data.TicketID) {
-		t.Fatalf("records = %+v", records)
 	}
 }
 

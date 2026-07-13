@@ -11,7 +11,6 @@ func runContextBundleSections(snapshot readmodelcore.RunSnapshot, progress readm
 		ContextRunSection(snapshot),
 		ContextGoalSection(snapshot),
 		ContextDoDSection(snapshot),
-		ContextExecutionContextSection(snapshot),
 		ContextTaskProgressSection(progress),
 		ContextTaskDecompositionSection(snapshot.TaskDecompositions),
 		ContextExecutionSectionsSection(snapshot.ExecutionSections),

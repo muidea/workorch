@@ -6,17 +6,50 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
-type CreateApprovalCommand = approvalcontracts.CreateApprovalCommand
-type EnsureApprovalCommand = approvalcontracts.CreateApprovalCommand
-type UpdateApprovalCommand = approvalcontracts.UpdateApprovalCommand
+type CreateApprovalCommand struct {
+	ApprovalID     common.ApprovalID
+	WorkspaceID    common.WorkspaceID
+	RunID          common.RunID
+	StepID         common.StepID
+	Reason         string
+	Action         string
+	Context        eventvalue.Payload
+	AutoGovernance eventvalue.Payload
+}
+
+type EnsureApprovalCommand = CreateApprovalCommand
+
+type UpdateApprovalCommand struct {
+	ApprovalID     common.ApprovalID
+	WorkspaceID    common.WorkspaceID
+	RunID          common.RunID
+	StepID         common.StepID
+	Reason         string
+	Action         string
+	Context        eventvalue.Payload
+	State          common.ApprovalState
+	AutoGovernance eventvalue.Payload
+	ResolvedAt     string
+	ResolvedBy     string
+	CreatedAt      string
+	UpdatedAt      string
+}
 type DeleteApprovalCommand = approvalcontracts.DeleteApprovalCommand
-type EnsureApprovedCommand = approvalcontracts.ResolveApprovalCommand
-type EnsureRejectedCommand = approvalcontracts.ResolveApprovalCommand
+type ResolveApprovalCommand struct {
+	ApprovalID  common.ApprovalID
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	Context     eventvalue.Payload
+}
+
+type EnsureApprovedCommand = ResolveApprovalCommand
+type EnsureRejectedCommand = ResolveApprovalCommand
 
 type GetApprovalCommand struct {
 	WorkspaceID common.WorkspaceID

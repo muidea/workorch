@@ -166,8 +166,6 @@ func (a *Agent) RunWithBackend(ctx context.Context, workspaceID string, goalText
 
 func (a *Agent) handleBackendEvent(ctx context.Context, evt backend.Event, runDone chan<- error) {
 	switch evt.Type {
-	case backend.EventStepDispatched, backend.EventStepCompleted:
-		a.Send(Event{Type: EventProgress, Payload: evt.Payload})
 	case backend.EventDecisionCreated:
 		ticketID := firstString(evt.Payload, "ticketId", "ID", "id", backend.PayloadKeyBlockingTicketID)
 		if ticketID == "" {

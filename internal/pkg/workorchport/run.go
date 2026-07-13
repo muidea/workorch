@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type RunInfo struct {
@@ -14,7 +13,6 @@ type RunInfo struct {
 	GoalID             common.GoalID
 	DoDID              common.DoDID
 	DefinitionRevision string
-	ExecutionContext   map[string]any
 	State              common.RunState
 	Priority           int
 	BlockingTicketID   common.TicketID
@@ -23,23 +21,22 @@ type RunInfo struct {
 }
 
 type ActivateRunRequest struct {
-	GoalID                common.GoalID
-	DoDID                 common.DoDID
-	LLMProviderID         string
-	DialogLanguage        string
-	SoulID                common.SoulID
-	SoulBindings          map[string]common.SoulID
-	SkillIDs              []common.SkillID
-	MCPServerIDs          []common.MCPServerID
-	CapabilityIDs         []common.MCPCapabilityID
-	MemoryIDs             []common.MemoryID
-	Priority              int
-	RequestID             string
-	Reason                string
-	Source                string
-	DefinitionRevision    string
-	DecisionID            common.TicketID
-	ExecutionContextPatch map[string]any
+	GoalID             common.GoalID
+	DoDID              common.DoDID
+	LLMProviderID      string
+	DialogLanguage     string
+	SoulID             common.SoulID
+	SoulBindings       map[string]common.SoulID
+	SkillIDs           []common.SkillID
+	MCPServerIDs       []common.MCPServerID
+	CapabilityIDs      []common.MCPCapabilityID
+	MemoryIDs          []common.MemoryID
+	Priority           int
+	RequestID          string
+	Reason             string
+	Source             string
+	DefinitionRevision string
+	DecisionID         common.TicketID
 }
 
 type RunCommandIntent string
@@ -83,17 +80,16 @@ func ValidateWorkspaceRunCommand(req WorkspaceRunCommand) (RunCommandIntent, err
 }
 
 type WorkspaceRunCommand struct {
-	WorkspaceID           common.WorkspaceID
-	ExpectedRunID         common.RunID
-	Intent                RunCommandIntent
-	Reason                string
-	Source                string
-	RequestID             string
-	DefinitionRevision    string
-	DecisionID            common.TicketID
-	Priority              int
-	ExecutionContextPatch map[string]any
-	Activation            ActivateRunRequest
+	WorkspaceID        common.WorkspaceID
+	ExpectedRunID      common.RunID
+	Intent             RunCommandIntent
+	Reason             string
+	Source             string
+	RequestID          string
+	DefinitionRevision string
+	DecisionID         common.TicketID
+	Priority           int
+	Activation         ActivateRunRequest
 }
 
 type RunStatusInfo struct {
@@ -111,60 +107,25 @@ type RunStatusInfo struct {
 	BlockingTicketID     common.TicketID
 	BlockingApprovalID   common.ApprovalID
 	FailureReason        string
-	RuntimeExecution     *RuntimeExecutionInfo
 	ConvergenceStatus    *ConvergenceStatusInfo
 	SchedulerDiagnostics *SchedulerDiagnosticsInfo
 	Acceptance           AcceptanceProjectionInfo
 }
 
 type ConvergenceStatusInfo struct {
-	WorkspaceID                 common.WorkspaceID
-	RunID                       common.RunID
-	RunState                    common.RunState
-	CurrentFocusID              string
-	NextActionKind              string
-	CurrentGap                  string
-	MissingEvidenceKinds        []string
-	AcceptedEvidenceCount       int
-	RejectedEvidenceCount       int
-	LatestEffectiveProgressAt   string
-	LatestContractViolationRule string
-	LatestRecovery              string
-	LatestRejectedDiagnosticRef string
-	DecisionCause               string
-	RetryAttempt                int
-	RetryMaxAttempts            int
-	RetrySignatureRepeatCount   int
-	RetryBudgetScope            map[string]any
-	NarrowedRetryAttempted      bool
-	ManagedValidationAvailable  bool
-	Stalled                     bool
-	IneffectiveRetry            bool
-}
-
-type RuntimeExecutionInfo struct {
-	StepID              common.StepID
-	StepKind            string
-	StepState           common.StepState
-	RequestID           string
-	QueueKey            string
-	ContractViolation   *runtimemodel.ContractViolation
-	AcceptedAt          string
-	LastProgressAt      string
-	LastProgressEvent   string
-	LastProgressStage   string
-	LastProgressSummary string
-	WorkerID            string
-	WorkerStartedAt     string
-	WorkerHeartbeatAt   string
-	WorkerStoppedAt     string
-	WorkerLostAt        string
-	DoneAt              string
-	FailedAt            string
-	FinalizedAt         string
-	FinalizeEvent       string
-	Pending             bool
-	Gap                 string
+	WorkspaceID               common.WorkspaceID
+	RunID                     common.RunID
+	RunState                  common.RunState
+	CurrentFocusID            string
+	NextActionKind            string
+	CurrentGap                string
+	MissingEvidenceKinds      []string
+	AcceptedEvidenceCount     int
+	RejectedEvidenceCount     int
+	LatestEffectiveProgressAt string
+	DecisionCause             string
+	Stalled                   bool
+	IneffectiveRetry          bool
 }
 
 type RunBackend interface {

@@ -27,7 +27,7 @@ func CreateRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) erro
 		DoDID:              item.DoDID,
 		DefinitionRevision: item.DefinitionRevision,
 		InitialStepKind:    kind,
-		ExecutionContext:   item.ExecutionContext,
+		RuntimeBootstrap:   item.RuntimeBootstrap,
 		Priority:           item.Priority,
 	})
 	return err
@@ -43,47 +43,13 @@ func StartRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) error
 	return err
 }
 
-func ResumeRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run, executionContextPatch map[string]any) error {
+func ResumeRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
 	_, err := sendRunMagicCommand[orchestratorevents.ResumeRunCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandResumeRun, orchestratorevents.CommandDestination, "run", string(item.ID), item.WorkspaceID, item.ID, orchestratorevents.ResumeRunCommand{
-		WorkspaceID:           item.WorkspaceID,
-		RunID:                 item.ID,
-		ExecutionContextPatch: cloneMap(executionContextPatch),
-	})
-	return err
-}
-
-func RecoverRuntimeGap(ctx context.Context, hub magicevent.Hub, item *runmodel.Run, recovery RuntimeGapRecovery, executionContextPatch map[string]any) error {
-	if item == nil || item.ID == "" || recovery.StepID == "" || recovery.Gap == "" {
-		return common.ErrInvalidArgument
-	}
-	workspaceID := item.WorkspaceID
-	if recovery.WorkspaceID != "" {
-		workspaceID = recovery.WorkspaceID
-	}
-	if workspaceID == "" {
-		return common.ErrInvalidArgument
-	}
-	idempotencyKey := recovery.IdempotencyKey
-	if idempotencyKey == "" {
-		idempotencyKey = runtimeGapRecoveryIdempotencyKey(workspaceID, item.ID, recovery.StepID, string(recovery.Gap), recovery.RequestID, recovery.QueueKey)
-	}
-	_, err := sendRunMagicCommand[orchestratorevents.RecoverRuntimeGapCommand, orchestratorevents.OrchestratorCommandResult](ctx, hub, orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, orchestratorevents.CommandDestination, "run", string(item.ID), workspaceID, item.ID, orchestratorevents.RecoverRuntimeGapCommand{
-		WorkspaceID:           workspaceID,
-		RunID:                 item.ID,
-		StepID:                recovery.StepID,
-		StepKind:              recovery.StepKind,
-		Gap:                   string(recovery.Gap),
-		IdempotencyKey:        idempotencyKey,
-		RequestID:             recovery.RequestID,
-		QueueKey:              recovery.QueueKey,
-		LatestStepTime:        recovery.LatestStepTime,
-		RecoveryPolicy:        recovery.RecoveryPolicy,
-		RecoverySafety:        recovery.RecoverySafety,
-		Reason:                recovery.Reason,
-		ExecutionContextPatch: cloneMap(executionContextPatch),
+		WorkspaceID: item.WorkspaceID,
+		RunID:       item.ID,
 	})
 	return err
 }

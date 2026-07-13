@@ -10,6 +10,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type fakeEventRecordLister struct {
@@ -84,17 +85,10 @@ func TestEffectiveWorkspaceDoDMergesReadyItems(t *testing.T) {
 func TestBuildActivationMemoryRecallTrace(t *testing.T) {
 	runID := common.RunID("run-001")
 	workspaceID := common.WorkspaceID("ws-001")
-	trace := BuildActivationMemoryRecallTrace(runID, workspaceID, map[string]any{
-		"memoryRetrieval": map[string]any{
-			"policy":             "semantic_vector_search",
-			"status":             "selected",
-			"providerId":         "embedder",
-			"operation":          "embeddings",
-			"retrievedMemoryIds": []any{"mem-001", "mem-002"},
-			"minScore":           0.25,
-			"limit":              2,
-		},
-	}, "2026-06-04T00:00:00Z")
+	trace := BuildRuntimeV2ActivationMemoryRecallTrace(runID, workspaceID, &runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{Memories: []runtimecontract.RuntimeMemoryContext{
+		{ID: "mem-001", Summary: "first", VectorScore: 0.25},
+		{ID: "mem-002", Summary: "second", VectorScore: 0.5},
+	}}}, "2026-06-04T00:00:00Z")
 	if trace == nil {
 		t.Fatal("BuildActivationMemoryRecallTrace returned nil")
 	}
@@ -104,11 +98,8 @@ func TestBuildActivationMemoryRecallTrace(t *testing.T) {
 	if trace.WorkspaceID != workspaceID || trace.RunID != runID {
 		t.Fatalf("trace scope = workspace:%s run:%s", trace.WorkspaceID, trace.RunID)
 	}
-	if trace.Policy != "semantic_vector_search" || trace.Status != "selected" {
+	if trace.Policy != "runtime_v2_typed_activation" || trace.Status != "selected" {
 		t.Fatalf("trace policy/status = %s/%s", trace.Policy, trace.Status)
-	}
-	if trace.MinScore != 0.25 || trace.Limit != 2 {
-		t.Fatalf("trace score/limit = %v/%d", trace.MinScore, trace.Limit)
 	}
 	if len(trace.RetrievedMemoryIDs) != 2 || trace.RetrievedMemoryIDs[0] != "mem-001" || trace.RetrievedMemoryIDs[1] != "mem-002" {
 		t.Fatalf("retrieved memory IDs = %#v", trace.RetrievedMemoryIDs)
@@ -123,16 +114,12 @@ func TestActiveRunDefinitionContextStale(t *testing.T) {
 	goal := &workspacemodel.Goal{ID: "goal-001", WorkspaceID: workspaceID, Text: "ship it"}
 	dod := &workspacemodel.DoD{ID: "dod-001", WorkspaceID: workspaceID, Items: []string{"tests pass"}, State: common.DoDStateReady}
 	run := &runmodel.Run{
-		ID:          "run-001",
-		WorkspaceID: workspaceID,
-		GoalID:      goal.ID,
-		DoDID:       dod.ID,
-		ExecutionContext: map[string]any{
-			"goalId": string(goal.ID),
-			"goal":   GoalContext(goal),
-			"doDId":  string(dod.ID),
-			"dod":    DoDContext(dod),
-		},
+		ID: "run-001", WorkspaceID: workspaceID, GoalID: goal.ID, DoDID: dod.ID,
+		DefinitionRevision: "goal:goal-001|dod:dod-001",
+		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{Definition: runtimecontract.RuntimeDefinitionContext{
+			Revision: "goal:goal-001|dod:dod-001", GoalID: goal.ID, GoalDefinition: goal.Text,
+			DoDID: dod.ID, DoDDefinition: "1. tests pass", CapabilityContract: []string{"shell/command"},
+		}},
 	}
 
 	if ActiveRunDefinitionContextStale(run, goal, dod) {
@@ -196,49 +183,6 @@ func TestDialogLanguageUsesRequestedThenFallback(t *testing.T) {
 	}
 	if got := DialogLanguage("  ", " en "); got != "en" {
 		t.Fatalf("DialogLanguage fallback = %q, want en", got)
-	}
-}
-
-func TestWorkspaceExecutionContextBaseContextBuildsDefinitionContext(t *testing.T) {
-	workspaceID := common.WorkspaceID("ws-001")
-	goal := &workspacemodel.Goal{ID: "goal-001", WorkspaceID: workspaceID, Text: "ship"}
-	dod := &workspacemodel.DoD{ID: "dod-001", WorkspaceID: workspaceID, Items: []string{"done"}, State: common.DoDStateReady}
-	policies := []map[string]any{{"kind": "validation"}}
-
-	contextData := WorkspaceExecutionContextBaseContext(WorkspaceExecutionContextBase{
-		WorkspaceID:            workspaceID,
-		Goal:                   goal,
-		DoD:                    dod,
-		GoalContexts:           []map[string]any{{"id": string(goal.ID), "text": goal.Text}},
-		DoDContexts:            []map[string]any{{"id": string(dod.ID), "items": []any{"done"}}},
-		DefinitionChangeImpact: map[string]any{"changed": true},
-		ExecutionContract:      map[string]any{"stateChangePolicy": "allowed_but_not_required"},
-		DialogLanguage:         "zh-CN",
-		EvidencePolicies:       policies,
-	})
-
-	if contextData["activation"] != "workspace_execution" || contextData["workspaceId"] != string(workspaceID) {
-		t.Fatalf("context identity = %+v", contextData)
-	}
-	if contextData["goalId"] != string(goal.ID) || contextData["doDId"] != string(dod.ID) {
-		t.Fatalf("definition IDs = goal:%v dod:%v", contextData["goalId"], contextData["doDId"])
-	}
-	revision, _ := contextData["definitionRevision"].(map[string]any)
-	if revision["policy"] != "workspace_goal_dod_cumulative" ||
-		revision["effectiveGoalId"] != string(goal.ID) ||
-		revision["effectiveDoDId"] != string(dod.ID) {
-		t.Fatalf("definitionRevision = %+v, want current goal/dod revision", revision)
-	}
-	if contextData["goalDefinitionPolicy"] == "" || contextData["doDDefinitionPolicy"] == "" {
-		t.Fatalf("definition policies missing: %+v", contextData)
-	}
-	if contextData["dialogLanguage"] != "zh-CN" {
-		t.Fatalf("dialog language = %v", contextData["dialogLanguage"])
-	}
-	policies[0]["kind"] = "mutated"
-	storedPolicies, _ := contextData["evidencePolicies"].([]map[string]any)
-	if len(storedPolicies) != 1 || storedPolicies[0]["kind"] != "validation" {
-		t.Fatalf("evidence policies were not cloned: %+v", storedPolicies)
 	}
 }
 
@@ -357,35 +301,6 @@ func TestWorkspaceExecutionContractIncludesTemplateStagePoliciesFromHints(t *tes
 	}
 }
 
-func TestMergeGovernanceContinuationContextSuppressesContinuationAfterDefinitionChange(t *testing.T) {
-	contextData := map[string]any{}
-	history := []map[string]any{{
-		"runId":          "run-001",
-		"ticketId":       "decision-001",
-		"resolutionType": "replan",
-	}}
-
-	MergeGovernanceContinuationContext(contextData, map[string]any{"changed": true}, history, map[string]any{"runId": "run-000"})
-
-	if contextData["definitionChangeContinuationPolicy"] != "definition_change_supersedes_prior_actionable_continuation" {
-		t.Fatalf("definition policy = %v", contextData["definitionChangeContinuationPolicy"])
-	}
-	if contextData["replanContinuation"] != nil {
-		t.Fatalf("replanContinuation = %+v, want suppressed", contextData["replanContinuation"])
-	}
-	if contextData["rejectedResultContinuation"] != nil {
-		t.Fatalf("rejectedResultContinuation = %+v, want suppressed", contextData["rejectedResultContinuation"])
-	}
-	storedHistory, _ := contextData["governanceHistory"].([]map[string]any)
-	if len(storedHistory) != 1 {
-		t.Fatalf("governanceHistory = %+v, want retained", contextData["governanceHistory"])
-	}
-	history[0]["runId"] = "mutated"
-	if storedHistory[0]["runId"] != "run-001" {
-		t.Fatalf("governanceHistory was not cloned: %+v", storedHistory)
-	}
-}
-
 func TestDefinitionChangeImpactUsesCurrentModelRevisionWhenEventProjectionLags(t *testing.T) {
 	goal := &workspacemodel.Goal{
 		ID:                     "goal-current",
@@ -420,34 +335,5 @@ func TestDefinitionChangeImpactUsesCurrentModelRevisionWhenEventProjectionLags(t
 		revisions[0]["source"] != "current_definition_model" ||
 		revisions[0]["previousDefinitionHash"] != "goal:previous" {
 		t.Fatalf("goal definitionRevisions = %+v, want current model revision marker", revisions)
-	}
-}
-
-func TestCreatedWorkspaceRunExecutionContextInjectsCompressedContext(t *testing.T) {
-	input := map[string]any{
-		"dialogLanguage": "zh-CN",
-		"custom":         "value",
-	}
-	contextData := CreatedWorkspaceRunExecutionContext(
-		"run-core-created",
-		"ws-core-created",
-		"goal-core-created",
-		"dod-core-created",
-		input,
-		7,
-		"en-US",
-	)
-	if contextData["custom"] != "value" {
-		t.Fatalf("contextData = %+v, want custom input retained", contextData)
-	}
-	if contextData["compressedContext"] == nil {
-		t.Fatalf("contextData = %+v, want compressedContext", contextData)
-	}
-	if input["compressedContext"] != nil {
-		t.Fatalf("input mutated with compressedContext: %+v", input)
-	}
-	compressed, _ := contextData["compressedContext"].(map[string]any)
-	if compressed["runId"] != "run-core-created" || compressed["workspaceId"] != "ws-core-created" {
-		t.Fatalf("compressed = %+v, want created run identity", compressed)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	workspaceservice "github.com/muidea/workorch/internal/modules/blocks/workspace/service"
 	systemevents "github.com/muidea/workorch/internal/modules/kernel/system/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
@@ -216,10 +217,12 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 		if !ok || m.workspaces == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.workspaces.Update(ctx, workspaceFromUpdateCommand(cmd)); err != nil {
+		item := workspaceFromUpdateCommand(cmd)
+		if err := m.workspaces.Update(ctx, item); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{}, nil
+		m.publishWorkspaceUpdated(ctx, item)
+		return workspaceevents.WorkspaceCommandResult{Workspace: item}, nil
 	case workspaceevents.TopicWorkspaceCommandDelete, workspaceevents.TopicWorkspaceCommandPurge:
 		cmd, ok := data.(workspaceevents.DeleteWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" {
@@ -396,6 +399,19 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (wo
 	default:
 		return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 	}
+}
+
+func (m *Module) publishWorkspaceUpdated(ctx context.Context, item *workspacemodel.Workspace) {
+	if m == nil || m.eventHub == nil || item == nil {
+		return
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceStateChanged, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, workspaceevents.WorkspaceChangedData{
+		WorkspaceID: item.ID, Title: item.Title, Description: item.Description,
+		DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory,
+		State: item.State, ActiveRunID: item.ActiveRunID,
+	})
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(item.ID), WorkspaceID: string(item.ID)}))
+	m.eventHub.Post(event)
 }
 
 func workspaceScopeFromCommand(topic string, data any) (common.WorkspaceID, error) {

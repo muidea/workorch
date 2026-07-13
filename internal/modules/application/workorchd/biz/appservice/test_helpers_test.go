@@ -10,14 +10,15 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governancemodule "github.com/muidea/workorch/internal/modules/kernel/governance"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
@@ -25,9 +26,19 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
+
+func mustAppserviceEventPayload(t *testing.T, input map[string]any) eventvalue.Payload {
+	t.Helper()
+	payload, err := eventvalue.FromMap(input)
+	if err != nil {
+		t.Fatalf("eventvalue.FromMap: %v", err)
+	}
+	return payload
+}
 
 func TestMain(m *testing.M) {
 	skillHubRunner = testNoopSkillHubRunner{}
@@ -389,10 +400,9 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
-	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.CommandHub)
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
 	ensureTestWorkspace(t, ctx, session, workspaceID)
-	if err := actions.EnsureRun(ctx, common.RunID(runID), common.WorkspaceID(workspaceID)); err != nil {
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: common.RunID(runID), WorkspaceID: common.WorkspaceID(workspaceID), State: common.RunStateActive}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
@@ -412,11 +422,11 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 		Reason:       "test decision gate",
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
 		Question:     "provide test decision input",
-		Context:      map[string]any{"requiredFields": []any{"input"}},
+		Context:      mustAppserviceEventPayload(t, map[string]any{"requiredFields": []any{"input"}}),
 	}); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
-	if err := actions.EnsureRunBlockedOnDecision(ctx, common.RunID(runID), ticketID); err != nil {
+	if _, err := sendAppserviceTestCommand[orchestratorevents.BlockDecisionCommand, orchestratorevents.OrchestratorCommandResult](ctx, exports.Infrastructure.CommandHub, orchestratorevents.TopicOrchestratorCommandBlockDecision, orchestratorevents.CommandDestination, orchestratorevents.BlockDecisionCommand{RunID: common.RunID(runID), TicketID: ticketID}); err != nil {
 		t.Fatalf("BlockOnDecision: %v", err)
 	}
 	item, err := exports.Repositories.Runs.Get(ctx, common.RunID(runID))
@@ -436,10 +446,9 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
-	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.CommandHub)
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
 	ensureTestWorkspace(t, ctx, session, workspaceID)
-	if err := actions.EnsureRun(ctx, common.RunID(runID), common.WorkspaceID(workspaceID)); err != nil {
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: common.RunID(runID), WorkspaceID: common.WorkspaceID(workspaceID), State: common.RunStateActive}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
@@ -451,10 +460,10 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 	}); err != nil {
 		t.Fatalf("Create approval step: %v", err)
 	}
-	if err := actions.EnsureApproval(ctx, approvalID, common.WorkspaceID(workspaceID), common.RunID(runID), stepID, "test approval gate"); err != nil {
+	if err := exports.Repositories.Approvals.Create(ctx, &approvalmodel.Approval{ID: approvalID, WorkspaceID: common.WorkspaceID(workspaceID), RunID: common.RunID(runID), StepID: stepID, Reason: "test approval gate", State: common.ApprovalStatePending}); err != nil {
 		t.Fatalf("CreateApproval: %v", err)
 	}
-	if err := actions.EnsureRunBlockedOnApproval(ctx, common.RunID(runID), approvalID); err != nil {
+	if _, err := sendAppserviceTestCommand[orchestratorevents.BlockApprovalCommand, orchestratorevents.OrchestratorCommandResult](ctx, exports.Infrastructure.CommandHub, orchestratorevents.TopicOrchestratorCommandBlockApproval, orchestratorevents.CommandDestination, orchestratorevents.BlockApprovalCommand{RunID: common.RunID(runID), ApprovalID: approvalID}); err != nil {
 		t.Fatalf("BlockOnApproval: %v", err)
 	}
 	item, err := exports.Repositories.Runs.Get(ctx, common.RunID(runID))

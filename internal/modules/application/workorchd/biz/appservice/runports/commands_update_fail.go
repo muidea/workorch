@@ -16,18 +16,20 @@ func UpdateRun(ctx context.Context, hub magicevent.Hub, item *runmodel.Run) erro
 		return common.ErrInvalidArgument
 	}
 	_, err := sendRunMagicCommand[runevents.UpdateRunCommand, runevents.RunCommandResult](ctx, hub, runevents.TopicRunCommandUpdate, runevents.CommandDestination, "run", string(item.ID), item.WorkspaceID, item.ID, runevents.UpdateRunCommand{
-		RunID:              item.ID,
-		WorkspaceID:        item.WorkspaceID,
-		GoalID:             item.GoalID,
-		DoDID:              item.DoDID,
-		DefinitionRevision: item.DefinitionRevision,
-		InitialStepKind:    item.InitialStepKind,
-		ExecutionContext:   cloneMap(item.ExecutionContext),
-		State:              item.State,
-		Priority:           item.Priority,
-		BlockingTicketID:   item.BlockingTicketID,
-		BlockingApprovalID: item.BlockingApprovalID,
-		FailureReason:      item.FailureReason,
+		RunID:                  item.ID,
+		WorkspaceID:            item.WorkspaceID,
+		GoalID:                 item.GoalID,
+		DoDID:                  item.DoDID,
+		DefinitionRevision:     item.DefinitionRevision,
+		InitialStepKind:        item.InitialStepKind,
+		RuntimeBootstrap:       item.RuntimeBootstrap,
+		RuntimeContractVersion: item.RuntimeContractVersion,
+		RuntimeState:           item.RuntimeState,
+		State:                  item.State,
+		Priority:               item.Priority,
+		BlockingTicketID:       item.BlockingTicketID,
+		BlockingApprovalID:     item.BlockingApprovalID,
+		FailureReason:          item.FailureReason,
 	})
 	return err
 }

@@ -11,7 +11,6 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestListRunsByWorkspaceFiltersOwnerReadResults(t *testing.T) {
@@ -86,64 +85,13 @@ func TestResumeRunPublishesCommandPayload(t *testing.T) {
 		return orchestratorevents.OrchestratorCommandResult{}
 	})
 	run := &runmodel.Run{ID: "run-resume-command", WorkspaceID: "ws-resume-command"}
-	patch := map[string]any{"mode": "resume"}
 
-	if err := ResumeRun(ctx, hub, run, patch); err != nil {
+	if err := ResumeRun(ctx, hub, run); err != nil {
 		t.Fatalf("ResumeRun: %v", err)
 	}
 
-	if captured.RunID != run.ID || captured.WorkspaceID != run.WorkspaceID || captured.ExecutionContextPatch["mode"] != "resume" {
+	if captured.RunID != run.ID || captured.WorkspaceID != run.WorkspaceID {
 		t.Fatalf("command = %+v, want populated resume command", captured)
-	}
-}
-
-func TestRecoverRuntimeGapPublishesGapSpecificCommandPayload(t *testing.T) {
-	ctx := context.Background()
-	testHub := newRunportsMagicTestHub(t)
-	hub := testHub.rawHub
-	var captured orchestratorevents.RecoverRuntimeGapCommand
-	testHub.subscribeOrchestrator(orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, func(data any) orchestratorevents.OrchestratorCommandResult {
-		cmd, ok := data.(orchestratorevents.RecoverRuntimeGapCommand)
-		if !ok {
-			t.Fatalf("command payload type = %T, want RecoverRuntimeGapCommand", data)
-		}
-		captured = cmd
-		return orchestratorevents.OrchestratorCommandResult{}
-	})
-	run := &runmodel.Run{ID: "run-runtime-gap-command", WorkspaceID: "ws-runtime-gap-command"}
-	recovery := RuntimeGapRecovery{
-		WorkspaceID:    run.WorkspaceID,
-		RunID:          run.ID,
-		StepID:         "run-runtime-gap-command/step-001",
-		StepKind:       "llm/workspace_execution",
-		Gap:            runtimeExecutionGapWorkerLost,
-		RequestID:      "request-runtime-gap",
-		QueueKey:       "queue-runtime-gap",
-		LatestStepTime: "2026-06-17T14:00:00Z",
-		RecoveryPolicy: runtimemodel.RuntimeRecoveryPolicy{
-			SideEffectPolicy:  runtimemodel.SideEffectPolicyExternalRead,
-			IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
-			WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
-		},
-		RecoverySafety: "recoverable_idempotent",
-		Reason:         "stale dispatched runtime gap: worker_lost",
-	}
-
-	if err := RecoverRuntimeGap(ctx, hub, run, recovery, map[string]any{"mode": "recover"}); err != nil {
-		t.Fatalf("RecoverRuntimeGap: %v", err)
-	}
-
-	if captured.RunID != run.ID ||
-		captured.WorkspaceID != run.WorkspaceID ||
-		captured.StepID != recovery.StepID ||
-		captured.Gap != string(runtimeExecutionGapWorkerLost) ||
-		captured.IdempotencyKey != runtimeGapRecoveryIdempotencyKey(run.WorkspaceID, run.ID, recovery.StepID, string(runtimeExecutionGapWorkerLost), recovery.RequestID, recovery.QueueKey) ||
-		captured.RequestID != recovery.RequestID ||
-		captured.QueueKey != recovery.QueueKey ||
-		captured.RecoveryPolicy.WatchdogRecovery != runtimemodel.WatchdogRecoveryRetryExternal ||
-		captured.RecoverySafety != recovery.RecoverySafety ||
-		captured.ExecutionContextPatch["mode"] != "recover" {
-		t.Fatalf("command = %+v, want populated runtime gap recovery command", captured)
 	}
 }
 

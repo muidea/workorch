@@ -90,8 +90,8 @@ func TestServiceRunUsesBackgroundRoutine(t *testing.T) {
 	if routine.asyncFunctionCalls != 2 {
 		t.Fatalf("Run submitted %d background functions, want projection baseline and HTTP server", routine.asyncFunctionCalls)
 	}
-	if routine.timerCalls != 1 {
-		t.Fatalf("Run submitted %d timers, want stale dispatched watchdog timer", routine.timerCalls)
+	if routine.timerCalls != 0 {
+		t.Fatalf("Run submitted %d timers, want no legacy watchdog timer", routine.timerCalls)
 	}
 	if routine.function == nil {
 		t.Fatal("Run submitted a nil background function")
@@ -106,7 +106,7 @@ func TestServiceRunUsesBackgroundRoutine(t *testing.T) {
 	}
 }
 
-func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *testing.T) {
+func TestServiceRunDoesNotRecoverLegacyInactiveRunningWorkspace(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	const workspaceID = "ws-service-startup-inactive"
@@ -147,11 +147,11 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 	if err := svc.Run(ctx); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if routine.asyncFunctionCalls != 3 {
-		t.Fatalf("Run submitted %d background functions, want recovery projection, projection baseline, and HTTP server", routine.asyncFunctionCalls)
+	if routine.asyncFunctionCalls != 2 {
+		t.Fatalf("Run submitted %d background functions, want projection baseline and HTTP server", routine.asyncFunctionCalls)
 	}
-	if routine.timerCalls != 1 {
-		t.Fatalf("Run submitted %d timers, want watchdog timer only", routine.timerCalls)
+	if routine.timerCalls != 0 {
+		t.Fatalf("Run submitted %d timers, want no legacy watchdog timer", routine.timerCalls)
 	}
 
 	readRepositories := testkit.OpenRepositories("file", dataRoot)
@@ -159,15 +159,15 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 	if err != nil {
 		t.Fatalf("read recovered workspace: %v", err)
 	}
-	if workspaceRecord.State != common.WorkspaceStateActive || workspaceRecord.ActiveRunID != "" {
-		t.Fatalf("workspace = %+v, want active without active run", workspaceRecord)
+	if workspaceRecord.State != common.WorkspaceStateActive || workspaceRecord.ActiveRunID != runID {
+		t.Fatalf("workspace = %+v, want legacy state left untouched", workspaceRecord)
 	}
 	runRecord, err := readRepositories.Runs.GetByWorkspaceID(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), workspaceID, runID)
 	if err != nil {
 		t.Fatalf("read recovered run: %v", err)
 	}
-	if runRecord.State != common.RunStateCancelled {
-		t.Fatalf("run = %+v, want cancelled startup inactive run", runRecord)
+	if runRecord.State != common.RunStateActive {
+		t.Fatalf("run = %+v, want legacy state left untouched", runRecord)
 	}
 	if err := svc.http.state.workspaceProjection.RebuildWorkspace(ctx, workspaceID); err != nil {
 		t.Fatalf("RebuildWorkspace: %v", err)
@@ -176,24 +176,11 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 	if err != nil {
 		t.Fatalf("ReadWorkspaceViewSnapshot: %v", err)
 	}
-	if snapshot.Workspace.State != string(common.WorkspaceStateActive) || snapshot.Workspace.ActiveRunID != "" {
-		t.Fatalf("projected workspace = %+v, want active without active run", snapshot.Workspace)
+	if snapshot.Workspace.State != string(common.WorkspaceStateActive) || snapshot.Workspace.ActiveRunID != runID {
+		t.Fatalf("projected workspace = %+v, want legacy state left untouched", snapshot.Workspace)
 	}
-	if snapshot.TaskProgress.Recovery.Mode != "restart" || snapshot.TaskProgress.Recovery.NextAction != "start_new_run" {
-		t.Fatalf("projected recovery = %+v, want restart with a new run", snapshot.TaskProgress.Recovery)
-	}
-	diagnostics := svc.http.state.schedulerDiagnostics.snapshot(workspaceID, runID)
-	if diagnostics == nil || diagnostics.LatestContinuation == nil {
-		t.Fatalf("scheduler diagnostics = %+v, want restart not scheduled diagnostic", diagnostics)
-	}
-	latest := diagnostics.LatestContinuation
-	if latest.State != schedulerDiagnosticStateNotScheduled ||
-		latest.Reason != schedulerReasonServiceRestartedPendingWorkNotRecovered ||
-		latest.Recoverability != schedulerRecoverabilityManualRetry {
-		t.Fatalf("latest diagnostic = %+v, want service restart manual retry diagnostic", latest)
-	}
-	if len(latest.RecommendedActions) != 2 || latest.RecommendedActions[0] != "run_resume" || latest.RecommendedActions[1] != "workspace_restart" {
-		t.Fatalf("recommended actions = %+v, want run_resume/workspace_restart", latest.RecommendedActions)
+	if diagnostics := svc.http.state.schedulerDiagnostics.snapshot(workspaceID, runID); diagnostics != nil && diagnostics.LatestContinuation != nil {
+		t.Fatalf("scheduler diagnostics = %+v, want no legacy startup recovery diagnostic", diagnostics)
 	}
 }
 
@@ -229,24 +216,6 @@ func TestServiceRunReturnsErrorWhenBackgroundSubmitFails(t *testing.T) {
 	}
 	if svc.runStarted.Load() {
 		t.Fatal("Run left service marked as started after background submission failure")
-	}
-}
-
-func TestHTTPServerStartupOnlySchedulesWatchdogTimer(t *testing.T) {
-	routine := &recordingBackgroundRoutine{}
-	httpServer := newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, routine)
-
-	httpServer.state.scheduleWatchdog()
-	httpServer.state.scheduleWatchdog()
-
-	if routine.asyncFunctionCalls != 0 {
-		t.Fatalf("startup scheduling submitted %d background functions, want no automatic recovery", routine.asyncFunctionCalls)
-	}
-	if routine.timerCalls != 1 {
-		t.Fatalf("startup scheduling submitted %d timers, want stale dispatched watchdog timer", routine.timerCalls)
-	}
-	if routine.function != nil {
-		t.Fatal("startup scheduling submitted an automatic recovery function")
 	}
 }
 

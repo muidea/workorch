@@ -6,6 +6,28 @@ import (
 	"time"
 )
 
+func mapFromValue(value any) map[string]any {
+	mapped, _ := value.(map[string]any)
+	return mapped
+}
+
+func mapSliceFromValue(value any) []map[string]any {
+	if items, ok := value.([]map[string]any); ok {
+		return items
+	}
+	raw, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	items := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		if mapped := mapFromValue(item); mapped != nil {
+			items = append(items, mapped)
+		}
+	}
+	return items
+}
+
 func stringFromMap(input map[string]any, key string) string {
 	if input == nil {
 		return ""

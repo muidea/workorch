@@ -11,18 +11,18 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-type WorkspaceExecutionContextInputs struct {
+type WorkspaceRuntimeActivationInputs struct {
 	Workspace *workspacemodel.Workspace
 	Goal      *workspacemodel.Goal
 	DoD       *workspacemodel.DoD
 }
 
-func ReadWorkspaceExecutionContextInputs(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID) (WorkspaceExecutionContextInputs, error) {
+func ReadWorkspaceRuntimeActivationInputs(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID) (WorkspaceRuntimeActivationInputs, error) {
 	if hub == nil || workspaceID == "" || goalID == "" || dodID == "" {
-		return WorkspaceExecutionContextInputs{}, common.ErrInvalidArgument
+		return WorkspaceRuntimeActivationInputs{}, common.ErrInvalidArgument
 	}
 	readCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
-	var ret WorkspaceExecutionContextInputs
+	var ret WorkspaceRuntimeActivationInputs
 	if err := readmodelcore.RunTasks(
 		func() error {
 			var err error
@@ -40,7 +40,7 @@ func ReadWorkspaceExecutionContextInputs(ctx context.Context, hub magicevent.Hub
 			return err
 		},
 	); err != nil {
-		return WorkspaceExecutionContextInputs{}, err
+		return WorkspaceRuntimeActivationInputs{}, err
 	}
 	return ret, nil
 }

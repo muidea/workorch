@@ -27,7 +27,6 @@ import (
 	orchestratormodule "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	systemmodule "github.com/muidea/workorch/internal/modules/kernel/system"
-	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
 type lifecycle interface {
@@ -80,27 +79,27 @@ func (h *runtimeHub) Terminate(ctx context.Context) {
 // NewRuntime creates a repository runtime and explicitly starts all owner modules
 // required by application integration tests. Production bootstrap intentionally
 // remains repository-only and does not call this helper.
-func NewRuntime(backend string, dataRoot string, policy workorchruntimepolicy.RuntimePolicy, commandHub magicevent.Hub) *bootstrap.Runtime {
-	return newRuntime(backend, dataRoot, policy, commandHub)
+func NewRuntime(backend string, dataRoot string, commandHub magicevent.Hub) *bootstrap.Runtime {
+	return newRuntime(backend, dataRoot, commandHub)
 }
 
 // TryNewRuntime is the error-returning form used by tests that exercise invalid
 // bootstrap configuration.
-func TryNewRuntime(backend string, dataRoot string, policy workorchruntimepolicy.RuntimePolicy, commandHub magicevent.Hub) (runtime *bootstrap.Runtime, err error) {
+func TryNewRuntime(backend string, dataRoot string, commandHub magicevent.Hub) (runtime *bootstrap.Runtime, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("build application test runtime: %v", recovered)
 			runtime = nil
 		}
 	}()
-	return newRuntime(backend, dataRoot, policy, commandHub), nil
+	return newRuntime(backend, dataRoot, commandHub), nil
 }
 
-func newRuntime(backend string, dataRoot string, policy workorchruntimepolicy.RuntimePolicy, commandHub magicevent.Hub) *bootstrap.Runtime {
+func newRuntime(backend string, dataRoot string, commandHub magicevent.Hub) *bootstrap.Runtime {
 	hub := newRuntimeHub(commandHub)
 	hub.repos = buildRepositories(backend, dataRoot)
-	runtime := bootstrap.NewWithBackendRuntimePolicyAndCommandHub(backend, dataRoot, policy, hub)
-	modules, err := startOwnerModules(RuntimeExports(runtime), policy, hub)
+	runtime := bootstrap.NewWithBackendAndCommandHub(backend, dataRoot, hub)
+	modules, err := startOwnerModules(RuntimeExports(runtime), hub)
 	if err != nil {
 		panic(fmt.Errorf("start application test owner modules: %w", err))
 	}
@@ -108,7 +107,7 @@ func newRuntime(backend string, dataRoot string, policy workorchruntimepolicy.Ru
 	return runtime
 }
 
-func startOwnerModules(exports Exports, policy workorchruntimepolicy.RuntimePolicy, rawHub magicevent.Hub) ([]lifecycle, error) {
+func startOwnerModules(exports Exports, rawHub magicevent.Hub) ([]lifecycle, error) {
 	background := exports.Infrastructure.BackgroundRoutine
 	repositories := exports.Repositories
 	configured := make([]lifecycle, 0, 21)
@@ -121,31 +120,31 @@ func startOwnerModules(exports Exports, policy workorchruntimepolicy.RuntimePoli
 	}
 
 	fileModule := filemodule.New()
-	if err := configure(fileModule, fileModule.Configure(filemodule.Dependencies{EventHub: rawHub, Background: background})); err != nil {
+	if err := configure(fileModule, fileModule.Configure(filemodule.Dependencies{EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	gitModule := gitmodule.New()
-	if err := configure(gitModule, gitModule.Configure(gitmodule.Dependencies{EventHub: rawHub, Background: background})); err != nil {
+	if err := configure(gitModule, gitModule.Configure(gitmodule.Dependencies{EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	shellModule := shellmodule.New()
-	if err := configure(shellModule, shellModule.Configure(shellmodule.Dependencies{EventHub: rawHub, Background: background})); err != nil {
+	if err := configure(shellModule, shellModule.Configure(shellmodule.Dependencies{EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	sshModule := sshmodule.New()
-	if err := configure(sshModule, sshModule.Configure(sshmodule.Dependencies{EventHub: rawHub, Background: background})); err != nil {
+	if err := configure(sshModule, sshModule.Configure(sshmodule.Dependencies{EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	webModule := webmodule.New()
-	if err := configure(webModule, webModule.Configure(webmodule.Dependencies{EventHub: rawHub, Background: background})); err != nil {
+	if err := configure(webModule, webModule.Configure(webmodule.Dependencies{EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	llmModule := llmmodule.New()
-	if err := configure(llmModule, llmModule.Configure(llmmodule.Dependencies{EventHub: rawHub, Background: background})); err != nil {
+	if err := configure(llmModule, llmModule.Configure(llmmodule.Dependencies{EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	mcpBlockModule := mcpblockmodule.New()
-	if err := configure(mcpBlockModule, mcpBlockModule.Configure(mcpblockmodule.Dependencies{EventHub: rawHub, Background: background})); err != nil {
+	if err := configure(mcpBlockModule, mcpBlockModule.Configure(mcpblockmodule.Dependencies{EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 
@@ -186,27 +185,13 @@ func startOwnerModules(exports Exports, policy workorchruntimepolicy.RuntimePoli
 		return nil, err
 	}
 
-	runtimeRegistry := orchestratormodule.NewRuntimeAdapterRegistry()
-	eventAdapter := orchestratormodule.NewEventRuntimeAdapter(rawHub)
-	for _, kind := range []string{
-		filemodule.StepKindList, filemodule.StepKindRead, filemodule.StepKindEdit,
-		filemodule.StepKindPatchApply, filemodule.StepKindPatchPreview, filemodule.StepKindPatchRevert,
-		gitmodule.StepKindRead, gitmodule.StepKindWrite, shellmodule.StepKindCommand, sshmodule.StepKindCommand,
-		webmodule.StepKindSearch, webmodule.StepKindFetch,
-		mcpblockmodule.StepKindToolCall, mcpblockmodule.StepKindResourceRead, mcpblockmodule.StepKindPromptGet,
-		llmmodule.StepKindWorkspaceExecution,
-	} {
-		if err := runtimeRegistry.Register(kind, eventAdapter); err != nil {
-			return nil, err
-		}
-	}
 	orchestratorModule := orchestratormodule.New()
 	if err := configure(orchestratorModule, orchestratorModule.Configure(orchestratormodule.Dependencies{
-		Runtime: runtimeRegistry, Steps: repositories.Steps, ToolCalls: repositories.ToolCalls,
+		Steps: repositories.Steps, ToolCalls: repositories.ToolCalls,
 		Patches: repositories.Patches, ValidationResults: repositories.ValidationResults,
 		RuntimeCheckpoints: repositories.RuntimeCheckpoints, EvidenceRecords: repositories.EvidenceRecords,
 		CoverageWorkItems: repositories.CoverageWorkItems, ArtifactContinuations: repositories.ArtifactContinuations,
-		RuntimePolicy: policy, CommandHub: rawHub, BackgroundRoutine: background,
+		CommandHub: rawHub, BackgroundRoutine: background,
 	})); err != nil {
 		return nil, err
 	}

@@ -14,7 +14,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
@@ -121,7 +120,7 @@ func (m *serverMetrics) render(config Config, projection *workspaceProjectionMan
 	if m != nil {
 		body += m.schedulerDiagnostics.renderMetrics()
 	}
-	return body + renderEventRecordIOMetrics() + renderRuntimeEventPublishMetrics() + renderWorkspaceProjectionMetrics(projection)
+	return body + renderEventRecordIOMetrics() + renderWorkspaceProjectionMetrics(projection)
 }
 
 func renderEventRecordIOMetrics() string {
@@ -139,26 +138,6 @@ func renderEventRecordIOMetrics() string {
 		metrics.MetadataRecordsScannedTotal,
 		metrics.PayloadHydratesTotal,
 		metrics.PayloadHydrateBytesTotal,
-	)
-}
-
-func renderRuntimeEventPublishMetrics() string {
-	metrics := runtimeevent.RuntimeEventPublishMetricsSnapshot()
-	return fmt.Sprintf(
-		"# TYPE workorch_runtime_event_publish_failures_total counter\n"+
-			"workorch_runtime_event_publish_failures_total{category=\"accepted\"} %d\n"+
-			"workorch_runtime_event_publish_failures_total{category=\"terminal\"} %d\n"+
-			"workorch_runtime_event_publish_failures_total{category=\"progress\"} %d\n"+
-			"workorch_runtime_event_publish_failures_total{category=\"worker_lifecycle\"} %d\n"+
-			"workorch_runtime_event_publish_failures_total{category=\"worker_lost\"} %d\n"+
-			"# TYPE workorch_runtime_heartbeat_timer_start_failures_total counter\n"+
-			"workorch_runtime_heartbeat_timer_start_failures_total %d\n",
-		metrics.AcceptedPublishFailuresTotal,
-		metrics.TerminalPublishFailuresTotal,
-		metrics.ProgressPublishFailuresTotal,
-		metrics.WorkerLifecycleFailuresTotal,
-		metrics.WorkerLostPublishFailuresTotal,
-		metrics.HeartbeatTimerStartFailuresTotal,
 	)
 }
 

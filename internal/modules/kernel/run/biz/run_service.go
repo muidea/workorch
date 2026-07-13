@@ -3,7 +3,7 @@ package run
 import (
 	"context"
 	"errors"
-	"reflect"
+	"fmt"
 	"strings"
 	"time"
 
@@ -16,37 +16,17 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
-
-type orchestrator interface {
-	StartRun(context.Context, common.RunID) error
-	BlockOnDecision(context.Context, common.RunID, common.TicketID) error
-	BlockOnApproval(context.Context, common.RunID, common.ApprovalID) error
-	ResumeRun(context.Context, common.RunID) error
-	ValidateRun(context.Context, common.RunID) error
-	CompleteRun(context.Context, common.RunID) error
-	CancelRun(context.Context, common.RunID) error
-	SupersedeRun(context.Context, common.RunID) error
-	FailRun(context.Context, common.RunID, string) error
-}
-
-type executionContextPatchOrchestrator interface {
-	ResumeRunWithExecutionContextPatch(context.Context, common.RunID, map[string]any) error
-}
-
-type loadedRunExecutionContextPatchOrchestrator interface {
-	ResumeLoadedRunWithExecutionContextPatch(context.Context, *runModel.Run, map[string]any) error
-}
 
 type workspaceReader interface {
 	Get(context.Context, common.WorkspaceID) (*workspaceModel.Workspace, error)
 }
 
 type Service struct {
-	runs         repository.RunRepository
-	workspaces   workspaceReader
-	orchestrator orchestrator
-	notifier     runStateNotifier
+	runs       repository.RunRepository
+	workspaces workspaceReader
+	notifier   runStateNotifier
 }
 
 type runStateNotifier interface {
@@ -58,11 +38,11 @@ type eventRunStateNotifier struct {
 }
 
 func NewServiceWithEventHub(runs repository.RunRepository, commandHub magicevent.Hub) *Service {
-	return newServiceWithPorts(runs, workspaceEventReader{hub: commandHub}, eventOrchestrator{hub: commandHub}, eventRunStateNotifier{hub: commandHub})
+	return newServiceWithPorts(runs, workspaceEventReader{hub: commandHub}, eventRunStateNotifier{hub: commandHub})
 }
 
-func newServiceWithPorts(runs repository.RunRepository, workspaces workspaceReader, orchestrator orchestrator, notifier runStateNotifier) *Service {
-	return &Service{runs: runs, workspaces: workspaces, orchestrator: orchestrator, notifier: notifier}
+func newServiceWithPorts(runs repository.RunRepository, workspaces workspaceReader, notifier runStateNotifier) *Service {
+	return &Service{runs: runs, workspaces: workspaces, notifier: notifier}
 }
 
 func (s *Service) CreateRun(ctx context.Context, cmd runcontracts.CreateRunCommand) error {
@@ -76,7 +56,10 @@ func (s *Service) CreateRun(ctx context.Context, cmd runcontracts.CreateRunComma
 		return err
 	}
 
-	definitionRevision := firstNonEmptyString(cmd.DefinitionRevision, runDefinitionRevisionFromExecutionContext(cmd.ExecutionContext))
+	definitionRevision := strings.TrimSpace(cmd.DefinitionRevision)
+	if err := validateRuntimeBootstrapForRun(cmd.RuntimeBootstrap, cmd.GoalID, cmd.DoDID, definitionRevision); err != nil {
+		return err
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	run := &runModel.Run{
 		ID:                 cmd.RunID,
@@ -86,7 +69,7 @@ func (s *Service) CreateRun(ctx context.Context, cmd runcontracts.CreateRunComma
 		Lineage:            runModel.RunLineage{LineageState: "active"},
 		DefinitionRevision: definitionRevision,
 		InitialStepKind:    cmd.InitialStepKind,
-		ExecutionContext:   cloneExecutionContext(cmd.ExecutionContext),
+		RuntimeBootstrap:   cloneRuntimeBootstrap(cmd.RuntimeBootstrap),
 		State:              common.RunStatePending,
 		Priority:           cmd.Priority,
 		FailureReason:      "",
@@ -98,6 +81,20 @@ func (s *Service) CreateRun(ctx context.Context, cmd runcontracts.CreateRunComma
 	return s.publishRunEvent(ctx, runevents.TopicRunCreated, run)
 }
 
+func validateRuntimeBootstrapForRun(bootstrap *runtimemodel.RuntimeBootstrap, goalID common.GoalID, dodID common.DoDID, definitionRevision string) error {
+	if bootstrap == nil {
+		return nil
+	}
+	value := bootstrap.Normalized()
+	if err := value.Validate(); err != nil {
+		return err
+	}
+	if value.Definition.GoalID != goalID || value.Definition.DoDID != dodID || value.Definition.Revision != definitionRevision {
+		return fmt.Errorf("%w: runtime bootstrap definition does not match run", common.ErrConflict)
+	}
+	return nil
+}
+
 func (s *Service) EnsureRun(ctx context.Context, cmd runcontracts.CreateRunCommand) error {
 	if cmd.WorkspaceID == "" || cmd.RunID == "" {
 		return common.ErrInvalidArgument
@@ -105,14 +102,14 @@ func (s *Service) EnsureRun(ctx context.Context, cmd runcontracts.CreateRunComma
 
 	run, err := s.loadRun(ctx, cmd.RunID, cmd.WorkspaceID)
 	if err == nil {
-		definitionRevision := firstNonEmptyString(cmd.DefinitionRevision, runDefinitionRevisionFromExecutionContext(cmd.ExecutionContext))
+		definitionRevision := strings.TrimSpace(cmd.DefinitionRevision)
 		if run.WorkspaceID != cmd.WorkspaceID ||
 			run.GoalID != cmd.GoalID ||
 			run.DoDID != cmd.DoDID ||
 			run.DefinitionRevision != definitionRevision ||
 			run.InitialStepKind != cmd.InitialStepKind ||
 			run.Priority != cmd.Priority ||
-			!reflect.DeepEqual(run.ExecutionContext, cmd.ExecutionContext) {
+			!sameRuntimeBootstrap(run.RuntimeBootstrap, cmd.RuntimeBootstrap) {
 			return common.ErrConflict
 		}
 		return nil
@@ -123,363 +120,19 @@ func (s *Service) EnsureRun(ctx context.Context, cmd runcontracts.CreateRunComma
 	return s.CreateRun(ctx, cmd)
 }
 
-func runDefinitionRevisionFromExecutionContext(input map[string]any) string {
-	revision, _ := input["definitionRevision"].(map[string]any)
-	if len(revision) == 0 {
-		return ""
-	}
-	if id := strings.TrimSpace(stringFromMap(revision, "id")); id != "" {
-		return id
-	}
-	goalID := strings.TrimSpace(stringFromMap(revision, "effectiveGoalId"))
-	doDID := strings.TrimSpace(stringFromMap(revision, "effectiveDoDId"))
-	if goalID == "" && doDID == "" {
-		return ""
-	}
-	return "goal:" + goalID + "|dod:" + doDID
-}
-
-func stringFromMap(input map[string]any, key string) string {
-	value, _ := input[key].(string)
-	return value
-}
-
-func firstNonEmptyString(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
-func cloneExecutionContext(input map[string]any) map[string]any {
-	if input == nil {
+func cloneRuntimeBootstrap(value *runtimemodel.RuntimeBootstrap) *runtimemodel.RuntimeBootstrap {
+	if value == nil {
 		return nil
 	}
-	ret := make(map[string]any, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
+	cloned := value.Clone()
+	return &cloned
 }
 
-func (s *Service) StartRun(ctx context.Context, cmd runcontracts.StartRunCommand) error {
-	if cmd.RunID == "" {
-		return common.ErrInvalidArgument
-	}
-	if s.orchestrator == nil {
-		return common.ErrInvalidArgument
-	}
-	return s.orchestrator.StartRun(ctx, cmd.RunID)
-}
-
-func (s *Service) EnsureStarted(ctx context.Context, cmd runcontracts.StartRunCommand) error {
-	if cmd.RunID == "" {
-		return common.ErrInvalidArgument
-	}
-	if s.orchestrator == nil {
-		return common.ErrInvalidArgument
-	}
-
-	r, err := s.loadRun(ctx, cmd.RunID, "")
-	if err != nil {
-		return err
-	}
-	if r.State == common.RunStateCompleted {
-		return nil
-	}
-	if isTerminalRunState(r.State) || r.State == common.RunStateActive || r.State == common.RunStateBlockedOnDecision || r.State == common.RunStateBlockedOnApproval {
-		return common.ErrConflict
-	}
-	return s.StartRun(ctx, cmd)
-}
-
-func (s *Service) ResumeRun(ctx context.Context, cmd runcontracts.ResumeRunCommand) error {
-	if cmd.RunID == "" {
-		return common.ErrInvalidArgument
-	}
-	if s.orchestrator == nil {
-		return common.ErrInvalidArgument
-	}
-	if cmd.LoadedRun != nil {
-		if cmd.LoadedRun.ID != cmd.RunID {
-			return common.ErrConflict
-		}
-		if cmd.WorkspaceID != "" && cmd.LoadedRun.WorkspaceID != cmd.WorkspaceID {
-			return common.ErrNotFound
-		}
-		if patcher, ok := s.orchestrator.(loadedRunExecutionContextPatchOrchestrator); ok {
-			return patcher.ResumeLoadedRunWithExecutionContextPatch(ctx, cmd.LoadedRun, cloneExecutionContext(cmd.ExecutionContextPatch))
-		}
-	} else if s.runs != nil {
-		loaded, err := s.loadRun(ctx, cmd.RunID, cmd.WorkspaceID)
-		if err != nil {
-			return err
-		}
-		if loaded.State == common.RunStateActive {
-			return common.ErrConflict
-		}
-		if patcher, ok := s.orchestrator.(loadedRunExecutionContextPatchOrchestrator); ok {
-			return patcher.ResumeLoadedRunWithExecutionContextPatch(ctx, loaded, cloneExecutionContext(cmd.ExecutionContextPatch))
-		}
-	}
-	if len(cmd.ExecutionContextPatch) > 0 {
-		if patcher, ok := s.orchestrator.(executionContextPatchOrchestrator); ok {
-			return patcher.ResumeRunWithExecutionContextPatch(ctx, cmd.RunID, cloneExecutionContext(cmd.ExecutionContextPatch))
-		}
-	}
-	return s.orchestrator.ResumeRun(ctx, cmd.RunID)
-}
-
-func (s *Service) EnsureResumed(ctx context.Context, cmd runcontracts.ResumeRunCommand) error {
-	if cmd.RunID == "" {
-		return common.ErrInvalidArgument
-	}
-	if s.orchestrator == nil {
-		return common.ErrInvalidArgument
-	}
-
-	r, err := s.loadRun(ctx, cmd.RunID, cmd.WorkspaceID)
-	if err != nil {
-		return err
-	}
-	if isTerminalRunState(r.State) {
-		return nil
-	}
-	if r.State != common.RunStateBlockedOnDecision &&
-		r.State != common.RunStateBlockedOnApproval {
-		return common.ErrConflict
-	}
-	return s.ResumeRun(ctx, cmd)
-}
-
-func (s *Service) BlockOnDecision(ctx context.Context, cmd runcontracts.BlockOnDecisionCommand) error {
-	if cmd.RunID == "" || cmd.TicketID == "" {
-		return common.ErrInvalidArgument
-	}
-	if s.orchestrator == nil {
-		return common.ErrInvalidArgument
-	}
-	return s.orchestrator.BlockOnDecision(ctx, cmd.RunID, cmd.TicketID)
-}
-
-func (s *Service) EnsureBlockedOnDecision(ctx context.Context, cmd runcontracts.BlockOnDecisionCommand) error {
-	if cmd.RunID == "" || cmd.TicketID == "" {
-		return common.ErrInvalidArgument
-	}
-	if s.orchestrator == nil {
-		return common.ErrInvalidArgument
-	}
-
-	r, err := s.loadRun(ctx, cmd.RunID, "")
-	if err != nil {
-		return err
-	}
-	if r.State == common.RunStateBlockedOnDecision && r.BlockingTicketID == cmd.TicketID {
-		return nil
-	}
-	if r.State == common.RunStateBlockedOnDecision && r.BlockingTicketID != "" && r.BlockingTicketID != cmd.TicketID {
-		return common.ErrConflict
-	}
-	if r.State == common.RunStateBlockedOnApproval && r.BlockingApprovalID != "" {
-		return common.ErrConflict
-	}
-	if isTerminalRunState(r.State) {
-		return nil
-	}
-	return s.BlockOnDecision(ctx, cmd)
-}
-
-func (s *Service) BlockOnApproval(ctx context.Context, cmd runcontracts.BlockOnApprovalCommand) error {
-	if cmd.RunID == "" || cmd.ApprovalID == "" {
-		return common.ErrInvalidArgument
-	}
-	if s.orchestrator == nil {
-		return common.ErrInvalidArgument
-	}
-	return s.orchestrator.BlockOnApproval(ctx, cmd.RunID, cmd.ApprovalID)
-}
-
-func (s *Service) EnsureBlockedOnApproval(ctx context.Context, cmd runcontracts.BlockOnApprovalCommand) error {
-	if cmd.RunID == "" || cmd.ApprovalID == "" {
-		return common.ErrInvalidArgument
-	}
-	if s.orchestrator == nil {
-		return common.ErrInvalidArgument
-	}
-
-	r, err := s.loadRun(ctx, cmd.RunID, "")
-	if err != nil {
-		return err
-	}
-	if r.State == common.RunStateBlockedOnApproval && r.BlockingApprovalID == cmd.ApprovalID {
-		return nil
-	}
-	if r.State == common.RunStateBlockedOnApproval && r.BlockingApprovalID != "" && r.BlockingApprovalID != cmd.ApprovalID {
-		return common.ErrConflict
-	}
-	if r.State == common.RunStateBlockedOnDecision && r.BlockingTicketID != "" {
-		return common.ErrConflict
-	}
-	if isTerminalRunState(r.State) {
-		return nil
-	}
-	return s.BlockOnApproval(ctx, cmd)
-}
-
-func (s *Service) ValidateRun(ctx context.Context, cmd runcontracts.ValidateRunCommand) error {
-	if cmd.RunID == "" {
-		return common.ErrInvalidArgument
-	}
-	if s.orchestrator != nil {
-		return s.orchestrator.ValidateRun(ctx, cmd.RunID)
-	}
-
-	r, err := s.loadRun(ctx, cmd.RunID, "")
-	if err != nil {
-		return err
-	}
-	if r.State != common.RunStateActive {
-		return common.ErrConflict
-	}
-	r.State = common.RunStateActive
-	r.FailureReason = ""
-	if err := s.runs.Update(ctx, r); err != nil {
-		return err
-	}
-	return s.publishRunEvent(ctx, runevents.TopicRunStateChanged, r)
-}
-
-func (s *Service) CompleteRun(ctx context.Context, cmd runcontracts.CompleteRunCommand) error {
-	if cmd.RunID == "" {
-		return common.ErrInvalidArgument
-	}
-	if s.orchestrator != nil {
-		return s.orchestrator.CompleteRun(ctx, cmd.RunID)
-	}
-
-	r, err := s.loadRun(ctx, cmd.RunID, "")
-	if err != nil {
-		return err
-	}
-	if r.State != common.RunStateActive {
-		return common.ErrConflict
-	}
-	r.State = common.RunStateCompleted
-	r.BlockingTicketID = ""
-	r.BlockingApprovalID = ""
-	r.FailureReason = ""
-	if strings.TrimSpace(r.EndedAt) == "" {
-		r.EndedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	}
-	if err := s.runs.Update(ctx, r); err != nil {
-		return err
-	}
-	return s.publishRunEvent(ctx, runevents.TopicRunStateChanged, r)
-}
-
-func (s *Service) CancelRun(ctx context.Context, cmd runcontracts.CancelRunCommand) error {
-	if cmd.RunID == "" {
-		return common.ErrInvalidArgument
-	}
-	if s.orchestrator != nil {
-		return s.orchestrator.CancelRun(ctx, cmd.RunID)
-	}
-
-	r, err := s.loadRun(ctx, cmd.RunID, "")
-	if err != nil {
-		return err
-	}
-	if !canCancelRun(r.State) {
-		return common.ErrConflict
-	}
-	r.State = common.RunStateCancelled
-	r.BlockingTicketID = ""
-	r.BlockingApprovalID = ""
-	r.FailureReason = ""
-	if strings.TrimSpace(r.EndedAt) == "" {
-		r.EndedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	}
-	if err := s.runs.Update(ctx, r); err != nil {
-		return err
-	}
-	return s.publishRunEvent(ctx, runevents.TopicRunStateChanged, r)
-}
-
-func (s *Service) SupersedeRun(ctx context.Context, cmd runcontracts.SupersedeRunCommand) error {
-	if cmd.RunID == "" {
-		return common.ErrInvalidArgument
-	}
-	if s.orchestrator != nil {
-		return s.orchestrator.SupersedeRun(ctx, cmd.RunID)
-	}
-
-	r, err := s.loadRun(ctx, cmd.RunID, "")
-	if err != nil {
-		return err
-	}
-	if !canSupersedeRun(r.State) {
-		return common.ErrConflict
-	}
-	r.State = common.RunStateSuperseded
-	if strings.TrimSpace(r.Lineage.LineageState) == "" || r.Lineage.LineageState == "active" {
-		r.Lineage.LineageState = "superseded"
-	}
-	r.BlockingTicketID = ""
-	r.BlockingApprovalID = ""
-	r.FailureReason = ""
-	if strings.TrimSpace(r.EndedAt) == "" {
-		r.EndedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	}
-	if err := s.runs.Update(ctx, r); err != nil {
-		return err
-	}
-	return s.publishRunEvent(ctx, runevents.TopicRunStateChanged, r)
-}
-
-func (s *Service) FailRun(ctx context.Context, cmd runcontracts.FailRunCommand) error {
-	if cmd.RunID == "" || cmd.Reason == "" {
-		return common.ErrInvalidArgument
-	}
-	if s.orchestrator != nil {
-		return s.orchestrator.FailRun(ctx, cmd.RunID, cmd.Reason)
-	}
-
-	r, err := s.loadRun(ctx, cmd.RunID, "")
-	if err != nil {
-		return err
-	}
-	if !canFailRun(r.State) {
-		return common.ErrConflict
-	}
-	r.State = common.RunStateFailed
-	r.BlockingTicketID = ""
-	r.BlockingApprovalID = ""
-	r.FailureReason = cmd.Reason
-	if strings.TrimSpace(r.EndedAt) == "" {
-		r.EndedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	}
-	if err := s.runs.Update(ctx, r); err != nil {
-		return err
-	}
-	return s.publishRunEvent(ctx, runevents.TopicRunStateChanged, r)
-}
-
-func isTerminalRunState(state common.RunState) bool {
-	return common.RunStateIsTerminal(state)
-}
-
-func canCancelRun(state common.RunState) bool {
-	return common.RunStateCanTransition(state, common.RunStateCancelled)
-}
-
-func canSupersedeRun(state common.RunState) bool {
-	return common.RunStateCanTransition(state, common.RunStateSuperseded)
-}
-
-func canFailRun(state common.RunState) bool {
-	return common.RunStateCanTransition(state, common.RunStateFailed)
+func sameRuntimeBootstrap(left *runtimemodel.RuntimeBootstrap, right *runtimemodel.RuntimeBootstrap) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return runtimemodel.SameRuntimeBootstrap(*left, *right)
 }
 
 func (s *Service) loadRun(ctx context.Context, runID common.RunID, explicitWorkspaceID common.WorkspaceID) (*runModel.Run, error) {

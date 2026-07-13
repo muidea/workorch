@@ -20,7 +20,6 @@ func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshot, 
 	ret.Results = MergeWorkspaceSnapshotResults(ret.Results, runSnapshot.Results)
 	ret.Artifacts = MergeWorkspaceSnapshotArtifacts(ret.Artifacts, runSnapshot.Artifacts)
 	ret.TaskProgress = runSnapshot.TaskProgress
-	ret.RuntimeExecution = runSnapshot.RuntimeExecution
 	ret.CoverageSummary = CoverageSummaryFromRunSnapshot(*runSnapshot)
 	ret.GapBaseline = runSnapshot.GapBaseline
 	ret.AuthorityDiagnostics = append([]readmodelcore.GapDiagnostic(nil), runSnapshot.AuthorityDiagnostics...)

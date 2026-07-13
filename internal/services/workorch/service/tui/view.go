@@ -177,9 +177,6 @@ func (m AppModel) renderMain(width, height int) string {
 	if section := renderLLMContextCompact(m.llmContext, m.llmContextSummary, width-2); section != "" {
 		b.WriteString(section)
 	}
-	if section := renderRuntimeExecutionCompact(m.runtimeExecution, width-2); section != "" {
-		b.WriteString(section)
-	}
 	if section := renderRuntimeEventsCompact(m.runtimeEvents, width-2, 8); section != "" {
 		b.WriteString(section)
 	}
@@ -595,29 +592,6 @@ func renderRuntimeEventsCompact(items []string, width int, limit int) string {
 	return b.String()
 }
 
-func renderRuntimeExecutionCompact(item *backend.RuntimeExecutionInfo, width int) string {
-	if item == nil || width <= 0 {
-		return ""
-	}
-	parts := compactStrings([]string{
-		runtimeExecutionContractViolationText(item),
-		runtimeExecutionPendingText(item),
-		runtimeExecutionGapText(item),
-		runtimeExecutionStepText(item),
-		runtimeExecutionRequestText(item),
-		runtimeExecutionProgressText(item),
-	})
-	if len(parts) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString(Heading.Render("Runtime Execution"))
-	b.WriteString("\n")
-	b.WriteString(truncateDisplay("- "+strings.Join(parts, " | "), width))
-	b.WriteString("\n")
-	return b.String()
-}
-
 func convergenceStatusText(item *backend.ConvergenceStatusInfo) string {
 	if item == nil {
 		return ""
@@ -627,9 +601,7 @@ func convergenceStatusText(item *backend.ConvergenceStatusInfo) string {
 		convergenceNextActionText(item),
 		convergenceGapText(item),
 		convergenceEvidenceText(item),
-		convergenceViolationText(item),
 		convergenceDecisionCauseText(item),
-		convergenceRetryText(item),
 		convergenceHeartbeatText(item),
 	})
 	return strings.Join(parts, " | ")
@@ -676,46 +648,11 @@ func convergenceEvidenceText(item *backend.ConvergenceStatusInfo) string {
 	return "evidence " + strings.Join(parts, " ")
 }
 
-func convergenceViolationText(item *backend.ConvergenceStatusInfo) string {
-	if item == nil || strings.TrimSpace(item.LatestContractViolationRule) == "" {
-		return ""
-	}
-	return strings.TrimSpace(strings.Join(compactStrings([]string{
-		"violation",
-		item.LatestContractViolationRule,
-		item.LatestRecovery,
-	}), " "))
-}
-
 func convergenceDecisionCauseText(item *backend.ConvergenceStatusInfo) string {
 	if item == nil || strings.TrimSpace(item.DecisionCause) == "" {
 		return ""
 	}
 	return "decision " + strings.TrimSpace(item.DecisionCause)
-}
-
-func convergenceRetryText(item *backend.ConvergenceStatusInfo) string {
-	if item == nil {
-		return ""
-	}
-	parts := make([]string, 0, 4)
-	if item.RetryAttempt > 0 {
-		if item.RetryMaxAttempts > 0 {
-			parts = append(parts, fmt.Sprintf("retry %d/%d", item.RetryAttempt, item.RetryMaxAttempts))
-		} else {
-			parts = append(parts, fmt.Sprintf("retry %d", item.RetryAttempt))
-		}
-	}
-	if item.NarrowedRetryAttempted {
-		parts = append(parts, "narrowed")
-	}
-	if item.ManagedValidationAvailable {
-		parts = append(parts, "managedValidation")
-	}
-	if strings.TrimSpace(item.LatestRejectedDiagnosticRef) != "" {
-		parts = append(parts, "rejected "+strings.TrimSpace(item.LatestRejectedDiagnosticRef))
-	}
-	return strings.Join(parts, " ")
 }
 
 func convergenceHeartbeatText(item *backend.ConvergenceStatusInfo) string {
@@ -731,142 +668,6 @@ func convergenceHeartbeatText(item *backend.ConvergenceStatusInfo) string {
 	}
 	if strings.TrimSpace(item.LatestEffectiveProgressAt) != "" {
 		parts = append(parts, "progress "+strings.TrimSpace(item.LatestEffectiveProgressAt))
-	}
-	return strings.Join(parts, " ")
-}
-
-func runtimeExecutionStatusText(item *backend.RuntimeExecutionInfo) string {
-	if item == nil {
-		return ""
-	}
-	parts := compactStrings([]string{
-		runtimeExecutionContractViolationText(item),
-		runtimeExecutionPendingText(item),
-		runtimeExecutionGapText(item),
-		runtimeExecutionStepText(item),
-	})
-	return strings.Join(parts, " | ")
-}
-
-func runtimeExecutionPendingText(item *backend.RuntimeExecutionInfo) string {
-	if item == nil {
-		return ""
-	}
-	if item.Pending {
-		return "runtime pending"
-	}
-	if item.FinalizedAt != "" || item.DoneAt != "" || item.FailedAt != "" {
-		return "runtime finalized"
-	}
-	return ""
-}
-
-func runtimeExecutionContractViolationText(item *backend.RuntimeExecutionInfo) string {
-	if item == nil || item.ContractViolation == nil {
-		return ""
-	}
-	violation := item.ContractViolation
-	parts := compactStrings([]string{
-		"contract violation",
-		violation.ViolatedRule,
-		violation.Recoverability,
-		runtimeExecutionContractViolationAttemptText(violation.Attempt, violation.MaxAttempts),
-	})
-	return strings.Join(parts, " ")
-}
-
-func runtimeExecutionContractViolationAttemptText(attempt int, maxAttempts int) string {
-	if attempt <= 0 {
-		return ""
-	}
-	if maxAttempts > 0 {
-		return fmt.Sprintf("attempt %d/%d", attempt, maxAttempts)
-	}
-	return fmt.Sprintf("attempt %d", attempt)
-}
-
-func runtimeExecutionGapText(item *backend.RuntimeExecutionInfo) string {
-	if item == nil || strings.TrimSpace(item.Gap) == "" {
-		return ""
-	}
-	return "gap " + strings.TrimSpace(item.Gap)
-}
-
-func runtimeExecutionStepText(item *backend.RuntimeExecutionInfo) string {
-	if item == nil {
-		return ""
-	}
-	label := strings.TrimSpace(strings.Join(compactStrings([]string{
-		string(item.StepID),
-		item.StepKind,
-		string(item.StepState),
-	}), " "))
-	if label == "" {
-		return ""
-	}
-	return "step " + label
-}
-
-func runtimeExecutionRequestText(item *backend.RuntimeExecutionInfo) string {
-	if item == nil {
-		return ""
-	}
-	label := strings.TrimSpace(strings.Join(compactStrings([]string{
-		item.RequestID,
-		item.QueueKey,
-		item.WorkerID,
-	}), " "))
-	if label == "" {
-		return ""
-	}
-	return "request " + label
-}
-
-func runtimeExecutionProgressText(item *backend.RuntimeExecutionInfo) string {
-	if item == nil {
-		return ""
-	}
-	if strings.TrimSpace(item.LastProgressSummary) != "" {
-		return strings.TrimSpace(item.LastProgressSummary)
-	}
-	if strings.TrimSpace(item.LastProgressEvent) != "" || strings.TrimSpace(item.LastProgressStage) != "" {
-		return strings.TrimSpace(strings.Join(compactStrings([]string{item.LastProgressEvent, item.LastProgressStage, item.LastProgressAt}), " "))
-	}
-	return ""
-}
-
-func llmUsageProgressText(payload map[string]any) string {
-	provider := firstPayloadString(payload, backend.PayloadKeyProviderID, "providerId", "ProviderID")
-	model := firstPayloadString(payload, backend.PayloadKeyModel, "model", "Model")
-	total := payloadIntValue(payload, backend.PayloadKeyTotalTokens, "totalTokens", "TotalTokens")
-	status := firstPayloadString(payload, backend.PayloadKeyStatus, "status", "Status")
-	label := strings.TrimSpace(strings.Join([]string{nonEmpty(provider, "llm"), model}, "/"))
-	if total > 0 {
-		return fmt.Sprintf("LLM usage recorded: %s %d tokens", label, total)
-	}
-	return "LLM usage recorded: " + strings.TrimSpace(label+" "+status)
-}
-
-func llmStreamProgressText(payload map[string]any) string {
-	summary := firstPayloadString(payload, backend.PayloadKeySummary, "summary", "Summary")
-	if strings.TrimSpace(summary) != "" {
-		return "LLM streaming: " + strings.TrimSpace(summary)
-	}
-	provider := firstPayloadString(payload, backend.PayloadKeyProviderID, "providerId", "ProviderID")
-	model := firstPayloadString(payload, backend.PayloadKeyModel, "model", "Model")
-	status := firstPayloadString(payload, backend.PayloadKeyStatus, "status", "Status")
-	chunks := payloadIntValue(payload, backend.PayloadKeyChunkCount, "chunkCount", "ChunkCount")
-	bytes := payloadIntValue(payload, backend.PayloadKeyReceivedBytes, "receivedBytes", "ReceivedBytes")
-	label := strings.TrimSpace(strings.Join([]string{nonEmpty(provider, "llm"), model}, "/"))
-	parts := []string{"LLM streaming:", label}
-	if status != "" {
-		parts = append(parts, status)
-	}
-	if chunks > 0 {
-		parts = append(parts, fmt.Sprintf("%d chunks", chunks))
-	}
-	if bytes > 0 {
-		parts = append(parts, fmt.Sprintf("%d bytes", bytes))
 	}
 	return strings.Join(parts, " ")
 }
@@ -992,9 +793,6 @@ func (m AppModel) renderRuntimeStatusBar(width int) string {
 	}
 	if active := m.activeArtifactContinuationStatus(); active != "" {
 		parts = append(parts, active)
-	}
-	if status := runtimeExecutionStatusText(m.runtimeExecution); status != "" {
-		parts = append(parts, status)
 	}
 	if status := convergenceStatusText(m.convergenceStatus); status != "" {
 		parts = append(parts, status)

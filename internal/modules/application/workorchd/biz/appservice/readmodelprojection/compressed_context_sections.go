@@ -10,12 +10,3 @@ func CompressedContextSourceSectionRefs(snapshot readmodelcore.RunSnapshot, rece
 	}
 	return compactUniqueStrings(refs)
 }
-
-func HasNonDefinitionExecutionContext(executionContext map[string]any) bool {
-	for key := range executionContext {
-		if key != "goal" && key != "dod" && key != "compressedContext" {
-			return true
-		}
-	}
-	return false
-}

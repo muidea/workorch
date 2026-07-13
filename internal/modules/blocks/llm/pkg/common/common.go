@@ -10,7 +10,6 @@ const ModuleID = runtimemodel.RuntimeModuleLLM
 
 const StepKindWorkspaceExecution = runtimemodel.StepKindLLMWorkspaceExecution
 const StepKindWorkspacePlan = runtimemodel.StepKindLLMWorkspacePlan
-const ExecutionContextLLMProviderID = "llmProviderId"
 const DefaultProviderID = "default"
 
 const (

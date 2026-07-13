@@ -26,7 +26,6 @@ func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []StepView
 		Approvals:             input.Approvals,
 	}
 	applyRunSnapshotCurrentStepToRun(&ret, currentStep)
-	ret.RuntimeExecution = MapRuntimeExecutionState(ret.Steps, ret.RuntimeCheckpoints, ret.Step)
 	ret.LLMContextBudgetSummary = SummarizeLLMContextBudgets(ret.LLMContextBudgets)
 	ret.LLMUsageSummary = SummarizeLLMUsage(ret.LLMUsageTraces)
 	ret.Acceptance = MapAcceptanceProjection(ret.Run)

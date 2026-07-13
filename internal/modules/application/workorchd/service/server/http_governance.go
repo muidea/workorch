@@ -109,10 +109,6 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			writeBusinessError(w, err)
 			return
 		}
-		if err := state.publishGovernanceContinuationRequested(r.Context(), runResumeRefsFromDecisions([]appservice.Decision{item}), runPriorityFromRequest(r, 0)); err != nil {
-			writeBusinessError(w, err)
-			return
-		}
 		state.rebuildProjectedWorkspacesForDecisions(r.Context(), []appservice.Decision{item})
 		writeJSON(w, http.StatusOK, decisionResponse{
 			Service:  "workorch",
@@ -135,10 +131,6 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			ResolutionPayload: req.ResolutionPayload,
 		})
 		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		if err := state.publishGovernanceContinuationRequested(r.Context(), runResumeRefsFromDecisions(items), runPriorityFromRequest(r, 0)); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
@@ -171,10 +163,6 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			writeBusinessError(w, err)
 			return
 		}
-		if err := state.publishGovernanceContinuationRequested(r.Context(), runResumeRefsFromApprovals([]appservice.Approval{item}), runPriorityFromRequest(r, 0)); err != nil {
-			writeBusinessError(w, err)
-			return
-		}
 		state.rebuildProjectedWorkspacesForApprovals(r.Context(), []appservice.Approval{item})
 		writeJSON(w, http.StatusOK, approvalResponse{
 			Service:  "workorch",
@@ -204,10 +192,6 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			writeBusinessError(w, err)
 			return
 		}
-		if err := state.publishGovernanceContinuationRequested(r.Context(), runResumeRefsFromApprovals([]appservice.Approval{item}), runPriorityFromRequest(r, 0)); err != nil {
-			writeBusinessError(w, err)
-			return
-		}
 		state.rebuildProjectedWorkspacesForApprovals(r.Context(), []appservice.Approval{item})
 		writeJSON(w, http.StatusOK, approvalResponse{
 			Service:  "workorch",
@@ -234,10 +218,6 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			Payload:     req.Payload,
 		})
 		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		if err := state.publishGovernanceContinuationRequested(r.Context(), runResumeRefsFromApprovals(items), runPriorityFromRequest(r, 0)); err != nil {
 			writeBusinessError(w, err)
 			return
 		}

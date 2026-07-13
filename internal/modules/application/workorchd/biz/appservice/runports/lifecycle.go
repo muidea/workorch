@@ -5,12 +5,13 @@ import (
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
-	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type CreateRunViewRequest struct {
@@ -37,9 +38,10 @@ func CreateRunView(ctx context.Context, request CreateRunViewRequest) (appmodelc
 	if err := ValidateRunDefinitions(ctx, request.Hub, workspaceID, goalID, dodID); err != nil {
 		return appmodelcore.Run{}, err
 	}
-	var executionContext map[string]any
+	var runtimeBootstrap *runtimecontract.RuntimeBootstrap
+	var definitionRevision string
 	if goalID != "" || dodID != "" {
-		contextData, err := activationports.BuildWorkspaceExecutionContextForIDs(ctx, activationports.WorkspaceExecutionContextByIDRequest{
+		build, err := activationports.BuildWorkspaceRuntimeActivationForIDs(ctx, activationports.WorkspaceRuntimeActivationByIDRequest{
 			Hub:                            request.Hub,
 			WorkspaceID:                    common.WorkspaceID(workspaceID),
 			GoalID:                         common.GoalID(goalID),
@@ -52,25 +54,27 @@ func CreateRunView(ctx context.Context, request CreateRunViewRequest) (appmodelc
 		if err != nil {
 			return appmodelcore.Run{}, err
 		}
-		executionContext = contextData
-		if effectiveGoalID, ok := executionContext["goalId"].(string); ok && strings.TrimSpace(effectiveGoalID) != "" {
-			goalID = strings.TrimSpace(effectiveGoalID)
+		if build.EffectiveGoal == nil || build.EffectiveDoD == nil {
+			return appmodelcore.Run{}, common.ErrInvalidArgument
 		}
-		if effectiveDoDID, ok := executionContext["doDId"].(string); ok && strings.TrimSpace(effectiveDoDID) != "" {
-			dodID = strings.TrimSpace(effectiveDoDID)
+		goalID = string(build.EffectiveGoal.ID)
+		dodID = string(build.EffectiveDoD.ID)
+		definitionRevision = build.DefinitionRevision
+		runtimeBootstrap, err = activationcore.RuntimeV2Bootstrap(build.EffectiveGoal, build.EffectiveDoD, build.DefinitionRevision, build.DefinitionChangeImpact, build.RuntimeActivation)
+		if err != nil {
+			return appmodelcore.Run{}, err
 		}
 	}
-
 	id := common.RunID(strings.TrimSpace(request.RunID))
 	wsID := common.WorkspaceID(workspaceID)
 	if err := CreateRun(ctx, request.Hub, &runmodel.Run{
-		ID:               id,
-		WorkspaceID:      wsID,
-		GoalID:           common.GoalID(goalID),
-		DoDID:            common.DoDID(dodID),
-		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
-		ExecutionContext: executionContext,
-		State:            common.RunStatePending,
+		ID:                 id,
+		WorkspaceID:        wsID,
+		GoalID:             common.GoalID(goalID),
+		DoDID:              common.DoDID(dodID),
+		DefinitionRevision: definitionRevision,
+		RuntimeBootstrap:   runtimeBootstrap,
+		State:              common.RunStatePending,
 	}); err != nil {
 		return appmodelcore.Run{}, err
 	}

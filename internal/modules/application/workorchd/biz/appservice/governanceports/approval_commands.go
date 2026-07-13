@@ -4,11 +4,11 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 func ApproveApproval(ctx context.Context, hub magicevent.Hub, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {
@@ -38,11 +38,15 @@ func resolveApprovalItem(ctx context.Context, hub magicevent.Hub, topic string, 
 	if item == nil || item.ID == "" {
 		return nil, common.ErrInvalidArgument
 	}
+	payload, err := eventvalue.FromMap(resolutionContext)
+	if err != nil {
+		return nil, err
+	}
 	return resolveApproval(ctx, hub, topic, approvalevents.EnsureApprovedCommand{
 		ApprovalID:  item.ID,
 		WorkspaceID: item.WorkspaceID,
 		RunID:       item.RunID,
-		Context:     governancecore.CloneApprovalMap(resolutionContext),
+		Context:     payload,
 	})
 }
 

@@ -11,8 +11,18 @@ import (
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventvalue"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
+
+func mustDecisionEventPayload(t *testing.T, input map[string]any) eventvalue.Payload {
+	t.Helper()
+	payload, err := eventvalue.FromMap(input)
+	if err != nil {
+		t.Fatalf("eventvalue.FromMap: %v", err)
+	}
+	return payload
+}
 
 func sendDecisionTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (decisionevents.DecisionCommandResult, error) {
 	ev := magicevent.NewEventWithContext(topic, "decision/module_test", decisionevents.CommandDestination, magicevent.NewHeader(), ctx, command)
@@ -329,7 +339,7 @@ func TestDecisionResolveCommandWithoutScopeResolvesUniqueOpenTicket(t *testing.T
 		TicketID:     ticketID,
 		ResolutionID: "resolution-unscoped-unique",
 		Type:         "provide_missing_info",
-		Payload:      map[string]any{"answer": "ok"},
+		Payload:      mustDecisionEventPayload(t, map[string]any{"answer": "ok"}),
 	})
 	if err != nil {
 		t.Fatalf("unscoped resolve err = %v, want response", err)
@@ -488,7 +498,7 @@ func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
 		RunID:              "run-resolution-contract",
 		StepID:             "step-resolution-contract",
 		Type:               "provide_missing_info",
-		Payload:            map[string]any{"answer": "ok"},
+		Payload:            mustDecisionEventPayload(t, map[string]any{"answer": "ok"}),
 		ContinuationAction: "resume",
 		ResumeRunID:        "run-current",
 		SuccessorRunID:     "run-next",
@@ -544,7 +554,7 @@ func TestDecisionCreateResolutionCommandRequiresTicketScope(t *testing.T) {
 		RunID:        "run-resolution-create-other",
 		StepID:       "step-resolution-create-other",
 		Type:         "provide_missing_info",
-		Payload:      map[string]any{"answer": "wrong scope"},
+		Payload:      mustDecisionEventPayload(t, map[string]any{"answer": "wrong scope"}),
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("create resolution with mismatched scope err = %v, want not found", err)
@@ -590,7 +600,7 @@ func TestDecisionCreateResolutionCommandRejectsUnsupportedType(t *testing.T) {
 		RunID:        "run-resolution-unsupported",
 		StepID:       "step-resolution-unsupported",
 		Type:         "unsupported_resolution",
-		Payload:      map[string]any{"answer": "nope"},
+		Payload:      mustDecisionEventPayload(t, map[string]any{"answer": "nope"}),
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("create resolution unsupported type err = %v, want invalid argument", err)
@@ -826,7 +836,7 @@ func TestDecisionUpdateTicketCommandPublishesUpdatedNotification(t *testing.T) {
 		Reason:       "provider unavailable",
 		DecisionKind: "operator_input",
 		Question:     "provide runtime config",
-		Context:      map[string]any{"attempt": float64(2)},
+		Context:      mustDecisionEventPayload(t, map[string]any{"attempt": float64(2)}),
 	})
 	if err != nil {
 		t.Fatalf("update ticket err = %v, want response", err)

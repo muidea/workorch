@@ -19,7 +19,7 @@ func ActiveRunDefinitionStale(ctx context.Context, hub magicevent.Hub, workspace
 	if run.GoalID != selectedGoal.ID || run.DoDID != selectedDoD.ID {
 		return true
 	}
-	if len(run.ExecutionContext) == 0 {
+	if run.RuntimeBootstrap == nil {
 		return true
 	}
 	eventRecords := readmodelports.EventRecordReader{Hub: hub}

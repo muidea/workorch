@@ -47,16 +47,6 @@ func (m AppModel) renderInspectStatus() string {
 			b.WriteString("\n")
 		}
 	}
-	if status := runtimeExecutionStatusText(m.runtimeExecution); status != "" {
-		b.WriteString("- runtime execution: ")
-		b.WriteString(status)
-		b.WriteString("\n")
-		if m.runtimeExecution.LastProgressSummary != "" {
-			b.WriteString("- runtime progress: ")
-			b.WriteString(m.runtimeExecution.LastProgressSummary)
-			b.WriteString("\n")
-		}
-	}
 	if status := convergenceStatusText(m.convergenceStatus); status != "" {
 		b.WriteString("- convergence: ")
 		b.WriteString(status)

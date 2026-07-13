@@ -4,9 +4,7 @@ import "strings"
 
 func ContextKeySkipped(key string) bool {
 	switch strings.TrimSpace(key) {
-	case "executionContext",
-		"executionContextPackage",
-		"failedStepInput",
+	case "failedStepInput",
 		"previousStepOutput",
 		"workspaceFileManifest",
 		"failureTargetRepairContext",

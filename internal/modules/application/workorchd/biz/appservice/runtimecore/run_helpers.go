@@ -73,7 +73,6 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 		},
 		DefinitionRevision: item.DefinitionRevision,
 		InitialStepKind:    item.InitialStepKind,
-		ExecutionContext:   CloneContextMap(item.ExecutionContext),
 		State:              string(common.CanonicalRunState(item.State)),
 		Priority:           item.Priority,
 		BlockingTicketID:   string(item.BlockingTicketID),

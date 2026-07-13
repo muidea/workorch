@@ -10,7 +10,6 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	workorchdcommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
-	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -18,7 +17,6 @@ import (
 const (
 	topicWorkspaceSnapshot      = "/workspace/snapshot"
 	topicRunSnapshot            = "/run/snapshot"
-	topicStepSnapshot           = "/step/snapshot"
 	topicDecisionTicketSnapshot = "/decision/ticket/snapshot"
 	topicApprovalSnapshot       = "/approval/snapshot"
 )
@@ -98,24 +96,6 @@ var (
 			return normalized, true
 		},
 	}
-	workorchStepSnapshotContract = workorchSnapshotContract{
-		publishedTopics: []string{runevents.TopicStepDispatched, runevents.TopicStepStateChanged},
-		matches: func(item eventstreamevents.EventRecordData, ref workorchSnapshotRef) bool {
-			return item.StepID == ref.stepID
-		},
-		normalize: func(item eventstreamevents.EventRecordData, _ workorchSnapshotRef) (SnapshotItem, bool) {
-			data, ok := events.DecodeStepPayload(item.Payload.Map())
-			if !ok {
-				return SnapshotItem{}, false
-			}
-			return normalizePublishedSnapshot(item, topicStepSnapshot, "step", StepPayload{
-				Kind:   llmcommon.CanonicalRuntimeBlockKind(data.Kind),
-				State:  string(data.State),
-				Input:  cloneMap(data.Input),
-				Output: cloneMap(data.Output),
-			}), true
-		},
-	}
 	workorchTicketSnapshotContract = workorchSnapshotContract{
 		publishedTopics: []string{decisionevents.TopicTicketCreated, decisionevents.TopicTicketResolved, decisionevents.TopicTicketUpdated},
 		matches: func(item eventstreamevents.EventRecordData, ref workorchSnapshotRef) bool {
@@ -142,7 +122,6 @@ var (
 	workorchSnapshotContracts = []workorchSnapshotContract{
 		workorchWorkspaceSnapshotContract,
 		workorchRunSnapshotContract,
-		workorchStepSnapshotContract,
 		workorchTicketSnapshotContract,
 		workorchApprovalSnapshotContract,
 	}

@@ -23,7 +23,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
 func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
@@ -42,7 +41,7 @@ func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 		t.Fatalf("workspace = %+v, want id", ws)
 	}
 
-	recordedHub, ok := commandHub.(*recordingMagicHub)
+	recordedHub, ok := commandHub.(*recordingEventHub)
 	if !ok {
 		t.Fatal("command hub does not expose sent events")
 	}
@@ -164,75 +163,6 @@ func TestEventHubEventsBackendReceivesTypedEventStreamRecord(t *testing.T) {
 	}
 }
 
-func TestEventHubRunResourceMapCompactsExecutionContext(t *testing.T) {
-	large := strings.Repeat("x", 1024*1024)
-	resource := resourceMap(RunInfo{
-		ID:                 "run-1",
-		WorkspaceID:        "ws-1",
-		GoalID:             "goal-1",
-		DoDID:              "dod-1",
-		DefinitionRevision: "goal:goal-1|dod:dod-1",
-		State:              common.RunStateActive,
-		ExecutionContext: map[string]any{
-			"goal":               map[string]any{"text": "goal text"},
-			"dod":                map[string]any{"items": []any{"dod item"}},
-			"operatorInputQueue": []map[string]any{{"content": "resume"}},
-			"processEvidenceTimeline": []any{
-				map[string]any{"content": large},
-			},
-		},
-	})
-
-	contextMap, ok := resource["ExecutionContext"].(map[string]any)
-	if !ok || contextMap == nil {
-		t.Fatalf("ExecutionContext = %+v, want compact context", resource["ExecutionContext"])
-	}
-	if _, ok := contextMap["processEvidenceTimeline"]; ok {
-		t.Fatalf("ExecutionContext contains processEvidenceTimeline, want heavy runtime fields omitted")
-	}
-	if resource["DefinitionRevision"] != "goal:goal-1|dod:dod-1" {
-		t.Fatalf("DefinitionRevision = %q, want preserved run definition revision", resource["DefinitionRevision"])
-	}
-	goal, _ := contextMap["goal"].(map[string]any)
-	if goal["text"] != "goal text" {
-		t.Fatalf("goal = %+v, want preserved display context", goal)
-	}
-	queue, _ := contextMap["operatorInputQueue"].([]map[string]any)
-	if len(queue) != 1 {
-		t.Fatalf("operatorInputQueue = %+v, want preserved operator input queue", contextMap["operatorInputQueue"])
-	}
-}
-
-func TestEventHubSnapshotResourceMapCompactsRunExecutionContext(t *testing.T) {
-	resource := resourceMap(WorkspaceSnapshotInfo{
-		Workspace: WorkspaceInfo{ID: "ws-1", State: common.WorkspaceStateActive},
-		Runs: []RunInfo{{
-			ID:          "run-1",
-			State:       common.RunStateActive,
-			GoalID:      "goal-1",
-			DoDID:       "dod-1",
-			WorkspaceID: "ws-1",
-			ExecutionContext: map[string]any{
-				"goal":              map[string]any{"text": "goal text"},
-				"coverageWorkItems": []any{map[string]any{"large": strings.Repeat("x", 1024)}},
-			},
-		}},
-	})
-
-	runs, _ := resource["Runs"].([]map[string]any)
-	if len(runs) != 1 {
-		t.Fatalf("Runs = %+v, want one compact run", resource["Runs"])
-	}
-	contextMap, _ := runs[0]["ExecutionContext"].(map[string]any)
-	if _, ok := contextMap["coverageWorkItems"]; ok {
-		t.Fatalf("run context contains coverageWorkItems, want compact snapshot run context")
-	}
-	goal, _ := contextMap["goal"].(map[string]any)
-	if goal["text"] != "goal text" {
-		t.Fatalf("goal = %+v, want preserved run goal context", goal)
-	}
-}
-
 func TestDecodeResultResourceUsesTypedPayloadBeforeJSONFallback(t *testing.T) {
 	want := WorkspaceSnapshotInfo{
 		Workspace: WorkspaceInfo{ID: "ws-typed", State: common.WorkspaceStateActive},
@@ -268,9 +198,6 @@ func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 		Priority:           7,
 		DefinitionRevision: "rev-restart-unified",
 		DecisionID:         "ticket-restart-unified",
-		ExecutionContextPatch: map[string]any{
-			"latestOperatorInput": map[string]any{"source": "test", "content": "restart"},
-		},
 		Activation: ActivateRunRequest{
 			GoalID:        "goal-restart-unified",
 			DoDID:         "dod-restart-unified",
@@ -291,7 +218,7 @@ func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
 	if captured.WorkspaceID != "ws-restart-unified" || captured.Intent != string(RunCommandIntentRestart) || captured.RequestID != "request-restart-unified" || captured.Reason != "test_restart_unified" || captured.Source != "test" || captured.DefinitionRevision != "rev-restart-unified" || captured.DecisionID != "ticket-restart-unified" || captured.Priority != 7 || captured.GoalID != "goal-restart-unified" || captured.DoDID != "dod-restart-unified" || captured.LLMProviderID != "provider-restart-unified" || captured.SoulID != "soul-restart-unified" {
 		t.Fatalf("workspace run restart command = %+v", captured)
 	}
-	if captured.SoulBindings["validation"] != "soul-validation-restart-unified" || len(captured.SkillIDs) != 1 || len(captured.MCPServerIDs) != 1 || len(captured.CapabilityIDs) != 1 || len(captured.MemoryIDs) != 1 || len(captured.ExecutionContextPatch.Fields) == 0 {
+	if captured.SoulBindings["validation"] != "soul-validation-restart-unified" || len(captured.SkillIDs) != 1 || len(captured.MCPServerIDs) != 1 || len(captured.CapabilityIDs) != 1 || len(captured.MemoryIDs) != 1 {
 		t.Fatalf("workspace run activation contract = %+v", captured)
 	}
 }
@@ -376,7 +303,7 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 	if snapshot == nil || snapshot.Workspace.ID != ws.ID {
 		t.Fatalf("snapshot = %+v, want workspace %s", snapshot, ws.ID)
 	}
-	recordedHub, ok := commandHub.(*recordingMagicHub)
+	recordedHub, ok := commandHub.(*recordingEventHub)
 	if !ok {
 		t.Fatal("command hub does not expose sent events")
 	}
@@ -657,7 +584,7 @@ func TestEventHubRunReadCommandsCarryWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
 	t.Cleanup(func() { rawHub.Terminate(ctx) })
-	recordedHub := &recordingMagicHub{Hub: rawHub}
+	recordedHub := &recordingEventHub{Hub: rawHub}
 	unsubscribe := subscribeRunReadCLIResponses(t, rawHub, "ws-run-read-scope", "run-read-scope")
 	defer unsubscribe()
 	be := NewEventHub(recordedHub)
@@ -817,7 +744,7 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 
 func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backend, magicevent.Hub) {
 	t.Helper()
-	runtime := testkit.NewRuntime("memory", "", workorchruntimepolicy.RuntimePolicy{}, nil)
+	runtime := testkit.NewRuntime("memory", "", nil)
 	session := appservice.NewRuntimeSession(runtime)
 	t.Cleanup(func() { _ = session.Close(ctx) })
 	var err error
@@ -830,7 +757,7 @@ func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backen
 		t.Fatalf("run dispatcher: %v", err)
 	}
 	t.Cleanup(dispatcher.Close)
-	commandHub := &recordingMagicHub{Hub: exports.Infrastructure.CommandHub}
+	commandHub := &recordingEventHub{Hub: exports.Infrastructure.CommandHub}
 	return NewEventHub(commandHub), commandHub
 }
 
@@ -878,7 +805,7 @@ func subscribeRunReadCLIResponses(t *testing.T, hub magicevent.Hub, workspaceID 
 
 func assertCLICommandWorkspaceScope(t *testing.T, hub magicevent.Hub, command string, workspaceID common.WorkspaceID, subjectID string) {
 	t.Helper()
-	recordedHub, ok := hub.(*recordingMagicHub)
+	recordedHub, ok := hub.(*recordingEventHub)
 	if !ok {
 		t.Fatal("command hub does not expose sent events")
 	}
@@ -895,20 +822,20 @@ func assertCLICommandWorkspaceScope(t *testing.T, hub magicevent.Hub, command st
 	t.Fatalf("published CLI command %s subject=%s not found", command, subjectID)
 }
 
-type recordingMagicHub struct {
+type recordingEventHub struct {
 	magicevent.Hub
 	mu   sync.Mutex
 	sent []magicevent.Event
 }
 
-func (h *recordingMagicHub) Send(event magicevent.Event) magicevent.Result {
+func (h *recordingEventHub) Send(event magicevent.Event) magicevent.Result {
 	h.mu.Lock()
 	h.sent = append(h.sent, event)
 	h.mu.Unlock()
 	return h.Hub.Send(event)
 }
 
-func (h *recordingMagicHub) Sent() []magicevent.Event {
+func (h *recordingEventHub) Sent() []magicevent.Event {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]magicevent.Event(nil), h.sent...)
@@ -1009,33 +936,5 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 	})
 	if artifact.Type != EventArtifactContinuationChanged || artifact.Payload["artifactContinuationId"] != "artifact-continuation-1" {
 		t.Fatalf("artifact continuation event = %+v, want artifact continuation id from subject", artifact)
-	}
-}
-
-func TestConvertBackendEventTreatsContractViolationAsProjectionChange(t *testing.T) {
-	for _, topic := range []string{
-		orchestratorevents.TopicOrchestratorContractViolationRecorded,
-		orchestratorevents.TopicOrchestratorContractViolationRetryRequested,
-		orchestratorevents.TopicOrchestratorContractViolationEscalated,
-	} {
-		t.Run(topic, func(t *testing.T) {
-			evt := convertBackendEvent(backendEventData{
-				Topic:       topic,
-				WorkspaceID: "ws-violation",
-				RunID:       "run-violation",
-				Payload: map[string]any{
-					"violatedRule":   "state_changing_required_missing",
-					"recoverability": "retry_same_contract",
-				},
-			})
-			if evt.Type != EventWorkspaceProjectionChanged ||
-				evt.WorkspaceID != "ws-violation" ||
-				evt.RunID != "run-violation" {
-				t.Fatalf("event = %+v, want workspace projection changed for contract violation", evt)
-			}
-			if evt.Payload["violatedRule"] != "state_changing_required_missing" {
-				t.Fatalf("payload = %+v, want violation summary preserved", evt.Payload)
-			}
-		})
 	}
 }

@@ -4,13 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	magicevent "github.com/muidea/magicCommon/event"
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorchconfig"
-	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
 func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState) {
@@ -58,10 +53,6 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 			writeBusinessError(w, err)
 			return
 		}
-		if err := state.publishRuntimePolicyUpdate(r.Context()); err != nil {
-			writeBusinessError(w, err)
-			return
-		}
 		writeJSON(w, http.StatusOK, configurationResponse{
 			Service:       "workorch",
 			Configuration: item,
@@ -103,33 +94,4 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 			Configuration: item,
 		})
 	})
-}
-
-func (s *serverState) publishRuntimePolicyUpdate(ctx context.Context) error {
-	if s == nil || s.commandHub == nil {
-		return common.ErrInvalidArgument
-	}
-	cfg, err := workorchconfig.Current()
-	if err != nil {
-		return err
-	}
-	ev := magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorCommandUpdateRuntimePolicy,
-		"workorchd/http/configuration",
-		orchestratorevents.CommandDestination,
-		magicevent.NewHeader(),
-		ctx,
-		orchestratorevents.UpdateRuntimePolicyCommand{Policy: workorchruntimepolicy.FromConfig(cfg)},
-	)
-	result := s.commandHub.Send(ev)
-	if result == nil {
-		return common.ErrInvalidArgument
-	}
-	if err := result.Error(); err != nil {
-		return err
-	}
-	if _, err := result.Get(); err != nil {
-		return err
-	}
-	return nil
 }

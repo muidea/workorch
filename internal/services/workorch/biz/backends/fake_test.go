@@ -168,7 +168,7 @@ func (f *fakeRun) Command(ctx context.Context, req backend.WorkspaceRunCommand) 
 		if req.ExpectedRunID == "" {
 			return f.Activate(ctx, req.WorkspaceID, req.Activation)
 		}
-		return f.Resume(ctx, req.WorkspaceID, req.ExpectedRunID, req.ExecutionContextPatch)
+		return f.Resume(ctx, req.WorkspaceID, req.ExpectedRunID)
 	case backend.RunCommandIntentRestart:
 		return f.Restart(ctx, req.WorkspaceID, req.Activation)
 	default:
@@ -187,7 +187,7 @@ func (f *fakeRun) Activate(ctx context.Context, wsID common.WorkspaceID, req bac
 func (f *fakeRun) Restart(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	return f.Activate(ctx, wsID, req)
 }
-func (f *fakeRun) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, _ ...map[string]any) (*backend.RunInfo, error) {
+func (f *fakeRun) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunInfo, error) {
 	return &backend.RunInfo{ID: id, WorkspaceID: wsID, State: "running"}, nil
 }
 func (f *fakeRun) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunInfo, error) {

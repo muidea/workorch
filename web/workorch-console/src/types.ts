@@ -338,7 +338,6 @@ export type Run = {
   goalId?: string;
   doDId?: string;
   initialStepKind?: string;
-  executionContext?: Record<string, unknown>;
   state: string;
   priority?: number;
   blockingTicketId?: string;
@@ -481,7 +480,6 @@ export type WorkspaceExecutionActivationRequest = {
   definitionRevision?: string;
   decisionId?: string;
   restart?: boolean;
-  executionContextPatch?: Record<string, unknown>;
 };
 
 export type Soul = {

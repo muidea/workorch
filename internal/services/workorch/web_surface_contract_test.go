@@ -73,7 +73,6 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 		"runId?: string;",
 		"intent?: 'resume' | 'restart' | 'replan';",
 		"restart?: boolean;",
-		"executionContextPatch?: Record<string, unknown>;",
 	} {
 		if !strings.Contains(typesData, want) {
 			t.Fatalf("WorkspaceExecutionActivationRequest missing %q", want)

@@ -10,9 +10,10 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -133,7 +134,7 @@ func TestRuntimeSessionExportsReturnsAssembledCapabilities(t *testing.T) {
 		}
 	})
 
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestRuntimeSessionFromExportsBorrowsLongLivedRuntime(t *testing.T) {
 	}
 
 	exports := testRuntimeExports(bootstrapRuntime)
-	if err := runtimeports.NewEventHubActionPort(exports.Infrastructure.CommandHub).EnsureWorkspace(context.Background(), "ws-long-lived-export-session", "long lived export session"); err != nil {
+	if err := exports.Repositories.Workspaces.Create(context.Background(), &workspacemodel.Workspace{ID: "ws-long-lived-export-session", Title: "long lived export session", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("create workspace after borrowed close: %v", err)
 	}
 	if _, err := exports.Repositories.Workspaces.Get(context.Background(), "ws-long-lived-export-session"); err != nil {
@@ -204,7 +205,7 @@ func TestRuntimeSessionWithBackendPublishesOrchestratorCommand(t *testing.T) {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Close(context.Background()) })
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
@@ -221,17 +222,16 @@ func TestRuntimeSessionRunServiceBlockOnApprovalUsesEventCommand(t *testing.T) {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Close(context.Background()) })
-	exports, err := session.Exports()
+	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-session-command")
 	ensureTestWorkspace(t, ctx, session, "ws-session-command")
-	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.CommandHub)
-	if err := actions.EnsureRun(ctx, "run-session-command", "ws-session-command"); err != nil {
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: "run-session-command", WorkspaceID: "ws-session-command", State: common.RunStateActive}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := actions.EnsureRunBlockedOnApproval(ctx, "run-session-command", "approval-session-command"); err != nil {
+	if _, err := sendAppserviceTestCommand[orchestratorevents.BlockApprovalCommand, orchestratorevents.OrchestratorCommandResult](ctx, exports.Infrastructure.CommandHub, orchestratorevents.TopicOrchestratorCommandBlockApproval, orchestratorevents.CommandDestination, orchestratorevents.BlockApprovalCommand{RunID: "run-session-command", ApprovalID: "approval-session-command"}); err != nil {
 		t.Fatalf("BlockOnApproval: %v", err)
 	}
 }

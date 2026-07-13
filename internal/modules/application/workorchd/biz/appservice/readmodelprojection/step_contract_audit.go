@@ -37,31 +37,18 @@ func projectStepContractAudit(sources ...map[string]any) map[string]any {
 	if len(coverageContext) == 0 {
 		coverageContext = readModelMapValue(authority["coverageWorkItemContext"])
 	}
-	executionContext := readModelMapValue(input["executionContext"])
-	if len(stagePacket) == 0 {
-		stagePacket = readModelMapValue(executionContext["stagePacket"])
-	}
-	if len(coverageContext) == 0 {
-		coverageContext = readModelMapValue(executionContext["coverageWorkItemContext"])
-	}
-	if len(authority) == 0 {
-		authority = readModelMapValue(executionContext["convergenceAuthority"])
-	}
-
-	requiredOutput, requiredOutputSource := selectStepContractRequiredOutput(input, currentActionContract, stagePacket, executionContext)
+	requiredOutput, requiredOutputSource := selectStepContractRequiredOutput(input, currentActionContract, stagePacket)
 	currentFocus := firstNonEmptyMap(
 		readModelMapValue(currentActionContract["currentFocus"]),
 		readModelMapValue(stagePacket["activeFocus"]),
 		readModelMapValue(coverageContext["currentFocus"]),
 		readModelMapValue(authority["currentFocus"]),
-		readModelMapValue(readModelMapValue(executionContext["gapBaseline"])["currentFocus"]),
 	)
 	nextAction := firstNonEmptyMap(
 		readModelMapValue(currentActionContract["nextAction"]),
 		readModelMapValue(currentActionContract["prerequisite"]),
 		readModelMapValue(stagePacket["nextAction"]),
 		readModelMapValue(authority["nextAction"]),
-		readModelMapValue(readModelMapValue(executionContext["gapBaseline"])["nextAction"]),
 	)
 
 	ret := map[string]any{
@@ -105,21 +92,19 @@ func projectStepContractAudit(sources ...map[string]any) map[string]any {
 		ret["requiredOutputSource"] = requiredOutputSource
 		ret["requiredOutput"] = compactStepRequiredOutputForAudit(requiredOutput)
 	}
-	if diagnostic := selectStepContractValidationFailureDiagnostic(input, currentActionContract, stagePacket, executionContext); len(diagnostic) > 0 {
+	if diagnostic := selectStepContractValidationFailureDiagnostic(input, currentActionContract, stagePacket); len(diagnostic) > 0 {
 		ret["validationFailureDiagnostic"] = diagnostic
 	}
 	return ret
 }
 
-func selectStepContractValidationFailureDiagnostic(input map[string]any, currentActionContract map[string]any, stagePacket map[string]any, executionContext map[string]any) map[string]any {
+func selectStepContractValidationFailureDiagnostic(input map[string]any, currentActionContract map[string]any, stagePacket map[string]any) map[string]any {
 	for _, source := range []map[string]any{
 		input,
 		readModelMapValue(input["runtimeDiagnostics"]),
 		readModelMapValue(input["lastFailureDiagnostics"]),
 		currentActionContract,
 		stagePacket,
-		executionContext,
-		readModelMapValue(executionContext["runtimeDiagnostics"]),
 	} {
 		if diagnostic := readModelMapValue(source["validationFailureDiagnostic"]); len(diagnostic) > 0 {
 			return compactStepValidationFailureDiagnosticForAudit(diagnostic)
@@ -128,7 +113,7 @@ func selectStepContractValidationFailureDiagnostic(input map[string]any, current
 	return nil
 }
 
-func selectStepContractRequiredOutput(input map[string]any, currentActionContract map[string]any, stagePacket map[string]any, executionContext map[string]any) (map[string]any, string) {
+func selectStepContractRequiredOutput(input map[string]any, currentActionContract map[string]any, stagePacket map[string]any) (map[string]any, string) {
 	candidates := []struct {
 		name  string
 		value map[string]any
@@ -137,8 +122,6 @@ func selectStepContractRequiredOutput(input map[string]any, currentActionContrac
 		{name: "stagePacket.requiredOutput", value: readModelMapValue(stagePacket["requiredOutput"])},
 		{name: "requiredOutput", value: readModelMapValue(input["requiredOutput"])},
 		{name: "repairActionPackage.requiredOutput", value: readModelMapValue(readModelMapValue(input["repairActionPackage"])["requiredOutput"])},
-		{name: "executionContext.stagePacket.requiredOutput", value: readModelMapValue(readModelMapValue(executionContext["stagePacket"])["requiredOutput"])},
-		{name: "executionContext.repairActionPackage.requiredOutput", value: readModelMapValue(readModelMapValue(executionContext["repairActionPackage"])["requiredOutput"])},
 	}
 	for _, candidate := range candidates {
 		if len(candidate.value) > 0 {

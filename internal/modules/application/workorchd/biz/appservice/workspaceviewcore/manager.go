@@ -15,7 +15,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -546,9 +545,6 @@ func (m *Manager) handleEventRecord(_ context.Context, record eventstreamevents.
 	if strings.TrimSpace(record.Topic) == "" || record.Topic == workorchdevents.TopicWorkspaceProjectionChanged {
 		return nil
 	}
-	if projectionEventIsRuntimeProgressOnly(record.Topic) {
-		return m.handleRuntimeProgressEvent(record)
-	}
 	workspaceID := strings.TrimSpace(string(record.WorkspaceID))
 	if workspaceID != "" {
 		m.store.MarkStale(workspaceID, record.Revision)
@@ -565,102 +561,6 @@ func (m *Manager) handleEventRecord(_ context.Context, record eventstreamevents.
 		m.ScheduleRebuildAll()
 	}
 	return nil
-}
-
-func projectionEventIsRuntimeProgressOnly(topic string) bool {
-	switch strings.TrimSpace(topic) {
-	case runevents.TopicRunLLMStreamProgress,
-		runevents.TopicRunLLMUsageRecorded,
-		runevents.TopicStepDispatched,
-		runevents.TopicStepStateChanged:
-		return true
-	default:
-		return false
-	}
-}
-
-func (m *Manager) handleRuntimeProgressEvent(record eventstreamevents.EventRecordData) error {
-	if m == nil || m.store == nil {
-		return nil
-	}
-	payload := record.Payload.Map()
-	progress, _ := events.DecodeLLMStreamProgressPayload(payload)
-	workspaceID := strings.TrimSpace(firstNonEmptyString(string(record.WorkspaceID), string(progress.WorkspaceID), stringFromPayload(payload, events.PayloadKeyWorkspaceID)))
-	if workspaceID == "" {
-		return nil
-	}
-	update := RuntimeProgressUpdate{
-		WorkspaceID:   workspaceID,
-		RunID:         strings.TrimSpace(firstNonEmptyString(string(record.RunID), string(progress.RunID), stringFromPayload(payload, events.PayloadKeyRunID))),
-		StepID:        strings.TrimSpace(firstNonEmptyString(string(record.StepID), string(progress.StepID), stringFromPayload(payload, events.PayloadKeyStepID))),
-		StepKind:      strings.TrimSpace(stringFromPayload(payload, events.PayloadKeyKind)),
-		StepState:     strings.TrimSpace(firstNonEmptyString(progress.Status, stringFromPayload(payload, events.PayloadKeyState), stringFromPayload(payload, events.PayloadKeyStatus))),
-		Topic:         record.Topic,
-		Revision:      record.Revision,
-		OccurredAt:    strings.TrimSpace(firstNonEmptyString(record.OccurredAt, stringFromPayload(payload, "occurredAt"))),
-		Event:         runtimeProgressEventName(record.Topic),
-		Stage:         strings.TrimSpace(firstNonEmptyString(stringFromPayload(payload, events.PayloadKeyStage), runtimeProgressStageName(record.Topic))),
-		Summary:       strings.TrimSpace(firstNonEmptyString(progress.Summary, stringFromPayload(payload, events.PayloadKeySummary), runtimeProgressSummary(record.Topic))),
-		RequestID:     strings.TrimSpace(stringFromPayload(payload, "requestId")),
-		QueueKey:      strings.TrimSpace(stringFromPayload(payload, "queueKey")),
-		WorkerID:      strings.TrimSpace(stringFromPayload(payload, "workerId")),
-		WorkerEventAt: strings.TrimSpace(firstNonEmptyString(stringFromPayload(payload, "heartbeatAt"), stringFromPayload(payload, "workerHeartbeatAt"))),
-	}
-	if m.store.ApplyRuntimeProgress(update) {
-		return nil
-	}
-	m.store.MarkStale(workspaceID, record.Revision)
-	if m.isRebuildAllInFlight() {
-		m.rememberPendingWorkspaceRebuild(workspaceID)
-		return nil
-	}
-	m.ScheduleRebuildWorkspace(workspaceID)
-	return nil
-}
-
-func runtimeProgressEventName(topic string) string {
-	switch strings.TrimSpace(topic) {
-	case runevents.TopicRunLLMStreamProgress:
-		return "runtime_step_progress"
-	case runevents.TopicRunLLMUsageRecorded:
-		return "runtime_usage_recorded"
-	case runevents.TopicStepDispatched:
-		return "runtime_step_dispatched"
-	case runevents.TopicStepStateChanged:
-		return "runtime_step_state_changed"
-	default:
-		return "runtime_progress"
-	}
-}
-
-func runtimeProgressStageName(topic string) string {
-	switch strings.TrimSpace(topic) {
-	case runevents.TopicRunLLMStreamProgress:
-		return "llm_stream"
-	case runevents.TopicRunLLMUsageRecorded:
-		return "llm_usage"
-	case runevents.TopicStepDispatched:
-		return "step_dispatched"
-	case runevents.TopicStepStateChanged:
-		return "step_state"
-	default:
-		return "runtime_progress"
-	}
-}
-
-func runtimeProgressSummary(topic string) string {
-	switch strings.TrimSpace(topic) {
-	case runevents.TopicRunLLMStreamProgress:
-		return "provider stream receiving"
-	case runevents.TopicRunLLMUsageRecorded:
-		return "llm usage recorded"
-	case runevents.TopicStepDispatched:
-		return "step dispatched"
-	case runevents.TopicStepStateChanged:
-		return "step state changed"
-	default:
-		return "runtime progress"
-	}
 }
 
 func (m *Manager) rememberPendingWorkspaceRebuild(workspaceID string) {

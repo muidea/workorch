@@ -50,4 +50,7 @@ func TestEventHubGeneratorUsesLLMCommandEvent(t *testing.T) {
 	if seenRequest.TraceRefs["templateId"] != "template-001" {
 		t.Fatalf("trace refs = %+v, want template id", seenRequest.TraceRefs)
 	}
+	if seenRequest.PromptContext == nil || len(seenRequest.PromptContext.Sections) != 2 {
+		t.Fatalf("prompt context = %+v, want typed setup contract and request sections", seenRequest.PromptContext)
+	}
 }

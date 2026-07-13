@@ -3,12 +3,12 @@ package shell
 import (
 	"context"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
-	magictask "github.com/muidea/magicCommon/task"
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/runtimeevent"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
@@ -16,10 +16,9 @@ const ModuleID = modulecommon.ModuleID
 const StepKindCommand = modulecommon.StepKindCommand
 
 type Module struct {
-	runtimeAdapter *shellbiz.RuntimeAdapter
-	executor       *runtimeevent.Executor
-	eventHub       magicevent.Hub
-	background     magictask.BackgroundRoutine
+	runtimeAdapter     *shellbiz.RuntimeAdapter
+	capabilityObserver magicevent.SimpleObserver
+	eventHub           magicevent.Hub
 }
 
 func New() *Module { return &Module{} }
@@ -27,14 +26,12 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 type Dependencies struct {
-	EventHub   magicevent.Hub
-	Background magictask.BackgroundRoutine
+	EventHub magicevent.Hub
 }
 
 func (m *Module) Configure(deps ...Dependencies) error {
 	if len(deps) > 0 {
 		m.eventHub = deps[0].EventHub
-		m.background = deps[0].Background
 	}
 	cfg, err := workorchconfig.Current()
 	if err != nil {
@@ -49,24 +46,60 @@ func (m *Module) Configure(deps ...Dependencies) error {
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.runtimeAdapter == nil || m.eventHub == nil || m.background == nil {
+	if m == nil || m.runtimeAdapter == nil || m.eventHub == nil {
 		return common.ErrInvalidArgument
 	}
-	if m.executor != nil {
+	if m.capabilityObserver != nil {
 		return nil
 	}
-	m.executor = runtimeevent.NewExecutor(ModuleID, m.eventHub, m.background, m.runtimeAdapter, StepKindCommand)
-	return m.executor.Run()
+	m.capabilityObserver = magicevent.NewSimpleObserver(ModuleID, m.eventHub)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
+	m.capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation, m.handleRuntimeOperation)
+	return nil
 }
 
 func (m *Module) Stop(ctx context.Context) error {
 	_ = ctx
-	if m.executor != nil {
-		m.executor.Teardown()
+	if m.capabilityObserver != nil {
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteRuntimeOperation)
+		m.capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
 	}
-	m.executor = nil
+	m.capabilityObserver = nil
 	m.runtimeAdapter = nil
 	m.eventHub = nil
-	m.background = nil
 	return nil
+}
+
+func (m *Module) handleRuntimeOperation(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ExecuteRuntimeOperationCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	response, err := orchestratorevents.ExecuteRuntimeOperation(event.Context(), command, m.runtimeAdapter)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	result.Set(response, nil)
+}
+
+func (m *Module) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.AcquireRuntimeCapabilitiesCommand)
+	if !ok {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, StepKindCommand)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	result.Set(response, nil)
+}
+
+func setCapabilityError(result magicevent.Result, err error) {
+	if result != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+	}
 }

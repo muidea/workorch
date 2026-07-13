@@ -8,6 +8,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func RunObservableAfterStartConflict(ctx context.Context, hub magicevent.Hub, runID common.RunID) (bool, error) {
@@ -44,11 +45,11 @@ func NextWorkspaceExecutionRunID(ctx context.Context, hub magicevent.Hub, worksp
 	return common.RunID(activationcore.FormatNumericRunID(maxSeq + 1)), nil
 }
 
-func RecordActivationMemoryRecallTrace(ctx context.Context, commandHub magicevent.Hub, runID common.RunID, workspaceID common.WorkspaceID, executionContext map[string]any, occurredAt string) error {
+func RecordActivationMemoryRecallTrace(ctx context.Context, commandHub magicevent.Hub, runID common.RunID, workspaceID common.WorkspaceID, bootstrap *runtimecontract.RuntimeBootstrap, occurredAt string) error {
 	if commandHub == nil || runID == "" || workspaceID == "" {
 		return nil
 	}
-	trace := activationcore.BuildActivationMemoryRecallTrace(runID, workspaceID, executionContext, occurredAt)
+	trace := activationcore.BuildRuntimeV2ActivationMemoryRecallTrace(runID, workspaceID, bootstrap, occurredAt)
 	if trace == nil {
 		return nil
 	}

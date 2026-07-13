@@ -12,6 +12,7 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
 	"github.com/muidea/workorch/internal/pkg/common"
+	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -131,7 +132,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (ap
 		if err := m.ensureApprovalScopeForCommand(ctx, cmd.ApprovalID, scope); err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
-		item, err := m.servicePtr.EnsureApprovedAndReturn(ctx, cmd)
+		item, err := m.servicePtr.EnsureApprovedAndReturn(ctx, resolveApprovalContract(cmd))
 		if err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
@@ -148,7 +149,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (ap
 		if err := m.ensureApprovalScopeForCommand(ctx, cmd.ApprovalID, scope); err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
-		item, err := m.servicePtr.EnsureRejectedAndReturn(ctx, cmd)
+		item, err := m.servicePtr.EnsureRejectedAndReturn(ctx, resolveApprovalContract(cmd))
 		if err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
@@ -161,7 +162,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (ap
 		if !ok {
 			return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.EnsureApproval(ctx, cmd); err != nil {
+		if err := m.servicePtr.EnsureApproval(ctx, createApprovalContract(cmd)); err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
 		return approvalevents.ApprovalCommandResult{}, nil
@@ -170,7 +171,7 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (ap
 		if !ok {
 			return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.CreateApproval(ctx, cmd); err != nil {
+		if err := m.servicePtr.CreateApproval(ctx, createApprovalContract(cmd)); err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
 		return approvalevents.ApprovalCommandResult{}, nil
@@ -229,7 +230,8 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (ap
 		if err := m.approvals.Update(ctx, item); err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
-		return approvalevents.ApprovalCommandResult{}, nil
+		m.publishApprovalUpdated(ctx, item)
+		return approvalevents.ApprovalCommandResult{Approval: item}, nil
 	case approvalevents.TopicApprovalCommandDelete:
 		cmd, ok := data.(approvalevents.DeleteApprovalCommand)
 		if !ok || cmd.ApprovalID == "" {
@@ -245,6 +247,22 @@ func (m *Module) executeCommand(ctx context.Context, topic string, data any) (ap
 	default:
 		return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
 	}
+}
+
+func (m *Module) publishApprovalUpdated(ctx context.Context, item *approvalmodel.Approval) {
+	if m == nil || m.eventHub == nil || item == nil {
+		return
+	}
+	topic := approvalevents.TopicApprovalResolved
+	if item.State == common.ApprovalStateSuperseded {
+		topic = approvalevents.TopicApprovalSuperseded
+	}
+	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, approvalevents.NotificationDestination, magicevent.NewHeader(), ctx, approvalevents.ApprovalChangedData{
+		ApprovalID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, StepID: item.StepID,
+		Reason: item.Reason, Action: item.Action, State: item.State,
+	})
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "approval", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID), StepID: string(item.StepID)}))
+	m.eventHub.Post(event)
 }
 
 func setApprovalMagicResult(result magicevent.Result, data approvalevents.ApprovalCommandResult, err error) {
@@ -318,7 +336,29 @@ func filterApprovalsByCommandScope(items []*approvalmodel.Approval, scope approv
 	return ret
 }
 
-func approvalFromUpdateCommand(cmd approvalcontracts.UpdateApprovalCommand) *approvalmodel.Approval {
+func createApprovalContract(cmd approvalevents.CreateApprovalCommand) approvalcontracts.CreateApprovalCommand {
+	return approvalcontracts.CreateApprovalCommand{
+		ApprovalID:     cmd.ApprovalID,
+		WorkspaceID:    cmd.WorkspaceID,
+		RunID:          cmd.RunID,
+		StepID:         cmd.StepID,
+		Reason:         cmd.Reason,
+		Action:         cmd.Action,
+		Context:        cmd.Context.Map(),
+		AutoGovernance: cmd.AutoGovernance.Map(),
+	}
+}
+
+func resolveApprovalContract(cmd approvalevents.ResolveApprovalCommand) approvalcontracts.ResolveApprovalCommand {
+	return approvalcontracts.ResolveApprovalCommand{
+		ApprovalID:  cmd.ApprovalID,
+		WorkspaceID: cmd.WorkspaceID,
+		RunID:       cmd.RunID,
+		Context:     cmd.Context.Map(),
+	}
+}
+
+func approvalFromUpdateCommand(cmd approvalevents.UpdateApprovalCommand) *approvalmodel.Approval {
 	return &approvalmodel.Approval{
 		ID:             cmd.ApprovalID,
 		WorkspaceID:    cmd.WorkspaceID,
@@ -326,9 +366,9 @@ func approvalFromUpdateCommand(cmd approvalcontracts.UpdateApprovalCommand) *app
 		StepID:         cmd.StepID,
 		Reason:         cmd.Reason,
 		Action:         cmd.Action,
-		Context:        cloneMap(cmd.Context),
+		Context:        cmd.Context.Map(),
 		State:          cmd.State,
-		AutoGovernance: cloneMap(cmd.AutoGovernance),
+		AutoGovernance: cmd.AutoGovernance.Map(),
 		ResolvedAt:     cmd.ResolvedAt,
 		ResolvedBy:     cmd.ResolvedBy,
 		CreatedAt:      cmd.CreatedAt,

@@ -14,11 +14,8 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
-	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	"github.com/muidea/magicCommon/task"
@@ -403,26 +400,25 @@ type createRunRequest struct {
 }
 
 type workspaceExecutionCommandRequest struct {
-	RunID                 string            `json:"runId,omitempty"`
-	GoalID                string            `json:"goalId,omitempty"`
-	DoDID                 string            `json:"doDId,omitempty"`
-	LLMProviderID         string            `json:"llmProviderId,omitempty"`
-	SoulID                string            `json:"soulId,omitempty"`
-	SoulBindings          map[string]string `json:"soulBindings,omitempty"`
-	SkillIDs              []string          `json:"skillIds,omitempty"`
-	MCPServerIDs          []string          `json:"mcpServerIds,omitempty"`
-	CapabilityIDs         []string          `json:"capabilityIds,omitempty"`
-	MemoryIDs             []string          `json:"memoryIds,omitempty"`
-	DialogLanguage        string            `json:"dialogLanguage,omitempty"`
-	Priority              int               `json:"priority,omitempty"`
-	RequestID             string            `json:"requestId,omitempty"`
-	Reason                string            `json:"reason,omitempty"`
-	Source                string            `json:"source,omitempty"`
-	Intent                string            `json:"intent,omitempty"`
-	DefinitionRevision    string            `json:"definitionRevision,omitempty"`
-	DecisionID            string            `json:"decisionId,omitempty"`
-	Restart               bool              `json:"restart,omitempty"`
-	ExecutionContextPatch map[string]any    `json:"executionContextPatch,omitempty"`
+	RunID              string            `json:"runId,omitempty"`
+	GoalID             string            `json:"goalId,omitempty"`
+	DoDID              string            `json:"doDId,omitempty"`
+	LLMProviderID      string            `json:"llmProviderId,omitempty"`
+	SoulID             string            `json:"soulId,omitempty"`
+	SoulBindings       map[string]string `json:"soulBindings,omitempty"`
+	SkillIDs           []string          `json:"skillIds,omitempty"`
+	MCPServerIDs       []string          `json:"mcpServerIds,omitempty"`
+	CapabilityIDs      []string          `json:"capabilityIds,omitempty"`
+	MemoryIDs          []string          `json:"memoryIds,omitempty"`
+	DialogLanguage     string            `json:"dialogLanguage,omitempty"`
+	Priority           int               `json:"priority,omitempty"`
+	RequestID          string            `json:"requestId,omitempty"`
+	Reason             string            `json:"reason,omitempty"`
+	Source             string            `json:"source,omitempty"`
+	Intent             string            `json:"intent,omitempty"`
+	DefinitionRevision string            `json:"definitionRevision,omitempty"`
+	DecisionID         string            `json:"decisionId,omitempty"`
+	Restart            bool              `json:"restart,omitempty"`
 }
 
 type createSoulRequest = appservice.CreateSoulCommand
@@ -530,7 +526,7 @@ type listMemoryRecallTracesFunc func(context.Context, string, string, appservice
 type listEventRecordsFunc func(context.Context, string, string, appservice.EventRecordQuery) ([]appservice.EventRecord, error)
 type listRunInstancesFunc func(context.Context, string, string, string) ([]appservice.Run, error)
 type startRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
-type resumeRunInstanceFunc func(context.Context, string, string, string, ...map[string]any) (appservice.Run, error)
+type resumeRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
 type resumeWorkspaceExecutionFunc func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error)
 type listDecisionsFunc func(context.Context, string, string, string, string) ([]appservice.Decision, error)
 type listDecisionPageFunc func(context.Context, string, string, appservice.DecisionQuery) (appservice.DecisionPage, error)
@@ -684,7 +680,6 @@ type serverState struct {
 	runStatusNotifyMu            sync.Mutex
 	runStatusNotify              chan struct{}
 	eventUnsubscribes            []func()
-	runContinuations             *runContinuationScheduler
 	schedulerDiagnostics         *schedulerDiagnosticsStore
 	workspaceProjection          *workspaceProjectionManager
 	runSnapshotCacheMu           sync.Mutex
@@ -1123,12 +1118,10 @@ func newServerStateWithCommandHubAndBackground(config Config, commandHub magicev
 		schedulerDiagnostics:         diagnostics,
 		workspaceSetupDraftSessions:  map[string]*workspaceSetupDraftSession{},
 	}
-	state.runContinuations = newRunContinuationScheduler(state)
 	state.workspaceProjection = newWorkspaceProjectionManager(state)
 	state.configureRuntimeSession()
 	state.registerEventReplayRecorder()
 	state.registerRunStatusCacheInvalidationWatcher()
-	state.registerGovernanceResolvedResumeWatcher()
 	state.registerWorkorchDSchedulerCommandWatcher()
 	return state
 }
@@ -1512,11 +1505,11 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		})
 		return ret, err
 	}
-	s.resumeRun = func(ctx context.Context, _, _, runID string, executionContextPatch ...map[string]any) (appservice.Run, error) {
+	s.resumeRun = func(ctx context.Context, _, _, runID string) (appservice.Run, error) {
 		var ret appservice.Run
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
-			ret, err = appservice.ResumeRunWithSession(ctx, session, runID, executionContextPatch...)
+			ret, err = appservice.ResumeRunWithSession(ctx, session, runID)
 			return err
 		})
 		return ret, err
@@ -1933,59 +1926,6 @@ func (s *serverState) registerRunStatusCacheInvalidationWatcher() {
 	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
 }
 
-func (s *serverState) registerGovernanceResolvedResumeWatcher() {
-	if s == nil || s.commandHub == nil {
-		return
-	}
-	unsubscribe := subscribeEventRecordAppended(s.commandHub, "governance-resume", func(_ context.Context, record eventstreamevents.EventRecordData) error {
-		switch record.Topic {
-		case governanceevents.TopicGovernanceAutoResolved, decisionevents.TopicTicketResolved, approvalevents.TopicApprovalResolved:
-			s.publishGovernanceContinuationFromResolvedEvent(record)
-		}
-		return nil
-	})
-	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
-}
-
-func (s *serverState) publishGovernanceContinuationFromResolvedEvent(record eventstreamevents.EventRecordData) {
-	workspaceID := strings.TrimSpace(string(record.WorkspaceID))
-	runID := strings.TrimSpace(string(record.RunID))
-	if workspaceID == "" || runID == "" {
-		return
-	}
-	intent := "resume"
-	reason := "governance_resolved"
-	decisionID := ""
-	requestKind := "event"
-	payload := record.Payload.Map()
-	if record.Topic == decisionevents.TopicTicketResolved {
-		requestKind = "decision"
-		reason = "decision_resolved"
-		decisionID = firstNonEmptySchedulerString(
-			schedulerStringValue(payload, events.PayloadKeyDecisionID),
-			schedulerStringValue(payload, events.PayloadKeyBlockingTicketID),
-			record.SubjectID,
-		)
-		if strings.TrimSpace(schedulerStringValue(payload, events.PayloadKeyType)) == "replan" {
-			intent = "replan"
-			reason = "decision_replan_resolved"
-		}
-	} else if record.Topic == approvalevents.TopicApprovalResolved {
-		requestKind = "approval"
-		reason = "approval_resolved"
-	}
-	if err := s.publishGovernanceContinuationRequested(context.Background(), []governanceRunResumeRef{{
-		WorkspaceID: workspaceID,
-		RunID:       runID,
-		Intent:      intent,
-		Reason:      reason,
-		RequestID:   governanceRunResumeRequestID(requestKind, record.SubjectID, intent),
-		DecisionID:  decisionID,
-	}}, 0); err != nil {
-		slog.Warn("workorch governance continuation command publish failed", "topic", record.Topic, "workspaceID", workspaceID, "runID", runID, "err", err)
-	}
-}
-
 func isMemoryBackend(backend string) bool {
 	return backend == "memory"
 }
@@ -2018,11 +1958,7 @@ func isEventStreamCriticalTopic(topic string) bool {
 		workspaceevents.TopicWorkspaceCreated,
 		workspaceevents.TopicWorkspaceDeleted,
 		workspaceevents.TopicWorkspaceStateChanged,
-		runevents.TopicRunStateChanged,
-		runevents.TopicStepDispatched,
-		runevents.TopicStepStateChanged,
-		runevents.TopicRunLLMStreamProgress,
-		runevents.TopicRunLLMUsageRecorded:
+		runevents.TopicRunStateChanged:
 		return true
 	default:
 		return false
@@ -2157,42 +2093,4 @@ func (s *serverState) backgroundContext() context.Context {
 		return s.backgroundCtx
 	}
 	return context.Background()
-}
-
-func (s *serverState) eventContext(ctx context.Context) context.Context {
-	if ctx == nil {
-		ctx = s.backgroundContext()
-	}
-	if s == nil || s.commandHub == nil {
-		return ctx
-	}
-	return appservice.ContextWithCommandHub(ctx, s.commandHub)
-}
-
-func (s *serverState) scheduleWatchdog() {
-	if s == nil {
-		return
-	}
-	s.runContinuations.scheduleWatchdog()
-}
-
-func (s *serverState) recoverStuckRunningRuns(ctx context.Context) error {
-	if s == nil || s.runContinuations == nil {
-		return nil
-	}
-	return s.runContinuations.recoverStuckRunningRuns(ctx)
-}
-
-func (s *serverState) recoverStartupInactiveRunningWorkspaces(ctx context.Context) error {
-	if s == nil || s.runContinuations == nil {
-		return nil
-	}
-	return s.runContinuations.recoverStartupInactiveRunningWorkspaces(ctx)
-}
-
-func (s *serverState) recoverReplanContinuations(ctx context.Context) {
-	if s == nil || s.runContinuations == nil {
-		return
-	}
-	s.runContinuations.recoverReplanContinuations(ctx)
 }

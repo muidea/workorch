@@ -10,7 +10,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func TestReadWorkspaceExecutionContextInputsReadsDefinitionsWithExplicitScope(t *testing.T) {
+func TestReadWorkspaceRuntimeActivationInputsReadsDefinitionsWithExplicitScope(t *testing.T) {
 	ctx := context.Background()
 	runtime := newOwnerRuntime()
 	defer runtime.Shutdown(ctx)
@@ -29,9 +29,9 @@ func TestReadWorkspaceExecutionContextInputsReadsDefinitionsWithExplicitScope(t 
 		t.Fatal(err)
 	}
 
-	inputs, err := ReadWorkspaceExecutionContextInputs(ctx, exports.Infrastructure.CommandHub, workspaceID, goalID, dodID)
+	inputs, err := ReadWorkspaceRuntimeActivationInputs(ctx, exports.Infrastructure.CommandHub, workspaceID, goalID, dodID)
 	if err != nil {
-		t.Fatalf("ReadWorkspaceExecutionContextInputs err = %v", err)
+		t.Fatalf("ReadWorkspaceRuntimeActivationInputs err = %v", err)
 	}
 	if inputs.Workspace.ID != workspaceID || inputs.Goal.WorkspaceID != workspaceID || inputs.DoD.WorkspaceID != workspaceID {
 		t.Fatalf("inputs = %+v, want workspace scoped inputs", inputs)
@@ -81,7 +81,7 @@ func TestWorkspaceGovernanceHistoryReadsRunAndResolutionWithWorkspaceScope(t *te
 	if len(history) != 1 {
 		t.Fatalf("history length = %d, want 1: %+v", len(history), history)
 	}
-	if history[0]["ticketId"] != string(ticketID) || history[0]["runId"] != string(runID) {
+	if history[0].TicketID != ticketID || history[0].RunID != runID {
 		t.Fatalf("history = %+v, want scoped ticket/run", history[0])
 	}
 }

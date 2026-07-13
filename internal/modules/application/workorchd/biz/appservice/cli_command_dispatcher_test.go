@@ -73,10 +73,9 @@ func TestCLIWorkspaceSnapshotCommandProjectsDetailView(t *testing.T) {
 					EvidencePolicies: []map[string]any{{"large": "policy"}},
 				},
 				Runs: []Run{{
-					ID:               "run-cli-active",
-					WorkspaceID:      "ws-cli-detail",
-					State:            "running",
-					ExecutionContext: map[string]any{"coverageWorkItems": []any{map[string]any{"large": strings.Repeat("x", 2048)}}},
+					ID:          "run-cli-active",
+					WorkspaceID: "ws-cli-detail",
+					State:       "running",
 				}},
 				LLMUsageTraces: []LLMUsageTrace{{
 					ID:    "usage-cli",
@@ -102,7 +101,7 @@ func TestCLIWorkspaceSnapshotCommandProjectsDetailView(t *testing.T) {
 		t.Fatalf("workspace = %+v, want detail projection without heavy template fields", workspace)
 	}
 	runs := resource["runs"].([]map[string]any)
-	if len(runs) != 1 || runs[0]["executionContext"] != nil {
+	if len(runs) != 1 {
 		t.Fatalf("runs = %+v, want compact detail run projection", runs)
 	}
 	traces := resource["llmUsageTraces"].([]LLMUsageTrace)

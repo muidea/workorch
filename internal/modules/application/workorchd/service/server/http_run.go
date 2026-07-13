@@ -11,7 +11,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/eventvalue"
 )
 
 func registerRunReadRoutes(router engine.RouteRegistry, state *serverState) {
@@ -126,7 +125,6 @@ func registerRunWriteRoutes(router engine.RouteRegistry, state *serverState) {
 func runListMetadata(items []appservice.Run) []appservice.Run {
 	ret := make([]appservice.Run, 0, len(items))
 	for _, item := range items {
-		item.ExecutionContext = nil
 		ret = append(ret, item)
 	}
 	return ret
@@ -318,13 +316,12 @@ func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *htt
 		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(s.config, "start", command))
 	case "resume":
 		var req struct {
-			ExecutionContextPatch map[string]any `json:"executionContextPatch,omitempty"`
-			Intent                string         `json:"intent,omitempty"`
-			RequestID             string         `json:"requestId,omitempty"`
-			Reason                string         `json:"reason,omitempty"`
-			Source                string         `json:"source,omitempty"`
-			DefinitionRevision    string         `json:"definitionRevision,omitempty"`
-			DecisionID            string         `json:"decisionId,omitempty"`
+			Intent             string `json:"intent,omitempty"`
+			RequestID          string `json:"requestId,omitempty"`
+			Reason             string `json:"reason,omitempty"`
+			Source             string `json:"source,omitempty"`
+			DefinitionRevision string `json:"definitionRevision,omitempty"`
+			DecisionID         string `json:"decisionId,omitempty"`
 		}
 		if err := decodeOptionalJSON(r, &req); err != nil {
 			writeBusinessError(w, err)
@@ -334,22 +331,15 @@ func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *htt
 		if intent == "" {
 			intent = "resume"
 		}
-		switch intent {
-		case "resume", "replan":
-		default:
+		if intent != "resume" {
 			writeBusinessError(w, common.ErrInvalidArgument)
 			return
 		}
 		priority := runPriorityFromRequest(r, 0)
-		executionContextPatch, patchErr := eventvalue.FromMap(req.ExecutionContextPatch)
-		if patchErr != nil {
-			writeBusinessError(w, fmt.Errorf("invalid execution context patch: %w", patchErr))
-			return
-		}
 		command := prepareHTTPSchedulerCommand(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
 			WorkspaceID: common.WorkspaceID(workspaceID), RunID: common.RunID(runID), Intent: intent, Action: "resume",
 			Reason: req.Reason, Source: req.Source, RequestID: req.RequestID, DefinitionRevision: req.DefinitionRevision,
-			DecisionID: req.DecisionID, Priority: priority, ExecutionContextPatch: executionContextPatch,
+			DecisionID: req.DecisionID, Priority: priority,
 		})
 		if err := s.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); err != nil {
 			writeBusinessError(w, err)

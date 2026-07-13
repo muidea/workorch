@@ -53,19 +53,18 @@ type CreateWorkspaceCommand struct {
 }
 
 type ActivateWorkspaceExecutionCommand struct {
-	GoalID                string            `json:"goalId,omitempty"`
-	DoDID                 string            `json:"doDId,omitempty"`
-	LLMProviderID         string            `json:"llmProviderId,omitempty"`
-	SoulID                string            `json:"soulId,omitempty"`
-	SoulBindings          map[string]string `json:"soulBindings,omitempty"`
-	SkillIDs              []string          `json:"skillIds,omitempty"`
-	MCPServerIDs          []string          `json:"mcpServerIds,omitempty"`
-	CapabilityIDs         []string          `json:"capabilityIds,omitempty"`
-	MemoryIDs             []string          `json:"memoryIds,omitempty"`
-	DialogLanguage        string            `json:"dialogLanguage,omitempty"`
-	Priority              int               `json:"priority,omitempty"`
-	Restart               bool              `json:"restart,omitempty"`
-	ExecutionContextPatch map[string]any    `json:"executionContextPatch,omitempty"`
+	GoalID         string            `json:"goalId,omitempty"`
+	DoDID          string            `json:"doDId,omitempty"`
+	LLMProviderID  string            `json:"llmProviderId,omitempty"`
+	SoulID         string            `json:"soulId,omitempty"`
+	SoulBindings   map[string]string `json:"soulBindings,omitempty"`
+	SkillIDs       []string          `json:"skillIds,omitempty"`
+	MCPServerIDs   []string          `json:"mcpServerIds,omitempty"`
+	CapabilityIDs  []string          `json:"capabilityIds,omitempty"`
+	MemoryIDs      []string          `json:"memoryIds,omitempty"`
+	DialogLanguage string            `json:"dialogLanguage,omitempty"`
+	Priority       int               `json:"priority,omitempty"`
+	Restart        bool              `json:"restart,omitempty"`
 }
 
 type DeleteWorkspaceCommand struct {

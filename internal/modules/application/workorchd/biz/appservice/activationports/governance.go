@@ -2,14 +2,18 @@ package activationports
 
 import (
 	"context"
+	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func WorkspaceGovernanceHistory(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, limit int) []map[string]any {
+func WorkspaceGovernanceHistory(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, limit int) []runtimecontract.RuntimeGovernanceHistoryEntry {
 	if hub == nil || workspaceID == "" || limit <= 0 {
 		return nil
 	}
@@ -18,7 +22,7 @@ func WorkspaceGovernanceHistory(ctx context.Context, hub magicevent.Hub, workspa
 	if err != nil {
 		return nil
 	}
-	ret := make([]map[string]any, 0, min(limit, len(workspaceTickets)))
+	ret := make([]runtimecontract.RuntimeGovernanceHistoryEntry, 0, min(limit, len(workspaceTickets)))
 	for _, ticket := range workspaceTickets {
 		if ticket == nil || ticket.State != common.DecisionTicketStateResolved {
 			continue
@@ -37,26 +41,15 @@ func WorkspaceGovernanceHistory(ctx context.Context, hub magicevent.Hub, workspa
 		if err != nil || resolution == nil {
 			continue
 		}
-		ret = append(ret, common.RedactSensitiveMap(map[string]any{
-			"ticketId":          string(ticket.ID),
-			"runId":             string(ticket.RunID),
-			"stepId":            string(ticket.StepID),
-			"decisionKind":      ticket.DecisionKind,
-			"reason":            ticket.Reason,
-			"question":          ticket.Question,
-			"ticketContext":     activationcore.CompactFailureContext(ticket.Context),
-			"resolutionId":      string(resolution.ID),
-			"resolutionType":    resolution.Type,
-			"resolutionPayload": activationcore.CompactDecisionPayload(resolution.Payload),
-		}))
+		ret = append(ret, runtimeV2GovernanceHistoryEntry(ticket, resolution))
 		if len(ret) >= limit {
 			break
 		}
 	}
-	return ret
+	return runtimecontract.RuntimeContinuationContext{GovernanceHistory: ret}.Normalized().GovernanceHistory
 }
 
-func RejectedResultContinuation(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID) (map[string]any, error) {
+func RejectedResultContinuation(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID) (*runtimecontract.RuntimeRejectedResultContinuation, error) {
 	if hub == nil || workspaceID == "" || goalID == "" || dodID == "" {
 		return nil, nil
 	}
@@ -68,5 +61,154 @@ func RejectedResultContinuation(ctx context.Context, hub magicevent.Hub, workspa
 	if latest == nil || latest.State != common.ResultStateRejected {
 		return nil, nil
 	}
-	return activationcore.RejectedResultContinuationContext(latest), nil
+	value := runtimeV2RejectedResultContinuation(latest)
+	return &value, nil
+}
+
+func runtimeV2GovernanceHistoryEntry(ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) runtimecontract.RuntimeGovernanceHistoryEntry {
+	recoveryAction := firstRuntimeV2ContinuationString(
+		resolution.ContinuationAction,
+		continuationMapString(resolution.Payload, "recoveryAction"),
+	)
+	return runtimecontract.RuntimeGovernanceHistoryEntry{
+		TicketID: ticket.ID, RunID: ticket.RunID, StepID: ticket.StepID,
+		DecisionKind: ticket.DecisionKind, Reason: ticket.Reason, Question: ticket.Question,
+		ResolutionID: resolution.ID, ResolutionType: resolution.Type, RecoveryAction: recoveryAction,
+		ResolutionSummary: firstRuntimeV2ContinuationString(
+			continuationMapString(resolution.Payload, "summary"),
+			continuationMapString(resolution.Payload, "answer"),
+			continuationMapString(resolution.Payload, "note"),
+			continuationMapString(resolution.Payload, "resumeInstruction"),
+			continuationMapString(resolution.Payload, "reason"),
+		),
+		Failure: runtimeV2ContinuationFailure(ticket),
+	}.Normalized()
+}
+
+func runtimeV2ContinuationFailure(ticket *decisionmodel.Ticket) *runtimecontract.RuntimeContinuationFailure {
+	if ticket == nil {
+		return nil
+	}
+	contextData := ticket.Context
+	value := runtimecontract.RuntimeContinuationFailure{
+		Class:      firstRuntimeV2ContinuationString(ticket.FailureClass, continuationMapString(contextData, "failureClass")),
+		Signature:  firstRuntimeV2ContinuationString(ticket.FailureSignature, continuationMapString(contextData, "failureSignature")),
+		TargetRefs: runtimeV2ContinuationTargetRefs(contextData),
+		FailedStepID: common.StepID(firstRuntimeV2ContinuationString(
+			continuationMapString(contextData, "failedStepId"), string(ticket.StepID),
+		)),
+		FailedStepKind: continuationMapString(contextData, "failedStepKind"),
+		Summary: firstRuntimeV2ContinuationString(
+			continuationMapString(contextData, "failureReason"),
+			continuationMapString(contextData, "repairObjective"),
+			ticket.Reason,
+		),
+		RecoveryPolicy: continuationMapString(contextData, "recoveryPolicy"),
+	}.Normalized()
+	if value.Class == "" && value.Signature == "" && len(value.TargetRefs) == 0 && value.FailedStepID == "" && value.FailedStepKind == "" && value.Summary == "" && value.RecoveryPolicy == "" {
+		return nil
+	}
+	return &value
+}
+
+func runtimeV2RejectedResultContinuation(item *resultmodel.Result) runtimecontract.RuntimeRejectedResultContinuation {
+	ret := runtimecontract.RuntimeRejectedResultContinuation{
+		PredecessorRunID: item.RunID, ResultID: item.ID, ResultState: item.State,
+		SourceType: item.SourceType, SourceRef: item.SourceRef, Summary: item.Summary, GoalOutcome: item.SummaryDetail.GoalOutcome,
+		RequiredEvidence:  append(append(append([]string(nil), item.SummaryDetail.NextActions...), item.SummaryDetail.ResidualRisks...), item.SummaryDetail.KnownLimitations...),
+		EvidenceRefs:      append(append([]string(nil), item.EvidenceRefs...), item.SummaryDetail.EvidenceRefs...),
+		ArtifactRefs:      append(append([]common.ArtifactID(nil), item.ArtifactRefs...), item.SummaryDetail.ArtifactRefs...),
+		GateFailureReason: continuationMapString(item.SummaryDetail.Diagnostics, "gateFailureReason"),
+		RejectionReason:   continuationMapString(item.SummaryDetail.Diagnostics, "rejectionReason"),
+		SourceSummary:     continuationMapString(item.SummaryDetail.Diagnostics, "sourceSummary"),
+	}
+	for _, value := range item.DoDAssessment.Items {
+		continuationItem := runtimecontract.RuntimeContinuationItem{
+			Item: value.Item, State: value.State, Reason: value.FailureReason, EvidenceRefs: value.EvidenceRefs,
+		}
+		if strings.EqualFold(strings.TrimSpace(value.State), "satisfied") {
+			ret.SatisfiedDoDItems = append(ret.SatisfiedDoDItems, continuationItem)
+		} else {
+			ret.UnsatisfiedDoDItems = append(ret.UnsatisfiedDoDItems, continuationItem)
+		}
+	}
+	ret.CoverageGaps = append(ret.CoverageGaps, runtimeV2RejectedCoverageGaps(item.DoDAssessment.GoalCoverage, "goal")...)
+	ret.CoverageGaps = append(ret.CoverageGaps, runtimeV2RejectedCoverageGaps(item.DoDAssessment.AcceptanceDimensions, "acceptance")...)
+	ret.CoverageGaps = append(ret.CoverageGaps, runtimeV2RejectedCoverageGaps(item.DoDAssessment.DeliverableCoverage, "deliverable")...)
+	return ret.Normalized()
+}
+
+func runtimeV2RejectedCoverageGaps(coverage *resultmodel.DoDCoverage, scope string) []runtimecontract.RuntimeContinuationCoverageGap {
+	if coverage == nil {
+		return nil
+	}
+	ret := make([]runtimecontract.RuntimeContinuationCoverageGap, 0, len(coverage.Items))
+	for _, item := range coverage.Items {
+		satisfied := strings.EqualFold(strings.TrimSpace(item.State), "satisfied")
+		if satisfied && (len(item.EvidenceRefs) > 0 || (scope == "deliverable" && len(item.ArtifactRefs) > 0)) {
+			continue
+		}
+		ret = append(ret, runtimecontract.RuntimeContinuationCoverageGap{
+			Scope: scope, ID: item.ID, Deliverable: item.Deliverable, Name: item.Name, Path: item.Path,
+			Goal: item.Goal, GoalItem: item.GoalItem, Item: item.Item, Requirement: item.Requirement, State: item.State,
+			EvidenceRefs: item.EvidenceRefs, ArtifactRefs: item.ArtifactRefs,
+		})
+	}
+	return ret
+}
+
+func runtimeV2ContinuationTargetRefs(input map[string]any) []string {
+	refs := make([]string, 0)
+	for _, key := range []string{"failureTargetScope", "targetRef", "targetRefs", "repairTargetSet"} {
+		refs = appendRuntimeV2ContinuationRefs(refs, input[key])
+	}
+	return refs
+}
+
+func appendRuntimeV2ContinuationRefs(refs []string, value any) []string {
+	switch typed := value.(type) {
+	case string:
+		if text := strings.TrimSpace(typed); text != "" {
+			refs = append(refs, text)
+		}
+	case []string:
+		for _, item := range typed {
+			refs = appendRuntimeV2ContinuationRefs(refs, item)
+		}
+	case []any:
+		for _, item := range typed {
+			refs = appendRuntimeV2ContinuationRefs(refs, item)
+		}
+	case map[string]any:
+		for _, key := range []string{"targetRef", "targetRefs", "path", "uri", "resourceRef", "subjectRef", "workspaceRelativePath"} {
+			refs = appendRuntimeV2ContinuationRefs(refs, typed[key])
+		}
+	}
+	return refs
+}
+
+func continuationMapString(input map[string]any, key string) string {
+	if len(input) == 0 {
+		return ""
+	}
+	value, _ := input[key].(string)
+	return compactRuntimeV2ContinuationText(value)
+}
+
+func firstRuntimeV2ContinuationString(values ...string) string {
+	for _, value := range values {
+		if value = compactRuntimeV2ContinuationText(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func compactRuntimeV2ContinuationText(value string) string {
+	value = strings.TrimSpace(value)
+	runes := []rune(value)
+	if len(runes) > 2048 {
+		value = string(runes[:2048])
+	}
+	return value
 }

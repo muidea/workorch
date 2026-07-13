@@ -10,64 +10,24 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-type workspaceRestartRequest struct {
-	WorkspaceID string
-	Priority    int
-	Command     appservice.ActivateWorkspaceExecutionCommand
-}
-
 type workspaceRunRequest struct {
-	WorkspaceID           string
-	RunID                 string
-	Intent                string
-	Action                string
-	Reason                string
-	RequestID             string
-	DefinitionRevision    string
-	DecisionID            string
-	Priority              int
-	ExecutionContextPatch map[string]any
-	Command               appservice.ActivateWorkspaceExecutionCommand
-}
-
-type runContinuationRequest struct {
-	WorkspaceID           string
-	RunID                 string
-	Action                string
-	Priority              int
-	ExecutionContextPatch map[string]any
-}
-
-func (s *serverState) publishGovernanceContinuationRequested(ctx context.Context, refs []governanceRunResumeRef, priority int) error {
-	for _, ref := range uniqueGovernanceRunResumeRefs(refs) {
-		intent := strings.TrimSpace(ref.Intent)
-		if intent == "" {
-			intent = "resume"
-		}
-		reason := strings.TrimSpace(ref.Reason)
-		if reason == "" {
-			reason = "governance_resolved"
-		}
-		if err := s.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
-			WorkspaceID: common.WorkspaceID(ref.WorkspaceID),
-			RunID:       common.RunID(ref.RunID),
-			Intent:      intent,
-			Reason:      reason,
-			RequestID:   ref.RequestID,
-			Source:      "governance",
-			DecisionID:  ref.DecisionID,
-			Priority:    priority,
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
+	WorkspaceID        string
+	RunID              string
+	Intent             string
+	Action             string
+	Reason             string
+	RequestID          string
+	DefinitionRevision string
+	DecisionID         string
+	Priority           int
+	Command            appservice.ActivateWorkspaceExecutionCommand
 }
 
 func (s *serverState) publishWorkorchDSchedulerCommand(ctx context.Context, topic string, command workorchdevents.WorkspaceRunRequestedCommand) error {
@@ -320,19 +280,11 @@ func (s *serverState) projectRejectedSchedulerCommand(command workorchdevents.Wo
 func schedulerCommandIdempotencyKey(command workorchdevents.WorkspaceRunRequestedCommand) string {
 	req := workspaceRunRequestFromCommand(command)
 	switch strings.TrimSpace(req.Intent) {
-	case "replan":
-		return governanceRunResumeKey(governanceRunResumeRef{
-			WorkspaceID: req.WorkspaceID,
-			RunID:       req.RunID,
-			Intent:      "replan",
-			DecisionID:  req.DecisionID,
-		})
 	case "resume":
-		return governanceRunResumeKey(governanceRunResumeRef{
-			WorkspaceID: req.WorkspaceID,
-			RunID:       req.RunID,
-			Intent:      req.Intent,
-		})
+		if strings.TrimSpace(req.WorkspaceID) == "" || strings.TrimSpace(req.RunID) == "" {
+			return ""
+		}
+		return strings.Join([]string{"resume", strings.TrimSpace(req.WorkspaceID), strings.TrimSpace(req.RunID)}, "/")
 	case "restart":
 		if strings.TrimSpace(req.WorkspaceID) == "" {
 			return ""
@@ -358,91 +310,108 @@ func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, comma
 			if action == "" {
 				action = "resume"
 			}
-			if !s.runContinuations.scheduleRunContinuation(runContinuationRequest{
-				WorkspaceID:           req.WorkspaceID,
-				RunID:                 req.RunID,
-				Action:                action,
-				Priority:              req.Priority,
-				ExecutionContextPatch: req.ExecutionContextPatch,
-			}) {
-				return schedulerCommandQueueError(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
-			}
-			return nil
+			return s.sendRuntimeV2RunOwnerCommand(ctx, req.WorkspaceID, req.RunID, action)
 		}
 		req.Command.Restart = false
-		if !s.runContinuations.scheduleWorkspaceActivation(workspaceRestartRequest{
-			WorkspaceID: req.WorkspaceID,
-			Priority:    req.Priority,
-			Command:     req.Command,
-		}) {
-			return schedulerCommandQueueError(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
-		}
-		return nil
+		return s.executeWorkspaceRuntimeV2Activation(ctx, req)
 	case "restart":
 		if strings.TrimSpace(req.RunID) != "" {
 			return common.ErrInvalidArgument
 		}
 		req.Command.Restart = true
-		if !s.runContinuations.scheduleWorkspaceRestart(workspaceRestartRequest{
-			WorkspaceID: req.WorkspaceID,
-			Priority:    req.Priority,
-			Command:     req.Command,
-		}) {
-			return schedulerCommandQueueError(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
-		}
-		return nil
-	case "replan":
-		if strings.TrimSpace(req.RunID) == "" {
-			return common.ErrInvalidArgument
-		}
-		if !s.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{
-			WorkspaceID: req.WorkspaceID,
-			RunID:       req.RunID,
-			Intent:      "replan",
-			Reason:      req.Reason,
-			RequestID:   req.RequestID,
-			DecisionID:  req.DecisionID,
-		}}, req.Priority) {
-			return schedulerCommandQueueError(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
-		}
-		return nil
+		return s.executeWorkspaceRuntimeV2Activation(ctx, req)
 	default:
 		return common.ErrInvalidArgument
 	}
 }
 
-func schedulerCommandQueueError(topic string) error {
-	return fmt.Errorf("%w: scheduler command %s was not queued", common.ErrConflict, topic)
+func (s *serverState) executeWorkspaceRuntimeV2Activation(ctx context.Context, req workspaceRunRequest) error {
+	if s == nil || strings.TrimSpace(req.WorkspaceID) == "" {
+		return common.ErrInvalidArgument
+	}
+	workspaceID := strings.TrimSpace(req.WorkspaceID)
+	runCtx := appservice.ContextWithCommandHub(ctx, s.commandHub)
+	runCtx = common.ContextWithRuntimeWorkspaceID(runCtx, common.WorkspaceID(workspaceID))
+	release, err := s.acquireRunSlotWithPriority(runCtx, req.Priority)
+	if err != nil {
+		s.metrics.runCanceled.Add(1)
+		return err
+	}
+	defer release()
+	req.Command.Priority = req.Priority
+	activation, err := s.resumeWorkspaceExecution(runCtx, s.config.Backend, s.config.DataRoot, workspaceID, req.Command)
+	if err != nil {
+		s.notifyRunStatusChanged()
+		return err
+	}
+	s.metrics.observeRunOutcome(activation.Run)
+	s.notifyRunStatusChangedForRun(activation.Run)
+	return nil
+}
+
+func (s *serverState) sendRuntimeV2RunOwnerCommand(ctx context.Context, workspaceID string, runID string, action string) error {
+	if s == nil || s.commandHub == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(runID) == "" {
+		return common.ErrInvalidArgument
+	}
+	workspaceScope := common.WorkspaceID(strings.TrimSpace(workspaceID))
+	runScope := common.RunID(strings.TrimSpace(runID))
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceScope)
+	var topic string
+	var command any
+	switch strings.TrimSpace(action) {
+	case "start":
+		topic = orchestratorevents.TopicOrchestratorCommandStartRun
+		command = orchestratorevents.StartRunCommand{RunID: runScope}
+	case "resume":
+		topic = orchestratorevents.TopicOrchestratorCommandResumeRun
+		command = orchestratorevents.ResumeRunCommand{WorkspaceID: workspaceScope, RunID: runScope}
+	default:
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(topic, "workorchd/scheduler", orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{SubjectType: "run", SubjectID: string(runScope), WorkspaceID: string(workspaceScope), RunID: string(runScope)}))
+	response := s.commandHub.Send(event)
+	if response == nil {
+		return fmt.Errorf("%w: Runtime V2 run command %s returned no response", common.ErrConflict, topic)
+	}
+	if err := response.Error(); err != nil {
+		return err
+	}
+	data, err := response.Get()
+	if err != nil {
+		return err
+	}
+	if _, ok := data.(orchestratorevents.OrchestratorCommandResult); !ok {
+		return fmt.Errorf("%w: Runtime V2 run command %s returned %T", common.ErrInvalidArgument, topic, data)
+	}
+	return nil
 }
 
 func workspaceRunRequestFromCommand(command workorchdevents.WorkspaceRunRequestedCommand) workspaceRunRequest {
-	executionContextPatch := command.ExecutionContextPatch.Map()
 	cmd := appservice.ActivateWorkspaceExecutionCommand{
-		GoalID:                string(command.GoalID),
-		DoDID:                 string(command.DoDID),
-		LLMProviderID:         command.LLMProviderID,
-		SoulID:                string(command.SoulID),
-		SoulBindings:          cloneSchedulerStringMap(command.SoulBindings),
-		SkillIDs:              schedulerIDStrings(command.SkillIDs),
-		MCPServerIDs:          schedulerIDStrings(command.MCPServerIDs),
-		CapabilityIDs:         schedulerIDStrings(command.CapabilityIDs),
-		MemoryIDs:             schedulerIDStrings(command.MemoryIDs),
-		DialogLanguage:        command.DialogLanguage,
-		Priority:              command.Priority,
-		ExecutionContextPatch: executionContextPatch,
+		GoalID:         string(command.GoalID),
+		DoDID:          string(command.DoDID),
+		LLMProviderID:  command.LLMProviderID,
+		SoulID:         string(command.SoulID),
+		SoulBindings:   cloneSchedulerStringMap(command.SoulBindings),
+		SkillIDs:       schedulerIDStrings(command.SkillIDs),
+		MCPServerIDs:   schedulerIDStrings(command.MCPServerIDs),
+		CapabilityIDs:  schedulerIDStrings(command.CapabilityIDs),
+		MemoryIDs:      schedulerIDStrings(command.MemoryIDs),
+		DialogLanguage: command.DialogLanguage,
+		Priority:       command.Priority,
 	}
 	return workspaceRunRequest{
-		WorkspaceID:           string(command.WorkspaceID),
-		RunID:                 string(command.RunID),
-		Intent:                command.Intent,
-		Action:                command.Action,
-		Reason:                command.Reason,
-		RequestID:             command.RequestID,
-		DefinitionRevision:    command.DefinitionRevision,
-		DecisionID:            command.DecisionID,
-		Priority:              command.Priority,
-		ExecutionContextPatch: executionContextPatch,
-		Command:               cmd,
+		WorkspaceID:        string(command.WorkspaceID),
+		RunID:              string(command.RunID),
+		Intent:             command.Intent,
+		Action:             command.Action,
+		Reason:             command.Reason,
+		RequestID:          command.RequestID,
+		DefinitionRevision: command.DefinitionRevision,
+		DecisionID:         command.DecisionID,
+		Priority:           command.Priority,
+		Command:            cmd,
 	}
 }
 

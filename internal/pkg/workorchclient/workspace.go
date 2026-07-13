@@ -200,24 +200,23 @@ func (c *Client) ResumeWorkspaceExecution(ctx context.Context, workspaceID strin
 // resume/restart/replan commands that may carry the execution activation
 // contract inputs.
 type ActivationRequest struct {
-	RunID                 string            `json:"runId,omitempty"`
-	GoalID                string            `json:"goalId,omitempty"`
-	DoDID                 string            `json:"doDId,omitempty"`
-	LLMProviderID         string            `json:"llmProviderId,omitempty"`
-	SoulID                string            `json:"soulId,omitempty"`
-	SoulBindings          map[string]string `json:"soulBindings,omitempty"`
-	SkillIDs              []string          `json:"skillIds,omitempty"`
-	MCPServerIDs          []string          `json:"mcpServerIds,omitempty"`
-	CapabilityIDs         []string          `json:"capabilityIds,omitempty"`
-	MemoryIDs             []string          `json:"memoryIds,omitempty"`
-	DialogLanguage        string            `json:"dialogLanguage,omitempty"`
-	Priority              int               `json:"priority,omitempty"`
-	RequestID             string            `json:"requestId,omitempty"`
-	Reason                string            `json:"reason,omitempty"`
-	Source                string            `json:"source,omitempty"`
-	Intent                string            `json:"intent,omitempty"`
-	DefinitionRevision    string            `json:"definitionRevision,omitempty"`
-	DecisionID            string            `json:"decisionId,omitempty"`
-	Restart               bool              `json:"restart,omitempty"`
-	ExecutionContextPatch map[string]any    `json:"executionContextPatch,omitempty"`
+	RunID              string            `json:"runId,omitempty"`
+	GoalID             string            `json:"goalId,omitempty"`
+	DoDID              string            `json:"doDId,omitempty"`
+	LLMProviderID      string            `json:"llmProviderId,omitempty"`
+	SoulID             string            `json:"soulId,omitempty"`
+	SoulBindings       map[string]string `json:"soulBindings,omitempty"`
+	SkillIDs           []string          `json:"skillIds,omitempty"`
+	MCPServerIDs       []string          `json:"mcpServerIds,omitempty"`
+	CapabilityIDs      []string          `json:"capabilityIds,omitempty"`
+	MemoryIDs          []string          `json:"memoryIds,omitempty"`
+	DialogLanguage     string            `json:"dialogLanguage,omitempty"`
+	Priority           int               `json:"priority,omitempty"`
+	RequestID          string            `json:"requestId,omitempty"`
+	Reason             string            `json:"reason,omitempty"`
+	Source             string            `json:"source,omitempty"`
+	Intent             string            `json:"intent,omitempty"`
+	DefinitionRevision string            `json:"definitionRevision,omitempty"`
+	DecisionID         string            `json:"decisionId,omitempty"`
+	Restart            bool              `json:"restart,omitempty"`
 }

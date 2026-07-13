@@ -52,44 +52,11 @@ func (s *Service) Start() error {
 	s.subscribeApprovalNotifications()
 	s.subscribeGovernanceNotifications()
 	s.subscribeRunStateNotifications()
-	s.subscribeRunStepNotifications()
-	s.subscribeRunLLMNotifications()
 	s.subscribeWorkspaceNotifications()
 	s.subscribeResultNotifications()
 	s.subscribeMemoryNotifications()
 	s.subscribeOrchestratorDetailNotifications()
-	s.subscribeContractViolationNotifications()
 	return nil
-}
-
-func (s *Service) subscribeContractViolationNotifications() {
-	if s == nil || s.commandHub == nil {
-		return
-	}
-	const observerID = "/orchestrator/consumers/kernel/eventstream/contract-violation"
-	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.commandHub)
-	topics := []string{
-		orchestratorevents.TopicOrchestratorContractViolation,
-		orchestratorevents.TopicOrchestratorContractViolationRecorded,
-		orchestratorevents.TopicOrchestratorContractViolationRetryRequested,
-		orchestratorevents.TopicOrchestratorContractViolationEscalated,
-	}
-	for _, topic := range topics {
-		topic := topic
-		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
-			if data, ok := event.Data().(orchestratorevents.ContractViolationData); ok {
-				_ = s.appendRecord(event.Context(), contractViolationRecord(topic, event.Source(), data))
-			}
-			if result != nil {
-				result.Set(nil, nil)
-			}
-		})
-	}
-	s.unsubscribers = append(s.unsubscribers, func() {
-		for _, topic := range topics {
-			observer.Unsubscribe(topic)
-		}
-	})
 }
 
 func (s *Service) subscribeOrchestratorDetailNotifications() {
@@ -261,66 +228,6 @@ func (s *Service) subscribeWorkspaceNotifications() {
 		}
 		observer.Unsubscribe(workspaceevents.TopicGoalDefined)
 		observer.Unsubscribe(workspaceevents.TopicDoDDefined)
-	})
-}
-
-func (s *Service) subscribeRunStepNotifications() {
-	if s == nil || s.commandHub == nil {
-		return
-	}
-	const observerID = "/run/consumers/kernel/eventstream/step"
-	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.commandHub)
-	topics := []string{
-		runevents.TopicStepCreated,
-		runevents.TopicStepDispatched,
-		runevents.TopicStepSucceeded,
-		runevents.TopicStepFailed,
-		runevents.TopicStepSkipped,
-		runevents.TopicStepStateChanged,
-	}
-	for _, topic := range topics {
-		topic := topic
-		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
-			if data, ok := event.Data().(runevents.StepChangedData); ok {
-				_ = s.appendRecord(event.Context(), runStepRecord(topic, event.Source(), data))
-			}
-			if result != nil {
-				result.Set(nil, nil)
-			}
-		})
-	}
-	s.unsubscribers = append(s.unsubscribers, func() {
-		for _, topic := range topics {
-			observer.Unsubscribe(topic)
-		}
-	})
-}
-
-func (s *Service) subscribeRunLLMNotifications() {
-	if s == nil || s.commandHub == nil {
-		return
-	}
-	const observerID = "/run/consumers/kernel/eventstream/llm"
-	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, s.commandHub)
-	observer.Subscribe(runevents.TopicRunLLMStreamProgress, func(event magicevent.Event, result magicevent.Result) {
-		if data, ok := event.Data().(runevents.LLMStreamProgressData); ok {
-			_ = s.appendRecord(event.Context(), runLLMStreamProgressRecord(event.Source(), data))
-		}
-		if result != nil {
-			result.Set(nil, nil)
-		}
-	})
-	observer.Subscribe(runevents.TopicRunLLMUsageRecorded, func(event magicevent.Event, result magicevent.Result) {
-		if data, ok := event.Data().(runevents.LLMUsageRecordedData); ok {
-			_ = s.appendRecord(event.Context(), runLLMUsageRecord(event.Source(), data))
-		}
-		if result != nil {
-			result.Set(nil, nil)
-		}
-	})
-	s.unsubscribers = append(s.unsubscribers, func() {
-		observer.Unsubscribe(runevents.TopicRunLLMStreamProgress)
-		observer.Unsubscribe(runevents.TopicRunLLMUsageRecorded)
 	})
 }
 
@@ -593,100 +500,6 @@ func runStateRecord(topic string, source string, data runevents.RunStateChangedD
 	}
 }
 
-func runStepRecord(topic string, source string, data runevents.StepChangedData) *eventstreammodel.EventRecord {
-	return &eventstreammodel.EventRecord{
-		Topic:        topic,
-		SourceModule: source,
-		SubjectType:  "step",
-		SubjectID:    string(data.StepID),
-		WorkspaceID:  data.WorkspaceID,
-		RunID:        data.RunID,
-		StepID:       data.StepID,
-		Payload: events.StepPayload(
-			data.Kind,
-			data.State,
-			runStepSnapshotMap(data.Input, "inputRef"),
-			runStepSnapshotMap(data.Output, "outputRef"),
-		),
-	}
-}
-
-func runStepSnapshotMap(snapshot runevents.StepSnapshot, refKey string) map[string]any {
-	ret := snapshot.Summary.Map()
-	if len(ret) > 0 {
-		ret = map[string]any{"summary": ret}
-	}
-	if snapshot.Ref != "" {
-		if ret == nil {
-			ret = map[string]any{}
-		}
-		ret[refKey] = snapshot.Ref
-	}
-	return ret
-}
-
-func runLLMStreamProgressRecord(source string, data runevents.LLMStreamProgressData) *eventstreammodel.EventRecord {
-	return &eventstreammodel.EventRecord{
-		Topic:        runevents.TopicRunLLMStreamProgress,
-		SourceModule: source,
-		SubjectType:  "llm_stream_progress",
-		SubjectID:    string(data.StepID),
-		WorkspaceID:  data.WorkspaceID,
-		RunID:        data.RunID,
-		StepID:       data.StepID,
-		Payload: events.LLMStreamProgressPayload(
-			data.WorkspaceID,
-			data.RunID,
-			data.StepID,
-			data.ProviderID,
-			data.Model,
-			data.ChunkCount,
-			data.ReceivedBytes,
-			data.ElapsedMs,
-			data.Status,
-			data.Summary,
-		),
-	}
-}
-
-func runLLMUsageRecord(source string, data runevents.LLMUsageRecordedData) *eventstreammodel.EventRecord {
-	return &eventstreammodel.EventRecord{
-		Topic:        runevents.TopicRunLLMUsageRecorded,
-		SourceModule: source,
-		SubjectType:  "llm_usage",
-		SubjectID:    string(data.StepID),
-		WorkspaceID:  data.WorkspaceID,
-		RunID:        data.RunID,
-		StepID:       data.StepID,
-		Payload: events.LLMUsagePayload(events.LLMUsagePayloadData{
-			WorkspaceID:   data.WorkspaceID,
-			RunID:         data.RunID,
-			StepID:        data.StepID,
-			ProviderID:    data.ProviderID,
-			Provider:      data.Provider,
-			APISurface:    data.APISurface,
-			Model:         data.Model,
-			Operation:     data.Operation,
-			InputTokens:   data.InputTokens,
-			OutputTokens:  data.OutputTokens,
-			TotalTokens:   data.TotalTokens,
-			Estimated:     data.Estimated,
-			UsageSource:   data.UsageSource,
-			RequestBytes:  data.RequestBytes,
-			ResponseBytes: data.ResponseBytes,
-			Streaming:     data.Streaming,
-			ContextBudget: data.ContextBudget.Map(),
-			CacheUsage:    data.CacheUsage.Map(),
-			CacheMarkers:  data.CacheMarkers.Map(),
-			StartedAt:     data.StartedAt,
-			CompletedAt:   data.CompletedAt,
-			DurationMs:    data.DurationMs,
-			Status:        data.Status,
-			FailureClass:  data.FailureClass,
-		}),
-	}
-}
-
 func workspaceRecord(topic string, source string, data workspaceevents.WorkspaceChangedData) *eventstreammodel.EventRecord {
 	return &eventstreammodel.EventRecord{
 		Topic:        topic,
@@ -850,34 +663,6 @@ func artifactContinuationRecord(topic string, source string, data orchestratorev
 	return &eventstreammodel.EventRecord{
 		Topic: topic, SourceModule: source, SubjectType: "artifact_continuation", SubjectID: string(data.ContinuationID),
 		WorkspaceID: data.WorkspaceID, RunID: data.RunID, StepID: data.StepID, Payload: payload,
-	}
-}
-
-func contractViolationRecord(topic string, source string, data orchestratorevents.ContractViolationData) *eventstreammodel.EventRecord {
-	violation := data.Violation.Map()
-	payload := make(map[string]any, len(violation)+8)
-	for key, value := range violation {
-		payload[key] = value
-	}
-	payload["contractViolation"] = violation
-	payload["workspaceId"] = string(data.WorkspaceID)
-	payload["runId"] = string(data.RunID)
-	payload["sourceStepId"] = string(data.SourceStepID)
-	payload["stepId"] = string(data.SourceStepID)
-	payload["topic"] = data.Topic
-	payload["summary"] = data.Summary
-	if data.RetryStepID != "" {
-		payload["retryStepId"] = string(data.RetryStepID)
-	}
-	if data.TicketID != "" {
-		payload["ticketId"] = string(data.TicketID)
-	}
-	if contextPayload := data.Context.Map(); len(contextPayload) > 0 {
-		payload["context"] = contextPayload
-	}
-	return &eventstreammodel.EventRecord{
-		Topic: topic, SourceModule: source, SubjectType: "contract_violation", SubjectID: data.SubjectID,
-		WorkspaceID: data.WorkspaceID, RunID: data.RunID, StepID: data.SourceStepID, Payload: payload,
 	}
 }
 

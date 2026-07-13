@@ -9,7 +9,6 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -211,7 +210,7 @@ func TestWorkspaceSnapshotLoadsRunScopedLLMUsageOnlyForProjectionRun(t *testing.
 
 	var runScoped []common.RunID
 	for _, query := range reader.queries {
-		if query.RunID != "" && query.Topic == runevents.TopicRunLLMUsageRecorded {
+		if query.RunID != "" && query.Topic == "/run/llm_usage/recorded" {
 			runScoped = append(runScoped, query.RunID)
 		}
 	}
@@ -264,7 +263,7 @@ func TestWorkspaceProjectionSnapshotSkipsLLMUsagePayloadQueries(t *testing.T) {
 	}
 
 	for _, query := range reader.queries {
-		if query.Topic == runevents.TopicRunLLMUsageRecorded || query.IncludePayload {
+		if query.Topic == "/run/llm_usage/recorded" || query.IncludePayload {
 			t.Fatalf("projection snapshot event query = %+v, want no llm usage payload queries", query)
 		}
 	}
@@ -379,7 +378,7 @@ func (r *workspaceEventReaderByQuery) List(_ context.Context, query repository.E
 	if query.RunID != "" {
 		return r.runRecords[query.RunID], nil
 	}
-	if query.WorkspaceID != "" && query.Topic == runevents.TopicRunLLMUsageRecorded {
+	if query.WorkspaceID != "" && query.Topic == "/run/llm_usage/recorded" {
 		return r.workspaceRecords, nil
 	}
 	return nil, nil
@@ -407,7 +406,7 @@ func llmUsageEventRecord(id string, workspaceID common.WorkspaceID, runID common
 	return &eventstreammodel.EventRecord{
 		ID:          common.EventRecordID(id),
 		Version:     "workorch.event.v1",
-		Topic:       runevents.TopicRunLLMUsageRecorded,
+		Topic:       "/run/llm_usage/recorded",
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		StepID:      common.StepID(string(runID) + "/step-1"),

@@ -13,6 +13,7 @@ import (
 )
 
 const defaultProviderTimeout = 60 * time.Second
+const defaultEstimatedTokensPerByte = 0.25
 const defaultOpenAIBaseURL = "https://api.openai.com/v1"
 const defaultAnthropicBaseURL = "https://api.anthropic.com"
 const defaultContextWindowTokens = 32768

@@ -69,7 +69,11 @@ func (s *Service) EnsureTicket(ctx context.Context, cmd decisioncontracts.Create
 			item.Reason != cmd.Reason ||
 			item.DecisionKind != cmd.DecisionKind ||
 			item.Question != cmd.Question ||
-			!sameResolutionPayload(item.Context, cmd.Context) {
+			!sameResolutionPayload(item.Context, cmd.Context) ||
+			!sameResolutionPayload(item.AutoGovernance, cmd.AutoGovernance) ||
+			item.FailureClass != nonEmptyString(cmd.FailureClass, stringPayloadValue(cmd.Context, "failureClass")) ||
+			item.FailureSignature != nonEmptyString(cmd.FailureSignature, stringPayloadValue(cmd.Context, "failureSignature")) ||
+			!reflect.DeepEqual(item.AllowedRecoveryActions, nonEmptyStringSlice(cmd.AllowedRecoveryActions, stringSlicePayloadValue(cmd.Context, "allowedRecoveryActions"))) {
 			return common.ErrConflict
 		}
 		return nil
@@ -253,12 +257,13 @@ func ticketChangedData(ticket *decisionModel.Ticket) decisionevents.TicketChange
 		return decisionevents.TicketChangedData{}
 	}
 	return decisionevents.TicketChangedData{
-		TicketID:    ticket.ID,
-		WorkspaceID: ticket.WorkspaceID,
-		RunID:       ticket.RunID,
-		StepID:      ticket.StepID,
-		Reason:      ticket.Reason,
-		State:       ticket.State,
+		TicketID:     ticket.ID,
+		WorkspaceID:  ticket.WorkspaceID,
+		RunID:        ticket.RunID,
+		StepID:       ticket.StepID,
+		Reason:       ticket.Reason,
+		DecisionKind: ticket.DecisionKind,
+		State:        ticket.State,
 	}
 }
 

@@ -11,6 +11,7 @@ const (
 	RuntimeModuleSSH          = "blocks/ssh"
 	RuntimeModuleWeb          = "blocks/web"
 	RuntimeModuleOrchestrator = "kernel/orchestrator"
+	RuntimeModuleDecision     = "blocks/decision"
 )
 
 const (
@@ -46,5 +47,24 @@ func CanonicalRuntimeBlockKind(kind string) string {
 		return RuntimeBlockKindPatchApply
 	default:
 		return strings.TrimSpace(kind)
+	}
+}
+
+func RuntimeModuleForOperationKind(kind string) string {
+	switch CanonicalRuntimeBlockKind(kind) {
+	case StepKindFileList, StepKindFileRead, StepKindFileEdit, RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview, RuntimeBlockKindPatchRevert:
+		return RuntimeModuleFile
+	case StepKindGitRead, StepKindGitWrite:
+		return RuntimeModuleGit
+	case StepKindMCPToolCall, StepKindMCPResourceRead, StepKindMCPPromptGet:
+		return RuntimeModuleMCP
+	case StepKindShellCommand:
+		return RuntimeModuleShell
+	case StepKindSSHCommand:
+		return RuntimeModuleSSH
+	case StepKindWebSearch, StepKindWebFetch:
+		return RuntimeModuleWeb
+	default:
+		return ""
 	}
 }

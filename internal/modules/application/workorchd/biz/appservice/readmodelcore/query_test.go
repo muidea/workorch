@@ -3,8 +3,6 @@ package readmodelcore
 import (
 	"testing"
 
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
-
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -117,7 +115,7 @@ func TestRunEventRecordRepositoryQueries(t *testing.T) {
 	if projection.RunID != common.RunID("run-001") || projection.IncludePayload {
 		t.Fatalf("projection query = %+v, want run scoped compact projection query", projection)
 	}
-	if len(projection.ExcludeTopics) != 1 || projection.ExcludeTopics[0] != runevents.TopicRunLLMStreamProgress {
+	if len(projection.ExcludeTopics) != 1 || projection.ExcludeTopics[0] != "/run/llm_stream/progress" {
 		t.Fatalf("projection exclude topics = %+v, want stream progress excluded", projection.ExcludeTopics)
 	}
 
@@ -125,7 +123,7 @@ func TestRunEventRecordRepositoryQueries(t *testing.T) {
 	if llm.RunID != common.RunID("run-001") {
 		t.Fatalf("llm run id mismatch: %q", llm.RunID)
 	}
-	if llm.Topic != runevents.TopicRunLLMUsageRecorded {
+	if llm.Topic != "/run/llm_usage/recorded" {
 		t.Fatalf("llm topic mismatch: %q", llm.Topic)
 	}
 	if llm.Limit != 5000 {
@@ -155,7 +153,7 @@ func TestWorkspaceEventRecordRepositoryQueries(t *testing.T) {
 	if llm.WorkspaceID != common.WorkspaceID("ws-001") {
 		t.Fatalf("llm workspace id mismatch: %q", llm.WorkspaceID)
 	}
-	if llm.Topic != runevents.TopicRunLLMUsageRecorded {
+	if llm.Topic != "/run/llm_usage/recorded" {
 		t.Fatalf("llm topic mismatch: %q", llm.Topic)
 	}
 	if llm.Limit != 5000 {

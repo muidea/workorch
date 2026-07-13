@@ -9,6 +9,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestCreateAndStartWorkspaceExecutionRunUsesEventHubOwnerCommands(t *testing.T) {
@@ -26,13 +27,13 @@ func TestCreateAndStartWorkspaceExecutionRunUsesEventHubOwnerCommands(t *testing
 	seedActivationDefinitions(t, ctx, exports, workspaceID, goalID, dodID)
 
 	runID, err := CreateAndStartWorkspaceExecutionRun(ctx, exports.Infrastructure.CommandHub, CreateAndStartWorkspaceExecutionRunRequest{
-		WorkspaceID:           workspaceID,
-		GoalID:                goalID,
-		DoDID:                 dodID,
-		ExecutionContext:      map[string]any{"dialogLanguage": "en-US"},
-		Priority:              7,
-		LLMProviderID:         "verify-provider",
-		DefaultDialogLanguage: "en-US",
+		WorkspaceID:        workspaceID,
+		GoalID:             goalID,
+		DoDID:              dodID,
+		DefinitionRevision: "goal:" + string(goalID) + "|dod:" + string(dodID),
+		Priority:           7,
+		LLMProviderID:      "verify-provider",
+		RuntimeBootstrap:   activationRunTestBootstrap(goalID, dodID),
 	})
 	if err != nil {
 		t.Fatalf("CreateAndStartWorkspaceExecutionRun: %v", err)
@@ -53,9 +54,8 @@ func TestCreateAndStartWorkspaceExecutionRunUsesEventHubOwnerCommands(t *testing
 	if item.Priority != 7 {
 		t.Fatalf("priority = %d, want 7", item.Priority)
 	}
-	compressed, ok := item.ExecutionContext["compressedContext"].(map[string]any)
-	if !ok || compressed["runId"] != string(runID) || compressed["workspaceId"] != string(workspaceID) {
-		t.Fatalf("compressedContext = %#v, want run identity", item.ExecutionContext["compressedContext"])
+	if item.RuntimeBootstrap == nil || item.RuntimeBootstrap.Definition.Revision != "goal:"+string(goalID)+"|dod:"+string(dodID) {
+		t.Fatalf("run runtime bootstrap = %#v, want typed bootstrap", item.RuntimeBootstrap)
 	}
 }
 
@@ -79,16 +79,30 @@ func TestCreateAndStartWorkspaceExecutionRunContinuesWorkspaceRunSequence(t *tes
 	}
 
 	runID, err := CreateAndStartWorkspaceExecutionRun(ctx, exports.Infrastructure.CommandHub, CreateAndStartWorkspaceExecutionRunRequest{
-		WorkspaceID:           workspaceID,
-		GoalID:                "goal-activation-runports-sequence",
-		DoDID:                 "dod-activation-runports-sequence",
-		DefaultDialogLanguage: "en-US",
+		WorkspaceID:        workspaceID,
+		GoalID:             "goal-activation-runports-sequence",
+		DoDID:              "dod-activation-runports-sequence",
+		DefinitionRevision: "goal:goal-activation-runports-sequence|dod:dod-activation-runports-sequence",
+		RuntimeBootstrap:   activationRunTestBootstrap("goal-activation-runports-sequence", "dod-activation-runports-sequence"),
 	})
 	if err != nil {
 		t.Fatalf("CreateAndStartWorkspaceExecutionRun: %v", err)
 	}
 	if runID != "run-002" {
 		t.Fatalf("runID = %s, want run-002", runID)
+	}
+}
+
+func activationRunTestBootstrap(goalID common.GoalID, dodID common.DoDID) *runtimecontract.RuntimeBootstrap {
+	return &runtimecontract.RuntimeBootstrap{
+		Definition: runtimecontract.RuntimeDefinitionContext{
+			Revision: "goal:" + string(goalID) + "|dod:" + string(dodID), GoalID: goalID, GoalDefinition: "goal",
+			DoDID: dodID, DoDDefinition: "1. dod", CapabilityContract: []string{runtimecontract.StepKindShellCommand},
+		},
+		Activation: runtimecontract.RuntimeActivationContext{ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired}},
+		Focuses: []runtimecontract.CoverageFocus{{
+			ID: "focus-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		}},
 	}
 }
 
@@ -111,7 +125,7 @@ func TestRunObservableAfterStartConflictReadsRunWithContextWorkspaceScope(t *tes
 	}
 }
 
-func TestBuildWorkspaceExecutionContextForIDsUsesEventHubInputs(t *testing.T) {
+func TestBuildWorkspaceRuntimeActivationForIDsUsesEventHubInputs(t *testing.T) {
 	ctx := context.Background()
 	runtime := newOwnerRuntime()
 	t.Cleanup(func() {
@@ -125,7 +139,7 @@ func TestBuildWorkspaceExecutionContextForIDsUsesEventHubInputs(t *testing.T) {
 	dodID := common.DoDID("dod-activation-context-runports")
 	seedActivationDefinitions(t, ctx, exports, workspaceID, goalID, dodID)
 
-	contextData, err := BuildWorkspaceExecutionContextForIDs(ctx, WorkspaceExecutionContextByIDRequest{
+	build, err := BuildWorkspaceRuntimeActivationForIDs(ctx, WorkspaceRuntimeActivationByIDRequest{
 		Hub:                   exports.Infrastructure.CommandHub,
 		WorkspaceID:           workspaceID,
 		GoalID:                goalID,
@@ -133,16 +147,16 @@ func TestBuildWorkspaceExecutionContextForIDsUsesEventHubInputs(t *testing.T) {
 		DefaultDialogLanguage: "en-US",
 	})
 	if err != nil {
-		t.Fatalf("BuildWorkspaceExecutionContextForIDs: %v", err)
+		t.Fatalf("BuildWorkspaceRuntimeActivationForIDs: %v", err)
 	}
-	if contextData["workspaceId"] != string(workspaceID) || contextData["goalId"] != string(goalID) || contextData["doDId"] != string(dodID) {
-		t.Fatalf("context identity = %#v, want workspace/goal/dod IDs", contextData)
+	if build.EffectiveGoal == nil || build.EffectiveDoD == nil || build.EffectiveGoal.ID != goalID || build.EffectiveDoD.ID != dodID {
+		t.Fatalf("runtime activation definitions = %#v/%#v, want goal/dod IDs", build.EffectiveGoal, build.EffectiveDoD)
 	}
-	if contextData["dialogLanguage"] != "en-US" {
-		t.Fatalf("dialogLanguage = %#v, want en-US", contextData["dialogLanguage"])
+	if build.RuntimeActivation.DialogLanguage != "en-US" {
+		t.Fatalf("dialogLanguage = %#v, want en-US", build.RuntimeActivation.DialogLanguage)
 	}
-	if contextData["skillSelection"] == nil {
-		t.Fatalf("skillSelection is nil, want evidence")
+	if build.DefinitionRevision != "goal:"+string(goalID)+"|dod:"+string(dodID) {
+		t.Fatalf("definitionRevision = %q, want typed definition revision", build.DefinitionRevision)
 	}
 }
 

@@ -46,49 +46,38 @@ func TestMapObservedPreservesEnvelopeShape(t *testing.T) {
 func TestMapObservedDeepClonesNestedPayloads(t *testing.T) {
 	items := []observed.SnapshotItem{
 		{
-			ID:      "/step/snapshot:step-1",
+			ID:      "/decision/ticket/snapshot:ticket-1",
 			Version: "workorch.v1",
-			Topic:   "/step/snapshot",
-			Payload: observed.StepPayload{
-				Kind:  "llm/workspace_execution",
-				State: "completed",
-				Input: map[string]any{
+			Topic:   "/decision/ticket/snapshot",
+			Payload: observed.DecisionTicketPayload{
+				State: "resolved",
+				ResolutionPayload: map[string]any{
 					"workspaceId": "ws-1",
 					"items":       []any{"first", map[string]any{"nested": "original"}},
-				},
-				Output: map[string]any{
-					"status": "completed",
 				},
 			},
 		},
 	}
 
 	first := MapObserved(items)
-	firstInput := first[0].Payload[events.PayloadKeyInput].(map[string]any)
+	firstInput := first[0].Payload[events.PayloadKeyPayload].(map[string]any)
 	firstInput["workspaceId"] = "mutated"
 	firstItems := firstInput["items"].([]any)
 	firstItems[0] = "changed"
 	firstItems[1].(map[string]any)["nested"] = "mutated"
-	firstOutput := first[0].Payload[events.PayloadKeyOutput].(map[string]any)
-	firstOutput["status"] = "failed"
-
-	sourcePayload := items[0].Payload.(observed.StepPayload)
-	if sourcePayload.Input["workspaceId"] != "ws-1" {
-		t.Fatalf("source workspaceId = %v, want ws-1", sourcePayload.Input["workspaceId"])
+	sourcePayload := items[0].Payload.(observed.DecisionTicketPayload)
+	if sourcePayload.ResolutionPayload["workspaceId"] != "ws-1" {
+		t.Fatalf("source workspaceId = %v, want ws-1", sourcePayload.ResolutionPayload["workspaceId"])
 	}
-	sourceItems := sourcePayload.Input["items"].([]any)
+	sourceItems := sourcePayload.ResolutionPayload["items"].([]any)
 	if sourceItems[0] != "first" {
 		t.Fatalf("source items[0] = %v, want first", sourceItems[0])
 	}
 	if sourceItems[1].(map[string]any)["nested"] != "original" {
 		t.Fatalf("source nested = %v, want original", sourceItems[1].(map[string]any)["nested"])
 	}
-	if sourcePayload.Output["status"] != "completed" {
-		t.Fatalf("source status = %v, want completed", sourcePayload.Output["status"])
-	}
-
 	second := MapObserved(items)
-	secondInput := second[0].Payload[events.PayloadKeyInput].(map[string]any)
+	secondInput := second[0].Payload[events.PayloadKeyPayload].(map[string]any)
 	if secondInput["workspaceId"] != "ws-1" {
 		t.Fatalf("workspaceId = %v, want ws-1", secondInput["workspaceId"])
 	}
@@ -98,10 +87,6 @@ func TestMapObservedDeepClonesNestedPayloads(t *testing.T) {
 	}
 	if secondItems[1].(map[string]any)["nested"] != "original" {
 		t.Fatalf("nested = %v, want original", secondItems[1].(map[string]any)["nested"])
-	}
-	secondOutput := second[0].Payload[events.PayloadKeyOutput].(map[string]any)
-	if secondOutput["status"] != "completed" {
-		t.Fatalf("status = %v, want completed", secondOutput["status"])
 	}
 }
 

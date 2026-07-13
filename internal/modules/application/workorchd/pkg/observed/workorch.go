@@ -11,7 +11,6 @@ import (
 func BuildWorkorchSnapshot(
 	ws *workspacemodel.Workspace,
 	r *runmodel.Run,
-	steps []*runmodel.Step,
 	ticket *decisionmodel.Ticket,
 	resolution *decisionmodel.Resolution,
 	approval *approvalmodel.Approval,
@@ -34,19 +33,6 @@ func BuildWorkorchSnapshot(
 		runID:       r.ID,
 	}, published); ok {
 		observed = append(observed, runEnvelope)
-	}
-	for _, step := range steps {
-		if step == nil {
-			continue
-		}
-		if stepEnvelope, ok := latestPublishedSnapshot(workorchStepSnapshotContract, workorchSnapshotRef{
-			subjectID:   string(step.ID),
-			workspaceID: ws.ID,
-			runID:       r.ID,
-			stepID:      step.ID,
-		}, published); ok {
-			observed = append(observed, stepEnvelope)
-		}
 	}
 	if ticket != nil {
 		if ticketEnvelope, ok := latestPublishedSnapshot(workorchTicketSnapshotContract, workorchSnapshotRef{

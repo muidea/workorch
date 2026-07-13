@@ -79,6 +79,7 @@ func (m *Module) Run(ctx context.Context) *cd.Error {
 		}
 		m.doneObserver = magicevent.NewSimpleObserver(workorchdevents.CommandDestination, m.commandHub)
 		m.doneObserver.Subscribe(workorchdevents.TopicWorkorchDCommandDone, m.handleDoneCommand)
+		m.doneObserver.Subscribe(workorchdevents.TopicWorkorchDCommandRuntimeV1Retirement, m.handleRuntimeV1RetirementCommand)
 	}
 	return nil
 }
@@ -88,6 +89,7 @@ func (m *Module) Teardown(ctx context.Context) {
 		return
 	}
 	if m.doneObserver != nil {
+		m.doneObserver.Unsubscribe(workorchdevents.TopicWorkorchDCommandRuntimeV1Retirement)
 		m.doneObserver.Unsubscribe(workorchdevents.TopicWorkorchDCommandDone)
 		m.doneObserver = nil
 	}
@@ -104,6 +106,30 @@ func (m *Module) Teardown(ctx context.Context) {
 	}
 	m.service = nil
 	m.commandHub = nil
+}
+
+func (m *Module) handleRuntimeV1RetirementCommand(ev magicevent.Event, result magicevent.Result) {
+	cmd, ok := ev.Data().(workorchdevents.RuntimeV1RetirementCommand)
+	if !ok || m == nil || m.commandHub == nil || m.service == nil {
+		result.Set(nil, cd.NewError(cd.IllegalParam, "invalid Runtime V1 retirement command"))
+		return
+	}
+	retired, err := appservice.ExecuteRuntimeV1Retirement(ev.Context(), m.commandHub, cmd.DryRun, m.service.RebuildWorkspaceProjection)
+	if err != nil {
+		result.Set(nil, cd.NewError(cd.Unexpected, err.Error()))
+		return
+	}
+	failures := make([]workorchdevents.RuntimeV1RetirementFailure, 0, len(retired.Report.Failures))
+	for _, failure := range retired.Report.Failures {
+		failures = append(failures, workorchdevents.RuntimeV1RetirementFailure{SubjectType: failure.SubjectType, SubjectID: failure.SubjectID, Reason: failure.Reason})
+	}
+	result.Set(workorchdevents.RuntimeV1RetirementResult{DryRun: retired.DryRun, Report: workorchdevents.RuntimeV1RetirementReport{
+		ScannedV1Runs: retired.Report.ScannedV1Runs, SupersededRuns: retired.Report.SupersededRuns,
+		ClearedActiveRunIDs: retired.Report.ClearedActiveRunIDs, SupersededTickets: retired.Report.SupersededTickets,
+		SupersededApprovals: retired.Report.SupersededApprovals, ResourceScopesToRelease: retired.Report.ResourceScopesToRelease,
+		ReleasedResourceScopes: retired.Report.ReleasedResourceScopes, ProjectionRebuildRevision: retired.ProjectionRebuildRevision,
+		Failures: failures,
+	}}, nil)
 }
 
 func (m *Module) Done() <-chan error {

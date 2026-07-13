@@ -7,19 +7,19 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type CreateAndStartWorkspaceExecutionRunRequest struct {
-	WorkspaceID           common.WorkspaceID
-	GoalID                common.GoalID
-	DoDID                 common.DoDID
-	ExecutionContext      map[string]any
-	Priority              int
-	LLMProviderID         string
-	DefaultDialogLanguage string
-	MaxAttempts           int
+	WorkspaceID        common.WorkspaceID
+	GoalID             common.GoalID
+	DoDID              common.DoDID
+	DefinitionRevision string
+	Priority           int
+	LLMProviderID      string
+	MaxAttempts        int
+	RuntimeBootstrap   *runtimecontract.RuntimeBootstrap
 }
 
 func CreateAndStartWorkspaceExecutionRun(ctx context.Context, commandHub magicevent.Hub, request CreateAndStartWorkspaceExecutionRunRequest) (common.RunID, error) {
@@ -35,22 +35,13 @@ func CreateAndStartWorkspaceExecutionRun(ctx context.Context, commandHub magicev
 		if err != nil {
 			return "", err
 		}
-		createExecutionContext := activationcore.CreatedWorkspaceRunExecutionContext(
-			runID,
-			request.WorkspaceID,
-			request.GoalID,
-			request.DoDID,
-			request.ExecutionContext,
-			request.Priority,
-			request.DefaultDialogLanguage,
-		)
-		if err := CreateWorkspaceExecutionRun(ctx, commandHub, runID, request.WorkspaceID, request.GoalID, request.DoDID, createExecutionContext, request.Priority); err != nil {
+		if err := CreateWorkspaceExecutionRun(ctx, commandHub, runID, request.WorkspaceID, request.GoalID, request.DoDID, request.DefinitionRevision, request.RuntimeBootstrap, request.Priority); err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				continue
 			}
 			return "", err
 		}
-		if err := RecordActivationMemoryRecallTrace(ctx, commandHub, runID, request.WorkspaceID, createExecutionContext, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		if err := RecordActivationMemoryRecallTrace(ctx, commandHub, runID, request.WorkspaceID, request.RuntimeBootstrap, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			return "", err
 		}
 		startCtx := common.ContextWithRuntimeWorkspaceID(common.ContextWithRuntimeLLMProviderID(ctx, request.LLMProviderID), request.WorkspaceID)

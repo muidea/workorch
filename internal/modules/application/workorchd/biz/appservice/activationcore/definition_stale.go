@@ -1,41 +1,29 @@
 package activationcore
 
 import (
-	"encoding/json"
+	"fmt"
+	"strings"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 )
 
-func StableContextJSON(value any) string {
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return ""
-	}
-	return string(payload)
-}
-
 func ActiveRunDefinitionContextStale(run *runmodel.Run, effectiveGoal *workspacemodel.Goal, effectiveDoD *workspacemodel.DoD) bool {
-	if run == nil || effectiveGoal == nil || effectiveDoD == nil {
+	if run == nil || effectiveGoal == nil || effectiveDoD == nil || run.RuntimeBootstrap == nil {
 		return true
 	}
 	if run.GoalID != effectiveGoal.ID || run.DoDID != effectiveDoD.ID {
 		return true
 	}
-	if len(run.ExecutionContext) == 0 {
+	definition := run.RuntimeBootstrap.Definition.Normalized()
+	if definition.GoalID != effectiveGoal.ID || definition.DoDID != effectiveDoD.ID || strings.TrimSpace(definition.GoalDefinition) != strings.TrimSpace(effectiveGoal.Text) {
 		return true
 	}
-	current := map[string]any{
-		"goalId": string(effectiveGoal.ID),
-		"goal":   GoalContext(effectiveGoal),
-		"doDId":  string(effectiveDoD.ID),
-		"dod":    DoDContext(effectiveDoD),
+	dodLines := make([]string, 0, len(effectiveDoD.Items))
+	for idx, item := range effectiveDoD.Items {
+		if item = strings.TrimSpace(item); item != "" {
+			dodLines = append(dodLines, fmt.Sprintf("%d. %s", idx+1, item))
+		}
 	}
-	existing := map[string]any{
-		"goalId": run.ExecutionContext["goalId"],
-		"goal":   run.ExecutionContext["goal"],
-		"doDId":  run.ExecutionContext["doDId"],
-		"dod":    run.ExecutionContext["dod"],
-	}
-	return StableContextJSON(existing) != StableContextJSON(current)
+	return strings.TrimSpace(definition.DoDDefinition) != strings.Join(dodLines, "\n") || strings.TrimSpace(run.DefinitionRevision) != definition.Revision
 }

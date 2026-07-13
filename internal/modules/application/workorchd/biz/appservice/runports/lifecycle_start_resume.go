@@ -9,7 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func StartRunView(ctx context.Context, hub magicevent.Hub, deps CompressedContextDependencies, runID string) (appmodelcore.Run, error) {
+func StartRunView(ctx context.Context, hub magicevent.Hub, runID string) (appmodelcore.Run, error) {
 	if hub == nil {
 		return appmodelcore.Run{}, common.ErrInvalidArgument
 	}
@@ -22,9 +22,6 @@ func StartRunView(ctx context.Context, hub magicevent.Hub, deps CompressedContex
 		return appmodelcore.Run{}, err
 	}
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, loadedRun.WorkspaceID)
-	if err := AttachCompressedContextToLoadedRun(ctx, deps, loadedRun); err != nil {
-		return appmodelcore.Run{}, err
-	}
 	if err := StartRun(ctx, hub, loadedRun); err != nil {
 		return appmodelcore.Run{}, err
 	}
@@ -36,7 +33,7 @@ func StartRunView(ctx context.Context, hub magicevent.Hub, deps CompressedContex
 	return RunView(item), nil
 }
 
-func ResumeRunView(ctx context.Context, hub magicevent.Hub, deps CompressedContextDependencies, runID string, executionContextPatch ...map[string]any) (appmodelcore.Run, error) {
+func ResumeRunView(ctx context.Context, hub magicevent.Hub, runID string) (appmodelcore.Run, error) {
 	if hub == nil {
 		return appmodelcore.Run{}, common.ErrInvalidArgument
 	}
@@ -44,20 +41,12 @@ func ResumeRunView(ctx context.Context, hub magicevent.Hub, deps CompressedConte
 	if id == "" || common.RuntimeWorkspaceIDFromContext(ctx) == "" {
 		return appmodelcore.Run{}, common.ErrInvalidArgument
 	}
-	patch, loadedRun, err := CompressedContextPatchForRun(ctx, deps, id)
+	loadedRun, err := ReadRun(ctx, hub, id)
 	if err != nil {
 		return appmodelcore.Run{}, err
 	}
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, loadedRun.WorkspaceID)
-	for _, item := range executionContextPatch {
-		for key, value := range item {
-			if strings.TrimSpace(key) == "" {
-				continue
-			}
-			patch[key] = value
-		}
-	}
-	if err := ResumeRun(ctx, hub, loadedRun, patch); err != nil {
+	if err := ResumeRun(ctx, hub, loadedRun); err != nil {
 		return appmodelcore.Run{}, err
 	}
 

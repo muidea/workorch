@@ -1,4 +1,4 @@
-# Web Block
+# Web 能力组件
 
 ## 功能说明
 
@@ -6,8 +6,9 @@
 
 ## 组件交互及合同
 
-- `kernel/orchestrator` 使用 `internal/pkg/runtimeevent.ExecuteCommand` 派发 Web search/fetch，并接收 `ExecuteCommandResult`。
-- 本 block 通过 runtimeevent 发布 Accepted、Progress、Completed 或 Failed 具体通知。
+- `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递 Web search/fetch；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 V1 执行通知。
+- Runtime V2 capability preflight 通过 Orchestrator 定义的 typed EventHub command 查询本 block 实际提供的 search/fetch kinds。
+- Runtime V2 Web operation 只返回 typed status、failure 和有界 evidence 引用。
 - 需要校验外部访问授权时，本 block 导入 `blocks/approval/pkg/events`，通过 EventHub 查询 Approval；不注入 Approval service/repository。
 - request 必须携带 workspace/run/step scope、operation、provider/ref 和有界 query/url；result 返回 source refs、摘要、truncation、provider diagnostic、错误和 raw ref。
 

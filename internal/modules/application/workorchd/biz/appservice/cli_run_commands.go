@@ -19,7 +19,7 @@ func (d *CLICommandDispatcher) handleRunCommand(ctx context.Context, cmd clicore
 		item, err := ActivateWorkspaceExecutionWithSession(ctx, d.borrow(), string(cmd.WorkspaceID), clicore.ActivateWorkspaceExecutionCommandFromPayload(cmd.Payload))
 		return clicore.ResourceMap(item.Run), nil, err
 	case clicore.CommandRunResume:
-		item, err := ResumeRunWithSession(ctx, d.borrow(), cmd.SubjectID, clicore.MapValue(cmd.Payload, "executionContextPatch"))
+		item, err := ResumeRunWithSession(ctx, d.borrow(), cmd.SubjectID)
 		return clicore.ResourceMap(item), nil, err
 	case clicore.CommandRunGet:
 		item, err := ReadRunWithSession(ctx, d.borrow(), cmd.SubjectID)

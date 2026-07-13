@@ -96,10 +96,9 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 				EvidencePolicies: []map[string]any{{"large": "policy"}},
 			},
 			Runs: []readmodelcore.Run{{
-				ID:               "run-a",
-				WorkspaceID:      "ws-a",
-				State:            string(common.RunStateActive),
-				ExecutionContext: map[string]any{"coverageWorkItems": []any{map[string]any{"large": strings.Repeat("x", 2048)}}},
+				ID:          "run-a",
+				WorkspaceID: "ws-a",
+				State:       string(common.RunStateActive),
 			}},
 			LLMUsageTraces: []readmodelcore.LLMUsageTrace{{
 				ID:    "usage-a",
@@ -164,7 +163,7 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 	if snapshot.Workspace.ContextHints != nil || snapshot.Workspace.EvidencePolicies != nil {
 		t.Fatalf("snapshot workspace = %+v, want detail projection stored", snapshot.Workspace)
 	}
-	if len(snapshot.Runs) != 1 || snapshot.Runs[0].ExecutionContext != nil {
+	if len(snapshot.Runs) != 1 {
 		t.Fatalf("snapshot runs = %+v, want compact detail run stored", snapshot.Runs)
 	}
 	if signature := snapshot.LLMUsageTraces[0].ContextBudget["failureSignature"].(string); len(signature) > 1024+len("...[truncated]") {
@@ -274,7 +273,7 @@ func TestStoreListSnapshotOmitsDetailHeavyPayloads(t *testing.T) {
 					Summary: strings.Repeat("x", 4096),
 				}},
 			},
-			Runs:           []readmodelcore.Run{{ID: "run-compact-detail", WorkspaceID: "ws-compact-detail", State: "running", ExecutionContext: map[string]any{"payload": strings.Repeat("x", 4096)}}},
+			Runs:           []readmodelcore.Run{{ID: "run-compact-detail", WorkspaceID: "ws-compact-detail", State: "running"}},
 			Results:        []readmodelcore.Result{{ID: "result-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: "accepted", Summary: strings.Repeat("x", 4096)}},
 			Artifacts:      []readmodelcore.Artifact{{ID: "artifact-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", ArtifactType: "trace", State: "active", Metadata: map[string]any{"payload": strings.Repeat("x", 4096)}}},
 			LLMUsageTraces: []readmodelcore.LLMUsageTrace{{ID: "usage-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", ContextBudget: map[string]any{"payload": strings.Repeat("x", 4096)}}},
@@ -731,49 +730,6 @@ func TestStoreWorkspaceStatusUsesGlobalRevisionForQuietSnapshot(t *testing.T) {
 	}
 }
 
-func TestStoreGlobalStatusSourceRevisionCoversWorkspaceProjectedRevision(t *testing.T) {
-	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{
-		{ID: "ws-quiet", State: "active"},
-		{ID: "ws-active", State: "running", ActiveRunID: "run-active"},
-	}, map[string]readmodelcore.WorkspaceSnapshot{
-		"ws-quiet": {
-			Workspace: readmodelcore.Workspace{ID: "ws-quiet", State: "active"},
-		},
-		"ws-active": {
-			Workspace: readmodelcore.Workspace{ID: "ws-active", State: "running", ActiveRunID: "run-active"},
-			Run:       &readmodelcore.Run{ID: "run-active", WorkspaceID: "ws-active", State: string(common.RunStateActive)},
-		},
-	}, nil)
-
-	if !store.ApplyRuntimeProgress(RuntimeProgressUpdate{
-		WorkspaceID: "ws-active",
-		RunID:       "run-active",
-		StepID:      "step-active",
-		StepKind:    "llm/workspace_execution",
-		StepState:   string(common.StepStateExecuting),
-		Topic:       "run.step.dispatched",
-		Revision:    3193,
-	}) {
-		t.Fatal("ApplyRuntimeProgress returned false")
-	}
-
-	_, globalStatus, err := store.List()
-	if err != nil {
-		t.Fatalf("list workspaces: %v", err)
-	}
-	if globalStatus.ProjectedSourceRevision != 3193 || globalStatus.SourceEventRevision != 3193 {
-		t.Fatalf("global status = %+v, want source/projected revisions to cover workspace progress revision", globalStatus)
-	}
-	_, quietStatus, err := store.GetSnapshot("ws-quiet")
-	if err != nil {
-		t.Fatalf("get quiet snapshot: %v", err)
-	}
-	if quietStatus.SourceEventRevision != 3193 || quietStatus.ProjectedSourceRevision != 3193 {
-		t.Fatalf("quiet status = %+v, want fallback revisions to stay consistent with global progress", quietStatus)
-	}
-}
-
 func TestStoreKeepsExistingProjectionReadableWhileRebuilding(t *testing.T) {
 	store := NewStore()
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
@@ -962,251 +918,6 @@ func TestManagerPublishesProjectionChangedThroughAsyncHub(t *testing.T) {
 		data.ProjectedSourceRevision != status.ProjectedSourceRevision ||
 		data.ProjectionState != status.State {
 		t.Fatalf("projection data = %+v, want owner projection status %+v", data, status)
-	}
-}
-
-func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuildOrProjectionFanout(t *testing.T) {
-	ctx := context.Background()
-	commandHub := magicevent.NewHub(32)
-	t.Cleanup(func() { commandHub.Terminate(ctx) })
-	projectionEvents := subscribeProjectionNotifications(t, commandHub)
-	scheduled := map[string]int{}
-	scheduledFuncs := map[string][]func(context.Context){}
-	manager := NewManager(ManagerOptions{
-		Loader: fakeProjectionLoader{
-			workspaces: []appmodelcore.Workspace{{ID: "ws-a", State: "running", ActiveRunID: "run-a"}},
-			snapshots: map[string]readmodelcore.WorkspaceSnapshot{
-				"ws-a": {
-					Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
-					Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
-				},
-			},
-		},
-		CommandHub: commandHub,
-		Schedule: func(name string, fn func(context.Context)) bool {
-			scheduled[name]++
-			scheduledFuncs[name] = append(scheduledFuncs[name], fn)
-			return true
-		},
-	})
-	if err := manager.Start(ctx); err != nil {
-		t.Fatalf("start manager: %v", err)
-	}
-	scheduledFuncs["workspace_projection_rebuild_all"][0](ctx)
-	if err := manager.RebuildWorkspace(ctx, "ws-a"); err != nil {
-		t.Fatalf("rebuild workspace detail: %v", err)
-	}
-	drainProjectionNotifications(projectionEvents)
-	baselineWorkspaceRebuilds := scheduled["workspace_projection_rebuild"]
-
-	if err := publishManagerEventRecord(ctx, commandHub, managerEventRecordFixture{
-		Version:     events.WorkorchEventVersion,
-		Topic:       runevents.TopicRunLLMStreamProgress,
-		WorkspaceID: "ws-a",
-		RunID:       "run-a",
-		StepID:      "run-a/step-1",
-		Payload: events.LLMStreamProgressPayload(
-			"ws-a",
-			"run-a",
-			"run-a/step-1",
-			"provider-a",
-			"model-a",
-			2,
-			128,
-			250,
-			string(common.StepStateExecuting),
-			"provider call waiting",
-		),
-	}); err != nil {
-		t.Fatalf("publish llm progress event: %v", err)
-	}
-	if scheduled["workspace_projection_rebuild"] != baselineWorkspaceRebuilds {
-		t.Fatalf("workspace rebuilds after progress = %d, want unchanged %d", scheduled["workspace_projection_rebuild"], baselineWorkspaceRebuilds)
-	}
-	snapshot, status, err := manager.ReadWorkspaceSnapshot("ws-a")
-	if err != nil {
-		t.Fatalf("read snapshot after progress: %v", err)
-	}
-	if status.State != StateReady || status.SourceEventRevision == 0 || status.ProjectedSourceRevision != status.SourceEventRevision {
-		t.Fatalf("status after progress = %+v, want ready projected progress revision", status)
-	}
-	if snapshot.RunHeartbeat.LatestEventTopic != runevents.TopicRunLLMStreamProgress ||
-		snapshot.RunHeartbeat.LatestStepID != "run-a/step-1" ||
-		snapshot.RunHeartbeat.LatestStepState != string(common.StepStateExecuting) ||
-		snapshot.RunHeartbeat.ActivityState != "running" {
-		t.Fatalf("heartbeat after progress = %+v", snapshot.RunHeartbeat)
-	}
-	if snapshot.RuntimeExecution == nil ||
-		snapshot.RuntimeExecution.StepID != "run-a/step-1" ||
-		snapshot.RuntimeExecution.LastProgressSummary != "provider call waiting" ||
-		!snapshot.RuntimeExecution.Pending {
-		t.Fatalf("runtime execution after progress = %+v", snapshot.RuntimeExecution)
-	}
-	select {
-	case item := <-projectionEvents:
-		if item.ChangeKind == "runtime_progress" {
-			t.Fatalf("projection data = %+v, want no runtime_progress fanout", item)
-		}
-	case <-time.After(50 * time.Millisecond):
-	}
-}
-
-func TestManagerAppliesStepEventsWithoutFullWorkspaceRebuild(t *testing.T) {
-	ctx := context.Background()
-	commandHub := magicevent.NewHub(32)
-	t.Cleanup(func() { commandHub.Terminate(ctx) })
-	scheduled := map[string]int{}
-	scheduledFuncs := map[string][]func(context.Context){}
-	manager := NewManager(ManagerOptions{
-		Loader: fakeProjectionLoader{
-			workspaces: []appmodelcore.Workspace{{ID: "ws-a", State: "running", ActiveRunID: "run-a"}},
-			snapshots: map[string]readmodelcore.WorkspaceSnapshot{
-				"ws-a": {
-					Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
-					Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
-				},
-			},
-		},
-		CommandHub: commandHub,
-		Schedule: func(name string, fn func(context.Context)) bool {
-			scheduled[name]++
-			scheduledFuncs[name] = append(scheduledFuncs[name], fn)
-			return true
-		},
-	})
-	if err := manager.Start(ctx); err != nil {
-		t.Fatalf("start manager: %v", err)
-	}
-	scheduledFuncs["workspace_projection_rebuild_all"][0](ctx)
-	if err := manager.RebuildWorkspace(ctx, "ws-a"); err != nil {
-		t.Fatalf("rebuild workspace detail: %v", err)
-	}
-	baselineWorkspaceRebuilds := scheduled["workspace_projection_rebuild"]
-
-	if err := publishManagerEventRecord(ctx, commandHub, managerEventRecordFixture{
-		Version:     events.WorkorchEventVersion,
-		Topic:       runevents.TopicStepDispatched,
-		WorkspaceID: "ws-a",
-		RunID:       "run-a",
-		StepID:      "run-a/step-2",
-		Payload:     events.StepPayload("llm/workspace_execution", common.StepStateExecuting, nil, nil),
-	}); err != nil {
-		t.Fatalf("publish step dispatched event: %v", err)
-	}
-	if err := publishManagerEventRecord(ctx, commandHub, managerEventRecordFixture{
-		Version:     events.WorkorchEventVersion,
-		Topic:       runevents.TopicStepStateChanged,
-		WorkspaceID: "ws-a",
-		RunID:       "run-a",
-		StepID:      "run-a/step-2",
-		Payload:     events.StepPayload("llm/workspace_execution", common.StepStateSucceeded, nil, nil),
-	}); err != nil {
-		t.Fatalf("publish step state event: %v", err)
-	}
-	if scheduled["workspace_projection_rebuild"] != baselineWorkspaceRebuilds {
-		t.Fatalf("workspace rebuilds after step events = %d, want unchanged %d", scheduled["workspace_projection_rebuild"], baselineWorkspaceRebuilds)
-	}
-	snapshot, status, err := manager.ReadWorkspaceSnapshot("ws-a")
-	if err != nil {
-		t.Fatalf("read snapshot after step events: %v", err)
-	}
-	if status.State != StateReady || status.SourceEventRevision == 0 || status.ProjectedSourceRevision != status.SourceEventRevision {
-		t.Fatalf("status after step events = %+v, want ready projected progress revision", status)
-	}
-	if snapshot.RunHeartbeat.LatestEventTopic != runevents.TopicStepStateChanged ||
-		snapshot.RunHeartbeat.LatestStepID != "run-a/step-2" ||
-		snapshot.RunHeartbeat.LatestStepState != string(common.StepStateSucceeded) {
-		t.Fatalf("heartbeat after step events = %+v", snapshot.RunHeartbeat)
-	}
-	if snapshot.RuntimeExecution == nil ||
-		snapshot.RuntimeExecution.StepID != "run-a/step-2" ||
-		snapshot.RuntimeExecution.StepState != string(common.StepStateSucceeded) ||
-		snapshot.RuntimeExecution.LastProgressStage != "step_state" {
-		t.Fatalf("runtime execution after step events = %+v", snapshot.RuntimeExecution)
-	}
-}
-
-func TestStoreRejectsRuntimeProgressForDifferentRun(t *testing.T) {
-	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "running", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
-		"ws-a": {
-			Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
-			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
-		},
-	}, nil)
-
-	if store.ApplyRuntimeProgress(RuntimeProgressUpdate{
-		WorkspaceID: "ws-a",
-		RunID:       "run-b",
-		StepID:      "run-b/step-1",
-		StepState:   string(common.StepStateExecuting),
-		Topic:       runevents.TopicRunLLMStreamProgress,
-		Revision:    10,
-		Summary:     "wrong run progress",
-	}) {
-		t.Fatalf("ApplyRuntimeProgress returned true for different run")
-	}
-	snapshot, status, err := store.GetSnapshot("ws-a")
-	if err != nil {
-		t.Fatalf("get snapshot after rejected progress: %v", err)
-	}
-	if status.SourceEventRevision != 0 || status.ProjectedSourceRevision != 0 {
-		t.Fatalf("status after rejected progress = %+v, want unchanged source revisions", status)
-	}
-	if snapshot.RunHeartbeat.LatestStepID != "" || snapshot.RuntimeExecution != nil {
-		t.Fatalf("snapshot after rejected progress = %+v, want unchanged runtime progress fields", snapshot)
-	}
-}
-
-func TestStoreRuntimeProgressResetsExecutionStateForNewStep(t *testing.T) {
-	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "running", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
-		"ws-a": {
-			Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
-			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
-			RuntimeExecution: &readmodelcore.RuntimeExecutionState{
-				StepID:          "run-a/old-step",
-				RequestID:       "old-request",
-				QueueKey:        "old-queue",
-				WorkerStoppedAt: "2026-06-20T00:00:10Z",
-				DoneAt:          "2026-06-20T00:00:09Z",
-				Pending:         true,
-				Gap:             "runtime_terminal_not_finalized",
-			},
-		},
-	}, nil)
-
-	if !store.ApplyRuntimeProgress(RuntimeProgressUpdate{
-		WorkspaceID: "ws-a",
-		RunID:       "run-a",
-		StepID:      "run-a/new-step",
-		StepKind:    "llm/workspace_execution",
-		StepState:   string(common.StepStateExecuting),
-		Topic:       runevents.TopicRunLLMStreamProgress,
-		Revision:    10,
-		Summary:     "provider call waiting",
-	}) {
-		t.Fatalf("ApplyRuntimeProgress returned false for new step progress")
-	}
-	snapshot, _, err := store.GetSnapshot("ws-a")
-	if err != nil {
-		t.Fatalf("get snapshot after progress: %v", err)
-	}
-	if snapshot.RuntimeExecution == nil {
-		t.Fatal("RuntimeExecution is nil, want new step progress state")
-	}
-	if snapshot.RuntimeExecution.StepID != "run-a/new-step" ||
-		snapshot.RuntimeExecution.StepKind != "llm/workspace_execution" ||
-		snapshot.RuntimeExecution.LastProgressSummary != "provider call waiting" ||
-		!snapshot.RuntimeExecution.Pending ||
-		snapshot.RuntimeExecution.Gap != "accepted_in_progress" {
-		t.Fatalf("RuntimeExecution = %+v, want new step progress state", snapshot.RuntimeExecution)
-	}
-	if snapshot.RuntimeExecution.RequestID != "" ||
-		snapshot.RuntimeExecution.QueueKey != "" ||
-		snapshot.RuntimeExecution.WorkerStoppedAt != "" ||
-		snapshot.RuntimeExecution.DoneAt != "" {
-		t.Fatalf("RuntimeExecution retained old step fields: %+v", snapshot.RuntimeExecution)
 	}
 }
 
@@ -1405,40 +1116,6 @@ func TestStoreRunCommandRejectedRejectsUnknownWorkspace(t *testing.T) {
 	}
 	if status.SourceEventRevision != 0 || status.ProjectedSourceRevision != 0 {
 		t.Fatalf("status after rejected command = %+v, want unchanged revisions", status)
-	}
-}
-
-func TestStoreRuntimeProgressClearsGapForTerminalStep(t *testing.T) {
-	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "running", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
-		"ws-a": {
-			Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
-			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
-			RuntimeExecution: &readmodelcore.RuntimeExecutionState{
-				StepID:  "run-a/step-1",
-				Pending: true,
-				Gap:     "accepted_in_progress",
-			},
-		},
-	}, nil)
-
-	if !store.ApplyRuntimeProgress(RuntimeProgressUpdate{
-		WorkspaceID: "ws-a",
-		RunID:       "run-a",
-		StepID:      "run-a/step-1",
-		StepState:   string(common.StepStateSucceeded),
-		Topic:       runevents.TopicRunLLMStreamProgress,
-		Revision:    10,
-		Summary:     "step completed",
-	}) {
-		t.Fatalf("ApplyRuntimeProgress returned false for terminal progress")
-	}
-	snapshot, _, err := store.GetSnapshot("ws-a")
-	if err != nil {
-		t.Fatalf("get snapshot after terminal progress: %v", err)
-	}
-	if snapshot.RuntimeExecution == nil || snapshot.RuntimeExecution.Pending || snapshot.RuntimeExecution.Gap != "" {
-		t.Fatalf("RuntimeExecution = %+v, want terminal progress without pending gap", snapshot.RuntimeExecution)
 	}
 }
 

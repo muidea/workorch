@@ -76,15 +76,10 @@ func (s *Service) Run(_ context.Context) *cd.Error {
 	if s.http.state != nil && s.http.state.backgroundRoutine == nil {
 		s.http.state.backgroundRoutine = s.backgroundRoutine
 	}
-	if err := s.http.state.recoverStartupInactiveRunningWorkspaces(s.http.state.backgroundContext()); err != nil {
-		s.runStarted.Store(false)
-		return cd.NewError(cd.Unexpected, "startup inactive workspace recovery failed: "+err.Error())
-	}
 	if err := s.http.state.startWorkspaceProjection(s.http.state.backgroundContext()); err != nil {
 		s.runStarted.Store(false)
 		return cd.NewError(cd.Unexpected, "workspace projection startup failed: "+err.Error())
 	}
-	s.http.state.scheduleWatchdog()
 	if err := s.backgroundRoutine.AsyncFunction(runHTTPServer); err != nil {
 		s.runStarted.Store(false)
 		return cd.NewError(cd.Unexpected, "http server background scheduling failed: "+err.Error())
@@ -130,6 +125,16 @@ func (s *Service) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID str
 		return appservice.WorkspaceSnapshot{}, errors.New("workorch http server is not configured")
 	}
 	return s.http.ReadWorkspaceViewSnapshot(ctx, workspaceID)
+}
+
+func (s *Service) RebuildWorkspaceProjection(ctx context.Context) (int64, error) {
+	if s == nil || s.http == nil || s.http.state == nil || s.http.state.workspaceProjection == nil {
+		return 0, errors.New("workspace projection is not configured")
+	}
+	if err := s.http.state.workspaceProjection.RebuildAll(ctx); err != nil {
+		return 0, err
+	}
+	return s.http.state.workspaceProjection.Status().GlobalRevision, nil
 }
 
 func (s *Service) Done() <-chan error {

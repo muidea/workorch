@@ -139,11 +139,11 @@ func TestResolveDecisionPublishesContractCommand(t *testing.T) {
 		if cmd.ResolutionID != "resolution-ws-contract-ticket-contract-provide_missing_info" {
 			t.Fatalf("resolutionID = %q, want workspace-scoped id", cmd.ResolutionID)
 		}
-		if cmd.Payload["answer"] != "42" {
+		if cmd.Payload.Map()["answer"] != "42" {
 			t.Fatalf("command payload = %#v", cmd.Payload)
 		}
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
-		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload}
+		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload.Map()}
 		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
 	})
 
@@ -173,7 +173,7 @@ func TestResolveDecisionScopesResolutionIDByWorkspace(t *testing.T) {
 		}
 		resolutionIDs = append(resolutionIDs, cmd.ResolutionID)
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
-		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload}
+		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload.Map()}
 		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
 	})
 

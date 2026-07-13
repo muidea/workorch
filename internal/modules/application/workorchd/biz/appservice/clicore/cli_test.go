@@ -69,19 +69,18 @@ func TestCommandHelpersFromPayload(t *testing.T) {
 	}
 
 	activation := ActivateWorkspaceExecutionCommandFromPayload(map[string]any{
-		"goalId":                "goal-1",
-		"doDId":                 "dod-1",
-		"llmProviderId":         "provider-1",
-		"dialogLanguage":        "zh",
-		"soulId":                "soul-1",
-		"soulBindings":          map[string]any{"validation": "soul-validation"},
-		"skillIds":              []any{"skill-1", "skill-2"},
-		"mcpServerIds":          []string{"mcp-1"},
-		"capabilityIds":         []any{"capability-1", "capability-2"},
-		"memoryIds":             []string{"memory-1"},
-		"priority":              float64(7),
-		"restart":               true,
-		"executionContextPatch": map[string]any{"k": "v"},
+		"goalId":         "goal-1",
+		"doDId":          "dod-1",
+		"llmProviderId":  "provider-1",
+		"dialogLanguage": "zh",
+		"soulId":         "soul-1",
+		"soulBindings":   map[string]any{"validation": "soul-validation"},
+		"skillIds":       []any{"skill-1", "skill-2"},
+		"mcpServerIds":   []string{"mcp-1"},
+		"capabilityIds":  []any{"capability-1", "capability-2"},
+		"memoryIds":      []string{"memory-1"},
+		"priority":       float64(7),
+		"restart":        true,
 	})
 	if activation.GoalID != "goal-1" || activation.DoDID != "dod-1" ||
 		activation.LLMProviderID != "provider-1" || activation.DialogLanguage != "zh" || activation.SoulID != "soul-1" ||
@@ -90,7 +89,7 @@ func TestCommandHelpersFromPayload(t *testing.T) {
 		len(activation.MCPServerIDs) != 1 || activation.MCPServerIDs[0] != "mcp-1" ||
 		len(activation.CapabilityIDs) != 2 || activation.CapabilityIDs[1] != "capability-2" ||
 		len(activation.MemoryIDs) != 1 || activation.MemoryIDs[0] != "memory-1" ||
-		activation.Priority != 7 || !activation.Restart || activation.ExecutionContextPatch["k"] != "v" {
+		activation.Priority != 7 || !activation.Restart {
 		t.Fatalf("activation command = %+v", activation)
 	}
 

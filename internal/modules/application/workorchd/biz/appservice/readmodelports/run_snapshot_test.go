@@ -3,6 +3,7 @@ package readmodelports
 import (
 	"context"
 	"strconv"
+	"sync"
 	"testing"
 
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
@@ -10,7 +11,6 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -73,7 +73,7 @@ func TestRunSnapshotBuildsSnapshotFromReaders(t *testing.T) {
 	if len(events.queries) != 1 {
 		t.Fatalf("event reader queries = %d, want compact run event metadata query", len(events.queries))
 	}
-	if len(events.queries[0].ExcludeTopics) != 1 || events.queries[0].ExcludeTopics[0] != runevents.TopicRunLLMStreamProgress {
+	if len(events.queries[0].ExcludeTopics) != 1 || events.queries[0].ExcludeTopics[0] != "/run/llm_stream/progress" {
 		t.Fatalf("snapshot event exclude topics = %+v, want stream progress excluded", events.queries[0].ExcludeTopics)
 	}
 }
@@ -85,21 +85,21 @@ func TestRunObservabilityHydratesLLMUsagePayloads(t *testing.T) {
 	run := &runmodel.Run{ID: "run-observability-usage", WorkspaceID: workspace.ID, State: common.RunStateActive}
 	usage := &eventstreammodel.EventRecord{
 		ID:          "usage-run-observability",
-		Topic:       runevents.TopicRunLLMUsageRecorded,
+		Topic:       "/run/llm_usage/recorded",
 		WorkspaceID: workspace.ID,
 		RunID:       run.ID,
-		Payload: events.LLMUsagePayload(events.LLMUsagePayloadData{
-			WorkspaceID:  workspace.ID,
-			RunID:        run.ID,
-			StepID:       "run-observability-usage/step-usage",
-			ProviderID:   "provider-observability",
-			Model:        "model-observability",
-			Operation:    "chat_completions",
-			InputTokens:  30,
-			OutputTokens: 14,
-			TotalTokens:  44,
-			Status:       "completed",
-		}),
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID:  string(workspace.ID),
+			events.PayloadKeyRunID:        string(run.ID),
+			events.PayloadKeyStepID:       "run-observability-usage/step-usage",
+			events.PayloadKeyProviderID:   "provider-observability",
+			events.PayloadKeyModel:        "model-observability",
+			events.PayloadKeyOperation:    "chat_completions",
+			events.PayloadKeyInputTokens:  30,
+			events.PayloadKeyOutputTokens: 14,
+			events.PayloadKeyTotalTokens:  44,
+			events.PayloadKeyStatus:       "completed",
+		},
 	}
 	eventReader := &fakeRunSnapshotEventReader{records: []*eventstreammodel.EventRecord{usage}}
 
@@ -128,7 +128,7 @@ func TestRunObservabilityHydratesLLMUsagePayloads(t *testing.T) {
 	}
 	var usageQuerySeen bool
 	for _, query := range eventReader.queries {
-		if query.Topic == runevents.TopicRunLLMUsageRecorded && query.IncludePayload {
+		if query.Topic == "/run/llm_usage/recorded" && query.IncludePayload {
 			usageQuerySeen = true
 		}
 	}
@@ -256,14 +256,17 @@ func (fakeRunSnapshotArtifactContinuationReader) ListByRun(context.Context, comm
 }
 
 type fakeRunSnapshotEventReader struct {
+	mu      sync.Mutex
 	calls   int
 	queries []repository.EventRecordQuery
 	records []*eventstreammodel.EventRecord
 }
 
 func (f *fakeRunSnapshotEventReader) List(_ context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+	f.mu.Lock()
 	f.calls++
 	f.queries = append(f.queries, query)
+	f.mu.Unlock()
 	if len(f.records) == 0 {
 		return nil, nil
 	}

@@ -88,39 +88,6 @@ func TestSelectTerminalResultRunIgnoresAcceptedSlice(t *testing.T) {
 	}
 }
 
-func TestSelectTerminalResultRunIgnoresCompletedRunWithOpenCoverage(t *testing.T) {
-	t.Parallel()
-
-	workspaceID := common.WorkspaceID("ws-terminal-result-open-coverage")
-	runID := common.RunID("run-terminal-result-open-coverage")
-	result, run := SelectTerminalResultRun(workspaceID, map[common.RunID]*runmodel.Run{
-		runID: {
-			ID:          runID,
-			WorkspaceID: workspaceID,
-			State:       common.RunStateCompleted,
-			ExecutionContext: map[string]any{
-				"coverageWorkItems": []any{map[string]any{
-					"id":     "cwi-open",
-					"status": "open",
-				}},
-			},
-		},
-	}, []*resultmodel.Result{
-		{
-			ID:           "run-terminal-result-open-coverage/result/dod-assessment",
-			WorkspaceID:  workspaceID,
-			RunID:        runID,
-			State:        common.ResultStateAccepted,
-			SourceType:   resultcommon.SourceTypeDoDAssessment,
-			Summary:      "accepted current focus only",
-			EvidenceRefs: []string{"run-terminal-result-open-coverage/step-1"},
-		},
-	})
-	if result != nil || run != nil {
-		t.Fatalf("SelectTerminalResultRun = %+v/%+v, want open coverage accepted result ignored", result, run)
-	}
-}
-
 func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 	t.Parallel()
 
@@ -153,20 +120,9 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 			ID:    "step-current",
 			State: string(common.StepStateSucceeded),
 		},
-		TaskProgress: readmodelcore.TaskProgress{WorkspaceID: string(workspaceID), RunID: string(runID), State: string(common.RunStateCompleted), CurrentStepID: "step-current"},
-		Acceptance:   readmodelcore.AcceptanceProjection{ActiveSliceID: "slice-run", Summary: readmodelcore.AcceptanceSummary{ActiveSlices: 1}},
-		GapBaseline:  &readmodelcore.GapBaseline{WorkspaceID: string(workspaceID), RunID: string(runID), BaselineRevision: "gap-run"},
-		RuntimeExecution: &readmodelcore.RuntimeExecutionState{
-			StepID:    "step-current",
-			RequestID: "request-current",
-			Pending:   true,
-			Gap:       "runtime_terminal_not_finalized",
-			ContractViolation: &orchestratormodel.ContractViolation{
-				ID:             "violation-workspace-merge",
-				ViolatedRule:   "state_changing_required_missing",
-				Recoverability: "retry_same_contract",
-			},
-		},
+		TaskProgress:       readmodelcore.TaskProgress{WorkspaceID: string(workspaceID), RunID: string(runID), State: string(common.RunStateCompleted), CurrentStepID: "step-current"},
+		Acceptance:         readmodelcore.AcceptanceProjection{ActiveSliceID: "slice-run", Summary: readmodelcore.AcceptanceSummary{ActiveSlices: 1}},
+		GapBaseline:        &readmodelcore.GapBaseline{WorkspaceID: string(workspaceID), RunID: string(runID), BaselineRevision: "gap-run"},
 		TaskDecompositions: []readmodelcore.TaskDecomposition{{ID: "decomposition-run"}},
 		TaskPlans:          []readmodelcore.TaskPlan{{ID: "plan-run", AnchorStepID: "step-current", Revision: 1, State: "accepted"}},
 		ExecutionSections:  []readmodelcore.ExecutionSection{{ID: "section-run"}},
@@ -273,14 +229,6 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 	}
 	if got.TaskProgress.CurrentStepID != "step-current" {
 		t.Fatalf("TaskProgress = %+v, want run task progress", got.TaskProgress)
-	}
-	if got.RuntimeExecution == nil || got.RuntimeExecution.RequestID != "request-current" || got.RuntimeExecution.Gap != "runtime_terminal_not_finalized" {
-		t.Fatalf("RuntimeExecution = %+v, want run runtime projection", got.RuntimeExecution)
-	}
-	if got.RuntimeExecution.ContractViolation == nil ||
-		got.RuntimeExecution.ContractViolation.ID != "violation-workspace-merge" ||
-		got.RuntimeExecution.ContractViolation.ViolatedRule != "state_changing_required_missing" {
-		t.Fatalf("RuntimeExecution.ContractViolation = %+v, want merged run contract violation", got.RuntimeExecution.ContractViolation)
 	}
 	if len(got.Decisions) != 3 || got.Decisions[0].State != "resolved" {
 		t.Fatalf("Decisions = %+v, want run decision override merged into workspace snapshot", got.Decisions)

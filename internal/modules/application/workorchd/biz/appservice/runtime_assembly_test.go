@@ -1,18 +1,79 @@
 package appservice
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
+
+type managedRuntimeRecordFixture struct {
+	ID           string
+	Version      string
+	Topic        string
+	OccurredAt   string
+	SourceModule string
+	SubjectType  string
+	SubjectID    string
+	WorkspaceID  string
+	RunID        string
+	StepID       string
+	Revision     int64
+	Payload      map[string]any
+}
+
+func publishManagedRuntimeRecord(ctx context.Context, hub magicevent.Hub, record managedRuntimeRecordFixture) error {
+	data, err := eventstreamevents.EventRecordDataFromModel(&eventstreammodel.EventRecord{
+		ID:           common.EventRecordID(record.ID),
+		Version:      record.Version,
+		Topic:        record.Topic,
+		OccurredAt:   record.OccurredAt,
+		SourceModule: record.SourceModule,
+		SubjectType:  record.SubjectType,
+		SubjectID:    record.SubjectID,
+		WorkspaceID:  common.WorkspaceID(record.WorkspaceID),
+		RunID:        common.RunID(record.RunID),
+		StepID:       common.StepID(record.StepID),
+		Revision:     record.Revision,
+		Payload:      record.Payload,
+	})
+	if err != nil {
+		return err
+	}
+	event := magicevent.NewEventWithContext(
+		eventstreamevents.TopicEventStreamRecordAppended,
+		"kernel/eventstream",
+		eventstreamevents.NotificationDestination,
+		magicevent.NewHeader(),
+		ctx,
+		eventstreamevents.EventRecordAppendedData{Record: data},
+	)
+	result := hub.Send(event)
+	if result == nil {
+		return fmt.Errorf("record appended event returned no result")
+	}
+	if resultErr := result.Error(); resultErr != nil {
+		if strings.Contains(resultErr.Message, "missing observer") {
+			return nil
+		}
+		return resultErr
+	}
+	return nil
+}
 
 func TestManagedRuntimeFromCommandHubBuildsRuntimeWithEventCollector(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
 	exports := testRuntimeExports(session.Bootstrap)
-	runtime := runtimeports.NewManagedRuntimeFromCommandHub(exports.Infrastructure.CommandHub)
+	runtime := runtimecore.NewManagedRuntime(exports.Infrastructure.CommandHub)
 	if runtime == nil {
 		t.Fatal("expected runtime")
 	}
@@ -38,7 +99,7 @@ func TestManagedRuntimeFromCommandHubBuildsRuntimeWithEventCollector(t *testing.
 }
 
 func TestManagedRuntimeFromCommandHubReturnsNilWhenRequiredHubMissing(t *testing.T) {
-	runtime := runtimeports.NewManagedRuntimeFromCommandHub(nil)
+	runtime := runtimecore.NewManagedRuntime(nil)
 	if runtime != nil {
 		t.Fatalf("runtime = %#v, want nil", runtime)
 	}

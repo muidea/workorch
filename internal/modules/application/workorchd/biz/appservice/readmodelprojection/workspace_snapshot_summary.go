@@ -7,7 +7,6 @@ func ProjectWorkspaceSnapshotSummary(snapshot readmodelcore.WorkspaceSnapshot) r
 	ret.Run = nil
 	ret.Step = nil
 	ret.Result = nil
-	ret.RuntimeExecution = nil
 	ret.ContextBundle = nil
 	ret.GapBaseline = nil
 	ret.AuthorityDiagnostics = nil

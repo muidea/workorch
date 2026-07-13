@@ -1,0 +1,70 @@
+package orchestrator
+
+import (
+	"context"
+	"fmt"
+
+	magicevent "github.com/muidea/magicCommon/event"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+)
+
+func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command orchestratorevents.RequestRuntimeCandidateCommand) (orchestratorevents.RequestRuntimeCandidateResult, error) {
+	if hub == nil || command.WorkspaceID == "" || command.RunID == "" {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, common.ErrInvalidArgument
+	}
+	if command.Decision.AuthoritySnapshot.WorkspaceID != command.WorkspaceID || command.Decision.AuthoritySnapshot.RunID != command.RunID {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate command scope does not match authority snapshot")
+	}
+	if err := runtimecontract.ValidateAuthorityTransaction(command.Decision, command.Transaction); err != nil {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, err
+	}
+	if err := command.DefinitionContext.Validate(); err != nil {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, err
+	}
+	if command.DefinitionContext.Normalized().Revision != command.Transaction.DefinitionRevision {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate definition revision does not match authority transaction")
+	}
+	if err := command.CandidateContext.Validate(command.Decision); err != nil {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result := hub.Send(magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorRequestRuntimeCandidate,
+		ModuleID,
+		runtimecontract.RuntimeModuleLLM,
+		magicevent.NewHeader(),
+		ctx,
+		command,
+	))
+	if result == nil {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, common.ErrInvalidArgument
+	}
+	if err := prerequisiteResultError(result); err != nil {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, err
+	}
+	data, magicErr := result.Get()
+	if magicErr != nil {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, prerequisiteMagicError(magicErr)
+	}
+	response, ok := data.(orchestratorevents.RequestRuntimeCandidateResult)
+	if !ok {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an invalid runtime candidate result")
+	}
+	if err := runtimecontract.ValidateAuthorityTransaction(command.Decision, response.Transaction); err != nil {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, err
+	}
+	if response.Failure != nil {
+		if response.Failure.Class == "" || response.Failure.Reason == "" {
+			return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an invalid runtime candidate failure")
+		}
+		return response, nil
+	}
+	if err := response.Candidate.Validate(command.Decision); err != nil {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, err
+	}
+	return response, nil
+}

@@ -2,11 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 )
 
 func streamProgressTimelineItemFromPersistedEvent(item readmodelcore.EventRecord, runState string) (readmodelcore.RuntimeTimelineItem, bool) {
-	if item.Topic != runevents.TopicRunLLMStreamProgress {
+	if item.Topic != "/run/llm_stream/progress" {
 		return readmodelcore.RuntimeTimelineItem{}, false
 	}
 	payload := cloneReadModelMap(item.Payload)
@@ -14,7 +13,7 @@ func streamProgressTimelineItemFromPersistedEvent(item readmodelcore.EventRecord
 }
 
 func streamProgressTimelineItemFromObserved(item ObservedView, runState string) (readmodelcore.RuntimeTimelineItem, bool) {
-	if item.Topic != runevents.TopicRunLLMStreamProgress {
+	if item.Topic != "/run/llm_stream/progress" {
 		return readmodelcore.RuntimeTimelineItem{}, false
 	}
 	payload := cloneReadModelMap(item.Payload)

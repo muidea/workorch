@@ -8,10 +8,10 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const activationRunCommandSource = "application/workorchd/workspace-activation"
@@ -50,15 +50,15 @@ func SupersedeRun(ctx context.Context, hub magicevent.Hub, workspaceID common.Wo
 	})
 }
 
-func CreateWorkspaceExecutionRun(ctx context.Context, hub magicevent.Hub, runID common.RunID, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any, priority int) error {
+func CreateWorkspaceExecutionRun(ctx context.Context, hub magicevent.Hub, runID common.RunID, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, definitionRevision string, runtimeBootstrap *runtimecontract.RuntimeBootstrap, priority int) error {
 	return sendActivationMagicCommand[runevents.CreateRunCommand, runevents.RunCommandResult](ctx, hub, runevents.TopicRunCommandCreate, runevents.CommandDestination, "run", string(runID), workspaceID, runID, runevents.CreateRunCommand{
 		RunID:              runID,
 		WorkspaceID:        workspaceID,
 		GoalID:             goalID,
 		DoDID:              dodID,
-		DefinitionRevision: activationcore.DefinitionRevisionIDFromExecutionContext(executionContext),
+		DefinitionRevision: definitionRevision,
 		InitialStepKind:    llmcommon.StepKindWorkspaceExecution,
-		ExecutionContext:   executionContext,
+		RuntimeBootstrap:   runtimeBootstrap,
 		Priority:           priority,
 	})
 }

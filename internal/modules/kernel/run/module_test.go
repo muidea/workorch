@@ -185,19 +185,17 @@ func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 	rawHub := newRunModuleTestHub(t)
 	runs := memory.NewRunRepository()
 	if err := runs.Create(ctx, &runmodel.Run{
-		ID:               "run-compact-running",
-		WorkspaceID:      "ws-run-compact",
-		State:            common.RunStateActive,
-		ExecutionContext: map[string]any{"large": "context"},
-		Priority:         3,
+		ID:          "run-compact-running",
+		WorkspaceID: "ws-run-compact",
+		State:       common.RunStateActive,
+		Priority:    3,
 	}); err != nil {
 		t.Fatalf("create running run: %v", err)
 	}
 	if err := runs.Create(ctx, &runmodel.Run{
-		ID:               "run-compact-completed",
-		WorkspaceID:      "ws-run-compact",
-		State:            common.RunStateCompleted,
-		ExecutionContext: map[string]any{"large": "context"},
+		ID:          "run-compact-completed",
+		WorkspaceID: "ws-run-compact",
+		State:       common.RunStateCompleted,
 	}); err != nil {
 		t.Fatalf("create completed run: %v", err)
 	}
@@ -226,8 +224,8 @@ func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 	if len(items) != 1 || items[0].ID != "run-compact-running" {
 		t.Fatalf("items = %+v, want only running run", items)
 	}
-	if items[0].ExecutionContext != nil || items[0].Priority != 3 || items[0].WorkspaceID != "ws-run-compact" {
-		t.Fatalf("compact item = %+v, want metadata without execution context", items[0])
+	if items[0].Priority != 3 || items[0].WorkspaceID != "ws-run-compact" {
+		t.Fatalf("compact item = %+v, want metadata", items[0])
 	}
 }
 

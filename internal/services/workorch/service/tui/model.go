@@ -87,7 +87,6 @@ type AppModel struct {
 	llmContext             map[string]any
 	acceptance             backend.AcceptanceProjectionInfo
 	runHeartbeat           backend.RunHeartbeatInfo
-	runtimeExecution       *backend.RuntimeExecutionInfo
 	convergenceStatus      *backend.ConvergenceStatusInfo
 	runCommand             *backend.RunCommandStatusInfo
 	schedulerDiagnostics   *backend.SchedulerDiagnosticsInfo
@@ -196,8 +195,6 @@ func shouldConsumeBackendSubscriptionEvent(eventType backend.EventType) bool {
 		backend.EventGoalDefined,
 		backend.EventDoDDefined,
 		backend.EventRunStateChanged,
-		backend.EventStepDispatched,
-		backend.EventStepCompleted,
 		backend.EventDecisionCreated,
 		backend.EventDecisionResolved,
 		backend.EventApprovalCreated,
@@ -207,8 +204,6 @@ func shouldConsumeBackendSubscriptionEvent(eventType backend.EventType) bool {
 		backend.EventMemoryUpdated,
 		backend.EventMemoryDeleted,
 		backend.EventMemoryRecallRecorded,
-		backend.EventLLMStreamProgress,
-		backend.EventLLMUsageRecorded,
 		backend.EventPatchPreviewed,
 		backend.EventPatchApplied,
 		backend.EventPatchFailed,
@@ -1501,28 +1496,6 @@ func (m *AppModel) upsertMemoryRecall(next backend.MemoryRecallTraceInfo) {
 	m.memoryRecalls = append(m.memoryRecalls, next)
 }
 
-func (m *AppModel) applyLLMUsageEvent(payload map[string]any) {
-	m.llmUsage.EntryTotal++
-	inputTokens := payloadIntValue(payload, backend.PayloadKeyInputTokens, "inputTokens", "InputTokens")
-	outputTokens := payloadIntValue(payload, backend.PayloadKeyOutputTokens, "outputTokens", "OutputTokens")
-	totalTokens := payloadIntValue(payload, backend.PayloadKeyTotalTokens, "totalTokens", "TotalTokens")
-	if totalTokens == 0 {
-		totalTokens = inputTokens + outputTokens
-	}
-	m.llmUsage.InputTokens += inputTokens
-	m.llmUsage.OutputTokens += outputTokens
-	m.llmUsage.TotalTokens += totalTokens
-	if payloadBoolValue(payload, backend.PayloadKeyEstimated, "estimated", "Estimated") {
-		m.llmUsage.EstimatedEntries++
-	} else {
-		m.llmUsage.ProviderNativeEntries++
-	}
-	if strings.TrimSpace(firstPayloadString(payload, backend.PayloadKeyFailureClass, "failureClass", "FailureClass")) != "" ||
-		strings.EqualFold(firstPayloadString(payload, backend.PayloadKeyStatus, "status", "Status"), "failed") {
-		m.llmUsage.FailedEntries++
-	}
-}
-
 func renderDoDItems(items []string, width int, limit int) string {
 	if len(items) == 0 || width <= 0 || limit <= 0 {
 		return ""
@@ -2081,21 +2054,6 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		}
 		m.applyRunState(common.RunState(state), evt.Payload)
 		return m.fetchActiveBlockerDetails()
-	case backend.EventStepDispatched:
-		m.progress = progressRunning
-		m.progressText = stepProgressTextFromPayload("Working", evt.Payload, "Working; waiting for final result")
-		m.appendRuntimeEvent(m.progressText)
-		m.followMainViewportTailUnlessUserScrolled()
-	case backend.EventStepCompleted:
-		if state := common.StepState(firstPayloadString(evt.Payload, "state", "State", backend.PayloadKeyState)); state == common.StepStateFailed {
-			m.rememberFailureHint(failureMessageFromPayload(evt.Payload))
-		}
-		if m.progress == progressRunning {
-			m.progressText = stepProgressTextFromPayload("Step completed", evt.Payload, "Step completed; waiting for next update")
-			m.appendRuntimeEvent(m.progressText)
-			m.followMainViewportTailUnlessUserScrolled()
-		}
-		return m.requestWorkspaceContextRefresh(false)
 	case backend.EventDecisionCreated:
 		decision := backend.DecisionInfo{
 			ID:          common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", backend.PayloadKeyBlockingTicketID)),
@@ -2190,19 +2148,6 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		} else {
 			m.progressText = fmt.Sprintf("Memory recall: %s %d", nonEmpty(status, "selected"), len(ids))
 		}
-		m.appendRuntimeEvent(m.progressText)
-		m.followMainViewportTailUnlessUserScrolled()
-		return m.requestWorkspaceContextRefresh(false)
-	case backend.EventLLMStreamProgress:
-		m.progress = progressRunning
-		m.progressText = llmStreamProgressText(evt.Payload)
-		m.appendRuntimeEvent(m.progressText)
-		m.followMainViewportTailUnlessUserScrolled()
-		return nil
-	case backend.EventLLMUsageRecorded:
-		m.applyLLMUsageEvent(evt.Payload)
-		m.progressText = llmUsageProgressText(evt.Payload)
-		m.llmContext = payloadMapValue(evt.Payload, "contextBudget", "ContextBudget", backend.PayloadKeyContextBudget)
 		m.appendRuntimeEvent(m.progressText)
 		m.followMainViewportTailUnlessUserScrolled()
 		return m.requestWorkspaceContextRefresh(false)
@@ -3462,85 +3407,6 @@ func stepProgressText(prefix string, kind string, fallback string) string {
 		return kind
 	}
 	return prefix + ": " + kind
-}
-
-func stepProgressTextFromPayload(prefix string, payload map[string]any, fallback string) string {
-	kind := backend.CanonicalRuntimeBlockKind(firstPayloadString(payload, "kind", "Kind", backend.PayloadKeyKind))
-	if strings.TrimSpace(kind) == "" {
-		return fallback
-	}
-	detail := stepProgressDetailFromPayload(payload)
-	if detail == "" {
-		return stepProgressText(prefix, kind, fallback)
-	}
-	if strings.TrimSpace(prefix) == "" {
-		return strings.TrimSpace(kind + " " + detail)
-	}
-	return strings.TrimSpace(prefix + ": " + kind + " " + detail)
-}
-
-func stepProgressDetailFromPayload(payload map[string]any) string {
-	if len(payload) == 0 {
-		return ""
-	}
-	input := payloadMap(payload, "input", "Input")
-	summary := payloadMap(input, "summary", "Summary")
-	kind := firstPayloadString(payload, "kind", "Kind", backend.PayloadKeyKind)
-
-	if strings.Contains(kind, "mcp/") {
-		server := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "serverId", "ServerID", "mcpServerId", "MCPServerID")
-		tool := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "toolName", "ToolName", "name", "Name", "capabilityId", "CapabilityID")
-		if detail := strings.Trim(strings.Join([]string{server, tool}, ":"), ":"); detail != "" {
-			return detail
-		}
-	}
-	if detail := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "path", "Path"); detail != "" {
-		return detail
-	}
-	if detail := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "targetRef", "TargetRef", backend.PayloadKeyTargetRef); detail != "" {
-		return detail
-	}
-	if command := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "command", "Command"); command != "" {
-		args := firstPayloadStringSliceFromMaps([]map[string]any{payload, summary, input}, "args", "Args")
-		if len(args) > 0 {
-			return strings.TrimSpace(command + " " + strings.Join(args, " "))
-		}
-		return command
-	}
-	if tool := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "toolName", "ToolName", "name", "Name"); tool != "" {
-		return tool
-	}
-	if node := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "graphNodeId", "GraphNodeID"); node != "" {
-		return node
-	}
-	if callID := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "toolCallId", "ToolCallID", backend.PayloadKeyToolCallID); callID != "" {
-		return callID
-	}
-	return ""
-}
-
-func firstPayloadStringFromMaps(payloads []map[string]any, keys ...string) string {
-	for _, payload := range payloads {
-		if len(payload) == 0 {
-			continue
-		}
-		if value := firstPayloadString(payload, keys...); value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func firstPayloadStringSliceFromMaps(payloads []map[string]any, keys ...string) []string {
-	for _, payload := range payloads {
-		if len(payload) == 0 {
-			continue
-		}
-		if values := payloadStringSliceValue(payload, keys...); len(values) > 0 {
-			return values
-		}
-	}
-	return nil
 }
 
 func repairLoopSummary(progress backend.TaskProgressInfo) string {

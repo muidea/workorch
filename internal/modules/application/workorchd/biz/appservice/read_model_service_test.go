@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
@@ -373,19 +372,19 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 		}
 		topic := runevents.TopicRunStateChanged
 		if i == readModelEventRecordLimit+20 {
-			topic = runevents.TopicRunLLMUsageRecorded
-			payload = events.LLMUsagePayload(events.LLMUsagePayloadData{
-				WorkspaceID:  workspaceID,
-				RunID:        runID,
-				StepID:       common.StepID("run-bounded-events/step-usage"),
-				ProviderID:   "provider-a",
-				Model:        "model-a",
-				Operation:    "chat_completions",
-				InputTokens:  30,
-				OutputTokens: 14,
-				TotalTokens:  44,
-				Status:       "completed",
-			})
+			topic = "/run/llm_usage/recorded"
+			payload = map[string]any{
+				events.PayloadKeyWorkspaceID:  string(workspaceID),
+				events.PayloadKeyRunID:        string(runID),
+				events.PayloadKeyStepID:       "run-bounded-events/step-usage",
+				events.PayloadKeyProviderID:   "provider-a",
+				events.PayloadKeyModel:        "model-a",
+				events.PayloadKeyOperation:    "chat_completions",
+				events.PayloadKeyInputTokens:  30,
+				events.PayloadKeyOutputTokens: 14,
+				events.PayloadKeyTotalTokens:  44,
+				events.PayloadKeyStatus:       "completed",
+			}
 		}
 		if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
 			ID:          common.EventRecordID("event-bounded-" + strconv.Itoa(i)),
@@ -1423,9 +1422,9 @@ func TestReadRunSnapshotWithBackendReturnsSelectedAndUsedCapabilities(t *testing
 		ID:          runID,
 		WorkspaceID: workspaceID,
 		State:       common.RunStateCompleted,
-		ExecutionContext: map[string]any{
-			"capabilityIds": []string{string(capabilityID)},
-		},
+		RuntimeBootstrap: &orchestratormodel.RuntimeBootstrap{Activation: orchestratormodel.RuntimeActivationContext{MCPCapabilities: []orchestratormodel.RuntimeMCPCapabilityContext{{
+			ID: capabilityID, ServerID: "mcp-capability-read-model", Kind: mcpmodel.CapabilityKindTool, Name: "repo.summary", Enabled: true,
+		}}}},
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -1529,75 +1528,12 @@ func TestMapResultQualityFlagsWeakResult(t *testing.T) {
 	}
 }
 
-func TestMapResultQualityFlagsMissingDoDLeafCoverage(t *testing.T) {
-	snapshot := RunSnapshot{
-		Run: Run{
-			ID:          "run-quality-dod-leaf",
-			WorkspaceID: "ws-quality-dod-leaf",
-			DoDID:       "dod-quality-dod-leaf",
-			ExecutionContext: map[string]any{
-				"dod": map[string]any{
-					"items": []string{
-						"### 验收",
-						"- [ ] 结果质量：",
-						"- [ ] 覆盖主路径并可验证",
-						"- [ ] 覆盖错误路径并可验证",
-					},
-				},
-			},
-		},
-		Steps: []presenter.StepView{
-			{ID: "step-1"},
-		},
-		Results: []Result{
-			{
-				ID:          "result-quality-dod-leaf",
-				WorkspaceID: "ws-quality-dod-leaf",
-				RunID:       "run-quality-dod-leaf",
-				DoDID:       "dod-quality-dod-leaf",
-				State:       "accepted",
-				Summary:     "partial dod coverage",
-				DoDAssessment: &DoDAssessment{
-					Satisfied: true,
-					Summary:   "partial dod coverage",
-					Items: []DoDAssessmentItem{
-						{Item: "覆盖主路径并可验证", State: "satisfied", EvidenceRefs: []string{"step-1"}},
-					},
-				},
-				SummaryDetail: &ResultSummary{
-					GoalOutcome:         "main path covered",
-					VerificationSummary: "main path verified",
-					EvidenceRefs:        []string{"step-1"},
-					KnownLimitations:    []string{"error path not covered"},
-					NextActions:         []string{"cover error path"},
-				},
-				EvidenceRefs: []string{"step-1"},
-			},
-		},
-	}
-	quality := readmodelprojection.MapResultQuality(snapshot)
-	if len(quality) != 1 {
-		t.Fatalf("result quality = %+v, want one trace", quality)
-	}
-	if quality[0].State != "failed" {
-		t.Fatalf("result quality state = %q, want failed", quality[0].State)
-	}
-	if !containsResultQualityIssueCode(quality[0].Issues, "missing_dod_leaf_coverage") {
-		t.Fatalf("result quality issues = %+v, want missing_dod_leaf_coverage", quality[0].Issues)
-	}
-}
-
 func TestMapResultQualityFlagsWeakDoDItemEvidence(t *testing.T) {
 	snapshot := RunSnapshot{
 		Run: Run{
 			ID:          "run-quality-weak-evidence",
 			WorkspaceID: "ws-quality-weak-evidence",
 			DoDID:       "dod-quality-weak-evidence",
-			ExecutionContext: map[string]any{
-				"dod": map[string]any{
-					"items": []string{"- [ ] validation evidence is produced by real executed work"},
-				},
-			},
 		},
 		ValidationResults: []ValidationResult{
 			{
@@ -1681,9 +1617,9 @@ func TestReadRunSnapshotLoadsCapabilityCatalogOnce(t *testing.T) {
 		ID:          runID,
 		WorkspaceID: workspaceID,
 		State:       common.RunStateCompleted,
-		ExecutionContext: map[string]any{
-			"capabilityIds": []string{string(capabilityID)},
-		},
+		RuntimeBootstrap: &orchestratormodel.RuntimeBootstrap{Activation: orchestratormodel.RuntimeActivationContext{MCPCapabilities: []orchestratormodel.RuntimeMCPCapabilityContext{{
+			ID: capabilityID, ServerID: "mcp-capability-catalog", Kind: mcpmodel.CapabilityKindTool, Name: "repo.summary", Enabled: true,
+		}}}},
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -1926,24 +1862,28 @@ func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 		}},
 		EventRecords: []EventRecord{{
 			ID:          "event-web-step-completed",
-			Topic:       runevents.TopicStepStateChanged,
+			Topic:       "/step/state/changed",
 			SubjectType: "step",
 			SubjectID:   stepID,
 			WorkspaceID: "ws-web-event",
 			RunID:       runID,
 			StepID:      stepID,
 			OccurredAt:  "2026-05-05T00:00:02Z",
-			Payload: events.StepPayload(webcommon.StepKindSearch, common.StepStateSucceeded, nil, map[string]any{
-				"status":     "completed",
-				"stage":      "web_search",
-				"provider":   "default-http",
-				"query":      "golang latest",
-				"searchedAt": "2026-05-05T00:00:00Z",
-				"results": []map[string]any{{
-					"title": "Go Downloads",
-					"url":   "https://go.dev/dl/",
-				}},
-			}),
+			Payload: map[string]any{
+				events.PayloadKeyKind:  webcommon.StepKindSearch,
+				events.PayloadKeyState: string(common.StepStateSucceeded),
+				events.PayloadKeyOutput: map[string]any{
+					"status":     "completed",
+					"stage":      "web_search",
+					"provider":   "default-http",
+					"query":      "golang latest",
+					"searchedAt": "2026-05-05T00:00:00Z",
+					"results": []map[string]any{{
+						"title": "Go Downloads",
+						"url":   "https://go.dev/dl/",
+					}},
+				},
+			},
 		}},
 		WebSources: []WebSourceTrace{{
 			Query:        "golang latest",
@@ -1958,7 +1898,7 @@ func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 	if observability.Evidence.EventTotal != 1 || len(observability.WebSources) != 1 {
 		t.Fatalf("observability = %+v, want event count and web source projection", observability)
 	}
-	if !timelineContainsPersistedEvent(observability.Timeline, runevents.TopicStepStateChanged) ||
+	if !timelineContainsPersistedEvent(observability.Timeline, "/step/state/changed") ||
 		!timelineContainsStepOccurredAt(observability.Timeline, "step", stepID, "2026-05-05T00:00:02Z") {
 		t.Fatalf("timeline = %+v, want persisted web step event and step occurrence", observability.Timeline)
 	}
@@ -1981,7 +1921,7 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 					"shrinkLevel":           3,
 					"truncated":             true,
 					"rules":                 []string{"compact provider input", "apply priority compaction (P0/P1/P2)"},
-					"sourceRefs":            []string{"input.executionContext.goal", "input.graphEvidence"},
+					"sourceRefs":            []string{"runtime.definition.goal", "runtime.graphEvidence"},
 					"includedSections":      []string{"p0"},
 					"normalizedSections":    []string{"request-intent"},
 					"compressedSections":    []string{"p1", "p2"},
@@ -2086,44 +2026,6 @@ func TestRunContextBundleReusesSnapshotTaskProgress(t *testing.T) {
 	if progress.Summary != "cached progress reused" || progress.EvidenceRefs[0] != "cached-progress-evidence" {
 		t.Fatalf("run snapshot task progress = %+v, want cached projection", progress)
 	}
-}
-
-func TestRunContextBundleFiltersCoverageWorkItemsFullLedger(t *testing.T) {
-	snapshot := RunSnapshot{
-		Workspace: Workspace{ID: "ws-context-coverage", State: string(common.WorkspaceStateActive)},
-		Run: Run{
-			ID:          "run-context-coverage",
-			WorkspaceID: "ws-context-coverage",
-			State:       string(common.RunStateActive),
-			ExecutionContext: map[string]any{
-				"coverageWorkItems": []map[string]any{{
-					"id":      "large-ledger-item",
-					"summary": strings.Repeat("x", 128),
-				}},
-				"coverageWorkItemContext": map[string]any{
-					"summary":       "coverage summary",
-					"currentFocus":  "focus item",
-					"omittedCount":  7,
-					"fullLedgerRef": "workorch://coverage/full",
-				},
-			},
-		},
-	}
-
-	bundle := readmodelprojection.MapRunContextBundle(snapshot)
-	for _, section := range bundle.Sections {
-		if section.ID != "execution_context" {
-			continue
-		}
-		if _, ok := section.Data["coverageWorkItems"]; ok {
-			t.Fatalf("execution context section includes coverageWorkItems full ledger: %+v", section.Data)
-		}
-		if ctx := readModelMapValue(section.Data["coverageWorkItemContext"]); ctx["summary"] != "coverage summary" {
-			t.Fatalf("coverageWorkItemContext = %+v, want summary retained", section.Data["coverageWorkItemContext"])
-		}
-		return
-	}
-	t.Fatalf("sections = %+v, want execution_context section", bundle.Sections)
 }
 
 func TestRunProjectionHelpersReuseSnapshotDerivedViews(t *testing.T) {
@@ -2285,198 +2187,6 @@ func TestReadRunStatusPrefersBlockingDecisionStepOverStaleCheckpoint(t *testing.
 	}
 }
 
-func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing.T) {
-	dataRoot := t.TempDir()
-	session, ctx := newTestRuntimeSession(t, "memory", dataRoot)
-	exports := testRuntimeExports(session.Bootstrap)
-
-	workspaceID := common.WorkspaceID("ws-run-observability")
-	runID := common.RunID("run-observability")
-	stepID := common.StepID("run-observability/step-1")
-	toolCallID := common.ToolCallID("tool-call-observability")
-
-	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "observability", State: common.WorkspaceStateActive}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
-		ID:    stepID,
-		RunID: runID,
-		Kind:  "llm/workspace_execution",
-		State: common.StepStateSucceeded,
-		Output: map[string]any{
-			"stage": "llm_execution_graph_plan",
-			"streamEvents": []map[string]any{
-				{"type": "delta", "delta": `{"completionState":"continue"`},
-				{"type": "done"},
-			},
-		},
-	}); err != nil {
-		t.Fatalf("create step: %v", err)
-	}
-	if err := exports.Repositories.ToolCalls.Create(ctx, &runmodel.ToolCall{
-		ID:          toolCallID,
-		WorkspaceID: workspaceID,
-		RunID:       runID,
-		StepID:      stepID,
-		ToolName:    "graph/mock",
-		State:       common.ToolCallStateCompleted,
-	}); err != nil {
-		t.Fatalf("create tool call: %v", err)
-	}
-	if err := exports.Repositories.Patches.Create(ctx, &runmodel.Patch{
-		ID:          common.PatchID("patch-observability"),
-		WorkspaceID: workspaceID,
-		RunID:       runID,
-		StepID:      stepID,
-		ToolCallID:  toolCallID,
-		PatchType:   "unified_diff",
-		TargetRef:   "README.md",
-		State:       common.PatchStateApplied,
-	}); err != nil {
-		t.Fatalf("create patch: %v", err)
-	}
-	if err := exports.Repositories.ValidationResults.Create(ctx, &runmodel.ValidationResult{
-		ID:             common.ValidationResultID("validation-observability"),
-		WorkspaceID:    workspaceID,
-		RunID:          runID,
-		StepID:         stepID,
-		ValidationKind: "runtime_step",
-		State:          common.ValidationResultStatePassed,
-	}); err != nil {
-		t.Fatalf("create validation result: %v", err)
-	}
-	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
-		ID:               common.CheckpointID("checkpoint-observability"),
-		WorkspaceID:      workspaceID,
-		RunID:            runID,
-		CheckpointType:   common.CheckpointTypeRunState,
-		CurrentStepID:    stepID,
-		RunStateSnapshot: common.RunStateCompleted,
-		OccurredAt:       "2026-04-25T10:00:00Z",
-		Data:             map[string]any{"event": "step_completed"},
-	}); err != nil {
-		t.Fatalf("create checkpoint: %v", err)
-	}
-	runStateEvent := magicevent.NewEventWithContext(
-		runevents.TopicRunStateChanged,
-		"test",
-		runevents.NotificationDestination,
-		magicevent.NewHeader(),
-		ctx,
-		runevents.RunStateChangedData{
-			WorkspaceID: workspaceID,
-			RunID:       runID,
-			State:       common.RunStateCompleted,
-		},
-	)
-	if result := exports.Infrastructure.CommandHub.Send(runStateEvent); result == nil || result.Error() != nil {
-		t.Fatalf("send run state event: %v", result)
-	}
-	llmProgressEvent := magicevent.NewEventWithContext(
-		runevents.TopicRunLLMStreamProgress,
-		"test",
-		runevents.NotificationDestination,
-		magicevent.NewHeader(),
-		ctx,
-		runevents.LLMStreamProgressData{
-			WorkspaceID:   workspaceID,
-			RunID:         runID,
-			StepID:        stepID,
-			ProviderID:    "provider-a",
-			Model:         "model-a",
-			ChunkCount:    2,
-			ReceivedBytes: 28,
-			Status:        "completed",
-			Summary:       "llm_execution_graph_plan - completed",
-		},
-	)
-	if result := exports.Infrastructure.CommandHub.Send(llmProgressEvent); result == nil || result.Error() != nil {
-		t.Fatalf("send llm stream progress event: %v", result)
-	}
-	llmUsageEvent := magicevent.NewEventWithContext(
-		runevents.TopicRunLLMUsageRecorded,
-		"test",
-		runevents.NotificationDestination,
-		magicevent.NewHeader(),
-		ctx,
-		runevents.LLMUsageRecordedData{
-			WorkspaceID:   workspaceID,
-			RunID:         runID,
-			StepID:        stepID,
-			ProviderID:    "provider-a",
-			Provider:      "compatible",
-			Model:         "model-a",
-			Operation:     "chat_completions",
-			InputTokens:   128,
-			OutputTokens:  16,
-			TotalTokens:   144,
-			Estimated:     true,
-			RequestBytes:  3000,
-			ResponseBytes: 400,
-			Streaming:     true,
-			StartedAt:     "2026-04-25T10:00:01Z",
-			CompletedAt:   "2026-04-25T10:00:02Z",
-			DurationMs:    1000,
-			Status:        "completed",
-		},
-	)
-	if result := exports.Infrastructure.CommandHub.Send(llmUsageEvent); result == nil || result.Error() != nil {
-		t.Fatalf("send llm usage event: %v", result)
-	}
-
-	item, err := ReadRunObservabilityWithSession(ctx, session, string(runID))
-	if err != nil {
-		t.Fatalf("ReadRunObservabilityWithSession: %v", err)
-	}
-	if item.Progress.StepTotal != 1 || item.Progress.StepCompleted != 1 || !item.Progress.Terminal {
-		t.Fatalf("progress = %+v, want terminal completed progress", item.Progress)
-	}
-	if item.Evidence.ToolCallCompleted != 1 || item.Evidence.PatchApplied != 1 || item.Evidence.ValidationPassed != 1 || item.Evidence.RuntimeCheckpointTotal != 1 || item.Evidence.EventTotal == 0 {
-		t.Fatalf("evidence = %+v, want derived evidence counters", item.Evidence)
-	}
-	if item.LatestCheckpoint == nil || item.LatestCheckpoint.ID != "checkpoint-observability" {
-		t.Fatalf("latest checkpoint = %+v, want checkpoint-observability", item.LatestCheckpoint)
-	}
-	if len(item.Timeline) < 2 {
-		t.Fatalf("timeline = %+v, want checkpoint and events", item.Timeline)
-	}
-	if !timelineContainsStepOutput(item.Timeline, string(stepID), "llm_execution_graph_plan", string(common.StepStateSucceeded)) {
-		t.Fatalf("timeline = %+v, want step output timeline item", item.Timeline)
-	}
-	if !timelineContainsStreamDelta(item.Timeline, string(stepID), `{"completionState":"continue"`, string(common.StepStateSucceeded)) {
-		t.Fatalf("timeline = %+v, want stream delta timeline item", item.Timeline)
-	}
-	if !timelineContainsStepOccurredAt(item.Timeline, "step", string(stepID), "2026-04-25T10:00:00Z") {
-		t.Fatalf("timeline = %+v, want step occurrence derived from checkpoint", item.Timeline)
-	}
-	if !timelineContainsStepOccurredAt(item.Timeline, "step_stream", string(stepID), "2026-04-25T10:00:00Z") {
-		t.Fatalf("timeline = %+v, want stream occurrence derived from step checkpoint", item.Timeline)
-	}
-	if !timelineContainsLLMStreamProgressEvent(item.Timeline, string(stepID), "completed", 2, 28) {
-		t.Fatalf("timeline = %+v, want llm stream progress projected from persisted event", item.Timeline)
-	}
-	if len(item.LLMUsageTraces) != 1 || item.LLMUsageSummary.EntryTotal != 1 || item.LLMUsageSummary.TotalTokens != 144 {
-		t.Fatalf("llm usage traces/summary = %+v / %+v, want one usage trace and totalTokens=144", item.LLMUsageTraces, item.LLMUsageSummary)
-	}
-	if item.LLMUsageTraces[0].UsageSource != llmcommon.UsageSourceEstimated ||
-		!item.LLMUsageTraces[0].Estimated {
-		t.Fatalf("llm usage trace = %+v, want normalized usage semantics", item.LLMUsageTraces[0])
-	}
-	if item.LLMUsageSummary.EstimatedEntries != 1 ||
-		item.LLMUsageSummary.ProviderNativeEntries != 0 {
-		t.Fatalf("llm usage summary = %+v, want estimated=1 native=0", item.LLMUsageSummary)
-	}
-	if len(item.LLMUsageSummary.ProviderModelBreakdown) != 1 ||
-		item.LLMUsageSummary.ProviderModelBreakdown[0].ProviderID != "provider-a" ||
-		item.LLMUsageSummary.ProviderModelBreakdown[0].Model != "model-a" ||
-		item.LLMUsageSummary.ProviderModelBreakdown[0].EntryTotal != 1 {
-		t.Fatalf("llm usage provider/model breakdown = %+v, want provider-a/model-a one entry", item.LLMUsageSummary.ProviderModelBreakdown)
-	}
-}
-
 func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-stream-blocked-timeline")
 	runID := common.RunID("run-stream-blocked-timeline")
@@ -2501,24 +2211,24 @@ func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *t
 		}},
 		EventRecords: []EventRecord{{
 			ID:          "evt-stream-progress",
-			Topic:       runevents.TopicRunLLMStreamProgress,
+			Topic:       "/run/llm_stream/progress",
 			SubjectType: "llm_stream_progress",
 			SubjectID:   stepID,
 			WorkspaceID: string(workspaceID),
 			RunID:       string(runID),
 			StepID:      stepID,
-			Payload: events.LLMStreamProgressPayload(
-				workspaceID,
-				runID,
-				common.StepID(stepID),
-				"provider-a",
-				"model-a",
-				2,
-				28,
-				0,
-				"completed",
-				"llm_execution_graph_plan - completed",
-			),
+			Payload: map[string]any{
+				events.PayloadKeyWorkspaceID:   string(workspaceID),
+				events.PayloadKeyRunID:         string(runID),
+				events.PayloadKeyStepID:        stepID,
+				events.PayloadKeyProviderID:    "provider-a",
+				events.PayloadKeyModel:         "model-a",
+				events.PayloadKeyChunkCount:    2,
+				events.PayloadKeyReceivedBytes: 28,
+				events.PayloadKeyElapsedMs:     0,
+				events.PayloadKeyStatus:        "completed",
+				events.PayloadKeySummary:       "llm_execution_graph_plan - completed",
+			},
 		}},
 	})
 
@@ -2731,23 +2441,23 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 	records := []EventRecord{
 		{
 			ID:         "evt-1",
-			Topic:      runevents.TopicRunLLMUsageRecorded,
+			Topic:      "/run/llm_usage/recorded",
 			OccurredAt: "2026-05-07T10:00:00Z",
 			RunID:      "run-1",
 			StepID:     "run-1/step-1",
-			Payload: events.LLMUsagePayload(events.LLMUsagePayloadData{
-				WorkspaceID:  "ws-1",
-				RunID:        "run-1",
-				StepID:       "run-1/step-1",
-				ProviderID:   "provider-a",
-				Provider:     "compatible",
-				Model:        "model-a",
-				Operation:    "chat_completions",
-				InputTokens:  120,
-				OutputTokens: 30,
-				TotalTokens:  150,
-				Estimated:    true,
-				CacheUsage: map[string]any{
+			Payload: map[string]any{
+				events.PayloadKeyWorkspaceID:  "ws-1",
+				events.PayloadKeyRunID:        "run-1",
+				events.PayloadKeyStepID:       "run-1/step-1",
+				events.PayloadKeyProviderID:   "provider-a",
+				events.PayloadKeyProvider:     "compatible",
+				events.PayloadKeyModel:        "model-a",
+				events.PayloadKeyOperation:    "chat_completions",
+				events.PayloadKeyInputTokens:  120,
+				events.PayloadKeyOutputTokens: 30,
+				events.PayloadKeyTotalTokens:  150,
+				events.PayloadKeyEstimated:    true,
+				events.PayloadKeyCacheUsage: map[string]any{
 					"estimated":               true,
 					"source":                  "cache_plan_estimated",
 					"cacheReadTokens":         0,
@@ -2756,36 +2466,36 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 					"cacheableInputTokens":    90,
 					"nonCacheableInputTokens": 30,
 				},
-				Status: "completed",
-			}),
+				events.PayloadKeyStatus: "completed",
+			},
 		},
 		{
 			ID:         "evt-2",
-			Topic:      runevents.TopicRunLLMUsageRecorded,
+			Topic:      "/run/llm_usage/recorded",
 			OccurredAt: "2026-05-07T10:00:01Z",
 			RunID:      "run-1",
 			StepID:     "run-1/step-2",
-			Payload: events.LLMUsagePayload(events.LLMUsagePayloadData{
-				WorkspaceID:  "ws-1",
-				RunID:        "run-1",
-				StepID:       "run-1/step-2",
-				ProviderID:   "provider-b",
-				Provider:     "compatible",
-				Model:        "model-b",
-				Operation:    "chat_completions",
-				InputTokens:  60,
-				OutputTokens: 10,
-				TotalTokens:  70,
-				Estimated:    false,
-				CacheUsage: map[string]any{
+			Payload: map[string]any{
+				events.PayloadKeyWorkspaceID:  "ws-1",
+				events.PayloadKeyRunID:        "run-1",
+				events.PayloadKeyStepID:       "run-1/step-2",
+				events.PayloadKeyProviderID:   "provider-b",
+				events.PayloadKeyProvider:     "compatible",
+				events.PayloadKeyModel:        "model-b",
+				events.PayloadKeyOperation:    "chat_completions",
+				events.PayloadKeyInputTokens:  60,
+				events.PayloadKeyOutputTokens: 10,
+				events.PayloadKeyTotalTokens:  70,
+				events.PayloadKeyEstimated:    false,
+				events.PayloadKeyCacheUsage: map[string]any{
 					"estimated":           false,
 					"source":              llmcommon.UsageSourceProviderNative,
 					"cacheReadTokens":     20,
 					"cacheWriteTokens":    8,
 					"cacheCreationTokens": 8,
 				},
-				Status: "completed",
-			}),
+				events.PayloadKeyStatus: "completed",
+			},
 		},
 	}
 
@@ -2887,7 +2597,7 @@ func TestMapProjectedEventRecordsKeepsBoundedMetadataPayload(t *testing.T) {
 func TestMapEventRecordsCanonicalizesWorkspacePlanStepPayload(t *testing.T) {
 	items := []*eventstreammodel.EventRecord{{
 		ID:          common.EventRecordID("event-step-alias"),
-		Topic:       runevents.TopicStepStateChanged,
+		Topic:       "/step/state/changed",
 		OccurredAt:  "2026-05-16T10:00:00Z",
 		WorkspaceID: common.WorkspaceID("ws-step-alias"),
 		RunID:       common.RunID("run-step-alias"),
@@ -3438,19 +3148,11 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 		ID:          runID,
 		WorkspaceID: workspaceID,
 		State:       common.RunStateActive,
-		ExecutionContext: map[string]any{
-			"goal": map[string]any{"id": "goal-context-bundle", "text": "deliver context bundle"},
-			"dod":  map[string]any{"id": "dod-context-bundle", "state": "ready", "items": []any{"bundle exposes recovery context"}},
-			"skills": []any{
-				map[string]any{"id": "skill-context", "name": "context"},
-			},
-			"mcpServers": []any{
-				map[string]any{"id": "mcp-context", "name": "context mcp"},
-			},
-			"memories": []any{
-				map[string]any{"id": "memory-context", "summary": "prior context"},
-			},
-		},
+		RuntimeBootstrap: &orchestratormodel.RuntimeBootstrap{Activation: orchestratormodel.RuntimeActivationContext{
+			Skills:       []orchestratormodel.RuntimeSkillContext{{ID: "skill-context", Name: "context", Instruction: "context"}},
+			MCPServerIDs: []common.MCPServerID{"mcp-context"},
+			Memories:     []orchestratormodel.RuntimeMemoryContext{{ID: "memory-context", Summary: "prior context"}},
+		}},
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -3511,7 +3213,10 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
 	}
 	lightweight := readmodelprojection.CompressedContextFromLocalizedRunSnapshot(snapshot)
-	if !reflect.DeepEqual(lightweight, bundle.CompressedContext) {
+	wantLightweight := bundle.CompressedContext
+	lightweight.SourceSectionRefs = nil
+	wantLightweight.SourceSectionRefs = nil
+	if !reflect.DeepEqual(lightweight, wantLightweight) {
 		t.Fatalf("lightweight compressedContext = %+v, want full bundle compressed context %+v", lightweight, bundle.CompressedContext)
 	}
 	deps, err := readModelDependenciesFromSession(session)
@@ -3523,7 +3228,10 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 		t.Fatalf("readRunRecoverySnapshot: %v", err)
 	}
 	recoveryCompressed := readmodelprojection.CompressedContextFromLocalizedRunSnapshot(recoverySnapshot)
-	if !reflect.DeepEqual(recoveryCompressed, bundle.CompressedContext) {
+	wantRecoveryCompressed := bundle.CompressedContext
+	recoveryCompressed.SourceSectionRefs = nil
+	wantRecoveryCompressed.SourceSectionRefs = nil
+	if !reflect.DeepEqual(recoveryCompressed, wantRecoveryCompressed) {
 		t.Fatalf("recovery compressedContext = %+v, want full bundle compressed context %+v", recoveryCompressed, bundle.CompressedContext)
 	}
 	if len(recoverySnapshot.TaskDecompositions) != 0 || len(recoverySnapshot.ExecutionSections) != 0 || len(recoverySnapshot.SelectedCapabilities) != 0 || len(recoverySnapshot.UsedCapabilities) != 0 {
@@ -3814,7 +3522,7 @@ func timelineContainsPersistedEvent(items []RuntimeTimelineItem, topic string) b
 
 func timelineContainsLLMStreamProgressEvent(items []RuntimeTimelineItem, stepID string, status string, chunkCount int, receivedBytes int) bool {
 	for _, item := range items {
-		if item.Source != "llm_stream_progress_event" || item.Topic != runevents.TopicRunLLMStreamProgress || item.StepID != stepID {
+		if item.Source != "llm_stream_progress_event" || item.Topic != "/run/llm_stream/progress" || item.StepID != stepID {
 			continue
 		}
 		if item.Type != status {
@@ -3962,7 +3670,7 @@ func TestReadWorkspaceSnapshotWithBackendSummarizesRunScopedLLMUsageRecords(t *t
 	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
 		ID:          "run-scoped-llm-usage/event/llm-usage-recorded",
 		Version:     events.WorkorchEventVersion,
-		Topic:       runevents.TopicRunLLMUsageRecorded,
+		Topic:       "/run/llm_usage/recorded",
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		StepID:      "run-scoped-llm-usage/step-1",
@@ -4233,59 +3941,6 @@ func TestReadWorkspaceSnapshotProjectsActiveRunAndCurrentStep(t *testing.T) {
 	}
 }
 
-func TestReadWorkspaceSnapshotProjectsCoverageSummaryFromActiveRun(t *testing.T) {
-	session, ctx := newTestRuntimeSession(t, "memory", "")
-	exports := testRuntimeExports(session.Bootstrap)
-
-	workspaceID := common.WorkspaceID("ws-coverage-summary")
-	runID := common.RunID("run-coverage-summary")
-	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
-		ID:          workspaceID,
-		Title:       "coverage summary workspace",
-		State:       common.WorkspaceStateActive,
-		ActiveRunID: runID,
-	}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
-		ID:          runID,
-		WorkspaceID: workspaceID,
-		State:       common.RunStateActive,
-		ExecutionContext: map[string]any{
-			"coverageWorkItems": []map[string]any{
-				{"id": "open-item", "status": "open"},
-				{"id": "satisfied-item", "status": "satisfied"},
-				{"id": "blocked-item", "status": "blocked"},
-			},
-			"coverageWorkItemContext": map[string]any{
-				"summary":       "2 open coverage items",
-				"currentFocus":  "focus-A",
-				"omittedCount":  3,
-				"fullLedgerRef": "workorch://coverage/ledger",
-			},
-		},
-	}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-
-	snapshot, err := ReadWorkspaceSnapshotWithSession(ctx, session.Borrow(), string(workspaceID))
-	if err != nil {
-		t.Fatalf("ReadWorkspaceSnapshotWithSession: %v", err)
-	}
-	if snapshot.CoverageSummary["summary"] != "2 open coverage items" ||
-		snapshot.CoverageSummary["currentFocus"] != "focus-A" ||
-		snapshot.CoverageSummary["fullLedgerRef"] != "workorch://coverage/ledger" ||
-		snapshot.CoverageSummary["total"] != 3 ||
-		snapshot.CoverageSummary["open"] != 1 ||
-		snapshot.CoverageSummary["satisfied"] != 1 ||
-		snapshot.CoverageSummary["blocked"] != 1 {
-		t.Fatalf("coverageSummary = %+v, want active run coverage summary", snapshot.CoverageSummary)
-	}
-	if _, ok := snapshot.CoverageSummary["coverageWorkItems"]; ok {
-		t.Fatalf("coverageSummary = %+v, must not include full ledger", snapshot.CoverageSummary)
-	}
-}
-
 func TestReadWorkspaceSnapshotCanonicalizesWorkspacePlanCurrentStepKind(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
 	exports := testRuntimeExports(session.Bootstrap)
@@ -4394,9 +4049,6 @@ func TestReadRunSnapshotReadsCoverageWorkItemsFromOwnerRepository(t *testing.T) 
 		ID:          runID,
 		WorkspaceID: workspaceID,
 		State:       common.RunStateActive,
-		ExecutionContext: map[string]any{
-			"coverageWorkItemContext": map[string]any{"summary": "context projection retained"},
-		},
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -4432,9 +4084,6 @@ func TestReadRunSnapshotReadsCoverageWorkItemsFromOwnerRepository(t *testing.T) 
 	}
 	if item["targetText"] != "owner-backed coverage item" || item["status"] != "open" {
 		t.Fatalf("coverage item = %+v, want owner-backed fields", item)
-	}
-	if snapshot.CoverageWorkItemContext["summary"] != "context projection retained" {
-		t.Fatalf("coverage context = %+v, want existing context projection retained", snapshot.CoverageWorkItemContext)
 	}
 }
 
@@ -5144,75 +4793,6 @@ func TestTerminalRejectedResultStillProducesFailedOutcome(t *testing.T) {
 	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
 	if outcome.Accepted || !outcome.Terminal || outcome.State != "failed" || outcome.ResultID != "run-final-rejected/result/dod-assessment" {
 		t.Fatalf("outcome = %+v, want final rejected terminal outcome", outcome)
-	}
-}
-
-func TestReadTerminalRunModelsWithBackendRemainStableAcrossReloads(t *testing.T) {
-	dataRoot := t.TempDir()
-	workspaceID := "ws-run-terminal-reload"
-	runID := "run-approval-terminal-reload"
-	started := prepareApprovalRun(t, dataRoot, workspaceID, runID)
-	if _, err := RejectApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID); err != nil {
-		t.Fatalf("RejectApprovalWithBackend: %v", err)
-	}
-	runCtx := common.ContextWithRuntimeWorkspaceID(context.Background(), common.WorkspaceID(workspaceID))
-	if _, err := ResumeRunWithBackend(runCtx, "file", dataRoot, runID); err != nil {
-		t.Fatalf("ResumeRunWithBackend: %v", err)
-	}
-	_ = waitRunSnapshotWithBackend(t, "file", dataRoot, runID, 5*time.Second, func(snapshot RunSnapshot) bool {
-		return snapshot.Run.State == string(common.RunStateFailed) &&
-			snapshot.TaskProgress.State == string(common.RunStateFailed) &&
-			snapshot.TaskProgress.Recovery.NextAction == "inspect_failure_reason_and_evidence"
-	})
-
-	firstRun, err := ReadRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("first ReadRunWithBackend: %v", err)
-	}
-	firstSnapshot, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("first ReadRunSnapshotWithBackend: %v", err)
-	}
-	firstStatus, err := ReadRunStatusWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("first ReadRunStatusWithBackend: %v", err)
-	}
-	firstWorkspace, err := ReadWorkspaceSnapshotWithBackend(context.Background(), "file", dataRoot, workspaceID)
-	if err != nil {
-		t.Fatalf("first ReadWorkspaceSnapshotWithBackend: %v", err)
-	}
-
-	secondRun, err := ReadRunWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("second ReadRunWithBackend: %v", err)
-	}
-	secondSnapshot, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("second ReadRunSnapshotWithBackend: %v", err)
-	}
-	secondStatus, err := ReadRunStatusWithBackend(context.Background(), "file", dataRoot, runID)
-	if err != nil {
-		t.Fatalf("second ReadRunStatusWithBackend: %v", err)
-	}
-	secondWorkspace, err := ReadWorkspaceSnapshotWithBackend(context.Background(), "file", dataRoot, workspaceID)
-	if err != nil {
-		t.Fatalf("second ReadWorkspaceSnapshotWithBackend: %v", err)
-	}
-
-	if firstRun.State != "failed" || firstRun.FailureReason == "" {
-		t.Fatalf("first run = %+v, want failed with failure reason", firstRun)
-	}
-	if !reflect.DeepEqual(firstRun, secondRun) {
-		t.Fatalf("run mismatch after reload: first=%+v second=%+v", firstRun, secondRun)
-	}
-	if !reflect.DeepEqual(firstSnapshot, secondSnapshot) {
-		t.Fatalf("snapshot mismatch after reload: first=%+v second=%+v", firstSnapshot, secondSnapshot)
-	}
-	if !reflect.DeepEqual(firstStatus, secondStatus) {
-		t.Fatalf("status mismatch after reload: first=%+v second=%+v", firstStatus, secondStatus)
-	}
-	if !reflect.DeepEqual(firstWorkspace, secondWorkspace) {
-		t.Fatalf("workspace snapshot mismatch after reload: first=%+v second=%+v", firstWorkspace, secondWorkspace)
 	}
 }
 

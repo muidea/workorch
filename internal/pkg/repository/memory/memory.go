@@ -2318,8 +2318,13 @@ func compactStepSummary(item *run.Step) *run.Step {
 
 func cloneRun(item *run.Run) *run.Run {
 	cloned := *item
-	if item.ExecutionContext != nil {
-		cloned.ExecutionContext = cloneMap(item.ExecutionContext)
+	if item.RuntimeBootstrap != nil {
+		bootstrap := item.RuntimeBootstrap.Clone()
+		cloned.RuntimeBootstrap = &bootstrap
+	}
+	if item.RuntimeState != nil {
+		state := item.RuntimeState.Clone()
+		cloned.RuntimeState = &state
 	}
 	return &cloned
 }
@@ -2856,7 +2861,6 @@ var stepSummaryInputKeys = []string{
 	"recoveryRootStepId",
 	"recoveryLineageType",
 	"recoveryBudgetScope",
-	"contractViolationRecovery",
 	"failedStepId",
 	"failedStepKind",
 	"failedStepState",
@@ -2882,8 +2886,6 @@ var stepSummaryOutputKeys = []string{
 	"reason",
 	"failureClass",
 	"failureSignature",
-	"contractViolationType",
-	"contractViolation",
 	"ignoredExecutionGraphReason",
 	"command",
 	"args",

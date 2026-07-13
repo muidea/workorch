@@ -10,20 +10,21 @@ import (
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type workspaceExecutionContextBindings struct {
+type workspaceRuntimeActivationBindings struct {
 	defaultSoul       *soulmodel.Soul
+	stageSouls        map[string]*soulmodel.Soul
 	memories          []*memorymodel.MemoryItem
-	retrievalEvidence map[string]any
-	governanceHistory []map[string]any
+	governanceHistory []runtimecontract.RuntimeGovernanceHistoryEntry
 	soulRouting       appmodelcore.SoulRouting
 }
 
-func loadWorkspaceExecutionContextBindings(ctx context.Context, request WorkspaceExecutionContextRequest, effectiveGoal *workspacemodel.Goal, effectiveDoD *workspacemodel.DoD, memoryIDs []string) (workspaceExecutionContextBindings, error) {
+func loadWorkspaceRuntimeActivationBindings(ctx context.Context, request WorkspaceRuntimeActivationRequest, effectiveGoal *workspacemodel.Goal, effectiveDoD *workspacemodel.DoD, memoryIDs []string) (workspaceRuntimeActivationBindings, error) {
 	workspace := request.Workspace
 	command := request.Command
-	ret := workspaceExecutionContextBindings{}
+	ret := workspaceRuntimeActivationBindings{}
 	err := readmodelcore.RunTasks(
 		func() error {
 			result, err := ResolveWorkspaceSoulRouting(ctx, WorkspaceSoulRoutingRequest{
@@ -37,11 +38,12 @@ func loadWorkspaceExecutionContextBindings(ctx context.Context, request Workspac
 				return err
 			}
 			ret.defaultSoul = result.DefaultSoul
+			ret.stageSouls = result.StageSouls
 			ret.soulRouting = result.Routing
 			return nil
 		},
 		func() error {
-			memories, retrievalEvidence, err := SelectedWorkspaceMemoryItems(ctx, WorkspaceMemorySelectionRequest{
+			memories, _, err := SelectedWorkspaceMemoryItems(ctx, WorkspaceMemorySelectionRequest{
 				WorkspaceID: workspace.ID,
 				Hub:         request.Hub,
 
@@ -54,7 +56,6 @@ func loadWorkspaceExecutionContextBindings(ctx context.Context, request Workspac
 				return err
 			}
 			ret.memories = memories
-			ret.retrievalEvidence = retrievalEvidence
 			return nil
 		},
 		func() error {
